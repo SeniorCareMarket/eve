@@ -2,7 +2,9 @@
 
 > Generated: 2026-03-10
 > Amended: 2026-03-10 (post-review — see Appendix A for amendment rationale)
-> Source: [jvm-cljs-gap-analysis.md](jvm-cljs-gap-analysis.md)
+> Amended: 2026-03-10 (cljc unification integration — see Appendix B)
+> Source: [jvm-cljs-gap-analysis.md](jvm-cljs-gap-analysis.md),
+>         [cljc-unification-analysis.md](cljc-unification-analysis.md)
 
 ---
 
@@ -39,28 +41,46 @@ and Phase 2c (set native write ops) produces sets incompatible with CLJS readers
 
 **Work Items:**
 
-1. **Migrate set HAMT to `portable-hash-bytes`**
-   - Import or re-export `portable-hash-bytes` from `map.cljc` (or extract to shared ns)
+1. **Extract `portable-hash-bytes` to shared namespace** *(cljc unification)*
+   - Create `src/eve/hamt_util.cljc` (or add to `eve.deftype-proto.data`)
+   - Move `portable-hash-bytes` and its helpers (`ubyte`, `imul32`, `rotl32`,
+     `ushr32`) from `map.cljc:54-113` to the new shared namespace
+   - Update `map.cljc` to import from the new namespace instead of defining inline
+   - `set.cljc` imports from the same namespace
+   - This eliminates a `set → map` cross-dependency and establishes a clean shared
+     foundation for both HAMT implementations
+
+2. **Move bitwise helpers to shared `.cljc` sections** *(cljc unification)*
+   - In both `map.cljc` and `set.cljc`, move `mask-hash`, `bitpos`, `has-bit?`,
+     `get-index` out of the `#?(:cljs ...)` and `#?(:clj ...)` blocks into the
+     shared section — these are platform-identical pure integer arithmetic
+   - `popcount32` stays in each file but uses a `#?` reader conditional for the
+     one platform-specific line (CLJS: bit-manipulation + `js*`; JVM: `Integer/bitCount`)
+   - This eliminates 4 duplicate definitions per file and prevents copy-paste
+     divergence as new HAMT functions are added in later phases
+
+3. **Migrate set HAMT to `portable-hash-bytes`**
    - CLJS set: change `(hash v)` → `(portable-hash-bytes (ser/serialize-key v))` in
      `hamt-find`, `hamt-conj`, `hamt-disj`, and all HAMT navigation
    - JVM set: change `(hash elem)` → `(portable-hash-bytes (value->eve-bytes elem))` in
      `jvm-write-set!` and future `jvm-set-hamt-get`
 
-2. **Add `jvm-hashed?` flag to `EveHashSet`** (mirror map's approach)
+4. **Add `jvm-hashed?` flag to `EveHashSet`** (mirror map's approach)
    - JVM-built sets: `jvm-hashed? = true`
    - Sets read from CLJS-built slab data: `jvm-hashed? = false`
    - When `jvm-hashed?` is false, fall back to O(n) `jvm-set-reduce` for lookup
    - Store flag in set header byte 1 (currently padding)
 
-3. **CLJS migration path**: Existing CLJS-built sets in slab data will use old
+5. **CLJS migration path**: Existing CLJS-built sets in slab data will use old
    `cljs.core/hash`. New sets will use `portable-hash-bytes`. Detect via header flag.
 
-4. **Tests**
+6. **Tests**
    - Cross-process: JVM writes set, Node reads; Node writes set, JVM reads
    - Verify hash-directed lookup works for JVM-built sets
    - Verify fallback works for legacy CLJS-built sets
+   - Verify `map.cljc` still passes all tests after import change
 
-**Files:** `src/eve/map.cljc` (extract portable-hash-bytes), `src/eve/set.cljc`,
+**Files:** `src/eve/hamt_util.cljc` (new), `src/eve/map.cljc`, `src/eve/set.cljc`,
 `test/eve/jvm_set_test.clj`
 
 **Risk:** This is a **breaking change** for CLJS set HAMT layout. Existing slab
@@ -433,6 +453,8 @@ passing Eve vectors to Java APIs expecting `List`.
 | 18 | **Set uses platform-specific hash (not portable)** | **0** |
 | 19 | **Vec missing `java.util.List`** | **6c** |
 | 20 | **`IFn` arity handling (all arities must throw properly)** | **3** |
+| 21 | **Bitwise helpers duplicated across CLJS/JVM blocks** | **0** |
+| 22 | **`portable-hash-bytes` trapped in `map.cljc`, not shared** | **0** |
 
 ---
 
@@ -480,12 +502,13 @@ All tests run via `clojure -M:jvm-test`. The existing CLJS test suites
 ## Dependencies
 
 ```
-Phase 0 (Set hash migration) ── blocks ──→ Phase 1 (Set lookup)
-Phase 1 (Set lookup) ────────── blocks ──→ Phase 2c (Set write ops)
-Phase 2a (Map dissoc) ───────── blocks ──→ Phase 6a (Map transients)
-Phase 2c (Set write) ────────── blocks ──→ Phase 6a (Set transients)
-Phases 0-2 ──────────────────── blocks ──→ Phase 3 (IFn needs correct lookups)
-Phases 0-3 are independent of ─────────→ Phases 4-5 (can parallelize)
+Phase 0 items 1-2 (shared ns + bitwise) ── first ──→ Phase 0 items 3-5 (set hash migration)
+Phase 0 (Set hash migration) ────────────── blocks ──→ Phase 1 (Set lookup)
+Phase 1 (Set lookup) ────────────────────── blocks ──→ Phase 2c (Set write ops)
+Phase 2a (Map dissoc) ───────────────────── blocks ──→ Phase 6a (Map transients)
+Phase 2c (Set write) ────────────────────── blocks ──→ Phase 6a (Set transients)
+Phases 0-2 ──────────────────────────────── blocks ──→ Phase 3 (IFn needs correct lookups)
+Phases 0-3 are independent of ───────────────────────→ Phases 4-5 (can parallelize)
 Phase 6b (List gaps) is fully independent
 Phase 6c (Vec java.util.List) is fully independent
 ```
@@ -592,3 +615,48 @@ The original plan didn't call out existing JVM code that can be reused:
   `children-start-off`) already defined at lines 1365-1374.
 - **Set:** `jvm-set-reduce` (1376) — full tree walk exists; can be reused for
   `IReduce` and as fallback for non-portable-hashed sets.
+
+---
+
+## Appendix B: CLJC Unification Integration
+
+Changes to incorporate recommendations from [cljc-unification-analysis.md](cljc-unification-analysis.md).
+
+### What changed in this plan
+
+Two work items were added to Phase 0 (items 1 and 2), and two gaps were added
+to the tracking table (items 21 and 22). No other phases changed.
+
+| Unification Recommendation | Plan Impact | Where |
+|---|---|---|
+| Extract `portable-hash-bytes` to shared ns | Added as Phase 0, item 1 | Replaces inline import from `map.cljc` |
+| Move bitwise helpers to shared sections | Added as Phase 0, item 2 | ~30 min; no logic changes |
+| Shared header read/write helpers | No change | Blocked on CLJS ISlabIO migration |
+| Shared HAMT traversal via ISlabIO | No change | Deferred to post-parity refactoring pass |
+| Shared equiv/hash logic | No change | Method bodies too short to justify |
+| Unified deftype | No change | Not recommended — interfaces differ |
+| Macro-based HAMT | No change | Not recommended — too complex |
+
+### Why most recommendations don't affect the plan
+
+The unification analysis is sequenced **after** the parity plan:
+
+1. **Quick wins (items 1-2 above)** slot naturally into Phase 0, which already
+   touches the same files. No schedule impact.
+2. **Medium-term unification** (shared HAMT traversal, shared equiv/hash) is
+   explicitly recommended for after JVM parity is achieved. The new JVM code
+   written in Phases 1-2 already uses ISlabIO exclusively, making it ready for
+   future unification without extra work now.
+3. **Not-recommended items** (unified deftype, macro HAMT) require no action.
+
+### Future unification pass (post-parity)
+
+After all parity phases are complete, a separate refactoring pass should:
+
+1. Benchmark CLJS ISlabIO overhead vs. direct DataView access
+2. If < 5% regression, migrate CLJS HAMT reads to ISlabIO
+3. Share `hamt-get`, `hamt-reduce`, `hamt-build-entries` across platforms
+   (~500 lines map, ~300 lines set)
+4. Consider shared `equiv`/`hash` helpers if implementations have grown complex
+
+This is tracked in the unification analysis, not in this plan.
