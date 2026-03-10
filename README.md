@@ -17,6 +17,32 @@ mutate Clojure data structures via mmap files on disk.
 - **Epoch-based GC** — cooperative garbage collection ensures old HAMT nodes are freed only after every reader has moved past them. No stop-the-world pauses.
 - **Zero-copy reads** — `deref` walks mmap'd/SAB memory directly. No deserialization into intermediate heap objects.
 
+## Performance
+
+Swap latency (p50, no contention) on persistent mmap-backed atoms.
+Measured on Linux, JDK 21, Node 18.
+
+```
+Atom Size     Keys    Depth   JVM swap p50   Node swap p50
+──────────────────────────────────────────────────────────
+  12 MB       1,800     3      2.94 ms        0.19 ms
+ 115 MB      16,400     4      2.56 ms        0.20 ms
+   1 GB     ~150,000    5      (measuring)    (measuring)
+```
+
+Swap latency stays flat because each `swap!` only path-copies O(log32 N)
+HAMT nodes — the rest of the tree is structurally shared. A 115 MB atom
+with 16,400 keys is 4 levels deep; a 1-billion-key atom would be 6.
+
+Cross-process contention (4 JVM threads + 4 Node processes, shared `:counter`):
+
+```
+Atom Size     Throughput    Counter     Result
+──────────────────────────────────────────────
+  12 MB        526 ops/s    400/400     CORRECT
+ 115 MB        197 ops/s    400/400     CORRECT
+```
+
 ## Usage
 
 ### As a dependency
