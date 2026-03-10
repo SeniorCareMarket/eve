@@ -30,7 +30,7 @@ These live in shared memory like all EVE types and must be used within atoms.
 An adaptation of Okasaki and Gill's "Fast Mergeable Integer Maps" — a 16-way branching PATRICIA trie with 32-bit integer keys. Useful for integer-keyed lookup tables, sparse arrays, and scenarios requiring efficient range queries or merge operations.
 
 ```clojure
-(require '[eve :as e])
+(require '[eve.alpha :as e])
 (require '[eve.deftype.int-map :as im])
 ```
 
@@ -123,7 +123,7 @@ On deref, int-map values are materialized to plain CLJS maps. All standard seque
 An Okasaki-style persistent red-black tree. Each node lives in SAB memory. Inserts produce new nodes via path-copying (persistent/immutable). Useful when you need sorted iteration or ordered membership testing.
 
 ```clojure
-(require '[eve :as e])
+(require '[eve.alpha :as e])
 (require '[eve.deftype.rb-tree :as rb])
 ```
 

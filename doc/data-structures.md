@@ -15,13 +15,13 @@ Eve provides `SharedArrayBuffer`-backed atoms and persistent data structures tha
 | Array | `eve/eve-array` | Typed array in SharedArrayBuffer |
 | Custom types | `eve/deftype` | User-defined SAB-backed types |
 
-Most user code only needs `eve` — shared atoms are available as `e/atom`. For advanced features (custom `AtomDomain`, `deftype`, `extend-type`), require `eve`.
+Most user code only needs `eve.alpha` — shared atoms are available as `e/atom`. For advanced features (custom `AtomDomain`, `deftype`, `extend-type`), require `eve.alpha` with `:include-macros true`.
 
 ## Setup
 
 ```clojure
 (ns my-app.core
-  (:require [eve :as e]))
+  (:require [eve.alpha :as e]))
 
 ;; Create a shared atom — the allocator initializes automatically
 (defonce state (e/atom {:counter 0}))
@@ -31,7 +31,7 @@ For advanced eve features (standalone atom domains, custom SAB-backed types):
 
 ```clojure
 (ns my-app.advanced
-  (:require [eve :as eve :include-macros true]))
+  (:require [eve.alpha :as eve :include-macros true]))
 ```
 
 ## AtomDomain
@@ -79,7 +79,7 @@ The fat kernel handles this automatically for the global atom instance.
 
 ## SharedAtom
 
-A `SharedAtom` is an individual atom within a shared `AtomDomain`. Multiple `SharedAtom`s share the same underlying `SharedArrayBuffer`. `e/atom` (from `eve`) is the standard way to create one:
+A `SharedAtom` is an individual atom within a shared `AtomDomain`. Multiple `SharedAtom`s share the same underlying `SharedArrayBuffer`. `e/atom` (from `eve.alpha`) is the standard way to create one:
 
 ```clojure
 ;; Create a SharedAtom in the global AtomDomain
@@ -131,7 +131,7 @@ There is no need to call `eve/hash-map`, `eve/hash-set`, `eve/vector`, or `eve/l
 Eve arrays provide typed array storage in `SharedArrayBuffer` with optional atomic operations. Atoms handle typed arrays automatically — when you store a typed array in an Eve atom, it is backed by shared memory transparently.
 
 ```clojure
-(require '[eve :as eve])
+(require '[eve.alpha :as eve])
 (require '[eve.array :as arr])
 
 ;; Construction
@@ -196,7 +196,7 @@ These use SIMD for 4x throughput but are **not atomic** — use only when exclus
 Define types with fields stored directly in `SharedArrayBuffer`:
 
 ```clojure
-(require '[eve :as eve :include-macros true])
+(require '[eve.alpha :as eve :include-macros true])
 
 (eve/deftype Counter [^:mutable ^:int32 count label]
   ICounted
@@ -316,4 +316,4 @@ Use X-RAY for storage model validation:
 (a/xray-replay!)
 ```
 
-See [Testing](10-testing.md) for the full X-RAY reference.
+See CLAUDE.md for test commands and suite details.

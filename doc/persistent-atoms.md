@@ -15,7 +15,7 @@ compare-and-swap (CAS).
 ### Node.js (ClojureScript)
 
 ```clojure
-(require '[eve :as e])
+(require '[eve.alpha :as e])
 
 ;; Create a persistent atom at an explicit path
 (def counter (e/atom {:id ::counter :persistent "./my-db"} {:count 0}))
