@@ -9,7 +9,7 @@ mutate Clojure data structures via mmap files on disk.
 
 ## Features
 
-- **O(log32 N) persistent collections** — 32-way branching HAMT maps, vectors, sets, and lists in shared memory. A 1-billion-key map is only 6 levels deep. Swap latency is constant regardless of atom size: JVM p50 ~2.5–3 ms, Node p50 ~0.2 ms — identical for a 12 MB atom (1,800 keys) and a 115 MB atom (16,400 keys).
+- **O(log32 N) persistent collections** — 32-way branching HAMT maps, vectors, sets, and lists in shared memory. A 1-billion-key map is only 6 levels deep. Swap latency is constant regardless of atom size: JVM p50 ~1 ms, Node p50 ~0.16 ms — identical from a 12 MB atom (1,800 keys) through a 1 GB atom (150,000 keys).
 - **Exabyte-scale durable atoms** — atoms backed by memory-mapped sparse files that grow lazily from kilobytes to terabytes. Data survives process restarts — no export/import step.
 - **Cross-process, uncoordinated** — multiple JVM and Node.js processes mutate the same atom concurrently via lock-free CAS on a single 32-bit root pointer. No coordination server, no locks, no leader election.
 - **In-browser shared memory** — `SharedArrayBuffer`-backed atoms let web workers share and atomically mutate persistent data structures without `postMessage` serialization.
@@ -23,16 +23,31 @@ Swap latency (p50, no contention) on persistent mmap-backed atoms.
 Measured on Linux, JDK 21, Node 18.
 
 ```
-Atom Size     Keys    Depth   JVM swap p50   Node swap p50
-──────────────────────────────────────────────────────────
-  12 MB       1,800     3      2.94 ms        0.19 ms
- 115 MB      16,400     4      2.56 ms        0.20 ms
-   1 GB     ~150,000    5      (measuring)    (measuring)
+Atom Size     Keys      Depth   JVM swap p50   Node swap p50
+─────────────────────────────────────────────────────────────
+  12 MB       1,800       3      1.10 ms        0.15 ms
+ 115 MB      16,400       4      0.88 ms        0.16 ms
+   1 GB     ~150,000      5      1.23 ms        0.17 ms
 ```
 
 Swap latency stays flat because each `swap!` only path-copies O(log32 N)
 HAMT nodes — the rest of the tree is structurally shared. A 115 MB atom
 with 16,400 keys is 4 levels deep; a 1-billion-key atom would be 6.
+
+```
+  Swap latency vs atom size (p50, log scale)
+
+  ms
+  10 ┤
+     │
+   1 ┤  ■──────────────────■───────────────■  JVM  (~1 ms)
+     │
+ 0.1 ┤  ●──────────────────●───────────────●  Node (~0.16 ms)
+     │
+0.01 ┤
+     └──┬───────────────────┬───────────────┬──
+       12 MB             115 MB            1 GB
+```
 
 Cross-process contention (4 JVM threads + 4 Node processes, shared `:counter`):
 
