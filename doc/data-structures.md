@@ -316,4 +316,4 @@ Use X-RAY for storage model validation:
 (a/xray-replay!)
 ```
 
-See [Testing](10-testing.md) for the full X-RAY reference.
+See CLAUDE.md for test commands and suite details.
