@@ -227,11 +227,11 @@ clojure -M:jvm-test
    ```clojure
    (ns eve.my-feature-test
      (:require [clojure.test :refer [deftest testing is]]
-               [eve.atom :as atom]))
+               [eve.alpha :as e]))
 
    (deftest basic-test
      (testing "my feature"
-       (let [a (atom/atom {:x 0})]
+       (let [a (e/atom {:x 0})]
          (swap! a update :x inc)
          (is (= {:x 1} @a)))))
    ```

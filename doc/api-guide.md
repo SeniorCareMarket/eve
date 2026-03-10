@@ -9,7 +9,6 @@ Complete reference for Eve's public API surface.
 | Namespace | Platform | Purpose |
 |---|---|---|
 | `eve.alpha` | CLJS + CLJ | Public API entry point |
-| `eve.atom` | CLJS + CLJ | Cross-process mmap atom (lower-level) |
 | `eve.shared-atom` | CLJS only | SAB-backed atom internals |
 | `eve.obj` | CLJS only | Typed shared objects (AoS/SoA) |
 | `eve.array` | CLJS only | Typed array API |
@@ -138,58 +137,6 @@ These are rarely needed — standard Clojure literals (`{}`, `[]`, `#{}`, `'()`)
   IMyProtocol
   (-my-method [this] ...))
 ```
-
----
-
-## eve.atom (Persistent Atoms — JVM + CLJS)
-
-Lower-level API for persistent (mmap-backed) atoms. Most users should use `e/atom` instead.
-
-```clojure
-(require '[eve.atom :as atom])
-```
-
-### `atom/atom` (JVM)
-
-The JVM version of `atom` dispatches between heap-backed and mmap-backed:
-
-```clojure
-;; Heap-backed (in-memory, no files)
-(atom/atom ::counter {:count 0})     ;; named
-(atom/atom {:id ::counter} {:count 0}) ;; config map
-(atom/atom {:count 0})                 ;; anonymous
-
-;; Persistent (mmap-backed)
-(atom/atom {:id ::counter :persistent "./my-db"} {:count 0})
-```
-
-### `atom/persistent-atom`
-
-Explicit persistent atom constructor:
-
-```clojure
-(atom/persistent-atom {:id ::counter :persistent "./my-db"} {:count 0})
-(atom/persistent-atom ::counter {:count 0})  ;; default domain
-(atom/persistent-atom {:count 0})            ;; anonymous
-```
-
-### `atom/persistent-atom-domain`
-
-Opens or creates a domain. Caches by path — repeated calls return the same domain.
-
-```clojure
-(def d (atom/persistent-atom-domain "./my-db"))
-```
-
-### `atom/close-atom-domain!`
-
-Releases the worker slot and cancels the heartbeat timer.
-
-```clojure
-(atom/close-atom-domain! domain)
-```
-
-Also available as `e/close-atom-domain!` via `eve.alpha`.
 
 ---
 

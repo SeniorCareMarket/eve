@@ -49,13 +49,18 @@ High-level system design and memory model.
 
 ## Two Atom Modes
 
-### In-Process: SharedArrayBuffer (CLJS)
+### In-Process (CLJS + CLJ)
 
-- **Backing:** `SharedArrayBuffer` — shared memory visible to all workers/threads in the same process.
-- **Created by:** `e/atom` without `:persistent`.
-- **Atom container:** `AtomDomain` — a single SAB holding many named atoms.
-- **Concurrency:** Cross-worker CAS via `Atomics.compareExchange`.
-- **GC:** Epoch-based — blocks are freed only when no reader holds a reference.
+Created by `e/atom` **without** `:persistent`. Data lives in memory only — no files on disk.
+
+| | CLJS (browser / Node.js) | CLJ (JVM) |
+|---|---|---|
+| **Backing** | `SharedArrayBuffer` — shared memory visible to all workers/threads in the same process | `byte[]` + `sun.misc.Unsafe` atomics (`JvmHeapRegion`) — heap-allocated, single-process |
+| **Atom container** | `AtomDomain` — a single SAB holding many named atoms | `MmapAtomDomain` backed by heap regions (cached per id) |
+| **Concurrency** | Cross-worker CAS via `Atomics.compareExchange` | In-process CAS via `Unsafe.compareAndSwapInt` |
+| **GC** | Epoch-based — blocks are freed only when no reader holds a reference | Same epoch-based retire queue (no heartbeat needed — single process) |
+
+Both platforms use the same slab allocator, serializer, and HAMT implementation. The only difference is the `IMemRegion` backing store.
 
 ### Cross-Process: Memory-Mapped Files (CLJ + CLJS)
 
