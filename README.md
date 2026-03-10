@@ -9,7 +9,7 @@ mutate Clojure data structures via mmap files on disk.
 
 ## Features
 
-- **O(log32 N) persistent collections** — 32-way branching HAMT maps, vectors, sets, and lists in shared memory. A 1-billion-key map is only 6 levels deep — sub-microsecond single-key reads on the JVM at tested scales (0.2–0.6 μs full deref for maps up to 500 keys).
+- **O(log32 N) persistent collections** — 32-way branching HAMT maps, vectors, sets, and lists in shared memory. A 1-billion-key map is only 6 levels deep. Swap latency is constant regardless of atom size: JVM p50 ~2.5–3 ms, Node p50 ~0.2 ms — identical for a 12 MB atom (1,800 keys) and a 115 MB atom (16,400 keys).
 - **Exabyte-scale durable atoms** — atoms backed by memory-mapped sparse files that grow lazily from kilobytes to terabytes. Data survives process restarts — no export/import step.
 - **Cross-process, uncoordinated** — multiple JVM and Node.js processes mutate the same atom concurrently via lock-free CAS on a single 32-bit root pointer. No coordination server, no locks, no leader election.
 - **In-browser shared memory** — `SharedArrayBuffer`-backed atoms let web workers share and atomically mutate persistent data structures without `postMessage` serialization.

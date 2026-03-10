@@ -8,6 +8,43 @@ set -euo pipefail
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-/home/user/eve}"
 
+# ── 0. Generate Maven settings.xml from current proxy env vars ──────────
+# The proxy IP and JWT change every session, so settings.xml must be
+# regenerated dynamically. Without this, shadow-cljs (Pomegranate/Aether)
+# and `clojure -P` fail with 407 Proxy Authentication Required.
+if [ -n "${HTTPS_PROXY:-}" ]; then
+  PROXY_HOST=$(python3 -c "import os,urllib.parse; print(urllib.parse.urlparse(os.environ['HTTPS_PROXY']).hostname)")
+  PROXY_PORT=$(python3 -c "import os,urllib.parse; print(urllib.parse.urlparse(os.environ['HTTPS_PROXY']).port)")
+  PROXY_USER=$(python3 -c "import os,urllib.parse; print(urllib.parse.urlparse(os.environ['HTTPS_PROXY']).username or '')")
+  PROXY_PASS=$(python3 -c "import os,urllib.parse; print(urllib.parse.urlparse(os.environ['HTTPS_PROXY']).password or '')")
+
+  mkdir -p ~/.m2
+  cat > ~/.m2/settings.xml << XMLEOF
+<settings>
+  <proxies>
+    <proxy>
+      <id>egress-proxy</id>
+      <active>true</active>
+      <protocol>https</protocol>
+      <host>${PROXY_HOST}</host>
+      <port>${PROXY_PORT}</port>
+      <username>${PROXY_USER}</username>
+      <password>${PROXY_PASS}</password>
+    </proxy>
+    <proxy>
+      <id>egress-proxy-http</id>
+      <active>true</active>
+      <protocol>http</protocol>
+      <host>${PROXY_HOST}</host>
+      <port>${PROXY_PORT}</port>
+      <username>${PROXY_USER}</username>
+      <password>${PROXY_PASS}</password>
+    </proxy>
+  </proxies>
+</settings>
+XMLEOF
+fi
+
 # ── 1. Install Clojure CLI if missing ─────────────────────────────────────
 if ! command -v clojure &>/dev/null; then
   echo "[ccweb-setup] Installing Clojure CLI..."
