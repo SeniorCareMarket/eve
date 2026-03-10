@@ -13,7 +13,7 @@ Both provide full Atomics API for cross-worker access.
 
 ```clojure
 (ns my-app.core
-  (:require [eve :as e]
+  (:require [eve.alpha :as e]
             [eve.obj :as obj]))
 ```
 
