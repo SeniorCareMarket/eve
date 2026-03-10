@@ -9,11 +9,13 @@ mutate Clojure data structures via mmap files on disk.
 
 ## Features
 
-- **Persistent collections** — HAMT maps, vectors, sets, lists in shared memory
-- **Cross-process atoms** — mmap-backed atoms with CAS semantics
-- **JVM interop** — JVM Clojure and Node.js share data structures
-- **Epoch GC** — cooperative garbage collection for slab-allocated blocks
-- **Zero-copy reads** — deref without serialization overhead
+- **O(log32 N) persistent collections** — 32-way branching HAMT maps, vectors, sets, and lists in shared memory. A 1-billion-key map is only 6 levels deep — sub-microsecond access at GB scale, single-digit microseconds at TB scale.
+- **Exabyte-scale durable atoms** — atoms backed by memory-mapped sparse files that grow lazily from kilobytes to terabytes. Data survives process restarts — no export/import step.
+- **Cross-process, uncoordinated** — multiple JVM and Node.js processes mutate the same atom concurrently via lock-free CAS on a single 32-bit root pointer. No coordination server, no locks, no leader election.
+- **In-browser shared memory** — `SharedArrayBuffer`-backed atoms let web workers share and atomically mutate persistent data structures without `postMessage` serialization.
+- **Three platforms, one format** — browser (CLJS), Node.js (CLJS), and JVM (Clojure) all use identical on-disk/in-memory layouts, hash functions, and CAS protocols. A domain created by one platform can be joined by any other.
+- **Epoch-based GC** — cooperative garbage collection ensures old HAMT nodes are freed only after every reader has moved past them. No stop-the-world pauses.
+- **Zero-copy reads** — `deref` walks mmap'd/SAB memory directly. No deserialization into intermediate heap objects.
 
 ## Usage
 
@@ -40,18 +42,26 @@ eve/eve {:git/url "https://github.com/SeniorCareMarket/eve"
 The native addon is only needed for cross-process persistent atoms (mmap).
 In-process SharedArrayBuffer atoms work without it.
 
-### In-process atoms (SharedArrayBuffer)
+### In-process atoms
+
+Every platform has a heap-backed in-process mode — no files on disk, no native addon required.
+
+| Platform | Backing |
+|---|---|
+| Browser (CLJS) | `SharedArrayBuffer` — shared across web workers via `Atomics` CAS |
+| Node.js (CLJS) | `SharedArrayBuffer` — same as browser |
+| JVM (Clojure) | `byte[]` + `sun.misc.Unsafe` atomics — heap-allocated, single-process |
 
 ```clojure
 (require '[eve.alpha :as e])
 
-;; Create a SharedArrayBuffer-backed atom (slab allocator auto-initializes)
+;; Create an in-process atom (slab allocator auto-initializes)
 (def my-atom (e/atom {:key "value"}))
 
 (swap! my-atom assoc :count 42)
 @my-atom ;; => {:key "value", :count 42}
 
-;; Named atoms — same :id returns the same atom across threads/workers/processes
+;; Named atoms — same :id returns the same atom across threads/workers
 (def state (e/atom ::app-state {:counter 0}))
 (swap! state update :counter inc)
 ```
@@ -107,10 +117,16 @@ node target/eve-test/all.js all
 
 | Document | Description |
 |---|---|
+| [getting-started.md](doc/getting-started.md) | Installation, first atom, basic usage |
+| [api-guide.md](doc/api-guide.md) | Complete public API reference |
 | [persistent-atoms.md](doc/persistent-atoms.md) | Cross-process persistent atoms — quick start, CAS semantics, API |
 | [data-structures.md](doc/data-structures.md) | Eve data structures — atoms, maps, sets, vectors, lists, typed arrays |
 | [collections.md](doc/collections.md) | Specialized collections — IntMap, sorted set, PATRICIA trie |
 | [obj.md](doc/obj.md) | `eve/obj` typed shared objects — AoS/SoA layouts, schemas, atomic ops |
+| [architecture.md](doc/architecture.md) | System design, memory model, slab allocator, CAS loop, epoch GC |
+| [internals.md](doc/internals.md) | Deep dive — slab allocator, serialization format, HAMT, native addon |
+| [platform-support.md](doc/platform-support.md) | Platform requirements and JVM vs Node.js differences |
+| [testing.md](doc/testing.md) | Test suites, how to run them, what they cover |
 
 ## License
 
