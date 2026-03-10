@@ -5,7 +5,7 @@
 
    Usage: clj -M:native-x-stress-atom <base-path>
    Example: clj -M:native-x-stress-atom /tmp/eve-10m"
-  (:require [cljs-thread.eve.atom :as atom]
+  (:require [eve.atom :as atom]
             [clojure.edn :as edn])
   (:import [java.io File]))
 

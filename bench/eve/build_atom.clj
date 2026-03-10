@@ -3,7 +3,7 @@
 
    Usage: clj -M:native-build-atom <base-path> <target-mb>
    Example: clj -M:native-build-atom /tmp/eve-10m 10"
-  (:require [cljs-thread.eve.atom :as atom])
+  (:require [eve.atom :as atom])
   (:import [java.io File]))
 
 (defn- total-disk-bytes [base]
