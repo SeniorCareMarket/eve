@@ -1,0 +1,18 @@
+.shadow-cljs/
+.clj-kondo/
+.lsp/
+.portal/
+.DS_Store
+test-results/
+node_modules/
+.cpcache/
+.nrepl-port
+*.log
+target/
+out/
+build/
+# Eve mmap atom domain files (created by tests/runtime)
+*.slab[0-6]
+*.slab[0-5].bm
+*.root
+*.rmap

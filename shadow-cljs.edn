@@ -1,0 +1,114 @@
+{:deps {:aliases [:node-test]}
+ :builds
+ {;; Unified eve test runner.
+  ;; Usage: node target/eve-test/all.js [suite]
+  :eve-test
+  {:target :node-script
+   :main eve.runner.eve-test-main/main
+   :output-to "target/eve-test/all.js"}
+
+  ;; Standalone mmap-atom worker for cross-process e2e tests
+  :mmap-worker
+  {:target    :node-script
+   :output-to "target/eve-test/mmap-worker.js"
+   :main      eve.runner.mmap-worker-main/main}
+
+  ;; Standalone benchmark worker for cross-process benchmarks
+  :bench-worker
+  {:target    :node-script
+   :output-to "target/eve-test/bench-worker.js"
+   :main      eve.runner.bench-worker-main/main}
+
+  ;; X-RAY stress test — needs its own target because loading map/vec/list/set
+  ;; registers type encoders that break xray's HAMT allocation.
+  :xray-stress-test
+  {:target :node-test
+   :output-to "target/eve-test/xray-stress-test.js"
+   :ns-regexp "xray-stress-test$"
+   :autorun true}
+
+  ;; Array debug
+  :array-debug
+  {:target :node-script
+   :main eve.array-debug/run-debug
+   :output-to "target/eve-test/array-debug.js"}
+
+  ;; Eve integration tests: main-thread entry
+  :eve-integration
+  {:target     :node-script
+   :output-to  "target/eve-test/integration.js"
+   :main       eve.runner.eve-integration-main/main}
+
+  ;; Eve smoke tests: main-thread entry
+  :eve-smoke
+  {:target     :node-script
+   :output-to  "target/eve-test/smoke.js"
+   :main       eve.runner.eve-smoke-main/main}
+
+  ;; Eve performance tests: main-thread entry
+  :eve-perf
+  {:target     :node-script
+   :output-to  "target/eve-test/perf.js"
+   :main       eve.runner.eve-perf-main/main}
+
+  ;; Allocator race condition tests
+  :eve-alloc-race
+  {:target     :node-script
+   :output-to  "target/eve-test/alloc-race.js"
+   :main       eve.runner.alloc-race-main/main}
+
+  ;; Smoke tests unified: single compilation unit for :advanced mode
+  :eve-smoke-unified
+  {:target     :node-script
+   :output-to  "target/eve-test/unified-smoke.js"
+   :main       eve.runner.eve-smoke-unified/main
+   :compiler-options {:load-tests true}}
+
+  ;; Integration tests unified: single compilation unit for :advanced mode
+  :eve-integration-unified
+  {:target     :node-script
+   :output-to  "target/eve-test/unified-integration.js"
+   :main       eve.runner.eve-integration-unified/main
+   :compiler-options {:load-tests true}}
+
+  ;; Performance tests unified: single compilation unit for :advanced mode
+  :eve-perf-unified
+  {:target     :node-script
+   :output-to  "target/eve-test/unified-perf.js"
+   :main       eve.runner.eve-perf-unified/main
+   :compiler-options {:load-tests true}}
+
+  ;; Eve benchmark framework
+  :eve-bench
+  {:target     :node-script
+   :output-to  "target/eve-bench/bench.js"
+   :main       eve.runner.eve-bench-main/main}
+
+  ;; Eve benchmark unified (single compilation unit for :advanced mode)
+  :eve-bench-unified
+  {:target     :node-script
+   :output-to  "target/eve-bench/unified-bench.js"
+   :main       eve.runner.eve-bench-unified/main
+   :compiler-options {:load-tests true}}
+
+  ;; Eve benchmark worker (shared by compile/release)
+  :eve-bench-worker
+  {:target     :node-script
+   :output-to  "target/eve-bench/worker.js"
+   :main       eve.runner.thread-test-worker/main}
+
+  ;; X-RAY step debugger
+  :eve-xray
+  {:target     :node-script
+   :output-to  "target/eve-test/xray.js"
+   :main       eve.runner.eve-xray-main/main}
+
+  ;; X-RAY browser test — needs its own build (map/vec/list/set encoder
+  ;; side-effects break xray's HAMT allocation)
+  :xray-test-browser
+  {:target     :browser
+   :output-dir "target/xray-test-browser"
+   :asset-path "."
+   :modules    {:main {:init-fn eve.runner.eve-xray-test-main/init!}}
+   :js-options {:resolve {"worker_threads" {:target :browser :global "null"}
+                          "wabt"           {:target :browser :global "null"}}}}}}

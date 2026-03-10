@@ -1,0 +1,18 @@
+{
+  "name": "eve-native",
+  "version": "1.0.0",
+  "description": "Shared-memory persistent data structures for ClojureScript — native addon",
+  "scripts": {
+    "build:addon": "node-gyp build",
+    "install": "node-gyp-build"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.6.0",
+    "node-gyp-build": "^4.8.1"
+  },
+  "devDependencies": {
+    "shadow-cljs": "^3.3.6",
+    "wabt": "^1.0.39"
+  },
+  "gypfile": true
+}

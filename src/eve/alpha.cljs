@@ -1,0 +1,35 @@
+(ns eve.alpha
+  "Eve public API.
+
+   Provides shared-memory persistent data structures and atoms.
+   Re-exports core functionality for standalone library consumption."
+  (:refer-clojure :exclude [atom aget aset hash-map hash-set])
+  (:require
+   [eve.shared-atom :as a]
+   [eve.array :as arr]
+   [eve.deftype-proto.alloc :as eve-alloc]
+   [eve.map :as eve-map]
+   [eve.vec]
+   [eve.set :as eve-set]
+   [eve.list]))
+
+;; Cross-module registrations (avoids circular deps between map ↔ shared-atom)
+(a/register-xray-hamt-validator! eve-map/validate-from-header-offset)
+
+;; Auto-initialize slab allocator on namespace load
+(defonce ^:private init-promise (eve-alloc/init!))
+
+;; Atom API
+(def atom a/atom)
+(def atom-domain a/atom-domain)
+
+;; Data Structure API
+(def hash-map eve-map/hash-map)
+(def empty-hash-map eve-map/empty-hash-map)
+(def hash-set eve-set/hash-set)
+(def empty-hash-set eve-set/empty-hash-set)
+
+;; Typed Array API
+(def aget arr/aget)
+(def aset! arr/aset!)
+(def get-typed-view arr/get-typed-view)
