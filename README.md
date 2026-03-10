@@ -24,15 +24,15 @@ Add eve to both `deps.edn` (for ClojureScript source) and `package.json`
 
 ```clojure
 ;; deps.edn
-eve/eve {:git/url "https://github.com/SeniorCareMarket-com/eve"
-         :git/sha "fc60e12c"}
+eve/eve {:git/url "https://github.com/SeniorCareMarket/eve"
+         :git/sha "0e084fff"}
 ```
 
 ```json
 // package.json — native addon (builds automatically on npm install)
 {
   "dependencies": {
-    "eve-native": "github:SeniorCareMarket-com/eve"
+    "eve-native": "github:SeniorCareMarket/eve"
   }
 }
 ```
