@@ -67,20 +67,23 @@
     (let [d  (atom/persistent-atom-domain base-path)
           a  (atom/atom {:id :eve/main :persistent base-path} {:counter 0})
           t0 (System/nanoTime)]
-      ;; Build in batches — stop when disk size reaches target
-      (loop [offset 0]
-        (let [disk (total-disk-bytes base-path)]
-          (when (< disk target-bytes)
-            (let [end   (+ offset batch-size)
-                  batch (into {} (for [i (range offset end)]
-                                   [(keyword (str "k" i)) (rich-value i)]))]
-              (swap! a merge batch)
-              (let [disk-mb   (/ (double (total-disk-bytes base-path)) (* 1024 1024))
-                    elapsed-s (/ (- (System/nanoTime) t0) 1e9)]
-                (printf "\r  %,6d keys | %6.1f MB on disk | %5.1fs elapsed"
-                        end disk-mb elapsed-s)
-                (flush))
-              (recur end)))))
+      ;; Build with individual assoc calls — each is O(log32 N) via structural
+      ;; sharing. Avoids the O(N) merge that re-serializes the entire map.
+      (loop [i 0]
+        (let [disk (if (zero? (mod i batch-size))
+                     (total-disk-bytes base-path)
+                     0)]
+          (when (or (zero? disk) (< disk target-bytes))
+            (let [k (keyword (str "k" i))
+                  v (rich-value i)]
+              (swap! a assoc k v)
+              (when (zero? (mod (inc i) batch-size))
+                (let [disk-mb   (/ (double (total-disk-bytes base-path)) (* 1024 1024))
+                      elapsed-s (/ (- (System/nanoTime) t0) 1e9)]
+                  (printf "\r  %,6d keys | %6.1f MB on disk | %5.1fs elapsed"
+                          (inc i) disk-mb elapsed-s)
+                  (flush)))
+              (recur (inc i))))))
       (let [elapsed-s  (/ (- (System/nanoTime) t0) 1e9)
             disk-bytes (total-disk-bytes base-path)
             disk-mb    (/ (double disk-bytes) (* 1024 1024))
