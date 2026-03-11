@@ -1,29 +1,32 @@
 (ns eve.obj
-  "Simple typed objects and object-arrays backed by SharedArrayBuffer.
+  "Simple typed objects and object-arrays backed by SharedArrayBuffer (CLJS)
+   or slab memory (JVM).
 
    Two representations optimized for different use cases:
 
    1. eve-obj (AoS) - Single object with named typed fields
       Good for: individual records, tree nodes, whole-object operations
 
-   2. eve-obj-array (SoA) - Collection of objects stored column-wise
+   2. eve-obj-array (SoA) - Collection of objects stored column-wise (CLJS only)
       Good for: batch processing, SIMD operations, cache-efficient iteration
 
-   Both provide full Atomics API and compose with eve-array."
+   Both provide full Atomics API and compose with eve-array (CLJS).
+   JVM provides read/write via ISlabIO."
   (:refer-clojure :exclude [get assoc! get-in])
   (:require
-   [eve.shared-atom :as atom]
-   [eve.array :as arr]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.serialize :as ser]
-   [eve.wasm-mem :as wasm]))
+   #?@(:cljs [[eve.shared-atom :as atom]
+              [eve.array :as arr]
+              [eve.wasm-mem :as wasm]]
+       :clj  [[eve.mem :as mem]])))
 
 ;; Forward declarations
-(declare get ObjArrayRow get-in)
+#?(:cljs (declare get ObjArrayRow get-in))
 
 ;;=============================================================================
-;; Schema - defines the shape of an object (like V8 hidden classes)
+;; Shared Schema — defines the shape of an object (like V8 hidden classes)
 ;;=============================================================================
 
 (def ^:private type-sizes
@@ -65,20 +68,20 @@
    Returns {:fields {field-key {:type t :offset o :size s}} :total-size n}"
   [schema]
   (let [;; Sort fields by alignment (descending) for optimal packing
-        sorted-fields (sort-by (fn [[_k v]] (- (type-alignments v 4)))
+        sorted-fields (sort-by (fn [[_k v]] (- (clojure.core/get type-alignments v 4)))
                                schema)]
     (loop [fields (seq sorted-fields)
            offset 0
            layout {}]
       (if-let [[field-key field-type] (first fields)]
-        (let [size (type-sizes field-type 4)
-              alignment (type-alignments field-type 4)
+        (let [size (clojure.core/get type-sizes field-type 4)
+              alignment (clojure.core/get type-alignments field-type 4)
               aligned-offset (align-offset offset alignment)]
           (recur (next fields)
                  (+ aligned-offset size)
-                 (assoc layout field-key {:type field-type
-                                          :offset aligned-offset
-                                          :size size})))
+                 (clojure.core/assoc layout field-key {:type field-type
+                                                       :offset aligned-offset
+                                                       :size size})))
         {:fields layout
          :total-size (align-offset offset 4)}))))  ;; Final alignment to 4-byte boundary
 
@@ -94,9 +97,26 @@
      :size (:total-size layout)
      :field-keys (vec (keys (:fields layout)))}))
 
+;;-----------------------------------------------------------------------------
+;; Shared schema encoding/decoding for slab serialization
+;;-----------------------------------------------------------------------------
+
+(defn- obj-type-kw->code [kw]
+  (case kw :int8 0 :uint8 1 :int16 2 :uint16 3 :int32 4 :uint32 5
+            :float32 6 :float64 7 :obj 8 :array 9
+            (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+                    (str "Unknown Obj field type: " kw)))))
+
+(defn- obj-code->type-kw [code]
+  (case (int code) 0 :int8 1 :uint8 2 :int16 3 :uint16 4 :int32 5 :uint32
+                   6 :float32 7 :float64 8 :obj 9 :array))
+
 ;;=============================================================================
-;; Single Object (AoS style) - eve-obj
+;; CLJS implementation — SharedArrayBuffer + Atomics
 ;;=============================================================================
+
+#?(:cljs
+   (do
 
 (deftype Obj [schema
               ^js/SharedArrayBuffer sab
@@ -196,8 +216,7 @@
   (-lookup obj k))
 
 (defn assoc!
-  "Set field value in object. Uses Atomics.store for int32/uint32.
-   Returns the value written."
+  "Set field value in object. Uses Atomics.store for int32/uint32."
   [^Obj obj k v]
   (let [schema (.-schema obj)
         sab (.-sab obj)
@@ -231,15 +250,9 @@
             field-type (:type field-info)]
         (case field-type
           (:int32 :obj :array)
-          (== expected (js/Atomics.compareExchange
-                        (js/Int32Array. sab)
-                        (unsigned-bit-shift-right field-offset 2)
-                        expected new-val))
+          (== expected (js/Atomics.compareExchange (js/Int32Array. sab) (unsigned-bit-shift-right field-offset 2) expected new-val))
           :uint32
-          (== expected (js/Atomics.compareExchange
-                        (js/Uint32Array. sab)
-                        (unsigned-bit-shift-right field-offset 2)
-                        expected new-val))
+          (== expected (js/Atomics.compareExchange (js/Uint32Array. sab) (unsigned-bit-shift-right field-offset 2) expected new-val))
           (throw (js/Error. (str "CAS only supported on int32/uint32/obj/array fields, got: " field-type)))))
       (throw (js/Error. (str "Unknown field: " k))))))
 
@@ -294,9 +307,7 @@
 ;; Single Object - Constructor
 ;;=============================================================================
 
-(defn- alloc-obj-region
-  "Allocate region for an object with given schema. Returns {:sab sab :offset offset :descriptor-idx idx}"
-  [schema]
+(defn- alloc-obj-region [schema]
   (let [byte-size (:size schema)
         eve-env (if atom/*global-atom-instance*
                   (atom/get-env atom/*global-atom-instance*)
@@ -309,28 +320,19 @@
        :descriptor-idx (:descriptor-idx alloc-result)})))
 
 (defn obj
-  "Create a new typed object from a schema and initial values.
-
-   Usage:
-     (def schema (create-schema {:key :int32 :left :int32 :right :int32}))
-     (def node (obj schema {:key 42 :left -1 :right -1}))
-
-   Or inline schema:
-     (def node (obj {:key :int32 :left :int32} {:key 42 :left -1}))"
+  "Create a new typed object from a schema and initial values."
   ([schema-or-field-map]
    (obj schema-or-field-map {}))
   ([schema-or-field-map init-values]
    (let [schema (if (map? schema-or-field-map)
                   (if (:layout schema-or-field-map)
-                    schema-or-field-map  ;; Already a schema
-                    (create-schema schema-or-field-map))  ;; Field map
+                    schema-or-field-map
+                    (create-schema schema-or-field-map))
                   schema-or-field-map)
          {:keys [sab offset descriptor-idx]} (alloc-obj-region schema)
          obj-instance (Obj. schema sab offset descriptor-idx nil nil)]
-     ;; Initialize fields
      (doseq [[k v] init-values]
        (assoc! obj-instance k v))
-     ;; Zero-fill uninitialized int32/uint32 fields
      (doseq [[k field-info] (:layout schema)]
        (when (and (not (contains? init-values k))
                   (#{:int32 :uint32 :obj :array} (:type field-info)))
@@ -338,87 +340,46 @@
      obj-instance)))
 
 ;;=============================================================================
-;; Object Array (SoA style) - eve-obj-array
+;; Object Array (SoA style) - CLJS only
 ;;=============================================================================
-;; Stores N objects as separate column arrays for cache/SIMD efficiency
 
-(deftype ObjArray [schema
-                   ^number length
-                   columns        ;; map of {field-key -> Int32Array/etc}
-                   ^:mutable __hash
-                   ^IPersistentMap _meta]
-
+(deftype ObjArray [schema ^number length columns ^:mutable __hash ^IPersistentMap _meta]
   Object
   (toString [this]
     (str "#eve/obj-array [schema=" (pr-str (:field-map schema)) " length=" length "]"))
-
-  IMeta
-  (-meta [_] _meta)
-
-  IWithMeta
-  (-with-meta [_ new-meta]
-    (ObjArray. schema length columns __hash new-meta))
-
-  ICounted
-  (-count [_] length)
-
+  IMeta (-meta [_] _meta)
+  IWithMeta (-with-meta [_ new-meta] (ObjArray. schema length columns __hash new-meta))
+  ICounted (-count [_] length)
   IIndexed
   (-nth [this idx]
-    (if (and (>= idx 0) (< idx length))
-      ;; Return a "view" object for this row
-      (ObjArrayRow. this idx)
+    (if (and (>= idx 0) (< idx length)) (ObjArrayRow. this idx)
       (throw (js/Error. (str "Index out of bounds: " idx)))))
   (-nth [this idx not-found]
-    (if (and (>= idx 0) (< idx length))
-      (ObjArrayRow. this idx)
-      not-found))
-
+    (if (and (>= idx 0) (< idx length)) (ObjArrayRow. this idx) not-found))
   IFn
-  (-invoke [this idx]
-    (-nth this idx))
-  (-invoke [this idx not-found]
-    (-nth this idx not-found))
-
+  (-invoke [this idx] (-nth this idx))
+  (-invoke [this idx not-found] (-nth this idx not-found))
   ISeqable
-  (-seq [this]
-    (when (pos? length)
-      (map #(-nth this %) (range length))))
-
+  (-seq [this] (when (pos? length) (map #(-nth this %) (range length))))
   IPrintWithWriter
   (-pr-writer [this writer opts]
-    (-write writer "#eve/obj-array [")
-    (-write writer (str "schema=" (pr-str (:field-map schema))))
-    (-write writer (str " length=" length))
-    (-write writer "]")))
+    (-write writer (str "#eve/obj-array [schema=" (pr-str (:field-map schema)) " length=" length "]"))))
 
-;; Row view - provides object-like access to a single row in SoA storage
-(deftype ObjArrayRow [^ObjArray parent
-                      ^number idx]
-
+(deftype ObjArrayRow [^ObjArray parent ^number idx]
   Object
   (toString [this]
     (let [schema (.-schema parent)]
-      (str "#eve/obj-array-row "
-           (into {} (map (fn [k] [k (get-in parent [idx k])]) (:field-keys schema))))))
-
+      (str "#eve/obj-array-row " (into {} (map (fn [k] [k (get-in parent [idx k])]) (:field-keys schema))))))
   ILookup
-  (-lookup [this k]
-    (get-in parent [idx k]))
-  (-lookup [this k not-found]
-    (get-in parent [idx k] not-found))
-
+  (-lookup [this k] (get-in parent [idx k]))
+  (-lookup [this k not-found] (get-in parent [idx k] not-found))
   IFn
-  (-invoke [this k]
-    (-lookup this k))
-  (-invoke [this k not-found]
-    (-lookup this k not-found))
-
+  (-invoke [this k] (-lookup this k))
+  (-invoke [this k not-found] (-lookup this k not-found))
   ISeqable
   (-seq [this]
     (let [schema (.-schema parent)]
-      (map (fn [k] (MapEntry. k (-lookup this k) nil))
-           (:field-keys schema))))
-
+      (map (fn [k] (MapEntry. k (-lookup this k) nil)) (:field-keys schema))))
   IPrintWithWriter
   (-pr-writer [this writer opts]
     (let [schema (.-schema parent)]
@@ -440,85 +401,53 @@
 
 (defn get-in
   "Get field value at [idx field-key] from object array."
-  ([^ObjArray arr path]
-   (get-in arr path nil))
+  ([^ObjArray arr path] (get-in arr path nil))
   ([^ObjArray arr [idx k] not-found]
-   (let [columns (.-columns arr)
-         schema (.-schema arr)]
+   (let [columns (.-columns arr)]
      (if-let [col (clojure.core/get columns k)]
-       (if (and (>= idx 0) (< idx (.-length arr)))
-         (arr/aget col idx)
-         not-found)
+       (if (and (>= idx 0) (< idx (.-length arr))) (arr/aget col idx) not-found)
        not-found))))
 
 (defn assoc-in!
-  "Set field value at [idx field-key] in object array. Returns value."
+  "Set field value at [idx field-key] in object array."
   [^ObjArray arr [idx k] v]
   (let [columns (.-columns arr)]
     (if-let [col (clojure.core/get columns k)]
       (do (arr/aset! col idx v) v)
       (throw (js/Error. (str "Unknown field: " k))))))
 
-(defn cas-in!
-  "CAS at [idx field-key]. Returns true if successful."
-  [^ObjArray arr [idx k] expected new-val]
-  (let [columns (.-columns arr)]
-    (if-let [col (clojure.core/get columns k)]
-      (arr/cas! col idx expected new-val)
-      (throw (js/Error. (str "Unknown field: " k))))))
-
-(defn add-in!
-  "Atomic add at [idx field-key]. Returns old value."
-  [^ObjArray arr [idx k] delta]
-  (let [columns (.-columns arr)]
-    (if-let [col (clojure.core/get columns k)]
-      (arr/add! col idx delta)
-      (throw (js/Error. (str "Unknown field: " k))))))
-
-(defn sub-in!
-  "Atomic subtract at [idx field-key]. Returns old value."
-  [^ObjArray arr [idx k] delta]
-  (let [columns (.-columns arr)]
-    (if-let [col (clojure.core/get columns k)]
-      (arr/sub! col idx delta)
-      (throw (js/Error. (str "Unknown field: " k))))))
-
-(defn exchange-in!
-  "Atomic exchange at [idx field-key]. Returns old value."
-  [^ObjArray arr [idx k] new-val]
-  (let [columns (.-columns arr)]
-    (if-let [col (clojure.core/get columns k)]
-      (arr/exchange! col idx new-val)
-      (throw (js/Error. (str "Unknown field: " k))))))
-
-;;=============================================================================
-;; Object Array - Column Access (for SIMD/batch operations)
-;;=============================================================================
-
-(defn column
-  "Get the raw typed array for a column. Use for SIMD/batch operations.
-
-   Example:
-     (def nodes (obj-array 1000 {:key :int32 :val :int32}))
-     (def keys-col (column nodes :key))
-     ;; keys-col is an Int32Array - use for SIMD ops"
-  [^ObjArray arr k]
-  (clojure.core/get (.-columns arr) k))
-
-(defn column-reduce
-  "Reduce over a single column with index.
-   f is (fn [acc idx val] ...)"
-  [^ObjArray arr k init f]
-  (if-let [col (column arr k)]
-    (arr/areduce col init f)
+(defn cas-in! [^ObjArray arr [idx k] expected new-val]
+  (if-let [col (clojure.core/get (.-columns arr) k)]
+    (arr/cas! col idx expected new-val)
     (throw (js/Error. (str "Unknown field: " k)))))
 
-(defn column-map!
-  "Map over a single column in place.
-   f is (fn [idx val] new-val)"
-  [^ObjArray arr k f]
-  (if-let [col (column arr k)]
-    (arr/amap! col f)
+(defn add-in! [^ObjArray arr [idx k] delta]
+  (if-let [col (clojure.core/get (.-columns arr) k)]
+    (arr/add! col idx delta)
+    (throw (js/Error. (str "Unknown field: " k)))))
+
+(defn sub-in! [^ObjArray arr [idx k] delta]
+  (if-let [col (clojure.core/get (.-columns arr) k)]
+    (arr/sub! col idx delta)
+    (throw (js/Error. (str "Unknown field: " k)))))
+
+(defn exchange-in! [^ObjArray arr [idx k] new-val]
+  (if-let [col (clojure.core/get (.-columns arr) k)]
+    (arr/exchange! col idx new-val)
+    (throw (js/Error. (str "Unknown field: " k)))))
+
+;;=============================================================================
+;; Object Array - Column Access
+;;=============================================================================
+
+(defn column [^ObjArray arr k] (clojure.core/get (.-columns arr) k))
+
+(defn column-reduce [^ObjArray arr k init f]
+  (if-let [col (column arr k)] (arr/areduce col init f)
+    (throw (js/Error. (str "Unknown field: " k)))))
+
+(defn column-map! [^ObjArray arr k f]
+  (if-let [col (column arr k)] (arr/amap! col f)
     (throw (js/Error. (str "Unknown field: " k)))))
 
 ;;=============================================================================
@@ -526,33 +455,14 @@
 ;;=============================================================================
 
 (defn obj-array
-  "Create a new SoA-style object array.
-
-   Storage: Each field is stored as a separate typed array (column-wise).
-   This is cache-efficient and SIMD-friendly for field-wise operations.
-
-   Usage:
-     (def nodes (obj-array 1000 {:key :int32 :left :int32 :right :int32}))
-     (assoc-in! nodes [0 :key] 42)
-     (get-in nodes [0 :key])  ;; => 42
-
-     ;; Column access for SIMD
-     (def keys-col (column nodes :key))  ;; raw Int32Array"
-  ([n schema-or-field-map]
-   (obj-array n schema-or-field-map nil))
+  ([n schema-or-field-map] (obj-array n schema-or-field-map nil))
   ([n schema-or-field-map init-val]
    (let [schema (if (map? schema-or-field-map)
-                  (if (:layout schema-or-field-map)
-                    schema-or-field-map
-                    (create-schema schema-or-field-map))
+                  (if (:layout schema-or-field-map) schema-or-field-map (create-schema schema-or-field-map))
                   schema-or-field-map)
-         ;; Create column arrays - only int32 for now
-         ;; TODO: Support other typed arrays
          columns (into {}
-                       (map (fn [[k field-info]]
-                              [k (if init-val
-                                   (arr/int32-array n init-val)
-                                   (arr/int32-array n))])
+                       (map (fn [[k _]]
+                              [k (if init-val (arr/int32-array n init-val) (arr/int32-array n))])
                             (:layout schema)))]
      (ObjArray. schema n columns nil nil))))
 
@@ -560,67 +470,30 @@
 ;; Low-level access
 ;;=============================================================================
 
-(defn get-schema
-  "Get the schema from an object or object-array."
-  [obj-or-arr]
-  (cond
-    (instance? Obj obj-or-arr) (.-schema obj-or-arr)
-    (instance? ObjArray obj-or-arr) (.-schema obj-or-arr)
-    :else nil))
+(defn get-schema [obj-or-arr]
+  (cond (instance? Obj obj-or-arr) (.-schema obj-or-arr)
+        (instance? ObjArray obj-or-arr) (.-schema obj-or-arr)
+        :else nil))
 
-(defn get-sab
-  "Get the underlying SharedArrayBuffer from a single object."
-  [^Obj obj]
-  (.-sab obj))
-
-(defn get-offset
-  "Get the byte offset of a single object."
-  [^Obj obj]
-  (.-offset obj))
-
-(defn get-descriptor-idx
-  "Get the block descriptor index for this object. For GC tracking."
-  [^Obj obj]
-  (.-descriptor-idx obj))
+(defn get-sab [^Obj obj] (.-sab obj))
+(defn get-offset [^Obj obj] (.-offset obj))
+(defn get-descriptor-idx [^Obj obj] (.-descriptor-idx obj))
 
 ;;=============================================================================
 ;; GC / Lifecycle
 ;;=============================================================================
 
-(defn retire!
-  "Mark this object's block as retired for GC.
-   Call when replacing this object with a new version.
-   Returns true if successfully retired, false if already being processed."
-  [^Obj obj]
+(defn retire! [^Obj obj]
   (when-let [desc-idx (.-descriptor-idx obj)]
     (let [eve-env (when atom/*global-atom-instance*
                     (atom/get-env atom/*global-atom-instance*))]
-      (when eve-env
-        (atom/retire-block! eve-env desc-idx)))))
+      (when eve-env (atom/retire-block! eve-env desc-idx)))))
 
 ;;=============================================================================
-;; Slab-backed atom root registration (mmap-atom Phase 7)
-;;
-;; Allows Obj to be stored as an atom root value via the mmap slab allocator.
-;; Block layout (type-id 0x1E):
-;;   [0x1E:u8][pad:u8][schema-len:u16 LE][schema-bytes...][field-data...]
-;; Schema encoding per field: [name-len:u8][name-bytes...][type-code:u8]
-;;   Type codes: 0=:int8 1=:uint8 2=:int16 3=:uint16 4=:int32 5=:uint32
-;;               6=:float32 7=:float64 8=:obj 9=:array
+;; Slab-backed atom root registration
 ;;=============================================================================
 
-(defn- obj-type-kw->code [kw]
-  (case kw :int8 0 :uint8 1 :int16 2 :uint16 3 :int32 4 :uint32 5
-            :float32 6 :float64 7 :obj 8 :array 9
-            (throw (js/Error. (str "Unknown Obj field type: " kw)))))
-
-(defn- obj-code->type-kw [code]
-  (case (int code) 0 :int8 1 :uint8 2 :int16 3 :uint16 4 :int32 5 :uint32
-                   6 :float32 7 :float64 8 :obj 9 :array))
-
-(defn- encode-obj-schema
-  "Encode field-map {keyword → type-keyword} to a compact Uint8Array."
-  [field-map]
+(defn- encode-obj-schema [field-map]
   (let [encoder (js/TextEncoder.)
         fields  (seq field-map)
         nbufs   (mapv (fn [[k _]] (.encode encoder (name k))) fields)
@@ -639,10 +512,7 @@
           (recur (+ pos 2 nlen) (next fseq) (next bseq)))))
     buf))
 
-(defn- decode-obj-schema
-  "Decode schema bytes from a Uint8Array at the given absolute byte offset.
-   Returns a field-map {keyword → type-keyword}."
-  [^js u8 start]
+(defn- decode-obj-schema [^js u8 start]
   (let [dv      (js/DataView. (.-buffer u8))
         n       (.getUint8 dv start)
         decoder (js/TextDecoder.)]
@@ -652,10 +522,9 @@
               nm        (.decode decoder (.subarray u8 (inc pos) (+ pos 1 nlen)))
               type-code (.getUint8 dv (+ pos 1 nlen))]
           (recur (inc i) (+ pos 2 nlen)
-                 (assoc fm (keyword nm) (obj-code->type-kw type-code))))
+                 (clojure.core/assoc fm (keyword nm) (obj-code->type-kw type-code))))
         fm))))
 
-;; Builder: Obj → slab block (type-id 0x1E)
 (ser/register-cljs-to-sab-builder!
   (fn [v] (instance? Obj v))
   (fn [^Obj o]
@@ -675,7 +544,6 @@
       (reify d/IEveRoot
         (-root-header-off [_] blk-off)))))
 
-;; Header constructor: slab block (0x1E) → Obj
 (ser/register-header-constructor!
   ser/EVE_OBJ_SLAB_TYPE_ID
   (fn [_sab blk-off]
@@ -689,7 +557,106 @@
           data-off   (+ byte-base 4 schema-len)]
       (Obj. schema sab data-off -1 nil nil))))
 
-;; Disposer: free the single slab block (schema + field data both embedded)
 (ser/register-header-disposer!
   ser/EVE_OBJ_SLAB_TYPE_ID
   (fn [blk-off] (alloc/free! blk-off)))
+
+)) ;; end #?(:cljs (do ...))
+
+;;=============================================================================
+;; JVM implementation — slab-backed typed objects via ISlabIO
+;;=============================================================================
+
+#?(:clj
+   (do
+
+     (deftype JvmObj [schema       ;; {:field-map, :layout, :size, :field-keys}
+                      ^long slab-off  ;; slab-qualified offset of 0x1E block
+                      ^long data-off  ;; relative offset of field data within block
+                      sio           ;; ISlabIO context
+                      ^:unsynchronized-mutable _hash_val]
+
+       clojure.lang.Counted
+       (count [_] (clojure.core/count (:field-keys schema)))
+
+       clojure.lang.ILookup
+       (valAt [this k] (.valAt this k nil))
+       (valAt [this k not-found]
+         (if-let [{:keys [type offset]} (clojure.core/get (:layout schema) k)]
+           (let [fld-off (+ data-off offset)]
+             (case type
+               :int8    (let [b (alloc/-sio-read-u8 sio slab-off fld-off)]
+                          (if (> b 127) (- b 256) b))
+               :uint8   (alloc/-sio-read-u8 sio slab-off fld-off)
+               :int16   (let [v (alloc/-sio-read-u16 sio slab-off fld-off)]
+                          (if (> v 32767) (- v 65536) v))
+               :uint16  (alloc/-sio-read-u16 sio slab-off fld-off)
+               :int32   (alloc/-sio-read-i32 sio slab-off fld-off)
+               :uint32  (bit-and (long (alloc/-sio-read-i32 sio slab-off fld-off)) 0xFFFFFFFF)
+               (:obj :array) (alloc/-sio-read-i32 sio slab-off fld-off)
+               :float32 (Float/intBitsToFloat (alloc/-sio-read-i32 sio slab-off fld-off))
+               :float64 (let [lo (bit-and (long (alloc/-sio-read-i32 sio slab-off fld-off)) 0xFFFFFFFF)
+                              hi (bit-and (long (alloc/-sio-read-i32 sio slab-off (+ fld-off 4))) 0xFFFFFFFF)]
+                          (Double/longBitsToDouble (bit-or (bit-shift-left hi 32) lo)))))
+           not-found))
+
+       clojure.lang.Seqable
+       (seq [this]
+         (map (fn [k] (clojure.lang.MapEntry/create k (.valAt this k)))
+              (:field-keys schema)))
+
+       clojure.lang.IFn
+       (invoke [this k] (.valAt this k))
+       (invoke [this k not-found] (.valAt this k not-found))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (if _hash_val
+           _hash_val
+           (let [h (reduce (fn [h k]
+                             (unchecked-int (+ (* 31 h)
+                                               (clojure.lang.Util/hasheq
+                                                 (clojure.lang.MapEntry/create k (.valAt this k))))))
+                           (int 1)
+                           (:field-keys schema))]
+             (set! _hash_val h)
+             h)))
+
+       java.lang.Iterable
+       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+
+       java.lang.Object
+       (toString [this]
+         (str "#eve/obj " (into {} (.seq this))))
+       (equals [this other]
+         (cond
+           (identical? this other) true
+           (not (instance? JvmObj other)) false
+           :else (let [^JvmObj o other]
+                   (and (= (:field-keys schema) (:field-keys (.-schema o)))
+                        (every? (fn [k] (= (.valAt this k) (.valAt o k)))
+                                (:field-keys schema))))))
+       (hashCode [this] (.hasheq this)))
+
+     (defmethod print-method JvmObj [^JvmObj o ^java.io.Writer w]
+       (.write w (str "#eve/obj " (into {} (.seq o)))))
+
+     (defn jvm-obj-from-offset
+       "Construct a JVM JvmObj from a slab-qualified offset of a 0x1E block."
+       [sio slab-off]
+       (let [slen     (alloc/-sio-read-u16 sio slab-off 2)
+             s-raw    (alloc/-sio-read-bytes sio slab-off 4 slen)
+             schema-map (let [n  (bit-and (long (aget ^bytes s-raw 0)) 0xFF)]
+                          (loop [i 0 pos 1 fm (array-map)]
+                            (if (< i n)
+                              (let [nlen (bit-and (long (aget ^bytes s-raw pos)) 0xFF)
+                                    nm   (String. ^bytes s-raw (int (inc pos)) (int nlen) "UTF-8")
+                                    tc   (bit-and (long (aget ^bytes s-raw (+ pos 1 nlen))) 0xFF)]
+                                (recur (inc i) (+ pos 2 nlen)
+                                       (clojure.core/assoc fm (keyword nm) (obj-code->type-kw tc))))
+                              fm)))
+             schema   (create-schema schema-map)
+             data-off (+ 4 slen)]
+         (JvmObj. schema slab-off data-off sio nil)))
+
+     )) ;; end #?(:clj (do ...))

@@ -1464,7 +1464,7 @@
        (size [_] (int cnt))
        (isEmpty [_] (zero? cnt))
        (contains [_ o]
-         (some #(clojure.lang.Util/equiv % o) (map #(jvm-sabvec-nth sio cnt shift root tail % coll-factory) (range cnt))))
+         (boolean (some #(clojure.lang.Util/equiv % o) (map #(jvm-sabvec-nth sio cnt shift root tail % coll-factory) (range cnt)))))
        (containsAll [this c]
          (every? #(.contains this %) c))
        (indexOf [this o]

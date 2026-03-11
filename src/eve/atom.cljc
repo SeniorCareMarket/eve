@@ -23,7 +23,9 @@
       :clj  [[eve.map :as eve-map]
               [eve.set :as eve-set]
               [eve.vec :as eve-vec]
-              [eve.list :as eve-list]]))
+              [eve.list :as eve-list]
+              [eve.array :as eve-array]
+              [eve.obj :as eve-obj]]))
   #?(:clj (:import [eve.map EveHashMap])))
 
 ;; ---------------------------------------------------------------------------
@@ -596,8 +598,8 @@
              0xEE (into #{} (eve-set/jvm-eve-hash-set-from-offset sio ptr cf))
              0x12 (into [] (eve-vec/jvm-sabvec-from-offset sio ptr cf))
              0x13 (into '() (reverse (eve-list/jvm-sab-list-from-offset sio ptr)))
-             0x1D (alloc/jvm-read-eve-array sio ptr)
-             0x1E (alloc/jvm-read-obj sio ptr)
+             0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
+             0x1E (eve-obj/jvm-obj-from-offset sio ptr)
              0x01 (alloc/jvm-read-scalar-block sio ptr)
              (throw (ex-info "jvm-mmap-deref: unknown root type-id"
                              {:type-id type-id :ptr ptr}))))))
