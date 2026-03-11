@@ -1340,10 +1340,12 @@
        clojure.lang.Seqable
        (seq [_]
          (when (pos? cnt)
-           (let [items (java.util.ArrayList. (int cnt))]
-             (dotimes [i cnt]
-               (.add items (jvm-sabvec-nth sio cnt shift root tail i coll-factory)))
-             (seq items))))
+           (letfn [(vec-seq [i]
+                     (when (< i cnt)
+                       (lazy-seq
+                         (cons (jvm-sabvec-nth sio cnt shift root tail i coll-factory)
+                               (vec-seq (inc i))))))]
+             (vec-seq 0))))
 
        clojure.lang.Associative
        (assoc [this k v]

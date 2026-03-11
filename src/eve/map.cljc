@@ -2432,6 +2432,63 @@
               ;; Unknown node type
               init)))))
 
+     (defn- jvm-hamt-lazy-seq
+       "Return a lazy seq of MapEntry over the HAMT rooted at root-off."
+       [sio root-off coll-factory]
+       (when-not (== root-off NIL_OFFSET)
+         (let [node-type (-sio-read-u8 sio root-off 0)]
+           (case (int node-type)
+             ;; Bitmap node
+             1
+             (let [data-bm     (-sio-read-i32 sio root-off 4)
+                   node-bm     (-sio-read-i32 sio root-off 8)
+                   data-count  (popcount32 data-bm)
+                   node-bm-cnt (popcount32 node-bm)
+                   hashes-off  (+ NODE_HEADER_SIZE (* 4 node-bm-cnt))
+                   kv-start    (+ hashes-off (* 4 data-count))]
+               ;; Collect inline KV entries eagerly (they're in this node)
+               (let [inline-entries
+                     (loop [i 0 pos kv-start acc []]
+                       (if (>= i data-count)
+                         acc
+                         (let [key-len (-sio-read-i32 sio root-off pos)
+                               key-bs  (-sio-read-bytes sio root-off (+ pos 4) key-len)
+                               val-off (+ pos 4 key-len)
+                               val-len (-sio-read-i32 sio root-off val-off)
+                               val-bs  (-sio-read-bytes sio root-off (+ val-off 4) val-len)
+                               k       (eve-bytes->value key-bs sio coll-factory)
+                               v       (eve-bytes->value val-bs sio coll-factory)]
+                           (recur (inc i) (+ val-off 4 val-len)
+                                  (conj acc (clojure.lang.MapEntry/create k v))))))
+                     ;; Lazily concat child node seqs
+                     child-seqs
+                     (lazy-seq
+                       (apply concat
+                         (map (fn [ci]
+                                (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
+                                  (jvm-hamt-lazy-seq sio child-off coll-factory)))
+                              (range node-bm-cnt))))]
+                 (concat inline-entries child-seqs)))
+
+             ;; Collision node
+             3
+             (let [cnt (-sio-read-u8 sio root-off 1)]
+               (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+                 (if (>= i cnt)
+                   acc
+                   (let [key-len (-sio-read-i32 sio root-off pos)
+                         key-bs  (-sio-read-bytes sio root-off (+ pos 4) key-len)
+                         val-off (+ pos 4 key-len)
+                         val-len (-sio-read-i32 sio root-off val-off)
+                         val-bs  (-sio-read-bytes sio root-off (+ val-off 4) val-len)
+                         k       (eve-bytes->value key-bs sio coll-factory)
+                         v       (eve-bytes->value val-bs sio coll-factory)]
+                     (recur (inc i) (+ val-off 4 val-len)
+                            (conj acc (clojure.lang.MapEntry/create k v)))))))
+
+             ;; Unknown node type
+             nil))))
+
      (defn jvm-hamt-get
        "Find key k in HAMT rooted at root-off. Returns value or not-found.
         Uses portable hash for O(log n) trie-directed lookup."
@@ -3094,15 +3151,7 @@
        clojure.lang.Seqable
        (seq [_]
          (when (pos? cnt)
-           (let [entries (java.util.ArrayList.)]
-             (jvm-hamt-kv-reduce
-               sio root-off
-               (fn [_ k v]
-                 (.add entries (clojure.lang.MapEntry/create k v))
-                 nil)
-               nil
-               coll-factory)
-             (seq entries))))
+           (jvm-hamt-lazy-seq sio root-off coll-factory)))
 
        clojure.lang.IPersistentCollection
        (empty [_]

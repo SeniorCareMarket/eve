@@ -1429,6 +1429,50 @@
 
               init)))))
 
+     (defn- jvm-set-hamt-lazy-seq
+       "Return a lazy seq of elements from the set HAMT rooted at root-off."
+       [sio root-off coll-factory]
+       (when-not (== root-off NIL_OFFSET)
+         (let [node-type (-sio-read-u8 sio root-off 0)]
+           (case (int node-type)
+             ;; Bitmap node
+             1
+             (let [data-bm     (-sio-read-i32 sio root-off 4)
+                   node-bm     (-sio-read-i32 sio root-off 8)
+                   node-bm-cnt (popcount32 node-bm)
+                   vals-start  (+ NODE_HEADER_SIZE (* 4 node-bm-cnt))
+                   data-cnt    (popcount32 data-bm)]
+               (let [inline-vals
+                     (loop [i 0 pos vals-start acc []]
+                       (if (>= i data-cnt)
+                         acc
+                         (let [val-len (-sio-read-i32 sio root-off pos)
+                               val-bs  (-sio-read-bytes sio root-off (+ pos 4) val-len)
+                               elem    (eve-bytes->value val-bs sio coll-factory)]
+                           (recur (inc i) (+ pos 4 val-len) (conj acc elem)))))
+                     child-seqs
+                     (lazy-seq
+                       (apply concat
+                         (map (fn [ci]
+                                (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
+                                  (jvm-set-hamt-lazy-seq sio child-off coll-factory)))
+                              (range node-bm-cnt))))]
+                 (concat inline-vals child-seqs)))
+
+             ;; Collision node
+             2
+             (let [cnt (-sio-read-u8 sio root-off 1)]
+               (loop [i 0 pos NODE_HEADER_SIZE acc []]
+                 (if (>= i cnt)
+                   acc
+                   (let [val-len (-sio-read-i32 sio root-off pos)
+                         val-bs  (-sio-read-bytes sio root-off (+ pos 4) val-len)
+                         elem    (eve-bytes->value val-bs sio coll-factory)]
+                     (recur (inc i) (+ pos 4 val-len) (conj acc elem))))))
+
+             ;; Unknown
+             nil))))
+
      ;; -----------------------------------------------------------------------
      ;; JVM O(log n) hash-directed lookup
      ;; -----------------------------------------------------------------------
@@ -1953,9 +1997,7 @@
        clojure.lang.Seqable
        (seq [_]
          (when (pos? cnt)
-           (let [items (java.util.ArrayList.)]
-             (jvm-set-reduce sio root-off (fn [_ e] (.add items e) _) nil coll-factory)
-             (seq items))))
+           (jvm-set-hamt-lazy-seq sio root-off coll-factory)))
 
        clojure.lang.IFn
        (invoke [this k] (.get this k))
