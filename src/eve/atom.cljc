@@ -25,7 +25,8 @@
               [eve.vec :as eve-vec]
               [eve.list :as eve-list]
               [eve.array :as eve-array]
-              [eve.obj :as eve-obj]]))
+              [eve.obj :as eve-obj]
+              [eve.perf :as perf]]))
   #?(:clj (:import [eve.map EveHashMap]
                    [eve.set EveHashSet]
                    [eve.vec SabVecRoot]
@@ -711,49 +712,55 @@
          (when (>= attempt d/MAX_SWAP_RETRIES)
            (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
          ;; Refresh slab regions in case another process grew them
-         (alloc/refresh-jvm-slab-regions! sio)
-         (jvm-pin-thread-epoch! domain-state (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+         (perf/timed :refresh-regions (alloc/refresh-jvm-slab-regions! sio))
+         (perf/timed :pin-epoch
+           (jvm-pin-thread-epoch! domain-state (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)))
          (let [[tag result]
                (try
                  (let [old-ptr (mem/-load-i32 root-r ptr-off)
-                       old-val (jvm-read-root-value sio old-ptr)
+                       old-val (perf/timed :read-root (jvm-read-root-value sio old-ptr))
                        _       (alloc/start-jvm-alloc-log!)
                        _       (alloc/start-jvm-replaced-log!)
-                       new-val (apply f old-val args)
-                       new-ptr (jvm-resolve-new-ptr sio new-val)
+                       new-val (perf/timed :apply-f (apply f old-val args))
+                       new-ptr (perf/timed :resolve-ptr (jvm-resolve-new-ptr sio new-val))
                        cur-log (alloc/drain-jvm-alloc-log!)
                        replaced-log (alloc/drain-jvm-replaced-log!)
                        eve-passthru? (or (instance? EveHashMap new-val)
                                         (instance? EveHashSet new-val)
                                         (instance? SabVecRoot new-val)
                                         (instance? SabList new-val))
-                       w       (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
+                       w       (perf/timed :cas (mem/-cas-i32! root-r ptr-off old-ptr new-ptr))]
                    (if (== w old-ptr)
                      (let [new-epoch (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)]
-                       (when (and (not= old-ptr alloc/NIL_OFFSET)
-                                  (not= old-ptr CLAIMED_SENTINEL))
-                         (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
-                           ;; Map→Map: replaced nodes were collected during path-copy
-                           (let [offs (conj (or replaced-log []) old-ptr)]
-                             (.add retire-q {:offsets offs :epoch (inc new-epoch)}))
-                           ;; Other types: use alloc-log if available, else just header
-                           (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs
-                                                  (Integer/valueOf (int old-ptr)))]
-                             (.add retire-q {:offsets (or old-log [old-ptr])
-                                             :epoch (inc new-epoch)}))))
+                       (perf/timed :retire-enqueue
+                         (when (and (not= old-ptr alloc/NIL_OFFSET)
+                                    (not= old-ptr CLAIMED_SENTINEL))
+                           (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
+                             ;; Map→Map: replaced nodes were collected during path-copy
+                             (let [offs (conj (or replaced-log []) old-ptr)]
+                               (.add retire-q {:offsets offs :epoch (inc new-epoch)}))
+                             ;; Other types: use alloc-log if available, else just header
+                             (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs
+                                                    (Integer/valueOf (int old-ptr)))]
+                               (.add retire-q {:offsets (or old-log [old-ptr])
+                                               :epoch (inc new-epoch)})))))
                        (when (and (not eve-passthru?) cur-log (not= new-ptr alloc/NIL_OFFSET))
                          (.put ^java.util.concurrent.ConcurrentHashMap tree-logs
                                (Integer/valueOf (int new-ptr)) cur-log))
                        [:ok new-val])
                      ;; CAS failed — free ALL blocks allocated for the new tree
-                     (do (when cur-log
+                     (do (perf/count! :cas-retry)
+                         (when cur-log
                            (doseq [off cur-log]
                              (alloc/-sio-free! sio off)))
                          [:retry nil])))
                  (finally
-                   (jvm-unpin-thread-epoch! domain-state)))]
+                   (perf/timed :unpin-epoch
+                     (jvm-unpin-thread-epoch! domain-state))))]
            (case tag
-             :ok    (do (jvm-try-flush-retires! root-r retire-q sio flush-ts) result)
+             :ok    (do (perf/timed :flush-retires
+                          (jvm-try-flush-retires! root-r retire-q sio flush-ts))
+                        result)
              :retry (do (cas-backoff! attempt) (recur (inc attempt))))))))))
 
 ;; ---------------------------------------------------------------------------
