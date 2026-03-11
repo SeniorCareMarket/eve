@@ -1,5 +1,5 @@
 (ns eve.array
-  "Typed arrays backed by SharedArrayBuffer for all numeric types.
+  "Typed arrays backed by SharedArrayBuffer (CLJS) or slab memory (JVM).
 
    Create arrays with the unified constructor:
      (eve-array :int32 10)          ;; 10 zero-filled int32 elements
@@ -8,50 +8,56 @@
 
    Supported types: :int8 :uint8 :int16 :uint16 :int32 :uint32 :float32 :float64
 
-   Integer types (:int8 through :uint32) support full Atomics API:
+   Integer types (:int8 through :uint32) support full Atomics API (CLJS):
      aget, aset!, cas!, add!, sub!, band!, bor!, bxor!
    Float types (:float32 :float64) support non-atomic aget/aset! only.
-   wait!/notify! are :int32 only.
+   wait!/notify! are :int32 only (CLJS).
 
    SIMD-accelerated bulk operations (afill-simd!, asum-simd, etc.) are
-   available for :int32 arrays when atomicity is not required."
+   available for :int32 arrays when atomicity is not required (CLJS)."
   (:refer-clojure :exclude [aget aset areduce amap])
   (:require
    [clojure.string :as str]
-   [eve.shared-atom :as atom]
    [eve.deftype-proto.data :as d]
-   [eve.wasm-mem :as wasm]
    [eve.deftype-proto.alloc :as alloc]
-   [eve.deftype-proto.serialize :as ser]))
+   [eve.deftype-proto.serialize :as ser]
+   #?@(:cljs [[eve.shared-atom :as atom]
+              [eve.wasm-mem :as wasm]]
+       :clj  [[eve.mem :as mem]])))
 
 ;; Forward declarations
 (declare eve-array aget aset!)
 
 ;;-----------------------------------------------------------------------------
-;; Constants
+;; Shared Constants
 ;;-----------------------------------------------------------------------------
 
 (def ^:const HEADER_SIZE 8) ;; [subtype:u8][pad:3][count:u32LE]
 
 ;;-----------------------------------------------------------------------------
-;; Type metadata lookup
+;; Shared type metadata lookup
 ;;-----------------------------------------------------------------------------
 
-(defn- subtype->elem-shift
+(defn subtype->elem-shift
   "Subtype code → log2(bytes-per-element)."
   [code]
-  (case code
-    (0x01 0x02 0x03) 0   ;; u8, i8, u8-clamped: 1 byte
-    (0x04 0x05) 1   ;; i16, u16: 2 bytes
-    (0x06 0x07 0x08) 2 ;; i32, u32, f32: 4 bytes
-    0x09 3))         ;; f64: 8 bytes
+  (case (int code)
+    (1 2 3) 0   ;; u8, i8, u8-clamped: 1 byte
+    (4 5)   1   ;; i16, u16: 2 bytes
+    (6 7 8) 2   ;; i32, u32, f32: 4 bytes
+    9       3)) ;; f64: 8 bytes
 
-(defn- subtype->atomic?
+(defn subtype->elem-size
+  "Subtype code → bytes-per-element."
+  [code]
+  (bit-shift-left 1 (subtype->elem-shift code)))
+
+(defn subtype->atomic?
   "True if the subtype supports Atomics (integer types only, not Uint8ClampedArray)."
   [code]
-  (and (<= code 0x07) (not= code 0x03)))
+  (and (<= (int code) 7) (not= (int code) 3)))
 
-(defn- type-kw->subtype
+(defn type-kw->subtype
   "Type keyword → serializer subtype code."
   [kw]
   (case kw
@@ -64,22 +70,30 @@
     :uint32        ser/TYPED_ARRAY_UINT32
     :float32       ser/TYPED_ARRAY_FLOAT32
     :float64       ser/TYPED_ARRAY_FLOAT64
-    (throw (js/Error. (str "Unknown eve-array type: " kw
-                           ". Supported: :int8 :uint8 :uint8-clamped :int16 :uint16 :int32 :uint32 :float32 :float64")))))
+    (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+            (str "Unknown eve-array type: " kw
+                 ". Supported: :int8 :uint8 :uint8-clamped :int16 :uint16 :int32 :uint32 :float32 :float64")))))
 
-(defn- subtype->type-kw
+(defn subtype->type-kw
   "Subtype code → type keyword (for printing)."
   [code]
-  (case code
-    0x01 :uint8
-    0x02 :int8
-    0x03 :uint8-clamped
-    0x04 :int16
-    0x05 :uint16
-    0x06 :int32
-    0x07 :uint32
-    0x08 :float32
-    0x09 :float64))
+  (case (int code)
+    1 :uint8
+    2 :int8
+    3 :uint8-clamped
+    4 :int16
+    5 :uint16
+    6 :int32
+    7 :uint32
+    8 :float32
+    9 :float64))
+
+;;=============================================================================
+;; CLJS implementation — SharedArrayBuffer + Atomics
+;;=============================================================================
+
+#?(:cljs
+   (do
 
 (defn- make-typed-view
   "Create a JS typed array view over the entire SAB for a given subtype."
@@ -911,3 +925,115 @@
           atomic (subtype->atomic? subtype)
           view (make-typed-view sab subtype)]
       (EveArray. sab block-offset data-offset elem-count -1 subtype elem-shift atomic view nil nil))))
+
+)) ;; end #?(:cljs (do ...))
+
+;;=============================================================================
+;; JVM implementation — slab-backed typed arrays via ISlabIO
+;;=============================================================================
+
+#?(:clj
+   (do
+
+     (deftype JvmEveArray [^long cnt
+                           ^long slab-off    ;; slab-qualified offset of 0x1D block
+                           ^long subtype-code
+                           sio              ;; ISlabIO context
+                           ^:unsynchronized-mutable _hash_val]
+
+       clojure.lang.Counted
+       (count [_] (int cnt))
+
+       clojure.lang.Indexed
+       (nth [this i]
+         (if (and (>= i 0) (< i cnt))
+           (let [es   (subtype->elem-size subtype-code)
+                 raw  (alloc/-sio-read-bytes sio slab-off (+ 8 (* i es)) es)
+                 bb   (doto (java.nio.ByteBuffer/wrap raw)
+                        (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
+             (case (int subtype-code)
+               (1 3) (bit-and (long (aget ^bytes raw 0)) 0xFF)
+               2     (long (aget ^bytes raw 0))
+               4     (long (.getShort bb))
+               5     (bit-and (long (.getShort bb)) 0xFFFF)
+               6     (long (.getInt bb))
+               7     (bit-and (long (.getInt bb)) 0xFFFFFFFF)
+               8     (double (.getFloat bb))
+               9     (.getDouble bb)))
+           (throw (IndexOutOfBoundsException. (str "Index " i " out of bounds for length " cnt)))))
+       (nth [this i not-found]
+         (if (and (>= i 0) (< i cnt))
+           (.nth this i)
+           not-found))
+
+       clojure.lang.ILookup
+       (valAt [this k] (.nth this (int k)))
+       (valAt [this k not-found] (.nth this (int k) not-found))
+
+       clojure.lang.Seqable
+       (seq [this]
+         (when (pos? cnt)
+           (letfn [(arr-seq [i]
+                     (when (< i cnt)
+                       (lazy-seq (cons (.nth this i) (arr-seq (inc i))))))]
+             (arr-seq 0))))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (if (zero? cnt)
+           (f)
+           (loop [i 1 acc (.nth this 0)]
+             (if (or (>= i cnt) (reduced? acc))
+               (unreduced acc)
+               (recur (inc i) (f acc (.nth this i)))))))
+
+       clojure.lang.IReduceInit
+       (reduce [this f init]
+         (loop [i 0 acc init]
+           (if (or (>= i cnt) (reduced? acc))
+             (unreduced acc)
+             (recur (inc i) (f acc (.nth this i))))))
+
+       clojure.lang.IFn
+       (invoke [this i] (.nth this (int i)))
+       (invoke [this i not-found] (.nth this (int i) not-found))
+
+       java.lang.Iterable
+       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (if _hash_val
+           _hash_val
+           (let [h (loop [i 0 h (int (+ 1 (* 31 subtype-code)))]
+                     (if (< i cnt)
+                       (recur (inc i) (unchecked-int (+ (* 31 h) (clojure.lang.Util/hasheq (.nth this i)))))
+                       h))]
+             (set! _hash_val h)
+             h)))
+
+       java.lang.Object
+       (toString [this]
+         (str "#eve/array " (subtype->type-kw subtype-code) " " (vec (seq this))))
+       (equals [this other]
+         (cond
+           (identical? this other) true
+           (not (instance? JvmEveArray other)) false
+           :else (let [^JvmEveArray o other]
+                   (and (== cnt (.-cnt o))
+                        (== subtype-code (.-subtype-code o))
+                        (every? true? (map = (seq this) (seq o)))))))
+       (hashCode [this] (.hasheq this)))
+
+     (defmethod print-method JvmEveArray [^JvmEveArray a ^java.io.Writer w]
+       (.write w (str "#eve/array " (subtype->type-kw (.-subtype-code a)) " "))
+       (print-method (vec (seq a)) w))
+
+     (defn jvm-eve-array-from-offset
+       "Construct a JVM JvmEveArray from a slab-qualified offset of a 0x1D block."
+       [sio slab-off]
+       (let [subtype (long (alloc/-sio-read-u8 sio slab-off 1))
+             cnt     (alloc/-sio-read-i32 sio slab-off 4)]
+         (JvmEveArray. cnt slab-off subtype sio nil)))
+
+     )) ;; end #?(:clj (do ...))
