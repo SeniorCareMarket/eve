@@ -123,6 +123,14 @@
 
 #?(:clj
    (do
+     (def ^:dynamic *jvm-slab-ctx*
+       "The current JVM slab I/O context (JvmSlabCtx).
+        Bind this (via clojure.core/binding) before calling collection
+        constructors that don't take an explicit sio argument, e.g.:
+          (binding [alloc/*jvm-slab-ctx* (alloc/make-jvm-heap-slab-ctx)]
+            (eve-map/empty-hash-map))"
+       nil)
+
      ;; Thread-local alloc log for tracking blocks allocated during a swap.
      ;; Used by jvm-mmap-swap! to free ALL blocks on CAS failure.
      (def ^:private ^ThreadLocal jvm-alloc-log-tl (ThreadLocal.))
@@ -430,8 +438,10 @@
      (defn refresh-jvm-slab-regions!
        "Re-map any JVM slab regions whose header total_blocks exceeds the
         cached value (i.e. another process grew them). Thread-safe.
-        Fast path: if no slab class grew, skip the lock entirely."
-       [^JvmSlabCtx sio]
+        Fast path: if no slab class grew, skip the lock entirely.
+        0-arity: uses *jvm-slab-ctx*.  1-arity: explicit sio."
+       ([] (refresh-jvm-slab-regions! *jvm-slab-ctx*))
+       ([^JvmSlabCtx sio]
        (let [regions        (.-regions sio)
              total-blocks   (.-total-blocks sio)
              file-paths     (.-file-paths sio)
@@ -493,7 +503,7 @@
                              cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
                          (when (> hdr-data-sz cur-size)
                            (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
-                             (aset regions OVERFLOW_CLASS_IDX new-r)))))))))))))
+                             (aset regions OVERFLOW_CLASS_IDX new-r))))))))))))))
 
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)
@@ -543,37 +553,38 @@
           ;; Heap slabs: bitmap is embedded in same region (no separate file)
           (make-jvm-slab-ctx regions regions))))
 
-     (def ^:dynamic *jvm-slab-ctx*
-       "The current JVM slab I/O context (JvmSlabCtx).
-        Bind this (via clojure.core/binding) before calling collection
-        constructors that don't take an explicit sio argument, e.g.:
-          (binding [alloc/*jvm-slab-ctx* (alloc/make-jvm-heap-slab-ctx)]
-            (eve-map/empty-hash-map))"
-       nil)
-
      (defn jvm-read-header-type-byte
-       "Read the type-id byte at offset 0 of the slab block at slab-qualified offset."
-       [sio slab-off]
-       (-sio-read-u8 sio slab-off 0))
+       "Read the type-id byte at offset 0 of the slab block at slab-qualified offset.
+        1-arity: uses *jvm-slab-ctx*.  2-arity: explicit sio."
+       ([slab-off]
+        (-sio-read-u8 *jvm-slab-ctx* slab-off 0))
+       ([sio slab-off]
+        (-sio-read-u8 sio slab-off 0)))
 
      (defn jvm-alloc-scalar-block!
        "Allocate a slab block for a primitive scalar atom root value (JVM).
-        Returns slab-qualified offset."
-       [sio v]
-       (let [ev-bytes (mem/value->eve-bytes v)
-             n        (inc (alength ^bytes ev-bytes))
-             blk-off  (-sio-alloc! sio n)]
-         (-sio-write-u8! sio blk-off 0 ser/SCALAR_BLOCK_TYPE_ID)
-         (-sio-write-bytes! sio blk-off 1 ev-bytes)
-         blk-off))
+        Returns slab-qualified offset.
+        1-arity: uses *jvm-slab-ctx*.  2-arity: explicit sio."
+       ([v]
+        (jvm-alloc-scalar-block! *jvm-slab-ctx* v))
+       ([sio v]
+        (let [ev-bytes (mem/value->eve-bytes v)
+              n        (inc (alength ^bytes ev-bytes))
+              blk-off  (-sio-alloc! sio n)]
+          (-sio-write-u8! sio blk-off 0 ser/SCALAR_BLOCK_TYPE_ID)
+          (-sio-write-bytes! sio blk-off 1 ev-bytes)
+          blk-off)))
 
      (defn jvm-read-scalar-block
-       "Read the primitive value from a scalar value block (JVM)."
-       [sio slab-off]
-       (let [class-idx (decode-class-idx slab-off)
-             blk-size  (long (nth d/SLAB_SIZES class-idx))
-             ev-bytes  (-sio-read-bytes sio slab-off 1 (dec blk-size))]
-         (mem/eve-bytes->value ev-bytes)))
+       "Read the primitive value from a scalar value block (JVM).
+        1-arity: uses *jvm-slab-ctx*.  2-arity: explicit sio."
+       ([slab-off]
+        (jvm-read-scalar-block *jvm-slab-ctx* slab-off))
+       ([sio slab-off]
+        (let [class-idx (decode-class-idx slab-off)
+              blk-size  (long (nth d/SLAB_SIZES class-idx))
+              ev-bytes  (-sio-read-bytes sio slab-off 1 (dec blk-size))]
+          (mem/eve-bytes->value ev-bytes))))
 
      ;;-----------------------------------------------------------------------
      ;; JVM EveArray slab block read/write  (type-id 0x1D)

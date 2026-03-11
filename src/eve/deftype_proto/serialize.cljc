@@ -91,6 +91,51 @@
 (def ^:const TYPED_ARRAY_BIGUINT64     0x0B)
 
 ;;-----------------------------------------------------------------------------
+;; JVM constructor registries  (mirrors CLJS sab-type-constructors)
+;;-----------------------------------------------------------------------------
+
+#?(:clj
+   (do
+
+;; Tag-based constructor registry: tag (int) → (fn [header-off] → collection)
+;; Populated by map.cljc, set.cljc, vec.cljc, list.cljc at load time.
+;; Mirrors CLJS sab-type-constructors but takes only header-off (sio via *jvm-slab-ctx*).
+(defonce jvm-type-constructors (java.util.concurrent.ConcurrentHashMap.))
+
+;; Header-type-id registry: header-byte (int) → (fn [header-off] → collection)
+;; Keyed by byte 0 of a slab block header (0xED map, 0xEE set, 0x12 vec, etc.)
+;; Mirrors CLJS sab-header-constructors.
+(defonce jvm-header-constructors (java.util.concurrent.ConcurrentHashMap.))
+
+(defn register-jvm-type-constructor!
+  "Register a JVM constructor for deserializing SAB pointer tags.
+   2-arity: registers by pointer tag only.
+   3-arity: also registers by header type-id byte."
+  ([tag ctor-fn]
+   (.put jvm-type-constructors (int tag) ctor-fn))
+  ([tag header-type-id ctor-fn]
+   (.put jvm-type-constructors (int tag) ctor-fn)
+   (.put jvm-header-constructors (int header-type-id) ctor-fn)))
+
+(defn register-jvm-header-constructor!
+  "Register a JVM header constructor without overriding the FAST_TAG entry."
+  [header-type-id ctor-fn]
+  (.put jvm-header-constructors (int header-type-id) ctor-fn))
+
+(defn get-jvm-type-constructor
+  "Look up a JVM constructor by SAB pointer tag (0x10–0x13, 0x1C, etc.)."
+  [tag]
+  (.get jvm-type-constructors (int tag)))
+
+(defn get-jvm-header-constructor
+  "Look up a JVM constructor by header type-id byte.
+   Returns nil if not registered."
+  [type-id-byte]
+  (.get jvm-header-constructors (int type-id-byte)))
+
+)) ;; end :clj
+
+;;-----------------------------------------------------------------------------
 ;; CLJS implementations
 ;;-----------------------------------------------------------------------------
 
