@@ -15,6 +15,7 @@
      3. Cross-process contention (JVM + Node concurrent swaps)
      4. Summary table"
   (:require [eve.atom :as atom]
+            [eve.perf :as perf]
             [clojure.edn :as edn]
             [clojure.string :as str])
   (:import [java.io File]))
@@ -201,6 +202,29 @@
         (let [eve-val @eve-a]
           (assert (= (:counter eve-val) 0) "Eve round-trip failed")
           (assert (= (count (:users eve-val)) n-users) "Eve user count mismatch"))
+
+        ;; ══════════════════════════════════════════════════════════════
+        ;; DIAGNOSTIC: Profiled swap analysis
+        ;; ══════════════════════════════════════════════════════════════
+        (section "DIAGNOSTIC: Profiled Eve swaps (10 ops)")
+
+        (perf/enable!)
+        (dotimes [i 10]
+          (let [t0 (System/nanoTime)]
+            (swap! eve-a assoc-in [:users :new-user] (user-record 9999))
+            (let [ms (/ (- (System/nanoTime) t0) 1e6)]
+              (printf "  swap %d: %.1f ms\n" i ms)
+              (flush))))
+
+        (println)
+        (println "  Perf breakdown (10 swaps):")
+        (perf/report)
+        (perf/disable!)
+
+        (println)
+        (println "  Disk after 10 swaps:")
+        (printf "    %.1f MB\n" (/ (double (total-disk-bytes base-path)) (* 1024 1024)))
+        (flush)
 
         ;; ══════════════════════════════════════════════════════════════
         ;; Phase 2: Individual operation benchmarks (24 benchmarks)
