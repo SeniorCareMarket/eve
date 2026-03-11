@@ -107,3 +107,35 @@
             l   (eve-list/jvm-sab-list-from-offset sio hdr)]
         (is (= 0 (reduce + 0 l)))
         (is (= 0 (reduce + l)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 6b: ISeq tests
+;; ---------------------------------------------------------------------------
+
+(deftest list-first
+  (testing "first returns head element"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) '(:a :b :c))
+            l   (eve-list/jvm-sab-list-from-offset sio hdr)]
+        (is (= :a (first l)))))))
+
+(deftest list-next
+  (testing "next returns rest of list"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) '(1 2 3))
+            l   (eve-list/jvm-sab-list-from-offset sio hdr)]
+        (is (instance? eve.list.SabList (next l)))
+        (is (= '(2 3) (seq (next l))))
+        (is (= '(3) (seq (next (next l)))))
+        (is (nil? (next (next (next l)))))))))
+
+(deftest list-rest
+  (testing "rest returns rest or empty list"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) '(42))
+            l   (eve-list/jvm-sab-list-from-offset sio hdr)]
+        (is (instance? eve.list.SabList (rest l)))
+        (is (zero? (count (rest l))))))))

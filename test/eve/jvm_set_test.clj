@@ -296,3 +296,40 @@
             result (reduce (fn [acc _] (if (>= (count acc) 5) (reduced acc) (conj acc 1)))
                            [] s)]
         (is (= 5 (count result)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 6a: Transient tests
+;; ---------------------------------------------------------------------------
+
+(deftest set-transient-roundtrip
+  (testing "transient -> conj! -> persistent! roundtrip"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{1 2 3})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (persistent! (conj! (transient s) 4))]
+        (is (instance? eve.set.EveHashSet s2))
+        (is (= #{1 2 3 4} (set s2)))))))
+
+(deftest set-transient-batch-conj
+  (testing "batch conj! builds correct set"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (persistent! (reduce conj! (transient s) (range 50)))]
+        (is (instance? eve.set.EveHashSet s2))
+        (is (= 50 (count s2)))
+        (doseq [i (range 50)]
+          (is (contains? s2 i) (str "should contain " i)))))))
+
+(deftest set-transient-disjoin
+  (testing "disjoin! removes elements"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{:a :b :c :d}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (persistent! (-> (transient s) (disj! :b) (disj! :d)))]
+        (is (instance? eve.set.EveHashSet s2))
+        (is (= #{:a :c} (set s2)))))))

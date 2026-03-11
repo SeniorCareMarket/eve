@@ -1457,6 +1457,40 @@
        (invoke [this i not-found] (.nth this (int i) not-found))
 
        java.util.RandomAccess
+       java.util.List
+       (get [this i] (.nth this (int i)))
+       (size [_] (int cnt))
+       (isEmpty [_] (zero? cnt))
+       (contains [_ o]
+         (some #(clojure.lang.Util/equiv % o) (map #(jvm-sabvec-nth sio cnt shift root tail % coll-factory) (range cnt))))
+       (containsAll [this c]
+         (every? #(.contains this %) c))
+       (indexOf [this o]
+         (loop [i 0]
+           (if (>= i cnt) -1
+             (if (clojure.lang.Util/equiv (.nth this i) o) i (recur (inc i))))))
+       (lastIndexOf [this o]
+         (loop [i (dec cnt)]
+           (if (< i 0) -1
+             (if (clojure.lang.Util/equiv (.nth this i) o) i (recur (dec i))))))
+       (toArray [this]
+         (let [arr (object-array cnt)]
+           (dotimes [i cnt] (aset arr i (.nth this i)))
+           arr))
+       (subList [this from to]
+         (vec (map #(.nth this %) (range from to))))
+       (listIterator [this]
+         (.listIterator (java.util.ArrayList. ^java.util.Collection (.seq this))))
+       (listIterator [this idx]
+         (.listIterator (java.util.ArrayList. ^java.util.Collection (.seq this)) idx))
+       (add [_ _] (throw (UnsupportedOperationException.)))
+       (addAll [_ _] (throw (UnsupportedOperationException.)))
+       (set [_ _ _] (throw (UnsupportedOperationException.)))
+       (^boolean remove [_ _] (throw (UnsupportedOperationException.)))
+       (removeAll [_ _] (throw (UnsupportedOperationException.)))
+       (retainAll [_ _] (throw (UnsupportedOperationException.)))
+       (clear [_] (throw (UnsupportedOperationException.)))
+
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 

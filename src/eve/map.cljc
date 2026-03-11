@@ -2728,6 +2728,7 @@
                       (jvm-read-children sio root-off cc) nhs nkvs) true])))))))
 
      (declare jvm-write-collision-node!)
+     (declare jvm-make-transient-map)
      (declare jvm-hamt-collision-assoc!)
 
      (defn- jvm-hamt-assoc-with-collision!
@@ -3155,6 +3156,12 @@
        (hasheq [this]
          (clojure.lang.Murmur3/hashUnordered this))
 
+       clojure.lang.IEditableCollection
+       (asTransient [this]
+         (when-not jvm-hashed?
+           (throw (UnsupportedOperationException. "Cannot create transient from non-portable-hash map")))
+         (jvm-make-transient-map root-off cnt sio coll-factory))
+
        java.lang.Object
        (toString [this]
          (str (into {} this)))
@@ -3162,6 +3169,68 @@
          (clojure.lang.APersistentMap/mapEquals this other))
        (hashCode [this]
          (clojure.lang.APersistentMap/mapHash this)))
+
+     (deftype TransientEveHashMap
+       [^:unsynchronized-mutable ^long root-off
+        ^:unsynchronized-mutable ^long cnt
+        sio
+        coll-factory
+        ^:volatile-mutable edit]
+
+       clojure.lang.Counted
+       (count [_]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (int cnt))
+
+       clojure.lang.ILookup
+       (valAt [this k] (.valAt this k nil))
+       (valAt [_ k not-found]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (jvm-hamt-get sio root-off k not-found coll-factory))
+
+       clojure.lang.ITransientMap
+       (assoc [this k v]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (let [^bytes kb (value->eve-bytes k)
+               kh (portable-hash-bytes kb)
+               ^bytes vb (value+sio->eve-bytes sio v)
+               result (jvm-hamt-assoc! sio root-off kh kb vb 0)]
+           (if result
+             (let [[new-root added?] result]
+               (set! root-off (long new-root))
+               (when added? (set! cnt (long (inc cnt)))))
+             (let [[new-root added?] (jvm-hamt-assoc-with-collision! sio root-off kh kb vb 0)]
+               (set! root-off (long new-root))
+               (when added? (set! cnt (long (inc cnt))))))
+           this))
+       (without [this k]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (let [^bytes kb (value->eve-bytes k)
+               kh        (portable-hash-bytes kb)
+               new-root  (jvm-hamt-dissoc sio root-off kh kb 0)]
+           (when-not (== new-root root-off)
+             (set! root-off (long new-root))
+             (set! cnt (long (dec cnt))))
+           this))
+       (persistent [this]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (set! edit nil)
+         (let [hdr (jvm-write-map-header! sio cnt root-off true)]
+           (EveHashMap. cnt root-off hdr sio coll-factory nil true)))
+
+       clojure.lang.ITransientAssociative
+
+       clojure.lang.ITransientCollection
+       (conj [this o]
+         (if (instance? java.util.Map$Entry o)
+           (let [^java.util.Map$Entry e o]
+             (.assoc this (.getKey e) (.getValue e)))
+           (if (vector? o)
+             (.assoc this (nth o 0) (nth o 1))
+             (reduce conj this o)))))
+
+     (defn- jvm-make-transient-map [root-off cnt sio coll-factory]
+       (TransientEveHashMap. root-off cnt sio coll-factory (Object.)))
 
      ;; -----------------------------------------------------------------------
      ;; JVM EveHashMap factory

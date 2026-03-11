@@ -248,3 +248,22 @@
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= 0 (reduce + 0 v)))
         (is (= 0 (reduce + v)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 6c: java.util.List tests
+;; ---------------------------------------------------------------------------
+
+(deftest vec-is-java-list
+  (testing "SabVecRoot implements java.util.List"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [10 20 30])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
+        (is (instance? java.util.List v))
+        (is (= 3 (.size ^java.util.List v)))
+        (is (= 10 (.get ^java.util.List v 0)))
+        (is (= 30 (.get ^java.util.List v 2)))
+        (is (.contains ^java.util.List v 20))
+        (is (not (.contains ^java.util.List v 99)))
+        (is (= 1 (.indexOf ^java.util.List v 20)))
+        (is (= -1 (.indexOf ^java.util.List v 99)))))))

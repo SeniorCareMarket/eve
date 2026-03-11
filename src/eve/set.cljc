@@ -1879,6 +1879,7 @@
      ;; -----------------------------------------------------------------------
 
      (declare jvm-eve-hash-set-from-offset)
+     (declare jvm-make-transient-set)
 
      (deftype EveHashSet [^long cnt ^long root-off ^long header-off
                          ^boolean jvm-hashed? sio coll-factory _meta]
@@ -1996,10 +1997,67 @@
          (let [s (.seq this)]
            (if s (reduce f s) (f))))
 
+       clojure.lang.IEditableCollection
+       (asTransient [this]
+         (when-not jvm-hashed?
+           (throw (UnsupportedOperationException. "Cannot create transient from non-portable-hash set")))
+         (jvm-make-transient-set root-off cnt sio coll-factory))
+
        java.lang.Object
        (toString [this] (str (set (.seq this))))
        (equals [this other] (clojure.lang.APersistentSet/setEquals this other))
        (hashCode [this] (clojure.lang.Murmur3/hashUnordered this)))
+
+     (declare ->TransientEveHashSet)
+
+     (deftype TransientEveHashSet
+       [^:unsynchronized-mutable ^long root-off
+        ^:unsynchronized-mutable ^long cnt
+        sio
+        coll-factory
+        ^:volatile-mutable edit]
+
+       clojure.lang.Counted
+       (count [_]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (int cnt))
+
+       clojure.lang.ITransientSet
+       (disjoin [this elem]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (let [^bytes eb (value+sio->eve-bytes sio elem)
+               eh        (portable-hash-bytes eb)
+               new-root  (jvm-set-hamt-disjoin sio root-off eh eb 0)]
+           (when-not (== new-root root-off)
+             (set! root-off (long new-root))
+             (set! cnt (long (dec cnt))))
+           this))
+       (contains [_ elem]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (not (identical? ::absent
+                (jvm-set-hamt-get sio root-off elem ::absent coll-factory))))
+       (get [_ elem]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (let [result (jvm-set-hamt-get sio root-off elem ::absent coll-factory)]
+           (when-not (identical? result ::absent) result)))
+
+       clojure.lang.ITransientCollection
+       (conj [this elem]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (let [^bytes eb (value+sio->eve-bytes sio elem)
+               eh        (portable-hash-bytes eb)
+               [new-root added?] (jvm-set-hamt-conj sio root-off eh eb 0)]
+           (set! root-off (long new-root))
+           (when added? (set! cnt (long (inc cnt))))
+           this))
+       (persistent [_]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (set! edit nil)
+         (let [hdr (jvm-set-write-header! sio cnt root-off)]
+           (EveHashSet. cnt root-off hdr true sio coll-factory nil))))
+
+     (defn- jvm-make-transient-set [root-off cnt sio coll-factory]
+       (TransientEveHashSet. root-off cnt sio coll-factory (Object.)))
 
      (defn jvm-eve-hash-set-from-offset
        "Construct a JVM EveHashSet from a slab-qualified header-off and ISlabIO context.

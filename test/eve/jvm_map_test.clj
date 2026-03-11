@@ -231,3 +231,41 @@
             result (reduce (fn [acc _] (if (>= (count acc) 5) (reduced acc) (conj acc 1)))
                            [] m)]
         (is (= 5 (count result)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 6a: Transient tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-transient-roundtrip
+  (testing "transient -> assoc! -> persistent! roundtrip"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) {:a 1})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (persistent! (assoc! (transient m) :b 2))]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= {:a 1 :b 2} (into {} m2)))))))
+
+(deftest map-transient-batch-assoc
+  (testing "batch assoc! builds correct map"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) {})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (persistent! (reduce (fn [t i] (assoc! t (keyword (str "k" i)) i))
+                                     (transient m) (range 50)))]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= 50 (count m2)))
+        (doseq [i (range 50)]
+          (is (= i (get m2 (keyword (str "k" i)))) (str "key k" i)))))))
+
+(deftest map-transient-dissoc
+  (testing "dissoc! removes keys"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src {:a 1 :b 2 :c 3 :d 4}
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (persistent! (-> (transient m) (dissoc! :b) (dissoc! :d)))]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= {:a 1 :c 3} (into {} m2)))))))
