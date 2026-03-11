@@ -154,8 +154,13 @@
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
                region    (aget regions class-idx)
-               b         (mem/-read-bytes region (+ base field-off) 1)]
-           (bit-and (aget ^bytes b 0) 0xFF)))
+               abs-off   (+ base field-off)
+               ;; Read the aligned i32 containing our byte, extract with shift+mask.
+               ;; Avoids allocating a byte[] on every read.
+               aligned   (bit-and abs-off (bit-not 3))
+               word      (mem/-load-i32 region aligned)
+               shift-amt (* (bit-and abs-off 3) 8)]
+           (bit-and (unsigned-bit-shift-right word shift-amt) 0xFF)))
 
        (-sio-write-u8! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
@@ -163,9 +168,18 @@
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
                region    (aget regions class-idx)
-               b         (byte-array 1)]
-           (aset b 0 (unchecked-byte val))
-           (mem/-write-bytes! region (+ base field-off) b)))
+               abs-off   (+ base field-off)
+               ;; CAS loop: read aligned i32, update target byte, store back.
+               ;; Avoids allocating byte[] on every write.
+               aligned   (bit-and abs-off (bit-not 3))
+               shift-amt (* (bit-and abs-off 3) 8)
+               mask      (bit-not (bit-shift-left 0xFF shift-amt))]
+           (loop []
+             (let [old-word (mem/-load-i32 region aligned)
+                   new-word (bit-or (bit-and old-word mask)
+                                    (bit-shift-left (bit-and val 0xFF) shift-amt))]
+               (when-not (== old-word (mem/-cas-i32! region aligned old-word new-word))
+                 (recur))))))
 
        (-sio-read-u16 [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
@@ -173,10 +187,13 @@
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
                region    (aget regions class-idx)
-               b         (mem/-read-bytes region (+ base field-off) 2)]
-           ;; Little-endian u16
-           (bit-or (bit-and (aget ^bytes b 0) 0xFF)
-                   (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8))))
+               abs-off   (+ base field-off)
+               ;; Read aligned i32 containing our u16, extract with shift+mask.
+               ;; Assumes u16 doesn't straddle a 4-byte boundary (layout guarantees 2-byte align).
+               aligned   (bit-and abs-off (bit-not 3))
+               word      (mem/-load-i32 region aligned)
+               shift-amt (* (bit-and abs-off 3) 8)]
+           (bit-and (unsigned-bit-shift-right word shift-amt) 0xFFFF)))
 
        (-sio-write-u16! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
@@ -184,10 +201,17 @@
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
                region    (aget regions class-idx)
-               b         (byte-array 2)]
-           (aset b 0 (unchecked-byte (bit-and val 0xFF)))
-           (aset b 1 (unchecked-byte (bit-and (unsigned-bit-shift-right val 8) 0xFF)))
-           (mem/-write-bytes! region (+ base field-off) b)))
+               abs-off   (+ base field-off)
+               ;; CAS loop: read aligned i32, update target u16, store back.
+               aligned   (bit-and abs-off (bit-not 3))
+               shift-amt (* (bit-and abs-off 3) 8)
+               mask      (bit-not (bit-shift-left 0xFFFF shift-amt))]
+           (loop []
+             (let [old-word (mem/-load-i32 region aligned)
+                   new-word (bit-or (bit-and old-word mask)
+                                    (bit-shift-left (bit-and val 0xFFFF) shift-amt))]
+               (when-not (== old-word (mem/-cas-i32! region aligned old-word new-word))
+                 (recur))))))
 
        (-sio-read-i32 [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
