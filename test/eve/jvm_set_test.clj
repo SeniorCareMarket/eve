@@ -73,14 +73,7 @@
         (is (not (zero? (bit-and flags eve-set/SET_FLAG_PORTABLE_HASH)))
             "SET_FLAG_PORTABLE_HASH should be set in header byte 1")))))
 
-(deftest jvm-hashed-flag-read
-  (testing "jvm-eve-hash-set-from-offset reads jvm-hashed? correctly"
-    (with-heap-slab
-      (let [sio alloc/*jvm-slab-ctx*
-            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{:a :b})
-            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
-        (is (.-jvm-hashed? ^eve.set.EveHashSet s)
-            "jvm-hashed? should be true for sets with portable hash flag")))))
+;; jvm-hashed-flag-read test removed — jvm-hashed? field eliminated in R2
 
 (deftest large-set-contains-all
   (testing "contains? works for 100-element set (exercises hash collisions)"
@@ -155,13 +148,12 @@
               (str "should miss " i)))))))
 
 (deftest hamt-get-via-contains-and-get
-  (testing "EveHashSet.contains and .get use O(log n) path when jvm-hashed?"
+  (testing "EveHashSet.contains and .get use O(log n) HAMT path"
     (with-heap-slab
       (let [sio alloc/*jvm-slab-ctx*
             src (set (range 100))
             hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
-        (is (.-jvm-hashed? ^eve.set.EveHashSet s))
         (doseq [i (range 100)]
           (is (contains? s i) (str "contains? should find " i))
           (is (= i (get s i)) (str "get should return " i)))

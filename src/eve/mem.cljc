@@ -34,7 +34,9 @@
       [java.nio ByteBuffer ByteOrder]
       [java.nio.channels FileChannel FileChannel$MapMode]
       [java.nio.file OpenOption Paths StandardOpenOption]
-      [java.util Date UUID])))
+      [java.util Date UUID]))
+  (:require
+   [eve.deftype-proto.data :as d]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol
@@ -614,6 +616,20 @@
 (defn read-bytes     [r byte-off len]       (-read-bytes     r byte-off len))
 (defn write-bytes!   [r byte-off src]       (-write-bytes!   r byte-off src))
 
+#?(:clj
+   (defn copy-region!
+     "Bulk copy len bytes between two IMemRegion instances.
+      For JvmMmapRegion↔JvmMmapRegion: uses MemorySegment/copy (native memcpy).
+      For any JvmHeapRegion involved: falls back to read-bytes/write-bytes."
+     [src-region src-byte-off dst-region dst-byte-off len]
+     (if (and (instance? JvmMmapRegion src-region)
+              (instance? JvmMmapRegion dst-region))
+       (let [src-seg (.-seg ^JvmMmapRegion src-region)
+             dst-seg (.-seg ^JvmMmapRegion dst-region)]
+         (MemorySegment/copy src-seg (long src-byte-off) dst-seg (long dst-byte-off) (long len)))
+       (let [bs (-read-bytes src-region src-byte-off len)]
+         (-write-bytes! dst-region dst-byte-off bs)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Portable IMemRegion Bitmap Operations — shared CLJ + CLJS
 ;; ---------------------------------------------------------------------------
@@ -1135,6 +1151,16 @@
                (keyword? v) (symbol? v)
                (instance? java.util.UUID v) (instance? java.util.Date v))
            (value->eve-bytes v)
+
+           ;; Already slab-backed Eve type — return pointer to existing header
+           (satisfies? d/IEveRoot v)
+           (let [off (d/-root-header-off v)
+                 tag (cond
+                       (map? v)    0x10
+                       (set? v)    0x11
+                       (vector? v) 0x12
+                       :else       0x13)]
+             (jvm-sab-pointer-bytes tag off))
 
            (map? v)
            (if-let [write-map! (get writers :map)]

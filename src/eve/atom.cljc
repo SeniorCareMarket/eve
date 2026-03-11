@@ -26,7 +26,10 @@
               [eve.list :as eve-list]
               [eve.array :as eve-array]
               [eve.obj :as eve-obj]]))
-  #?(:clj (:import [eve.map EveHashMap])))
+  #?(:clj (:import [eve.map EveHashMap]
+                   [eve.set EveHashSet]
+                   [eve.vec SabVecRoot]
+                   [eve.list SabList])))
 
 ;; ---------------------------------------------------------------------------
 ;; B2 constants
@@ -577,17 +580,18 @@
      (defn- jvm-coll-factory
        "Collection factory for deserializing nested collection values from slabs.
         Called by eve-bytes->value when it encounters SAB pointer tags (0x10–0x13).
-        Maps return slab-backed EveHashMap; others materialize to plain types."
+        Returns slab-backed Eve types directly — no materialization."
        [tag sio slab-offset]
        (case (int tag)
          0x10 (eve-map/jvm-eve-hash-map-from-offset sio slab-offset jvm-coll-factory)
-         0x11 (into #{} (eve-set/jvm-eve-hash-set-from-offset sio slab-offset jvm-coll-factory))
-         0x12 (into [] (eve-vec/jvm-sabvec-from-offset sio slab-offset jvm-coll-factory))
-         0x13 (into '() (reverse (eve-list/jvm-sab-list-from-offset sio slab-offset)))
+         0x11 (eve-set/jvm-eve-hash-set-from-offset sio slab-offset jvm-coll-factory)
+         0x12 (eve-vec/jvm-sabvec-from-offset sio slab-offset jvm-coll-factory)
+         0x13 (eve-list/jvm-sab-list-from-offset sio slab-offset jvm-coll-factory)
          (throw (ex-info "jvm-coll-factory: unknown tag" {:tag tag}))))
 
      (defn- jvm-read-root-value
-       "Read the atom value from a root pointer. Caller must ensure epoch is pinned."
+       "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
+        Returns slab-backed Eve types directly — no materialization."
        [sio ptr]
        (when (and (not= ptr alloc/NIL_OFFSET)
                   (not= ptr CLAIMED_SENTINEL))
@@ -595,9 +599,9 @@
                cf      jvm-coll-factory]
            (case (int type-id)
              0xED (eve-map/jvm-eve-hash-map-from-offset sio ptr cf)
-             0xEE (into #{} (eve-set/jvm-eve-hash-set-from-offset sio ptr cf))
-             0x12 (into [] (eve-vec/jvm-sabvec-from-offset sio ptr cf))
-             0x13 (into '() (reverse (eve-list/jvm-sab-list-from-offset sio ptr)))
+             0xEE (eve-set/jvm-eve-hash-set-from-offset sio ptr cf)
+             0x12 (eve-vec/jvm-sabvec-from-offset sio ptr cf)
+             0x13 (eve-list/jvm-sab-list-from-offset sio ptr cf)
              0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
              0x1E (eve-obj/jvm-obj-from-offset sio ptr)
              0x01 (alloc/jvm-read-scalar-block sio ptr)
@@ -642,14 +646,16 @@
 
      (defn- jvm-resolve-new-ptr
        "Resolve the slab-qualified offset for a new atom root value (JVM).
-        If new-val is already a slab-backed EveHashMap, returns its header-off
+        If new-val is already a slab-backed Eve type, returns its header-off
         directly (no re-serialization). Otherwise serializes to slab."
        [sio new-val]
        (let [encode (partial mem/value+sio->eve-bytes sio)]
          (cond
-           (nil? new-val)     alloc/NIL_OFFSET
-           (instance? EveHashMap new-val)
-           (.-header-off ^EveHashMap new-val)
+           (nil? new-val)                  alloc/NIL_OFFSET
+           (instance? EveHashMap new-val)  (.-header-off ^EveHashMap new-val)
+           (instance? EveHashSet new-val)  (.-header-off ^EveHashSet new-val)
+           (instance? SabVecRoot new-val)  (.-header-off ^SabVecRoot new-val)
+           (instance? SabList new-val)     (.-header-off ^SabList new-val)
            (map? new-val)
            (if (and (contains? new-val :schema) (contains? new-val :values))
              (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
@@ -698,7 +704,7 @@
 
      (defn- jvm-mmap-swap!
        "B2 CAS-loop swap (JVM). Epoch pinned for the ENTIRE iteration to
-        protect lazy EveHashMap reads and jvm-collect-replaced-nodes."
+        protect lazy EveHashMap reads during path-copy."
        [{:keys [root-r sio retire-q tree-logs flush-ts] :as domain-state} atom-slot-idx f args]
        (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
        (loop [attempt 0]
@@ -712,22 +718,25 @@
                  (let [old-ptr (mem/-load-i32 root-r ptr-off)
                        old-val (jvm-read-root-value sio old-ptr)
                        _       (alloc/start-jvm-alloc-log!)
+                       _       (alloc/start-jvm-replaced-log!)
                        new-val (apply f old-val args)
                        new-ptr (jvm-resolve-new-ptr sio new-val)
                        cur-log (alloc/drain-jvm-alloc-log!)
-                       eve-passthru? (instance? EveHashMap new-val)
+                       replaced-log (alloc/drain-jvm-replaced-log!)
+                       eve-passthru? (or (instance? EveHashMap new-val)
+                                        (instance? EveHashSet new-val)
+                                        (instance? SabVecRoot new-val)
+                                        (instance? SabList new-val))
                        w       (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
                    (if (== w old-ptr)
                      (let [new-epoch (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)]
                        (when (and (not= old-ptr alloc/NIL_OFFSET)
                                   (not= old-ptr CLAIMED_SENTINEL))
-                         (if (and eve-passthru? (instance? EveHashMap old-val))
-                           (let [^EveHashMap old-em old-val
-                                 ^EveHashMap new-em new-val
-                                 replaced (jvm-collect-replaced-nodes
-                                            sio (.-root-off old-em) (.-root-off new-em))
-                                 offs (conj replaced old-ptr)]
+                         (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
+                           ;; Map→Map: replaced nodes were collected during path-copy
+                           (let [offs (conj (or replaced-log []) old-ptr)]
                              (.add retire-q {:offsets offs :epoch (inc new-epoch)}))
+                           ;; Other types: use alloc-log if available, else just header
                            (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs
                                                   (Integer/valueOf (int old-ptr)))]
                              (.add retire-q {:offsets (or old-log [old-ptr])
