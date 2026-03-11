@@ -207,7 +207,7 @@ reading them. Persistent atoms use epoch-based garbage collection:
 - After a successful `swap!`, old nodes are placed in a **retire queue** tagged with the epoch
 - Periodically, the retire queue is flushed: nodes whose epoch is older than
   all currently-pinned epochs are freed
-- Stale processes (no heartbeat for 60s) are ignored during the epoch scan
+- Stale processes (no heartbeat for 30s) are ignored during the epoch scan
 
 This guarantees that no node is freed while any process could still be reading it.
 
@@ -354,7 +354,7 @@ Persistent atoms support any standard Clojure/ClojureScript value:
   Create multiple domains if you need more.
 
 - **256 concurrent processes per domain.** The worker registry has 256 slots.
-  Stale processes (no heartbeat for 60s) are automatically reclaimed.
+  Stale processes (no heartbeat for 30s) are automatically reclaimed.
 
 - **No watches or validators.** Persistent atoms do not support `add-watch` or
   `set-validator!`. Use polling or application-level change detection.

@@ -90,10 +90,10 @@ SharedArrayBuffer requires:
 | Atom creation | `(e/atom ...)` via `eve.alpha` | `(atom/atom ...)` via `eve.atom` |
 | Persistent atom | `(e/atom {:id ::k :persistent "path"} val)` | `(atom/atom {:id ::k :persistent "path"} val)` |
 | AtomDomain | `(eve/atom-domain val :sab-size N)` | `(atom/persistent-atom-domain "path")` |
-| Close domain | `e/close-atom-domain!` | `atom/close-atom-domain!` |
+| Close domain | Not available | `atom/close-atom-domain!` (also via `e/close-atom-domain!` on CLJ) |
 | deftype macro | `(eve/deftype ...)` (CLJS only) | Not available |
-| Typed objects | `eve.obj` (CLJS only) | Not available |
-| Typed arrays | `eve.array` (CLJS only) | Not available |
+| Typed objects | `eve.obj` | `eve.obj` |
+| Typed arrays | `eve.array` | `eve.array` |
 | Integer map | `eve.deftype.int-map` (CLJS only) | Not available |
 | Sorted set | `eve.deftype.rb-tree` (CLJS only) | Not available |
 
@@ -210,7 +210,7 @@ Process B (Node.js):
 
 - Requires Java 21+ for Panama FFM
 - Requires `--add-opens` and `--enable-native-access` JVM flags
-- `eve/deftype`, `eve.obj`, `eve.array`, integer maps, and sorted sets are CLJS-only
+- `eve/deftype`, integer maps, and sorted sets are CLJS-only
 - No `add-watch` / `set-validator!` on persistent atoms
 
 ### macOS Specific

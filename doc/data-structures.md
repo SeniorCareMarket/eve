@@ -8,11 +8,11 @@ Eve provides `SharedArrayBuffer`-backed atoms and persistent data structures tha
 |------|------------|-----------|
 | SharedAtom | `e/atom` | Slot within an AtomDomain's SAB |
 | AtomDomain | `eve/atom-domain` | SharedArrayBuffer — a shared mutable map |
-| HashMap | `eve/hash-map` | HAMT in SharedArrayBuffer |
-| HashSet | `eve/hash-set` | HAMT in SharedArrayBuffer |
-| Vector | `eve/vector` | Persistent vector in SharedArrayBuffer |
-| List | `eve/list` | Persistent list in SharedArrayBuffer |
-| Array | `eve/eve-array` | Typed array in SharedArrayBuffer |
+| HashMap | `e/hash-map` | HAMT in SharedArrayBuffer |
+| HashSet | `e/hash-set` | HAMT in SharedArrayBuffer |
+| Vector | (automatic via atom) | Persistent vector in SharedArrayBuffer |
+| List | (automatic via atom) | Persistent list in SharedArrayBuffer |
+| Array | `e/eve-array` | Typed array in SharedArrayBuffer |
 | Custom types | `eve/deftype` | User-defined SAB-backed types |
 
 Most user code only needs `eve.alpha` — shared atoms are available as `e/atom`. For advanced features (custom `AtomDomain`, `deftype`, `extend-type`), require `eve.alpha` with `:include-macros true`.
@@ -68,11 +68,8 @@ To share an `AtomDomain` across workers, extract its SAB references and pass the
 
 ```clojure
 ;; On the creating worker:
-(def transfer (eve/sab-transfer-data my-domain))
+(def transfer (e/sab-transfer-data my-domain))
 ;; => {:sab <SharedArrayBuffer> :reader-map-sab <SharedArrayBuffer>}
-
-;; On a receiving worker:
-(eve/init-eve-on-worker! transfer)
 ```
 
 The fat kernel handles this automatically for the global atom instance.
@@ -97,8 +94,7 @@ SharedAtoms support the same protocols as AtomDomain: `IDeref`, `IReset`, `ISwap
 ### Type Predicates
 
 ```clojure
-(eve/atom-domain? my-domain)  ;=> true
-(eve/shared-atom? counter)    ;=> true
+(e/shared-atom? counter)    ;=> true
 ```
 
 ## HashMap, HashSet, Vector, List — Transparent Storage
@@ -124,7 +120,7 @@ When you put a regular Clojure map, set, vector, or list into a shared atom, EVE
 
 Under the hood, the map is stored as an EVE HAMT, the set as an EVE hash-set, and the vector as an EVE persistent vector — all in `SharedArrayBuffer`. Every worker that can reach this atom sees the same shared memory, with zero-copy semantics.
 
-There is no need to call `eve/hash-map`, `eve/hash-set`, `eve/vector`, or `eve/list` directly. Regular Clojure constructors (`{}`, `#{}`, `[]`, `'()`) are serialized into the EVE equivalents automatically during `swap!` and `reset!`.
+There is no need to call `e/hash-map` or `e/hash-set` directly in most cases. Regular Clojure constructors (`{}`, `#{}`, `[]`, `'()`) are serialized into the EVE equivalents automatically during `swap!` and `reset!`. Vectors and lists do not have standalone constructors — they are created automatically when stored in an atom.
 
 ## Typed Arrays
 
@@ -146,7 +142,7 @@ Supported types: `:int8`, `:uint8`, `:uint8-clamped`, `:int16`, `:uint16`, `:int
 
 ```clojure
 (eve/aget my-array 0)        ;; read (atomic for integer types)
-(eve/aset my-array 0 42)     ;; write (atomic for integer types)
+(eve/aset! my-array 0 42)    ;; write (atomic for integer types)
 ```
 
 ### Atomic Operations (integer types only)
@@ -187,8 +183,8 @@ These use SIMD for 4x throughput but are **not atomic** — use only when exclus
 (arr/afill-simd! my-array 42 start end)           ;; fill range
 (arr/acopy-simd! dest src)                        ;; copy array
 (arr/asum-simd my-array)                          ;; sum all elements
-(arr/areduce-simd my-array init-val f)            ;; SIMD reduce
-(arr/amap-simd my-array f)                        ;; SIMD map
+(arr/areduce my-array init-val f)                  ;; reduce
+(arr/amap my-array f)                              ;; map
 ```
 
 ## `eve/deftype` — Custom SAB-Backed Types
@@ -260,16 +256,16 @@ When `e/atom` creates the first SharedAtom, it bootstraps a global `AtomDomain` 
 
 Six size-stratified slabs, each in its own `SharedArrayBuffer`. Growth factor is 4× via `WebAssembly.Memory` maximum.
 
-| Class | Block Size | Initial Capacity | Max Blocks | Growth Max |
-|-------|-----------|-------------------|-----------|-----------|
-| 0 | 32 B | 32 MB | 1,048,576 | 128 MB |
-| 1 | 64 B | 64 MB | 1,048,576 | 256 MB |
-| 2 | 128 B | 64 MB | 524,288 | 256 MB |
-| 3 | 256 B | 32 MB | 131,072 | 128 MB |
-| 4 | 512 B | 16 MB | 32,768 | 64 MB |
-| 5 | 1024 B | 16 MB | 16,384 | 64 MB |
+| Class | Block Size | Initial Capacity | Max Capacity | Max Blocks |
+|-------|-----------|-------------------|-------------|-----------|
+| 0 | 32 B | 64 KB (2K blocks) | 1 GB | 32M blocks |
+| 1 | 64 B | 64 KB (1K blocks) | 1 GB | 16M blocks |
+| 2 | 128 B | 32 KB (256 blocks) | 1 GB | 8M blocks |
+| 3 | 256 B | 32 KB (128 blocks) | 512 MB | 2M blocks |
+| 4 | 512 B | 16 KB (32 blocks) | 256 MB | 512K blocks |
+| 5 | 1024 B | 16 KB (16 blocks) | 256 MB | 256K blocks |
 
-**Total initial slab capacity: 224 MB** (32+64+64+32+16+16). Typical contents per class: tiny HAMT bitmap nodes (class 0), common HAMT nodes (1), vec trie nodes (2), collision/serialized values (3–5).
+**Total initial slab capacity: ~224 KB** (64+64+32+32+16+16). Slabs grow lazily on demand — sparse files and lazy mmap page commit mean untouched pages cost zero physical memory or disk. Typical contents per class: tiny HAMT bitmap nodes (class 0), common HAMT nodes (1), vec trie nodes (2), collision/serialized values (3–5).
 
 #### Worker registry & scratch
 

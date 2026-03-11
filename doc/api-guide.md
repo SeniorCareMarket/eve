@@ -10,8 +10,8 @@ Complete reference for Eve's public API surface.
 |---|---|---|
 | `eve.alpha` | CLJS + CLJ | Public API entry point |
 | `eve.shared-atom` | CLJS only | SAB-backed atom internals |
-| `eve.obj` | CLJS only | Typed shared objects (AoS/SoA) |
-| `eve.array` | CLJS only | Typed array API |
+| `eve.obj` | CLJS + CLJ | Typed shared objects (AoS/SoA) |
+| `eve.array` | CLJS + CLJ | Typed array API |
 | `eve.deftype.int-map` | CLJS only | Integer map (PATRICIA trie) |
 | `eve.deftype.rb-tree` | CLJS only | Sorted set (red-black tree) |
 
@@ -106,19 +106,15 @@ These are rarely needed — standard Clojure literals (`{}`, `[]`, `#{}`, `'()`)
 ### Type Predicates
 
 ```clojure
-(eve/atom-domain? my-domain)  ;; true if AtomDomain
-(eve/shared-atom? counter)    ;; true if SharedAtom
+(e/shared-atom? counter)    ;; true if SharedAtom
 ```
 
 ### Cross-Worker Support (CLJS)
 
 ```clojure
 ;; Extract SAB references for cross-worker transfer
-(eve/sab-transfer-data my-domain)
+(e/sab-transfer-data my-domain)
 ;; => {:sab <SharedArrayBuffer> :reader-map-sab <SharedArrayBuffer>}
-
-;; Initialize Eve on a receiving worker
-(eve/init-eve-on-worker! transfer-data)
 ```
 
 ### Macros (CLJS — requires `:include-macros true`)
@@ -140,7 +136,7 @@ These are rarely needed — standard Clojure literals (`{}`, `[]`, `#{}`, `'()`)
 
 ---
 
-## eve.obj — Typed Shared Objects (CLJS)
+## eve.obj — Typed Shared Objects
 
 Schema-based typed objects backed by `SharedArrayBuffer`. Two layouts:
 
@@ -207,7 +203,7 @@ Integer types (`:int32`, `:uint32`) support atomic operations. Fields are sorted
 
 ---
 
-## eve.array — Typed Arrays (CLJS)
+## eve.array — Typed Arrays
 
 Typed array storage in `SharedArrayBuffer` with optional atomic operations.
 
@@ -270,8 +266,8 @@ Not atomic — use only with exclusive access:
 (arr/afill-simd! my-array 42 start end)           ;; fill range
 (arr/acopy-simd! dest src)                        ;; copy array
 (arr/asum-simd my-array)                          ;; sum all elements
-(arr/areduce-simd my-array init-val f)            ;; SIMD reduce
-(arr/amap-simd my-array f)                        ;; SIMD map
+(arr/areduce my-array init-val f)                  ;; reduce
+(arr/amap my-array f)                              ;; map
 ```
 
 ---

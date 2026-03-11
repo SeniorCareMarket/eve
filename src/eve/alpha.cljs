@@ -29,7 +29,14 @@
 (def hash-set eve-set/hash-set)
 (def empty-hash-set eve-set/empty-hash-set)
 
+;; Type Predicates
+(def shared-atom? a/shared-atom?)
+
+;; Cross-Worker Support
+(def sab-transfer-data a/sab-transfer-data)
+
 ;; Typed Array API
+(def eve-array arr/eve-array)
 (def aget arr/aget)
 (def aset! arr/aset!)
 (def get-typed-view arr/get-typed-view)
