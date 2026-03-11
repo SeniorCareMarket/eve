@@ -29,7 +29,8 @@
                                      mask-hash bitpos has-bit? get-index]]
       [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                             value+sio->eve-bytes
-                                            register-jvm-collection-writer!]])))
+                                            register-jvm-collection-writer!]]
+      [eve.perf :as perf])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -2737,12 +2738,13 @@
        "Bulk-copy a bitmap node and patch one child pointer. Returns new slab offset.
         This is the hot path for assoc on existing keys — O(1) per HAMT level."
        [sio src-off data-bm node-bm child-idx new-child-off]
-       (eve-alloc/log-replaced-node! src-off)
-       (let [node-size (jvm-node-byte-size sio src-off data-bm node-bm)
-             dst-off   (-sio-alloc! sio node-size)]
-         (-sio-copy-block! sio dst-off 0 src-off 0 node-size)
-         (-sio-write-i32!  sio dst-off (+ NODE_HEADER_SIZE (* child-idx 4)) new-child-off)
-         dst-off))
+       (perf/timed :copy-node-patch-child
+         (eve-alloc/log-replaced-node! src-off)
+         (let [node-size (jvm-node-byte-size sio src-off data-bm node-bm)
+               dst-off   (perf/timed :sio-alloc (-sio-alloc! sio node-size))]
+           (perf/timed :sio-copy-block (-sio-copy-block! sio dst-off 0 src-off 0 node-size))
+           (-sio-write-i32!  sio dst-off (+ NODE_HEADER_SIZE (* child-idx 4)) new-child-off)
+           dst-off)))
 
      (defn- jvm-skip-kv-at
        "Skip past one KV entry at pos within a node, returning the next pos."
@@ -2765,6 +2767,7 @@
      (defn- jvm-copy-node-replace-kv!
        "Bulk-copy a bitmap node and replace one KV entry. Returns new slab offset."
        [sio src-off data-bm node-bm data-idx kh ^bytes kb ^bytes vb]
+       (perf/timed :copy-node-replace-kv
        (eve-alloc/log-replaced-node! src-off)
        (let [[kv-pos old-kv-size] (jvm-kv-pos-and-size sio src-off data-bm node-bm data-idx)
              new-kv-size (+ 4 (alength kb) 4 (alength vb))
@@ -2812,11 +2815,12 @@
                      (let [entry-size (- (jvm-skip-kv-at sio src-off src-pos) src-pos)]
                        (-sio-copy-block! sio dst-off dst-pos src-off src-pos entry-size)
                        (recur (inc i) (+ src-pos entry-size) (+ dst-pos entry-size)))))))
-             dst-off))))
+             dst-off)))))
 
      (defn- jvm-copy-node-add-kv!
        "Copy a bitmap node, inserting a new KV entry at data-idx. Returns new slab offset."
        [sio src-off src-data-bm new-data-bm node-bm data-idx kh ^bytes kb ^bytes vb]
+       (perf/timed :copy-node-add-kv
        (eve-alloc/log-replaced-node! src-off)
        (let [new-kv-size (+ 4 (alength kb) 4 (alength vb))
              old-kv-total (jvm-node-kv-total-size sio src-off src-data-bm node-bm)
@@ -2857,13 +2861,14 @@
                  (let [entry-size (- (jvm-skip-kv-at sio src-off src-pos) src-pos)]
                    (-sio-copy-block! sio dst-off dst-pos src-off src-pos entry-size)
                    (recur (inc src-i) (inc dst-i) (+ src-pos entry-size) (+ dst-pos entry-size)))))))
-         dst-off))
+         dst-off)))
 
      (defn- jvm-copy-node-remove-kv-add-child!
        "Copy a bitmap node, removing a KV entry and inserting a child pointer.
         Returns new slab offset."
        [sio src-off src-data-bm src-node-bm
         new-data-bm new-node-bm remove-idx new-child-idx new-child-off]
+       (perf/timed :copy-node-remove-kv-add-child
        (eve-alloc/log-replaced-node! src-off)
        (let [old-kv-total (jvm-node-kv-total-size sio src-off src-data-bm src-node-bm)
              ;; Calculate size of removed KV entry
@@ -2911,7 +2916,7 @@
                  (let [entry-size (- (jvm-skip-kv-at sio src-off src-pos) src-pos)]
                    (-sio-copy-block! sio dst-off dst-pos src-off src-pos entry-size)
                    (recur (inc src-i) (+ src-pos entry-size) (+ dst-pos entry-size)))))))
-         dst-off))
+         dst-off)))
 
      (defn- jvm-hamt-assoc!
        "Path-copy assoc into JVM-hashed HAMT. Returns [new-root-off added?]
@@ -3299,24 +3304,24 @@
              (clojure.lang.MapEntry/create k v))))
        (assoc [this k v]
          (if jvm-hashed?
-           (let [^bytes kb (value->eve-bytes k)
+           (let [^bytes kb (perf/timed :serialize-key (value->eve-bytes k))
                  kh (portable-hash-bytes kb)
-                 ^bytes vb (value+sio->eve-bytes sio v)
-                 result (jvm-hamt-assoc! sio root-off kh kb vb 0)]
+                 ^bytes vb (perf/timed :serialize-val (value+sio->eve-bytes sio v))
+                 result (perf/timed :hamt-assoc (jvm-hamt-assoc! sio root-off kh kb vb 0))]
              (if result
                (let [[new-root added?] result]
                  (if (== new-root root-off)
                    this
                    (let [new-cnt (if added? (inc cnt) cnt)
-                         hdr (jvm-write-map-header! sio new-cnt new-root true)]
+                         hdr (perf/timed :write-map-header (jvm-write-map-header! sio new-cnt new-root true))]
                      (EveHashMap. new-cnt new-root hdr sio coll-factory nil true))))
                ;; Collision node encountered — handle natively
-               (let [result2 (jvm-hamt-assoc-with-collision! sio root-off kh kb vb 0)]
+               (let [result2 (perf/timed :hamt-assoc-collision (jvm-hamt-assoc-with-collision! sio root-off kh kb vb 0))]
                  (let [[new-root added?] result2]
                    (if (== new-root root-off)
                      this
                      (let [new-cnt (if added? (inc cnt) cnt)
-                           hdr (jvm-write-map-header! sio new-cnt new-root true)]
+                           hdr (perf/timed :write-map-header (jvm-write-map-header! sio new-cnt new-root true))]
                        (EveHashMap. new-cnt new-root hdr sio coll-factory nil true)))))))
            (assoc (into {} this) k v)))
        (assocEx [this k v]
