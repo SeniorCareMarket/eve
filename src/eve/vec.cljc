@@ -1513,7 +1513,10 @@
 
        clojure.lang.IHashEq
        (hasheq [this]
-         (clojure.lang.Murmur3/hashOrdered this)))
+         (clojure.lang.Murmur3/hashOrdered this))
+
+       d/IEveRoot
+       (-root-header-off [_] header-off))
 
      (defn jvm-sabvec-from-offset
        "Construct a JVM SabVecRoot from a slab-qualified header-off and ISlabIO context."
