@@ -25,14 +25,14 @@ Measured on Linux, JDK 21, Node 18.
 ```
 Atom Size     Keys      Depth   JVM swap p50   Node swap p50
 ─────────────────────────────────────────────────────────────
-  12 MB       1,800       3      1.10 ms        0.15 ms
- 115 MB      16,400       4      0.88 ms        0.16 ms
-   1 GB     ~150,000      5      1.23 ms        0.17 ms
+  11 MB       1,801       3      1.53 ms        0.16 ms
+ 114 MB      18,801       4      2.59 ms        0.34 ms
+ 1.1 GB      25,001       4      3.55 ms        0.22 ms
 ```
 
 Swap latency stays flat because each `swap!` only path-copies O(log32 N)
-HAMT nodes — the rest of the tree is structurally shared. A 115 MB atom
-with 16,400 keys is 4 levels deep; a 1-billion-key atom would be 6.
+HAMT nodes — the rest of the tree is structurally shared. A 114 MB atom
+with 18,801 keys is 4 levels deep; a 1-billion-key atom would be 6.
 
 ```
   Swap latency vs atom size (p50, log scale)
@@ -40,13 +40,13 @@ with 16,400 keys is 4 levels deep; a 1-billion-key atom would be 6.
   ms
   10 ┤
      │
-   1 ┤  ■──────────────────■───────────────■  JVM  (~1 ms)
+   1 ┤  ■──────────────────■───────────────■  JVM  (~1.5–3.5 ms)
      │
- 0.1 ┤  ●──────────────────●───────────────●  Node (~0.16 ms)
+ 0.1 ┤  ●──────────────────●───────────────●  Node (~0.2 ms)
      │
 0.01 ┤
      └──┬───────────────────┬───────────────┬──
-       12 MB             115 MB            1 GB
+       11 MB             114 MB           1.1 GB
 ```
 
 Cross-process contention (4 JVM threads + 4 Node processes, shared `:counter`):
@@ -54,8 +54,9 @@ Cross-process contention (4 JVM threads + 4 Node processes, shared `:counter`):
 ```
 Atom Size     Throughput    Counter     Result
 ──────────────────────────────────────────────
-  12 MB        526 ops/s    400/400     CORRECT
- 115 MB        197 ops/s    400/400     CORRECT
+  11 MB        924 ops/s    400/400     CORRECT
+ 114 MB        462 ops/s    400/400     CORRECT
+ 1.1 GB        546 ops/s    400/400     CORRECT
 ```
 
 ## Usage

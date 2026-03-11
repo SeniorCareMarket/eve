@@ -90,7 +90,10 @@
 
         ;; ── Phase 2: JVM Single-Writer Swap Latency ──
         ;; Updates EXISTING keys — takes the O(log32 N) replace path in the HAMT.
+        ;; Warmup: 50 unprofiled swaps so JIT compiles the hot path before timing.
         (section "Phase 2: JVM Single-Writer Swap Latency")
+        (dotimes [i 50]
+          (swap! a assoc (keyword (str "k" (mod i key-count))) {:warmup true :i i}))
         (let [n    100
               lats (long-array n)]
           (dotimes [i n]
