@@ -1413,11 +1413,11 @@
                       (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
                         (recur (inc ci) (jvm-set-reduce sio child-off f acc coll-factory)))))))
 
-              ;; Collision node: [type:u8 cnt:u8 pad:2 hash:i32 val1... val2...]
+              ;; Collision node: [type:u8 cnt:u8 hash:u32@2 unused:u32@8] entries@12
               2
               (let [cnt (-sio-read-u8 sio root-off 1)]
                 (loop [i   0
-                       pos 8  ;; after type:u8 + cnt:u8 + pad:2 + hash:i32
+                       pos NODE_HEADER_SIZE  ;; entries start at offset 12
                        acc init]
                   (if (or (>= i cnt) (reduced? acc))
                     (unreduced acc)
@@ -1447,19 +1447,19 @@
                (and (> cnt 1) (apply = (map first entries))))
            (let [kh       (first (first entries))
                  val-size (reduce (fn [acc [_ vb]] (+ acc 4 (alength vb))) 0 entries)
-                 ;; Collision header: [type:u8][cnt:u8][pad:u16][hash:i32] = 8 bytes
-                 node-off (-sio-alloc! sio (+ 8 val-size))]
+                 ;; Collision header matches CLJS: [type:u8][cnt:u8][hash:u32@2][unused:u32@8] = 12 bytes
+                 node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE val-size))]
              (-sio-write-u8!  sio node-off 0 NODE_TYPE_COLLISION)
              (-sio-write-u8!  sio node-off 1 cnt)
-             (-sio-write-u16! sio node-off 2 0)
-             (-sio-write-i32! sio node-off 4 kh)
+             (-sio-write-i32! sio node-off 2 kh)  ;; hash at offset 2 (matches CLJS r-set-u32 2)
+             (-sio-write-i32! sio node-off 8 0)   ;; unused
              (reduce (fn [pos [_ vb]]
                        (let [vlen (alength vb)]
                          (-sio-write-i32! sio node-off pos vlen)
                          (when (pos? vlen)
                            (-sio-write-bytes! sio node-off (+ pos 4) vb))
                          (+ pos 4 vlen)))
-                     8 entries)
+                     NODE_HEADER_SIZE entries)
              node-off)
 
            ;; Build a bitmap node grouping entries by slot at this shift level

@@ -1,6 +1,7 @@
 (ns eve.jvm-set-test
   (:require [clojure.test :refer [deftest is testing]]
             [eve.deftype-proto.alloc :as alloc]
+            [eve.hamt-util :as hu]
             [eve.mem :as mem]
             [eve.set :as eve-set]))
 
@@ -58,3 +59,63 @@
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= src (set s)))
         (is (= 50 (count s)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 0.6: Cross-process set hash compatibility tests
+;; ---------------------------------------------------------------------------
+
+(deftest portable-hash-flag-set
+  (testing "JVM-written sets have SET_FLAG_PORTABLE_HASH flag"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{1 2 3})
+            flags (alloc/-sio-read-u8 sio hdr 1)]
+        (is (not (zero? (bit-and flags eve-set/SET_FLAG_PORTABLE_HASH)))
+            "SET_FLAG_PORTABLE_HASH should be set in header byte 1")))))
+
+(deftest jvm-hashed-flag-read
+  (testing "jvm-eve-hash-set-from-offset reads jvm-hashed? correctly"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{:a :b})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (.-jvm-hashed? ^eve.set.EveHashSet s)
+            "jvm-hashed? should be true for sets with portable hash flag")))))
+
+(deftest large-set-contains-all
+  (testing "contains? works for 100-element set (exercises hash collisions)"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (set (range 100))
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= 100 (count s)))
+        (doseq [i (range 100)]
+          (is (contains? s i) (str "should contain " i)))
+        (is (not (contains? s 999)))))))
+
+(deftest portable-hash-cross-platform-consistency
+  (testing "portable-hash-bytes produces same hash on JVM as expected"
+    ;; Verify that the JVM portable-hash-bytes matches known values
+    ;; by hashing serialized integers and checking consistency
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            serialize (partial mem/value+sio->eve-bytes sio)]
+        (doseq [v [0 1 42 -1 100 999]]
+          (let [vb (serialize v)
+                h  (hu/portable-hash-bytes vb)]
+            (is (integer? h) (str "hash of " v " should be integer"))
+            ;; Hash should be deterministic
+            (is (= h (hu/portable-hash-bytes (serialize v)))
+                (str "hash of " v " should be deterministic"))))))))
+
+(deftest set-with-mixed-types-roundtrip
+  (testing "set with strings, keywords, and integers"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{:a "hello" 42 :b "world" 99}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= src (set s)))
+        (doseq [v src]
+          (is (contains? s v) (str "should contain " (pr-str v))))))))

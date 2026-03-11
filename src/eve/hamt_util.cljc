@@ -20,7 +20,7 @@
 
 (defn- imul32 [a b]
   #?(:cljs (js/Math.imul a b)
-     :clj  (long (unchecked-multiply-int a b))))
+     :clj  (long (unchecked-multiply-int (unchecked-int a) (unchecked-int b)))))
 
 (defn- rotl32 [x r]
   #?(:cljs (bit-or (unsigned-bit-shift-right x (- 32 r)) (bit-shift-left x r))
