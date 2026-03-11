@@ -739,10 +739,12 @@
 
      (def ^:private ^:const KW_CACHE_MAX 4096)
 
-     ;; --- EVE binary format — ByteBuffer helpers ---
+     ;; --- EVE binary format — manual LE byte helpers (no ByteBuffer alloc) ---
 
      (defn- le-bb
-       "Wrap a byte[] in a little-endian ByteBuffer."
+       "Wrap a byte[] in a little-endian ByteBuffer.
+        Only used for variable-length flat collection encoding where streaming
+        writes justify the ByteBuffer overhead."
        ^ByteBuffer [^bytes b]
        (-> (ByteBuffer/wrap b) (.order ByteOrder/LITTLE_ENDIAN)))
 
@@ -750,16 +752,68 @@
        (bit-and (aget b i) 0xFF))
 
      (defn- read-u32-le ^long [^bytes b ^long i]
-       (Integer/toUnsignedLong (.getInt (le-bb b) (int i))))
+       (bit-or (bit-and (long (aget b i)) 0xFF)
+               (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
+               (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
+               (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)))
 
      (defn- read-i32-le ^long [^bytes b ^long i]
-       (.getInt (le-bb b) (int i)))
+       (let [u (read-u32-le b i)]
+         (if (>= u 0x80000000)
+           (- u 0x100000000)
+           u)))
 
      (defn- read-i64-le ^long [^bytes b ^long i]
-       (.getLong (le-bb b) (int i)))
+       (bit-or (bit-and (long (aget b i)) 0xFF)
+               (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
+               (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
+               (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)
+               (bit-shift-left (bit-and (long (aget b (+ i 4))) 0xFF) 32)
+               (bit-shift-left (bit-and (long (aget b (+ i 5))) 0xFF) 40)
+               (bit-shift-left (bit-and (long (aget b (+ i 6))) 0xFF) 48)
+               (bit-shift-left (long (aget b (+ i 7))) 56)))
 
      (defn- read-f64-le ^double [^bytes b ^long i]
-       (.getDouble (le-bb b) (int i)))
+       (Double/longBitsToDouble (read-i64-le b i)))
+
+     ;; --- LE write helpers (eliminates ByteBuffer alloc for fixed-size types) ---
+
+     (defn- put-i32-le! [^bytes b ^long off ^long v]
+       (aset b off       (unchecked-byte v))
+       (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
+       (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
+       (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24))))
+
+     (defn- put-i64-le! [^bytes b ^long off ^long v]
+       (aset b off       (unchecked-byte v))
+       (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
+       (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
+       (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24)))
+       (aset b (+ off 4) (unchecked-byte (unsigned-bit-shift-right v 32)))
+       (aset b (+ off 5) (unchecked-byte (unsigned-bit-shift-right v 40)))
+       (aset b (+ off 6) (unchecked-byte (unsigned-bit-shift-right v 48)))
+       (aset b (+ off 7) (unchecked-byte (unsigned-bit-shift-right v 56))))
+
+     (defn- put-f64-le! [^bytes b ^long off ^double v]
+       (put-i64-le! b off (Double/doubleToRawLongBits v)))
+
+     ;; --- Cached constant byte arrays for zero-alloc serialization ---
+
+     (def ^:private ^bytes BYTES-NIL     (byte-array 0))
+     (def ^:private ^bytes BYTES-FALSE   (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 TAG-FALSE)))
+     (def ^:private ^bytes BYTES-TRUE    (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 TAG-TRUE)))
+
+     ;; Small integer cache [-128, 127] — mirrors java.lang.Integer cache range.
+     ;; Each entry is a pre-built 7-byte INT32 array.
+     (def ^:private small-int-cache
+       (let [^objects arr (object-array 256)]
+         (dotimes [i 256]
+           (let [n (- i 128)
+                 b (byte-array 7)]
+             (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-INT32)
+             (put-i32-le! b 3 n)
+             (aset arr i b)))
+         arr))
 
      (defn- read-utf8 ^String [^bytes b ^long off ^long len]
        (String. b (int off) (int len) "UTF-8"))
@@ -839,9 +893,8 @@
                  (symbol ns-str name-str))
 
                0x0B  ; TAG-UUID — 16 raw bytes in big-endian order
-               (let [bb (ByteBuffer/wrap b 3 16)
-                     msb (.getLong bb)
-                     lsb (.getLong bb)]
+               (let [msb (Long/reverseBytes (read-i64-le b 3))
+                     lsb (Long/reverseBytes (read-i64-le b 11))]
                  (UUID. msb lsb))
 
                ;; SAB pointer types — collection values in slab memory
@@ -902,7 +955,8 @@
      ;; --- EVE binary format — serializer (primitive types only) ---
 
      (defn- bytes-header-tag
-       "Create a 3-byte prefix [0xEE 0xDB tag]."
+       "Create a 3-byte prefix [0xEE 0xDB tag]. Only used for variable-size types
+        that need a fresh array. Fixed-size types use cached constants or put-* helpers."
        ^bytes [tag]
        (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 (unchecked-byte tag))))
 
@@ -972,14 +1026,17 @@
 
         Maps are flat-encoded as FLAT_MAP (tag 0xED); sequential collections and sets
         are flat-encoded as FLAT_VEC (tag 0xEF).  Use value+sio->eve-bytes when HAMT
-        allocation in a slab context is required."
+        allocation in a slab context is required.
+
+        Fixed-size types use manual LE byte writes (no ByteBuffer allocation).
+        nil, booleans, and small integers [-128,127] return cached arrays (zero alloc)."
        ^bytes [v]
        (cond
          (nil? v)
-         (byte-array 0)
+         BYTES-NIL
 
          (instance? Boolean v)
-         (bytes-header-tag (if v 0x02 0x01))
+         (if v BYTES-TRUE BYTES-FALSE)
 
          (or (instance? Long v)
              (instance? Integer v)
@@ -987,29 +1044,31 @@
              (instance? Byte v))
          (let [n (long v)]
            (if (and (>= n Integer/MIN_VALUE) (<= n Integer/MAX_VALUE))
-             ;; INT32: [0xEE][0xDB][0x03][i32LE:4]
-             (let [b (byte-array 7)]
-               (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-INT32)
-               (.putInt (le-bb b) 3 (int n))
-               b)
+             ;; INT32: check small-int cache first
+             (if (and (>= n -128) (<= n 127))
+               (aget ^objects small-int-cache (+ (int n) 128))
+               (let [b (byte-array 7)]
+                 (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-INT32)
+                 (put-i32-le! b 3 n)
+                 b))
              ;; INT64: [0xEE][0xDB][0x0F][i64LE:8]
              (let [b (byte-array 11)]
                (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-INT64)
-               (.putLong (le-bb b) 3 n)
+               (put-i64-le! b 3 n)
                b)))
 
          (or (instance? Double v) (instance? Float v))
          ;; FLOAT64: [0xEE][0xDB][0x04][f64LE:8]
          (let [b (byte-array 11)]
            (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLOAT64)
-           (.putDouble (le-bb b) 3 (double v))
+           (put-f64-le! b 3 (double v))
            b)
 
          (instance? Date v)
          ;; DATE: [0xEE][0xDB][0x0E][f64LE:8]  (milliseconds since epoch)
          (let [b (byte-array 11)]
            (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-DATE)
-           (.putDouble (le-bb b) 3 (double (.getTime ^Date v)))
+           (put-f64-le! b 3 (double (.getTime ^Date v)))
            b)
 
          (instance? String v)
@@ -1024,7 +1083,7 @@
              ;; STRING_LONG: [0xEE][0xDB][0x06][len:u32LE][utf8]
              (let [b (byte-array (+ 7 slen))]
                (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-STRING-LONG)
-               (.putInt (le-bb b) 3 (int slen))
+               (put-i32-le! b 3 (long slen))
                (System/arraycopy utf8 0 b 7 slen) b)))
 
          (keyword? v)
@@ -1042,7 +1101,7 @@
                            (System/arraycopy utf8 0 b 4 slen) b)
                          (let [b (byte-array (+ 7 slen))]
                            (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-KEYWORD-LONG)
-                           (.putInt (le-bb b) 3 (int slen))
+                           (put-i32-le! b 3 (long slen))
                            (System/arraycopy utf8 0 b 7 slen) b)))
                      (let [^bytes ns-utf8 (.getBytes ^String ns-str "UTF-8")
                            ^bytes nm-utf8 (.getBytes ^String nm-str "UTF-8")
@@ -1057,9 +1116,9 @@
                            (System/arraycopy nm-utf8 0 b (+ 5 ns-len) nm-len) b)
                          (let [b (byte-array (+ 11 ns-len nm-len))]
                            (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-KW-NS-LONG)
-                           (.putInt (le-bb b) 3 (int ns-len))
+                           (put-i32-le! b 3 (long ns-len))
                            (System/arraycopy ns-utf8 0 b 7 ns-len)
-                           (.putInt (le-bb b) (+ 7 ns-len) (int nm-len))
+                           (put-i32-le! b (+ 7 ns-len) (long nm-len))
                            (System/arraycopy nm-utf8 0 b (+ 11 ns-len) nm-len) b))))]
                (when (> (.size kw-encode-cache) KW_CACHE_MAX) (.clear kw-encode-cache))
                (.put kw-encode-cache v result)
@@ -1091,11 +1150,13 @@
          (instance? UUID v)
          ;; UUID: [0xEE][0xDB][0x0B][msb:8 bytes BE][lsb:8 bytes BE]
          (let [^UUID u v
-               b (byte-array 19)]
+               b (byte-array 19)
+               msb (.getMostSignificantBits u)
+               lsb (.getLeastSignificantBits u)]
            (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-UUID)
-           (doto (ByteBuffer/wrap b 3 16)
-             (.putLong (.getMostSignificantBits u))
-             (.putLong (.getLeastSignificantBits u)))
+           ;; msb and lsb are big-endian (network order)
+           (put-i64-le! b 3 (Long/reverseBytes msb))
+           (put-i64-le! b 11 (Long/reverseBytes lsb))
            b)
 
          (map? v)
