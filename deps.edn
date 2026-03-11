@@ -3,7 +3,8 @@
  :aliases
  {:node-test
   {:extra-paths ["test"]
-   :extra-deps {thheller/shadow-cljs {:mvn/version "3.3.6"}}}
+   :extra-deps {thheller/shadow-cljs {:mvn/version "3.3.6"}
+                org.clojure/test.check {:mvn/version "1.1.1"}}}
   :jvm-test
   {:extra-paths ["test"]
    :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
