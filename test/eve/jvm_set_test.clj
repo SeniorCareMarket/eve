@@ -119,3 +119,51 @@
         (is (= src (set s)))
         (doseq [v src]
           (is (contains? s v) (str "should contain " (pr-str v))))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 1: O(log n) hash-directed lookup tests
+;; ---------------------------------------------------------------------------
+
+(deftest hamt-get-basic
+  (testing "jvm-set-hamt-get finds elements by hash-directed trie descent"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{:a :b :c 1 2 3 "x" "y"}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            root-off (alloc/-sio-read-i32 sio hdr eve-set/SABSETROOT_ROOT_OFF_OFFSET)]
+        (doseq [v src]
+          (is (not (identical? ::miss
+                    (eve-set/jvm-set-hamt-get sio root-off v ::miss)))
+              (str "should find " (pr-str v))))
+        (is (identical? ::miss
+              (eve-set/jvm-set-hamt-get sio root-off :missing ::miss))
+            "should return not-found for absent element")))))
+
+(deftest hamt-get-large-set
+  (testing "O(log n) lookup works for 200-element set with hash collisions"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (set (range 200))
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            root-off (alloc/-sio-read-i32 sio hdr eve-set/SABSETROOT_ROOT_OFF_OFFSET)]
+        (doseq [i (range 200)]
+          (is (= i (eve-set/jvm-set-hamt-get sio root-off i ::miss))
+              (str "should find " i)))
+        (doseq [i (range 200 210)]
+          (is (identical? ::miss
+                (eve-set/jvm-set-hamt-get sio root-off i ::miss))
+              (str "should miss " i)))))))
+
+(deftest hamt-get-via-contains-and-get
+  (testing "EveHashSet.contains and .get use O(log n) path when jvm-hashed?"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (set (range 100))
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (.-jvm-hashed? ^eve.set.EveHashSet s))
+        (doseq [i (range 100)]
+          (is (contains? s i) (str "contains? should find " i))
+          (is (= i (get s i)) (str "get should return " i)))
+        (is (not (contains? s 999)))
+        (is (nil? (get s 999)))))))
