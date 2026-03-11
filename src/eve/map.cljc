@@ -3213,7 +3213,7 @@
 
        java.lang.Object
        (toString [this]
-         (str (into {} this)))
+         (pr-str this))
        (equals [this other]
          (clojure.lang.APersistentMap/mapEquals this other))
        (hashCode [this]
@@ -3296,8 +3296,8 @@
               jvm-hash?  (== 1 (-sio-read-u8 sio header-off 1))]
           (EveHashMap. cnt root-off header-off sio coll-factory nil jvm-hash?))))
 
-     (defmethod print-method EveHashMap [^EveHashMap m ^java.io.Writer w]
-       (print-method (into {} m) w))
+     (defmethod print-method EveHashMap [m ^java.io.Writer w]
+       (#'clojure.core/print-map m print-method w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)

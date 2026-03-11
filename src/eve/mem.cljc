@@ -34,7 +34,9 @@
       [java.nio ByteBuffer ByteOrder]
       [java.nio.channels FileChannel FileChannel$MapMode]
       [java.nio.file OpenOption Paths StandardOpenOption]
-      [java.util Date UUID])))
+      [java.util Date UUID]))
+  (:require
+   [eve.deftype-proto.data :as d]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol
@@ -1135,6 +1137,16 @@
                (keyword? v) (symbol? v)
                (instance? java.util.UUID v) (instance? java.util.Date v))
            (value->eve-bytes v)
+
+           ;; Already slab-backed Eve type — return pointer to existing header
+           (satisfies? d/IEveRoot v)
+           (let [off (d/-root-header-off v)
+                 tag (cond
+                       (map? v)    0x10
+                       (set? v)    0x11
+                       (vector? v) 0x12
+                       :else       0x13)]
+             (jvm-sab-pointer-bytes tag off))
 
            (map? v)
            (if-let [write-map! (get writers :map)]

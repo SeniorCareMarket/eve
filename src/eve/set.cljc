@@ -1926,68 +1926,45 @@
      (declare jvm-make-transient-set)
 
      (deftype EveHashSet [^long cnt ^long root-off ^long header-off
-                         ^boolean jvm-hashed? sio coll-factory _meta]
+                         sio coll-factory _meta]
 
        clojure.lang.IMeta
        (meta [_] _meta)
 
        clojure.lang.IObj
        (withMeta [_ new-meta]
-         (EveHashSet. cnt root-off header-off jvm-hashed? sio coll-factory new-meta))
+         (EveHashSet. cnt root-off header-off sio coll-factory new-meta))
 
        clojure.lang.Counted
        (count [_] (int cnt))
 
        clojure.lang.IPersistentSet
        (disjoin [this elem]
-         (if jvm-hashed?
-           (let [^bytes eb (value+sio->eve-bytes sio elem)
-                 eh        (portable-hash-bytes eb)
-                 new-root  (jvm-set-hamt-disjoin sio root-off eh eb 0)]
-             (if (== new-root root-off)
-               this
-               (let [new-cnt (dec cnt)
-                     hdr (jvm-set-write-header! sio new-cnt new-root)]
-                 (EveHashSet. new-cnt new-root hdr true sio coll-factory nil))))
-           (disj (into #{} this) elem)))
+         (let [^bytes eb (value+sio->eve-bytes sio elem)
+               eh        (portable-hash-bytes eb)
+               new-root  (jvm-set-hamt-disjoin sio root-off eh eb 0)]
+           (if (== new-root root-off)
+             this
+             (let [new-cnt (dec cnt)
+                   hdr (jvm-set-write-header! sio new-cnt new-root)]
+               (EveHashSet. new-cnt new-root hdr sio coll-factory nil)))))
        (contains [_ elem]
-         (if jvm-hashed?
-           (not (identical? ::absent
-                  (jvm-set-hamt-get sio root-off elem ::absent coll-factory)))
-           ;; Fallback O(n) for legacy non-portable-hash sets
-           (let [^bytes eb (value->eve-bytes elem)]
-             (true? (jvm-set-reduce
-                      sio root-off
-                      (fn [_ stored]
-                        (if (java.util.Arrays/equals ^bytes (value->eve-bytes stored) eb)
-                          (reduced true) _))
-                      false coll-factory)))))
+         (not (identical? ::absent
+                (jvm-set-hamt-get sio root-off elem ::absent coll-factory))))
        (get [_ elem]
-         (if jvm-hashed?
-           (let [result (jvm-set-hamt-get sio root-off elem ::absent coll-factory)]
-             (when-not (identical? result ::absent) result))
-           ;; Fallback O(n) for legacy non-portable-hash sets
-           (let [^bytes eb (value->eve-bytes elem)
-                 found (jvm-set-reduce
-                         sio root-off
-                         (fn [_ stored]
-                           (if (java.util.Arrays/equals ^bytes (value->eve-bytes stored) eb)
-                             (reduced stored) _))
-                         ::absent coll-factory)]
-             (when-not (identical? found ::absent) found))))
+         (let [result (jvm-set-hamt-get sio root-off elem ::absent coll-factory)]
+           (when-not (identical? result ::absent) result)))
 
        clojure.lang.IPersistentCollection
        (cons [this elem]
-         (if jvm-hashed?
-           (let [^bytes eb (value+sio->eve-bytes sio elem)
-                 eh        (portable-hash-bytes eb)
-                 [new-root added?] (jvm-set-hamt-conj sio root-off eh eb 0)]
-             (if (== new-root root-off)
-               this
-               (let [new-cnt (if added? (inc cnt) cnt)
-                     hdr (jvm-set-write-header! sio new-cnt new-root)]
-                 (EveHashSet. new-cnt new-root hdr true sio coll-factory nil))))
-           (conj (into #{} this) elem)))
+         (let [^bytes eb (value+sio->eve-bytes sio elem)
+               eh        (portable-hash-bytes eb)
+               [new-root added?] (jvm-set-hamt-conj sio root-off eh eb 0)]
+           (if (== new-root root-off)
+             this
+             (let [new-cnt (if added? (inc cnt) cnt)
+                   hdr (jvm-set-write-header! sio new-cnt new-root)]
+               (EveHashSet. new-cnt new-root hdr sio coll-factory nil)))))
        (empty [_]
          (let [hdr-off (jvm-write-set! sio (partial value+sio->eve-bytes sio) #{})]
            (jvm-eve-hash-set-from-offset sio hdr-off)))
@@ -2040,13 +2017,11 @@
            (if s (reduce f s) (f))))
 
        clojure.lang.IEditableCollection
-       (asTransient [this]
-         (when-not jvm-hashed?
-           (throw (UnsupportedOperationException. "Cannot create transient from non-portable-hash set")))
+       (asTransient [_]
          (jvm-make-transient-set root-off cnt sio coll-factory))
 
        java.lang.Object
-       (toString [this] (str (set (.seq this))))
+       (toString [this] (pr-str this))
        (equals [this other] (clojure.lang.APersistentSet/setEquals this other))
        (hashCode [this] (clojure.lang.Murmur3/hashUnordered this)))
 
@@ -2096,7 +2071,7 @@
          (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
          (set! edit nil)
          (let [hdr (jvm-set-write-header! sio cnt root-off)]
-           (EveHashSet. cnt root-off hdr true sio coll-factory nil))))
+           (EveHashSet. cnt root-off hdr sio coll-factory nil))))
 
      (defn- jvm-make-transient-set [root-off cnt sio coll-factory]
        (TransientEveHashSet. root-off cnt sio coll-factory (Object.)))
@@ -2106,14 +2081,12 @@
         Reads the flags byte to determine if the HAMT was built with portable-hash-bytes."
        ([sio header-off] (jvm-eve-hash-set-from-offset sio header-off nil))
        ([sio header-off coll-factory]
-        (let [flags    (-sio-read-u8 sio header-off 1)
-              portable (not (zero? (bit-and flags SET_FLAG_PORTABLE_HASH)))
-              cnt      (-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
+        (let [cnt      (-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
               root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
-          (EveHashSet. cnt root-off header-off portable sio coll-factory nil))))
+          (EveHashSet. cnt root-off header-off sio coll-factory nil))))
 
-     (defmethod print-method EveHashSet [^EveHashSet s ^java.io.Writer w]
-       (print-method (set (seq s)) w))
+     (defmethod print-method EveHashSet [s ^java.io.Writer w]
+       (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)

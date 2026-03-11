@@ -1184,7 +1184,7 @@
                    (recur nxt (f acc val))))))))
 
        java.lang.Object
-       (toString [this] (str (sequence (.seq this))))
+       (toString [this] (pr-str this))
        (equals [this other] (= (.seq this) (seq other)))
        (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))
 
@@ -1201,8 +1201,8 @@
               head-off (-sio-read-i32 sio header-off SABLIST_HEAD_OFFSET)]
           (SabList. cnt head-off header-off sio coll-factory))))
 
-     (defmethod print-method SabList [^SabList l ^java.io.Writer w]
-       (print-method (sequence (.seq l)) w))
+     (defmethod print-method SabList [l ^java.io.Writer w]
+       (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq l) w))
 
      ;; Register the JVM list writer so mem/value+sio->eve-bytes can route to it
      (mem/register-jvm-collection-writer! :list jvm-write-list!)))

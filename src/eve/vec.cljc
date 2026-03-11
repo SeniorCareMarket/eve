@@ -1497,7 +1497,7 @@
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
        java.lang.Object
-       (toString [this] (str (vec (seq this))))
+       (toString [this] (pr-str this))
        (equals [this other]
          (cond
            (identical? this other) true
@@ -1526,8 +1526,8 @@
               tail-len (-sio-read-i32 sio header-off SABVECROOT_TAIL_LEN_OFFSET)]
           (SabVecRoot. cnt shift root tail tail-len header-off sio coll-factory nil))))
 
-     (defmethod print-method SabVecRoot [^SabVecRoot v ^java.io.Writer w]
-       (print-method (vec (seq v)) w))
+     (defmethod print-method SabVecRoot [v ^java.io.Writer w]
+       (#'clojure.core/print-sequential "[" #'clojure.core/pr-on " " "]" (seq v) w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)
