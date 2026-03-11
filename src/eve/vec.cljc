@@ -1436,6 +1436,22 @@
                  hdr      (jvm-vec-write-header! sio new-cnt new-shift new-root new-tail new-tl)]
              (SabVecRoot. new-cnt new-shift new-root new-tail new-tl hdr sio coll-factory nil))))
 
+       clojure.lang.IReduceInit
+       (reduce [_ f init]
+         (loop [i 0 acc init]
+           (if (or (>= i cnt) (reduced? acc))
+             (unreduced acc)
+             (recur (inc i) (f acc (jvm-sabvec-nth sio cnt shift root tail i coll-factory))))))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (if (zero? cnt)
+           (f)
+           (loop [i 1 acc (jvm-sabvec-nth sio cnt shift root tail 0 coll-factory)]
+             (if (or (>= i cnt) (reduced? acc))
+               (unreduced acc)
+               (recur (inc i) (f acc (jvm-sabvec-nth sio cnt shift root tail i coll-factory)))))))
+
        clojure.lang.IFn
        (invoke [this i] (.nth this (int i)))
        (invoke [this i not-found] (.nth this (int i) not-found))

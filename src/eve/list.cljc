@@ -1146,6 +1146,25 @@
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
+       clojure.lang.IReduceInit
+       (reduce [_ f init]
+         (loop [off head-off acc init]
+           (if (or (== off NIL_OFFSET) (reduced? acc))
+             (unreduced acc)
+             (let [[next-off val] (jvm-list-node-read sio off)]
+               (recur next-off (f acc val))))))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (if (zero? cnt)
+           (f)
+           (let [[next-off first-val] (jvm-list-node-read sio head-off)]
+             (loop [off next-off acc first-val]
+               (if (or (== off NIL_OFFSET) (reduced? acc))
+                 (unreduced acc)
+                 (let [[nxt val] (jvm-list-node-read sio off)]
+                   (recur nxt (f acc val))))))))
+
        java.lang.Object
        (toString [this] (str (sequence (.seq this))))
        (equals [this other] (= (.seq this) (seq other)))

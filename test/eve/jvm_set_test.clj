@@ -262,3 +262,37 @@
             hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{:x})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= "#{:x}" (pr-str s)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 5a: IReduceInit / IReduce tests
+;; ---------------------------------------------------------------------------
+
+(deftest set-reduce-init
+  (testing "reduce with init collects all elements"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{1 2 3 4 5}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            result (reduce conj #{} s)]
+        (is (= src result))))))
+
+(deftest set-reduce-no-init
+  (testing "reduce without init sums elements"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{1 2 3 4 5}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= 15 (reduce + s)))))))
+
+(deftest set-reduce-early-termination
+  (testing "reduce with reduced stops early"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (set (range 50))
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            result (reduce (fn [acc _] (if (>= (count acc) 5) (reduced acc) (conj acc 1)))
+                           [] s)]
+        (is (= 5 (count result)))))))

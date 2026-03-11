@@ -1985,6 +1985,17 @@
        (hasheq [this]
          (clojure.lang.Murmur3/hashUnordered this))
 
+       clojure.lang.IReduceInit
+       (reduce [_ f init]
+         (jvm-set-reduce sio root-off
+           (fn [acc elem] (f acc elem))
+           init coll-factory))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (let [s (.seq this)]
+           (if s (reduce f s) (f))))
+
        java.lang.Object
        (toString [this] (str (set (.seq this))))
        (equals [this other] (clojure.lang.APersistentSet/setEquals this other))

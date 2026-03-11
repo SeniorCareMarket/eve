@@ -64,3 +64,46 @@
             l   (eve-list/jvm-sab-list-from-offset sio hdr)]
         (is (= src (seq l)))
         (is (= 50 (count l)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 5a: IReduceInit / IReduce tests
+;; ---------------------------------------------------------------------------
+
+(deftest list-reduce-init
+  (testing "reduce with init collects all elements in order"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src '(10 20 30 40 50)
+            hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) src)
+            l   (eve-list/jvm-sab-list-from-offset sio hdr)
+            result (reduce conj [] l)]
+        (is (= [10 20 30 40 50] result))))))
+
+(deftest list-reduce-no-init
+  (testing "reduce without init sums elements"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src '(1 2 3 4 5)
+            hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) src)
+            l   (eve-list/jvm-sab-list-from-offset sio hdr)]
+        (is (= 15 (reduce + l)))))))
+
+(deftest list-reduce-early-termination
+  (testing "reduce with reduced stops early"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (apply list (range 50))
+            hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) src)
+            l   (eve-list/jvm-sab-list-from-offset sio hdr)
+            result (reduce (fn [acc x] (if (>= (count acc) 5) (reduced acc) (conj acc x)))
+                           [] l)]
+        (is (= 5 (count result)))))))
+
+(deftest list-reduce-empty
+  (testing "reduce on empty list"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) '())
+            l   (eve-list/jvm-sab-list-from-offset sio hdr)]
+        (is (= 0 (reduce + 0 l)))
+        (is (= 0 (reduce + l)))))))

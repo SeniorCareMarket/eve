@@ -196,3 +196,38 @@
             hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) {:a 1})
             m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
         (is (= "{:a 1}" (pr-str m)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 5a: IReduceInit / IReduce tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-reduce-init
+  (testing "reduce with init collects all entries"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            result (reduce conj [] m)]
+        (is (= (set src) (set result)))))))
+
+(deftest map-reduce-no-init
+  (testing "reduce without init works"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            result (reduce (fn [acc e] (conj acc e)) m)]
+        (is (some? result))))))
+
+(deftest map-reduce-early-termination
+  (testing "reduce with reduced stops early"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 20)))
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            result (reduce (fn [acc _] (if (>= (count acc) 5) (reduced acc) (conj acc 1)))
+                           [] m)]
+        (is (= 5 (count result)))))))

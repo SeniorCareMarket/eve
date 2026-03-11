@@ -3119,6 +3119,17 @@
        (kvreduce [_ f init]
          (jvm-hamt-kv-reduce sio root-off f init coll-factory))
 
+       clojure.lang.IReduceInit
+       (reduce [_ f init]
+         (jvm-hamt-kv-reduce sio root-off
+           (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
+           init coll-factory))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (let [s (.seq this)]
+           (if s (reduce f s) (f))))
+
        clojure.lang.IFn
        (invoke [this k] (.valAt this k))
        (invoke [this k not-found] (.valAt this k not-found))

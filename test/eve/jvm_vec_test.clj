@@ -205,3 +205,46 @@
             hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [1 2 3])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= "[1 2 3]" (pr-str v)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 5a: IReduceInit / IReduce tests
+;; ---------------------------------------------------------------------------
+
+(deftest vec-reduce-init
+  (testing "reduce with init collects all elements in order"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src [10 20 30 40 50]
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) src)
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            result (reduce conj [] v)]
+        (is (= src result))))))
+
+(deftest vec-reduce-no-init
+  (testing "reduce without init sums elements"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src [1 2 3 4 5]
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) src)
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
+        (is (= 15 (reduce + v)))))))
+
+(deftest vec-reduce-early-termination
+  (testing "reduce with reduced stops early"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (vec (range 100))
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) src)
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            result (reduce (fn [acc x] (if (>= acc 10) (reduced acc) (+ acc x)))
+                           0 v)]
+        (is (= 10 result))))))
+
+(deftest vec-reduce-empty
+  (testing "reduce on empty vec"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
+        (is (= 0 (reduce + 0 v)))
+        (is (= 0 (reduce + v)))))))
