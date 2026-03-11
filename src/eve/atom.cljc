@@ -704,7 +704,7 @@
 
      (defn- jvm-mmap-swap!
        "B2 CAS-loop swap (JVM). Epoch pinned for the ENTIRE iteration to
-        protect lazy EveHashMap reads and jvm-collect-replaced-nodes."
+        protect lazy EveHashMap reads during path-copy."
        [{:keys [root-r sio retire-q tree-logs flush-ts] :as domain-state} atom-slot-idx f args]
        (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
        (loop [attempt 0]
@@ -718,9 +718,11 @@
                  (let [old-ptr (mem/-load-i32 root-r ptr-off)
                        old-val (jvm-read-root-value sio old-ptr)
                        _       (alloc/start-jvm-alloc-log!)
+                       _       (alloc/start-jvm-replaced-log!)
                        new-val (apply f old-val args)
                        new-ptr (jvm-resolve-new-ptr sio new-val)
                        cur-log (alloc/drain-jvm-alloc-log!)
+                       replaced-log (alloc/drain-jvm-replaced-log!)
                        eve-passthru? (or (instance? EveHashMap new-val)
                                         (instance? EveHashSet new-val)
                                         (instance? SabVecRoot new-val)
@@ -731,12 +733,8 @@
                        (when (and (not= old-ptr alloc/NIL_OFFSET)
                                   (not= old-ptr CLAIMED_SENTINEL))
                          (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
-                           ;; Map→Map: structural diff finds only O(log32 n) changed nodes
-                           (let [^EveHashMap old-em old-val
-                                 ^EveHashMap new-em new-val
-                                 replaced (jvm-collect-replaced-nodes
-                                            sio (.-root-off old-em) (.-root-off new-em))
-                                 offs (conj replaced old-ptr)]
+                           ;; Map→Map: replaced nodes were collected during path-copy
+                           (let [offs (conj (or replaced-log []) old-ptr)]
                              (.add retire-q {:offsets offs :epoch (inc new-epoch)}))
                            ;; Other types: use alloc-log if available, else just header
                            (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs

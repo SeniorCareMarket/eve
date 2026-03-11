@@ -111,7 +111,11 @@
      Throws on OOM.")
 
   (-sio-free!     [ctx slab-offset]
-    "Free a block. Returns true if freed, false on double-free."))
+    "Free a block. Returns true if freed, false on double-free.")
+
+  (-sio-copy-block! [ctx dst-slab-offset dst-field-off src-slab-offset src-field-off len]
+    "Bulk copy len bytes from src to dst within slab memory.
+     Both offsets are slab-qualified; field-offs are byte offsets within block."))
 
 ;;=============================================================================
 ;; JVM: JvmSlabCtx  (CLJ only)
@@ -134,6 +138,28 @@
        (let [^java.util.List log (.get jvm-alloc-log-tl)]
          (.set jvm-alloc-log-tl nil)
          (when log (vec log))))
+
+     ;; Thread-local replaced-nodes log for tracking old nodes replaced during
+     ;; HAMT path-copy. Eliminates the post-CAS tree walk in jvm-collect-replaced-nodes.
+     (def ^ThreadLocal jvm-replaced-log-tl (ThreadLocal.))
+
+     (defn start-jvm-replaced-log!
+       "Begin logging replaced node offsets on this thread."
+       []
+       (.set jvm-replaced-log-tl (java.util.ArrayList.)))
+
+     (defn drain-jvm-replaced-log!
+       "Stop logging and return the replaced node offsets as a vector. Clears the log."
+       []
+       (let [^java.util.List log (.get jvm-replaced-log-tl)]
+         (.set jvm-replaced-log-tl nil)
+         (when log (vec log))))
+
+     (defn log-replaced-node!
+       "Record that a slab offset was replaced during path-copy."
+       [slab-off]
+       (when-let [^java.util.List log (.get jvm-replaced-log-tl)]
+         (.add log slab-off)))
 
      (deftype JvmSlabCtx
        [^objects regions         ;; IMemRegion[6+] — one per slab class (data files)
@@ -336,6 +362,19 @@
                                (ex-info "JvmSlabCtx: all slab classes full"
                                         {:class-idx ci}))))))))))))
 
+       (-sio-copy-block! [_ dst-slab-offset dst-field-off src-slab-offset src-field-off len]
+         (let [src-ci  (decode-class-idx src-slab-offset)
+               src-bi  (decode-block-idx src-slab-offset)
+               src-base (+ (aget data-offsets src-ci) (* src-bi (aget block-sizes src-ci)))
+               src-rgn  (aget regions src-ci)
+               dst-ci  (decode-class-idx dst-slab-offset)
+               dst-bi  (decode-block-idx dst-slab-offset)
+               dst-base (+ (aget data-offsets dst-ci) (* dst-bi (aget block-sizes dst-ci)))
+               dst-rgn  (aget regions dst-ci)]
+           (mem/copy-region! src-rgn (+ src-base (long src-field-off))
+                             dst-rgn (+ dst-base (long dst-field-off))
+                             len)))
+
        (-sio-free! [ctx slab-offset]
          (let [class-idx (decode-class-idx slab-offset)]
            (if (== class-idx OVERFLOW_CLASS_IDX)
@@ -390,49 +429,71 @@
 
      (defn refresh-jvm-slab-regions!
        "Re-map any JVM slab regions whose header total_blocks exceeds the
-        cached value (i.e. another process grew them). Thread-safe."
+        cached value (i.e. another process grew them). Thread-safe.
+        Fast path: if no slab class grew, skip the lock entirely."
        [^JvmSlabCtx sio]
        (let [regions        (.-regions sio)
-             bitmap-regions (.-bitmap-regions sio)
-             data-offsets   (.-data-offsets sio)
              total-blocks   (.-total-blocks sio)
-             block-sizes    (.-block-sizes sio)
              file-paths     (.-file-paths sio)
-             bitmap-paths   (.-bitmap-paths sio)]
-         (locking regions
-           (dotimes [ci d/NUM_SLAB_CLASSES]
-             (when-let [path (aget file-paths ci)]
-               (let [cached    (long (aget total-blocks ci))
-                     ;; Read total_blocks from existing region's header (always
-                     ;; mapped). Avoids opening a throwaway peek mmap that leaks.
-                     cur-r     (aget regions ci)
-                     hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                 (when (> hdr-total cached)
-                   (let [blk-size   (long (aget block-sizes ci))
-                         data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
-                         bm-bytes   (d/bitmap-byte-size hdr-total)
-                         new-region (mem/open-mmap-region path data-bytes)
-                         new-bm     (mem/open-mmap-region (aget bitmap-paths ci) bm-bytes)]
-                     (aset regions ci new-region)
-                     (aset bitmap-regions ci new-bm)
-                     (aset total-blocks ci (int hdr-total)))))))
-           ;; Also refresh coalesc region (class 6)
-           (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
-             (let [cur-region  (aget regions OVERFLOW_CLASS_IDX)
-                   data-off    (long (aget data-offsets OVERFLOW_CLASS_IDX))]
-               (if (nil? cur-region)
-                 ;; First open — must peek the file to learn data-size
-                 (let [peek-r      (mem/open-mmap-region path 64)
-                       hdr-data-sz (long (mem/-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
-                   (when (pos? hdr-data-sz)
-                     (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
-                       (aset regions OVERFLOW_CLASS_IDX new-r))))
-                 ;; Subsequent — read header from existing region (no leak)
-                 (let [hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
-                       cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
-                   (when (> hdr-data-sz cur-size)
-                     (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
-                       (aset regions OVERFLOW_CLASS_IDX new-r))))))))))
+             data-offsets   (.-data-offsets sio)
+             ;; Fast path: lockless scan for growth in classes 0-5
+             any-grew?
+             (loop [ci 0]
+               (cond
+                 (>= ci (int d/NUM_SLAB_CLASSES)) false
+                 (nil? (aget file-paths ci)) (recur (inc ci))
+                 :else
+                 (let [cached    (long (aget total-blocks ci))
+                       cur-r     (aget regions ci)
+                       hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                   (if (> hdr-total cached)
+                     true
+                     (recur (inc ci))))))
+             ;; Check coalesc (class 6) growth without lock
+             coalesc-grew?
+             (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+               (let [cur-region (aget regions OVERFLOW_CLASS_IDX)]
+                 (if (nil? cur-region)
+                   true ;; never opened — must check
+                   (let [data-off    (long (aget data-offsets OVERFLOW_CLASS_IDX))
+                         hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                         cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                     (> hdr-data-sz cur-size)))))]
+         (when (or any-grew? coalesc-grew?)
+           (let [bitmap-regions (.-bitmap-regions sio)
+                 block-sizes    (.-block-sizes sio)
+                 bitmap-paths   (.-bitmap-paths sio)]
+             (locking regions
+               (when any-grew?
+                 (dotimes [ci d/NUM_SLAB_CLASSES]
+                   (when-let [path (aget file-paths ci)]
+                     (let [cached    (long (aget total-blocks ci))
+                           cur-r     (aget regions ci)
+                           hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                       (when (> hdr-total cached)
+                         (let [blk-size   (long (aget block-sizes ci))
+                               data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
+                               bm-bytes   (d/bitmap-byte-size hdr-total)
+                               new-region (mem/open-mmap-region path data-bytes)
+                               new-bm     (mem/open-mmap-region (aget bitmap-paths ci) bm-bytes)]
+                           (aset regions ci new-region)
+                           (aset bitmap-regions ci new-bm)
+                           (aset total-blocks ci (int hdr-total))))))))
+               (when coalesc-grew?
+                 (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+                   (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
+                         data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
+                     (if (nil? cur-region)
+                       (let [peek-r      (mem/open-mmap-region path 64)
+                             hdr-data-sz (long (mem/-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
+                         (when (pos? hdr-data-sz)
+                           (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
+                             (aset regions OVERFLOW_CLASS_IDX new-r))))
+                       (let [hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                             cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                         (when (> hdr-data-sz cur-size)
+                           (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
+                             (aset regions OVERFLOW_CLASS_IDX new-r)))))))))))))
 
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)
@@ -1334,7 +1395,9 @@
        (-sio-read-bytes [_ slab-offset field-off len] (read-bytes slab-offset field-off len))
        (-sio-write-bytes! [_ slab-offset field-off src] (write-bytes! slab-offset field-off src))
        (-sio-alloc!    [_ size-bytes] (alloc-offset size-bytes))
-       (-sio-free!     [_ slab-offset] (free! slab-offset)))
+       (-sio-free!     [_ slab-offset] (free! slab-offset))
+       (-sio-copy-block! [_ dst-slab-offset dst-field-off src-slab-offset src-field-off len]
+         (copy-within-slab! dst-slab-offset dst-field-off src-slab-offset src-field-off len)))
 
      ;; -----------------------------------------------------------------------
      ;; Root Pointer Operations
