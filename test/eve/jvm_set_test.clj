@@ -119,3 +119,74 @@
         (is (= src (set s)))
         (doseq [v src]
           (is (contains? s v) (str "should contain " (pr-str v))))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 1: O(log n) hash-directed lookup tests
+;; ---------------------------------------------------------------------------
+
+(deftest hamt-get-basic
+  (testing "jvm-set-hamt-get finds present elements"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{1 2 3 4 5}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (doseq [v src]
+          (is (= v (eve-set/jvm-set-hamt-get sio (.-root-off ^eve.set.EveHashSet s) v ::absent))
+              (str "should find " v)))
+        (is (= ::absent (eve-set/jvm-set-hamt-get sio (.-root-off ^eve.set.EveHashSet s) 99 ::absent))
+            "should return not-found for absent element")))))
+
+(deftest hamt-get-empty
+  (testing "jvm-set-hamt-get on empty set"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= ::absent (eve-set/jvm-set-hamt-get sio (.-root-off ^eve.set.EveHashSet s) 1 ::absent)))))))
+
+(deftest hamt-get-single
+  (testing "jvm-set-hamt-get on single-element set"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{42})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= 42 (eve-set/jvm-set-hamt-get sio (.-root-off ^eve.set.EveHashSet s) 42 ::absent)))
+        (is (= ::absent (eve-set/jvm-set-hamt-get sio (.-root-off ^eve.set.EveHashSet s) 99 ::absent)))))))
+
+(deftest hamt-get-scale
+  (testing "jvm-set-hamt-get works for 200-element set (collision coverage)"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (set (range 200))
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (doseq [i (range 200)]
+          (is (= i (eve-set/jvm-set-hamt-get sio (.-root-off ^eve.set.EveHashSet s) i ::absent))
+              (str "should find " i)))
+        (doseq [i (range 200 210)]
+          (is (= ::absent (eve-set/jvm-set-hamt-get sio (.-root-off ^eve.set.EveHashSet s) i ::absent))
+              (str "should not find " i)))))))
+
+(deftest contains-uses-hamt-get
+  (testing "contains? dispatches to hash-directed lookup for portable-hash sets"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src (set (range 200))
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (.-jvm-hashed? ^eve.set.EveHashSet s))
+        (doseq [i (range 200)]
+          (is (contains? s i) (str "contains? should find " i)))
+        (is (not (contains? s 999)))))))
+
+(deftest get-uses-hamt-get
+  (testing ".get dispatches to hash-directed lookup for portable-hash sets"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{:a :b :c}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= :a (.get ^eve.set.EveHashSet s :a)))
+        (is (= :b (.get ^eve.set.EveHashSet s :b)))
+        (is (nil? (.get ^eve.set.EveHashSet s :missing)))))))

@@ -1430,6 +1430,71 @@
               init)))))
 
      ;; -----------------------------------------------------------------------
+     ;; JVM hash-directed set lookup — O(log n)
+     ;; -----------------------------------------------------------------------
+
+     (defn jvm-set-hamt-get
+       "Hash-directed O(log n) lookup in set HAMT. Returns the element or not-found.
+        Uses portable-hash-bytes for trie navigation.
+        Set bitmap nodes have no hash array (unlike map) — at leaf, compare
+        serialized bytes directly."
+       ([sio root-off elem not-found] (jvm-set-hamt-get sio root-off elem not-found nil))
+       ([sio root-off elem not-found coll-factory]
+        (let [^bytes eb (value->eve-bytes elem)
+              eh       (portable-hash-bytes eb)]
+          (loop [off   root-off
+                 shift 0]
+            (if (== off NIL_OFFSET)
+              not-found
+              (let [nt (int (-sio-read-u8 sio off 0))]
+                (case nt
+                  ;; Bitmap node
+                  1 (let [dbm (int (-sio-read-i32 sio off 4))
+                          nbm (int (-sio-read-i32 sio off 8))
+                          bit (bitpos eh shift)]
+                      (cond
+                        ;; Check child node first (deeper navigation)
+                        (has-bit? nbm bit)
+                        (recur (-sio-read-i32 sio off
+                                 (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                               (+ shift SHIFT_STEP))
+
+                        ;; Check inline value
+                        (has-bit? dbm bit)
+                        (let [di       (get-index dbm bit)
+                              vals-off (+ NODE_HEADER_SIZE (* 4 (popcount32 nbm)))
+                              ;; Skip to the di-th value
+                              pos      (loop [i 0 p vals-off]
+                                         (if (== i di) p
+                                           (let [vl (-sio-read-i32 sio off p)]
+                                             (recur (inc i) (+ p 4 vl)))))
+                              vl       (-sio-read-i32 sio off pos)
+                              vb       (-sio-read-bytes sio off (+ pos 4) vl)]
+                          (if (java.util.Arrays/equals vb eb)
+                            (eve-bytes->value vb sio coll-factory)
+                            not-found))
+
+                        :else not-found))
+
+                  ;; Collision node (type=2)
+                  ;; Layout: [type:u8][cnt:u8][hash:i32@2][unused:i32@8][entries@12]
+                  2 (let [ch (-sio-read-i32 sio off 2)]
+                      (if (not= ch eh)
+                        not-found
+                        (let [cc (-sio-read-u8 sio off 1)]
+                          (loop [i 0 pos NODE_HEADER_SIZE]
+                            (if (>= i cc)
+                              not-found
+                              (let [vl  (-sio-read-i32 sio off pos)
+                                    vb  (-sio-read-bytes sio off (+ pos 4) vl)]
+                                (if (java.util.Arrays/equals vb eb)
+                                  (eve-bytes->value vb sio coll-factory)
+                                  (recur (inc i) (+ pos 4 vl)))))))))
+
+                  ;; Unknown node type
+                  not-found)))))))
+
+     ;; -----------------------------------------------------------------------
      ;; JVM EveHashSet write support
      ;; -----------------------------------------------------------------------
 
@@ -1553,27 +1618,31 @@
        (disjoin [this elem]
          (disj (into #{} this) elem))
        (contains [_ elem]
-         (let [^bytes eb (value->eve-bytes elem)
-               found (jvm-set-reduce
-                       sio root-off
-                       (fn [_ stored]
-                         (if (java.util.Arrays/equals ^bytes (value->eve-bytes stored) eb)
-                           (reduced true)
-                           _))
-                       false
-                       coll-factory)]
-           (true? found)))
+         (if jvm-hashed?
+           (not (identical? ::absent (jvm-set-hamt-get sio root-off elem ::absent coll-factory)))
+           (let [^bytes eb (value->eve-bytes elem)
+                 found (jvm-set-reduce
+                         sio root-off
+                         (fn [_ stored]
+                           (if (java.util.Arrays/equals ^bytes (value->eve-bytes stored) eb)
+                             (reduced true)
+                             _))
+                         false
+                         coll-factory)]
+             (true? found))))
        (get [_ elem]
-         (let [^bytes eb (value->eve-bytes elem)
-               found (jvm-set-reduce
-                       sio root-off
-                       (fn [_ stored]
-                         (if (java.util.Arrays/equals ^bytes (value->eve-bytes stored) eb)
-                           (reduced stored)
-                           _))
-                       ::absent
-                       coll-factory)]
-           (when-not (identical? found ::absent) found)))
+         (if jvm-hashed?
+           (jvm-set-hamt-get sio root-off elem nil coll-factory)
+           (let [^bytes eb (value->eve-bytes elem)
+                 found (jvm-set-reduce
+                         sio root-off
+                         (fn [_ stored]
+                           (if (java.util.Arrays/equals ^bytes (value->eve-bytes stored) eb)
+                             (reduced stored)
+                             _))
+                         ::absent
+                         coll-factory)]
+             (when-not (identical? found ::absent) found))))
 
        clojure.lang.IPersistentCollection
        (cons [this elem]
