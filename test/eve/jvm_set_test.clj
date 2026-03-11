@@ -226,3 +226,18 @@
           (is (contains? s3 i) (str "should contain odd " i)))
         (doseq [i (range 0 50 2)]
           (is (not (contains? s3 i)) (str "should not contain even " i)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 3: IFn tests
+;; ---------------------------------------------------------------------------
+
+(deftest set-ifn
+  (testing "EveHashSet implements IFn"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{:a :b :c})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= :a (s :a)))
+        (is (= :b (s :b)))
+        (is (nil? (s :missing)))
+        (is (= :nf (s :missing :nf)))))))

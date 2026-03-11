@@ -3119,6 +3119,10 @@
        (kvreduce [_ f init]
          (jvm-hamt-kv-reduce sio root-off f init coll-factory))
 
+       clojure.lang.IFn
+       (invoke [this k] (.valAt this k))
+       (invoke [this k not-found] (.valAt this k not-found))
+
        java.lang.Iterable
        (iterator [this]
          (clojure.lang.SeqIterator. (.seq this)))

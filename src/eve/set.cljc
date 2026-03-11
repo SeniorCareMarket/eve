@@ -1956,6 +1956,11 @@
              (jvm-set-reduce sio root-off (fn [_ e] (.add items e) _) nil coll-factory)
              (seq items))))
 
+       clojure.lang.IFn
+       (invoke [this k] (.get this k))
+       (invoke [this k not-found]
+         (if (.contains this k) (.get this k) not-found))
+
        java.util.Set
        (size [_] (int cnt))
        (isEmpty [_] (zero? cnt))

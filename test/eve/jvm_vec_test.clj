@@ -169,3 +169,18 @@
             v3  (nth (iterate pop v2) 30)]
         (is (= 40 (count v3)))
         (is (= (vec (range 40)) (vec v3)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 3: IFn tests
+;; ---------------------------------------------------------------------------
+
+(deftest vec-ifn
+  (testing "SabVecRoot implements IFn"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [10 20 30])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
+        (is (= 10 (v 0)))
+        (is (= 20 (v 1)))
+        (is (= 30 (v 2)))
+        (is (= :nf (v 5 :nf)))))))

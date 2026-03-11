@@ -160,3 +160,18 @@
         (is (instance? eve.map.EveHashMap m2))
         (is (= 999 (get m2 :new-key)))
         (is (= 201 (count m2)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 3: IFn tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-ifn
+  (testing "EveHashMap implements IFn"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) {:a 1 :b 2})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= 1 (m :a)))
+        (is (= 2 (m :b)))
+        (is (nil? (m :c)))
+        (is (= :default (m :c :default)))))))

@@ -1134,6 +1134,15 @@
        (equiv [this other]
          (clojure.lang.Util/equiv (.seq this) (seq other)))
 
+       clojure.lang.IFn
+       (invoke [this i]
+         (nth (.seq this) (int i)))
+       (invoke [this i not-found]
+         (let [s (.seq this)]
+           (if (and s (>= (int i) 0) (< (int i) cnt))
+             (nth s (int i))
+             not-found)))
+
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 

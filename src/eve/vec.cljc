@@ -1436,6 +1436,10 @@
                  hdr      (jvm-vec-write-header! sio new-cnt new-shift new-root new-tail new-tl)]
              (SabVecRoot. new-cnt new-shift new-root new-tail new-tl hdr sio coll-factory nil))))
 
+       clojure.lang.IFn
+       (invoke [this i] (.nth this (int i)))
+       (invoke [this i not-found] (.nth this (int i) not-found))
+
        java.util.RandomAccess
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
