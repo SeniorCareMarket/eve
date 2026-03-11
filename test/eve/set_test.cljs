@@ -94,7 +94,7 @@
 
 (deftest scale-test
   (testing "100 elements"
-    (let [s (into (ss/hash-set) (range 100))]
+    (let [s (into (ss/empty-hash-set) (range 100))]
       (is (= 100 (count s)))
       (doseq [i (range 100)]
         (is (contains? s i))))))

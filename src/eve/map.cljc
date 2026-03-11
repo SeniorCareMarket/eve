@@ -13,7 +13,9 @@
       [eve.deftype-proto.alloc :as eve-alloc]
       [eve.deftype-proto.data :as d]
       [eve.deftype-proto.xray :as eve-xray]
-      [eve.deftype-proto.serialize :as ser])
+      [eve.deftype-proto.serialize :as ser]
+      [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
+                                     mask-hash bitpos has-bit? get-index]])
      :clj
      (:require
       [eve.deftype-proto.alloc :as eve-alloc
@@ -22,6 +24,8 @@
                -sio-write-i32! -sio-write-bytes! -sio-alloc!
                decode-class-idx decode-block-idx NIL_OFFSET]]
       [eve.deftype-proto.data :as d]
+      [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
+                                     mask-hash bitpos has-bit? get-index]]
       [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                             value+sio->eve-bytes
                                             register-jvm-collection-writer!]])))
@@ -46,71 +50,10 @@
 (def ^:const SABMAPROOT_ROOT_OFF_OFFSET 8)
 
 ;;=============================================================================
-;; Portable Murmur3_x86_32 hash — identical output on CLJS and JVM
+;; Portable Murmur3 hash and bitwise helpers — imported from eve.hamt-util
 ;;=============================================================================
-;; Used for HAMT trie navigation so both platforms produce the same tree shape.
-;; Input: serialized key bytes (Uint8Array on CLJS, byte[] on JVM).
-
-(defn- ubyte
-  "Read unsigned byte from buf at index i."
-  [buf i]
-  #?(:cljs (aget buf i)
-     :clj  (bit-and (long (aget ^bytes buf i)) 0xFF)))
-
-(defn- imul32 [a b]
-  #?(:cljs (js/Math.imul a b)
-     :clj  (long (unchecked-multiply-int a b))))
-
-(defn- rotl32 [x r]
-  #?(:cljs (bit-or (unsigned-bit-shift-right x (- 32 r)) (bit-shift-left x r))
-     :clj  (long (Integer/rotateLeft (unchecked-int x) (int r)))))
-
-(defn- ushr32 [x n]
-  #?(:cljs (unsigned-bit-shift-right x n)
-     :clj  (unsigned-bit-shift-right (Integer/toUnsignedLong (unchecked-int x)) (int n))))
-
-(defn portable-hash-bytes
-  "Murmur3_x86_32 hash (seed=0) of byte array.
-   Returns int32, identical on CLJS (Uint8Array) and JVM (byte[])."
-  [buf]
-  (let [len     #?(:cljs (.-length buf) :clj (alength ^bytes buf))
-        nblocks (unsigned-bit-shift-right len 2)]
-    (loop [i 0, h (int 0)]
-      (if (< i nblocks)
-        (let [j (* i 4)
-              k (bit-or (ubyte buf j)
-                        (bit-shift-left (ubyte buf (+ j 1)) 8)
-                        (bit-shift-left (ubyte buf (+ j 2)) 16)
-                        (bit-shift-left (ubyte buf (+ j 3)) 24))
-              k (-> k (imul32 (unchecked-int 0xcc9e2d51)) (rotl32 15)
-                      (imul32 (unchecked-int 0x1b873593)))
-              h (bit-xor h k)
-              h (-> h (rotl32 13) (imul32 5))
-              h (+ h (unchecked-int 0xe6546b64))]
-          (recur (inc i) #?(:cljs (bit-or h 0) :clj (long (unchecked-int h)))))
-        ;; Tail
-        (let [t (bit-shift-left nblocks 2)
-              r (bit-and len 3)
-              k (cond (== r 3) (bit-or (ubyte buf t)
-                                       (bit-shift-left (ubyte buf (+ t 1)) 8)
-                                       (bit-shift-left (ubyte buf (+ t 2)) 16))
-                      (== r 2) (bit-or (ubyte buf t)
-                                       (bit-shift-left (ubyte buf (+ t 1)) 8))
-                      (== r 1) (ubyte buf t)
-                      :else    0)
-              h (if (pos? r)
-                  (bit-xor h (-> k (imul32 (unchecked-int 0xcc9e2d51))
-                                   (rotl32 15)
-                                   (imul32 (unchecked-int 0x1b873593))))
-                  h)
-              ;; fmix32
-              h (bit-xor h len)
-              h (bit-xor h (ushr32 h 16))
-              h (imul32 h (unchecked-int 0x85ebca6b))
-              h (bit-xor h (ushr32 h 13))
-              h (imul32 h (unchecked-int 0xc2b2ae35))
-              h (bit-xor h (ushr32 h 16))]
-          #?(:cljs (bit-or h 0) :clj (unchecked-int h)))))))
+;; portable-hash-bytes, popcount32, mask-hash, bitpos, has-bit?, get-index
+;; are imported via :require above.)
 
 ;;=============================================================================
 ;; CLJS implementations (full HAMT + EveHashMap deftype)
@@ -262,28 +205,6 @@
     (if (and size-class (pool-put! size-class slab-offset))
       true
       (do (eve-alloc/free! slab-offset) nil))))
-
-;;=============================================================================
-;; Bit operations (pure JS, avoids WASM boundary crossing)
-;;=============================================================================
-
-(defn- popcount32 [n]
-  (let [n (- (bit-and n 0xFFFFFFFF) (bit-and (unsigned-bit-shift-right n 1) 0x55555555))
-        n (+ (bit-and n 0x33333333) (bit-and (unsigned-bit-shift-right n 2) 0x33333333))
-        n (bit-and (+ n (unsigned-bit-shift-right n 4)) 0x0f0f0f0f)]
-    (unsigned-bit-shift-right (js* "(~{} * 0x01010101)" n) 24)))
-
-(defn- mask-hash [kh shift]
-  (bit-and (unsigned-bit-shift-right kh shift) MASK))
-
-(defn- bitpos [kh shift]
-  (bit-shift-left 1 (mask-hash kh shift)))
-
-(defn- has-bit? [bitmap bit]
-  (not (zero? (bit-and bitmap bit))))
-
-(defn- get-index [bitmap bit]
-  (popcount32 (bit-and bitmap (dec bit))))
 
 ;;=============================================================================
 ;; Node read helpers — resolve slab-qualified offset, then read fields
@@ -2431,25 +2352,9 @@
 #?(:clj
    (do
      ;; -----------------------------------------------------------------------
-     ;; Bit operations (portable — no js*)
+     ;; Bit operations — imported from eve.hamt-util
+     ;; hashes-start-off / kv-data-start-off are map-specific (hash array)
      ;; -----------------------------------------------------------------------
-
-     (defn- popcount32
-       "Count set bits in the lower 32 bits of n."
-       [n]
-       (Integer/bitCount (unchecked-int n)))
-
-     (defn- mask-hash [kh shift]
-       (bit-and (unsigned-bit-shift-right kh shift) MASK))
-
-     (defn- bitpos [kh shift]
-       (bit-shift-left 1 (mask-hash kh shift)))
-
-     (defn- has-bit? [bitmap bit]
-       (not (zero? (bit-and bitmap bit))))
-
-     (defn- get-index [bitmap bit]
-       (popcount32 (bit-and bitmap (dec bit))))
 
      (defn- hashes-start-off [node-bm]
        (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm))))
@@ -2526,6 +2431,63 @@
 
               ;; Unknown node type
               init)))))
+
+     (defn- jvm-hamt-lazy-seq
+       "Return a lazy seq of MapEntry over the HAMT rooted at root-off."
+       [sio root-off coll-factory]
+       (when-not (== root-off NIL_OFFSET)
+         (let [node-type (-sio-read-u8 sio root-off 0)]
+           (case (int node-type)
+             ;; Bitmap node
+             1
+             (let [data-bm     (-sio-read-i32 sio root-off 4)
+                   node-bm     (-sio-read-i32 sio root-off 8)
+                   data-count  (popcount32 data-bm)
+                   node-bm-cnt (popcount32 node-bm)
+                   hashes-off  (+ NODE_HEADER_SIZE (* 4 node-bm-cnt))
+                   kv-start    (+ hashes-off (* 4 data-count))]
+               ;; Collect inline KV entries eagerly (they're in this node)
+               (let [inline-entries
+                     (loop [i 0 pos kv-start acc []]
+                       (if (>= i data-count)
+                         acc
+                         (let [key-len (-sio-read-i32 sio root-off pos)
+                               key-bs  (-sio-read-bytes sio root-off (+ pos 4) key-len)
+                               val-off (+ pos 4 key-len)
+                               val-len (-sio-read-i32 sio root-off val-off)
+                               val-bs  (-sio-read-bytes sio root-off (+ val-off 4) val-len)
+                               k       (eve-bytes->value key-bs sio coll-factory)
+                               v       (eve-bytes->value val-bs sio coll-factory)]
+                           (recur (inc i) (+ val-off 4 val-len)
+                                  (conj acc (clojure.lang.MapEntry/create k v))))))
+                     ;; Lazily concat child node seqs
+                     child-seqs
+                     (lazy-seq
+                       (apply concat
+                         (map (fn [ci]
+                                (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
+                                  (jvm-hamt-lazy-seq sio child-off coll-factory)))
+                              (range node-bm-cnt))))]
+                 (concat inline-entries child-seqs)))
+
+             ;; Collision node
+             3
+             (let [cnt (-sio-read-u8 sio root-off 1)]
+               (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+                 (if (>= i cnt)
+                   acc
+                   (let [key-len (-sio-read-i32 sio root-off pos)
+                         key-bs  (-sio-read-bytes sio root-off (+ pos 4) key-len)
+                         val-off (+ pos 4 key-len)
+                         val-len (-sio-read-i32 sio root-off val-off)
+                         val-bs  (-sio-read-bytes sio root-off (+ val-off 4) val-len)
+                         k       (eve-bytes->value key-bs sio coll-factory)
+                         v       (eve-bytes->value val-bs sio coll-factory)]
+                     (recur (inc i) (+ val-off 4 val-len)
+                            (conj acc (clojure.lang.MapEntry/create k v)))))))
+
+             ;; Unknown node type
+             nil))))
 
      (defn jvm-hamt-get
        "Find key k in HAMT rooted at root-off. Returns value or not-found.
@@ -2822,6 +2784,266 @@
                    [(jvm-write-bitmap-node! sio ndbm nbm
                       (jvm-read-children sio root-off cc) nhs nkvs) true])))))))
 
+     (declare jvm-write-collision-node!)
+     (declare jvm-make-transient-map)
+     (declare jvm-hamt-collision-assoc!)
+
+     (defn- jvm-hamt-assoc-with-collision!
+       "Like jvm-hamt-assoc! but handles collision nodes natively.
+        Returns [new-root-off added?]. Never returns nil."
+       [sio root-off kh ^bytes kb ^bytes vb shift]
+       (if (== root-off NIL_OFFSET)
+         [(jvm-write-bitmap-node! sio (bitpos kh shift) 0 [] [kh] [[kb vb]]) true]
+         (let [nt (int (-sio-read-u8 sio root-off 0))]
+           (case nt
+             ;; Bitmap node
+             1 (let [dbm (-sio-read-i32 sio root-off 4)
+                     nbm (-sio-read-i32 sio root-off 8)
+                     bit (bitpos kh shift)
+                     cc  (popcount32 nbm)
+                     dc  (popcount32 dbm)]
+                 (cond
+                   ;; Child node — recurse
+                   (has-bit? nbm bit)
+                   (let [ci  (get-index nbm bit)
+                         co  (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))
+                         [nc added?] (jvm-hamt-assoc-with-collision! sio co kh kb vb (+ shift SHIFT_STEP))]
+                     (if (== nc co)
+                       [root-off false]
+                       (let [ch (assoc (jvm-read-children sio root-off cc) ci nc)]
+                         [(jvm-write-bitmap-node! sio dbm nbm ch
+                            (jvm-read-hashes sio root-off nbm dc)
+                            (jvm-read-node-kvs sio root-off dbm nbm)) added?])))
+
+                   ;; Data slot — check key match
+                   (has-bit? dbm bit)
+                   (let [di   (get-index dbm bit)
+                         kvs  (jvm-read-node-kvs sio root-off dbm nbm)
+                         [^bytes ekb ^bytes evb] (nth kvs di)]
+                     (if (java.util.Arrays/equals ekb kb)
+                       ;; Same key — replace value
+                       (if (java.util.Arrays/equals evb vb)
+                         [root-off false]
+                         [(jvm-write-bitmap-node! sio dbm nbm
+                            (jvm-read-children sio root-off cc)
+                            (jvm-read-hashes sio root-off nbm dc)
+                            (assoc kvs di [kb vb])) false])
+                       ;; Different key — need to push down or create collision
+                       (let [hs-off (hashes-start-off nbm)
+                             ekh    (-sio-read-i32 sio root-off (+ hs-off (* di 4)))]
+                         (if (== ekh kh)
+                           ;; Same hash → create collision node as child
+                           (let [coll (jvm-write-collision-node! sio kh [[ekb evb] [kb vb]])
+                                 ndbm (bit-xor dbm bit)
+                                 nnbm (bit-or nbm bit)
+                                 nci  (get-index nnbm bit)
+                                 och  (jvm-read-children sio root-off cc)
+                                 nch  (vec (concat (subvec och 0 nci) [coll] (subvec och nci)))
+                                 ohs  (jvm-read-hashes sio root-off nbm dc)
+                                 nhs  (vec (concat (subvec ohs 0 di) (subvec ohs (inc di))))
+                                 nkvs (vec (concat (subvec kvs 0 di) (subvec kvs (inc di))))]
+                             [(jvm-write-bitmap-node! sio ndbm nnbm nch nhs nkvs) true])
+                           ;; Different hash → push down normally
+                           (let [ss   (+ shift SHIFT_STEP)
+                                 ebit (bitpos ekh ss)
+                                 nbit (bitpos kh ss)
+                                 sub  (if (== ebit nbit)
+                                        (let [[s _] (jvm-hamt-assoc-with-collision! sio NIL_OFFSET ekh ekb evb ss)]
+                                          (first (jvm-hamt-assoc-with-collision! sio s kh kb vb ss)))
+                                        (let [sdbm (bit-or ebit nbit)
+                                              [h1 kv1 h2 kv2] (if (< (Integer/toUnsignedLong (unchecked-int ebit))
+                                                                      (Integer/toUnsignedLong (unchecked-int nbit)))
+                                                                 [ekh [ekb evb] kh [kb vb]]
+                                                                 [kh [kb vb] ekh [ekb evb]])]
+                                          (jvm-write-bitmap-node! sio sdbm 0 [] [h1 h2] [kv1 kv2])))
+                                 ndbm (bit-xor dbm bit)
+                                 nnbm (bit-or nbm bit)
+                                 nci  (get-index nnbm bit)
+                                 och  (jvm-read-children sio root-off cc)
+                                 nch  (vec (concat (subvec och 0 nci) [sub] (subvec och nci)))
+                                 ohs  (jvm-read-hashes sio root-off nbm dc)
+                                 nhs  (vec (concat (subvec ohs 0 di) (subvec ohs (inc di))))
+                                 nkvs (vec (concat (subvec kvs 0 di) (subvec kvs (inc di))))]
+                             [(jvm-write-bitmap-node! sio ndbm nnbm nch nhs nkvs) true])))))
+
+                   ;; Empty slot — add data entry
+                   :else
+                   (let [di   (get-index dbm bit)
+                         ndbm (bit-or dbm bit)
+                         ohs  (jvm-read-hashes sio root-off nbm dc)
+                         kvs  (jvm-read-node-kvs sio root-off dbm nbm)
+                         nhs  (vec (concat (subvec ohs 0 di) [kh] (subvec ohs di)))
+                         nkvs (vec (concat (subvec kvs 0 di) [[kb vb]] (subvec kvs di)))]
+                     [(jvm-write-bitmap-node! sio ndbm nbm
+                        (jvm-read-children sio root-off cc) nhs nkvs) true])))
+
+             ;; Collision node — delegate
+             3 (jvm-hamt-collision-assoc! sio root-off kh kb vb)
+
+             ;; Unknown — should not happen
+             [root-off false]))))
+
+     (defn- jvm-write-collision-node!
+       "Allocate and write a collision node from a seq of [kb vb] pairs.
+        All entries must share the same hash kh. Returns slab offset."
+       [sio kh entries]
+       (let [cnt     (count entries)
+             kv-size (reduce (fn [a [^bytes kb ^bytes vb]]
+                               (+ a 4 (alength kb) 4 (alength vb)))
+                             0 entries)
+             off     (-sio-alloc! sio (+ COLLISION_HEADER_SIZE kv-size))]
+         (-sio-write-u8!  sio off 0 NODE_TYPE_COLLISION)
+         (-sio-write-u8!  sio off 1 cnt)
+         (-sio-write-u16! sio off 2 0)
+         (-sio-write-i32! sio off 4 kh)
+         (reduce (fn [pos [^bytes kb ^bytes vb]]
+                   (jvm-map-write-kv! sio off pos kb vb))
+                 COLLISION_HEADER_SIZE entries)
+         off))
+
+     (defn- jvm-read-collision-entries
+       "Read all KV byte-array pairs from a collision node."
+       [sio node-off cnt]
+       (loop [i 0 pos COLLISION_HEADER_SIZE acc (transient [])]
+         (if (>= i cnt)
+           (persistent! acc)
+           (let [klen (-sio-read-i32 sio node-off pos)
+                 kb   (-sio-read-bytes sio node-off (+ pos 4) klen)
+                 voff (+ pos 4 klen)
+                 vlen (-sio-read-i32 sio node-off voff)
+                 vb   (-sio-read-bytes sio node-off (+ voff 4) vlen)]
+             (recur (inc i) (+ voff 4 vlen) (conj! acc [kb vb]))))))
+
+     (defn- jvm-hamt-collision-assoc!
+       "Path-copy assoc into a collision node. Returns [new-off added?]."
+       [sio node-off kh ^bytes kb ^bytes vb]
+       (let [cc   (-sio-read-u8 sio node-off 1)
+             es   (jvm-read-collision-entries sio node-off cc)
+             idx  (reduce (fn [_ i]
+                            (let [[^bytes ekb _] (nth es i)]
+                              (if (java.util.Arrays/equals ekb kb)
+                                (reduced i) _)))
+                          nil (range cc))]
+         (if idx
+           ;; Key exists — replace value
+           (let [[^bytes _ekb ^bytes evb] (nth es idx)]
+             (if (java.util.Arrays/equals evb vb)
+               [node-off false]
+               [(jvm-write-collision-node! sio kh (assoc es idx [kb vb])) false]))
+           ;; New key — add entry
+           [(jvm-write-collision-node! sio kh (conj es [kb vb])) true])))
+
+     (defn- jvm-hamt-dissoc
+       "Path-copy dissoc from JVM-hashed HAMT. Returns new-root-off.
+        If key is not found, returns root-off unchanged."
+       [sio root-off kh ^bytes kb shift]
+       (if (== root-off NIL_OFFSET)
+         root-off
+         (let [nt (int (-sio-read-u8 sio root-off 0))]
+           (case nt
+             ;; Bitmap node
+             1 (let [dbm (-sio-read-i32 sio root-off 4)
+                     nbm (-sio-read-i32 sio root-off 8)
+                     bit (bitpos kh shift)
+                     cc  (popcount32 nbm)
+                     dc  (popcount32 dbm)]
+                 (cond
+                   ;; Key might be in a child node
+                   (has-bit? nbm bit)
+                   (let [ci    (get-index nbm bit)
+                         co    (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))
+                         new-c (jvm-hamt-dissoc sio co kh kb (+ shift SHIFT_STEP))]
+                     (if (== new-c co)
+                       root-off ;; key not found in child
+                       (if (== new-c NIL_OFFSET)
+                         ;; Child became empty — remove child pointer
+                         (let [nnbm (bit-xor nbm bit)]
+                           (if (and (zero? nnbm) (zero? dbm))
+                             NIL_OFFSET
+                             (let [nch  (vec (concat (subvec (jvm-read-children sio root-off cc) 0 ci)
+                                                     (subvec (jvm-read-children sio root-off cc) (inc ci))))]
+                               (jvm-write-bitmap-node! sio dbm nnbm nch
+                                 (jvm-read-hashes sio root-off nbm dc)
+                                 (jvm-read-node-kvs sio root-off dbm nbm)))))
+                         ;; Check if child is now a single-entry bitmap node — promote inline
+                         (let [cnt (-sio-read-u8 sio new-c 0)]
+                           (if (== (int cnt) (int NODE_TYPE_BITMAP))
+                             (let [cdbm (-sio-read-i32 sio new-c 4)
+                                   cnbm (-sio-read-i32 sio new-c 8)]
+                               (if (and (zero? cnbm) (== 1 (popcount32 cdbm)))
+                                 ;; Single inline entry — promote to parent's data slot
+                                 (let [ckvs (jvm-read-node-kvs sio new-c cdbm cnbm)
+                                       chs  (jvm-read-hashes sio new-c cnbm 1)
+                                       ;; Remove child, add data entry
+                                       nnbm (bit-xor nbm bit)
+                                       ndbm (bit-or dbm bit)
+                                       ;; Determine insertion position in data slots
+                                       di   (get-index ndbm bit)
+                                       och  (jvm-read-children sio root-off cc)
+                                       nch  (vec (concat (subvec och 0 ci) (subvec och (inc ci))))
+                                       ohs  (jvm-read-hashes sio root-off nbm dc)
+                                       nhs  (vec (concat (subvec ohs 0 di) chs (subvec ohs di)))
+                                       okvs (jvm-read-node-kvs sio root-off dbm nbm)
+                                       nkvs (vec (concat (subvec okvs 0 di) ckvs (subvec okvs di)))]
+                                   (jvm-write-bitmap-node! sio ndbm nnbm nch nhs nkvs))
+                                 ;; Child has multiple entries — just update child pointer
+                                 (let [och (jvm-read-children sio root-off cc)
+                                       nch (assoc och ci new-c)]
+                                   (jvm-write-bitmap-node! sio dbm nbm nch
+                                     (jvm-read-hashes sio root-off nbm dc)
+                                     (jvm-read-node-kvs sio root-off dbm nbm)))))
+                             ;; Child is collision node — just update child pointer
+                             (let [och (jvm-read-children sio root-off cc)
+                                   nch (assoc och ci new-c)]
+                               (jvm-write-bitmap-node! sio dbm nbm nch
+                                 (jvm-read-hashes sio root-off nbm dc)
+                                 (jvm-read-node-kvs sio root-off dbm nbm))))))))
+
+                   ;; Key might be an inline data entry
+                   (has-bit? dbm bit)
+                   (let [di   (get-index dbm bit)
+                         kvs  (jvm-read-node-kvs sio root-off dbm nbm)
+                         [^bytes ekb _] (nth kvs di)]
+                     (if (java.util.Arrays/equals ekb kb)
+                       ;; Found — remove this data entry
+                       (let [ndbm (bit-xor dbm bit)
+                             ndc  (dec dc)]
+                         (if (and (zero? ndbm) (zero? nbm))
+                           NIL_OFFSET
+                           (let [ohs  (jvm-read-hashes sio root-off nbm dc)
+                                 nhs  (vec (concat (subvec ohs 0 di) (subvec ohs (inc di))))
+                                 nkvs (vec (concat (subvec kvs 0 di) (subvec kvs (inc di))))]
+                             (jvm-write-bitmap-node! sio ndbm nbm
+                               (jvm-read-children sio root-off cc) nhs nkvs))))
+                       ;; Different key at same slot — key not in map
+                       root-off))
+
+                   ;; Slot empty — key not in map
+                   :else root-off))
+
+             ;; Collision node
+             3 (let [ch  (-sio-read-i32 sio root-off 4)
+                     cc  (-sio-read-u8 sio root-off 1)
+                     es  (jvm-read-collision-entries sio root-off cc)
+                     idx (reduce (fn [_ i]
+                                   (let [[^bytes ekb _] (nth es i)]
+                                     (if (java.util.Arrays/equals ekb kb)
+                                       (reduced i) _)))
+                                 nil (range cc))]
+                 (if (nil? idx)
+                   root-off ;; key not found
+                   (let [nes (vec (concat (subvec es 0 idx) (subvec es (inc idx))))]
+                     (if (== 1 (count nes))
+                       ;; Single entry remaining — promote to bitmap node
+                       (let [[^bytes rkb ^bytes rvb] (first nes)
+                             rkh (portable-hash-bytes rkb)]
+                         (jvm-write-bitmap-node! sio (bitpos rkh shift) 0 [] [rkh] [[rkb rvb]]))
+                       ;; Multiple entries — rebuild collision node
+                       (jvm-write-collision-node! sio ch nes)))))
+
+             ;; Unknown node type
+             root-off))))
+
      (defn- jvm-write-map-header!
        "Allocate and write an EveHashMap header block. Returns slab offset."
        [sio cnt root-off jvm-hashed?]
@@ -2898,15 +3120,30 @@
                    (let [new-cnt (if added? (inc cnt) cnt)
                          hdr (jvm-write-map-header! sio new-cnt new-root true)]
                      (EveHashMap. new-cnt new-root hdr sio coll-factory nil true))))
-               ;; Fallback for collision nodes
-               (assoc (into {} this) k v)))
+               ;; Collision node encountered — handle natively
+               (let [result2 (jvm-hamt-assoc-with-collision! sio root-off kh kb vb 0)]
+                 (let [[new-root added?] result2]
+                   (if (== new-root root-off)
+                     this
+                     (let [new-cnt (if added? (inc cnt) cnt)
+                           hdr (jvm-write-map-header! sio new-cnt new-root true)]
+                       (EveHashMap. new-cnt new-root hdr sio coll-factory nil true)))))))
            (assoc (into {} this) k v)))
        (assocEx [this k v]
          (if (.containsKey this k)
            (throw (RuntimeException. (str "Key already present: " k)))
            (.assoc this k v)))
        (without [this k]
-         (dissoc (into {} this) k))
+         (if jvm-hashed?
+           (let [^bytes kb (value->eve-bytes k)
+                 kh        (portable-hash-bytes kb)
+                 new-root  (jvm-hamt-dissoc sio root-off kh kb 0)]
+             (if (== new-root root-off)
+               this
+               (let [new-cnt (dec cnt)
+                     hdr (jvm-write-map-header! sio new-cnt new-root true)]
+                 (EveHashMap. new-cnt new-root hdr sio coll-factory nil true))))
+           (dissoc (into {} this) k)))
 
        clojure.lang.Counted
        (count [_] (int cnt))
@@ -2914,15 +3151,7 @@
        clojure.lang.Seqable
        (seq [_]
          (when (pos? cnt)
-           (let [entries (java.util.ArrayList.)]
-             (jvm-hamt-kv-reduce
-               sio root-off
-               (fn [_ k v]
-                 (.add entries (clojure.lang.MapEntry/create k v))
-                 nil)
-               nil
-               coll-factory)
-             (seq entries))))
+           (jvm-hamt-lazy-seq sio root-off coll-factory)))
 
        clojure.lang.IPersistentCollection
        (empty [_]
@@ -2939,6 +3168,21 @@
        clojure.lang.IKVReduce
        (kvreduce [_ f init]
          (jvm-hamt-kv-reduce sio root-off f init coll-factory))
+
+       clojure.lang.IReduceInit
+       (reduce [_ f init]
+         (jvm-hamt-kv-reduce sio root-off
+           (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
+           init coll-factory))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (let [s (.seq this)]
+           (if s (reduce f s) (f))))
+
+       clojure.lang.IFn
+       (invoke [this k] (.valAt this k))
+       (invoke [this k not-found] (.valAt this k not-found))
 
        java.lang.Iterable
        (iterator [this]
@@ -2957,6 +3201,16 @@
        (values [this] (vals this))
        (entrySet [this] (set (.seq this)))
 
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (clojure.lang.Murmur3/hashUnordered this))
+
+       clojure.lang.IEditableCollection
+       (asTransient [this]
+         (when-not jvm-hashed?
+           (throw (UnsupportedOperationException. "Cannot create transient from non-portable-hash map")))
+         (jvm-make-transient-map root-off cnt sio coll-factory))
+
        java.lang.Object
        (toString [this]
          (str (into {} this)))
@@ -2964,6 +3218,68 @@
          (clojure.lang.APersistentMap/mapEquals this other))
        (hashCode [this]
          (clojure.lang.APersistentMap/mapHash this)))
+
+     (deftype TransientEveHashMap
+       [^:unsynchronized-mutable ^long root-off
+        ^:unsynchronized-mutable ^long cnt
+        sio
+        coll-factory
+        ^:volatile-mutable edit]
+
+       clojure.lang.Counted
+       (count [_]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (int cnt))
+
+       clojure.lang.ILookup
+       (valAt [this k] (.valAt this k nil))
+       (valAt [_ k not-found]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (jvm-hamt-get sio root-off k not-found coll-factory))
+
+       clojure.lang.ITransientMap
+       (assoc [this k v]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (let [^bytes kb (value->eve-bytes k)
+               kh (portable-hash-bytes kb)
+               ^bytes vb (value+sio->eve-bytes sio v)
+               result (jvm-hamt-assoc! sio root-off kh kb vb 0)]
+           (if result
+             (let [[new-root added?] result]
+               (set! root-off (long new-root))
+               (when added? (set! cnt (long (inc cnt)))))
+             (let [[new-root added?] (jvm-hamt-assoc-with-collision! sio root-off kh kb vb 0)]
+               (set! root-off (long new-root))
+               (when added? (set! cnt (long (inc cnt))))))
+           this))
+       (without [this k]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (let [^bytes kb (value->eve-bytes k)
+               kh        (portable-hash-bytes kb)
+               new-root  (jvm-hamt-dissoc sio root-off kh kb 0)]
+           (when-not (== new-root root-off)
+             (set! root-off (long new-root))
+             (set! cnt (long (dec cnt))))
+           this))
+       (persistent [this]
+         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
+         (set! edit nil)
+         (let [hdr (jvm-write-map-header! sio cnt root-off true)]
+           (EveHashMap. cnt root-off hdr sio coll-factory nil true)))
+
+       clojure.lang.ITransientAssociative
+
+       clojure.lang.ITransientCollection
+       (conj [this o]
+         (if (instance? java.util.Map$Entry o)
+           (let [^java.util.Map$Entry e o]
+             (.assoc this (.getKey e) (.getValue e)))
+           (if (vector? o)
+             (.assoc this (nth o 0) (nth o 1))
+             (reduce conj this o)))))
+
+     (defn- jvm-make-transient-map [root-off cnt sio coll-factory]
+       (TransientEveHashMap. root-off cnt sio coll-factory (Object.)))
 
      ;; -----------------------------------------------------------------------
      ;; JVM EveHashMap factory
@@ -2979,6 +3295,9 @@
               root-off   (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)
               jvm-hash?  (== 1 (-sio-read-u8 sio header-off 1))]
           (EveHashMap. cnt root-off header-off sio coll-factory nil jvm-hash?))))
+
+     (defmethod print-method EveHashMap [^EveHashMap m ^java.io.Writer w]
+       (print-method (into {} m) w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)

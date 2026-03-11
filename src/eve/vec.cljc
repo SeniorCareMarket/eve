@@ -1178,6 +1178,138 @@
              (-sio-write-i32! sio header-off SABVECROOT_TAIL_LEN_OFFSET tail-len)
              header-off))))
 
+     ;; -----------------------------------------------------------------------
+     ;; JVM SabVec incremental ops: conj, assocN, pop
+     ;; -----------------------------------------------------------------------
+
+     (defn- jvm-vec-clone-node!
+       "Clone a trie node, returning a new node with identical slots."
+       [sio node-off]
+       (let [new-off (jvm-vec-alloc-node! sio)]
+         (dotimes [i NODE_SIZE]
+           (-sio-write-i32! sio new-off (* i 4) (-sio-read-i32 sio node-off (* i 4))))
+         new-off))
+
+     (defn- jvm-vec-new-path!
+       "Create a path of empty nodes from level to shift=SHIFT_STEP, with
+        node-off inserted at the leaf level. Returns new root of the path."
+       [sio level node-off]
+       (if (== level SHIFT_STEP)
+         node-off
+         (let [new-node (jvm-vec-alloc-node! sio)]
+           (-sio-write-i32! sio new-node 0 (jvm-vec-new-path! sio (- level SHIFT_STEP) node-off))
+           new-node)))
+
+     (defn- jvm-vec-push-tail!
+       "Push a tail node into the trie. Returns new root (may be a deeper copy).
+        cnt is the CURRENT element count (before adding the new tail element)."
+       [sio cnt shift root tail-node]
+       (let [idx     (bit-and (unsigned-bit-shift-right (dec cnt) shift) MASK)
+             new-root (jvm-vec-clone-node! sio root)]
+         (if (== shift SHIFT_STEP)
+           ;; At the leaf level — insert tail-node directly
+           (do (-sio-write-i32! sio new-root (* idx 4) tail-node)
+               new-root)
+           ;; Internal level
+           (let [child (-sio-read-i32 sio root (* idx 4))]
+             (if (not= child NIL_OFFSET)
+               ;; Child exists — recurse
+               (let [new-child (jvm-vec-push-tail! sio cnt (- shift SHIFT_STEP) child tail-node)]
+                 (-sio-write-i32! sio new-root (* idx 4) new-child)
+                 new-root)
+               ;; No child — create new path
+               (let [new-child (jvm-vec-new-path! sio (- shift SHIFT_STEP) tail-node)]
+                 (-sio-write-i32! sio new-root (* idx 4) new-child)
+                 new-root))))))
+
+     (defn- jvm-vec-write-header!
+       "Allocate and write a SabVecRoot header block."
+       [sio cnt shift root tail tail-len]
+       (let [hdr-off (-sio-alloc! sio SABVECROOT_HEADER_SIZE)]
+         (eve-alloc/-sio-write-u8! sio hdr-off 0 SabVecRoot-type-id)
+         (-sio-write-i32! sio hdr-off SABVECROOT_CNT_OFFSET cnt)
+         (-sio-write-i32! sio hdr-off SABVECROOT_SHIFT_OFFSET shift)
+         (-sio-write-i32! sio hdr-off SABVECROOT_ROOT_OFFSET root)
+         (-sio-write-i32! sio hdr-off SABVECROOT_TAIL_OFFSET tail)
+         (-sio-write-i32! sio hdr-off SABVECROOT_TAIL_LEN_OFFSET tail-len)
+         hdr-off))
+
+     (defn- jvm-vec-conj-impl
+       "Add element to the end of the vector. Returns new SabVecRoot fields
+        [new-cnt new-shift new-root new-tail new-tail-len]."
+       [sio cnt shift root tail tail-len ^bytes val-bytes]
+       (let [val-off (jvm-vec-alloc-value-block! sio val-bytes)]
+         (if (< tail-len NODE_SIZE)
+           ;; Tail has room — clone tail (or allocate fresh if nil) and append
+           (let [new-tail (if (== tail NIL_OFFSET)
+                            (jvm-vec-alloc-node! sio)
+                            (jvm-vec-clone-node! sio tail))]
+             (-sio-write-i32! sio new-tail (* tail-len 4) val-off)
+             [(inc cnt) shift root new-tail (inc tail-len)])
+           ;; Tail full — push into trie
+           (let [;; Does the root need to overflow? (tree is full at current depth)
+                 overflow? (> (unsigned-bit-shift-right cnt SHIFT_STEP)
+                              (bit-shift-left 1 shift))
+                 new-root  (if overflow?
+                             ;; Create new root level
+                             (let [nr (jvm-vec-alloc-node! sio)]
+                               (-sio-write-i32! sio nr 0 root)
+                               (-sio-write-i32! sio nr 4 (jvm-vec-new-path! sio shift tail))
+                               nr)
+                             ;; Push tail into existing tree
+                             (if (== root NIL_OFFSET)
+                               ;; First overflow from tail — the old tail becomes the first leaf
+                               (let [nr (jvm-vec-alloc-node! sio)]
+                                 (-sio-write-i32! sio nr 0 tail)
+                                 nr)
+                               (jvm-vec-push-tail! sio cnt shift root tail)))
+                 new-shift (if overflow? (+ shift SHIFT_STEP) shift)
+                 ;; New tail with single element
+                 new-tail  (let [t (jvm-vec-alloc-node! sio)]
+                             (-sio-write-i32! sio t 0 val-off)
+                             t)]
+             [(inc cnt) new-shift new-root new-tail 1]))))
+
+     (defn- jvm-vec-do-assoc!
+       "Path-copy update at index i in the trie. Returns new node at this level."
+       [sio shift node-off i val-off]
+       (let [new-node (jvm-vec-clone-node! sio node-off)]
+         (if (zero? shift)
+           ;; Leaf level — replace value pointer
+           (let [idx (bit-and i MASK)]
+             (-sio-write-i32! sio new-node (* idx 4) val-off)
+             new-node)
+           ;; Internal — recurse
+           (let [idx   (bit-and (unsigned-bit-shift-right i shift) MASK)
+                 child (-sio-read-i32 sio node-off (* idx 4))
+                 new-child (jvm-vec-do-assoc! sio (- shift SHIFT_STEP) child i val-off)]
+             (-sio-write-i32! sio new-node (* idx 4) new-child)
+             new-node))))
+
+     (defn- jvm-vec-pop-tail!
+       "Remove the rightmost element from the trie.
+        Returns new node-off, or NIL_OFFSET if this level becomes empty."
+       [sio cnt shift node-off]
+       (let [idx (bit-and (unsigned-bit-shift-right (- cnt 2) shift) MASK)]
+         (cond
+           ;; Recurse into children
+           (> shift SHIFT_STEP)
+           (let [child     (-sio-read-i32 sio node-off (* idx 4))
+                 new-child (jvm-vec-pop-tail! sio cnt (- shift SHIFT_STEP) child)]
+             (if (and (== new-child NIL_OFFSET) (zero? idx))
+               NIL_OFFSET
+               (let [new-node (jvm-vec-clone-node! sio node-off)]
+                 (-sio-write-i32! sio new-node (* idx 4) new-child)
+                 new-node)))
+
+           ;; Leaf level
+           (zero? idx) NIL_OFFSET
+
+           :else
+           (let [new-node (jvm-vec-clone-node! sio node-off)]
+             (-sio-write-i32! sio new-node (* idx 4) NIL_OFFSET)
+             new-node))))
+
      (declare jvm-sabvec-from-offset)
 
      (deftype SabVecRoot
@@ -1208,10 +1340,12 @@
        clojure.lang.Seqable
        (seq [_]
          (when (pos? cnt)
-           (let [items (java.util.ArrayList. (int cnt))]
-             (dotimes [i cnt]
-               (.add items (jvm-sabvec-nth sio cnt shift root tail i coll-factory)))
-             (seq items))))
+           (letfn [(vec-seq [i]
+                     (when (< i cnt)
+                       (lazy-seq
+                         (cons (jvm-sabvec-nth sio cnt shift root tail i coll-factory)
+                               (vec-seq (inc i))))))]
+             (vec-seq 0))))
 
        clojure.lang.Associative
        (assoc [this k v]
@@ -1221,9 +1355,28 @@
 
        clojure.lang.IPersistentVector
        (assocN [this i v]
-         (assoc (into [] this) i v))
+         (cond
+           (== i cnt) (.cons this v)
+           (or (< i 0) (>= i cnt)) (throw (IndexOutOfBoundsException. (str "Index " i " out of bounds")))
+           :else
+           (let [^bytes vb  (value+sio->eve-bytes sio v)
+                 val-off    (jvm-vec-alloc-value-block! sio vb)
+                 toff       (jvm-tail-offset-calc cnt NODE_SIZE SHIFT_STEP)]
+             (if (>= i toff)
+               ;; In the tail
+               (let [new-tail (jvm-vec-clone-node! sio tail)]
+                 (-sio-write-i32! sio new-tail (* (- i toff) 4) val-off)
+                 (let [hdr (jvm-vec-write-header! sio cnt shift root new-tail tail-len)]
+                   (SabVecRoot. cnt shift root new-tail tail-len hdr sio coll-factory nil)))
+               ;; In the trie
+               (let [new-root (jvm-vec-do-assoc! sio shift root i val-off)
+                     hdr      (jvm-vec-write-header! sio cnt shift new-root tail tail-len)]
+                 (SabVecRoot. cnt shift new-root tail tail-len hdr sio coll-factory nil))))))
        (cons [this v]
-         (conj (into [] this) v))
+         (let [^bytes vb (value+sio->eve-bytes sio v)
+               [nc ns nr nt ntl] (jvm-vec-conj-impl sio cnt shift root tail tail-len vb)
+               hdr (jvm-vec-write-header! sio nc ns nr nt ntl)]
+           (SabVecRoot. nc ns nr nt ntl hdr sio coll-factory nil)))
        (length [_] (int cnt))
        (empty [_]
          (let [hdr-off (jvm-write-vec! sio (partial value+sio->eve-bytes sio) [])]
@@ -1251,9 +1404,95 @@
        (valAt [this i] (.nth this (int i)))
        (valAt [this i not-found] (.nth this (int i) not-found))
        (peek [this] (when (pos? cnt) (.nth this (dec cnt))))
-       (pop [this] (pop (into [] this)))
+       (pop [this]
+         (cond
+           (zero? cnt) (throw (IllegalStateException. "Can't pop empty vector"))
+           (== cnt 1) (.empty this)
+           ;; Tail has more than 1 element — shrink tail
+           (> tail-len 1)
+           (let [new-tail (jvm-vec-alloc-node! sio)]
+             (dotimes [i (dec tail-len)]
+               (-sio-write-i32! sio new-tail (* i 4) (-sio-read-i32 sio tail (* i 4))))
+             (let [new-cnt (dec cnt)
+                   hdr     (jvm-vec-write-header! sio new-cnt shift root new-tail (dec tail-len))]
+               (SabVecRoot. new-cnt shift root new-tail (dec tail-len) hdr sio coll-factory nil)))
+           ;; Tail has 1 element — pull rightmost leaf from trie as new tail
+           :else
+           (let [new-toff (jvm-tail-offset-calc (dec cnt) NODE_SIZE SHIFT_STEP)
+                 ;; Navigate to the rightmost leaf to use as new tail
+                 new-tail (loop [node-off root sh shift]
+                            (let [idx (bit-and (unsigned-bit-shift-right new-toff sh) MASK)]
+                              (if (== sh SHIFT_STEP)
+                                (jvm-node-get sio node-off idx)
+                                (recur (jvm-node-get sio node-off idx) (- sh SHIFT_STEP)))))
+                 new-root (jvm-vec-pop-tail! sio cnt shift root)
+                 ;; Shrink depth if root has only one child at slot 0
+                 [new-root new-shift]
+                 (if (and (> shift SHIFT_STEP)
+                          (== NIL_OFFSET (-sio-read-i32 sio new-root 4)))
+                   [(-sio-read-i32 sio new-root 0) (- shift SHIFT_STEP)]
+                   [new-root shift])
+                 new-root (if (== new-root NIL_OFFSET) NIL_OFFSET new-root)
+                 new-cnt  (dec cnt)
+                 new-tl   (- new-cnt new-toff)
+                 hdr      (jvm-vec-write-header! sio new-cnt new-shift new-root new-tail new-tl)]
+             (SabVecRoot. new-cnt new-shift new-root new-tail new-tl hdr sio coll-factory nil))))
+
+       clojure.lang.IReduceInit
+       (reduce [_ f init]
+         (loop [i 0 acc init]
+           (if (or (>= i cnt) (reduced? acc))
+             (unreduced acc)
+             (recur (inc i) (f acc (jvm-sabvec-nth sio cnt shift root tail i coll-factory))))))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (if (zero? cnt)
+           (f)
+           (loop [i 1 acc (jvm-sabvec-nth sio cnt shift root tail 0 coll-factory)]
+             (if (or (>= i cnt) (reduced? acc))
+               (unreduced acc)
+               (recur (inc i) (f acc (jvm-sabvec-nth sio cnt shift root tail i coll-factory)))))))
+
+       clojure.lang.IFn
+       (invoke [this i] (.nth this (int i)))
+       (invoke [this i not-found] (.nth this (int i) not-found))
 
        java.util.RandomAccess
+       java.util.List
+       (get [this i] (.nth this (int i)))
+       (size [_] (int cnt))
+       (isEmpty [_] (zero? cnt))
+       (contains [_ o]
+         (boolean (some #(clojure.lang.Util/equiv % o) (map #(jvm-sabvec-nth sio cnt shift root tail % coll-factory) (range cnt)))))
+       (containsAll [this c]
+         (every? #(.contains this %) c))
+       (indexOf [this o]
+         (loop [i 0]
+           (if (>= i cnt) -1
+             (if (clojure.lang.Util/equiv (.nth this i) o) i (recur (inc i))))))
+       (lastIndexOf [this o]
+         (loop [i (dec cnt)]
+           (if (< i 0) -1
+             (if (clojure.lang.Util/equiv (.nth this i) o) i (recur (dec i))))))
+       (toArray [this]
+         (let [arr (object-array cnt)]
+           (dotimes [i cnt] (aset arr i (.nth this i)))
+           arr))
+       (subList [this from to]
+         (vec (map #(.nth this %) (range from to))))
+       (listIterator [this]
+         (.listIterator (java.util.ArrayList. ^java.util.Collection (.seq this))))
+       (listIterator [this idx]
+         (.listIterator (java.util.ArrayList. ^java.util.Collection (.seq this)) idx))
+       (add [_ _] (throw (UnsupportedOperationException.)))
+       (addAll [_ _] (throw (UnsupportedOperationException.)))
+       (set [_ _ _] (throw (UnsupportedOperationException.)))
+       (^boolean remove [_ _] (throw (UnsupportedOperationException.)))
+       (removeAll [_ _] (throw (UnsupportedOperationException.)))
+       (retainAll [_ _] (throw (UnsupportedOperationException.)))
+       (clear [_] (throw (UnsupportedOperationException.)))
+
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
@@ -1270,7 +1509,11 @@
                     (if (== i cnt) true
                       (if (.equals ^Object (.nth this i) (.nth ov i))
                         (recur (inc i)) false)))))))
-       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this)))
+       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (clojure.lang.Murmur3/hashOrdered this)))
 
      (defn jvm-sabvec-from-offset
        "Construct a JVM SabVecRoot from a slab-qualified header-off and ISlabIO context."
@@ -1282,6 +1525,9 @@
               tail     (-sio-read-i32 sio header-off SABVECROOT_TAIL_OFFSET)
               tail-len (-sio-read-i32 sio header-off SABVECROOT_TAIL_LEN_OFFSET)]
           (SabVecRoot. cnt shift root tail tail-len header-off sio coll-factory nil))))
+
+     (defmethod print-method SabVecRoot [^SabVecRoot v ^java.io.Writer w]
+       (print-method (vec (seq v)) w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)
