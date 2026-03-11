@@ -118,16 +118,32 @@
 (def ^:private results (atom []))
 
 (defn- bench
-  "Run f n-iters times, return elapsed-ms. Stores result in results atom."
+  "Run f n-iters times, return elapsed-ms. Stores result in results atom.
+   Logs per-op timing for the first 5 ops and every 10th op after that."
   [label n-iters f]
-  (let [t0 (System/nanoTime)]
-    (dotimes [_ n-iters] (f))
+  (printf "  [start] %s (%d ops)\n" label n-iters)
+  (flush)
+  (let [lats (long-array n-iters)
+        t0   (System/nanoTime)]
+    (dotimes [i n-iters]
+      (let [t-op (System/nanoTime)]
+        (f)
+        (let [op-ns (- (System/nanoTime) t-op)]
+          (aset lats i op-ns)
+          (when (or (< i 5) (zero? (mod i 10)))
+            (printf "    op %d: %.1f ms\n" i (/ (double op-ns) 1e6))
+            (flush)))))
     (let [elapsed-ms (nanos->ms (- (System/nanoTime) t0))
-          ms-per-op  (/ elapsed-ms (max 1 n-iters))]
+          ms-per-op  (/ elapsed-ms (max 1 n-iters))
+          sorted     (sort (map #(/ (double %) 1e6) (seq lats)))
+          cnt        (count sorted)
+          p50        (nth sorted (quot cnt 2))
+          p99        (nth sorted (int (* cnt 0.99)))]
       (swap! results conj {:label label :elapsed-ms elapsed-ms
-                           :ops n-iters :ms-per-op ms-per-op})
-      (printf "  %-45s %8.1f ms  (%d ops, %.3f ms/op)\n"
-              label elapsed-ms n-iters ms-per-op)
+                           :ops n-iters :ms-per-op ms-per-op
+                           :p50-ms p50 :p99-ms p99})
+      (printf "  %-45s %8.1f ms  (%d ops, %.3f ms/op, p50=%.1f p99=%.1f)\n"
+              label elapsed-ms n-iters ms-per-op p50 p99)
       (flush)
       elapsed-ms)))
 
