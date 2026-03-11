@@ -222,7 +222,9 @@ These files follow the same pattern: shared HAMT/tree logic with `#?` blocks for
 - Lines 5-28: Namespace requires (different imports)
 - Lines 37-53: Forward declares (CLJS has write fn declares)
 - ~200 lines: CLJS write path (assoc, dissoc) using `alloc/read-*` module functions
-- ~100 lines: CLJ read-only thin wrappers
+- ~200 lines: CLJ write path (`jvm-hamt-assoc!` at line ~2916, `jvm-hamt-dissoc!` etc.) — full path-copy via ISlabIO
+
+**Important:** Both platforms already have **full write support** through ISlabIO. The CLJ side implements `jvm-hamt-assoc!`, `jvm-hamt-dissoc!`, etc. with path-copy allocation. The CLJS side has equivalent functions but uses module-level `alloc/read-*` instead of ISlabIO. This means the write *algorithms* are already duplicated — unification would collapse two parallel implementations into one.
 
 **What to share:**
 The CLJS write path (HAMT node creation, path-copying) calls `alloc/read-i32`, `alloc/write-i32!` etc. These could call through ISlabIO instead. The write logic is pure HAMT algorithm — hash partitioning, node splitting, collision handling — with memory access as the only platform-specific part.
@@ -234,14 +236,14 @@ The CLJS write path (HAMT node creation, path-copying) calls `alloc/read-i32`, `
 4. Add `sio` parameter to write functions that currently use module-level state
 5. Keep only ns declaration and deftype constructor in `#?` blocks
 
-**Estimated delta:** ~200 lines move from CLJS-only → shared
+**Estimated delta:** ~400 lines collapse (two parallel write paths → one shared)
 
 #### `set.cljc` (2,110 lines) — Currently 75% → Target **92%**
-Same structure as map. HAMT with different node types.
-**Estimated delta:** ~150 lines shared
+Same structure as map. Both CLJ and CLJS have full write paths via ISlabIO / module-level functions.
+**Estimated delta:** ~250 lines shared
 
 #### `vec.cljc` (1,553 lines) — Currently 70% → Target **90%**
-Persistent vector tree. Write ops (conj, assoc, pop) use `alloc/read-*` directly.
+Persistent vector tree. Both platforms have write ops; CLJS uses `alloc/read-*` directly.
 **Estimated delta:** ~150 lines shared
 
 #### `list.cljc` (1,208 lines) — Currently 60% → Target **85%**
@@ -576,7 +578,7 @@ If profiling reveals performance regression:
 | .cljc shared code % | ~74% | ~90-92% | +16-18% |
 | `#?` conditionals in data structures | ~30 | ~6 | -24 |
 | Raw DataView calls in .cljc | 105 | 0 | -105 |
-| Lines in pure shared .cljc | ~12,100 | ~14,800 | +2,700 |
+| Lines in pure shared .cljc | ~12,100 | ~15,200 | +3,100 |
 | Files convertible to .cljc | 0 | 3-4 | +3-4 |
 | New protocol methods needed | 0 | 2 | +2 (f64 read/write) |
 | New shared helper functions | 0 | 2 | +2 (UTF-8 encode/decode) |
