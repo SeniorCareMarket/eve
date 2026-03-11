@@ -3,6 +3,7 @@
 > Generated: 2026-03-10
 > Amended: 2026-03-10 (post-review — see Appendix A for amendment rationale)
 > Amended: 2026-03-10 (cljc unification integration — see Appendix B)
+> Amended: 2026-03-11 (array/obj cljc migration — see Phase 7 and Appendix C)
 > Source: [jvm-cljs-gap-analysis.md](jvm-cljs-gap-analysis.md),
 >         [cljc-unification-analysis.md](cljc-unification-analysis.md)
 
@@ -15,9 +16,11 @@ have significant interop and correctness gaps compared to their CLJS counterpart
 The most critical issues are: (1) mutating operations (`dissoc`, `conj`, `pop`,
 `disjoin`) silently return standard Clojure types instead of Eve types, breaking
 type identity and cross-process sharing; (2) set lookups are O(n) instead of
-O(log n); and (3) collections lack `IFn`, `IHashEq`, `IReduce`, and `print-method`,
-making them non-idiomatic in Clojure code. This plan organizes remediation into
-7 phases across 12 work items, ordered by correctness impact first, then
+O(log n); (3) collections lack `IFn`, `IHashEq`, `IReduce`, and `print-method`,
+making them non-idiomatic in Clojure code; and (4) `EveArray` and `Obj`/`ObjArray`
+are CLJS-only (`array.cljs`, `obj.cljs`) with no JVM deftypes — JVM reads return
+plain vectors/maps instead of typed instances. This plan organizes remediation into
+8 phases across 30 tracked gaps, ordered by correctness impact first, then
 ergonomics, then performance.
 
 ---
@@ -429,6 +432,257 @@ passing Eve vectors to Java APIs expecting `List`.
 
 ---
 
+### Phase 7 — Array and Obj: CLJS → CLJC Migration + JVM Deftypes
+
+**Gap:** `eve.array` (696 lines) and `eve.obj` (696 lines) are pure `.cljs` files.
+The JVM can serialize/deserialize their slab blocks (type-id `0x1D` and `0x1E`)
+via `jvm-write-eve-array!`, `jvm-read-eve-array`, `jvm-write-obj!`, and
+`jvm-read-obj` in `alloc.cljc`, but these return plain Clojure vectors and maps —
+not typed instances. There are no `EveArray` or `Obj`/`ObjArray` deftypes on JVM.
+
+#### Current State
+
+| Aspect | CLJS (`array.cljs`) | JVM (`alloc.cljc`) |
+|--------|---------------------|---------------------|
+| Deftype | `EveArray` with 11 fields | None — returns `vector` |
+| Read | Live view over SAB (atomic/non-atomic) | `jvm-read-eve-array` → `mapv` to vector |
+| Write | Allocates SAB region, writes header | `jvm-write-eve-array!` → slab block |
+| Protocols | ICounted, IIndexed, ILookup, IFn, ISeqable, IReduce, IHash, IEquiv, IPrintWithWriter, ISabStorable, IsEve | None |
+| Atomics | cas!, exchange!, add!, sub!, band!, bor!, bxor! | N/A (no shared memory) |
+| Wait/Notify | wait!, wait-async, notify! (int32 only) | N/A |
+| SIMD | afill-simd!, acopy-simd!, asum-simd, amin-simd, amax-simd, aequal-simd? | N/A |
+| Slab integration | SAB pointer (0x1D), header constructor, disposer | Slab read/write only |
+
+| Aspect | CLJS (`obj.cljs`) | JVM (`alloc.cljc`) |
+|--------|-------------------|---------------------|
+| Deftypes | `Obj`, `ObjArray`, `ObjArrayRow` | None — returns `{:schema ... :values ...}` |
+| Read | Live field access via DataView + Atomics | `jvm-read-obj` → map of field values |
+| Write | Allocates SAB region per object | `jvm-write-obj!` → slab block |
+| Schema | `create-schema`, `compute-layout` (alignment-aware) | `jvm-obj-layout`, `jvm-encode/decode-obj-schema` |
+| Protocols | ICounted, ILookup, IFn, ISeqable, IHash, IEquiv, IPrintWithWriter (on Obj) | None |
+| Atomics | cas!, add!, sub!, exchange! on int32/uint32 fields | N/A |
+| ObjArray | SoA columns backed by `EveArray`; column-reduce, column-map! | N/A |
+
+#### What CAN Be Shared (→ `.cljc` shared section)
+
+1. **Constants** — `HEADER_SIZE`, subtype codes, type-size/alignment maps
+   - `array.cljs:34` — `HEADER_SIZE = 8`
+   - `array.cljs:40-47` — `subtype->elem-shift` (pure arithmetic)
+   - `array.cljs:49-52` — `subtype->atomic?` (pure logic)
+   - `array.cljs:54-68` — `type-kw->subtype` (lookup table, minus `js/Error`)
+   - `array.cljs:70-82` — `subtype->type-kw` (lookup table)
+   - `obj.cljs:29-53` — `type-sizes`, `type-alignments`, `align-offset`
+   - `obj.cljs:63-83` — `compute-layout` (pure data transform)
+   - `obj.cljs:85-95` — `create-schema` (pure data transform)
+   - `obj.cljs:612-619` — `obj-type-kw->code`, `obj-code->type-kw` (lookup tables)
+   - **Overlap with `alloc.cljc`:** `obj-code->type-kw`, `obj-type-kw->code`,
+     `obj-type-sizes`, `obj-type-alignments`, `jvm-obj-layout` (lines 624-656)
+     are **duplicated** between `obj.cljs` and `alloc.cljc`. These must be
+     consolidated into the shared section.
+
+2. **Schema encode/decode** — `encode-obj-schema` / `decode-obj-schema`
+   - Nearly identical logic in `obj.cljs:621-656` and `alloc.cljc:658-686`
+   - CLJS uses `TextEncoder`/`TextDecoder`; JVM uses `String.getBytes("UTF-8")`
+   - Can be unified with `#?` reader conditionals for the encoding calls only
+
+#### What CANNOT Be Shared (→ platform-specific `#?` blocks)
+
+1. **Deftypes** — `EveArray`, `Obj`, `ObjArray`, `ObjArrayRow` implement platform-
+   specific protocols (CLJS: `ICounted`/`-count`, JVM: `Counted`/`count`, etc.)
+2. **Memory access** — CLJS uses SAB + DataView + Atomics; JVM uses ISlabIO or
+   `ByteBuffer`. Fundamentally different memory models.
+3. **Atomics** — CLJS: `js/Atomics.load/store/compareExchange/add/sub/and/or/xor`;
+   JVM: `java.util.concurrent.atomic` or `VarHandle` (Java 9+). Different APIs,
+   and JVM doesn't have SharedArrayBuffer.
+4. **Wait/Notify** — CLJS: `js/Atomics.wait/waitAsync/notify`; JVM: `Object.wait/notify`
+   or `LockSupport`. Completely different threading models.
+5. **SIMD** — CLJS-only via WASM. No JVM equivalent in this codebase (JVM has
+   `jdk.incubator.vector` but that's a different API entirely).
+6. **SAB allocation** — `alloc-eve-region`, `alloc-obj-region` use `atom/*global-atom-instance*`
+   and SAB-specific allocation. JVM uses slab files with `ISlabIO`.
+7. **Slab registration** — `register-cljs-to-sab-builder!`, `register-header-constructor!`,
+   `register-sab-type-constructor!` are CLJS-specific registration hooks.
+
+#### 7a. File Restructuring
+
+**Work Items:**
+
+1. **Rename `src/eve/array.cljs` → `src/eve/array.cljc`**
+   - Move shared constants and helper functions to the top (outside `#?`)
+   - Wrap existing CLJS code in `#?(:cljs (do ...))`
+   - Add `#?(:clj (do ...))` block for JVM deftype and functions
+   - Update `ns` require: replace `(:require [eve.shared-atom :as atom] [eve.wasm-mem :as wasm] ...)`
+     with `#?` conditionals — `eve.shared-atom` and `eve.wasm-mem` are CLJS-only
+
+2. **Rename `src/eve/obj.cljs` → `src/eve/obj.cljc`**
+   - Same restructuring as array
+   - Consolidate schema system: `compute-layout`, `create-schema`, type maps into
+     shared section (these are pure Clojure, no platform deps)
+   - Move duplicated code from `alloc.cljc` lines 624-656 (`obj-code->type-kw`,
+     `obj-type-kw->code`, `obj-type-sizes`, `obj-type-alignments`, `jvm-obj-layout`)
+     into `obj.cljc` shared section, and import from there in `alloc.cljc`
+   - Schema encode/decode: unify `encode-obj-schema`/`decode-obj-schema` with `#?`
+     for the `TextEncoder`/`String.getBytes` calls
+
+3. **Update `alloc.cljc`** to import shared schema/layout functions from `obj.cljc`
+   instead of defining them locally
+
+4. **Update `shadow-cljs.edn` and `deps.edn`** if the file renames require build
+   config changes (unlikely for `.cljs` → `.cljc` but verify)
+
+#### 7b. JVM `EveArray` Deftype
+
+**Work Items:**
+
+1. **Define `EveArray` JVM deftype** in `src/eve/array.cljc` `#?(:clj ...)` block
+   - Fields: `sio` (ISlabIO), `slab-off` (slab-qualified offset), `subtype-code`,
+     `length`, `elem-shift`, `_meta`, `__hash`
+   - Reads go through ISlabIO: `-sio-read-u8`, `-sio-read-i32`, `-sio-read-bytes`
+   - No live mutable view (unlike CLJS SAB) — each read is a slab IO call
+
+2. **Implement Clojure interfaces on JVM `EveArray`:**
+   - `clojure.lang.Counted` — `count` returns `length`
+   - `clojure.lang.Indexed` — `nth(i)` reads element at data offset + i*elem_size
+   - `clojure.lang.ILookup` — `valAt(idx)` delegates to `nth`
+   - `clojure.lang.IFn` — `invoke(idx)`, `invoke(idx, not-found)`
+   - `clojure.lang.Seqable` — lazy seq over indices
+   - `clojure.lang.IReduce` — direct iteration without seq allocation
+   - `clojure.lang.IHashEq` — same hash algorithm as CLJS (subtype-seeded, element-folded)
+   - `clojure.lang.IPersistentCollection` — `count`, `cons` (→ throw UnsupportedOp),
+     `empty`, `equiv`
+   - `clojure.lang.IMeta` / `clojure.lang.IObj` — metadata support
+   - `java.lang.Iterable` — element iterator
+   - `print-method` multimethod — `#eve/array :int32 [1 2 3]`
+
+3. **Wire `jvm-read-eve-array`** to return `EveArray` deftype instead of vector
+   - Existing code in `alloc.cljc:589-616` reads and materializes to vector
+   - New code returns a live `EveArray` backed by ISlabIO (lazy, reads on demand)
+   - Keep the materializing reader as `jvm-read-eve-array-vec` for backward compat
+
+4. **Constructor** — `eve-array` function on JVM
+   - `(eve-array :int32 10)` → allocate slab block via ISlabIO, write header, return `EveArray`
+   - `(eve-array :int32 [1 2 3])` → allocate, write header + elements, return `EveArray`
+   - Uses `jvm-write-eve-array!` internally
+
+5. **Element mutation on JVM** (subset of CLJS API)
+   - `aget` / `aset!` — basic read/write via ISlabIO
+   - Atomic ops: **not supported** on JVM slab files (mmap doesn't guarantee atomicity
+     across processes the way SAB does). Document this limitation.
+   - Wait/notify: **not supported** on JVM.
+   - SIMD: **not supported** on JVM.
+   - Functional ops (`areduce`, `amap`, `afill!`, `acopy!`): implement via ISlabIO reads
+
+6. **Tests** — `test/eve/jvm_array_test.clj` (expand existing 7 tests)
+   - `jvm-read-eve-array` returns `EveArray` (not vector)
+   - `(count arr)`, `(nth arr 0)`, `(arr 0)` work
+   - `(seq arr)` returns lazy seq
+   - `(reduce + arr)` works
+   - `(pr-str arr)` produces expected format
+   - `(= arr1 arr2)` and `(hash arr1)` work
+   - Round-trip: write from JVM, read back as `EveArray`
+   - Cross-process: CLJS writes EveArray, JVM reads as `EveArray` (not vector)
+   - All 9 subtypes (int8 through float64) work
+
+#### 7c. JVM `Obj` and `ObjArray` Deftypes
+
+**Work Items:**
+
+1. **Define `Obj` JVM deftype** in `src/eve/obj.cljc` `#?(:clj ...)` block
+   - Fields: `schema`, `sio` (ISlabIO), `slab-off`, `data-offset`, `_meta`, `__hash`
+   - Schema is the shared `create-schema` result (same structure as CLJS)
+   - Field reads: compute field byte offset from schema layout, read via ISlabIO
+   - Field writes: `assoc!` writes via ISlabIO
+
+2. **Implement Clojure interfaces on JVM `Obj`:**
+   - `clojure.lang.ILookup` — `valAt(field-key)` reads field from slab
+   - `clojure.lang.IFn` — `invoke(field-key)`, `invoke(field-key, not-found)`
+   - `clojure.lang.Counted` — count of schema fields
+   - `clojure.lang.Seqable` — seq of `MapEntry`s (field-key → value)
+   - `clojure.lang.IHashEq` — same hash algorithm as CLJS
+   - `clojure.lang.IPersistentCollection` — `count`, `equiv`
+   - `clojure.lang.Associative` — `assoc` (creates new Obj with one field changed)
+   - `clojure.lang.IMeta` / `clojure.lang.IObj` — metadata
+   - `java.lang.Iterable` — entry iterator
+   - `print-method` — `#eve/obj {:key 42, :left -1}`
+
+3. **Define `ObjArray` JVM deftype** in `src/eve/obj.cljc` `#?(:clj ...)` block
+   - Fields: `schema`, `length`, `columns` (map of field-key → `EveArray`)
+   - Depends on JVM `EveArray` from Phase 7b
+   - Each column is a JVM `EveArray` of type `:int32` (matching CLJS limitation —
+     all columns currently Int32Array)
+
+4. **Implement Clojure interfaces on JVM `ObjArray`:**
+   - `clojure.lang.Counted` — `count` returns `length`
+   - `clojure.lang.Indexed` — `nth(idx)` returns `ObjArrayRow` view
+   - `clojure.lang.IFn` — `invoke(idx)`
+   - `clojure.lang.Seqable` — lazy seq of `ObjArrayRow`s
+   - `print-method` — `#eve/obj-array [schema={...} length=N]`
+
+5. **Define `ObjArrayRow` JVM deftype** — read-only view into ObjArray at index
+   - `clojure.lang.ILookup` — reads from parent ObjArray column
+   - `clojure.lang.IFn` — `invoke(field-key)`
+   - `clojure.lang.Seqable` — seq of entries
+   - `print-method` — `#eve/obj-array-row {:key 42, :val 7}`
+
+6. **Wire `jvm-read-obj`** to return `Obj` deftype instead of plain map
+   - Keep `jvm-read-obj-map` for backward compat
+
+7. **Constructor** — `obj` function on JVM
+   - `(obj {:key :int32 :val :int32} {:key 42 :val 7})` → allocate slab, write schema
+     + field data, return `Obj`
+   - Uses `jvm-write-obj!` internally
+
+8. **Constructor** — `obj-array` function on JVM
+   - `(obj-array 1000 {:key :int32 :val :int32})` → creates N `EveArray` columns
+   - Returns `ObjArray`
+
+9. **Mutation on JVM** (subset of CLJS API)
+   - `get` / `assoc!` — basic field read/write via ISlabIO
+   - Atomic ops: not supported (same mmap limitation as array)
+   - `get-in` / `assoc-in!` for ObjArray
+
+10. **Tests** — `test/eve/jvm_obj_test.clj` (expand existing 7 tests)
+    - `jvm-read-obj` returns `Obj` (not map)
+    - `(:key obj)` works (ILookup + IFn)
+    - `(seq obj)` returns MapEntry seq
+    - `(pr-str obj)` produces expected format
+    - `ObjArray` round-trip: create, write fields, read back
+    - `ObjArrayRow` provides correct field access
+    - All 10 field types work correctly
+    - Cross-process: CLJS writes Obj, JVM reads as `Obj`
+    - Schema round-trip: encode → decode → same layout
+
+#### 7d. Consolidate Duplicated Code
+
+**Work Items:**
+
+1. **Schema system consolidation**
+   - Move `obj-code->type-kw`, `obj-type-kw->code`, `obj-type-sizes`,
+     `obj-type-alignments`, `align-offset`, `compute-layout`, `create-schema`
+     into the shared section of `obj.cljc`
+   - Remove duplicates from `alloc.cljc` lines 624-656 (`obj-code->type-kw`,
+     `obj-type-kw->code`, `obj-type-sizes`, `obj-type-alignments`, `jvm-obj-layout`,
+     `jvm-align`)
+   - `alloc.cljc` imports the layout function from `obj.cljc`
+
+2. **Schema encode/decode unification**
+   - Merge `encode-obj-schema` (CLJS `obj.cljs:621-639`) and `jvm-encode-obj-schema`
+     (`alloc.cljc:658-675`) into one function with `#?` for string encoding
+   - Merge `decode-obj-schema` (CLJS `obj.cljs:642-656`) and `jvm-decode-obj-schema`
+     (`alloc.cljc:677-686`) similarly
+
+3. **Array subtype helpers consolidation**
+   - `subtype->elem-shift`, `subtype->atomic?`, `type-kw->subtype`, `subtype->type-kw`
+     move to shared section — they're pure lookup tables with no platform deps
+   - `jvm-subtype-elem-size` in `alloc.cljc` is equivalent to `subtype->elem-shift`
+     (just returns bytes instead of shift) — consolidate or derive one from the other
+
+**Files:** `src/eve/array.cljc` (renamed), `src/eve/obj.cljc` (renamed),
+`src/eve/deftype_proto/alloc.cljc`, `test/eve/jvm_array_test.clj`,
+`test/eve/jvm_obj_test.clj`
+
+---
+
 ## Complete Gap → Phase Mapping
 
 | # | Gap | Phase |
@@ -455,6 +709,14 @@ passing Eve vectors to Java APIs expecting `List`.
 | 20 | **`IFn` arity handling (all arities must throw properly)** | **3** |
 | 21 | **Bitwise helpers duplicated across CLJS/JVM blocks** | **0** |
 | 22 | **`portable-hash-bytes` trapped in `map.cljc`, not shared** | **0** |
+| 23 | **`EveArray` is CLJS-only — no JVM deftype** | **7b** |
+| 24 | **`jvm-read-eve-array` returns vector, not `EveArray`** | **7b** |
+| 25 | **`Obj` is CLJS-only — no JVM deftype** | **7c** |
+| 26 | **`ObjArray`/`ObjArrayRow` are CLJS-only — no JVM deftypes** | **7c** |
+| 27 | **`jvm-read-obj` returns map, not `Obj`** | **7c** |
+| 28 | **Schema system duplicated between `obj.cljs` and `alloc.cljc`** | **7d** |
+| 29 | **Array subtype helpers duplicated between `array.cljs` and `alloc.cljc`** | **7d** |
+| 30 | **Array/obj `.cljs` files not `.cljc` — can't compile on JVM** | **7a** |
 
 ---
 
@@ -481,6 +743,10 @@ All tests run via `clojure -M:jvm-test`. The existing CLJS test suites
 | 6a | Transient round-trips for map and set |
 | 6b | List first/rest/next/nth/meta/nested-coll |
 | 6c | Vec java.util.List interop |
+| 7a | File renames compile on both platforms; CLJS tests still pass |
+| 7b | JVM EveArray: read/write, nth, seq, reduce, hash, equiv, print, cross-process |
+| 7c | JVM Obj/ObjArray: read/write, field access, schema, print, cross-process |
+| 7d | Schema/subtype dedup: alloc.cljc imports from obj.cljc/array.cljc |
 
 ---
 
@@ -496,6 +762,9 @@ All tests run via `clojure -M:jvm-test`. The existing CLJS test suites
 | `IHashEq` hash values differ from Clojure stdlib | Verify `(hash eve-coll) == (hash (into <equiv> eve-coll))` in tests |
 | `IFn` arity explosion | Implement full arity set with throws; or accept AbstractMethodError |
 | **Epoch GC / slab retirement for new write ops** | See Appendix A, item 6 |
+| `.cljs` → `.cljc` rename breaks CLJS build | Verify shadow-cljs resolves `.cljc`; run full test suite |
+| JVM EveArray lacks atomics/SIMD | Document limitation clearly; mmap doesn't support SAB atomics |
+| `alloc.cljc` circular dependency with `obj.cljc` | `alloc.cljc` imports schema helpers from `obj.cljc`; `obj.cljc` imports alloc fns from `alloc.cljc` — may need a third namespace or careful ordering |
 
 ---
 
@@ -511,6 +780,10 @@ Phases 0-2 ───────────────────────
 Phases 0-3 are independent of ───────────────────────→ Phases 4-5 (can parallelize)
 Phase 6b (List gaps) is fully independent
 Phase 6c (Vec java.util.List) is fully independent
+Phase 7a (File renames) ──────────────────── blocks ──→ Phase 7b-7d
+Phase 7b (JVM EveArray) ─────────────────── blocks ──→ Phase 7c (ObjArray uses EveArray columns)
+Phase 7d (Dedup) depends on 7a-7c completing
+Phase 7 is fully independent of Phases 0-6
 ```
 
 ---
@@ -660,3 +933,71 @@ After all parity phases are complete, a separate refactoring pass should:
 4. Consider shared `equiv`/`hash` helpers if implementations have grown complex
 
 This is tracked in the unification analysis, not in this plan.
+
+---
+
+## Appendix C: Array/Obj CLJC Migration Analysis
+
+### Motivation
+
+`eve.array` and `eve.obj` are pure CLJS files (`.cljs`) that cannot be compiled
+on the JVM. The JVM can read/write their slab block formats (type-ids `0x1D` and
+`0x1E`) via helper functions in `alloc.cljc`, but returns plain Clojure vectors
+and maps instead of typed instances. This creates a parity gap:
+
+- CLJS: `(nth my-array 0)` → atomic read from SharedArrayBuffer
+- JVM: `(nth (jvm-read-eve-array sio off) 0)` → materialized Clojure vector lookup
+
+The migration to `.cljc` enables: (a) JVM deftypes with the same API surface as
+CLJS (minus atomics/SIMD), (b) lazy reads from slab instead of eager materialization,
+(c) cross-process type identity (JVM code sees `EveArray` not `PersistentVector`),
+and (d) elimination of ~100 lines of duplicated code between the `.cljs` files and
+`alloc.cljc`.
+
+### Code Duplication Inventory
+
+| Code | `array.cljs` / `obj.cljs` | `alloc.cljc` (JVM) | Shareable? |
+|------|--------------------------|---------------------|------------|
+| Subtype codes (0x01-0x09) | `type-kw->subtype` (line 54) | Implicit in case branches | Yes |
+| Elem shift / size | `subtype->elem-shift` (line 40) | `jvm-subtype-elem-size` (line 529) | Yes (derive) |
+| Obj type codes | `obj-type-kw->code` (line 612) | `obj-type-kw->code` (line 628) | Yes (identical) |
+| Obj type sizes | `type-sizes` (line 29) | `obj-type-sizes` (line 631) | Yes (identical) |
+| Obj type alignments | `type-alignments` (line 42) | `obj-type-alignments` (line 635) | Yes (identical) |
+| Align helper | `align-offset` (line 55) | `jvm-align` (line 639) | Yes (identical) |
+| Layout computation | `compute-layout` (line 63) | `jvm-obj-layout` (line 643) | Yes (identical) |
+| Schema creation | `create-schema` (line 85) | N/A (inline) | Yes |
+| Schema encode | `encode-obj-schema` (line 621) | `jvm-encode-obj-schema` (line 658) | Yes (with `#?`) |
+| Schema decode | `decode-obj-schema` (line 642) | `jvm-decode-obj-schema` (line 677) | Yes (with `#?`) |
+
+**Total dedup potential:** ~120 lines from schema/layout consolidation, ~20 lines
+from subtype helper consolidation.
+
+### JVM Limitations vs. CLJS
+
+The following CLJS features have **no JVM equivalent** and will be CLJS-only:
+
+| Feature | Reason |
+|---------|--------|
+| SharedArrayBuffer backing | JVM uses slab files (mmap), not SAB |
+| `js/Atomics.*` operations | No equivalent for mmap files; `VarHandle` works for heap only |
+| `wait!` / `wait-async` / `notify!` | SAB-specific threading primitives |
+| WASM SIMD ops | CLJS-only WASM module |
+| `ISabStorable` / `ISabRetirable` | CLJS SAB lifecycle protocols |
+| `register-sab-type-constructor!` | CLJS deserialization hook |
+| `register-cljs-to-sab-builder!` | CLJS serialization hook |
+| `make-typed-view` (JS TypedArray) | JS-specific memory view |
+| `from-typed-array` | JS TypedArray conversion |
+
+The JVM `EveArray` will support: `aget`, `aset!`, `areduce`, `amap`, `afill!`,
+`acopy!`, and all Clojure collection protocols. Mutation goes through ISlabIO.
+
+### Implementation Order
+
+1. **Phase 7a first** — file renames must happen before any JVM code is added.
+   Run full CLJS test suite after renames to ensure no breakage.
+2. **Phase 7b before 7c** — `ObjArray` columns are `EveArray` instances, so the
+   JVM `EveArray` deftype must exist first.
+3. **Phase 7d last** — deduplication is a refactoring pass that depends on 7a-7c
+   being stable.
+
+Phase 7 is fully independent of Phases 0-6 and can be worked on in parallel.
