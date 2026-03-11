@@ -137,6 +137,15 @@ npm run build:addon
 clojure -M:jvm-test
 ```
 
+### Test output rule
+
+Always tee test output to files so you never have to run the same test twice:
+
+```bash
+node target/eve-test/all.js slab 2>&1 | tee /tmp/slab-test.txt
+clojure -M:jvm-test 2>&1 | tee /tmp/jvm-test.txt
+```
+
 ---
 
 ## Namespace Map

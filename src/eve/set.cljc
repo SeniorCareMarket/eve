@@ -12,7 +12,9 @@
       [eve.deftype-proto.alloc :as eve-alloc]
       [eve.deftype-proto.data :as d]
       [eve.deftype-proto.serialize :as ser]
-      [eve.deftype-proto.simd :as simd])
+      [eve.deftype-proto.simd :as simd]
+      [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
+                                     mask-hash bitpos has-bit? get-index]])
      :clj
      (:require
       [eve.deftype-proto.alloc :as eve-alloc
@@ -21,6 +23,8 @@
                -sio-write-bytes! -sio-alloc!
                NIL_OFFSET]]
       [eve.deftype-proto.data :as d]
+      [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
+                                     mask-hash bitpos has-bit? get-index]]
       [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                             value+sio->eve-bytes
                                             register-jvm-collection-writer!]])))
@@ -40,6 +44,10 @@
 (def ^:const SABSETROOT_CNT_OFFSET 4)
 (def ^:const SABSETROOT_ROOT_OFF_OFFSET 8)
 (def ^:const EveHashSet-type-id 0xEE)
+
+;; Flags byte (offset 1 of set header):
+;; Bit 0 = portable-hash (1 = HAMT built with portable-hash-bytes, 0 = legacy platform hash)
+(def ^:const SET_FLAG_PORTABLE_HASH 0x01)
 
 ;;=============================================================================
 ;; CLJS implementations
@@ -238,8 +246,7 @@
 ;; then count entries: [val_len:u32][val_bytes...]
 ;;-----------------------------------------------------------------------------
 
-;; Use SIMD-accelerated popcount when available
-(def ^:private popcount32 simd/popcount32)
+;; popcount32, mask-hash, bitpos, has-bit?, get-index imported from eve.hamt-util
 
 (defn- read-node-type
   "Read node type byte from a slab-qualified offset."
@@ -685,7 +692,7 @@
                   (do (set! hamt-conj-added? false) root-off)
                   ;; Need to split: remove inline, add child node
                   (let [existing-vb (ser/serialize-val existing-v)
-                        existing-vh (hash existing-v)]
+                        existing-vh (portable-hash-bytes existing-vb)]
                     (if (== existing-vh vh)
                       ;; Hash collision -> create collision node as child
                       (let [collision-off (make-collision-node! vh [existing-vb vb])
@@ -700,10 +707,13 @@
                       (let [new-child-off (let [bp1 (bit-and (unsigned-bit-shift-right existing-vh (+ shift SHIFT_STEP)) MASK)
                                                 bp2 (bit-and (unsigned-bit-shift-right vh (+ shift SHIFT_STEP)) MASK)]
                                             (if (== bp1 bp2)
-                                              ;; Same position at next level, need deeper split
+                                              ;; Same position at next level, need deeper split.
+                                              ;; Create a node with existing-v at bp1, then recurse
+                                              ;; at shift+SHIFT_STEP (NOT shift+2*SHIFT_STEP) so the
+                                              ;; bit position matches the shift level hamt-conj uses.
                                               (let [sub (hamt-conj
                                                           (make-single-val-bitmap-node! bp1 existing-vb)
-                                                          v vh vb (+ shift SHIFT_STEP SHIFT_STEP))]
+                                                          v vh vb (+ shift SHIFT_STEP))]
                                                 sub)
                                               ;; Different positions -> two-value node
                                               (make-two-val-bitmap-node! bp1 existing-vb bp2 vb)))
@@ -999,12 +1009,13 @@
 
 (defn- make-eve-hash-set
   "Create a EveHashSet, allocating a 12-byte header block in the slab.
-   The header stores: [type-id:u8 | pad:3 | cnt:i32 | root-off:i32]."
+   The header stores: [type-id:u8 | flags:u8 | pad:u16 | cnt:i32 | root-off:i32].
+   Flags bit 0 = portable-hash (always set for new sets)."
   [cnt root-off]
   (let [header-off (alloc-bytes! 12)]
     (eve-alloc/resolve-u8! header-off)
     (r-set-u8 0 EveHashSet-type-id)
-    (r-set-u8 1 0) (r-set-u8 2 0) (r-set-u8 3 0)
+    (r-set-u8 1 SET_FLAG_PORTABLE_HASH) (r-set-u8 2 0) (r-set-u8 3 0)
     (r-set-i32 SABSETROOT_CNT_OFFSET cnt)
     (r-set-i32 SABSETROOT_ROOT_OFF_OFFSET root-off)
     (EveHashSet. cnt root-off header-off nil nil)))
@@ -1038,7 +1049,7 @@
   ILookup
   (-lookup [this v] (-lookup this v nil))
   (-lookup [_ v not-found]
-    (let [vh (hash v)]
+    (let [vh (portable-hash-bytes (ser/serialize-key v))]
       (if (hamt-find root-off v vh 0)
         v
         not-found)))
@@ -1046,7 +1057,7 @@
   ICollection
   (-conj [this v]
     (let [vb (ser/serialize-key v)
-          vh (hash v)
+          vh (portable-hash-bytes vb)
           new-root (hamt-conj root-off v vh vb 0)]
       (if hamt-conj-added?
         (let [new-set (make-eve-hash-set (inc cnt) new-root)
@@ -1064,7 +1075,7 @@
 
   ISet
   (-disjoin [this v]
-    (let [vh (hash v)
+    (let [vh (portable-hash-bytes (ser/serialize-key v))
           new-root (hamt-disj root-off v vh 0)]
       (if hamt-disj-removed?
         (if (== new-root eve-alloc/NIL_OFFSET)
@@ -1089,7 +1100,7 @@
     (and (set? other)
          (== cnt (count other))
          (every? (fn [v]
-                   (hamt-find root-off v (hash v) 0))
+                   (hamt-find root-off v (portable-hash-bytes (ser/serialize-key v)) 0))
                  other)))
 
   IFn
@@ -1190,7 +1201,7 @@
   (-lookup [this v] (-lookup this v nil))
   (-lookup [_ v not-found]
     (when-not edit (throw (js/Error. "Transient used after persistent!")))
-    (let [vh (hash v)]
+    (let [vh (portable-hash-bytes (ser/serialize-key v))]
       (if (hamt-find root-offset v vh 0)
         v
         not-found)))
@@ -1199,7 +1210,7 @@
   (-conj! [this v]
     (when-not edit (throw (js/Error. "Transient used after persistent!")))
     (let [vb (ser/serialize-key v)
-          vh (hash v)
+          vh (portable-hash-bytes vb)
           new-root (hamt-conj root-offset v vh vb 0)]
       (set! root-offset new-root)
       (when hamt-conj-added? (set! cnt (inc cnt)))
@@ -1215,7 +1226,7 @@
   ITransientSet
   (-disjoin! [this v]
     (when-not edit (throw (js/Error. "Transient used after persistent!")))
-    (let [vh (hash v)
+    (let [vh (portable-hash-bytes (ser/serialize-key v))
           new-root (hamt-disj root-offset v vh 0)]
       (set! root-offset new-root)
       (when hamt-disj-removed? (set! cnt (dec cnt)))
@@ -1362,13 +1373,7 @@
 
 #?(:clj
    (do
-     (defn- popcount32 [n]
-       (Integer/bitCount (unchecked-int n)))
-
-     (defn- mask-hash [kh shift] (bit-and (unsigned-bit-shift-right kh shift) MASK))
-     (defn- bitpos [kh shift] (bit-shift-left 1 (mask-hash kh shift)))
-     (defn- has-bit? [bitmap bit] (not (zero? (bit-and bitmap bit))))
-     (defn- get-index [bitmap bit] (popcount32 (bit-and bitmap (dec bit))))
+     ;; popcount32, mask-hash, bitpos, has-bit?, get-index imported from eve.hamt-util
 
      (defn- children-start-off [node-bm]
        (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm))))
@@ -1408,11 +1413,11 @@
                       (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
                         (recur (inc ci) (jvm-set-reduce sio child-off f acc coll-factory)))))))
 
-              ;; Collision node: [type:u8 cnt:u8 pad:2 hash:i32 val1... val2...]
+              ;; Collision node: [type:u8 cnt:u8 hash:u32@2 unused:u32@8] entries@12
               2
               (let [cnt (-sio-read-u8 sio root-off 1)]
                 (loop [i   0
-                       pos 8  ;; after type:u8 + cnt:u8 + pad:2 + hash:i32
+                       pos NODE_HEADER_SIZE  ;; entries start at offset 12
                        acc init]
                   (if (or (>= i cnt) (reduced? acc))
                     (unreduced acc)
@@ -1442,19 +1447,19 @@
                (and (> cnt 1) (apply = (map first entries))))
            (let [kh       (first (first entries))
                  val-size (reduce (fn [acc [_ vb]] (+ acc 4 (alength vb))) 0 entries)
-                 ;; Collision header: [type:u8][cnt:u8][pad:u16][hash:i32] = 8 bytes
-                 node-off (-sio-alloc! sio (+ 8 val-size))]
+                 ;; Collision header matches CLJS: [type:u8][cnt:u8][hash:u32@2][unused:u32@8] = 12 bytes
+                 node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE val-size))]
              (-sio-write-u8!  sio node-off 0 NODE_TYPE_COLLISION)
              (-sio-write-u8!  sio node-off 1 cnt)
-             (-sio-write-u16! sio node-off 2 0)
-             (-sio-write-i32! sio node-off 4 kh)
+             (-sio-write-i32! sio node-off 2 kh)  ;; hash at offset 2 (matches CLJS r-set-u32 2)
+             (-sio-write-i32! sio node-off 8 0)   ;; unused
              (reduce (fn [pos [_ vb]]
                        (let [vlen (alength vb)]
                          (-sio-write-i32! sio node-off pos vlen)
                          (when (pos? vlen)
                            (-sio-write-bytes! sio node-off (+ pos 4) vb))
                          (+ pos 4 vlen)))
-                     8 entries)
+                     NODE_HEADER_SIZE entries)
              node-off)
 
            ;; Build a bitmap node grouping entries by slot at this shift level
@@ -1507,17 +1512,19 @@
      (defn jvm-write-set!
        "Serialize a Clojure set to EVE HAMT set structure in the slab.
         Returns the slab-qualified offset of the EveHashSet header block.
-        serialize-val: (fn [v] ^bytes) — called for each set element."
+        serialize-val: (fn [v] ^bytes) — called for each set element.
+        Uses portable-hash-bytes for cross-platform compatible HAMT navigation."
        [sio serialize-val s]
        (let [entries  (mapv (fn [elem]
-                              [(hash elem) ^bytes (serialize-val elem)])
+                              (let [vb ^bytes (serialize-val elem)]
+                                [(portable-hash-bytes vb) vb]))
                             s)
              root-off (jvm-set-hamt-build-entries! sio entries 0)
              cnt      (count s)
-             ;; EveHashSet header: [type-id:u8][pad:u8][pad:u16][cnt:i32][root-off:i32] = 12 bytes
+             ;; EveHashSet header: [type-id:u8][flags:u8][pad:u16][cnt:i32][root-off:i32] = 12 bytes
              hdr-off  (-sio-alloc! sio 12)]
          (-sio-write-u8!  sio hdr-off 0 EveHashSet-type-id)
-         (-sio-write-u8!  sio hdr-off 1 0)
+         (-sio-write-u8!  sio hdr-off 1 SET_FLAG_PORTABLE_HASH)
          (-sio-write-u16! sio hdr-off 2 0)
          (-sio-write-i32! sio hdr-off SABSETROOT_CNT_OFFSET cnt)
          (-sio-write-i32! sio hdr-off SABSETROOT_ROOT_OFF_OFFSET root-off)
@@ -1529,14 +1536,15 @@
 
      (declare jvm-eve-hash-set-from-offset)
 
-     (deftype EveHashSet [^long cnt ^long root-off ^long header-off sio coll-factory _meta]
+     (deftype EveHashSet [^long cnt ^long root-off ^long header-off
+                         ^boolean jvm-hashed? sio coll-factory _meta]
 
        clojure.lang.IMeta
        (meta [_] _meta)
 
        clojure.lang.IObj
        (withMeta [_ new-meta]
-         (EveHashSet. cnt root-off header-off sio coll-factory new-meta))
+         (EveHashSet. cnt root-off header-off jvm-hashed? sio coll-factory new-meta))
 
        clojure.lang.Counted
        (count [_] (int cnt))
@@ -1609,12 +1617,15 @@
        (hashCode [this] (clojure.lang.Murmur3/hashUnordered this)))
 
      (defn jvm-eve-hash-set-from-offset
-       "Construct a JVM EveHashSet from a slab-qualified header-off and ISlabIO context."
+       "Construct a JVM EveHashSet from a slab-qualified header-off and ISlabIO context.
+        Reads the flags byte to determine if the HAMT was built with portable-hash-bytes."
        ([sio header-off] (jvm-eve-hash-set-from-offset sio header-off nil))
        ([sio header-off coll-factory]
-        (let [cnt      (-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
+        (let [flags    (-sio-read-u8 sio header-off 1)
+              portable (not (zero? (bit-and flags SET_FLAG_PORTABLE_HASH)))
+              cnt      (-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
               root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
-          (EveHashSet. cnt root-off header-off sio coll-factory nil))))
+          (EveHashSet. cnt root-off header-off portable sio coll-factory nil))))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)
