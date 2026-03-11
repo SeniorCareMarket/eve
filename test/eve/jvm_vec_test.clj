@@ -91,3 +91,81 @@
             hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr coll-factory)]
         (is (= src (vec v)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 2b: Native conj / assocN / pop tests
+;; ---------------------------------------------------------------------------
+
+(deftest conj-returns-sabvecroot
+  (testing "conj returns SabVecRoot, not PersistentVector"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [1 2 3])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            v2  (conj v 4)]
+        (is (instance? eve.vec.SabVecRoot v2))
+        (is (= [1 2 3 4] (vec v2)))
+        (is (= 4 (count v2)))))))
+
+(deftest conj-past-node-size
+  (testing "conj past NODE_SIZE triggers tail push + tree growth"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            v2  (reduce conj v (range 100))]
+        (is (instance? eve.vec.SabVecRoot v2))
+        (is (= 100 (count v2)))
+        (doseq [i (range 100)]
+          (is (= i (nth v2 i)) (str "nth " i)))))))
+
+(deftest assocn-returns-sabvecroot
+  (testing "assocN returns SabVecRoot"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [10 20 30])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            v2  (assoc v 1 99)]
+        (is (instance? eve.vec.SabVecRoot v2))
+        (is (= [10 99 30] (vec v2)))))))
+
+(deftest assocn-append
+  (testing "assocN at count acts as conj"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [1 2])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            v2  (assoc v 2 3)]
+        (is (= [1 2 3] (vec v2)))))))
+
+(deftest pop-returns-sabvecroot
+  (testing "pop returns SabVecRoot"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [1 2 3])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            v2  (pop v)]
+        (is (instance? eve.vec.SabVecRoot v2))
+        (is (= [1 2] (vec v2)))
+        (is (= 2 (count v2)))))))
+
+(deftest pop-to-empty
+  (testing "pop to single element then to empty"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [42])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            v2  (pop v)]
+        (is (zero? (count v2)))
+        (is (= [] (vec v2)))))))
+
+(deftest conj-pop-roundtrip
+  (testing "build with conj, shrink with pop"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)
+            v2  (reduce conj v (range 70))
+            v3  (nth (iterate pop v2) 30)]
+        (is (= 40 (count v3)))
+        (is (= (vec (range 40)) (vec v3)))))))
