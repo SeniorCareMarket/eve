@@ -97,13 +97,13 @@ Blocks larger than 1024 bytes are handled by a coalescing allocator in `.slab6`:
 
 | Offset | Field | Description |
 |---|---|---|
-| 0 | STATUS | `FREE=0`, `ALLOCATED=1`, `ZEROED_UNUSED=-1` |
+| 0 | STATUS | `FREE=0`, `ALLOCATED=1`, `RETIRED=2`, `EMBEDDED_ATOM_HEADER=3`, `ORPHANED=4`, `ZEROED_UNUSED=-1` |
 | 4 | DATA_OFFSET | Byte offset relative to data region start |
 | 8 | DATA_LENGTH | Used bytes (informational) |
 | 12 | BLOCK_CAPACITY | Total capacity of this contiguous block |
-| 16 | RESERVED | Always -1 |
+| 16 | VALUE_DATA_DESC_IDX | Descriptor index of value data block (or NIL sentinel) |
 | 20 | LOCK_OWNER | 0=unlocked, nonzero=locked |
-| 24 | RESERVED2 | Always 0 |
+| 24 | RETIRED_EPOCH | Epoch when block was retired (for GC) |
 
 On free, adjacent `FREE` blocks are coalesced to reduce fragmentation. Since `SLAB_SIZES[6]=1`, the block index directly equals the byte offset in the data region.
 

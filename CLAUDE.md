@@ -21,9 +21,6 @@ Clojure data structure via memory-mapped files on disk.
 These must pass before any code change.
 
 ```bash
-# From the eve/ directory:
-cd eve
-
 # Build native addon (only if mmap_cas.cc changes)
 npm run build:addon
 
@@ -90,14 +87,21 @@ capacity-mirror array, WASM scratch region, or `BD_ARRAY_START = 6168` constant.
 
 The cross-process atom files are: `.slab0`–`.slab5`, `.root`, `.rmap`.
 
-### 2. Flat serialization is forbidden in `atom.cljc`
+### 2. Flat serialization functions are forbidden in `atom.cljc`
 
-`atom.cljc` must not use `serialize-flat-element`, `value->eve-bytes`,
-`eve-bytes->value`, or flat tags `0xED` / `0xEE` / `0xEF`.
+`atom.cljc` must not use `serialize-flat-element` or `value->eve-bytes`.
 
-### 3. SAB pointer tags (0x10–0x13) are SAB-only
+Note: `0xED` and `0xEE` are also the HAMT type-id headers for EveHashMap and
+EveHashSet respectively — their use as type-id headers in `jvm-read-root-value`
+is correct. The prohibition is specifically on flat *serialization* functions,
+not on the HAMT type-id constants.
 
-Tags `0x10`–`0x13` must never appear in cross-process atom serialization.
+### 3. SAB pointer tags (0x10–0x13) encoding
+
+Tags `0x10`–`0x13` encode nested collection slab-qualified offsets. In
+cross-process atom serialization, these tags point into mmap-backed slabs.
+In SAB atoms, they point into SharedArrayBuffer-backed slabs. The tag
+format is shared; only the backing store differs.
 
 ---
 
@@ -128,7 +132,8 @@ npx shadow-cljs compile eve-test
 # Run specific test suite
 node target/eve-test/all.js <suite>
 # Suites: all, core, slab, epoch-gc, obj, int-map, rb-tree, batch2, batch3,
-#         batch4, typed-array, mem, mmap, mmap-slab, mmap-atom, mmap-atom-e2e
+#         batch4, typed-array, array, mem, mmap, mmap-slab, mmap-atom,
+#         mmap-atom-e2e, mmap-domain, large-scale, deftype, validation
 
 # Build native addon
 npm run build:addon
@@ -155,14 +160,22 @@ clojure -M:jvm-test 2>&1 | tee /tmp/jvm-test.txt
 | `eve.alpha` | `src/eve/alpha.cljs` + `.clj` | Public API entry point |
 | `eve.atom` | `src/eve/atom.cljc` | Cross-process mmap atom |
 | `eve.mem` | `src/eve/mem.cljc` | IMemRegion protocol |
+| `eve.hamt-util` | `src/eve/hamt_util.cljc` | Shared HAMT bitwise helpers + portable hash |
 | `eve.deftype-proto.alloc` | `src/eve/deftype_proto/alloc.cljc` | Slab allocator |
 | `eve.deftype-proto.data` | `src/eve/deftype_proto/data.cljc` | Slab constants |
 | `eve.deftype-proto.serialize` | `src/eve/deftype_proto/serialize.cljc` | Serializer |
+| `eve.deftype-proto.coalesc` | `src/eve/deftype_proto/coalesc.cljc` | Coalescing overflow allocator |
 | `eve.map` | `src/eve/map.cljc` | Eve HAMT map |
 | `eve.vec` | `src/eve/vec.cljc` | Eve persistent vector |
 | `eve.set` | `src/eve/set.cljc` | Eve persistent set |
 | `eve.list` | `src/eve/list.cljc` | Eve persistent list |
-| `eve.shared-atom` | `src/eve/shared_atom.cljs` | SAB-backed atom |
+| `eve.array` | `src/eve/array.cljc` | Typed array API |
+| `eve.obj` | `src/eve/obj.cljc` | Typed shared objects (AoS/SoA) |
+| `eve.shared-atom` | `src/eve/shared_atom.cljs` | SAB-backed atom (CLJS) |
+| `eve.deftype` | `src/eve/deftype.cljs` + `.clj` | deftype macro |
+| `eve.deftype.int-map` | `src/eve/deftype/int_map.cljs` | Integer map (CLJS) |
+| `eve.deftype.rb-tree` | `src/eve/deftype/rb_tree.cljs` | Sorted set (CLJS) |
+| `eve.perf` | `src/eve/perf.clj` | JVM profiling tools |
 
 ---
 

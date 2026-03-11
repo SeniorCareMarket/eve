@@ -43,8 +43,9 @@ clojure -M:jvm-test
 
 # Available suites:
 #   all, core, slab, epoch-gc, obj, int-map, rb-tree,
-#   batch2, batch3, batch4, typed-array, mem, mmap,
-#   mmap-slab, mmap-atom, mmap-atom-e2e
+#   batch2, batch3, batch4, typed-array, array, mem, mmap,
+#   mmap-slab, mmap-atom, mmap-atom-e2e, mmap-domain,
+#   large-scale, deftype, validation
 ```
 
 ### Building the Native Addon
@@ -67,12 +68,16 @@ src/eve/
 ├── set.cljc             # Eve persistent set
 ├── list.cljc            # Eve persistent list
 ├── shared_atom.cljs     # SAB-backed atom
-├── obj.cljs             # Typed shared objects
+├── obj.cljc             # Typed shared objects
 ├── deftype_proto/
 │   ├── alloc.cljc       # Slab allocator
 │   ├── data.cljc        # Slab constants
 │   ├── serialize.cljc   # Serializer
+│   ├── coalesc.cljc     # Coalescing overflow allocator
 │   └── ...
+├── array.cljc           # Typed arrays
+├── hamt_util.cljc       # Shared HAMT bitwise helpers
+├── perf.clj             # JVM profiling tools
 └── deftype/
     ├── int_map.cljs     # Integer map (PATRICIA trie)
     └── rb_tree.cljs     # Red-black tree
