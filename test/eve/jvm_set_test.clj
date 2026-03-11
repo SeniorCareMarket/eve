@@ -167,3 +167,62 @@
           (is (= i (get s i)) (str "get should return " i)))
         (is (not (contains? s 999)))
         (is (nil? (get s 999)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 2c: Native conj / disjoin tests
+;; ---------------------------------------------------------------------------
+
+(deftest conj-returns-eve-hash-set
+  (testing "conj returns EveHashSet, not PersistentHashSet"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{1 2 3})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (conj s 4)]
+        (is (instance? eve.set.EveHashSet s2))
+        (is (= #{1 2 3 4} (set s2)))
+        (is (= 4 (count s2)))))))
+
+(deftest conj-existing-element
+  (testing "conj-ing existing element returns same set"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{:a :b})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (conj s :a)]
+        (is (identical? s s2))))))
+
+(deftest disjoin-returns-eve-hash-set
+  (testing "disjoin returns EveHashSet, not PersistentHashSet"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{:x :y :z})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (disj s :y)]
+        (is (instance? eve.set.EveHashSet s2))
+        (is (= #{:x :z} (set s2)))
+        (is (= 2 (count s2)))))))
+
+(deftest disjoin-missing-element
+  (testing "disjoin on missing element returns same set"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{1 2})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (disj s 999)]
+        (is (identical? s s2))))))
+
+(deftest conj-disjoin-roundtrip
+  (testing "add elements then remove some, verify membership"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
+            s2  (reduce conj s (range 50))
+            s3  (reduce disj s2 (range 0 50 2))]  ;; remove evens
+        (is (instance? eve.set.EveHashSet s3))
+        (is (= 25 (count s3)))
+        (doseq [i (range 1 50 2)]
+          (is (contains? s3 i) (str "should contain odd " i)))
+        (doseq [i (range 0 50 2)]
+          (is (not (contains? s3 i)) (str "should not contain even " i)))))))

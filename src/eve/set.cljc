@@ -1597,6 +1597,284 @@
          hdr-off))
 
      ;; -----------------------------------------------------------------------
+     ;; JVM set HAMT read helpers
+     ;; -----------------------------------------------------------------------
+
+     (defn- jvm-set-read-children [sio node-off cc]
+       (mapv #(-sio-read-i32 sio node-off (+ NODE_HEADER_SIZE (* % 4))) (range cc)))
+
+     (defn- jvm-set-read-values
+       "Read all value byte-arrays from a set bitmap node's inline data entries."
+       [sio node-off data-bm node-bm]
+       (let [dc      (popcount32 data-bm)
+             nc      (popcount32 node-bm)
+             vals-off (+ NODE_HEADER_SIZE (* 4 nc))]
+         (loop [i 0 pos vals-off acc (transient [])]
+           (if (>= i dc)
+             (persistent! acc)
+             (let [vl (-sio-read-i32 sio node-off pos)
+                   vb (-sio-read-bytes sio node-off (+ pos 4) vl)]
+               (recur (inc i) (+ pos 4 vl) (conj! acc vb)))))))
+
+     (defn- jvm-set-write-bitmap-node!
+       "Allocate and write a set bitmap node. Returns slab offset.
+        Unlike map, set nodes have no hash array — just children + values."
+       [sio data-bm node-bm children values]
+       (let [cc       (count children)
+             dc       (count values)
+             val-size (reduce (fn [a ^bytes vb] (+ a 4 (alength vb))) 0 values)
+             off      (-sio-alloc! sio (+ NODE_HEADER_SIZE (* 4 cc) val-size))]
+         (-sio-write-u8!  sio off 0 NODE_TYPE_BITMAP)
+         (-sio-write-u8!  sio off 1 0)
+         (-sio-write-u16! sio off 2 0)
+         (-sio-write-i32! sio off 4 data-bm)
+         (-sio-write-i32! sio off 8 node-bm)
+         (dotimes [i cc]
+           (-sio-write-i32! sio off (+ NODE_HEADER_SIZE (* i 4)) (nth children i)))
+         (reduce (fn [pos ^bytes vb]
+                   (let [vlen (alength vb)]
+                     (-sio-write-i32! sio off pos vlen)
+                     (when (pos? vlen)
+                       (-sio-write-bytes! sio off (+ pos 4) vb))
+                     (+ pos 4 vlen)))
+                 (+ NODE_HEADER_SIZE (* cc 4)) values)
+         off))
+
+     (defn- jvm-set-write-collision-node!
+       "Allocate and write a set collision node from value byte-arrays.
+        All entries must share the same hash eh. Returns slab offset."
+       [sio eh values]
+       (let [cnt      (count values)
+             val-size (reduce (fn [a ^bytes vb] (+ a 4 (alength vb))) 0 values)
+             off      (-sio-alloc! sio (+ NODE_HEADER_SIZE val-size))]
+         (-sio-write-u8!  sio off 0 NODE_TYPE_COLLISION)
+         (-sio-write-u8!  sio off 1 cnt)
+         (-sio-write-i32! sio off 2 eh)
+         (-sio-write-i32! sio off 8 0) ;; unused
+         (reduce (fn [pos ^bytes vb]
+                   (let [vlen (alength vb)]
+                     (-sio-write-i32! sio off pos vlen)
+                     (when (pos? vlen)
+                       (-sio-write-bytes! sio off (+ pos 4) vb))
+                     (+ pos 4 vlen)))
+                 NODE_HEADER_SIZE values)
+         off))
+
+     (defn- jvm-set-read-collision-values
+       "Read all value byte-arrays from a set collision node."
+       [sio node-off cnt]
+       (loop [i 0 pos NODE_HEADER_SIZE acc (transient [])]
+         (if (>= i cnt)
+           (persistent! acc)
+           (let [vl (-sio-read-i32 sio node-off pos)
+                 vb (-sio-read-bytes sio node-off (+ pos 4) vl)]
+             (recur (inc i) (+ pos 4 vl) (conj! acc vb))))))
+
+     ;; -----------------------------------------------------------------------
+     ;; JVM set HAMT path-copy conj
+     ;; -----------------------------------------------------------------------
+
+     (defn- jvm-set-hamt-conj
+       "Path-copy conj into set HAMT. Returns [new-root-off added?].
+        added? is true if elem was new, false if already present."
+       [sio root-off eh ^bytes eb shift]
+       (if (== root-off NIL_OFFSET)
+         [(jvm-set-write-bitmap-node! sio (bitpos eh shift) 0 [] [eb]) true]
+         (let [nt (int (-sio-read-u8 sio root-off 0))]
+           (case nt
+             ;; Bitmap node
+             1 (let [dbm (-sio-read-i32 sio root-off 4)
+                     nbm (-sio-read-i32 sio root-off 8)
+                     bit (bitpos eh shift)
+                     cc  (popcount32 nbm)
+                     dc  (popcount32 dbm)]
+                 (cond
+                   ;; Child node — recurse
+                   (has-bit? nbm bit)
+                   (let [ci  (get-index nbm bit)
+                         co  (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))
+                         [nc added?] (jvm-set-hamt-conj sio co eh eb (+ shift SHIFT_STEP))]
+                     (if (== nc co)
+                       [root-off false]
+                       (let [ch (assoc (jvm-set-read-children sio root-off cc) ci nc)]
+                         [(jvm-set-write-bitmap-node! sio dbm nbm ch
+                            (jvm-set-read-values sio root-off dbm nbm)) added?])))
+
+                   ;; Inline data — check value match
+                   (has-bit? dbm bit)
+                   (let [di   (get-index dbm bit)
+                         vals (jvm-set-read-values sio root-off dbm nbm)
+                         ^bytes evb (nth vals di)]
+                     (if (java.util.Arrays/equals evb eb)
+                       [root-off false] ;; already present
+                       ;; Different value — push down or create collision
+                       (let [evh (portable-hash-bytes evb)]
+                         (if (== evh (unchecked-int eh))
+                           ;; Same hash → collision node as child
+                           (let [coll (jvm-set-write-collision-node! sio eh [evb eb])
+                                 ndbm (bit-xor dbm bit)
+                                 nnbm (bit-or nbm bit)
+                                 nci  (get-index nnbm bit)
+                                 och  (jvm-set-read-children sio root-off cc)
+                                 nch  (vec (concat (subvec och 0 nci) [coll] (subvec och nci)))
+                                 nvals (vec (concat (subvec vals 0 di) (subvec vals (inc di))))]
+                             [(jvm-set-write-bitmap-node! sio ndbm nnbm nch nvals) true])
+                           ;; Different hash — push down
+                           (let [ss   (+ shift SHIFT_STEP)
+                                 ebit (bitpos evh ss)
+                                 nbit (bitpos eh ss)
+                                 sub  (if (== ebit nbit)
+                                        (let [[s _] (jvm-set-hamt-conj sio NIL_OFFSET evh evb ss)]
+                                          (first (jvm-set-hamt-conj sio s eh eb ss)))
+                                        (let [sdbm (bit-or ebit nbit)
+                                              [v1 v2] (if (< (Integer/toUnsignedLong (unchecked-int ebit))
+                                                             (Integer/toUnsignedLong (unchecked-int nbit)))
+                                                        [evb eb] [eb evb])]
+                                          (jvm-set-write-bitmap-node! sio sdbm 0 [] [v1 v2])))
+                                 ndbm (bit-xor dbm bit)
+                                 nnbm (bit-or nbm bit)
+                                 nci  (get-index nnbm bit)
+                                 och  (jvm-set-read-children sio root-off cc)
+                                 nch  (vec (concat (subvec och 0 nci) [sub] (subvec och nci)))
+                                 nvals (vec (concat (subvec vals 0 di) (subvec vals (inc di))))]
+                             [(jvm-set-write-bitmap-node! sio ndbm nnbm nch nvals) true])))))
+
+                   ;; Empty slot — add inline data
+                   :else
+                   (let [di    (get-index dbm bit)
+                         ndbm  (bit-or dbm bit)
+                         vals  (jvm-set-read-values sio root-off dbm nbm)
+                         nvals (vec (concat (subvec vals 0 di) [eb] (subvec vals di)))]
+                     [(jvm-set-write-bitmap-node! sio ndbm nbm
+                        (jvm-set-read-children sio root-off cc) nvals) true])))
+
+             ;; Collision node
+             2 (let [cc  (-sio-read-u8 sio root-off 1)
+                     vs  (jvm-set-read-collision-values sio root-off cc)
+                     idx (reduce (fn [_ i]
+                                   (let [^bytes evb (nth vs i)]
+                                     (if (java.util.Arrays/equals evb eb)
+                                       (reduced i) _)))
+                                 nil (range cc))]
+                 (if idx
+                   [root-off false] ;; already present
+                   [(jvm-set-write-collision-node! sio (unchecked-int eh) (conj vs eb)) true]))
+
+             ;; Unknown
+             [root-off false]))))
+
+     ;; -----------------------------------------------------------------------
+     ;; JVM set HAMT path-copy disjoin
+     ;; -----------------------------------------------------------------------
+
+     (defn- jvm-set-hamt-disjoin
+       "Path-copy disjoin from set HAMT. Returns new-root-off.
+        If elem not found, returns root-off unchanged."
+       [sio root-off eh ^bytes eb shift]
+       (if (== root-off NIL_OFFSET)
+         root-off
+         (let [nt (int (-sio-read-u8 sio root-off 0))]
+           (case nt
+             ;; Bitmap node
+             1 (let [dbm (-sio-read-i32 sio root-off 4)
+                     nbm (-sio-read-i32 sio root-off 8)
+                     bit (bitpos eh shift)
+                     cc  (popcount32 nbm)
+                     dc  (popcount32 dbm)]
+                 (cond
+                   ;; Child node — recurse
+                   (has-bit? nbm bit)
+                   (let [ci    (get-index nbm bit)
+                         co    (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))
+                         new-c (jvm-set-hamt-disjoin sio co eh eb (+ shift SHIFT_STEP))]
+                     (if (== new-c co)
+                       root-off
+                       (if (== new-c NIL_OFFSET)
+                         ;; Child empty
+                         (let [nnbm (bit-xor nbm bit)]
+                           (if (and (zero? nnbm) (zero? dbm))
+                             NIL_OFFSET
+                             (let [och (jvm-set-read-children sio root-off cc)
+                                   nch (vec (concat (subvec och 0 ci) (subvec och (inc ci))))]
+                               (jvm-set-write-bitmap-node! sio dbm nnbm nch
+                                 (jvm-set-read-values sio root-off dbm nbm)))))
+                         ;; Check if child is single-entry bitmap → promote inline
+                         (let [cnt2 (-sio-read-u8 sio new-c 0)]
+                           (if (== (int cnt2) (int NODE_TYPE_BITMAP))
+                             (let [cdbm (-sio-read-i32 sio new-c 4)
+                                   cnbm (-sio-read-i32 sio new-c 8)]
+                               (if (and (zero? cnbm) (== 1 (popcount32 cdbm)))
+                                 ;; Promote single inline entry
+                                 (let [cvals (jvm-set-read-values sio new-c cdbm cnbm)
+                                       nnbm  (bit-xor nbm bit)
+                                       ndbm  (bit-or dbm bit)
+                                       di    (get-index ndbm bit)
+                                       och   (jvm-set-read-children sio root-off cc)
+                                       nch   (vec (concat (subvec och 0 ci) (subvec och (inc ci))))
+                                       ovals (jvm-set-read-values sio root-off dbm nbm)
+                                       nvals (vec (concat (subvec ovals 0 di) cvals (subvec ovals di)))]
+                                   (jvm-set-write-bitmap-node! sio ndbm nnbm nch nvals))
+                                 ;; Child has multiple entries — update pointer
+                                 (let [och (jvm-set-read-children sio root-off cc)
+                                       nch (assoc och ci new-c)]
+                                   (jvm-set-write-bitmap-node! sio dbm nbm nch
+                                     (jvm-set-read-values sio root-off dbm nbm)))))
+                             ;; Collision child — update pointer
+                             (let [och (jvm-set-read-children sio root-off cc)
+                                   nch (assoc och ci new-c)]
+                               (jvm-set-write-bitmap-node! sio dbm nbm nch
+                                 (jvm-set-read-values sio root-off dbm nbm))))))))
+
+                   ;; Inline data
+                   (has-bit? dbm bit)
+                   (let [di   (get-index dbm bit)
+                         vals (jvm-set-read-values sio root-off dbm nbm)
+                         ^bytes evb (nth vals di)]
+                     (if (java.util.Arrays/equals evb eb)
+                       ;; Found — remove
+                       (let [ndbm (bit-xor dbm bit)]
+                         (if (and (zero? ndbm) (zero? nbm))
+                           NIL_OFFSET
+                           (let [nvals (vec (concat (subvec vals 0 di) (subvec vals (inc di))))]
+                             (jvm-set-write-bitmap-node! sio ndbm nbm
+                               (jvm-set-read-children sio root-off cc) nvals))))
+                       root-off))
+
+                   :else root-off))
+
+             ;; Collision node
+             2 (let [ch  (-sio-read-i32 sio root-off 2)
+                     cc  (-sio-read-u8 sio root-off 1)
+                     vs  (jvm-set-read-collision-values sio root-off cc)
+                     idx (reduce (fn [_ i]
+                                   (let [^bytes evb (nth vs i)]
+                                     (if (java.util.Arrays/equals evb eb)
+                                       (reduced i) _)))
+                                 nil (range cc))]
+                 (if (nil? idx)
+                   root-off
+                   (let [nvs (vec (concat (subvec vs 0 idx) (subvec vs (inc idx))))]
+                     (if (== 1 (count nvs))
+                       ;; Promote single entry to bitmap
+                       (let [^bytes rvb (first nvs)
+                             rvh (portable-hash-bytes rvb)]
+                         (jvm-set-write-bitmap-node! sio (bitpos rvh shift) 0 [] [rvb]))
+                       (jvm-set-write-collision-node! sio ch nvs)))))
+
+             root-off))))
+
+     (defn- jvm-set-write-header!
+       "Allocate and write an EveHashSet header block. Returns slab offset."
+       [sio cnt root-off]
+       (let [hdr-off (-sio-alloc! sio 12)]
+         (-sio-write-u8!  sio hdr-off 0 EveHashSet-type-id)
+         (-sio-write-u8!  sio hdr-off 1 SET_FLAG_PORTABLE_HASH)
+         (-sio-write-u16! sio hdr-off 2 0)
+         (-sio-write-i32! sio hdr-off SABSETROOT_CNT_OFFSET cnt)
+         (-sio-write-i32! sio hdr-off SABSETROOT_ROOT_OFF_OFFSET root-off)
+         hdr-off))
+
+     ;; -----------------------------------------------------------------------
      ;; JVM EveHashSet deftype — IPersistentSet backed by slab HAMT
      ;; -----------------------------------------------------------------------
 
@@ -1617,7 +1895,16 @@
 
        clojure.lang.IPersistentSet
        (disjoin [this elem]
-         (disj (into #{} this) elem))
+         (if jvm-hashed?
+           (let [^bytes eb (value+sio->eve-bytes sio elem)
+                 eh        (portable-hash-bytes eb)
+                 new-root  (jvm-set-hamt-disjoin sio root-off eh eb 0)]
+             (if (== new-root root-off)
+               this
+               (let [new-cnt (dec cnt)
+                     hdr (jvm-set-write-header! sio new-cnt new-root)]
+                 (EveHashSet. new-cnt new-root hdr true sio coll-factory nil))))
+           (disj (into #{} this) elem)))
        (contains [_ elem]
          (if jvm-hashed?
            (not (identical? ::absent
@@ -1646,7 +1933,16 @@
 
        clojure.lang.IPersistentCollection
        (cons [this elem]
-         (conj (into #{} this) elem))
+         (if jvm-hashed?
+           (let [^bytes eb (value+sio->eve-bytes sio elem)
+                 eh        (portable-hash-bytes eb)
+                 [new-root added?] (jvm-set-hamt-conj sio root-off eh eb 0)]
+             (if (== new-root root-off)
+               this
+               (let [new-cnt (if added? (inc cnt) cnt)
+                     hdr (jvm-set-write-header! sio new-cnt new-root)]
+                 (EveHashSet. new-cnt new-root hdr true sio coll-factory nil))))
+           (conj (into #{} this) elem)))
        (empty [_]
          (let [hdr-off (jvm-write-set! sio (partial value+sio->eve-bytes sio) #{})]
            (jvm-eve-hash-set-from-offset sio hdr-off)))
