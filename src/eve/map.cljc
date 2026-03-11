@@ -2466,11 +2466,12 @@
                      ;; Lazily concat child node seqs
                      child-seqs
                      (lazy-seq
-                       (apply concat
-                         (map (fn [ci]
-                                (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
-                                  (jvm-hamt-lazy-seq child-off)))
-                              (range node-bm-cnt))))]
+                       (binding [eve-alloc/*jvm-slab-ctx* sio]
+                         (apply concat
+                           (map (fn [ci]
+                                  (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
+                                    (jvm-hamt-lazy-seq child-off)))
+                                (range node-bm-cnt)))))]
                  (concat inline-entries child-seqs)))
 
              ;; Collision node
@@ -3273,17 +3274,22 @@
      (defn jvm-write-map!
        "Serialize a Clojure map to EVE HAMT structure in the slab.
         Returns the slab-qualified offset of the EveHashMap header block.
-        serialize-val: (fn [v] ^bytes) — called for each map value."
-       [serialize-val m]
-       (let [entries  (mapv (fn [[k v]]
-                              (let [^bytes kb (value->eve-bytes k)]
-                                [(portable-hash-bytes kb)
-                                 kb
-                                 ^bytes (serialize-val v)]))
-                            m)
-             root-off (jvm-hamt-build-entries! entries 0)
-             cnt      (count m)]
-         (jvm-write-map-header! cnt root-off)))
+        serialize-val: (fn [v] ^bytes) — called for each map value.
+        2-arity: uses *jvm-slab-ctx*.
+        3-arity: backward compat (binds sio as *jvm-slab-ctx*)."
+       ([serialize-val m]
+        (let [entries  (mapv (fn [[k v]]
+                               (let [^bytes kb (value->eve-bytes k)]
+                                 [(portable-hash-bytes kb)
+                                  kb
+                                  ^bytes (serialize-val v)]))
+                             m)
+              root-off (jvm-hamt-build-entries! entries 0)
+              cnt      (count m)]
+          (jvm-write-map-header! cnt root-off)))
+       ([sio serialize-val m]
+        (binding [eve-alloc/*jvm-slab-ctx* sio]
+          (jvm-write-map! serialize-val m))))
 
      ;; -----------------------------------------------------------------------
      ;; JVM EveHashMap deftype — IPersistentMap backed by slab HAMT
@@ -3295,6 +3301,7 @@
        [^long cnt        ;; entry count
         ^long root-off   ;; slab-qualified offset to root HAMT node
         ^long header-off ;; slab-qualified offset to EveHashMap header block
+        sio              ;; captured JvmSlabCtx (from *jvm-slab-ctx* at construction)
         _meta]           ;; IPersistentMap metadata (IObj)
 
        clojure.lang.IMeta
@@ -3302,70 +3309,77 @@
 
        clojure.lang.IObj
        (withMeta [_ new-meta]
-         (EveHashMap. cnt root-off header-off new-meta))
+         (EveHashMap. cnt root-off header-off sio new-meta))
 
        clojure.lang.MapEquivalence
 
        clojure.lang.ILookup
        (valAt [_ k]
-         (jvm-hamt-get root-off k nil))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (jvm-hamt-get root-off k nil)))
        (valAt [_ k not-found]
-         (jvm-hamt-get root-off k not-found))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (jvm-hamt-get root-off k not-found)))
 
        clojure.lang.IPersistentMap
        (containsKey [_ k]
-         (not (identical? (jvm-hamt-get root-off k ::absent) ::absent)))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (not (identical? (jvm-hamt-get root-off k ::absent) ::absent))))
        (entryAt [_ k]
-         (let [v (jvm-hamt-get root-off k ::absent)]
-           (when-not (identical? v ::absent)
-             (clojure.lang.MapEntry/create k v))))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (let [v (jvm-hamt-get root-off k ::absent)]
+             (when-not (identical? v ::absent)
+               (clojure.lang.MapEntry/create k v)))))
        (assoc [this k v]
-         (let [sio eve-alloc/*jvm-slab-ctx*
-               ^bytes kb (perf/timed :serialize-key (value->eve-bytes k))
-               kh (portable-hash-bytes kb)
-               ^bytes vb (perf/timed :serialize-val (value+sio->eve-bytes v))
-               result (perf/timed :hamt-assoc (jvm-hamt-assoc! root-off kh kb vb 0))]
-           (if result
-             (let [[new-root added?] result]
-               (if (== new-root root-off)
-                 this
-                 (let [new-cnt (if added? (inc cnt) cnt)
-                       hdr (perf/timed :write-map-header (jvm-write-map-header! new-cnt new-root))]
-                   (EveHashMap. new-cnt new-root hdr nil))))
-             ;; Collision node encountered — handle natively
-             (let [result2 (perf/timed :hamt-assoc-collision (jvm-hamt-assoc-with-collision! root-off kh kb vb 0))]
-               (let [[new-root added?] result2]
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (let [^bytes kb (perf/timed :serialize-key (value->eve-bytes k))
+                 kh (portable-hash-bytes kb)
+                 ^bytes vb (perf/timed :serialize-val (value+sio->eve-bytes v))
+                 result (perf/timed :hamt-assoc (jvm-hamt-assoc! root-off kh kb vb 0))]
+             (if result
+               (let [[new-root added?] result]
                  (if (== new-root root-off)
                    this
                    (let [new-cnt (if added? (inc cnt) cnt)
                          hdr (perf/timed :write-map-header (jvm-write-map-header! new-cnt new-root))]
-                     (EveHashMap. new-cnt new-root hdr nil))))))))
+                     (EveHashMap. new-cnt new-root hdr sio nil))))
+               ;; Collision node encountered — handle natively
+               (let [result2 (perf/timed :hamt-assoc-collision (jvm-hamt-assoc-with-collision! root-off kh kb vb 0))]
+                 (let [[new-root added?] result2]
+                   (if (== new-root root-off)
+                     this
+                     (let [new-cnt (if added? (inc cnt) cnt)
+                           hdr (perf/timed :write-map-header (jvm-write-map-header! new-cnt new-root))]
+                       (EveHashMap. new-cnt new-root hdr sio nil)))))))))
        (assocEx [this k v]
          (if (.containsKey this k)
            (throw (RuntimeException. (str "Key already present: " k)))
            (.assoc this k v)))
        (without [this k]
-         (let [^bytes kb (value->eve-bytes k)
-               kh        (portable-hash-bytes kb)
-               new-root  (jvm-hamt-dissoc root-off kh kb 0)]
-           (if (== new-root root-off)
-             this
-             (let [new-cnt (dec cnt)
-                   hdr (jvm-write-map-header! new-cnt new-root)]
-               (EveHashMap. new-cnt new-root hdr nil)))))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (let [^bytes kb (value->eve-bytes k)
+                 kh        (portable-hash-bytes kb)
+                 new-root  (jvm-hamt-dissoc root-off kh kb 0)]
+             (if (== new-root root-off)
+               this
+               (let [new-cnt (dec cnt)
+                     hdr (jvm-write-map-header! new-cnt new-root)]
+                 (EveHashMap. new-cnt new-root hdr sio nil))))))
 
        clojure.lang.Counted
        (count [_] (int cnt))
 
        clojure.lang.Seqable
        (seq [_]
-         (when (pos? cnt)
-           (jvm-hamt-lazy-seq root-off)))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (when (pos? cnt)
+             (jvm-hamt-lazy-seq root-off))))
 
        clojure.lang.IPersistentCollection
        (empty [_]
-         (let [hdr-off (jvm-write-map! value+sio->eve-bytes {})]
-           (jvm-eve-hash-map-from-offset hdr-off)))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (let [hdr-off (jvm-write-map! value+sio->eve-bytes {})]
+             (jvm-eve-hash-map-from-offset hdr-off))))
        (cons [this o]
          (if (map? o)
            (reduce-kv (fn [m k v] (.assoc ^EveHashMap m k v)) this o)
@@ -3376,13 +3390,15 @@
 
        clojure.lang.IKVReduce
        (kvreduce [_ f init]
-         (jvm-hamt-kv-reduce root-off f init))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (jvm-hamt-kv-reduce root-off f init)))
 
        clojure.lang.IReduceInit
        (reduce [_ f init]
-         (jvm-hamt-kv-reduce root-off
-           (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
-           init))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (jvm-hamt-kv-reduce root-off
+             (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
+             init)))
 
        clojure.lang.IReduce
        (reduce [this f]
@@ -3415,8 +3431,9 @@
          (clojure.lang.Murmur3/hashUnordered this))
 
        clojure.lang.IEditableCollection
-       (asTransient [this]
-         (jvm-make-transient-map root-off cnt))
+       (asTransient [_]
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (jvm-make-transient-map root-off cnt sio)))
 
        d/IEveRoot
        (-root-header-off [_] header-off)
@@ -3432,6 +3449,7 @@
      (deftype TransientEveHashMap
        [^:unsynchronized-mutable ^long root-off
         ^:unsynchronized-mutable ^long cnt
+        sio
         ^:volatile-mutable edit]
 
        clojure.lang.Counted
@@ -3443,37 +3461,41 @@
        (valAt [this k] (.valAt this k nil))
        (valAt [_ k not-found]
          (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (jvm-hamt-get root-off k not-found))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (jvm-hamt-get root-off k not-found)))
 
        clojure.lang.ITransientMap
        (assoc [this k v]
          (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (let [^bytes kb (value->eve-bytes k)
-               kh (portable-hash-bytes kb)
-               ^bytes vb (value+sio->eve-bytes v)
-               result (jvm-hamt-assoc! root-off kh kb vb 0)]
-           (if result
-             (let [[new-root added?] result]
-               (set! root-off (long new-root))
-               (when added? (set! cnt (long (inc cnt)))))
-             (let [[new-root added?] (jvm-hamt-assoc-with-collision! root-off kh kb vb 0)]
-               (set! root-off (long new-root))
-               (when added? (set! cnt (long (inc cnt))))))
-           this))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (let [^bytes kb (value->eve-bytes k)
+                 kh (portable-hash-bytes kb)
+                 ^bytes vb (value+sio->eve-bytes v)
+                 result (jvm-hamt-assoc! root-off kh kb vb 0)]
+             (if result
+               (let [[new-root added?] result]
+                 (set! root-off (long new-root))
+                 (when added? (set! cnt (long (inc cnt)))))
+               (let [[new-root added?] (jvm-hamt-assoc-with-collision! root-off kh kb vb 0)]
+                 (set! root-off (long new-root))
+                 (when added? (set! cnt (long (inc cnt))))))
+             this)))
        (without [this k]
          (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (let [^bytes kb (value->eve-bytes k)
-               kh        (portable-hash-bytes kb)
-               new-root  (jvm-hamt-dissoc root-off kh kb 0)]
-           (when-not (== new-root root-off)
-             (set! root-off (long new-root))
-             (set! cnt (long (dec cnt))))
-           this))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (let [^bytes kb (value->eve-bytes k)
+                 kh        (portable-hash-bytes kb)
+                 new-root  (jvm-hamt-dissoc root-off kh kb 0)]
+             (when-not (== new-root root-off)
+               (set! root-off (long new-root))
+               (set! cnt (long (dec cnt))))
+             this)))
        (persistent [this]
          (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
          (set! edit nil)
-         (let [hdr (jvm-write-map-header! cnt root-off)]
-           (EveHashMap. cnt root-off hdr nil)))
+         (binding [eve-alloc/*jvm-slab-ctx* sio]
+           (let [hdr (jvm-write-map-header! cnt root-off)]
+             (EveHashMap. cnt root-off hdr sio nil))))
 
        clojure.lang.ITransientAssociative
 
@@ -3486,8 +3508,8 @@
              (.assoc this (nth o 0) (nth o 1))
              (reduce conj this o)))))
 
-     (defn- jvm-make-transient-map [root-off cnt]
-       (TransientEveHashMap. root-off cnt (Object.)))
+     (defn- jvm-make-transient-map [root-off cnt sio]
+       (TransientEveHashMap. root-off cnt sio (Object.)))
 
      ;; -----------------------------------------------------------------------
      ;; JVM EveHashMap factory
@@ -3496,12 +3518,16 @@
      (defn jvm-eve-hash-map-from-offset
        "Construct a JVM EveHashMap from a slab-qualified header-off.
         Reads cnt and root-off from the header block.
-        Uses eve-alloc/*jvm-slab-ctx* for slab access."
-       [header-off]
-       (let [sio      eve-alloc/*jvm-slab-ctx*
-             cnt      (-sio-read-i32 sio header-off SABMAPROOT_CNT_OFFSET)
-             root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
-         (EveHashMap. cnt root-off header-off nil)))
+        1-arity: uses eve-alloc/*jvm-slab-ctx*.
+        2/3-arity: backward compat (sio explicit, coll-factory ignored)."
+       ([header-off]
+        (jvm-eve-hash-map-from-offset eve-alloc/*jvm-slab-ctx* header-off))
+       ([sio header-off]
+        (jvm-eve-hash-map-from-offset sio header-off nil))
+       ([sio header-off _coll-factory]
+        (let [cnt      (-sio-read-i32 sio header-off SABMAPROOT_CNT_OFFSET)
+              root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
+          (EveHashMap. cnt root-off header-off sio nil))))
 
      (defmethod print-method EveHashMap [m ^java.io.Writer w]
        (#'clojure.core/print-map m print-method w))
