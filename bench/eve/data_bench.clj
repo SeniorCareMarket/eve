@@ -167,8 +167,11 @@
     (println "Usage: clj -M:native-data-bench <base-path> [target-mb]")
     (System/exit 1))
   (let [base-path    (first args)
-        n-users      500
-        n-orders     1000]
+        target-mb    (if (second args) (Double/parseDouble (second args)) 6.0)
+        ;; 500 users + 1000 orders ≈ 5.9 MB on disk
+        scale        (/ target-mb 6.0)
+        n-users      (max 10 (int (* 500 scale)))
+        n-orders     (max 20 (int (* 1000 scale)))]
     (cleanup! base-path)
 
     (println)
