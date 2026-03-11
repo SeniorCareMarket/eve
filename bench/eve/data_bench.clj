@@ -16,6 +16,7 @@
      4. Summary table"
   (:require [eve.atom :as atom]
             [eve.perf :as perf]
+            [eve.deftype-proto.data :as d]
             [clojure.edn :as edn]
             [clojure.string :as str])
   (:import [java.io File]))
@@ -204,26 +205,29 @@
           (assert (= (count (:users eve-val)) n-users) "Eve user count mismatch"))
 
         ;; ══════════════════════════════════════════════════════════════
-        ;; DIAGNOSTIC: Profiled swap analysis
+        ;; DIAGNOSTIC: IEveRoot check + profiled swap
         ;; ══════════════════════════════════════════════════════════════
-        (section "DIAGNOSTIC: Profiled Eve swaps (10 ops)")
+        (section "DIAGNOSTIC: IEveRoot + profiled swap")
+
+        (let [eve-val @eve-a
+              users-val (:users eve-val)]
+          (printf "  Root value type: %s\n" (type eve-val))
+          (printf "  IEveRoot? root:  %s\n" (satisfies? d/IEveRoot eve-val))
+          (printf "  IEveRoot? users: %s\n" (satisfies? d/IEveRoot users-val))
+          (flush))
 
         (perf/enable!)
-        (dotimes [i 10]
+        (dotimes [i 5]
           (let [t0 (System/nanoTime)]
             (swap! eve-a assoc-in [:users :new-user] (user-record 9999))
             (let [ms (/ (- (System/nanoTime) t0) 1e6)]
               (printf "  swap %d: %.1f ms\n" i ms)
               (flush))))
-
-        (println)
-        (println "  Perf breakdown (10 swaps):")
+        (println "  Perf breakdown (5 swaps):")
         (perf/report)
         (perf/disable!)
-
-        (println)
-        (println "  Disk after 10 swaps:")
-        (printf "    %.1f MB\n" (/ (double (total-disk-bytes base-path)) (* 1024 1024)))
+        (printf "  Disk after 5 swaps: %.1f MB\n"
+                (/ (double (total-disk-bytes base-path)) (* 1024 1024)))
         (flush)
 
         ;; ══════════════════════════════════════════════════════════════
@@ -362,12 +366,12 @@
           #(swap! clj-a update :users
                   (fn [users]
                     (reduce (fn [m i]
-                              (update-in m [(keyword (str "u" i)) :profile :prefs :font-size] inc))
+                              (update-in m [(keyword (str "u" i)) :profile :prefs :font-size] (fnil inc 0)))
                             users (range 50))))
           #(swap! eve-a update :users
                   (fn [users]
                     (reduce (fn [m i]
-                              (update-in m [(keyword (str "u" i)) :profile :prefs :font-size] inc))
+                              (update-in m [(keyword (str "u" i)) :profile :prefs :font-size] (fnil inc 0)))
                             users (range 50)))))
 
         ;; 23. Build new structure from existing: users → sorted-by-score leaderboard
@@ -386,9 +390,9 @@
         ;; 24. Swap with full rewrite of nested structure
         (bench-pair "xform/rewrite-nested-matrix" 100
           #(swap! clj-a update-in [:users :u0 :matrix]
-                  (fn [mx] (mapv (fn [row] (mapv (fn [x] (* x 2)) row)) mx)))
+                  (fn [mx] (mapv (fn [row] (mapv (fn [x] (mod (+ x 1) 1000)) row)) mx)))
           #(swap! eve-a update-in [:users :u0 :matrix]
-                  (fn [mx] (mapv (fn [row] (mapv (fn [x] (* x 2)) row)) mx))))
+                  (fn [mx] (mapv (fn [row] (mapv (fn [x] (mod (+ x 1) 1000)) row)) mx))))
 
         ;; ══════════════════════════════════════════════════════════════
         ;; Phase 3: Bulk operation benchmarks

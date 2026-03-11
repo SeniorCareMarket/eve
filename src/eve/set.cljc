@@ -2020,6 +2020,9 @@
        (asTransient [_]
          (jvm-make-transient-set root-off cnt sio coll-factory))
 
+       d/IEveRoot
+       (-root-header-off [_] header-off)
+
        java.lang.Object
        (toString [this] (pr-str this))
        (equals [this other] (clojure.lang.APersistentSet/setEquals this other))
