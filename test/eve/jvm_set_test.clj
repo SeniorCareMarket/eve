@@ -241,3 +241,24 @@
         (is (= :b (s :b)))
         (is (nil? (s :missing)))
         (is (= :nf (s :missing :nf)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 4: IHashEq + print-method tests
+;; ---------------------------------------------------------------------------
+
+(deftest set-hasheq
+  (testing "hash of EveHashSet equals hash of equivalent Clojure set"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src #{:a :b :c}
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) src)
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= (hash src) (hash s)))))))
+
+(deftest set-print-method
+  (testing "pr-str prints as set literal"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-set/jvm-write-set! sio (partial mem/value+sio->eve-bytes sio) #{:x})
+            s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
+        (is (= "#{:x}" (pr-str s)))))))

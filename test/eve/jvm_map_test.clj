@@ -175,3 +175,24 @@
         (is (= 2 (m :b)))
         (is (nil? (m :c)))
         (is (= :default (m :c :default)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 4: IHashEq + print-method tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-hasheq
+  (testing "hash of EveHashMap equals hash of equivalent Clojure map"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= (hash src) (hash m)))))))
+
+(deftest map-print-method
+  (testing "pr-str prints as map literal"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) {:a 1})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= "{:a 1}" (pr-str m)))))))

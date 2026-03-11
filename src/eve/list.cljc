@@ -1149,7 +1149,11 @@
        java.lang.Object
        (toString [this] (str (sequence (.seq this))))
        (equals [this other] (= (.seq this) (seq other)))
-       (hashCode [this] (clojure.lang.Util/hasheq (.seq this))))
+       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (clojure.lang.Murmur3/hashOrdered this)))
 
      (defn jvm-sab-list-from-offset
        "Construct a JVM SabList from a slab-qualified header-off and ISlabIO context."
@@ -1157,6 +1161,9 @@
        (let [cnt      (-sio-read-i32 sio header-off SABLIST_CNT_OFFSET)
              head-off (-sio-read-i32 sio header-off SABLIST_HEAD_OFFSET)]
          (SabList. cnt head-off header-off sio)))
+
+     (defmethod print-method SabList [^SabList l ^java.io.Writer w]
+       (print-method (sequence (.seq l)) w))
 
      ;; Register the JVM list writer so mem/value+sio->eve-bytes can route to it
      (mem/register-jvm-collection-writer! :list jvm-write-list!)))

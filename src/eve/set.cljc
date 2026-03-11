@@ -1981,6 +1981,10 @@
        (clear [_] (throw (UnsupportedOperationException.)))
        (containsAll [this coll] (every? #(.contains this %) coll))
 
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (clojure.lang.Murmur3/hashUnordered this))
+
        java.lang.Object
        (toString [this] (str (set (.seq this))))
        (equals [this other] (clojure.lang.APersistentSet/setEquals this other))
@@ -1996,6 +2000,9 @@
               cnt      (-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
               root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
           (EveHashSet. cnt root-off header-off portable sio coll-factory nil))))
+
+     (defmethod print-method EveHashSet [^EveHashSet s ^java.io.Writer w]
+       (print-method (set (seq s)) w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)

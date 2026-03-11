@@ -1457,7 +1457,11 @@
                     (if (== i cnt) true
                       (if (.equals ^Object (.nth this i) (.nth ov i))
                         (recur (inc i)) false)))))))
-       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this)))
+       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (clojure.lang.Murmur3/hashOrdered this)))
 
      (defn jvm-sabvec-from-offset
        "Construct a JVM SabVecRoot from a slab-qualified header-off and ISlabIO context."
@@ -1469,6 +1473,9 @@
               tail     (-sio-read-i32 sio header-off SABVECROOT_TAIL_OFFSET)
               tail-len (-sio-read-i32 sio header-off SABVECROOT_TAIL_LEN_OFFSET)]
           (SabVecRoot. cnt shift root tail tail-len header-off sio coll-factory nil))))
+
+     (defmethod print-method SabVecRoot [^SabVecRoot v ^java.io.Writer w]
+       (print-method (vec (seq v)) w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)

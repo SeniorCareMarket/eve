@@ -3140,6 +3140,10 @@
        (values [this] (vals this))
        (entrySet [this] (set (.seq this)))
 
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (clojure.lang.Murmur3/hashUnordered this))
+
        java.lang.Object
        (toString [this]
          (str (into {} this)))
@@ -3162,6 +3166,9 @@
               root-off   (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)
               jvm-hash?  (== 1 (-sio-read-u8 sio header-off 1))]
           (EveHashMap. cnt root-off header-off sio coll-factory nil jvm-hash?))))
+
+     (defmethod print-method EveHashMap [^EveHashMap m ^java.io.Writer w]
+       (print-method (into {} m) w))
 
      ;; -----------------------------------------------------------------------
      ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)

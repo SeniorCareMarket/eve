@@ -184,3 +184,24 @@
         (is (= 20 (v 1)))
         (is (= 30 (v 2)))
         (is (= :nf (v 5 :nf)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 4: IHashEq + print-method tests
+;; ---------------------------------------------------------------------------
+
+(deftest vec-hasheq
+  (testing "hash of SabVecRoot equals hash of equivalent Clojure vector"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            src [1 2 3 4 5]
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) src)
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
+        (is (= (hash src) (hash v)))))))
+
+(deftest vec-print-method
+  (testing "pr-str prints as vector literal"
+    (with-heap-slab
+      (let [sio alloc/*jvm-slab-ctx*
+            hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [1 2 3])
+            v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
+        (is (= "[1 2 3]" (pr-str v)))))))
