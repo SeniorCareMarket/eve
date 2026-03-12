@@ -671,40 +671,14 @@
     #?(:cljs (.-offset__ this)
        :clj offset__))
 
-  ;; --- CLJ-only interfaces ---
+  ;; --- CLJ-only interfaces (no CLJS equivalent) ---
   #?@(:clj
       [clojure.lang.IPersistentSet
-       (disjoin [this v]
-         (let [^bytes vb (serialize-val-bytes v)
-               vh (portable-hash-bytes vb)
-               [new-root removed?] (hamt-disj sio root-off vh vb 0)]
-           (if-not removed?
-             this
-             (make-eve2-hash-set sio (dec cnt) new-root))))
+       ;; contains has no CLJS protocol equivalent
        (contains [_ v]
          (let [^bytes vb (serialize-val-bytes v)
                vh (portable-hash-bytes vb)]
            (hamt-find sio root-off v vh vb)))
-       (get [_ v]
-         (let [^bytes vb (serialize-val-bytes v)
-               vh (portable-hash-bytes vb)]
-           (when (hamt-find sio root-off v vh vb) v)))
-
-       clojure.lang.IPersistentCollection
-       (empty [_]
-         (make-eve2-hash-set sio 0 NIL_OFFSET))
-       (cons [this v]
-         (let [^bytes vb (serialize-val-bytes v)
-               vh (portable-hash-bytes vb)
-               [new-root added?] (hamt-conj sio root-off vh vb 0)]
-           (if-not added?
-             this
-             (make-eve2-hash-set sio (inc cnt) new-root))))
-       (equiv [this other]
-         (cond
-           (not (instance? java.util.Set other)) false
-           (not= cnt (.size ^java.util.Set other)) false
-           :else (every? #(.contains ^java.util.Set other %) (.seq this))))
 
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))

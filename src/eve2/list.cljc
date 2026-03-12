@@ -255,51 +255,16 @@
     #?(:cljs (.-offset__ this)
        :clj offset__))
 
-  ;; --- CLJ-only interfaces ---
+  ;; --- CLJ-only interfaces (no CLJS equivalent) ---
   #?@(:clj
       [clojure.lang.ISeq
-       (first [_]
-         (when (pos? cnt)
-           (read-node-value sio head-off)))
+       ;; next is CLJ-only (INext has no JVM mapping)
        (next [_]
          (when (> cnt 1)
            (let [next-off (read-node-next sio head-off)]
              (make-eve2-list sio (dec cnt) next-off))))
-       (more [this]
-         (or (.next this)
-             (make-eve2-list sio 0 NIL_OFFSET)))
-       (cons [_ v]
-         (let [vb (serialize-element-bytes v)
-               node-off (alloc-list-node! sio head-off vb)]
-           (make-eve2-list sio (inc cnt) node-off)))
 
        clojure.lang.IPersistentList
-
-       clojure.lang.IPersistentStack
-       (peek [_]
-         (when (pos? cnt)
-           (read-node-value sio head-off)))
-       (pop [_]
-         (if (zero? cnt)
-           (throw (IllegalStateException. "Can't pop empty list"))
-           (let [next-off (read-node-next sio head-off)]
-             (make-eve2-list sio (dec cnt) next-off))))
-
-       clojure.lang.IPersistentCollection
-       (empty [_]
-         (make-eve2-list sio 0 NIL_OFFSET))
-       (equiv [this other]
-         (cond
-           (not (sequential? other)) false
-           (not= cnt (count other)) false
-           :else
-           (loop [off head-off i 0 s (seq other)]
-             (if (or (>= i cnt) (nil? s))
-               true
-               (let [v (read-node-value sio off)]
-                 (if (= v (clojure.core/first s))
-                   (recur (read-node-next sio off) (inc i) (clojure.core/next s))
-                   false))))))
 
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))

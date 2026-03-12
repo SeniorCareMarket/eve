@@ -500,40 +500,12 @@
     #?(:cljs (.-offset__ this)
        :clj offset__))
 
-  ;; --- CLJ-only interfaces ---
+  ;; --- CLJ-only interfaces (no CLJS equivalent) ---
   #?@(:clj
       [clojure.lang.IPersistentVector
-       (assocN [this i v]
-         (cond
-           (== i cnt) (.cons this v)
-           (or (< i 0) (>= i cnt)) (throw (IndexOutOfBoundsException. (str "Index " i " out of bounds")))
-           :else (vec-assoc-n-impl sio cnt shift root tail tail-len i v)))
-       (cons [_ v]
-         (vec-conj-impl sio cnt shift root tail tail-len v))
+       ;; length and entryAt have no CLJS protocol equivalent
        (length [_] (int cnt))
-       (empty [_]
-         (let [new-tail (alloc-node! sio)]
-           (make-eve2-vec-impl sio 0 SHIFT_STEP NIL_OFFSET new-tail 0)))
-       (equiv [this other]
-         (cond
-           (identical? this other) true
-           (instance? clojure.lang.IPersistentVector other)
-           (let [ov ^clojure.lang.IPersistentVector other]
-             (and (== cnt (.count ov))
-                  (loop [i 0]
-                    (if (== i cnt) true
-                      (if (clojure.lang.Util/equiv (.nth this i) (.nth ov i))
-                        (recur (inc i)) false)))))
-           :else false))
-       (containsKey [_ i] (and (>= i 0) (< i cnt)))
        (entryAt [this i] (when (.containsKey this i) (clojure.lang.MapEntry/create i (.nth this i))))
-       (valAt [this i] (.nth this (int i)))
-       (valAt [this i not-found] (.nth this (int i) not-found))
-       (peek [this] (when (pos? cnt) (.nth this (dec cnt))))
-       (pop [this]
-         (if (zero? cnt)
-           (throw (IllegalStateException. "Can't pop empty vector"))
-           (vec-pop-impl sio cnt shift root tail tail-len)))
 
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
