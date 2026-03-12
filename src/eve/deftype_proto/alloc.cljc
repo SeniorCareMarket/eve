@@ -1408,7 +1408,10 @@
        (-sio-alloc!    [_ size-bytes] (alloc-offset size-bytes))
        (-sio-free!     [_ slab-offset] (free! slab-offset))
        (-sio-copy-block! [_ dst-slab-offset dst-field-off src-slab-offset src-field-off len]
-         (copy-within-slab! dst-slab-offset dst-field-off src-slab-offset src-field-off len)))
+         (if (== (decode-class-idx dst-slab-offset) (decode-class-idx src-slab-offset))
+           (copy-within-slab! dst-slab-offset dst-field-off src-slab-offset src-field-off len)
+           (let [src-bytes (read-bytes src-slab-offset src-field-off len)]
+             (write-bytes! dst-slab-offset dst-field-off src-bytes)))))
 
      ;; -----------------------------------------------------------------------
      ;; Root Pointer Operations

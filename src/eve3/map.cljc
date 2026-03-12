@@ -918,20 +918,19 @@
   (invoke [this k] (hamt-get sio__ root-off k nil))
   (invoke [this k nf] (hamt-get sio__ root-off k nf))
 
-  IPrintWithWriter
-  (-pr-writer [this writer _opts]
-    #?(:cljs (do
-               (-write writer "{")
-               (let [s (seq this)]
-                 (when s
-                   (loop [[[k v] & more] s first? true]
-                     (when-not first? (-write writer ", "))
-                     (-write writer (pr-str k))
-                     (-write writer " ")
-                     (-write writer (pr-str v))
-                     (when more (recur more false)))))
-               (-write writer "}"))
-       :clj nil))
+  #?@(:cljs [IPrintWithWriter
+             (-pr-writer [this writer _opts]
+               (do
+                 (-write writer "{")
+                 (let [s (seq this)]
+                   (when s
+                     (loop [[[k v] & more] s first? true]
+                       (when-not first? (-write writer ", "))
+                       (-write writer (pr-str k))
+                       (-write writer " ")
+                       (-write writer (pr-str v))
+                       (when more (recur more false)))))
+                 (-write writer "}")))])
 
   d/IDirectSerialize
   (-direct-serialize [this]

@@ -630,18 +630,17 @@
           vh (portable-hash-bytes vb)]
       (if (hamt-find sio__ root-off v vh vb) v nf)))
 
-  IPrintWithWriter
-  (-pr-writer [this writer _opts]
-    #?(:cljs (do
-               (-write writer "#{")
-               (let [s (seq this)]
-                 (when s
-                   (loop [[v & more] s first? true]
-                     (when-not first? (-write writer " "))
-                     (-write writer (pr-str v))
-                     (when more (recur more false)))))
-               (-write writer "}"))
-       :clj nil))
+  #?@(:cljs [IPrintWithWriter
+             (-pr-writer [this writer _opts]
+               (do
+                 (-write writer "#{")
+                 (let [s (seq this)]
+                   (when s
+                     (loop [[v & more] s first? true]
+                       (when-not first? (-write writer " "))
+                       (-write writer (pr-str v))
+                       (when more (recur more false)))))
+                 (-write writer "}")))])
 
   d/IDirectSerialize
   (-direct-serialize [this]
