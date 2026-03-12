@@ -43,7 +43,8 @@
    [eve.mmap-atom-e2e-test :as mmap-atom-e2e-test]
    [eve.mmap-domain-test :as mmap-domain-test]
    [eve.conformance-test :as conformance-test]
-   [eve.fuzz-test :as fuzz-test]))
+   [eve.fuzz-test :as fuzz-test]
+   [eve2.deftype-test :as eve2-deftype-test]))
 
 ;; Anti-DCE exports
 (goog/exportSymbol "eve.deftype_test" deftype-test)
@@ -70,6 +71,7 @@
 (goog/exportSymbol "eve.mmap_domain_test" mmap-domain-test)
 (goog/exportSymbol "eve.conformance_test" conformance-test)
 (goog/exportSymbol "eve.fuzz_test" fuzz-test)
+(goog/exportSymbol "eve2.deftype_test" eve2-deftype-test)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -200,6 +202,9 @@
 (defn- run-fuzz! []
   (t/run-tests 'eve.fuzz-test))
 
+(defn- run-eve2! []
+  (t/run-tests 'eve2.deftype-test))
+
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -242,6 +247,7 @@
    "mmap-domain"   run-mmap-domain!
    "conformance"   run-conformance!
    "fuzz"          run-fuzz!
+   "eve2"          run-eve2!
    "all"           run-all!
    ;; Aliases
    "map-test"        run-slab!
@@ -256,7 +262,7 @@
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "obj"
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
-   "mmap-domain" "conformance" "fuzz"])
+   "mmap-domain" "conformance" "fuzz" "eve2"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]
