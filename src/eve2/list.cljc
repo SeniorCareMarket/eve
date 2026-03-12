@@ -14,7 +14,7 @@
             NIL_OFFSET]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:cljs [[eve.deftype-proto.alloc :as eve-alloc]]
+   #?@(:cljs [[eve2.alloc :as eve-alloc]]
        :clj  [[eve2.deftype :as eve2]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))

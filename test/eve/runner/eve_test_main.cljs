@@ -44,7 +44,8 @@
    [eve.mmap-domain-test :as mmap-domain-test]
    [eve.conformance-test :as conformance-test]
    [eve.fuzz-test :as fuzz-test]
-   [eve2.deftype-test :as eve2-deftype-test]))
+   [eve2.deftype-test :as eve2-deftype-test]
+   [eve2.stress-test :as eve2-stress-test]))
 
 ;; Anti-DCE exports
 (goog/exportSymbol "eve.deftype_test" deftype-test)
@@ -72,6 +73,7 @@
 (goog/exportSymbol "eve.conformance_test" conformance-test)
 (goog/exportSymbol "eve.fuzz_test" fuzz-test)
 (goog/exportSymbol "eve2.deftype_test" eve2-deftype-test)
+(goog/exportSymbol "eve2.stress_test" eve2-stress-test)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -205,6 +207,9 @@
 (defn- run-eve2! []
   (t/run-tests 'eve2.deftype-test))
 
+(defn- run-eve2-stress! []
+  (t/run-tests 'eve2.stress-test))
+
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -248,6 +253,7 @@
    "conformance"   run-conformance!
    "fuzz"          run-fuzz!
    "eve2"          run-eve2!
+   "eve2-stress"   run-eve2-stress!
    "all"           run-all!
    ;; Aliases
    "map-test"        run-slab!
@@ -262,7 +268,7 @@
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "obj"
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
-   "mmap-domain" "conformance" "fuzz" "eve2"])
+   "mmap-domain" "conformance" "fuzz" "eve2" "eve2-stress"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]

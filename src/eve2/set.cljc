@@ -17,7 +17,7 @@
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                   mask-hash bitpos has-bit? get-index]]
-   #?@(:cljs [[eve.deftype-proto.alloc :as eve-alloc]]
+   #?@(:cljs [[eve2.alloc :as eve-alloc]]
        :clj  [[eve2.deftype :as eve2]
               [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                        value+sio->eve-bytes
@@ -39,7 +39,7 @@
 (def ^:const COLLISION_HEADER_SIZE 12)
 
 ;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
-(def ^:const EveHashSet-type-id 0xEE)
+(def EveHashSet-type-id 0xEE) ;; also emitted by eve2-deftype
 (def ^:const SABSETROOT_CNT_OFFSET 4)
 (def ^:const SABSETROOT_ROOT_OFF_OFFSET 8)
 (def ^:const SET_FLAG_PORTABLE_HASH 0x01)
