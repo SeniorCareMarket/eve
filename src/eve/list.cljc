@@ -1105,107 +1105,110 @@
             (let [[next-off val] (jvm-list-node-read sio head-off coll-factory)]
               (cons val (jvm-list-seq sio next-off coll-factory)))))))
 
-     (deftype SabList [^long cnt ^long head-off ^long header-off sio coll-factory]
+     #?(:bb nil
+        :clj
+        (do
+          (deftype SabList [^long cnt ^long head-off ^long header-off sio coll-factory]
 
-       clojure.lang.Counted
-       (count [_] (int cnt))
+            clojure.lang.Counted
+            (count [_] (int cnt))
 
-       clojure.lang.Sequential
+            clojure.lang.Sequential
 
-       clojure.lang.Seqable
-       (seq [_]
-         (when (pos? cnt)
-           (jvm-list-seq sio head-off coll-factory)))
+            clojure.lang.Seqable
+            (seq [_]
+              (when (pos? cnt)
+                (jvm-list-seq sio head-off coll-factory)))
 
-       clojure.lang.ISeq
-       (first [_]
-         (when (pos? cnt)
-           (second (jvm-list-node-read sio head-off coll-factory))))
-       (next [_]
-         (when (> cnt 1)
-           (let [[next-off _] (jvm-list-node-read sio head-off coll-factory)]
-             (SabList. (dec cnt) next-off header-off sio coll-factory))))
-       (more [this]
-         (let [n (.next this)]
-           (if n n (let [hdr-off (jvm-alloc-list-header! sio 0 NIL_OFFSET)]
-                     (SabList. 0 NIL_OFFSET hdr-off sio coll-factory)))))
+            clojure.lang.ISeq
+            (first [_]
+              (when (pos? cnt)
+                (second (jvm-list-node-read sio head-off coll-factory))))
+            (next [_]
+              (when (> cnt 1)
+                (let [[next-off _] (jvm-list-node-read sio head-off coll-factory)]
+                  (SabList. (dec cnt) next-off header-off sio coll-factory))))
+            (more [this]
+              (let [n (.next this)]
+                (if n n (let [hdr-off (jvm-alloc-list-header! sio 0 NIL_OFFSET)]
+                          (SabList. 0 NIL_OFFSET hdr-off sio coll-factory)))))
 
-       clojure.lang.IPersistentList
-       (cons [_ v]
-         (let [new-node-off (jvm-alloc-list-node! sio (partial value+sio->eve-bytes sio) v head-off)
-               new-cnt      (inc cnt)
-               new-hdr-off  (jvm-alloc-list-header! sio new-cnt new-node-off)]
-           (SabList. new-cnt new-node-off new-hdr-off sio coll-factory)))
-       (empty [_]
-         (let [hdr-off (jvm-alloc-list-header! sio 0 NIL_OFFSET)]
-           (SabList. 0 NIL_OFFSET hdr-off sio coll-factory)))
-       (peek [_]
-         (when (pos? cnt)
-           (second (jvm-list-node-read sio head-off coll-factory))))
-       (pop [_]
-         (when (zero? cnt)
-           (throw (IllegalStateException. "Can't pop empty list")))
-         (let [[next-off _] (jvm-list-node-read sio head-off coll-factory)
-               new-cnt      (dec cnt)
-               new-hdr-off  (jvm-alloc-list-header! sio new-cnt next-off)]
-           (SabList. new-cnt next-off new-hdr-off sio coll-factory)))
-       (equiv [this other]
-         (clojure.lang.Util/equiv (.seq this) (seq other)))
+            clojure.lang.IPersistentList
+            (cons [_ v]
+              (let [new-node-off (jvm-alloc-list-node! sio (partial value+sio->eve-bytes sio) v head-off)
+                    new-cnt      (inc cnt)
+                    new-hdr-off  (jvm-alloc-list-header! sio new-cnt new-node-off)]
+                (SabList. new-cnt new-node-off new-hdr-off sio coll-factory)))
+            (empty [_]
+              (let [hdr-off (jvm-alloc-list-header! sio 0 NIL_OFFSET)]
+                (SabList. 0 NIL_OFFSET hdr-off sio coll-factory)))
+            (peek [_]
+              (when (pos? cnt)
+                (second (jvm-list-node-read sio head-off coll-factory))))
+            (pop [_]
+              (when (zero? cnt)
+                (throw (IllegalStateException. "Can't pop empty list")))
+              (let [[next-off _] (jvm-list-node-read sio head-off coll-factory)
+                    new-cnt      (dec cnt)
+                    new-hdr-off  (jvm-alloc-list-header! sio new-cnt next-off)]
+                (SabList. new-cnt next-off new-hdr-off sio coll-factory)))
+            (equiv [this other]
+              (clojure.lang.Util/equiv (.seq this) (seq other)))
 
-       clojure.lang.IFn
-       (invoke [this i]
-         (nth (.seq this) (int i)))
-       (invoke [this i not-found]
-         (let [s (.seq this)]
-           (if (and s (>= (int i) 0) (< (int i) cnt))
-             (nth s (int i))
-             not-found)))
+            clojure.lang.IFn
+            (invoke [this i]
+              (nth (.seq this) (int i)))
+            (invoke [this i not-found]
+              (let [s (.seq this)]
+                (if (and s (>= (int i) 0) (< (int i) cnt))
+                  (nth s (int i))
+                  not-found)))
 
-       java.lang.Iterable
-       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+            java.lang.Iterable
+            (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
-       clojure.lang.IReduceInit
-       (reduce [_ f init]
-         (loop [off head-off acc init]
-           (if (or (== off NIL_OFFSET) (reduced? acc))
-             (unreduced acc)
-             (let [[next-off val] (jvm-list-node-read sio off coll-factory)]
-               (recur next-off (f acc val))))))
+            clojure.lang.IReduceInit
+            (reduce [_ f init]
+              (loop [off head-off acc init]
+                (if (or (== off NIL_OFFSET) (reduced? acc))
+                  (unreduced acc)
+                  (let [[next-off val] (jvm-list-node-read sio off coll-factory)]
+                    (recur next-off (f acc val))))))
 
-       clojure.lang.IReduce
-       (reduce [this f]
-         (if (zero? cnt)
-           (f)
-           (let [[next-off first-val] (jvm-list-node-read sio head-off coll-factory)]
-             (loop [off next-off acc first-val]
-               (if (or (== off NIL_OFFSET) (reduced? acc))
-                 (unreduced acc)
-                 (let [[nxt val] (jvm-list-node-read sio off coll-factory)]
-                   (recur nxt (f acc val))))))))
+            clojure.lang.IReduce
+            (reduce [this f]
+              (if (zero? cnt)
+                (f)
+                (let [[next-off first-val] (jvm-list-node-read sio head-off coll-factory)]
+                  (loop [off next-off acc first-val]
+                    (if (or (== off NIL_OFFSET) (reduced? acc))
+                      (unreduced acc)
+                      (let [[nxt val] (jvm-list-node-read sio off coll-factory)]
+                        (recur nxt (f acc val))))))))
 
-       java.lang.Object
-       (toString [this] (pr-str this))
-       (equals [this other] (= (.seq this) (seq other)))
-       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))
+            java.lang.Object
+            (toString [this] (pr-str this))
+            (equals [this other] (= (.seq this) (seq other)))
+            (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))
 
-       clojure.lang.IHashEq
-       (hasheq [this]
-         (clojure.lang.Murmur3/hashOrdered this))
+            clojure.lang.IHashEq
+            (hasheq [this]
+              (clojure.lang.Murmur3/hashOrdered this))
 
-       d/IEveRoot
-       (-root-header-off [_] header-off))
+            d/IEveRoot
+            (-root-header-off [_] header-off))
 
-     (defn jvm-sab-list-from-offset
-       "Construct a JVM SabList from a slab-qualified header-off and ISlabIO context.
+          (defn jvm-sab-list-from-offset
+            "Construct a JVM SabList from a slab-qualified header-off and ISlabIO context.
         Optional coll-factory enables nested collection deserialization."
-       ([sio header-off] (jvm-sab-list-from-offset sio header-off nil))
-       ([sio header-off coll-factory]
-        (let [cnt      (-sio-read-i32 sio header-off SABLIST_CNT_OFFSET)
-              head-off (-sio-read-i32 sio header-off SABLIST_HEAD_OFFSET)]
-          (SabList. cnt head-off header-off sio coll-factory))))
+            ([sio header-off] (jvm-sab-list-from-offset sio header-off nil))
+            ([sio header-off coll-factory]
+             (let [cnt      (-sio-read-i32 sio header-off SABLIST_CNT_OFFSET)
+                   head-off (-sio-read-i32 sio header-off SABLIST_HEAD_OFFSET)]
+               (SabList. cnt head-off header-off sio coll-factory))))
 
-     (defmethod print-method SabList [l ^java.io.Writer w]
-       (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq l) w))
+          (defmethod print-method SabList [l ^java.io.Writer w]
+            (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq l) w))))
 
      ;; Register the JVM list writer so mem/value+sio->eve-bytes can route to it
      (mem/register-jvm-collection-writer! :list jvm-write-list!)))

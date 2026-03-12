@@ -1312,6 +1312,9 @@
 
      (declare jvm-sabvec-from-offset)
 
+     #?(:bb nil
+        :clj
+        (do
      (deftype SabVecRoot
        [^long cnt ^long shift ^long root ^long tail ^long tail-len ^long header-off sio coll-factory _meta]
 
@@ -1550,7 +1553,7 @@
        [coll]
        (let [sio     eve-alloc/*jvm-slab-ctx*
              hdr-off (jvm-write-vec! sio (partial value+sio->eve-bytes sio) coll)]
-         (jvm-sabvec-from-offset sio hdr-off)))
+         (jvm-sabvec-from-offset sio hdr-off)))))
 
      ;; Register the JVM vec writer so mem/value+sio->eve-bytes can route to it
      (register-jvm-collection-writer! :vec jvm-write-vec!)))

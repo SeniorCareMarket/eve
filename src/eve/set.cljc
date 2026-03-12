@@ -1925,6 +1925,10 @@
      (declare jvm-eve-hash-set-from-offset)
      (declare jvm-make-transient-set)
 
+     #?(:bb nil
+        :clj
+        (do
+
      (deftype EveHashSet [^long cnt ^long root-off ^long header-off
                          sio coll-factory _meta]
 
@@ -2107,7 +2111,7 @@
        "Create an EVE hash set in the current JVM slab context.
         Requires eve-alloc/*jvm-slab-ctx* to be bound."
        [& vs]
-       (reduce conj (empty-hash-set) vs))
+       (reduce conj (empty-hash-set) vs))))
 
      ;; Register the JVM set writer so mem/value+sio->eve-bytes can route to it
      (register-jvm-collection-writer! :set jvm-write-set!)))

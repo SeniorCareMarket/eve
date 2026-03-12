@@ -16,7 +16,12 @@
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.serialize :as ser]
    [eve.mem :as mem]
-   #?@(:cljs [[eve.map :as eve-map]
+   #?@(:bb   [[eve.map :as eve-map]
+              [eve.set :as eve-set]
+              [eve.vec :as eve-vec]
+              [eve.list :as eve-list]
+              [eve.perf :as perf]]
+      :cljs [[eve.map :as eve-map]
               [eve.vec]
               [eve.set]
               [eve.list]]
@@ -27,7 +32,7 @@
               [eve.array :as eve-array]
               [eve.obj :as eve-obj]
               [eve.perf :as perf]]))
-  #?(:bb nil
+  #?(:bb (:refer-clojure)
      :clj (:import [eve.map EveHashMap]
                    [eve.set EveHashSet]
                    [eve.vec SabVecRoot]
@@ -405,15 +410,23 @@
 
 #?(:clj
    (do
-     (defn- cas-backoff!
-       "Jittered exponential backoff after CAS failure (JVM).
-        First 3 failures retry immediately. Failures 4+ use LockSupport/parkNanos
-        with 100μs..min(2^(n-3),8)ms jitter to break thundering herd."
-       [attempt]
-       (when (> attempt 3)
-         (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) BACKOFF_CAP_MS)
-               nanos  (* (inc (rand-int (* max-ms 1000))) 1000)]
-           (java.util.concurrent.locks.LockSupport/parkNanos nanos))))
+     #?(:bb
+        (defn- cas-backoff!
+          "Jittered backoff after CAS failure (bb). Uses Thread/sleep."
+          [attempt]
+          (when (> attempt 3)
+            (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) BACKOFF_CAP_MS)]
+              (Thread/sleep max-ms))))
+        :clj
+        (defn- cas-backoff!
+          "Jittered exponential backoff after CAS failure (JVM).
+           First 3 failures retry immediately. Failures 4+ use LockSupport/parkNanos
+           with 100μs..min(2^(n-3),8)ms jitter to break thundering herd."
+          [attempt]
+          (when (> attempt 3)
+            (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) BACKOFF_CAP_MS)
+                  nanos  (* (inc (rand-int (* max-ms 1000))) 1000)]
+              (java.util.concurrent.locks.LockSupport/parkNanos nanos)))))
 
      (defn- jvm-open-mmap-domain!
        "Create and initialise mmap-backed atom domain on JVM.
@@ -483,22 +496,31 @@
                           alloc/NIL_OFFSET)
          (let [slot-idx (mmap-claim-slot! root-r)]
            (write-heartbeat! root-r slot-idx)
-           (let [sched (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
-                               (reify java.util.concurrent.ThreadFactory
-                                 (newThread [_ r]
-                                   (doto (Thread. r)
-                                     (.setDaemon true)
-                                     (.setName "eve-heartbeat")))))
-                          (.scheduleAtFixedRate
-                            #(write-heartbeat! root-r slot-idx)
-                            10 10 java.util.concurrent.TimeUnit/SECONDS))]
-             {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
-              :slot-idx slot-idx :heartbeat-sched sched
-              :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
-              :tree-logs (java.util.concurrent.ConcurrentHashMap.)
-              :flush-ts (volatile! 0)
-              :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
-              :pin-lock (Object.)}))))
+           #?(:bb
+              {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
+               :slot-idx slot-idx :heartbeat-sched nil
+               :retire-q (java.util.LinkedList.)
+               :tree-logs (java.util.concurrent.ConcurrentHashMap.)
+               :flush-ts (volatile! 0)
+               :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
+               :pin-lock (Object.)}
+              :clj
+              (let [sched (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
+                                  (reify java.util.concurrent.ThreadFactory
+                                    (newThread [_ r]
+                                      (doto (Thread. r)
+                                        (.setDaemon true)
+                                        (.setName "eve-heartbeat")))))
+                             (.scheduleAtFixedRate
+                               #(write-heartbeat! root-r slot-idx)
+                               10 10 java.util.concurrent.TimeUnit/SECONDS))]
+                {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
+                 :slot-idx slot-idx :heartbeat-sched sched
+                 :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
+                 :tree-logs (java.util.concurrent.ConcurrentHashMap.)
+                 :flush-ts (volatile! 0)
+                 :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
+                 :pin-lock (Object.)})))))
 
      (defn- jvm-join-mmap-domain!
        "Open existing mmap-backed atom domain on JVM."
@@ -537,22 +559,31 @@
              rmap-r   (mem/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES)
              slot-idx (mmap-claim-slot! root-r)]
          (write-heartbeat! root-r slot-idx)
-         (let [sched (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
-                             (reify java.util.concurrent.ThreadFactory
-                               (newThread [_ r]
-                                 (doto (Thread. r)
-                                   (.setDaemon true)
-                                   (.setName "eve-heartbeat")))))
-                        (.scheduleAtFixedRate
-                          #(write-heartbeat! root-r slot-idx)
-                          10 10 java.util.concurrent.TimeUnit/SECONDS))]
-           {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
-            :slot-idx slot-idx :heartbeat-sched sched
-            :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
-            :tree-logs (java.util.concurrent.ConcurrentHashMap.)
-            :flush-ts (volatile! 0)
-            :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
-            :pin-lock (Object.)})))
+         #?(:bb
+            {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
+             :slot-idx slot-idx :heartbeat-sched nil
+             :retire-q (java.util.LinkedList.)
+             :tree-logs (java.util.concurrent.ConcurrentHashMap.)
+             :flush-ts (volatile! 0)
+             :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
+             :pin-lock (Object.)}
+            :clj
+            (let [sched (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
+                                (reify java.util.concurrent.ThreadFactory
+                                  (newThread [_ r]
+                                    (doto (Thread. r)
+                                      (.setDaemon true)
+                                      (.setName "eve-heartbeat")))))
+                           (.scheduleAtFixedRate
+                             #(write-heartbeat! root-r slot-idx)
+                             10 10 java.util.concurrent.TimeUnit/SECONDS))]
+              {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
+               :slot-idx slot-idx :heartbeat-sched sched
+               :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
+               :tree-logs (java.util.concurrent.ConcurrentHashMap.)
+               :flush-ts (volatile! 0)
+               :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
+               :pin-lock (Object.)}))))
 
      (defn- jvm-pin-thread-epoch!
        "Pin epoch for the current JVM thread. Multiple threads share one worker
@@ -579,36 +610,74 @@
            (let [min-e (reduce min (.values thread-epochs))]
              (mmap-pin-epoch! root-r slot-idx (int min-e))))))
 
-     (defn- jvm-coll-factory
-       "Collection factory for deserializing nested collection values from slabs.
-        Called by eve-bytes->value when it encounters SAB pointer tags (0x10–0x13).
-        Returns slab-backed Eve types directly — no materialization."
-       [tag sio slab-offset]
-       (case (int tag)
-         0x10 (eve-map/jvm-eve-hash-map-from-offset sio slab-offset jvm-coll-factory)
-         0x11 (eve-set/jvm-eve-hash-set-from-offset sio slab-offset jvm-coll-factory)
-         0x12 (eve-vec/jvm-sabvec-from-offset sio slab-offset jvm-coll-factory)
-         0x13 (eve-list/jvm-sab-list-from-offset sio slab-offset jvm-coll-factory)
-         (throw (ex-info "jvm-coll-factory: unknown tag" {:tag tag}))))
+     #?(:bb
+        (defn- jvm-coll-factory
+          "Collection factory for bb — materializes to regular Clojure data."
+          [tag sio slab-offset]
+          (case (int tag)
+            0x10 (eve-map/jvm-hamt-kv-reduce sio
+                   (alloc/-sio-read-i32 sio slab-offset eve.map/SABMAPROOT_ROOT_OFF_OFFSET)
+                   (fn [m k v] (assoc m k v)) {} jvm-coll-factory)
+            0x11 (eve-set/jvm-set-reduce sio
+                   (alloc/-sio-read-i32 sio slab-offset eve.set/SABSETROOT_ROOT_OFF_OFFSET)
+                   (fn [s elem] (conj s elem)) #{} jvm-coll-factory)
+            0x12 (let [cnt   (alloc/-sio-read-i32 sio slab-offset eve.vec/SABVECROOT_CNT_OFFSET)
+                       shift (alloc/-sio-read-i32 sio slab-offset eve.vec/SABVECROOT_SHIFT_OFFSET)
+                       root  (alloc/-sio-read-i32 sio slab-offset eve.vec/SABVECROOT_ROOT_OFFSET)
+                       tail  (alloc/-sio-read-i32 sio slab-offset eve.vec/SABVECROOT_TAIL_OFFSET)]
+                   (eve-vec/jvm-sabvec-reduce sio cnt shift root tail
+                     (fn [v elem] (conj v elem)) [] jvm-coll-factory))
+            0x13 (let [head-off (alloc/-sio-read-i32 sio slab-offset eve.list/SABLIST_HEAD_OFFSET)]
+                   (vec (eve-list/jvm-list-seq sio head-off jvm-coll-factory)))
+            (throw (ex-info "jvm-coll-factory: unknown tag" {:tag tag}))))
+        :clj
+        (defn- jvm-coll-factory
+          "Collection factory for deserializing nested collection values from slabs.
+           Called by eve-bytes->value when it encounters SAB pointer tags (0x10–0x13).
+           Returns slab-backed Eve types directly — no materialization."
+          [tag sio slab-offset]
+          (case (int tag)
+            0x10 (eve-map/jvm-eve-hash-map-from-offset sio slab-offset jvm-coll-factory)
+            0x11 (eve-set/jvm-eve-hash-set-from-offset sio slab-offset jvm-coll-factory)
+            0x12 (eve-vec/jvm-sabvec-from-offset sio slab-offset jvm-coll-factory)
+            0x13 (eve-list/jvm-sab-list-from-offset sio slab-offset jvm-coll-factory)
+            (throw (ex-info "jvm-coll-factory: unknown tag" {:tag tag})))))
 
-     (defn- jvm-read-root-value
-       "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
-        Returns slab-backed Eve types directly — no materialization."
-       [sio ptr]
-       (when (and (not= ptr alloc/NIL_OFFSET)
-                  (not= ptr CLAIMED_SENTINEL))
-         (let [type-id (alloc/jvm-read-header-type-byte sio ptr)
-               cf      jvm-coll-factory]
-           (case (int type-id)
-             0xED (eve-map/jvm-eve-hash-map-from-offset sio ptr cf)
-             0xEE (eve-set/jvm-eve-hash-set-from-offset sio ptr cf)
-             0x12 (eve-vec/jvm-sabvec-from-offset sio ptr cf)
-             0x13 (eve-list/jvm-sab-list-from-offset sio ptr cf)
-             0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
-             0x1E (eve-obj/jvm-obj-from-offset sio ptr)
-             0x01 (alloc/jvm-read-scalar-block sio ptr)
-             (throw (ex-info "jvm-mmap-deref: unknown root type-id"
-                             {:type-id type-id :ptr ptr}))))))
+     #?(:bb
+        (defn- jvm-read-root-value
+          "Read the atom value from a root pointer (bb).
+           Materializes to regular Clojure data. Array/obj types not supported."
+          [sio ptr]
+          (when (and (not= ptr alloc/NIL_OFFSET)
+                     (not= ptr CLAIMED_SENTINEL))
+            (let [type-id (alloc/jvm-read-header-type-byte sio ptr)]
+              (case (int type-id)
+                0xED (jvm-coll-factory 0x10 sio ptr)
+                0xEE (jvm-coll-factory 0x11 sio ptr)
+                0x12 (jvm-coll-factory 0x12 sio ptr)
+                0x13 (jvm-coll-factory 0x13 sio ptr)
+                0x01 (alloc/jvm-read-scalar-block sio ptr)
+                (throw (ex-info "jvm-mmap-deref: unknown root type-id"
+                                {:type-id type-id :ptr ptr}))))))
+        :clj
+        (defn- jvm-read-root-value
+          "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
+           Returns slab-backed Eve types directly — no materialization."
+          [sio ptr]
+          (when (and (not= ptr alloc/NIL_OFFSET)
+                     (not= ptr CLAIMED_SENTINEL))
+            (let [type-id (alloc/jvm-read-header-type-byte sio ptr)
+                  cf      jvm-coll-factory]
+              (case (int type-id)
+                0xED (eve-map/jvm-eve-hash-map-from-offset sio ptr cf)
+                0xEE (eve-set/jvm-eve-hash-set-from-offset sio ptr cf)
+                0x12 (eve-vec/jvm-sabvec-from-offset sio ptr cf)
+                0x13 (eve-list/jvm-sab-list-from-offset sio ptr cf)
+                0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
+                0x1E (eve-obj/jvm-obj-from-offset sio ptr)
+                0x01 (alloc/jvm-read-scalar-block sio ptr)
+                (throw (ex-info "jvm-mmap-deref: unknown root type-id"
+                                {:type-id type-id :ptr ptr})))))))
 
      (defn- jvm-mmap-deref
        [{:keys [root-r sio] :as domain-state} atom-slot-idx]
@@ -622,53 +691,94 @@
            (finally
              (jvm-unpin-thread-epoch! domain-state)))))
 
-     (defn- jvm-try-flush-retires!
-       "Free retired HAMT trees whose epoch is safe to reclaim.
-        OBJ-1: Skip the 256-slot scan when the last scan was recent enough."
-       [root-r ^java.util.Queue retire-q sio flush-ts]
-       (let [now    (System/currentTimeMillis)
-             last-t @flush-ts
-             q-len  (.size retire-q)]
-         (when (or (> (- now last-t) FLUSH_INTERVAL_MS)
-                   (> q-len FLUSH_QUEUE_THRESHOLD))
-           (vreset! flush-ts now)
-           (let [safe-epoch (mmap-min-safe-epoch root-r)
-                 entries    (java.util.ArrayList.)]
-             (loop []
-               (when-let [e (.poll retire-q)]
-                 (.add entries e)
-                 (recur)))
-             (doseq [entry entries]
-               (let [{:keys [offsets epoch]} entry]
-                 (if (or (nil? safe-epoch) (< epoch safe-epoch))
-                   (doseq [off offsets]
-                     (when (not= off alloc/NIL_OFFSET)
-                       (alloc/-sio-free! sio off)))
-                   (.add retire-q entry))))))))
+     #?(:bb
+        (defn- jvm-try-flush-retires!
+          "Free retired HAMT trees whose epoch is safe to reclaim (bb).
+           OBJ-1: Skip the 256-slot scan when the last scan was recent enough."
+          [root-r retire-q sio flush-ts]
+          (let [now    (System/currentTimeMillis)
+                last-t @flush-ts
+                q-len  (.size retire-q)]
+            (when (or (> (- now last-t) FLUSH_INTERVAL_MS)
+                      (> q-len FLUSH_QUEUE_THRESHOLD))
+              (vreset! flush-ts now)
+              (let [safe-epoch (mmap-min-safe-epoch root-r)
+                    entries    (java.util.ArrayList.)]
+                (loop []
+                  (when-let [e (.poll retire-q)]
+                    (.add entries e)
+                    (recur)))
+                (doseq [entry entries]
+                  (let [{:keys [offsets epoch]} entry]
+                    (if (or (nil? safe-epoch) (< epoch safe-epoch))
+                      (doseq [off offsets]
+                        (when (not= off alloc/NIL_OFFSET)
+                          (alloc/-sio-free! sio off)))
+                      (.add retire-q entry))))))))
+        :clj
+        (defn- jvm-try-flush-retires!
+          "Free retired HAMT trees whose epoch is safe to reclaim.
+           OBJ-1: Skip the 256-slot scan when the last scan was recent enough."
+          [root-r ^java.util.Queue retire-q sio flush-ts]
+          (let [now    (System/currentTimeMillis)
+                last-t @flush-ts
+                q-len  (.size retire-q)]
+            (when (or (> (- now last-t) FLUSH_INTERVAL_MS)
+                      (> q-len FLUSH_QUEUE_THRESHOLD))
+              (vreset! flush-ts now)
+              (let [safe-epoch (mmap-min-safe-epoch root-r)
+                    entries    (java.util.ArrayList.)]
+                (loop []
+                  (when-let [e (.poll retire-q)]
+                    (.add entries e)
+                    (recur)))
+                (doseq [entry entries]
+                  (let [{:keys [offsets epoch]} entry]
+                    (if (or (nil? safe-epoch) (< epoch safe-epoch))
+                      (doseq [off offsets]
+                        (when (not= off alloc/NIL_OFFSET)
+                          (alloc/-sio-free! sio off)))
+                      (.add retire-q entry)))))))))
 
-     (defn- jvm-resolve-new-ptr
-       "Resolve the slab-qualified offset for a new atom root value (JVM).
-        If new-val is already a slab-backed Eve type, returns its header-off
-        directly (no re-serialization). Otherwise serializes to slab."
-       [sio new-val]
-       (let [encode (partial mem/value+sio->eve-bytes sio)]
-         (cond
-           (nil? new-val)                  alloc/NIL_OFFSET
-           (instance? EveHashMap new-val)  (.-header-off ^EveHashMap new-val)
-           (instance? EveHashSet new-val)  (.-header-off ^EveHashSet new-val)
-           (instance? SabVecRoot new-val)  (.-header-off ^SabVecRoot new-val)
-           (instance? SabList new-val)     (.-header-off ^SabList new-val)
-           (map? new-val)
-           (if (and (contains? new-val :schema) (contains? new-val :values))
-             (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
-             (eve-map/jvm-write-map! sio encode new-val))
-           (set? new-val)     (eve-set/jvm-write-set! sio encode new-val)
-           (vector? new-val)  (eve-vec/jvm-write-vec! sio encode new-val)
-           (or (list? new-val)
-               (seq? new-val)) (eve-list/jvm-write-list! sio encode new-val)
-           (.isArray (class new-val))
-           (alloc/jvm-write-eve-array! sio new-val)
-           :else              (alloc/jvm-alloc-scalar-block! sio new-val))))
+     #?(:bb
+        (defn- jvm-resolve-new-ptr
+          "Resolve the slab-qualified offset for a new atom root value (bb).
+           Uses satisfies? instead of instance? (no Java class imports in bb)."
+          [sio new-val]
+          (let [encode (partial mem/value+sio->eve-bytes sio)]
+            (cond
+              (nil? new-val)                    alloc/NIL_OFFSET
+              (satisfies? d/IEveRoot new-val)   (d/-root-header-off new-val)
+              (map? new-val)                    (eve-map/jvm-write-map! sio encode new-val)
+              (set? new-val)                    (eve-set/jvm-write-set! sio encode new-val)
+              (vector? new-val)                 (eve-vec/jvm-write-vec! sio encode new-val)
+              (or (list? new-val)
+                  (seq? new-val))               (eve-list/jvm-write-list! sio encode new-val)
+              :else                             (alloc/jvm-alloc-scalar-block! sio new-val))))
+        :clj
+        (defn- jvm-resolve-new-ptr
+          "Resolve the slab-qualified offset for a new atom root value (JVM).
+           If new-val is already a slab-backed Eve type, returns its header-off
+           directly (no re-serialization). Otherwise serializes to slab."
+          [sio new-val]
+          (let [encode (partial mem/value+sio->eve-bytes sio)]
+            (cond
+              (nil? new-val)                  alloc/NIL_OFFSET
+              (instance? EveHashMap new-val)  (.-header-off ^EveHashMap new-val)
+              (instance? EveHashSet new-val)  (.-header-off ^EveHashSet new-val)
+              (instance? SabVecRoot new-val)  (.-header-off ^SabVecRoot new-val)
+              (instance? SabList new-val)     (.-header-off ^SabList new-val)
+              (map? new-val)
+              (if (and (contains? new-val :schema) (contains? new-val :values))
+                (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
+                (eve-map/jvm-write-map! sio encode new-val))
+              (set? new-val)     (eve-set/jvm-write-set! sio encode new-val)
+              (vector? new-val)  (eve-vec/jvm-write-vec! sio encode new-val)
+              (or (list? new-val)
+                  (seq? new-val)) (eve-list/jvm-write-list! sio encode new-val)
+              (.isArray (class new-val))
+              (alloc/jvm-write-eve-array! sio new-val)
+              :else              (alloc/jvm-alloc-scalar-block! sio new-val)))))
 
      (defn- jvm-collect-replaced-nodes
        "Walk old and new HAMT trees, collecting old node offsets that differ.
@@ -726,17 +836,19 @@
                        new-ptr (perf/timed :resolve-ptr (jvm-resolve-new-ptr sio new-val))
                        cur-log (alloc/drain-jvm-alloc-log!)
                        replaced-log (alloc/drain-jvm-replaced-log!)
-                       eve-passthru? (or (instance? EveHashMap new-val)
-                                        (instance? EveHashSet new-val)
-                                        (instance? SabVecRoot new-val)
-                                        (instance? SabList new-val))
+                       eve-passthru? #?(:bb  (satisfies? d/IEveRoot new-val)
+                                        :clj (or (instance? EveHashMap new-val)
+                                                 (instance? EveHashSet new-val)
+                                                 (instance? SabVecRoot new-val)
+                                                 (instance? SabList new-val)))
                        w       (perf/timed :cas (mem/-cas-i32! root-r ptr-off old-ptr new-ptr))]
                    (if (== w old-ptr)
                      (let [new-epoch (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)]
                        (perf/timed :retire-enqueue
                          (when (and (not= old-ptr alloc/NIL_OFFSET)
                                     (not= old-ptr CLAIMED_SENTINEL))
-                           (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
+                           (if #?(:bb  false  ;; skip map→map optimization in bb
+                                  :clj (and (instance? EveHashMap old-val) (instance? EveHashMap new-val)))
                              ;; Map→Map: replaced nodes were collected during path-copy
                              (let [offs (conj (or replaced-log []) old-ptr)]
                                (.add retire-q {:offsets offs :epoch (inc new-epoch)}))
@@ -785,7 +897,17 @@
 ;; MmapAtom — JVM
 ;; ---------------------------------------------------------------------------
 
-#?(:clj
+#?(:bb
+   (deftype MmapAtom [domain-state atom-slot-idx]
+     clojure.lang.IDeref
+     (deref [_] (jvm-mmap-deref domain-state atom-slot-idx))
+     clojure.lang.IAtom
+     (swap [_ f]        (jvm-mmap-swap! domain-state atom-slot-idx f []))
+     (swap [_ f a]      (jvm-mmap-swap! domain-state atom-slot-idx f [a]))
+     (swap [_ f a b]    (jvm-mmap-swap! domain-state atom-slot-idx f [a b]))
+     (swap [_ f a b xs] (jvm-mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
+     (reset [_ v]       (jvm-mmap-swap! domain-state atom-slot-idx (constantly v) [])))
+   :clj
    (deftype MmapAtom [domain-state atom-slot-idx]
      clojure.lang.IDeref
      (deref [_] (jvm-mmap-deref domain-state atom-slot-idx))
@@ -815,7 +937,11 @@
 ;; MmapAtomDomain — JVM
 ;; ---------------------------------------------------------------------------
 
-#?(:clj
+#?(:bb
+   (deftype MmapAtomDomain [domain-state registry-cache]
+     clojure.lang.IDeref
+     (deref [_] (jvm-mmap-deref domain-state 0)))
+   :clj
    (deftype MmapAtomDomain [domain-state registry-cache]
      clojure.lang.IDeref
      (deref [_] (jvm-mmap-deref domain-state 0))
@@ -979,7 +1105,7 @@
     (let [a (MmapAtom. ds slot-idx)]
       (when (some? initial-val)
         #?(:cljs (-swap! a (constantly initial-val))
-           :clj  (.reset a initial-val)))
+           :clj  (reset! a initial-val)))
       a)))
 
 (defn lookup-or-create-mmap-atom!
@@ -1132,7 +1258,7 @@
            (write-heartbeat! root-r slot-idx)
            {:root-r root-r :rmap-r rmap-r :sio sio :base-path nil
             :slot-idx slot-idx :heartbeat-sched nil
-            :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
+            :retire-q #?(:bb (java.util.LinkedList.) :clj (java.util.concurrent.ConcurrentLinkedQueue.))
             :tree-logs (java.util.concurrent.ConcurrentHashMap.)
             :flush-ts (volatile! 0)
             :thread-epochs (java.util.concurrent.ConcurrentHashMap.)

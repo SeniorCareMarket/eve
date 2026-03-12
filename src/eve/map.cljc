@@ -3271,6 +3271,9 @@
 
      (declare jvm-eve-hash-map-from-offset)
 
+     #?(:bb nil
+        :clj
+        (do
      (deftype EveHashMap
        [^long cnt        ;; entry count
         ^long root-off   ;; slab-qualified offset to root HAMT node
@@ -3508,7 +3511,7 @@
        (let [m       (apply clojure.core/hash-map kvs)
              sio     eve-alloc/*jvm-slab-ctx*
              hdr-off (jvm-write-map! sio (partial value+sio->eve-bytes sio) m)]
-         (jvm-eve-hash-map-from-offset sio hdr-off)))
+         (jvm-eve-hash-map-from-offset sio hdr-off)))))
 
      ;; Register the JVM map writer so mem/value+sio->eve-bytes can route to it
      (register-jvm-collection-writer! :map jvm-write-map!)))
