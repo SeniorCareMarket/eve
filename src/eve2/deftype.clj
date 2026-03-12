@@ -319,22 +319,44 @@
                              all-methods)))))
             by-iface)))
 
+(defn- has-equiv-impl?
+  "Check if parsed protos include an equiv method (via IEquiv mapping or direct)."
+  [parsed-protos]
+  (or (user-provides-protocol? parsed-protos 'IEquiv)
+      (some (fn [{:keys [protocol methods]}]
+              (and (= protocol 'clojure.lang.IPersistentCollection)
+                   (some #(= (:name %) 'equiv) methods)))
+            parsed-protos)))
+
+(defn- user-provides-object?
+  "Check if user provides Object or java.lang.Object implementations."
+  [parsed-protos]
+  (some #(contains? #{'Object 'java.lang.Object} (:protocol %)) parsed-protos))
+
 (defn- clj-boilerplate
   "Generate JVM boilerplate."
   [type-name parsed-protos]
   (concat
-   (when-not (user-provides-protocol? parsed-protos 'IHash)
+   (when-not (or (user-provides-protocol? parsed-protos 'IHash)
+                 (some #(= 'clojure.lang.IHashEq (:protocol %)) parsed-protos))
      ['clojure.lang.IHashEq
       (list 'hasheq ['this] (list 'System/identityHashCode 'this))])
-   ['Object
-    (list 'hashCode ['this] (list '.hasheq 'this))
-    (list 'equals ['this 'other]
-          (list 'and (list 'instance? type-name 'other)
-                (list '= (list '.hasheq 'this) (list '.hasheq 'other))))
-    (list 'toString ['this] (str "#eve2/" (name type-name)))]))
+   (when-not (user-provides-object? parsed-protos)
+     ['Object
+      (list 'hashCode ['this] (list '.hasheq 'this))
+      (list 'equals ['this 'other]
+            (if (has-equiv-impl? parsed-protos)
+              (list 'cond
+                    (list 'identical? 'this 'other) true
+                    :else (list '.equiv 'this 'other))
+              (list 'and (list 'instance? type-name 'other)
+                    (list '= (list '.hasheq 'this) (list '.hasheq 'other)))))
+      (list 'toString ['this] (str "#eve2/" (name type-name)))])))
 
 (defn- emit-clj
-  "Emit CLJ deftype expansion."
+  "Emit CLJ deftype expansion.
+   CLJ deftype fields: [declared-fields... ^long offset__ sio _meta]
+   offset__ stores the slab header offset (equivalent to CLJS offset__)."
   [type-name fields parsed-protos type-id _total-size]
   (let [jvm-fields (mapv (fn [f]
                            (let [sym (symbol (:name f))
@@ -346,7 +368,11 @@
                                (with-meta sym {:tag hint})
                                sym)))
                          fields)
-        all-fields (conj jvm-fields 'sio '_meta)
+        ;; Add offset__ (slab header offset) + sio + _meta
+        all-fields (-> jvm-fields
+                       (conj (with-meta 'offset__ {:tag 'long}))
+                       (conj 'sio)
+                       (conj '_meta))
         translated-protos (clj-emit-protocols parsed-protos)
         boilerplate (clj-boilerplate type-name parsed-protos)
         ctor-name (symbol (str "->" (name type-name)))]
@@ -357,7 +383,7 @@
 
        (~'defn ~ctor-name [~@(mapv (fn [f] (symbol (:name f))) fields)]
          (new ~type-name ~@(mapv (fn [f] (symbol (:name f))) fields)
-              eve.deftype-proto.alloc/*jvm-slab-ctx* nil))
+              0 eve.deftype-proto.alloc/*jvm-slab-ctx* nil))
 
        (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
 
@@ -384,7 +410,8 @@
   [type-name fields & body]
   (let [parsed-fields (mapv reg/parse-field fields)
         {:keys [fields total-size]} (reg/compute-layout parsed-fields)
-        type-id (reg/next-type-id!)
+        type-id (or (:type-id (clojure.core/meta type-name))
+                    (reg/next-type-id!))
         type-key (str (ns-name *ns*) "/" (name type-name))
         _ (reg/register-type! (name type-name)
                               {:type-id type-id

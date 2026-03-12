@@ -21,10 +21,12 @@
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                   mask-hash bitpos has-bit? get-index]]
    #?@(:cljs [[eve.deftype-proto.alloc :as eve-alloc]]
-       :clj  [[eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
+       :clj  [[eve2.deftype :as eve2]
+              [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                         value+sio->eve-bytes
                                         register-jvm-collection-writer!]]
-              [eve.perf :as perf]])))
+              [eve.perf :as perf]]))
+  #?(:cljs (:require-macros [eve2.deftype :as eve2])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -816,272 +818,265 @@
    (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)])
 
 ;;=============================================================================
-;; EveHashMap deftype
+;; EveHashMap deftype — unified via eve2-deftype macro
+;;
+;; Fields: cnt (int32 @ offset 4), root-off (int32 @ offset 8)
+;; CLJS: deftype EveHashMap [offset__] — fields read from slab
+;; CLJ:  deftype EveHashMap [cnt root-off offset__ sio _meta]
 ;;=============================================================================
-;; Uses #? for platform-specific protocol names. The HAMT algorithms are
-;; unified via ISlabIO — both platforms call the same functions above.
 
 (declare make-eve2-hash-map)
 
-#?(:cljs
-   (deftype EveHashMap [cnt root-off header-off
-                        ^:mutable __hash]
-     IMeta
-     (-meta [_] nil)
+(eve2/eve2-deftype ^{:type-id 0xED} EveHashMap [^:int32 cnt ^:int32 root-off]
+  ;; --- Shared mapped protocols ---
+  ICounted
+  (-count [_] #?(:cljs cnt :clj (int cnt)))
 
-     IWithMeta
-     (-with-meta [this _] this)
+  ISeqable
+  (-seq [_]
+    (when (pos? cnt)
+      #?(:cljs (hamt-seq eve-alloc/cljs-sio root-off)
+         :clj (binding [alloc/*jvm-slab-ctx* sio]
+                 (hamt-seq sio root-off)))))
 
-     ICounted
-     (-count [_] cnt)
+  ;; --- Platform-specific protocols ---
+  #?@(:cljs
+      [IMeta
+       (-meta [_] nil)
 
-     ILookup
-     (-lookup [this k] (-lookup this k nil))
-     (-lookup [_ k not-found]
-       (hamt-get eve-alloc/cljs-sio root-off k not-found))
+       IWithMeta
+       (-with-meta [this _] this)
 
-     IAssociative
-     (-contains-key? [_ k]
-       (not (identical? (hamt-get eve-alloc/cljs-sio root-off k ::absent) ::absent)))
-     (-assoc [this k v]
-       (let [sio eve-alloc/cljs-sio
-             kb  (serialize-key-bytes k)
-             vb  (serialize-val-bytes v)
-             kh  (portable-hash-bytes kb)
-             [new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
-         (if (== new-root root-off)
-           this
-           (let [new-cnt (if added? (inc cnt) cnt)]
-             (make-eve2-hash-map sio new-cnt new-root)))))
+       ILookup
+       (-lookup [this k] (-lookup this k nil))
+       (-lookup [_ k not-found]
+         (hamt-get eve-alloc/cljs-sio root-off k not-found))
 
-     IMap
-     (-dissoc [this k]
-       (let [sio eve-alloc/cljs-sio
-             kb  (serialize-key-bytes k)
-             kh  (portable-hash-bytes kb)
-             [new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
-         (if-not removed?
-           this
-           (if (== new-root NIL_OFFSET)
-             (make-eve2-hash-map sio 0 NIL_OFFSET)
-             (make-eve2-hash-map sio (dec cnt) new-root)))))
-
-     ICollection
-     (-conj [this entry]
-       (if (vector? entry)
-         (-assoc this (nth entry 0) (nth entry 1))
-         (if (satisfies? IMapEntry entry)
-           (-assoc this (key entry) (val entry))
-           (reduce -conj this entry))))
-
-     IEmptyableCollection
-     (-empty [_] (make-eve2-hash-map eve-alloc/cljs-sio 0 NIL_OFFSET))
-
-     ISeqable
-     (-seq [_]
-       (when (pos? cnt)
-         (hamt-seq eve-alloc/cljs-sio root-off)))
-
-     IReduce
-     (-reduce [this f]
-       (if (zero? cnt)
-         (f)
-         (let [result (hamt-kv-reduce eve-alloc/cljs-sio root-off
-                        (fn [acc k v]
-                          (if (nil? acc)
-                            (MapEntry. k v nil)
-                            (f acc (MapEntry. k v nil))))
-                        nil)]
-           (if (reduced? result) @result result))))
-     (-reduce [_ f init]
-       (let [result (hamt-kv-reduce eve-alloc/cljs-sio root-off
-                      (fn [acc k v] (f acc (MapEntry. k v nil)))
-                      init)]
-         (if (reduced? result) @result result)))
-
-     IKVReduce
-     (-kv-reduce [_ f init]
-       (let [result (hamt-kv-reduce eve-alloc/cljs-sio root-off f init)]
-         (if (reduced? result) @result result)))
-
-     IEquiv
-     (-equiv [this other]
-       (and (map? other)
-            (== cnt (count other))
-            (every? (fn [[k v]]
-                      (let [found (hamt-get eve-alloc/cljs-sio root-off k ::absent)]
-                        (and (not (identical? found ::absent)) (= v found))))
-                    other)))
-
-     IHash
-     (-hash [this]
-       (if __hash
-         __hash
-         (let [h (hash-unordered-coll this)]
-           (set! __hash h) h)))
-
-     IFn
-     (-invoke [this k] (-lookup this k nil))
-     (-invoke [this k nf] (-lookup this k nf))
-
-     IPrintWithWriter
-     (-pr-writer [this writer _opts]
-       (-write writer "{")
-       (let [s (seq this)]
-         (when s
-           (loop [[[k v] & more] s first? true]
-             (when-not first? (-write writer ", "))
-             (-write writer (pr-str k))
-             (-write writer " ")
-             (-write writer (pr-str v))
-             (when more (recur more false)))))
-       (-write writer "}"))
-
-     d/IDirectSerialize
-     (-direct-serialize [_]
-       (ser/encode-sab-pointer ser/FAST_TAG_SAB_MAP header-off))
-
-     d/ISabStorable
-     (-sab-tag [_] :eve-hash-map)
-     (-sab-encode [this _]
-       (d/-direct-serialize this))
-     (-sab-dispose [_ _]
-       ;; TODO: proper tree disposal
-       nil)
-
-     d/IsEve
-     (-eve? [_] true)
-
-     d/IEveRoot
-     (-root-header-off [_] header-off))
-
-   :clj
-   (deftype EveHashMap
-     [^long cnt ^long root-off ^long header-off sio _meta]
-
-     clojure.lang.IMeta
-     (meta [_] _meta)
-
-     clojure.lang.IObj
-     (withMeta [_ new-meta]
-       (EveHashMap. cnt root-off header-off sio new-meta))
-
-     clojure.lang.MapEquivalence
-
-     clojure.lang.ILookup
-     (valAt [this k] (.valAt this k nil))
-     (valAt [_ k not-found]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (hamt-get sio root-off k not-found)))
-
-     clojure.lang.IPersistentMap
-     (containsKey [_ k]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (not (identical? (hamt-get sio root-off k ::absent) ::absent))))
-     (entryAt [_ k]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (let [v (hamt-get sio root-off k ::absent)]
-           (when-not (identical? v ::absent)
-             (clojure.lang.MapEntry/create k v)))))
-     (assoc [this k v]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (let [^bytes kb (serialize-key-bytes k)
-               kh (portable-hash-bytes kb)
-               ^bytes vb (serialize-val-bytes v)
+       IAssociative
+       (-contains-key? [_ k]
+         (not (identical? (hamt-get eve-alloc/cljs-sio root-off k ::absent) ::absent)))
+       (-assoc [this k v]
+         (let [sio eve-alloc/cljs-sio
+               kb  (serialize-key-bytes k)
+               vb  (serialize-val-bytes v)
+               kh  (portable-hash-bytes kb)
                [new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
            (if (== new-root root-off)
              this
-             (let [new-cnt (if added? (inc cnt) cnt)
-                   hdr (write-map-header! sio new-cnt new-root)]
-               (EveHashMap. new-cnt new-root hdr sio nil))))))
-     (assocEx [this k v]
-       (if (.containsKey this k)
-         (throw (RuntimeException. (str "Key already present: " k)))
-         (.assoc this k v)))
-     (without [this k]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (let [^bytes kb (serialize-key-bytes k)
-               kh (portable-hash-bytes kb)
+             (let [new-cnt (if added? (inc cnt) cnt)]
+               (make-eve2-hash-map sio new-cnt new-root)))))
+
+       IMap
+       (-dissoc [this k]
+         (let [sio eve-alloc/cljs-sio
+               kb  (serialize-key-bytes k)
+               kh  (portable-hash-bytes kb)
                [new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
            (if-not removed?
              this
-             (let [new-cnt (dec cnt)
-                   hdr (write-map-header! sio new-cnt new-root)]
-               (EveHashMap. new-cnt new-root hdr sio nil))))))
+             (if (== new-root NIL_OFFSET)
+               (make-eve2-hash-map sio 0 NIL_OFFSET)
+               (make-eve2-hash-map sio (dec cnt) new-root)))))
 
-     clojure.lang.Counted
-     (count [_] (int cnt))
+       ICollection
+       (-conj [this entry]
+         (if (vector? entry)
+           (-assoc this (nth entry 0) (nth entry 1))
+           (if (satisfies? IMapEntry entry)
+             (-assoc this (key entry) (val entry))
+             (reduce -conj this entry))))
 
-     clojure.lang.Seqable
-     (seq [_]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (when (pos? cnt)
-           (hamt-seq sio root-off))))
+       IEmptyableCollection
+       (-empty [_] (make-eve2-hash-map eve-alloc/cljs-sio 0 NIL_OFFSET))
 
-     clojure.lang.IPersistentCollection
-     (empty [_]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (let [hdr (write-map-header! sio 0 NIL_OFFSET)]
-           (EveHashMap. 0 NIL_OFFSET hdr sio nil))))
-     (cons [this o]
-       (if (map? o)
-         (reduce-kv (fn [m k v] (.assoc ^EveHashMap m k v)) this o)
-         (let [[k v] (if (vector? o) o [(key o) (val o)])]
-           (.assoc this k v))))
-     (equiv [this other]
-       (clojure.lang.APersistentMap/mapEquals this other))
+       IReduce
+       (-reduce [this f]
+         (if (zero? cnt)
+           (f)
+           (let [result (hamt-kv-reduce eve-alloc/cljs-sio root-off
+                          (fn [acc k v]
+                            (if (nil? acc)
+                              (MapEntry. k v nil)
+                              (f acc (MapEntry. k v nil))))
+                          nil)]
+             (if (reduced? result) @result result))))
+       (-reduce [_ f init]
+         (let [result (hamt-kv-reduce eve-alloc/cljs-sio root-off
+                        (fn [acc k v] (f acc (MapEntry. k v nil)))
+                        init)]
+           (if (reduced? result) @result result)))
 
-     clojure.lang.IKVReduce
-     (kvreduce [_ f init]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (hamt-kv-reduce sio root-off f init)))
+       IKVReduce
+       (-kv-reduce [_ f init]
+         (let [result (hamt-kv-reduce eve-alloc/cljs-sio root-off f init)]
+           (if (reduced? result) @result result)))
 
-     clojure.lang.IReduceInit
-     (reduce [_ f init]
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (hamt-kv-reduce sio root-off
-           (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
-           init)))
+       IEquiv
+       (-equiv [this other]
+         (and (map? other)
+              (== cnt (count other))
+              (every? (fn [[k v]]
+                        (let [found (hamt-get eve-alloc/cljs-sio root-off k ::absent)]
+                          (and (not (identical? found ::absent)) (= v found))))
+                      other)))
 
-     clojure.lang.IReduce
-     (reduce [this f]
-       (let [s (.seq this)]
-         (if s (reduce f s) (f))))
+       IHash
+       (-hash [this]
+         (hash-unordered-coll this))
 
-     clojure.lang.IFn
-     (invoke [this k] (.valAt this k))
-     (invoke [this k nf] (.valAt this k nf))
+       IFn
+       (-invoke [this k] (-lookup this k nil))
+       (-invoke [this k nf] (-lookup this k nf))
 
-     java.lang.Iterable
-     (iterator [this]
-       (clojure.lang.SeqIterator. (.seq this)))
+       IPrintWithWriter
+       (-pr-writer [this writer _opts]
+         (-write writer "{")
+         (let [s (seq this)]
+           (when s
+             (loop [[[k v] & more] s first? true]
+               (when-not first? (-write writer ", "))
+               (-write writer (pr-str k))
+               (-write writer " ")
+               (-write writer (pr-str v))
+               (when more (recur more false)))))
+         (-write writer "}"))
 
-     java.util.Map
-     (size [_] (int cnt))
-     (isEmpty [_] (zero? cnt))
-     (containsValue [_ _v] (throw (UnsupportedOperationException.)))
-     (get [this k] (.valAt this k))
-     (put [_ _ _] (throw (UnsupportedOperationException.)))
-     (remove [_ _] (throw (UnsupportedOperationException.)))
-     (putAll [_ _] (throw (UnsupportedOperationException.)))
-     (clear [_] (throw (UnsupportedOperationException.)))
-     (keySet [this] (set (keys this)))
-     (values [this] (vals this))
-     (entrySet [this] (set (.seq this)))
+       d/IDirectSerialize
+       (-direct-serialize [this]
+         (ser/encode-sab-pointer ser/FAST_TAG_SAB_MAP (.-offset__ this)))
 
-     clojure.lang.IHashEq
-     (hasheq [this]
-       (clojure.lang.Murmur3/hashUnordered this))
+       d/ISabStorable
+       (-sab-tag [_] :eve-hash-map)
+       (-sab-encode [this _]
+         (d/-direct-serialize this))
+       (-sab-dispose [_ _] nil)
 
-     d/IEveRoot
-     (-root-header-off [_] header-off)
+       d/IsEve
+       (-eve? [_] true)
 
-     java.lang.Object
-     (toString [this] (pr-str this))
-     (equals [this other]
-       (clojure.lang.APersistentMap/mapEquals this other))
-     (hashCode [this]
-       (clojure.lang.APersistentMap/mapHash this))))
+       d/IEveRoot
+       (-root-header-off [this] (.-offset__ this))]
+
+      :clj
+      [clojure.lang.IMeta
+       (meta [_] _meta)
+
+       clojure.lang.IObj
+       (withMeta [_ new-meta]
+         (EveHashMap. cnt root-off offset__ sio new-meta))
+
+       clojure.lang.MapEquivalence
+
+       clojure.lang.ILookup
+       (valAt [this k] (.valAt this k nil))
+       (valAt [_ k not-found]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (hamt-get sio root-off k not-found)))
+
+       clojure.lang.IPersistentMap
+       (containsKey [_ k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (not (identical? (hamt-get sio root-off k ::absent) ::absent))))
+       (entryAt [_ k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [v (hamt-get sio root-off k ::absent)]
+             (when-not (identical? v ::absent)
+               (clojure.lang.MapEntry/create k v)))))
+       (assoc [this k v]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [^bytes kb (serialize-key-bytes k)
+                 kh (portable-hash-bytes kb)
+                 ^bytes vb (serialize-val-bytes v)
+                 [new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
+             (if (== new-root root-off)
+               this
+               (let [new-cnt (if added? (inc cnt) cnt)]
+                 (make-eve2-hash-map sio new-cnt new-root))))))
+       (assocEx [this k v]
+         (if (.containsKey this k)
+           (throw (RuntimeException. (str "Key already present: " k)))
+           (.assoc this k v)))
+       (without [this k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [^bytes kb (serialize-key-bytes k)
+                 kh (portable-hash-bytes kb)
+                 [new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
+             (if-not removed?
+               this
+               (make-eve2-hash-map sio (dec cnt) new-root)))))
+
+       clojure.lang.Counted
+       (count [_] (int cnt))
+
+       clojure.lang.Seqable
+       (seq [_]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (when (pos? cnt)
+             (hamt-seq sio root-off))))
+
+       clojure.lang.IPersistentCollection
+       (empty [_]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (make-eve2-hash-map sio 0 NIL_OFFSET)))
+       (cons [this o]
+         (if (map? o)
+           (reduce-kv (fn [m k v] (.assoc ^EveHashMap m k v)) this o)
+           (let [[k v] (if (vector? o) o [(key o) (val o)])]
+             (.assoc this k v))))
+       (equiv [this other]
+         (clojure.lang.APersistentMap/mapEquals this other))
+
+       clojure.lang.IKVReduce
+       (kvreduce [_ f init]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (hamt-kv-reduce sio root-off f init)))
+
+       clojure.lang.IReduceInit
+       (reduce [_ f init]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (hamt-kv-reduce sio root-off
+             (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
+             init)))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (let [s (.seq this)]
+           (if s (reduce f s) (f))))
+
+       clojure.lang.IFn
+       (invoke [this k] (.valAt this k))
+       (invoke [this k nf] (.valAt this k nf))
+
+       java.lang.Iterable
+       (iterator [this]
+         (clojure.lang.SeqIterator. (.seq this)))
+
+       java.util.Map
+       (size [_] (int cnt))
+       (isEmpty [_] (zero? cnt))
+       (containsValue [_ _v] (throw (UnsupportedOperationException.)))
+       (get [this k] (.valAt this k))
+       (put [_ _ _] (throw (UnsupportedOperationException.)))
+       (remove [_ _] (throw (UnsupportedOperationException.)))
+       (putAll [_ _] (throw (UnsupportedOperationException.)))
+       (clear [_] (throw (UnsupportedOperationException.)))
+       (keySet [this] (set (keys this)))
+       (values [this] (vals this))
+       (entrySet [this] (set (.seq this)))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (clojure.lang.Murmur3/hashUnordered this))
+
+       d/IEveRoot
+       (-root-header-off [_] offset__)
+
+       java.lang.Object
+       (toString [this] (pr-str this))
+       (equals [this other]
+         (clojure.lang.APersistentMap/mapEquals this other))
+       (hashCode [this]
+         (clojure.lang.APersistentMap/mapHash this))]))
 
 ;;=============================================================================
 ;; Constructors
@@ -1091,14 +1086,14 @@
   "Internal constructor: allocate header, create EveHashMap."
   [sio ^long cnt ^long root-off]
   (let [hdr (write-map-header! sio cnt root-off)]
-    #?(:cljs (EveHashMap. cnt root-off hdr nil)
+    #?(:cljs (EveHashMap. hdr)
        :clj  (EveHashMap. cnt root-off hdr sio nil))))
 
 (defn eve2-hash-map-from-header
   "Reconstruct an EveHashMap from an existing header offset."
   ([sio ^long header-off]
    (let [[cnt root-off] (read-map-header sio header-off)]
-     #?(:cljs (EveHashMap. cnt root-off header-off nil)
+     #?(:cljs (EveHashMap. header-off)
         :clj  (EveHashMap. cnt root-off header-off sio nil)))))
 
 (defn empty-hash-map
@@ -1110,36 +1105,16 @@
 (defn hash-map
   "Create an Eve2 hash map from key-value pairs."
   [& kvs]
-  (let [sio (get-sio)]
-    (reduce (fn [m [k v]]
-              (let [kb (serialize-key-bytes k)
-                    vb (serialize-val-bytes v)
-                    kh (portable-hash-bytes kb)
-                    m-cnt #?(:cljs (.-cnt m) :clj (.cnt ^EveHashMap m))
-                    m-root #?(:cljs (.-root-off m) :clj (.root_off ^EveHashMap m))
-                    [new-root added?] (hamt-assoc sio m-root kh kb vb 0)]
-                (if (== new-root m-root)
-                  m
-                  (make-eve2-hash-map sio (if added? (inc m-cnt) m-cnt) new-root))))
-            (make-eve2-hash-map sio 0 NIL_OFFSET)
-            (partition 2 kvs))))
+  (reduce (fn [m [k v]] (assoc m k v))
+          (empty-hash-map)
+          (partition 2 kvs)))
 
 (defn into-hash-map
   "Create an Eve2 hash map from a collection of [k v] entries."
   [coll]
-  (let [sio (get-sio)]
-    (reduce (fn [m [k v]]
-              (let [kb (serialize-key-bytes k)
-                    vb (serialize-val-bytes v)
-                    kh (portable-hash-bytes kb)
-                    m-cnt #?(:cljs (.-cnt m) :clj (.cnt ^EveHashMap m))
-                    m-root #?(:cljs (.-root-off m) :clj (.root_off ^EveHashMap m))
-                    [new-root added?] (hamt-assoc sio m-root kh kb vb 0)]
-                (if (== new-root m-root)
-                  m
-                  (make-eve2-hash-map sio (if added? (inc m-cnt) m-cnt) new-root))))
-            (make-eve2-hash-map sio 0 NIL_OFFSET)
-            coll)))
+  (reduce (fn [m [k v]] (assoc m k v))
+          (empty-hash-map)
+          coll))
 
 ;;=============================================================================
 ;; Registration
