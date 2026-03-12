@@ -829,16 +829,14 @@
 
 (eve2/eve2-deftype ^{:type-id 0xED} EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Shared protocols (CLJS names, macro translates for JVM) ---
+  ;; CLJ method bodies are auto-wrapped in (binding [*jvm-slab-ctx* sio] ...) by the macro.
   ICounted
   (-count [_] #?(:cljs cnt :clj (int cnt)))
 
   ISeqable
   (-seq [_]
-    (let [sio (get-sio)]
-      (when (pos? cnt)
-        #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                  (hamt-seq sio root-off))
-           :cljs (hamt-seq sio root-off)))))
+    (when (pos? cnt)
+      (hamt-seq (get-sio) root-off)))
 
   IMeta
   (-meta [_] #?(:cljs nil :clj _meta))
@@ -851,50 +849,32 @@
   ILookup
   (-lookup [this k] (-lookup this k nil))
   (-lookup [_ k not-found]
-    (let [sio (get-sio)]
-      #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                (hamt-get sio root-off k not-found))
-         :cljs (hamt-get sio root-off k not-found))))
+    (hamt-get (get-sio) root-off k not-found))
 
   IAssociative
   (-contains-key? [_ k]
-    (let [sio (get-sio)]
-      #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                (not (identical? (hamt-get sio root-off k ::absent) ::absent)))
-         :cljs (not (identical? (hamt-get sio root-off k ::absent) ::absent)))))
+    (not (identical? (hamt-get (get-sio) root-off k ::absent) ::absent)))
   (-assoc [this k v]
     (let [sio (get-sio)
           kb  (serialize-key-bytes k)
           vb  (serialize-val-bytes v)
-          kh  (portable-hash-bytes kb)]
-      #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                (let [[new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
-                  (if (== new-root root-off)
-                    this
-                    (make-eve2-hash-map sio (if added? (inc cnt) cnt) new-root))))
-         :cljs (let [[new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
-                 (if (== new-root root-off)
-                   this
-                   (make-eve2-hash-map sio (if added? (inc cnt) cnt) new-root))))))
+          kh  (portable-hash-bytes kb)
+          [new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
+      (if (== new-root root-off)
+        this
+        (make-eve2-hash-map sio (if added? (inc cnt) cnt) new-root))))
 
   IMap
   (-dissoc [this k]
     (let [sio (get-sio)
           kb  (serialize-key-bytes k)
-          kh  (portable-hash-bytes kb)]
-      #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                (let [[new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
-                  (if-not removed?
-                    this
-                    (if (== new-root NIL_OFFSET)
-                      (make-eve2-hash-map sio 0 NIL_OFFSET)
-                      (make-eve2-hash-map sio (dec cnt) new-root)))))
-         :cljs (let [[new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
-                 (if-not removed?
-                   this
-                   (if (== new-root NIL_OFFSET)
-                     (make-eve2-hash-map sio 0 NIL_OFFSET)
-                     (make-eve2-hash-map sio (dec cnt) new-root)))))))
+          kh  (portable-hash-bytes kb)
+          [new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
+      (if-not removed?
+        this
+        (if (== new-root NIL_OFFSET)
+          (make-eve2-hash-map sio 0 NIL_OFFSET)
+          (make-eve2-hash-map sio (dec cnt) new-root)))))
 
   ICollection
   (-conj [this entry]
@@ -910,10 +890,7 @@
 
   IEmptyableCollection
   (-empty [_]
-    (let [sio (get-sio)]
-      #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                (make-eve2-hash-map sio 0 NIL_OFFSET))
-         :cljs (make-eve2-hash-map sio 0 NIL_OFFSET))))
+    (make-eve2-hash-map (get-sio) 0 NIL_OFFSET))
 
   IReduce
   (-reduce [this f]
@@ -930,10 +907,9 @@
                (if s (reduce f s) (f)))))
   (-reduce [_ f init]
     (let [sio (get-sio)]
-      #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                (hamt-kv-reduce sio root-off
-                  (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
-                  init))
+      #?(:clj (hamt-kv-reduce sio root-off
+                (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
+                init)
          :cljs (let [result (hamt-kv-reduce sio root-off
                               (fn [acc k v] (f acc (MapEntry. k v nil)))
                               init)]
@@ -942,8 +918,7 @@
   IKVReduce
   (-kv-reduce [_ f init]
     (let [sio (get-sio)]
-      #?(:clj (binding [alloc/*jvm-slab-ctx* sio]
-                (hamt-kv-reduce sio root-off f init))
+      #?(:clj (hamt-kv-reduce sio root-off f init)
          :cljs (let [result (hamt-kv-reduce sio root-off f init)]
                  (if (reduced? result) @result result)))))
 
@@ -979,7 +954,7 @@
                      (-write writer (pr-str v))
                      (when more (recur more false)))))
                (-write writer "}"))
-       :clj nil))  ;; CLJ uses Object/toString below
+       :clj nil))
 
   d/IDirectSerialize
   (-direct-serialize [this]
@@ -1006,10 +981,9 @@
 
        clojure.lang.IPersistentMap
        (entryAt [_ k]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [v (hamt-get sio root-off k ::absent)]
-             (when-not (identical? v ::absent)
-               (clojure.lang.MapEntry/create k v)))))
+         (let [v (hamt-get sio root-off k ::absent)]
+           (when-not (identical? v ::absent)
+             (clojure.lang.MapEntry/create k v))))
        (assocEx [this k v]
          (if (.containsKey this k)
            (throw (RuntimeException. (str "Key already present: " k)))

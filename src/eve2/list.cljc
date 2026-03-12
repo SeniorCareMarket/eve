@@ -111,7 +111,8 @@
 (declare make-eve2-list)
 
 (eve2/eve2-deftype ^{:type-id 0x13} EveList [^:int32 cnt ^:int32 head-off]
-  ;; --- Shared mapped protocols ---
+  ;; --- Shared protocols (CLJS names, macro translates for JVM) ---
+  ;; CLJ method bodies are auto-wrapped in (binding [*jvm-slab-ctx* sio] ...) by the macro.
   ISequential
 
   ICounted
@@ -120,230 +121,185 @@
   ISeqable
   (-seq [this] (when (pos? cnt) this))
 
-  ;; --- Platform-specific protocols ---
-  #?@(:cljs
-      [IStack
-       (-peek [_]
-         (when (pos? cnt)
-           (read-node-value eve-alloc/cljs-sio head-off)))
-       (-pop [_]
-         (if (zero? cnt)
-           (throw (js/Error. "Can't pop empty list"))
-           (let [sio eve-alloc/cljs-sio
-                 next-off (read-node-next sio head-off)]
-             (make-eve2-list sio (dec cnt) next-off))))
+  IMeta
+  (-meta [_] #?(:cljs nil :clj _meta))
 
-       ICollection
-       (-conj [_ v]
-         (let [sio eve-alloc/cljs-sio
-               vb (serialize-element-bytes v)
-               node-off (alloc-list-node! sio head-off vb)]
-           (make-eve2-list sio (inc cnt) node-off)))
+  IWithMeta
+  (-with-meta [this m]
+    #?(:cljs this
+       :clj (EveList. cnt head-off offset__ sio m)))
 
-       IEmptyableCollection
-       (-empty [_]
-         (make-eve2-list eve-alloc/cljs-sio 0 NIL_OFFSET))
+  IStack
+  (-peek [_]
+    (when (pos? cnt)
+      (read-node-value (get-sio) head-off)))
+  (-pop [_]
+    (if (zero? cnt)
+      (throw (#?(:cljs js/Error. :clj IllegalStateException.)
+              "Can't pop empty list"))
+      (let [sio (get-sio)
+            next-off (read-node-next sio head-off)]
+        (make-eve2-list sio (dec cnt) next-off))))
 
-       ISeq
-       (-first [_]
-         (when (pos? cnt)
-           (read-node-value eve-alloc/cljs-sio head-off)))
-       (-rest [_]
-         (if (<= cnt 1)
-           (make-eve2-list eve-alloc/cljs-sio 0 NIL_OFFSET)
-           (let [sio eve-alloc/cljs-sio
-                 next-off (read-node-next sio head-off)]
-             (make-eve2-list sio (dec cnt) next-off))))
+  ICollection
+  (-conj [_ v]
+    (let [sio (get-sio)
+          vb (serialize-element-bytes v)
+          node-off (alloc-list-node! sio head-off vb)]
+      (make-eve2-list sio (inc cnt) node-off)))
 
-       INext
-       (-next [_]
-         (when (> cnt 1)
-           (let [sio eve-alloc/cljs-sio
-                 next-off (read-node-next sio head-off)]
-             (make-eve2-list sio (dec cnt) next-off))))
+  IEmptyableCollection
+  (-empty [_]
+    (make-eve2-list (get-sio) 0 NIL_OFFSET))
 
-       IReduce
-       (-reduce [_ f]
-         (if (zero? cnt)
-           (f)
-           (let [sio eve-alloc/cljs-sio]
-             (loop [off head-off i 0 acc nil]
-               (if (or (== off NIL_OFFSET) (>= i cnt))
-                 (if (reduced? acc) @acc acc)
-                 (let [v (read-node-value sio off)
-                       next (read-node-next sio off)
-                       new-acc (if (zero? i) v (f acc v))]
-                   (if (reduced? new-acc)
-                     @new-acc
-                     (recur next (inc i) new-acc))))))))
-       (-reduce [_ f init]
-         (let [sio eve-alloc/cljs-sio]
-           (loop [off head-off i 0 acc init]
-             (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
-               (if (reduced? acc) @acc acc)
-               (let [v (read-node-value sio off)
-                     next (read-node-next sio off)]
-                 (recur next (inc i) (f acc v)))))))
+  ISeq
+  (-first [_]
+    (when (pos? cnt)
+      (read-node-value (get-sio) head-off)))
+  (-rest [_]
+    (if (<= cnt 1)
+      (make-eve2-list (get-sio) 0 NIL_OFFSET)
+      (let [sio (get-sio)
+            next-off (read-node-next sio head-off)]
+        (make-eve2-list sio (dec cnt) next-off))))
 
-       IEquiv
-       (-equiv [_ other]
-         (cond
-           (not (sequential? other)) false
-           (not= cnt (count other)) false
-           :else
-           (let [sio eve-alloc/cljs-sio]
-             (loop [off head-off i 0 os (seq other)]
-               (if (or (>= i cnt) (nil? os))
-                 true
-                 (let [v (read-node-value sio off)]
-                   (if (= v (first os))
-                     (recur (read-node-next sio off) (inc i) (next os))
-                     false)))))))
+  INext
+  (-next [_]
+    (when (> cnt 1)
+      (let [sio (get-sio)
+            next-off (read-node-next sio head-off)]
+        (make-eve2-list sio (dec cnt) next-off))))
 
-       IHash
-       (-hash [this]
-         (hash-ordered-coll this))
+  IReduce
+  (-reduce [_ f]
+    (if (zero? cnt)
+      (f)
+      (let [sio (get-sio)]
+        (loop [off head-off i 0 acc nil]
+          (if (or (== off NIL_OFFSET) (>= i cnt))
+            (if (reduced? acc) @acc acc)
+            (let [v (read-node-value sio off)
+                  next (read-node-next sio off)
+                  new-acc (if (zero? i) v (f acc v))]
+              (if (reduced? new-acc)
+                @new-acc
+                (recur next (inc i) new-acc))))))))
+  (-reduce [_ f init]
+    (let [sio (get-sio)]
+      (loop [off head-off i 0 acc init]
+        (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
+          (#?(:cljs (fn [x] (if (reduced? x) @x x)) :clj unreduced) acc)
+          (let [v (read-node-value sio off)
+                next (read-node-next sio off)]
+            (recur next (inc i) (f acc v)))))))
 
-       IFn
-       (-invoke [_ n]
-         (if (and (integer? n) (>= n 0) (< n cnt))
-           (let [sio eve-alloc/cljs-sio]
-             (loop [off head-off i 0]
-               (if (== i n)
-                 (read-node-value sio off)
-                 (recur (read-node-next sio off) (inc i)))))
-           nil))
+  IEquiv
+  (-equiv [_ other]
+    (cond
+      (not (sequential? other)) false
+      (not= cnt (count other)) false
+      :else
+      (let [sio (get-sio)]
+        (loop [off head-off i 0 os (seq other)]
+          (if (or (>= i cnt) (nil? os))
+            true
+            (let [v (read-node-value sio off)]
+              (if (= v (first os))
+                (recur (read-node-next sio off) (inc i) (next os))
+                false)))))))
 
-       IPrintWithWriter
-       (-pr-writer [_ writer _opts]
-         (let [sio eve-alloc/cljs-sio]
-           (-write writer "(")
-           (loop [off head-off i 0]
-             (when (and (< i (min cnt 10)) (not= off NIL_OFFSET))
-               (when (pos? i) (-write writer " "))
-               (-write writer (pr-str (read-node-value sio off)))
-               (recur (read-node-next sio off) (inc i))))
-           (when (> cnt 10)
-             (-write writer " ..."))
-           (-write writer ")")))
+  IHash
+  (-hash [this]
+    #?(:cljs (hash-ordered-coll this)
+       :clj (clojure.lang.Murmur3/hashOrdered this)))
 
-       d/IDirectSerialize
-       (-direct-serialize [this]
-         (ser/encode-sab-pointer ser/FAST_TAG_SAB_LIST (.-offset__ this)))
+  IFn
+  (-invoke [_ n]
+    (if (and (integer? n) (>= n 0) (< n cnt))
+      (let [sio (get-sio)]
+        (loop [off head-off i 0]
+          (if (== i n)
+            (read-node-value sio off)
+            (recur (read-node-next sio off) (inc i)))))
+      nil))
 
-       d/ISabStorable
-       (-sab-tag [_] :eve-list)
-       (-sab-encode [this _] (d/-direct-serialize this))
-       (-sab-dispose [_ _] nil)
+  IPrintWithWriter
+  (-pr-writer [_ writer _opts]
+    #?(:cljs (let [sio (get-sio)]
+               (-write writer "(")
+               (loop [off head-off i 0]
+                 (when (and (< i (min cnt 10)) (not= off NIL_OFFSET))
+                   (when (pos? i) (-write writer " "))
+                   (-write writer (pr-str (read-node-value sio off)))
+                   (recur (read-node-next sio off) (inc i))))
+               (when (> cnt 10)
+                 (-write writer " ..."))
+               (-write writer ")"))
+       :clj nil))
 
-       d/IsEve
-       (-eve? [_] true)
+  d/IDirectSerialize
+  (-direct-serialize [this]
+    #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_LIST (.-offset__ this))
+       :clj offset__))
 
-       d/IEveRoot
-       (-root-header-off [this] (.-offset__ this))]
+  d/ISabStorable
+  (-sab-tag [_] :eve-list)
+  (-sab-encode [this _] (d/-direct-serialize this))
+  (-sab-dispose [_ _] nil)
 
-      :clj
-      [clojure.lang.IMeta
-       (meta [_] _meta)
+  d/IsEve
+  (-eve? [_] true)
 
-       clojure.lang.IObj
-       (withMeta [_ new-meta]
-         (EveList. cnt head-off offset__ sio new-meta))
+  d/IEveRoot
+  (-root-header-off [this]
+    #?(:cljs (.-offset__ this)
+       :clj offset__))
 
-       clojure.lang.ISeq
+  ;; --- CLJ-only interfaces ---
+  #?@(:clj
+      [clojure.lang.ISeq
        (first [_]
          (when (pos? cnt)
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (read-node-value sio head-off))))
+           (read-node-value sio head-off)))
        (next [_]
          (when (> cnt 1)
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (let [next-off (read-node-next sio head-off)]
-               (make-eve2-list sio (dec cnt) next-off)))))
+           (let [next-off (read-node-next sio head-off)]
+             (make-eve2-list sio (dec cnt) next-off))))
        (more [this]
          (or (.next this)
-             (binding [alloc/*jvm-slab-ctx* sio]
-               (make-eve2-list sio 0 NIL_OFFSET))))
+             (make-eve2-list sio 0 NIL_OFFSET)))
        (cons [_ v]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [vb (serialize-element-bytes v)
-                 node-off (alloc-list-node! sio head-off vb)]
-             (make-eve2-list sio (inc cnt) node-off))))
+         (let [vb (serialize-element-bytes v)
+               node-off (alloc-list-node! sio head-off vb)]
+           (make-eve2-list sio (inc cnt) node-off)))
 
        clojure.lang.IPersistentList
 
        clojure.lang.IPersistentStack
        (peek [_]
          (when (pos? cnt)
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (read-node-value sio head-off))))
+           (read-node-value sio head-off)))
        (pop [_]
          (if (zero? cnt)
            (throw (IllegalStateException. "Can't pop empty list"))
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (let [next-off (read-node-next sio head-off)]
-               (make-eve2-list sio (dec cnt) next-off)))))
+           (let [next-off (read-node-next sio head-off)]
+             (make-eve2-list sio (dec cnt) next-off))))
 
        clojure.lang.IPersistentCollection
        (empty [_]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (make-eve2-list sio 0 NIL_OFFSET)))
+         (make-eve2-list sio 0 NIL_OFFSET))
        (equiv [this other]
          (cond
            (not (sequential? other)) false
+           (not= cnt (count other)) false
            :else
-           (let [os (seq other)]
-             (if (not= cnt (count other))
-               false
-               (binding [alloc/*jvm-slab-ctx* sio]
-                 (loop [off head-off i 0 s os]
-                   (if (or (>= i cnt) (nil? s))
-                     true
-                     (let [v (read-node-value sio off)]
-                       (if (= v (clojure.core/first s))
-                         (recur (read-node-next sio off) (inc i) (clojure.core/next s))
-                         false)))))))))
-
-       clojure.lang.Seqable
-       (seq [this] (when (pos? cnt) this))
-
-       clojure.lang.Counted
-       (count [_] (int cnt))
-
-       clojure.lang.IReduceInit
-       (reduce [_ f init]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (loop [off head-off i 0 acc init]
-             (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
-               (unreduced acc)
-               (let [v (read-node-value sio off)
-                     next (read-node-next sio off)]
-                 (recur next (inc i) (f acc v)))))))
-
-       clojure.lang.IReduce
-       (reduce [this f]
-         (if (zero? cnt)
-           (f)
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (loop [off head-off i 0 acc nil]
-               (if (or (== off NIL_OFFSET) (>= i cnt))
-                 (if (reduced? acc) @acc acc)
-                 (let [v (read-node-value sio off)
-                       next (read-node-next sio off)
-                       new-acc (if (zero? i) v (f acc v))]
-                   (if (reduced? new-acc)
-                     @new-acc
-                     (recur next (inc i) new-acc))))))))
-
-       clojure.lang.IFn
-       (invoke [this n]
-         (if (and (integer? n) (>= (long n) 0) (< (long n) cnt))
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (loop [off head-off i 0]
-               (if (== i (long n))
-                 (read-node-value sio off)
-                 (recur (read-node-next sio off) (inc i)))))
-           nil))
+           (loop [off head-off i 0 s (seq other)]
+             (if (or (>= i cnt) (nil? s))
+               true
+               (let [v (read-node-value sio off)]
+                 (if (= v (clojure.core/first s))
+                   (recur (read-node-next sio off) (inc i) (clojure.core/next s))
+                   false))))))
 
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
@@ -356,14 +312,7 @@
            (not (sequential? other)) false
            :else (.equiv this other)))
        (hashCode [this]
-         (clojure.lang.Murmur3/hashOrdered this))
-
-       clojure.lang.IHashEq
-       (hasheq [this]
-         (clojure.lang.Murmur3/hashOrdered this))
-
-       d/IEveRoot
-       (-root-header-off [_] offset__)]))
+         (clojure.lang.Murmur3/hashOrdered this))]))
 
 ;;=============================================================================
 ;; Constructors

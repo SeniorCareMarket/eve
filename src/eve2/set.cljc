@@ -272,7 +272,7 @@
                 (if (value-matches? sio root-off pos vb)
                   [root-off false]
                   (let [[existing-vb _] (read-value-at sio root-off pos)
-                        existing-vh vh]
+                        existing-vh (portable-hash-bytes existing-vb)]
                     (if (>= shift 30)
                       (let [coll (make-collision-node! sio vh [[existing-vb] [vb]])
                             new-data-bm (bit-xor data-bm bit)
@@ -308,9 +308,10 @@
                                   (values-start-off new-node-bm) val-list)
                           [dst-off true]))
                       (let [sub-shift (+ shift SHIFT_STEP)
-                            existing-bit (bitpos vh sub-shift)
+                            existing-vh (portable-hash-bytes existing-vb)
+                            existing-bit (bitpos existing-vh sub-shift)
                             new-bit (bitpos vh sub-shift)]
-                        (let [[sub _] (hamt-conj sio NIL_OFFSET vh existing-vb sub-shift)
+                        (let [[sub _] (hamt-conj sio NIL_OFFSET existing-vh existing-vb sub-shift)
                               [final-sub _] (hamt-conj sio sub vh vb sub-shift)
                               new-data-bm (bit-xor data-bm bit)
                               new-node-bm (bit-or node-bm bit)
@@ -548,196 +549,165 @@
 (declare make-eve2-hash-set)
 
 (eve2/eve2-deftype ^{:type-id 0xEE} EveHashSet [^:int32 cnt ^:int32 root-off]
-  ;; --- Shared mapped protocols ---
+  ;; --- Shared protocols (CLJS names, macro translates for JVM) ---
+  ;; CLJ method bodies are auto-wrapped in (binding [*jvm-slab-ctx* sio] ...) by the macro.
   ICounted
   (-count [_] #?(:cljs cnt :clj (int cnt)))
 
   ISeqable
   (-seq [_]
     (when (pos? cnt)
-      #?(:cljs (hamt-seq eve-alloc/cljs-sio root-off)
-         :clj (binding [alloc/*jvm-slab-ctx* sio]
-                 (hamt-seq sio root-off)))))
+      (hamt-seq (get-sio) root-off)))
 
-  ;; --- Platform-specific protocols ---
-  #?@(:cljs
-      [IMeta
-       (-meta [_] nil)
+  IMeta
+  (-meta [_] #?(:cljs nil :clj _meta))
 
-       IWithMeta
-       (-with-meta [this _] this)
+  IWithMeta
+  (-with-meta [this m]
+    #?(:cljs this
+       :clj (EveHashSet. cnt root-off offset__ sio m)))
 
-       ILookup
-       (-lookup [this v] (-lookup this v nil))
-       (-lookup [_ v not-found]
-         (let [sio eve-alloc/cljs-sio
-               vb (serialize-val-bytes v)
-               vh (portable-hash-bytes vb)]
-           (if (hamt-find sio root-off v vh vb)
-             v
-             not-found)))
+  ILookup
+  (-lookup [this v] (-lookup this v nil))
+  (-lookup [_ v not-found]
+    (let [sio (get-sio)
+          vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)]
+      (if (hamt-find sio root-off v vh vb)
+        v
+        not-found)))
 
-       ISet
-       (-disjoin [this v]
-         (let [sio eve-alloc/cljs-sio
-               vb (serialize-val-bytes v)
+  ISet
+  (-disjoin [this v]
+    (let [sio (get-sio)
+          vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)
+          [new-root removed?] (hamt-disj sio root-off vh vb 0)]
+      (if-not removed?
+        this
+        (make-eve2-hash-set sio (dec cnt) new-root))))
+  (-get [_ v]
+    (let [sio (get-sio)
+          vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)]
+      (when (hamt-find sio root-off v vh vb) v)))
+
+  ICollection
+  (-conj [this v]
+    (let [sio (get-sio)
+          vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)
+          [new-root added?] (hamt-conj sio root-off vh vb 0)]
+      (if-not added?
+        this
+        (make-eve2-hash-set sio (inc cnt) new-root))))
+
+  IEmptyableCollection
+  (-empty [_]
+    (make-eve2-hash-set (get-sio) 0 NIL_OFFSET))
+
+  IReduce
+  (-reduce [_ f]
+    (let [result (hamt-val-reduce (get-sio) root-off
+                   (fn [acc v]
+                     (if (nil? acc) v (f acc v)))
+                   nil)]
+      (if (reduced? result) @result result)))
+  (-reduce [_ f init]
+    (let [result (hamt-val-reduce (get-sio) root-off f init)]
+      (if (reduced? result) @result result)))
+
+  IEquiv
+  (-equiv [this other]
+    #?(:cljs (and (set? other)
+                  (== cnt (count other))
+                  (every? (fn [v]
+                            (let [vb (serialize-val-bytes v)
+                                  vh (portable-hash-bytes vb)]
+                              (hamt-find (get-sio) root-off v vh vb)))
+                          other))
+       :clj (cond
+               (not (instance? java.util.Set other)) false
+               (not= cnt (.size ^java.util.Set other)) false
+               :else (every? #(.contains ^java.util.Set other %) (.seq this)))))
+
+  IHash
+  (-hash [this]
+    #?(:cljs (hash-unordered-coll this)
+       :clj (clojure.lang.Murmur3/hashUnordered this)))
+
+  IFn
+  (-invoke [this v] (-lookup this v nil))
+  (-invoke [this v nf] (-lookup this v nf))
+
+  IPrintWithWriter
+  (-pr-writer [this writer _opts]
+    #?(:cljs (do
+               (-write writer "#{")
+               (let [s (seq this)]
+                 (when s
+                   (loop [[v & more] s first? true]
+                     (when-not first? (-write writer " "))
+                     (-write writer (pr-str v))
+                     (when more (recur more false)))))
+               (-write writer "}"))
+       :clj nil))
+
+  d/IDirectSerialize
+  (-direct-serialize [this]
+    #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_SET (.-offset__ this))
+       :clj offset__))
+
+  d/ISabStorable
+  (-sab-tag [_] :hash-set)
+  (-sab-encode [this _] (d/-direct-serialize this))
+  (-sab-dispose [_ _] nil)
+
+  d/IsEve
+  (-eve? [_] true)
+
+  d/IEveRoot
+  (-root-header-off [this]
+    #?(:cljs (.-offset__ this)
+       :clj offset__))
+
+  ;; --- CLJ-only interfaces ---
+  #?@(:clj
+      [clojure.lang.IPersistentSet
+       (disjoin [this v]
+         (let [^bytes vb (serialize-val-bytes v)
                vh (portable-hash-bytes vb)
                [new-root removed?] (hamt-disj sio root-off vh vb 0)]
            (if-not removed?
              this
              (make-eve2-hash-set sio (dec cnt) new-root))))
+       (contains [_ v]
+         (let [^bytes vb (serialize-val-bytes v)
+               vh (portable-hash-bytes vb)]
+           (hamt-find sio root-off v vh vb)))
+       (get [_ v]
+         (let [^bytes vb (serialize-val-bytes v)
+               vh (portable-hash-bytes vb)]
+           (when (hamt-find sio root-off v vh vb) v)))
 
-       ICollection
-       (-conj [this v]
-         (let [sio eve-alloc/cljs-sio
-               vb (serialize-val-bytes v)
+       clojure.lang.IPersistentCollection
+       (empty [_]
+         (make-eve2-hash-set sio 0 NIL_OFFSET))
+       (cons [this v]
+         (let [^bytes vb (serialize-val-bytes v)
                vh (portable-hash-bytes vb)
                [new-root added?] (hamt-conj sio root-off vh vb 0)]
            (if-not added?
              this
              (make-eve2-hash-set sio (inc cnt) new-root))))
-
-       IEmptyableCollection
-       (-empty [_]
-         (make-eve2-hash-set eve-alloc/cljs-sio 0 NIL_OFFSET))
-
-       IReduce
-       (-reduce [_ f]
-         (let [result (hamt-val-reduce eve-alloc/cljs-sio root-off
-                        (fn [acc v]
-                          (if (nil? acc) v (f acc v)))
-                        nil)]
-           (if (reduced? result) @result result)))
-       (-reduce [_ f init]
-         (let [result (hamt-val-reduce eve-alloc/cljs-sio root-off f init)]
-           (if (reduced? result) @result result)))
-
-       IEquiv
-       (-equiv [this other]
-         (and (set? other)
-              (== cnt (count other))
-              (every? (fn [v]
-                        (let [vb (serialize-val-bytes v)
-                              vh (portable-hash-bytes vb)]
-                          (hamt-find eve-alloc/cljs-sio root-off v vh vb)))
-                      other)))
-
-       IHash
-       (-hash [this]
-         (hash-unordered-coll this))
-
-       IFn
-       (-invoke [this v] (-lookup this v nil))
-       (-invoke [this v nf] (-lookup this v nf))
-
-       IPrintWithWriter
-       (-pr-writer [this writer _opts]
-         (-write writer "#{")
-         (let [s (seq this)]
-           (when s
-             (loop [[v & more] s first? true]
-               (when-not first? (-write writer " "))
-               (-write writer (pr-str v))
-               (when more (recur more false)))))
-         (-write writer "}"))
-
-       d/IDirectSerialize
-       (-direct-serialize [this]
-         (ser/encode-sab-pointer ser/FAST_TAG_SAB_SET (.-offset__ this)))
-
-       d/ISabStorable
-       (-sab-tag [_] :hash-set)
-       (-sab-encode [this _] (d/-direct-serialize this))
-       (-sab-dispose [_ _] nil)
-
-       d/IsEve
-       (-eve? [_] true)
-
-       d/IEveRoot
-       (-root-header-off [this] (.-offset__ this))]
-
-      :clj
-      [clojure.lang.IMeta
-       (meta [_] _meta)
-
-       clojure.lang.IObj
-       (withMeta [_ new-meta]
-         (EveHashSet. cnt root-off offset__ sio new-meta))
-
-       clojure.lang.IPersistentSet
-       (disjoin [this v]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [^bytes vb (serialize-val-bytes v)
-                 vh (portable-hash-bytes vb)
-                 [new-root removed?] (hamt-disj sio root-off vh vb 0)]
-             (if-not removed?
-               this
-               (make-eve2-hash-set sio (dec cnt) new-root)))))
-       (contains [_ v]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [^bytes vb (serialize-val-bytes v)
-                 vh (portable-hash-bytes vb)]
-             (hamt-find sio root-off v vh vb))))
-       (get [_ v]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [^bytes vb (serialize-val-bytes v)
-                 vh (portable-hash-bytes vb)]
-             (when (hamt-find sio root-off v vh vb) v))))
-
-       clojure.lang.Seqable
-       (seq [_]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (when (pos? cnt)
-             (hamt-seq sio root-off))))
-
-       clojure.lang.Counted
-       (count [_] (int cnt))
-
-       clojure.lang.IPersistentCollection
-       (empty [_]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (make-eve2-hash-set sio 0 NIL_OFFSET)))
-       (cons [this v]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [^bytes vb (serialize-val-bytes v)
-                 vh (portable-hash-bytes vb)
-                 [new-root added?] (hamt-conj sio root-off vh vb 0)]
-             (if-not added?
-               this
-               (make-eve2-hash-set sio (inc cnt) new-root)))))
        (equiv [this other]
          (cond
            (not (instance? java.util.Set other)) false
            (not= cnt (.size ^java.util.Set other)) false
            :else (every? #(.contains ^java.util.Set other %) (.seq this))))
 
-       clojure.lang.IReduceInit
-       (reduce [_ f init]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (hamt-val-reduce sio root-off f init)))
-
-       clojure.lang.IReduce
-       (reduce [this f]
-         (let [s (.seq this)]
-           (if s (reduce f s) (f))))
-
-       clojure.lang.IFn
-       (invoke [this v] (.get this v))
-       (invoke [this v nf]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [^bytes vb (serialize-val-bytes v)
-                 vh (portable-hash-bytes vb)]
-             (if (hamt-find sio root-off v vh vb) v nf))))
-
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
-
-       clojure.lang.IHashEq
-       (hasheq [this]
-         (clojure.lang.Murmur3/hashUnordered this))
-
-       d/IEveRoot
-       (-root-header-off [_] offset__)
 
        java.lang.Object
        (toString [this] (pr-str this))

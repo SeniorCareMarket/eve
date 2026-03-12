@@ -335,7 +335,8 @@
 (eve2/eve2-deftype ^{:type-id 0x12} EveVector
   [^:int32 cnt ^:int32 shift ^:int32 root ^:int32 tail ^:int32 tail-len]
 
-  ;; --- Shared mapped protocols ---
+  ;; --- Shared protocols (CLJS names, macro translates for JVM) ---
+  ;; CLJ method bodies are auto-wrapped in (binding [*jvm-slab-ctx* sio] ...) by the macro.
   ISequential
 
   ICounted
@@ -344,207 +345,185 @@
   ISeqable
   (-seq [_]
     (when (pos? cnt)
-      (let [sio #?(:cljs eve-alloc/cljs-sio :clj sio)]
-        #?(:clj (binding [alloc/*jvm-slab-ctx* sio])
-           :cljs nil)
-        (let [captured-cnt cnt
-              captured-shift shift
-              captured-root root
-              captured-tail tail]
-          #?(:cljs
-             ((fn iter [i]
-                (lazy-seq
-                 (when (< i captured-cnt)
-                   (cons (nth-impl sio captured-cnt captured-shift captured-root captured-tail i)
-                         (iter (inc i))))))
-              0)
-             :clj
-             (binding [alloc/*jvm-slab-ctx* sio]
-               (letfn [(vec-seq [i]
-                         (when (< i captured-cnt)
-                           (lazy-seq
-                            (clojure.core/cons
-                             (nth-impl sio captured-cnt captured-shift captured-root captured-tail i)
-                             (vec-seq (inc i))))))]
-                 (vec-seq 0))))))))
+      (let [sio (get-sio)]
+        #?(:cljs
+           ((fn iter [i]
+              (lazy-seq
+               (when (< i cnt)
+                 (cons (nth-impl sio cnt shift root tail i)
+                       (iter (inc i))))))
+            0)
+           :clj
+           (letfn [(vec-seq [i]
+                     (when (< i cnt)
+                       (lazy-seq
+                        (clojure.core/cons
+                         (nth-impl sio cnt shift root tail i)
+                         (vec-seq (inc i))))))]
+             (vec-seq 0))))))
 
-  ;; --- Platform-specific protocols ---
-  #?@(:cljs
-      [ILookup
-       (-lookup [_ k]
-         (if (and (integer? k) (>= k 0) (< k cnt))
-           (nth-impl eve-alloc/cljs-sio cnt shift root tail k)
-           nil))
-       (-lookup [_ k not-found]
-         (if (and (integer? k) (>= k 0) (< k cnt))
-           (nth-impl eve-alloc/cljs-sio cnt shift root tail k)
-           not-found))
+  IMeta
+  (-meta [_] #?(:cljs nil :clj _meta))
 
-       IIndexed
-       (-nth [_ n]
-         (if (or (neg? n) (>= n cnt))
-           (throw (js/Error. (str "Index out of bounds: " n)))
-           (nth-impl eve-alloc/cljs-sio cnt shift root tail n)))
-       (-nth [this n not-found]
-         (if (or (neg? n) (>= n cnt))
-           not-found
-           (-nth this n)))
+  IWithMeta
+  (-with-meta [this m]
+    #?(:cljs this
+       :clj (EveVector. cnt shift root tail tail-len offset__ sio m)))
 
-       ICollection
-       (-conj [_ val]
-         (vec-conj-impl eve-alloc/cljs-sio cnt shift root tail tail-len val))
+  ILookup
+  (-lookup [_ k]
+    (if (and (integer? k) (>= k 0) (< k cnt))
+      (nth-impl (get-sio) cnt shift root tail k)
+      nil))
+  (-lookup [_ k not-found]
+    (if (and (integer? k) (>= k 0) (< k cnt))
+      (nth-impl (get-sio) cnt shift root tail k)
+      not-found))
 
-       IEmptyableCollection
-       (-empty [_]
-         (let [sio eve-alloc/cljs-sio
-               new-tail (alloc-node! sio)]
-           (make-eve2-vec-impl sio 0 SHIFT_STEP NIL_OFFSET new-tail 0)))
+  IIndexed
+  (-nth [_ n]
+    (if (or (neg? n) (>= n cnt))
+      (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
+              (str "Index out of bounds: " n)))
+      (nth-impl (get-sio) cnt shift root tail n)))
+  (-nth [this n not-found]
+    (if (or (neg? n) (>= n cnt))
+      not-found
+      (-nth this n)))
 
-       IStack
-       (-peek [_]
-         (when (pos? cnt)
-           (nth-impl eve-alloc/cljs-sio cnt shift root tail (dec cnt))))
-       (-pop [_]
-         (if (zero? cnt)
-           (throw (js/Error. "Can't pop empty vector"))
-           (vec-pop-impl eve-alloc/cljs-sio cnt shift root tail tail-len)))
+  ICollection
+  (-conj [_ val]
+    (vec-conj-impl (get-sio) cnt shift root tail tail-len val))
 
-       IVector
-       (-assoc-n [this n val]
-         (cond
-           (== n cnt) (-conj this val)
-           (or (neg? n) (> n cnt))
-           (throw (js/Error. (str "Index " n " out of bounds [0," cnt "]")))
-           :else
-           (vec-assoc-n-impl eve-alloc/cljs-sio cnt shift root tail tail-len n val)))
+  IEmptyableCollection
+  (-empty [_]
+    (let [sio (get-sio)
+          new-tail (alloc-node! sio)]
+      (make-eve2-vec-impl sio 0 SHIFT_STEP NIL_OFFSET new-tail 0)))
 
-       IAssociative
-       (-assoc [this k v]
-         (if (integer? k)
-           (-assoc-n this k v)
-           (throw (js/Error. "Vector's key for assoc must be a number."))))
-       (-contains-key? [_ k]
-         (and (integer? k) (>= k 0) (< k cnt)))
+  IStack
+  (-peek [_]
+    (when (pos? cnt)
+      (nth-impl (get-sio) cnt shift root tail (dec cnt))))
+  (-pop [_]
+    (if (zero? cnt)
+      (throw (#?(:cljs js/Error. :clj IllegalStateException.)
+              "Can't pop empty vector"))
+      (vec-pop-impl (get-sio) cnt shift root tail tail-len)))
 
-       IFn
-       (-invoke [this k] (-lookup this k nil))
-       (-invoke [this k not-found] (-lookup this k not-found))
+  IVector
+  (-assoc-n [this n val]
+    (cond
+      (== n cnt) (-conj this val)
+      (or (neg? n) (> n cnt))
+      (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
+              (str "Index " n " out of bounds [0," cnt "]")))
+      :else
+      (vec-assoc-n-impl (get-sio) cnt shift root tail tail-len n val)))
 
-       IReduce
-       (-reduce [_ f]
-         (let [sio eve-alloc/cljs-sio]
-           (case cnt
-             0 (f)
-             1 (nth-impl sio cnt shift root tail 0)
-             (loop [i 1 acc (nth-impl sio cnt shift root tail 0)]
-               (if (>= i cnt)
-                 acc
-                 (let [acc' (f acc (nth-impl sio cnt shift root tail i))]
-                   (if (reduced? acc') @acc' (recur (inc i) acc'))))))))
-       (-reduce [_ f init]
-         (let [sio eve-alloc/cljs-sio]
-           (loop [i 0 acc init]
-             (if (or (>= i cnt) (reduced? acc))
-               (if (reduced? acc) @acc acc)
-               (recur (inc i) (f acc (nth-impl sio cnt shift root tail i)))))))
+  IAssociative
+  (-assoc [this k v]
+    (if (integer? k)
+      (-assoc-n this k v)
+      (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+              "Vector's key for assoc must be a number."))))
+  (-contains-key? [_ k]
+    (and (integer? k) (>= k 0) (< k cnt)))
 
-       IEquiv
-       (-equiv [_ other]
-         (let [sio eve-alloc/cljs-sio]
-           (cond
-             (not (sequential? other)) false
-             (not= cnt (count other)) false
-             :else
-             (loop [i 0]
-               (if (>= i cnt)
-                 true
-                 (if (= (nth-impl sio cnt shift root tail i) (nth other i))
-                   (recur (inc i))
-                   false))))))
+  IFn
+  (-invoke [this k] (-lookup this k nil))
+  (-invoke [this k not-found] (-lookup this k not-found))
 
-       IHash
-       (-hash [this]
-         (hash-ordered-coll this))
+  IReduce
+  (-reduce [_ f]
+    (let [sio (get-sio)]
+      (case (int cnt)
+        0 (f)
+        1 (nth-impl sio cnt shift root tail 0)
+        (loop [i 1 acc (nth-impl sio cnt shift root tail 0)]
+          (if (>= i cnt)
+            acc
+            (let [acc' (f acc (nth-impl sio cnt shift root tail i))]
+              (if (reduced? acc') @acc' (recur (inc i) acc'))))))))
+  (-reduce [_ f init]
+    (let [sio (get-sio)]
+      (loop [i 0 acc init]
+        (if (or (>= i cnt) (reduced? acc))
+          (#?(:cljs (fn [x] (if (reduced? x) @x x)) :clj unreduced) acc)
+          (recur (inc i) (f acc (nth-impl sio cnt shift root tail i)))))))
 
-       IPrintWithWriter
-       (-pr-writer [_ writer _opts]
-         (let [sio eve-alloc/cljs-sio]
-           (-write writer "[")
-           (dotimes [i (min cnt 10)]
-             (when (pos? i) (-write writer " "))
-             (-write writer (pr-str (nth-impl sio cnt shift root tail i))))
-           (when (> cnt 10)
-             (-write writer " ..."))
-           (-write writer "]")))
+  IEquiv
+  (-equiv [_ other]
+    (let [sio (get-sio)]
+      (cond
+        (not (sequential? other)) false
+        (not= cnt (count other)) false
+        :else
+        (loop [i 0]
+          (if (>= i cnt)
+            true
+            (if (= (nth-impl sio cnt shift root tail i) (nth other i))
+              (recur (inc i))
+              false))))))
 
-       d/IDirectSerialize
-       (-direct-serialize [this]
-         (ser/encode-sab-pointer ser/FAST_TAG_SAB_VEC (.-offset__ this)))
+  IHash
+  (-hash [this]
+    #?(:cljs (hash-ordered-coll this)
+       :clj (clojure.lang.Murmur3/hashOrdered this)))
 
-       d/ISabStorable
-       (-sab-tag [_] :eve-vec)
-       (-sab-encode [this _] (d/-direct-serialize this))
-       (-sab-dispose [_ _] nil)
+  IPrintWithWriter
+  (-pr-writer [_ writer _opts]
+    (let [sio (get-sio)]
+      (-write writer "[")
+      (dotimes [i (min cnt 10)]
+        (when (pos? i) (-write writer " "))
+        (-write writer (pr-str (nth-impl sio cnt shift root tail i))))
+      (when (> cnt 10)
+        (-write writer " ..."))
+      (-write writer "]")))
 
-       d/IsEve
-       (-eve? [_] true)
+  d/IDirectSerialize
+  (-direct-serialize [this]
+    #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_VEC (.-offset__ this))
+       :clj offset__))
 
-       d/IEveRoot
-       (-root-header-off [this] (.-offset__ this))]
+  d/ISabStorable
+  (-sab-tag [_] :eve-vec)
+  (-sab-encode [this _] (d/-direct-serialize this))
+  (-sab-dispose [_ _] nil)
 
-      :clj
-      [clojure.lang.IMeta
-       (meta [_] _meta)
+  d/IsEve
+  (-eve? [_] true)
 
-       clojure.lang.IObj
-       (withMeta [_ new-meta]
-         (EveVector. cnt shift root tail tail-len offset__ sio new-meta))
+  d/IEveRoot
+  (-root-header-off [this]
+    #?(:cljs (.-offset__ this)
+       :clj offset__))
 
-       clojure.lang.Indexed
-       (nth [_ n]
-         (when (or (< n 0) (>= n cnt))
-           (throw (IndexOutOfBoundsException. (str "Index " n " out of bounds, cnt=" cnt))))
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (nth-impl sio cnt shift root tail n)))
-       (nth [_ n not-found]
-         (if (or (< n 0) (>= n cnt))
-           not-found
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (nth-impl sio cnt shift root tail n))))
-
-       clojure.lang.Associative
-       (assoc [this k v]
-         (if (clojure.lang.Util/isInteger k)
-           (.assocN this (int k) v)
-           (throw (IllegalArgumentException. "Key must be integer"))))
-
-       clojure.lang.IPersistentVector
+  ;; --- CLJ-only interfaces ---
+  #?@(:clj
+      [clojure.lang.IPersistentVector
        (assocN [this i v]
          (cond
            (== i cnt) (.cons this v)
            (or (< i 0) (>= i cnt)) (throw (IndexOutOfBoundsException. (str "Index " i " out of bounds")))
-           :else
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (vec-assoc-n-impl sio cnt shift root tail tail-len i v))))
+           :else (vec-assoc-n-impl sio cnt shift root tail tail-len i v)))
        (cons [_ v]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (vec-conj-impl sio cnt shift root tail tail-len v)))
+         (vec-conj-impl sio cnt shift root tail tail-len v))
        (length [_] (int cnt))
        (empty [_]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (let [new-tail (alloc-node! sio)]
-             (make-eve2-vec-impl sio 0 SHIFT_STEP NIL_OFFSET new-tail 0))))
+         (let [new-tail (alloc-node! sio)]
+           (make-eve2-vec-impl sio 0 SHIFT_STEP NIL_OFFSET new-tail 0)))
        (equiv [this other]
          (cond
            (identical? this other) true
            (instance? clojure.lang.IPersistentVector other)
            (let [ov ^clojure.lang.IPersistentVector other]
              (and (== cnt (.count ov))
-                  (binding [alloc/*jvm-slab-ctx* sio]
-                    (loop [i 0]
-                      (if (== i cnt) true
-                        (if (clojure.lang.Util/equiv (.nth this i) (.nth ov i))
-                          (recur (inc i)) false))))))
+                  (loop [i 0]
+                    (if (== i cnt) true
+                      (if (clojure.lang.Util/equiv (.nth this i) (.nth ov i))
+                        (recur (inc i)) false)))))
            :else false))
        (containsKey [_ i] (and (>= i 0) (< i cnt)))
        (entryAt [this i] (when (.containsKey this i) (clojure.lang.MapEntry/create i (.nth this i))))
@@ -552,47 +531,9 @@
        (valAt [this i not-found] (.nth this (int i) not-found))
        (peek [this] (when (pos? cnt) (.nth this (dec cnt))))
        (pop [this]
-         (cond
-           (zero? cnt) (throw (IllegalStateException. "Can't pop empty vector"))
-           :else
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (vec-pop-impl sio cnt shift root tail tail-len))))
-
-       clojure.lang.Seqable
-       (seq [_]
-         (when (pos? cnt)
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (letfn [(vec-seq [i]
-                       (when (< i cnt)
-                         (lazy-seq
-                          (clojure.core/cons (nth-impl sio cnt shift root tail i)
-                                (vec-seq (inc i))))))]
-               (vec-seq 0)))))
-
-       clojure.lang.Counted
-       (count [_] (int cnt))
-
-       clojure.lang.IReduceInit
-       (reduce [_ f init]
-         (binding [alloc/*jvm-slab-ctx* sio]
-           (loop [i 0 acc init]
-             (if (or (>= i cnt) (reduced? acc))
-               (unreduced acc)
-               (recur (inc i) (f acc (nth-impl sio cnt shift root tail i)))))))
-
-       clojure.lang.IReduce
-       (reduce [this f]
          (if (zero? cnt)
-           (f)
-           (binding [alloc/*jvm-slab-ctx* sio]
-             (loop [i 1 acc (nth-impl sio cnt shift root tail 0)]
-               (if (or (>= i cnt) (reduced? acc))
-                 (unreduced acc)
-                 (recur (inc i) (f acc (nth-impl sio cnt shift root tail i))))))))
-
-       clojure.lang.IFn
-       (invoke [this i] (.nth this (int i)))
-       (invoke [this i not-found] (.nth this (int i) not-found))
+           (throw (IllegalStateException. "Can't pop empty vector"))
+           (vec-pop-impl sio cnt shift root tail tail-len)))
 
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
@@ -606,19 +547,11 @@
            :else
            (let [ov ^clojure.lang.IPersistentVector other]
              (and (== cnt (.count ov))
-                  (binding [alloc/*jvm-slab-ctx* sio]
-                    (loop [i 0]
-                      (if (== i cnt) true
-                        (if (.equals ^Object (.nth this i) (.nth ov i))
-                          (recur (inc i)) false))))))))
-       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))
-
-       clojure.lang.IHashEq
-       (hasheq [this]
-         (clojure.lang.Murmur3/hashOrdered this))
-
-       d/IEveRoot
-       (-root-header-off [_] offset__)]))
+                  (loop [i 0]
+                    (if (== i cnt) true
+                      (if (.equals ^Object (.nth this i) (.nth ov i))
+                        (recur (inc i)) false)))))))
+       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))]))
 
 ;;=============================================================================
 ;; Constructor

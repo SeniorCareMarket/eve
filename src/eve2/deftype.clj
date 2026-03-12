@@ -304,7 +304,9 @@
             {:protocol iface :methods (vec translated)}))))))
 
 (defn- clj-emit-protocols
-  "Emit JVM protocol/interface implementations."
+  "Emit JVM protocol/interface implementations.
+   Each method body is auto-wrapped in (binding [*jvm-slab-ctx* sio] ...)
+   so downstream functions that read the dynamic var work correctly."
   [parsed-protos]
   (let [translated (keep clj-translate-protocol parsed-protos)
         by-iface (group-by :protocol translated)]
@@ -315,7 +317,10 @@
                   [iface]
                   (cons iface
                         (map (fn [{:keys [name args body]}]
-                               (list name args (cons 'do body)))
+                               (list name args
+                                     (list 'clojure.core/binding
+                                           ['eve.deftype-proto.alloc/*jvm-slab-ctx* 'sio]
+                                           (cons 'do body))))
                              all-methods)))))
             by-iface)))
 
