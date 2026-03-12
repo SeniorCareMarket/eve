@@ -51,13 +51,6 @@
               "-Dio.netty.tryReflectionSetAccessible=true"
               "-Xmx1g"]
    :main-opts ["-m" "eve.data-bench"]}
-  :eve2-compare-bench
-  {:extra-paths ["bench"]
-   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
-              "--enable-native-access=ALL-UNNAMED"
-              "-Dio.netty.tryReflectionSetAccessible=true"
-              "-Xmx1g"]
-   :main-opts ["-m" "eve2.compare-bench"]}
   :mcp {:extra-deps {io.github.bhauman/clojure-mcp {:git/tag "v0.2.6" :git/sha "35a660b"}}
         :exec-fn clojure-mcp.main/start
         :exec-args {:config-profile :cli-assist}}
