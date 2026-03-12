@@ -25,8 +25,11 @@
 
     ICollection
     {:iface   clojure.lang.IPersistentCollection
-     :methods {-conj  {:jvm-name cons  :arities [[_ v]]}
-               -empty {:jvm-name empty :arities [[_]]}}}
+     :methods {-conj  {:jvm-name cons  :arities [[_ v]]}}}
+
+    IEmptyableCollection
+    {:iface   clojure.lang.IPersistentCollection
+     :methods {-empty {:jvm-name empty :arities [[_]]}}}
 
     IEquiv
     {:iface   clojure.lang.IPersistentCollection
@@ -69,6 +72,15 @@
     {:iface   clojure.lang.IPersistentStack
      :methods {-peek {:jvm-name peek :arities [[_]]}
                -pop  {:jvm-name pop  :arities [[_]]}}}
+
+    IVector
+    {:iface   clojure.lang.IPersistentVector
+     :methods {-assoc-n {:jvm-name assocN :arities [[_ n val]]}}}
+
+    ISet
+    {:iface   clojure.lang.IPersistentSet
+     :methods {-disjoin  {:jvm-name disjoin  :arities [[_ v]]}
+               -get      {:jvm-name get      :arities [[_ v]]}}}
 
     ISeq
     {:iface   clojure.lang.ISeq
