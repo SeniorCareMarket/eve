@@ -27,7 +27,8 @@
               [eve.array :as eve-array]
               [eve.obj :as eve-obj]
               [eve.perf :as perf]]))
-  #?(:clj (:import [eve.map EveHashMap]
+  #?(:bb nil
+     :clj (:import [eve.map EveHashMap]
                    [eve.set EveHashSet]
                    [eve.vec SabVecRoot]
                    [eve.list SabList])))

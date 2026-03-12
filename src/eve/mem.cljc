@@ -27,7 +27,14 @@
    All byte-off arguments are BYTE offsets. Atomic ops require 4-byte
    alignment (enforced by the caller — util.cljs already does this via
    the (* field-idx 4) convention)."
-  #?(:clj
+  #?(:bb
+     (:import
+      [java.io RandomAccessFile]
+      [java.nio ByteBuffer ByteOrder MappedByteBuffer]
+      [java.nio.channels FileChannel FileChannel$MapMode]
+      [java.nio.file OpenOption Paths StandardOpenOption]
+      [java.util Date UUID])
+     :clj
      (:import
       [java.io RandomAccessFile]
       [java.lang.foreign Arena MemorySegment]
@@ -350,10 +357,230 @@
          (NodeMmapRegion. buf size-bytes)))))
 
 ;; ---------------------------------------------------------------------------
-;; JVM implementations
+;; Babashka implementations — MappedByteBuffer (no Panama FFM, no Unsafe)
 ;; ---------------------------------------------------------------------------
+;; bb takes `:bb` before `:clj` in reader conditionals.
+;; Uses MappedByteBuffer for mmap regions and ByteBuffer.wrap for heap regions.
+;; Atomic ops are simulated via locking — sufficient for single-process bb scripts.
 
-#?(:clj
+#?(:bb
+   (do
+     ;; Locking object for simulated atomics. Babashka is single-threaded for
+     ;; scripting, but we still do CAS-style reads; a global lock suffices.
+     (def ^:private bb-lock (Object.))
+
+     ;; BbMmapRegion — file-backed MappedByteBuffer with simulated atomics
+     (deftype BbMmapRegion [^MappedByteBuffer mbb ^long size]
+       IMemRegion
+
+       (-byte-length [_] size)
+
+       (-load-i32 [_ byte-off]
+         (locking bb-lock
+           (.getInt mbb (int byte-off))))
+
+       (-store-i32! [_ byte-off val]
+         (locking bb-lock
+           (.putInt mbb (int byte-off) (unchecked-int val)))
+         nil)
+
+       (-cas-i32! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getInt mbb (int byte-off))]
+             (when (== cur (int expected))
+               (.putInt mbb (int byte-off) (unchecked-int desired)))
+             cur)))
+
+       (-add-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt mbb (int byte-off))]
+             (.putInt mbb (int byte-off) (unchecked-int (+ old (int delta))))
+             old)))
+
+       (-sub-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt mbb (int byte-off))]
+             (.putInt mbb (int byte-off) (unchecked-int (- old (int delta))))
+             old)))
+
+       (-exchange-i32! [_ byte-off val]
+         (locking bb-lock
+           (let [old (.getInt mbb (int byte-off))]
+             (.putInt mbb (int byte-off) (unchecked-int val))
+             old)))
+
+       (-load-i64 [_ byte-off]
+         (locking bb-lock
+           (.getLong mbb (int byte-off))))
+
+       (-store-i64! [_ byte-off val]
+         (locking bb-lock
+           (.putLong mbb (int byte-off) (long val)))
+         nil)
+
+       (-cas-i64! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getLong mbb (int byte-off))]
+             (when (== cur (long expected))
+               (.putLong mbb (int byte-off) (long desired)))
+             cur)))
+
+       (-add-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong mbb (int byte-off))]
+             (.putLong mbb (int byte-off) (+ old (long delta)))
+             old)))
+
+       (-sub-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong mbb (int byte-off))]
+             (.putLong mbb (int byte-off) (- old (long delta)))
+             old)))
+
+       (-wait-i32! [_ byte-off expected timeout-ms]
+         (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+           (loop []
+             (let [cur (locking bb-lock (.getInt mbb (int byte-off)))]
+               (cond
+                 (not= cur (int expected))                  :not-equal
+                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 :else (do (Thread/sleep 1)
+                           (recur)))))))
+
+       (-notify-i32! [_ _byte-off _n] 0)
+
+       (-supports-watch? [_] false)
+
+       (-read-bytes [_ byte-off len]
+         (let [dst (byte-array len)]
+           (locking bb-lock
+             (.position mbb (int byte-off))
+             (.get mbb dst))
+           dst))
+
+       (-write-bytes! [_ byte-off src]
+         (locking bb-lock
+           (.position mbb (int byte-off))
+           (.put mbb ^bytes src))
+         nil))
+
+     (defn open-mmap-region
+       "Open (or create) a file-backed shared memory region at path-str.
+        Uses MappedByteBuffer (compatible with Babashka/GraalVM native-image)."
+       [path-str size-bytes]
+       (let [size  (long size-bytes)
+             _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
+                     (try (when (< (.length raf) size) (.setLength raf size))
+                          (finally (.close raf))))
+             path  (Paths/get ^String path-str (into-array String []))
+             ^FileChannel fc
+             (FileChannel/open path
+               (into-array OpenOption
+                 [StandardOpenOption/READ
+                  StandardOpenOption/WRITE]))
+             ^MappedByteBuffer mbb (.map fc FileChannel$MapMode/READ_WRITE 0 size)]
+         (.close fc)
+         (.order mbb ByteOrder/LITTLE_ENDIAN)
+         (BbMmapRegion. mbb size)))
+
+     ;; BbHeapRegion — byte[] backed by ByteBuffer.wrap with simulated atomics
+     (deftype BbHeapRegion [^ByteBuffer bb-buf ^bytes backing ^long size]
+       IMemRegion
+
+       (-byte-length [_] size)
+
+       (-load-i32 [_ byte-off]
+         (locking bb-lock
+           (.getInt bb-buf (int byte-off))))
+
+       (-store-i32! [_ byte-off val]
+         (locking bb-lock
+           (.putInt bb-buf (int byte-off) (unchecked-int val)))
+         nil)
+
+       (-cas-i32! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getInt bb-buf (int byte-off))]
+             (when (== cur (int expected))
+               (.putInt bb-buf (int byte-off) (unchecked-int desired)))
+             cur)))
+
+       (-add-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt bb-buf (int byte-off))]
+             (.putInt bb-buf (int byte-off) (unchecked-int (+ old (int delta))))
+             old)))
+
+       (-sub-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt bb-buf (int byte-off))]
+             (.putInt bb-buf (int byte-off) (unchecked-int (- old (int delta))))
+             old)))
+
+       (-exchange-i32! [_ byte-off val]
+         (locking bb-lock
+           (let [old (.getInt bb-buf (int byte-off))]
+             (.putInt bb-buf (int byte-off) (unchecked-int val))
+             old)))
+
+       (-load-i64 [_ byte-off]
+         (locking bb-lock
+           (.getLong bb-buf (int byte-off))))
+
+       (-store-i64! [_ byte-off val]
+         (locking bb-lock
+           (.putLong bb-buf (int byte-off) (long val)))
+         nil)
+
+       (-cas-i64! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getLong bb-buf (int byte-off))]
+             (when (== cur (long expected))
+               (.putLong bb-buf (int byte-off) (long desired)))
+             cur)))
+
+       (-add-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong bb-buf (int byte-off))]
+             (.putLong bb-buf (int byte-off) (+ old (long delta)))
+             old)))
+
+       (-sub-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong bb-buf (int byte-off))]
+             (.putLong bb-buf (int byte-off) (- old (long delta)))
+             old)))
+
+       (-wait-i32! [_ byte-off expected timeout-ms]
+         (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+           (loop []
+             (let [cur (locking bb-lock (.getInt bb-buf (int byte-off)))]
+               (cond
+                 (not= cur (int expected))                  :not-equal
+                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 :else (do (Thread/sleep 1)
+                           (recur)))))))
+
+       (-notify-i32! [_ _byte-off _n] 0)
+
+       (-supports-watch? [_] false)
+
+       (-read-bytes [_ byte-off len]
+         (java.util.Arrays/copyOfRange backing (int byte-off) (int (+ byte-off len))))
+
+       (-write-bytes! [_ byte-off src]
+         (System/arraycopy src 0 backing (int byte-off) (alength ^bytes src))
+         nil))
+
+     (defn make-heap-region
+       "Create an IMemRegion backed by a zero-initialized heap byte array.
+        Uses ByteBuffer.wrap for int32/int64 ops (Babashka-compatible)."
+       [size-bytes]
+       (let [ba  (byte-array (int size-bytes))
+             buf (doto (ByteBuffer/wrap ba) (.order ByteOrder/LITTLE_ENDIAN))]
+         (BbHeapRegion. buf ba (long size-bytes)))))
+
+   :clj
    (do
      ;; sun.misc.Unsafe for atomic int32 ops over native memory.
      ;; Works on Java 21 (preview FFM) and Java 22+ (final FFM).
@@ -616,7 +843,13 @@
 (defn read-bytes     [r byte-off len]       (-read-bytes     r byte-off len))
 (defn write-bytes!   [r byte-off src]       (-write-bytes!   r byte-off src))
 
-#?(:clj
+#?(:bb
+   (defn copy-region!
+     "Bulk copy len bytes between two IMemRegion instances (Babashka)."
+     [src-region src-byte-off dst-region dst-byte-off len]
+     (let [bs (-read-bytes src-region src-byte-off len)]
+       (-write-bytes! dst-region dst-byte-off bs)))
+   :clj
    (defn copy-region!
      "Bulk copy len bytes between two IMemRegion instances.
       For JvmMmapRegion↔JvmMmapRegion: uses MemorySegment/copy (native memcpy).

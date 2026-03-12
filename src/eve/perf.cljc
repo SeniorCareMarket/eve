@@ -19,6 +19,29 @@
      (perf/timed :hamt-assoc (jvm-hamt-assoc! ...))")
 
 ;; ---------------------------------------------------------------------------
+;; Babashka stubs — profiling is JVM-only; bb gets no-ops
+;; ---------------------------------------------------------------------------
+
+#?(:bb
+   (do
+     (defn enabled? [] false)
+     (defn enable!  [] :enabled)
+     (defn disable! [] :disabled)
+     (defn count!   [_section] nil)
+     (defn record-timing! [_section _elapsed-ns] nil)
+     (defmacro timed [_section & body] `(do ~@body))
+     (defn snapshot [] [])
+     (defn report  [] (println "  (profiling not available in Babashka)"))
+     (defn reset-all! [] nil))
+
+;; ---------------------------------------------------------------------------
+;; JVM implementation
+;; ---------------------------------------------------------------------------
+
+   :clj
+   (do
+
+;; ---------------------------------------------------------------------------
 ;; Global toggle
 ;; ---------------------------------------------------------------------------
 
@@ -175,4 +198,4 @@
   []
   (doseq [^java.lang.ref.WeakReference wr all-accumulators]
     (when-let [^java.util.HashMap m (.get wr)]
-      (.clear m))))
+      (.clear m))))))

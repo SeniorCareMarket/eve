@@ -1,0 +1,9 @@
+{:paths ["src"]
+ :tasks
+ {test:bb
+  {:doc  "Run Babashka compatibility smoke tests"
+   :task (load-file "script/bb_test.clj")}
+
+  example:bb
+  {:doc  "Run the Babashka example (mmap region + serialization)"
+   :task (load-file "script/bb_example.clj")}}}
