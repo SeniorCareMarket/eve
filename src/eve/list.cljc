@@ -14,10 +14,10 @@
             NIL_OFFSET]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:clj  [[eve3.deftype :as eve3]
+   #?@(:clj  [[eve.deftype-proto.eve3-deftype :as eve3]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
-  #?(:cljs (:require-macros [eve3.deftype :as eve3])))
+  #?(:cljs (:require-macros [eve.deftype-proto.eve3-deftype :as eve3])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -104,40 +104,41 @@
 
 (declare make-eve3-list)
 
-(deftype EveList [sio__
-                  #?@(:clj [^:unsynchronized-mutable offset__])
-                  #?@(:cljs [^:mutable offset__])
-                  #?@(:clj [^int cnt]) #?@(:cljs [cnt])
-                  head-off]
+(eve3/eve3-deftype ^{:type-id 0x13} EveList [^:int32 cnt ^:int32 head-off]
 
-  #?@(:cljs [ISequential])
-  #?(:clj clojure.lang.Sequential)
+  clojure.lang.Sequential
 
-  #?(:cljs ICounted :clj clojure.lang.Counted)
-  (#?(:cljs -count :clj count) [_] #?(:cljs cnt :clj (int cnt)))
+  clojure.lang.Counted
+  (count [_] #?(:cljs cnt :clj (int cnt)))
 
-  #?(:cljs ISeqable :clj clojure.lang.Seqable)
-  (#?(:cljs -seq :clj seq) [this] (when (pos? cnt) this))
+  clojure.lang.Seqable
+  (seq [this] (when (pos? cnt) this))
 
-  #?(:cljs IMeta :clj clojure.lang.IMeta)
-  (#?(:cljs -meta :clj meta) [_] nil)
+  clojure.lang.IMeta
+  (meta [_] nil)
 
-  #?(:cljs IWithMeta :clj clojure.lang.IObj)
-  (#?(:cljs -with-meta :clj withMeta) [this m] this)
+  clojure.lang.IObj
+  (withMeta [this m] this)
 
-  #?(:cljs IStack :clj clojure.lang.IPersistentStack)
-  (#?(:cljs -peek :clj peek) [_]
+  clojure.lang.IPersistentStack
+  (peek [_]
     (when (pos? cnt)
       (read-node-value sio__ head-off)))
-  (#?(:cljs -pop :clj pop) [_]
+  (pop [_]
     (if (zero? cnt)
       (throw (#?(:cljs js/Error. :clj IllegalStateException.)
               "Can't pop empty list"))
       (let [next-off (read-node-next sio__ head-off)]
         (make-eve3-list sio__ (dec cnt) next-off))))
 
-  #?(:cljs IEquiv :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -equiv :clj equiv) [_ other]
+  clojure.lang.IPersistentCollection
+  (cons [_ v]
+    (let [vb (serialize-element-bytes v)
+          node-off (alloc-list-node! sio__ head-off vb)]
+      (make-eve3-list sio__ (inc cnt) node-off)))
+  (empty [_]
+    (make-eve3-list sio__ 0 NIL_OFFSET))
+  (equiv [_ other]
     (cond
       (not (sequential? other)) false
       (not= cnt (count other)) false
@@ -150,44 +151,27 @@
               (recur (read-node-next sio__ off) (inc i) (clojure.core/next os))
               false))))))
 
-  #?(:cljs IEmptyableCollection :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -empty :clj empty) [_]
-    (make-eve3-list sio__ 0 NIL_OFFSET))
-
-  #?(:cljs ICollection :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -conj :clj cons) [_ v]
-    (let [vb (serialize-element-bytes v)
-          node-off (alloc-list-node! sio__ head-off vb)]
-      (make-eve3-list sio__ (inc cnt) node-off)))
-
-  #?(:cljs IHash :clj clojure.lang.IHashEq)
-  (#?(:cljs -hash :clj hasheq) [this]
+  clojure.lang.IHashEq
+  (hasheq [this]
     #?(:cljs (hash-ordered-coll this)
        :clj (clojure.lang.Murmur3/hashOrdered this)))
 
-  #?(:cljs ISeq :clj clojure.lang.ISeq)
-  (#?(:cljs -first :clj first) [_]
+  clojure.lang.ISeq
+  (first [_]
     (when (pos? cnt)
       (read-node-value sio__ head-off)))
-  (#?(:cljs -rest :clj more) [_]
+  (more [_]
     (if (<= cnt 1)
       (make-eve3-list sio__ 0 NIL_OFFSET)
       (let [next-off (read-node-next sio__ head-off)]
         (make-eve3-list sio__ (dec cnt) next-off))))
-  #?@(:clj
-      [(next [_]
-         (when (> cnt 1)
-           (let [next-off (read-node-next sio__ head-off)]
-             (make-eve3-list sio__ (dec cnt) next-off))))])
+  (next [_]
+    (when (> cnt 1)
+      (let [next-off (read-node-next sio__ head-off)]
+        (make-eve3-list sio__ (dec cnt) next-off))))
 
-  #?@(:cljs [INext
-             (-next [_]
-               (when (> cnt 1)
-                 (let [next-off (read-node-next sio__ head-off)]
-                   (make-eve3-list sio__ (dec cnt) next-off))))])
-
-  #?(:cljs IFn :clj clojure.lang.IFn)
-  (#?(:cljs -invoke :clj invoke) [_ n]
+  clojure.lang.IFn
+  (invoke [_ n]
     (if (and (integer? n) (>= n 0) (< n cnt))
       (loop [off head-off i 0]
         (if (== i n)
@@ -195,6 +179,17 @@
           (recur (read-node-next sio__ off) (inc i))))
       nil))
 
+  clojure.lang.IReduceInit
+  (reduce [_ f init]
+    (loop [off head-off i 0 acc init]
+      (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
+        #?(:cljs (if (reduced? acc) @acc acc)
+           :clj  (unreduced acc))
+        (let [v (read-node-value sio__ off)
+              nxt (read-node-next sio__ off)]
+          (recur nxt (inc i) (f acc v))))))
+
+  ;; CLJS-only: 1-arity reduce (no CLJ equivalent)
   #?@(:cljs [IReduce
              (-reduce [_ f]
                (if (zero? cnt)
@@ -206,29 +201,10 @@
                      (let [v (read-node-value sio__ off)
                            result (f acc v)]
                        (if (reduced? result) @result
-                         (recur (read-node-next sio__ off) (inc i) result)))))))
-             (-reduce [_ f init]
-               (loop [off head-off i 0 acc init]
-                 (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
-                   (if (reduced? acc) @acc acc)
-                   (let [v (read-node-value sio__ off)
-                         nxt (read-node-next sio__ off)]
-                     (recur nxt (inc i) (f acc v))))))])
-
-  #?@(:clj [clojure.lang.IReduceInit
-             (reduce [_ f init]
-               (loop [off head-off i 0 acc init]
-                 (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
-                   (unreduced acc)
-                   (let [v (read-node-value sio__ off)
-                         nxt (read-node-next sio__ off)]
-                     (recur nxt (inc i) (f acc v))))))])
+                         (recur (read-node-next sio__ off) (inc i) result)))))))])
 
   d/IDirectSerialize
-  (d/-direct-serialize [this]
-    (when (nil? offset__)
-      (set! offset__ (write-list-header! sio__ cnt head-off)))
-    offset__)
+  (d/-direct-serialize [this] offset__)
 
   d/ISabStorable
   (d/-sab-tag [_] :eve-list)
@@ -239,10 +215,7 @@
   (d/-eve? [_] true)
 
   d/IEveRoot
-  (d/-root-header-off [this]
-    (when (nil? offset__)
-      (set! offset__ (write-list-header! sio__ cnt head-off)))
-    offset__)
+  (d/-root-header-off [this] offset__)
 
   #?@(:cljs [IPrintWithWriter
              (-pr-writer [this writer _opts]
@@ -254,22 +227,20 @@
                    (recur (read-node-next sio__ off) (inc i))))
                (-write writer ")"))])
 
-  ;; --- CLJ-only interfaces ---
-  #?@(:clj
-      [clojure.lang.IPersistentList
+  clojure.lang.IPersistentList
 
-       java.lang.Iterable
-       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+  java.lang.Iterable
+  (iterator [this] #?(:clj (clojure.lang.SeqIterator. (.seq this))))
 
-       java.lang.Object
-       (toString [this] (pr-str this))
-       (equals [this other]
-         (cond
-           (identical? this other) true
-           (not (sequential? other)) false
-           :else (.equiv this other)))
-       (hashCode [this]
-         (clojure.lang.Murmur3/hashOrdered this))]))
+  java.lang.Object
+  (toString [this] #?(:clj (pr-str this)))
+  (equals [this other]
+    #?(:clj (cond
+              (identical? this other) true
+              (not (sequential? other)) false
+              :else (.equiv this other))))
+  (hashCode [this]
+    #?(:clj (clojure.lang.Murmur3/hashOrdered this))))
 
 ;;=============================================================================
 ;; Disposal & retirement (CLJS only)
@@ -294,9 +265,9 @@
        [eve-list]
        (when (instance? EveList eve-list)
          (let [sio (.-sio__ eve-list)
-               hd  (.-head-off eve-list)
-               hdr (.-offset__ eve-list)]
-           (when (not= hd NIL_OFFSET)
+               hdr (.-offset__ eve-list)
+               hd  (when hdr (-sio-read-i32 sio hdr LIST_HEAD_OFFSET))]
+           (when (and hd (not= hd NIL_OFFSET))
              (free-list-chain! sio hd))
            (when (and hdr (not= hdr NIL_OFFSET))
              (-sio-free! sio hdr)))))
@@ -323,10 +294,11 @@
      (extend-type EveList
        d/ISabRetirable
        (-sab-retire-diff! [this new-value _slab-env mode]
-         (let [sio     (.-sio__ this)
-               old-head (.-head-off this)
+         (let [sio      (.-sio__ this)
+               hdr      (.-offset__ this)
+               old-head (-sio-read-i32 sio hdr LIST_HEAD_OFFSET)
                new-head (when (instance? EveList new-value)
-                          (.-head-off new-value))]
+                          (-sio-read-i32 sio (.-offset__ new-value) LIST_HEAD_OFFSET))]
            (if new-head
              ;; Both are EveList — retire replaced chain nodes
              (retire-replaced-chain! sio old-head new-head mode)
@@ -338,17 +310,15 @@
 ;;=============================================================================
 
 (defn- make-eve3-list
-  "Internal constructor. Defers header write — header is materialized lazily
-   when -root-header-off or -direct-serialize is called."
+  "Internal constructor: allocate header, create EveList."
   [sio cnt head-off]
-  (EveList. sio nil cnt head-off))
-
+  (let [hdr (write-list-header! sio cnt head-off)]
+    (EveList. sio hdr)))
 
 (defn eve3-list-from-header
-  "Reconstruct an EveList from a header offset."
+  "Reconstruct an EveList from an existing header offset."
   [sio header-off]
-  (let [[cnt head-off] (read-list-header sio header-off)]
-    (EveList. sio header-off cnt head-off)))
+  (EveList. sio header-off))
 
 (defn empty-list
   "Create an empty Eve list.

@@ -1,4 +1,4 @@
-(ns eve3.proto-map
+(ns eve.deftype-proto.proto-map
   "CLJ → CLJS protocol mapping table.
 
    Maps JVM interface/class symbols to CLJS protocol + method translations.

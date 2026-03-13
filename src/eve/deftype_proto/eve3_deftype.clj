@@ -1,20 +1,19 @@
-(ns eve3.deftype
-  "Unified CLJC deftype macro for Eve3 data structures.
+(ns eve.deftype-proto.eve3-deftype
+  "Unified CLJC deftype macro for Eve data structures.
 
    Users write CLJ-style protocol names (clojure.lang.Counted, count).
    On CLJS, the macro translates to CLJS equivalents (ICounted, -count).
    On CLJ, names pass through verbatim.
 
-   Key difference from eve2: both platforms use ISlabIO for field access.
+   Both platforms use ISlabIO for field access.
    Deftype fields are always [sio__ ^long offset__] on both platforms.
-   No dynamic vars, no DataView inlining.
 
    Example:
      (eve3/eve3-deftype EvePoint [^:int32 x ^:int32 y]
        clojure.lang.Counted
        (count [_] 2))"
-  (:require [eve3.proto-map :as pm]
-            [eve3.deftype.registry :as reg]))
+  (:require [eve.deftype-proto.proto-map :as pm]
+            [eve.deftype-proto.eve3-deftype.registry :as reg]))
 
 ;;=============================================================================
 ;; Field Read/Write via ISlabIO
@@ -224,7 +223,7 @@
    (when-not (user-provides-protocol? parsed-protos 'java.lang.Object)
      ['IPrintWithWriter
       (list '-pr-writer ['this 'writer '_opts]
-            (list '-write 'writer (str "#eve3/" (name type-name) " "))
+            (list '-write 'writer (str "#eve/" (name type-name) " "))
             (list '-write 'writer (str "{:offset " (list '.-offset__ 'this) "}")))])))
 
 (defn- emit-cljs
@@ -292,7 +291,7 @@
                     :else (list '.equiv 'this 'other))
               (list 'and (list 'instance? type-name 'other)
                     (list '= (list '.hasheq 'this) (list '.hasheq 'other)))))
-      (list 'toString ['this] (str "#eve3/" (name type-name)))])))
+      (list 'toString ['this] (str "#eve/" (name type-name)))])))
 
 (defn- emit-clj
   "Emit CLJ deftype expansion.
@@ -316,7 +315,7 @@
 ;;=============================================================================
 
 (defmacro eve3-deftype
-  "Define a unified CLJC Eve3 type.
+  "Define a unified CLJC Eve type.
 
    Fields support type hints: ^:int32, ^:uint32, ^:float32, ^:float64.
    Protocol implementations use CLJ-style names (clojure.lang.Counted, count).

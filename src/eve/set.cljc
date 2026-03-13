@@ -17,10 +17,10 @@
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                   mask-hash bitpos has-bit? get-index]]
-   #?@(:clj  [[eve3.deftype :as eve3]
+   #?@(:clj  [[eve.deftype-proto.eve3-deftype :as eve3]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
-  #?(:cljs (:require-macros [eve3.deftype :as eve3])))
+  #?(:cljs (:require-macros [eve.deftype-proto.eve3-deftype :as eve3])))
 
 ;;=============================================================================
 ;; Shared Constants

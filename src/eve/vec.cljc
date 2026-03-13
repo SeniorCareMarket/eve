@@ -13,10 +13,10 @@
             -sio-copy-block! NIL_OFFSET]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:clj  [[eve3.deftype :as eve3]
+   #?@(:clj  [[eve.deftype-proto.eve3-deftype :as eve3]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
-  #?(:cljs (:require-macros [eve3.deftype :as eve3])))
+  #?(:cljs (:require-macros [eve.deftype-proto.eve3-deftype :as eve3])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -305,27 +305,20 @@
              (free-block! sio node-slab-off)))))))
 
 ;;=============================================================================
-;; EveVector deftype — plain deftype with cached fields for performance.
-;; Fields are read from slab header once at construction time, not on every access.
+;; EveVector deftype — unified via eve3-deftype macro.
+;; Fields are read from slab header via ISlabIO on each method call.
 ;;=============================================================================
 
-(deftype EveVector [sio__
-                    #?@(:clj [^:unsynchronized-mutable offset__])
-                    #?@(:cljs [^:mutable offset__])
-                    #?@(:clj [^int cnt ^int shift])
-                    #?@(:cljs [cnt shift])
-                    root tail
-                    #?@(:clj [^int tail-len])
-                    #?@(:cljs [tail-len])]
+(eve3/eve3-deftype ^{:type-id 0x12} EveVector
+  [^:int32 cnt ^:int32 shift ^:int32 root ^:int32 tail ^:int32 tail-len]
 
-  #?@(:cljs [ISequential])
-  #?(:clj clojure.lang.Sequential)
+  clojure.lang.Sequential
 
-  #?(:cljs ICounted :clj clojure.lang.Counted)
-  (#?(:cljs -count :clj count) [_] #?(:cljs cnt :clj (int cnt)))
+  clojure.lang.Counted
+  (count [_] #?(:cljs cnt :clj (int cnt)))
 
-  #?(:cljs ISeqable :clj clojure.lang.Seqable)
-  (#?(:cljs -seq :clj seq) [_]
+  clojure.lang.Seqable
+  (seq [_]
     (when (pos? cnt)
       #?(:cljs
          ((fn iter [i]
@@ -343,35 +336,40 @@
                        (vec-seq (inc i))))))]
            (vec-seq 0)))))
 
-  #?(:cljs IMeta :clj clojure.lang.IMeta)
-  (#?(:cljs -meta :clj meta) [_] nil)
+  clojure.lang.IMeta
+  (meta [_] nil)
 
-  #?(:cljs IWithMeta :clj clojure.lang.IObj)
-  (#?(:cljs -with-meta :clj withMeta) [this m] this)
+  clojure.lang.IObj
+  (withMeta [this m] this)
 
-  #?(:cljs ILookup :clj clojure.lang.ILookup)
-  (#?(:cljs -lookup :clj valAt) [_ k]
+  clojure.lang.ILookup
+  (valAt [_ k]
     (if (and (integer? k) (>= k 0) (< k cnt))
       (nth-impl sio__ cnt shift root tail k)
       nil))
-  (#?(:cljs -lookup :clj valAt) [_ k not-found]
+  (valAt [_ k not-found]
     (if (and (integer? k) (>= k 0) (< k cnt))
       (nth-impl sio__ cnt shift root tail k)
       not-found))
 
-  #?(:cljs IIndexed :clj clojure.lang.Indexed)
-  (#?(:cljs -nth :clj nth) [_ n]
+  clojure.lang.Indexed
+  (nth [_ n]
     (if (or (neg? n) (>= n cnt))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index out of bounds: " n)))
       (nth-impl sio__ cnt shift root tail n)))
-  (#?(:cljs -nth :clj nth) [this n not-found]
+  (nth [this n not-found]
     (if (or (neg? n) (>= n cnt))
       not-found
       #?(:cljs (-nth this n) :clj (.nth this n))))
 
-  #?(:cljs IEquiv :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -equiv :clj equiv) [_ other]
+  clojure.lang.IPersistentCollection
+  (cons [_ val]
+    (vec-conj-impl sio__ cnt shift root tail tail-len val))
+  (empty [_]
+    (let [new-tail (alloc-node! sio__)]
+      (make-eve3-vec-impl sio__ 0 SHIFT_STEP NIL_OFFSET new-tail 0)))
+  (equiv [_ other]
     (cond
       (not (sequential? other)) false
       (not= cnt (count other)) false
@@ -383,32 +381,23 @@
             (recur (inc i))
             false)))))
 
-  #?(:cljs IEmptyableCollection :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -empty :clj empty) [_]
-    (let [new-tail (alloc-node! sio__)]
-      (make-eve3-vec-impl sio__ 0 SHIFT_STEP NIL_OFFSET new-tail 0)))
-
-  #?(:cljs ICollection :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -conj :clj cons) [_ val]
-    (vec-conj-impl sio__ cnt shift root tail tail-len val))
-
-  #?(:cljs IHash :clj clojure.lang.IHashEq)
-  (#?(:cljs -hash :clj hasheq) [this]
+  clojure.lang.IHashEq
+  (hasheq [this]
     #?(:cljs (hash-ordered-coll this)
        :clj (clojure.lang.Murmur3/hashOrdered this)))
 
-  #?(:cljs IStack :clj clojure.lang.IPersistentStack)
-  (#?(:cljs -peek :clj peek) [_]
+  clojure.lang.IPersistentStack
+  (peek [_]
     (when (pos? cnt)
       (nth-impl sio__ cnt shift root tail (dec cnt))))
-  (#?(:cljs -pop :clj pop) [_]
+  (pop [_]
     (if (zero? cnt)
       (throw (#?(:cljs js/Error. :clj IllegalStateException.)
               "Can't pop empty vector"))
       (vec-pop-impl sio__ cnt shift root tail tail-len)))
 
-  #?(:cljs IVector :clj clojure.lang.IPersistentVector)
-  (#?(:cljs -assoc-n :clj assocN) [this n val]
+  clojure.lang.IPersistentVector
+  (assocN [this n val]
     (cond
       (== n cnt) (#?(:cljs -conj :clj .cons) this val)
       (or (neg? n) (> n cnt))
@@ -416,24 +405,36 @@
               (str "Index " n " out of bounds [0," cnt "]")))
       :else
       (vec-assoc-n-impl sio__ cnt shift root tail tail-len n val)))
+  #?@(:clj
+      [(length [_] (int cnt))
+       (entryAt [this i] (when (.containsKey this i) (clojure.lang.MapEntry/create i (.nth this i))))])
 
-  #?(:cljs IAssociative :clj clojure.lang.Associative)
-  (#?(:cljs -assoc :clj assoc) [this k v]
+  clojure.lang.Associative
+  (assoc [this k v]
     (if (integer? k)
       #?(:cljs (-assoc-n this k v)
          :clj  (.assocN this k v))
       (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
               "Vector's key for assoc must be a number."))))
-  (#?(:cljs -contains-key? :clj containsKey) [_ k]
+  (containsKey [_ k]
     (and (integer? k) (>= k 0) (< k cnt)))
 
-  #?(:cljs IFn :clj clojure.lang.IFn)
-  (#?(:cljs -invoke :clj invoke) [this k] (nth-impl sio__ cnt shift root tail k))
-  (#?(:cljs -invoke :clj invoke) [this k not-found]
+  clojure.lang.IFn
+  (invoke [this k] (nth-impl sio__ cnt shift root tail k))
+  (invoke [this k not-found]
     (if (and (integer? k) (>= k 0) (< k cnt))
       (nth-impl sio__ cnt shift root tail k)
       not-found))
 
+  clojure.lang.IReduceInit
+  (reduce [_ f init]
+    (loop [i 0 acc init]
+      (if (or (>= i cnt) (reduced? acc))
+        #?(:cljs (if (reduced? acc) @acc acc)
+           :clj  (unreduced acc))
+        (recur (inc i) (f acc (nth-impl sio__ cnt shift root tail i))))))
+
+  ;; CLJS-only: 1-arity reduce (no CLJ equivalent)
   #?@(:cljs [IReduce
              (-reduce [_ f]
                (case (int cnt)
@@ -443,24 +444,10 @@
                    (if (>= i cnt)
                      acc
                      (let [val (f acc (nth-impl sio__ cnt shift root tail i))]
-                       (if (reduced? val) @val (recur (inc i) val)))))))
-             (-reduce [_ f init]
-               (loop [i 0 acc init]
-                 (if (or (>= i cnt) (reduced? acc))
-                   (if (reduced? acc) @acc acc)
-                   (recur (inc i) (f acc (nth-impl sio__ cnt shift root tail i))))))])
-
-  #?@(:clj [clojure.lang.IReduceInit
-             (reduce [_ f init]
-               (loop [i 0 acc init]
-                 (if (or (>= i cnt) (reduced? acc))
-                   (unreduced acc)
-                   (recur (inc i) (f acc (nth-impl sio__ cnt shift root tail i))))))])
+                       (if (reduced? val) @val (recur (inc i) val)))))))])
 
   d/IDirectSerialize
   (d/-direct-serialize [this]
-    (when (nil? offset__)
-      (set! offset__ (write-vec-header! sio__ cnt shift root tail tail-len)))
     #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_VEC offset__)
        :clj offset__))
 
@@ -473,10 +460,7 @@
   (d/-eve? [_] true)
 
   d/IEveRoot
-  (d/-root-header-off [this]
-    (when (nil? offset__)
-      (set! offset__ (write-vec-header! sio__ cnt shift root tail tail-len)))
-    offset__)
+  (d/-root-header-off [this] offset__)
 
   #?@(:cljs [IPrintWithWriter
              (-pr-writer [this writer _opts]
@@ -488,43 +472,38 @@
                    (recur (inc i))))
                (-write writer "]"))])
 
-  ;; --- CLJ-only interfaces ---
-  #?@(:clj
-      [clojure.lang.IPersistentVector
-       (length [_] (int cnt))
-       (entryAt [this i] (when (.containsKey this i) (clojure.lang.MapEntry/create i (.nth this i))))
+  java.lang.Iterable
+  (iterator [this] #?(:clj (clojure.lang.SeqIterator. (.seq this))))
 
-       java.lang.Iterable
-       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
-
-       java.lang.Object
-       (toString [this] (pr-str this))
-       (equals [this other]
-         (cond
-           (identical? this other) true
-           (not (instance? clojure.lang.IPersistentVector other)) false
-           :else
-           (let [ov ^clojure.lang.IPersistentVector other]
-             (and (== cnt (.count ov))
-                  (loop [i 0]
-                    (if (== i cnt) true
-                      (if (.equals ^Object (.nth this i) (.nth ov i))
-                        (recur (inc i)) false)))))))
-       (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))]))
+  java.lang.Object
+  (toString [this] #?(:clj (pr-str this)))
+  (equals [this other]
+    #?(:clj (cond
+              (identical? this other) true
+              (not (instance? clojure.lang.IPersistentVector other)) false
+              :else
+              (let [ov ^clojure.lang.IPersistentVector other]
+                (and (== cnt (.count ov))
+                     (loop [i 0]
+                       (if (== i cnt) true
+                         (if (.equals ^Object (.nth this i) (.nth ov i))
+                           (recur (inc i)) false))))))))
+  (hashCode [this] #?(:clj (clojure.lang.Murmur3/hashOrdered this))))
 
 ;;=============================================================================
 ;; Constructor (after deftype so CLJ can resolve EveVector class)
 ;;=============================================================================
 
-(defn- make-eve3-vec-impl [sio cnt shift root tail tail-len]
-  (EveVector. sio nil cnt shift root tail tail-len))
+(defn- make-eve3-vec-impl
+  "Internal constructor: allocate header, create EveVector."
+  [sio cnt shift root tail tail-len]
+  (let [hdr (write-vec-header! sio cnt shift root tail tail-len)]
+    (EveVector. sio hdr)))
 
-(defn- make-eve3-vec [sio hdr]
-  (let [[cnt shift root tail tail-len] (read-vec-header sio hdr)]
-    (EveVector. sio hdr cnt shift root tail tail-len)))
-
-(defn eve3-vec-from-header [sio header-off]
-  (make-eve3-vec sio header-off))
+(defn eve3-vec-from-header
+  "Reconstruct an EveVector from an existing header offset."
+  [sio header-off]
+  (EveVector. sio header-off))
 
 (defn empty-vec
   "Create an empty Eve vector.
@@ -552,11 +531,11 @@
 
         WARNING: After disposal, the vector must not be used."
        [^js eve-vec]
-       (let [sio       (.-sio__ eve-vec)
-             root-off  (.-root eve-vec)
-             tail-off  (.-tail eve-vec)
-             shift-val (.-shift eve-vec)
-             header-off (.-offset__ eve-vec)]
+       (let [sio        (.-sio__ eve-vec)
+             header-off (.-offset__ eve-vec)
+             root-off   (-sio-read-i32 sio header-off SABVECROOT_ROOT_OFFSET)
+             tail-off   (-sio-read-i32 sio header-off SABVECROOT_TAIL_OFFSET)
+             shift-val  (-sio-read-i32 sio header-off SABVECROOT_SHIFT_OFFSET)]
          ;; Free the trie
          (when (not= root-off NIL_OFFSET)
            (free-trie-node! sio root-off shift-val))
@@ -601,12 +580,14 @@
    (extend-type EveVector
      d/ISabRetirable
      (-sab-retire-diff! [this new-value _slab-env mode]
-       (let [sio    (.-sio__ this)
-             old-root (.-root this)
-             old-shift (.-shift this)]
+       (let [sio       (.-sio__ this)
+             hdr       (.-offset__ this)
+             old-root  (-sio-read-i32 sio hdr SABVECROOT_ROOT_OFFSET)
+             old-shift (-sio-read-i32 sio hdr SABVECROOT_SHIFT_OFFSET)]
          (if (instance? EveVector new-value)
            ;; Both are EveVector — diff trie paths
-           (let [new-root-off (.-root new-value)]
+           (let [new-hdr      (.-offset__ new-value)
+                 new-root-off (-sio-read-i32 sio new-hdr SABVECROOT_ROOT_OFFSET)]
              (retire-replaced-trie-path! sio old-root new-root-off old-shift -1 mode))
            ;; Different type — dispose entire old trie
            (dispose! this))))))
