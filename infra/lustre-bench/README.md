@@ -34,14 +34,28 @@ swap performance and data transformation throughput.
 | Transform pipeline | Read 64MB → md5 → write result (throughput) | dd + md5sum |
 | Metadata storm | create/stat/delete thousands of files | touch/stat/rm |
 
-## Usage
+## Quick start (recommended)
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your project_id
+
+./run-bench.sh
+# Creates infra → waits for benchmarks → collects results → destroys everything
+# Results saved to ./results-YYYYMMDD-HHMMSS/
+```
+
+Flags:
+- `--no-destroy` — leave infrastructure running after collecting results
+- `--timeout 120` — abort after 120 minutes (default: 90)
+
+## Manual usage
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your project_id
 
 terraform init
-terraform plan
 terraform apply
 
 # Wait for VMs to finish (~4x bench_duration_minutes)
@@ -53,7 +67,7 @@ gcloud compute ssh lustre-bench-vm-0 --zone=us-central1-a --tunnel-through-iap \
 # Or from GCS if results_bucket was set:
 gsutil cat gs://BUCKET/results/*/summary.json
 
-# Tear down
+# Tear down when done
 terraform destroy
 ```
 
