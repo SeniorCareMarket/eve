@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__clojure-mcp"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

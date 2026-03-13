@@ -1,11 +1,11 @@
-(ns eve.set
-  "Eve persistent HAMT set — unified CLJ/CLJS implementation.
+(ns eve2.set
+  "Eve2 persistent HAMT set — unified CLJ/CLJS implementation.
 
    Uses ISlabIO protocol for all memory access.
    Sets store values only (no key-hash arrays like maps).
    Collision nodes use type 2 (distinct from map collision type 3).
 
-   Uses eve3/deftype macro: CLJ protocol names, auto-translated on CLJS."
+   Uses eve2/deftype macro: one deftype form, CLJS protocol names auto-mapped."
   (:refer-clojure :exclude [hash-set])
   (:require
    [eve.deftype-proto.alloc :as alloc
@@ -17,10 +17,12 @@
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                   mask-hash bitpos has-bit? get-index]]
-   #?@(:clj  [[eve3.deftype :as eve3]
-              [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+   #?@(:cljs [[eve2.alloc :as eve-alloc]]
+       :clj  [[eve2.deftype :as eve2]
+              [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
+                                       value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
-  #?(:cljs (:require-macros [eve3.deftype :as eve3])))
+  #?(:cljs (:require-macros [eve2.deftype :as eve2])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -37,7 +39,7 @@
 (def ^:const COLLISION_HEADER_SIZE 12)
 
 ;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
-(def EveHashSet-type-id 0xEE) ;; also emitted by eve3-deftype
+(def EveHashSet-type-id 0xEE) ;; also emitted by eve2-deftype
 (def ^:const SABSETROOT_CNT_OFFSET 4)
 (def ^:const SABSETROOT_ROOT_OFF_OFFSET 8)
 (def ^:const SET_FLAG_PORTABLE_HASH 0x01)
@@ -48,7 +50,7 @@
 
 (defn- serialize-val-bytes [v]
   #?(:cljs (ser/serialize-element v)
-     :clj  (value+sio->eve-bytes v)))
+     :clj  (value->eve-bytes v)))
 
 (defn- deserialize-val-bytes [val-bytes]
   #?(:cljs (ser/deserialize-element {} val-bytes)
@@ -64,6 +66,10 @@
 (defn- bytes-length [ba]
   #?(:cljs (.-length ba)
      :clj  (alength ^bytes ba)))
+
+(defn- get-sio []
+  #?(:cljs eve-alloc/cljs-sio
+     :clj  alloc/*jvm-slab-ctx*))
 
 ;;=============================================================================
 ;; Node I/O helpers
@@ -533,217 +539,106 @@
    (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)])
 
 ;;=============================================================================
-;; CLJS-only: HAMT node freeing helpers (via ISlabIO)
-;;=============================================================================
-
-#?(:cljs
-   (do
-     (declare free-hamt-node!)
-
-     (defn- free-hamt-node!
-       "Recursively free a HAMT node and all its children via ISlabIO."
-       [sio slab-off]
-       (when (not= slab-off NIL_OFFSET)
-         (let [node-type (-sio-read-u8 sio slab-off 0)]
-           (case (int node-type)
-             ;; Bitmap node — free children first
-             1 (let [node-bm (-sio-read-i32 sio slab-off 8)
-                     child-count (popcount32 node-bm)]
-                 (dotimes [i child-count]
-                   (let [child-off (-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* i 4)))]
-                     (free-hamt-node! sio child-off)))
-                 (-sio-free! sio slab-off))
-             ;; Collision node — no children
-             2 (-sio-free! sio slab-off)
-             ;; Unknown
-             (-sio-free! sio slab-off)))))))
-
-;;=============================================================================
-;; CLJS-only: Disposal & Retirement
-;;=============================================================================
-
-#?(:cljs
-   (do
-     (defn dispose!
-       "Dispose an EveHashSet, freeing its entire HAMT tree and header block.
-        Call this when the set is no longer needed to reclaim slab memory.
-
-        WARNING: After disposal, the set must not be used."
-       [^js hash-set]
-       (let [sio (.-sio__ hash-set)
-             header-off (.-offset__ hash-set)
-             root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
-         (when (not= root-off NIL_OFFSET)
-           (free-hamt-node! sio root-off))
-         (when (not= header-off NIL_OFFSET)
-           (-sio-free! sio header-off))))
-
-     (defn retire-replaced-path!
-       "After an atom swap that replaced old-root with new-root, free the old
-        path nodes that are no longer referenced by the new tree.
-
-        Walks both trees following the hash bits for value hash vh. At each level
-        where old-node != new-node, the old node is freed.
-
-        vh: the hash of the value that was modified"
-       [sio old-root new-root vh]
-       (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
-         (loop [old-off old-root
-                new-off new-root
-                sh 0]
-           (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
-             ;; Free this old node
-             (-sio-free! sio old-off)
-             ;; Continue down the hash path via node_bitmap children
-             (let [old-type (-sio-read-u8 sio old-off 0)]
-               (when (== old-type NODE_TYPE_BITMAP)
-                 (let [bit-pos (bit-and (unsigned-bit-shift-right vh sh) MASK)
-                       old-node-bm (-sio-read-i32 sio old-off 8)
-                       new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
-                       new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
-                                     (-sio-read-i32 sio new-off 8))
-                       old-bit (bit-shift-left 1 bit-pos)]
-                   (when (and (not (zero? (bit-and old-node-bm old-bit)))
-                              new-node-bm
-                              (not (zero? (bit-and new-node-bm old-bit))))
-                     (let [old-child-idx (popcount32 (bit-and old-node-bm (dec old-bit)))
-                           new-child-idx (popcount32 (bit-and new-node-bm (dec old-bit)))
-                           old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-child-idx 4)))
-                           new-child (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-child-idx 4)))]
-                       (recur old-child new-child (+ sh SHIFT_STEP)))))))))))
-
-     (defn retire-tree-diff!
-       "Full tree diff: walk old and new HAMT trees in parallel, freeing all
-        old nodes that differ from the new tree.
-
-        At each node pair:
-        - If old-off == new-off -> shared subtree, skip entirely
-        - If old-off != new-off -> free old node, recurse into children
-
-        Cost: O(changed nodes). Shared subtrees are skipped via integer compare."
-       [sio old-root new-root]
-       (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
-         (letfn [(walk [old-off new-off]
-                   (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
-                     ;; Free this old node
-                     (-sio-free! sio old-off)
-                     ;; Recurse into children if bitmap node
-                     (let [old-type (-sio-read-u8 sio old-off 0)]
-                       (when (== old-type NODE_TYPE_BITMAP)
-                         (let [old-node-bm (-sio-read-i32 sio old-off 8)
-                               new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
-                               new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
-                                             (-sio-read-i32 sio new-off 8))]
-                           ;; Walk only set bits in old-node-bm
-                           (loop [remaining old-node-bm
-                                  old-idx 0]
-                             (when (not (zero? remaining))
-                               (let [bit (bit-and remaining (- remaining)) ;; lowest set bit
-                                     old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
-                                     new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
-                                                 (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
-                                                   (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
-                                                 NIL_OFFSET)]
-                                 (walk old-child new-child)
-                                 (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
-           (walk old-root new-root))))))
-
-;;=============================================================================
-;; EveHashSet deftype — unified via eve3-deftype macro
+;; EveHashSet deftype — unified via eve2-deftype macro
 ;;
 ;; Fields: cnt (int32 @ offset 4), root-off (int32 @ offset 8)
-;; Both platforms: deftype EveHashSet [sio__ offset__]
+;; CLJS: deftype EveHashSet [offset__] — fields read from slab
+;; CLJ:  deftype EveHashSet [cnt root-off offset__ sio _meta]
 ;;=============================================================================
 
-(declare make-eve3-hash-set)
+(declare make-eve2-hash-set)
 
-(eve3/eve3-deftype ^{:type-id 0xEE} EveHashSet [^:int32 cnt ^:int32 root-off]
-  clojure.lang.Counted
-  (count [_] #?(:cljs cnt :clj (int cnt)))
+(eve2/eve2-deftype ^{:type-id 0xEE} EveHashSet [^:int32 cnt ^:int32 root-off]
+  ;; --- Shared protocols (CLJS names, macro translates for JVM) ---
+  ;; CLJ method bodies are auto-wrapped in (binding [*jvm-slab-ctx* sio] ...) by the macro.
+  ICounted
+  (-count [_] #?(:cljs cnt :clj (int cnt)))
 
-  clojure.lang.Seqable
-  (seq [_]
+  ISeqable
+  (-seq [_]
     (when (pos? cnt)
-      (hamt-seq sio__ root-off)))
+      (hamt-seq (get-sio) root-off)))
 
-  clojure.lang.IMeta
-  (meta [_] nil)
+  IMeta
+  (-meta [_] #?(:cljs nil :clj _meta))
 
-  clojure.lang.IObj
-  (withMeta [this m] this)
+  IWithMeta
+  (-with-meta [this m]
+    #?(:cljs this
+       :clj (EveHashSet. cnt root-off offset__ sio m)))
 
-  clojure.lang.ILookup
-  (valAt [_ v]
-    (let [sio sio__
-          vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (if (hamt-find sio root-off v vh vb) v nil)))
-  (valAt [_ v not-found]
-    (let [sio sio__
+  ILookup
+  (-lookup [this v] #?(:cljs (-lookup this v nil) :clj (.valAt this v nil)))
+  (-lookup [_ v not-found]
+    (let [sio (get-sio)
           vb (serialize-val-bytes v)
           vh (portable-hash-bytes vb)]
       (if (hamt-find sio root-off v vh vb)
         v
         not-found)))
 
-  clojure.lang.IPersistentSet
-  (disjoin [this v]
-    (let [sio sio__
+  ISet
+  (-disjoin [this v]
+    (let [sio (get-sio)
           vb (serialize-val-bytes v)
           vh (portable-hash-bytes vb)
           [new-root removed?] (hamt-disj sio root-off vh vb 0)]
       (if-not removed?
         this
-        (make-eve3-hash-set sio (dec cnt) new-root))))
-  (get [_ v]
-    (let [sio sio__
+        (make-eve2-hash-set sio (dec cnt) new-root))))
+  (-get [_ v]
+    (let [sio (get-sio)
           vb (serialize-val-bytes v)
           vh (portable-hash-bytes vb)]
       (when (hamt-find sio root-off v vh vb) v)))
 
-  clojure.lang.IPersistentCollection
-  (cons [this v]
-    (let [sio sio__
+  ICollection
+  (-conj [this v]
+    (let [sio (get-sio)
           vb (serialize-val-bytes v)
           vh (portable-hash-bytes vb)
           [new-root added?] (hamt-conj sio root-off vh vb 0)]
       (if-not added?
         this
-        (make-eve3-hash-set sio (inc cnt) new-root))))
-  (empty [_]
-    (make-eve3-hash-set sio__ 0 NIL_OFFSET))
-  (equiv [this other]
+        (make-eve2-hash-set sio (inc cnt) new-root))))
+
+  IEmptyableCollection
+  (-empty [_]
+    (make-eve2-hash-set (get-sio) 0 NIL_OFFSET))
+
+  IReduce
+  (-reduce [_ f]
+    (let [result (hamt-val-reduce (get-sio) root-off
+                   (fn [acc v]
+                     (if (nil? acc) v (f acc v)))
+                   nil)]
+      (if (reduced? result) @result result)))
+  (-reduce [_ f init]
+    (let [result (hamt-val-reduce (get-sio) root-off f init)]
+      (if (reduced? result) @result result)))
+
+  IEquiv
+  (-equiv [this other]
     #?(:cljs (and (set? other)
                   (== cnt (count other))
                   (every? (fn [v]
                             (let [vb (serialize-val-bytes v)
                                   vh (portable-hash-bytes vb)]
-                              (hamt-find sio__ root-off v vh vb)))
+                              (hamt-find (get-sio) root-off v vh vb)))
                           other))
        :clj (cond
                (not (instance? java.util.Set other)) false
                (not= cnt (.size ^java.util.Set other)) false
                :else (every? #(.contains ^java.util.Set other %) (.seq this)))))
 
-  clojure.lang.IReduceInit
-  (reduce [_ f init]
-    (let [result (hamt-val-reduce sio__ root-off f init)]
-      (if (reduced? result) @result result)))
-
-  clojure.lang.IHashEq
-  (hasheq [this]
+  IHash
+  (-hash [this]
     #?(:cljs (hash-unordered-coll this)
        :clj (clojure.lang.Murmur3/hashUnordered this)))
 
-  clojure.lang.IFn
-  (invoke [this v]
-    (let [vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (when (hamt-find sio__ root-off v vh vb) v)))
-  (invoke [this v nf]
-    (let [vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (if (hamt-find sio__ root-off v vh vb) v nf)))
+  IFn
+  (-invoke [this v] #?(:cljs (-lookup this v nil) :clj (.valAt this v nil)))
+  (-invoke [this v nf] #?(:cljs (-lookup this v nf) :clj (.valAt this v nf)))
 
   #?@(:cljs [IPrintWithWriter
              (-pr-writer [this writer _opts]
@@ -782,7 +677,7 @@
        (contains [_ v]
          (let [^bytes vb (serialize-val-bytes v)
                vh (portable-hash-bytes vb)]
-           (hamt-find sio__ root-off v vh vb)))
+           (hamt-find sio root-off v vh vb)))
 
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
@@ -800,75 +695,33 @@
          (reduce + 0 (map hash (.seq this))))]))
 
 ;;=============================================================================
-;; CLJS-only: 2-arity IReduce (reduce without init)
-;;=============================================================================
-
-#?(:cljs
-   (extend-type EveHashSet
-     IReduce
-     (-reduce
-       ([coll f]
-        (let [s (seq coll)]
-          (if s
-            (reduce f (first s) (rest s))
-            (f))))
-       ([coll f start]
-        (let [sio (.-sio__ coll)
-              root-off (-sio-read-i32 sio (.-offset__ coll) SABSETROOT_ROOT_OFF_OFFSET)
-              result (hamt-val-reduce sio root-off f start)]
-          (if (reduced? result) @result result))))))
-
-;;=============================================================================
-;; CLJS-only: ISabRetirable implementation
-;;=============================================================================
-
-#?(:cljs
-   (extend-type EveHashSet
-     d/ISabRetirable
-     (-sab-retire-diff! [this new-value _slab-env mode]
-       (let [sio (.-sio__ this)
-             old-root (-sio-read-i32 sio (.-offset__ this) SABSETROOT_ROOT_OFF_OFFSET)]
-         (if (instance? EveHashSet new-value)
-           (let [new-root-off (-sio-read-i32 sio (.-offset__ new-value) SABSETROOT_ROOT_OFF_OFFSET)]
-             ;; Full tree diff for all operations (no modified-khs tracking in eve3)
-             (retire-tree-diff! sio old-root new-root-off))
-           (when (not= old-root NIL_OFFSET)
-             (free-hamt-node! sio old-root)))
-         ;; Free the header block
-         (when (not= (.-offset__ this) NIL_OFFSET)
-           (-sio-free! sio (.-offset__ this)))))))
-
-;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
-(defn- make-eve3-hash-set
+(defn- make-eve2-hash-set
   "Internal constructor."
   [sio cnt root-off]
   (let [hdr (write-set-header! sio cnt root-off)]
-    (EveHashSet. sio hdr)))
+    #?(:cljs (EveHashSet. hdr)
+       :clj  (EveHashSet. cnt root-off hdr sio nil))))
 
-(defn eve3-hash-set-from-header
+(defn eve2-hash-set-from-header
   "Reconstruct an EveHashSet from a header offset."
   [sio header-off]
-  (EveHashSet. sio header-off))
+  (let [[cnt root-off] (read-set-header sio header-off)]
+    #?(:cljs (EveHashSet. header-off)
+       :clj  (EveHashSet. cnt root-off header-off sio nil))))
 
 (defn empty-hash-set
-  "Create an empty Eve hash set.
-   0-arity: uses platform default sio.  1-arity: explicit sio."
-  ([]  (empty-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
-  ([sio] (make-eve3-hash-set sio 0 NIL_OFFSET)))
+  "Create an empty Eve2 hash set."
+  []
+  (let [sio (get-sio)]
+    (make-eve2-hash-set sio 0 NIL_OFFSET)))
 
 (defn hash-set
-  "Create an Eve hash set from values.
-   If first arg satisfies ISlabIO, uses it as sio.
-   Otherwise uses platform default sio and all args as values."
-  [& args]
-  (let [default-sio #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)
-        [sio vals] (if (and (seq args) (satisfies? ISlabIO (first args)))
-                     [(first args) (rest args)]
-                     [default-sio args])]
-    (reduce conj (empty-hash-set sio) vals)))
+  "Create an Eve2 hash set from values."
+  [& vals]
+  (reduce conj (empty-hash-set) vals))
 
 ;;=============================================================================
 ;; Registration
@@ -879,7 +732,7 @@
      (register-jvm-collection-writer! :set
        (fn [sio serialize-val coll]
          (let [entries (mapv (fn [v]
-                               (let [^bytes vb (value+sio->eve-bytes v)
+                               (let [^bytes vb (value->eve-bytes v)
                                      vh (portable-hash-bytes vb)]
                                  [vh vb]))
                              coll)]
@@ -893,23 +746,7 @@
 
      (ser/register-jvm-type-constructor! EveHashSet-type-id
        (fn [header-off]
-         (eve3-hash-set-from-header alloc/*jvm-slab-ctx* header-off)))
+         (eve2-hash-set-from-header alloc/*jvm-slab-ctx* header-off)))
 
      (defmethod print-method EveHashSet [s ^java.io.Writer w]
-       (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w))
-
-     ;; Backward-compat JVM aliases
-     (defn jvm-write-set!
-       "Serialize a Clojure set to slab. Returns header offset.
-        Backward-compat alias for the registered :set writer."
-       [sio serialize-val coll]
-       (mem/jvm-write-collection! :set sio coll))
-
-     (defn jvm-eve-hash-set-from-offset
-       "Reconstruct an EveHashSet from a header offset.
-        Backward-compat alias. coll-factory arg is ignored (registry-based)."
-       ([sio header-off] (eve3-hash-set-from-header sio header-off))
-       ([sio header-off _coll-factory] (eve3-hash-set-from-header sio header-off)))))
-
-;; No-op pool stub — pool system removed, kept for backward compat
-#?(:cljs (defn reset-pools! [] nil))
+       (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w))))

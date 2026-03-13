@@ -43,7 +43,8 @@
       [java.nio.file OpenOption Paths StandardOpenOption]
       [java.util Date UUID]))
   (:require
-   [eve.deftype-proto.data :as d]))
+   [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.serialize :as ser]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol
@@ -1130,25 +1131,33 @@
                      lsb (Long/reverseBytes (read-i64-le b 11))]
                  (UUID. msb lsb))
 
-               ;; SAB pointer types — collection values in slab memory
-               0x10 (if (and sio coll-factory)
-                      (coll-factory 0x10 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_MAP: pass sio+coll-factory to eve-bytes->value.")))
-               0x11 (if (and sio coll-factory)
-                      (coll-factory 0x11 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_SET: pass sio+coll-factory to eve-bytes->value.")))
-               0x12 (if (and sio coll-factory)
-                      (coll-factory 0x12 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_VEC: pass sio+coll-factory to eve-bytes->value.")))
-               0x13 (if (and sio coll-factory)
-                      (coll-factory 0x13 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_LIST: pass sio+coll-factory to eve-bytes->value.")))
-               0x1D (if (and sio coll-factory)
-                      (coll-factory 0x1D sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE ARRAY: pass sio+coll-factory to eve-bytes->value.")))
-               0x1E (if (and sio coll-factory)
-                      (coll-factory 0x1E sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE OBJ: pass sio+coll-factory to eve-bytes->value.")))
+               ;; SAB pointer types — collection values in slab memory.
+               ;; Prefer registry lookup (mirrors CLJS pattern); fall back to
+               ;; legacy coll-factory callback for backward compat.
+               0x10 (let [ctor (or (ser/get-jvm-type-constructor 0x10)
+                                   (when coll-factory (fn [off] (coll-factory 0x10 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_MAP: no constructor registered."))))
+               0x11 (let [ctor (or (ser/get-jvm-type-constructor 0x11)
+                                   (when coll-factory (fn [off] (coll-factory 0x11 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_SET: no constructor registered."))))
+               0x12 (let [ctor (or (ser/get-jvm-type-constructor 0x12)
+                                   (when coll-factory (fn [off] (coll-factory 0x12 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_VEC: no constructor registered."))))
+               0x13 (let [ctor (or (ser/get-jvm-type-constructor 0x13)
+                                   (when coll-factory (fn [off] (coll-factory 0x13 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_LIST: no constructor registered."))))
+               0x1D (let [ctor (or (ser/get-jvm-type-constructor 0x1D)
+                                   (when coll-factory (fn [off] (coll-factory 0x1D sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE ARRAY: no constructor registered."))))
+               0x1E (let [ctor (or (ser/get-jvm-type-constructor 0x1E)
+                                   (when coll-factory (fn [off] (coll-factory 0x1E sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE OBJ: no constructor registered."))))
 
                ;; Flat map — cross-process binary map encoding
                0xED
@@ -1421,6 +1430,7 @@
 
      ;; Late-bound collection writers registered by map/vec/set/list namespaces at
      ;; load time. Using a defonce atom avoids circular compile-time dependencies.
+     (declare value+sio->eve-bytes)
      (defonce ^:private jvm-coll-writers (clojure.core/atom {}))
 
      (defn register-jvm-collection-writer!
@@ -1431,14 +1441,27 @@
        [tag writer]
        (swap! jvm-coll-writers assoc tag writer))
 
+     (defn jvm-write-collection!
+       "Serialize a Clojure collection to slab via the registered writer.
+        Returns the slab-qualified header offset.
+        tag — :map, :set, :vec, or :list."
+       [tag sio coll]
+       (let [writer (get @jvm-coll-writers tag)]
+         (if writer
+           (writer sio (partial value+sio->eve-bytes sio) coll)
+           (throw (ex-info (str "jvm-write-collection!: no writer for " tag) {:tag tag})))))
+
      (defn value+sio->eve-bytes
        "Serialize v to EVE bytes, allocating collection structures into sio.
         Maps → SAB_MAP pointer (0x10), sets → SAB_SET (0x11),
         vectors → SAB_VEC (0x12), lists → SAB_LIST (0x13).
         Primitives are encoded inline via value->eve-bytes.
         Collection writers must be registered via register-jvm-collection-writer!
-        before calling this function with collection values."
-       ^bytes [sio v]
+        before calling this function with collection values.
+        1-arity: uses *jvm-slab-ctx*.  2-arity: explicit sio."
+       (^bytes [v]
+        (value+sio->eve-bytes @(resolve 'eve.deftype-proto.alloc/*jvm-slab-ctx*) v))
+       (^bytes [sio v]
        (let [writers @jvm-coll-writers]
          (cond
            (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
@@ -1483,5 +1506,5 @@
 
            :else
            (throw (ex-info "value+sio->eve-bytes: unsupported type"
-                           {:type (type v) :value v})))))))
+                           {:type (type v) :value v}))))))))
 
