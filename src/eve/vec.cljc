@@ -613,9 +613,6 @@
 
 (def empty-sab-vec empty-vec)
 (def sab-vec eve-vec)
-(def eve3-vec eve-vec)
-(def eve3-vec-from-header vec-from-header)
-(def make-eve3-vec-impl make-vec-impl)
 
 ;;=============================================================================
 ;; Registration — via register-eve-type! macro

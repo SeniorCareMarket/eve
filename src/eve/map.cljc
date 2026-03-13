@@ -1404,5 +1404,3 @@
                              (#'clojure.core/print-map m print-method w)))
                :cljs nil)})
 
-;; Backward-compat aliases
-(def eve3-hash-map-from-header hash-map-from-header)

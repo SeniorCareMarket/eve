@@ -909,8 +909,6 @@
                                   (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w)))
                    :cljs nil)})
 
-;; Backward-compat aliases
-(def eve3-hash-set-from-header hash-set-from-header)
 
 ;; No-op pool stub — pool system removed, kept for backward compat
 #?(:cljs (defn reset-pools! [] nil))

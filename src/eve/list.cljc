@@ -324,8 +324,6 @@
 ;; Backward-compat aliases
 (def empty-sab-list empty-list)
 (def sab-list eve-list)
-(def eve3-list eve-list)
-(def eve3-list-from-header list-from-header)
 
 ;;=============================================================================
 ;; Registration
