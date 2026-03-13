@@ -356,7 +356,8 @@
                                     (rseq elems))]
                (write-list-header! sio cnt head-off))))))
 
-     (ser/register-jvm-type-constructor! SabList-type-id
+     ;; Register by pointer tag (0x13) and header type-id (0x13) — same value
+     (ser/register-jvm-type-constructor! ser/FAST_TAG_SAB_LIST EveList-type-id
        (fn [header-off]
          (eve3-list-from-header alloc/*jvm-slab-ctx* header-off)))
 

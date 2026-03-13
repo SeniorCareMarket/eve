@@ -1404,8 +1404,8 @@
                                     NIL_OFFSET entries)]
                (write-map-header! sio (count m) root-off))))))
 
-     ;; Register type constructor for SAB pointer tag 0x10
-     (ser/register-jvm-type-constructor! 0x10
+     ;; Register type constructor by pointer tag (0x10) and header type-id (0xED)
+     (ser/register-jvm-type-constructor! 0x10 EveHashMap-type-id
        (fn [header-off]
          (eve3-hash-map-from-header alloc/*jvm-slab-ctx* header-off)))
 

@@ -694,7 +694,8 @@
                              (recur parent-nodes (+ sh SHIFT_STEP)))))))]
                (write-vec-header! sio cnt sft root tail-off tail-len))))))
 
-     (ser/register-jvm-type-constructor! SabVecRoot-type-id
+     ;; Register by pointer tag (0x12) and header type-id (0x12) — same value
+     (ser/register-jvm-type-constructor! ser/FAST_TAG_SAB_VEC EveVector-type-id
        (fn [header-off]
          (eve3-vec-from-header alloc/*jvm-slab-ctx* header-off)))
 

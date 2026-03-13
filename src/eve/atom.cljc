@@ -578,29 +578,22 @@
      (defn- jvm-read-root-value
        "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
         Returns slab-backed Eve types directly — no materialization.
-        Uses the type constructor registry populated by eve.map/set/vec/list at load time."
+        Uses the header-constructor registry populated by eve.map/set/vec/list at load time."
        [sio ptr]
        (when (and (not= ptr alloc/NIL_OFFSET)
                   (not= ptr CLAIMED_SENTINEL))
          (let [type-id (alloc/jvm-read-header-type-byte sio ptr)]
            (case (int type-id)
              0x01 (alloc/jvm-read-scalar-block sio ptr)
-             ;; For type-ids that match pointer tags (vec 0x12, list 0x13),
-             ;; look up directly. For map (0xED) and set (0xEE), map to
-             ;; pointer tags (0x10, 0x11).
-             (let [tag (case (int type-id)
-                         0xED 0x10
-                         0xEE 0x11
-                         type-id)
-                   ctor (ser/get-jvm-type-constructor tag)]
-               (if ctor
-                 (ctor ptr)
-                 ;; Try array/obj constructors
-                 (case (int type-id)
-                   0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
-                   0x1E (eve-obj/jvm-obj-from-offset sio ptr)
-                   (throw (ex-info "jvm-mmap-deref: unknown root type-id"
-                                   {:type-id type-id :ptr ptr})))))))))
+             ;; Look up by header type-id byte directly
+             (if-let [ctor (ser/get-jvm-header-constructor type-id)]
+               (ctor ptr)
+               ;; Try array/obj constructors
+               (case (int type-id)
+                 0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
+                 0x1E (eve-obj/jvm-obj-from-offset sio ptr)
+                 (throw (ex-info "jvm-mmap-deref: unknown root type-id"
+                                 {:type-id type-id :ptr ptr}))))))))
 
      (defn- jvm-mmap-deref
        [{:keys [root-r sio] :as domain-state} atom-slot-idx]

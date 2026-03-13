@@ -906,7 +906,8 @@
                                     NIL_OFFSET entries)]
                (write-set-header! sio (count coll) root-off))))))
 
-     (ser/register-jvm-type-constructor! EveHashSet-type-id
+     ;; Register by pointer tag (0x11) and header type-id (0xEE)
+     (ser/register-jvm-type-constructor! 0x11 EveHashSet-type-id
        (fn [header-off]
          (eve3-hash-set-from-header alloc/*jvm-slab-ctx* header-off)))
 
