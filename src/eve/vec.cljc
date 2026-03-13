@@ -13,7 +13,9 @@
             -sio-copy-block! NIL_OFFSET]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:clj  [[eve3.deftype :as eve3]
+   #?@(:bb   [[eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+                                       register-jvm-collection-writer!]]]
+       :clj  [[eve3.deftype :as eve3]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
   #?(:cljs (:require-macros [eve3.deftype :as eve3])))
@@ -309,6 +311,8 @@
 ;; Fields are read from slab header once at construction time, not on every access.
 ;;=============================================================================
 
+#?(:bb nil
+   :default
 (deftype EveVector [sio__
                     #?@(:clj [^:unsynchronized-mutable offset__])
                     #?@(:cljs [^:mutable offset__])
@@ -450,7 +454,7 @@
                    (if (reduced? acc) @acc acc)
                    (recur (inc i) (f acc (nth-impl sio__ cnt shift root tail i))))))])
 
-  #?@(:clj [clojure.lang.IReduceInit
+  #?@(:bb [] :clj [clojure.lang.IReduceInit
              (reduce [_ f init]
                (loop [i 0 acc init]
                  (if (or (>= i cnt) (reduced? acc))
@@ -488,8 +492,9 @@
                    (recur (inc i))))
                (-write writer "]"))])
 
-  ;; --- CLJ-only interfaces ---
-  #?@(:clj
+  ;; --- CLJ-only interfaces (not supported in bb) ---
+  #?@(:bb []
+      :clj
       [clojure.lang.IPersistentVector
        (length [_] (int cnt))
        (entryAt [this i] (when (.containsKey this i) (clojure.lang.MapEntry/create i (.nth this i))))
@@ -511,34 +516,38 @@
                       (if (.equals ^Object (.nth this i) (.nth ov i))
                         (recur (inc i)) false)))))))
        (hashCode [this] (clojure.lang.Murmur3/hashOrdered this))]))
+) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; Constructor (after deftype so CLJ can resolve EveVector class)
 ;;=============================================================================
 
-(defn- make-eve3-vec-impl [sio cnt shift root tail tail-len]
-  (EveVector. sio nil cnt shift root tail tail-len))
+#?(:bb nil
+   :default
+   (do
+     (defn- make-eve3-vec-impl [sio cnt shift root tail tail-len]
+       (EveVector. sio nil cnt shift root tail tail-len))
 
-(defn- make-eve3-vec [sio hdr]
-  (let [[cnt shift root tail tail-len] (read-vec-header sio hdr)]
-    (EveVector. sio hdr cnt shift root tail tail-len)))
+     (defn- make-eve3-vec [sio hdr]
+       (let [[cnt shift root tail tail-len] (read-vec-header sio hdr)]
+         (EveVector. sio hdr cnt shift root tail tail-len)))
 
-(defn eve3-vec-from-header [sio header-off]
-  (make-eve3-vec sio header-off))
+     (defn eve3-vec-from-header [sio header-off]
+       (make-eve3-vec sio header-off))
 
-(defn empty-vec
-  "Create an empty Eve vector.
-   0-arity: uses platform default sio.  1-arity: explicit sio."
-  ([] (empty-vec #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
-  ([sio]
-   (let [tail (alloc-node! sio)]
-     (make-eve3-vec-impl sio 0 SHIFT_STEP NIL_OFFSET tail 0))))
+     (defn empty-vec
+       "Create an empty Eve vector.
+        0-arity: uses platform default sio.  1-arity: explicit sio."
+       ([] (empty-vec #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
+       ([sio]
+        (let [tail (alloc-node! sio)]
+          (make-eve3-vec-impl sio 0 SHIFT_STEP NIL_OFFSET tail 0))))
 
-(defn eve3-vec
-  "Create an Eve vector from a collection."
-  ([coll] (eve3-vec #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
-  ([sio coll]
-   (reduce conj (empty-vec sio) coll)))
+     (defn eve3-vec
+       "Create an Eve vector from a collection."
+       ([coll] (eve3-vec #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
+       ([sio coll]
+        (reduce conj (empty-vec sio) coll)))))
 
 ;;=============================================================================
 ;; Disposal (CLJS only)
@@ -615,14 +624,80 @@
 ;; Backward-compat aliases
 ;;=============================================================================
 
-(def empty-sab-vec empty-vec)
-(def sab-vec eve3-vec)
+#?(:bb nil
+   :default
+   (do
+     (def empty-sab-vec empty-vec)
+     (def sab-vec eve3-vec)))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb
+   (do
+     ;; Register collection writer (same algorithm — builds trie from plain vec)
+     (register-jvm-collection-writer! :vec
+       (fn [sio serialize-val coll]
+         (let [elems (vec coll)
+               cnt   (count elems)]
+           (if (zero? cnt)
+             (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET NIL_OFFSET 0)
+             (let [val-offs (mapv (fn [elem]
+                                    (make-value-block! sio (serialize-val elem)))
+                                  elems)
+                   toff     (tail-offset-calc cnt)
+                   tail-len (- cnt toff)
+                   tail-off (let [t-off (alloc-node! sio)]
+                              (dorun (map-indexed
+                                       (fn [i v-off]
+                                         (-sio-write-i32! sio t-off (* i 4) v-off))
+                                       (subvec val-offs toff cnt)))
+                              t-off)
+                   trie-val-offs (subvec val-offs 0 toff)
+                   [root sft]
+                   (if (empty? trie-val-offs)
+                     [NIL_OFFSET SHIFT_STEP]
+                     (let [leaf-nodes
+                           (mapv (fn [chunk]
+                                   (let [node-off (alloc-node! sio)]
+                                     (dorun (map-indexed
+                                              (fn [i v-off]
+                                                (-sio-write-i32! sio node-off (* i 4) v-off))
+                                              chunk))
+                                     node-off))
+                                 (partition-all NODE_SIZE trie-val-offs))]
+                       (loop [nodes leaf-nodes sh SHIFT_STEP]
+                         (if (<= (count nodes) NODE_SIZE)
+                           (let [root-off (alloc-node! sio)]
+                             (dorun (map-indexed
+                                      (fn [i child-off]
+                                        (-sio-write-i32! sio root-off (* i 4) child-off))
+                                      nodes))
+                             [root-off sh])
+                           (let [parent-nodes
+                                 (mapv (fn [chunk]
+                                         (let [node-off (alloc-node! sio)]
+                                           (dorun (map-indexed
+                                                    (fn [i child-off]
+                                                      (-sio-write-i32! sio node-off (* i 4) child-off))
+                                                    chunk))
+                                           node-off))
+                                       (partition-all NODE_SIZE nodes))]
+                             (recur parent-nodes (+ sh SHIFT_STEP)))))))]
+               (write-vec-header! sio cnt sft root tail-off tail-len))))))
+
+     ;; Register bb materializing constructor: tag 0x12 → plain Clojure vector
+     (ser/register-jvm-type-constructor! SabVecRoot-type-id
+       (fn [header-off]
+         (let [sio   alloc/*jvm-slab-ctx*
+               [cnt shift root tail _tail-len] (read-vec-header sio header-off)]
+           (loop [i 0 v (transient [])]
+             (if (>= i cnt)
+               (persistent! v)
+               (recur (inc i) (conj! v (nth-impl sio cnt shift root tail i)))))))))
+
+   :clj
    (do
      (register-jvm-collection-writer! :vec
        (fn [sio serialize-val coll]

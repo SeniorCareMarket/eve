@@ -22,7 +22,11 @@
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                   mask-hash bitpos has-bit? get-index]]
-   #?@(:clj  [[eve3.deftype :as eve3]
+   #?@(:bb   [[eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
+                                        value+sio->eve-bytes
+                                        register-jvm-collection-writer!]]
+              [eve.perf :as perf]]
+       :clj  [[eve3.deftype :as eve3]
               [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                         value+sio->eve-bytes
                                         register-jvm-collection-writer!]]
@@ -821,6 +825,8 @@
 
 (declare make-eve3-hash-map)
 
+#?(:bb nil
+   :default
 (eve3/eve3-deftype ^{:type-id 0xED} EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Unified protocols (CLJ names) ---
 
@@ -986,53 +992,60 @@
        (equals [this other]
          (clojure.lang.APersistentMap/mapEquals this other))
        (hashCode [this]
-         (clojure.lang.APersistentMap/mapHash this))]))
+         (clojure.lang.APersistentMap/mapHash this))])) ;; end eve3-deftype
+) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
-(defn- make-eve3-hash-map
-  "Internal constructor: allocate header, create EveHashMap."
-  [sio ^long cnt ^long root-off]
-  (let [hdr (write-map-header! sio cnt root-off)]
-    (EveHashMap. sio hdr)))
+#?(:bb nil
+   :default
+   (do
+     (defn- make-eve3-hash-map
+       "Internal constructor: allocate header, create EveHashMap."
+       [sio ^long cnt ^long root-off]
+       (let [hdr (write-map-header! sio cnt root-off)]
+         (EveHashMap. sio hdr)))
 
-(defn eve3-hash-map-from-header
-  "Reconstruct an EveHashMap from an existing header offset."
-  ([sio ^long header-off]
-   (EveHashMap. sio header-off)))
+     (defn eve3-hash-map-from-header
+       "Reconstruct an EveHashMap from an existing header offset."
+       ([sio ^long header-off]
+        (EveHashMap. sio header-off)))))
 
-(defn empty-hash-map
-  "Create an empty Eve hash map.
-   0-arity: uses platform default sio.  1-arity: explicit sio."
-  ([]  (empty-hash-map #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
-  ([sio] (make-eve3-hash-map sio 0 NIL_OFFSET)))
+#?(:bb nil
+   :default
+   (do
+     (defn empty-hash-map
+       "Create an empty Eve hash map.
+        0-arity: uses platform default sio.  1-arity: explicit sio."
+       ([]  (empty-hash-map #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
+       ([sio] (make-eve3-hash-map sio 0 NIL_OFFSET)))
 
-(defn hash-map
-  "Create an Eve hash map from key-value pairs.
-   If first arg satisfies ISlabIO, uses it as sio and rest as kvs.
-   Otherwise uses platform default sio and all args as kvs.
-   (hash-map) → empty map
-   (hash-map k v ...) → map with pairs
-   (hash-map sio k v ...) → map with pairs using explicit sio"
-  [& args]
-  (let [default-sio #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)
-        [sio kvs] (if (and (seq args) (satisfies? ISlabIO (first args)))
-                    [(first args) (rest args)]
-                    [default-sio args])]
-    (reduce (fn [m [k v]] (assoc m k v))
-            (empty-hash-map sio)
-            (partition 2 kvs))))
+     (defn hash-map
+       "Create an Eve hash map from key-value pairs.
+        If first arg satisfies ISlabIO, uses it as sio and rest as kvs.
+        Otherwise uses platform default sio and all args as kvs.
+        (hash-map) → empty map
+        (hash-map k v ...) → map with pairs
+        (hash-map sio k v ...) → map with pairs using explicit sio"
+       [& args]
+       (let [default-sio #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)
+             [sio kvs] (if (and (seq args) (satisfies? ISlabIO (first args)))
+                         [(first args) (rest args)]
+                         [default-sio args])]
+         (reduce (fn [m [k v]] (assoc m k v))
+                 (empty-hash-map sio)
+                 (partition 2 kvs))))
 
-(defn into-hash-map
-  "Create an Eve hash map from a collection of [k v] entries.
-   1-arity: uses platform default sio.  2-arity: explicit sio."
-  ([coll] (into-hash-map #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
-  ([sio coll]
-   (reduce (fn [m [k v]] (assoc m k v))
-           (empty-hash-map sio)
-           coll)))
+     (defn into-hash-map
+       "Create an Eve hash map from a collection of [k v] entries.
+        1-arity: uses platform default sio.  2-arity: explicit sio."
+       ([coll] (into-hash-map #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
+       ([sio coll]
+        (reduce (fn [m [k v]] (assoc m k v))
+                (empty-hash-map sio)
+                coll)))))
 
 ;;=============================================================================
 ;; CLJS-only: mmap-mode? and debug helpers
@@ -1380,7 +1393,34 @@
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb
+   (do
+     ;; Register collection writer (same algorithm — builds HAMT from plain map)
+     (register-jvm-collection-writer! :map
+       (fn [_sio _serialize-elem m]
+         (let [sio alloc/*jvm-slab-ctx*
+               entries (map (fn [[k v]]
+                              (let [kb (value->eve-bytes k)
+                                    kh (portable-hash-bytes kb)
+                                    vb (value+sio->eve-bytes v)]
+                                [kh kb vb]))
+                            m)]
+           (if (empty? entries)
+             (write-map-header! sio 0 NIL_OFFSET)
+             (let [root-off (reduce (fn [root [kh kb vb]]
+                                      (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
+                                        new-root))
+                                    NIL_OFFSET entries)]
+               (write-map-header! sio (count m) root-off))))))
+
+     ;; Register bb materializing constructor: tag 0x10 → plain Clojure map
+     (ser/register-jvm-type-constructor! 0x10
+       (fn [header-off]
+         (let [sio      alloc/*jvm-slab-ctx*
+               [_cnt root-off] (read-map-header sio header-off)]
+           (hamt-kv-reduce sio root-off (fn [m k v] (assoc m k v)) {})))))
+
+   :clj
    (do
      ;; Register collection writer so mem/value+sio->eve-bytes routes maps here
      (register-jvm-collection-writer! :map

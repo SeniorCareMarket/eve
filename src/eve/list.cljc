@@ -14,7 +14,9 @@
             NIL_OFFSET]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:clj  [[eve3.deftype :as eve3]
+   #?@(:bb   [[eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+                                       register-jvm-collection-writer!]]]
+       :clj  [[eve3.deftype :as eve3]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
   #?(:cljs (:require-macros [eve3.deftype :as eve3])))
@@ -104,6 +106,8 @@
 
 (declare make-eve3-list)
 
+#?(:bb nil
+   :default
 (deftype EveList [sio__
                   #?@(:clj [^:unsynchronized-mutable offset__])
                   #?@(:cljs [^:mutable offset__])
@@ -215,7 +219,7 @@
                          nxt (read-node-next sio__ off)]
                      (recur nxt (inc i) (f acc v))))))])
 
-  #?@(:clj [clojure.lang.IReduceInit
+  #?@(:bb [] :clj [clojure.lang.IReduceInit
              (reduce [_ f init]
                (loop [off head-off i 0 acc init]
                  (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
@@ -254,8 +258,9 @@
                    (recur (read-node-next sio__ off) (inc i))))
                (-write writer ")"))])
 
-  ;; --- CLJ-only interfaces ---
-  #?@(:clj
+  ;; --- CLJ-only interfaces (not supported in bb) ---
+  #?@(:bb []
+      :clj
       [clojure.lang.IPersistentList
 
        java.lang.Iterable
@@ -270,6 +275,7 @@
            :else (.equiv this other)))
        (hashCode [this]
          (clojure.lang.Murmur3/hashOrdered this))]))
+) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; Disposal & retirement (CLJS only)
@@ -337,40 +343,70 @@
 ;; Constructors
 ;;=============================================================================
 
-(defn- make-eve3-list
-  "Internal constructor. Defers header write — header is materialized lazily
-   when -root-header-off or -direct-serialize is called."
-  [sio cnt head-off]
-  (EveList. sio nil cnt head-off))
+#?(:bb nil
+   :default
+   (do
+     (defn- make-eve3-list
+       "Internal constructor. Defers header write — header is materialized lazily
+        when -root-header-off or -direct-serialize is called."
+       [sio cnt head-off]
+       (EveList. sio nil cnt head-off))
 
+     (defn eve3-list-from-header
+       "Reconstruct an EveList from a header offset."
+       [sio header-off]
+       (let [[cnt head-off] (read-list-header sio header-off)]
+         (EveList. sio header-off cnt head-off)))
 
-(defn eve3-list-from-header
-  "Reconstruct an EveList from a header offset."
-  [sio header-off]
-  (let [[cnt head-off] (read-list-header sio header-off)]
-    (EveList. sio header-off cnt head-off)))
+     (defn empty-list
+       "Create an empty Eve list.
+        0-arity: uses platform default sio.  1-arity: explicit sio."
+       ([] (empty-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
+       ([sio] (make-eve3-list sio 0 NIL_OFFSET)))
 
-(defn empty-list
-  "Create an empty Eve list.
-   0-arity: uses platform default sio.  1-arity: explicit sio."
-  ([] (empty-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
-  ([sio] (make-eve3-list sio 0 NIL_OFFSET)))
+     (defn eve3-list
+       "Create an Eve list from a collection (reversed, as cons-list)."
+       ([coll] (eve3-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
+       ([sio coll]
+        (reduce conj (empty-list sio) (reverse coll))))
 
-(defn eve3-list
-  "Create an Eve list from a collection (reversed, as cons-list)."
-  ([coll] (eve3-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
-  ([sio coll]
-   (reduce conj (empty-list sio) (reverse coll))))
-
-;; Backward-compat aliases
-(def empty-sab-list empty-list)
-(def sab-list eve3-list)
+     ;; Backward-compat aliases
+     (def empty-sab-list empty-list)
+     (def sab-list eve3-list)))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb
+   (do
+     ;; Register collection writer (same algorithm — builds linked list from plain seq)
+     (register-jvm-collection-writer! :list
+       (fn [sio serialize-val coll]
+         (let [elems (vec coll)
+               cnt (count elems)]
+           (if (zero? cnt)
+             (write-list-header! sio 0 NIL_OFFSET)
+             (let [head-off (reduce (fn [next-off elem]
+                                      (let [^bytes vb (serialize-val elem)]
+                                        (alloc-list-node! sio next-off vb)))
+                                    NIL_OFFSET
+                                    (rseq elems))]
+               (write-list-header! sio cnt head-off))))))
+
+     ;; Register bb materializing constructor: tag 0x13 → plain Clojure vector
+     (ser/register-jvm-type-constructor! SabList-type-id
+       (fn [header-off]
+         (let [sio alloc/*jvm-slab-ctx*
+               [cnt head-off] (read-list-header sio header-off)]
+           (loop [off head-off i 0 acc (transient [])]
+             (if (or (== off NIL_OFFSET) (>= i cnt))
+               (persistent! acc)
+               (let [v   (read-node-value sio off)
+                     nxt (read-node-next sio off)]
+                 (recur nxt (inc i) (conj! acc v)))))))))
+
+   :clj
    (do
      (register-jvm-collection-writer! :list
        (fn [sio serialize-val coll]

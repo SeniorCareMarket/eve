@@ -16,10 +16,12 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
-                                  mask-hash bitpos has-bit? get-index]]
-   #?@(:clj  [[eve3.deftype :as eve3]
-              [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
-                                       register-jvm-collection-writer!]]]))
+                                 mask-hash bitpos has-bit? get-index]]
+   #?@(:bb [[eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+                                     register-jvm-collection-writer!]]]
+       :clj [[eve3.deftype :as eve3]
+             [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+                                      register-jvm-collection-writer!]]]))
   #?(:cljs (:require-macros [eve3.deftype :as eve3])))
 
 ;;=============================================================================
@@ -48,22 +50,22 @@
 
 (defn- serialize-val-bytes [v]
   #?(:cljs (ser/serialize-element v)
-     :clj  (value+sio->eve-bytes v)))
+     :clj (value+sio->eve-bytes v)))
 
 (defn- deserialize-val-bytes [val-bytes]
   #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj  (eve-bytes->value val-bytes)))
+     :clj (eve-bytes->value val-bytes)))
 
 (defn- bytes-equal? [a b]
   #?(:cljs (and (== (.-length a) (.-length b))
                 (loop [i 0]
                   (if (>= i (.-length a)) true
-                    (if (not= (aget a i) (aget b i)) false (recur (inc i))))))
-     :clj  (java.util.Arrays/equals ^bytes a ^bytes b)))
+                      (if (not= (aget a i) (aget b i)) false (recur (inc i))))))
+     :clj (java.util.Arrays/equals ^bytes a ^bytes b)))
 
 (defn- bytes-length [ba]
   #?(:cljs (.-length ba)
-     :clj  (alength ^bytes ba)))
+     :clj (alength ^bytes ba)))
 
 ;;=============================================================================
 ;; Node I/O helpers
@@ -80,7 +82,7 @@
   "Read a value [len:u32][bytes...] at pos within node. Returns [vb next-pos]."
   [sio node-off pos]
   (let [vlen (-sio-read-i32 sio node-off pos)
-        vb   (-sio-read-bytes sio node-off (+ pos 4) vlen)]
+        vb (-sio-read-bytes sio node-off (+ pos 4) vlen)]
     [vb (+ pos 4 vlen)]))
 
 (defn- skip-value-at
@@ -114,8 +116,8 @@
   (let [vlen (bytes-length vb)
         nsize (+ NODE_HEADER_SIZE (+ 4 vlen))
         node-off (-sio-alloc! sio nsize)]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 0)
     (-sio-write-i32! sio node-off 4 data-bm)
     (-sio-write-i32! sio node-off 8 0)
@@ -127,8 +129,8 @@
         vlen2 (bytes-length vb2)
         nsize (+ NODE_HEADER_SIZE (+ 4 vlen1) (+ 4 vlen2))
         node-off (-sio-alloc! sio nsize)]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 0)
     (-sio-write-i32! sio node-off 4 data-bm)
     (-sio-write-i32! sio node-off 8 0)
@@ -138,8 +140,8 @@
 
 (defn- make-single-child-node! [sio node-bm child-off]
   (let [node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE 4))]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 0)
     (-sio-write-i32! sio node-off 4 0)
     (-sio-write-i32! sio node-off 8 node-bm)
@@ -150,8 +152,8 @@
   (let [vlen (bytes-length vb)
         nsize (+ NODE_HEADER_SIZE 4 (+ 4 vlen))
         node-off (-sio-alloc! sio nsize)]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 0)
     (-sio-write-i32! sio node-off 4 data-bm)
     (-sio-write-i32! sio node-off 8 node-bm)
@@ -163,8 +165,8 @@
   (let [cnt (count entries)
         vals-size (reduce (fn [acc [vb]] (+ acc 4 (bytes-length vb))) 0 entries)
         node-off (-sio-alloc! sio (+ COLLISION_HEADER_SIZE vals-size))]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_COLLISION)
-    (-sio-write-u8!  sio node-off 1 cnt)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_COLLISION)
+    (-sio-write-u8! sio node-off 1 cnt)
     (-sio-write-u16! sio node-off 2 0)
     (-sio-write-i32! sio node-off 4 vh)
     (-sio-write-i32! sio node-off 8 0)
@@ -213,14 +215,14 @@
               (cond
                 (has-bit? nbm bit)
                 (recur (-sio-read-i32 sio off
-                         (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                                      (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
                        (+ shift SHIFT_STEP))
                 (has-bit? dbm bit)
                 (let [di (get-index dbm bit)
                       vs (values-start-off nbm)
                       pos (loop [i 0 p vs]
                             (if (== i di) p
-                              (recur (inc i) (skip-value-at sio off p))))]
+                                (recur (inc i) (skip-value-at sio off p))))]
                   (boolean (value-matches? sio off pos vb)))
                 :else false))
           2 (let [ch (-sio-read-i32 sio off 4)]
@@ -246,7 +248,7 @@
       (case (int nt)
         1 (let [data-bm (-sio-read-i32 sio root-off 4)
                 node-bm (-sio-read-i32 sio root-off 8)
-                bit     (bitpos vh shift)]
+                bit (bitpos vh shift)]
             (cond
               (has-bit? node-bm bit)
               (let [child-idx (get-index node-bm bit)
@@ -262,7 +264,7 @@
                     vs (values-start-off node-bm)
                     pos (loop [i 0 p vs]
                           (if (== i di) p
-                            (recur (inc i) (skip-value-at sio root-off p))))]
+                              (recur (inc i) (skip-value-at sio root-off p))))]
                 (if (value-matches? sio root-off pos vb)
                   [root-off false]
                   (let [[existing-vb _] (read-value-at sio root-off pos)
@@ -279,14 +281,14 @@
                               val-list (let [v-off (values-start-off node-bm)]
                                          (loop [i 0 p v-off acc []]
                                            (if (>= i old-dc) acc
-                                             (let [[ev np] (read-value-at sio root-off p)]
-                                               (recur (inc i) np
-                                                      (if (== i di) acc (conj acc ev)))))))
+                                               (let [[ev np] (read-value-at sio root-off p)]
+                                                 (recur (inc i) np
+                                                        (if (== i di) acc (conj acc ev)))))))
                               vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
                               nsize (+ NODE_HEADER_SIZE (* 4 new-cc) vals-size)
                               dst-off (-sio-alloc! sio nsize)]
-                          (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
-                          (-sio-write-u8!  sio dst-off 1 0)
+                          (-sio-write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                          (-sio-write-u8! sio dst-off 1 0)
                           (-sio-write-u16! sio dst-off 2 0)
                           (-sio-write-i32! sio dst-off 4 new-data-bm)
                           (-sio-write-i32! sio dst-off 8 new-node-bm)
@@ -296,7 +298,7 @@
                                 (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4)) coll)
                                     (recur si (inc di2)))
                                 (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4))
-                                      (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
+                                                     (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
                                     (recur (inc si) (inc di2))))))
                           (reduce (fn [p ev] (write-value! sio dst-off p ev))
                                   (values-start-off new-node-bm) val-list)
@@ -317,14 +319,14 @@
                                 val-list (let [v-off (values-start-off node-bm)]
                                            (loop [i 0 p v-off acc []]
                                              (if (>= i old-dc) acc
-                                               (let [[ev np] (read-value-at sio root-off p)]
-                                                 (recur (inc i) np
-                                                        (if (== i di) acc (conj acc ev)))))))
+                                                 (let [[ev np] (read-value-at sio root-off p)]
+                                                   (recur (inc i) np
+                                                          (if (== i di) acc (conj acc ev)))))))
                                 vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
                                 nsize (+ NODE_HEADER_SIZE (* 4 new-cc) vals-size)
                                 dst-off (-sio-alloc! sio nsize)]
-                            (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
-                            (-sio-write-u8!  sio dst-off 1 0)
+                            (-sio-write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                            (-sio-write-u8! sio dst-off 1 0)
                             (-sio-write-u16! sio dst-off 2 0)
                             (-sio-write-i32! sio dst-off 4 new-data-bm)
                             (-sio-write-i32! sio dst-off 8 new-node-bm)
@@ -334,7 +336,7 @@
                                   (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4)) final-sub)
                                       (recur si (inc di2)))
                                   (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4))
-                                        (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
+                                                       (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
                                       (recur (inc si) (inc di2))))))
                             (reduce (fn [p ev] (write-value! sio dst-off p ev))
                                     (values-start-off new-node-bm) val-list)
@@ -349,14 +351,14 @@
                     val-list (let [v-off (values-start-off node-bm)]
                                (loop [i 0 p v-off acc []]
                                  (if (>= i old-dc) acc
-                                   (let [[ev np] (read-value-at sio root-off p)]
-                                     (recur (inc i) np (conj acc ev))))))
+                                     (let [[ev np] (read-value-at sio root-off p)]
+                                       (recur (inc i) np (conj acc ev))))))
                     new-val-list (vec (concat (subvec val-list 0 di) [vb] (subvec val-list di)))
                     vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 new-val-list)
                     nsize (+ NODE_HEADER_SIZE (* 4 cc) vals-size)
                     dst-off (-sio-alloc! sio nsize)]
-                (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
-                (-sio-write-u8!  sio dst-off 1 0)
+                (-sio-write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                (-sio-write-u8! sio dst-off 1 0)
                 (-sio-write-u16! sio dst-off 2 0)
                 (-sio-write-i32! sio dst-off 4 new-data-bm)
                 (-sio-write-i32! sio dst-off 8 node-bm)
@@ -371,16 +373,16 @@
             (if (== vh node-hash)
               (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
                               (if (>= i cc) acc
-                                (let [[ev np] (read-value-at sio root-off pos)]
-                                  (recur (inc i) np (conj acc ev)))))]
+                                  (let [[ev np] (read-value-at sio root-off pos)]
+                                    (recur (inc i) np (conj acc ev)))))]
                 (if (some #(bytes-equal? % vb) entries)
                   [root-off false]
                   [(make-collision-node! sio vh (mapv (fn [ev] [ev]) (conj entries vb))) true]))
               (if (>= shift 30)
                 (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
                                 (if (>= i cc) acc
-                                  (let [[ev np] (read-value-at sio root-off pos)]
-                                    (recur (inc i) np (conj acc ev)))))]
+                                    (let [[ev np] (read-value-at sio root-off pos)]
+                                      (recur (inc i) np (conj acc ev)))))]
                   [(make-collision-node! sio node-hash (mapv (fn [ev] [ev]) (conj entries vb))) true])
                 (let [bit1 (bitpos node-hash shift)
                       bit2 (bitpos vh shift)]
@@ -402,7 +404,7 @@
       (case (int nt)
         1 (let [data-bm (-sio-read-i32 sio root-off 4)
                 node-bm (-sio-read-i32 sio root-off 8)
-                bit     (bitpos vh shift)]
+                bit (bitpos vh shift)]
             (cond
               (has-bit? node-bm bit)
               (let [child-idx (get-index node-bm bit)
@@ -419,7 +421,7 @@
                     vs (values-start-off node-bm)
                     pos (loop [i 0 p vs]
                           (if (== i di) p
-                            (recur (inc i) (skip-value-at sio root-off p))))]
+                              (recur (inc i) (skip-value-at sio root-off p))))]
                 (if (value-matches? sio root-off pos vb)
                   (let [new-data-bm (bit-xor data-bm bit)
                         new-dc (popcount32 new-data-bm)
@@ -430,14 +432,14 @@
                             val-list (let [v-off (values-start-off node-bm)]
                                        (loop [i 0 p v-off acc []]
                                          (if (>= i old-dc) acc
-                                           (let [[ev np] (read-value-at sio root-off p)]
-                                             (recur (inc i) np
-                                                    (if (== i di) acc (conj acc ev)))))))
+                                             (let [[ev np] (read-value-at sio root-off p)]
+                                               (recur (inc i) np
+                                                      (if (== i di) acc (conj acc ev)))))))
                             vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
                             nsize (+ NODE_HEADER_SIZE (* 4 cc) vals-size)
                             dst-off (-sio-alloc! sio nsize)]
-                        (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
-                        (-sio-write-u8!  sio dst-off 1 0)
+                        (-sio-write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                        (-sio-write-u8! sio dst-off 1 0)
                         (-sio-write-u16! sio dst-off 2 0)
                         (-sio-write-i32! sio dst-off 4 new-data-bm)
                         (-sio-write-i32! sio dst-off 8 node-bm)
@@ -456,10 +458,10 @@
               [root-off false]
               (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
                               (if (>= i cc) acc
-                                (let [[ev np] (read-value-at sio root-off pos)]
-                                  (recur (inc i) np (conj acc ev)))))]
+                                  (let [[ev np] (read-value-at sio root-off pos)]
+                                    (recur (inc i) np (conj acc ev)))))]
                 (if-let [idx (some (fn [i] (when (bytes-equal? (nth entries i) vb) i))
-                               (range cc))]
+                                   (range cc))]
                   (if (== cc 1)
                     [NIL_OFFSET true]
                     (let [remaining (vec (concat (subvec entries 0 idx) (subvec entries (inc idx))))]
@@ -479,15 +481,15 @@
       (case (int nt)
         1 (let [data-bm (-sio-read-i32 sio root-off 4)
                 node-bm (-sio-read-i32 sio root-off 8)
-                dc      (popcount32 data-bm)
-                cc      (popcount32 node-bm)
-                vs      (values-start-off node-bm)
+                dc (popcount32 data-bm)
+                cc (popcount32 node-bm)
+                vs (values-start-off node-bm)
                 acc (loop [i 0 pos vs acc init]
                       (if (or (>= i dc) (reduced? acc))
                         acc
                         (let [vlen (-sio-read-i32 sio root-off pos)
-                              vbs  (-sio-read-bytes sio root-off (+ pos 4) vlen)
-                              v    (deserialize-val-bytes vbs)]
+                              vbs (-sio-read-bytes sio root-off (+ pos 4) vlen)
+                              v (deserialize-val-bytes vbs)]
                           (recur (inc i) (+ pos 4 vlen) (f acc v)))))]
             (if (reduced? acc)
               acc
@@ -502,8 +504,8 @@
               (if (or (>= i cc) (reduced? acc))
                 acc
                 (let [vlen (-sio-read-i32 sio root-off pos)
-                      vbs  (-sio-read-bytes sio root-off (+ pos 4) vlen)
-                      v    (deserialize-val-bytes vbs)]
+                      vbs (-sio-read-bytes sio root-off (+ pos 4) vlen)
+                      v (deserialize-val-bytes vbs)]
                   (recur (inc i) (+ pos 4 vlen) (f acc v))))))
 
         init))))
@@ -511,8 +513,8 @@
 (defn- hamt-seq [sio root-off]
   (let [entries (volatile! (transient []))]
     (hamt-val-reduce sio root-off
-      (fn [_ v] (vswap! entries conj! v))
-      nil)
+                     (fn [_ v] (vswap! entries conj! v))
+                     nil)
     (seq (persistent! @entries))))
 
 ;;=============================================================================
@@ -521,8 +523,8 @@
 
 (defn- write-set-header! [sio cnt root-off]
   (let [off (-sio-alloc! sio 12)]
-    (-sio-write-u8!  sio off 0 EveHashSet-type-id)
-    (-sio-write-u8!  sio off 1 SET_FLAG_PORTABLE_HASH)
+    (-sio-write-u8! sio off 0 EveHashSet-type-id)
+    (-sio-write-u8! sio off 1 SET_FLAG_PORTABLE_HASH)
     (-sio-write-u16! sio off 2 0)
     (-sio-write-i32! sio off SABSETROOT_CNT_OFFSET cnt)
     (-sio-write-i32! sio off SABSETROOT_ROOT_OFF_OFFSET root-off)
@@ -657,147 +659,150 @@
 
 (declare make-eve3-hash-set)
 
+#?(:bb nil
+   :default
 (eve3/eve3-deftype ^{:type-id 0xEE} EveHashSet [^:int32 cnt ^:int32 root-off]
-  clojure.lang.Counted
-  (count [_] #?(:cljs cnt :clj (int cnt)))
+                   clojure.lang.Counted
+                   (count [_] #?(:cljs cnt :clj (int cnt)))
 
-  clojure.lang.Seqable
-  (seq [_]
-    (when (pos? cnt)
-      (hamt-seq sio__ root-off)))
+                   clojure.lang.Seqable
+                   (seq [_]
+                        (when (pos? cnt)
+                          (hamt-seq sio__ root-off)))
 
-  clojure.lang.IMeta
-  (meta [_] nil)
+                   clojure.lang.IMeta
+                   (meta [_] nil)
 
-  clojure.lang.IObj
-  (withMeta [this m] this)
+                   clojure.lang.IObj
+                   (withMeta [this m] this)
 
-  clojure.lang.ILookup
-  (valAt [_ v]
-    (let [sio sio__
-          vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (if (hamt-find sio root-off v vh vb) v nil)))
-  (valAt [_ v not-found]
-    (let [sio sio__
-          vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (if (hamt-find sio root-off v vh vb)
-        v
-        not-found)))
+                   clojure.lang.ILookup
+                   (valAt [_ v]
+                          (let [sio sio__
+                                vb (serialize-val-bytes v)
+                                vh (portable-hash-bytes vb)]
+                            (if (hamt-find sio root-off v vh vb) v nil)))
+                   (valAt [_ v not-found]
+                          (let [sio sio__
+                                vb (serialize-val-bytes v)
+                                vh (portable-hash-bytes vb)]
+                            (if (hamt-find sio root-off v vh vb)
+                              v
+                              not-found)))
 
-  clojure.lang.IPersistentSet
-  (disjoin [this v]
-    (let [sio sio__
-          vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)
-          [new-root removed?] (hamt-disj sio root-off vh vb 0)]
-      (if-not removed?
-        this
-        (make-eve3-hash-set sio (dec cnt) new-root))))
-  (get [_ v]
-    (let [sio sio__
-          vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (when (hamt-find sio root-off v vh vb) v)))
+                   clojure.lang.IPersistentSet
+                   (disjoin [this v]
+                            (let [sio sio__
+                                  vb (serialize-val-bytes v)
+                                  vh (portable-hash-bytes vb)
+                                  [new-root removed?] (hamt-disj sio root-off vh vb 0)]
+                              (if-not removed?
+                                this
+                                (make-eve3-hash-set sio (dec cnt) new-root))))
+                   (get [_ v]
+                        (let [sio sio__
+                              vb (serialize-val-bytes v)
+                              vh (portable-hash-bytes vb)]
+                          (when (hamt-find sio root-off v vh vb) v)))
 
-  clojure.lang.IPersistentCollection
-  (cons [this v]
-    (let [sio sio__
-          vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)
-          [new-root added?] (hamt-conj sio root-off vh vb 0)]
-      (if-not added?
-        this
-        (make-eve3-hash-set sio (inc cnt) new-root))))
-  (empty [_]
-    (make-eve3-hash-set sio__ 0 NIL_OFFSET))
-  (equiv [this other]
-    #?(:cljs (and (set? other)
-                  (== cnt (count other))
-                  (every? (fn [v]
-                            (let [vb (serialize-val-bytes v)
-                                  vh (portable-hash-bytes vb)]
-                              (hamt-find sio__ root-off v vh vb)))
-                          other))
-       :clj (cond
-               (not (instance? java.util.Set other)) false
-               (not= cnt (.size ^java.util.Set other)) false
-               :else (every? #(.contains ^java.util.Set other %) (.seq this)))))
+                   clojure.lang.IPersistentCollection
+                   (cons [this v]
+                         (let [sio sio__
+                               vb (serialize-val-bytes v)
+                               vh (portable-hash-bytes vb)
+                               [new-root added?] (hamt-conj sio root-off vh vb 0)]
+                           (if-not added?
+                             this
+                             (make-eve3-hash-set sio (inc cnt) new-root))))
+                   (empty [_]
+                          (make-eve3-hash-set sio__ 0 NIL_OFFSET))
+                   (equiv [this other]
+                          #?(:cljs (and (set? other)
+                                        (== cnt (count other))
+                                        (every? (fn [v]
+                                                  (let [vb (serialize-val-bytes v)
+                                                        vh (portable-hash-bytes vb)]
+                                                    (hamt-find sio__ root-off v vh vb)))
+                                                other))
+                             :clj (cond
+                                    (not (instance? java.util.Set other)) false
+                                    (not= cnt (.size ^java.util.Set other)) false
+                                    :else (every? #(.contains ^java.util.Set other %) (.seq this)))))
 
-  clojure.lang.IReduceInit
-  (reduce [_ f init]
-    (let [result (hamt-val-reduce sio__ root-off f init)]
-      (if (reduced? result) @result result)))
+                   clojure.lang.IReduceInit
+                   (reduce [_ f init]
+                           (let [result (hamt-val-reduce sio__ root-off f init)]
+                             (if (reduced? result) @result result)))
 
-  clojure.lang.IHashEq
-  (hasheq [this]
-    #?(:cljs (hash-unordered-coll this)
-       :clj (clojure.lang.Murmur3/hashUnordered this)))
+                   clojure.lang.IHashEq
+                   (hasheq [this]
+                           #?(:cljs (hash-unordered-coll this)
+                              :clj (clojure.lang.Murmur3/hashUnordered this)))
 
-  clojure.lang.IFn
-  (invoke [this v]
-    (let [vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (when (hamt-find sio__ root-off v vh vb) v)))
-  (invoke [this v nf]
-    (let [vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (if (hamt-find sio__ root-off v vh vb) v nf)))
+                   clojure.lang.IFn
+                   (invoke [this v]
+                           (let [vb (serialize-val-bytes v)
+                                 vh (portable-hash-bytes vb)]
+                             (when (hamt-find sio__ root-off v vh vb) v)))
+                   (invoke [this v nf]
+                           (let [vb (serialize-val-bytes v)
+                                 vh (portable-hash-bytes vb)]
+                             (if (hamt-find sio__ root-off v vh vb) v nf)))
 
-  #?@(:cljs [IPrintWithWriter
-             (-pr-writer [this writer _opts]
-               (do
-                 (-write writer "#{")
-                 (let [s (seq this)]
-                   (when s
-                     (loop [[v & more] s first? true]
-                       (when-not first? (-write writer " "))
-                       (-write writer (pr-str v))
-                       (when more (recur more false)))))
-                 (-write writer "}")))])
+                   #?@(:cljs [IPrintWithWriter
+                              (-pr-writer [this writer _opts]
+                                          (do
+                                            (-write writer "#{")
+                                            (let [s (seq this)]
+                                              (when s
+                                                (loop [[v & more] s first? true]
+                                                  (when-not first? (-write writer " "))
+                                                  (-write writer (pr-str v))
+                                                  (when more (recur more false)))))
+                                            (-write writer "}")))])
 
-  d/IDirectSerialize
-  (-direct-serialize [this]
-    #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_SET (.-offset__ this))
-       :clj offset__))
+                   d/IDirectSerialize
+                   (-direct-serialize [this]
+                                      #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_SET (.-offset__ this))
+                                         :clj offset__))
 
-  d/ISabStorable
-  (-sab-tag [_] :hash-set)
-  (-sab-encode [this _] (d/-direct-serialize this))
-  (-sab-dispose [_ _] nil)
+                   d/ISabStorable
+                   (-sab-tag [_] :hash-set)
+                   (-sab-encode [this _] (d/-direct-serialize this))
+                   (-sab-dispose [_ _] nil)
 
-  d/IsEve
-  (-eve? [_] true)
+                   d/IsEve
+                   (-eve? [_] true)
 
-  d/IEveRoot
-  (-root-header-off [this]
-    #?(:cljs (.-offset__ this)
-       :clj offset__))
+                   d/IEveRoot
+                   (-root-header-off [this]
+                                     #?(:cljs (.-offset__ this)
+                                        :clj offset__))
 
   ;; --- CLJ-only interfaces (no CLJS equivalent) ---
-  #?@(:clj
-      [clojure.lang.IPersistentSet
+                   #?@(:clj
+                       [clojure.lang.IPersistentSet
        ;; contains has no CLJS protocol equivalent
-       (contains [_ v]
-         (let [^bytes vb (serialize-val-bytes v)
-               vh (portable-hash-bytes vb)]
-           (hamt-find sio__ root-off v vh vb)))
+                        (contains [_ v]
+                                  (let [^bytes vb (serialize-val-bytes v)
+                                        vh (portable-hash-bytes vb)]
+                                    (hamt-find sio__ root-off v vh vb)))
 
-       java.lang.Iterable
-       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+                        java.lang.Iterable
+                        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
-       java.lang.Object
-       (toString [this] (pr-str this))
-       (equals [this other]
-         (cond
-           (identical? this other) true
-           (not (instance? java.util.Set other)) false
-           :else
-           (and (== cnt (.size ^java.util.Set other))
-                (every? #(.contains ^java.util.Set other %) (.seq this)))))
-       (hashCode [this]
-         (reduce + 0 (map hash (.seq this))))]))
+                        java.lang.Object
+                        (toString [this] (pr-str this))
+                        (equals [this other]
+                                (cond
+                                  (identical? this other) true
+                                  (not (instance? java.util.Set other)) false
+                                  :else
+                                  (and (== cnt (.size ^java.util.Set other))
+                                       (every? #(.contains ^java.util.Set other %) (.seq this)))))
+                        (hashCode [this]
+                                  (reduce + 0 (map hash (.seq this))))])) ;; end eve3-deftype
+) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; CLJS-only: 2-arity IReduce (reduce without init)
@@ -842,58 +847,86 @@
 ;; Constructors
 ;;=============================================================================
 
-(defn- make-eve3-hash-set
-  "Internal constructor."
-  [sio cnt root-off]
-  (let [hdr (write-set-header! sio cnt root-off)]
-    (EveHashSet. sio hdr)))
+#?(:bb nil
+   :default
+   (do
+     (defn- make-eve3-hash-set
+       "Internal constructor."
+       [sio cnt root-off]
+       (let [hdr (write-set-header! sio cnt root-off)]
+         (EveHashSet. sio hdr)))
 
-(defn eve3-hash-set-from-header
-  "Reconstruct an EveHashSet from a header offset."
-  [sio header-off]
-  (EveHashSet. sio header-off))
+     (defn eve3-hash-set-from-header
+       "Reconstruct an EveHashSet from a header offset."
+       [sio header-off]
+       (EveHashSet. sio header-off))
 
-(defn empty-hash-set
-  "Create an empty Eve hash set.
-   0-arity: uses platform default sio.  1-arity: explicit sio."
-  ([]  (empty-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
-  ([sio] (make-eve3-hash-set sio 0 NIL_OFFSET)))
+     (defn empty-hash-set
+       "Create an empty Eve hash set.
+        0-arity: uses platform default sio.  1-arity: explicit sio."
+       ([] (empty-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
+       ([sio] (make-eve3-hash-set sio 0 NIL_OFFSET)))
 
-(defn hash-set
-  "Create an Eve hash set from values.
-   If first arg satisfies ISlabIO, uses it as sio.
-   Otherwise uses platform default sio and all args as values."
-  [& args]
-  (let [default-sio #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)
-        [sio vals] (if (and (seq args) (satisfies? ISlabIO (first args)))
-                     [(first args) (rest args)]
-                     [default-sio args])]
-    (reduce conj (empty-hash-set sio) vals)))
+     (defn hash-set
+       "Create an Eve hash set from values.
+        If first arg satisfies ISlabIO, uses it as sio.
+        Otherwise uses platform default sio and all args as values."
+       [& args]
+       (let [default-sio #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)
+             [sio vals] (if (and (seq args) (satisfies? ISlabIO (first args)))
+                          [(first args) (rest args)]
+                          [default-sio args])]
+         (reduce conj (empty-hash-set sio) vals)))))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb
+   (do
+     ;; Register collection writer (same algorithm — builds HAMT from plain set)
+     (register-jvm-collection-writer! :set
+                                      (fn [sio serialize-val coll]
+                                        (let [entries (mapv (fn [v]
+                                                              (let [^bytes vb (value+sio->eve-bytes v)
+                                                                    vh (portable-hash-bytes vb)]
+                                                                [vh vb]))
+                                                            coll)]
+                                          (if (empty? entries)
+                                            (write-set-header! sio 0 NIL_OFFSET)
+                                            (let [root-off (reduce (fn [root [vh vb]]
+                                                                     (let [[new-root _] (hamt-conj sio root vh vb 0)]
+                                                                       new-root))
+                                                                   NIL_OFFSET entries)]
+                                              (write-set-header! sio (count coll) root-off))))))
+
+     ;; Register bb materializing constructor: SAB pointer tag 0x11 → plain Clojure set
+     (ser/register-jvm-type-constructor! 0x11
+                                         (fn [header-off]
+                                           (let [sio alloc/*jvm-slab-ctx*
+                                                 [_cnt root-off] (read-set-header sio header-off)]
+                                             (hamt-val-reduce sio root-off (fn [s elem] (conj s elem)) #{})))))
+
+   :clj
    (do
      (register-jvm-collection-writer! :set
-       (fn [sio serialize-val coll]
-         (let [entries (mapv (fn [v]
-                               (let [^bytes vb (value+sio->eve-bytes v)
-                                     vh (portable-hash-bytes vb)]
-                                 [vh vb]))
-                             coll)]
-           (if (empty? entries)
-             (write-set-header! sio 0 NIL_OFFSET)
-             (let [root-off (reduce (fn [root [vh vb]]
-                                      (let [[new-root _] (hamt-conj sio root vh vb 0)]
-                                        new-root))
-                                    NIL_OFFSET entries)]
-               (write-set-header! sio (count coll) root-off))))))
+                                      (fn [sio serialize-val coll]
+                                        (let [entries (mapv (fn [v]
+                                                              (let [^bytes vb (value+sio->eve-bytes v)
+                                                                    vh (portable-hash-bytes vb)]
+                                                                [vh vb]))
+                                                            coll)]
+                                          (if (empty? entries)
+                                            (write-set-header! sio 0 NIL_OFFSET)
+                                            (let [root-off (reduce (fn [root [vh vb]]
+                                                                     (let [[new-root _] (hamt-conj sio root vh vb 0)]
+                                                                       new-root))
+                                                                   NIL_OFFSET entries)]
+                                              (write-set-header! sio (count coll) root-off))))))
 
      (ser/register-jvm-type-constructor! EveHashSet-type-id
-       (fn [header-off]
-         (eve3-hash-set-from-header alloc/*jvm-slab-ctx* header-off)))
+                                         (fn [header-off]
+                                           (eve3-hash-set-from-header alloc/*jvm-slab-ctx* header-off)))
 
      (defmethod print-method EveHashSet [s ^java.io.Writer w]
        (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w))
