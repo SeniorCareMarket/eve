@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and fill in your values.
+
+project_id = "my-gcp-project"
+region     = "us-central1"
+zone       = "us-central1-a"
+
+# Lustre configuration
+lustre_capacity_gib    = 18000  # 18 TiB minimum, increments of 9000
+lustre_throughput_tier = 250    # 125, 250, 500, or 1000 MB/s per TiB
+
+# Benchmark VMs
+vm_count        = 3
+vm_machine_type = "c3-standard-8"  # 8 vCPUs, good network throughput
+bench_duration_minutes = 10        # per benchmark phase
+
+# Optional: GCS bucket for result collection (leave empty to skip)
+# results_bucket = "my-lustre-bench-results-20260313"
