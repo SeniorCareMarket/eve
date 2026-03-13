@@ -105,7 +105,9 @@
 
 (declare make-eve3-list)
 
-(deftype EveList [sio__ offset__
+(deftype EveList [sio__
+                  #?@(:clj [^:unsynchronized-mutable offset__])
+                  #?@(:cljs [^:mutable offset__])
                   #?@(:clj [^int cnt]) #?@(:cljs [cnt])
                   head-off]
 
@@ -220,7 +222,10 @@
                      (recur nxt (inc i) (f acc v))))))])
 
   d/IDirectSerialize
-  (d/-direct-serialize [this] offset__)
+  (d/-direct-serialize [this]
+    (when (nil? offset__)
+      (set! offset__ (write-list-header! sio__ cnt head-off)))
+    offset__)
 
   d/ISabStorable
   (d/-sab-tag [_] :eve-list)
@@ -231,7 +236,10 @@
   (d/-eve? [_] true)
 
   d/IEveRoot
-  (d/-root-header-off [this] offset__)
+  (d/-root-header-off [this]
+    (when (nil? offset__)
+      (set! offset__ (write-list-header! sio__ cnt head-off)))
+    offset__)
 
   #?@(:cljs [IPrintWithWriter
              (-pr-writer [this writer _opts]
@@ -265,10 +273,11 @@
 ;;=============================================================================
 
 (defn- make-eve3-list
-  "Internal constructor."
+  "Internal constructor. Defers header write — header is materialized lazily
+   when -root-header-off or -direct-serialize is called."
   [sio cnt head-off]
-  (let [hdr (write-list-header! sio cnt head-off)]
-    (EveList. sio hdr cnt head-off)))
+  (EveList. sio nil cnt head-off))
+
 
 (defn eve3-list-from-header
   "Reconstruct an EveList from a header offset."

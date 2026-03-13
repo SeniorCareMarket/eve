@@ -275,7 +275,9 @@
 ;; Fields are read from slab header once at construction time, not on every access.
 ;;=============================================================================
 
-(deftype EveVector [sio__ offset__
+(deftype EveVector [sio__
+                    #?@(:clj [^:unsynchronized-mutable offset__])
+                    #?@(:cljs [^:mutable offset__])
                     #?@(:clj [^int cnt ^int shift])
                     #?@(:cljs [cnt shift])
                     root tail
@@ -419,6 +421,8 @@
 
   d/IDirectSerialize
   (d/-direct-serialize [this]
+    (when (nil? offset__)
+      (set! offset__ (write-vec-header! sio__ cnt shift root tail tail-len)))
     #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_VEC offset__)
        :clj offset__))
 
@@ -431,7 +435,10 @@
   (d/-eve? [_] true)
 
   d/IEveRoot
-  (d/-root-header-off [this] offset__)
+  (d/-root-header-off [this]
+    (when (nil? offset__)
+      (set! offset__ (write-vec-header! sio__ cnt shift root tail tail-len)))
+    offset__)
 
   #?@(:cljs [IPrintWithWriter
              (-pr-writer [this writer _opts]
@@ -472,8 +479,7 @@
 ;;=============================================================================
 
 (defn- make-eve3-vec-impl [sio cnt shift root tail tail-len]
-  (let [hdr (write-vec-header! sio cnt shift root tail tail-len)]
-    (EveVector. sio hdr cnt shift root tail tail-len)))
+  (EveVector. sio nil cnt shift root tail tail-len))
 
 (defn- make-eve3-vec [sio hdr]
   (let [[cnt shift root tail tail-len] (read-vec-header sio hdr)]

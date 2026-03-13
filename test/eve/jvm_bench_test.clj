@@ -57,13 +57,19 @@
   (testing "Vector benchmarks (JVM)"
     (with-heap-slab
       (let [sio alloc/*jvm-slab-ctx*]
-        ;; Build
-        (bench "eve1" "vec-build" (str "build " N)
+        ;; Build (bulk)
+        (bench "eve1" "vec-build-bulk" (str "bulk-build " N)
           #(let [hdr (v1/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) (range N))]
              (v1/jvm-sabvec-from-offset sio hdr)))
-        (bench "eve2" "vec-build" (str "build " N)
+        (bench "eve3" "vec-build-bulk" (str "bulk-build " N)
+          #(v3/eve3-vec sio (range N)))
+        ;; Build (incremental conj)
+        (bench "eve1" "vec-build" (str "conj " N)
+          #(let [hdr (v1/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) [])]
+             (reduce conj (v1/jvm-sabvec-from-offset sio hdr) (range N))))
+        (bench "eve2" "vec-build" (str "conj " N)
           #(reduce conj (v2/empty-vec) (range N)))
-        (bench "eve3" "vec-build" (str "build " N)
+        (bench "eve3" "vec-build" (str "conj " N)
           #(reduce conj (v3/empty-vec sio) (range N)))
 
         ;; Lookup
@@ -215,10 +221,18 @@
   (testing "List benchmarks (JVM)"
     (with-heap-slab
       (let [sio alloc/*jvm-slab-ctx*]
-        ;; Build
-        (bench "eve1" "list-conj" (str "conj " N)
+        ;; Build (bulk)
+        (bench "eve1" "list-build-bulk" (str "bulk-build " N)
           #(let [hdr (l1/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) (range N))]
              (l1/jvm-sab-list-from-offset sio hdr)))
+        (bench "eve3" "list-build-bulk" (str "bulk-build " N)
+          #(l3/eve3-list sio (range N)))
+        ;; Build (incremental conj)
+        (bench "eve1" "list-conj" (str "conj " N)
+          #(reduce conj
+             (let [hdr (l1/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) '())]
+               (l1/jvm-sab-list-from-offset sio hdr))
+             (range N)))
         (bench "eve2" "list-conj" (str "conj " N)
           #(reduce conj (l2/empty-list) (range N)))
         (bench "eve3" "list-conj" (str "conj " N)
@@ -253,10 +267,10 @@
   (println "╠═══════════════════╬═══════════╬═══════════╬═══════════╬══════╣")
 
   (let [by-op (group-by :op @results)]
-    (doseq [op ["vec-build" "vec-nth" "vec-reduce"
+    (doseq [op ["vec-build-bulk" "vec-build" "vec-nth" "vec-reduce"
                  "map-build" "map-get" "map-reduce"
                  "set-build" "set-contains" "set-reduce"
-                 "list-conj" "list-pop"]]
+                 "list-build-bulk" "list-conj" "list-pop"]]
       (let [entries (get by-op op)
             get-ms (fn [gen] (:median-ms (first (filter #(= gen (:gen %)) entries))))
             e1 (get-ms "eve1")
