@@ -821,7 +821,7 @@
 
 (declare make-eve3-hash-map)
 
-(eve3/eve3-deftype ^{:type-id 0xED} EveHashMap [^:int32 cnt ^:int32 root-off]
+(eve3/eve3-deftype EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Unified protocols (CLJ names) ---
 
   clojure.lang.Counted
@@ -893,9 +893,10 @@
   clojure.lang.IReduceInit
   (reduce [_ f init]
     (let [sio sio__]
-      #?(:clj (hamt-kv-reduce sio root-off
-                (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
-                init)
+      #?(:clj (let [result (hamt-kv-reduce sio root-off
+                             (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
+                             init)]
+                (if (reduced? result) @result result))
          :cljs (let [result (hamt-kv-reduce sio root-off
                               (fn [acc k v] (f acc (MapEntry. k v nil)))
                               init)]
@@ -904,7 +905,8 @@
   clojure.lang.IKVReduce
   (kvreduce [_ f init]
     (let [sio sio__]
-      #?(:clj (hamt-kv-reduce sio root-off f init)
+      #?(:clj (let [result (hamt-kv-reduce sio root-off f init)]
+                (if (reduced? result) @result result))
          :cljs (let [result (hamt-kv-reduce sio root-off f init)]
                  (if (reduced? result) @result result)))))
 

@@ -657,7 +657,7 @@
 
 (declare make-eve3-hash-set)
 
-(eve3/eve3-deftype ^{:type-id 0xEE} EveHashSet [^:int32 cnt ^:int32 root-off]
+(eve3/eve3-deftype EveHashSet [^:int32 cnt ^:int32 root-off]
   clojure.lang.Counted
   (count [_] #?(:cljs cnt :clj (int cnt)))
 
@@ -786,6 +786,21 @@
 
        java.lang.Iterable
        (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+
+       java.util.Set
+       (size [_] (int cnt))
+       (isEmpty [_] (zero? cnt))
+       (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
+       ;; contains is already defined via IPersistentSet above
+       (^boolean containsAll [this ^java.util.Collection c]
+         (boolean (every? #(.contains this %) c)))
+       ;; Unsupported mutators (immutable set)
+       (add [_ _] (throw (UnsupportedOperationException.)))
+       (remove [_ _] (throw (UnsupportedOperationException.)))
+       (addAll [_ _] (throw (UnsupportedOperationException.)))
+       (retainAll [_ _] (throw (UnsupportedOperationException.)))
+       (removeAll [_ _] (throw (UnsupportedOperationException.)))
+       (clear [_] (throw (UnsupportedOperationException.)))
 
        java.lang.Object
        (toString [this] (pr-str this))

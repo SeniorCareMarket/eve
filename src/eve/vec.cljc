@@ -26,7 +26,8 @@
 (def ^:const SHIFT_STEP 5)
 (def ^:const MASK 0x1f)
 
-(def ^:const SabVecRoot-type-id 0x12)
+(def EveVector-type-id 0x12)
+(def SabVecRoot-type-id EveVector-type-id) ;; backward compat
 
 (def ^:const SABVECROOT_CNT_OFFSET 4)
 (def ^:const SABVECROOT_SHIFT_OFFSET 8)
@@ -309,7 +310,7 @@
 ;; Fields are read from slab header via ISlabIO on each method call.
 ;;=============================================================================
 
-(eve3/eve3-deftype ^{:type-id 0x12} EveVector
+(eve3/eve3-deftype EveVector
   [^:int32 cnt ^:int32 shift ^:int32 root ^:int32 tail ^:int32 tail-len]
 
   clojure.lang.Sequential
@@ -474,6 +475,44 @@
 
   java.lang.Iterable
   (iterator [this] #?(:clj (clojure.lang.SeqIterator. (.seq this))))
+
+  #?@(:clj
+      [java.util.List
+       (size [_] (int cnt))
+       (isEmpty [_] (zero? cnt))
+       (get [this ^int i] (.nth this i))
+       (indexOf [this o]
+         (int (loop [i 0]
+           (cond
+             (== i cnt) -1
+             (.equals ^Object (.nth this i) o) i
+             :else (recur (inc i))))))
+       (lastIndexOf [this o]
+         (int (loop [i (dec cnt)]
+           (cond
+             (< i 0) -1
+             (.equals ^Object (.nth this (int i)) o) i
+             :else (recur (dec i))))))
+       (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
+       (^boolean contains [this o] (not= -1 (.indexOf this o)))
+       (^boolean containsAll [this ^java.util.Collection c]
+         (boolean (every? #(.contains this %) c)))
+       (^java.util.List subList [this ^int from ^int to]
+         (java.util.Collections/unmodifiableList
+           (java.util.ArrayList. ^java.util.Collection (subvec (vec this) from to))))
+       (^java.util.ListIterator listIterator [this] (.listIterator (java.util.ArrayList. this) 0))
+       (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.ArrayList. this) i))
+       ;; Unsupported mutators (immutable)
+       (set [_ _ _] (throw (UnsupportedOperationException.)))
+       (add [_ _ _] (throw (UnsupportedOperationException.)))
+       (^boolean add [_ _] (throw (UnsupportedOperationException.)))
+       (^boolean remove [_ _] (throw (UnsupportedOperationException.)))
+       (addAll [_ _] (throw (UnsupportedOperationException.)))
+       (addAll [_ _ _] (throw (UnsupportedOperationException.)))
+       (removeAll [_ _] (throw (UnsupportedOperationException.)))
+       (retainAll [_ _] (throw (UnsupportedOperationException.)))
+       (clear [_] (throw (UnsupportedOperationException.)))
+       (^Object remove [_ ^int _] (throw (UnsupportedOperationException.)))])
 
   java.lang.Object
   (toString [this] #?(:clj (pr-str this)))

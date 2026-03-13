@@ -228,7 +228,7 @@
 
 (defn- emit-cljs
   "Emit CLJS deftype expansion."
-  [type-name fields parsed-protos type-id total-size]
+  [type-name fields parsed-protos type-id total-size emit-type-id-def?]
   (let [field-map (into {} (map (fn [f] [(:name f) f]) fields))
         translated (cljs-emit-protocols parsed-protos fields field-map)
         boilerplate (cljs-boilerplate type-name parsed-protos)]
@@ -237,7 +237,8 @@
          ~@boilerplate
          ~@translated)
 
-       (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
+       ~@(when emit-type-id-def?
+           [`(~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)])
 
        ~type-name)))
 
@@ -297,7 +298,7 @@
   "Emit CLJ deftype expansion.
    Fields: [sio__ ^long offset__]
    sio__ is the ISlabIO context, offset__ is the slab header offset."
-  [type-name fields parsed-protos type-id _total-size]
+  [type-name fields parsed-protos type-id _total-size emit-type-id-def?]
   (let [field-map (into {} (map (fn [f] [(:name f) f]) fields))
         translated (clj-emit-protocols parsed-protos fields field-map)
         boilerplate (clj-boilerplate type-name parsed-protos)]
@@ -306,7 +307,8 @@
          ~@boilerplate
          ~@translated)
 
-       (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
+       ~@(when emit-type-id-def?
+           [`(~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)])
 
        ~type-name)))
 
@@ -322,12 +324,21 @@
    On CLJS, these are translated to CLJS equivalents automatically.
 
    Both platforms store [sio__ offset__] — ISlabIO context + slab offset.
-   Field reads emit ISlabIO protocol calls on both platforms."
+   Field reads emit ISlabIO protocol calls on both platforms.
+
+   Type-id resolution (in priority order):
+     1. ^{:type-id 0xNN} metadata on type-name (explicit override)
+     2. (def TypeName-type-id ...) in same namespace (convention lookup)
+     3. Auto-assigned from incrementing counter (for user types)"
   [type-name fields & body]
   (let [parsed-fields (mapv reg/parse-field fields)
         {:keys [fields total-size]} (reg/compute-layout parsed-fields)
+        resolved-var (resolve (symbol (str (name type-name) "-type-id")))
         type-id (or (:type-id (clojure.core/meta type-name))
+                    (when resolved-var (deref resolved-var))
                     (reg/next-type-id!))
+        ;; Only emit (def TypeName-type-id ...) if not already defined
+        emit-type-id-def? (nil? resolved-var)
         type-key (str (ns-name *ns*) "/" (name type-name))
         _ (reg/register-type! (name type-name)
                               {:type-id type-id
@@ -337,6 +348,6 @@
         parsed-protos (parse-protocol-impls body)]
     (if (:ns &env)
       ;; CLJS compilation
-      (emit-cljs type-name fields parsed-protos type-id total-size)
+      (emit-cljs type-name fields parsed-protos type-id total-size emit-type-id-def?)
       ;; CLJ compilation
-      (emit-clj type-name fields parsed-protos type-id total-size))))
+      (emit-clj type-name fields parsed-protos type-id total-size emit-type-id-def?))))

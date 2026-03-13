@@ -23,7 +23,8 @@
 ;; Shared Constants
 ;;=============================================================================
 
-(def ^:const SabList-type-id 0x13)
+(def EveList-type-id 0x13)
+(def SabList-type-id EveList-type-id) ;; backward compat
 (def ^:const LIST_CNT_OFFSET 4)
 (def ^:const LIST_HEAD_OFFSET 8)
 (def ^:const LIST_HEADER_SIZE 12)
@@ -104,7 +105,7 @@
 
 (declare make-eve3-list)
 
-(eve3/eve3-deftype ^{:type-id 0x13} EveList [^:int32 cnt ^:int32 head-off]
+(eve3/eve3-deftype EveList [^:int32 cnt ^:int32 head-off]
 
   clojure.lang.Sequential
 
