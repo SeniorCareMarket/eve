@@ -6,6 +6,7 @@
    Usage: clj -M:native-x-stress-atom <base-path>
    Example: clj -M:native-x-stress-atom /tmp/eve-10m"
   (:require [eve.atom :as atom]
+            [eve.mem :as mem]
             [clojure.edn :as edn])
   (:import [java.io File]))
 
@@ -52,9 +53,10 @@
 
 (defn -main [& args]
   (when (< (count args) 1)
-    (println "Usage: clj -M:native-x-stress-atom <base-path>")
+    (println "Usage: clj -M:native-x-stress-atom <base-path> [--lustre]")
     (System/exit 1))
-  (let [base-path (first args)]
+  (let [base-path (first args)
+        lustre?   (boolean (some #{"--lustre"} args))]
     ;; Preflight checks
     (when-not (.exists (File. (str base-path ".root")))
       (println (str "Error: No atom found at " base-path))
@@ -72,13 +74,14 @@
       (println "====================================================")
       (printf  "  Atom:    %s\n" base-path)
       (printf  "  On disk: %.1f MB\n" disk-mb)
+      (printf  "  Lustre:  %s\n" lustre?)
       (println "====================================================")
 
       ;; ── Phase 1: Cold Open ──
       (section "Phase 1: Cold Open (JVM joins atom from disk)")
       (let [t0        (System/nanoTime)
-            d         (atom/persistent-atom-domain base-path)
-            a         (atom/atom {:id :eve/main :persistent base-path} nil)
+            d         (atom/persistent-atom-domain base-path :lustre? lustre?)
+            a         (atom/atom {:id :eve/main :persistent base-path :lustre? lustre?} nil)
             open-ms   (nanos->ms (- (System/nanoTime) t0))
             t1        (System/nanoTime)
             val       @a
@@ -111,8 +114,9 @@
 
         ;; ── Phase 3: Node Single-Writer Swap Latency ──
         (section "Phase 3: Node Single-Writer Swap Latency")
-        (let [r (spawn-node-edn! bench-worker "bench-swap-latencies"
-                                 base-path "100" "stress-node")]
+        (let [r (apply spawn-node-edn! bench-worker "bench-swap-latencies"
+                                 base-path "100" "stress-node"
+                                 (when lustre? ["--lustre"]))]
           (printf "  100 swaps (Node.js process, new keys)\n")
           (printf "    p50:     %6.2f ms\n" (:p50-ms r))
           (printf "    p95:     %6.2f ms\n" (:p95-ms r))
@@ -140,8 +144,9 @@
               node-futures
               (mapv (fn [_]
                       (future
-                        (spawn-node-edn! bench-worker "bench-contend"
-                                         base-path (str ops-per-worker))))
+                        (apply spawn-node-edn! bench-worker "bench-contend"
+                                         base-path (str ops-per-worker)
+                                         (when lustre? ["--lustre"]))))
                     (range n-node))
               ;; Wait for all
               _            (run! deref jvm-futures)

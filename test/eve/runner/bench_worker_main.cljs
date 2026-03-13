@@ -29,12 +29,18 @@
       (.-size (.statSync fs path))
       (catch :default _ 0))))
 
+(defn- lustre-flag?
+  "Check if --lustre flag is present in argv."
+  []
+  (some #(= "--lustre" %) (array-seq (.-argv js/process))))
+
 (defn- join-domain-atom!
   "Join an existing domain at base and look up the 'main' atom.
-   Returns [domain atom]."
+   Returns [domain atom]. Respects --lustre CLI flag."
   [base]
-  (let [d (atom/persistent-atom-domain base)
-        a (atom/persistent-atom {:id :eve/main :persistent base} nil)]
+  (let [lustre? (boolean (lustre-flag?))
+        d (atom/persistent-atom-domain base :lustre? lustre?)
+        a (atom/persistent-atom {:id :eve/main :persistent base :lustre? lustre?} nil)]
     [d a]))
 
 (defn main [& _args]

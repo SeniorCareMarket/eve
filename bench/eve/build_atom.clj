@@ -3,7 +3,8 @@
 
    Usage: clj -M:native-build-atom <base-path> <target-mb>
    Example: clj -M:native-build-atom /tmp/eve-10m 10"
-  (:require [eve.atom :as atom])
+  (:require [eve.atom :as atom]
+            [eve.mem :as mem])
   (:import [java.io File]))
 
 (defn- total-disk-bytes [base]
@@ -45,11 +46,13 @@
 
 (defn -main [& args]
   (when (< (count args) 2)
-    (println "Usage: clj -M:native-build-atom <base-path> <target-mb>")
+    (println "Usage: clj -M:native-build-atom <base-path> <target-mb> [--lustre]")
     (println "Example: clj -M:native-build-atom /tmp/eve-10m 10")
+    (println "         clj -M:native-build-atom /tmp/eve-lustre-10m 10 --lustre")
     (System/exit 1))
   (let [base-path    (first args)
         target-mb    (parse-long (second args))
+        lustre?      (some #{"--lustre"} args)
         target-bytes (* target-mb 1024 1024)
         batch-size   200]
     (cleanup! base-path)
@@ -58,14 +61,15 @@
     (println "========================================")
     (printf  "  Path:   %s\n" base-path)
     (printf  "  Target: ~%d MB on disk\n" target-mb)
+    (printf  "  Lustre: %s\n" (boolean lustre?))
     (println "  Types:  maps, vectors, sets, lists, strings,")
     (println "          keywords, integers, booleans")
     (println "========================================")
     (println)
     ;; Pre-insert :counter key so the stress test can update it in-place
     ;; (JVM HAMT assoc on existing keys takes the fast O(log32 N) replace path)
-    (let [d  (atom/persistent-atom-domain base-path)
-          a  (atom/atom {:id :eve/main :persistent base-path} {:counter 0})
+    (let [d  (atom/persistent-atom-domain base-path :lustre? (boolean lustre?))
+          a  (atom/atom {:id :eve/main :persistent base-path :lustre? (boolean lustre?)} {:counter 0})
           t0 (System/nanoTime)]
       ;; Build with individual assoc calls — each is O(log32 N) via structural
       ;; sharing. Avoids the O(N) merge that re-serializes the entire map.
