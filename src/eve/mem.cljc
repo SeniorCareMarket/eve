@@ -265,7 +265,7 @@
 
      (defn- native
        "Return the loaded native addon, auto-loading if needed."
-       []
+       ^js []
        (or @native-addon
            (try-auto-load-addon!)
            (throw (ex-info "mmap_cas native addon not found — run npm install to build it" {}))))

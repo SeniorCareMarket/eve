@@ -184,7 +184,7 @@
         h)))
 
   IEquiv
-  (-equiv [this other]
+  (-equiv [this ^js other]
     (cond
       (identical? this other) true
       (not (instance? Obj other)) false
@@ -549,7 +549,7 @@
   (fn [_sab blk-off]
     (let [schema-len (alloc/read-u16 blk-off 2)
           class-idx  (alloc/decode-class-idx blk-off)
-          u8-view    (wasm/slab-u8-view class-idx)
+          u8-view    (proto-wasm/slab-u8-view class-idx)
           byte-base  (alloc/slab-offset->byte-offset blk-off)
           field-map  (decode-obj-schema u8-view (+ byte-base 4))
           schema     (create-schema field-map)

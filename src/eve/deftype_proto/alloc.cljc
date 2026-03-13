@@ -840,8 +840,12 @@
 
 #?(:cljs
    (do
-     ;; Forward declaration for init-root-sab!
+     ;; Forward declarations
      (declare init-root-sab!)
+     (declare mmap-coalesc-region)
+     (declare grow-mmap-coalesc!)
+     (declare grow-mmap-slab!)
+     (declare refresh-mmap-coalesc!)
 
      ;; Cached per-slab layout info (set during init-slab!)
      ;; Slots 0-5: slab classes. Slot 6: overflow (legacy SAB).
@@ -1389,7 +1393,7 @@
        [slab-off]
        (let [blk-size (aget d/SLAB_SIZES (decode-class-idx slab-off))
              ev-bytes (read-bytes slab-off 1 (dec blk-size))]
-         (ser/deserialize-element ev-bytes)))
+         (ser/deserialize-element nil ev-bytes)))
 
      ;; -----------------------------------------------------------------------
      ;; CljsSlabIO — ISlabIO backed by DataView  (CLJS only)
@@ -1650,7 +1654,7 @@
          (set! mmap-coalesc-max-data-size max-data-size)
          (set! mmap-coalesc-cached-data-size initial-data-size)
          ;; Register for read/write access
-         (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region)
+         (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
          (set! mmap-coalesc-region region)))
 
      (defn open-mmap-coalesc!
@@ -1670,7 +1674,7 @@
          (set! mmap-coalesc-path path)
          (set! mmap-coalesc-max-data-size coalesc/DEFAULT_DATA_SIZE)
          (set! mmap-coalesc-cached-data-size cur-data-sz)
-         (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region)
+         (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
          (set! mmap-coalesc-region region)))
 
      (defn- grow-mmap-coalesc!
@@ -1686,7 +1690,7 @@
                    total-bytes (+ (aget slab-data-offsets OVERFLOW_CLASS_IDX) result)
                    region      (mem/open-mmap-region mmap-coalesc-path total-bytes)]
                (set! mmap-coalesc-cached-data-size result)
-               (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region)
+               (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
                (set! mmap-coalesc-region region)
                true)))))
 
@@ -1700,7 +1704,7 @@
                                   hdr-data-sz)
                    region      (mem/open-mmap-region mmap-coalesc-path total-bytes)]
                (set! mmap-coalesc-cached-data-size hdr-data-sz)
-               (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region)
+               (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
                (set! mmap-coalesc-region region))))))
 
      (defn reset-mmap-coalesc!

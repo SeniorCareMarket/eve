@@ -822,7 +822,7 @@
 
 (declare make-hash-map)
 
-(eve/deftype EveHashMap [^:int32 cnt ^:int32 root-off]
+(eve/deftype ^{:type-id 0xED} EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Unified protocols (CLJ names) ---
 
   clojure.lang.Counted
@@ -868,6 +868,15 @@
         (if (== new-root NIL_OFFSET)
           (make-hash-map sio 0 NIL_OFFSET)
           (make-hash-map sio (dec cnt) new-root)))))
+  #?@(:clj
+      [(entryAt [_ k]
+                (let [v (hamt-get sio__ root-off k ::absent)]
+                  (when-not (identical? v ::absent)
+                    (clojure.lang.MapEntry/create k v))))
+       (assocEx [this k v]
+                (if (.containsKey this k)
+                  (throw (RuntimeException. (str "Key already present: " k)))
+                  (.assoc this k v)))])
 
   clojure.lang.IPersistentCollection
   (cons [this entry]
@@ -943,16 +952,6 @@
   ;; --- CLJ-only interfaces (no CLJS equivalent) ---
   #?@(:clj
       [clojure.lang.MapEquivalence
-
-       clojure.lang.IPersistentMap
-       (entryAt [_ k]
-                (let [v (hamt-get sio__ root-off k ::absent)]
-                  (when-not (identical? v ::absent)
-                    (clojure.lang.MapEntry/create k v))))
-       (assocEx [this k v]
-                (if (.containsKey this k)
-                  (throw (RuntimeException. (str "Key already present: " k)))
-                  (.assoc this k v)))
 
        java.lang.Iterable
        (iterator [this]
@@ -1076,8 +1075,8 @@
 (defn dispose!
   "Dispose an EveHashMap, freeing its entire HAMT tree and header block."
   [eve-map]
-  (let [sio (#?(:cljs .-sio__ :clj .sio__) eve-map)
-        header-off (#?(:cljs .-offset__ :clj .offset__) eve-map)
+  (let [sio (#?(:cljs .-sio__ :clj .sio__) #?(:cljs ^js eve-map :clj eve-map))
+        header-off (#?(:cljs .-offset__ :clj .offset__) #?(:cljs ^js eve-map :clj eve-map))
         root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
     (when (not= root-off NIL_OFFSET)
       (free-hamt-node! sio root-off))
@@ -1194,8 +1193,8 @@
    Includes both HAMT tree nodes and the header block.
    Returns a vector of offsets to free when the epoch is safe."
   [old-map new-value]
-  (let [sio (#?(:cljs .-sio__ :clj .sio__) old-map)
-        header-off (#?(:cljs .-offset__ :clj .offset__) old-map)
+  (let [sio (#?(:cljs .-sio__ :clj .sio__) #?(:cljs ^js old-map :clj old-map))
+        header-off (#?(:cljs .-offset__ :clj .offset__) #?(:cljs ^js old-map :clj old-map))
         root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
     (if (instance? EveHashMap new-value)
       (let [new-header (#?(:cljs .-offset__ :clj .offset__) new-value)

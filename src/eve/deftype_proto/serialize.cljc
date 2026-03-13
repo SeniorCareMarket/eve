@@ -97,6 +97,8 @@
 #?(:clj
    (do
 
+(declare encode-eve-pointer)
+
 ;; Tag-based constructor registry: tag (int) → (fn [header-off] → collection)
 ;; Populated by map.cljc, set.cljc, vec.cljc, list.cljc at load time.
 ;; Mirrors CLJS sab-type-constructors but takes only header-off (sio via *jvm-slab-ctx*).
@@ -141,6 +143,8 @@
 
 #?(:cljs
    (do
+
+(declare encode-eve-pointer)
 
 ;;-----------------------------------------------------------------------------
 ;; SAB type registries (populated by sab_map, sab_set, sab_vec, sab_list at load)

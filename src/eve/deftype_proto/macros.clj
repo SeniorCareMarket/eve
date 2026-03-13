@@ -26,8 +26,8 @@
   (let [read-fn (case type-class
                   :primitive
                   (case type-hint
-                    (:int8 :uint8)     'eve.deftype-proto.alloc/-sio-read-u8
-                    (:int16 :uint16)   'eve.deftype-proto.alloc/-sio-read-u16
+                    (:int8 :uint8) 'eve.deftype-proto.alloc/-sio-read-u8
+                    (:int16 :uint16) 'eve.deftype-proto.alloc/-sio-read-u16
                     (:int32 :uint32 :float32 :float64)
                     'eve.deftype-proto.alloc/-sio-read-i32)
                   ;; :eve-type, :serialized — stored as int32
@@ -40,8 +40,8 @@
   (let [write-fn (case type-class
                    :primitive
                    (case type-hint
-                     (:int8 :uint8)     'eve.deftype-proto.alloc/-sio-write-u8!
-                     (:int16 :uint16)   'eve.deftype-proto.alloc/-sio-write-u16!
+                     (:int8 :uint8) 'eve.deftype-proto.alloc/-sio-write-u8!
+                     (:int16 :uint16) 'eve.deftype-proto.alloc/-sio-write-u16!
                      (:int32 :uint32 :float32 :float64)
                      'eve.deftype-proto.alloc/-sio-write-i32!)
                    ;; :eve-type, :serialized
@@ -78,16 +78,16 @@
     ;; Recurse into forms
     (seq? form)
     (with-meta (apply list (map #(rewrite-set!-forms % field-map) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(rewrite-set!-forms % field-map) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(rewrite-set!-forms k field-map)
                                 (rewrite-set!-forms v field-map)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 ;;=============================================================================
@@ -221,7 +221,8 @@
             (list 'and
                   (list 'instance? type-name 'other)
                   (list '== (list '.-offset__ '_) (list '.-offset__ 'other))))])
-   (when-not (user-provides-protocol? parsed-protos 'java.lang.Object)
+   (when-not (or (user-provides-protocol? parsed-protos 'java.lang.Object)
+                 (user-provides-protocol? parsed-protos 'IPrintWithWriter))
      ['IPrintWithWriter
       (list '-pr-writer ['this 'writer '_opts]
             (list '-write 'writer (str "#eve/" (name type-name) " "))
@@ -238,8 +239,8 @@
         boilerplate (cljs-boilerplate type-name parsed-protos type-key)]
     `(do
        (~'deftype ~type-name [~'sio__ ~'offset__]
-         ~@boilerplate
-         ~@translated)
+                  ~@boilerplate
+                  ~@translated)
 
        ~@(when emit-type-id-def?
            [`(~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)])
@@ -313,8 +314,8 @@
         boilerplate (clj-boilerplate type-name parsed-protos type-key)]
     `(do
        (~'deftype ~type-name [~'sio__ ~(with-meta 'offset__ {:tag 'long})]
-         ~@boilerplate
-         ~@translated)
+                  ~@boilerplate
+                  ~@translated)
 
        ~@(when emit-type-id-def?
            [`(~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)])
@@ -349,7 +350,9 @@
                     (when resolved-var (deref resolved-var))
                     (reg/next-type-id!))
         ;; Only emit (def TypeName-type-id ...) if not already defined
-        emit-type-id-def? (nil? resolved-var)
+        ;; and not provided via metadata
+        emit-type-id-def? (and (nil? resolved-var)
+                               (nil? (:type-id (clojure.core/meta type-name))))
         type-key (str (ns-name *ns*) "/" (name type-name))
         _ (reg/register-type! (name type-name)
                               {:type-id type-id
@@ -395,29 +398,29 @@
       `(do
          ;; Type constructor registration
          (eve.deftype-proto.serialize/register-sab-type-constructor!
-           ~fast-tag ~type-id
-           (fn [_sab# header-off#]
-             (~from-header (eve.deftype-proto.alloc/->CljsSlabIO) header-off#)))
+          ~fast-tag ~type-id
+          (fn [_sab# header-off#]
+            (~from-header (eve.deftype-proto.alloc/->CljsSlabIO) header-off#)))
 
          ;; Header disposer
          ~@(when dispose
              [`(eve.deftype-proto.serialize/register-header-disposer! ~type-id
-                 (fn [slab-off#]
-                   (~dispose (~from-header (eve.deftype-proto.alloc/->CljsSlabIO) slab-off#))))])
+                                                                      (fn [slab-off#]
+                                                                        (~dispose (~from-header (eve.deftype-proto.alloc/->CljsSlabIO) slab-off#))))])
 
          ;; Builder for auto-conversion
          ~@(when (and builder-pred builder-ctor)
              [`(eve.deftype-proto.serialize/register-cljs-to-sab-builder!
-                 ~builder-pred
-                 (fn [v#] (~builder-ctor (eve.deftype-proto.alloc/->CljsSlabIO) v#)))]))
+                ~builder-pred
+                (fn [v#] (~builder-ctor (eve.deftype-proto.alloc/->CljsSlabIO) v#)))]))
 
       ;; CLJ
       `(do
          ;; Type constructor registration
          (eve.deftype-proto.serialize/register-jvm-type-constructor!
-           ~fast-tag ~type-id
-           (fn [header-off#]
-             (~from-header eve.deftype-proto.alloc/*jvm-slab-ctx* header-off#)))
+          ~fast-tag ~type-id
+          (fn [header-off#]
+            (~from-header eve.deftype-proto.alloc/*jvm-slab-ctx* header-off#)))
 
          ;; Collection writer
          ~@(when coll-writer

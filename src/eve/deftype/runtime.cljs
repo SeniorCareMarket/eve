@@ -175,7 +175,7 @@
 (defn write-eve-type!
   "Write an eve-type field: type-tag check + store offset.
    Returns the written value."
-  [eve-env eve-offset field-offset expected-type-id val]
+  [eve-env eve-offset field-offset expected-type-id ^js val]
   (let [sab (:sab eve-env)]
     (if (nil? val)
       (do (.setInt32 (js/DataView. sab) (+ eve-offset field-offset) -1 true)
@@ -190,7 +190,7 @@
 
 (defn write-eve-type-volatile!
   "Write a volatile eve-type field via Atomics.store."
-  [eve-env eve-offset field-offset expected-type-id val]
+  [eve-env eve-offset field-offset expected-type-id ^js val]
   (let [sab (:sab eve-env)]
     (if (nil? val)
       (do (js/Atomics.store (js/Int32Array. sab)
@@ -210,7 +210,7 @@
 (defn cas-eve-type!
   "CAS on a volatile eve-type field. expected and new-val are eve-type instances.
    Returns true if successful."
-  [eve-env eve-offset field-offset expected-type-id expected-instance new-instance]
+  [eve-env eve-offset field-offset expected-type-id ^js expected-instance ^js new-instance]
   (let [sab (:sab eve-env)
         idx (unsigned-bit-shift-right (+ eve-offset field-offset) 2)
         expected-off (if (nil? expected-instance) -1 (.-eve-offset expected-instance))
