@@ -991,6 +991,36 @@
                 -1))
             (recur (inc word-idx) 0)))))))
 
+#?(:clj
+   (defn imr-bitmap-find-free-bulk
+     "Like imr-bitmap-find-free but reads the bitmap in one bulk -read-bytes call,
+      then scans the local byte array. This avoids per-word fcntl lock overhead in
+      lustre mode where -load-i32 acquires a byte-range lock per call.
+      The snapshot may be slightly stale, but that's safe: the caller retries via
+      imr-bitmap-alloc-cas! which uses a proper CAS."
+     [region bm-byte-offset total-bits start-bit]
+     (let [word-count (int (unsigned-bit-shift-right (+ total-bits 31) 5))
+           byte-len   (* word-count 4)
+           ^bytes raw (-read-bytes region bm-byte-offset byte-len)
+           buf        (-> (java.nio.ByteBuffer/wrap raw)
+                          (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
+       (loop [word-idx    (int (unsigned-bit-shift-right start-bit 5))
+              bit-in-word (int (bit-and start-bit 31))]
+         (if (>= word-idx word-count)
+           -1
+           (let [word     (.getInt buf (* word-idx 4))
+                 inverted (bit-xor word -1)
+                 masked   (if (pos? bit-in-word)
+                            (bit-and inverted (bit-shift-left -1 bit-in-word))
+                            inverted)]
+             (if (not (zero? masked))
+               (let [bit-pos (Integer/numberOfTrailingZeros masked)
+                     abs-bit (+ (bit-shift-left word-idx 5) bit-pos)]
+                 (if (< abs-bit total-bits)
+                   abs-bit
+                   -1))
+               (recur (inc word-idx) 0))))))))
+
 (defn imr-bitmap-alloc-cas!
   "Atomically set bit-idx in the bitmap from 0→1 (mark block allocated).
    Returns true on success, false if bit was already set (lost CAS race)."

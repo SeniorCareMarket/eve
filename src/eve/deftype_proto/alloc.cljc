@@ -289,9 +289,13 @@
              (letfn [(try-alloc [ci]
                        (let [bm-rgn (aget bitmap-regions ci)
                              bm-off (aget bitmap-offsets ci)
-                             total  (aget total-blocks ci)]
+                             total  (aget total-blocks ci)
+                             ;; Lustre bitmap regions: bulk-read to avoid per-word fcntl lock
+                             find-free (if (instance? eve.mem.LustreJvmMmapRegion bm-rgn)
+                                         mem/imr-bitmap-find-free-bulk
+                                         mem/imr-bitmap-find-free)]
                          (loop [start-bit 0 wrapped? false]
-                           (let [candidate (mem/imr-bitmap-find-free bm-rgn bm-off total start-bit)]
+                           (let [candidate (find-free bm-rgn bm-off total start-bit)]
                              (cond
                                (not= candidate -1)
                                (if (mem/imr-bitmap-alloc-cas! bm-rgn bm-off candidate)

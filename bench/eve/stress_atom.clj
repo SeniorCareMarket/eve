@@ -129,7 +129,7 @@
         (section "Phase 4: 4 JVM Threads + 4 Node Processes (counter contention)")
         ;; Reset counter to 0 (update, not insert — :counter was pre-inserted by build)
         (swap! a assoc :counter 0)
-        (let [ops-per-worker 50
+        (let [ops-per-worker 125
               n-jvm  4
               n-node 4
               t0     (System/nanoTime)
