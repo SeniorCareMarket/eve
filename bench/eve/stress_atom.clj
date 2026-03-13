@@ -95,9 +95,9 @@
         ;; Updates EXISTING keys — takes the O(log32 N) replace path in the HAMT.
         ;; Warmup: 50 unprofiled swaps so JIT compiles the hot path before timing.
         (section "Phase 2: JVM Single-Writer Swap Latency")
-        (dotimes [i 50]
+        (dotimes [i 100]
           (swap! a assoc (keyword (str "k" (mod i key-count))) {:warmup true :i i}))
-        (let [n    100
+        (let [n    500
               lats (long-array n)]
           (dotimes [i n]
             (let [k (keyword (str "k" (mod i key-count)))
@@ -115,9 +115,9 @@
         ;; ── Phase 3: Node Single-Writer Swap Latency ──
         (section "Phase 3: Node Single-Writer Swap Latency")
         (let [r (apply spawn-node-edn! bench-worker "bench-swap-latencies"
-                                 base-path "100" "stress-node"
+                                 base-path "500" "stress-node"
                                  (when lustre? ["--lustre"]))]
-          (printf "  100 swaps (Node.js process, new keys)\n")
+          (printf "  500 swaps (Node.js process, new keys)\n")
           (printf "    p50:     %6.2f ms\n" (:p50-ms r))
           (printf "    p95:     %6.2f ms\n" (:p95-ms r))
           (printf "    p99:     %6.2f ms\n" (:p99-ms r))
