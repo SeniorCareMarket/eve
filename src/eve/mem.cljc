@@ -27,7 +27,14 @@
    All byte-off arguments are BYTE offsets. Atomic ops require 4-byte
    alignment (enforced by the caller — util.cljs already does this via
    the (* field-idx 4) convention)."
-  #?(:clj
+  #?(:bb
+     (:import
+      [java.io RandomAccessFile]
+      [java.nio ByteBuffer ByteOrder MappedByteBuffer]
+      [java.nio.channels FileChannel FileChannel$MapMode]
+      [java.nio.file OpenOption Paths StandardOpenOption]
+      [java.util Date UUID])
+     :clj
      (:import
       [java.io RandomAccessFile]
       [java.lang.foreign Arena MemorySegment]
@@ -36,7 +43,8 @@
       [java.nio.file OpenOption Paths StandardOpenOption]
       [java.util Date UUID]))
   (:require
-   [eve.deftype-proto.data :as d]))
+   [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.serialize :as ser]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol
@@ -350,10 +358,230 @@
          (NodeMmapRegion. buf size-bytes)))))
 
 ;; ---------------------------------------------------------------------------
-;; JVM implementations
+;; Babashka implementations — MappedByteBuffer (no Panama FFM, no Unsafe)
 ;; ---------------------------------------------------------------------------
+;; bb takes `:bb` before `:clj` in reader conditionals.
+;; Uses MappedByteBuffer for mmap regions and ByteBuffer.wrap for heap regions.
+;; Atomic ops are simulated via locking — sufficient for single-process bb scripts.
 
-#?(:clj
+#?(:bb
+   (do
+     ;; Locking object for simulated atomics. Babashka is single-threaded for
+     ;; scripting, but we still do CAS-style reads; a global lock suffices.
+     (def ^:private bb-lock (Object.))
+
+     ;; BbMmapRegion — file-backed MappedByteBuffer with simulated atomics
+     (deftype BbMmapRegion [^MappedByteBuffer mbb ^long size]
+       IMemRegion
+
+       (-byte-length [_] size)
+
+       (-load-i32 [_ byte-off]
+         (locking bb-lock
+           (.getInt mbb (int byte-off))))
+
+       (-store-i32! [_ byte-off val]
+         (locking bb-lock
+           (.putInt mbb (int byte-off) (unchecked-int val)))
+         nil)
+
+       (-cas-i32! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getInt mbb (int byte-off))]
+             (when (== cur (int expected))
+               (.putInt mbb (int byte-off) (unchecked-int desired)))
+             cur)))
+
+       (-add-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt mbb (int byte-off))]
+             (.putInt mbb (int byte-off) (unchecked-int (+ old (int delta))))
+             old)))
+
+       (-sub-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt mbb (int byte-off))]
+             (.putInt mbb (int byte-off) (unchecked-int (- old (int delta))))
+             old)))
+
+       (-exchange-i32! [_ byte-off val]
+         (locking bb-lock
+           (let [old (.getInt mbb (int byte-off))]
+             (.putInt mbb (int byte-off) (unchecked-int val))
+             old)))
+
+       (-load-i64 [_ byte-off]
+         (locking bb-lock
+           (.getLong mbb (int byte-off))))
+
+       (-store-i64! [_ byte-off val]
+         (locking bb-lock
+           (.putLong mbb (int byte-off) (long val)))
+         nil)
+
+       (-cas-i64! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getLong mbb (int byte-off))]
+             (when (== cur (long expected))
+               (.putLong mbb (int byte-off) (long desired)))
+             cur)))
+
+       (-add-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong mbb (int byte-off))]
+             (.putLong mbb (int byte-off) (+ old (long delta)))
+             old)))
+
+       (-sub-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong mbb (int byte-off))]
+             (.putLong mbb (int byte-off) (- old (long delta)))
+             old)))
+
+       (-wait-i32! [_ byte-off expected timeout-ms]
+         (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+           (loop []
+             (let [cur (locking bb-lock (.getInt mbb (int byte-off)))]
+               (cond
+                 (not= cur (int expected))                  :not-equal
+                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 :else (do (Thread/sleep 1)
+                           (recur)))))))
+
+       (-notify-i32! [_ _byte-off _n] 0)
+
+       (-supports-watch? [_] false)
+
+       (-read-bytes [_ byte-off len]
+         (let [dst (byte-array len)]
+           (locking bb-lock
+             (.position mbb (int byte-off))
+             (.get mbb dst))
+           dst))
+
+       (-write-bytes! [_ byte-off src]
+         (locking bb-lock
+           (.position mbb (int byte-off))
+           (.put mbb ^bytes src))
+         nil))
+
+     (defn open-mmap-region
+       "Open (or create) a file-backed shared memory region at path-str.
+        Uses MappedByteBuffer (compatible with Babashka/GraalVM native-image)."
+       [path-str size-bytes]
+       (let [size  (long size-bytes)
+             _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
+                     (try (when (< (.length raf) size) (.setLength raf size))
+                          (finally (.close raf))))
+             path  (Paths/get ^String path-str (into-array String []))
+             ^FileChannel fc
+             (FileChannel/open path
+               (into-array OpenOption
+                 [StandardOpenOption/READ
+                  StandardOpenOption/WRITE]))
+             ^MappedByteBuffer mbb (.map fc FileChannel$MapMode/READ_WRITE 0 size)]
+         (.close fc)
+         (.order mbb ByteOrder/LITTLE_ENDIAN)
+         (BbMmapRegion. mbb size)))
+
+     ;; BbHeapRegion — byte[] backed by ByteBuffer.wrap with simulated atomics
+     (deftype BbHeapRegion [^ByteBuffer bb-buf ^bytes backing ^long size]
+       IMemRegion
+
+       (-byte-length [_] size)
+
+       (-load-i32 [_ byte-off]
+         (locking bb-lock
+           (.getInt bb-buf (int byte-off))))
+
+       (-store-i32! [_ byte-off val]
+         (locking bb-lock
+           (.putInt bb-buf (int byte-off) (unchecked-int val)))
+         nil)
+
+       (-cas-i32! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getInt bb-buf (int byte-off))]
+             (when (== cur (int expected))
+               (.putInt bb-buf (int byte-off) (unchecked-int desired)))
+             cur)))
+
+       (-add-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt bb-buf (int byte-off))]
+             (.putInt bb-buf (int byte-off) (unchecked-int (+ old (int delta))))
+             old)))
+
+       (-sub-i32! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getInt bb-buf (int byte-off))]
+             (.putInt bb-buf (int byte-off) (unchecked-int (- old (int delta))))
+             old)))
+
+       (-exchange-i32! [_ byte-off val]
+         (locking bb-lock
+           (let [old (.getInt bb-buf (int byte-off))]
+             (.putInt bb-buf (int byte-off) (unchecked-int val))
+             old)))
+
+       (-load-i64 [_ byte-off]
+         (locking bb-lock
+           (.getLong bb-buf (int byte-off))))
+
+       (-store-i64! [_ byte-off val]
+         (locking bb-lock
+           (.putLong bb-buf (int byte-off) (long val)))
+         nil)
+
+       (-cas-i64! [_ byte-off expected desired]
+         (locking bb-lock
+           (let [cur (.getLong bb-buf (int byte-off))]
+             (when (== cur (long expected))
+               (.putLong bb-buf (int byte-off) (long desired)))
+             cur)))
+
+       (-add-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong bb-buf (int byte-off))]
+             (.putLong bb-buf (int byte-off) (+ old (long delta)))
+             old)))
+
+       (-sub-i64! [_ byte-off delta]
+         (locking bb-lock
+           (let [old (.getLong bb-buf (int byte-off))]
+             (.putLong bb-buf (int byte-off) (- old (long delta)))
+             old)))
+
+       (-wait-i32! [_ byte-off expected timeout-ms]
+         (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+           (loop []
+             (let [cur (locking bb-lock (.getInt bb-buf (int byte-off)))]
+               (cond
+                 (not= cur (int expected))                  :not-equal
+                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 :else (do (Thread/sleep 1)
+                           (recur)))))))
+
+       (-notify-i32! [_ _byte-off _n] 0)
+
+       (-supports-watch? [_] false)
+
+       (-read-bytes [_ byte-off len]
+         (java.util.Arrays/copyOfRange backing (int byte-off) (int (+ byte-off len))))
+
+       (-write-bytes! [_ byte-off src]
+         (System/arraycopy src 0 backing (int byte-off) (alength ^bytes src))
+         nil))
+
+     (defn make-heap-region
+       "Create an IMemRegion backed by a zero-initialized heap byte array.
+        Uses ByteBuffer.wrap for int32/int64 ops (Babashka-compatible)."
+       [size-bytes]
+       (let [ba  (byte-array (int size-bytes))
+             buf (doto (ByteBuffer/wrap ba) (.order ByteOrder/LITTLE_ENDIAN))]
+         (BbHeapRegion. buf ba (long size-bytes)))))
+
+   :clj
    (do
      ;; sun.misc.Unsafe for atomic int32 ops over native memory.
      ;; Works on Java 21 (preview FFM) and Java 22+ (final FFM).
@@ -616,7 +844,13 @@
 (defn read-bytes     [r byte-off len]       (-read-bytes     r byte-off len))
 (defn write-bytes!   [r byte-off src]       (-write-bytes!   r byte-off src))
 
-#?(:clj
+#?(:bb
+   (defn copy-region!
+     "Bulk copy len bytes between two IMemRegion instances (Babashka)."
+     [src-region src-byte-off dst-region dst-byte-off len]
+     (let [bs (-read-bytes src-region src-byte-off len)]
+       (-write-bytes! dst-region dst-byte-off bs)))
+   :clj
    (defn copy-region!
      "Bulk copy len bytes between two IMemRegion instances.
       For JvmMmapRegion↔JvmMmapRegion: uses MemorySegment/copy (native memcpy).
@@ -897,25 +1131,33 @@
                      lsb (Long/reverseBytes (read-i64-le b 11))]
                  (UUID. msb lsb))
 
-               ;; SAB pointer types — collection values in slab memory
-               0x10 (if (and sio coll-factory)
-                      (coll-factory 0x10 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_MAP: pass sio+coll-factory to eve-bytes->value.")))
-               0x11 (if (and sio coll-factory)
-                      (coll-factory 0x11 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_SET: pass sio+coll-factory to eve-bytes->value.")))
-               0x12 (if (and sio coll-factory)
-                      (coll-factory 0x12 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_VEC: pass sio+coll-factory to eve-bytes->value.")))
-               0x13 (if (and sio coll-factory)
-                      (coll-factory 0x13 sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE SAB_LIST: pass sio+coll-factory to eve-bytes->value.")))
-               0x1D (if (and sio coll-factory)
-                      (coll-factory 0x1D sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE ARRAY: pass sio+coll-factory to eve-bytes->value.")))
-               0x1E (if (and sio coll-factory)
-                      (coll-factory 0x1E sio (read-i32-le b 3))
-                      (throw (UnsupportedOperationException. "EVE OBJ: pass sio+coll-factory to eve-bytes->value.")))
+               ;; SAB pointer types — collection values in slab memory.
+               ;; Prefer registry lookup (mirrors CLJS pattern); fall back to
+               ;; legacy coll-factory callback for backward compat.
+               0x10 (let [ctor (or (ser/get-jvm-type-constructor 0x10)
+                                   (when coll-factory (fn [off] (coll-factory 0x10 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_MAP: no constructor registered."))))
+               0x11 (let [ctor (or (ser/get-jvm-type-constructor 0x11)
+                                   (when coll-factory (fn [off] (coll-factory 0x11 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_SET: no constructor registered."))))
+               0x12 (let [ctor (or (ser/get-jvm-type-constructor 0x12)
+                                   (when coll-factory (fn [off] (coll-factory 0x12 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_VEC: no constructor registered."))))
+               0x13 (let [ctor (or (ser/get-jvm-type-constructor 0x13)
+                                   (when coll-factory (fn [off] (coll-factory 0x13 sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE SAB_LIST: no constructor registered."))))
+               0x1D (let [ctor (or (ser/get-jvm-type-constructor 0x1D)
+                                   (when coll-factory (fn [off] (coll-factory 0x1D sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE ARRAY: no constructor registered."))))
+               0x1E (let [ctor (or (ser/get-jvm-type-constructor 0x1E)
+                                   (when coll-factory (fn [off] (coll-factory 0x1E sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE OBJ: no constructor registered."))))
 
                ;; Flat map — cross-process binary map encoding
                0xED
@@ -1188,6 +1430,7 @@
 
      ;; Late-bound collection writers registered by map/vec/set/list namespaces at
      ;; load time. Using a defonce atom avoids circular compile-time dependencies.
+     (declare value+sio->eve-bytes)
      (defonce ^:private jvm-coll-writers (clojure.core/atom {}))
 
      (defn register-jvm-collection-writer!
@@ -1198,14 +1441,27 @@
        [tag writer]
        (swap! jvm-coll-writers assoc tag writer))
 
+     (defn jvm-write-collection!
+       "Serialize a Clojure collection to slab via the registered writer.
+        Returns the slab-qualified header offset.
+        tag — :map, :set, :vec, or :list."
+       [tag sio coll]
+       (let [writer (get @jvm-coll-writers tag)]
+         (if writer
+           (writer sio (partial value+sio->eve-bytes sio) coll)
+           (throw (ex-info (str "jvm-write-collection!: no writer for " tag) {:tag tag})))))
+
      (defn value+sio->eve-bytes
        "Serialize v to EVE bytes, allocating collection structures into sio.
         Maps → SAB_MAP pointer (0x10), sets → SAB_SET (0x11),
         vectors → SAB_VEC (0x12), lists → SAB_LIST (0x13).
         Primitives are encoded inline via value->eve-bytes.
         Collection writers must be registered via register-jvm-collection-writer!
-        before calling this function with collection values."
-       ^bytes [sio v]
+        before calling this function with collection values.
+        1-arity: uses *jvm-slab-ctx*.  2-arity: explicit sio."
+       (^bytes [v]
+        (value+sio->eve-bytes @(resolve 'eve.deftype-proto.alloc/*jvm-slab-ctx*) v))
+       (^bytes [sio v]
        (let [writers @jvm-coll-writers]
          (cond
            (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
@@ -1250,5 +1506,5 @@
 
            :else
            (throw (ex-info "value+sio->eve-bytes: unsupported type"
-                           {:type (type v) :value v})))))))
+                           {:type (type v) :value v}))))))))
 

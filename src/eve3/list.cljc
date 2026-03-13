@@ -1,5 +1,5 @@
-(ns eve.list
-  "Eve persistent list — unified CLJ/CLJS implementation.
+(ns eve3.list
+  "Eve3 persistent list — unified CLJ/CLJS implementation.
 
    Singly-linked persistent (immutable) list using ISlabIO for memory access.
    Node layout: [next-off:i32 @ 0][val-len:u32 @ 4][val-bytes... @ 8]
@@ -14,8 +14,7 @@
             NIL_OFFSET]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:bb   [[eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
-                                       register-jvm-collection-writer!]]]
+   #?@(:cljs [[eve3.alloc :as eve-alloc]]
        :clj  [[eve3.deftype :as eve3]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
@@ -106,8 +105,6 @@
 
 (declare make-eve3-list)
 
-#?(:bb nil
-   :default
 (deftype EveList [sio__
                   #?@(:clj [^:unsynchronized-mutable offset__])
                   #?@(:cljs [^:mutable offset__])
@@ -140,7 +137,13 @@
       (let [next-off (read-node-next sio__ head-off)]
         (make-eve3-list sio__ (dec cnt) next-off))))
 
-  #?(:cljs IEquiv :clj clojure.lang.IPersistentCollection)
+  #?(:cljs ICollection :clj clojure.lang.IPersistentCollection)
+  (#?(:cljs -conj :clj cons) [_ v]
+    (let [vb (serialize-element-bytes v)
+          node-off (alloc-list-node! sio__ head-off vb)]
+      (make-eve3-list sio__ (inc cnt) node-off)))
+  (#?(:cljs -empty :clj empty) [_]
+    (make-eve3-list sio__ 0 NIL_OFFSET))
   (#?(:cljs -equiv :clj equiv) [_ other]
     (cond
       (not (sequential? other)) false
@@ -153,16 +156,6 @@
             (if (= v (first os))
               (recur (read-node-next sio__ off) (inc i) (clojure.core/next os))
               false))))))
-
-  #?(:cljs IEmptyableCollection :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -empty :clj empty) [_]
-    (make-eve3-list sio__ 0 NIL_OFFSET))
-
-  #?(:cljs ICollection :clj clojure.lang.IPersistentCollection)
-  (#?(:cljs -conj :clj cons) [_ v]
-    (let [vb (serialize-element-bytes v)
-          node-off (alloc-list-node! sio__ head-off vb)]
-      (make-eve3-list sio__ (inc cnt) node-off)))
 
   #?(:cljs IHash :clj clojure.lang.IHashEq)
   (#?(:cljs -hash :clj hasheq) [this]
@@ -219,7 +212,7 @@
                          nxt (read-node-next sio__ off)]
                      (recur nxt (inc i) (f acc v))))))])
 
-  #?@(:bb [] :clj [clojure.lang.IReduceInit
+  #?@(:clj [clojure.lang.IReduceInit
              (reduce [_ f init]
                (loop [off head-off i 0 acc init]
                  (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
@@ -258,9 +251,8 @@
                    (recur (read-node-next sio__ off) (inc i))))
                (-write writer ")"))])
 
-  ;; --- CLJ-only interfaces (not supported in bb) ---
-  #?@(:bb []
-      :clj
+  ;; --- CLJ-only interfaces ---
+  #?@(:clj
       [clojure.lang.IPersistentList
 
        java.lang.Iterable
@@ -275,138 +267,39 @@
            :else (.equiv this other)))
        (hashCode [this]
          (clojure.lang.Murmur3/hashOrdered this))]))
-) ;; end #?(:bb nil :default ...)
-
-;;=============================================================================
-;; Disposal & retirement (CLJS only)
-;;=============================================================================
-
-#?(:cljs
-   (do
-     (defn- free-list-chain!
-       "Free all nodes in a list linked-list chain via ISlabIO."
-       [sio head-off]
-       (loop [node-off head-off]
-         (when (not= node-off NIL_OFFSET)
-           (let [next-off (read-node-next sio node-off)]
-             (-sio-free! sio node-off)
-             (recur next-off)))))
-
-     (defn dispose!
-       "Dispose an EveList, freeing all nodes and header.
-        Call this when the list is no longer needed to reclaim slab memory.
-
-        WARNING: After disposal, the list must not be used."
-       [eve-list]
-       (when (instance? EveList eve-list)
-         (let [sio (.-sio__ eve-list)
-               hd  (.-head-off eve-list)
-               hdr (.-offset__ eve-list)]
-           (when (not= hd NIL_OFFSET)
-             (free-list-chain! sio hd))
-           (when (and hdr (not= hdr NIL_OFFSET))
-             (-sio-free! sio hdr)))))
-
-     (defn retire-replaced-chain!
-       "After an atom swap that replaced a list, retire old nodes not shared
-        by the new list.
-
-        Walks the old chain, freeing nodes until we hit a node shared with
-        the new chain (or NIL).
-
-        mode is accepted for API compat but currently ignored (always frees)."
-       ([sio old-head new-head]
-        (retire-replaced-chain! sio old-head new-head :free))
-       ([sio old-head new-head mode]
-        (when (and (not= old-head NIL_OFFSET) (not= old-head new-head))
-          (loop [node-off old-head]
-            (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))
-              (let [next-off (read-node-next sio node-off)]
-                (-sio-free! sio node-off)
-                (recur next-off)))))))
-
-     ;; Extend EveList with ISabRetirable
-     (extend-type EveList
-       d/ISabRetirable
-       (-sab-retire-diff! [this new-value _slab-env mode]
-         (let [sio     (.-sio__ this)
-               old-head (.-head-off this)
-               new-head (when (instance? EveList new-value)
-                          (.-head-off new-value))]
-           (if new-head
-             ;; Both are EveList — retire replaced chain nodes
-             (retire-replaced-chain! sio old-head new-head mode)
-             ;; Different type — dispose entire old list
-             (dispose! this)))))))
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
-#?(:bb nil
-   :default
-   (do
-     (defn- make-eve3-list
-       "Internal constructor. Defers header write — header is materialized lazily
-        when -root-header-off or -direct-serialize is called."
-       [sio cnt head-off]
-       (EveList. sio nil cnt head-off))
+(defn- make-eve3-list
+  "Internal constructor. Defers header write — header is materialized lazily
+   when -root-header-off or -direct-serialize is called."
+  [sio cnt head-off]
+  (EveList. sio nil cnt head-off))
 
-     (defn eve3-list-from-header
-       "Reconstruct an EveList from a header offset."
-       [sio header-off]
-       (let [[cnt head-off] (read-list-header sio header-off)]
-         (EveList. sio header-off cnt head-off)))
 
-     (defn empty-list
-       "Create an empty Eve list.
-        0-arity: uses platform default sio.  1-arity: explicit sio."
-       ([] (empty-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
-       ([sio] (make-eve3-list sio 0 NIL_OFFSET)))
+(defn eve3-list-from-header
+  "Reconstruct an EveList from a header offset."
+  [sio header-off]
+  (let [[cnt head-off] (read-list-header sio header-off)]
+    (EveList. sio header-off cnt head-off)))
 
-     (defn eve3-list
-       "Create an Eve list from a collection (reversed, as cons-list)."
-       ([coll] (eve3-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
-       ([sio coll]
-        (reduce conj (empty-list sio) (reverse coll))))
+(defn empty-list
+  "Create an empty Eve3 list."
+  [sio]
+  (make-eve3-list sio 0 NIL_OFFSET))
 
-     ;; Backward-compat aliases
-     (def empty-sab-list empty-list)
-     (def sab-list eve3-list)))
+(defn eve3-list
+  "Create an Eve3 list from a collection (reversed, as cons-list)."
+  [sio coll]
+  (reduce conj (empty-list sio) (reverse coll)))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-#?(:bb
-   (do
-     ;; Register collection writer (same algorithm — builds linked list from plain seq)
-     (register-jvm-collection-writer! :list
-       (fn [sio serialize-val coll]
-         (let [elems (vec coll)
-               cnt (count elems)]
-           (if (zero? cnt)
-             (write-list-header! sio 0 NIL_OFFSET)
-             (let [head-off (reduce (fn [next-off elem]
-                                      (let [^bytes vb (serialize-val elem)]
-                                        (alloc-list-node! sio next-off vb)))
-                                    NIL_OFFSET
-                                    (rseq elems))]
-               (write-list-header! sio cnt head-off))))))
-
-     ;; Register bb materializing constructor: tag 0x13 → plain Clojure vector
-     (ser/register-jvm-type-constructor! SabList-type-id
-       (fn [header-off]
-         (let [sio alloc/*jvm-slab-ctx*
-               [cnt head-off] (read-list-header sio header-off)]
-           (loop [off head-off i 0 acc (transient [])]
-             (if (or (== off NIL_OFFSET) (>= i cnt))
-               (persistent! acc)
-               (let [v   (read-node-value sio off)
-                     nxt (read-node-next sio off)]
-                 (recur nxt (inc i) (conj! acc v)))))))))
-
-   :clj
+#?(:clj
    (do
      (register-jvm-collection-writer! :list
        (fn [sio serialize-val coll]
@@ -426,22 +319,4 @@
          (eve3-list-from-header alloc/*jvm-slab-ctx* header-off)))
 
      (defmethod print-method EveList [lst ^java.io.Writer w]
-       (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq lst) w))
-
-     ;; Backward-compat JVM aliases
-     (defn jvm-write-list!
-       "Serialize a Clojure list/seq to slab. Returns header offset.
-        Backward-compat alias for the registered :list writer."
-       [sio serialize-val coll]
-       (mem/jvm-write-collection! :list sio coll))
-
-     (defn jvm-sab-list-from-offset
-       "Reconstruct an EveList from a header offset.
-        Backward-compat alias. coll-factory arg is ignored (registry-based)."
-       ([sio header-off] (eve3-list-from-header sio header-off))
-       ([sio header-off _coll-factory] (eve3-list-from-header sio header-off)))
-
-     (def SabList EveList)))
-
-;; No-op pool stub — pool system removed, kept for backward compat
-#?(:cljs (defn reset-pools! [] nil))
+       (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq lst) w))))

@@ -41,7 +41,13 @@
    [eve.mmap-slab-test :as mmap-slab-test]
    [eve.mmap-atom-test :as mmap-atom-test]
    [eve.mmap-atom-e2e-test :as mmap-atom-e2e-test]
-   [eve.mmap-domain-test :as mmap-domain-test]))
+   [eve.mmap-domain-test :as mmap-domain-test]
+   [eve.conformance-test :as conformance-test]
+   [eve.fuzz-test :as fuzz-test]
+   [eve2.deftype-test :as eve2-deftype-test]
+   [eve2.stress-test :as eve2-stress-test]
+   [eve3.stress-test :as eve3-stress-test]
+   [eve.bench-test :as bench-test]))
 
 ;; Anti-DCE exports
 (goog/exportSymbol "eve.deftype_test" deftype-test)
@@ -66,6 +72,12 @@
 (goog/exportSymbol "eve.mmap_atom_test" mmap-atom-test)
 (goog/exportSymbol "eve.mmap_atom_e2e_test" mmap-atom-e2e-test)
 (goog/exportSymbol "eve.mmap_domain_test" mmap-domain-test)
+(goog/exportSymbol "eve.conformance_test" conformance-test)
+(goog/exportSymbol "eve.fuzz_test" fuzz-test)
+(goog/exportSymbol "eve2.deftype_test" eve2-deftype-test)
+(goog/exportSymbol "eve2.stress_test" eve2-stress-test)
+(goog/exportSymbol "eve3.stress_test" eve3-stress-test)
+(goog/exportSymbol "eve.bench_test" bench-test)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -73,7 +85,9 @@
     'eve.vec-test
     'eve.list-test
     'eve.set-test
-    'eve.large-scale-test})
+    'eve.large-scale-test
+    'eve.conformance-test
+    'eve.fuzz-test})
 
 (defn- recycle-slab-env! []
   (eve-map/reset-pools!)
@@ -188,6 +202,24 @@
   (load-native-addon!)
   (t/run-tests 'eve.mmap-domain-test))
 
+(defn- run-conformance! []
+  (t/run-tests 'eve.conformance-test))
+
+(defn- run-fuzz! []
+  (t/run-tests 'eve.fuzz-test))
+
+(defn- run-eve2! []
+  (t/run-tests 'eve2.deftype-test))
+
+(defn- run-eve2-stress! []
+  (t/run-tests 'eve2.stress-test))
+
+(defn- run-eve3-stress! []
+  (t/run-tests 'eve3.stress-test))
+
+(defn- run-bench! []
+  (t/run-tests 'eve.bench-test))
+
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -228,6 +260,12 @@
    "mmap-atom"     run-mmap-atom!
    "mmap-atom-e2e" run-mmap-atom-e2e!
    "mmap-domain"   run-mmap-domain!
+   "conformance"   run-conformance!
+   "fuzz"          run-fuzz!
+   "eve2"          run-eve2!
+   "eve2-stress"   run-eve2-stress!
+   "eve3-stress"   run-eve3-stress!
+   "bench"         run-bench!
    "all"           run-all!
    ;; Aliases
    "map-test"        run-slab!
@@ -242,7 +280,8 @@
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "obj"
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
-   "mmap-domain"])
+   "mmap-domain" "conformance" "fuzz" "eve2" "eve2-stress" "eve3-stress"
+   "bench"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]
