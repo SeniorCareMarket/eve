@@ -716,5 +716,24 @@
 
      (def SabVecRoot EveVector)))
 
+;; CLJS registrations
+#?(:cljs
+   (do
+     ;; Register SAB type constructor for deserialization (tag 0x12 = vec)
+     (ser/register-sab-type-constructor!
+       ser/FAST_TAG_SAB_VEC
+       EveVector-type-id
+       (fn [_sab header-off]
+         (eve3-vec-from-header (alloc/->CljsSlabIO) header-off)))
+
+     ;; Register disposer for vec root values
+     (ser/register-header-disposer! EveVector-type-id
+       (fn [slab-off] (dispose! (eve3-vec-from-header (alloc/->CljsSlabIO) slab-off))))
+
+     ;; Register CLJS vector → EveVector builder for convert-to-sab (mmap atoms)
+     (ser/register-cljs-to-sab-builder!
+       vector?
+       (fn [v] (eve3-vec (alloc/->CljsSlabIO) v)))))
+
 ;; No-op pool stub — pool system removed, kept for backward compat
 #?(:cljs (defn reset-pools! [] nil))

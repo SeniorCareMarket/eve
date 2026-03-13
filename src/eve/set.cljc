@@ -926,5 +926,24 @@
        ([sio header-off] (eve3-hash-set-from-header sio header-off))
        ([sio header-off _coll-factory] (eve3-hash-set-from-header sio header-off)))))
 
+;; CLJS registrations
+#?(:cljs
+   (do
+     ;; Register SAB type constructor for deserialization (tag 0x11 = set)
+     (ser/register-sab-type-constructor!
+       ser/FAST_TAG_SAB_SET
+       EveHashSet-type-id
+       (fn [_sab header-off]
+         (eve3-hash-set-from-header (alloc/->CljsSlabIO) header-off)))
+
+     ;; Register disposer for set root values
+     (ser/register-header-disposer! EveHashSet-type-id
+       (fn [slab-off] (dispose! (eve3-hash-set-from-header (alloc/->CljsSlabIO) slab-off))))
+
+     ;; Register CLJS set → EveHashSet builder for convert-to-sab (mmap atoms)
+     (ser/register-cljs-to-sab-builder!
+       set?
+       (fn [s] (reduce conj (empty-hash-set (alloc/->CljsSlabIO)) s)))))
+
 ;; No-op pool stub — pool system removed, kept for backward compat
 #?(:cljs (defn reset-pools! [] nil))

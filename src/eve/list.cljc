@@ -378,5 +378,24 @@
 
      (def SabList EveList)))
 
+;; CLJS registrations
+#?(:cljs
+   (do
+     ;; Register SAB type constructor for deserialization (tag 0x13 = list)
+     (ser/register-sab-type-constructor!
+       ser/FAST_TAG_SAB_LIST
+       EveList-type-id
+       (fn [_sab header-off]
+         (eve3-list-from-header (alloc/->CljsSlabIO) header-off)))
+
+     ;; Register disposer for list root values
+     (ser/register-header-disposer! EveList-type-id
+       (fn [slab-off] (dispose! (eve3-list-from-header (alloc/->CljsSlabIO) slab-off))))
+
+     ;; Register CLJS list/seq → EveList builder for convert-to-sab (mmap atoms)
+     (ser/register-cljs-to-sab-builder!
+       seq?
+       (fn [s] (eve3-list (alloc/->CljsSlabIO) s)))))
+
 ;; No-op pool stub — pool system removed, kept for backward compat
 #?(:cljs (defn reset-pools! [] nil))
