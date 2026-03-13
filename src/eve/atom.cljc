@@ -21,16 +21,13 @@
               [eve.set]
               [eve.list]]
       :clj  [[eve.map :as eve-map]
-              [eve.set :as eve-set]
-              [eve.vec :as eve-vec]
-              [eve.list :as eve-list]
+              [eve.set]
+              [eve.vec]
+              [eve.list]
               [eve.array :as eve-array]
               [eve.obj :as eve-obj]
               [eve.perf :as perf]]))
-  #?(:clj (:import [eve.map EveHashMap]
-                   [eve.set EveHashSet]
-                   [eve.vec SabVecRoot]
-                   [eve.list SabList])))
+  #?(:clj (:import [eve.map EveHashMap])))
 
 ;; ---------------------------------------------------------------------------
 ;; B2 constants
@@ -578,36 +575,32 @@
            (let [min-e (reduce min (.values thread-epochs))]
              (mmap-pin-epoch! root-r slot-idx (int min-e))))))
 
-     (defn- jvm-coll-factory
-       "Collection factory for deserializing nested collection values from slabs.
-        Called by eve-bytes->value when it encounters SAB pointer tags (0x10–0x13).
-        Returns slab-backed Eve types directly — no materialization."
-       [tag sio slab-offset]
-       (case (int tag)
-         0x10 (eve-map/jvm-eve-hash-map-from-offset slab-offset)
-         0x11 (eve-set/jvm-eve-hash-set-from-offset sio slab-offset jvm-coll-factory)
-         0x12 (eve-vec/jvm-sabvec-from-offset sio slab-offset jvm-coll-factory)
-         0x13 (eve-list/jvm-sab-list-from-offset sio slab-offset jvm-coll-factory)
-         (throw (ex-info "jvm-coll-factory: unknown tag" {:tag tag}))))
-
      (defn- jvm-read-root-value
        "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
-        Returns slab-backed Eve types directly — no materialization."
+        Returns slab-backed Eve types directly — no materialization.
+        Uses the type constructor registry populated by eve.map/set/vec/list at load time."
        [sio ptr]
        (when (and (not= ptr alloc/NIL_OFFSET)
                   (not= ptr CLAIMED_SENTINEL))
-         (let [type-id (alloc/jvm-read-header-type-byte sio ptr)
-               cf      jvm-coll-factory]
+         (let [type-id (alloc/jvm-read-header-type-byte sio ptr)]
            (case (int type-id)
-             0xED (eve-map/jvm-eve-hash-map-from-offset ptr)
-             0xEE (eve-set/jvm-eve-hash-set-from-offset sio ptr cf)
-             0x12 (eve-vec/jvm-sabvec-from-offset sio ptr cf)
-             0x13 (eve-list/jvm-sab-list-from-offset sio ptr cf)
-             0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
-             0x1E (eve-obj/jvm-obj-from-offset sio ptr)
              0x01 (alloc/jvm-read-scalar-block sio ptr)
-             (throw (ex-info "jvm-mmap-deref: unknown root type-id"
-                             {:type-id type-id :ptr ptr}))))))
+             ;; For type-ids that match pointer tags (vec 0x12, list 0x13),
+             ;; look up directly. For map (0xED) and set (0xEE), map to
+             ;; pointer tags (0x10, 0x11).
+             (let [tag (case (int type-id)
+                         0xED 0x10
+                         0xEE 0x11
+                         type-id)
+                   ctor (ser/get-jvm-type-constructor tag)]
+               (if ctor
+                 (ctor ptr)
+                 ;; Try array/obj constructors
+                 (case (int type-id)
+                   0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
+                   0x1E (eve-obj/jvm-obj-from-offset sio ptr)
+                   (throw (ex-info "jvm-mmap-deref: unknown root type-id"
+                                   {:type-id type-id :ptr ptr})))))))))
 
      (defn- jvm-mmap-deref
        [{:keys [root-r sio] :as domain-state} atom-slot-idx]
@@ -649,26 +642,30 @@
      (defn- jvm-resolve-new-ptr
        "Resolve the slab-qualified offset for a new atom root value (JVM).
         If new-val is already a slab-backed Eve type, returns its header-off
-        directly (no re-serialization). Otherwise serializes to slab."
+        directly (no re-serialization). Otherwise serializes to slab via the
+        collection writer registry."
        [sio new-val]
-       (let [encode (partial mem/value+sio->eve-bytes sio)]
-         (cond
-           (nil? new-val)                  alloc/NIL_OFFSET
-           (instance? EveHashMap new-val)  (.-header-off ^EveHashMap new-val)
-           (instance? EveHashSet new-val)  (.-header-off ^EveHashSet new-val)
-           (instance? SabVecRoot new-val)  (.-header-off ^SabVecRoot new-val)
-           (instance? SabList new-val)     (.-header-off ^SabList new-val)
-           (map? new-val)
-           (if (and (contains? new-val :schema) (contains? new-val :values))
-             (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
-             (eve-map/jvm-write-map! sio encode new-val))
-           (set? new-val)     (eve-set/jvm-write-set! sio encode new-val)
-           (vector? new-val)  (eve-vec/jvm-write-vec! sio encode new-val)
-           (or (list? new-val)
-               (seq? new-val)) (eve-list/jvm-write-list! sio encode new-val)
-           (.isArray (class new-val))
-           (alloc/jvm-write-eve-array! sio new-val)
-           :else              (alloc/jvm-alloc-scalar-block! sio new-val))))
+       (cond
+         (nil? new-val)
+         alloc/NIL_OFFSET
+
+         ;; Already an Eve type — use its header-off directly (via IEveRoot protocol)
+         (satisfies? d/IEveRoot new-val)
+         (d/-root-header-off new-val)
+
+         ;; Clojure native types — serialize via collection writer registry
+         (map? new-val)
+         (if (and (contains? new-val :schema) (contains? new-val :values))
+           (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
+           (mem/jvm-write-collection! :map sio new-val))
+         (set? new-val)     (mem/jvm-write-collection! :set sio new-val)
+         (vector? new-val)  (mem/jvm-write-collection! :vec sio new-val)
+         (or (list? new-val) (seq? new-val))
+                            (mem/jvm-write-collection! :list sio new-val)
+         (.isArray (class new-val))
+         (alloc/jvm-write-eve-array! sio new-val)
+         :else
+         (alloc/jvm-alloc-scalar-block! sio new-val)))
 
      (defn- jvm-collect-replaced-nodes
        "Walk old and new HAMT trees, collecting old node offsets that differ.
@@ -727,10 +724,7 @@
                        new-ptr (perf/timed :resolve-ptr (jvm-resolve-new-ptr sio new-val))
                        cur-log (alloc/drain-jvm-alloc-log!)
                        replaced-log (alloc/drain-jvm-replaced-log!)
-                       eve-passthru? (or (instance? EveHashMap new-val)
-                                        (instance? EveHashSet new-val)
-                                        (instance? SabVecRoot new-val)
-                                        (instance? SabList new-val))
+                       eve-passthru? (satisfies? d/IEveRoot new-val)
                        w       (perf/timed :cas (mem/-cas-i32! root-r ptr-off old-ptr new-ptr))]
                    (if (== w old-ptr)
                      (let [new-epoch (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)]

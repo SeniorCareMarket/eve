@@ -1197,6 +1197,7 @@
 
      ;; Late-bound collection writers registered by map/vec/set/list namespaces at
      ;; load time. Using a defonce atom avoids circular compile-time dependencies.
+     (declare value+sio->eve-bytes)
      (defonce ^:private jvm-coll-writers (clojure.core/atom {}))
 
      (defn register-jvm-collection-writer!
@@ -1206,6 +1207,16 @@
         Called from collection namespaces after their jvm-write-*! fns are defined."
        [tag writer]
        (swap! jvm-coll-writers assoc tag writer))
+
+     (defn jvm-write-collection!
+       "Serialize a Clojure collection to slab via the registered writer.
+        Returns the slab-qualified header offset.
+        tag — :map, :set, :vec, or :list."
+       [tag sio coll]
+       (let [writer (get @jvm-coll-writers tag)]
+         (if writer
+           (writer sio (partial value+sio->eve-bytes sio) coll)
+           (throw (ex-info (str "jvm-write-collection!: no writer for " tag) {:tag tag})))))
 
      (defn value+sio->eve-bytes
        "Serialize v to EVE bytes, allocating collection structures into sio.
