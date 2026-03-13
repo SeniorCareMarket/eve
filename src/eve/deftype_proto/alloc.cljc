@@ -312,17 +312,26 @@
                              bm-path    (aget bitmap-paths ci)
                              data-bytes (+ (long d/SLAB_HEADER_SIZE) (* n-blocks blk-size))
                              bm-bytes   (d/bitmap-byte-size n-blocks)
-                             new-region (mem/open-mmap-region path data-bytes)
-                             new-bm     (mem/open-mmap-region bm-path bm-bytes)]
-                         (aset regions ci new-region)
-                         (aset bitmap-regions ci new-bm)
-                         (aset total-blocks ci (int n-blocks))))
+                             ;; Infer lustre mode from existing region type —
+                             ;; *lustre-mode* may not be bound on remap threads.
+                             lustre?    (instance? eve.mem.LustreJvmMmapRegion
+                                          (aget regions ci))]
+                         (binding [mem/*lustre-mode* lustre?]
+                           (let [new-region (mem/open-mmap-region path data-bytes)
+                                 new-bm     (mem/open-mmap-region bm-path bm-bytes)]
+                             (aset regions ci new-region)
+                             (aset bitmap-regions ci new-bm)
+                             (aset total-blocks ci (int n-blocks))))))
                      (grow! [ci]
                        (locking regions ;; serialize growth across JVM threads
                          (when-let [path (aget file-paths ci)]
                            (let [cached    (long (aget total-blocks ci))
+                                 ;; Infer lustre mode from existing region type
+                                 lustre?   (instance? eve.mem.LustreJvmMmapRegion
+                                             (aget regions ci))
                                  ;; Peek header to detect external growth
-                                 peek-r    (mem/open-mmap-region path 64)
+                                 peek-r    (binding [mem/*lustre-mode* lustre?]
+                                             (mem/open-mmap-region path 64))
                                  hdr-total (long (mem/-load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS))]
                              (if (> hdr-total cached)
                                ;; Another process/thread grew — re-map at header size
@@ -460,40 +469,45 @@
                          cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
                      (> hdr-data-sz cur-size)))))]
          (when (or any-grew? coalesc-grew?)
-           (let [bitmap-regions (.-bitmap-regions sio)
+           ;; Infer lustre mode from any existing region in the array.
+           ;; *lustre-mode* may not be bound on remap/refresh threads.
+           (let [lustre? (some #(instance? eve.mem.LustreJvmMmapRegion %)
+                               (seq regions))
+                 bitmap-regions (.-bitmap-regions sio)
                  block-sizes    (.-block-sizes sio)
                  bitmap-paths   (.-bitmap-paths sio)]
-             (locking regions
-               (when any-grew?
-                 (dotimes [ci d/NUM_SLAB_CLASSES]
-                   (when-let [path (aget file-paths ci)]
-                     (let [cached    (long (aget total-blocks ci))
-                           cur-r     (aget regions ci)
-                           hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                       (when (> hdr-total cached)
-                         (let [blk-size   (long (aget block-sizes ci))
-                               data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
-                               bm-bytes   (d/bitmap-byte-size hdr-total)
-                               new-region (mem/open-mmap-region path data-bytes)
-                               new-bm     (mem/open-mmap-region (aget bitmap-paths ci) bm-bytes)]
-                           (aset regions ci new-region)
-                           (aset bitmap-regions ci new-bm)
-                           (aset total-blocks ci (int hdr-total))))))))
-               (when coalesc-grew?
-                 (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
-                   (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
-                         data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
-                     (if (nil? cur-region)
-                       (let [peek-r      (mem/open-mmap-region path 64)
-                             hdr-data-sz (long (mem/-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
-                         (when (pos? hdr-data-sz)
-                           (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
-                             (aset regions OVERFLOW_CLASS_IDX new-r))))
-                       (let [hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
-                             cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
-                         (when (> hdr-data-sz cur-size)
-                           (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
-                             (aset regions OVERFLOW_CLASS_IDX new-r)))))))))))))
+             (binding [mem/*lustre-mode* (boolean lustre?)]
+               (locking regions
+                 (when any-grew?
+                   (dotimes [ci d/NUM_SLAB_CLASSES]
+                     (when-let [path (aget file-paths ci)]
+                       (let [cached    (long (aget total-blocks ci))
+                             cur-r     (aget regions ci)
+                             hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                         (when (> hdr-total cached)
+                           (let [blk-size   (long (aget block-sizes ci))
+                                 data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
+                                 bm-bytes   (d/bitmap-byte-size hdr-total)
+                                 new-region (mem/open-mmap-region path data-bytes)
+                                 new-bm     (mem/open-mmap-region (aget bitmap-paths ci) bm-bytes)]
+                             (aset regions ci new-region)
+                             (aset bitmap-regions ci new-bm)
+                             (aset total-blocks ci (int hdr-total))))))))
+                 (when coalesc-grew?
+                   (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+                     (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
+                           data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
+                       (if (nil? cur-region)
+                         (let [peek-r      (mem/open-mmap-region path 64)
+                               hdr-data-sz (long (mem/-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
+                           (when (pos? hdr-data-sz)
+                             (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
+                               (aset regions OVERFLOW_CLASS_IDX new-r))))
+                         (let [hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                               cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                           (when (> hdr-data-sz cur-size)
+                             (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
+                               (aset regions OVERFLOW_CLASS_IDX new-r))))))))))))))
 
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)

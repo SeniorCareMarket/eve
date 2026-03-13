@@ -31,7 +31,7 @@
      (:import
       [java.io RandomAccessFile]
       [java.lang.foreign Arena MemorySegment]
-      [java.nio ByteBuffer ByteOrder]
+      [java.nio ByteBuffer ByteOrder MappedByteBuffer]
       [java.nio.channels FileChannel FileChannel$MapMode]
       [java.nio.file OpenOption Paths StandardOpenOption]
       [java.util Date UUID]
@@ -717,6 +717,7 @@
         ^long base-addr
         ^long size
         ^FileChannel lock-channel
+        ^MappedByteBuffer mapped-buf
         ^ReentrantLock thread-lock]
 
        IMemRegion
@@ -740,7 +741,7 @@
            (let [fl (.lock lock-channel (long byte-off) 4 false)]
              (try
                (.putIntVolatile UNSAFE nil (+ base-addr (long byte-off)) (unchecked-int val))
-               (.force lock-channel false)
+               (.force mapped-buf (int byte-off) 4)
                (finally (.release fl))))
            (finally (.unlock thread-lock)))
          nil)
@@ -754,7 +755,7 @@
                      cur  (.getIntVolatile UNSAFE nil addr)]
                  (when (= cur (unchecked-int expected))
                    (.putIntVolatile UNSAFE nil addr (unchecked-int desired))
-                   (.force lock-channel false))
+                   (.force mapped-buf (int byte-off) 4))
                  cur)
                (finally (.release fl))))
            (finally (.unlock thread-lock))))
@@ -768,7 +769,7 @@
                      old  (.getIntVolatile UNSAFE nil addr)
                      nv   (unchecked-int (+ old (unchecked-int delta)))]
                  (.putIntVolatile UNSAFE nil addr nv)
-                 (.force lock-channel false)
+                 (.force mapped-buf (int byte-off) 4)
                  old)
                (finally (.release fl))))
            (finally (.unlock thread-lock))))
@@ -782,7 +783,7 @@
                      old  (.getIntVolatile UNSAFE nil addr)
                      nv   (unchecked-int (- old (unchecked-int delta)))]
                  (.putIntVolatile UNSAFE nil addr nv)
-                 (.force lock-channel false)
+                 (.force mapped-buf (int byte-off) 4)
                  old)
                (finally (.release fl))))
            (finally (.unlock thread-lock))))
@@ -795,7 +796,7 @@
                (let [addr (+ base-addr (long byte-off))
                      old  (.getIntVolatile UNSAFE nil addr)]
                  (.putIntVolatile UNSAFE nil addr (unchecked-int val))
-                 (.force lock-channel false)
+                 (.force mapped-buf (int byte-off) 4)
                  old)
                (finally (.release fl))))
            (finally (.unlock thread-lock))))
@@ -817,7 +818,7 @@
            (let [fl (.lock lock-channel (long byte-off) 8 false)]
              (try
                (.putLongVolatile UNSAFE nil (+ base-addr (long byte-off)) (long val))
-               (.force lock-channel false)
+               (.force mapped-buf (int byte-off) 8)
                (finally (.release fl))))
            (finally (.unlock thread-lock)))
          nil)
@@ -831,7 +832,7 @@
                      cur  (.getLongVolatile UNSAFE nil addr)]
                  (when (= cur (long expected))
                    (.putLongVolatile UNSAFE nil addr (long desired))
-                   (.force lock-channel false))
+                   (.force mapped-buf (int byte-off) 8))
                  cur)
                (finally (.release fl))))
            (finally (.unlock thread-lock))))
@@ -845,7 +846,7 @@
                      old  (.getLongVolatile UNSAFE nil addr)
                      nv   (+ old (long delta))]
                  (.putLongVolatile UNSAFE nil addr nv)
-                 (.force lock-channel false)
+                 (.force mapped-buf (int byte-off) 8)
                  old)
                (finally (.release fl))))
            (finally (.unlock thread-lock))))
@@ -859,7 +860,7 @@
                      old  (.getLongVolatile UNSAFE nil addr)
                      nv   (- old (long delta))]
                  (.putLongVolatile UNSAFE nil addr nv)
-                 (.force lock-channel false)
+                 (.force mapped-buf (int byte-off) 8)
                  old)
                (finally (.release fl))))
            (finally (.unlock thread-lock))))
@@ -902,13 +903,14 @@
                      (try (when (< (.length raf) size) (.setLength raf size))
                           (finally (.close raf))))
              path  (Paths/get ^String path-str (into-array String []))
-             arena (Arena/ofShared)
-             seg   (with-open [^FileChannel fc
-                                (FileChannel/open path
-                                  (into-array OpenOption
-                                    [StandardOpenOption/READ
-                                     StandardOpenOption/WRITE]))]
-                     (.map fc FileChannel$MapMode/READ_WRITE 0 size arena))
+             ;; Map as MappedByteBuffer for scoped force(index, length).
+             ;; Wrap as MemorySegment for Unsafe native address access.
+             ^FileChannel map-ch (FileChannel/open path
+                                   (into-array OpenOption
+                                     [StandardOpenOption/READ
+                                      StandardOpenOption/WRITE]))
+             ^MappedByteBuffer mbb (.map map-ch FileChannel$MapMode/READ_WRITE 0 size)
+             seg   (MemorySegment/ofBuffer mbb)
              ;; Separate FileChannel kept open for fcntl locking —
              ;; MUST NOT be closed until the region is disposed.
              lock-ch (FileChannel/open path
@@ -916,7 +918,7 @@
                          [StandardOpenOption/READ
                           StandardOpenOption/WRITE]))]
          (LustreJvmMmapRegion. seg (.address seg) size
-                               lock-ch
+                               lock-ch mbb
                                (ReentrantLock.))))))
 
 ;; ---------------------------------------------------------------------------
