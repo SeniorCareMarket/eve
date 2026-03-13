@@ -6,6 +6,7 @@
    Usage: clj -M:native-x-stress-atom <base-path>
    Example: clj -M:native-x-stress-atom /tmp/eve-10m"
   (:require [eve.atom :as atom]
+            [eve.mem :as mem]
             [clojure.edn :as edn])
   (:import [java.io File]))
 
@@ -52,9 +53,10 @@
 
 (defn -main [& args]
   (when (< (count args) 1)
-    (println "Usage: clj -M:native-x-stress-atom <base-path>")
+    (println "Usage: clj -M:native-x-stress-atom <base-path> [--lustre]")
     (System/exit 1))
-  (let [base-path (first args)]
+  (let [base-path (first args)
+        lustre?   (boolean (some #{"--lustre"} args))]
     ;; Preflight checks
     (when-not (.exists (File. (str base-path ".root")))
       (println (str "Error: No atom found at " base-path))
@@ -72,13 +74,14 @@
       (println "====================================================")
       (printf  "  Atom:    %s\n" base-path)
       (printf  "  On disk: %.1f MB\n" disk-mb)
+      (printf  "  Lustre:  %s\n" lustre?)
       (println "====================================================")
 
       ;; ── Phase 1: Cold Open ──
       (section "Phase 1: Cold Open (JVM joins atom from disk)")
       (let [t0        (System/nanoTime)
-            d         (atom/persistent-atom-domain base-path)
-            a         (atom/atom {:id :eve/main :persistent base-path} nil)
+            d         (atom/persistent-atom-domain base-path :lustre? lustre?)
+            a         (atom/atom {:id :eve/main :persistent base-path :lustre? lustre?} nil)
             open-ms   (nanos->ms (- (System/nanoTime) t0))
             t1        (System/nanoTime)
             val       @a
@@ -92,9 +95,9 @@
         ;; Updates EXISTING keys — takes the O(log32 N) replace path in the HAMT.
         ;; Warmup: 50 unprofiled swaps so JIT compiles the hot path before timing.
         (section "Phase 2: JVM Single-Writer Swap Latency")
-        (dotimes [i 50]
+        (dotimes [i 100]
           (swap! a assoc (keyword (str "k" (mod i key-count))) {:warmup true :i i}))
-        (let [n    100
+        (let [n    500
               lats (long-array n)]
           (dotimes [i n]
             (let [k (keyword (str "k" (mod i key-count)))
@@ -111,9 +114,10 @@
 
         ;; ── Phase 3: Node Single-Writer Swap Latency ──
         (section "Phase 3: Node Single-Writer Swap Latency")
-        (let [r (spawn-node-edn! bench-worker "bench-swap-latencies"
-                                 base-path "100" "stress-node")]
-          (printf "  100 swaps (Node.js process, new keys)\n")
+        (let [r (apply spawn-node-edn! bench-worker "bench-swap-latencies"
+                                 base-path "500" "stress-node"
+                                 (when lustre? ["--lustre"]))]
+          (printf "  500 swaps (Node.js process, new keys)\n")
           (printf "    p50:     %6.2f ms\n" (:p50-ms r))
           (printf "    p95:     %6.2f ms\n" (:p95-ms r))
           (printf "    p99:     %6.2f ms\n" (:p99-ms r))
@@ -125,7 +129,7 @@
         (section "Phase 4: 4 JVM Threads + 4 Node Processes (counter contention)")
         ;; Reset counter to 0 (update, not insert — :counter was pre-inserted by build)
         (swap! a assoc :counter 0)
-        (let [ops-per-worker 50
+        (let [ops-per-worker 125
               n-jvm  4
               n-node 4
               t0     (System/nanoTime)
@@ -140,8 +144,9 @@
               node-futures
               (mapv (fn [_]
                       (future
-                        (spawn-node-edn! bench-worker "bench-contend"
-                                         base-path (str ops-per-worker))))
+                        (apply spawn-node-edn! bench-worker "bench-contend"
+                                         base-path (str ops-per-worker)
+                                         (when lustre? ["--lustre"]))))
                     (range n-node))
               ;; Wait for all
               _            (run! deref jvm-futures)

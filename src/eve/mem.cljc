@@ -31,10 +31,11 @@
      (:import
       [java.io RandomAccessFile]
       [java.lang.foreign Arena MemorySegment]
-      [java.nio ByteBuffer ByteOrder]
+      [java.nio ByteBuffer ByteOrder MappedByteBuffer]
       [java.nio.channels FileChannel FileChannel$MapMode]
       [java.nio.file OpenOption Paths StandardOpenOption]
-      [java.util Date UUID]))
+      [java.util Date UUID]
+      [java.util.concurrent.locks ReentrantLock]))
   (:require
    [eve.deftype-proto.data :as d]))
 
@@ -121,6 +122,14 @@
   (-write-bytes! [r byte-off src]
     "Copy all bytes from src into the region at byte-off.
      Non-atomic — callers are responsible for any needed synchronisation."))
+
+;; ---------------------------------------------------------------------------
+;; Lustre mode flag — when true, open-mmap-region returns Lustre regions
+;; that use fcntl byte-range locking for cross-node atomics.
+;; ---------------------------------------------------------------------------
+
+#?(:cljs (defonce ^:dynamic *lustre-mode* false)
+   :clj  (def ^:dynamic *lustre-mode* false))
 
 ;; ---------------------------------------------------------------------------
 ;; CLJS implementations
@@ -341,13 +350,103 @@
      (defn open-mmap-region
        "Open (or create) a file-backed shared memory region at path.
         If the file is new it is truncated to size-bytes.
-        Returns a NodeMmapRegion whose backing is the mmap'd page.
+        Returns a NodeMmapRegion (default) or LustreMmapRegion (when
+        *lustre-mode* is true).
 
         Example:
           (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))"
        [path size-bytes]
-       (let [buf (.open (native) path size-bytes)]
-         (NodeMmapRegion. buf size-bytes)))))
+       (if *lustre-mode*
+         (let [result (.openWithFd (native) path size-bytes)]
+           (LustreMmapRegion. (.-buf result) (.-fd result) size-bytes))
+         (let [buf (.open (native) path size-bytes)]
+           (NodeMmapRegion. buf size-bytes))))
+
+     ;; --- LustreMmapRegion — fcntl byte-range locking for cross-node atomics ---
+     ;; Uses mmap for data access (zero-copy reads) but fcntl byte-range locks
+     ;; for all atomic operations, enabling Eve atoms to work across machines on
+     ;; a Lustre filesystem mounted with -o flock.
+     ;;
+     ;; Pattern: lock N bytes via fcntl(F_SETLKW), read via mmap, compare,
+     ;; conditionally write + msync, unlock. This is a pessimistic lock-based
+     ;; CAS — slower than hardware CAS (~50-200us vs ~10ns on Lustre) but
+     ;; correct across nodes via the Lustre LDLM.
+
+     (deftype LustreMmapRegion [^js buf   ; Node.js Buffer (mmap'd page)
+                                 fd        ; file descriptor (kept open for fcntl)
+                                 size]     ; byte length
+       IMemRegion
+       (-byte-length [_] size)
+
+       ;; --- atomic i32 via fcntl ---
+       (-load-i32 [_ byte-off]
+         (.fcntlLoad32 (native) fd buf byte-off))
+
+       (-store-i32! [_ byte-off val]
+         (.fcntlStore32 (native) fd buf byte-off val)
+         nil)
+
+       (-cas-i32! [_ byte-off expected desired]
+         (.fcntlCas32 (native) fd buf byte-off expected desired))
+
+       (-add-i32! [_ byte-off delta]
+         (.fcntlAdd32 (native) fd buf byte-off delta))
+
+       (-sub-i32! [_ byte-off delta]
+         (.fcntlSub32 (native) fd buf byte-off delta))
+
+       (-exchange-i32! [_ byte-off val]
+         (.fcntlExchange32 (native) fd buf byte-off val))
+
+       ;; --- atomic i64 via fcntl ---
+       (-load-i64 [_ byte-off]
+         (.fcntlLoad64 (native) fd buf byte-off))
+
+       (-store-i64! [_ byte-off val]
+         (.fcntlStore64 (native) fd buf byte-off val)
+         nil)
+
+       (-cas-i64! [_ byte-off expected desired]
+         (.fcntlCas64 (native) fd buf byte-off expected desired))
+
+       (-add-i64! [_ byte-off delta]
+         (.fcntlAdd64 (native) fd buf byte-off delta))
+
+       (-sub-i64! [_ byte-off delta]
+         (.fcntlSub64 (native) fd buf byte-off delta))
+
+       ;; --- wait/notify — polling fallback (no futex across Lustre nodes) ---
+       (-wait-i32! [this byte-off expected timeout-ms]
+         (let [deadline (+ (js/Date.now) timeout-ms)]
+           (loop []
+             (let [cur (-load-i32 this byte-off)]
+               (cond
+                 (not= cur expected) :not-equal
+                 (>= (js/Date.now) deadline) :timed-out
+                 :else (do (.nanosleep (native) 100000)  ; 100µs
+                           (recur)))))))
+
+       (-notify-i32! [_ _byte-off _n] 0)
+
+       (-supports-watch? [_] false)
+
+       ;; --- byte I/O — direct mmap access (same as NodeMmapRegion) ---
+       (-read-bytes [_ byte-off len]
+         (let [sliced (.slice buf byte-off (+ byte-off len))]
+           (js/Uint8Array. (.-buffer sliced) (.-byteOffset sliced) (.-byteLength sliced))))
+
+       (-write-bytes! [_ byte-off src]
+         (let [src-buf (js/Buffer.from (.-buffer src) (.-byteOffset src) (.-byteLength src))]
+           (.copy src-buf buf byte-off))
+         nil))
+
+     (defn open-lustre-region
+       "Open (or create) a file-backed Lustre-compatible memory region at path.
+        Like open-mmap-region but keeps the fd open for fcntl byte-range locking.
+        Returns a LustreMmapRegion."
+       [path size-bytes]
+       (let [result (.openWithFd (native) path size-bytes)]
+         (LustreMmapRegion. (.-buf result) (.-fd result) size-bytes)))))
 
 ;; ---------------------------------------------------------------------------
 ;; JVM implementations
@@ -363,6 +462,10 @@
        (let [f (.getDeclaredField sun.misc.Unsafe "theUnsafe")]
          (.setAccessible f true)
          (.get f nil)))
+
+     ;; Forward declaration — LustreJvmMmapRegion and open-lustre-region are
+     ;; defined after JvmHeapRegion but referenced in open-mmap-region.
+     (declare open-lustre-region)
 
      ;; JvmMmapRegion stores the MemorySegment (for bulk copy) and its base native
      ;; address (for Unsafe ops, avoiding a .address() call on every atomic op).
@@ -465,9 +568,11 @@
         Example:
           (mem/open-mmap-region \"/tmp/eve.main\" (* 256 1024 1024))"
        [path-str size-bytes]
-       (let [size  (long size-bytes)
-             ;; Ensure the file exists and is at least size-bytes long.
-             ;; Only grow the file — never truncate an existing larger file
+       (if *lustre-mode*
+         (open-lustre-region path-str size-bytes)
+         (let [size  (long size-bytes)
+               ;; Ensure the file exists and is at least size-bytes long.
+               ;; Only grow the file — never truncate an existing larger file
              ;; (e.g. a 1 MB domain file peeked at 4096 bytes must not be truncated).
              _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
                      (try (when (< (.length raf) size) (.setLength raf size))
@@ -482,7 +587,7 @@
                                    [StandardOpenOption/READ
                                     StandardOpenOption/WRITE]))]
                      (.map fc FileChannel$MapMode/READ_WRITE 0 size arena))]
-         (JvmMmapRegion. seg (.address seg) size)))
+           (JvmMmapRegion. seg (.address seg) size))))
 
      ;; -----------------------------------------------------------------------
      ;; JvmHeapRegion — heap byte[] backed by Unsafe atomics
@@ -593,7 +698,228 @@
         semantics.  Unlike JvmMmapRegion, this is not file-backed — data lives
         only in the JVM heap and is not visible to other processes."
        [size-bytes]
-       (JvmHeapRegion. (byte-array (int size-bytes)) (long size-bytes)))))
+       (JvmHeapRegion. (byte-array (int size-bytes)) (long size-bytes)))
+
+     ;; -----------------------------------------------------------------------
+     ;; LustreJvmMmapRegion — fcntl byte-range locking for cross-node atomics
+     ;; -----------------------------------------------------------------------
+     ;; Uses mmap for data access (zero-copy reads via MemorySegment) but
+     ;; Java FileChannel.lock() (which maps to fcntl F_SETLKW on Linux) for
+     ;; all atomic operations. Enables Eve atoms to work across machines on
+     ;; a Lustre filesystem mounted with -o flock.
+     ;;
+     ;; A ReentrantLock serializes intra-JVM threads because POSIX fcntl locks
+     ;; are process-scoped — all threads in the JVM share one lock identity.
+     ;; The FileChannel.lock() handles inter-process coordination.
+
+     (deftype LustreJvmMmapRegion
+       [^MemorySegment seg
+        ^long base-addr
+        ^long size
+        ^FileChannel lock-channel
+        ^MappedByteBuffer mapped-buf
+        ^ReentrantLock thread-lock]
+
+       IMemRegion
+
+       (-byte-length [_] size)
+
+       ;; --- atomic i32 via fcntl (FileChannel.lock) ---
+
+       (-load-i32 [_ byte-off]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 4 false)]
+             (try
+               (.getIntVolatile UNSAFE nil (+ base-addr (long byte-off)))
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       (-store-i32! [_ byte-off val]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 4 false)]
+             (try
+               (.putIntVolatile UNSAFE nil (+ base-addr (long byte-off)) (unchecked-int val))
+               (.force mapped-buf (int byte-off) 4)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock)))
+         nil)
+
+       (-cas-i32! [_ byte-off expected desired]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 4 false)]
+             (try
+               (let [addr (+ base-addr (long byte-off))
+                     cur  (.getIntVolatile UNSAFE nil addr)]
+                 (when (= cur (unchecked-int expected))
+                   (.putIntVolatile UNSAFE nil addr (unchecked-int desired))
+                   (.force mapped-buf (int byte-off) 4))
+                 cur)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       (-add-i32! [_ byte-off delta]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 4 false)]
+             (try
+               (let [addr (+ base-addr (long byte-off))
+                     old  (.getIntVolatile UNSAFE nil addr)
+                     nv   (unchecked-int (+ old (unchecked-int delta)))]
+                 (.putIntVolatile UNSAFE nil addr nv)
+                 (.force mapped-buf (int byte-off) 4)
+                 old)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       (-sub-i32! [_ byte-off delta]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 4 false)]
+             (try
+               (let [addr (+ base-addr (long byte-off))
+                     old  (.getIntVolatile UNSAFE nil addr)
+                     nv   (unchecked-int (- old (unchecked-int delta)))]
+                 (.putIntVolatile UNSAFE nil addr nv)
+                 (.force mapped-buf (int byte-off) 4)
+                 old)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       (-exchange-i32! [_ byte-off val]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 4 false)]
+             (try
+               (let [addr (+ base-addr (long byte-off))
+                     old  (.getIntVolatile UNSAFE nil addr)]
+                 (.putIntVolatile UNSAFE nil addr (unchecked-int val))
+                 (.force mapped-buf (int byte-off) 4)
+                 old)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       ;; --- atomic i64 via fcntl ---
+
+       (-load-i64 [_ byte-off]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 8 false)]
+             (try
+               (.getLongVolatile UNSAFE nil (+ base-addr (long byte-off)))
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       (-store-i64! [_ byte-off val]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 8 false)]
+             (try
+               (.putLongVolatile UNSAFE nil (+ base-addr (long byte-off)) (long val))
+               (.force mapped-buf (int byte-off) 8)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock)))
+         nil)
+
+       (-cas-i64! [_ byte-off expected desired]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 8 false)]
+             (try
+               (let [addr (+ base-addr (long byte-off))
+                     cur  (.getLongVolatile UNSAFE nil addr)]
+                 (when (= cur (long expected))
+                   (.putLongVolatile UNSAFE nil addr (long desired))
+                   (.force mapped-buf (int byte-off) 8))
+                 cur)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       (-add-i64! [_ byte-off delta]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 8 false)]
+             (try
+               (let [addr (+ base-addr (long byte-off))
+                     old  (.getLongVolatile UNSAFE nil addr)
+                     nv   (+ old (long delta))]
+                 (.putLongVolatile UNSAFE nil addr nv)
+                 (.force mapped-buf (int byte-off) 8)
+                 old)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       (-sub-i64! [_ byte-off delta]
+         (.lock thread-lock)
+         (try
+           (let [fl (.lock lock-channel (long byte-off) 8 false)]
+             (try
+               (let [addr (+ base-addr (long byte-off))
+                     old  (.getLongVolatile UNSAFE nil addr)
+                     nv   (- old (long delta))]
+                 (.putLongVolatile UNSAFE nil addr nv)
+                 (.force mapped-buf (int byte-off) 8)
+                 old)
+               (finally (.release fl))))
+           (finally (.unlock thread-lock))))
+
+       ;; --- wait/notify — polling fallback (same as JvmMmapRegion) ---
+
+       (-wait-i32! [this byte-off expected timeout-ms]
+         (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+           (loop []
+             (let [cur (-load-i32 this byte-off)]
+               (cond
+                 (not= cur (int expected))                  :not-equal
+                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 :else (do (Thread/sleep 0 100000)
+                           (recur)))))))
+
+       (-notify-i32! [_ _byte-off _n] 0)
+
+       (-supports-watch? [_] false)
+
+       ;; --- byte I/O — direct mmap access (same as JvmMmapRegion) ---
+
+       (-read-bytes [_ byte-off len]
+         (let [dst (byte-array len)]
+           (MemorySegment/copy seg (long byte-off) (MemorySegment/ofArray dst) 0 (long len))
+           dst))
+
+       (-write-bytes! [_ byte-off src]
+         (MemorySegment/copy (MemorySegment/ofArray src) 0 seg (long byte-off) (long (alength src)))
+         nil))
+
+     (defn open-lustre-region
+       "Open (or create) a file-backed Lustre-compatible memory region at path-str.
+        Like open-mmap-region but keeps a FileChannel open for fcntl byte-range
+        locking. Uses a ReentrantLock for intra-JVM thread serialization.
+        Returns a LustreJvmMmapRegion."
+       [path-str size-bytes]
+       (let [size  (long size-bytes)
+             _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
+                     (try (when (< (.length raf) size) (.setLength raf size))
+                          (finally (.close raf))))
+             path  (Paths/get ^String path-str (into-array String []))
+             ;; Map as MappedByteBuffer for scoped force(index, length).
+             ;; Wrap as MemorySegment for Unsafe native address access.
+             ^FileChannel map-ch (FileChannel/open path
+                                   (into-array OpenOption
+                                     [StandardOpenOption/READ
+                                      StandardOpenOption/WRITE]))
+             ^MappedByteBuffer mbb (.map map-ch FileChannel$MapMode/READ_WRITE 0 size)
+             seg   (MemorySegment/ofBuffer mbb)
+             ;; Separate FileChannel kept open for fcntl locking —
+             ;; MUST NOT be closed until the region is disposed.
+             lock-ch (FileChannel/open path
+                       (into-array OpenOption
+                         [StandardOpenOption/READ
+                          StandardOpenOption/WRITE]))]
+         (LustreJvmMmapRegion. seg (.address seg) size
+                               lock-ch mbb
+                               (ReentrantLock.))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dispatch wrappers — work against IMemRegion on both platforms
@@ -664,6 +990,36 @@
                 abs-bit
                 -1))
             (recur (inc word-idx) 0)))))))
+
+#?(:clj
+   (defn imr-bitmap-find-free-bulk
+     "Like imr-bitmap-find-free but reads the bitmap in one bulk -read-bytes call,
+      then scans the local byte array. This avoids per-word fcntl lock overhead in
+      lustre mode where -load-i32 acquires a byte-range lock per call.
+      The snapshot may be slightly stale, but that's safe: the caller retries via
+      imr-bitmap-alloc-cas! which uses a proper CAS."
+     [region bm-byte-offset total-bits start-bit]
+     (let [word-count (int (unsigned-bit-shift-right (+ total-bits 31) 5))
+           byte-len   (* word-count 4)
+           ^bytes raw (-read-bytes region bm-byte-offset byte-len)
+           buf        (-> (java.nio.ByteBuffer/wrap raw)
+                          (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
+       (loop [word-idx    (int (unsigned-bit-shift-right start-bit 5))
+              bit-in-word (int (bit-and start-bit 31))]
+         (if (>= word-idx word-count)
+           -1
+           (let [word     (.getInt buf (* word-idx 4))
+                 inverted (bit-xor word -1)
+                 masked   (if (pos? bit-in-word)
+                            (bit-and inverted (bit-shift-left -1 bit-in-word))
+                            inverted)]
+             (if (not (zero? masked))
+               (let [bit-pos (Integer/numberOfTrailingZeros masked)
+                     abs-bit (+ (bit-shift-left word-idx 5) bit-pos)]
+                 (if (< abs-bit total-bits)
+                   abs-bit
+                   -1))
+               (recur (inc word-idx) 0))))))))
 
 (defn imr-bitmap-alloc-cas!
   "Atomically set bit-idx in the bitmap from 0→1 (mark block allocated).
