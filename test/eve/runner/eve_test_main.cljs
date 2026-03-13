@@ -41,7 +41,8 @@
    [eve.mmap-slab-test :as mmap-slab-test]
    [eve.mmap-atom-test :as mmap-atom-test]
    [eve.mmap-atom-e2e-test :as mmap-atom-e2e-test]
-   [eve.mmap-domain-test :as mmap-domain-test]))
+   [eve.mmap-domain-test :as mmap-domain-test]
+   [eve.lustre-test :as lustre-test]))
 
 ;; Anti-DCE exports
 (goog/exportSymbol "eve.deftype_test" deftype-test)
@@ -66,6 +67,7 @@
 (goog/exportSymbol "eve.mmap_atom_test" mmap-atom-test)
 (goog/exportSymbol "eve.mmap_atom_e2e_test" mmap-atom-e2e-test)
 (goog/exportSymbol "eve.mmap_domain_test" mmap-domain-test)
+(goog/exportSymbol "eve.lustre_test" lustre-test)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -188,6 +190,10 @@
   (load-native-addon!)
   (t/run-tests 'eve.mmap-domain-test))
 
+(defn- run-lustre! []
+  (load-native-addon!)
+  (t/run-tests 'eve.lustre-test))
+
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -228,6 +234,7 @@
    "mmap-atom"     run-mmap-atom!
    "mmap-atom-e2e" run-mmap-atom-e2e!
    "mmap-domain"   run-mmap-domain!
+   "lustre"        run-lustre!
    "all"           run-all!
    ;; Aliases
    "map-test"        run-slab!
@@ -242,7 +249,7 @@
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "obj"
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
-   "mmap-domain"])
+   "mmap-domain" "lustre"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]

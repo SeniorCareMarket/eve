@@ -333,11 +333,407 @@ static Napi::Value Notify32(const Napi::CallbackInfo& info)
 }
 
 // ---------------------------------------------------------------------------
+// Lustre mode — fcntl byte-range locking for cross-node atomics
+// ---------------------------------------------------------------------------
+// On Lustre, hardware atomics (__atomic_*) only work within a single machine's
+// cache-coherent memory domain. For cross-node atomics, we use POSIX fcntl
+// byte-range locks via the Lustre LDLM (Distributed Lock Manager).
+//
+// Pattern: lock N bytes via F_SETLKW, pread, compare, pwrite, msync, unlock.
+// This is a pessimistic lock-based CAS — slower than hardware CAS (~50-200us
+// vs ~10ns) but correct across Lustre nodes.
+//
+// All Lustre clients must mount with -o flock (default since Lustre 2.13+).
+
+// MmapFdDeleter: like MmapDeleter but also closes the kept-open fd.
+struct MmapFdDeleter {
+    size_t size;
+    int fd;
+    static void Finalize(Napi::Env /*env*/, uint8_t* ptr, MmapFdDeleter* hint) {
+        ::munmap(ptr, hint->size);
+        ::close(hint->fd);
+        delete hint;
+    }
+};
+
+// openWithFd(path, size) -> {buf: Buffer, fd: number}
+// Like Open() but keeps the fd open for fcntl locking.
+static Napi::Value OpenWithFd(const Napi::CallbackInfo& info)
+{
+    auto env  = info.Env();
+    auto path = info[0].As<Napi::String>().Utf8Value();
+    auto size = static_cast<size_t>(info[1].As<Napi::Number>().Uint32Value());
+
+    int fd = ::open(path.c_str(), O_RDWR | O_CREAT, 0600);
+    if (fd < 0) {
+        Napi::Error::New(env, std::string("open failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    struct stat st{};
+    ::fstat(fd, &st);
+    if (static_cast<size_t>(st.st_size) < size) {
+        if (::ftruncate(fd, static_cast<off_t>(size)) != 0) {
+            ::close(fd);
+            Napi::Error::New(env, std::string("ftruncate failed: ") + std::strerror(errno))
+                .ThrowAsJavaScriptException();
+            return env.Null();
+        }
+    }
+
+    void* ptr = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    // Do NOT close fd — keep it open for fcntl byte-range locking
+    if (ptr == MAP_FAILED) {
+        ::close(fd);
+        Napi::Error::New(env, std::string("mmap failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* deleter = new MmapFdDeleter{ size, fd };
+    auto buf = Napi::Buffer<uint8_t>::New(
+        env,
+        static_cast<uint8_t*>(ptr),
+        size,
+        MmapFdDeleter::Finalize,
+        deleter);
+
+    auto result = Napi::Object::New(env);
+    result["buf"] = buf;
+    result["fd"]  = Napi::Number::New(env, fd);
+    return result;
+}
+
+// Helper: acquire exclusive fcntl lock on [offset, offset+len)
+static int fcntl_lock(int fd, off_t offset, off_t len)
+{
+    struct flock fl{};
+    fl.l_type   = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start  = offset;
+    fl.l_len    = len;
+    int ret;
+    do {
+        ret = ::fcntl(fd, F_SETLKW, &fl);
+    } while (ret < 0 && errno == EINTR);
+    return ret;
+}
+
+// Helper: release fcntl lock on [offset, offset+len)
+static int fcntl_unlock(int fd, off_t offset, off_t len)
+{
+    struct flock fl{};
+    fl.l_type   = F_UNLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start  = offset;
+    fl.l_len    = len;
+    return ::fcntl(fd, F_SETLK, &fl);
+}
+
+// fcntlCas32(fd, buf, byteOffset, expected, desired) -> old value
+static Napi::Value FcntlCas32(const Napi::CallbackInfo& info)
+{
+    auto env      = info.Env();
+    auto fd       = info[0].As<Napi::Number>().Int32Value();
+    auto buf      = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off      = info[2].As<Napi::Number>().Uint32Value();
+    auto expected = info[3].As<Napi::Number>().Int32Value();
+    auto desired  = info[4].As<Napi::Number>().Int32Value();
+
+    if (fcntl_lock(fd, off, 4) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int32_t*>(buf.Data() + off);
+    std::int32_t old;
+    ::memcpy(&old, p, 4);
+
+    if (old == expected) {
+        ::memcpy(p, &desired, 4);
+        ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+    }
+
+    fcntl_unlock(fd, off, 4);
+    return Napi::Number::New(env, old);
+}
+
+// fcntlLoad32(fd, buf, byteOffset) -> value
+static Napi::Value FcntlLoad32(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    auto fd  = info[0].As<Napi::Number>().Int32Value();
+    auto buf = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off = info[2].As<Napi::Number>().Uint32Value();
+
+    if (fcntl_lock(fd, off, 4) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int32_t*>(buf.Data() + off);
+    std::int32_t val;
+    ::memcpy(&val, p, 4);
+
+    fcntl_unlock(fd, off, 4);
+    return Napi::Number::New(env, val);
+}
+
+// fcntlStore32(fd, buf, byteOffset, val) -> undefined
+static Napi::Value FcntlStore32(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    auto fd  = info[0].As<Napi::Number>().Int32Value();
+    auto buf = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off = info[2].As<Napi::Number>().Uint32Value();
+    auto val = info[3].As<Napi::Number>().Int32Value();
+
+    if (fcntl_lock(fd, off, 4) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int32_t*>(buf.Data() + off);
+    ::memcpy(p, &val, 4);
+    ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+
+    fcntl_unlock(fd, off, 4);
+    return env.Undefined();
+}
+
+// fcntlAdd32(fd, buf, byteOffset, delta) -> old value
+static Napi::Value FcntlAdd32(const Napi::CallbackInfo& info)
+{
+    auto env   = info.Env();
+    auto fd    = info[0].As<Napi::Number>().Int32Value();
+    auto buf   = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off   = info[2].As<Napi::Number>().Uint32Value();
+    auto delta = info[3].As<Napi::Number>().Int32Value();
+
+    if (fcntl_lock(fd, off, 4) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int32_t*>(buf.Data() + off);
+    std::int32_t old;
+    ::memcpy(&old, p, 4);
+    std::int32_t nv = old + delta;
+    ::memcpy(p, &nv, 4);
+    ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+
+    fcntl_unlock(fd, off, 4);
+    return Napi::Number::New(env, old);
+}
+
+// fcntlSub32(fd, buf, byteOffset, delta) -> old value
+static Napi::Value FcntlSub32(const Napi::CallbackInfo& info)
+{
+    auto env   = info.Env();
+    auto fd    = info[0].As<Napi::Number>().Int32Value();
+    auto buf   = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off   = info[2].As<Napi::Number>().Uint32Value();
+    auto delta = info[3].As<Napi::Number>().Int32Value();
+
+    if (fcntl_lock(fd, off, 4) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int32_t*>(buf.Data() + off);
+    std::int32_t old;
+    ::memcpy(&old, p, 4);
+    std::int32_t nv = old - delta;
+    ::memcpy(p, &nv, 4);
+    ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+
+    fcntl_unlock(fd, off, 4);
+    return Napi::Number::New(env, old);
+}
+
+// fcntlExchange32(fd, buf, byteOffset, val) -> old value
+static Napi::Value FcntlExchange32(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    auto fd  = info[0].As<Napi::Number>().Int32Value();
+    auto buf = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off = info[2].As<Napi::Number>().Uint32Value();
+    auto val = info[3].As<Napi::Number>().Int32Value();
+
+    if (fcntl_lock(fd, off, 4) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int32_t*>(buf.Data() + off);
+    std::int32_t old;
+    ::memcpy(&old, p, 4);
+    ::memcpy(p, &val, 4);
+    ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+
+    fcntl_unlock(fd, off, 4);
+    return Napi::Number::New(env, old);
+}
+
+// --- fcntl i64 variants ---
+
+// fcntlCas64(fd, buf, byteOffset, expected, desired) -> old value
+static Napi::Value FcntlCas64(const Napi::CallbackInfo& info)
+{
+    auto env      = info.Env();
+    auto fd       = info[0].As<Napi::Number>().Int32Value();
+    auto buf      = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off      = info[2].As<Napi::Number>().Uint32Value();
+    auto expected = static_cast<std::int64_t>(info[3].As<Napi::Number>().Int64Value());
+    auto desired  = static_cast<std::int64_t>(info[4].As<Napi::Number>().Int64Value());
+
+    if (fcntl_lock(fd, off, 8) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int64_t*>(buf.Data() + off);
+    std::int64_t old;
+    ::memcpy(&old, p, 8);
+
+    if (old == expected) {
+        ::memcpy(p, &desired, 8);
+        ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+    }
+
+    fcntl_unlock(fd, off, 8);
+    return Napi::Number::New(env, static_cast<double>(old));
+}
+
+// fcntlLoad64(fd, buf, byteOffset) -> value
+static Napi::Value FcntlLoad64(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    auto fd  = info[0].As<Napi::Number>().Int32Value();
+    auto buf = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off = info[2].As<Napi::Number>().Uint32Value();
+
+    if (fcntl_lock(fd, off, 8) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int64_t*>(buf.Data() + off);
+    std::int64_t val;
+    ::memcpy(&val, p, 8);
+
+    fcntl_unlock(fd, off, 8);
+    return Napi::Number::New(env, static_cast<double>(val));
+}
+
+// fcntlStore64(fd, buf, byteOffset, val) -> undefined
+static Napi::Value FcntlStore64(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    auto fd  = info[0].As<Napi::Number>().Int32Value();
+    auto buf = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off = info[2].As<Napi::Number>().Uint32Value();
+    auto val = static_cast<std::int64_t>(info[3].As<Napi::Number>().Int64Value());
+
+    if (fcntl_lock(fd, off, 8) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int64_t*>(buf.Data() + off);
+    ::memcpy(p, &val, 8);
+    ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+
+    fcntl_unlock(fd, off, 8);
+    return env.Undefined();
+}
+
+// fcntlAdd64(fd, buf, byteOffset, delta) -> old value
+static Napi::Value FcntlAdd64(const Napi::CallbackInfo& info)
+{
+    auto env   = info.Env();
+    auto fd    = info[0].As<Napi::Number>().Int32Value();
+    auto buf   = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off   = info[2].As<Napi::Number>().Uint32Value();
+    auto delta = static_cast<std::int64_t>(info[3].As<Napi::Number>().Int64Value());
+
+    if (fcntl_lock(fd, off, 8) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int64_t*>(buf.Data() + off);
+    std::int64_t old;
+    ::memcpy(&old, p, 8);
+    std::int64_t nv = old + delta;
+    ::memcpy(p, &nv, 8);
+    ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+
+    fcntl_unlock(fd, off, 8);
+    return Napi::Number::New(env, static_cast<double>(old));
+}
+
+// fcntlSub64(fd, buf, byteOffset, delta) -> old value
+static Napi::Value FcntlSub64(const Napi::CallbackInfo& info)
+{
+    auto env   = info.Env();
+    auto fd    = info[0].As<Napi::Number>().Int32Value();
+    auto buf   = info[1].As<Napi::Buffer<uint8_t>>();
+    auto off   = info[2].As<Napi::Number>().Uint32Value();
+    auto delta = static_cast<std::int64_t>(info[3].As<Napi::Number>().Int64Value());
+
+    if (fcntl_lock(fd, off, 8) < 0) {
+        Napi::Error::New(env, std::string("fcntl lock failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto* p = reinterpret_cast<std::int64_t*>(buf.Data() + off);
+    std::int64_t old;
+    ::memcpy(&old, p, 8);
+    std::int64_t nv = old - delta;
+    ::memcpy(p, &nv, 8);
+    ::msync(buf.Data() + (off & ~(4095UL)), 4096, MS_SYNC);
+
+    fcntl_unlock(fd, off, 8);
+    return Napi::Number::New(env, static_cast<double>(old));
+}
+
+// closeFd(fd) -> undefined
+static Napi::Value CloseFd(const Napi::CallbackInfo& info)
+{
+    auto fd = info[0].As<Napi::Number>().Int32Value();
+    ::close(fd);
+    return info.Env().Undefined();
+}
+
+// nanosleep helper for Lustre polling wait (no futex across nodes)
+static Napi::Value NanoSleep(const Napi::CallbackInfo& info)
+{
+    auto ns = info[0].As<Napi::Number>().Int64Value();
+    struct timespec ts{ 0, static_cast<long>(ns) };
+    ::nanosleep(&ts, nullptr);
+    return info.Env().Undefined();
+}
+
+// ---------------------------------------------------------------------------
 // Module init
 // ---------------------------------------------------------------------------
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
+    // Existing hardware-atomic ops
     exports["open"]     = Napi::Function::New(env, Open,     "open");
     exports["load32"]   = Napi::Function::New(env, Load32,   "load32");
     exports["store32"]  = Napi::Function::New(env, Store32,  "store32");
@@ -351,6 +747,22 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports["sub64"]    = Napi::Function::New(env, Sub64,    "sub64");
     exports["wait32"]   = Napi::Function::New(env, Wait32,   "wait32");
     exports["notify32"] = Napi::Function::New(env, Notify32, "notify32");
+
+    // Lustre fcntl-based ops
+    exports["openWithFd"]     = Napi::Function::New(env, OpenWithFd,     "openWithFd");
+    exports["fcntlLoad32"]    = Napi::Function::New(env, FcntlLoad32,    "fcntlLoad32");
+    exports["fcntlStore32"]   = Napi::Function::New(env, FcntlStore32,   "fcntlStore32");
+    exports["fcntlCas32"]     = Napi::Function::New(env, FcntlCas32,     "fcntlCas32");
+    exports["fcntlAdd32"]     = Napi::Function::New(env, FcntlAdd32,     "fcntlAdd32");
+    exports["fcntlSub32"]     = Napi::Function::New(env, FcntlSub32,     "fcntlSub32");
+    exports["fcntlExchange32"] = Napi::Function::New(env, FcntlExchange32, "fcntlExchange32");
+    exports["fcntlLoad64"]    = Napi::Function::New(env, FcntlLoad64,    "fcntlLoad64");
+    exports["fcntlStore64"]   = Napi::Function::New(env, FcntlStore64,   "fcntlStore64");
+    exports["fcntlCas64"]     = Napi::Function::New(env, FcntlCas64,     "fcntlCas64");
+    exports["fcntlAdd64"]     = Napi::Function::New(env, FcntlAdd64,     "fcntlAdd64");
+    exports["fcntlSub64"]     = Napi::Function::New(env, FcntlSub64,     "fcntlSub64");
+    exports["closeFd"]        = Napi::Function::New(env, CloseFd,        "closeFd");
+    exports["nanosleep"]      = Napi::Function::New(env, NanoSleep,      "nanosleep");
     return exports;
 }
 
