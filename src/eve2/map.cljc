@@ -847,7 +847,7 @@
        :clj (EveHashMap. cnt root-off offset__ sio m)))
 
   ILookup
-  (-lookup [this k] (-lookup this k nil))
+  (-lookup [this k] #?(:cljs (-lookup this k nil) :clj (.valAt this k nil)))
   (-lookup [_ k not-found]
     (hamt-get (get-sio) root-off k not-found))
 
@@ -938,23 +938,22 @@
        :clj (clojure.lang.Murmur3/hashUnordered this)))
 
   IFn
-  (-invoke [this k] (-lookup this k nil))
-  (-invoke [this k nf] (-lookup this k nf))
+  (-invoke [this k] #?(:cljs (-lookup this k nil) :clj (.valAt this k nil)))
+  (-invoke [this k nf] #?(:cljs (-lookup this k nf) :clj (.valAt this k nf)))
 
-  IPrintWithWriter
-  (-pr-writer [this writer _opts]
-    #?(:cljs (do
-               (-write writer "{")
-               (let [s (seq this)]
-                 (when s
-                   (loop [[[k v] & more] s first? true]
-                     (when-not first? (-write writer ", "))
-                     (-write writer (pr-str k))
-                     (-write writer " ")
-                     (-write writer (pr-str v))
-                     (when more (recur more false)))))
-               (-write writer "}"))
-       :clj nil))
+  #?@(:cljs [IPrintWithWriter
+             (-pr-writer [this writer _opts]
+               (do
+                 (-write writer "{")
+                 (let [s (seq this)]
+                   (when s
+                     (loop [[[k v] & more] s first? true]
+                       (when-not first? (-write writer ", "))
+                       (-write writer (pr-str k))
+                       (-write writer " ")
+                       (-write writer (pr-str v))
+                       (when more (recur more false)))))
+                 (-write writer "}")))])
 
   d/IDirectSerialize
   (-direct-serialize [this]

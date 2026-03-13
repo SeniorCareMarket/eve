@@ -312,7 +312,9 @@
         by-iface (group-by :protocol translated)]
     (mapcat (fn [[iface impls]]
               (let [all-methods (mapcat :methods impls)
-                    marker? (some :marker? impls)]
+                    marker? (some :marker? impls)
+                    ;; Normalize java.lang.Object → Object for deftype
+                    iface (if (= iface 'java.lang.Object) 'Object iface)]
                 (if marker?
                   [iface]
                   (cons iface

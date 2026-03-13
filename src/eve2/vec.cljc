@@ -389,7 +389,7 @@
   (-nth [this n not-found]
     (if (or (neg? n) (>= n cnt))
       not-found
-      (-nth this n)))
+      #?(:cljs (-nth this n) :clj (.nth this n))))
 
   ICollection
   (-conj [_ val]
@@ -414,7 +414,7 @@
   IVector
   (-assoc-n [this n val]
     (cond
-      (== n cnt) (-conj this val)
+      (== n cnt) #?(:cljs (-conj this val) :clj (.cons this val))
       (or (neg? n) (> n cnt))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index " n " out of bounds [0," cnt "]")))
@@ -424,15 +424,15 @@
   IAssociative
   (-assoc [this k v]
     (if (integer? k)
-      (-assoc-n this k v)
+      #?(:cljs (-assoc-n this k v) :clj (.assocN this k v))
       (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
               "Vector's key for assoc must be a number."))))
   (-contains-key? [_ k]
     (and (integer? k) (>= k 0) (< k cnt)))
 
   IFn
-  (-invoke [this k] (-lookup this k nil))
-  (-invoke [this k not-found] (-lookup this k not-found))
+  (-invoke [this k] #?(:cljs (-lookup this k nil) :clj (.valAt this k nil)))
+  (-invoke [this k not-found] #?(:cljs (-lookup this k not-found) :clj (.valAt this k not-found)))
 
   IReduce
   (-reduce [_ f]
@@ -471,16 +471,16 @@
     #?(:cljs (hash-ordered-coll this)
        :clj (clojure.lang.Murmur3/hashOrdered this)))
 
-  IPrintWithWriter
-  (-pr-writer [_ writer _opts]
-    (let [sio (get-sio)]
-      (-write writer "[")
-      (dotimes [i (min cnt 10)]
-        (when (pos? i) (-write writer " "))
-        (-write writer (pr-str (nth-impl sio cnt shift root tail i))))
-      (when (> cnt 10)
-        (-write writer " ..."))
-      (-write writer "]")))
+  #?@(:cljs [IPrintWithWriter
+             (-pr-writer [_ writer _opts]
+               (let [sio (get-sio)]
+                 (-write writer "[")
+                 (dotimes [i (min cnt 10)]
+                   (when (pos? i) (-write writer " "))
+                   (-write writer (pr-str (nth-impl sio cnt shift root tail i))))
+                 (when (> cnt 10)
+                   (-write writer " ..."))
+                 (-write writer "]")))])
 
   d/IDirectSerialize
   (-direct-serialize [this]

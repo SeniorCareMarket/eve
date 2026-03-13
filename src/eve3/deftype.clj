@@ -254,7 +254,9 @@
   (let [grouped (group-by :protocol parsed-protos)]
     (mapcat (fn [[proto impls]]
               (let [all-methods (mapcat :methods impls)
-                    marker? (some (fn [imp] (empty? (:methods imp))) impls)]
+                    marker? (some (fn [imp] (empty? (:methods imp))) impls)
+                    ;; Normalize java.lang.Object → Object for deftype
+                    proto (if (= proto 'java.lang.Object) 'Object proto)]
                 (if (and marker? (empty? all-methods))
                   [proto]
                   (cons proto

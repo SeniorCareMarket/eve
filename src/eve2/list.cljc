@@ -223,19 +223,18 @@
             (recur (read-node-next sio off) (inc i)))))
       nil))
 
-  IPrintWithWriter
-  (-pr-writer [_ writer _opts]
-    #?(:cljs (let [sio (get-sio)]
-               (-write writer "(")
-               (loop [off head-off i 0]
-                 (when (and (< i (min cnt 10)) (not= off NIL_OFFSET))
-                   (when (pos? i) (-write writer " "))
-                   (-write writer (pr-str (read-node-value sio off)))
-                   (recur (read-node-next sio off) (inc i))))
-               (when (> cnt 10)
-                 (-write writer " ..."))
-               (-write writer ")"))
-       :clj nil))
+  #?@(:cljs [IPrintWithWriter
+             (-pr-writer [_ writer _opts]
+               (let [sio (get-sio)]
+                 (-write writer "(")
+                 (loop [off head-off i 0]
+                   (when (and (< i (min cnt 10)) (not= off NIL_OFFSET))
+                     (when (pos? i) (-write writer " "))
+                     (-write writer (pr-str (read-node-value sio off)))
+                     (recur (read-node-next sio off) (inc i))))
+                 (when (> cnt 10)
+                   (-write writer " ..."))
+                 (-write writer ")")))])
 
   d/IDirectSerialize
   (-direct-serialize [this]

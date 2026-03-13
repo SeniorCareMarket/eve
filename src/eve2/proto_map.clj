@@ -57,8 +57,8 @@
      :methods {-invoke {:jvm-name invoke :arities [[_ a] [_ a b]]}}}
 
     IReduce
-    {:iface   clojure.lang.IReduceInit
-     :methods {-reduce {:jvm-name reduce :arities [[_ f init]]}}}
+    {:iface   clojure.lang.IReduce
+     :methods {-reduce {:jvm-name reduce :arities [[_ f] [_ f init]]}}}
 
     IKVReduce
     {:iface   clojure.lang.IKVReduce
