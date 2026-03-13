@@ -295,10 +295,10 @@ Phase 4: Gap 4 — Name-based type resolution
 
 | Phase | Gap | Status | Notes |
 |-------|-----|--------|-------|
-| 1 | Gap 5: Remove metadata | Not started | |
-| 2 | Gap 2: Auto-register | Not started | |
-| 3 | Gap 1+3: Unify IDs + deref | Not started | |
-| 4 | Gap 4: Name resolution | Not started | |
+| 1 | Gap 5: Remove metadata | Done | Convention-based type-id lookup, java.util.Set/List, map reduce fix |
+| 2 | Gap 2: Auto-register | Done | CLJS registrations for set/vec/list (constructor, disposer, builder) |
+| 3 | Gap 1+3: Unify IDs + deref | Done | Registry-based JVM deref, dual registration by tag+header-id |
+| 4 | Gap 4: Name resolution | Done | ISabpType protocol on all types, TypeName-type-key defs |
 
 ---
 

@@ -13,7 +13,8 @@
        clojure.lang.Counted
        (count [_] 2))"
   (:require [eve.deftype-proto.proto-map :as pm]
-            [eve.deftype-proto.eve3-deftype.registry :as reg]))
+            [eve.deftype-proto.eve3-deftype.registry :as reg]
+            [eve.deftype-proto.data :as d]))
 
 ;;=============================================================================
 ;; Field Read/Write via ISlabIO
@@ -210,7 +211,7 @@
 
 (defn- cljs-boilerplate
   "Generate default CLJS boilerplate protocols."
-  [type-name parsed-protos]
+  [type-name parsed-protos type-key]
   (concat
    (when-not (user-provides-protocol? parsed-protos 'clojure.lang.IHashEq)
      ['IHash (list '-hash ['_] (list 'hash (list '.-offset__ '_)))])
@@ -224,14 +225,17 @@
      ['IPrintWithWriter
       (list '-pr-writer ['this 'writer '_opts]
             (list '-write 'writer (str "#eve/" (name type-name) " "))
-            (list '-write 'writer (str "{:offset " (list '.-offset__ 'this) "}")))])))
+            (list '-write 'writer (str "{:offset " (list '.-offset__ 'this) "}")))])
+   ;; ISabpType — every eve3 type carries its qualified name
+   ['eve.deftype-proto.data/ISabpType
+    (list '-sabp-type-key ['_] type-key)]))
 
 (defn- emit-cljs
   "Emit CLJS deftype expansion."
-  [type-name fields parsed-protos type-id total-size emit-type-id-def?]
+  [type-name fields parsed-protos type-id total-size emit-type-id-def? type-key]
   (let [field-map (into {} (map (fn [f] [(:name f) f]) fields))
         translated (cljs-emit-protocols parsed-protos fields field-map)
-        boilerplate (cljs-boilerplate type-name parsed-protos)]
+        boilerplate (cljs-boilerplate type-name parsed-protos type-key)]
     `(do
        (~'deftype ~type-name [~'sio__ ~'offset__]
          ~@boilerplate
@@ -239,6 +243,8 @@
 
        ~@(when emit-type-id-def?
            [`(~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)])
+
+       (~'def ~(symbol (str (name type-name) "-type-key")) ~type-key)
 
        ~type-name)))
 
@@ -277,7 +283,7 @@
 
 (defn- clj-boilerplate
   "Generate JVM boilerplate."
-  [type-name parsed-protos]
+  [type-name parsed-protos type-key]
   (concat
    (when-not (user-provides-protocol? parsed-protos 'clojure.lang.IHashEq)
      ['clojure.lang.IHashEq
@@ -292,16 +298,19 @@
                     :else (list '.equiv 'this 'other))
               (list 'and (list 'instance? type-name 'other)
                     (list '= (list '.hasheq 'this) (list '.hasheq 'other)))))
-      (list 'toString ['this] (str "#eve/" (name type-name)))])))
+      (list 'toString ['this] (str "#eve/" (name type-name)))])
+   ;; ISabpType — every eve3 type carries its qualified name
+   ['eve.deftype-proto.data/ISabpType
+    (list '-sabp-type-key ['_] type-key)]))
 
 (defn- emit-clj
   "Emit CLJ deftype expansion.
    Fields: [sio__ ^long offset__]
    sio__ is the ISlabIO context, offset__ is the slab header offset."
-  [type-name fields parsed-protos type-id _total-size emit-type-id-def?]
+  [type-name fields parsed-protos type-id _total-size emit-type-id-def? type-key]
   (let [field-map (into {} (map (fn [f] [(:name f) f]) fields))
         translated (clj-emit-protocols parsed-protos fields field-map)
-        boilerplate (clj-boilerplate type-name parsed-protos)]
+        boilerplate (clj-boilerplate type-name parsed-protos type-key)]
     `(do
        (~'deftype ~type-name [~'sio__ ~(with-meta 'offset__ {:tag 'long})]
          ~@boilerplate
@@ -309,6 +318,8 @@
 
        ~@(when emit-type-id-def?
            [`(~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)])
+
+       (~'def ~(symbol (str (name type-name) "-type-key")) ~type-key)
 
        ~type-name)))
 
@@ -347,7 +358,7 @@
                                :type-key type-key})
         parsed-protos (parse-protocol-impls body)]
     (if (:ns &env)
-      ;; CLJS compilation
-      (emit-cljs type-name fields parsed-protos type-id total-size emit-type-id-def?)
+      ;; CLJS compilation — use CLJS namespace from &env
+      (emit-cljs type-name fields parsed-protos type-id total-size emit-type-id-def? type-key)
       ;; CLJ compilation
-      (emit-clj type-name fields parsed-protos type-id total-size emit-type-id-def?))))
+      (emit-clj type-name fields parsed-protos type-id total-size emit-type-id-def? type-key))))
