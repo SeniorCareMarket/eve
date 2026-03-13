@@ -38,7 +38,8 @@
 (def ^:const COLLISION_HEADER_SIZE 12)
 
 ;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
-(def EveHashSet-type-id 0xEE) ;; also emitted by eve/deftype
+#?(:clj (def EveHashSet-type-id 0xEE)
+   :cljs (declare EveHashSet-type-id))
 (def ^:const SABSETROOT_CNT_OFFSET 4)
 (def ^:const SABSETROOT_ROOT_OFF_OFFSET 8)
 (def ^:const SET_FLAG_PORTABLE_HASH 0x01)
@@ -567,8 +568,8 @@
 
    WARNING: After disposal, the set must not be used."
   [hash-set]
-  (let [sio (#?(:cljs .-sio__ :clj .sio__) hash-set)
-        header-off (#?(:cljs .-offset__ :clj .offset__) hash-set)
+  (let [sio (#?(:cljs (.-sio__ ^js hash-set) :clj (.sio__ hash-set)))
+        header-off (#?(:cljs (.-offset__ ^js hash-set) :clj (.offset__ hash-set)))
         root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
     (when (not= root-off NIL_OFFSET)
       (free-hamt-node! sio root-off))
@@ -677,11 +678,13 @@
       (if-not removed?
         this
         (make-hash-set sio (dec cnt) new-root))))
-  (get [_ v]
-    (let [sio sio__
-          vb (serialize-val-bytes v)
-          vh (portable-hash-bytes vb)]
-      (when (hamt-find sio root-off v vh vb) v)))
+  ;; get is CLJ-only; on CLJS, ILookup/valAt handles (get set v)
+  #?@(:clj
+      [(get [_ v]
+         (let [sio sio__
+               vb (serialize-val-bytes v)
+               vh (portable-hash-bytes vb)]
+           (when (hamt-find sio root-off v vh vb) v)))])
 
   clojure.lang.IPersistentCollection
   (cons [this v]
@@ -750,6 +753,20 @@
   d/IEveRoot
   (-root-header-off [this] offset__)
 
+  ;; java.lang.Object in main body so macro sees it and skips default IPrintWithWriter.
+  ;; Proto map marks it :clj-only? so CLJS translation strips it automatically.
+  java.lang.Object
+  (toString [this] (pr-str this))
+  (equals [this other]
+    (cond
+      (identical? this other) true
+      (not (instance? java.util.Set other)) false
+      :else
+      (and (== cnt (.size ^java.util.Set other))
+           (every? #(.contains ^java.util.Set other %) (.seq this)))))
+  (hashCode [this]
+    (reduce + 0 (map hash (.seq this))))
+
   ;; --- CLJ-only interfaces (no CLJS equivalent) ---
   #?@(:clj
       [clojure.lang.IPersistentSet
@@ -775,19 +792,7 @@
        (addAll [_ _] (throw (UnsupportedOperationException.)))
        (retainAll [_ _] (throw (UnsupportedOperationException.)))
        (removeAll [_ _] (throw (UnsupportedOperationException.)))
-       (clear [_] (throw (UnsupportedOperationException.)))
-
-       java.lang.Object
-       (toString [this] (pr-str this))
-       (equals [this other]
-         (cond
-           (identical? this other) true
-           (not (instance? java.util.Set other)) false
-           :else
-           (and (== cnt (.size ^java.util.Set other))
-                (every? #(.contains ^java.util.Set other %) (.seq this)))))
-       (hashCode [this]
-         (reduce + 0 (map hash (.seq this))))]))
+       (clear [_] (throw (UnsupportedOperationException.)))]))
 
 ;;=============================================================================
 ;; CLJS-only: 2-arity IReduce (reduce without init)

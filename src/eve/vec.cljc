@@ -549,8 +549,8 @@
 
    WARNING: After disposal, the vector must not be used."
   [eve-vec]
-  (let [sio        (#?(:cljs .-sio__ :clj .sio__) eve-vec)
-        header-off (#?(:cljs .-offset__ :clj .offset__) eve-vec)
+  (let [sio        (#?(:cljs .-sio__ :clj .sio__) #?(:cljs ^js eve-vec :clj eve-vec))
+        header-off (#?(:cljs .-offset__ :clj .offset__) #?(:cljs ^js eve-vec :clj eve-vec))
         root-off   (-sio-read-i32 sio header-off SABVECROOT_ROOT_OFFSET)
         tail-off   (-sio-read-i32 sio header-off SABVECROOT_TAIL_OFFSET)
         shift-val  (-sio-read-i32 sio header-off SABVECROOT_SHIFT_OFFSET)]

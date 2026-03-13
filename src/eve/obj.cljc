@@ -184,11 +184,11 @@
         h)))
 
   IEquiv
-  (-equiv [this ^js other]
+  (-equiv [this other]
     (cond
       (identical? this other) true
       (not (instance? Obj other)) false
-      (not= (:field-keys schema) (:field-keys (.-schema other))) false
+      (not= (:field-keys schema) (:field-keys (.-schema #?(:cljs ^js other :clj other)))) false
       :else (every? (fn [k] (= (-lookup this k) (-lookup other k)))
                     (:field-keys schema))))
 

@@ -867,8 +867,8 @@
   "Release the worker slot and cancel heartbeat for a domain.
    Atoms created from this domain become invalid after close.
    Removes the domain from the internal cache."
-  [^js d]
-  (let [{:keys [root-r slot-idx base-path] :as ds} (.-domain-state d)]
+  [d]
+  (let [{:keys [root-r slot-idx base-path] :as ds} (.-domain-state #?(:cljs ^js d :clj d))]
     (when (and root-r slot-idx)
       #?(:cljs (when-let [tid (:timer-id ds)] (js/clearInterval tid))
          :clj  (when-let [sched (:heartbeat-sched ds)] (.shutdown sched)))
@@ -880,8 +880,8 @@
   "Release the worker slot acquired when this atom was opened or joined.
    Cancels the heartbeat timer. Call when the process is done using the atom.
    Safe to call multiple times (idempotent via slot INACTIVE check)."
-  [^js a]
-  (let [{:keys [root-r slot-idx] :as ds} (.-domain-state a)]
+  [a]
+  (let [{:keys [root-r slot-idx] :as ds} (.-domain-state #?(:cljs ^js a :clj a))]
     (when (and root-r slot-idx)
       #?(:cljs (when-let [tid (:timer-id ds)] (js/clearInterval tid))
          :clj  (when-let [sched (:heartbeat-sched ds)] (.shutdown sched)))
