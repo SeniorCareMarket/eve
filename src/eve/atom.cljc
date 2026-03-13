@@ -584,7 +584,7 @@
         Returns slab-backed Eve types directly — no materialization."
        [tag sio slab-offset]
        (case (int tag)
-         0x10 (eve-map/jvm-eve-hash-map-from-offset sio slab-offset jvm-coll-factory)
+         0x10 (eve-map/jvm-eve-hash-map-from-offset slab-offset)
          0x11 (eve-set/jvm-eve-hash-set-from-offset sio slab-offset jvm-coll-factory)
          0x12 (eve-vec/jvm-sabvec-from-offset sio slab-offset jvm-coll-factory)
          0x13 (eve-list/jvm-sab-list-from-offset sio slab-offset jvm-coll-factory)
@@ -599,7 +599,7 @@
          (let [type-id (alloc/jvm-read-header-type-byte sio ptr)
                cf      jvm-coll-factory]
            (case (int type-id)
-             0xED (eve-map/jvm-eve-hash-map-from-offset sio ptr cf)
+             0xED (eve-map/jvm-eve-hash-map-from-offset ptr)
              0xEE (eve-set/jvm-eve-hash-set-from-offset sio ptr cf)
              0x12 (eve-vec/jvm-sabvec-from-offset sio ptr cf)
              0x13 (eve-list/jvm-sab-list-from-offset sio ptr cf)
@@ -613,13 +613,14 @@
        [{:keys [root-r sio] :as domain-state} atom-slot-idx]
        ;; Refresh slab regions in case another process grew them
        (alloc/refresh-jvm-slab-regions! sio)
-       (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-         (jvm-pin-thread-epoch! domain-state epoch)
-         (try
-           (jvm-read-root-value sio
-             (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)))
-           (finally
-             (jvm-unpin-thread-epoch! domain-state)))))
+       (binding [alloc/*jvm-slab-ctx* sio]
+         (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+           (jvm-pin-thread-epoch! domain-state epoch)
+           (try
+             (jvm-read-root-value sio
+               (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)))
+             (finally
+               (jvm-unpin-thread-epoch! domain-state))))))
 
      (defn- jvm-try-flush-retires!
        "Free retired HAMT trees whose epoch is safe to reclaim.
@@ -707,6 +708,7 @@
        "B2 CAS-loop swap (JVM). Epoch pinned for the ENTIRE iteration to
         protect lazy EveHashMap reads during path-copy."
        [{:keys [root-r sio retire-q tree-logs flush-ts] :as domain-state} atom-slot-idx f args]
+       (binding [alloc/*jvm-slab-ctx* sio]
        (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
        (loop [attempt 0]
          (when (>= attempt d/MAX_SWAP_RETRIES)
@@ -761,7 +763,7 @@
              :ok    (do (perf/timed :flush-retires
                           (jvm-try-flush-retires! root-r retire-q sio flush-ts))
                         result)
-             :retry (do (cas-backoff! attempt) (recur (inc attempt))))))))))
+             :retry (do (cas-backoff! attempt) (recur (inc attempt)))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; MmapAtomDomain — CLJS
