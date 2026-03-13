@@ -2447,7 +2447,7 @@
 
     (satisfies? sd/ISabStorable v)
     (case (sd/-sab-tag v)
-      :eve-hash-map (persistent!
+      :eve-map (persistent!
                 (reduce-kv (fn [m k val] (assoc! m k (eve->cljs val)))
                            (transient {}) v))
       :eve-vec (let [n (count v)]

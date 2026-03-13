@@ -1,4 +1,4 @@
-(ns eve.deftype-proto.eve3-deftype
+(ns eve.deftype-proto.macros
   "Unified CLJC deftype macro for Eve data structures.
 
    Users write CLJ-style protocol names (clojure.lang.Counted, count).
@@ -9,11 +9,11 @@
    Deftype fields are always [sio__ ^long offset__] on both platforms.
 
    Example:
-     (eve3/eve3-deftype EvePoint [^:int32 x ^:int32 y]
+     (eve/deftype EvePoint [^:int32 x ^:int32 y]
        clojure.lang.Counted
        (count [_] 2))"
   (:require [eve.deftype-proto.proto-map :as pm]
-            [eve.deftype-proto.eve3-deftype.registry :as reg]
+            [eve.deftype-proto.macros.registry :as reg]
             [eve.deftype-proto.data :as d]))
 
 ;;=============================================================================
@@ -226,7 +226,7 @@
       (list '-pr-writer ['this 'writer '_opts]
             (list '-write 'writer (str "#eve/" (name type-name) " "))
             (list '-write 'writer (str "{:offset " (list '.-offset__ 'this) "}")))])
-   ;; ISabpType — every eve3 type carries its qualified name
+   ;; ISabpType — every Eve type carries its qualified name
    ['eve.deftype-proto.data/ISabpType
     (list '-sabp-type-key ['_] type-key)]))
 
@@ -299,7 +299,7 @@
               (list 'and (list 'instance? type-name 'other)
                     (list '= (list '.hasheq 'this) (list '.hasheq 'other)))))
       (list 'toString ['this] (str "#eve/" (name type-name)))])
-   ;; ISabpType — every eve3 type carries its qualified name
+   ;; ISabpType — every Eve type carries its qualified name
    ['eve.deftype-proto.data/ISabpType
     (list '-sabp-type-key ['_] type-key)]))
 
@@ -327,7 +327,7 @@
 ;; Main Macro
 ;;=============================================================================
 
-(defmacro eve3-deftype
+(defmacro deftype
   "Define a unified CLJC Eve type.
 
    Fields support type hints: ^:int32, ^:uint32, ^:float32, ^:float64.
@@ -362,3 +362,67 @@
       (emit-cljs type-name fields parsed-protos type-id total-size emit-type-id-def? type-key)
       ;; CLJ compilation
       (emit-clj type-name fields parsed-protos type-id total-size emit-type-id-def? type-key))))
+
+;;=============================================================================
+;; Registration Macro
+;;=============================================================================
+
+(defmacro register-eve-type!
+  "Generate all platform-specific registration boilerplate for an Eve collection type.
+
+   Called AFTER deftype and constructor functions are defined.
+
+   Options map keys:
+     :fast-tag       — SAB pointer tag constant (e.g., ser/FAST_TAG_SAB_VEC)
+     :type-id        — type-id constant (e.g., EveVector-type-id)
+     :from-header    — (fn [sio header-off] → instance) constructor symbol
+     :dispose        — (fn [instance] → nil) disposal function symbol (optional)
+     :builder-pred   — predicate for auto-conversion (e.g., vector?) (optional)
+     :builder-ctor   — (fn [sio coll] → instance) constructor for builder (optional)
+     :coll-writer    — {:tag :vec, :fn writer-fn-symbol} collection writer (CLJ, optional)
+     :print-fn       — symbol of print helper (CLJ, optional)
+
+   Generates:
+     CLJ:  register-jvm-type-constructor!, print-method, collection writer
+     CLJS: register-sab-type-constructor!, register-header-disposer!,
+           register-cljs-to-sab-builder!"
+  [opts-map]
+  (let [opts (if (symbol? opts-map) (eval opts-map) opts-map)
+        {:keys [fast-tag type-id from-header dispose builder-pred builder-ctor
+                coll-writer print-fn]} opts]
+    (if (:ns &env)
+      ;; CLJS
+      `(do
+         ;; Type constructor registration
+         (eve.deftype-proto.serialize/register-sab-type-constructor!
+           ~fast-tag ~type-id
+           (fn [_sab# header-off#]
+             (~from-header (eve.deftype-proto.alloc/->CljsSlabIO) header-off#)))
+
+         ;; Header disposer
+         ~@(when dispose
+             [`(eve.deftype-proto.serialize/register-header-disposer! ~type-id
+                 (fn [slab-off#]
+                   (~dispose (~from-header (eve.deftype-proto.alloc/->CljsSlabIO) slab-off#))))])
+
+         ;; Builder for auto-conversion
+         ~@(when (and builder-pred builder-ctor)
+             [`(eve.deftype-proto.serialize/register-cljs-to-sab-builder!
+                 ~builder-pred
+                 (fn [v#] (~builder-ctor (eve.deftype-proto.alloc/->CljsSlabIO) v#)))]))
+
+      ;; CLJ
+      `(do
+         ;; Type constructor registration
+         (eve.deftype-proto.serialize/register-jvm-type-constructor!
+           ~fast-tag ~type-id
+           (fn [header-off#]
+             (~from-header eve.deftype-proto.alloc/*jvm-slab-ctx* header-off#)))
+
+         ;; Collection writer
+         ~@(when coll-writer
+             [`(eve.mem/register-jvm-collection-writer! ~(:tag coll-writer) ~(:fn coll-writer))])
+
+         ;; Print method
+         ~@(when print-fn
+             [`(~print-fn)])))))

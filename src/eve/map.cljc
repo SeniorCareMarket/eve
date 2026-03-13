@@ -10,7 +10,7 @@
    Both platforms use portable-hash-bytes (Murmur3 over serialized key bytes)
    for identical trie navigation.
 
-   Uses eve3/deftype macro: CLJ protocol names, auto-translated on CLJS."
+   Uses eve/deftype macro: CLJ protocol names, auto-translated on CLJS."
   (:refer-clojure :exclude [hash-map])
   (:require
    [eve.deftype-proto.alloc :as alloc
@@ -21,13 +21,14 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
-                                  mask-hash bitpos has-bit? get-index]]
-   #?@(:clj  [[eve.deftype-proto.eve3-deftype :as eve3]
-              [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
-                                        value+sio->eve-bytes
-                                        register-jvm-collection-writer!]]
-              [eve.perf :as perf]]))
-  #?(:cljs (:require-macros [eve.deftype-proto.eve3-deftype :as eve3])))
+                                 mask-hash bitpos has-bit? get-index]]
+   [eve.platform :as p]
+   #?@(:clj [[eve.deftype-proto.macros :as eve]
+             [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
+                                      value+sio->eve-bytes
+                                      register-jvm-collection-writer!]]
+             [eve.perf :as perf]]))
+  #?(:cljs (:require-macros [eve.deftype-proto.macros :as eve])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -44,7 +45,7 @@
 (def ^:const COLLISION_HEADER_SIZE 8)
 
 ;; EveHashMap header: type-id:u8 + pad:3 + count:i32 + root-off:i32 = 12
-(def EveHashMap-type-id 0xED) ;; also emitted by eve3-deftype
+(def EveHashMap-type-id 0xED) ;; also emitted by eve/deftype
 (def ^:const SABMAPROOT_CNT_OFFSET 4)
 (def ^:const SABMAPROOT_ROOT_OFF_OFFSET 8)
 
@@ -58,19 +59,19 @@
   "Serialize a key to bytes (platform-specific)."
   [k]
   #?(:cljs (ser/serialize-key k)
-     :clj  (value->eve-bytes k)))
+     :clj (value->eve-bytes k)))
 
 (defn- serialize-val-bytes
   "Serialize a value to bytes (platform-specific)."
   [v]
   #?(:cljs (ser/serialize-val v)
-     :clj  (value+sio->eve-bytes v)))
+     :clj (value+sio->eve-bytes v)))
 
 (defn- deserialize-value-bytes
   "Deserialize value bytes (platform-specific)."
   [val-bytes]
   #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj  (eve-bytes->value val-bytes)))
+     :clj (eve-bytes->value val-bytes)))
 
 (defn- bytes-equal?
   "Compare two byte arrays for equality."
@@ -78,14 +79,14 @@
   #?(:cljs (and (== (.-length a) (.-length b))
                 (loop [i 0]
                   (if (>= i (.-length a)) true
-                    (if (not= (aget a i) (aget b i)) false (recur (inc i))))))
-     :clj  (java.util.Arrays/equals ^bytes a ^bytes b)))
+                      (if (not= (aget a i) (aget b i)) false (recur (inc i))))))
+     :clj (java.util.Arrays/equals ^bytes a ^bytes b)))
 
 (defn- bytes-length
   "Get byte array length."
   ^long [ba]
   #?(:cljs (.-length ba)
-     :clj  (alength ^bytes ba)))
+     :clj (alength ^bytes ba)))
 
 ;;=============================================================================
 ;; Computed node layout helpers
@@ -144,10 +145,10 @@
   "Read key and value byte arrays at pos. Returns [kb vb next-pos]."
   [sio ^long node-off ^long pos]
   (let [klen (-sio-read-i32 sio node-off pos)
-        kb   (-sio-read-bytes sio node-off (+ pos 4) klen)
+        kb (-sio-read-bytes sio node-off (+ pos 4) klen)
         voff (+ pos 4 klen)
         vlen (-sio-read-i32 sio node-off voff)
-        vb   (-sio-read-bytes sio node-off (+ voff 4) vlen)]
+        vb (-sio-read-bytes sio node-off (+ voff 4) vlen)]
     [kb vb (+ voff 4 vlen)]))
 
 ;;=============================================================================
@@ -160,7 +161,7 @@
   (let [cached (-sio-read-u16 sio node-off 2)]
     (if (pos? cached)
       cached
-      (let [dc     (popcount32 data-bm)
+      (let [dc (popcount32 data-bm)
             kv-off (kv-data-start-off data-bm node-bm)]
         (loop [i 0 pos kv-off]
           (if (>= i dc)
@@ -182,10 +183,10 @@
 (defn- make-single-entry-node!
   "Create bitmap node with exactly 1 data entry and 0 children."
   [sio data-bm kh kb vb]
-  (let [kv-size  (calc-kv-size kb vb)
+  (let [kv-size (calc-kv-size kb vb)
         node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE 4 kv-size))]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 kv-size)
     (-sio-write-i32! sio node-off 4 data-bm)
     (-sio-write-i32! sio node-off 8 0)
@@ -196,10 +197,10 @@
 (defn- make-two-entry-node!
   "Create bitmap node with exactly 2 data entries and 0 children."
   [sio data-bm kh1 kb1 vb1 kh2 kb2 vb2]
-  (let [kv-size  (+ (calc-kv-size kb1 vb1) (calc-kv-size kb2 vb2))
+  (let [kv-size (+ (calc-kv-size kb1 vb1) (calc-kv-size kb2 vb2))
         node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE 8 kv-size))]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 kv-size)
     (-sio-write-i32! sio node-off 4 data-bm)
     (-sio-write-i32! sio node-off 8 0)
@@ -213,8 +214,8 @@
   "Create bitmap node with 0 data entries and 1 child."
   [sio ^long node-bm ^long child-off]
   (let [node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE 4))]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 0)
     (-sio-write-i32! sio node-off 4 0)
     (-sio-write-i32! sio node-off 8 node-bm)
@@ -224,10 +225,10 @@
 (defn- make-child-and-entry-node!
   "Create bitmap node with 1 data entry and 1 child."
   [sio data-bm node-bm child-off kh kb vb]
-  (let [kv-size  (calc-kv-size kb vb)
+  (let [kv-size (calc-kv-size kb vb)
         node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE 4 4 kv-size))]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio node-off 1 0)
     (-sio-write-u16! sio node-off 2 kv-size)
     (-sio-write-i32! sio node-off 4 data-bm)
     (-sio-write-i32! sio node-off 8 node-bm)
@@ -242,8 +243,8 @@
   (let [cnt (count entries)
         kv-size (reduce (fn [acc [_ kb vb]] (+ acc (calc-kv-size kb vb))) 0 entries)
         node-off (-sio-alloc! sio (+ COLLISION_HEADER_SIZE kv-size))]
-    (-sio-write-u8!  sio node-off 0 NODE_TYPE_COLLISION)
-    (-sio-write-u8!  sio node-off 1 cnt)
+    (-sio-write-u8! sio node-off 0 NODE_TYPE_COLLISION)
+    (-sio-write-u8! sio node-off 1 cnt)
     (-sio-write-u16! sio node-off 2 0)
     (-sio-write-i32! sio node-off 4 kh)
     (reduce (fn [pos [_ kb vb]]
@@ -279,24 +280,24 @@
   [sio src-off data-bm node-bm data-idx kh kb vb]
   (let [[kv-pos old-kv-size] (kv-pos-and-size sio src-off data-bm node-bm data-idx)
         new-kv-size (calc-kv-size kb vb)
-        size-diff   (- new-kv-size old-kv-size)
-        old-nsize   (node-byte-size sio src-off data-bm node-bm)
-        new-nsize   (+ old-nsize size-diff)
-        dc          (popcount32 data-bm)
-        cc          (popcount32 node-bm)]
+        size-diff (- new-kv-size old-kv-size)
+        old-nsize (node-byte-size sio src-off data-bm node-bm)
+        new-nsize (+ old-nsize size-diff)
+        dc (popcount32 data-bm)
+        cc (popcount32 node-bm)]
     (if (zero? size-diff)
       ;; Same size — bulk copy, overwrite KV + hash
       (let [dst-off (-sio-alloc! sio new-nsize)]
         (-sio-copy-block! sio dst-off 0 src-off 0 old-nsize)
-        (-sio-write-i32!   sio dst-off kv-pos (bytes-length kb))
+        (-sio-write-i32! sio dst-off kv-pos (bytes-length kb))
         (-sio-write-bytes! sio dst-off (+ kv-pos 4) kb)
-        (-sio-write-i32!   sio dst-off (+ kv-pos 4 (bytes-length kb)) (bytes-length vb))
+        (-sio-write-i32! sio dst-off (+ kv-pos 4 (bytes-length kb)) (bytes-length vb))
         (-sio-write-bytes! sio dst-off (+ kv-pos 4 (bytes-length kb) 4) vb)
-        (-sio-write-i32!   sio dst-off (+ (hashes-start-off node-bm) (* data-idx 4)) kh)
+        (-sio-write-i32! sio dst-off (+ (hashes-start-off node-bm) (* data-idx 4)) kh)
         dst-off)
       ;; Different size — rebuild with splice
-      (let [dst-off    (-sio-alloc! sio new-nsize)
-            kv-total   (+ (node-kv-total-size sio src-off data-bm node-bm) size-diff)
+      (let [dst-off (-sio-alloc! sio new-nsize)
+            kv-total (+ (node-kv-total-size sio src-off data-bm node-bm) size-diff)
             children-end (+ NODE_HEADER_SIZE (* 4 cc))]
         (-sio-copy-block! sio dst-off 0 src-off 0 children-end)
         (-sio-write-u16! sio dst-off 2 kv-total)
@@ -304,9 +305,9 @@
         (let [h-off (hashes-start-off node-bm)]
           (dotimes [i dc]
             (-sio-write-i32! sio dst-off (+ h-off (* i 4))
-              (if (== i data-idx)
-                kh
-                (-sio-read-i32 sio src-off (+ h-off (* i 4)))))))
+                             (if (== i data-idx)
+                               kh
+                               (-sio-read-i32 sio src-off (+ h-off (* i 4)))))))
         ;; Copy KV entries, replacing at data-idx
         (let [src-kv-off (kv-data-start-off data-bm node-bm)]
           (loop [i 0 sp src-kv-off dp src-kv-off]
@@ -324,16 +325,16 @@
   "Copy a bitmap node, inserting a new KV at data-idx."
   [sio src-off src-data-bm new-data-bm node-bm
    data-idx kh kb vb]
-  (let [new-kv-size  (calc-kv-size kb vb)
+  (let [new-kv-size (calc-kv-size kb vb)
         old-kv-total (node-kv-total-size sio src-off src-data-bm node-bm)
         new-kv-total (+ old-kv-total new-kv-size)
-        cc      (popcount32 node-bm)
-        new-dc  (popcount32 new-data-bm)
-        old-dc  (popcount32 src-data-bm)
-        nsize   (+ NODE_HEADER_SIZE (* 4 cc) (* 4 new-dc) new-kv-total)
+        cc (popcount32 node-bm)
+        new-dc (popcount32 new-data-bm)
+        old-dc (popcount32 src-data-bm)
+        nsize (+ NODE_HEADER_SIZE (* 4 cc) (* 4 new-dc) new-kv-total)
         dst-off (-sio-alloc! sio nsize)]
-    (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio dst-off 1 0)
+    (-sio-write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio dst-off 1 0)
     (-sio-write-u16! sio dst-off 2 new-kv-total)
     (-sio-write-i32! sio dst-off 4 new-data-bm)
     (-sio-write-i32! sio dst-off 8 node-bm)
@@ -348,7 +349,7 @@
             (do (-sio-write-i32! sio dst-off (+ h-off (* di 4)) kh)
                 (recur si (inc di)))
             (do (-sio-write-i32! sio dst-off (+ h-off (* di 4))
-                  (-sio-read-i32 sio src-off (+ h-off (* si 4))))
+                                 (-sio-read-i32 sio src-off (+ h-off (* si 4))))
                 (recur (inc si) (inc di)))))))
     ;; Build KV data with insertion
     (let [src-kv-off (kv-data-start-off src-data-bm node-bm)
@@ -371,14 +372,14 @@
   (let [old-kv-total (node-kv-total-size sio src-off src-data-bm src-node-bm)
         [_ removed-size] (kv-pos-and-size sio src-off src-data-bm src-node-bm remove-idx)
         new-kv-total (- old-kv-total removed-size)
-        new-cc  (popcount32 new-node-bm)
-        new-dc  (popcount32 new-data-bm)
-        old-cc  (popcount32 src-node-bm)
-        old-dc  (popcount32 src-data-bm)
-        nsize   (+ NODE_HEADER_SIZE (* 4 new-cc) (* 4 new-dc) new-kv-total)
+        new-cc (popcount32 new-node-bm)
+        new-dc (popcount32 new-data-bm)
+        old-cc (popcount32 src-node-bm)
+        old-dc (popcount32 src-data-bm)
+        nsize (+ NODE_HEADER_SIZE (* 4 new-cc) (* 4 new-dc) new-kv-total)
         dst-off (-sio-alloc! sio nsize)]
-    (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
-    (-sio-write-u8!  sio dst-off 1 0)
+    (-sio-write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8! sio dst-off 1 0)
     (-sio-write-u16! sio dst-off 2 new-kv-total)
     (-sio-write-i32! sio dst-off 4 new-data-bm)
     (-sio-write-i32! sio dst-off 8 new-node-bm)
@@ -390,7 +391,7 @@
             (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di 4)) new-child-off)
                 (recur si (inc di)))
             (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di 4))
-                  (-sio-read-i32 sio src-off (+ src-c-off (* si 4))))
+                                 (-sio-read-i32 sio src-off (+ src-c-off (* si 4))))
                 (recur (inc si) (inc di)))))))
     ;; Build hash array, skipping removed entry
     (let [src-h-off (hashes-start-off src-node-bm)
@@ -400,7 +401,7 @@
           (if (== si remove-idx)
             (recur (inc si) di)
             (do (-sio-write-i32! sio dst-off (+ dst-h-off (* di 4))
-                  (-sio-read-i32 sio src-off (+ src-h-off (* si 4))))
+                                 (-sio-read-i32 sio src-off (+ src-h-off (* si 4))))
                 (recur (inc si) (inc di)))))))
     ;; Build KV data, skipping removed entry
     (let [src-kv-off (kv-data-start-off src-data-bm src-node-bm)
@@ -435,7 +436,7 @@
                 (cond
                   (has-bit? nbm bit)
                   (recur (-sio-read-i32 sio off
-                           (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                                        (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
                          (+ shift SHIFT_STEP))
 
                   (has-bit? dbm bit)
@@ -447,7 +448,7 @@
                       (let [kvs (kv-data-start-off dbm nbm)
                             pos (loop [i 0 p kvs]
                                   (if (== i di) p
-                                    (recur (inc i) (skip-kv-at sio off p))))
+                                      (recur (inc i) (skip-kv-at sio off p))))
                             kl (-sio-read-i32 sio off pos)
                             eks (-sio-read-bytes sio off (+ pos 4) kl)]
                         (if (bytes-equal? eks kb)
@@ -467,7 +468,7 @@
                     (loop [i 0 pos COLLISION_HEADER_SIZE]
                       (if (>= i cc)
                         not-found
-                        (let [kl  (-sio-read-i32 sio off pos)
+                        (let [kl (-sio-read-i32 sio off pos)
                               eks (-sio-read-bytes sio off (+ pos 4) kl)]
                           (if (bytes-equal? eks kb)
                             (let [vo (+ pos 4 kl)
@@ -495,7 +496,7 @@
         ;; Bitmap node
         1 (let [data-bm (-sio-read-i32 sio root-off 4)
                 node-bm (-sio-read-i32 sio root-off 8)
-                bit     (bitpos kh shift)]
+                bit (bitpos kh shift)]
             (cond
               ;; Child node — descend
               (has-bit? node-bm bit)
@@ -511,11 +512,11 @@
               (has-bit? data-bm bit)
               (let [data-idx (get-index data-bm bit)
                     existing-kh (-sio-read-i32 sio root-off
-                                  (+ (hashes-start-off node-bm) (* data-idx 4)))
+                                               (+ (hashes-start-off node-bm) (* data-idx 4)))
                     kvs (kv-data-start-off data-bm node-bm)
                     pos (loop [i 0 p kvs]
                           (if (== i data-idx) p
-                            (recur (inc i) (skip-kv-at sio root-off p))))]
+                              (recur (inc i) (skip-kv-at sio root-off p))))]
                 (if (key-bytes-match? sio root-off pos kb)
                   ;; Same key — replace value
                   (let [kl (-sio-read-i32 sio root-off pos)
@@ -535,13 +536,13 @@
                     (if (or (== existing-kh kh) (>= shift 30))
                       ;; Collision
                       (let [coll (make-collision-node! sio kh
-                                   [[existing-kh existing-kb existing-vb] [kh kb vb]])
+                                                       [[existing-kh existing-kb existing-vb] [kh kb vb]])
                             new-data-bm (bit-xor data-bm bit)
                             new-node-bm (bit-or node-bm bit)
                             new-child-idx (get-index new-node-bm bit)]
                         [(copy-node-remove-kv-add-child!
-                           sio root-off data-bm node-bm new-data-bm new-node-bm
-                           data-idx new-child-idx coll)
+                          sio root-off data-bm node-bm new-data-bm new-node-bm
+                          data-idx new-child-idx coll)
                          true])
                       ;; Push down to sub-node
                       (let [sub-shift (+ shift SHIFT_STEP)
@@ -554,27 +555,27 @@
                                 new-node-bm (bit-or node-bm bit)
                                 new-child-idx (get-index new-node-bm bit)]
                             [(copy-node-remove-kv-add-child!
-                               sio root-off data-bm node-bm new-data-bm new-node-bm
-                               data-idx new-child-idx final-sub)
+                              sio root-off data-bm node-bm new-data-bm new-node-bm
+                              data-idx new-child-idx final-sub)
                              true])
                           (let [sub-data-bm (bit-or existing-bit new-bit)
                                 sub (if (< (unsigned-bit-shift-right existing-bit 0)
                                            (unsigned-bit-shift-right new-bit 0))
                                       (make-two-entry-node! sio sub-data-bm
-                                        existing-kh existing-kb existing-vb kh kb vb)
+                                                            existing-kh existing-kb existing-vb kh kb vb)
                                       (make-two-entry-node! sio sub-data-bm
-                                        kh kb vb existing-kh existing-kb existing-vb))
+                                                            kh kb vb existing-kh existing-kb existing-vb))
                                 new-data-bm (bit-xor data-bm bit)
                                 new-node-bm (bit-or node-bm bit)
                                 new-child-idx (get-index new-node-bm bit)]
                             [(copy-node-remove-kv-add-child!
-                               sio root-off data-bm node-bm new-data-bm new-node-bm
-                               data-idx new-child-idx sub)
+                              sio root-off data-bm node-bm new-data-bm new-node-bm
+                              data-idx new-child-idx sub)
                              true])))))))
 
               ;; Empty position — add to data_bitmap
               :else
-              (let [data-idx    (get-index data-bm bit)
+              (let [data-idx (get-index data-bm bit)
                     new-data-bm (bit-or data-bm bit)]
                 [(copy-node-add-kv! sio root-off data-bm new-data-bm node-bm
                                     data-idx kh kb vb)
@@ -582,7 +583,7 @@
 
         ;; Collision node
         3 (let [node-hash (-sio-read-i32 sio root-off 4)
-                cnt       (-sio-read-u8 sio root-off 1)]
+                cnt (-sio-read-u8 sio root-off 1)]
             (if (== kh node-hash)
               ;; Same hash — add/replace in collision
               (loop [i 0 pos COLLISION_HEADER_SIZE entries []]
@@ -596,8 +597,8 @@
                         ;; Replace value, collect remaining
                         (let [remaining (loop [j (inc i) p next-pos acc []]
                                           (if (>= j cnt) acc
-                                            (let [[rk rv np] (read-kv-bytes-at sio root-off p)]
-                                              (recur (inc j) np (conj acc [node-hash rk rv])))))]
+                                              (let [[rk rv np] (read-kv-bytes-at sio root-off p)]
+                                                (recur (inc j) np (conj acc [node-hash rk rv])))))]
                           [(make-collision-node! sio kh (into (conj entries [kh kb vb]) remaining))
                            false]))
                       ;; Continue
@@ -606,8 +607,8 @@
               (if (>= shift 30)
                 (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
                                 (if (>= i cnt) acc
-                                  (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
-                                    (recur (inc i) np (conj acc [node-hash ek ev])))))]
+                                    (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
+                                      (recur (inc i) np (conj acc [node-hash ek ev])))))]
                   [(make-collision-node! sio node-hash (conj entries [kh kb vb])) true])
                 (let [bit1 (bitpos node-hash shift)
                       bit2 (bitpos kh shift)]
@@ -633,7 +634,7 @@
         ;; Bitmap node
         1 (let [data-bm (-sio-read-i32 sio root-off 4)
                 node-bm (-sio-read-i32 sio root-off 8)
-                bit     (bitpos kh shift)]
+                bit (bitpos kh shift)]
             (cond
               ;; Child — descend
               (has-bit? node-bm bit)
@@ -656,7 +657,7 @@
                     kvs (kv-data-start-off data-bm node-bm)
                     pos (loop [i 0 p kvs]
                           (if (== i data-idx) p
-                            (recur (inc i) (skip-kv-at sio root-off p))))]
+                              (recur (inc i) (skip-kv-at sio root-off p))))]
                 (if (key-bytes-match? sio root-off pos kb)
                   ;; Found — remove it
                   (let [new-data-bm (bit-xor data-bm bit)
@@ -670,21 +671,21 @@
                             children (mapv #(-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* % 4))) (range cc))
                             h-off (hashes-start-off node-bm)
                             hashes (vec (keep-indexed
-                                          (fn [i _] (when (not= i data-idx)
-                                                      (-sio-read-i32 sio root-off (+ h-off (* i 4)))))
-                                          (range old-dc)))
+                                         (fn [i _] (when (not= i data-idx)
+                                                     (-sio-read-i32 sio root-off (+ h-off (* i 4)))))
+                                         (range old-dc)))
                             kvs-list (let [kv-off (kv-data-start-off data-bm node-bm)]
                                        (loop [i 0 pos kv-off acc []]
                                          (if (>= i old-dc) acc
-                                           (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
-                                             (recur (inc i) np
-                                                    (if (== i data-idx) acc (conj acc [ek ev])))))))]
+                                             (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
+                                               (recur (inc i) np
+                                                      (if (== i data-idx) acc (conj acc [ek ev])))))))]
                         ;; Write new node
                         (let [kvs-size (reduce (fn [a [kb vb]] (+ a (calc-kv-size kb vb))) 0 kvs-list)
                               nsize (+ NODE_HEADER_SIZE (* 4 cc) (* 4 dc) kvs-size)
                               new-off (-sio-alloc! sio nsize)]
-                          (-sio-write-u8!  sio new-off 0 NODE_TYPE_BITMAP)
-                          (-sio-write-u8!  sio new-off 1 0)
+                          (-sio-write-u8! sio new-off 0 NODE_TYPE_BITMAP)
+                          (-sio-write-u8! sio new-off 1 0)
                           (-sio-write-u16! sio new-off 2 kvs-size)
                           (-sio-write-i32! sio new-off 4 new-data-bm)
                           (-sio-write-i32! sio new-off 8 node-bm)
@@ -703,19 +704,19 @@
 
         ;; Collision node
         3 (let [node-hash (-sio-read-i32 sio root-off 4)
-                cnt       (-sio-read-u8 sio root-off 1)]
+                cnt (-sio-read-u8 sio root-off 1)]
             (if (not= kh node-hash)
               [root-off false]
               (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
                               (if (>= i cnt) acc
-                                (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
-                                  (recur (inc i) np (conj acc [ek ev])))))]
+                                  (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
+                                    (recur (inc i) np (conj acc [ek ev])))))]
                 (if-let [idx (some (fn [i] (when (bytes-equal? (first (nth entries i)) kb) i))
-                               (range cnt))]
+                                   (range cnt))]
                   (if (== cnt 1)
                     [NIL_OFFSET true]
                     (let [remaining (vec (concat (subvec entries 0 idx)
-                                                (subvec entries (inc idx))))
+                                                 (subvec entries (inc idx))))
                           new-entries (mapv (fn [[ek ev]] [node-hash ek ev]) remaining)]
                       [(make-collision-node! sio kh new-entries) true]))
                   [root-off false]))))
@@ -735,22 +736,22 @@
     (let [nt (-sio-read-u8 sio root-off 0)]
       (case (int nt)
         ;; Bitmap node
-        1 (let [data-bm  (-sio-read-i32 sio root-off 4)
-                node-bm  (-sio-read-i32 sio root-off 8)
-                dc       (popcount32 data-bm)
-                cc       (popcount32 node-bm)
-                kv-off   (kv-data-start-off data-bm node-bm)
+        1 (let [data-bm (-sio-read-i32 sio root-off 4)
+                node-bm (-sio-read-i32 sio root-off 8)
+                dc (popcount32 data-bm)
+                cc (popcount32 node-bm)
+                kv-off (kv-data-start-off data-bm node-bm)
                 ;; Process inline entries
                 acc (loop [i 0 pos kv-off acc init]
                       (if (or (>= i dc) (reduced? acc))
                         acc
-                        (let [kl  (-sio-read-i32 sio root-off pos)
-                              kb  (-sio-read-bytes sio root-off (+ pos 4) kl)
-                              vo  (+ pos 4 kl)
-                              vl  (-sio-read-i32 sio root-off vo)
-                              vb  (-sio-read-bytes sio root-off (+ vo 4) vl)
-                              k   (deserialize-value-bytes kb)
-                              v   (deserialize-value-bytes vb)]
+                        (let [kl (-sio-read-i32 sio root-off pos)
+                              kb (-sio-read-bytes sio root-off (+ pos 4) kl)
+                              vo (+ pos 4 kl)
+                              vl (-sio-read-i32 sio root-off vo)
+                              vb (-sio-read-bytes sio root-off (+ vo 4) vl)
+                              k (deserialize-value-bytes kb)
+                              v (deserialize-value-bytes vb)]
                           (recur (inc i) (+ vo 4 vl) (f acc k v)))))]
             ;; Process child nodes
             (if (reduced? acc)
@@ -772,8 +773,8 @@
                       vo (+ pos 4 kl)
                       vl (-sio-read-i32 sio root-off vo)
                       vb (-sio-read-bytes sio root-off (+ vo 4) vl)
-                      k  (deserialize-value-bytes kb)
-                      v  (deserialize-value-bytes vb)]
+                      k (deserialize-value-bytes kb)
+                      v (deserialize-value-bytes vb)]
                   (recur (inc i) (+ vo 4 vl) (f acc k v))))))
 
         ;; Unknown
@@ -784,11 +785,11 @@
   [sio ^long root-off]
   (let [entries (volatile! (transient []))]
     (hamt-kv-reduce sio root-off
-      (fn [_ k v]
-        (vswap! entries conj!
-          #?(:cljs (MapEntry. k v nil)
-             :clj  (clojure.lang.MapEntry/create k v))))
-      nil)
+                    (fn [_ k v]
+                      (vswap! entries conj!
+                              #?(:cljs (MapEntry. k v nil)
+                                 :clj (clojure.lang.MapEntry/create k v))))
+                    nil)
     (seq (persistent! @entries))))
 
 ;;=============================================================================
@@ -799,8 +800,8 @@
   "Allocate and write a 12-byte EveHashMap header. Returns slab offset."
   ^long [sio ^long cnt ^long root-off]
   (let [off (-sio-alloc! sio 12)]
-    (-sio-write-u8!  sio off 0 EveHashMap-type-id)
-    (-sio-write-u8!  sio off 1 1) ;; flags
+    (-sio-write-u8! sio off 0 EveHashMap-type-id)
+    (-sio-write-u8! sio off 1 1) ;; flags
     (-sio-write-u16! sio off 2 0)
     (-sio-write-i32! sio off SABMAPROOT_CNT_OFFSET cnt)
     (-sio-write-i32! sio off SABMAPROOT_ROOT_OFF_OFFSET root-off)
@@ -813,15 +814,15 @@
    (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)])
 
 ;;=============================================================================
-;; EveHashMap deftype — unified via eve3-deftype macro
+;; EveHashMap deftype — unified via eve/deftype macro
 ;;
 ;; Fields: cnt (int32 @ offset 4), root-off (int32 @ offset 8)
 ;; Both platforms: deftype EveHashMap [sio__ offset__]
 ;;=============================================================================
 
-(declare make-eve3-hash-map)
+(declare make-hash-map)
 
-(eve3/eve3-deftype EveHashMap [^:int32 cnt ^:int32 root-off]
+(eve/deftype EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Unified protocols (CLJ names) ---
 
   clojure.lang.Counted
@@ -848,25 +849,25 @@
     (not (identical? (hamt-get sio__ root-off k ::absent) ::absent)))
   (assoc [this k v]
     (let [sio sio__
-          kb  (serialize-key-bytes k)
-          vb  (serialize-val-bytes v)
-          kh  (portable-hash-bytes kb)
+          kb (serialize-key-bytes k)
+          vb (serialize-val-bytes v)
+          kh (portable-hash-bytes kb)
           [new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
       (if (== new-root root-off)
         this
-        (make-eve3-hash-map sio (if added? (inc cnt) cnt) new-root))))
+        (make-hash-map sio (if added? (inc cnt) cnt) new-root))))
 
   clojure.lang.IPersistentMap
   (without [this k]
     (let [sio sio__
-          kb  (serialize-key-bytes k)
-          kh  (portable-hash-bytes kb)
+          kb (serialize-key-bytes k)
+          kh (portable-hash-bytes kb)
           [new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
       (if-not removed?
         this
         (if (== new-root NIL_OFFSET)
-          (make-eve3-hash-map sio 0 NIL_OFFSET)
-          (make-eve3-hash-map sio (dec cnt) new-root)))))
+          (make-hash-map sio 0 NIL_OFFSET)
+          (make-hash-map sio (dec cnt) new-root)))))
 
   clojure.lang.IPersistentCollection
   (cons [this entry]
@@ -876,11 +877,11 @@
                  (assoc this (key entry) (val entry))
                  (reduce conj this entry)))
        :clj (if (map? entry)
-               (reduce-kv (fn [m k v] (.assoc ^EveHashMap m k v)) this entry)
-               (let [[k v] (if (vector? entry) entry [(key entry) (val entry)])]
-                 (.assoc this k v)))))
+              (reduce-kv (fn [m k v] (.assoc ^EveHashMap m k v)) this entry)
+              (let [[k v] (if (vector? entry) entry [(key entry) (val entry)])]
+                (.assoc this k v)))))
   (empty [_]
-    (make-eve3-hash-map sio__ 0 NIL_OFFSET))
+    (make-hash-map sio__ 0 NIL_OFFSET))
   (equiv [this other]
     #?(:cljs (and (map? other)
                   (== cnt (count other))
@@ -893,27 +894,19 @@
   clojure.lang.IReduceInit
   (reduce [_ f init]
     (let [sio sio__]
-      #?(:clj (let [result (hamt-kv-reduce sio root-off
-                             (fn [acc k v] (f acc (clojure.lang.MapEntry/create k v)))
-                             init)]
-                (if (reduced? result) @result result))
-         :cljs (let [result (hamt-kv-reduce sio root-off
-                              (fn [acc k v] (f acc (MapEntry. k v nil)))
-                              init)]
-                 (if (reduced? result) @result result)))))
+      (unreduced
+       (hamt-kv-reduce sio root-off
+                       (fn [acc k v] (f acc #?(:clj (clojure.lang.MapEntry/create k v)
+                                               :cljs (MapEntry. k v nil))))
+                       init))))
 
   clojure.lang.IKVReduce
   (kvreduce [_ f init]
-    (let [sio sio__]
-      #?(:clj (let [result (hamt-kv-reduce sio root-off f init)]
-                (if (reduced? result) @result result))
-         :cljs (let [result (hamt-kv-reduce sio root-off f init)]
-                 (if (reduced? result) @result result)))))
+    (let [result (hamt-kv-reduce sio__ root-off f init)]
+      (unreduced result)))
 
   clojure.lang.IHashEq
-  (hasheq [this]
-    #?(:cljs (hash-unordered-coll this)
-       :clj (clojure.lang.Murmur3/hashUnordered this)))
+  (hasheq [this] (p/hash-unordered this))
 
   clojure.lang.IFn
   (invoke [this k] (hamt-get sio__ root-off k nil))
@@ -921,36 +914,31 @@
 
   #?@(:cljs [IPrintWithWriter
              (-pr-writer [this writer _opts]
-               (do
-                 (-write writer "{")
-                 (let [s (seq this)]
-                   (when s
-                     (loop [[[k v] & more] s first? true]
-                       (when-not first? (-write writer ", "))
-                       (-write writer (pr-str k))
-                       (-write writer " ")
-                       (-write writer (pr-str v))
-                       (when more (recur more false)))))
-                 (-write writer "}")))])
+                         (do
+                           (-write writer "{")
+                           (let [s (seq this)]
+                             (when s
+                               (loop [[[k v] & more] s first? true]
+                                 (when-not first? (-write writer ", "))
+                                 (-write writer (pr-str k))
+                                 (-write writer " ")
+                                 (-write writer (pr-str v))
+                                 (when more (recur more false)))))
+                           (-write writer "}")))])
 
   d/IDirectSerialize
-  (-direct-serialize [this]
-    #?(:cljs (ser/encode-sab-pointer ser/FAST_TAG_SAB_MAP (.-offset__ this))
-       :clj offset__))
+  (-direct-serialize [this] offset__)
 
   d/ISabStorable
-  (-sab-tag [_] :eve-hash-map)
-  (-sab-encode [this _]
-    (d/-direct-serialize this))
+  (-sab-tag [_] :eve-map)
+  (-sab-encode [this _] #?(:cljs (ser/encode-eve-pointer this) :clj offset__))
   (-sab-dispose [_ _] nil)
 
   d/IsEve
   (-eve? [_] true)
 
   d/IEveRoot
-  (-root-header-off [this]
-    #?(:cljs (.-offset__ this)
-       :clj offset__))
+  (-root-header-off [this] offset__)
 
   ;; --- CLJ-only interfaces (no CLJS equivalent) ---
   #?@(:clj
@@ -958,17 +946,17 @@
 
        clojure.lang.IPersistentMap
        (entryAt [_ k]
-         (let [v (hamt-get sio__ root-off k ::absent)]
-           (when-not (identical? v ::absent)
-             (clojure.lang.MapEntry/create k v))))
+                (let [v (hamt-get sio__ root-off k ::absent)]
+                  (when-not (identical? v ::absent)
+                    (clojure.lang.MapEntry/create k v))))
        (assocEx [this k v]
-         (if (.containsKey this k)
-           (throw (RuntimeException. (str "Key already present: " k)))
-           (.assoc this k v)))
+                (if (.containsKey this k)
+                  (throw (RuntimeException. (str "Key already present: " k)))
+                  (.assoc this k v)))
 
        java.lang.Iterable
        (iterator [this]
-         (clojure.lang.SeqIterator. (.seq this)))
+                 (clojure.lang.SeqIterator. (.seq this)))
 
        java.util.Map
        (size [_] (int cnt))
@@ -986,21 +974,21 @@
        java.lang.Object
        (toString [this] (pr-str this))
        (equals [this other]
-         (clojure.lang.APersistentMap/mapEquals this other))
+               (clojure.lang.APersistentMap/mapEquals this other))
        (hashCode [this]
-         (clojure.lang.APersistentMap/mapHash this))]))
+                 (clojure.lang.APersistentMap/mapHash this))]))
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
-(defn- make-eve3-hash-map
+(defn- make-hash-map
   "Internal constructor: allocate header, create EveHashMap."
   [sio ^long cnt ^long root-off]
   (let [hdr (write-map-header! sio cnt root-off)]
     (EveHashMap. sio hdr)))
 
-(defn eve3-hash-map-from-header
+(defn hash-map-from-header
   "Reconstruct an EveHashMap from an existing header offset."
   ([sio ^long header-off]
    (EveHashMap. sio header-off)))
@@ -1008,8 +996,8 @@
 (defn empty-hash-map
   "Create an empty Eve hash map.
    0-arity: uses platform default sio.  1-arity: explicit sio."
-  ([]  (empty-hash-map #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
-  ([sio] (make-eve3-hash-map sio 0 NIL_OFFSET)))
+  ([] (empty-hash-map #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
+  ([sio] (make-hash-map sio 0 NIL_OFFSET)))
 
 (defn hash-map
   "Create an Eve hash map from key-value pairs.
@@ -1055,204 +1043,186 @@
      (defn enable-pool-track! [] nil)
      (defn disable-pool-track! [] nil)
 
-     ;; Register CLJS map → EveHashMap builder for convert-to-sab (mmap atoms)
-     (ser/register-cljs-to-sab-builder!
-       map?
-       (fn [m] (into-hash-map (alloc/->CljsSlabIO) m)))
-
      ;; Register direct-map-encoder so serializer can handle plain CLJS maps
      (ser/set-direct-map-encoder!
-       (fn [m]
-         (let [sio (alloc/->CljsSlabIO)
-               eve-m (into-hash-map sio m)]
-           (ser/encode-sab-pointer ser/FAST_TAG_SAB_MAP (.-offset__ eve-m)))))
-
-     ;; Register SAB type constructor for deserialization (tag 0x10 = map)
-     (ser/register-sab-type-constructor!
-       ser/FAST_TAG_SAB_MAP
-       EveHashMap-type-id  ;; 0xED
-       (fn [_sab header-off]
-         (eve3-hash-map-from-header (alloc/->CljsSlabIO) header-off)))
-
-     ;; Register disposer for map root values
-     (ser/register-header-disposer! EveHashMap-type-id
-       (fn [slab-off] (dispose! (eve3-hash-map-from-header (alloc/->CljsSlabIO) slab-off))))))
+      (fn [m]
+        (let [sio (alloc/->CljsSlabIO)
+              eve-m (into-hash-map sio m)]
+          (ser/encode-eve-pointer eve-m))))))
 
 ;;=============================================================================
-;; CLJS-only: Free / Retire / Dispose
+;; Free / Retire / Dispose
 ;;=============================================================================
 
-#?(:cljs
-   (do
-     (defn- free-hamt-node!
-       "Recursively free a HAMT node and all its children via ISlabIO."
-       [sio slab-off]
-       (when (not= slab-off NIL_OFFSET)
-         (let [node-type (-sio-read-u8 sio slab-off 0)]
-           (case (int node-type)
+(defn- free-hamt-node!
+  "Recursively free a HAMT node and all its children via ISlabIO."
+  [sio slab-off]
+  (when (not= slab-off NIL_OFFSET)
+    (let [node-type (-sio-read-u8 sio slab-off 0)]
+      (case (int node-type)
              ;; Bitmap node — read children BEFORE freeing to avoid use-after-free
-             1 (let [node-bm (-sio-read-i32 sio slab-off 8)
-                     child-count (popcount32 node-bm)
-                     children (mapv #(-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* % 4)))
-                                    (range child-count))]
-                 (-sio-free! sio slab-off)
-                 (doseq [child-off children]
-                   (free-hamt-node! sio child-off)))
+        1 (let [node-bm (-sio-read-i32 sio slab-off 8)
+                child-count (popcount32 node-bm)
+                children (mapv #(-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* % 4)))
+                               (range child-count))]
+            (-sio-free! sio slab-off)
+            (doseq [child-off children]
+              (free-hamt-node! sio child-off)))
              ;; Collision node — no children
-             3 (-sio-free! sio slab-off)
+        3 (-sio-free! sio slab-off)
              ;; Unknown
-             (-sio-free! sio slab-off)))))
+        (-sio-free! sio slab-off)))))
 
-     (defn dispose!
-       "Dispose an EveHashMap, freeing its entire HAMT tree and header block."
-       [^js eve-map]
-       (let [sio (.-sio__ eve-map)
-             header-off (.-offset__ eve-map)
-             root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
-         (when (not= root-off NIL_OFFSET)
-           (free-hamt-node! sio root-off))
-         (when (not= header-off NIL_OFFSET)
-           (-sio-free! sio header-off))))
+(defn dispose!
+  "Dispose an EveHashMap, freeing its entire HAMT tree and header block."
+  [eve-map]
+  (let [sio (#?(:cljs .-sio__ :clj .sio__) eve-map)
+        header-off (#?(:cljs .-offset__ :clj .offset__) eve-map)
+        root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
+    (when (not= root-off NIL_OFFSET)
+      (free-hamt-node! sio root-off))
+    (when (not= header-off NIL_OFFSET)
+      (-sio-free! sio header-off))))
 
-     (defn retire-replaced-path!
-       "After an atom swap that replaced old-root with new-root, free the old
+(defn retire-replaced-path!
+  "After an atom swap that replaced old-root with new-root, free the old
         path nodes that are no longer referenced by the new tree.
         Walks both trees following the hash bits for key kh."
-       [sio old-root new-root kh]
-       (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
-         (loop [old-off old-root
-                new-off new-root
-                sh 0]
-           (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+  [sio old-root new-root kh]
+  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+    (loop [old-off old-root
+           new-off new-root
+           sh 0]
+      (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
              ;; Read data BEFORE freeing
-             (let [old-type (-sio-read-u8 sio old-off 0)
-                   [old-child new-child next-sh]
-                   (when (== old-type NODE_TYPE_BITMAP)
-                     (let [bit (bitpos kh sh)
-                           old-node-bm (-sio-read-i32 sio old-off 8)
-                           new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
-                           new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
-                                         (-sio-read-i32 sio new-off 8))]
-                       (when (and (has-bit? old-node-bm bit)
-                                  new-node-bm
-                                  (has-bit? new-node-bm bit))
-                         (let [old-child-idx (get-index old-node-bm bit)
-                               new-child-idx (get-index new-node-bm bit)]
-                           [(-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-child-idx 4)))
-                            (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-child-idx 4)))
-                            (+ sh SHIFT_STEP)]))))]
+        (let [old-type (-sio-read-u8 sio old-off 0)
+              [old-child new-child next-sh]
+              (when (== old-type NODE_TYPE_BITMAP)
+                (let [bit (bitpos kh sh)
+                      old-node-bm (-sio-read-i32 sio old-off 8)
+                      new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
+                      new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                                    (-sio-read-i32 sio new-off 8))]
+                  (when (and (has-bit? old-node-bm bit)
+                             new-node-bm
+                             (has-bit? new-node-bm bit))
+                    (let [old-child-idx (get-index old-node-bm bit)
+                          new-child-idx (get-index new-node-bm bit)]
+                      [(-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-child-idx 4)))
+                       (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-child-idx 4)))
+                       (+ sh SHIFT_STEP)]))))]
                ;; Free this old node
-               (-sio-free! sio old-off)
+          (-sio-free! sio old-off)
                ;; Continue down the hash path
-               (when old-child
-                 (recur old-child new-child next-sh)))))))
+          (when old-child
+            (recur old-child new-child next-sh)))))))
 
-     (defn retire-tree-diff!
-       "Full tree diff: walk old and new HAMT trees in parallel, freeing all
+(defn retire-tree-diff!
+  "Full tree diff: walk old and new HAMT trees in parallel, freeing all
         old nodes that differ from the new tree."
-       [sio old-root new-root]
-       (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
-         (letfn [(walk [old-off new-off]
-                   (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+  [sio old-root new-root]
+  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+    (letfn [(walk [old-off new-off]
+              (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
                      ;; Read children BEFORE freeing
-                     (let [old-type (-sio-read-u8 sio old-off 0)
-                           children-to-walk
-                           (when (== old-type NODE_TYPE_BITMAP)
-                             (let [old-node-bm (-sio-read-i32 sio old-off 8)
-                                   new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
-                                   new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
-                                                 (-sio-read-i32 sio new-off 8))]
-                               (loop [remaining old-node-bm
-                                      old-idx 0
-                                      result (transient [])]
-                                 (if (zero? remaining)
-                                   (persistent! result)
-                                   (let [bit (bit-and remaining (- remaining))
-                                         old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
-                                         new-child (if (and new-node-bm (has-bit? new-node-bm bit))
-                                                     (let [new-idx (get-index new-node-bm bit)]
-                                                       (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
-                                                     NIL_OFFSET)]
-                                     (recur (bit-and remaining (dec remaining))
-                                            (inc old-idx)
-                                            (conj! result [old-child new-child])))))))]
+                (let [old-type (-sio-read-u8 sio old-off 0)
+                      children-to-walk
+                      (when (== old-type NODE_TYPE_BITMAP)
+                        (let [old-node-bm (-sio-read-i32 sio old-off 8)
+                              new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
+                              new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                                            (-sio-read-i32 sio new-off 8))]
+                          (loop [remaining old-node-bm
+                                 old-idx 0
+                                 result (transient [])]
+                            (if (zero? remaining)
+                              (persistent! result)
+                              (let [bit (bit-and remaining (- remaining))
+                                    old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
+                                    new-child (if (and new-node-bm (has-bit? new-node-bm bit))
+                                                (let [new-idx (get-index new-node-bm bit)]
+                                                  (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
+                                                NIL_OFFSET)]
+                                (recur (bit-and remaining (dec remaining))
+                                       (inc old-idx)
+                                       (conj! result [old-child new-child])))))))]
                        ;; Free this old node
-                       (-sio-free! sio old-off)
+                  (-sio-free! sio old-off)
                        ;; Walk children
-                       (doseq [[old-child new-child] children-to-walk]
-                         (walk old-child new-child)))))]
-           (walk old-root new-root))))
+                  (doseq [[old-child new-child] children-to-walk]
+                    (walk old-child new-child)))))]
+      (walk old-root new-root))))
 
-     (defn collect-tree-diff-offsets
-       "Like retire-tree-diff! but COLLECTS slab-qualified offsets instead of freeing.
+(defn collect-tree-diff-offsets
+  "Like retire-tree-diff! but COLLECTS slab-qualified offsets instead of freeing.
         Returns a vector of old-tree node offsets that differ from new-tree."
-       [sio old-root new-root]
-       (if (or (== old-root NIL_OFFSET) (== old-root new-root))
-         []
-         (let [result (volatile! (transient []))]
-           (letfn [(walk [old-off new-off]
-                     (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
-                       (let [old-type (-sio-read-u8 sio old-off 0)
-                             children-to-walk
-                             (when (== old-type NODE_TYPE_BITMAP)
-                               (let [old-node-bm (-sio-read-i32 sio old-off 8)
-                                     new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
-                                     new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
-                                                   (-sio-read-i32 sio new-off 8))]
-                                 (loop [remaining old-node-bm
-                                        old-idx 0
-                                        pairs (transient [])]
-                                   (if (zero? remaining)
-                                     (persistent! pairs)
-                                     (let [bit (bit-and remaining (- remaining))
-                                           old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
-                                           new-child (if (and new-node-bm (has-bit? new-node-bm bit))
-                                                       (let [new-idx (get-index new-node-bm bit)]
-                                                         (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
-                                                       NIL_OFFSET)]
-                                       (recur (bit-and remaining (dec remaining))
-                                              (inc old-idx)
-                                              (conj! pairs [old-child new-child])))))))]
-                         (vswap! result conj! old-off)
-                         (doseq [[old-child new-child] children-to-walk]
-                           (walk old-child new-child)))))]
-             (walk old-root new-root))
-           (persistent! @result))))
+  [sio old-root new-root]
+  (if (or (== old-root NIL_OFFSET) (== old-root new-root))
+    []
+    (let [result (volatile! (transient []))]
+      (letfn [(walk [old-off new-off]
+                (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+                  (let [old-type (-sio-read-u8 sio old-off 0)
+                        children-to-walk
+                        (when (== old-type NODE_TYPE_BITMAP)
+                          (let [old-node-bm (-sio-read-i32 sio old-off 8)
+                                new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
+                                new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                                              (-sio-read-i32 sio new-off 8))]
+                            (loop [remaining old-node-bm
+                                   old-idx 0
+                                   pairs (transient [])]
+                              (if (zero? remaining)
+                                (persistent! pairs)
+                                (let [bit (bit-and remaining (- remaining))
+                                      old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
+                                      new-child (if (and new-node-bm (has-bit? new-node-bm bit))
+                                                  (let [new-idx (get-index new-node-bm bit)]
+                                                    (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
+                                                  NIL_OFFSET)]
+                                  (recur (bit-and remaining (dec remaining))
+                                         (inc old-idx)
+                                         (conj! pairs [old-child new-child])))))))]
+                    (vswap! result conj! old-off)
+                    (doseq [[old-child new-child] children-to-walk]
+                      (walk old-child new-child)))))]
+        (walk old-root new-root))
+      (persistent! @result))))
 
-     (defn collect-retire-diff-offsets
-       "Collect all slab offsets that would be freed by -sab-retire-diff!.
-        Includes both HAMT tree nodes and the header block.
-        Returns a vector of offsets to free when the epoch is safe."
-       [^js old-map new-value]
-       (let [sio (.-sio__ old-map)
-             header-off (.-offset__ old-map)
-             root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
-         (if (instance? EveHashMap new-value)
-           (let [new-header (.-offset__ new-value)
-                 other-root (-sio-read-i32 sio new-header SABMAPROOT_ROOT_OFF_OFFSET)
-                 node-offsets (collect-tree-diff-offsets sio root-off other-root)]
-             (if (not= header-off NIL_OFFSET)
-               (conj node-offsets header-off)
-               node-offsets))
-           ;; Not an EveHashMap — collect entire tree for disposal
-           (let [tree-offsets (volatile! (transient []))]
-             (when (not= root-off NIL_OFFSET)
-               (letfn [(collect-all [slab-off]
-                         (when (not= slab-off NIL_OFFSET)
-                           (let [node-type (-sio-read-u8 sio slab-off 0)
-                                 children (when (== node-type NODE_TYPE_BITMAP)
-                                            (let [node-bm (-sio-read-i32 sio slab-off 8)
-                                                  cc (popcount32 node-bm)]
-                                              (mapv #(-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* % 4)))
-                                                    (range cc))))]
-                             (vswap! tree-offsets conj! slab-off)
-                             (doseq [child children]
-                               (collect-all child)))))]
-                 (collect-all root-off)))
-             (let [offs (persistent! @tree-offsets)]
-               (if (not= header-off NIL_OFFSET)
-                 (conj offs header-off)
-                 offs))))))))
+(defn collect-retire-diff-offsets
+  "Collect all slab offsets that would be freed by -sab-retire-diff!.
+   Includes both HAMT tree nodes and the header block.
+   Returns a vector of offsets to free when the epoch is safe."
+  [old-map new-value]
+  (let [sio (#?(:cljs .-sio__ :clj .sio__) old-map)
+        header-off (#?(:cljs .-offset__ :clj .offset__) old-map)
+        root-off (-sio-read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
+    (if (instance? EveHashMap new-value)
+      (let [new-header (#?(:cljs .-offset__ :clj .offset__) new-value)
+            other-root (-sio-read-i32 sio new-header SABMAPROOT_ROOT_OFF_OFFSET)
+            node-offsets (collect-tree-diff-offsets sio root-off other-root)]
+        (if (not= header-off NIL_OFFSET)
+          (conj node-offsets header-off)
+          node-offsets))
+      ;; Not an EveHashMap — collect entire tree for disposal
+      (let [tree-offsets (volatile! (transient []))]
+        (when (not= root-off NIL_OFFSET)
+          (letfn [(collect-all [slab-off]
+                    (when (not= slab-off NIL_OFFSET)
+                      (let [node-type (-sio-read-u8 sio slab-off 0)
+                            children (when (== node-type NODE_TYPE_BITMAP)
+                                       (let [node-bm (-sio-read-i32 sio slab-off 8)
+                                             cc (popcount32 node-bm)]
+                                         (mapv #(-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* % 4)))
+                                               (range cc))))]
+                        (vswap! tree-offsets conj! slab-off)
+                        (doseq [child children]
+                          (collect-all child)))))]
+            (collect-all root-off)))
+        (let [offs (persistent! @tree-offsets)]
+          (if (not= header-off NIL_OFFSET)
+            (conj offs header-off)
+            offs))))))
 
 ;;=============================================================================
 ;; CLJS-only: HAMT Validation
@@ -1363,20 +1333,19 @@
 ;; CLJS-only: ISabRetirable
 ;;=============================================================================
 
-#?(:cljs
-   (extend-type EveHashMap
-     d/ISabRetirable
-     (-sab-retire-diff! [this new-value _slab-env mode]
-       (let [sio (.-sio__ this)
-             old-root (-sio-read-i32 sio (.-offset__ this) SABMAPROOT_ROOT_OFF_OFFSET)]
-         (if (instance? EveHashMap new-value)
-           (let [new-root (-sio-read-i32 sio (.-offset__ new-value) SABMAPROOT_ROOT_OFF_OFFSET)]
-             (retire-tree-diff! sio old-root new-root))
-           (when (not= old-root NIL_OFFSET)
-             (free-hamt-node! sio old-root)))
-         ;; Free the header block
-         (when (not= (.-offset__ this) NIL_OFFSET)
-           (-sio-free! sio (.-offset__ this)))))))
+(extend-type EveHashMap
+  d/ISabRetirable
+  (-sab-retire-diff! [this new-value _slab-env mode]
+    (let [sio (#?(:cljs .-sio__ :clj .sio__) this)
+          old-root (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) this) SABMAPROOT_ROOT_OFF_OFFSET)]
+      (if (instance? EveHashMap new-value)
+        (let [new-root (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) SABMAPROOT_ROOT_OFF_OFFSET)]
+          (retire-tree-diff! sio old-root new-root))
+        (when (not= old-root NIL_OFFSET)
+          (free-hamt-node! sio old-root)))
+      ;; Free the header block
+      (when (not= (#?(:cljs .-offset__ :clj .offset__) this) NIL_OFFSET)
+        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this))))))
 
 ;;=============================================================================
 ;; Registration
@@ -1386,31 +1355,23 @@
    (do
      ;; Register collection writer so mem/value+sio->eve-bytes routes maps here
      (register-jvm-collection-writer! :map
-       (fn [_sio _serialize-elem m]
+                                      (fn [_sio _serialize-elem m]
          ;; Build HAMT from Clojure map, return header offset
-         (let [sio alloc/*jvm-slab-ctx*
-               entries (map (fn [[k v]]
-                              (let [kb (value->eve-bytes k)
-                                    kh (portable-hash-bytes kb)
-                                    vb (value+sio->eve-bytes v)]
-                                [kh kb vb]))
-                            m)]
-           (if (empty? entries)
-             (write-map-header! sio 0 NIL_OFFSET)
+                                        (let [sio alloc/*jvm-slab-ctx*
+                                              entries (map (fn [[k v]]
+                                                             (let [kb (value->eve-bytes k)
+                                                                   kh (portable-hash-bytes kb)
+                                                                   vb (value+sio->eve-bytes v)]
+                                                               [kh kb vb]))
+                                                           m)]
+                                          (if (empty? entries)
+                                            (write-map-header! sio 0 NIL_OFFSET)
              ;; Build HAMT from entries
-             (let [root-off (reduce (fn [root [kh kb vb]]
-                                      (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
-                                        new-root))
-                                    NIL_OFFSET entries)]
-               (write-map-header! sio (count m) root-off))))))
-
-     ;; Register type constructor by pointer tag (0x10) and header type-id (0xED)
-     (ser/register-jvm-type-constructor! 0x10 EveHashMap-type-id
-       (fn [header-off]
-         (eve3-hash-map-from-header alloc/*jvm-slab-ctx* header-off)))
-
-     (defmethod print-method EveHashMap [m ^java.io.Writer w]
-       (#'clojure.core/print-map m print-method w))
+                                            (let [root-off (reduce (fn [root [kh kb vb]]
+                                                                     (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
+                                                                       new-root))
+                                                                   NIL_OFFSET entries)]
+                                              (write-map-header! sio (count m) root-off))))))
 
      ;; Backward-compat JVM aliases
      (defn jvm-write-map!
@@ -1425,8 +1386,23 @@
        "Reconstruct an EveHashMap from a header offset.
         Backward-compat alias. coll-factory arg is ignored (registry-based)."
        ([header-off]
-        (eve3-hash-map-from-header alloc/*jvm-slab-ctx* header-off))
+        (hash-map-from-header alloc/*jvm-slab-ctx* header-off))
        ([sio header-off]
-        (eve3-hash-map-from-header sio header-off))
+        (hash-map-from-header sio header-off))
        ([sio header-off _coll-factory]
-        (eve3-hash-map-from-header sio header-off)))))
+        (hash-map-from-header sio header-off)))))
+
+;; Type constructor + disposer + builder registrations
+(eve/register-eve-type!
+ {:fast-tag ser/FAST_TAG_SAB_MAP
+  :type-id EveHashMap-type-id
+  :from-header hash-map-from-header
+  :dispose dispose!
+  :builder-pred map?
+  :builder-ctor into-hash-map
+  :print-fn #?(:clj (fn [] (defmethod print-method EveHashMap [m ^java.io.Writer w]
+                             (#'clojure.core/print-map m print-method w)))
+               :cljs nil)})
+
+;; Backward-compat aliases
+(def eve3-hash-map-from-header hash-map-from-header)

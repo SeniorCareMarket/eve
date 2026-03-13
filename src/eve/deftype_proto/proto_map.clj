@@ -112,7 +112,28 @@
      :clj-only? true
      :methods {toString {:cljs-name nil :arities [[_]]}
                equals   {:cljs-name nil :arities [[_ other]]}
-               hashCode {:cljs-name nil :arities [[_]]}}}})
+               hashCode {:cljs-name nil :arities [[_]]}}}
+
+    java.util.List
+    {:cljs-proto nil
+     :clj-only? true
+     :methods {size          {:cljs-name nil :arities [[_]]}
+               isEmpty       {:cljs-name nil :arities [[_]]}
+               get           {:cljs-name nil :arities [[_ i]]}
+               indexOf       {:cljs-name nil :arities [[_ o]]}
+               lastIndexOf   {:cljs-name nil :arities [[_ o]]}
+               toArray       {:cljs-name nil :arities [[_]]}
+               contains      {:cljs-name nil :arities [[_ o]]}
+               containsAll   {:cljs-name nil :arities [[_ c]]}
+               subList       {:cljs-name nil :arities [[_ from to]]}
+               listIterator  {:cljs-name nil :arities [[_] [_ i]]}
+               set           {:cljs-name nil :arities [[_ _ _]]}
+               add           {:cljs-name nil :arities [[_ _] [_ _ _]]}
+               remove        {:cljs-name nil :arities [[_ _]]}
+               addAll        {:cljs-name nil :arities [[_ _] [_ _ _]]}
+               removeAll     {:cljs-name nil :arities [[_ _]]}
+               retainAll     {:cljs-name nil :arities [[_ _]]}
+               clear         {:cljs-name nil :arities [[_]]}}}})
 
 (defn lookup [iface-sym]
   (get jvm->cljs iface-sym))

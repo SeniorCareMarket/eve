@@ -1,5 +1,5 @@
-(ns eve.deftype-proto.eve3-deftype.registry
-  "Compile-time type registry for eve3-deftype macro.
+(ns eve.deftype-proto.macros.registry
+  "Compile-time type registry for eve/deftype macro.
    Handles field parsing, layout computation, and type ID allocation.")
 
 (defonce registry (atom {}))
