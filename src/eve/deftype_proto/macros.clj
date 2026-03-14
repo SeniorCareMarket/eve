@@ -345,8 +345,27 @@
   [type-name fields & body]
   (let [parsed-fields (mapv reg/parse-field fields)
         {:keys [fields total-size]} (reg/compute-layout parsed-fields)
-        resolved-var (resolve (symbol (str (name type-name) "-type-id")))
-        type-id (or (when resolved-var (deref resolved-var))
+        type-id-sym (symbol (str (name type-name) "-type-id"))
+        ;; Resolve existing type-id def: CLJ uses `resolve`, CLJS checks the
+        ;; analyzer's namespace :defs (because CLJ `resolve` cannot see CLJS vars).
+        resolved-var (if (:ns &env)
+                       ;; CLJS: look up in the analyzer's namespace defs
+                       (when-let [compiler-env (some-> (find-ns 'cljs.env)
+                                                       (ns-resolve '*compiler*)
+                                                       deref)]
+                         (let [ns-sym (-> &env :ns :name)]
+                           (get-in @compiler-env
+                                   [:cljs.analyzer/namespaces ns-sym :defs type-id-sym])))
+                       ;; CLJ: standard resolve
+                       (resolve type-id-sym))
+        ;; For CLJS analyzer defs, the value lives under :init :val (for const literals)
+        ;; or we fall back to the auto-incrementing counter.
+        type-id (or (when resolved-var
+                      (if (:ns &env)
+                        ;; CLJS: extract literal init value from analyzer def info
+                        (get-in resolved-var [:init :val])
+                        ;; CLJ: deref the var
+                        (deref resolved-var)))
                     (reg/next-type-id!))
         ;; Only emit (def TypeName-type-id ...) if not already defined
         emit-type-id-def? (nil? resolved-var)
