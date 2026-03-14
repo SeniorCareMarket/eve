@@ -301,14 +301,15 @@
                        [(list (symbol (str (name type-name) ".")) env-sym offset-sym)]))))
         ]
     `(do
-       ;; The real deftype (creates auto-generated ->TypeName)
-       (~'cljs.core/deftype ~type-name [~env-sym ~off-sym]
+       ;; The real deftype — using bare deftype (not cljs.core/deftype) so the
+       ;; subsequent defn cleanly replaces the auto-generated ->TypeName without
+       ;; clashing with the fully-qualified form's stronger binding.
+       (~'deftype ~type-name [~env-sym ~off-sym]
          ~@boilerplate
          ~@transformed-protos)
 
-       ;; Override the auto-generated 2-arg constructor with our custom one
-       ;; that takes field values. Using defn so the compiler sees the correct arity.
-       ;; This causes :redef-in-file warnings but eliminates ~101 :fn-arity warnings.
+       ;; Constructor: takes user-facing field values, allocates in SAB,
+       ;; writes fields, returns the constructed instance.
        (~'defn ~ctor-name [~env-sym ~@ctor-args] ~ctor-body)
 
        ;; Return the type name
