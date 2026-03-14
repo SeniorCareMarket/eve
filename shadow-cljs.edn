@@ -5,7 +5,10 @@
   :eve-test
   {:target :node-script
    :main eve.runner.eve-test-main/main
-   :output-to "target/eve-test/all.js"}
+   :output-to "target/eve-test/all.js"
+   ;; redef-in-file: expected from eve-deftype macro (defn ->Ctor replaces deftype-generated one)
+   ;; undeclared-var: expected in test runner (namespace aliases used as anti-DCE values)
+   :compiler-options {:warnings {:redef-in-file false :undeclared-var false}}}
 
   ;; Standalone mmap-atom worker for cross-process e2e tests
   :mmap-worker
