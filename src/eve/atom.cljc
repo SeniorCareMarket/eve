@@ -840,21 +840,22 @@
    If domain files already exist, joins them. Otherwise creates new ones.
    Caches domains by path — subsequent calls with the same path return the
    same domain. Returns an MmapAtomDomain. Use close-atom-domain! to release."
-  [base-path & {:keys [capacities] :or {capacities {}}}]
+  [base-path & {:keys [capacities lustre?] :or {capacities {} lustre? false}}]
   (or (get @domain-cache base-path)
-      (let [exists? (domain-files-exist? base-path)
-            d #?(:cljs (MmapAtomDomain.
-                         (if exists?
-                           (cljs-join-mmap-domain! base-path)
-                           (cljs-open-mmap-domain! base-path :capacities capacities))
-                         (cljs.core/atom {}))
-                 :clj  (MmapAtomDomain.
-                         (if exists?
-                           (jvm-join-mmap-domain! base-path)
-                           (jvm-open-mmap-domain! base-path :capacities capacities))
-                         (clojure.core/atom {})))]
-        (swap! domain-cache assoc base-path d)
-        d)))
+      (binding [mem/*lustre-mode* lustre?]
+        (let [exists? (domain-files-exist? base-path)
+              d #?(:cljs (MmapAtomDomain.
+                           (if exists?
+                             (cljs-join-mmap-domain! base-path)
+                             (cljs-open-mmap-domain! base-path :capacities capacities))
+                           (cljs.core/atom {}))
+                   :clj  (MmapAtomDomain.
+                           (if exists?
+                             (jvm-join-mmap-domain! base-path)
+                             (jvm-open-mmap-domain! base-path :capacities capacities))
+                           (clojure.core/atom {})))]
+          (swap! domain-cache assoc base-path d)
+          d))))
 
 (defn join-atom-domain
   "Join an existing mmap-backed atom domain at base-path.
@@ -1024,12 +1025,14 @@
 (defn- resolve-domain
   "Resolve which domain to use for a persistent-atom call.
    :persistent in opts → open/join that path.
+   :lustre? in opts → use fcntl byte-range locking for cross-node atomics.
    Otherwise → *global-persistent-atom-domain* or lazy default at ./eve/."
   [opts]
-  (if-let [path (:persistent opts)]
-    (persistent-atom-domain path)
-    (or *global-persistent-atom-domain*
-        (persistent-atom-domain "./eve/"))))
+  (let [lustre? (:lustre? opts false)]
+    (if-let [path (:persistent opts)]
+      (persistent-atom-domain path :lustre? lustre?)
+      (or *global-persistent-atom-domain*
+          (persistent-atom-domain "./eve/" :lustre? lustre?)))))
 
 (def ^:private anon-counter
   "Auto-incrementing counter for anonymous persistent atoms."

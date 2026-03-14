@@ -44,7 +44,8 @@
    [eve.mmap-domain-test :as mmap-domain-test]
    [eve.conformance-test :as conformance-test]
    [eve.fuzz-test :as fuzz-test]
-   ))
+   [eve.lustre-test :as lustre-test]
+   [eve.lustre-bench :as lustre-bench]))
 
 ;; Anti-DCE exports — namespace aliases as values force the test namespaces to load.
 ;; The undeclared-var warnings here are expected and harmless.
@@ -72,6 +73,8 @@
 (goog/exportSymbol "eve.mmap_domain_test" mmap-domain-test)
 (goog/exportSymbol "eve.conformance_test" conformance-test)
 (goog/exportSymbol "eve.fuzz_test" fuzz-test)
+(goog/exportSymbol "eve.lustre_test" lustre-test)
+(goog/exportSymbol "eve.lustre_bench" lustre-bench)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -202,6 +205,13 @@
 (defn- run-fuzz! []
   (t/run-tests 'eve.fuzz-test))
 
+(defn- run-lustre! []
+  (load-native-addon!)
+  (t/run-tests 'eve.lustre-test))
+
+(defn- run-lustre-bench! []
+  (load-native-addon!)
+  (lustre-bench/run-all-benches!))
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -244,6 +254,8 @@
    "mmap-domain"   run-mmap-domain!
    "conformance"   run-conformance!
    "fuzz"          run-fuzz!
+   "lustre"        run-lustre!
+   "lustre-bench"  run-lustre-bench!
    "all"           run-all!
    ;; Aliases
    "map-test"        run-slab!
@@ -258,7 +270,7 @@
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "obj"
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
-   "mmap-domain" "conformance" "fuzz"])
+   "mmap-domain" "conformance" "fuzz" "lustre" "lustre-bench"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]
