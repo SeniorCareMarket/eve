@@ -21,13 +21,12 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
-                                 mask-hash bitpos has-bit? get-index]]
+                                 bitpos has-bit? get-index]]
    [eve.platform :as p]
    #?@(:clj [[eve.deftype-proto.macros :as eve]
              [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                       value+sio->eve-bytes
-                                      register-jvm-collection-writer!]]
-             [eve.perf :as perf]]))
+                                      register-jvm-collection-writer!]]]))
   #?(:cljs (:require-macros [eve.deftype-proto.macros :as eve])))
 
 ;;=============================================================================

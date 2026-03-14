@@ -313,11 +313,6 @@
 (def ^:private kw-deser-cache (js/Map.))
 (def ^:const ^:private KW_DESER_CACHE_MAX 16384)
 
-(defn clear-deser-caches!
-  "Clear deserialization caches. Call when SAB environment is replaced."
-  []
-  (.clear kw-deser-cache))
-
 ;; Reusable scratch buffers for fixed-size numeric types.
 ;; Two buffers allow key and value to be serialized simultaneously.
 ;; Max fixed-size is 19 bytes (UUID), so 32 bytes is generous.
