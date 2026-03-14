@@ -822,7 +822,7 @@
 
 (declare make-hash-map)
 
-(eve/deftype ^{:type-id 0xED} EveHashMap [^:int32 cnt ^:int32 root-off]
+(eve/deftype EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Unified protocols (CLJ names) ---
 
   clojure.lang.Counted

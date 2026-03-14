@@ -12,6 +12,7 @@
      (eve/deftype EvePoint [^:int32 x ^:int32 y]
        clojure.lang.Counted
        (count [_] 2))"
+  (:refer-clojure :exclude [deftype])
   (:require [eve.deftype-proto.proto-map :as pm]
             [eve.deftype-proto.macros.registry :as reg]
             [eve.deftype-proto.data :as d]))
@@ -339,20 +340,16 @@
    Field reads emit ISlabIO protocol calls on both platforms.
 
    Type-id resolution (in priority order):
-     1. ^{:type-id 0xNN} metadata on type-name (explicit override)
-     2. (def TypeName-type-id ...) in same namespace (convention lookup)
-     3. Auto-assigned from incrementing counter (for user types)"
+     1. (def TypeName-type-id ...) in same namespace (convention lookup)
+     2. Auto-assigned from incrementing counter (for user types)"
   [type-name fields & body]
   (let [parsed-fields (mapv reg/parse-field fields)
         {:keys [fields total-size]} (reg/compute-layout parsed-fields)
         resolved-var (resolve (symbol (str (name type-name) "-type-id")))
-        type-id (or (:type-id (clojure.core/meta type-name))
-                    (when resolved-var (deref resolved-var))
+        type-id (or (when resolved-var (deref resolved-var))
                     (reg/next-type-id!))
         ;; Only emit (def TypeName-type-id ...) if not already defined
-        ;; and not provided via metadata
-        emit-type-id-def? (and (nil? resolved-var)
-                               (nil? (:type-id (clojure.core/meta type-name))))
+        emit-type-id-def? (nil? resolved-var)
         type-key (str (ns-name *ns*) "/" (name type-name))
         _ (reg/register-type! (name type-name)
                               {:type-id type-id

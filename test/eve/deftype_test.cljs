@@ -1,6 +1,6 @@
 (ns eve.deftype-test
   "Tests for eve/deftype macro: field reads, writes, protocols, Fressian."
-  (:require-macros [eve.alpha :refer [deftype extend-type]])
+  (:require-macros [eve.alpha :refer [extend-type]])
   (:require
    [cljs.test :refer [deftest testing is]]
    [eve.alpha :as eve]
