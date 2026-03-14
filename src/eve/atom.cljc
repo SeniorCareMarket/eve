@@ -10,29 +10,46 @@
    Phase 7: universal root types (any Eve collection, scalar, or nil).
    Phase 6 extends: epoch GC, cross-process acceptance test."
   (:refer-clojure :exclude [atom])
-  (:require
-   [eve.deftype-proto.coalesc :as coalesc]
-   [eve.deftype-proto.data :as d]
-   [eve.deftype-proto.alloc :as alloc]
-   [eve.deftype-proto.serialize :as ser]
-   [eve.mem :as mem]
-   #?@(:cljs [[eve.map :as eve-map]
-              [eve.vec]
-              [eve.set]
-              [eve.list]]
-       :bb [[eve.map :as eve-map]
-            [eve.set :as eve-set]
-            [eve.vec :as eve-vec]
-            [eve.list :as eve-list]
-            [eve.perf :as perf]]
-       :clj [[eve.map :as eve-map]
-             [eve.set]
-             [eve.vec]
-             [eve.list]
-             [eve.array :as eve-array]
-             [eve.obj :as eve-obj]
-             [eve.perf :as perf]]))
-  #?(:clj (:import [eve.map EveHashMap])))
+  #?(:bb
+     (:require
+      [eve.deftype-proto.coalesc :as coalesc]
+      [eve.deftype-proto.data :as d]
+      [eve.deftype-proto.alloc :as alloc]
+      [eve.deftype-proto.serialize :as ser]
+      [eve.mem :as mem]
+      [eve.map :as eve-map]
+      [eve.set :as eve-set]
+      [eve.vec :as eve-vec]
+      [eve.list :as eve-list]
+      [eve.perf :as perf])
+     :cljs
+     (:require
+      [eve.deftype-proto.coalesc :as coalesc]
+      [eve.deftype-proto.data :as d]
+      [eve.deftype-proto.alloc :as alloc]
+      [eve.deftype-proto.serialize :as ser]
+      [eve.mem :as mem]
+      [eve.map :as eve-map]
+      [eve.vec]
+      [eve.set]
+      [eve.list])
+     :clj
+     (:require
+      [eve.deftype-proto.coalesc :as coalesc]
+      [eve.deftype-proto.data :as d]
+      [eve.deftype-proto.alloc :as alloc]
+      [eve.deftype-proto.serialize :as ser]
+      [eve.mem :as mem]
+      [eve.map :as eve-map]
+      [eve.set]
+      [eve.vec]
+      [eve.list]
+      [eve.array :as eve-array]
+      [eve.obj :as eve-obj]
+      [eve.perf :as perf]))
+)
+
+#?(:bb nil :clj (import '[eve.map EveHashMap]))
 
 ;; ---------------------------------------------------------------------------
 ;; B2 constants
@@ -490,7 +507,7 @@
               {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
                :slot-idx slot-idx :heartbeat-sched nil
                :retire-q (java.util.LinkedList.)
-               :tree-logs {}
+               :tree-logs (java.util.HashMap.)
                :flush-ts (volatile! 0)
                :thread-epochs (clojure.core/atom {})
                :pin-lock (Object.)}
@@ -553,7 +570,7 @@
             {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
              :slot-idx slot-idx :heartbeat-sched nil
              :retire-q (java.util.LinkedList.)
-             :tree-logs {}
+             :tree-logs (java.util.HashMap.)
              :flush-ts (volatile! 0)
              :thread-epochs (clojure.core/atom {})
              :pin-lock (Object.)}
@@ -682,9 +699,7 @@
            (let [safe-epoch (mmap-min-safe-epoch root-r)
                  entries (java.util.ArrayList.)]
              (loop []
-               (when-let [e #?(:bb (when (seq retire-q) (let [e (first retire-q)]
-                                                          (.remove ^java.util.LinkedList retire-q 0)
-                                                          e))
+               (when-let [e #?(:bb (when (seq retire-q) (.removeFirst ^java.util.LinkedList retire-q))
                                :clj (.poll ^java.util.Queue retire-q))]
                  (.add entries e)
                  (recur)))
@@ -791,10 +806,12 @@
                                    (when (and (not= old-ptr alloc/NIL_OFFSET)
                                               (not= old-ptr CLAIMED_SENTINEL))
                                      #?(:bb
-                              ;; bb: simplified retire — just enqueue old-ptr + alloc-log
-                                        (.add ^java.util.List retire-q
-                                              {:offsets (or cur-log [old-ptr])
-                                               :epoch (inc new-epoch)})
+                              ;; bb: look up old tree's blocks from tree-logs, retire them
+                                        (let [old-key (Integer/valueOf (int old-ptr))
+                                              old-log (.remove ^java.util.HashMap tree-logs old-key)]
+                                          (.add ^java.util.List retire-q
+                                                {:offsets (or old-log [old-ptr])
+                                                 :epoch (inc new-epoch)}))
                                         :clj
                                         (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
                                 ;; Map->Map: replaced nodes were collected during path-copy
@@ -805,7 +822,12 @@
                                                                  (Integer/valueOf (int old-ptr)))]
                                             (.add ^java.util.Queue retire-q {:offsets (or old-log [old-ptr])
                                                                               :epoch (inc new-epoch)}))))))
-                       #?(:clj
+                       ;; Store new tree's alloc-log for future retire
+                       #?(:bb
+                          (when (and cur-log (not= new-ptr alloc/NIL_OFFSET))
+                            (.put ^java.util.HashMap tree-logs
+                                  (Integer/valueOf (int new-ptr)) cur-log))
+                          :clj
                           (when (and (not eve-passthru?) cur-log (not= new-ptr alloc/NIL_OFFSET))
                             (.put ^java.util.concurrent.ConcurrentHashMap tree-logs
                                   (Integer/valueOf (int new-ptr)) cur-log)))
@@ -846,8 +868,23 @@
 ;; MmapAtom — JVM / bb
 ;; ---------------------------------------------------------------------------
 
-#?(:cljs nil
-   :default
+#?(:bb
+   (deftype MmapAtom [domain-state atom-slot-idx]
+     clojure.lang.IDeref
+     (deref [_] (jvm-mmap-deref domain-state atom-slot-idx))
+     clojure.lang.IAtom
+     (swap [_ f] (jvm-mmap-swap! domain-state atom-slot-idx f []))
+     (swap [_ f a] (jvm-mmap-swap! domain-state atom-slot-idx f [a]))
+     (swap [_ f a b] (jvm-mmap-swap! domain-state atom-slot-idx f [a b]))
+     (swap [_ f a b xs] (jvm-mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
+     (reset [_ v] (jvm-mmap-swap! domain-state atom-slot-idx (constantly v) []))
+     (compareAndSet [_ old-val new-val]
+       (let [current (jvm-mmap-deref domain-state atom-slot-idx)]
+         (if (= current old-val)
+           (do (jvm-mmap-swap! domain-state atom-slot-idx (constantly new-val) []) true)
+           false))))
+   :cljs nil
+   :clj
    (deftype MmapAtom [domain-state atom-slot-idx]
      clojure.lang.IDeref
      (deref [_] (jvm-mmap-deref domain-state atom-slot-idx))
@@ -877,8 +914,12 @@
 ;; MmapAtomDomain — JVM / bb
 ;; ---------------------------------------------------------------------------
 
-#?(:cljs nil
-   :default
+#?(:bb
+   (deftype MmapAtomDomain [domain-state registry-cache]
+     clojure.lang.IDeref
+     (deref [_] (jvm-mmap-deref domain-state 0)))
+   :cljs nil
+   :clj
    (deftype MmapAtomDomain [domain-state registry-cache]
      clojure.lang.IDeref
      (deref [_] (jvm-mmap-deref domain-state 0))
@@ -888,6 +929,16 @@
        (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
          (MmapAtom. domain-state slot-idx)
          not-found))))
+
+(defn domain-lookup
+  "Look up an atom in a MmapAtomDomain by keyword (bb-compatible).
+   Use this instead of (:key domain) in Babashka."
+  ([domain k] (domain-lookup domain k nil))
+  ([domain k not-found]
+   (let [registry-cache (.-registry-cache domain)]
+     (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
+       (MmapAtom. (.-domain-state domain) slot-idx)
+       not-found))))
 
 ;; ---------------------------------------------------------------------------
 ;; Domain cache and file detection (must precede persistent-atom-domain)
@@ -1043,7 +1094,7 @@
     (let [a (MmapAtom. ds slot-idx)]
       (when (some? initial-val)
         #?(:cljs (-swap! a (constantly initial-val))
-           :default (.reset a initial-val)))
+           :default (swap! a (constantly initial-val))))
       a)))
 
 (defn lookup-or-create-mmap-atom!
@@ -1142,10 +1193,11 @@
     (lookup-or-create-mmap-atom! domain kw-str value)))
 
 ;; ---------------------------------------------------------------------------
-;; Heap-backed (non-persistent) atom — JVM only
+;; Heap-backed (non-persistent) atom — JVM only (not bb)
 ;; ---------------------------------------------------------------------------
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      (defn- jvm-open-heap-domain!
        "Create an in-memory (non-persistent) atom domain on JVM.

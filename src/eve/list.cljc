@@ -344,7 +344,8 @@
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      (register-jvm-collection-writer! :list
        (fn [sio serialize-val coll]

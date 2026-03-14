@@ -684,7 +684,8 @@
 ;; JVM implementations
 ;; ---------------------------------------------------------------------------
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      ;; sun.misc.Unsafe for atomic int32 ops over native memory.
      ;; Works on Java 21 (preview FFM) and Java 22+ (final FFM).
@@ -1229,7 +1230,8 @@
                 -1))
             (recur (inc word-idx) 0)))))))
 
-#?(:clj
+#?(:bb nil
+   :clj
    (defn imr-bitmap-find-free-bulk
      "Like imr-bitmap-find-free but reads the bitmap in one bulk -read-bytes call,
       then scans the local byte array. This avoids per-word fcntl lock overhead in

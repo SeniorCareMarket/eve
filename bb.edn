@@ -1,5 +1,4 @@
 {:paths ["src"]
- :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
  :tasks
  {atom-swap {:doc "Run bb atom swap example"
              :task (load-file "examples/bb_atom_swap.clj")}}}

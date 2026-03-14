@@ -1198,6 +1198,8 @@
         (walk old-root new-root))
       (persistent! @result))))
 
+#?(:bb nil
+   :default
 (defn collect-retire-diff-offsets
   "Collect all slab offsets that would be freed by -sab-retire-diff!.
    Includes both HAMT tree nodes and the header block.
@@ -1231,7 +1233,7 @@
         (let [offs (persistent! @tree-offsets)]
           (if (not= header-off NIL_OFFSET)
             (conj offs header-off)
-            offs))))))
+            offs)))))))
 
 ;;=============================================================================
 ;; CLJS-only: HAMT Validation
@@ -1342,6 +1344,8 @@
 ;; CLJS-only: ISabRetirable
 ;;=============================================================================
 
+#?(:bb nil
+   :default
 (extend-type EveHashMap
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
@@ -1354,13 +1358,14 @@
           (free-hamt-node! sio old-root)))
       ;; Free the header block
       (when (not= (#?(:cljs .-offset__ :clj .offset__) this) NIL_OFFSET)
-        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this))))))
+        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this)))))))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      ;; Register collection writer so mem/value+sio->eve-bytes routes maps here
      (register-jvm-collection-writer! :map

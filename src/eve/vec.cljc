@@ -201,9 +201,12 @@
 #?(:bb nil :default (declare make-vec-impl))
 
 ;;=============================================================================
-;; Conj / AssocN / Pop implementations
+;; Conj / AssocN / Pop implementations (used by EveVector deftype — not bb)
 ;;=============================================================================
 
+#?(:bb nil
+   :default
+(do
 (defn- vec-conj-impl [sio cnt shift root tail tail-len v]
   (let [val-bytes (serialize-element-bytes v)
         val-off (make-value-block! sio val-bytes)]
@@ -273,7 +276,8 @@
 
           new-toff (tail-offset-calc new-cnt)
           new-tl (- new-cnt new-toff)]
-      (make-vec-impl sio new-cnt new-shift new-root new-tail-off new-tl))))
+      (make-vec-impl sio new-cnt new-shift new-root new-tail-off new-tl)))) ;; end vec-pop-impl
+)) ;; end do, end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; Disposal helpers — recursive freeing for vector trees
@@ -636,7 +640,8 @@
 ;;=============================================================================
 
 ;; CLJ collection writer (too custom for macro generation)
-#?(:clj
+#?(:bb nil
+   :clj
    (register-jvm-collection-writer! :vec
      (fn [sio serialize-val coll]
        (let [elems (vec coll)
