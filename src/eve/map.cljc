@@ -23,7 +23,11 @@
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                  bitpos has-bit? get-index]]
    [eve.platform :as p]
-   #?@(:clj [[eve.deftype-proto.macros :as eve]
+   #?@(:bb [[eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
+                                     value+sio->eve-bytes
+                                     register-jvm-collection-writer!]]
+            [eve.perf :as perf]]
+       :clj [[eve.deftype-proto.macros :as eve]
              [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                       value+sio->eve-bytes
                                       register-jvm-collection-writer!]]]))
@@ -484,7 +488,7 @@
 ;; HAMT Assoc (unified)
 ;;=============================================================================
 
-(defn- hamt-assoc
+(defn hamt-assoc
   "Assoc key/value into HAMT. Returns [new-root added?]."
   [sio root-off kh kb vb shift]
   (if (== root-off NIL_OFFSET)
@@ -727,7 +731,7 @@
 ;; HAMT Seq / Reduce (unified)
 ;;=============================================================================
 
-(defn- hamt-kv-reduce
+(defn hamt-kv-reduce
   "Walk HAMT tree, calling (f acc k v) at each entry. Supports reduced?."
   [sio ^long root-off f init]
   (if (== root-off NIL_OFFSET)
@@ -795,7 +799,7 @@
 ;; Map header read/write
 ;;=============================================================================
 
-(defn- write-map-header!
+(defn write-map-header!
   "Allocate and write a 12-byte EveHashMap header. Returns slab offset."
   ^long [sio ^long cnt ^long root-off]
   (let [off (-sio-alloc! sio 12)]
@@ -806,7 +810,7 @@
     (-sio-write-i32! sio off SABMAPROOT_ROOT_OFF_OFFSET root-off)
     off))
 
-(defn- read-map-header
+(defn read-map-header
   "Read cnt and root-off from an EveHashMap header. Returns [cnt root-off]."
   [sio ^long header-off]
   [(-sio-read-i32 sio header-off SABMAPROOT_CNT_OFFSET)
@@ -819,8 +823,10 @@
 ;; Both platforms: deftype EveHashMap [sio__ offset__]
 ;;=============================================================================
 
-(declare make-hash-map)
+#?(:bb nil :default (declare make-hash-map))
 
+#?(:bb nil
+   :default
 (eve/deftype EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Unified protocols (CLJ names) ---
 
@@ -974,12 +980,16 @@
        (equals [this other]
                (clojure.lang.APersistentMap/mapEquals this other))
        (hashCode [this]
-                 (clojure.lang.APersistentMap/mapHash this))]))
+                 (clojure.lang.APersistentMap/mapHash this))])) ;; end eve/deftype
+) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
+#?(:bb nil
+   :default
+(do
 (defn- make-hash-map
   "Internal constructor: allocate header, create EveHashMap."
   [sio ^long cnt ^long root-off]
@@ -1020,7 +1030,8 @@
   ([sio coll]
    (reduce (fn [m [k v]] (assoc m k v))
            (empty-hash-map sio)
-           coll)))
+           coll))))
+) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; CLJS-only: mmap-mode? and debug helpers
@@ -1391,14 +1402,33 @@
         (hash-map-from-header sio header-off)))))
 
 ;; Type constructor + disposer + builder registrations
-(eve/register-eve-type!
- {:fast-tag ser/FAST_TAG_SAB_MAP
-  :type-id EveHashMap-type-id
-  :from-header hash-map-from-header
-  :dispose dispose!
-  :builder-pred map?
-  :builder-ctor into-hash-map
-  :print-fn #?(:clj (fn [] (defmethod print-method EveHashMap [m ^java.io.Writer w]
-                             (#'clojure.core/print-map m print-method w)))
-               :cljs nil)})
+#?(:bb
+   ;; bb: register collection writer only (no deftype, no registry constructors)
+   (register-jvm-collection-writer! :map
+                                    (fn [_sio _serialize-elem m]
+                                      (let [sio alloc/*jvm-slab-ctx*
+                                            entries (map (fn [[k v]]
+                                                           (let [kb (value->eve-bytes k)
+                                                                 kh (portable-hash-bytes kb)
+                                                                 vb (value+sio->eve-bytes sio v)]
+                                                             [kh kb vb]))
+                                                         m)]
+                                        (if (empty? entries)
+                                          (write-map-header! sio 0 NIL_OFFSET)
+                                          (let [root-off (reduce (fn [root [kh kb vb]]
+                                                                   (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
+                                                                     new-root))
+                                                                 NIL_OFFSET entries)]
+                                            (write-map-header! sio (count m) root-off))))))
+   :default
+   (eve/register-eve-type!
+    {:fast-tag ser/FAST_TAG_SAB_MAP
+     :type-id EveHashMap-type-id
+     :from-header hash-map-from-header
+     :dispose dispose!
+     :builder-pred map?
+     :builder-ctor into-hash-map
+     :print-fn #?(:clj (fn [] (defmethod print-method EveHashMap [m ^java.io.Writer w]
+                                (#'clojure.core/print-map m print-method w)))
+                  :cljs nil)}))
 

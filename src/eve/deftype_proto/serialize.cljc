@@ -94,7 +94,19 @@
 ;; JVM constructor registries  (mirrors CLJS sab-type-constructors)
 ;;-----------------------------------------------------------------------------
 
-#?(:clj
+#?(:bb
+   ;; Babashka stubs — bb uses direct dispatch in atom.cljc, not the registry.
+   ;; These stubs exist so collection namespaces can call register-* without error.
+   (do
+     (declare encode-eve-pointer)
+     (defn register-jvm-type-constructor!
+       ([_tag _ctor-fn] nil)
+       ([_tag _header-type-id _ctor-fn] nil))
+     (defn register-jvm-header-constructor! [_type-id _ctor-fn] nil)
+     (defn get-jvm-type-constructor [_tag] nil)
+     (defn get-jvm-header-constructor [_type-id-byte] nil))
+
+   :clj
    (do
 
 (declare encode-eve-pointer)

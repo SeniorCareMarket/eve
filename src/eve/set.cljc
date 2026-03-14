@@ -18,7 +18,10 @@
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                   bitpos has-bit? get-index]]
    [eve.platform :as p]
-   #?@(:clj  [[eve.deftype-proto.macros :as eve]
+   #?@(:bb  [[eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+                                      register-jvm-collection-writer!]]
+             [eve.perf :as perf]]
+       :clj [[eve.deftype-proto.macros :as eve]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
   #?(:cljs (:require-macros [eve.deftype-proto.macros :as eve])))
@@ -241,7 +244,7 @@
 ;; HAMT Conj (unified) — returns [new-root added?]
 ;;=============================================================================
 
-(defn- hamt-conj [sio root-off vh vb shift]
+(defn hamt-conj [sio root-off vh vb shift]
   (if (== root-off NIL_OFFSET)
     [(make-single-value-node! sio (bitpos vh shift) vb) true]
     (let [nt (-sio-read-u8 sio root-off 0)]
@@ -474,7 +477,7 @@
 ;; HAMT Reduce / Seq (unified)
 ;;=============================================================================
 
-(defn- hamt-val-reduce [sio root-off f init]
+(defn hamt-val-reduce [sio root-off f init]
   (if (== root-off NIL_OFFSET)
     init
     (let [nt (-sio-read-u8 sio root-off 0)]
@@ -521,7 +524,7 @@
 ;; Header read/write
 ;;=============================================================================
 
-(defn- write-set-header! [sio cnt root-off]
+(defn write-set-header! [sio cnt root-off]
   (let [off (-sio-alloc! sio 12)]
     (-sio-write-u8!  sio off 0 EveHashSet-type-id)
     (-sio-write-u8!  sio off 1 SET_FLAG_PORTABLE_HASH)
@@ -530,7 +533,7 @@
     (-sio-write-i32! sio off SABSETROOT_ROOT_OFF_OFFSET root-off)
     off))
 
-(defn- read-set-header [sio header-off]
+(defn read-set-header [sio header-off]
   [(-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
    (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)])
 
@@ -638,8 +641,12 @@
 ;; Both platforms: deftype EveHashSet [sio__ offset__]
 ;;=============================================================================
 
-(declare make-hash-set)
+#?(:bb nil
+   :default
+   (declare make-hash-set))
 
+#?(:bb nil
+   :default
 (eve/deftype EveHashSet [^:int32 cnt ^:int32 root-off]
   clojure.lang.Counted
   (count [_] #?(:cljs cnt :clj (int cnt)))
@@ -793,6 +800,7 @@
        (retainAll [_ _] (throw (UnsupportedOperationException.)))
        (removeAll [_ _] (throw (UnsupportedOperationException.)))
        (clear [_] (throw (UnsupportedOperationException.)))]))
+) ;; end #?(:bb nil :default ...) for deftype
 
 ;;=============================================================================
 ;; CLJS-only: 2-arity IReduce (reduce without init)
@@ -817,6 +825,8 @@
 ;; ISabRetirable
 ;;=============================================================================
 
+#?(:bb nil
+   :default
 (extend-type EveHashSet
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
@@ -829,12 +839,15 @@
           (free-hamt-node! sio old-root)))
       ;; Free the header block
       (when (not= (#?(:cljs .-offset__ :clj .offset__) this) NIL_OFFSET)
-        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this))))))
+        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this)))))))
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
+#?(:bb nil
+   :default
+(do
 (defn- make-hash-set
   "Internal constructor."
   [sio cnt root-off]
@@ -862,6 +875,7 @@
                      [(first args) (rest args)]
                      [default-sio args])]
     (reduce conj (empty-hash-set sio) vals)))
+)) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; Registration
@@ -897,6 +911,25 @@
        ([sio header-off] (hash-set-from-header sio header-off))
        ([sio header-off _coll-factory] (hash-set-from-header sio header-off)))))
 
+#?(:bb
+   ;; bb: register collection writer only (no deftype, no registry constructors)
+   (register-jvm-collection-writer! :set
+     (fn [_sio _serialize-elem coll]
+       (let [sio alloc/*jvm-slab-ctx*
+             entries (mapv (fn [v]
+                             (let [^bytes vb (value+sio->eve-bytes v)
+                                   vh (portable-hash-bytes vb)]
+                               [vh vb]))
+                           coll)]
+         (if (empty? entries)
+           (write-set-header! sio 0 NIL_OFFSET)
+           (let [root-off (reduce (fn [root [vh vb]]
+                                    (let [[new-root _] (hamt-conj sio root vh vb 0)]
+                                      new-root))
+                                  NIL_OFFSET entries)]
+             (write-set-header! sio (count coll) root-off))))))
+   :default
+(do
 (defn- into-hash-set
   "Build an EveHashSet from a Clojure set."
   ([coll] (into-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
@@ -913,6 +946,7 @@
    :print-fn    #?(:clj (fn [] (defmethod print-method EveHashSet [s ^java.io.Writer w]
                                   (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w)))
                    :cljs nil)})
+)) ;; end #?(:bb nil :default ...)
 
 
 ;; No-op pool stub — pool system removed, kept for backward compat
