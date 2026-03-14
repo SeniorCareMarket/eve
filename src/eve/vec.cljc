@@ -310,7 +310,7 @@
 ;; Fields are read from slab header via ISlabIO on each method call.
 ;;=============================================================================
 
-(eve/deftype EveVector
+(eve/deftype ^{:type-id 0x12} EveVector
   [^:int32 cnt ^:int32 shift ^:int32 root ^:int32 tail ^:int32 tail-len]
 
   clojure.lang.Sequential

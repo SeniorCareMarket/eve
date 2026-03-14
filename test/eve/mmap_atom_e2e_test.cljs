@@ -24,9 +24,9 @@
 (defn- base [tag] (str "/tmp/eve-p6-e2e" ts "-" tag))
 
 (defn- spawn [action & args]
-  (let [result (.spawnSync cp "node"
-                  (apply array worker-script action args)
-                  #js {:encoding "utf8" :timeout 15000})]
+  (let [^js result (.spawnSync ^js cp "node"
+                      (apply array worker-script action args)
+                      #js {:encoding "utf8" :timeout 15000})]
     {:exit   (.-status result)
      :stdout (.-stdout result)
      :stderr (.-stderr result)}))

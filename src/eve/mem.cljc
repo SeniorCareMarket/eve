@@ -277,52 +277,52 @@
          size)
 
        (-load-i32 [_ byte-off]
-         (.load32 (native) buf byte-off))
+         (.load32 ^js (native) buf byte-off))
 
        (-store-i32! [_ byte-off val]
-         (.store32 (native) buf byte-off val)
+         (.store32 ^js (native) buf byte-off val)
          nil)
 
        (-cas-i32! [_ byte-off expected desired]
          ;; Native cas32 returns the *old* value — same contract as Atomics.compareExchange
-         (.cas32 (native) buf byte-off expected desired))
+         (.cas32 ^js (native) buf byte-off expected desired))
 
        (-add-i32! [_ byte-off delta]
-         (.add32 (native) buf byte-off delta))
+         (.add32 ^js (native) buf byte-off delta))
 
        (-sub-i32! [_ byte-off delta]
-         (.sub32 (native) buf byte-off delta))
+         (.sub32 ^js (native) buf byte-off delta))
 
        (-exchange-i32! [_ byte-off val]
          ;; Simulate exchange via CAS loop (native addon may not expose exchange32).
          (loop []
-           (let [old (.load32 (native) buf byte-off)]
-             (if (== old (.cas32 (native) buf byte-off old val))
+           (let [old (.load32 ^js (native) buf byte-off)]
+             (if (== old (.cas32 ^js (native) buf byte-off old val))
                old
                (recur)))))
 
        (-load-i64 [_ byte-off]
-         (.load64 (native) buf byte-off))
+         (.load64 ^js (native) buf byte-off))
 
        (-store-i64! [_ byte-off val]
-         (.store64 (native) buf byte-off val)
+         (.store64 ^js (native) buf byte-off val)
          nil)
 
        (-cas-i64! [_ byte-off expected desired]
-         (.cas64 (native) buf byte-off expected desired))
+         (.cas64 ^js (native) buf byte-off expected desired))
 
        (-add-i64! [_ byte-off delta]
-         (.add64 (native) buf byte-off delta))
+         (.add64 ^js (native) buf byte-off delta))
 
        (-sub-i64! [_ byte-off delta]
-         (.sub64 (native) buf byte-off delta))
+         (.sub64 ^js (native) buf byte-off delta))
 
        (-wait-i32! [_ byte-off expected timeout-ms]
          ;; Native wait32 returns "ok" | "not-equal" | "timed-out"
-         (wait-result->kw (.wait32 (native) buf byte-off expected timeout-ms)))
+         (wait-result->kw (.wait32 ^js (native) buf byte-off expected timeout-ms)))
 
        (-notify-i32! [_ byte-off n]
-         (.notify32 (native) buf byte-off n))
+         (.notify32 ^js (native) buf byte-off n))
 
        (-supports-watch? [_] false)
 
@@ -347,7 +347,7 @@
         Example:
           (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))"
        [path size-bytes]
-       (let [buf (.open (native) path size-bytes)]
+       (let [buf (.open ^js (native) path size-bytes)]
          (NodeMmapRegion. buf size-bytes)))))
 
 ;; ---------------------------------------------------------------------------

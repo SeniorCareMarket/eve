@@ -256,12 +256,13 @@
             (list '-hash ['_] (list 'hash off-sym))])
          ;; IEquiv
          (when-not (user-provides-protocol? parsed-protos 'IEquiv)
-           ['IEquiv
-            (list '-equiv ['_ 'other]
-                  (list 'and
-                        (list 'instance? type-name 'other)
-                        (list 'identical? env-sym (list '.-eve-env 'other))
-                        (list '== off-sym (list '.-eve-offset 'other))))])
+           (let [other-js (with-meta 'other {:tag 'js})]
+             ['IEquiv
+              (list '-equiv ['_ 'other]
+                    (list 'and
+                          (list 'instance? type-name 'other)
+                          (list 'identical? env-sym (list '.-eve-env other-js))
+                          (list '== off-sym (list '.-eve-offset other-js))))]))
          ;; IPrintWithWriter
          (when-not (user-provides-protocol? parsed-protos 'IPrintWithWriter)
            (let [print-body
@@ -306,8 +307,9 @@
          ~@transformed-protos)
 
        ;; Override the auto-generated constructor with our custom one
-       ;; that takes field values instead of raw env/offset
-       (~'set! ~ctor-name (~'fn [~env-sym ~@ctor-args] ~ctor-body))
+       ;; that takes field values instead of raw env/offset.
+       ;; Using defn (not set!) so the compiler sees the correct arity.
+       (~'defn ~ctor-name [~env-sym ~@ctor-args] ~ctor-body)
 
        ;; Return the type name
        ~type-name)))

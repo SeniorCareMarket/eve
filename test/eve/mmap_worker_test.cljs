@@ -24,7 +24,7 @@
                                     :workerData #js{:p addon-path
                                                     :f path}})]
       (.on w "message"
-           (fn [msg]
+           (fn [^js msg]
              (is (= "ok" (.-r msg)) "wait32 returned ok")
              (is (= 999  (.-v msg)) "new value 999 visible in worker")
              (.unlinkSync fs path)

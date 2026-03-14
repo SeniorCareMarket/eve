@@ -533,7 +533,7 @@
    This is the key abstraction that hides SAB from users."
   []
   (when-let [global-atom atom/*global-atom-instance*]
-    (.-s-atom-env global-atom)))
+    (.-s-atom-env ^js global-atom)))
 
 ;;-----------------------------------------------------------------------------
 ;; SortedSet — user-facing wrapper implementing CLJS collection protocols

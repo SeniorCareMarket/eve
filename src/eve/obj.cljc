@@ -19,7 +19,8 @@
    [eve.deftype-proto.serialize :as ser]
    #?@(:cljs [[eve.shared-atom :as atom]
               [eve.array :as arr]
-              [eve.wasm-mem :as wasm]]
+              [eve.wasm-mem :as wasm]
+              [eve.deftype-proto.wasm :as proto-wasm]]
        :clj  [[eve.mem :as mem]])))
 
 ;; Forward declarations

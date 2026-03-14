@@ -159,7 +159,7 @@
    This is the key abstraction that hides SAB from users."
   []
   (when-let [global-atom atom/*global-atom-instance*]
-    (.-s-atom-env global-atom)))
+    (.-s-atom-env ^js global-atom)))
 
 ;;-----------------------------------------------------------------------------
 ;; Polymorphic node loading — read type-id byte to pick constructor
@@ -273,7 +273,7 @@
 (defn- node-offset
   "Get the SAB offset from a node, or -1 if nil."
   [node]
-  (if (nil? node) -1 (.-eve-offset node)))
+  (if (nil? node) -1 (.-eve-offset ^js node)))
 
 ;;-----------------------------------------------------------------------------
 ;; IIntMapNode implementations
@@ -878,7 +878,7 @@
 
 (defn merge-with
   "Merge two int-maps using f to resolve value conflicts."
-  ([f a b]
+  ([f ^js a ^js b]
    (let [root-a (load-node (.-env a) (.-root-offset a))
          root-b (load-node (.-env b) (.-root-offset b))
          epoch' (inc (max (.-epoch a) (.-epoch b)))]
@@ -898,7 +898,7 @@
 
 (defn update
   "Update the value at key k by applying f."
-  ([m k f]
+  ([^js m k f]
    (let [env (.-env m)
          epoch' (inc (.-epoch m))
          root (load-node env (.-root-offset m))
@@ -911,7 +911,7 @@
 
 (defn range
   "Return an int-map with only entries in [min-k, max-k] inclusive."
-  [m min-k max-k]
+  [^js m min-k max-k]
   (let [env (.-env m)
         root (load-node env (.-root-offset m))
         root' (when root (-im-range root (int min-k) (int max-k)))]
