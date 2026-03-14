@@ -752,33 +752,6 @@
          :data-start data-start :data-size data-size
          :desc-table desc-table}))))
 
-(defn- _xray-find-active-region
-  "Find the byte range where most of the action is (non-FREE blocks).
-   Returns [zoom-start zoom-size] covering allocations with some padding.
-   NOTE: Kept for debugging/visualization - prefix indicates intentional non-use."
-  [blocks data-start data-size]
-  (let [blen (.-length blocks)]
-    (if (zero? blen)
-      [data-start data-size]
-      (let [;; Find min/max offset of non-FREE blocks
-            min-off (volatile! (+ data-start data-size))
-            max-end (volatile! data-start)]
-        (dotimes [bi blen]
-          (let [b (aget blocks bi)
-                off (aget b 0) cap (aget b 1) status (aget b 2)]
-            (when (not= status d/STATUS_FREE)
-              (vswap! min-off min off)
-              (vswap! max-end max (+ off cap)))))
-        (if (>= @min-off @max-end)
-          ;; All blocks are FREE — show the start region
-          [data-start (min data-size 4096)]
-          ;; Add 10% padding on each side
-          (let [range-size (- @max-end @min-off)
-                pad (max 64 (js/Math.ceil (* range-size 0.1)))
-                zoom-start (max data-start (- @min-off pad))
-                zoom-end   (min (+ data-start data-size) (+ @max-end pad))]
-            [zoom-start (- zoom-end zoom-start)]))))))
-
 (defn validate-storage-model!
   "X-RAY: ASCII art invariant checker with SAB vs MIRROR views side-by-side.
 
@@ -1024,21 +997,6 @@
       :frame-history (vec (map (fn [f] {:label (:label f) :valid? (:valid? f)
                                          :lines (:lines f) :desc-lines (:desc-lines f)})
                                (array-seq xray-frames)))})))
-
-(defn xray-replay!
-  "Replay the X-RAY video buffer — print all captured frames with descriptor tables."
-  []
-  (println "\n=== [X-RAY VIDEO REPLAY] ===")
-  (dotimes [fi (.-length xray-frames)]
-    (let [f (aget xray-frames fi)]
-      (println (str "\n--- Frame " (inc fi) "/" (.-length xray-frames)
-                    (when (:label f) (str " [" (:label f) "]"))
-                    (if (:valid? f) " PASS" " FAIL") " ---"))
-      (doseq [line (:lines f)]
-        (println line))
-      (doseq [line (:desc-lines f)]
-        (println line))))
-  (println "=== [/X-RAY VIDEO REPLAY] ==="))
 
 ;;;;====================================================================================================
 ;;;; X-RAY Transaction Guard — before/after swap! invariant checking
@@ -1307,10 +1265,6 @@
                        #js [(:offset result) (:descriptor-idx result)])))]
     result))
 
-(defn reset-root-pool!
-  "Clear the root block pool. Called when SAB environment changes."
-  []
-  (set! (.-length root-block-pool) 0))
 
 (defn start-read! [s-atom-env descriptor-idx]
   (let [log-prefix (str "[W:" d/*worker-id* " StartRead desc:" descriptor-idx "] ")
@@ -1406,44 +1360,6 @@
                   #_(println log-prefix-cleanup "Could not acquire lock for ORPHANED cleanup. Retrying lock.")
                   (u/yield-cpu 0.01)
                   (recur (dec lock-cleanup-retries)))))))))))
-
-#_(defn end-read! [s-atom-env target-descriptor-idx worker-id-for-log]
-    (let [log-prefix (str "[W:" worker-id-for-log " EndRead desc:" target-descriptor-idx "] ")
-          index-view (:index-view s-atom-env)
-          rm-view (:reader-map-view s-atom-env)]
-      (if (and rm-view (.-buffer rm-view) (> (.-length rm-view) 0))
-        (let [map-idx (u/get-reader-map-idx target-descriptor-idx)]
-          (if (or (< map-idx 0) (>= map-idx (.-length rm-view)))
-            (println log-prefix "CRITICAL_ER - Reader map IDX OUT OF BOUNDS:" map-idx)
-            (let [current-val-before-sub (u/atomic-load-int rm-view map-idx)]
-              (if (<= current-val-before-sub 0)
-                (println log-prefix "CRITICAL_ER_PRE_SUB - Count for map_idx:" map-idx " is ALREADY " current-val-before-sub ". NOT decrementing.")
-                (let [old-val-returned-by-sub (u/atomic-sub-int rm-view map-idx 1)
-                      new-val-after-sub (dec old-val-returned-by-sub)]
-                  (println (str "ER;" worker-id-for-log ";" target-descriptor-idx ";" map-idx ";" (js/performance.now) ";" new-val-after-sub
-                                ";(was " old-val-returned-by-sub ")"))
-                  (when (< new-val-after-sub 0)
-                    (println log-prefix "CRITICAL_ER_POST_SUB - Reader count for map_idx:" map-idx " WENT NEGATIVE:" new-val-after-sub)))))))
-        (println log-prefix "CRITICAL_ER - Invalid reader-map-view:" (pr-str rm-view)))
-
-      (when (and index-view (.-buffer index-view))
-        (let [current_block_status (u/read-block-descriptor-field index-view target-descriptor-idx d/OFFSET_BD_STATUS)]
-          (when (= current_block_status d/STATUS_ORPHANED)
-            (let [lock_owner_field_idx (+ (u/get-block-descriptor-base-int32-offset target-descriptor-idx) (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
-              (if (== 0 (u/atomic-compare-exchange-int index-view lock_owner_field_idx 0 worker-id-for-log))
-                (try
-                  (let [status_now (u/read-block-descriptor-field index-view target-descriptor-idx d/OFFSET_BD_STATUS)
-                        reader-check-result-final (check-readers s-atom-env target-descriptor-idx)]
-                    (if (and (= status_now d/STATUS_ORPHANED) (= :ok reader-check-result-final))
-                      (do
-                        (println log-prefix "ORPHANED_CLEANUP: desc " target-descriptor-idx " - Confirmed last reader, performing final free.")
-                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/OFFSET_BD_DATA_LENGTH 0)
-                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/OFFSET_BD_STATUS d/STATUS_FREE))
-                      (when (not= status_now d/STATUS_ORPHANED) (println log-prefix "ORPHANED_CLEANUP: desc " target-descriptor-idx " - Status changed from ORPHANED to " status_now " during cleanup attempt."))))
-                  (finally (u/atomic-store-int index-view lock_owner_field_idx 0)))
-                #_(println log-prefix "ORPHANED_CLEANUP: desc " target-descriptor-idx " - Could not acquire lock.")))))) ; Minimal logging for this case
-      :ok))
 
 ;;;;====================================================================================================
 ;;;; Block Coalescing — merge adjacent free blocks to prevent fragmentation
@@ -3579,117 +3495,5 @@
           (.catch (fn [err] (js/console.warn "EVE WASM init failed (using JS fallback):" err)))))))
 
 (defn shared-atom? [obj] (instance? SharedAtom obj))
-
-(defn conveyable-> [t]
-  (cond
-    (shared-atom? t)
-    #js {:type "shared-atom"
-         :parent-atom-domain-id "global"
-         :shared-atom-id (.-shared-atom-id ^js t)
-         :header-descriptor-idx (.-header-descriptor-idx ^js t)
-         :meta-map (clj->js (.-meta-map ^js t))}
-
-    (instance? AtomDomain t)
-    #js {:type "atom-domain"
-         :meta-map (clj->js (.-meta-map ^js t))
-         :validator-fn nil} ; Can't serialize functions, will use global atom's validator
-
-    :else t))
-
-(defn <-conveyable [m]
-  (cond
-    (and (map? m) (= "shared-atom" (:type m)))
-    (let [parent-atom-domain-id (:parent-atom-domain-id m)
-          parent-atom-domain (cond
-                               (= parent-atom-domain-id "global") *global-atom-instance*
-                               :else (do (println "!!! <-conveyable: Unknown parent-atom-domain-id:" parent-atom-domain-id) nil))
-          received-id (:shared-atom-id m)
-          header-idx (:header-descriptor-idx m)
-          meta-from-conveyed (:meta-map m {})]
-      (if (or (nil? parent-atom-domain) (nil? received-id) (nil? header-idx))
-        (do (println "!!! atom/<-conveyable: CRITICAL - Cannot reconstruct SharedAtom." (pr-str m)) nil)
-        (->SharedAtom parent-atom-domain received-id header-idx nil meta-from-conveyed (cljs.core/atom {}))))
-
-    (and (map? m) (= "atom-domain" (:type m)))
-    (if *global-atom-instance*
-      (let [meta-from-conveyed (:meta-map m {})]
-        ;; Return the global atom instance, optionally with updated metadata
-        (if (empty? meta-from-conveyed)
-          *global-atom-instance*
-          (-with-meta *global-atom-instance* meta-from-conveyed)))
-      (do (println "!!! atom/<-conveyable: CRITICAL - No global atom instance for AtomDomain reconstruction") nil))
-
-    :else m))
-
-(defn mem-window
-  ([atom-domain-deftype-instance] (mem-window atom-domain-deftype-instance {}))
-  ([atom-domain-deftype-instance opts]
-   (let [s-atom-env-map (get-env atom-domain-deftype-instance)
-         {:keys [sab index-view data-view config]} s-atom-env-map]
-     (when (or (nil? sab) (nil? index-view) (nil? data-view) (nil? config))
-       (throw (js/Error. "mem-window: s-atom-env components are nil.")))
-     (let [{:keys [sab-total-size-bytes max-block-descriptors index-region-size data-region-start-offset]} config
-           {:keys [max-descriptors-to-show max-view-lines chars-per-line show-legend? descriptors-per-table-row focus-offset]
-            :or {max-descriptors-to-show 32 max-view-lines 12 chars-per-line 32 show-legend? false descriptors-per-table-row 16 focus-offset nil}} opts]
-       (println (str "--- Atom Memory Window (SAB Size: " sab-total-size-bytes ", MaxDesc: " max-block-descriptors ") ---"))
-       (println (str "IndexRegionSz: " index-region-size ", DataRegionStart: " data-region-start-offset))
-       (when (instance? AtomDomain atom-domain-deftype-instance)
-         (println (str "AtomDomain Root Ptr (data block desc_idx): "
-                       (js/Atomics.load index-view (/ d/OFFSET_ATOM_ROOT_DATA_DESC_IDX d/SIZE_OF_INT32)))))
-       (println "--- Block Descriptors ---")
-       (if (pos? max-descriptors-to-show)
-         (loop [current-idx (or (:start-descriptor opts) 0)]
-           (when (< current-idx (min (+ (or (:start-descriptor opts) 0) max-descriptors-to-show) max-block-descriptors))
-             (u/print-descriptor-table index-view current-idx descriptors-per-table-row (min (+ (or (:start-descriptor opts) 0) max-descriptors-to-show) max-block-descriptors))
-             (recur (+ current-idx descriptors-per-table-row))))
-         (println "  (No descriptors requested to be shown)"))
-       (let [data-region-actual-size (max 0 (- sab-total-size-bytes data-region-start-offset))
-             max_display_bytes (* max-view-lines chars-per-line)
-             max_addr_to_display (+ data-region-start-offset (min data-region-actual-size max_display_bytes) -1)
-             target_addr_hex_len (max 6 (count (.toString max_addr_to_display 16)))
-             model-char-map-full-str (u/generate-model-char-map-str index-view config data-region-actual-size)]
-         (println (str "Model Char View (Data Region, " chars-per-line " chars/line): #=alloc +=cont _=free .=unused/zeroed"))
-         (if (pos? data-region-actual-size)
-           (loop [line-idx 0 current-char-map-offset 0]
-             (when (and (< line-idx max-view-lines) (< current-char-map-offset (count model-char-map-full-str)))
-               (let [chars-on-this-line (min chars-per-line (- (count model-char-map-full-str) current-char-map-offset))
-                     line-abs-sab-offset (+ data-region-start-offset current-char-map-offset)
-                     hex-addr-raw (.toString line-abs-sab-offset 16)
-                     addr-padding-needed (max 0 (- target_addr_hex_len (count hex-addr-raw)))
-                     address-str (str (apply str (repeat addr-padding-needed "0")) hex-addr-raw ": ")
-                     is-focused-line? (and focus-offset (>= focus-offset line-abs-sab-offset) (< focus-offset (+ line-abs-sab-offset chars-per-line)))]
-                 (println (str (if is-focused-line? ">> " "   ")
-                               (u/format-char-data-line address-str model-char-map-full-str current-char-map-offset chars-on-this-line chars-per-line))))
-               (recur (inc line-idx) (+ current-char-map-offset chars-per-line))))
-           (println "Data Region is empty or invalid for Model Char View."))
-         (println (str "Raw Data (Enhanced Char View, " chars-per-line " bytes/line):"))
-         (if (pos? data-region-actual-size)
-           (u/hex-window sab {:offset data-region-start-offset :length (min data-region-actual-size (* max-view-lines chars-per-line)) :bytes-per-row chars-per-line :show-legend? show-legend?})
-           (println "Data Region is empty or invalid for Raw Data View.")))
-       (let [value-data-block-desc-idx-to-decode
-             (cond
-               (instance? AtomDomain atom-domain-deftype-instance)
-               (js/Atomics.load index-view (/ d/OFFSET_ATOM_ROOT_DATA_DESC_IDX d/SIZE_OF_INT32))
-               (instance? SharedAtom atom-domain-deftype-instance)
-               (let [hdr-desc-idx (.-header-descriptor-idx ^SharedAtom atom-domain-deftype-instance)
-                     ptr-field-offset (+ (u/get-block-descriptor-base-int32-offset hdr-desc-idx) (/ d/OFFSET_BD_VALUE_DATA_DESC_IDX d/SIZE_OF_INT32))]
-                 (js/Atomics.load index-view ptr-field-offset))
-               :else d/ROOT_POINTER_NIL_SENTINEL)]
-         (when (not= value-data-block-desc-idx-to-decode d/ROOT_POINTER_NIL_SENTINEL)
-           (println (str "Decode of Atom's Value (from data_block_desc_idx: " value-data-block-desc-idx-to-decode ")"))
-           (let [data-block-status (u/read-block-descriptor-field index-view value-data-block-desc-idx-to-decode d/OFFSET_BD_STATUS)
-                 data-offset (u/read-block-descriptor-field index-view value-data-block-desc-idx-to-decode d/OFFSET_BD_DATA_OFFSET)
-                 data-length (u/read-block-descriptor-field index-view value-data-block-desc-idx-to-decode d/OFFSET_BD_DATA_LENGTH)]
-             (if (and (or (== data-block-status d/STATUS_ALLOCATED) (== data-block-status d/STATUS_EMBEDDED_ATOM_HEADER))
-                      (>= data-length 0)
-                      (<= (+ data-offset data-length) sab-total-size-bytes))
-               (let [block-data-segment (if (> data-length 0) (js/Uint8Array. sab data-offset data-length) (js/Uint8Array. 0))]
-                 (println (str "  Raw Hex (first 32 bytes): " (u/format-bytes-as-hex block-data-segment 32)))
-                 (println "  Decoded:" (try (pr-str (default-deserializer block-data-segment {:s-atom-env s-atom-env-map})) (catch :default e (str "ERROR Deserializing: " e))))
-                 (when (= data-block-status d/STATUS_EMBEDDED_ATOM_HEADER) (println "  (Note: Decoded an EMBEDDED_ATOM_HEADER's value pointer field)")))
-               (println (str "Atom's value data block (desc_idx: " value-data-block-desc-idx-to-decode ") invalid/empty. Status: " data-block-status ", Length: " data-length)))))
-         (when (= value-data-block-desc-idx-to-decode d/ROOT_POINTER_NIL_SENTINEL)
-           (println "Atom's value is nil (pointer is NIL_SENTINEL).")))
-       (println "--- End Atom Memory Window ---")))))
 
 

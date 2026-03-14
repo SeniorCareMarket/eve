@@ -456,9 +456,3 @@
 ;; Max swap retries for CAS loops
 (def ^:const MAX_SWAP_RETRIES 1000)
 
-;; Legacy sabp-cleanup registry
-(defonce ^:private sabp-cleanup-fns (atom {}))
-(defn register-sabp-cleanup! [type-key-str cleanup-fn]
-  (swap! sabp-cleanup-fns assoc type-key-str cleanup-fn))
-(defn get-sabp-cleanup-fn [type-key-str]
-  (get @sabp-cleanup-fns type-key-str))

@@ -202,32 +202,6 @@
    :value_data_desc_idx (read-block-descriptor-field sab-int32-view descriptor-idx d/OFFSET_BD_VALUE_DATA_DESC_IDX)
    :lock-owner (read-block-descriptor-field sab-int32-view descriptor-idx d/OFFSET_BD_LOCK_OWNER)})
 
-(defn find-descriptor-for-data-offset
-  [s-atom-env target-data-offset]
-  (let [index-view (:index-view s-atom-env)
-        raw-max (get-max-block-descriptors index-view)
-        ;; Guard against corrupted header: cap at configured max or 262144
-        max-descriptors (let [cfg-max (get-in s-atom-env [:config :max-block-descriptors])]
-                          (if (and (number? raw-max) (pos? raw-max)
-                                   (<= raw-max (or cfg-max 262144)))
-                            raw-max
-                            (or cfg-max 262144)))]
-    (log ">>> find-descriptor: ENTER. target-offset:" target-data-offset "Max Descriptors:" max-descriptors)
-    (loop [check-idx 0]
-      (if (>= check-idx max-descriptors)
-        (do (log ">>> find-descriptor: NOT FOUND for target-offset:" target-data-offset)
-            nil)
-        (let [current-data-offset (read-block-descriptor-field index-view check-idx d/OFFSET_BD_DATA_OFFSET)
-              status (read-block-descriptor-field index-view check-idx d/OFFSET_BD_STATUS)]
-          (when (== current-data-offset target-data-offset)
-            (log ">>> find-descriptor: Found matching offset" target-data-offset "at desc_idx" check-idx "WITH STATUS" status))
-          (if (and (== current-data-offset target-data-offset)
-                   (== status d/STATUS_ALLOCATED))
-            (let [found-desc (assoc (read-full-block-descriptor index-view check-idx) :descriptor-idx check-idx)]
-              (log ">>> find-descriptor: Found AND ALLOCATED for target" target-data-offset "desc:" (pr-str found-desc))
-              found-desc)
-            (recur (inc check-idx))))))))
-
 ;; default-reader-handlers removed — Fressian reader no longer used (Phase 5)
 
 (defn format-bytes-as-hex [byte-array-view max-bytes-to-show]
@@ -295,34 +269,6 @@
           (.push row-parts col-spacing))
         (println (.trim (.join row-parts "")))))
     (println "")))
-
-(defn -equiv-sequential [coll other]
-  (log ">>> -equiv-sequential CALLED for:" (pr-str coll) "AND" (pr-str other))
-  (if (sequential? other)
-    (do
-      (log ">>> -equiv-sequential: other is sequential")
-      (if (counted? other)
-        (do
-          (log ">>> -equiv-sequential: other is counted. coll count:" (count coll) "other count:" (count other))
-          (if (not= (count coll) (count other))
-            (do (log ">>> -equiv-sequential: COUNTS DIFFER, returning false") false)
-            (loop [idx 0
-                   s1 (seq coll)
-                   s2 (seq other)]
-              (log ">>> -equiv-sequential loop: idx" idx "s1 nil?" (nil? s1) "s2 nil?" (nil? s2))
-              (cond
-                (nil? s1) (if (nil? s2) (do (log ">>> -equiv-sequential: Both seqs nil, returning true") true)
-                              (do (log ">>> -equiv-sequential: s1 nil, s2 not. Returning false") false))
-                (nil? s2) (do (log ">>> -equiv-sequential: s2 nil, s1 not. Returning false") false)
-                :else (let [first1 (first s1)
-                            first2 (first s2)
-                            elements-equal? (= first1 first2)]
-                        (log ">>> -equiv-sequential loop: Comparing elements - first1:" (pr-str first1) "(type:" (type first1) ") vs first2:" (pr-str first2) "(type:" (type first2) ") EQUAL?:" elements-equal?)
-                        (if elements-equal?
-                          (recur (inc idx) (next s1) (next s2))
-                          (do (log ">>> -equiv-sequential: ELEMENTS DIFFER at idx" idx ", returning false") false)))))))
-        (do (log ">>> -equiv-sequential: other is not counted, returning false") false)))
-    (do (log ">>> -equiv-sequential: other is not sequential, returning false") false)))
 
 (defonce is-node? (exists? js/process))
 

@@ -138,5 +138,3 @@
 (defn lookup [iface-sym]
   (get jvm->cljs iface-sym))
 
-(defn mapped? [iface-sym]
-  (contains? jvm->cljs iface-sym))

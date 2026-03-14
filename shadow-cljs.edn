@@ -93,13 +93,7 @@
    :main       eve.runner.eve-bench-unified/main
    :compiler-options {:load-tests true}}
 
-  ;; Eve benchmark worker (shared by compile/release)
-  :eve-bench-worker
-  {:target     :node-script
-   :output-to  "target/eve-bench/worker.js"
-   :main       eve.runner.thread-test-worker/main}
-
-  ;; X-RAY step debugger
+;; X-RAY step debugger
   :eve-xray
   {:target     :node-script
    :output-to  "target/eve-test/xray.js"

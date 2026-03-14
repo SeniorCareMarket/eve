@@ -244,11 +244,6 @@
 ;; implementations are faster due to WASM call/copy overhead for small inputs.
 ;;-----------------------------------------------------------------------------
 
-(defn- _wasm-popcount32 [n]
-  (if-let [^js inst @wasm-instance]
-    (.popcnt32 (.-exports inst) n)
-    (js-popcount32 n)))
-
 (defn- wasm-memcmp
   "Compare two Uint8Arrays using WASM memory."
   [^js a ^js b]
@@ -267,11 +262,6 @@
             (.set u8 b len-a)
             (.memcmp (.-exports inst) 0 len-a len-a)))))
     (js-memcmp a b)))
-
-(defn- _wasm-bytes-equal?
-  "Check if two byte arrays are equal using WASM."
-  [^js a ^js b]
-  (zero? (wasm-memcmp a b)))
 
 ;;-----------------------------------------------------------------------------
 ;; Public API

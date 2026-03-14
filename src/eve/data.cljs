@@ -88,9 +88,6 @@
 ;; Used for copying serialized keys before WASM lookup.
 (defonce ^:const WASM_SCRATCH_SIZE 4096)  ;; 4KB per worker, supports keys up to 4KB
 
-;; ... (rest of data.cljs: tags, protocols, reader map constants)
-;; Ensure OFFSET_READER_MAP_START is compatible with the new OFFSET_BLOCK_DESCRIPTORS_ARRAY_START
-;; (defonce ^:const OFFSET_READER_MAP_START OFFSET_BLOCK_DESCRIPTORS_ARRAY_START)
 
 
 
@@ -101,44 +98,6 @@
 
 
 
-
-
-
-
-;; (defonce ^:const STATUS_FREE 0)
-;; (defonce ^:const STATUS_ALLOCATED 1)
-;; (defonce ^:const STATUS_LOCKED_FOR_UPDATE 2)
-;; (defonce ^:const STATUS_EMBEDDED_ATOM_HEADER 3)
-;; (defonce ^:const STATUS_ZEROED_UNUSED -1)
-;; (defonce ^:const ROOT_POINTER_NIL_SENTINEL -1)
-
-;; (defonce ^:const OFFSET_SAB_TOTAL_SIZE 0)
-;; (defonce ^:const OFFSET_INDEX_REGION_SIZE 4)
-;; (defonce ^:const OFFSET_DATA_REGION_START 8)
-;; (defonce ^:const OFFSET_MAX_BLOCK_DESCRIPTORS 12)
-(defonce ^:const OFFSET_ATOM_ROOT_POINTER 16)
-;; (defonce ^:const OFFSET_FREE_LIST_HEAD_IDX 20)
-;; (defonce ^:const OFFSET_BLOCK_DESCRIPTORS_ARRAY_START 20) ; Adjusted
-
-(defonce ^:const OFFSET_ALLOCATOR_GLOBAL_LOCK 24)
-;; (defonce ^:const OFFSET_BLOCK_DESCRIPTORS_ARRAY_START 28)
-
-;; (defonce ^:const OFFSET_BD_STATUS 0)
-;; (defonce ^:const OFFSET_BD_DATA_OFFSET 4)
-;; (defonce ^:const OFFSET_BD_DATA_LENGTH 8)
-;; (defonce ^:const OFFSET_BD_BLOCK_CAPACITY 12)
-;; (defonce ^:const OFFSET_BD_ATOMIC_VALUE_POINTER 16) ; Shifted
-;; (defonce ^:const OFFSET_BD_LOCK_OWNER 20) ; New field
-;; (defonce ^:const SIZE_OF_INT32 4)
-;; (defonce ^:const SIZE_OF_BLOCK_DESCRIPTOR (* 6 SIZE_OF_INT32)) ; 6 fields
-
-;; (defonce ^:const OFFSET_BD_NEXT_FREE_IDX 16)
-;; (defonce ^:const OFFSET_BD_PREV_FREE_IDX 20)
-;; (defonce ^:const OFFSET_BD_FREE_SPACE_RIGHT 24)
-
-;; (defonce ^:const SIZE_OF_BLOCK_DESCRIPTOR (* 8 SIZE_OF_INT32))
-;; (defonce ^:const MINIMUM_USABLE_BLOCK_SIZE 1)
-;; (defonce ^:const MAX_SWAP_RETRIES 1000)
 
 ;;-----------------------------------------------------------------------------
 ;; Custom Tags for JS Types
@@ -217,12 +176,6 @@
 (defprotocol ISabpType
   (-sabp-type-key [this] "Returns the string key used for registering this SAB-P type."))
 
-;; Legacy sabp-cleanup registry (moved from raw.cljs in Phase 5)
-(defonce ^:private sabp-cleanup-fns (clojure.core/atom {}))
-(defn register-sabp-cleanup! [type-key-str cleanup-fn]
-  (swap! sabp-cleanup-fns assoc type-key-str cleanup-fn))
-(defn get-sabp-cleanup-fn [type-key-str]
-  (get @sabp-cleanup-fns type-key-str))
 
 (def ^:dynamic *persistent?* true)
 
