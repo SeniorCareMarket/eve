@@ -306,11 +306,10 @@
          ~@boilerplate
          ~@transformed-protos)
 
-       ;; Re-declare the constructor to clear the auto-generated 2-arg arity info,
-       ;; then set! to the real multi-arg constructor. This avoids both :fn-arity
-       ;; warnings (from wrong arity) and :redef-in-file (from defn).
-       (~'declare ~ctor-name)
-       (~'set! ~ctor-name (~'fn [~env-sym ~@ctor-args] ~ctor-body))
+       ;; Override the auto-generated 2-arg constructor with our custom one
+       ;; that takes field values. Using defn so the compiler sees the correct arity.
+       ;; This causes :redef-in-file warnings but eliminates ~101 :fn-arity warnings.
+       (~'defn ~ctor-name [~env-sym ~@ctor-args] ~ctor-body)
 
        ;; Return the type name
        ~type-name)))
