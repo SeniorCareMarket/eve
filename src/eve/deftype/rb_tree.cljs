@@ -14,6 +14,7 @@
 
    The SAB environment is obtained automatically from the global atom
    instance — users never need to pass env explicitly."
+  (:refer-clojure :exclude [sorted-set])
   (:require-macros [eve.deftype])
   (:require
    [eve.deftype]

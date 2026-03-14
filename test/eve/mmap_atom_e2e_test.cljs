@@ -16,7 +16,7 @@
             [eve.atom :as atom]
             [eve.mem :as mem]))
 
-(def ^:private cp (js* "require('child_process')"))
+(def ^:private ^js cp (js* "require('child_process')"))
 (def ^:private ts (str "-" (js/Date.now)))
 (def ^:private worker-script
   (.resolve (js/require "path") "target/eve-test/mmap-worker.js"))

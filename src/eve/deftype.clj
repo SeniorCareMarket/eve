@@ -306,10 +306,11 @@
          ~@boilerplate
          ~@transformed-protos)
 
-       ;; Override the auto-generated constructor with our custom one
-       ;; that takes field values instead of raw env/offset.
-       ;; Using defn (not set!) so the compiler sees the correct arity.
-       (~'defn ~ctor-name [~env-sym ~@ctor-args] ~ctor-body)
+       ;; Re-declare the constructor to clear the auto-generated 2-arg arity info,
+       ;; then set! to the real multi-arg constructor. This avoids both :fn-arity
+       ;; warnings (from wrong arity) and :redef-in-file (from defn).
+       (~'declare ~ctor-name)
+       (~'set! ~ctor-name (~'fn [~env-sym ~@ctor-args] ~ctor-body))
 
        ;; Return the type name
        ~type-name)))
