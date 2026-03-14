@@ -14,6 +14,7 @@
 
    The SAB environment is obtained automatically from the global atom
    instance — users never need to pass env explicitly."
+  (:refer-clojure :exclude [sorted-set])
   (:require-macros [eve.deftype])
   (:require
    [eve.deftype]
@@ -533,7 +534,7 @@
    This is the key abstraction that hides SAB from users."
   []
   (when-let [global-atom atom/*global-atom-instance*]
-    (.-s-atom-env global-atom)))
+    (.-s-atom-env ^js global-atom)))
 
 ;;-----------------------------------------------------------------------------
 ;; SortedSet — user-facing wrapper implementing CLJS collection protocols

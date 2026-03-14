@@ -91,11 +91,60 @@
 (def ^:const TYPED_ARRAY_BIGUINT64     0x0B)
 
 ;;-----------------------------------------------------------------------------
+;; JVM constructor registries  (mirrors CLJS sab-type-constructors)
+;;-----------------------------------------------------------------------------
+
+#?(:clj
+   (do
+
+(declare encode-eve-pointer)
+
+;; Tag-based constructor registry: tag (int) → (fn [header-off] → collection)
+;; Populated by map.cljc, set.cljc, vec.cljc, list.cljc at load time.
+;; Mirrors CLJS sab-type-constructors but takes only header-off (sio via *jvm-slab-ctx*).
+(defonce jvm-type-constructors (java.util.concurrent.ConcurrentHashMap.))
+
+;; Header-type-id registry: header-byte (int) → (fn [header-off] → collection)
+;; Keyed by byte 0 of a slab block header (0xED map, 0xEE set, 0x12 vec, etc.)
+;; Mirrors CLJS sab-header-constructors.
+(defonce jvm-header-constructors (java.util.concurrent.ConcurrentHashMap.))
+
+(defn register-jvm-type-constructor!
+  "Register a JVM constructor for deserializing SAB pointer tags.
+   2-arity: registers by pointer tag only.
+   3-arity: also registers by header type-id byte."
+  ([tag ctor-fn]
+   (.put jvm-type-constructors (int tag) ctor-fn))
+  ([tag header-type-id ctor-fn]
+   (.put jvm-type-constructors (int tag) ctor-fn)
+   (.put jvm-header-constructors (int header-type-id) ctor-fn)))
+
+(defn register-jvm-header-constructor!
+  "Register a JVM header constructor without overriding the FAST_TAG entry."
+  [header-type-id ctor-fn]
+  (.put jvm-header-constructors (int header-type-id) ctor-fn))
+
+(defn get-jvm-type-constructor
+  "Look up a JVM constructor by SAB pointer tag (0x10–0x13, 0x1C, etc.)."
+  [tag]
+  (.get jvm-type-constructors (int tag)))
+
+(defn get-jvm-header-constructor
+  "Look up a JVM constructor by header type-id byte.
+   Returns nil if not registered."
+  [type-id-byte]
+  (.get jvm-header-constructors (int type-id-byte)))
+
+)) ;; end :clj
+
+;;-----------------------------------------------------------------------------
 ;; CLJS implementations
 ;;-----------------------------------------------------------------------------
 
 #?(:cljs
    (do
+
+(declare encode-eve-pointer)
 
 ;;-----------------------------------------------------------------------------
 ;; SAB type registries (populated by sab_map, sab_set, sab_vec, sab_list at load)
@@ -233,9 +282,7 @@
             sab-m (try-build-sab tagged-map)]
         (when sab-m
           ;; Get the SAB_MAP encoding, then change the tag byte to RECORD
-          (let [bytes (if (satisfies? d/ISabStorable sab-m)
-                        (d/-sab-encode sab-m nil)
-                        (d/-direct-serialize sab-m))]
+          (let [bytes (encode-eve-pointer sab-m)]
             (aset bytes 2 FAST_TAG_RECORD)
             bytes))))))
 
@@ -305,6 +352,23 @@
   (aset sab-ptr-buf 2 tag)
   (.setInt32 sab-ptr-dv 3 offset true)
   sab-ptr-buf)
+
+(def ^:private sab-tag->fast-tag
+  "Map from ISabStorable tag keywords to SAB pointer fast-tag bytes."
+  {:eve-map  FAST_TAG_SAB_MAP
+   :hash-set FAST_TAG_SAB_SET
+   :eve-vec  FAST_TAG_SAB_VEC
+   :eve-list FAST_TAG_SAB_LIST})
+
+(defn encode-eve-pointer
+  "Encode an Eve collection instance as a SAB pointer.
+   Looks up the fast-tag from -sab-tag, gets offset from -direct-serialize,
+   and produces the 7-byte SAB pointer encoding."
+  [eve-inst]
+  (let [offset (d/-direct-serialize eve-inst)
+        tag-kw (d/-sab-tag eve-inst)
+        fast-tag (get sab-tag->fast-tag tag-kw)]
+    (encode-sab-pointer fast-tag offset)))
 
 ;;-----------------------------------------------------------------------------
 ;; Internal: serialize typed array
@@ -605,16 +669,14 @@
           (some? (typed-array-subtype elem))
           (serialize-typed-array elem)
 
-          ;; IDirectSerialize (legacy SAB types)
+          ;; Eve types — already in shared memory, encode as SAB pointer
           (satisfies? d/IDirectSerialize elem)
-          (d/-direct-serialize elem)
+          (encode-eve-pointer elem)
 
           ;; Other CLJS collections (sets, vecs, lists) — auto-convert via builder
           :else
           (if-let [sab-inst (try-build-sab elem)]
-            (if (satisfies? d/ISabStorable sab-inst)
-              (d/-sab-encode sab-inst nil)
-              (d/-direct-serialize sab-inst))
+            (encode-eve-pointer sab-inst)
             ;; Unsupported type — encode as empty bytes
             (js/Uint8Array. 0))))))
 
@@ -629,10 +691,10 @@
     (or (serialize-numeric-b elem)
         ;; Variable-size types - same as serialize-key but uses scratch B
         (cond
-          ;; SAB types — already in shared memory, encode as pointer
+          ;; Eve types — already in shared memory, encode as SAB pointer
           ;; Must check before map? since EveHashMap satisfies map?
           (satisfies? d/ISabStorable elem)
-          (d/-sab-encode elem nil)
+          (encode-eve-pointer elem)
 
           ;; Records — must check before map? (records satisfy map?)
           (satisfies? IRecord elem)
@@ -709,16 +771,14 @@
           (some? (typed-array-subtype elem))
           (serialize-typed-array elem)
 
-          ;; IDirectSerialize (legacy SAB types)
+          ;; Eve types — already in shared memory, encode as SAB pointer
           (satisfies? d/IDirectSerialize elem)
-          (d/-direct-serialize elem)
+          (encode-eve-pointer elem)
 
           ;; Other CLJS collections (sets, vecs, lists) — auto-convert via builder
           :else
           (if-let [sab-inst (try-build-sab elem)]
-            (if (satisfies? d/ISabStorable sab-inst)
-              (d/-sab-encode sab-inst nil)
-              (d/-direct-serialize sab-inst))
+            (encode-eve-pointer sab-inst)
             ;; Unsupported type — encode as empty bytes
             (js/Uint8Array. 0))))))
 

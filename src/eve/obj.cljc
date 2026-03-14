@@ -19,7 +19,8 @@
    [eve.deftype-proto.serialize :as ser]
    #?@(:cljs [[eve.shared-atom :as atom]
               [eve.array :as arr]
-              [eve.wasm-mem :as wasm]]
+              [eve.wasm-mem :as wasm]
+              [eve.deftype-proto.wasm :as proto-wasm]]
        :clj  [[eve.mem :as mem]])))
 
 ;; Forward declarations
@@ -188,7 +189,7 @@
     (cond
       (identical? this other) true
       (not (instance? Obj other)) false
-      (not= (:field-keys schema) (:field-keys (.-schema other))) false
+      (not= (:field-keys schema) (:field-keys (.-schema #?(:cljs ^js other :clj other)))) false
       :else (every? (fn [k] (= (-lookup this k) (-lookup other k)))
                     (:field-keys schema))))
 
@@ -549,7 +550,7 @@
   (fn [_sab blk-off]
     (let [schema-len (alloc/read-u16 blk-off 2)
           class-idx  (alloc/decode-class-idx blk-off)
-          u8-view    (wasm/slab-u8-view class-idx)
+          u8-view    (proto-wasm/slab-u8-view class-idx)
           byte-base  (alloc/slab-offset->byte-offset blk-off)
           field-map  (decode-obj-schema u8-view (+ byte-base 4))
           schema     (create-schema field-map)

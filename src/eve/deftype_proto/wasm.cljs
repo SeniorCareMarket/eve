@@ -602,7 +602,7 @@
    Called by alloc/init-mmap-slab! and alloc/open-mmap-slab!.
    bitmap-region is the separate bitmap file's region; bitmap ops use it.
    Block data reads/writes use :u8/:dv views from the data region."
-  [class-idx region bitmap-region]
+  [class-idx ^js region bitmap-region]
   (let [node-buf (.-buf region)
         ab       (.-buffer node-buf)
         boff     (.-byteOffset node-buf)

@@ -1,33 +1,27 @@
 (ns eve.set
-  "EVE persistent set backed by SharedArrayBuffer — shared CLJ/CLJS.
+  "Eve persistent HAMT set — unified CLJ/CLJS implementation.
 
-   JVM provides read-only access (contains?, count, seq) via ISlabIO.
-   Write support (conj, disj) is CLJS-only in this phase.
+   Uses ISlabIO protocol for all memory access.
+   Sets store values only (no key-hash arrays like maps).
+   Collision nodes use type 2 (distinct from map collision type 3).
 
-   Note: EveHashSet uses a separate HAMT variant (NODE_TYPE_BITMAP=1,
-   NODE_TYPE_COLLISION=2) from EveHashMap (which uses NODE_TYPE_COLLISION=3)."
+   Uses eve/deftype macro: CLJ protocol names, auto-translated on CLJS."
   (:refer-clojure :exclude [hash-set])
-  #?(:cljs
-     (:require
-      [eve.deftype-proto.alloc :as eve-alloc]
-      [eve.deftype-proto.data :as d]
-      [eve.deftype-proto.serialize :as ser]
-      [eve.deftype-proto.simd :as simd]
-      [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
-                                     mask-hash bitpos has-bit? get-index]])
-     :clj
-     (:require
-      [eve.deftype-proto.alloc :as eve-alloc
-       :refer [ISlabIO -sio-read-u8 -sio-read-i32 -sio-read-bytes
-               -sio-write-u8! -sio-write-u16! -sio-write-i32!
-               -sio-write-bytes! -sio-alloc!
-               NIL_OFFSET]]
-      [eve.deftype-proto.data :as d]
-      [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
-                                     mask-hash bitpos has-bit? get-index]]
-      [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
-                                            value+sio->eve-bytes
-                                            register-jvm-collection-writer!]])))
+  (:require
+   [eve.deftype-proto.alloc :as alloc
+    :refer [ISlabIO -sio-read-u8 -sio-read-u16 -sio-read-i32
+            -sio-read-bytes -sio-write-u8! -sio-write-u16!
+            -sio-write-i32! -sio-write-bytes! -sio-alloc!
+            -sio-free! -sio-copy-block! NIL_OFFSET]]
+   [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.serialize :as ser]
+   [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
+                                  mask-hash bitpos has-bit? get-index]]
+   [eve.platform :as p]
+   #?@(:clj  [[eve.deftype-proto.macros :as eve]
+              [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+                                       register-jvm-collection-writer!]]]))
+  #?(:cljs (:require-macros [eve.deftype-proto.macros :as eve])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -37,2077 +31,889 @@
 (def ^:const MASK 0x1f)
 
 (def ^:const NODE_TYPE_BITMAP 1)
-(def ^:const NODE_TYPE_COLLISION 2)   ;; Note: different from EveHashMap!
+(def ^:const NODE_TYPE_COLLISION 2) ;; Sets use 2, maps use 3
 
+;; Node header: type:u8 + flags:u8 + pad:u16 + data_bitmap:u32 + node_bitmap:u32 = 12
 (def ^:const NODE_HEADER_SIZE 12)
+(def ^:const COLLISION_HEADER_SIZE 12)
 
+;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
+#?(:clj (def EveHashSet-type-id 0xEE)
+   :cljs (declare EveHashSet-type-id))
 (def ^:const SABSETROOT_CNT_OFFSET 4)
 (def ^:const SABSETROOT_ROOT_OFF_OFFSET 8)
-(def ^:const EveHashSet-type-id 0xEE)
-
-;; Flags byte (offset 1 of set header):
-;; Bit 0 = portable-hash (1 = HAMT built with portable-hash-bytes, 0 = legacy platform hash)
 (def ^:const SET_FLAG_PORTABLE_HASH 0x01)
 
 ;;=============================================================================
-;; CLJS implementations
+;; Platform-specific helpers
 ;;=============================================================================
 
-#?(:cljs
-   (do
+(defn- serialize-val-bytes [v]
+  #?(:cljs (ser/serialize-element v)
+     :clj  (value+sio->eve-bytes v)))
 
-;;-----------------------------------------------------------------------------
-;; Allocation helpers - Pool with size-class normalization + batch pre-alloc
-;; In the slab world, pools just hold slab-qualified offsets.
-;; No descriptor-idx tracking needed — free! takes a slab-qualified offset.
-;;-----------------------------------------------------------------------------
+(defn- deserialize-val-bytes [val-bytes]
+  #?(:cljs (ser/deserialize-element {} val-bytes)
+     :clj  (eve-bytes->value val-bytes)))
 
-(def ^:private ^:const MAX_POOL_SIZE 512)
-(def ^:private ^:const BATCH_ALLOC_SIZE 64)
+(defn- bytes-equal? [a b]
+  #?(:cljs (and (== (.-length a) (.-length b))
+                (loop [i 0]
+                  (if (>= i (.-length a)) true
+                    (if (not= (aget a i) (aget b i)) false (recur (inc i))))))
+     :clj  (java.util.Arrays/equals ^bytes a ^bytes b)))
 
-(defn- size-class-for
-  "Find the appropriate size class for a given allocation size."
-  [n]
-  (cond (<= n 64) 64 (<= n 128) 128 (<= n 256) 256 (<= n 512) 512 :else nil))
+(defn- bytes-length [ba]
+  #?(:cljs (.-length ba)
+     :clj  (alength ^bytes ba)))
 
-;; Per-class pools — each entry is just a slab-qualified offset (i32).
-(def ^:private pool-64 #js [])
-(def ^:private pool-128 #js [])
-(def ^:private pool-256 #js [])
-(def ^:private pool-512 #js [])
+;;=============================================================================
+;; Node I/O helpers
+;;=============================================================================
 
-(defn reset-pools!
-  "Reset global node pools.
-   Must be called when switching to a new slab environment."
-  []
-  (set! pool-64 #js [])
-  (set! pool-128 #js [])
-  (set! pool-256 #js [])
-  (set! pool-512 #js []))
+(defn- children-start ^long [] NODE_HEADER_SIZE)
 
-(defn drain-pools!
-  "Free all pooled blocks and reset pools."
-  []
-  (doseq [pool [pool-64 pool-128 pool-256 pool-512]]
-    (dotimes [i (.-length pool)]
-      (eve-alloc/free! (aget pool i))))
-  (set! pool-64 #js [])
-  (set! pool-128 #js [])
-  (set! pool-256 #js [])
-  (set! pool-512 #js []))
-
-(defn- pool-get!
-  "Try to get a slab-qualified offset from the pool. Returns offset or nil."
-  [size-class]
-  (let [stack (case size-class
-                64 pool-64  128 pool-128
-                256 pool-256  512 pool-512
-                nil)]
-    (when (and stack (pos? (.-length stack)))
-      (.pop stack))))
-
-(defn- pool-put!
-  "Add a slab-qualified offset to the pool. Returns true if added, false if pool is full."
-  [size-class slab-offset]
-  (let [stack (case size-class
-                64 pool-64  128 pool-128
-                256 pool-256  512 pool-512
-                nil)]
-    (when stack
-      (if (< (.-length stack) MAX_POOL_SIZE)
-        (do (.push stack slab-offset) true)
-        false))))
-
-(defn- alloc-bytes!
-  "Allocate n bytes, rounded up to nearest size class.
-   Returns a slab-qualified offset."
-  [n]
-  (let [size-class (size-class-for n)]
-    (if size-class
-      ;; Try pool first
-      (if-let [pooled (pool-get! size-class)]
-        pooled
-        ;; Pool miss — batch alloc
-        (let [results (eve-alloc/batch-alloc size-class BATCH_ALLOC_SIZE)
-              results (if (and results (pos? (.-length results)))
-                        results
-                        (do (drain-pools!)
-                            (eve-alloc/batch-alloc size-class BATCH_ALLOC_SIZE)))
-              len (if results (.-length results) 0)]
-          (when (== len 0)
-            (throw (js/Error. (str "Set allocation failed: out of memory for " size-class " bytes"))))
-          ;; Put extras into pool
-          (loop [i 1]
-            (when (< i len)
-              (pool-put! size-class (aget results i))
-              (recur (inc i))))
-          ;; Return first
-          (aget results 0)))
-      ;; Too large for pooling — direct alloc
-      (eve-alloc/alloc-offset n))))
-
-;; Forward declare for recursive freeing
-(declare free-hamt-node!)
-
-(defn- maybe-pool-or-free!
-  "Try to add a freed block to the pool. If pool is full, actually free it."
-  [slab-offset size]
-  (let [size-class (size-class-for size)]
-    (if (and size-class (pool-put! size-class slab-offset))
-      true
-      (do (eve-alloc/free! slab-offset) nil))))
-
-(defn- node-size-for-free
-  "Get the block size for a slab-qualified offset, for pool/free routing."
-  ^number [^number slab-off]
-  (let [class-idx (eve-alloc/decode-class-idx slab-off)]
-    (if (< class-idx d/NUM_SLAB_CLASSES)
-      (aget d/SLAB_SIZES class-idx)
-      0)))
-
-(defn- free-hamt-node!
-  "Recursively free a HAMT node and all its children."
-  [slab-off]
-  (when (not= slab-off eve-alloc/NIL_OFFSET)
-    (let [node-type (let [base (eve-alloc/resolve-dv! slab-off)]
-                      (.getUint8 eve-alloc/resolved-dv base))]
-      (case node-type
-        ;; Bitmap node — free children first
-        1 (let [base (eve-alloc/resolve-dv! slab-off)
-                node-bm (.getUint32 eve-alloc/resolved-dv (+ base 8) true)
-                child-count (popcount32 node-bm)]
-            (dotimes [i child-count]
-              (let [child-off (.getInt32 eve-alloc/resolved-dv
-                                        (+ base NODE_HEADER_SIZE (* i 4)) true)]
-                ;; Re-resolve needed after recursive calls
-                (free-hamt-node! child-off)))
-            (let [size (node-size-for-free slab-off)]
-              (if (pos? size)
-                (maybe-pool-or-free! slab-off size)
-                (eve-alloc/free! slab-off))))
-
-        ;; Collision node — no children
-        2 (let [size (node-size-for-free slab-off)]
-            (if (pos? size)
-              (maybe-pool-or-free! slab-off size)
-              (eve-alloc/free! slab-off)))
-
-        ;; Unknown
-        (eve-alloc/free! slab-off)))))
-
-(defn- copy-from-sab
-  "Copy bytes from a slab-qualified offset + byte-within-block into a new Uint8Array."
-  [^number slab-off ^number byte-off ^number len]
-  (let [src (eve-alloc/read-bytes slab-off byte-off len)
-        dst (js/Uint8Array. len)]
-    (.set dst src)
-    dst))
-
-;;-----------------------------------------------------------------------------
-;; Resolved-node access helpers
-;;-----------------------------------------------------------------------------
-;; After calling resolve-dv!/resolve-u8!, use these to read fields at
-;; (resolved-dv, resolved-base + field-offset) without re-resolving.
-;; Callers MUST call resolve-dv! or resolve-u8! before using these.
-
-(defn- r-get-u8 ^number [^number off]
-  (.getUint8 eve-alloc/resolved-dv (+ eve-alloc/resolved-base off)))
-
-(defn- r-get-u32 ^number [^number off]
-  (.getUint32 eve-alloc/resolved-dv (+ eve-alloc/resolved-base off) true))
-
-(defn- r-get-i32 ^number [^number off]
-  (.getInt32 eve-alloc/resolved-dv (+ eve-alloc/resolved-base off) true))
-
-(defn- r-set-u8 [^number off ^number val]
-  (.setUint8 eve-alloc/resolved-dv (+ eve-alloc/resolved-base off) val))
-
-(defn- r-set-u16 [^number off ^number val]
-  (.setUint16 eve-alloc/resolved-dv (+ eve-alloc/resolved-base off) val true))
-
-(defn- r-set-u32 [^number off ^number val]
-  (.setUint32 eve-alloc/resolved-dv (+ eve-alloc/resolved-base off) val true))
-
-(defn- r-set-i32 [^number off ^number val]
-  (.setInt32 eve-alloc/resolved-dv (+ eve-alloc/resolved-base off) val true))
-
-;;-----------------------------------------------------------------------------
-;; Low-level two-bitmap HAMT operations
-;;
-;; Node layout for bitmap nodes:
-;; [type:u8][pad:u8][data_bitmap:u32][node_bitmap:u32][children...][values...]
-;; - data_bitmap: which slots have inline values (popcount = # of inline values)
-;; - node_bitmap: which slots have child node pointers (popcount = # of children)
-;; - children: 4 bytes each, i32 slab-qualified offsets
-;; - values: [len:u32][bytes...] for each inline value
-;;
-;; Collision node layout:
-;; [type:u8][count:u8][hash:u32][unused:u32]
-;; then count entries: [val_len:u32][val_bytes...]
-;;-----------------------------------------------------------------------------
-
-;; popcount32, mask-hash, bitpos, has-bit?, get-index imported from eve.hamt-util
-
-(defn- read-node-type
-  "Read node type byte from a slab-qualified offset."
-  ^number [^number slab-off]
-  (let [base (eve-alloc/resolve-dv! slab-off)]
-    (.getUint8 eve-alloc/resolved-dv base)))
-
-(defn- read-node-bitmap
-  "Read node bitmap (u32 at offset+8)."
-  ^number [^number slab-off]
-  (let [base (eve-alloc/resolve-dv! slab-off)]
-    (.getUint32 eve-alloc/resolved-dv (+ base 8) true)))
-
-(defn- read-child-offset
-  "Read child pointer (i32) at child-idx within a node.
-   The child pointer is itself a slab-qualified offset."
-  ^number [^number slab-off ^number child-idx]
-  (let [base (eve-alloc/resolve-dv! slab-off)]
-    (.getInt32 eve-alloc/resolved-dv (+ base NODE_HEADER_SIZE (* child-idx 4)) true)))
-
-(defn- val-data-start
-  "Calculate offset-within-node where value data starts for given node_bitmap."
-  ^number [^number node-bm]
+(defn- values-start-off
+  "Byte offset where inline values begin."
+  [node-bm]
   (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm))))
 
-(defn- has-data? [data-bm bit-pos]
-  (not (zero? (bit-and data-bm (bit-shift-left 1 bit-pos)))))
+(defn- read-value-at
+  "Read a value [len:u32][bytes...] at pos within node. Returns [vb next-pos]."
+  [sio node-off pos]
+  (let [vlen (-sio-read-i32 sio node-off pos)
+        vb   (-sio-read-bytes sio node-off (+ pos 4) vlen)]
+    [vb (+ pos 4 vlen)]))
 
-(defn- has-node? [node-bm bit-pos]
-  (not (zero? (bit-and node-bm (bit-shift-left 1 bit-pos)))))
+(defn- skip-value-at
+  "Skip a value entry, returning offset after it."
+  [sio node-off pos]
+  (let [vlen (-sio-read-i32 sio node-off pos)]
+    (+ pos 4 vlen)))
 
-(defn- get-data-idx [data-bm bit-pos]
-  (popcount32 (bit-and data-bm (dec (bit-shift-left 1 bit-pos)))))
+(defn- write-value!
+  "Write a value at pos within node. Returns offset after written data."
+  [sio node-off pos vb]
+  (let [vlen (bytes-length vb)]
+    (-sio-write-i32! sio node-off pos vlen)
+    (when (pos? vlen)
+      (-sio-write-bytes! sio node-off (+ pos 4) vb))
+    (+ pos 4 vlen)))
 
-(defn- get-child-idx [node-bm bit-pos]
-  (popcount32 (bit-and node-bm (dec (bit-shift-left 1 bit-pos)))))
+(defn- value-matches?
+  "Check if value bytes at pos match vb."
+  [sio node-off pos vb]
+  (let [stored-len (-sio-read-i32 sio node-off pos)]
+    (when (== stored-len (bytes-length vb))
+      (let [stored-bytes (-sio-read-bytes sio node-off (+ pos 4) stored-len)]
+        (bytes-equal? stored-bytes vb)))))
 
-;;-----------------------------------------------------------------------------
-;; Value reading/writing helpers
-;;-----------------------------------------------------------------------------
+;;=============================================================================
+;; Node construction
+;;=============================================================================
 
-(defn- skip-val-at
-  "Skip over a value entry at pos-in-node. Returns next pos-in-node."
-  ^number [^number pos]
-  (let [len (r-get-u32 pos)]
-    (+ pos 4 len)))
+(defn- make-single-value-node! [sio data-bm vb]
+  (let [vlen (bytes-length vb)
+        nsize (+ NODE_HEADER_SIZE (+ 4 vlen))
+        node-off (-sio-alloc! sio nsize)]
+    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u16! sio node-off 2 0)
+    (-sio-write-i32! sio node-off 4 data-bm)
+    (-sio-write-i32! sio node-off 8 0)
+    (write-value! sio node-off NODE_HEADER_SIZE vb)
+    node-off))
 
-(defn- read-val-at
-  "Read a value from the given offset within a resolved node. Returns [value next-offset-in-node].
-   Uses zero-copy deserialization — reads directly from the resolved DataView."
-  [^number slab-off ^number val-off-in-node]
-  (eve-alloc/resolve-u8! slab-off)
-  (let [val-len (r-get-u32 val-off-in-node)
-        val-start (+ val-off-in-node 4)
-        val-bytes (copy-from-sab slab-off val-start val-len)
-        val-val (ser/deserialize-element {} val-bytes)
-        next-off (+ val-start val-len)]
-    [val-val next-off]))
+(defn- make-two-value-node! [sio data-bm vb1 vb2]
+  (let [vlen1 (bytes-length vb1)
+        vlen2 (bytes-length vb2)
+        nsize (+ NODE_HEADER_SIZE (+ 4 vlen1) (+ 4 vlen2))
+        node-off (-sio-alloc! sio nsize)]
+    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u16! sio node-off 2 0)
+    (-sio-write-i32! sio node-off 4 data-bm)
+    (-sio-write-i32! sio node-off 8 0)
+    (let [next-pos (write-value! sio node-off NODE_HEADER_SIZE vb1)]
+      (write-value! sio node-off next-pos vb2))
+    node-off))
 
-(defn- write-val!
-  "Write a value at pos-in-node within a resolved node. Returns next pos-in-node after written data."
-  ^number [^number pos ^js val-bytes]
-  (let [val-len (.-length val-bytes)]
-    (r-set-u32 pos val-len)
-    (when (pos? val-len)
-      (.set eve-alloc/resolved-u8 val-bytes (+ eve-alloc/resolved-base pos 4)))
-    (+ pos 4 val-len)))
+(defn- make-single-child-node! [sio node-bm child-off]
+  (let [node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE 4))]
+    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u16! sio node-off 2 0)
+    (-sio-write-i32! sio node-off 4 0)
+    (-sio-write-i32! sio node-off 8 node-bm)
+    (-sio-write-i32! sio node-off NODE_HEADER_SIZE child-off)
+    node-off))
 
-(defn- get-val-at-idx
-  "Read value at data index within a bitmap node."
-  [^number slab-off ^number data-bm ^number node-bm ^number idx]
-  (let [vs (val-data-start node-bm)]
-    (eve-alloc/resolve-u8! slab-off)
-    (loop [i 0 pos vs]
-      (if (== i idx)
-        (let [[v _] (read-val-at slab-off pos)]
-          v)
-        (recur (inc i) (skip-val-at pos))))))
+(defn- make-child-and-value-node! [sio data-bm node-bm child-off vb]
+  (let [vlen (bytes-length vb)
+        nsize (+ NODE_HEADER_SIZE 4 (+ 4 vlen))
+        node-off (-sio-alloc! sio nsize)]
+    (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
+    (-sio-write-u8!  sio node-off 1 0)
+    (-sio-write-u16! sio node-off 2 0)
+    (-sio-write-i32! sio node-off 4 data-bm)
+    (-sio-write-i32! sio node-off 8 node-bm)
+    (-sio-write-i32! sio node-off NODE_HEADER_SIZE child-off)
+    (write-value! sio node-off (+ NODE_HEADER_SIZE 4) vb)
+    node-off))
 
-;;-----------------------------------------------------------------------------
-;; Raw byte copying helpers for value data (no vector creation)
-;;-----------------------------------------------------------------------------
+(defn- make-collision-node! [sio vh entries]
+  (let [cnt (count entries)
+        vals-size (reduce (fn [acc [vb]] (+ acc 4 (bytes-length vb))) 0 entries)
+        node-off (-sio-alloc! sio (+ COLLISION_HEADER_SIZE vals-size))]
+    (-sio-write-u8!  sio node-off 0 NODE_TYPE_COLLISION)
+    (-sio-write-u8!  sio node-off 1 cnt)
+    (-sio-write-u16! sio node-off 2 0)
+    (-sio-write-i32! sio node-off 4 vh)
+    (-sio-write-i32! sio node-off 8 0)
+    (reduce (fn [pos [vb]]
+              (write-value! sio node-off pos vb))
+            COLLISION_HEADER_SIZE entries)
+    node-off))
 
-(defn- calc-node-val-total-size
-  "Calculate total bytes used by all values in a bitmap node."
-  ^number [^number slab-off ^number data-bm ^number node-bm]
-  (let [vs (val-data-start node-bm)
-        val-count (popcount32 data-bm)]
-    (eve-alloc/resolve-u8! slab-off)
-    (loop [i 0 pos vs]
-      (if (>= i val-count)
-        (- pos vs)
-        (recur (inc i) (skip-val-at pos))))))
+;;=============================================================================
+;; Node copy helpers
+;;=============================================================================
 
-;;-----------------------------------------------------------------------------
-;; Optimized node creation with raw byte copying
-;;-----------------------------------------------------------------------------
+(defn- node-values-size [sio node-off data-bm node-bm]
+  (let [dc (popcount32 data-bm)
+        v-off (values-start-off node-bm)]
+    (loop [i 0 pos v-off]
+      (if (>= i dc)
+        (- pos v-off)
+        (recur (inc i) (skip-value-at sio node-off pos))))))
 
-(defn- make-bitmap-node-with-raw-val!
-  "Create bitmap node, copying value data directly from source node.
-   If update-child-idx >= 0, replaces that child with new-child-off.
-   Source and destination may be in different slabs."
-  ([data-bm node-bm src-slab-off src-data-bm src-node-bm]
-   (make-bitmap-node-with-raw-val! data-bm node-bm src-slab-off src-data-bm src-node-bm -1 eve-alloc/NIL_OFFSET))
-  ([data-bm node-bm src-slab-off src-data-bm src-node-bm update-child-idx new-child-off]
-   (let [child-count (popcount32 node-bm)
-         existing-val-size (calc-node-val-total-size src-slab-off src-data-bm src-node-bm)
-         node-size (+ NODE_HEADER_SIZE (* 4 child-count) existing-val-size)
-         dst-slab-off (alloc-bytes! node-size)]
-     ;; Write header
-     (eve-alloc/resolve-u8! dst-slab-off)
-     (r-set-u8 0 NODE_TYPE_BITMAP)
-     (r-set-u8 1 0)
-     (r-set-u16 2 0)
-     (r-set-u32 4 data-bm)
-     (r-set-u32 8 node-bm)
-     ;; Write child offsets
-     (dotimes [i child-count]
-       (let [child-off (if (== i update-child-idx)
-                         new-child-off
-                         (eve-alloc/read-i32 src-slab-off (+ NODE_HEADER_SIZE (* i 4))))]
-         (r-set-i32 (+ NODE_HEADER_SIZE (* i 4)) child-off)))
-     ;; Copy value data from source
-     (let [src-vs (val-data-start src-node-bm)
-           dst-vs (val-data-start node-bm)]
-       (when (pos? existing-val-size)
-         (let [src-bytes (eve-alloc/read-bytes src-slab-off src-vs existing-val-size)]
-           (eve-alloc/resolve-u8! dst-slab-off)
-           (.set eve-alloc/resolved-u8 src-bytes (+ eve-alloc/resolved-base dst-vs)))))
-     dst-slab-off)))
+(defn- node-byte-size [sio node-off data-bm node-bm]
+  (+ NODE_HEADER_SIZE
+     (* 4 (popcount32 node-bm))
+     (node-values-size sio node-off data-bm node-bm)))
 
-(defn- make-bitmap-node-with-added-val!
-  "Create bitmap node adding a new inline value at insert-idx.
-   Copies existing values from source and inserts new value."
-  [new-data-bm new-node-bm src-slab-off src-data-bm src-node-bm insert-idx ^js vb]
-  (let [src-child-count (popcount32 src-node-bm)
-        dst-child-count (popcount32 new-node-bm)
-        data-count (popcount32 src-data-bm)
-        src-val-size (calc-node-val-total-size src-slab-off src-data-bm src-node-bm)
-        new-val-size (+ 4 (.-length vb))
-        node-size (+ NODE_HEADER_SIZE (* 4 dst-child-count) src-val-size new-val-size)
-        dst-slab-off (alloc-bytes! node-size)]
-    ;; Write header
-    (eve-alloc/resolve-u8! dst-slab-off)
-    (r-set-u8 0 NODE_TYPE_BITMAP)
-    (r-set-u8 1 0)
-    (r-set-u16 2 0)
-    (r-set-u32 4 new-data-bm)
-    (r-set-u32 8 new-node-bm)
-    ;; Copy children (same as source)
-    (dotimes [i src-child-count]
-      (r-set-i32 (+ NODE_HEADER_SIZE (* i 4))
-                 (eve-alloc/read-i32 src-slab-off (+ NODE_HEADER_SIZE (* i 4)))))
-    ;; Read source value positions first
-    (eve-alloc/resolve-u8! src-slab-off)
-    (let [src-vs (val-data-start src-node-bm)
-          positions (loop [i 0 pos src-vs acc #js []]
-                      (if (>= i data-count)
-                        acc
-                        (let [next (skip-val-at pos)]
-                          (.push acc #js [pos (- next pos)])
-                          (recur (inc i) next acc))))]
-      ;; Write values with insertion
-      (eve-alloc/resolve-u8! dst-slab-off)
-      (let [dst-vs (val-data-start new-node-bm)]
-        (loop [src-i 0 dst-pos dst-vs inserted? false]
-          (let [dst-i (+ src-i (if inserted? 1 0))]
-            (cond
-              (and (== src-i insert-idx) (not inserted?))
-              ;; Insert new value here
-              (let [next-dst (write-val! dst-pos vb)]
-                (recur src-i next-dst true))
+(defn- copy-node-patch-child! [sio src-off data-bm node-bm child-idx new-child-off]
+  (let [nsize (node-byte-size sio src-off data-bm node-bm)
+        dst-off (-sio-alloc! sio nsize)]
+    (-sio-copy-block! sio dst-off 0 src-off 0 nsize)
+    (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* child-idx 4)) new-child-off)
+    dst-off))
 
-              (>= src-i data-count)
-              ;; Done with source, insert at end if not yet inserted
-              (when-not inserted?
-                (write-val! dst-pos vb))
+;;=============================================================================
+;; HAMT Find (unified)
+;;=============================================================================
 
-              :else
-              ;; Copy existing value
-              (let [entry (aget positions src-i)
-                    src-pos (aget entry 0)
-                    val-len (aget entry 1)
-                    src-bytes (eve-alloc/read-bytes src-slab-off src-pos val-len)]
-                (eve-alloc/resolve-u8! dst-slab-off)
-                (.set eve-alloc/resolved-u8 src-bytes (+ eve-alloc/resolved-base dst-pos))
-                (recur (inc src-i) (+ dst-pos val-len) inserted?)))))))
-    dst-slab-off))
-
-(defn- make-bitmap-node-removing-val!
-  "Create bitmap node with value at remove-idx removed, optionally inserting a new child."
-  ([new-data-bm new-node-bm src-slab-off src-data-bm src-node-bm remove-idx]
-   (make-bitmap-node-removing-val! new-data-bm new-node-bm src-slab-off src-data-bm src-node-bm remove-idx -1 eve-alloc/NIL_OFFSET))
-  ([new-data-bm new-node-bm src-slab-off src-data-bm src-node-bm remove-idx insert-child-idx new-child-off]
-   (let [src-child-count (popcount32 src-node-bm)
-         dst-child-count (popcount32 new-node-bm)
-         data-count (popcount32 src-data-bm)
-         ;; Calculate size - one fewer value, possibly one more child
-         src-val-size (calc-node-val-total-size src-slab-off src-data-bm src-node-bm)
-         ;; Find size of removed value
-         _ (eve-alloc/resolve-u8! src-slab-off)
-         removed-val-size (let [vs (val-data-start src-node-bm)]
-                            (loop [i 0 pos vs]
-                              (if (== i remove-idx)
-                                (- (skip-val-at pos) pos)
-                                (recur (inc i) (skip-val-at pos)))))
-         new-val-size (- src-val-size removed-val-size)
-         node-size (+ NODE_HEADER_SIZE (* 4 dst-child-count) new-val-size)
-         dst-slab-off (alloc-bytes! node-size)]
-     ;; Write header
-     (eve-alloc/resolve-u8! dst-slab-off)
-     (r-set-u8 0 NODE_TYPE_BITMAP)
-     (r-set-u8 1 0)
-     (r-set-u16 2 0)
-     (r-set-u32 4 new-data-bm)
-     (r-set-u32 8 new-node-bm)
-     ;; Copy children with optional insertion
-     (if (>= insert-child-idx 0)
-       ;; Insert new child
-       (loop [src-i 0 dst-i 0]
-         (cond
-           (>= dst-i dst-child-count) nil  ;; done
-           (== dst-i insert-child-idx)
-           (do (r-set-i32 (+ NODE_HEADER_SIZE (* dst-i 4)) new-child-off)
-               (recur src-i (inc dst-i)))
-           :else
-           (do (r-set-i32 (+ NODE_HEADER_SIZE (* dst-i 4))
-                          (eve-alloc/read-i32 src-slab-off (+ NODE_HEADER_SIZE (* src-i 4))))
-               (recur (inc src-i) (inc dst-i)))))
-       ;; Copy children unchanged
-       (dotimes [i src-child-count]
-         (r-set-i32 (+ NODE_HEADER_SIZE (* i 4))
-                    (eve-alloc/read-i32 src-slab-off (+ NODE_HEADER_SIZE (* i 4))))))
-     ;; Copy values, skipping removed one
-     (eve-alloc/resolve-u8! src-slab-off)
-     (let [src-vs (val-data-start src-node-bm)
-           positions (loop [i 0 pos src-vs acc #js []]
-                       (if (>= i data-count)
-                         acc
-                         (let [next (skip-val-at pos)]
-                           (.push acc #js [pos (- next pos)])
-                           (recur (inc i) next acc))))]
-       (eve-alloc/resolve-u8! dst-slab-off)
-       (let [dst-vs (val-data-start new-node-bm)]
-         (loop [i 0 dst-pos dst-vs]
-           (when (< i data-count)
-             (let [entry (aget positions i)
-                   src-pos (aget entry 0)
-                   val-len (aget entry 1)]
-               (if (== i remove-idx)
-                 ;; Skip this value
-                 (recur (inc i) dst-pos)
-                 ;; Copy this value
-                 (let [src-bytes (eve-alloc/read-bytes src-slab-off src-pos val-len)]
-                   (eve-alloc/resolve-u8! dst-slab-off)
-                   (.set eve-alloc/resolved-u8 src-bytes (+ eve-alloc/resolved-base dst-pos))
-                   (recur (inc i) (+ dst-pos val-len)))))))))
-     dst-slab-off)))
-
-(defn- make-bitmap-node-removing-child!
-  "Create bitmap node with a child removed (for disj)."
-  [data-bm new-node-bm src-slab-off src-data-bm src-node-bm remove-child-idx]
-  (let [src-child-count (popcount32 src-node-bm)
-        dst-child-count (popcount32 new-node-bm)
-        val-size (calc-node-val-total-size src-slab-off src-data-bm src-node-bm)
-        node-size (+ NODE_HEADER_SIZE (* 4 dst-child-count) val-size)
-        dst-slab-off (alloc-bytes! node-size)]
-    ;; Write header
-    (eve-alloc/resolve-u8! dst-slab-off)
-    (r-set-u8 0 NODE_TYPE_BITMAP)
-    (r-set-u8 1 0)
-    (r-set-u16 2 0)
-    (r-set-u32 4 data-bm)
-    (r-set-u32 8 new-node-bm)
-    ;; Copy children, skipping removed one
-    (loop [src-i 0 dst-i 0]
-      (when (< src-i src-child-count)
-        (if (== src-i remove-child-idx)
-          (recur (inc src-i) dst-i)
-          (do (r-set-i32 (+ NODE_HEADER_SIZE (* dst-i 4))
-                         (eve-alloc/read-i32 src-slab-off (+ NODE_HEADER_SIZE (* src-i 4))))
-              (recur (inc src-i) (inc dst-i))))))
-    ;; Copy all value data
-    (let [src-vs (val-data-start src-node-bm)
-          dst-vs (val-data-start new-node-bm)]
-      (when (pos? val-size)
-        (let [src-bytes (eve-alloc/read-bytes src-slab-off src-vs val-size)]
-          (eve-alloc/resolve-u8! dst-slab-off)
-          (.set eve-alloc/resolved-u8 src-bytes (+ eve-alloc/resolved-base dst-vs)))))
-    dst-slab-off))
-
-(defn- make-single-val-bitmap-node!
-  "Create a bitmap node with single inline value."
-  [bit-pos ^js vb]
-  (let [data-bm (bit-shift-left 1 bit-pos)
-        val-len (.-length vb)
-        node-size (+ NODE_HEADER_SIZE 4 val-len)  ;; header + val len + val bytes
-        slab-off (alloc-bytes! node-size)]
-    (eve-alloc/resolve-u8! slab-off)
-    (r-set-u8 0 NODE_TYPE_BITMAP)
-    (r-set-u8 1 0)
-    (r-set-u16 2 0)
-    (r-set-u32 4 data-bm)  ;; data_bitmap
-    (r-set-u32 8 0)        ;; node_bitmap = 0
-    ;; Write value (no children)
-    (r-set-u32 NODE_HEADER_SIZE val-len)
-    (when (pos? val-len)
-      (.set eve-alloc/resolved-u8 vb (+ eve-alloc/resolved-base NODE_HEADER_SIZE 4)))
-    slab-off))
-
-(defn- make-two-val-bitmap-node!
-  "Create a bitmap node with two inline values at different bit positions."
-  [bit-pos1 ^js vb1 bit-pos2 ^js vb2]
-  (let [;; Order by bit position
-        [first-bpos first-vb second-bpos second-vb]
-        (if (< bit-pos1 bit-pos2)
-          [bit-pos1 vb1 bit-pos2 vb2]
-          [bit-pos2 vb2 bit-pos1 vb1])
-        data-bm (bit-or (bit-shift-left 1 first-bpos) (bit-shift-left 1 second-bpos))
-        val1-len (.-length first-vb)
-        val2-len (.-length second-vb)
-        node-size (+ NODE_HEADER_SIZE 4 val1-len 4 val2-len)
-        slab-off (alloc-bytes! node-size)]
-    (eve-alloc/resolve-u8! slab-off)
-    (r-set-u8 0 NODE_TYPE_BITMAP)
-    (r-set-u8 1 0)
-    (r-set-u16 2 0)
-    (r-set-u32 4 data-bm)
-    (r-set-u32 8 0)  ;; node_bitmap = 0
-    ;; Write first value
-    (let [pos1 NODE_HEADER_SIZE]
-      (r-set-u32 pos1 val1-len)
-      (when (pos? val1-len)
-        (.set eve-alloc/resolved-u8 first-vb (+ eve-alloc/resolved-base pos1 4)))
-      ;; Write second value
-      (let [pos2 (+ pos1 4 val1-len)]
-        (r-set-u32 pos2 val2-len)
-        (when (pos? val2-len)
-          (.set eve-alloc/resolved-u8 second-vb (+ eve-alloc/resolved-base pos2 4)))))
-    slab-off))
-
-(defn- make-collision-node!
-  "Create a collision node for values with same hash."
-  [hash-val val-bytes-seq]
-  (let [cnt (count val-bytes-seq)
-        ;; Calculate total size
-        entries-size (reduce (fn [acc vb] (+ acc 4 (.-length vb))) 0 val-bytes-seq)
-        node-size (+ NODE_HEADER_SIZE entries-size)
-        slab-off (alloc-bytes! node-size)]
-    (eve-alloc/resolve-u8! slab-off)
-    (r-set-u8 0 NODE_TYPE_COLLISION)
-    (r-set-u8 1 cnt)
-    (r-set-u32 2 hash-val)
-    (r-set-u32 8 0)  ;; unused
-    ;; Write entries
-    (loop [vs (seq val-bytes-seq) pos NODE_HEADER_SIZE]
-      (when vs
-        (let [vb (first vs)
-              vlen (.-length vb)]
-          (r-set-u32 pos vlen)
-          (when (pos? vlen)
-            (.set eve-alloc/resolved-u8 vb (+ eve-alloc/resolved-base pos 4)))
-          (recur (next vs) (+ pos 4 vlen)))))
-    slab-off))
-
-;;-----------------------------------------------------------------------------
-;; HAMT lookup
-;;-----------------------------------------------------------------------------
-
-(defn- hamt-find
-  "Look up value in HAMT. Returns found?."
-  [root-off v vh shift]
-  (if (== root-off eve-alloc/NIL_OFFSET)
-    false
-    (let [node-type (read-node-type root-off)]
-      (case node-type
-        ;; Bitmap node
-        1 (let [base (eve-alloc/resolve-dv! root-off)
-                data-bm (.getUint32 eve-alloc/resolved-dv (+ base 4) true)
-                node-bm (.getUint32 eve-alloc/resolved-dv (+ base 8) true)
-                bit-pos (bit-and (unsigned-bit-shift-right vh shift) MASK)]
-            (cond
-              ;; Check inline value first
-              (has-data? data-bm bit-pos)
-              (let [idx (get-data-idx data-bm bit-pos)
-                    found-v (get-val-at-idx root-off data-bm node-bm idx)]
-                (= v found-v))
-
-              ;; Check child node
-              (has-node? node-bm bit-pos)
-              (let [idx (get-child-idx node-bm bit-pos)
-                    child-off (read-child-offset root-off idx)]
-                (recur child-off v vh (+ shift SHIFT_STEP)))
-
-              ;; Not found
-              :else false))
-
-        ;; Collision node
-        2 (let [base (eve-alloc/resolve-u8! root-off)
-                cnt (r-get-u8 1)]
-            (loop [i 0 pos NODE_HEADER_SIZE]
-              (if (>= i cnt)
+(defn- hamt-find [sio root-off v vh vb]
+  (loop [off root-off shift 0]
+    (if (== off NIL_OFFSET)
+      false
+      (let [nt (-sio-read-u8 sio off 0)]
+        (case (int nt)
+          1 (let [dbm (-sio-read-i32 sio off 4)
+                  nbm (-sio-read-i32 sio off 8)
+                  bit (bitpos vh shift)]
+              (cond
+                (has-bit? nbm bit)
+                (recur (-sio-read-i32 sio off
+                         (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                       (+ shift SHIFT_STEP))
+                (has-bit? dbm bit)
+                (let [di (get-index dbm bit)
+                      vs (values-start-off nbm)
+                      pos (loop [i 0 p vs]
+                            (if (== i di) p
+                              (recur (inc i) (skip-value-at sio off p))))]
+                  (boolean (value-matches? sio off pos vb)))
+                :else false))
+          2 (let [ch (-sio-read-i32 sio off 4)]
+              (if (not= ch vh)
                 false
-                (let [[entry-v next-pos] (read-val-at root-off pos)]
-                  (if (= v entry-v)
-                    true
-                    (recur (inc i) next-pos))))))
+                (let [cc (-sio-read-u8 sio off 1)]
+                  (loop [i 0 pos COLLISION_HEADER_SIZE]
+                    (if (>= i cc)
+                      false
+                      (if (value-matches? sio off pos vb)
+                        true
+                        (recur (inc i) (skip-value-at sio off pos))))))))
+          false)))))
 
-        ;; Unknown
-        false))))
+;;=============================================================================
+;; HAMT Conj (unified) — returns [new-root added?]
+;;=============================================================================
 
-;;-----------------------------------------------------------------------------
-;; HAMT conj (persistent)
-;;-----------------------------------------------------------------------------
-
-;; Module-level mutable flags to eliminate CLJS vector allocation per hamt-conj/disj call.
-(def ^:private ^:mutable hamt-conj-added? false)
-(def ^:private ^:mutable hamt-disj-removed? false)
-
-(defn- hamt-conj
-  "Add value to HAMT. Returns new-root-off (slab-qualified offset).
-   Sets hamt-conj-added? to true if new value, false otherwise."
-  [root-off v vh vb shift]
-  (if (== root-off eve-alloc/NIL_OFFSET)
-    ;; Empty -> create single-value bitmap node
-    (let [bit-pos (bit-and (unsigned-bit-shift-right vh shift) MASK)]
-      (set! hamt-conj-added? true)
-      (make-single-val-bitmap-node! bit-pos vb))
-    (let [node-type (read-node-type root-off)]
-      (case node-type
-        ;; Bitmap node
-        1 (let [base (eve-alloc/resolve-dv! root-off)
-                data-bm (.getUint32 eve-alloc/resolved-dv (+ base 4) true)
-                node-bm (.getUint32 eve-alloc/resolved-dv (+ base 8) true)
-                bit-pos (bit-and (unsigned-bit-shift-right vh shift) MASK)]
+(defn- hamt-conj [sio root-off vh vb shift]
+  (if (== root-off NIL_OFFSET)
+    [(make-single-value-node! sio (bitpos vh shift) vb) true]
+    (let [nt (-sio-read-u8 sio root-off 0)]
+      (case (int nt)
+        1 (let [data-bm (-sio-read-i32 sio root-off 4)
+                node-bm (-sio-read-i32 sio root-off 8)
+                bit     (bitpos vh shift)]
             (cond
-              ;; Slot has inline value
-              (has-data? data-bm bit-pos)
-              (let [idx (get-data-idx data-bm bit-pos)
-                    existing-v (get-val-at-idx root-off data-bm node-bm idx)]
-                (if (= v existing-v)
-                  ;; Already in set
-                  (do (set! hamt-conj-added? false) root-off)
-                  ;; Need to split: remove inline, add child node
-                  (let [existing-vb (ser/serialize-val existing-v)
+              (has-bit? node-bm bit)
+              (let [child-idx (get-index node-bm bit)
+                    child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* child-idx 4)))
+                    [new-child added?] (hamt-conj sio child-off vh vb (+ shift SHIFT_STEP))]
+                (if (== new-child child-off)
+                  [root-off false]
+                  [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child)
+                   added?]))
+
+              (has-bit? data-bm bit)
+              (let [di (get-index data-bm bit)
+                    vs (values-start-off node-bm)
+                    pos (loop [i 0 p vs]
+                          (if (== i di) p
+                            (recur (inc i) (skip-value-at sio root-off p))))]
+                (if (value-matches? sio root-off pos vb)
+                  [root-off false]
+                  (let [[existing-vb _] (read-value-at sio root-off pos)
                         existing-vh (portable-hash-bytes existing-vb)]
-                    (if (== existing-vh vh)
-                      ;; Hash collision -> create collision node as child
-                      (let [collision-off (make-collision-node! vh [existing-vb vb])
-                            new-data-bm (bit-xor data-bm (bit-shift-left 1 bit-pos))
-                            new-node-bm (bit-or node-bm (bit-shift-left 1 bit-pos))
-                            child-idx (get-child-idx new-node-bm bit-pos)]
-                        (set! hamt-conj-added? true)
-                        (make-bitmap-node-removing-val! new-data-bm new-node-bm
-                                                         root-off data-bm node-bm idx
-                                                         child-idx collision-off))
-                      ;; Different hashes -> recurse to split
-                      (let [new-child-off (let [bp1 (bit-and (unsigned-bit-shift-right existing-vh (+ shift SHIFT_STEP)) MASK)
-                                                bp2 (bit-and (unsigned-bit-shift-right vh (+ shift SHIFT_STEP)) MASK)]
-                                            (if (== bp1 bp2)
-                                              ;; Same position at next level, need deeper split.
-                                              ;; Create a node with existing-v at bp1, then recurse
-                                              ;; at shift+SHIFT_STEP (NOT shift+2*SHIFT_STEP) so the
-                                              ;; bit position matches the shift level hamt-conj uses.
-                                              (let [sub (hamt-conj
-                                                          (make-single-val-bitmap-node! bp1 existing-vb)
-                                                          v vh vb (+ shift SHIFT_STEP))]
-                                                sub)
-                                              ;; Different positions -> two-value node
-                                              (make-two-val-bitmap-node! bp1 existing-vb bp2 vb)))
-                            new-data-bm (bit-xor data-bm (bit-shift-left 1 bit-pos))
-                            new-node-bm (bit-or node-bm (bit-shift-left 1 bit-pos))
-                            child-idx (get-child-idx new-node-bm bit-pos)]
-                        (set! hamt-conj-added? true)
-                        (make-bitmap-node-removing-val! new-data-bm new-node-bm
-                                                         root-off data-bm node-bm idx
-                                                         child-idx new-child-off))))))
+                    (if (>= shift 30)
+                      (let [coll (make-collision-node! sio vh [[existing-vb] [vb]])
+                            new-data-bm (bit-xor data-bm bit)
+                            new-node-bm (bit-or node-bm bit)
+                            new-child-idx (get-index new-node-bm bit)]
+                        (let [old-dc (popcount32 data-bm)
+                              new-dc (popcount32 new-data-bm)
+                              new-cc (popcount32 new-node-bm)
+                              old-cc (popcount32 node-bm)
+                              val-list (let [v-off (values-start-off node-bm)]
+                                         (loop [i 0 p v-off acc []]
+                                           (if (>= i old-dc) acc
+                                             (let [[ev np] (read-value-at sio root-off p)]
+                                               (recur (inc i) np
+                                                      (if (== i di) acc (conj acc ev)))))))
+                              vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
+                              nsize (+ NODE_HEADER_SIZE (* 4 new-cc) vals-size)
+                              dst-off (-sio-alloc! sio nsize)]
+                          (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
+                          (-sio-write-u8!  sio dst-off 1 0)
+                          (-sio-write-u16! sio dst-off 2 0)
+                          (-sio-write-i32! sio dst-off 4 new-data-bm)
+                          (-sio-write-i32! sio dst-off 8 new-node-bm)
+                          (loop [si 0 di2 0]
+                            (when (< di2 new-cc)
+                              (if (== di2 new-child-idx)
+                                (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4)) coll)
+                                    (recur si (inc di2)))
+                                (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4))
+                                      (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
+                                    (recur (inc si) (inc di2))))))
+                          (reduce (fn [p ev] (write-value! sio dst-off p ev))
+                                  (values-start-off new-node-bm) val-list)
+                          [dst-off true]))
+                      (let [sub-shift (+ shift SHIFT_STEP)
+                            existing-vh (portable-hash-bytes existing-vb)
+                            existing-bit (bitpos existing-vh sub-shift)
+                            new-bit (bitpos vh sub-shift)]
+                        (let [[sub _] (hamt-conj sio NIL_OFFSET existing-vh existing-vb sub-shift)
+                              [final-sub _] (hamt-conj sio sub vh vb sub-shift)
+                              new-data-bm (bit-xor data-bm bit)
+                              new-node-bm (bit-or node-bm bit)
+                              new-child-idx (get-index new-node-bm bit)]
+                          (let [old-dc (popcount32 data-bm)
+                                new-dc (popcount32 new-data-bm)
+                                new-cc (popcount32 new-node-bm)
+                                old-cc (popcount32 node-bm)
+                                val-list (let [v-off (values-start-off node-bm)]
+                                           (loop [i 0 p v-off acc []]
+                                             (if (>= i old-dc) acc
+                                               (let [[ev np] (read-value-at sio root-off p)]
+                                                 (recur (inc i) np
+                                                        (if (== i di) acc (conj acc ev)))))))
+                                vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
+                                nsize (+ NODE_HEADER_SIZE (* 4 new-cc) vals-size)
+                                dst-off (-sio-alloc! sio nsize)]
+                            (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
+                            (-sio-write-u8!  sio dst-off 1 0)
+                            (-sio-write-u16! sio dst-off 2 0)
+                            (-sio-write-i32! sio dst-off 4 new-data-bm)
+                            (-sio-write-i32! sio dst-off 8 new-node-bm)
+                            (loop [si 0 di2 0]
+                              (when (< di2 new-cc)
+                                (if (== di2 new-child-idx)
+                                  (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4)) final-sub)
+                                      (recur si (inc di2)))
+                                  (do (-sio-write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4))
+                                        (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
+                                      (recur (inc si) (inc di2))))))
+                            (reduce (fn [p ev] (write-value! sio dst-off p ev))
+                                    (values-start-off new-node-bm) val-list)
+                            [dst-off true])))))))
 
-              ;; Slot has child node
-              (has-node? node-bm bit-pos)
-              (let [child-idx (get-child-idx node-bm bit-pos)
-                    child-off (read-child-offset root-off child-idx)
-                    new-child-off (hamt-conj child-off v vh vb (+ shift SHIFT_STEP))]
-                ;; hamt-conj-added? set by recursive call
-                (if-not hamt-conj-added?
-                  root-off
-                  ;; Child was modified
-                  (make-bitmap-node-with-raw-val! data-bm node-bm
-                                                   root-off data-bm node-bm
-                                                   child-idx new-child-off)))
-
-              ;; Empty slot -> add inline value
               :else
-              (let [new-data-bm (bit-or data-bm (bit-shift-left 1 bit-pos))
-                    insert-idx (get-data-idx new-data-bm bit-pos)]
-                (set! hamt-conj-added? true)
-                (make-bitmap-node-with-added-val! new-data-bm node-bm
-                                                   root-off data-bm node-bm
-                                                   insert-idx vb))))
+              (let [di (get-index data-bm bit)
+                    new-data-bm (bit-or data-bm bit)
+                    old-dc (popcount32 data-bm)
+                    new-dc (popcount32 new-data-bm)
+                    cc (popcount32 node-bm)
+                    val-list (let [v-off (values-start-off node-bm)]
+                               (loop [i 0 p v-off acc []]
+                                 (if (>= i old-dc) acc
+                                   (let [[ev np] (read-value-at sio root-off p)]
+                                     (recur (inc i) np (conj acc ev))))))
+                    new-val-list (vec (concat (subvec val-list 0 di) [vb] (subvec val-list di)))
+                    vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 new-val-list)
+                    nsize (+ NODE_HEADER_SIZE (* 4 cc) vals-size)
+                    dst-off (-sio-alloc! sio nsize)]
+                (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
+                (-sio-write-u8!  sio dst-off 1 0)
+                (-sio-write-u16! sio dst-off 2 0)
+                (-sio-write-i32! sio dst-off 4 new-data-bm)
+                (-sio-write-i32! sio dst-off 8 node-bm)
+                (when (pos? cc)
+                  (-sio-copy-block! sio dst-off NODE_HEADER_SIZE root-off NODE_HEADER_SIZE (* 4 cc)))
+                (reduce (fn [p ev] (write-value! sio dst-off p ev))
+                        (values-start-off node-bm) new-val-list)
+                [dst-off true])))
 
-        ;; Collision node
-        2 (let [base (eve-alloc/resolve-u8! root-off)
-                node-hash (r-get-u32 2)
-                cnt (r-get-u8 1)]
+        2 (let [node-hash (-sio-read-i32 sio root-off 4)
+                cc (-sio-read-u8 sio root-off 1)]
             (if (== vh node-hash)
-              ;; Same hash -> check if already present or add
-              (loop [i 0 pos NODE_HEADER_SIZE val-bytes-list []]
-                (if (>= i cnt)
-                  ;; Value not found -> add new entry
-                  (let [all-vals (conj val-bytes-list vb)]
-                    (set! hamt-conj-added? true)
-                    (make-collision-node! vh all-vals))
-                  (let [_ (eve-alloc/resolve-u8! root-off)
-                        val-len (r-get-u32 pos)
-                        val-bytes (copy-from-sab root-off (+ pos 4) val-len)
-                        entry-v (ser/deserialize-element {} val-bytes)
-                        next-pos (+ pos 4 val-len)]
-                    (if (= v entry-v)
-                      ;; Already in set
-                      (do (set! hamt-conj-added? false) root-off)
-                      ;; Continue searching
-                      (recur (inc i) next-pos (conj val-bytes-list val-bytes))))))
-              ;; Different hash -> split into internal node
-              (let [bit-pos1 (bit-and (unsigned-bit-shift-right node-hash shift) MASK)
-                    bit-pos2 (bit-and (unsigned-bit-shift-right vh shift) MASK)]
-                (if (== bit-pos1 bit-pos2)
-                  ;; Same bit position -> recurse
-                  (let [sub-node (hamt-conj root-off v vh vb (+ shift SHIFT_STEP))
-                        ;; hamt-conj-added? set by recursive call
-                        node-bm (bit-shift-left 1 bit-pos1)
-                        slab-off (alloc-bytes! (+ NODE_HEADER_SIZE 4))]
-                    (eve-alloc/resolve-u8! slab-off)
-                    (r-set-u8 0 NODE_TYPE_BITMAP)
-                    (r-set-u8 1 0)
-                    (r-set-u16 2 0)        ;; pad
-                    (r-set-u32 4 0)        ;; data_bitmap = 0
-                    (r-set-u32 8 node-bm)  ;; node_bitmap
-                    (r-set-i32 NODE_HEADER_SIZE sub-node)
-                    slab-off)
-                  ;; Different positions -> collision + new value
-                  (let [new-val-off (make-single-val-bitmap-node! bit-pos2 vb)
-                        node-bm (bit-or (bit-shift-left 1 bit-pos1) (bit-shift-left 1 bit-pos2))
-                        slab-off (alloc-bytes! (+ NODE_HEADER_SIZE 8))]
-                    (eve-alloc/resolve-u8! slab-off)
-                    (r-set-u8 0 NODE_TYPE_BITMAP)
-                    (r-set-u8 1 0)
-                    (r-set-u16 2 0)        ;; pad
-                    (r-set-u32 4 0)        ;; data_bitmap = 0
-                    (r-set-u32 8 node-bm)  ;; node_bitmap
-                    ;; Order children by bit position
-                    (if (< bit-pos1 bit-pos2)
-                      (do (r-set-i32 NODE_HEADER_SIZE root-off)
-                          (r-set-i32 (+ NODE_HEADER_SIZE 4) new-val-off))
-                      (do (r-set-i32 NODE_HEADER_SIZE new-val-off)
-                          (r-set-i32 (+ NODE_HEADER_SIZE 4) root-off)))
-                    (set! hamt-conj-added? true)
-                    slab-off)))))
+              (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+                              (if (>= i cc) acc
+                                (let [[ev np] (read-value-at sio root-off pos)]
+                                  (recur (inc i) np (conj acc ev)))))]
+                (if (some #(bytes-equal? % vb) entries)
+                  [root-off false]
+                  [(make-collision-node! sio vh (mapv (fn [ev] [ev]) (conj entries vb))) true]))
+              (if (>= shift 30)
+                (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+                                (if (>= i cc) acc
+                                  (let [[ev np] (read-value-at sio root-off pos)]
+                                    (recur (inc i) np (conj acc ev)))))]
+                  [(make-collision-node! sio node-hash (mapv (fn [ev] [ev]) (conj entries vb))) true])
+                (let [bit1 (bitpos node-hash shift)
+                      bit2 (bitpos vh shift)]
+                  (if (== bit1 bit2)
+                    (let [[new-child _] (hamt-conj sio root-off vh vb (+ shift SHIFT_STEP))]
+                      [(make-single-child-node! sio bit1 new-child) true])
+                    [(make-child-and-value-node! sio bit2 bit1 root-off vb) true])))))
 
-        ;; Unknown
-        (do (set! hamt-conj-added? false) root-off)))))
+        [root-off false]))))
 
-;;-----------------------------------------------------------------------------
-;; HAMT disj (persistent)
-;;-----------------------------------------------------------------------------
+;;=============================================================================
+;; HAMT Disj (unified)
+;;=============================================================================
 
-(defn- hamt-disj
-  "Remove value from HAMT. Returns new-root-off (slab-qualified offset).
-   Sets hamt-disj-removed? to true if value was removed, false otherwise."
-  [root-off v vh shift]
-  (if (== root-off eve-alloc/NIL_OFFSET)
-    (do (set! hamt-disj-removed? false) eve-alloc/NIL_OFFSET)
-    (let [node-type (read-node-type root-off)]
-      (case node-type
-        ;; Bitmap node
-        1 (let [base (eve-alloc/resolve-dv! root-off)
-                data-bm (.getUint32 eve-alloc/resolved-dv (+ base 4) true)
-                node-bm (.getUint32 eve-alloc/resolved-dv (+ base 8) true)
-                bit-pos (bit-and (unsigned-bit-shift-right vh shift) MASK)]
+(defn- hamt-disj [sio root-off vh vb shift]
+  (if (== root-off NIL_OFFSET)
+    [root-off false]
+    (let [nt (-sio-read-u8 sio root-off 0)]
+      (case (int nt)
+        1 (let [data-bm (-sio-read-i32 sio root-off 4)
+                node-bm (-sio-read-i32 sio root-off 8)
+                bit     (bitpos vh shift)]
             (cond
-              ;; Check inline value
-              (has-data? data-bm bit-pos)
-              (let [idx (get-data-idx data-bm bit-pos)
-                    found-v (get-val-at-idx root-off data-bm node-bm idx)]
-                (if-not (= v found-v)
-                  (do (set! hamt-disj-removed? false) root-off)
-                  ;; Remove this inline value
-                  (let [new-data-bm (bit-xor data-bm (bit-shift-left 1 bit-pos))
-                        total-entries (+ (popcount32 new-data-bm) (popcount32 node-bm))]
-                    (set! hamt-disj-removed? true)
-                    (if (zero? total-entries)
-                      ;; Node becomes empty
-                      eve-alloc/NIL_OFFSET
-                      ;; Remove value from node
-                      (make-bitmap-node-removing-val! new-data-bm node-bm
-                                                       root-off data-bm node-bm idx)))))
+              (has-bit? node-bm bit)
+              (let [child-idx (get-index node-bm bit)
+                    child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* child-idx 4)))
+                    [new-child removed?] (hamt-disj sio child-off vh vb (+ shift SHIFT_STEP))]
+                (if-not removed?
+                  [root-off false]
+                  (if (== new-child NIL_OFFSET)
+                    [(copy-node-patch-child! sio root-off data-bm node-bm child-idx NIL_OFFSET) true]
+                    [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child) true])))
 
-              ;; Check child node
-              (has-node? node-bm bit-pos)
-              (let [child-idx (get-child-idx node-bm bit-pos)
-                    child-off (read-child-offset root-off child-idx)
-                    new-child (hamt-disj child-off v vh (+ shift SHIFT_STEP))]
-                ;; hamt-disj-removed? set by recursive call
-                (if-not hamt-disj-removed?
-                  root-off
-                  (if (== new-child eve-alloc/NIL_OFFSET)
-                    ;; Child was removed entirely
-                    (let [new-node-bm (bit-xor node-bm (bit-shift-left 1 bit-pos))
-                          total-entries (+ (popcount32 data-bm) (popcount32 new-node-bm))]
-                      (if (zero? total-entries)
-                        eve-alloc/NIL_OFFSET
-                        (make-bitmap-node-removing-child! data-bm new-node-bm
-                                                           root-off data-bm node-bm child-idx)))
-                    ;; Child was modified
-                    (make-bitmap-node-with-raw-val! data-bm node-bm
-                                                     root-off data-bm node-bm
-                                                     child-idx new-child))))
+              (has-bit? data-bm bit)
+              (let [di (get-index data-bm bit)
+                    vs (values-start-off node-bm)
+                    pos (loop [i 0 p vs]
+                          (if (== i di) p
+                            (recur (inc i) (skip-value-at sio root-off p))))]
+                (if (value-matches? sio root-off pos vb)
+                  (let [new-data-bm (bit-xor data-bm bit)
+                        new-dc (popcount32 new-data-bm)
+                        cc (popcount32 node-bm)]
+                    (if (and (zero? new-dc) (zero? cc))
+                      [NIL_OFFSET true]
+                      (let [old-dc (popcount32 data-bm)
+                            val-list (let [v-off (values-start-off node-bm)]
+                                       (loop [i 0 p v-off acc []]
+                                         (if (>= i old-dc) acc
+                                           (let [[ev np] (read-value-at sio root-off p)]
+                                             (recur (inc i) np
+                                                    (if (== i di) acc (conj acc ev)))))))
+                            vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
+                            nsize (+ NODE_HEADER_SIZE (* 4 cc) vals-size)
+                            dst-off (-sio-alloc! sio nsize)]
+                        (-sio-write-u8!  sio dst-off 0 NODE_TYPE_BITMAP)
+                        (-sio-write-u8!  sio dst-off 1 0)
+                        (-sio-write-u16! sio dst-off 2 0)
+                        (-sio-write-i32! sio dst-off 4 new-data-bm)
+                        (-sio-write-i32! sio dst-off 8 node-bm)
+                        (when (pos? cc)
+                          (-sio-copy-block! sio dst-off NODE_HEADER_SIZE root-off NODE_HEADER_SIZE (* 4 cc)))
+                        (reduce (fn [p ev] (write-value! sio dst-off p ev))
+                                (values-start-off node-bm) val-list)
+                        [dst-off true])))
+                  [root-off false]))
 
-              ;; Not found
-              :else (do (set! hamt-disj-removed? false) root-off)))
+              :else [root-off false]))
 
-        ;; Collision node
-        2 (let [base (eve-alloc/resolve-u8! root-off)
-                cnt (r-get-u8 1)
-                node-hash (r-get-u32 2)]
-            (loop [i 0 pos NODE_HEADER_SIZE val-bytes-list []]
-              (if (>= i cnt)
-                ;; Value not found
-                (do (set! hamt-disj-removed? false) root-off)
-                (let [_ (eve-alloc/resolve-u8! root-off)
-                      val-len (r-get-u32 pos)
-                      val-bytes (copy-from-sab root-off (+ pos 4) val-len)
-                      entry-v (ser/deserialize-element {} val-bytes)
-                      next-pos (+ pos 4 val-len)]
-                  (if (= v entry-v)
-                    ;; Found - remove it
-                    (let [rest-vals (loop [j (inc i) p next-pos acc []]
-                                      (if (>= j cnt)
-                                        acc
-                                        (let [_ (eve-alloc/resolve-u8! root-off)
-                                              vl (r-get-u32 p)
-                                              vbytes (copy-from-sab root-off (+ p 4) vl)]
-                                          (recur (inc j) (+ p 4 vl) (conj acc vbytes)))))
-                          all-remaining (into val-bytes-list rest-vals)]
-                      (set! hamt-disj-removed? true)
-                      (cond
-                        (empty? all-remaining) eve-alloc/NIL_OFFSET
-                        (== 1 (count all-remaining))
-                        ;; Convert to single-value bitmap node
-                        (let [vb (first all-remaining)
-                              bp (bit-and (unsigned-bit-shift-right node-hash shift) MASK)]
-                          (make-single-val-bitmap-node! bp vb))
-                        :else
-                        (make-collision-node! node-hash all-remaining)))
-                    ;; Continue searching
-                    (recur (inc i) next-pos (conj val-bytes-list val-bytes)))))))
+        2 (let [node-hash (-sio-read-i32 sio root-off 4)
+                cc (-sio-read-u8 sio root-off 1)]
+            (if (not= vh node-hash)
+              [root-off false]
+              (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+                              (if (>= i cc) acc
+                                (let [[ev np] (read-value-at sio root-off pos)]
+                                  (recur (inc i) np (conj acc ev)))))]
+                (if-let [idx (some (fn [i] (when (bytes-equal? (nth entries i) vb) i))
+                               (range cc))]
+                  (if (== cc 1)
+                    [NIL_OFFSET true]
+                    (let [remaining (vec (concat (subvec entries 0 idx) (subvec entries (inc idx))))]
+                      [(make-collision-node! sio vh (mapv (fn [ev] [ev]) remaining)) true]))
+                  [root-off false]))))
 
-        ;; Unknown
-        (do (set! hamt-disj-removed? false) root-off)))))
+        [root-off false]))))
 
-;;-----------------------------------------------------------------------------
-;; Streaming reduce (direct tree walk, no materialization)
-;;-----------------------------------------------------------------------------
+;;=============================================================================
+;; HAMT Reduce / Seq (unified)
+;;=============================================================================
 
-(defn- hamt-val-reduce
-  "Walk HAMT tree directly, calling (f acc v) at each value.
-   Supports reduced? for early termination."
-  [^number offset f init]
-  (if (== offset eve-alloc/NIL_OFFSET)
+(defn- hamt-val-reduce [sio root-off f init]
+  (if (== root-off NIL_OFFSET)
     init
-    (let [node-type (read-node-type offset)]
-      (case node-type
-        ;; Bitmap node
-        1 (let [base (eve-alloc/resolve-dv! offset)
-                data-bm (.getUint32 eve-alloc/resolved-dv (+ base 4) true)
-                node-bm (.getUint32 eve-alloc/resolved-dv (+ base 8) true)
-                data-count (popcount32 data-bm)
-                vs (val-data-start node-bm)
-                ;; Reduce over inline values
-                acc-after-data
-                (loop [i 0 pos vs acc init]
-                  (if (or (>= i data-count) (reduced? acc))
-                    acc
-                    (let [[v next-pos] (read-val-at offset pos)]
-                      (recur (inc i) next-pos (f acc v)))))
-                child-count (popcount32 node-bm)]
-            (if (reduced? acc-after-data)
-              acc-after-data
-              ;; Reduce over children
-              (loop [i 0 acc acc-after-data]
-                (if (or (>= i child-count) (reduced? acc))
+    (let [nt (-sio-read-u8 sio root-off 0)]
+      (case (int nt)
+        1 (let [data-bm (-sio-read-i32 sio root-off 4)
+                node-bm (-sio-read-i32 sio root-off 8)
+                dc      (popcount32 data-bm)
+                cc      (popcount32 node-bm)
+                vs      (values-start-off node-bm)
+                acc (loop [i 0 pos vs acc init]
+                      (if (or (>= i dc) (reduced? acc))
+                        acc
+                        (let [vlen (-sio-read-i32 sio root-off pos)
+                              vbs  (-sio-read-bytes sio root-off (+ pos 4) vlen)
+                              v    (deserialize-val-bytes vbs)]
+                          (recur (inc i) (+ pos 4 vlen) (f acc v)))))]
+            (if (reduced? acc)
+              acc
+              (loop [i 0 acc acc]
+                (if (or (>= i cc) (reduced? acc))
                   acc
-                  (let [child-off (read-child-offset offset i)]
-                    (recur (inc i) (hamt-val-reduce child-off f acc)))))))
+                  (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* i 4)))]
+                    (recur (inc i) (hamt-val-reduce sio child-off f acc)))))))
 
-        ;; Collision node
-        2 (let [base (eve-alloc/resolve-u8! offset)
-                cnt (r-get-u8 1)]
-            (loop [i 0 pos NODE_HEADER_SIZE acc init]
-              (if (or (>= i cnt) (reduced? acc))
+        2 (let [cc (-sio-read-u8 sio root-off 1)]
+            (loop [i 0 pos COLLISION_HEADER_SIZE acc init]
+              (if (or (>= i cc) (reduced? acc))
                 acc
-                (let [[v next-pos] (read-val-at offset pos)]
-                  (recur (inc i) next-pos (f acc v))))))
+                (let [vlen (-sio-read-i32 sio root-off pos)
+                      vbs  (-sio-read-bytes sio root-off (+ pos 4) vlen)
+                      v    (deserialize-val-bytes vbs)]
+                  (recur (inc i) (+ pos 4 vlen) (f acc v))))))
 
         init))))
 
-;;-----------------------------------------------------------------------------
-;; HAMT seq
-;;-----------------------------------------------------------------------------
+(defn- hamt-seq [sio root-off]
+  (let [entries (volatile! (transient []))]
+    (hamt-val-reduce sio root-off
+      (fn [_ v] (vswap! entries conj! v))
+      nil)
+    (seq (persistent! @entries))))
 
-(defn- hamt-seq
-  "Return lazy seq of values from HAMT."
-  [root-off]
-  (when (not= root-off eve-alloc/NIL_OFFSET)
-    ((fn walk [off]
-       (lazy-seq
-        (when (not= off eve-alloc/NIL_OFFSET)
-          (let [node-type (read-node-type off)]
-            (case node-type
-              ;; Bitmap node
-              1 (let [base (eve-alloc/resolve-dv! off)
-                      data-bm (.getUint32 eve-alloc/resolved-dv (+ base 4) true)
-                      node-bm (.getUint32 eve-alloc/resolved-dv (+ base 8) true)
-                      data-count (popcount32 data-bm)
-                      child-count (popcount32 node-bm)
-                      ;; Inline values first
-                      inline-vals (when (pos? data-count)
-                                    (loop [i 0 pos (val-data-start node-bm) result []]
-                                      (if (>= i data-count)
-                                        result
-                                        (let [[v next-pos] (read-val-at off pos)]
-                                          (recur (inc i) next-pos (conj result v))))))
-                      ;; Then children
-                      child-vals (when (pos? child-count)
-                                   (mapcat (fn [i]
-                                             (walk (read-child-offset off i)))
-                                           (range child-count)))]
-                  (concat inline-vals child-vals))
+;;=============================================================================
+;; Header read/write
+;;=============================================================================
 
-              ;; Collision node
-              2 (let [base (eve-alloc/resolve-u8! off)
-                      cnt (r-get-u8 1)]
-                  (loop [i 0 pos NODE_HEADER_SIZE result []]
-                    (if (>= i cnt)
-                      result
-                      (let [[v next-pos] (read-val-at off pos)]
-                        (recur (inc i) next-pos (conj result v))))))
+(defn- write-set-header! [sio cnt root-off]
+  (let [off (-sio-alloc! sio 12)]
+    (-sio-write-u8!  sio off 0 EveHashSet-type-id)
+    (-sio-write-u8!  sio off 1 SET_FLAG_PORTABLE_HASH)
+    (-sio-write-u16! sio off 2 0)
+    (-sio-write-i32! sio off SABSETROOT_CNT_OFFSET cnt)
+    (-sio-write-i32! sio off SABSETROOT_ROOT_OFF_OFFSET root-off)
+    off))
 
-              ;; Unknown
-              nil)))))
-     root-off)))
+(defn- read-set-header [sio header-off]
+  [(-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
+   (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)])
 
-;;-----------------------------------------------------------------------------
-;; EveHashSet header — slab-allocated 12-byte block
-;;-----------------------------------------------------------------------------
-;; In the slab version, EveHashSet stores cnt and root-off as JS properties
-;; plus a header-off slab-qualified offset to a 12-byte header block for
-;; serialization (encode-sab-pointer).
+;;=============================================================================
+;; HAMT node freeing helpers (via ISlabIO)
+;;=============================================================================
+
+(declare free-hamt-node!)
+
+(defn- free-hamt-node!
+  "Recursively free a HAMT node and all its children via ISlabIO."
+  [sio slab-off]
+  (when (not= slab-off NIL_OFFSET)
+    (let [node-type (-sio-read-u8 sio slab-off 0)]
+      (case (int node-type)
+        ;; Bitmap node — free children first
+        1 (let [node-bm (-sio-read-i32 sio slab-off 8)
+                child-count (popcount32 node-bm)]
+            (dotimes [i child-count]
+              (let [child-off (-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* i 4)))]
+                (free-hamt-node! sio child-off)))
+            (-sio-free! sio slab-off))
+        ;; Collision node — no children
+        2 (-sio-free! sio slab-off)
+        ;; Unknown
+        (-sio-free! sio slab-off)))))
+
+;;=============================================================================
+;; Disposal & Retirement
+;;=============================================================================
+
+(defn dispose!
+  "Dispose an EveHashSet, freeing its entire HAMT tree and header block.
+   Call this when the set is no longer needed to reclaim slab memory.
+
+   WARNING: After disposal, the set must not be used."
+  [hash-set]
+  (let [sio (#?(:cljs (.-sio__ ^js hash-set) :clj (.sio__ hash-set)))
+        header-off (#?(:cljs (.-offset__ ^js hash-set) :clj (.offset__ hash-set)))
+        root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
+    (when (not= root-off NIL_OFFSET)
+      (free-hamt-node! sio root-off))
+    (when (not= header-off NIL_OFFSET)
+      (-sio-free! sio header-off))))
+
+(defn retire-replaced-path!
+  "After an atom swap that replaced old-root with new-root, free the old
+   path nodes that are no longer referenced by the new tree.
+   vh: the hash of the value that was modified"
+  [sio old-root new-root vh]
+  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+    (loop [old-off old-root
+           new-off new-root
+           sh 0]
+      (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+        (-sio-free! sio old-off)
+        (let [old-type (-sio-read-u8 sio old-off 0)]
+          (when (== old-type NODE_TYPE_BITMAP)
+            (let [bit-pos (bit-and (unsigned-bit-shift-right vh sh) MASK)
+                  old-node-bm (-sio-read-i32 sio old-off 8)
+                  new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
+                  new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                                (-sio-read-i32 sio new-off 8))
+                  old-bit (bit-shift-left 1 bit-pos)]
+              (when (and (not (zero? (bit-and old-node-bm old-bit)))
+                         new-node-bm
+                         (not (zero? (bit-and new-node-bm old-bit))))
+                (let [old-child-idx (popcount32 (bit-and old-node-bm (dec old-bit)))
+                      new-child-idx (popcount32 (bit-and new-node-bm (dec old-bit)))
+                      old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-child-idx 4)))
+                      new-child (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-child-idx 4)))]
+                  (recur old-child new-child (+ sh SHIFT_STEP)))))))))))
+
+(defn retire-tree-diff!
+  "Full tree diff: walk old and new HAMT trees in parallel, freeing all
+   old nodes that differ from the new tree."
+  [sio old-root new-root]
+  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+    (letfn [(walk [old-off new-off]
+              (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+                (-sio-free! sio old-off)
+                (let [old-type (-sio-read-u8 sio old-off 0)]
+                  (when (== old-type NODE_TYPE_BITMAP)
+                    (let [old-node-bm (-sio-read-i32 sio old-off 8)
+                          new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
+                          new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                                        (-sio-read-i32 sio new-off 8))]
+                      (loop [remaining old-node-bm
+                             old-idx 0]
+                        (when (not (zero? remaining))
+                          (let [bit (bit-and remaining (- remaining))
+                                old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
+                                new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
+                                            (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
+                                              (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
+                                            NIL_OFFSET)]
+                            (walk old-child new-child)
+                            (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
+      (walk old-root new-root))))
+
+;;=============================================================================
+;; EveHashSet deftype — unified via eve/deftype macro
 ;;
-;; Header layout: [type-id:u8 | pad:3 | cnt:i32 | root-off:i32]
+;; Fields: cnt (int32 @ offset 4), root-off (int32 @ offset 8)
+;; Both platforms: deftype EveHashSet [sio__ offset__]
+;;=============================================================================
 
-(defn- make-eve-hash-set
-  "Create a EveHashSet, allocating a 12-byte header block in the slab.
-   The header stores: [type-id:u8 | flags:u8 | pad:u16 | cnt:i32 | root-off:i32].
-   Flags bit 0 = portable-hash (always set for new sets)."
-  [cnt root-off]
-  (let [header-off (alloc-bytes! 12)]
-    (eve-alloc/resolve-u8! header-off)
-    (r-set-u8 0 EveHashSet-type-id)
-    (r-set-u8 1 SET_FLAG_PORTABLE_HASH) (r-set-u8 2 0) (r-set-u8 3 0)
-    (r-set-i32 SABSETROOT_CNT_OFFSET cnt)
-    (r-set-i32 SABSETROOT_ROOT_OFF_OFFSET root-off)
-    (EveHashSet. cnt root-off header-off nil nil)))
+(declare make-hash-set)
 
-(defn- make-eve-hash-set-from-header
-  "Reconstruct a EveHashSet from an existing header slab-qualified offset.
-   Reads cnt and root-off from the header block."
-  [header-off]
-  (eve-alloc/resolve-u8! header-off)
-  (let [cnt (r-get-i32 SABSETROOT_CNT_OFFSET)
-        root-off (r-get-i32 SABSETROOT_ROOT_OFF_OFFSET)]
-    (EveHashSet. cnt root-off header-off nil nil)))
+(eve/deftype EveHashSet [^:int32 cnt ^:int32 root-off]
+  clojure.lang.Counted
+  (count [_] #?(:cljs cnt :clj (int cnt)))
 
-;;-----------------------------------------------------------------------------
-;; EveHashSet - persistent set handle
-;;-----------------------------------------------------------------------------
+  clojure.lang.Seqable
+  (seq [_]
+    (when (pos? cnt)
+      (hamt-seq sio__ root-off)))
 
-(deftype EveHashSet [cnt root-off header-off
-                     ^:mutable _modified_khs
-                     ^:mutable __hash]
+  clojure.lang.IMeta
+  (meta [_] nil)
 
-  IMeta
-  (-meta [_] nil)
+  clojure.lang.IObj
+  (withMeta [this m] this)
 
-  IWithMeta
-  (-with-meta [this _new-meta] this)
-
-  ICounted
-  (-count [_] cnt)
-
-  ILookup
-  (-lookup [this v] (-lookup this v nil))
-  (-lookup [_ v not-found]
-    (let [vh (portable-hash-bytes (ser/serialize-key v))]
-      (if (hamt-find root-off v vh 0)
+  clojure.lang.ILookup
+  (valAt [_ v]
+    (let [sio sio__
+          vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)]
+      (if (hamt-find sio root-off v vh vb) v nil)))
+  (valAt [_ v not-found]
+    (let [sio sio__
+          vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)]
+      (if (hamt-find sio root-off v vh vb)
         v
         not-found)))
 
-  ICollection
-  (-conj [this v]
-    (let [vb (ser/serialize-key v)
+  clojure.lang.IPersistentSet
+  (disjoin [this v]
+    (let [sio sio__
+          vb (serialize-val-bytes v)
           vh (portable-hash-bytes vb)
-          new-root (hamt-conj root-off v vh vb 0)]
-      (if hamt-conj-added?
-        (let [new-set (make-eve-hash-set (inc cnt) new-root)
-              parent-khs (.-_modified_khs this)
-              parent-len (if parent-khs (.-length parent-khs) 0)]
-          (when (<= parent-len 8)
-            (let [khs (if (and parent-khs (pos? parent-len)) (.slice parent-khs 0) #js [])]
-              (.push khs vh)
-              (set! (.-_modified_khs new-set) khs)))
-          new-set)
-        this)))
+          [new-root removed?] (hamt-disj sio root-off vh vb 0)]
+      (if-not removed?
+        this
+        (make-hash-set sio (dec cnt) new-root))))
+  ;; get is CLJ-only; on CLJS, ILookup/valAt handles (get set v)
+  #?@(:clj
+      [(get [_ v]
+         (let [sio sio__
+               vb (serialize-val-bytes v)
+               vh (portable-hash-bytes vb)]
+           (when (hamt-find sio root-off v vh vb) v)))])
 
-  IEmptyableCollection
-  (-empty [_] (empty-hash-set))
+  clojure.lang.IPersistentCollection
+  (cons [this v]
+    (let [sio sio__
+          vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)
+          [new-root added?] (hamt-conj sio root-off vh vb 0)]
+      (if-not added?
+        this
+        (make-hash-set sio (inc cnt) new-root))))
+  (empty [_]
+    (make-hash-set sio__ 0 NIL_OFFSET))
+  (equiv [this other]
+    #?(:cljs (and (set? other)
+                  (== cnt (count other))
+                  (every? (fn [v]
+                            (let [vb (serialize-val-bytes v)
+                                  vh (portable-hash-bytes vb)]
+                              (hamt-find sio__ root-off v vh vb)))
+                          other))
+       :clj (cond
+               (not (instance? java.util.Set other)) false
+               (not= cnt (.size ^java.util.Set other)) false
+               :else (every? #(.contains ^java.util.Set other %) (.seq this)))))
 
-  ISet
-  (-disjoin [this v]
-    (let [vh (portable-hash-bytes (ser/serialize-key v))
-          new-root (hamt-disj root-off v vh 0)]
-      (if hamt-disj-removed?
-        (if (== new-root eve-alloc/NIL_OFFSET)
-          (empty-hash-set)
-          (let [new-set (make-eve-hash-set (dec cnt) new-root)
-                parent-khs (.-_modified_khs this)
-                parent-len (if parent-khs (.-length parent-khs) 0)]
-            (when (<= parent-len 8)
-              (let [khs (if (and parent-khs (pos? parent-len)) (.slice parent-khs 0) #js [])]
-                (.push khs vh)
-                (set! (.-_modified_khs new-set) khs)))
-            new-set))
-        this)))
+  clojure.lang.IReduceInit
+  (reduce [_ f init]
+    (unreduced (hamt-val-reduce sio__ root-off f init)))
 
-  ISeqable
-  (-seq [_]
-    (when (pos? cnt)
-      (hamt-seq root-off)))
+  clojure.lang.IHashEq
+  (hasheq [this] (p/hash-unordered this))
 
-  IEquiv
-  (-equiv [this other]
-    (and (set? other)
-         (== cnt (count other))
-         (every? (fn [v]
-                   (hamt-find root-off v (portable-hash-bytes (ser/serialize-key v)) 0))
-                 other)))
+  clojure.lang.IFn
+  (invoke [this v]
+    (let [vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)]
+      (when (hamt-find sio__ root-off v vh vb) v)))
+  (invoke [this v nf]
+    (let [vb (serialize-val-bytes v)
+          vh (portable-hash-bytes vb)]
+      (if (hamt-find sio__ root-off v vh vb) v nf)))
 
-  IFn
-  (-invoke [this v] (-lookup this v nil))
-  (-invoke [this v not-found] (-lookup this v not-found))
-
-  IHash
-  (-hash [this]
-    (if __hash
-      __hash
-      (let [h (hash-unordered-coll (seq this))]
-        (set! __hash h) h)))
-
-  IReduce
-  (-reduce [this f]
-    (if (zero? cnt)
-      (f)
-      (let [;; Get first value and reduce from there
-            first-val (first (seq this))
-            result (hamt-val-reduce root-off
-                                    (fn [acc v]
-                                      (if (identical? v first-val)
-                                        acc  ;; Skip first value
-                                        (f acc v)))
-                                    first-val)]
-        (if (reduced? result) @result result))))
-  (-reduce [this f init]
-    (let [result (hamt-val-reduce root-off f init)]
-      (if (reduced? result) @result result)))
-
-  IPrintWithWriter
-  (-pr-writer [this writer opts]
-    (let [values (take 10 (seq this))]
-      (-write writer "#{")
-      (doseq [[i v] (map-indexed vector values)]
-        (when (pos? i) (-write writer " "))
-        (-write writer (pr-str v)))
-      (when (> cnt 10)
-        (-write writer " ..."))
-      (-write writer "}")))
-
-  IEditableCollection
-  (-as-transient [this]
-    (->TransientEveHashSet root-off this root-off cnt (js/Object.)))
+  #?@(:cljs [IPrintWithWriter
+             (-pr-writer [this writer _opts]
+               (do
+                 (-write writer "#{")
+                 (let [s (seq this)]
+                   (when s
+                     (loop [[v & more] s first? true]
+                       (when-not first? (-write writer " "))
+                       (-write writer (pr-str v))
+                       (when more (recur more false)))))
+                 (-write writer "}")))])
 
   d/IDirectSerialize
-  (-direct-serialize [this]
-    (ser/encode-sab-pointer ser/FAST_TAG_SAB_SET header-off))
+  (-direct-serialize [this] offset__)
 
   d/ISabStorable
   (-sab-tag [_] :hash-set)
-  (-sab-encode [this _slab-env]
-    (d/-direct-serialize this))
-  (-sab-dispose [this _slab-env]
-    (when (not= root-off eve-alloc/NIL_OFFSET)
-      (free-hamt-node! root-off))
-    ;; Free the header block
-    (when (not= header-off eve-alloc/NIL_OFFSET)
-      (eve-alloc/free! header-off)))
+  (-sab-encode [this _] #?(:cljs (ser/encode-eve-pointer this) :clj offset__))
+  (-sab-dispose [_ _] nil)
 
   d/IsEve
   (-eve? [_] true)
 
   d/IEveRoot
-  (-root-header-off [_] header-off)
-
-  d/ISabRetirable
-  (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [old-root root-off]
-      (if (instance? EveHashSet new-value)
-        (let [new-root-off (.-root-off new-value)
-              modified-khs (.-_modified_khs new-value)]
-          (if (and modified-khs (pos? (.-length modified-khs)) (<= (.-length modified-khs) 8))
-            ;; Fast path: retire via hash-directed path walk for each modified key
-            (dotimes [i (.-length modified-khs)]
-              (retire-replaced-path! old-root new-root-off (aget modified-khs i)))
-            ;; Fallback: full tree diff for bulk operations
-            (retire-tree-diff! old-root new-root-off)))
-        (when (not= old-root eve-alloc/NIL_OFFSET)
-          (free-hamt-node! old-root)))
-      ;; Free the header block
-      (when (not= header-off eve-alloc/NIL_OFFSET)
-        (eve-alloc/free! header-off)))))
-
-;;-----------------------------------------------------------------------------
-;; TransientEveHashSet - mutable set for batch operations
-;;-----------------------------------------------------------------------------
-
-(deftype TransientEveHashSet [initial-root-off
-                           original-persistent
-                           ^:mutable root-offset
-                           ^:mutable cnt
-                           ^:mutable edit]
-  ICounted
-  (-count [_] cnt)
-
-  ILookup
-  (-lookup [this v] (-lookup this v nil))
-  (-lookup [_ v not-found]
-    (when-not edit (throw (js/Error. "Transient used after persistent!")))
-    (let [vh (portable-hash-bytes (ser/serialize-key v))]
-      (if (hamt-find root-offset v vh 0)
-        v
-        not-found)))
-
-  ITransientCollection
-  (-conj! [this v]
-    (when-not edit (throw (js/Error. "Transient used after persistent!")))
-    (let [vb (ser/serialize-key v)
-          vh (portable-hash-bytes vb)
-          new-root (hamt-conj root-offset v vh vb 0)]
-      (set! root-offset new-root)
-      (when hamt-conj-added? (set! cnt (inc cnt)))
-      this))
-  (-persistent! [_]
-    (when-not edit (throw (js/Error. "Transient used after persistent!")))
-    (set! edit nil)
-    (if (== root-offset initial-root-off)
-      ;; No-op transient round-trip: return original persistent set
-      original-persistent
-      (make-eve-hash-set cnt root-offset)))
-
-  ITransientSet
-  (-disjoin! [this v]
-    (when-not edit (throw (js/Error. "Transient used after persistent!")))
-    (let [vh (portable-hash-bytes (ser/serialize-key v))
-          new-root (hamt-disj root-offset v vh 0)]
-      (set! root-offset new-root)
-      (when hamt-disj-removed? (set! cnt (dec cnt)))
-      this)))
-
-;;-----------------------------------------------------------------------------
-;; Disposal - explicit cleanup for reclaiming slab memory
-;;-----------------------------------------------------------------------------
-
-(defn dispose!
-  "Dispose a EveHashSet, freeing its entire HAMT tree and header block.
-   Call this when the set is no longer needed to reclaim slab memory.
-
-   WARNING: After disposal, the set must not be used. Any access will
-   result in undefined behavior or errors."
-  [^js hash-set]
-  (let [root-off (.-root-off hash-set)
-        header-off (.-header-off hash-set)]
-    (when (not= root-off eve-alloc/NIL_OFFSET)
-      (free-hamt-node! root-off))
-    (when (not= header-off eve-alloc/NIL_OFFSET)
-      (let [size (node-size-for-free header-off)]
-        (if (pos? size)
-          (maybe-pool-or-free! header-off size)
-          (eve-alloc/free! header-off))))))
-
-(defn retire-replaced-path!
-  "After an atom swap that replaced old-root with new-root, free the old
-   path nodes that are no longer referenced by the new tree.
-
-   Walks both trees following the hash bits for value hash vh. At each level
-   where old-node != new-node, the old node is freed or pooled.
-
-   Only retires individual path nodes -- shared subtrees are untouched.
-
-   vh: the hash of the value that was modified"
-  [old-root new-root vh]
-  (when (and (not= old-root eve-alloc/NIL_OFFSET) (not= old-root new-root))
-    (loop [old-off old-root
-           new-off new-root
-           sh 0]
-      (when (and (not= old-off eve-alloc/NIL_OFFSET) (not= old-off new-off))
-        ;; Free/pool this old node
-        (let [size (node-size-for-free old-off)]
-          (if (pos? size)
-            (maybe-pool-or-free! old-off size)
-            (eve-alloc/free! old-off)))
-        ;; Continue down the hash path via node_bitmap children
-        (let [old-type (read-node-type old-off)]
-          (when (== old-type NODE_TYPE_BITMAP)
-            (let [bit-pos (bit-and (unsigned-bit-shift-right vh sh) MASK)
-                  old-node-bm (read-node-bitmap old-off)
-                  new-type (when (not= new-off eve-alloc/NIL_OFFSET) (read-node-type new-off))
-                  new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
-                                (read-node-bitmap new-off))]
-              (when (and (has-node? old-node-bm bit-pos)
-                         new-node-bm
-                         (has-node? new-node-bm bit-pos))
-                (let [old-child-idx (get-child-idx old-node-bm bit-pos)
-                      new-child-idx (get-child-idx new-node-bm bit-pos)
-                      old-child (read-child-offset old-off old-child-idx)
-                      new-child (read-child-offset new-off new-child-idx)]
-                  (recur old-child new-child (+ sh SHIFT_STEP)))))))))))
-
-(defn retire-tree-diff!
-  "Full tree diff: walk old and new HAMT trees in parallel, freeing all
-   old nodes that differ from the new tree.
-
-   At each node pair:
-   - If old-off == new-off -> shared subtree, skip entirely
-   - If old-off != new-off -> free old node, recurse into children
-
-   Cost: O(changed nodes). Shared subtrees are skipped via integer compare."
-  [old-root new-root]
-  (when (and (not= old-root eve-alloc/NIL_OFFSET) (not= old-root new-root))
-    (letfn [(walk [old-off new-off]
-              (when (and (not= old-off eve-alloc/NIL_OFFSET) (not= old-off new-off))
-                ;; Free this old node
-                (let [size (node-size-for-free old-off)]
-                  (if (pos? size)
-                    (maybe-pool-or-free! old-off size)
-                    (eve-alloc/free! old-off)))
-                ;; Recurse into children if bitmap node
-                (let [old-type (read-node-type old-off)]
-                  (when (== old-type NODE_TYPE_BITMAP)
-                    (let [old-node-bm (read-node-bitmap old-off)
-                          new-type (when (not= new-off eve-alloc/NIL_OFFSET) (read-node-type new-off))
-                          new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
-                                        (read-node-bitmap new-off))]
-                      ;; Walk only set bits in old-node-bm (bit-walking)
-                      (loop [remaining old-node-bm
-                             old-idx 0]
-                        (when (not (zero? remaining))
-                          (let [bit (bit-and remaining (- remaining))  ;; lowest set bit
-                                old-child (read-child-offset old-off old-idx)
-                                new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
-                                            (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
-                                              (read-child-offset new-off new-idx))
-                                            eve-alloc/NIL_OFFSET)]
-                            (walk old-child new-child)
-                            (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
-      (walk old-root new-root))))
-
-;;-----------------------------------------------------------------------------
-;; Constructors
-;;-----------------------------------------------------------------------------
-
-(defn empty-hash-set
-  "Return an empty EVE set."
-  []
-  (make-eve-hash-set 0 eve-alloc/NIL_OFFSET))
-
-(defn hash-set
-  "Create a EVE set from values."
-  [& vs]
-  (reduce conj (empty-hash-set) vs))
-
-(defn into-hash-set
-  "Create a EVE set from a collection."
-  [coll]
-  (reduce conj (empty-hash-set) coll))
-
-;;-----------------------------------------------------------------------------
-;; SAB Pointer Registration
-;;-----------------------------------------------------------------------------
-
-(ser/register-sab-type-constructor!
-  ser/FAST_TAG_SAB_SET
-  0xEE
-  (fn [_sab header-off] (make-eve-hash-set-from-header header-off)))
-
-;; Register disposer for set root values
-(ser/register-header-disposer! 0xEE
-  (fn [slab-off] (dispose! (make-eve-hash-set-from-header slab-off))))
-
-(ser/register-cljs-to-sab-builder!
-  set?
-  (fn [s] (into-hash-set s)))
-)) ;; end #?(:cljs ...)
-
-;;=============================================================================
-;; JVM: read-only EveHashSet via ISlabIO
-;;=============================================================================
-
-#?(:clj
-   (do
-     ;; popcount32, mask-hash, bitpos, has-bit?, get-index imported from eve.hamt-util
-
-     (defn- children-start-off [node-bm]
-       (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm))))
-
-     (defn jvm-set-reduce
-       "Walk set HAMT, calling (f acc elem) at each element. Supports reduced?.
-        Pass coll-factory to support nested collection elements."
-       ([sio root-off f init] (jvm-set-reduce sio root-off f init nil))
-       ([sio root-off f init coll-factory]
-        (if (== root-off NIL_OFFSET)
-          init
-          (let [node-type (-sio-read-u8 sio root-off 0)]
-            (case (int node-type)
-              ;; Bitmap node: header=[type:u8 pad:u8 data-bm:u32 node-bm:u32] then children, then values
-              1
-              (let [data-bm     (-sio-read-i32 sio root-off 4)
-                    node-bm     (-sio-read-i32 sio root-off 8)
-                    node-bm-cnt (popcount32 node-bm)
-                    vals-start  (+ NODE_HEADER_SIZE (* 4 node-bm-cnt))
-                    data-cnt    (popcount32 data-bm)]
-                ;; Walk inline values
-                (let [acc (loop [i   0
-                                 pos vals-start
-                                 acc init]
-                            (if (or (>= i data-cnt) (reduced? acc))
-                              acc
-                              (let [val-len (-sio-read-i32 sio root-off pos)
-                                    val-bs  (-sio-read-bytes sio root-off (+ pos 4) val-len)
-                                    elem    (eve-bytes->value val-bs sio coll-factory)
-                                    new-acc (f acc elem)]
-                                (recur (inc i) (+ pos 4 val-len) new-acc))))]
-                  ;; Recurse into children
-                  (loop [ci  0
-                         acc (unreduced acc)]
-                    (if (or (>= ci node-bm-cnt) (reduced? acc))
-                      (unreduced acc)
-                      (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
-                        (recur (inc ci) (jvm-set-reduce sio child-off f acc coll-factory)))))))
-
-              ;; Collision node: [type:u8 cnt:u8 hash:u32@2 unused:u32@8] entries@12
-              2
-              (let [cnt (-sio-read-u8 sio root-off 1)]
-                (loop [i   0
-                       pos NODE_HEADER_SIZE  ;; entries start at offset 12
-                       acc init]
-                  (if (or (>= i cnt) (reduced? acc))
-                    (unreduced acc)
-                    (let [val-len (-sio-read-i32 sio root-off pos)
-                          val-bs  (-sio-read-bytes sio root-off (+ pos 4) val-len)
-                          elem    (eve-bytes->value val-bs sio coll-factory)
-                          new-acc (f acc elem)]
-                      (recur (inc i) (+ pos 4 val-len) new-acc)))))
-
-              init)))))
-
-     (defn- jvm-set-hamt-lazy-seq
-       "Return a lazy seq of elements from the set HAMT rooted at root-off."
-       [sio root-off coll-factory]
-       (when-not (== root-off NIL_OFFSET)
-         (let [node-type (-sio-read-u8 sio root-off 0)]
-           (case (int node-type)
-             ;; Bitmap node
-             1
-             (let [data-bm     (-sio-read-i32 sio root-off 4)
-                   node-bm     (-sio-read-i32 sio root-off 8)
-                   node-bm-cnt (popcount32 node-bm)
-                   vals-start  (+ NODE_HEADER_SIZE (* 4 node-bm-cnt))
-                   data-cnt    (popcount32 data-bm)]
-               (let [inline-vals
-                     (loop [i 0 pos vals-start acc []]
-                       (if (>= i data-cnt)
-                         acc
-                         (let [val-len (-sio-read-i32 sio root-off pos)
-                               val-bs  (-sio-read-bytes sio root-off (+ pos 4) val-len)
-                               elem    (eve-bytes->value val-bs sio coll-factory)]
-                           (recur (inc i) (+ pos 4 val-len) (conj acc elem)))))
-                     child-seqs
-                     (lazy-seq
-                       (apply concat
-                         (map (fn [ci]
-                                (let [child-off (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))]
-                                  (jvm-set-hamt-lazy-seq sio child-off coll-factory)))
-                              (range node-bm-cnt))))]
-                 (concat inline-vals child-seqs)))
-
-             ;; Collision node
-             2
-             (let [cnt (-sio-read-u8 sio root-off 1)]
-               (loop [i 0 pos NODE_HEADER_SIZE acc []]
-                 (if (>= i cnt)
-                   acc
-                   (let [val-len (-sio-read-i32 sio root-off pos)
-                         val-bs  (-sio-read-bytes sio root-off (+ pos 4) val-len)
-                         elem    (eve-bytes->value val-bs sio coll-factory)]
-                     (recur (inc i) (+ pos 4 val-len) (conj acc elem))))))
-
-             ;; Unknown
-             nil))))
-
-     ;; -----------------------------------------------------------------------
-     ;; JVM O(log n) hash-directed lookup
-     ;; -----------------------------------------------------------------------
-
-     (defn jvm-set-hamt-get
-       "Find elem in set HAMT rooted at root-off using hash-directed trie descent.
-        Returns the deserialized element if found, or not-found sentinel.
-        O(log n) — requires HAMT built with portable-hash-bytes."
-       ([sio root-off elem not-found]
-        (jvm-set-hamt-get sio root-off elem not-found nil))
-       ([sio root-off elem not-found coll-factory]
-        (let [^bytes eb (value->eve-bytes elem)
-              eh        (portable-hash-bytes eb)]
-          (loop [off   root-off
-                 shift 0]
-            (if (== off NIL_OFFSET)
-              not-found
-              (let [nt (int (-sio-read-u8 sio off 0))]
-                (case nt
-                  ;; Bitmap node: header=[type:u8 pad:u8 data-bm:u32@4 node-bm:u32@8]
-                  ;; then child-ptrs, then inline values (no hash array for sets)
-                  1 (let [data-bm (int (-sio-read-i32 sio off 4))
-                          node-bm (int (-sio-read-i32 sio off 8))
-                          bit     (bitpos eh shift)]
-                      (cond
-                        ;; Child node at this position — descend
-                        (has-bit? node-bm bit)
-                        (recur (-sio-read-i32 sio off
-                                 (+ NODE_HEADER_SIZE (* (get-index node-bm bit) 4)))
-                               (+ shift SHIFT_STEP))
-
-                        ;; Inline value at this position — compare bytes
-                        (has-bit? data-bm bit)
-                        (let [di        (get-index data-bm bit)
-                              node-cnt  (popcount32 node-bm)
-                              vals-off  (+ NODE_HEADER_SIZE (* 4 node-cnt))
-                              ;; Skip to the di-th value entry
-                              pos       (loop [i 0 p vals-off]
-                                          (if (== i di) p
-                                            (let [vl (-sio-read-i32 sio off p)]
-                                              (recur (inc i) (+ p 4 vl)))))
-                              vl        (-sio-read-i32 sio off pos)
-                              vb        (-sio-read-bytes sio off (+ pos 4) vl)]
-                          (if (java.util.Arrays/equals vb eb)
-                            (eve-bytes->value vb sio coll-factory)
-                            not-found))
-
-                        :else not-found))
-
-                  ;; Collision node: [type:u8][cnt:u8][hash:u32@2][unused:u32@8] entries@12
-                  2 (let [ch (-sio-read-i32 sio off 2)]
-                      (if (not= ch (unchecked-int eh))
-                        not-found
-                        (let [cc (-sio-read-u8 sio off 1)]
-                          (loop [i 0 pos NODE_HEADER_SIZE]
-                            (if (>= i cc)
-                              not-found
-                              (let [vl (-sio-read-i32 sio off pos)
-                                    vb (-sio-read-bytes sio off (+ pos 4) vl)]
-                                (if (java.util.Arrays/equals vb eb)
-                                  (eve-bytes->value vb sio coll-factory)
-                                  (recur (inc i) (+ pos 4 vl)))))))))
-
-                  ;; Unknown node type
-                  not-found)))))))
-
-     ;; -----------------------------------------------------------------------
-     ;; JVM EveHashSet write support
-     ;; -----------------------------------------------------------------------
-
-     (defn- jvm-set-hamt-build-entries!
-       "Recursively build set HAMT nodes from a seq of [kh vb] entries.
-        Returns slab-qualified offset of the root node, or NIL_OFFSET if empty.
-        Set bitmap nodes have no hash array (unlike map)."
-       [sio entries shift]
-       (let [cnt (count entries)]
-         (cond
-           (zero? cnt) NIL_OFFSET
-
-           ;; Hash bits exhausted or all entries share same hash → collision node (type=2)
-           (or (>= shift 32)
-               (and (> cnt 1) (apply = (map first entries))))
-           (let [kh       (first (first entries))
-                 val-size (reduce (fn [acc [_ vb]] (+ acc 4 (alength vb))) 0 entries)
-                 ;; Collision header matches CLJS: [type:u8][cnt:u8][hash:u32@2][unused:u32@8] = 12 bytes
-                 node-off (-sio-alloc! sio (+ NODE_HEADER_SIZE val-size))]
-             (-sio-write-u8!  sio node-off 0 NODE_TYPE_COLLISION)
-             (-sio-write-u8!  sio node-off 1 cnt)
-             (-sio-write-i32! sio node-off 2 kh)  ;; hash at offset 2 (matches CLJS r-set-u32 2)
-             (-sio-write-i32! sio node-off 8 0)   ;; unused
-             (reduce (fn [pos [_ vb]]
-                       (let [vlen (alength vb)]
-                         (-sio-write-i32! sio node-off pos vlen)
-                         (when (pos? vlen)
-                           (-sio-write-bytes! sio node-off (+ pos 4) vb))
-                         (+ pos 4 vlen)))
-                     NODE_HEADER_SIZE entries)
-             node-off)
-
-           ;; Build a bitmap node grouping entries by slot at this shift level
-           :else
-           (let [grouped      (group-by (fn [[kh _]]
-                                          (bit-and (unsigned-bit-shift-right kh shift) MASK))
-                                        entries)
-                 single-slots (sort-by first
-                                (filter (fn [[_ es]] (= 1 (count es))) grouped))
-                 multi-slots  (sort-by first
-                                (filter (fn [[_ es]] (> (count es) 1)) grouped))
-                 data-bm      (reduce (fn [bm [slot _]]
-                                        (bit-or bm (bit-shift-left 1 slot)))
-                                      0 single-slots)
-                 node-bm      (reduce (fn [bm [slot _]]
-                                        (bit-or bm (bit-shift-left 1 slot)))
-                                      0 multi-slots)
-                 ;; Build child nodes (in slot order)
-                 children     (mapv (fn [[_ es]]
-                                      (jvm-set-hamt-build-entries! sio es (+ shift SHIFT_STEP)))
-                                    multi-slots)
-                 ;; Inline values (in slot order, no hash array for sets)
-                 data-entries (mapv (fn [[_ [entry]]] entry) single-slots)
-                 child-count  (count children)
-                 val-size     (reduce (fn [acc [_ vb]] (+ acc 4 (alength vb))) 0 data-entries)
-                 node-size    (+ NODE_HEADER_SIZE (* 4 child-count) val-size)
-                 node-off     (-sio-alloc! sio node-size)]
-             ;; Write header
-             (-sio-write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-             (-sio-write-u8!  sio node-off 1 0)
-             (-sio-write-u16! sio node-off 2 0)
-             (-sio-write-i32! sio node-off 4 data-bm)
-             (-sio-write-i32! sio node-off 8 node-bm)
-             ;; Write child pointers
-             (dorun (map-indexed
-                      (fn [i child-off]
-                        (-sio-write-i32! sio node-off (+ NODE_HEADER_SIZE (* i 4)) child-off))
-                      children))
-             ;; Write values (no hash array — set differs from map)
-             (reduce (fn [pos [_ vb]]
-                       (let [vlen (alength vb)]
-                         (-sio-write-i32! sio node-off pos vlen)
-                         (when (pos? vlen)
-                           (-sio-write-bytes! sio node-off (+ pos 4) vb))
-                         (+ pos 4 vlen)))
-                     (+ NODE_HEADER_SIZE (* child-count 4))
-                     data-entries)
-             node-off))))
-
-     (defn jvm-write-set!
-       "Serialize a Clojure set to EVE HAMT set structure in the slab.
-        Returns the slab-qualified offset of the EveHashSet header block.
-        serialize-val: (fn [v] ^bytes) — called for each set element.
-        Uses portable-hash-bytes for cross-platform compatible HAMT navigation."
-       [sio serialize-val s]
-       (let [entries  (mapv (fn [elem]
-                              (let [vb ^bytes (serialize-val elem)]
-                                [(portable-hash-bytes vb) vb]))
-                            s)
-             root-off (jvm-set-hamt-build-entries! sio entries 0)
-             cnt      (count s)
-             ;; EveHashSet header: [type-id:u8][flags:u8][pad:u16][cnt:i32][root-off:i32] = 12 bytes
-             hdr-off  (-sio-alloc! sio 12)]
-         (-sio-write-u8!  sio hdr-off 0 EveHashSet-type-id)
-         (-sio-write-u8!  sio hdr-off 1 SET_FLAG_PORTABLE_HASH)
-         (-sio-write-u16! sio hdr-off 2 0)
-         (-sio-write-i32! sio hdr-off SABSETROOT_CNT_OFFSET cnt)
-         (-sio-write-i32! sio hdr-off SABSETROOT_ROOT_OFF_OFFSET root-off)
-         hdr-off))
-
-     ;; -----------------------------------------------------------------------
-     ;; JVM set HAMT read helpers
-     ;; -----------------------------------------------------------------------
-
-     (defn- jvm-set-read-children [sio node-off cc]
-       (mapv #(-sio-read-i32 sio node-off (+ NODE_HEADER_SIZE (* % 4))) (range cc)))
-
-     (defn- jvm-set-read-values
-       "Read all value byte-arrays from a set bitmap node's inline data entries."
-       [sio node-off data-bm node-bm]
-       (let [dc      (popcount32 data-bm)
-             nc      (popcount32 node-bm)
-             vals-off (+ NODE_HEADER_SIZE (* 4 nc))]
-         (loop [i 0 pos vals-off acc (transient [])]
-           (if (>= i dc)
-             (persistent! acc)
-             (let [vl (-sio-read-i32 sio node-off pos)
-                   vb (-sio-read-bytes sio node-off (+ pos 4) vl)]
-               (recur (inc i) (+ pos 4 vl) (conj! acc vb)))))))
-
-     (defn- jvm-set-write-bitmap-node!
-       "Allocate and write a set bitmap node. Returns slab offset.
-        Unlike map, set nodes have no hash array — just children + values."
-       [sio data-bm node-bm children values]
-       (let [cc       (count children)
-             dc       (count values)
-             val-size (reduce (fn [a ^bytes vb] (+ a 4 (alength vb))) 0 values)
-             off      (-sio-alloc! sio (+ NODE_HEADER_SIZE (* 4 cc) val-size))]
-         (-sio-write-u8!  sio off 0 NODE_TYPE_BITMAP)
-         (-sio-write-u8!  sio off 1 0)
-         (-sio-write-u16! sio off 2 0)
-         (-sio-write-i32! sio off 4 data-bm)
-         (-sio-write-i32! sio off 8 node-bm)
-         (dotimes [i cc]
-           (-sio-write-i32! sio off (+ NODE_HEADER_SIZE (* i 4)) (nth children i)))
-         (reduce (fn [pos ^bytes vb]
-                   (let [vlen (alength vb)]
-                     (-sio-write-i32! sio off pos vlen)
-                     (when (pos? vlen)
-                       (-sio-write-bytes! sio off (+ pos 4) vb))
-                     (+ pos 4 vlen)))
-                 (+ NODE_HEADER_SIZE (* cc 4)) values)
-         off))
-
-     (defn- jvm-set-write-collision-node!
-       "Allocate and write a set collision node from value byte-arrays.
-        All entries must share the same hash eh. Returns slab offset."
-       [sio eh values]
-       (let [cnt      (count values)
-             val-size (reduce (fn [a ^bytes vb] (+ a 4 (alength vb))) 0 values)
-             off      (-sio-alloc! sio (+ NODE_HEADER_SIZE val-size))]
-         (-sio-write-u8!  sio off 0 NODE_TYPE_COLLISION)
-         (-sio-write-u8!  sio off 1 cnt)
-         (-sio-write-i32! sio off 2 eh)
-         (-sio-write-i32! sio off 8 0) ;; unused
-         (reduce (fn [pos ^bytes vb]
-                   (let [vlen (alength vb)]
-                     (-sio-write-i32! sio off pos vlen)
-                     (when (pos? vlen)
-                       (-sio-write-bytes! sio off (+ pos 4) vb))
-                     (+ pos 4 vlen)))
-                 NODE_HEADER_SIZE values)
-         off))
-
-     (defn- jvm-set-read-collision-values
-       "Read all value byte-arrays from a set collision node."
-       [sio node-off cnt]
-       (loop [i 0 pos NODE_HEADER_SIZE acc (transient [])]
-         (if (>= i cnt)
-           (persistent! acc)
-           (let [vl (-sio-read-i32 sio node-off pos)
-                 vb (-sio-read-bytes sio node-off (+ pos 4) vl)]
-             (recur (inc i) (+ pos 4 vl) (conj! acc vb))))))
-
-     ;; -----------------------------------------------------------------------
-     ;; JVM set HAMT path-copy conj
-     ;; -----------------------------------------------------------------------
-
-     (defn- jvm-set-hamt-conj
-       "Path-copy conj into set HAMT. Returns [new-root-off added?].
-        added? is true if elem was new, false if already present."
-       [sio root-off eh ^bytes eb shift]
-       (if (== root-off NIL_OFFSET)
-         [(jvm-set-write-bitmap-node! sio (bitpos eh shift) 0 [] [eb]) true]
-         (let [nt (int (-sio-read-u8 sio root-off 0))]
-           (case nt
-             ;; Bitmap node
-             1 (let [dbm (-sio-read-i32 sio root-off 4)
-                     nbm (-sio-read-i32 sio root-off 8)
-                     bit (bitpos eh shift)
-                     cc  (popcount32 nbm)
-                     dc  (popcount32 dbm)]
-                 (cond
-                   ;; Child node — recurse
-                   (has-bit? nbm bit)
-                   (let [ci  (get-index nbm bit)
-                         co  (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))
-                         [nc added?] (jvm-set-hamt-conj sio co eh eb (+ shift SHIFT_STEP))]
-                     (if (== nc co)
-                       [root-off false]
-                       (let [ch (assoc (jvm-set-read-children sio root-off cc) ci nc)]
-                         [(jvm-set-write-bitmap-node! sio dbm nbm ch
-                            (jvm-set-read-values sio root-off dbm nbm)) added?])))
-
-                   ;; Inline data — check value match
-                   (has-bit? dbm bit)
-                   (let [di   (get-index dbm bit)
-                         vals (jvm-set-read-values sio root-off dbm nbm)
-                         ^bytes evb (nth vals di)]
-                     (if (java.util.Arrays/equals evb eb)
-                       [root-off false] ;; already present
-                       ;; Different value — push down or create collision
-                       (let [evh (portable-hash-bytes evb)]
-                         (if (== evh (unchecked-int eh))
-                           ;; Same hash → collision node as child
-                           (let [coll (jvm-set-write-collision-node! sio eh [evb eb])
-                                 ndbm (bit-xor dbm bit)
-                                 nnbm (bit-or nbm bit)
-                                 nci  (get-index nnbm bit)
-                                 och  (jvm-set-read-children sio root-off cc)
-                                 nch  (vec (concat (subvec och 0 nci) [coll] (subvec och nci)))
-                                 nvals (vec (concat (subvec vals 0 di) (subvec vals (inc di))))]
-                             [(jvm-set-write-bitmap-node! sio ndbm nnbm nch nvals) true])
-                           ;; Different hash — push down
-                           (let [ss   (+ shift SHIFT_STEP)
-                                 ebit (bitpos evh ss)
-                                 nbit (bitpos eh ss)
-                                 sub  (if (== ebit nbit)
-                                        (let [[s _] (jvm-set-hamt-conj sio NIL_OFFSET evh evb ss)]
-                                          (first (jvm-set-hamt-conj sio s eh eb ss)))
-                                        (let [sdbm (bit-or ebit nbit)
-                                              [v1 v2] (if (< (Integer/toUnsignedLong (unchecked-int ebit))
-                                                             (Integer/toUnsignedLong (unchecked-int nbit)))
-                                                        [evb eb] [eb evb])]
-                                          (jvm-set-write-bitmap-node! sio sdbm 0 [] [v1 v2])))
-                                 ndbm (bit-xor dbm bit)
-                                 nnbm (bit-or nbm bit)
-                                 nci  (get-index nnbm bit)
-                                 och  (jvm-set-read-children sio root-off cc)
-                                 nch  (vec (concat (subvec och 0 nci) [sub] (subvec och nci)))
-                                 nvals (vec (concat (subvec vals 0 di) (subvec vals (inc di))))]
-                             [(jvm-set-write-bitmap-node! sio ndbm nnbm nch nvals) true])))))
-
-                   ;; Empty slot — add inline data
-                   :else
-                   (let [di    (get-index dbm bit)
-                         ndbm  (bit-or dbm bit)
-                         vals  (jvm-set-read-values sio root-off dbm nbm)
-                         nvals (vec (concat (subvec vals 0 di) [eb] (subvec vals di)))]
-                     [(jvm-set-write-bitmap-node! sio ndbm nbm
-                        (jvm-set-read-children sio root-off cc) nvals) true])))
-
-             ;; Collision node
-             2 (let [cc  (-sio-read-u8 sio root-off 1)
-                     vs  (jvm-set-read-collision-values sio root-off cc)
-                     idx (reduce (fn [_ i]
-                                   (let [^bytes evb (nth vs i)]
-                                     (if (java.util.Arrays/equals evb eb)
-                                       (reduced i) _)))
-                                 nil (range cc))]
-                 (if idx
-                   [root-off false] ;; already present
-                   [(jvm-set-write-collision-node! sio (unchecked-int eh) (conj vs eb)) true]))
-
-             ;; Unknown
-             [root-off false]))))
-
-     ;; -----------------------------------------------------------------------
-     ;; JVM set HAMT path-copy disjoin
-     ;; -----------------------------------------------------------------------
-
-     (defn- jvm-set-hamt-disjoin
-       "Path-copy disjoin from set HAMT. Returns new-root-off.
-        If elem not found, returns root-off unchanged."
-       [sio root-off eh ^bytes eb shift]
-       (if (== root-off NIL_OFFSET)
-         root-off
-         (let [nt (int (-sio-read-u8 sio root-off 0))]
-           (case nt
-             ;; Bitmap node
-             1 (let [dbm (-sio-read-i32 sio root-off 4)
-                     nbm (-sio-read-i32 sio root-off 8)
-                     bit (bitpos eh shift)
-                     cc  (popcount32 nbm)
-                     dc  (popcount32 dbm)]
-                 (cond
-                   ;; Child node — recurse
-                   (has-bit? nbm bit)
-                   (let [ci    (get-index nbm bit)
-                         co    (-sio-read-i32 sio root-off (+ NODE_HEADER_SIZE (* ci 4)))
-                         new-c (jvm-set-hamt-disjoin sio co eh eb (+ shift SHIFT_STEP))]
-                     (if (== new-c co)
-                       root-off
-                       (if (== new-c NIL_OFFSET)
-                         ;; Child empty
-                         (let [nnbm (bit-xor nbm bit)]
-                           (if (and (zero? nnbm) (zero? dbm))
-                             NIL_OFFSET
-                             (let [och (jvm-set-read-children sio root-off cc)
-                                   nch (vec (concat (subvec och 0 ci) (subvec och (inc ci))))]
-                               (jvm-set-write-bitmap-node! sio dbm nnbm nch
-                                 (jvm-set-read-values sio root-off dbm nbm)))))
-                         ;; Check if child is single-entry bitmap → promote inline
-                         (let [cnt2 (-sio-read-u8 sio new-c 0)]
-                           (if (== (int cnt2) (int NODE_TYPE_BITMAP))
-                             (let [cdbm (-sio-read-i32 sio new-c 4)
-                                   cnbm (-sio-read-i32 sio new-c 8)]
-                               (if (and (zero? cnbm) (== 1 (popcount32 cdbm)))
-                                 ;; Promote single inline entry
-                                 (let [cvals (jvm-set-read-values sio new-c cdbm cnbm)
-                                       nnbm  (bit-xor nbm bit)
-                                       ndbm  (bit-or dbm bit)
-                                       di    (get-index ndbm bit)
-                                       och   (jvm-set-read-children sio root-off cc)
-                                       nch   (vec (concat (subvec och 0 ci) (subvec och (inc ci))))
-                                       ovals (jvm-set-read-values sio root-off dbm nbm)
-                                       nvals (vec (concat (subvec ovals 0 di) cvals (subvec ovals di)))]
-                                   (jvm-set-write-bitmap-node! sio ndbm nnbm nch nvals))
-                                 ;; Child has multiple entries — update pointer
-                                 (let [och (jvm-set-read-children sio root-off cc)
-                                       nch (assoc och ci new-c)]
-                                   (jvm-set-write-bitmap-node! sio dbm nbm nch
-                                     (jvm-set-read-values sio root-off dbm nbm)))))
-                             ;; Collision child — update pointer
-                             (let [och (jvm-set-read-children sio root-off cc)
-                                   nch (assoc och ci new-c)]
-                               (jvm-set-write-bitmap-node! sio dbm nbm nch
-                                 (jvm-set-read-values sio root-off dbm nbm))))))))
-
-                   ;; Inline data
-                   (has-bit? dbm bit)
-                   (let [di   (get-index dbm bit)
-                         vals (jvm-set-read-values sio root-off dbm nbm)
-                         ^bytes evb (nth vals di)]
-                     (if (java.util.Arrays/equals evb eb)
-                       ;; Found — remove
-                       (let [ndbm (bit-xor dbm bit)]
-                         (if (and (zero? ndbm) (zero? nbm))
-                           NIL_OFFSET
-                           (let [nvals (vec (concat (subvec vals 0 di) (subvec vals (inc di))))]
-                             (jvm-set-write-bitmap-node! sio ndbm nbm
-                               (jvm-set-read-children sio root-off cc) nvals))))
-                       root-off))
-
-                   :else root-off))
-
-             ;; Collision node
-             2 (let [ch  (-sio-read-i32 sio root-off 2)
-                     cc  (-sio-read-u8 sio root-off 1)
-                     vs  (jvm-set-read-collision-values sio root-off cc)
-                     idx (reduce (fn [_ i]
-                                   (let [^bytes evb (nth vs i)]
-                                     (if (java.util.Arrays/equals evb eb)
-                                       (reduced i) _)))
-                                 nil (range cc))]
-                 (if (nil? idx)
-                   root-off
-                   (let [nvs (vec (concat (subvec vs 0 idx) (subvec vs (inc idx))))]
-                     (if (== 1 (count nvs))
-                       ;; Promote single entry to bitmap
-                       (let [^bytes rvb (first nvs)
-                             rvh (portable-hash-bytes rvb)]
-                         (jvm-set-write-bitmap-node! sio (bitpos rvh shift) 0 [] [rvb]))
-                       (jvm-set-write-collision-node! sio ch nvs)))))
-
-             root-off))))
-
-     (defn- jvm-set-write-header!
-       "Allocate and write an EveHashSet header block. Returns slab offset."
-       [sio cnt root-off]
-       (let [hdr-off (-sio-alloc! sio 12)]
-         (-sio-write-u8!  sio hdr-off 0 EveHashSet-type-id)
-         (-sio-write-u8!  sio hdr-off 1 SET_FLAG_PORTABLE_HASH)
-         (-sio-write-u16! sio hdr-off 2 0)
-         (-sio-write-i32! sio hdr-off SABSETROOT_CNT_OFFSET cnt)
-         (-sio-write-i32! sio hdr-off SABSETROOT_ROOT_OFF_OFFSET root-off)
-         hdr-off))
-
-     ;; -----------------------------------------------------------------------
-     ;; JVM EveHashSet deftype — IPersistentSet backed by slab HAMT
-     ;; -----------------------------------------------------------------------
-
-     (declare jvm-eve-hash-set-from-offset)
-     (declare jvm-make-transient-set)
-
-     (deftype EveHashSet [^long cnt ^long root-off ^long header-off
-                         sio coll-factory _meta]
-
-       clojure.lang.IMeta
-       (meta [_] _meta)
-
-       clojure.lang.IObj
-       (withMeta [_ new-meta]
-         (EveHashSet. cnt root-off header-off sio coll-factory new-meta))
-
-       clojure.lang.Counted
-       (count [_] (int cnt))
-
-       clojure.lang.IPersistentSet
-       (disjoin [this elem]
-         (let [^bytes eb (value+sio->eve-bytes sio elem)
-               eh        (portable-hash-bytes eb)
-               new-root  (jvm-set-hamt-disjoin sio root-off eh eb 0)]
-           (if (== new-root root-off)
-             this
-             (let [new-cnt (dec cnt)
-                   hdr (jvm-set-write-header! sio new-cnt new-root)]
-               (EveHashSet. new-cnt new-root hdr sio coll-factory nil)))))
-       (contains [_ elem]
-         (not (identical? ::absent
-                (jvm-set-hamt-get sio root-off elem ::absent coll-factory))))
-       (get [_ elem]
-         (let [result (jvm-set-hamt-get sio root-off elem ::absent coll-factory)]
-           (when-not (identical? result ::absent) result)))
-
-       clojure.lang.IPersistentCollection
-       (cons [this elem]
-         (let [^bytes eb (value+sio->eve-bytes sio elem)
-               eh        (portable-hash-bytes eb)
-               [new-root added?] (jvm-set-hamt-conj sio root-off eh eb 0)]
-           (if (== new-root root-off)
-             this
-             (let [new-cnt (if added? (inc cnt) cnt)
-                   hdr (jvm-set-write-header! sio new-cnt new-root)]
-               (EveHashSet. new-cnt new-root hdr sio coll-factory nil)))))
-       (empty [_]
-         (let [hdr-off (jvm-write-set! sio (partial value+sio->eve-bytes sio) #{})]
-           (jvm-eve-hash-set-from-offset sio hdr-off)))
-       (equiv [this other]
-         (clojure.lang.APersistentSet/setEquals this other))
-
-       clojure.lang.Seqable
-       (seq [_]
-         (when (pos? cnt)
-           (jvm-set-hamt-lazy-seq sio root-off coll-factory)))
-
-       clojure.lang.IFn
-       (invoke [this k] (.get this k))
-       (invoke [this k not-found]
-         (if (.contains this k) (.get this k) not-found))
+  (-root-header-off [this] offset__)
+
+  ;; java.lang.Object in main body so macro sees it and skips default IPrintWithWriter.
+  ;; Proto map marks it :clj-only? so CLJS translation strips it automatically.
+  java.lang.Object
+  (toString [this] (pr-str this))
+  (equals [this other]
+    (cond
+      (identical? this other) true
+      (not (instance? java.util.Set other)) false
+      :else
+      (and (== cnt (.size ^java.util.Set other))
+           (every? #(.contains ^java.util.Set other %) (.seq this)))))
+  (hashCode [this]
+    (reduce + 0 (map hash (.seq this))))
+
+  ;; --- CLJ-only interfaces (no CLJS equivalent) ---
+  #?@(:clj
+      [clojure.lang.IPersistentSet
+       ;; contains has no CLJS protocol equivalent
+       (contains [_ v]
+         (let [^bytes vb (serialize-val-bytes v)
+               vh (portable-hash-bytes vb)]
+           (hamt-find sio__ root-off v vh vb)))
+
+       java.lang.Iterable
+       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
        java.util.Set
        (size [_] (int cnt))
        (isEmpty [_] (zero? cnt))
-       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
-       (^objects toArray [this] (into-array Object (seq this)))
-       (^objects toArray [this ^objects arr]
-         (let [src (object-array (seq this))
-               n (alength src)
-               m (alength arr)]
-           (System/arraycopy src 0 arr 0 (min n m))
-           (when (< n m) (aset arr n nil))
-           arr))
+       (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
+       ;; contains is already defined via IPersistentSet above
+       (^boolean containsAll [this ^java.util.Collection c]
+         (boolean (every? #(.contains this %) c)))
+       ;; Unsupported mutators (immutable set)
        (add [_ _] (throw (UnsupportedOperationException.)))
        (remove [_ _] (throw (UnsupportedOperationException.)))
        (addAll [_ _] (throw (UnsupportedOperationException.)))
        (retainAll [_ _] (throw (UnsupportedOperationException.)))
        (removeAll [_ _] (throw (UnsupportedOperationException.)))
-       (clear [_] (throw (UnsupportedOperationException.)))
-       (containsAll [this coll] (every? #(.contains this %) coll))
+       (clear [_] (throw (UnsupportedOperationException.)))]))
 
-       clojure.lang.IHashEq
-       (hasheq [this]
-         (clojure.lang.Murmur3/hashUnordered this))
+;;=============================================================================
+;; CLJS-only: 2-arity IReduce (reduce without init)
+;;=============================================================================
 
-       clojure.lang.IReduceInit
-       (reduce [_ f init]
-         (jvm-set-reduce sio root-off
-           (fn [acc elem] (f acc elem))
-           init coll-factory))
+#?(:cljs
+   (extend-type EveHashSet
+     IReduce
+     (-reduce
+       ([coll f]
+        (let [s (seq coll)]
+          (if s
+            (reduce f (first s) (rest s))
+            (f))))
+       ([coll f start]
+        (let [sio (.-sio__ coll)
+              root-off (-sio-read-i32 sio (.-offset__ coll) SABSETROOT_ROOT_OFF_OFFSET)
+              result (hamt-val-reduce sio root-off f start)]
+          (if (reduced? result) @result result))))))
 
-       clojure.lang.IReduce
-       (reduce [this f]
-         (let [s (.seq this)]
-           (if s (reduce f s) (f))))
+;;=============================================================================
+;; ISabRetirable
+;;=============================================================================
 
-       clojure.lang.IEditableCollection
-       (asTransient [_]
-         (jvm-make-transient-set root-off cnt sio coll-factory))
+(extend-type EveHashSet
+  d/ISabRetirable
+  (-sab-retire-diff! [this new-value _slab-env mode]
+    (let [sio (#?(:cljs .-sio__ :clj .sio__) this)
+          old-root (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) this) SABSETROOT_ROOT_OFF_OFFSET)]
+      (if (instance? EveHashSet new-value)
+        (let [new-root-off (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) SABSETROOT_ROOT_OFF_OFFSET)]
+          (retire-tree-diff! sio old-root new-root-off))
+        (when (not= old-root NIL_OFFSET)
+          (free-hamt-node! sio old-root)))
+      ;; Free the header block
+      (when (not= (#?(:cljs .-offset__ :clj .offset__) this) NIL_OFFSET)
+        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this))))))
 
-       d/IEveRoot
-       (-root-header-off [_] header-off)
+;;=============================================================================
+;; Constructors
+;;=============================================================================
 
-       java.lang.Object
-       (toString [this] (pr-str this))
-       (equals [this other] (clojure.lang.APersistentSet/setEquals this other))
-       (hashCode [this] (clojure.lang.Murmur3/hashUnordered this)))
+(defn- make-hash-set
+  "Internal constructor."
+  [sio cnt root-off]
+  (let [hdr (write-set-header! sio cnt root-off)]
+    (EveHashSet. sio hdr)))
 
-     (declare ->TransientEveHashSet)
+(defn hash-set-from-header
+  "Reconstruct an EveHashSet from a header offset."
+  [sio header-off]
+  (EveHashSet. sio header-off))
 
-     (deftype TransientEveHashSet
-       [^:unsynchronized-mutable ^long root-off
-        ^:unsynchronized-mutable ^long cnt
-        sio
-        coll-factory
-        ^:volatile-mutable edit]
+(defn empty-hash-set
+  "Create an empty Eve hash set.
+   0-arity: uses platform default sio.  1-arity: explicit sio."
+  ([]  (empty-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
+  ([sio] (make-hash-set sio 0 NIL_OFFSET)))
 
-       clojure.lang.Counted
-       (count [_]
-         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (int cnt))
+(defn hash-set
+  "Create an Eve hash set from values.
+   If first arg satisfies ISlabIO, uses it as sio.
+   Otherwise uses platform default sio and all args as values."
+  [& args]
+  (let [default-sio #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)
+        [sio vals] (if (and (seq args) (satisfies? ISlabIO (first args)))
+                     [(first args) (rest args)]
+                     [default-sio args])]
+    (reduce conj (empty-hash-set sio) vals)))
 
-       clojure.lang.ITransientSet
-       (disjoin [this elem]
-         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (let [^bytes eb (value+sio->eve-bytes sio elem)
-               eh        (portable-hash-bytes eb)
-               new-root  (jvm-set-hamt-disjoin sio root-off eh eb 0)]
-           (when-not (== new-root root-off)
-             (set! root-off (long new-root))
-             (set! cnt (long (dec cnt))))
-           this))
-       (contains [_ elem]
-         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (not (identical? ::absent
-                (jvm-set-hamt-get sio root-off elem ::absent coll-factory))))
-       (get [_ elem]
-         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (let [result (jvm-set-hamt-get sio root-off elem ::absent coll-factory)]
-           (when-not (identical? result ::absent) result)))
+;;=============================================================================
+;; Registration
+;;=============================================================================
 
-       clojure.lang.ITransientCollection
-       (conj [this elem]
-         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (let [^bytes eb (value+sio->eve-bytes sio elem)
-               eh        (portable-hash-bytes eb)
-               [new-root added?] (jvm-set-hamt-conj sio root-off eh eb 0)]
-           (set! root-off (long new-root))
-           (when added? (set! cnt (long (inc cnt))))
-           this))
-       (persistent [_]
-         (when-not edit (throw (IllegalAccessError. "Transient used after persistent!")))
-         (set! edit nil)
-         (let [hdr (jvm-set-write-header! sio cnt root-off)]
-           (EveHashSet. cnt root-off hdr sio coll-factory nil))))
+#?(:clj
+   (do
+     (register-jvm-collection-writer! :set
+       (fn [sio serialize-val coll]
+         (let [entries (mapv (fn [v]
+                               (let [^bytes vb (value+sio->eve-bytes v)
+                                     vh (portable-hash-bytes vb)]
+                                 [vh vb]))
+                             coll)]
+           (if (empty? entries)
+             (write-set-header! sio 0 NIL_OFFSET)
+             (let [root-off (reduce (fn [root [vh vb]]
+                                      (let [[new-root _] (hamt-conj sio root vh vb 0)]
+                                        new-root))
+                                    NIL_OFFSET entries)]
+               (write-set-header! sio (count coll) root-off))))))
 
-     (defn- jvm-make-transient-set [root-off cnt sio coll-factory]
-       (TransientEveHashSet. root-off cnt sio coll-factory (Object.)))
+     ;; Backward-compat JVM aliases
+     (defn jvm-write-set!
+       "Serialize a Clojure set to slab. Returns header offset.
+        Backward-compat alias for the registered :set writer."
+       [sio serialize-val coll]
+       (mem/jvm-write-collection! :set sio coll))
 
      (defn jvm-eve-hash-set-from-offset
-       "Construct a JVM EveHashSet from a slab-qualified header-off and ISlabIO context.
-        Reads the flags byte to determine if the HAMT was built with portable-hash-bytes."
-       ([sio header-off] (jvm-eve-hash-set-from-offset sio header-off nil))
-       ([sio header-off coll-factory]
-        (let [cnt      (-sio-read-i32 sio header-off SABSETROOT_CNT_OFFSET)
-              root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
-          (EveHashSet. cnt root-off header-off sio coll-factory nil))))
+       "Reconstruct an EveHashSet from a header offset.
+        Backward-compat alias. coll-factory arg is ignored (registry-based)."
+       ([sio header-off] (hash-set-from-header sio header-off))
+       ([sio header-off _coll-factory] (hash-set-from-header sio header-off)))))
 
-     (defmethod print-method EveHashSet [s ^java.io.Writer w]
-       (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w))
+(defn- into-hash-set
+  "Build an EveHashSet from a Clojure set."
+  ([coll] (into-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
+  ([sio coll] (reduce conj (empty-hash-set sio) coll)))
 
-     ;; -----------------------------------------------------------------------
-     ;; JVM user-facing constructors (use eve-alloc/*jvm-slab-ctx*)
-     ;; -----------------------------------------------------------------------
+;; Type constructor + disposer + builder registrations
+(eve/register-eve-type!
+  {:fast-tag    ser/FAST_TAG_SAB_SET
+   :type-id     EveHashSet-type-id
+   :from-header hash-set-from-header
+   :dispose     dispose!
+   :builder-pred set?
+   :builder-ctor into-hash-set
+   :print-fn    #?(:clj (fn [] (defmethod print-method EveHashSet [s ^java.io.Writer w]
+                                  (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w)))
+                   :cljs nil)})
 
-     (defn empty-hash-set
-       "Create an empty EVE hash set in the current JVM slab context.
-        Requires eve-alloc/*jvm-slab-ctx* to be bound."
-       []
-       (let [sio     eve-alloc/*jvm-slab-ctx*
-             hdr-off (jvm-write-set! sio (partial value+sio->eve-bytes sio) #{})]
-         (jvm-eve-hash-set-from-offset sio hdr-off)))
 
-     (defn hash-set
-       "Create an EVE hash set in the current JVM slab context.
-        Requires eve-alloc/*jvm-slab-ctx* to be bound."
-       [& vs]
-       (reduce conj (empty-hash-set) vs))
-
-     ;; Register the JVM set writer so mem/value+sio->eve-bytes can route to it
-     (register-jvm-collection-writer! :set jvm-write-set!)))
+;; No-op pool stub — pool system removed, kept for backward compat
+#?(:cljs (defn reset-pools! [] nil))

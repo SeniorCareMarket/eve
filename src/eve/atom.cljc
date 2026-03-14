@@ -21,16 +21,13 @@
               [eve.set]
               [eve.list]]
       :clj  [[eve.map :as eve-map]
-              [eve.set :as eve-set]
-              [eve.vec :as eve-vec]
-              [eve.list :as eve-list]
+              [eve.set]
+              [eve.vec]
+              [eve.list]
               [eve.array :as eve-array]
               [eve.obj :as eve-obj]
               [eve.perf :as perf]]))
-  #?(:clj (:import [eve.map EveHashMap]
-                   [eve.set EveHashSet]
-                   [eve.vec SabVecRoot]
-                   [eve.list SabList])))
+  #?(:clj (:import [eve.map EveHashMap])))
 
 ;; ---------------------------------------------------------------------------
 ;; B2 constants
@@ -578,48 +575,38 @@
            (let [min-e (reduce min (.values thread-epochs))]
              (mmap-pin-epoch! root-r slot-idx (int min-e))))))
 
-     (defn- jvm-coll-factory
-       "Collection factory for deserializing nested collection values from slabs.
-        Called by eve-bytes->value when it encounters SAB pointer tags (0x10–0x13).
-        Returns slab-backed Eve types directly — no materialization."
-       [tag sio slab-offset]
-       (case (int tag)
-         0x10 (eve-map/jvm-eve-hash-map-from-offset sio slab-offset jvm-coll-factory)
-         0x11 (eve-set/jvm-eve-hash-set-from-offset sio slab-offset jvm-coll-factory)
-         0x12 (eve-vec/jvm-sabvec-from-offset sio slab-offset jvm-coll-factory)
-         0x13 (eve-list/jvm-sab-list-from-offset sio slab-offset jvm-coll-factory)
-         (throw (ex-info "jvm-coll-factory: unknown tag" {:tag tag}))))
-
      (defn- jvm-read-root-value
        "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
-        Returns slab-backed Eve types directly — no materialization."
+        Returns slab-backed Eve types directly — no materialization.
+        Uses the header-constructor registry populated by eve.map/set/vec/list at load time."
        [sio ptr]
        (when (and (not= ptr alloc/NIL_OFFSET)
                   (not= ptr CLAIMED_SENTINEL))
-         (let [type-id (alloc/jvm-read-header-type-byte sio ptr)
-               cf      jvm-coll-factory]
+         (let [type-id (alloc/jvm-read-header-type-byte sio ptr)]
            (case (int type-id)
-             0xED (eve-map/jvm-eve-hash-map-from-offset sio ptr cf)
-             0xEE (eve-set/jvm-eve-hash-set-from-offset sio ptr cf)
-             0x12 (eve-vec/jvm-sabvec-from-offset sio ptr cf)
-             0x13 (eve-list/jvm-sab-list-from-offset sio ptr cf)
-             0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
-             0x1E (eve-obj/jvm-obj-from-offset sio ptr)
              0x01 (alloc/jvm-read-scalar-block sio ptr)
-             (throw (ex-info "jvm-mmap-deref: unknown root type-id"
-                             {:type-id type-id :ptr ptr}))))))
+             ;; Look up by header type-id byte directly
+             (if-let [ctor (ser/get-jvm-header-constructor type-id)]
+               (ctor ptr)
+               ;; Try array/obj constructors
+               (case (int type-id)
+                 0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
+                 0x1E (eve-obj/jvm-obj-from-offset sio ptr)
+                 (throw (ex-info "jvm-mmap-deref: unknown root type-id"
+                                 {:type-id type-id :ptr ptr}))))))))
 
      (defn- jvm-mmap-deref
        [{:keys [root-r sio] :as domain-state} atom-slot-idx]
        ;; Refresh slab regions in case another process grew them
        (alloc/refresh-jvm-slab-regions! sio)
-       (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-         (jvm-pin-thread-epoch! domain-state epoch)
-         (try
-           (jvm-read-root-value sio
-             (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)))
-           (finally
-             (jvm-unpin-thread-epoch! domain-state)))))
+       (binding [alloc/*jvm-slab-ctx* sio]
+         (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+           (jvm-pin-thread-epoch! domain-state epoch)
+           (try
+             (jvm-read-root-value sio
+               (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)))
+             (finally
+               (jvm-unpin-thread-epoch! domain-state))))))
 
      (defn- jvm-try-flush-retires!
        "Free retired HAMT trees whose epoch is safe to reclaim.
@@ -648,26 +635,30 @@
      (defn- jvm-resolve-new-ptr
        "Resolve the slab-qualified offset for a new atom root value (JVM).
         If new-val is already a slab-backed Eve type, returns its header-off
-        directly (no re-serialization). Otherwise serializes to slab."
+        directly (no re-serialization). Otherwise serializes to slab via the
+        collection writer registry."
        [sio new-val]
-       (let [encode (partial mem/value+sio->eve-bytes sio)]
-         (cond
-           (nil? new-val)                  alloc/NIL_OFFSET
-           (instance? EveHashMap new-val)  (.-header-off ^EveHashMap new-val)
-           (instance? EveHashSet new-val)  (.-header-off ^EveHashSet new-val)
-           (instance? SabVecRoot new-val)  (.-header-off ^SabVecRoot new-val)
-           (instance? SabList new-val)     (.-header-off ^SabList new-val)
-           (map? new-val)
-           (if (and (contains? new-val :schema) (contains? new-val :values))
-             (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
-             (eve-map/jvm-write-map! sio encode new-val))
-           (set? new-val)     (eve-set/jvm-write-set! sio encode new-val)
-           (vector? new-val)  (eve-vec/jvm-write-vec! sio encode new-val)
-           (or (list? new-val)
-               (seq? new-val)) (eve-list/jvm-write-list! sio encode new-val)
-           (.isArray (class new-val))
-           (alloc/jvm-write-eve-array! sio new-val)
-           :else              (alloc/jvm-alloc-scalar-block! sio new-val))))
+       (cond
+         (nil? new-val)
+         alloc/NIL_OFFSET
+
+         ;; Already an Eve type — use its header-off directly (via IEveRoot protocol)
+         (satisfies? d/IEveRoot new-val)
+         (d/-root-header-off new-val)
+
+         ;; Clojure native types — serialize via collection writer registry
+         (map? new-val)
+         (if (and (contains? new-val :schema) (contains? new-val :values))
+           (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
+           (mem/jvm-write-collection! :map sio new-val))
+         (set? new-val)     (mem/jvm-write-collection! :set sio new-val)
+         (vector? new-val)  (mem/jvm-write-collection! :vec sio new-val)
+         (or (list? new-val) (seq? new-val))
+                            (mem/jvm-write-collection! :list sio new-val)
+         (.isArray (class new-val))
+         (alloc/jvm-write-eve-array! sio new-val)
+         :else
+         (alloc/jvm-alloc-scalar-block! sio new-val)))
 
      (defn- jvm-collect-replaced-nodes
        "Walk old and new HAMT trees, collecting old node offsets that differ.
@@ -707,6 +698,7 @@
        "B2 CAS-loop swap (JVM). Epoch pinned for the ENTIRE iteration to
         protect lazy EveHashMap reads during path-copy."
        [{:keys [root-r sio retire-q tree-logs flush-ts] :as domain-state} atom-slot-idx f args]
+       (binding [alloc/*jvm-slab-ctx* sio]
        (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
        (loop [attempt 0]
          (when (>= attempt d/MAX_SWAP_RETRIES)
@@ -725,10 +717,7 @@
                        new-ptr (perf/timed :resolve-ptr (jvm-resolve-new-ptr sio new-val))
                        cur-log (alloc/drain-jvm-alloc-log!)
                        replaced-log (alloc/drain-jvm-replaced-log!)
-                       eve-passthru? (or (instance? EveHashMap new-val)
-                                        (instance? EveHashSet new-val)
-                                        (instance? SabVecRoot new-val)
-                                        (instance? SabList new-val))
+                       eve-passthru? (satisfies? d/IEveRoot new-val)
                        w       (perf/timed :cas (mem/-cas-i32! root-r ptr-off old-ptr new-ptr))]
                    (if (== w old-ptr)
                      (let [new-epoch (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)]
@@ -761,7 +750,7 @@
              :ok    (do (perf/timed :flush-retires
                           (jvm-try-flush-retires! root-r retire-q sio flush-ts))
                         result)
-             :retry (do (cas-backoff! attempt) (recur (inc attempt))))))))))
+             :retry (do (cas-backoff! attempt) (recur (inc attempt)))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; MmapAtomDomain — CLJS
@@ -880,7 +869,7 @@
    Atoms created from this domain become invalid after close.
    Removes the domain from the internal cache."
   [d]
-  (let [{:keys [root-r slot-idx base-path] :as ds} (.-domain-state d)]
+  (let [{:keys [root-r slot-idx base-path] :as ds} (.-domain-state #?(:cljs ^js d :clj d))]
     (when (and root-r slot-idx)
       #?(:cljs (when-let [tid (:timer-id ds)] (js/clearInterval tid))
          :clj  (when-let [sched (:heartbeat-sched ds)] (.shutdown sched)))
@@ -893,7 +882,7 @@
    Cancels the heartbeat timer. Call when the process is done using the atom.
    Safe to call multiple times (idempotent via slot INACTIVE check)."
   [a]
-  (let [{:keys [root-r slot-idx] :as ds} (.-domain-state a)]
+  (let [{:keys [root-r slot-idx] :as ds} (.-domain-state #?(:cljs ^js a :clj a))]
     (when (and root-r slot-idx)
       #?(:cljs (when-let [tid (:timer-id ds)] (js/clearInterval tid))
          :clj  (when-let [sched (:heartbeat-sched ds)] (.shutdown sched)))

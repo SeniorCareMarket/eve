@@ -256,12 +256,13 @@
             (list '-hash ['_] (list 'hash off-sym))])
          ;; IEquiv
          (when-not (user-provides-protocol? parsed-protos 'IEquiv)
-           ['IEquiv
-            (list '-equiv ['_ 'other]
-                  (list 'and
-                        (list 'instance? type-name 'other)
-                        (list 'identical? env-sym (list '.-eve-env 'other))
-                        (list '== off-sym (list '.-eve-offset 'other))))])
+           (let [other-js (with-meta 'other {:tag 'js})]
+             ['IEquiv
+              (list '-equiv ['_ 'other]
+                    (list 'and
+                          (list 'instance? type-name 'other)
+                          (list 'identical? env-sym (list '.-eve-env other-js))
+                          (list '== off-sym (list '.-eve-offset other-js))))]))
          ;; IPrintWithWriter
          (when-not (user-provides-protocol? parsed-protos 'IPrintWithWriter)
            (let [print-body
@@ -300,14 +301,16 @@
                        [(list (symbol (str (name type-name) ".")) env-sym offset-sym)]))))
         ]
     `(do
-       ;; The real deftype (creates auto-generated ->TypeName)
-       (~'cljs.core/deftype ~type-name [~env-sym ~off-sym]
+       ;; The real deftype — using bare deftype (not cljs.core/deftype) so the
+       ;; subsequent defn cleanly replaces the auto-generated ->TypeName without
+       ;; clashing with the fully-qualified form's stronger binding.
+       (~'deftype ~type-name [~env-sym ~off-sym]
          ~@boilerplate
          ~@transformed-protos)
 
-       ;; Override the auto-generated constructor with our custom one
-       ;; that takes field values instead of raw env/offset
-       (~'set! ~ctor-name (~'fn [~env-sym ~@ctor-args] ~ctor-body))
+       ;; Constructor: takes user-facing field values, allocates in SAB,
+       ;; writes fields, returns the constructed instance.
+       (~'defn ~ctor-name [~env-sym ~@ctor-args] ~ctor-body)
 
        ;; Return the type name
        ~type-name)))

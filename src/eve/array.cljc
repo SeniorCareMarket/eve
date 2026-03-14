@@ -22,7 +22,8 @@
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.serialize :as ser]
    #?@(:cljs [[eve.shared-atom :as atom]
-              [eve.wasm-mem :as wasm]]
+              [eve.wasm-mem :as wasm]
+              [eve.deftype-proto.wasm :as proto-wasm]]
        :clj  [[eve.mem :as mem]])))
 
 ;; Forward declarations
@@ -889,7 +890,7 @@
           n         (alloc/read-i32 blk-off 4)
           es        (subtype->elem-shift subtype)
           class-idx (alloc/decode-class-idx blk-off)
-          u8-view   (wasm/slab-u8-view class-idx)
+          u8-view   (proto-wasm/slab-u8-view class-idx)
           sab       (.-buffer u8-view)
           byte-base (alloc/slab-offset->byte-offset blk-off)
           data-off  (+ byte-base 8)
