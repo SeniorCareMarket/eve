@@ -41,8 +41,7 @@
 (def ^:const COLLISION_HEADER_SIZE 12)
 
 ;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
-#?(:clj (def EveHashSet-type-id 0xEE)
-   :cljs (declare EveHashSet-type-id))
+(def EveHashSet-type-id 0xEE)
 (def ^:const SABSETROOT_CNT_OFFSET 4)
 (def ^:const SABSETROOT_ROOT_OFF_OFFSET 8)
 (def ^:const SET_FLAG_PORTABLE_HASH 0x01)
