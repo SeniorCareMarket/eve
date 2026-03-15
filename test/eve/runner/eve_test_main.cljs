@@ -45,7 +45,9 @@
    [eve.conformance-test :as conformance-test]
    [eve.fuzz-test :as fuzz-test]
    [eve.lustre-test :as lustre-test]
-   [eve.lustre-bench :as lustre-bench]))
+   [eve.lustre-bench :as lustre-bench]
+   [eve.dataset-test :as dataset-test]
+   [eve.tensor-test :as tensor-test]))
 
 ;; Anti-DCE exports — namespace aliases as values force the test namespaces to load.
 ;; The undeclared-var warnings here are expected and harmless.
@@ -75,6 +77,8 @@
 (goog/exportSymbol "eve.fuzz_test" fuzz-test)
 (goog/exportSymbol "eve.lustre_test" lustre-test)
 (goog/exportSymbol "eve.lustre_bench" lustre-bench)
+(goog/exportSymbol "eve.dataset_test" dataset-test)
+(goog/exportSymbol "eve.tensor_test" tensor-test)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -212,6 +216,12 @@
 (defn- run-lustre-bench! []
   (load-native-addon!)
   (lustre-bench/run-all-benches!))
+
+(defn- run-dataset! []
+  (t/run-tests 'eve.dataset-test))
+
+(defn- run-tensor! []
+  (t/run-tests 'eve.tensor-test))
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -228,7 +238,9 @@
     'eve.batch4-validation-test
     'eve.deftype.int-map-test
     'eve.deftype.rb-tree-test
-    'eve.typed-array-test))
+    'eve.typed-array-test
+    'eve.dataset-test
+    'eve.tensor-test))
 
 ;; Suite registry
 (def ^:private suite-runners
@@ -256,6 +268,8 @@
    "fuzz"          run-fuzz!
    "lustre"        run-lustre!
    "lustre-bench"  run-lustre-bench!
+   "dataset"       run-dataset!
+   "tensor"        run-tensor!
    "all"           run-all!
    ;; Aliases
    "map-test"        run-slab!
@@ -270,7 +284,8 @@
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "obj"
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
-   "mmap-domain" "conformance" "fuzz" "lustre" "lustre-bench"])
+   "mmap-domain" "conformance" "fuzz" "lustre" "lustre-bench"
+   "dataset" "tensor"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]

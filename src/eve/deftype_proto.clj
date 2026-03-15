@@ -298,6 +298,157 @@
   (some #(= proto-sym (:protocol %)) parsed-protos))
 
 ;;-----------------------------------------------------------------------------
+;; JVM Code Generation Helpers (ISlabIO Pattern)
+;;-----------------------------------------------------------------------------
+;;
+;; On JVM, slab field access uses the ISlabIO protocol:
+;;   (-sio-read-i32 sio slab-offset field-off)
+;;   (-sio-write-i32! sio slab-offset field-off val)
+;; The deftype stores [^long slab-off__ sio__] instead of [offset__].
+;; ISlabIO methods handle class/block resolution internally.
+
+(defn- jvm-read-fn-for-type
+  "Return the JVM read expression for a field type.
+   sio__ and slab-off__ are bound from deftype fields."
+  [{:keys [type-hint type-class]} slab-off-expr field-offset]
+  (case type-class
+    :primitive
+    (case type-hint
+      :int8    (list 'let ['b__jvm (list 'eve.deftype-proto.alloc/-sio-read-u8
+                                         'sio__ slab-off-expr field-offset)]
+                 (list 'if (list '> 'b__jvm 127) (list '- 'b__jvm 256) 'b__jvm))
+      :uint8   (list 'eve.deftype-proto.alloc/-sio-read-u8 'sio__ slab-off-expr field-offset)
+      :int16   (list 'let ['v__jvm (list 'eve.deftype-proto.alloc/-sio-read-u16
+                                         'sio__ slab-off-expr field-offset)]
+                 (list 'if (list '> 'v__jvm 32767) (list '- 'v__jvm 65536) 'v__jvm))
+      :uint16  (list 'eve.deftype-proto.alloc/-sio-read-u16 'sio__ slab-off-expr field-offset)
+      :int32   (list 'eve.deftype-proto.alloc/-sio-read-i32 'sio__ slab-off-expr field-offset)
+      :uint32  (list 'bit-and
+                     (list 'long (list 'eve.deftype-proto.alloc/-sio-read-i32
+                                       'sio__ slab-off-expr field-offset))
+                     0xFFFFFFFF)
+      :float32 (list 'Float/intBitsToFloat
+                     (list 'int (list 'eve.deftype-proto.alloc/-sio-read-i32
+                                      'sio__ slab-off-expr field-offset)))
+      :float64 (list 'let ['lo__jvm (list 'bit-and
+                                          (list 'long (list 'eve.deftype-proto.alloc/-sio-read-i32
+                                                            'sio__ slab-off-expr field-offset))
+                                          0xFFFFFFFF)
+                            'hi__jvm (list 'bit-and
+                                          (list 'long (list 'eve.deftype-proto.alloc/-sio-read-i32
+                                                            'sio__ slab-off-expr (+ field-offset 4)))
+                                          0xFFFFFFFF)]
+                 (list 'Double/longBitsToDouble
+                       (list 'bit-or (list 'bit-shift-left 'hi__jvm 32) 'lo__jvm))))
+    :eve-type
+    (list 'eve.deftype-proto.alloc/-sio-read-i32 'sio__ slab-off-expr field-offset)
+    ;; default
+    (list 'eve.deftype-proto.alloc/-sio-read-i32 'sio__ slab-off-expr field-offset)))
+
+(defn- jvm-write-fn-for-type
+  "Return the JVM write expression for a field type."
+  [{:keys [type-hint type-class]} slab-off-expr field-offset val-expr]
+  (case type-class
+    :primitive
+    (case type-hint
+      (:int8 :uint8)
+      (list 'eve.deftype-proto.alloc/-sio-write-u8! 'sio__ slab-off-expr field-offset
+            (list 'int val-expr))
+      (:int16 :uint16)
+      (list 'eve.deftype-proto.alloc/-sio-write-u16! 'sio__ slab-off-expr field-offset
+            (list 'int val-expr))
+      (:int32 :uint32)
+      (list 'eve.deftype-proto.alloc/-sio-write-i32! 'sio__ slab-off-expr field-offset
+            (list 'int val-expr))
+      :float32
+      (list 'eve.deftype-proto.alloc/-sio-write-i32! 'sio__ slab-off-expr field-offset
+            (list 'Float/floatToRawIntBits (list 'float val-expr)))
+      :float64
+      (list 'let ['bits__jvm (list 'Double/doubleToRawLongBits (list 'double val-expr))]
+        (list 'do
+          (list 'eve.deftype-proto.alloc/-sio-write-i32! 'sio__ slab-off-expr field-offset
+                (list 'unchecked-int (list 'bit-and 'bits__jvm 0xFFFFFFFF)))
+          (list 'eve.deftype-proto.alloc/-sio-write-i32! 'sio__ slab-off-expr (+ field-offset 4)
+                (list 'unchecked-int (list 'unsigned-bit-shift-right 'bits__jvm 32))))))
+    :eve-type
+    (list 'eve.deftype-proto.alloc/-sio-write-i32! 'sio__ slab-off-expr field-offset
+          (list 'int val-expr))
+    ;; default
+    (list 'eve.deftype-proto.alloc/-sio-write-i32! 'sio__ slab-off-expr field-offset
+          (list 'int val-expr))))
+
+(defn- jvm-field-bindings
+  "Generate let-bindings for reading all fields on JVM."
+  [fields slab-off-expr]
+  (vec (mapcat (fn [f]
+                 [(symbol (:name f))
+                  (jvm-read-fn-for-type f slab-off-expr (:offset f))])
+               fields)))
+
+(defn- jvm-rewrite-set!-forms
+  "Rewrite (set! field val) to JVM ISlabIO write operations."
+  [form field-map slab-off-expr]
+  (cond
+    ;; set! on a field
+    (and (seq? form)
+         (= 'set! (first form))
+         (symbol? (second form))
+         (contains? field-map (name (second form))))
+    (let [field-spec (get field-map (name (second form)))
+          val-expr (jvm-rewrite-set!-forms (nth form 2) field-map slab-off-expr)]
+      (when (= :immutable (:mutability field-spec))
+        (throw (ex-info (str "Cannot set! immutable field: " (:name field-spec)) {})))
+      (jvm-write-fn-for-type field-spec slab-off-expr (:offset field-spec) val-expr))
+
+    ;; cas! — not yet supported on JVM
+    (and (seq? form)
+         (= 'cas! (first form))
+         (symbol? (second form))
+         (contains? field-map (name (second form))))
+    (throw (ex-info "cas! in eve-slab-deftype not yet supported on JVM (needs -sio-cas-i32! on ISlabIO)"
+                    {:field (name (second form))}))
+
+    ;; Recurse
+    (seq? form)
+    (with-meta (apply list (map #(jvm-rewrite-set!-forms % field-map slab-off-expr) form))
+               (meta form))
+    (vector? form)
+    (with-meta (mapv #(jvm-rewrite-set!-forms % field-map slab-off-expr) form)
+               (meta form))
+    (map? form)
+    (with-meta (into {} (map (fn [[k v]]
+                               [(jvm-rewrite-set!-forms k field-map slab-off-expr)
+                                (jvm-rewrite-set!-forms v field-map slab-off-expr)])
+                             form))
+               (meta form))
+    :else form))
+
+(defn- jvm-transform-method-body
+  "Transform method body for JVM deftype. slab-off__ and sio__ are deftype fields,
+   accessible directly in method bodies."
+  [body fields field-map]
+  (let [slab-off-sym 'slab-off__
+        field-read-bindings (jvm-field-bindings fields slab-off-sym)
+        rewritten (map #(jvm-rewrite-set!-forms % field-map slab-off-sym) body)]
+    (if (empty? field-read-bindings)
+      rewritten
+      (list (apply list 'let field-read-bindings (vec rewritten))))))
+
+(defn- jvm-transform-extend-method-body
+  "Transform method body for JVM extend-type. Binds slab-off__ and sio__
+   from the this reference since extend-type methods don't have field access."
+  [body fields field-map this-sym type-name]
+  (let [slab-off-sym 'slab-off__
+        field-read-bindings (jvm-field-bindings fields slab-off-sym)
+        rewritten (map #(jvm-rewrite-set!-forms % field-map slab-off-sym) body)
+        resolve-bindings ['slab-off__ (list '.-slab-off__
+                                            (with-meta this-sym {:tag type-name}))
+                          'sio__      (list '.-sio__
+                                            (with-meta this-sym {:tag type-name}))]
+        all-bindings (vec (concat resolve-bindings field-read-bindings))]
+    (list (apply list 'let all-bindings (vec rewritten)))))
+
+;;-----------------------------------------------------------------------------
 ;; eve-slab-deftype macro
 ;;-----------------------------------------------------------------------------
 
@@ -315,8 +466,8 @@
 
    The generated type:
      - Allocates from the slab allocator (no eve-env threading)
-     - Uses slab resolve pattern for field access (resolve-dv! per method)
-     - Only stores offset__ (slab-qualified offset, no sab__ field)
+     - CLJS: uses slab resolve pattern (resolve-dv! per method), stores offset__
+     - JVM: uses ISlabIO protocol methods, stores [^long slab-off__ sio__]
 
    Example:
      (eve-slab-deftype TreeNode [^:volatile-mutable ^:int32 key
@@ -327,125 +478,176 @@
        (-set-key! [this v] (set! key v))
        (-cas-left! [this old new] (cas! left old new)))"
   [type-name fields & body]
-  (let [;; Parse fields
+  (let [;; === SHARED: Parse fields, compute layout, register type ===
         parsed-fields (mapv parse-field fields)
-        ;; Compute layout
         {:keys [fields total-size]} (compute-layout parsed-fields)
-        ;; Assign type-id
         type-id (next-type-id!)
         type-key (str (ns-name *ns*) "/" (name type-name))
 
-        ;; Register
         _ (register-type! (name type-name)
                           {:type-id type-id
                            :total-size total-size
                            :fields fields
                            :type-key type-key})
 
-        ;; Build helpers
         field-map (into {} (map (fn [f] [(:name f) f]) fields))
         parsed-protos (parse-protocol-impls body)
         has-volatile? (has-volatile-fields? fields)
-
-        ;; Internal field name — slab version only has offset__
-        off-sym 'offset__
-
-        ;; Transform methods — use slab resolve pattern
-        transformed-protos
-        (mapcat (fn [{:keys [protocol methods]}]
-                  (cons protocol
-                        (map (fn [{:keys [name args body]}]
-                               (let [this-sym (first args)
-                                     tbody (transform-method-body
-                                            body fields field-map
-                                            nil
-                                            (list '.-offset__ this-sym)
-                                            has-volatile?)]
-                                 (list name args (cons 'do tbody))))
-                             methods)))
-                parsed-protos)
-
-        ;; Boilerplate protocols
-        boilerplate
-        (concat
-         ;; IHash
-         (when-not (user-provides-protocol? parsed-protos 'IHash)
-           ['IHash (list '-hash ['_] (list 'hash off-sym))])
-         ;; IEquiv — slab version compares offsets only (no sab__ field)
-         (when-not (user-provides-protocol? parsed-protos 'IEquiv)
-           ['IEquiv
-            (list '-equiv ['_ 'other]
-                  (list 'and
-                        (list 'instance? type-name 'other)
-                        (list '== off-sym (list '.-offset__ 'other))))])
-         ;; IPrintWithWriter
-         (when-not (user-provides-protocol? parsed-protos 'IPrintWithWriter)
-           ['IPrintWithWriter
-            (list '-pr-writer ['this 'writer '_opts]
-                  (list '-write 'writer (str "#slab/" (name type-name) " "))
-                  (list '-write 'writer (str "{:offset " off-sym "}")))]))
-
-        ;; Constructor
         ctor-name (symbol (str "->" (name type-name)))
-        ctor-args (mapv (fn [f] (symbol (:name f))) fields)
-        ;; Gensym for constructor offset
-        off-ctor-sym (gensym "offset_")
-        ;; Generate field write expressions — constructor resolves once then writes
-        field-writes (map (fn [f]
-                            (write-fn-for-type
-                             (assoc f :mutability (if (= :volatile-mutable (:mutability f))
-                                                    :volatile-mutable :mutable))
-                             nil 'slab-base__ (:offset f) (symbol (:name f))))
-                          fields)]
-    `(do
-       ;; The deftype — slab version only has offset__ (slab-qualified offset)
-       (~'deftype ~type-name [~off-sym]
-         ~@boilerplate
-         ~@transformed-protos)
+        ctor-args (mapv (fn [f] (symbol (:name f))) fields)]
 
-       ;; Constructor - allocates from slab allocator
-       (~'defn ~ctor-name [~@ctor-args]
-         (~'when-not eve.deftype-proto.data/*parent-atom*
-           (~'throw (~'js/Error. (~'str "Cannot construct " ~(str type-name)
-                                       " outside a transaction — *parent-atom* not bound"))))
-         (let [;; Allocate from slab (module-level, no env needed)
-               ~off-ctor-sym (eve.deftype-proto.alloc/alloc-offset (+ ~total-size 4))
-               ;; Resolve for writing fields
-               ~'slab-base__ (eve.deftype-proto.alloc/resolve-dv! ~off-ctor-sym)
-               ~'slab-dv__ eve.deftype-proto.alloc/resolved-dv
-               ~@(when has-volatile?
-                   ['slab-i32__ (list ':i32
-                                      (list 'eve.deftype-proto.wasm/get-slab-instance
-                                            (list 'eve.deftype-proto.alloc/decode-class-idx
-                                                  off-ctor-sym)))])
-               ;; Zero-fill the allocated region via resolved u8 view
-               ~'slab-u8__ (eve.deftype-proto.alloc/resolve-u8! ~off-ctor-sym)]
-           ;; Zero-fill
-           (dotimes [i# ~total-size]
-             (aset eve.deftype-proto.alloc/resolved-u8
-                   (+ ~'slab-u8__ i#) 0))
-           ;; Re-resolve after resolve-u8! (it overwrites resolved-dv)
-           (eve.deftype-proto.alloc/resolve-dv! ~off-ctor-sym)
-           (let [~'slab-dv__ eve.deftype-proto.alloc/resolved-dv
-                 ~'slab-base__ eve.deftype-proto.alloc/resolved-base]
-             ;; Write type-id byte
-             (.setUint8 ~'slab-dv__ ~'slab-base__ ~type-id)
-             ;; Write initial field values
-             ~@field-writes)
-           ;; Return instance with slab-qualified offset
-           (~(symbol (str (name type-name) ".")) ~off-ctor-sym)))
+    (if (:ns &env)
+      ;; =================================================================
+      ;; CLJS PATH (existing, unchanged)
+      ;; =================================================================
+      (let [off-sym 'offset__
 
-       ;; Offset accessor for composing types
-       (~'defn ~(symbol (str (name type-name) "-offset")) [inst#]
-         (.-offset__ inst#))
+            transformed-protos
+            (mapcat (fn [{:keys [protocol methods]}]
+                      (cons protocol
+                            (map (fn [{:keys [name args body]}]
+                                   (let [this-sym (first args)
+                                         tbody (transform-method-body
+                                                body fields field-map
+                                                nil
+                                                (list '.-offset__ this-sym)
+                                                has-volatile?)]
+                                     (list name args (cons 'do tbody))))
+                                 methods)))
+                    parsed-protos)
 
-       ;; Type-id constant
-       (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
+            boilerplate
+            (concat
+             (when-not (user-provides-protocol? parsed-protos 'IHash)
+               ['IHash (list '-hash ['_] (list 'hash off-sym))])
+             (when-not (user-provides-protocol? parsed-protos 'IEquiv)
+               ['IEquiv
+                (list '-equiv ['_ 'other]
+                      (list 'and
+                            (list 'instance? type-name 'other)
+                            (list '== off-sym (list '.-offset__ 'other))))])
+             (when-not (user-provides-protocol? parsed-protos 'IPrintWithWriter)
+               ['IPrintWithWriter
+                (list '-pr-writer ['this 'writer '_opts]
+                      (list '-write 'writer (str "#slab/" (name type-name) " "))
+                      (list '-write 'writer (str "{:offset " off-sym "}")))]))
 
-       ;; Nil sentinel constant
-       (~'def ~(symbol (str (name type-name) "-nil")) -1)
+            off-ctor-sym (gensym "offset_")
+            field-writes (map (fn [f]
+                                (write-fn-for-type
+                                 (assoc f :mutability (if (= :volatile-mutable (:mutability f))
+                                                        :volatile-mutable :mutable))
+                                 nil 'slab-base__ (:offset f) (symbol (:name f))))
+                              fields)]
+        `(do
+           (~'deftype ~type-name [~off-sym]
+             ~@boilerplate
+             ~@transformed-protos)
 
-       ~type-name)))
+           (~'defn ~ctor-name [~@ctor-args]
+             (~'when-not eve.deftype-proto.data/*parent-atom*
+               (~'throw (~'js/Error. (~'str "Cannot construct " ~(str type-name)
+                                           " outside a transaction — *parent-atom* not bound"))))
+             (let [~off-ctor-sym (eve.deftype-proto.alloc/alloc-offset (+ ~total-size 4))
+                   ~'slab-base__ (eve.deftype-proto.alloc/resolve-dv! ~off-ctor-sym)
+                   ~'slab-dv__ eve.deftype-proto.alloc/resolved-dv
+                   ~@(when has-volatile?
+                       ['slab-i32__ (list ':i32
+                                          (list 'eve.deftype-proto.wasm/get-slab-instance
+                                                (list 'eve.deftype-proto.alloc/decode-class-idx
+                                                      off-ctor-sym)))])
+                   ~'slab-u8__ (eve.deftype-proto.alloc/resolve-u8! ~off-ctor-sym)]
+               (dotimes [i# ~total-size]
+                 (aset eve.deftype-proto.alloc/resolved-u8
+                       (+ ~'slab-u8__ i#) 0))
+               (eve.deftype-proto.alloc/resolve-dv! ~off-ctor-sym)
+               (let [~'slab-dv__ eve.deftype-proto.alloc/resolved-dv
+                     ~'slab-base__ eve.deftype-proto.alloc/resolved-base]
+                 (.setUint8 ~'slab-dv__ ~'slab-base__ ~type-id)
+                 ~@field-writes)
+               (~(symbol (str (name type-name) ".")) ~off-ctor-sym)))
+
+           (~'defn ~(symbol (str (name type-name) "-offset")) [inst#]
+             (.-offset__ inst#))
+
+           (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
+           (~'def ~(symbol (str (name type-name) "-nil")) -1)
+
+           ~type-name))
+
+      ;; =================================================================
+      ;; JVM PATH (new — ISlabIO-based field access)
+      ;; =================================================================
+      (let [slab-off-field (with-meta 'slab-off__ {:tag 'long})
+
+            transformed-protos
+            (mapcat (fn [{:keys [protocol methods]}]
+                      (cons protocol
+                            (map (fn [{:keys [name args body]}]
+                                   (let [tbody (jvm-transform-method-body
+                                                body fields field-map)]
+                                     (list name args (cons 'do tbody))))
+                                 methods)))
+                    parsed-protos)
+
+            boilerplate
+            (concat
+             (when-not (user-provides-protocol? parsed-protos 'clojure.lang.IHashEq)
+               ['clojure.lang.IHashEq
+                (list 'hasheq ['_]
+                      (list 'clojure.lang.Murmur3/hashLong 'slab-off__))])
+             (when-not (user-provides-protocol? parsed-protos 'java.lang.Object)
+               ['java.lang.Object
+                (list 'equals ['_ 'other]
+                      (list 'and
+                            (list 'instance? type-name 'other)
+                            (list '== 'slab-off__
+                                  (list '.-slab-off__
+                                        (with-meta 'other {:tag type-name})))))
+                (list 'hashCode ['this] (list '.hasheq 'this))
+                (list 'toString ['_]
+                      (list 'str (str "#slab/" (name type-name) " {:offset ")
+                            'slab-off__ "}"))]))
+
+            field-writes
+            (map (fn [f]
+                   (jvm-write-fn-for-type
+                    (assoc f :mutability (if (= :volatile-mutable (:mutability f))
+                                           :volatile-mutable :mutable))
+                    'slab-off__ (:offset f) (symbol (:name f))))
+                 fields)]
+        `(do
+           ;; JVM deftype: [^long slab-off__ sio__]
+           (~'deftype ~type-name [~slab-off-field ~'sio__]
+             ~@boilerplate
+             ~@transformed-protos)
+
+           ;; Constructor — uses *jvm-slab-ctx* for sio
+           (~'defn ~ctor-name [~@ctor-args]
+             (let [~'sio__ eve.deftype-proto.alloc/*jvm-slab-ctx*]
+               (~'when-not ~'sio__
+                 (~'throw (IllegalStateException.
+                            (~'str "Cannot construct " ~(str type-name)
+                                   " — *jvm-slab-ctx* not bound"))))
+               (let [~'slab-off__ (eve.deftype-proto.alloc/-sio-alloc! ~'sio__ ~(+ total-size 4))]
+                 ;; Write type-id byte
+                 (eve.deftype-proto.alloc/-sio-write-u8! ~'sio__ ~'slab-off__ 0 ~type-id)
+                 ;; Write initial field values
+                 ~@field-writes
+                 ;; Return instance
+                 (~(symbol (str (name type-name) ".")) ~'slab-off__ ~'sio__))))
+
+           ;; Offset accessor
+           (~'defn ~(symbol (str (name type-name) "-offset")) [inst#]
+             (~'.-slab-off__ inst#))
+
+           ;; Type-id constant
+           (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
+
+           ;; Nil sentinel constant
+           (~'def ~(symbol (str (name type-name) "-nil")) -1)
+
+           ~type-name)))))
 
 (defmacro eve-slab-extend-type
   "Extend protocols to an existing eve-slab-deftype."
@@ -456,18 +658,35 @@
         fields (:fields type-reg)
         field-map (into {} (map (fn [f] [(:name f) f]) fields))
         has-volatile? (has-volatile-fields? fields)
-        parsed-protos (parse-protocol-impls body)
-        transformed-protos
-        (mapcat (fn [{:keys [protocol methods]}]
-                  (cons protocol
-                        (map (fn [{:keys [name args body]}]
-                               (let [this-sym (first args)
-                                     tbody (transform-method-body
-                                            body fields field-map
-                                            nil
-                                            (list '.-offset__ this-sym)
-                                            has-volatile?)]
-                                 (list name args (cons 'do tbody))))
-                             methods)))
-                parsed-protos)]
-    `(~'extend-type ~type-name ~@transformed-protos)))
+        parsed-protos (parse-protocol-impls body)]
+
+    (if (:ns &env)
+      ;; CLJS PATH (existing, unchanged)
+      (let [transformed-protos
+            (mapcat (fn [{:keys [protocol methods]}]
+                      (cons protocol
+                            (map (fn [{:keys [name args body]}]
+                                   (let [this-sym (first args)
+                                         tbody (transform-method-body
+                                                body fields field-map
+                                                nil
+                                                (list '.-offset__ this-sym)
+                                                has-volatile?)]
+                                     (list name args (cons 'do tbody))))
+                                 methods)))
+                    parsed-protos)]
+        `(~'extend-type ~type-name ~@transformed-protos))
+
+      ;; JVM PATH
+      (let [transformed-protos
+            (mapcat (fn [{:keys [protocol methods]}]
+                      (cons protocol
+                            (map (fn [{:keys [name args body]}]
+                                   (let [this-sym (first args)
+                                         tbody (jvm-transform-extend-method-body
+                                                body fields field-map
+                                                this-sym type-name)]
+                                     (list name args (cons 'do tbody))))
+                                 methods)))
+                    parsed-protos)]
+        `(~'extend-type ~type-name ~@transformed-protos)))))

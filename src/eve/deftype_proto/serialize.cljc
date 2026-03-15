@@ -77,6 +77,14 @@
 ;; Layout: [0x1E][pad:u8][schema-len:u16][schema-bytes...][field-data aligned to 4...]
 (def ^:const EVE_OBJ_SLAB_TYPE_ID 0x1E)
 
+;; Dataset slab block type-id — columnar table with named EveArray columns.
+;; Layout: [0x1F][pad:u8][pad:u16][row-count:i32][ncols:i32][col-list-off:i32]
+(def ^:const EVE_DATASET_SLAB_TYPE_ID 0x1F)
+
+;; Tensor slab block type-id — N-dimensional view over an EveArray.
+;; Layout: [0x20][pad:u8][pad:u16][rank:i32][dtype:i32][data-off:i32][elem-offset:i32][strides+dims...]
+(def ^:const EVE_TENSOR_SLAB_TYPE_ID 0x20)
+
 ;; Typed array subtype codes
 (def ^:const TYPED_ARRAY_UINT8         0x01)
 (def ^:const TYPED_ARRAY_INT8          0x02)
