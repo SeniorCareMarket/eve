@@ -348,23 +348,44 @@
 ;; Registration
 ;;=============================================================================
 
+;; Collection writer — shared by CLJ and bb
+#?(:cljs nil
+   :default
+   (defn- -write-list-coll!
+     "Serialize a Clojure list/seq to slab as an Eve linked list. Returns header offset."
+     [_sio _serialize-elem coll]
+     (let [sio alloc/*jvm-slab-ctx*
+           elems (vec coll)
+           cnt (count elems)]
+       (if (zero? cnt)
+         (write-list-header! sio 0 NIL_OFFSET)
+         (let [head-off (reduce (fn [next-off elem]
+                                  (let [vb (value+sio->eve-bytes sio elem)]
+                                    (alloc-list-node! sio next-off vb)))
+                                NIL_OFFSET
+                                (rseq elems))]
+           (write-list-header! sio cnt head-off))))))
+
+;; Type constructor + disposer + builder + collection writer registrations
+#?(:bb
+   (register-jvm-collection-writer! :list -write-list-coll!)
+   :default
+   (eve/register-eve-type!
+    {:fast-tag     ser/FAST_TAG_SAB_LIST
+     :type-id      EveList-type-id
+     :from-header  list-from-header
+     :dispose      dispose!
+     :builder-pred seq?
+     :builder-ctor eve-list
+     :coll-writer  #?(:clj {:tag :list :fn -write-list-coll!} :cljs nil)
+     :print-fn     #?(:clj (fn [] (defmethod print-method EveList [lst ^java.io.Writer w]
+                                    (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq lst) w)))
+                      :cljs nil)}))
+
+;; Backward-compat JVM aliases
 #?(:bb nil
    :clj
    (do
-     (register-jvm-collection-writer! :list
-       (fn [sio serialize-val coll]
-         (let [elems (vec coll)
-               cnt (count elems)]
-           (if (zero? cnt)
-             (write-list-header! sio 0 NIL_OFFSET)
-             (let [head-off (reduce (fn [next-off elem]
-                                      (let [^bytes vb (serialize-val elem)]
-                                        (alloc-list-node! sio next-off vb)))
-                                    NIL_OFFSET
-                                    (rseq elems))]
-               (write-list-header! sio cnt head-off))))))
-
-     ;; Backward-compat JVM aliases
      (defn jvm-write-list!
        "Serialize a Clojure list/seq to slab. Returns header offset.
         Backward-compat alias for the registered :list writer."
@@ -378,34 +399,6 @@
        ([sio header-off _coll-factory] (list-from-header sio header-off)))
 
      (def SabList EveList)))
-
-;; Type constructor + disposer + builder registrations
-#?(:bb
-   ;; bb: register collection writer only (no deftype, no registry constructors)
-   (register-jvm-collection-writer! :list
-     (fn [_sio _serialize-elem coll]
-       (let [sio alloc/*jvm-slab-ctx*
-             elems (vec coll)
-             cnt (count elems)]
-         (if (zero? cnt)
-           (write-list-header! sio 0 NIL_OFFSET)
-           (let [head-off (reduce (fn [next-off elem]
-                                    (let [vb (value+sio->eve-bytes elem)]
-                                      (alloc-list-node! sio next-off vb)))
-                                  NIL_OFFSET
-                                  (rseq elems))]
-             (write-list-header! sio cnt head-off))))))
-   :default
-(eve/register-eve-type!
-  {:fast-tag    ser/FAST_TAG_SAB_LIST
-   :type-id     EveList-type-id
-   :from-header list-from-header
-   :dispose     dispose!
-   :builder-pred seq?
-   :builder-ctor eve-list
-   :print-fn    #?(:clj (fn [] (defmethod print-method EveList [lst ^java.io.Writer w]
-                                  (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq lst) w)))
-                   :cljs nil)}))
 
 ;; No-op pool stub — pool system removed, kept for backward compat
 #?(:cljs (defn reset-pools! [] nil))

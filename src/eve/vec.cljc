@@ -639,127 +639,80 @@
      (def sab-vec eve-vec)))
 
 ;;=============================================================================
-;; Registration — via register-eve-type! macro
+;; Registration
 ;;=============================================================================
 
-;; CLJ collection writer (too custom for macro generation)
-#?(:bb nil
-   :clj
-   (register-jvm-collection-writer! :vec
-     (fn [sio serialize-val coll]
-       (let [elems (vec coll)
-             cnt   (count elems)]
-         (if (zero? cnt)
-           (let [empty-tail (alloc-node! sio)]
-             (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET empty-tail 0))
-           (let [val-offs (mapv (fn [elem]
-                                  (make-value-block! sio (serialize-val elem)))
-                                elems)
-                 toff     (tail-offset-calc cnt)
-                 tail-len (- cnt toff)
-                 tail-off (let [t-off (alloc-node! sio)]
-                            (dorun (map-indexed
-                                     (fn [i v-off]
-                                       (-sio-write-i32! sio t-off (* i 4) v-off))
-                                     (subvec val-offs toff cnt)))
-                            t-off)
-                 trie-val-offs (subvec val-offs 0 toff)
-                 [root sft]
-                 (if (empty? trie-val-offs)
-                   [NIL_OFFSET SHIFT_STEP]
-                   (let [leaf-nodes
-                         (mapv (fn [chunk]
-                                 (let [node-off (alloc-node! sio)]
-                                   (dorun (map-indexed
-                                            (fn [i v-off]
-                                              (-sio-write-i32! sio node-off (* i 4) v-off))
-                                            chunk))
-                                   node-off))
-                               (partition-all NODE_SIZE trie-val-offs))]
-                     (loop [nodes leaf-nodes sh SHIFT_STEP]
-                       (if (<= (count nodes) NODE_SIZE)
-                         (let [root-off (alloc-node! sio)]
-                           (dorun (map-indexed
-                                    (fn [i child-off]
-                                      (-sio-write-i32! sio root-off (* i 4) child-off))
-                                    nodes))
-                           [root-off sh])
-                         (let [parent-nodes
-                               (mapv (fn [chunk]
-                                       (let [node-off (alloc-node! sio)]
-                                         (dorun (map-indexed
-                                                  (fn [i child-off]
-                                                    (-sio-write-i32! sio node-off (* i 4) child-off))
-                                                  chunk))
-                                         node-off))
-                                     (partition-all NODE_SIZE nodes))]
-                           (recur parent-nodes (+ sh SHIFT_STEP)))))))]
-             (write-vec-header! sio cnt sft root tail-off tail-len)))))))
-
-;; Type constructor + disposer + builder registrations
-#?(:bb
-   ;; bb: register collection writer only (no deftype, no registry constructors)
-   (register-jvm-collection-writer! :vec
-     (fn [sio serialize-val coll]
-       (let [elems (vec coll)
-             cnt   (count elems)]
-         (if (zero? cnt)
-           (let [empty-tail (alloc-node! sio)]
-             (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET empty-tail 0))
-           (let [val-offs (mapv (fn [elem]
-                                  (make-value-block! sio (serialize-val elem)))
-                                elems)
-                 toff     (tail-offset-calc cnt)
-                 tail-len (- cnt toff)
-                 tail-off (let [t-off (alloc-node! sio)]
-                            (dorun (map-indexed
-                                     (fn [i v-off]
-                                       (-sio-write-i32! sio t-off (* i 4) v-off))
-                                     (subvec val-offs toff cnt)))
-                            t-off)
-                 trie-val-offs (subvec val-offs 0 toff)
-                 [root sft]
-                 (if (empty? trie-val-offs)
-                   [NIL_OFFSET SHIFT_STEP]
-                   (let [leaf-nodes
-                         (mapv (fn [chunk]
-                                 (let [node-off (alloc-node! sio)]
-                                   (dorun (map-indexed
-                                            (fn [i v-off]
-                                              (-sio-write-i32! sio node-off (* i 4) v-off))
-                                            chunk))
-                                   node-off))
-                               (partition-all NODE_SIZE trie-val-offs))]
-                     (loop [nodes leaf-nodes sh SHIFT_STEP]
-                       (if (<= (count nodes) NODE_SIZE)
-                         (let [root-off (alloc-node! sio)]
-                           (dorun (map-indexed
-                                    (fn [i child-off]
-                                      (-sio-write-i32! sio root-off (* i 4) child-off))
-                                    nodes))
-                           [root-off sh])
-                         (let [parent-nodes
-                               (mapv (fn [chunk]
-                                       (let [node-off (alloc-node! sio)]
-                                         (dorun (map-indexed
-                                                  (fn [i child-off]
-                                                    (-sio-write-i32! sio node-off (* i 4) child-off))
-                                                  chunk))
-                                         node-off))
-                                     (partition-all NODE_SIZE nodes))]
-                           (recur parent-nodes (+ sh SHIFT_STEP)))))))]
-             (write-vec-header! sio cnt sft root tail-off tail-len))))))
+;; Collection writer — shared by CLJ and bb
+#?(:cljs nil
    :default
-(eve/register-eve-type!
-  {:fast-tag    ser/FAST_TAG_SAB_VEC
-   :type-id     EveVector-type-id
-   :from-header vec-from-header
-   :dispose     dispose!
-   :builder-pred vector?
-   :builder-ctor eve-vec
-   :print-fn    #?(:clj (fn [] (defmethod print-method EveVector [v ^java.io.Writer w]
-                                  (#'clojure.core/print-sequential "[" #'clojure.core/pr-on " " "]" (seq v) w)))
-                   :cljs nil)}))
+   (defn- -write-vec-coll!
+     "Serialize a Clojure vector/seq to slab as an Eve persistent vector trie.
+      Returns header offset."
+     [sio serialize-val coll]
+     (let [elems (vec coll)
+           cnt   (count elems)]
+       (if (zero? cnt)
+         (let [empty-tail (alloc-node! sio)]
+           (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET empty-tail 0))
+         (let [val-offs (mapv (fn [elem]
+                                (make-value-block! sio (serialize-val elem)))
+                              elems)
+               toff     (tail-offset-calc cnt)
+               tail-len (- cnt toff)
+               tail-off (let [t-off (alloc-node! sio)]
+                          (dorun (map-indexed
+                                   (fn [i v-off]
+                                     (-sio-write-i32! sio t-off (* i 4) v-off))
+                                   (subvec val-offs toff cnt)))
+                          t-off)
+               trie-val-offs (subvec val-offs 0 toff)
+               [root sft]
+               (if (empty? trie-val-offs)
+                 [NIL_OFFSET SHIFT_STEP]
+                 (let [leaf-nodes
+                       (mapv (fn [chunk]
+                               (let [node-off (alloc-node! sio)]
+                                 (dorun (map-indexed
+                                          (fn [i v-off]
+                                            (-sio-write-i32! sio node-off (* i 4) v-off))
+                                          chunk))
+                                 node-off))
+                             (partition-all NODE_SIZE trie-val-offs))]
+                   (loop [nodes leaf-nodes sh SHIFT_STEP]
+                     (if (<= (count nodes) NODE_SIZE)
+                       (let [root-off (alloc-node! sio)]
+                         (dorun (map-indexed
+                                  (fn [i child-off]
+                                    (-sio-write-i32! sio root-off (* i 4) child-off))
+                                  nodes))
+                         [root-off sh])
+                       (let [parent-nodes
+                             (mapv (fn [chunk]
+                                     (let [node-off (alloc-node! sio)]
+                                       (dorun (map-indexed
+                                                (fn [i child-off]
+                                                  (-sio-write-i32! sio node-off (* i 4) child-off))
+                                                chunk))
+                                       node-off))
+                                   (partition-all NODE_SIZE nodes))]
+                         (recur parent-nodes (+ sh SHIFT_STEP)))))))]
+           (write-vec-header! sio cnt sft root tail-off tail-len))))))
+
+;; Type constructor + disposer + builder + collection writer registrations
+#?(:bb
+   (register-jvm-collection-writer! :vec -write-vec-coll!)
+   :default
+   (eve/register-eve-type!
+    {:fast-tag     ser/FAST_TAG_SAB_VEC
+     :type-id      EveVector-type-id
+     :from-header  vec-from-header
+     :dispose      dispose!
+     :builder-pred vector?
+     :builder-ctor eve-vec
+     :coll-writer  #?(:clj {:tag :vec :fn -write-vec-coll!} :cljs nil)
+     :print-fn     #?(:clj (fn [] (defmethod print-method EveVector [v ^java.io.Writer w]
+                                    (#'clojure.core/print-sequential "[" #'clojure.core/pr-on " " "]" (seq v) w)))
+                      :cljs nil)}))
 
 ;; Backward-compat JVM aliases (not for bb — references EveVector class)
 #?(:cljs nil
