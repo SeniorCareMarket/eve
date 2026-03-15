@@ -54,9 +54,14 @@
   #?(:cljs (ser/serialize-element v)
      :clj  (value+sio->eve-bytes v)))
 
-(defn- deserialize-val-bytes [val-bytes]
-  #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj  (eve-bytes->value val-bytes)))
+(defn- deserialize-val-bytes
+  ([val-bytes]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (eve-bytes->value val-bytes)))
+  ([val-bytes sio]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (binding [alloc/*jvm-slab-ctx* sio]
+              (eve-bytes->value val-bytes)))))
 
 (defn- bytes-equal? [a b]
   #?(:cljs (and (== (.-length a) (.-length b))
@@ -491,7 +496,7 @@
                         acc
                         (let [vlen (-sio-read-i32 sio root-off pos)
                               vbs  (-sio-read-bytes sio root-off (+ pos 4) vlen)
-                              v    (deserialize-val-bytes vbs)]
+                              v    (deserialize-val-bytes vbs sio)]
                           (recur (inc i) (+ pos 4 vlen) (f acc v)))))]
             (if (reduced? acc)
               acc
@@ -507,7 +512,7 @@
                 acc
                 (let [vlen (-sio-read-i32 sio root-off pos)
                       vbs  (-sio-read-bytes sio root-off (+ pos 4) vlen)
-                      v    (deserialize-val-bytes vbs)]
+                      v    (deserialize-val-bytes vbs sio)]
                   (recur (inc i) (+ pos 4 vlen) (f acc v))))))
 
         init))))
@@ -643,6 +648,7 @@
 #?(:bb nil
    :default
    (declare make-hash-set))
+#?(:clj (declare ->transient-set))
 
 #?(:bb nil
    :default
@@ -792,6 +798,10 @@
        ;; contains is already defined via IPersistentSet above
        (^boolean containsAll [this ^java.util.Collection c]
          (boolean (every? #(.contains this %) c)))
+       clojure.lang.IEditableCollection
+       (asTransient [this]
+         (eve.set/->transient-set this))
+
        ;; Unsupported mutators (immutable set)
        (add [_ _] (throw (UnsupportedOperationException.)))
        (remove [_ _] (throw (UnsupportedOperationException.)))
@@ -875,6 +885,29 @@
                      [default-sio args])]
     (reduce conj (empty-hash-set sio) vals)))
 )) ;; end #?(:bb nil :default ...)
+
+;;=============================================================================
+;; JVM Transient support (CLJ only)
+;;=============================================================================
+
+#?(:clj
+   (do
+     (deftype TransientEveHashSet [^:volatile-mutable s]
+       clojure.lang.ITransientSet
+       (disjoin [this v]
+         (set! s (disj s v))
+         this)
+       (get [_ v] (get s v))
+       (count [_] (count s))
+
+       clojure.lang.ITransientCollection
+       (conj [this v]
+         (set! s (conj s v))
+         this)
+       (persistent [_] s))
+
+     (defn ->transient-set [s]
+       (TransientEveHashSet. s))))
 
 ;;=============================================================================
 ;; Registration

@@ -46,9 +46,14 @@
   #?(:cljs (ser/serialize-element v)
      :clj  (value+sio->eve-bytes v)))
 
-(defn- deserialize-element-bytes [val-bytes]
-  #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj  (eve-bytes->value val-bytes)))
+(defn- deserialize-element-bytes
+  ([val-bytes]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (eve-bytes->value val-bytes)))
+  ([val-bytes sio]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (binding [alloc/*jvm-slab-ctx* sio]
+              (eve-bytes->value val-bytes)))))
 
 (defn- bytes-length [ba]
   #?(:cljs (.-length ba)
@@ -74,7 +79,7 @@
   [sio node-off]
   (let [vlen (-sio-read-i32 sio node-off NODE_VLEN_OFFSET)
         vbs  (-sio-read-bytes sio node-off NODE_VDATA_OFFSET vlen)]
-    (deserialize-element-bytes vbs)))
+    (deserialize-element-bytes vbs sio)))
 
 (defn read-node-next
   "Read the next pointer from a list node."

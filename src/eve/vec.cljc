@@ -48,9 +48,14 @@
   #?(:cljs (ser/serialize-element v)
      :clj  (value+sio->eve-bytes v)))
 
-(defn- deserialize-element-bytes [val-bytes]
-  #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj  (eve-bytes->value val-bytes)))
+(defn- deserialize-element-bytes
+  ([val-bytes]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (eve-bytes->value val-bytes)))
+  ([val-bytes sio]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (binding [alloc/*jvm-slab-ctx* sio]
+              (eve-bytes->value val-bytes)))))
 
 (defn- bytes-length [ba]
   #?(:cljs (.-length ba)
@@ -96,7 +101,7 @@
   (when (not= val-off NIL_OFFSET)
     (let [val-len (-sio-read-i32 sio val-off 0)
           val-bs  (-sio-read-bytes sio val-off 4 val-len)]
-      (deserialize-element-bytes val-bs))))
+      (deserialize-element-bytes val-bs sio))))
 
 ;;=============================================================================
 ;; Trie algorithms (unified via ISlabIO)
@@ -645,7 +650,8 @@
        (let [elems (vec coll)
              cnt   (count elems)]
          (if (zero? cnt)
-           (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET NIL_OFFSET 0)
+           (let [empty-tail (alloc-node! sio)]
+             (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET empty-tail 0))
            (let [val-offs (mapv (fn [elem]
                                   (make-value-block! sio (serialize-val elem)))
                                 elems)
@@ -698,7 +704,8 @@
        (let [elems (vec coll)
              cnt   (count elems)]
          (if (zero? cnt)
-           (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET NIL_OFFSET 0)
+           (let [empty-tail (alloc-node! sio)]
+             (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET empty-tail 0))
            (let [val-offs (mapv (fn [elem]
                                   (make-value-block! sio (serialize-val elem)))
                                 elems)

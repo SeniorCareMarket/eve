@@ -71,10 +71,15 @@
      :clj (value+sio->eve-bytes v)))
 
 (defn- deserialize-value-bytes
-  "Deserialize value bytes (platform-specific)."
-  [val-bytes]
-  #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj (eve-bytes->value val-bytes)))
+  "Deserialize value bytes (platform-specific).
+   On CLJ, binds *jvm-slab-ctx* so nested collection constructors can find the sio."
+  ([val-bytes]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj (eve-bytes->value val-bytes)))
+  ([val-bytes sio]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj (binding [alloc/*jvm-slab-ctx* sio]
+             (eve-bytes->value val-bytes)))))
 
 (defn- bytes-equal?
   "Compare two byte arrays for equality."
@@ -462,7 +467,7 @@
                           (let [vo (+ pos 4 kl)
                                 vl (-sio-read-i32 sio off vo)
                                 vb (-sio-read-bytes sio off (+ vo 4) vl)]
-                            (deserialize-value-bytes vb))
+                            (deserialize-value-bytes vb sio))
                           not-found))))
 
                   :else not-found))
@@ -481,7 +486,7 @@
                             (let [vo (+ pos 4 kl)
                                   vl (-sio-read-i32 sio off vo)
                                   vb (-sio-read-bytes sio off (+ vo 4) vl)]
-                              (deserialize-value-bytes vb))
+                              (deserialize-value-bytes vb sio))
                             (let [vo (+ pos 4 kl)]
                               (recur (inc i) (+ vo 4 (-sio-read-i32 sio off vo)))))))))))
 
@@ -763,8 +768,8 @@
                               vo (+ pos 4 kl)
                               vl (-sio-read-i32 sio root-off vo)
                               vb (-sio-read-bytes sio root-off (+ vo 4) vl)
-                              k (deserialize-value-bytes kb)
-                              v (deserialize-value-bytes vb)]
+                              k (deserialize-value-bytes kb sio)
+                              v (deserialize-value-bytes vb sio)]
                           (recur (inc i) (+ vo 4 vl) (f acc k v)))))]
             ;; Process child nodes
             (if (reduced? acc)
@@ -786,8 +791,8 @@
                       vo (+ pos 4 kl)
                       vl (-sio-read-i32 sio root-off vo)
                       vb (-sio-read-bytes sio root-off (+ vo 4) vl)
-                      k (deserialize-value-bytes kb)
-                      v (deserialize-value-bytes vb)]
+                      k (deserialize-value-bytes kb sio)
+                      v (deserialize-value-bytes vb sio)]
                   (recur (inc i) (+ vo 4 vl) (f acc k v))))))
 
         ;; Unknown
@@ -834,6 +839,7 @@
 ;;=============================================================================
 
 #?(:bb (declare bb-make-hash-map) :default (declare make-hash-map))
+#?(:clj (declare ->transient-map))
 
 #?(:bb
    (do
@@ -1087,6 +1093,10 @@
        (values [this] (vals this))
        (entrySet [this] (set (.seq this)))
 
+       clojure.lang.IEditableCollection
+       (asTransient [this]
+         (eve.map/->transient-map this))
+
        java.lang.Object
        (toString [this] (pr-str this))
        (equals [this other]
@@ -1180,6 +1190,38 @@
            (empty-hash-map sio)
            coll))))
 ) ;; end #?(:default ...)
+
+;;=============================================================================
+;; JVM Transient support (CLJ only)
+;;=============================================================================
+
+#?(:clj
+   (do
+     (deftype TransientEveHashMap [^:volatile-mutable m]
+       clojure.lang.ITransientMap
+       (assoc [this k v]
+         (set! m (assoc m k v))
+         this)
+       (without [this k]
+         (set! m (dissoc m k))
+         this)
+       (persistent [_] m)
+       (conj [this val]
+         (if (instance? java.util.Map$Entry val)
+           (let [^java.util.Map$Entry e val]
+             (set! m (assoc m (.getKey e) (.getValue e))))
+           (set! m (conj m val)))
+         this)
+
+       clojure.lang.Counted
+       (count [_] (count m))
+
+       clojure.lang.ILookup
+       (valAt [_ k] (get m k))
+       (valAt [_ k nf] (get m k nf)))
+
+     (defn ->transient-map [m]
+       (TransientEveHashMap. m))))
 
 ;;=============================================================================
 ;; CLJS-only: mmap-mode? and debug helpers
