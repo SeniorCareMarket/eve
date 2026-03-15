@@ -27,10 +27,8 @@
 (def ^:const SHIFT_STEP 5)
 (def ^:const MASK 0x1f)
 
-;; CLJ needs the def for macro resolve; CLJS gets it from eve/deftype expansion
-#?(:clj (def EveVector-type-id 0x12)
-   :cljs (declare EveVector-type-id))
-(def SabVecRoot-type-id #?(:clj EveVector-type-id :cljs 0x12)) ;; backward compat
+(def EveVector-type-id 0x12)
+(def SabVecRoot-type-id EveVector-type-id) ;; backward compat
 
 (def ^:const SABVECROOT_CNT_OFFSET 4)
 (def ^:const SABVECROOT_SHIFT_OFFSET 8)

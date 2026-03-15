@@ -24,9 +24,8 @@
 ;; Shared Constants
 ;;=============================================================================
 
-#?(:clj (def EveList-type-id 0x13)
-   :cljs (declare EveList-type-id))
-(def SabList-type-id #?(:clj EveList-type-id :cljs 0x13)) ;; backward compat
+(def EveList-type-id 0x13)
+(def SabList-type-id EveList-type-id) ;; backward compat
 (def ^:const LIST_CNT_OFFSET 4)
 (def ^:const LIST_HEAD_OFFSET 8)
 (def ^:const LIST_HEADER_SIZE 12)
