@@ -859,6 +859,9 @@
          (jvm-write-eve-array! sio arr)))))
 
 
+;; CLJS no-op for log-replaced-node! (CLJ/bb version is in the #?(:clj ...) block above)
+#?(:cljs (defn log-replaced-node! [_slab-off] nil))
+
 ;;=============================================================================
 ;; CLJS: Module-Level State, DataView Access, and CljsSlabIO  (CLJS only)
 ;;=============================================================================

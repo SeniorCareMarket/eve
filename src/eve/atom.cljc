@@ -75,6 +75,49 @@
 (def ^:const CLAIMED_SENTINEL -2) ;; "claimed but no value" slot marker
 
 ;; ---------------------------------------------------------------------------
+;; BB materializer registration — nested collections in slab memory.
+;; SAB pointer tags 0x10-0x13 in eve-bytes->value need constructors that
+;; materialize to plain Clojure data (bb can't implement Java interfaces).
+;; ---------------------------------------------------------------------------
+
+#?(:bb
+   (do
+     (ser/register-jvm-type-constructor!
+      0x10 0xED ;; SAB_MAP pointer → HAMT map header
+      (fn [header-off]
+        (let [sio alloc/*jvm-slab-ctx*
+              [_cnt root-off] (eve-map/read-map-header sio header-off)]
+          (eve-map/hamt-kv-reduce sio root-off
+                                  (fn [m k v] (assoc m k v)) {}))))
+     (ser/register-jvm-type-constructor!
+      0x11 0xEE ;; SAB_SET pointer → HAMT set header
+      (fn [header-off]
+        (let [sio alloc/*jvm-slab-ctx*
+              [_cnt root-off] (eve-set/read-set-header sio header-off)]
+          (eve-set/hamt-val-reduce sio root-off
+                                   (fn [s v] (conj s v)) #{}))))
+     (ser/register-jvm-type-constructor!
+      0x12 0x12 ;; SAB_VEC pointer → vec trie header
+      (fn [header-off]
+        (let [sio alloc/*jvm-slab-ctx*
+              [cnt shift root tail _tail-len] (eve-vec/read-vec-header sio header-off)]
+          (loop [i 0 acc (transient [])]
+            (if (>= i cnt)
+              (persistent! acc)
+              (recur (inc i) (conj! acc (eve-vec/nth-impl sio cnt shift root tail i))))))))
+     (ser/register-jvm-type-constructor!
+      0x13 0x13 ;; SAB_LIST pointer → linked list header
+      (fn [header-off]
+        (let [sio alloc/*jvm-slab-ctx*
+              [cnt head-off] (eve-list/read-list-header sio header-off)]
+          (loop [off head-off i 0 acc (transient [])]
+            (if (or (>= i cnt) (== off alloc/NIL_OFFSET))
+              (apply list (persistent! acc))
+              (recur (eve-list/read-node-next sio off)
+                     (inc i)
+                     (conj! acc (eve-list/read-node-value sio off))))))))))
+
+;; ---------------------------------------------------------------------------
 ;; Worker slot helpers — operate on mmap root-r, NOT the SAB @root-region
 ;; ---------------------------------------------------------------------------
 
@@ -628,7 +671,8 @@
      (defn- jvm-read-root-value
        "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
         CLJ: Returns slab-backed Eve types directly — no materialization.
-        BB: Materializes to plain Clojure data (bb can't implement Java interfaces)."
+        BB: Returns slab-backed types (BbEveHashMap etc.) — no materialization.
+            Vec/List/Set fall back to plain Clojure (no bb deftype yet)."
        [sio ptr]
        (when (and (not= ptr alloc/NIL_OFFSET)
                   (not= ptr CLAIMED_SENTINEL))
@@ -636,16 +680,14 @@
            #?(:bb
               (case (int type-id)
                 0x01 (alloc/jvm-read-scalar-block sio ptr)
-                ;; Map — materialize HAMT to plain Clojure map
-                0xED (let [[_cnt root-off] (eve-map/read-map-header sio ptr)]
-                       (eve-map/hamt-kv-reduce sio root-off
-                                               (fn [m k v] (assoc m k v)) {}))
-                ;; Set — materialize HAMT to plain Clojure set
+                ;; Map — slab-backed BbEveHashMap (no materialization)
+                0xED (eve-map/hash-map-from-header sio ptr)
+                ;; Set — materialize to plain Clojure set (no bb deftype yet)
                 0xEE (let [[_cnt root-off] (eve-set/read-set-header sio ptr)]
                        (eve-set/hamt-val-reduce sio root-off
                                                 (fn [s v] (conj s v)) #{}))
                 ;; Vec — materialize trie to plain Clojure vector
-                0x12 (let [[cnt shift root tail tail-len] (eve-vec/read-vec-header sio ptr)]
+                0x12 (let [[cnt shift root tail _tail-len] (eve-vec/read-vec-header sio ptr)]
                        (loop [i 0 acc (transient [])]
                          (if (>= i cnt)
                            (persistent! acc)
@@ -806,12 +848,18 @@
                                    (when (and (not= old-ptr alloc/NIL_OFFSET)
                                               (not= old-ptr CLAIMED_SENTINEL))
                                      #?(:bb
-                              ;; bb: look up old tree's blocks from tree-logs, retire them
-                                        (let [old-key (Integer/valueOf (int old-ptr))
-                                              old-log (.remove ^java.util.HashMap tree-logs old-key)]
-                                          (.add ^java.util.List retire-q
-                                                {:offsets (or old-log [old-ptr])
-                                                 :epoch (inc new-epoch)}))
+                              ;; bb: use replaced-log for Eve→Eve (structural sharing),
+                              ;; fall back to tree-logs for type changes
+                                        (if (and (satisfies? d/IEveRoot old-val)
+                                                 (satisfies? d/IEveRoot new-val))
+                                          (let [offs (conj (or replaced-log []) old-ptr)]
+                                            (.add ^java.util.List retire-q
+                                                  {:offsets offs :epoch (inc new-epoch)}))
+                                          (let [old-key (Integer/valueOf (int old-ptr))
+                                                old-log (.remove ^java.util.HashMap tree-logs old-key)]
+                                            (.add ^java.util.List retire-q
+                                                  {:offsets (or old-log [old-ptr])
+                                                   :epoch (inc new-epoch)})))
                                         :clj
                                         (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
                                 ;; Map->Map: replaced nodes were collected during path-copy
@@ -822,9 +870,9 @@
                                                                  (Integer/valueOf (int old-ptr)))]
                                             (.add ^java.util.Queue retire-q {:offsets (or old-log [old-ptr])
                                                                               :epoch (inc new-epoch)}))))))
-                       ;; Store new tree's alloc-log for future retire
+                       ;; Store new tree's alloc-log for future retire (non-Eve types only)
                        #?(:bb
-                          (when (and cur-log (not= new-ptr alloc/NIL_OFFSET))
+                          (when (and (not eve-passthru?) cur-log (not= new-ptr alloc/NIL_OFFSET))
                             (.put ^java.util.HashMap tree-logs
                                   (Integer/valueOf (int new-ptr)) cur-log))
                           :clj
