@@ -28,8 +28,11 @@
 (def ^:private bench-worker
   (str (System/getProperty "user.dir") "/target/eve-test/bench-worker.js"))
 
-(defn- spawn-node! [& args]
-  (let [pb   (doto (ProcessBuilder. ^java.util.List (into ["node"] args))
+(def ^:private bb-bench-worker
+  (str (System/getProperty "user.dir") "/bench/bb_bench_worker.clj"))
+
+(defn- spawn-proc! [cmd & args]
+  (let [pb   (doto (ProcessBuilder. ^java.util.List (into cmd args))
                (.redirectErrorStream false))
         proc (.start pb)
         out  (future (slurp (.getInputStream proc)))
@@ -37,11 +40,23 @@
         exit (.waitFor proc)]
     {:exit exit :out @out :err @err}))
 
-(defn- spawn-node-edn! [& args]
-  (let [r (apply spawn-node! args)]
+(defn- spawn-node! [& args]
+  (apply spawn-proc! ["node"] args))
+
+(defn- spawn-bb! [& args]
+  (apply spawn-proc! ["bb" "-f" bb-bench-worker] args))
+
+(defn- spawn-edn! [spawn-fn & args]
+  (let [r (apply spawn-fn args)]
     (when-not (zero? (:exit r))
-      (throw (ex-info "Node worker failed" {:args args :err (:err r)})))
+      (throw (ex-info "Worker failed" {:args args :err (:err r)})))
     (edn/read-string (.trim (:out r)))))
+
+(defn- spawn-node-edn! [& args]
+  (apply spawn-edn! spawn-node! args))
+
+(defn- spawn-bb-edn! [& args]
+  (apply spawn-edn! spawn-bb! args))
 
 (defn- nanos->ms [n] (/ (double n) 1e6))
 
@@ -454,9 +469,9 @@
           (printf "  Ratio: %.2fx\n" (if (pos? clj-ms) (/ eve-ms clj-ms) 0.0)))
 
         ;; ══════════════════════════════════════════════════════════════
-        ;; Phase 5: Cross-process contention (JVM + Node)
+        ;; Phase 5: Cross-process contention (JVM + Node + bb)
         ;; ══════════════════════════════════════════════════════════════
-        (section "Phase 5: Cross-Process Contention (JVM + Node)")
+        (section "Phase 5: Cross-Process Contention (JVM + Node + bb)")
 
         (if (.exists (File. bench-worker))
           (do
@@ -464,6 +479,7 @@
             (let [ops-per      50
                   n-jvm        2
                   n-node       2
+                  n-bb         2
                   t0           (System/nanoTime)
                   ;; JVM threads
                   jvm-futures
@@ -479,14 +495,22 @@
                             (spawn-node-edn! bench-worker "bench-contend"
                                              base-path (str ops-per))))
                         (range n-node))
+                  ;; bb processes
+                  bb-futures
+                  (mapv (fn [_]
+                          (future
+                            (spawn-bb-edn! "bench-contend"
+                                           base-path (str ops-per))))
+                        (range n-bb))
                   _            (run! deref jvm-futures)
                   node-results (mapv deref node-futures)
+                  bb-results   (mapv deref bb-futures)
                   wall-ms      (nanos->ms (- (System/nanoTime) t0))
                   final-count  (:counter @eve-a)
-                  expected     (* ops-per (+ n-jvm n-node))
+                  expected     (* ops-per (+ n-jvm n-node n-bb))
                   correct?     (= final-count expected)]
-              (printf "  %d JVM threads + %d Node processes × %d ops each\n"
-                      n-jvm n-node ops-per)
+              (printf "  %d JVM threads + %d Node processes + %d bb processes × %d ops each\n"
+                      n-jvm n-node n-bb ops-per)
               (printf "  Wall time:  %.0f ms\n" wall-ms)
               (printf "  Throughput: %.0f ops/s\n" (/ (* expected 1000.0) wall-ms))
               (printf "  Counter:    %d (expected %d) %s\n"
@@ -495,9 +519,9 @@
           (println "  (skipped — bench-worker.js not found, compile with shadow-cljs)"))
 
         ;; ══════════════════════════════════════════════════════════════
-        ;; Phase 6: Cross-process rich data writes (JVM + Node)
+        ;; Phase 6: Cross-process rich data writes (JVM + Node + bb)
         ;; ══════════════════════════════════════════════════════════════
-        (section "Phase 6: Cross-Process Rich Data Writes")
+        (section "Phase 6: Cross-Process Rich Data Writes (JVM + Node + bb)")
 
         (if (.exists (File. bench-worker))
           (let [n-writes  20
@@ -511,14 +535,20 @@
                 node-f    (future
                             (spawn-node-edn! bench-worker "bench-write-rich"
                                              base-path (str n-writes) "node-rich"))
+                ;; bb writes rich records concurrently
+                bb-f      (future
+                            (spawn-bb-edn! "bench-write-rich"
+                                           base-path (str n-writes) "bb-rich"))
                 _         @jvm-f
                 node-r    @node-f
+                bb-r      @bb-f
                 wall-ms   (nanos->ms (- (System/nanoTime) t0))]
-            (printf "  JVM wrote %d rich records + Node wrote %d rich records\n"
-                    n-writes n-writes)
-            (printf "  Wall time: %.0f ms  (Node: %.1f ms)\n" wall-ms (:elapsed-ms node-r))
+            (printf "  JVM wrote %d + Node wrote %d + bb wrote %d rich records\n"
+                    n-writes n-writes n-writes)
+            (printf "  Wall time: %.0f ms  (Node: %.1f ms, bb: %.1f ms)\n"
+                    wall-ms (:elapsed-ms node-r) (:elapsed-ms bb-r))
             (printf "  Combined throughput: %.0f records/s\n"
-                    (/ (* 2 n-writes 1000.0) wall-ms)))
+                    (/ (* 3 n-writes 1000.0) wall-ms)))
           (println "  (skipped — bench-worker.js not found)"))
 
         ;; ══════════════════════════════════════════════════════════════

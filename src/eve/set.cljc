@@ -648,7 +648,7 @@
 #?(:bb nil
    :default
    (declare make-hash-set))
-#?(:clj (declare ->transient-set))
+#?(:bb nil :clj (declare ->transient-set))
 
 #?(:bb nil
    :default
@@ -890,7 +890,8 @@
 ;; JVM Transient support (CLJ only)
 ;;=============================================================================
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      (deftype TransientEveHashSet [^:volatile-mutable s]
        clojure.lang.ITransientSet

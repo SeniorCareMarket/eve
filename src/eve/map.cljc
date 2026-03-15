@@ -839,7 +839,7 @@
 ;;=============================================================================
 
 #?(:bb (declare bb-make-hash-map) :default (declare make-hash-map))
-#?(:clj (declare ->transient-map))
+#?(:bb nil :clj (declare ->transient-map))
 
 #?(:bb
    (do
@@ -1195,7 +1195,8 @@
 ;; JVM Transient support (CLJ only)
 ;;=============================================================================
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      (deftype TransientEveHashMap [^:volatile-mutable m]
        clojure.lang.ITransientMap
