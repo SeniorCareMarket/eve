@@ -25,28 +25,30 @@ Measured on Linux, JDK 21, Node 18, Babashka 1.x.
 ```
 Atom Size     Keys      Depth   JVM swap p50   Node swap p50   bb swap p50
 ──────────────────────────────────────────────────────────────────────────
-  11 MB       1,801       3      1.53 ms        0.16 ms         1.40 ms
- 114 MB      18,801       4      2.59 ms        0.34 ms         1.40 ms
- 1.1 GB      25,001       4      3.55 ms        0.22 ms         1.40 ms
+  11 MB       1,801       3      0.81 ms        0.13 ms         5.16 ms
+ 101 MB      16,401       4      0.98 ms        0.14 ms        42.52 ms
+ 1.1 GB      60,500       4      4.58 ms        0.17 ms       315.56 ms
 ```
 
-Swap latency stays flat because each `swap!` only path-copies O(log32 N)
-HAMT nodes — the rest of the tree is structurally shared. A 114 MB atom
-with 18,801 keys is 4 levels deep; a 1-billion-key atom would be 6.
+JVM and Node swap latency stays near-flat because each `swap!` only
+path-copies O(log32 N) HAMT nodes — the rest of the tree is structurally
+shared. Babashka re-serializes the full root value on each swap, so its
+latency scales with atom size.
 
 ```
   Swap latency vs atom size (p50, log scale)
 
   ms
+ 100 ┤                                        ▲  bb   (5–316 ms)
+     │                          ▲
   10 ┤
-     │
-   1 ┤  ■──────────────────■───────────────■  JVM  (~1.5–3.5 ms)
-     │  ▲──────────────────▲───────────────▲  bb   (~1.4 ms)
- 0.1 ┤  ●──────────────────●───────────────●  Node (~0.2 ms)
+     │  ▲
+   1 ┤  ■──────────────────■───────────────■  JVM  (~0.8–4.6 ms)
+ 0.1 ┤  ●──────────────────●───────────────●  Node (~0.1–0.2 ms)
      │
 0.01 ┤
      └──┬───────────────────┬───────────────┬──
-       11 MB             114 MB           1.1 GB
+       11 MB             101 MB           1.1 GB
 ```
 
 Cross-process contention (2 JVM threads + 2 Node processes + 2 bb processes,
