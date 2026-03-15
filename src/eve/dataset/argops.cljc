@@ -85,7 +85,7 @@
    idx-arr is an :int32 EveArray of indices."
   [col idx-arr]
   (let [n (count idx-arr)
-        type-kw (arr/subtype->type-kw (.-subtype-code col))
+        type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
         out (arr/eve-array type-kw n)]
     (dotimes [i n]
       (arr/aset! out i (nth col (int (nth idx-arr i)))))

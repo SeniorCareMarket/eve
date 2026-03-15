@@ -1,8 +1,14 @@
 (ns eve.tensor-test
   (:require
-   [cljs.test :refer [deftest testing is]]
+   #?(:cljs [cljs.test :refer [deftest testing is]]
+      :clj  [clojure.test :refer [deftest testing is]])
    [eve.array :as arr]
    [eve.tensor :as tensor]))
+
+(defn- approx= [expected actual tolerance]
+  (< #?(:cljs (abs (- expected actual))
+        :clj  (Math/abs (double (- expected actual))))
+     tolerance))
 
 ;;=============================================================================
 ;; Construction
@@ -40,7 +46,7 @@
   (testing "mget / mset!"
     (let [t (tensor/zeros :float64 [3 4])]
       (tensor/mset! t 1 2 42.0)
-      (is (< (abs (- 42.0 (tensor/mget t 1 2))) 0.001))
+      (is (approx= 42.0 (tensor/mget t 1 2) 0.001))
       (is (= 0.0 (tensor/mget t 0 0))))))
 
 ;;=============================================================================
@@ -53,7 +59,7 @@
           t1 (tensor/from-array a [2 3])
           t2 (tensor/reshape t1 [3 2])]
       (is (= [3 2] (tensor/shape t2)))
-      ;; Same backing data — element 0 is still 1
+      ;; Same backing data - element 0 is still 1
       (is (= 1 (tensor/mget t2 0 0)))
       (is (= 6 (tensor/mget t2 2 1))))))
 
@@ -79,11 +85,11 @@
           ;; permute [2 0 1]: new shape = [4 2 3]
           tp (tensor/transpose t [2 0 1])]
       (is (= [4 2 3] (tensor/shape tp)))
-      ;; Element [i,j,k] in original → [k,i,j] in permuted
+      ;; Element [i,j,k] in original -> [k,i,j] in permuted
       ;; Original [0,0,0] = 0, permuted [0,0,0] should also be 0
       (is (= 0 (tensor/mget tp 0 0 0)))
       ;; Original [0,1,2] = 0*12 + 1*4 + 2 = 6
-      ;; In permuted: [2,0,1] → original[0,1,2] = 6
+      ;; In permuted: [2,0,1] -> original[0,1,2] = 6
       (is (= 6 (tensor/mget tp 2 0 1))))))
 
 (deftest slice-axis-test

@@ -28,9 +28,9 @@
                   col-order  ;; [keyword ...] — column name order
                   nrows      ;; int — number of rows
                   #?@(:cljs [^:mutable __hash
-                             ^IPersistentMap _meta]
-                      :clj  [^:unsynchronized-mutable __hash
-                             _meta])]
+                             ^IPersistentMap _mta]
+                      :clj  [^:unsynchronized-mutable _hash_val
+                             _mta])]
 
   #?@(:cljs
       [Object
@@ -38,7 +38,7 @@
          (str "#eve/dataset {" (count col-order) " cols × " nrows " rows}"))
 
        IMeta
-       (-meta [_] _meta)
+       (-meta [_] _mta)
        IWithMeta
        (-with-meta [_ new-meta]
          (Dataset. col-map col-order nrows __hash new-meta))
@@ -100,10 +100,10 @@
 
        clojure.lang.IHashEq
        (hasheq [this]
-         (if __hash
-           __hash
+         (if _hash_val
+           _hash_val
            (let [h (hash [col-order nrows (mapv #(hash (get col-map %)) col-order)])]
-             (set! __hash h)
+             (set! _hash_val h)
              h)))
 
        java.lang.Iterable
@@ -176,8 +176,7 @@
   (into {} (map (fn [k]
                   (let [col (column ds k)]
                     [k (arr/subtype->type-kw
-                        #?(:cljs (.-subtype-code col)
-                           :clj  (.-subtype-code col)))]))
+                        (arr/array-subtype-code col))]))
                 (column-names ds))))
 
 ;;-----------------------------------------------------------------------------

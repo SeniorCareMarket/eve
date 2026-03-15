@@ -89,6 +89,15 @@
     8 :float32
     9 :float64))
 
+;;-----------------------------------------------------------------------------
+;; Portable accessors (work on both platforms)
+;;-----------------------------------------------------------------------------
+
+(defn array-subtype-code
+  "Return the subtype code of an EveArray (portable across CLJS and JVM)."
+  [arr]
+  (.-subtype-code arr))
+
 ;;=============================================================================
 ;; CLJS implementation — SharedArrayBuffer + Atomics
 ;;=============================================================================
@@ -1036,5 +1045,151 @@
        (let [subtype (long (alloc/-sio-read-u8 sio slab-off 1))
              cnt     (alloc/-sio-read-i32 sio slab-off 4)]
          (JvmEveArray. cnt slab-off subtype sio nil)))
+
+;;-----------------------------------------------------------------------------
+;; JVM heap-backed EveArray (no slab required)
+;;-----------------------------------------------------------------------------
+
+     (deftype JvmHeapEveArray [^long cnt
+                                ^long subtype-code
+                                backing         ;; Java array (int[], double[], etc.)
+                                ^:unsynchronized-mutable _hash_val]
+
+       clojure.lang.Counted
+       (count [_] (int cnt))
+
+       clojure.lang.Indexed
+       (nth [this i]
+         (if (and (>= i 0) (< i cnt))
+           (case (int subtype-code)
+             (1 3) (bit-and (long (clojure.core/aget ^bytes backing i)) 0xFF)
+             2     (long (clojure.core/aget ^bytes backing i))
+             4     (long (clojure.core/aget ^shorts backing i))
+             5     (bit-and (long (clojure.core/aget ^shorts backing i)) 0xFFFF)
+             6     (long (clojure.core/aget ^ints backing i))
+             7     (bit-and (long (clojure.core/aget ^ints backing i)) 0xFFFFFFFF)
+             8     (double (clojure.core/aget ^floats backing i))
+             9     (clojure.core/aget ^doubles backing i))
+           (throw (IndexOutOfBoundsException. (str "Index " i " out of bounds for length " cnt)))))
+       (nth [this i not-found]
+         (if (and (>= i 0) (< i cnt))
+           (.nth this i)
+           not-found))
+
+       clojure.lang.ILookup
+       (valAt [this k] (.nth this (int k)))
+       (valAt [this k not-found] (.nth this (int k) not-found))
+
+       clojure.lang.Seqable
+       (seq [this]
+         (when (pos? cnt)
+           (letfn [(arr-seq [i]
+                     (when (< i cnt)
+                       (lazy-seq (cons (.nth this i) (arr-seq (inc i))))))]
+             (arr-seq 0))))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (if (zero? cnt)
+           (f)
+           (loop [i 1 acc (.nth this 0)]
+             (if (or (>= i cnt) (reduced? acc))
+               (unreduced acc)
+               (recur (inc i) (f acc (.nth this i)))))))
+
+       clojure.lang.IReduceInit
+       (reduce [this f init]
+         (loop [i 0 acc init]
+           (if (or (>= i cnt) (reduced? acc))
+             (unreduced acc)
+             (recur (inc i) (f acc (.nth this i))))))
+
+       clojure.lang.IFn
+       (invoke [this i] (.nth this (int i)))
+       (invoke [this i not-found] (.nth this (int i) not-found))
+
+       java.lang.Iterable
+       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (if _hash_val
+           _hash_val
+           (let [h (loop [i 0 h (int (+ 1 (* 31 subtype-code)))]
+                     (if (< i cnt)
+                       (recur (inc i) (unchecked-int (+ (* 31 h) (clojure.lang.Util/hasheq (.nth this i)))))
+                       h))]
+             (set! _hash_val h)
+             h)))
+
+       java.lang.Object
+       (toString [this]
+         (str "#eve/array " (subtype->type-kw subtype-code) " " (vec (seq this))))
+       (equals [this other]
+         (cond
+           (identical? this other) true
+           (not (or (instance? JvmHeapEveArray other)
+                    (instance? JvmEveArray other))) false
+           :else (and (== cnt (count other))
+                      (== subtype-code (.-subtype-code ^JvmHeapEveArray other))
+                      (every? true? (map = (seq this) (seq other))))))
+       (hashCode [this] (.hasheq this)))
+
+     (defmethod print-method JvmHeapEveArray [^JvmHeapEveArray a ^java.io.Writer w]
+       (.write w (str "#eve/array " (subtype->type-kw (.-subtype-code a)) " "))
+       (print-method (vec (seq a)) w))
+
+     (defn- make-jvm-backing-array
+       "Create a Java array of the right type for subtype-code."
+       [subtype-code ^long n]
+       (case (int subtype-code)
+         (1 2 3) (byte-array n)
+         (4 5)   (short-array n)
+         (6 7)   (int-array n)
+         8       (float-array n)
+         9       (double-array n)))
+
+     (defn- jvm-heap-aset!
+       "Write a value into a JvmHeapEveArray's backing array."
+       [^JvmHeapEveArray arr ^long idx val]
+       (let [backing (.-backing arr)
+             sc (.-subtype-code arr)]
+         (case (int sc)
+           (1 2 3) (clojure.core/aset ^bytes backing (int idx) (byte (int val)))
+           (4 5)   (clojure.core/aset ^shorts backing (int idx) (short (int val)))
+           (6 7)   (clojure.core/aset ^ints backing (int idx) (int val))
+           8       (clojure.core/aset ^floats backing (int idx) (float (double val)))
+           9       (clojure.core/aset ^doubles backing (int idx) (double val)))
+         val))
+
+     (defn eve-array
+       "Create a heap-backed typed array on JVM.
+        (eve-array :int32 10)          ;; 10 zero-filled
+        (eve-array :float64 10 0.0)    ;; 10 filled with 0.0
+        (eve-array :uint8 [1 2 3])     ;; from collection"
+       ([type-kw size-or-coll]
+        (if (number? size-or-coll)
+          (eve-array type-kw (int size-or-coll) nil)
+          (let [sc (type-kw->subtype type-kw)
+                coll (vec size-or-coll)
+                n (count coll)
+                backing (make-jvm-backing-array sc n)
+                arr (JvmHeapEveArray. n sc backing nil)]
+            (dotimes [i n]
+              (jvm-heap-aset! arr i (nth coll i)))
+            arr)))
+       ([type-kw n init-val]
+        (let [sc (type-kw->subtype type-kw)
+              backing (make-jvm-backing-array sc (int n))
+              arr (JvmHeapEveArray. (long n) sc backing nil)]
+          (when init-val
+            (dotimes [i n]
+              (jvm-heap-aset! arr i init-val)))
+          arr)))
+
+     (defn aset!
+       "Write element at index in a heap-backed EveArray."
+       [arr idx val]
+       (jvm-heap-aset! arr idx val))
 
      )) ;; end #?(:clj (do ...))

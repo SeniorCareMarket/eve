@@ -1,10 +1,16 @@
 (ns eve.dataset-test
   (:require
-   [cljs.test :refer [deftest testing is are]]
+   #?(:cljs [cljs.test :refer [deftest testing is are]]
+      :clj  [clojure.test :refer [deftest testing is are]])
    [eve.array :as arr]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]))
+
+(defn- approx= [expected actual tolerance]
+  (< #?(:cljs (abs (- expected actual))
+        :clj  (Math/abs (double (- expected actual))))
+     tolerance))
 
 ;;=============================================================================
 ;; Dataset construction and accessors
@@ -19,8 +25,8 @@
       (is (= 30 (nth a 2))))
     (let [a (arr/eve-array :float64 [1.5 2.5 3.5])]
       (is (= 3 (count a)))
-      (is (< (abs (- 1.5 (nth a 0))) 0.001))
-      (is (< (abs (- 2.5 (nth a 1))) 0.001)))))
+      (is (approx= 1.5 (nth a 0) 0.001))
+      (is (approx= 2.5 (nth a 1) 0.001)))))
 
 (deftest dataset-construction-test
   (testing "Dataset from column map"
@@ -88,7 +94,7 @@
           ds2 (ds/rename-columns ds1 {:price :cost})]
       (is (some #{:cost} (ds/column-names ds2)))
       (is (not (some #{:price} (ds/column-names ds2))))
-      (is (< (abs (- 10.5 (nth (ds/column ds2 :cost) 0))) 0.001)))))
+      (is (approx= 10.5 (nth (ds/column ds2 :cost) 0) 0.001)))))
 
 ;;=============================================================================
 ;; Row operations
@@ -100,8 +106,8 @@
                            :qty   (arr/eve-array :int32 [100 200 50 300])})
           ds2 (ds/filter-rows ds1 :price #(> % 15.0))]
       (is (= 2 (ds/row-count ds2)))
-      (is (< (abs (- 20.3 (nth (ds/column ds2 :price) 0))) 0.001))
-      (is (< (abs (- 30.1 (nth (ds/column ds2 :price) 1))) 0.001)))))
+      (is (approx= 20.3 (nth (ds/column ds2 :price) 0) 0.001))
+      (is (approx= 30.1 (nth (ds/column ds2 :price) 1) 0.001)))))
 
 (deftest sort-by-column-test
   (testing "sort ascending"
@@ -144,8 +150,8 @@
 (deftest sum-mean-test
   (testing "sum and mean"
     (let [col (arr/eve-array :float64 [10.0 20.0 30.0])]
-      (is (< (abs (- 60.0 (func/sum col))) 0.001))
-      (is (< (abs (- 20.0 (func/mean col))) 0.001)))))
+      (is (approx= 60.0 (func/sum col) 0.001))
+      (is (approx= 20.0 (func/mean col) 0.001)))))
 
 (deftest min-max-val-test
   (testing "min-val and max-val"
@@ -154,7 +160,7 @@
       (is (= 50 (func/max-val col))))))
 
 (deftest arithmetic-ops-test
-  (testing "add, mul, sub, div (array × array)"
+  (testing "add, mul, sub, div (array x array)"
     (let [a (arr/eve-array :int32 [10 20 30])
           b (arr/eve-array :int32 [1 2 3])
           s (func/add a b)
@@ -165,7 +171,7 @@
       (is (= 9 (nth d 0)))
       (is (= 10 (nth m 0)))
       (is (= 90 (nth m 2)))))
-  (testing "array × scalar"
+  (testing "array x scalar"
     (let [a (arr/eve-array :int32 [10 20 30])
           m (func/mul a 2)]
       (is (= 20 (nth m 0)))
@@ -174,8 +180,8 @@
     (let [a (arr/eve-array :int32 [10 20])
           b (arr/eve-array :int32 [3 4])
           r (func/div a b)]
-      (is (< (abs (- 3.333 (nth r 0))) 0.01))
-      (is (< (abs (- 5.0 (nth r 1))) 0.001)))))
+      (is (approx= 3.333 (nth r 0) 0.01))
+      (is (approx= 5.0 (nth r 1) 0.001)))))
 
 (deftest comparison-ops-test
   (testing "gt, lt, eq return uint8 mask"

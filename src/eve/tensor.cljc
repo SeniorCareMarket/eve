@@ -19,6 +19,9 @@
   (:require
    [eve.array :as arr]))
 
+;; Forward declarations (needed for JVM deftype protocol impls)
+(declare flat-get)
+
 ;;-----------------------------------------------------------------------------
 ;; NDBuffer type
 ;;-----------------------------------------------------------------------------
@@ -28,13 +31,13 @@
                    strides     ;; [int ...] — element strides per axis
                    elem-offset ;; int — offset into data (in elements, not bytes)
                    #?@(:cljs [^:mutable __hash]
-                       :clj  [^:unsynchronized-mutable __hash])]
+                       :clj  [^:unsynchronized-mutable _hash_val])]
 
   #?@(:cljs
       [Object
        (toString [this]
          (str "#eve/tensor " (pr-str shape)
-              " " (arr/subtype->type-kw (.-subtype-code data))))
+              " " (arr/subtype->type-kw (arr/array-subtype-code data))))
 
        ICounted
        (-count [_]
@@ -69,9 +72,9 @@
 
        clojure.lang.IHashEq
        (hasheq [this]
-         (if __hash __hash
+         (if _hash_val _hash_val
            (let [h (hash [shape (vec (take 100 (seq this)))])]
-             (set! __hash h) h)))
+             (set! _hash_val h) h)))
 
        clojure.lang.Seqable
        (seq [this]
@@ -90,7 +93,7 @@
        (hashCode [this] (.hasheq this))
        (toString [this]
          (str "#eve/tensor " (pr-str shape)
-              " " (arr/subtype->type-kw (.-subtype-code data))))]))
+              " " (arr/subtype->type-kw (arr/array-subtype-code data))))]))
 
 ;;-----------------------------------------------------------------------------
 ;; Internal helpers
@@ -189,8 +192,7 @@
 (defn dtype
   "Return the element type keyword."
   [^NDBuffer t]
-  (arr/subtype->type-kw #?(:cljs (.-subtype-code (.-data t))
-                           :clj  (.-subtype-code (.-data t)))))
+  (arr/subtype->type-kw (arr/array-subtype-code (.-data t))))
 
 (defn rank
   "Return the number of dimensions."
