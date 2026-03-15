@@ -1230,8 +1230,8 @@
                 -1))
             (recur (inc word-idx) 0)))))))
 
-#?(:bb nil
-   :clj
+#?(:cljs nil
+   :default
    (defn imr-bitmap-find-free-bulk
      "Like imr-bitmap-find-free but reads the bitmap in one bulk -read-bytes call,
       then scans the local byte array. This avoids per-word fcntl lock overhead in
