@@ -94,7 +94,27 @@
 ;; JVM constructor registries  (mirrors CLJS sab-type-constructors)
 ;;-----------------------------------------------------------------------------
 
-#?(:clj
+#?(:bb
+   ;; Babashka registry — backed by atoms so bb can register materializers
+   ;; for nested collection pointer tags (0x10-0x13) at load time.
+   (do
+     (declare encode-eve-pointer)
+     (defonce bb-type-constructors (atom {}))
+     (defonce bb-header-constructors (atom {}))
+     (defn register-jvm-type-constructor!
+       ([tag ctor-fn]
+        (swap! bb-type-constructors assoc (int tag) ctor-fn))
+       ([tag header-type-id ctor-fn]
+        (swap! bb-type-constructors assoc (int tag) ctor-fn)
+        (swap! bb-header-constructors assoc (int header-type-id) ctor-fn)))
+     (defn register-jvm-header-constructor! [type-id ctor-fn]
+       (swap! bb-header-constructors assoc (int type-id) ctor-fn))
+     (defn get-jvm-type-constructor [tag]
+       (get @bb-type-constructors (int tag)))
+     (defn get-jvm-header-constructor [type-id-byte]
+       (get @bb-header-constructors (int type-id-byte))))
+
+   :clj
    (do
 
 (declare encode-eve-pointer)

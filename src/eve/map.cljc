@@ -23,7 +23,11 @@
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                  bitpos has-bit? get-index]]
    [eve.platform :as p]
-   #?@(:clj [[eve.deftype-proto.macros :as eve]
+   #?@(:bb [[eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
+                                     value+sio->eve-bytes
+                                     register-jvm-collection-writer!]]
+            [eve.perf :as perf]]
+       :clj [[eve.deftype-proto.macros :as eve]
              [eve.mem :as mem :refer [eve-bytes->value value->eve-bytes
                                       value+sio->eve-bytes
                                       register-jvm-collection-writer!]]]))
@@ -67,10 +71,15 @@
      :clj (value+sio->eve-bytes v)))
 
 (defn- deserialize-value-bytes
-  "Deserialize value bytes (platform-specific)."
-  [val-bytes]
-  #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj (eve-bytes->value val-bytes)))
+  "Deserialize value bytes (platform-specific).
+   On CLJ, binds *jvm-slab-ctx* so nested collection constructors can find the sio."
+  ([val-bytes]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj (eve-bytes->value val-bytes)))
+  ([val-bytes sio]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj (binding [alloc/*jvm-slab-ctx* sio]
+             (eve-bytes->value val-bytes)))))
 
 (defn- bytes-equal?
   "Compare two byte arrays for equality."
@@ -258,6 +267,7 @@
 (defn- copy-node-patch-child!
   "Bulk-copy a bitmap node and patch one child pointer. Returns new offset."
   [sio src-off data-bm node-bm child-idx new-child-off]
+  (alloc/log-replaced-node! src-off)
   (let [nsize (node-byte-size sio src-off data-bm node-bm)
         dst-off (-sio-alloc! sio nsize)]
     (-sio-copy-block! sio dst-off 0 src-off 0 nsize)
@@ -277,6 +287,7 @@
 (defn- copy-node-replace-kv!
   "Bulk-copy a bitmap node and replace one KV entry."
   [sio src-off data-bm node-bm data-idx kh kb vb]
+  (alloc/log-replaced-node! src-off)
   (let [[kv-pos old-kv-size] (kv-pos-and-size sio src-off data-bm node-bm data-idx)
         new-kv-size (calc-kv-size kb vb)
         size-diff (- new-kv-size old-kv-size)
@@ -324,6 +335,7 @@
   "Copy a bitmap node, inserting a new KV at data-idx."
   [sio src-off src-data-bm new-data-bm node-bm
    data-idx kh kb vb]
+  (alloc/log-replaced-node! src-off)
   (let [new-kv-size (calc-kv-size kb vb)
         old-kv-total (node-kv-total-size sio src-off src-data-bm node-bm)
         new-kv-total (+ old-kv-total new-kv-size)
@@ -368,6 +380,7 @@
   [sio src-off src-data-bm src-node-bm
    new-data-bm new-node-bm remove-idx
    new-child-idx new-child-off]
+  (alloc/log-replaced-node! src-off)
   (let [old-kv-total (node-kv-total-size sio src-off src-data-bm src-node-bm)
         [_ removed-size] (kv-pos-and-size sio src-off src-data-bm src-node-bm remove-idx)
         new-kv-total (- old-kv-total removed-size)
@@ -454,7 +467,7 @@
                           (let [vo (+ pos 4 kl)
                                 vl (-sio-read-i32 sio off vo)
                                 vb (-sio-read-bytes sio off (+ vo 4) vl)]
-                            (deserialize-value-bytes vb))
+                            (deserialize-value-bytes vb sio))
                           not-found))))
 
                   :else not-found))
@@ -473,7 +486,7 @@
                             (let [vo (+ pos 4 kl)
                                   vl (-sio-read-i32 sio off vo)
                                   vb (-sio-read-bytes sio off (+ vo 4) vl)]
-                              (deserialize-value-bytes vb))
+                              (deserialize-value-bytes vb sio))
                             (let [vo (+ pos 4 kl)]
                               (recur (inc i) (+ vo 4 (-sio-read-i32 sio off vo)))))))))))
 
@@ -484,7 +497,7 @@
 ;; HAMT Assoc (unified)
 ;;=============================================================================
 
-(defn- hamt-assoc
+(defn hamt-assoc
   "Assoc key/value into HAMT. Returns [new-root added?]."
   [sio root-off kh kb vb shift]
   (if (== root-off NIL_OFFSET)
@@ -587,7 +600,8 @@
               ;; Same hash — add/replace in collision
               (loop [i 0 pos COLLISION_HEADER_SIZE entries []]
                 (if (>= i cnt)
-                  [(make-collision-node! sio kh (conj entries [kh kb vb])) true]
+                  (do (alloc/log-replaced-node! root-off)
+                      [(make-collision-node! sio kh (conj entries [kh kb vb])) true])
                   (let [[ekb evb next-pos] (read-kv-bytes-at sio root-off pos)]
                     (if (bytes-equal? ekb kb)
                       ;; Key matches — check value
@@ -598,6 +612,7 @@
                                           (if (>= j cnt) acc
                                               (let [[rk rv np] (read-kv-bytes-at sio root-off p)]
                                                 (recur (inc j) np (conj acc [node-hash rk rv])))))]
+                          (alloc/log-replaced-node! root-off)
                           [(make-collision-node! sio kh (into (conj entries [kh kb vb]) remaining))
                            false]))
                       ;; Continue
@@ -608,6 +623,7 @@
                                 (if (>= i cnt) acc
                                     (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
                                       (recur (inc i) np (conj acc [node-hash ek ev])))))]
+                  (alloc/log-replaced-node! root-off)
                   [(make-collision-node! sio node-hash (conj entries [kh kb vb])) true])
                 (let [bit1 (bitpos node-hash shift)
                       bit2 (bitpos kh shift)]
@@ -663,7 +679,8 @@
                         dc (popcount32 new-data-bm)
                         cc (popcount32 node-bm)]
                     (if (and (zero? dc) (zero? cc))
-                      [NIL_OFFSET true]
+                      (do (alloc/log-replaced-node! root-off)
+                          [NIL_OFFSET true])
                       ;; Rebuild without this entry
                       ;; Read all children, hashes, kvs except removed
                       (let [old-dc (popcount32 data-bm)
@@ -680,6 +697,7 @@
                                                (recur (inc i) np
                                                       (if (== i data-idx) acc (conj acc [ek ev])))))))]
                         ;; Write new node
+                        (alloc/log-replaced-node! root-off)
                         (let [kvs-size (reduce (fn [a [kb vb]] (+ a (calc-kv-size kb vb))) 0 kvs-list)
                               nsize (+ NODE_HEADER_SIZE (* 4 cc) (* 4 dc) kvs-size)
                               new-off (-sio-alloc! sio nsize)]
@@ -712,12 +730,13 @@
                                     (recur (inc i) np (conj acc [ek ev])))))]
                 (if-let [idx (some (fn [i] (when (bytes-equal? (first (nth entries i)) kb) i))
                                    (range cnt))]
-                  (if (== cnt 1)
-                    [NIL_OFFSET true]
-                    (let [remaining (vec (concat (subvec entries 0 idx)
-                                                 (subvec entries (inc idx))))
-                          new-entries (mapv (fn [[ek ev]] [node-hash ek ev]) remaining)]
-                      [(make-collision-node! sio kh new-entries) true]))
+                  (do (alloc/log-replaced-node! root-off)
+                      (if (== cnt 1)
+                        [NIL_OFFSET true]
+                        (let [remaining (vec (concat (subvec entries 0 idx)
+                                                     (subvec entries (inc idx))))
+                              new-entries (mapv (fn [[ek ev]] [node-hash ek ev]) remaining)]
+                          [(make-collision-node! sio kh new-entries) true])))
                   [root-off false]))))
 
         ;; Unknown
@@ -727,7 +746,7 @@
 ;; HAMT Seq / Reduce (unified)
 ;;=============================================================================
 
-(defn- hamt-kv-reduce
+(defn hamt-kv-reduce
   "Walk HAMT tree, calling (f acc k v) at each entry. Supports reduced?."
   [sio ^long root-off f init]
   (if (== root-off NIL_OFFSET)
@@ -749,8 +768,8 @@
                               vo (+ pos 4 kl)
                               vl (-sio-read-i32 sio root-off vo)
                               vb (-sio-read-bytes sio root-off (+ vo 4) vl)
-                              k (deserialize-value-bytes kb)
-                              v (deserialize-value-bytes vb)]
+                              k (deserialize-value-bytes kb sio)
+                              v (deserialize-value-bytes vb sio)]
                           (recur (inc i) (+ vo 4 vl) (f acc k v)))))]
             ;; Process child nodes
             (if (reduced? acc)
@@ -772,8 +791,8 @@
                       vo (+ pos 4 kl)
                       vl (-sio-read-i32 sio root-off vo)
                       vb (-sio-read-bytes sio root-off (+ vo 4) vl)
-                      k (deserialize-value-bytes kb)
-                      v (deserialize-value-bytes vb)]
+                      k (deserialize-value-bytes kb sio)
+                      v (deserialize-value-bytes vb sio)]
                   (recur (inc i) (+ vo 4 vl) (f acc k v))))))
 
         ;; Unknown
@@ -795,7 +814,7 @@
 ;; Map header read/write
 ;;=============================================================================
 
-(defn- write-map-header!
+(defn write-map-header!
   "Allocate and write a 12-byte EveHashMap header. Returns slab offset."
   ^long [sio ^long cnt ^long root-off]
   (let [off (-sio-alloc! sio 12)]
@@ -806,7 +825,7 @@
     (-sio-write-i32! sio off SABMAPROOT_ROOT_OFF_OFFSET root-off)
     off))
 
-(defn- read-map-header
+(defn read-map-header
   "Read cnt and root-off from an EveHashMap header. Returns [cnt root-off]."
   [sio ^long header-off]
   [(-sio-read-i32 sio header-off SABMAPROOT_CNT_OFFSET)
@@ -819,8 +838,113 @@
 ;; Both platforms: deftype EveHashMap [sio__ offset__]
 ;;=============================================================================
 
-(declare make-hash-map)
+#?(:bb (declare bb-make-hash-map) :default (declare make-hash-map))
+#?(:bb nil :clj (declare ->transient-map))
 
+#?(:bb
+   (do
+     ;; Babashka slab-backed HAMT map — no materialization.
+     ;; Uses bb's deftype + IPersistentMap support.
+     ;; All methods bind *jvm-slab-ctx* so nested value deserialization
+     ;; (0x10-0x13 pointer tags) can resolve via the registered constructors.
+     (deftype BbEveHashMap [sio header-off]
+       clojure.lang.IPersistentMap
+       (assoc [this k v]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [kb (serialize-key-bytes k)
+                 vb (serialize-val-bytes v)
+                 kh (portable-hash-bytes kb)
+                 [cnt root-off] (read-map-header sio header-off)
+                 [new-root added?] (hamt-assoc sio root-off kh kb vb 0)]
+             (if (== new-root root-off)
+               this
+               (bb-make-hash-map sio (if added? (inc cnt) cnt) new-root)))))
+       (assocEx [this k v]
+         (if (.containsKey this k)
+           (throw (RuntimeException. (str "Key already present: " k)))
+           (.assoc this k v)))
+       (without [this k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [kb (serialize-key-bytes k)
+                 kh (portable-hash-bytes kb)
+                 [cnt root-off] (read-map-header sio header-off)
+                 [new-root removed?] (hamt-dissoc sio root-off kh kb 0)]
+             (if-not removed?
+               this
+               (if (== new-root NIL_OFFSET)
+                 (bb-make-hash-map sio 0 NIL_OFFSET)
+                 (bb-make-hash-map sio (dec cnt) new-root))))))
+       (count [_]
+         (let [[cnt _] (read-map-header sio header-off)]
+           (int cnt)))
+       (empty [_]
+         (bb-make-hash-map sio 0 NIL_OFFSET))
+       (cons [this entry]
+         (if (map? entry)
+           (reduce-kv (fn [m k v] (.assoc ^BbEveHashMap m k v)) this entry)
+           (let [[k v] (if (vector? entry) entry [(key entry) (val entry)])]
+             (.assoc this k v))))
+       (equiv [this other]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (and (map? other)
+                (let [[cnt root-off] (read-map-header sio header-off)]
+                  (and (== cnt (count other))
+                       (every? (fn [[k v]]
+                                 (let [found (hamt-get sio root-off k ::absent)]
+                                   (and (not (identical? found ::absent)) (= v found))))
+                               other))))))
+       (entryAt [_ k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [[_ root-off] (read-map-header sio header-off)
+                 v (hamt-get sio root-off k ::absent)]
+             (when-not (identical? v ::absent)
+               (clojure.lang.MapEntry/create k v)))))
+
+       clojure.lang.ILookup
+       (valAt [_ k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [[_ root-off] (read-map-header sio header-off)]
+             (hamt-get sio root-off k nil))))
+       (valAt [_ k not-found]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [[_ root-off] (read-map-header sio header-off)]
+             (hamt-get sio root-off k not-found))))
+
+       clojure.lang.Seqable
+       (seq [_]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [[cnt root-off] (read-map-header sio header-off)]
+             (when (pos? cnt)
+               (hamt-seq sio root-off)))))
+
+       clojure.lang.IFn
+       (invoke [_ k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [[_ root-off] (read-map-header sio header-off)]
+             (hamt-get sio root-off k nil))))
+       (invoke [_ k nf]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [[_ root-off] (read-map-header sio header-off)]
+             (hamt-get sio root-off k nf))))
+
+       clojure.lang.Associative
+       (containsKey [_ k]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (let [[_ root-off] (read-map-header sio header-off)]
+             (not (identical? (hamt-get sio root-off k ::absent) ::absent)))))
+
+       java.lang.Iterable
+       (iterator [this]
+         (clojure.lang.SeqIterator. (.seq this)))
+
+       d/IEveRoot
+       (-root-header-off [_] header-off)
+
+       java.lang.Object
+       (toString [this]
+         (binding [alloc/*jvm-slab-ctx* sio]
+           (pr-str (into {} this))))))
+   :default
 (eve/deftype EveHashMap [^:int32 cnt ^:int32 root-off]
   ;; --- Unified protocols (CLJ names) ---
 
@@ -969,17 +1093,61 @@
        (values [this] (vals this))
        (entrySet [this] (set (.seq this)))
 
+       clojure.lang.IEditableCollection
+       (asTransient [this]
+         (eve.map/->transient-map this))
+
        java.lang.Object
        (toString [this] (pr-str this))
        (equals [this other]
                (clojure.lang.APersistentMap/mapEquals this other))
        (hashCode [this]
-                 (clojure.lang.APersistentMap/mapHash this))]))
+                 (clojure.lang.APersistentMap/mapHash this))])) ;; end eve/deftype
+) ;; end #?(:bb nil :default ...)
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
+#?(:bb
+   (do
+     (defn- bb-make-hash-map
+       "Internal constructor (bb): allocate header, create BbEveHashMap."
+       [sio cnt root-off]
+       (let [hdr (write-map-header! sio cnt root-off)]
+         (BbEveHashMap. sio hdr)))
+
+     (defn hash-map-from-header
+       "Reconstruct a BbEveHashMap from an existing header offset."
+       [sio header-off]
+       (BbEveHashMap. sio header-off))
+
+     (defn empty-hash-map
+       "Create an empty Eve hash map."
+       ([] (empty-hash-map alloc/*jvm-slab-ctx*))
+       ([sio] (bb-make-hash-map sio 0 NIL_OFFSET)))
+
+     (defn hash-map
+       "Create an Eve hash map from key-value pairs."
+       [& args]
+       (let [default-sio alloc/*jvm-slab-ctx*
+             [sio kvs] (if (and (seq args) (satisfies? ISlabIO (first args)))
+                         [(first args) (rest args)]
+                         [default-sio args])]
+         (reduce (fn [m [k v]] (assoc m k v))
+                 (empty-hash-map sio)
+                 (partition 2 kvs))))
+
+     (defn into-hash-map
+       "Create an Eve hash map from a collection of [k v] entries."
+       ([coll] (into-hash-map alloc/*jvm-slab-ctx* coll))
+       ([sio coll]
+        (reduce (fn [m [k v]] (assoc m k v))
+                (empty-hash-map sio)
+                coll))))
+
+   :default
+(do
 (defn- make-hash-map
   "Internal constructor: allocate header, create EveHashMap."
   [sio ^long cnt ^long root-off]
@@ -1020,7 +1188,41 @@
   ([sio coll]
    (reduce (fn [m [k v]] (assoc m k v))
            (empty-hash-map sio)
-           coll)))
+           coll))))
+) ;; end #?(:default ...)
+
+;;=============================================================================
+;; JVM Transient support (CLJ only)
+;;=============================================================================
+
+#?(:bb nil
+   :clj
+   (do
+     (deftype TransientEveHashMap [^:volatile-mutable m]
+       clojure.lang.ITransientMap
+       (assoc [this k v]
+         (set! m (assoc m k v))
+         this)
+       (without [this k]
+         (set! m (dissoc m k))
+         this)
+       (persistent [_] m)
+       (conj [this val]
+         (if (instance? java.util.Map$Entry val)
+           (let [^java.util.Map$Entry e val]
+             (set! m (assoc m (.getKey e) (.getValue e))))
+           (set! m (conj m val)))
+         this)
+
+       clojure.lang.Counted
+       (count [_] (count m))
+
+       clojure.lang.ILookup
+       (valAt [_ k] (get m k))
+       (valAt [_ k nf] (get m k nf)))
+
+     (defn ->transient-map [m]
+       (TransientEveHashMap. m))))
 
 ;;=============================================================================
 ;; CLJS-only: mmap-mode? and debug helpers
@@ -1187,6 +1389,8 @@
         (walk old-root new-root))
       (persistent! @result))))
 
+#?(:bb nil
+   :default
 (defn collect-retire-diff-offsets
   "Collect all slab offsets that would be freed by -sab-retire-diff!.
    Includes both HAMT tree nodes and the header block.
@@ -1220,7 +1424,7 @@
         (let [offs (persistent! @tree-offsets)]
           (if (not= header-off NIL_OFFSET)
             (conj offs header-off)
-            offs))))))
+            offs)))))))
 
 ;;=============================================================================
 ;; CLJS-only: HAMT Validation
@@ -1331,6 +1535,8 @@
 ;; CLJS-only: ISabRetirable
 ;;=============================================================================
 
+#?(:bb nil
+   :default
 (extend-type EveHashMap
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
@@ -1343,13 +1549,14 @@
           (free-hamt-node! sio old-root)))
       ;; Free the header block
       (when (not= (#?(:cljs .-offset__ :clj .offset__) this) NIL_OFFSET)
-        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this))))))
+        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this)))))))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      ;; Register collection writer so mem/value+sio->eve-bytes routes maps here
      (register-jvm-collection-writer! :map
@@ -1391,14 +1598,33 @@
         (hash-map-from-header sio header-off)))))
 
 ;; Type constructor + disposer + builder registrations
-(eve/register-eve-type!
- {:fast-tag ser/FAST_TAG_SAB_MAP
-  :type-id EveHashMap-type-id
-  :from-header hash-map-from-header
-  :dispose dispose!
-  :builder-pred map?
-  :builder-ctor into-hash-map
-  :print-fn #?(:clj (fn [] (defmethod print-method EveHashMap [m ^java.io.Writer w]
-                             (#'clojure.core/print-map m print-method w)))
-               :cljs nil)})
+#?(:bb
+   ;; bb: register collection writer only (no deftype, no registry constructors)
+   (register-jvm-collection-writer! :map
+                                    (fn [_sio _serialize-elem m]
+                                      (let [sio alloc/*jvm-slab-ctx*
+                                            entries (map (fn [[k v]]
+                                                           (let [kb (value->eve-bytes k)
+                                                                 kh (portable-hash-bytes kb)
+                                                                 vb (value+sio->eve-bytes sio v)]
+                                                             [kh kb vb]))
+                                                         m)]
+                                        (if (empty? entries)
+                                          (write-map-header! sio 0 NIL_OFFSET)
+                                          (let [root-off (reduce (fn [root [kh kb vb]]
+                                                                   (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
+                                                                     new-root))
+                                                                 NIL_OFFSET entries)]
+                                            (write-map-header! sio (count m) root-off))))))
+   :default
+   (eve/register-eve-type!
+    {:fast-tag ser/FAST_TAG_SAB_MAP
+     :type-id EveHashMap-type-id
+     :from-header hash-map-from-header
+     :dispose dispose!
+     :builder-pred map?
+     :builder-ctor into-hash-map
+     :print-fn #?(:clj (fn [] (defmethod print-method EveHashMap [m ^java.io.Writer w]
+                                (#'clojure.core/print-map m print-method w)))
+                  :cljs nil)}))
 

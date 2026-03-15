@@ -1,0 +1,4 @@
+{:paths ["src"]
+ :tasks
+ {atom-swap {:doc "Run bb atom swap example"
+             :task (load-file "examples/bb_atom_swap.clj")}}}

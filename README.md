@@ -4,35 +4,35 @@ Shared-memory persistent data structures for ClojureScript and Clojure.
 
 Eve provides persistent maps, vectors, sets, and lists backed by
 SharedArrayBuffer (in-process) or memory-mapped files (cross-process).
-JVM Clojure and Node.js ClojureScript processes can share and atomically
-mutate Clojure data structures via mmap files on disk.
+JVM Clojure, Node.js ClojureScript, and Babashka processes can share and
+atomically mutate Clojure data structures via mmap files on disk.
 
 ## Features
 
-- **O(log32 N) persistent collections** — 32-way branching HAMT maps, vectors, sets, and lists in shared memory. A 1-billion-key map is only 6 levels deep. Swap latency is constant regardless of atom size: JVM p50 ~1 ms, Node p50 ~0.16 ms — identical from a 12 MB atom (1,800 keys) through a 1 GB atom (150,000 keys).
+- **O(log32 N) persistent collections** — 32-way branching HAMT maps, vectors, sets, and lists in shared memory. A 1-billion-key map is only 6 levels deep. Swap latency is constant regardless of atom size: JVM p50 ~1 ms, Node p50 ~0.16 ms, bb p50 ~1.4 ms — identical from a 12 MB atom (1,800 keys) through a 1 GB atom (150,000 keys).
 - **Exabyte-scale durable atoms** — atoms backed by memory-mapped sparse files that grow lazily from kilobytes to terabytes. Data survives process restarts — no export/import step.
-- **Cross-process, uncoordinated** — multiple JVM and Node.js processes mutate the same atom concurrently via lock-free CAS on a single 32-bit root pointer. No coordination server, no locks, no leader election.
+- **Cross-process, uncoordinated** — multiple JVM, Node.js, and Babashka processes mutate the same atom concurrently via lock-free CAS on a single 32-bit root pointer. No coordination server, no locks, no leader election.
 - **In-browser shared memory** — `SharedArrayBuffer`-backed atoms let web workers share and atomically mutate persistent data structures without `postMessage` serialization.
-- **Three platforms, one format** — browser (CLJS), Node.js (CLJS), and JVM (Clojure) all use identical on-disk/in-memory layouts, hash functions, and CAS protocols. A domain created by one platform can be joined by any other.
+- **Four platforms, one format** — browser (CLJS), Node.js (CLJS), JVM (Clojure), and Babashka all use identical on-disk/in-memory layouts, hash functions, and CAS protocols. A domain created by one platform can be joined by any other.
 - **Epoch-based GC** — cooperative garbage collection ensures old HAMT nodes are freed only after every reader has moved past them. No stop-the-world pauses.
 - **Zero-copy reads** — `deref` walks mmap'd/SAB memory directly. No deserialization into intermediate heap objects.
 
 ## Performance
 
 Swap latency (p50, no contention) on persistent mmap-backed atoms.
-Measured on Linux, JDK 21, Node 18.
+Measured on Linux, JDK 21, Node 18, Babashka 1.x.
 
 ```
-Atom Size     Keys      Depth   JVM swap p50   Node swap p50
-─────────────────────────────────────────────────────────────
-  11 MB       1,801       3      1.53 ms        0.16 ms
- 114 MB      18,801       4      2.59 ms        0.34 ms
- 1.1 GB      25,001       4      3.55 ms        0.22 ms
+Atom Size     Keys      Depth   JVM swap p50   Node swap p50   bb swap p50
+──────────────────────────────────────────────────────────────────────────
+  11 MB       2,812       3      0.71 ms        0.09 ms         0.38 ms
+ 103 MB      17,428       4      0.75 ms        0.08 ms         0.43 ms
+ 1.1 GB      62,012       4      0.82 ms        0.07 ms         0.41 ms
 ```
 
 Swap latency stays flat because each `swap!` only path-copies O(log32 N)
-HAMT nodes — the rest of the tree is structurally shared. A 114 MB atom
-with 18,801 keys is 4 levels deep; a 1-billion-key atom would be 6.
+HAMT nodes — the rest of the tree is structurally shared. A 103 MB atom
+with 17,428 keys is 4 levels deep; a 1-billion-key atom would be 6.
 
 ```
   Swap latency vs atom size (p50, log scale)
@@ -40,23 +40,22 @@ with 18,801 keys is 4 levels deep; a 1-billion-key atom would be 6.
   ms
   10 ┤
      │
-   1 ┤  ■──────────────────■───────────────■  JVM  (~1.5–3.5 ms)
-     │
- 0.1 ┤  ●──────────────────●───────────────●  Node (~0.2 ms)
+   1 ┤  ■──────────────────■───────────────■  JVM  (~0.7–0.8 ms)
+     │  ▲──────────────────▲───────────────▲  bb   (~0.4 ms)
+ 0.1 ┤  ●──────────────────●───────────────●  Node (~0.08 ms)
      │
 0.01 ┤
      └──┬───────────────────┬───────────────┬──
-       11 MB             114 MB           1.1 GB
+       11 MB             103 MB           1.1 GB
 ```
 
-Cross-process contention (4 JVM threads + 4 Node processes, shared `:counter`):
+Cross-process contention (2 JVM threads + 2 Node processes + 2 bb processes,
+shared `:counter`):
 
 ```
 Atom Size     Throughput    Counter     Result
 ──────────────────────────────────────────────
-  11 MB        924 ops/s    400/400     CORRECT
- 114 MB        462 ops/s    400/400     CORRECT
- 1.1 GB        546 ops/s    400/400     CORRECT
+  2.4 MB       663 ops/s    300/300     CORRECT
 ```
 
 ## Usage
@@ -93,6 +92,7 @@ Every platform has a heap-backed in-process mode — no files on disk, no native
 | Browser (CLJS) | `SharedArrayBuffer` — shared across web workers via `Atomics` CAS |
 | Node.js (CLJS) | `SharedArrayBuffer` — same as browser |
 | JVM (Clojure) | `byte[]` + `sun.misc.Unsafe` atomics — heap-allocated, single-process |
+| Babashka | mmap files only (no in-process heap mode) |
 
 ```clojure
 (require '[eve.alpha :as e])
@@ -139,8 +139,8 @@ The native addon is auto-loaded via `node-gyp-build`.
 @counter ;; => 2
 ```
 
-Both platforms use identical on-disk formats — JVM and Node.js processes
-share the same atom simultaneously with full CAS semantics.
+All platforms use identical on-disk formats — JVM, Node.js, and Babashka
+processes share the same atom simultaneously with full CAS semantics.
 
 ## Building
 

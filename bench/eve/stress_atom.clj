@@ -7,7 +7,8 @@
    Example: clj -M:native-x-stress-atom /tmp/eve-10m"
   (:require [eve.atom :as atom]
             [eve.mem :as mem]
-            [clojure.edn :as edn])
+            [clojure.edn :as edn]
+            [clojure.string :as str])
   (:import [java.io File]))
 
 ;; ---------------------------------------------------------------------------
@@ -17,8 +18,11 @@
 (def ^:private bench-worker
   (str (System/getProperty "user.dir") "/target/eve-test/bench-worker.js"))
 
-(defn- spawn-node! [& args]
-  (let [pb   (doto (ProcessBuilder. ^java.util.List (into ["node"] args))
+(def ^:private bb-bench-worker
+  (str (System/getProperty "user.dir") "/bench/bb_bench_worker.clj"))
+
+(defn- spawn-proc! [cmd & args]
+  (let [pb   (doto (ProcessBuilder. ^java.util.List (into cmd args))
                (.redirectErrorStream false))
         proc (.start pb)
         out  (future (slurp (.getInputStream proc)))
@@ -26,11 +30,16 @@
         exit (.waitFor proc)]
     {:exit exit :out @out :err @err}))
 
-(defn- spawn-node-edn! [& args]
-  (let [r (apply spawn-node! args)]
+(defn- spawn-edn! [spawn-fn & args]
+  (let [r (apply spawn-fn args)]
     (when-not (zero? (:exit r))
-      (throw (ex-info "Node worker failed" {:args args :err (:err r)})))
+      (throw (ex-info "Worker failed" {:args args :err (:err r)})))
     (edn/read-string (.trim (:out r)))))
+
+(defn- spawn-node! [& args] (apply spawn-proc! ["node"] args))
+(defn- spawn-bb!   [& args] (apply spawn-proc! ["bb" "-f" bb-bench-worker] args))
+(defn- spawn-node-edn! [& args] (apply spawn-edn! spawn-node! args))
+(defn- spawn-bb-edn!   [& args] (apply spawn-edn! spawn-bb! args))
 
 (defn- nanos->ms [n] (/ (double n) 1e6))
 
@@ -118,6 +127,17 @@
                                  base-path "500" "stress-node"
                                  (when lustre? ["--lustre"]))]
           (printf "  500 swaps (Node.js process, new keys)\n")
+          (printf "    p50:     %6.2f ms\n" (:p50-ms r))
+          (printf "    p95:     %6.2f ms\n" (:p95-ms r))
+          (printf "    p99:     %6.2f ms\n" (:p99-ms r))
+          (printf "    min/max: %6.2f / %.2f ms\n" (:min-ms r) (:max-ms r)))
+
+        ;; ── Phase 3b: bb Single-Writer Swap Latency ──
+        (section "Phase 3b: bb Single-Writer Swap Latency")
+        (let [r (apply spawn-bb-edn! "bench-swap-latencies"
+                                base-path "500" "stress-bb"
+                                (when lustre? ["--lustre"]))]
+          (printf "  500 swaps (bb process, new keys)\n")
           (printf "    p50:     %6.2f ms\n" (:p50-ms r))
           (printf "    p95:     %6.2f ms\n" (:p95-ms r))
           (printf "    p99:     %6.2f ms\n" (:p99-ms r))

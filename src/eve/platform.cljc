@@ -36,6 +36,7 @@
    Uses Murmur3 ordered hashing on both CLJ and CLJS."
   [coll]
   #?(:cljs (hash-ordered-coll coll)
+     :bb   (clojure.core/hash-ordered-coll coll)
      :clj  (clojure.lang.Murmur3/hashOrdered coll)))
 
 (defn hash-unordered
@@ -43,4 +44,5 @@
    Uses Murmur3 unordered hashing on both CLJ and CLJS."
   [coll]
   #?(:cljs (hash-unordered-coll coll)
+     :bb   (clojure.core/hash-unordered-coll coll)
      :clj  (clojure.lang.Murmur3/hashUnordered coll)))

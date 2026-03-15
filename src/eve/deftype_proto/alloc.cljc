@@ -118,8 +118,20 @@
      Both offsets are slab-qualified; field-offs are byte offsets within block."))
 
 ;;=============================================================================
-;; JVM: JvmSlabCtx  (CLJ only)
+;; JVM: JvmSlabCtx  (CLJ only — also loaded by bb via :clj fallback)
 ;;=============================================================================
+
+;; Lustre bitmap scan helper.
+;; In bb, LustreJvmMmapRegion doesn't exist — always use the scalar scanner.
+;; In full CLJ, check instance? and upgrade to the bulk scanner when appropriate.
+#?(:bb (defn- lustre-region? [_rgn] false)
+   :clj (defn- lustre-region? [rgn] (instance? eve.mem.LustreJvmMmapRegion rgn)))
+
+#?(:bb (defn- bitmap-find-free-fn [_bm-rgn] mem/imr-bitmap-find-free-bulk)
+   :clj (defn- bitmap-find-free-fn [bm-rgn]
+          (if (lustre-region? bm-rgn)
+            mem/imr-bitmap-find-free-bulk
+            mem/imr-bitmap-find-free)))
 
 #?(:clj
    (do
@@ -299,15 +311,16 @@
                              bm-off (aget bitmap-offsets ci)
                              total  (aget total-blocks ci)
                              ;; Lustre bitmap regions: bulk-read to avoid per-word fcntl lock
-                             find-free (if (instance? eve.mem.LustreJvmMmapRegion bm-rgn)
-                                         mem/imr-bitmap-find-free-bulk
-                                         mem/imr-bitmap-find-free)]
-                         (loop [start-bit 0 wrapped? false]
+                             find-free (bitmap-find-free-fn bm-rgn)
+                             cursor (mem/-load-i32 (aget regions ci) d/SLAB_HDR_ALLOC_CURSOR)]
+                         (loop [start-bit (mod cursor total) wrapped? false]
                            (let [candidate (find-free bm-rgn bm-off total start-bit)]
                              (cond
                                (not= candidate -1)
                                (if (mem/imr-bitmap-alloc-cas! bm-rgn bm-off candidate)
                                  (let [slab-off (encode-slab-offset ci candidate)]
+                                   (mem/-store-i32! (aget regions ci) d/SLAB_HDR_ALLOC_CURSOR
+                                                    (mod (inc candidate) total))
                                    (mem/-sub-i32! (aget regions ci) d/SLAB_HDR_FREE_COUNT 1)
                                    (when-let [^java.util.List log (.get jvm-alloc-log-tl)]
                                      (.add log slab-off))
@@ -326,8 +339,7 @@
                              bm-bytes   (d/bitmap-byte-size n-blocks)
                              ;; Infer lustre mode from existing region type —
                              ;; *lustre-mode* may not be bound on remap threads.
-                             lustre?    (instance? eve.mem.LustreJvmMmapRegion
-                                          (aget regions ci))]
+                             lustre?    (lustre-region? (aget regions ci))]
                          (binding [mem/*lustre-mode* lustre?]
                            (let [new-region (mem/open-mmap-region path data-bytes)
                                  new-bm     (mem/open-mmap-region bm-path bm-bytes)]
@@ -339,8 +351,7 @@
                          (when-let [path (aget file-paths ci)]
                            (let [cached    (long (aget total-blocks ci))
                                  ;; Infer lustre mode from existing region type
-                                 lustre?   (instance? eve.mem.LustreJvmMmapRegion
-                                             (aget regions ci))
+                                 lustre?   (lustre-region? (aget regions ci))
                                  ;; Peek header to detect external growth
                                  peek-r    (binding [mem/*lustre-mode* lustre?]
                                              (mem/open-mmap-region path 64))
@@ -485,8 +496,7 @@
          (when (or any-grew? coalesc-grew?)
            ;; Infer lustre mode from any existing region in the array.
            ;; *lustre-mode* may not be bound on remap/refresh threads.
-           (let [lustre? (some #(instance? eve.mem.LustreJvmMmapRegion %)
-                               (seq regions))
+           (let [lustre? (some lustre-region? (seq regions))
                  bitmap-regions (.-bitmap-regions sio)
                  block-sizes    (.-block-sizes sio)
                  bitmap-paths   (.-bitmap-paths sio)]
@@ -851,6 +861,9 @@
        (fn [sio _serialize-elem arr]
          (jvm-write-eve-array! sio arr)))))
 
+
+;; CLJS no-op for log-replaced-node! (CLJ/bb version is in the #?(:clj ...) block above)
+#?(:cljs (defn log-replaced-node! [_slab-off] nil))
 
 ;;=============================================================================
 ;; CLJS: Module-Level State, DataView Access, and CljsSlabIO  (CLJS only)

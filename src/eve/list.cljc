@@ -15,7 +15,10 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
    [eve.platform :as p]
-   #?@(:clj  [[eve.deftype-proto.macros :as eve]
+   #?@(:bb  [[eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
+                                      register-jvm-collection-writer!]]
+             [eve.perf :as perf]]
+       :clj [[eve.deftype-proto.macros :as eve]
               [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
                                        register-jvm-collection-writer!]]]))
   #?(:cljs (:require-macros [eve.deftype-proto.macros :as eve])))
@@ -43,9 +46,14 @@
   #?(:cljs (ser/serialize-element v)
      :clj  (value+sio->eve-bytes v)))
 
-(defn- deserialize-element-bytes [val-bytes]
-  #?(:cljs (ser/deserialize-element {} val-bytes)
-     :clj  (eve-bytes->value val-bytes)))
+(defn- deserialize-element-bytes
+  ([val-bytes]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (eve-bytes->value val-bytes)))
+  ([val-bytes sio]
+   #?(:cljs (ser/deserialize-element {} val-bytes)
+      :clj  (binding [alloc/*jvm-slab-ctx* sio]
+              (eve-bytes->value val-bytes)))))
 
 (defn- bytes-length [ba]
   #?(:cljs (.-length ba)
@@ -66,14 +74,14 @@
       (-sio-write-bytes! sio node-off NODE_VDATA_OFFSET val-bytes))
     node-off))
 
-(defn- read-node-value
+(defn read-node-value
   "Read and deserialize the value from a list node."
   [sio node-off]
   (let [vlen (-sio-read-i32 sio node-off NODE_VLEN_OFFSET)
         vbs  (-sio-read-bytes sio node-off NODE_VDATA_OFFSET vlen)]
-    (deserialize-element-bytes vbs)))
+    (deserialize-element-bytes vbs sio)))
 
-(defn- read-node-next
+(defn read-node-next
   "Read the next pointer from a list node."
   [sio node-off]
   (-sio-read-i32 sio node-off NODE_NEXT_OFFSET))
@@ -82,7 +90,7 @@
 ;; Header read/write
 ;;=============================================================================
 
-(defn- write-list-header!
+(defn write-list-header!
   "Allocate and write a list header. Returns slab offset."
   [sio cnt head-off]
   (let [hdr (-sio-alloc! sio LIST_HEADER_SIZE)]
@@ -91,7 +99,7 @@
     (-sio-write-i32! sio hdr LIST_HEAD_OFFSET head-off)
     hdr))
 
-(defn- read-list-header
+(defn read-list-header
   "Read cnt and head-off from header. Returns [cnt head-off]."
   [sio hdr-off]
   [(-sio-read-i32 sio hdr-off LIST_CNT_OFFSET)
@@ -104,8 +112,10 @@
 ;; Both platforms: deftype EveList [sio__ offset__]
 ;;=============================================================================
 
-(declare make-list)
+#?(:bb nil :default (declare make-list))
 
+#?(:bb nil
+   :default
 (eve/deftype EveList [^:int32 cnt ^:int32 head-off]
 
   clojure.lang.Sequential
@@ -239,11 +249,15 @@
       :else (.equiv this other)))
   (hashCode [this]
     (clojure.lang.Murmur3/hashOrdered this)))
+) ;; end #?(:bb nil :default ...) for deftype
 
 ;;=============================================================================
 ;; Disposal & retirement
 ;;=============================================================================
 
+#?(:bb nil
+   :default
+(do
 (defn- free-list-chain!
   "Free all nodes in a list linked-list chain via ISlabIO."
   [sio head-off]
@@ -293,11 +307,15 @@
       (if new-head
         (retire-replaced-chain! sio old-head new-head mode)
         (dispose! this)))))
+)) ;; end #?(:bb nil :default ...) for disposal
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
+#?(:bb nil
+   :default
+(do
 (defn- make-list
   "Internal constructor: allocate header, create EveList."
   [sio cnt head-off]
@@ -324,12 +342,14 @@
 ;; Backward-compat aliases
 (def empty-sab-list empty-list)
 (def sab-list eve-list)
+)) ;; end #?(:bb nil :default ...) for constructors
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-#?(:clj
+#?(:bb nil
+   :clj
    (do
      (register-jvm-collection-writer! :list
        (fn [sio serialize-val coll]
@@ -360,6 +380,22 @@
      (def SabList EveList)))
 
 ;; Type constructor + disposer + builder registrations
+#?(:bb
+   ;; bb: register collection writer only (no deftype, no registry constructors)
+   (register-jvm-collection-writer! :list
+     (fn [_sio _serialize-elem coll]
+       (let [sio alloc/*jvm-slab-ctx*
+             elems (vec coll)
+             cnt (count elems)]
+         (if (zero? cnt)
+           (write-list-header! sio 0 NIL_OFFSET)
+           (let [head-off (reduce (fn [next-off elem]
+                                    (let [vb (value+sio->eve-bytes elem)]
+                                      (alloc-list-node! sio next-off vb)))
+                                  NIL_OFFSET
+                                  (rseq elems))]
+             (write-list-header! sio cnt head-off))))))
+   :default
 (eve/register-eve-type!
   {:fast-tag    ser/FAST_TAG_SAB_LIST
    :type-id     EveList-type-id
@@ -369,7 +405,7 @@
    :builder-ctor eve-list
    :print-fn    #?(:clj (fn [] (defmethod print-method EveList [lst ^java.io.Writer w]
                                   (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq lst) w)))
-                   :cljs nil)})
+                   :cljs nil)}))
 
 ;; No-op pool stub — pool system removed, kept for backward compat
 #?(:cljs (defn reset-pools! [] nil))
