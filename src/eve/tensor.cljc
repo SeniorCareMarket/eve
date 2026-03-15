@@ -2,7 +2,9 @@
   "N-dimensional views over EveArrays. Shape/strides for zero-copy reshaping,
    transposing, and slicing.
 
-   Construction:
+   Built with eve-deftype — lives inside Eve atoms, backed by slab memory.
+
+   Construction (inside swap!):
      (from-array arr [3 4])              ;; wrap 12-elem EveArray as 3×4 matrix
      (zeros :float64 [3 4])             ;; allocate + fill
      (ones :int32 [2 3 4])              ;; allocate + fill
@@ -17,25 +19,46 @@
      (mset! t 1 2 42.0)                  ;; set element at [1,2]"
   (:refer-clojure :exclude [to-array])
   (:require
-   [eve.array :as arr]))
+   [eve.array :as arr]
+   [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.serialize :as ser]
+   #?@(:cljs [[eve.deftype-proto.alloc :as alloc]
+              [eve.deftype.slab-runtime :as slab-rt]]
+       :clj  [[eve.deftype :refer [eve-deftype]]
+              [eve.deftype.slab-runtime :as slab-rt]]))
+  #?(:cljs (:require-macros [eve.deftype :refer [eve-deftype]])))
 
-;; Forward declarations (needed for JVM deftype protocol impls)
+;; Forward declarations
 (declare flat-get)
 
 ;;-----------------------------------------------------------------------------
-;; NDBuffer type
+;; Protocol for accessing NDBuffer internals from standalone functions
 ;;-----------------------------------------------------------------------------
 
-(deftype NDBuffer [data        ;; backing EveArray
-                   shape       ;; [int ...] — dimensions
-                   strides     ;; [int ...] — element strides per axis
-                   elem-offset ;; int — offset into data (in elements, not bytes)
-                   #?@(:cljs [^:mutable __hash]
-                       :clj  [^:unsynchronized-mutable _hash_val])]
+(defprotocol ITensorAccess
+  (-data [t] "Return backing EveArray.")
+  (-shape [t] "Return shape vector.")
+  (-strides [t] "Return strides vector.")
+  (-elem-offset [t] "Return element offset."))
+
+;;-----------------------------------------------------------------------------
+;; NDBuffer type — eve-deftype backed by slab memory
+;;-----------------------------------------------------------------------------
+
+(eve-deftype NDBuffer [^:int32 elem-offset
+                       data     ;; serialized: backing EveArray
+                       shape    ;; serialized: vector of ints
+                       strides] ;; serialized: vector of ints
+
+  ITensorAccess
+  (-data [_] data)
+  (-shape [_] shape)
+  (-strides [_] strides)
+  (-elem-offset [_] elem-offset)
 
   #?@(:cljs
       [Object
-       (toString [this]
+       (toString [_]
          (str "#eve/tensor " (pr-str shape)
               " " (arr/subtype->type-kw (arr/array-subtype-code data))))
 
@@ -45,15 +68,13 @@
 
        IHash
        (-hash [this]
-         (if __hash __hash
-           (let [h (hash [shape (vec (take 100 (seq this)))])]
-             (set! __hash h) h)))
+         (hash [shape (vec (take 100 (seq this)))]))
 
        IEquiv
        (-equiv [this other]
          (and (instance? NDBuffer other)
-              (= shape (.-shape ^NDBuffer other))
-              (every? true? (map = (seq this) (seq ^NDBuffer other)))))
+              (= shape (-shape other))
+              (every? true? (map = (seq this) (seq other)))))
 
        ISeqable
        (-seq [this]
@@ -72,9 +93,7 @@
 
        clojure.lang.IHashEq
        (hasheq [this]
-         (if _hash_val _hash_val
-           (let [h (hash [shape (vec (take 100 (seq this)))])]
-             (set! _hash_val h) h)))
+         (hash [shape (vec (take 100 (seq this)))]))
 
        clojure.lang.Seqable
        (seq [this]
@@ -88,10 +107,10 @@
        java.lang.Object
        (equals [this other]
          (and (instance? NDBuffer other)
-              (= shape (.-shape ^NDBuffer other))
-              (every? true? (map = (seq this) (seq ^NDBuffer other)))))
+              (= shape (-shape other))
+              (every? true? (map = (seq this) (seq other)))))
        (hashCode [this] (.hasheq this))
-       (toString [this]
+       (toString [_]
          (str "#eve/tensor " (pr-str shape)
               " " (arr/subtype->type-kw (arr/array-subtype-code data))))]))
 
@@ -140,9 +159,12 @@
 
 (defn- flat-get
   "Get element at a flat iteration index."
-  [^NDBuffer t flat-iter-idx]
-  (let [data-idx (flat-idx->multi (.-shape t) (.-strides t) (.-elem-offset t) flat-iter-idx)]
-    (nth (.-data t) data-idx)))
+  [t flat-iter-idx]
+  (let [sh (-shape t)
+        st (-strides t)
+        eo (-elem-offset t)
+        data-idx (flat-idx->multi sh st eo flat-iter-idx)]
+    (nth (-data t) data-idx)))
 
 ;;-----------------------------------------------------------------------------
 ;; Predicates
@@ -165,7 +187,7 @@
     (when (not= n (count arr))
       (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
               (str "Shape " shape " requires " n " elements but array has " (count arr)))))
-    (NDBuffer. arr (vec shape) (compute-c-strides shape) 0 nil)))
+    (->NDBuffer 0 arr (vec shape) (compute-c-strides shape))))
 
 (defn zeros
   "Create a zero-filled tensor."
@@ -186,23 +208,23 @@
 
 (defn shape
   "Return the shape vector."
-  [^NDBuffer t]
-  (.-shape t))
+  [t]
+  (-shape t))
 
 (defn dtype
   "Return the element type keyword."
-  [^NDBuffer t]
-  (arr/subtype->type-kw (arr/array-subtype-code (.-data t))))
+  [t]
+  (arr/subtype->type-kw (arr/array-subtype-code (-data t))))
 
 (defn rank
   "Return the number of dimensions."
-  [^NDBuffer t]
-  (count (.-shape t)))
+  [t]
+  (count (-shape t)))
 
 (defn contiguous?
   "True if the tensor has C-order (row-major) strides with no gaps."
-  [^NDBuffer t]
-  (= (.-strides t) (compute-c-strides (.-shape t))))
+  [t]
+  (= (-strides t) (compute-c-strides (-shape t))))
 
 ;;-----------------------------------------------------------------------------
 ;; Element access
@@ -210,17 +232,17 @@
 
 (defn mget
   "Get element at multi-dimensional index."
-  [^NDBuffer t & indices]
-  (let [flat (multi-idx->flat (.-strides t) (.-elem-offset t) indices)]
-    (nth (.-data t) flat)))
+  [t & indices]
+  (let [flat (multi-idx->flat (-strides t) (-elem-offset t) indices)]
+    (nth (-data t) flat)))
 
 (defn mset!
   "Set element at multi-dimensional index. Mutates the backing array."
-  [^NDBuffer t & args]
+  [t & args]
   (let [indices (butlast args)
         val (last args)
-        flat (multi-idx->flat (.-strides t) (.-elem-offset t) indices)]
-    (arr/aset! (.-data t) flat val)
+        flat (multi-idx->flat (-strides t) (-elem-offset t) indices)]
+    (arr/aset! (-data t) flat val)
     val))
 
 ;;-----------------------------------------------------------------------------
@@ -230,47 +252,44 @@
 (defn reshape
   "Return a new tensor with different shape, same data.
    Requires contiguous layout. Product of new shape must equal product of old."
-  [^NDBuffer t new-shape]
+  [t new-shape]
   (when-not (contiguous? t)
     (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
             "Cannot reshape non-contiguous tensor")))
-  (let [old-n (reduce * 1 (.-shape t))
+  (let [old-n (reduce * 1 (-shape t))
         new-n (reduce * 1 new-shape)]
     (when (not= old-n new-n)
       (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-              (str "Cannot reshape " (.-shape t) " to " new-shape
+              (str "Cannot reshape " (-shape t) " to " new-shape
                    ": element count mismatch"))))
-    (NDBuffer. (.-data t) (vec new-shape) (compute-c-strides new-shape)
-               (.-elem-offset t) nil)))
+    (->NDBuffer (-elem-offset t) (-data t) (vec new-shape) (compute-c-strides new-shape))))
 
 (defn transpose
   "Transpose: reverse axis order (zero-copy).
    With explicit perm vector, permute axes in that order."
-  ([^NDBuffer t]
-   (let [sh (.-shape t)
-         st (.-strides t)]
-     (NDBuffer. (.-data t) (vec (reverse sh)) (vec (reverse st))
-                (.-elem-offset t) nil)))
-  ([^NDBuffer t perm]
-   (let [sh (.-shape t)
-         st (.-strides t)]
-     (NDBuffer. (.-data t)
-                (vec (map #(nth sh %) perm))
-                (vec (map #(nth st %) perm))
-                (.-elem-offset t) nil))))
+  ([t]
+   (let [sh (-shape t)
+         st (-strides t)]
+     (->NDBuffer (-elem-offset t) (-data t) (vec (reverse sh)) (vec (reverse st)))))
+  ([t perm]
+   (let [sh (-shape t)
+         st (-strides t)]
+     (->NDBuffer (-elem-offset t) (-data t)
+                 (vec (map #(nth sh %) perm))
+                 (vec (map #(nth st %) perm))))))
 
 (defn slice-axis
   "Select a single index along an axis, reducing rank by 1.
    E.g., (slice-axis matrix 0 2) selects row 2 → returns a 1D tensor."
-  [^NDBuffer t axis idx]
-  (let [sh (.-shape t)
-        st (.-strides t)
-        new-offset (+ (.-elem-offset t) (* (nth st axis) idx))
+  [t axis idx]
+  (let [sh (-shape t)
+        st (-strides t)
+        new-offset (+ (-elem-offset t) (* (nth st axis) idx))
         new-shape (vec (concat (subvec sh 0 axis)
                                (subvec sh (inc axis))))
         new-strides (vec (concat (subvec st 0 axis)
                                   (subvec st (inc axis))))]
-    (NDBuffer. (.-data t) new-shape new-strides new-offset nil)))
+    (->NDBuffer new-offset (-data t) new-shape new-strides)))
 
 ;;-----------------------------------------------------------------------------
 ;; Bulk operations
@@ -279,25 +298,25 @@
 (defn emap
   "Element-wise operation, returning a new contiguous tensor.
    f takes elements from one or more tensors."
-  ([f ^NDBuffer t]
-   (let [n (reduce * 1 (.-shape t))
+  ([f t]
+   (let [n (reduce * 1 (-shape t))
          type-kw (dtype t)
          out-arr (arr/eve-array type-kw n)]
      (dotimes [i n]
        (arr/aset! out-arr i (f (flat-get t i))))
-     (from-array out-arr (.-shape t))))
-  ([f ^NDBuffer t1 ^NDBuffer t2]
-   (let [n (reduce * 1 (.-shape t1))
+     (from-array out-arr (-shape t))))
+  ([f t1 t2]
+   (let [n (reduce * 1 (-shape t1))
          type-kw (dtype t1)
          out-arr (arr/eve-array type-kw n)]
      (dotimes [i n]
        (arr/aset! out-arr i (f (flat-get t1 i) (flat-get t2 i))))
-     (from-array out-arr (.-shape t1)))))
+     (from-array out-arr (-shape t1)))))
 
 (defn ereduce
   "Reduce all elements of the tensor."
-  [f init ^NDBuffer t]
-  (let [n (reduce * 1 (.-shape t))]
+  [f init t]
+  (let [n (reduce * 1 (-shape t))]
     (loop [i 0 acc init]
       (if (< i n)
         (recur (inc i) (f acc (flat-get t i)))
@@ -309,8 +328,8 @@
 
 (defn to-array
   "Flatten tensor to a new contiguous EveArray."
-  [^NDBuffer t]
-  (let [n (reduce * 1 (.-shape t))
+  [t]
+  (let [n (reduce * 1 (-shape t))
         type-kw (dtype t)
         out (arr/eve-array type-kw n)]
     (dotimes [i n]
@@ -320,9 +339,8 @@
 (defn to-dataset
   "Convert a 2D tensor to a Dataset with given column names.
    Requires exactly rank-2."
-  [^NDBuffer t col-names]
-  ;; Lazy require to avoid circular dependency
-  (let [sh (.-shape t)]
+  [t col-names]
+  (let [sh (-shape t)]
     (when (not= 2 (count sh))
       (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
               "to-dataset requires a 2D tensor")))

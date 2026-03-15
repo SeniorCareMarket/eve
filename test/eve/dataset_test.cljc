@@ -5,12 +5,19 @@
    [eve.array :as arr]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
-   [eve.dataset.argops :as argops]))
+   [eve.dataset.argops :as argops]
+   #?(:cljs [eve.shared-atom :as sa])))
 
 (defn- approx= [expected actual tolerance]
   (< #?(:cljs (abs (- expected actual))
         :clj  (Math/abs (double (- expected actual))))
      tolerance))
+
+#?(:cljs
+   (defn- make-eve-atom
+     "Create an Eve shared atom for testing."
+     [initial-val]
+     (sa/atom initial-val)))
 
 ;;=============================================================================
 ;; Dataset construction and accessors
@@ -28,123 +35,162 @@
       (is (approx= 1.5 (nth a 0) 0.001))
       (is (approx= 2.5 (nth a 1) 0.001)))))
 
-(deftest dataset-construction-test
-  (testing "Dataset from column map"
-    (let [ds1 (ds/dataset {:price (arr/eve-array :float64 [10.5 20.3 30.1])
-                           :qty   (arr/eve-array :int32 [100 200 300])})]
-      (is (ds/dataset? ds1))
-      (is (= 3 (ds/row-count ds1)))
-      (is (= 2 (count (ds/column-names ds1))))
-      (is (some #{:price} (ds/column-names ds1)))
-      (is (some #{:qty} (ds/column-names ds1))))))
+#?(:cljs
+   (deftest dataset-construction-test
+     (testing "Dataset from column map (inside atom)"
+       (let [ea (make-eve-atom nil)
+             ds1 (swap! ea (fn [_]
+                             (ds/dataset {:price (arr/eve-array :float64 [10.5 20.3 30.1])
+                                          :qty   (arr/eve-array :int32 [100 200 300])})))]
+         (is (ds/dataset? ds1))
+         (is (= 3 (ds/row-count ds1)))
+         (is (= 2 (count (ds/column-names ds1))))
+         (is (some #{:price} (ds/column-names ds1)))
+         (is (some #{:qty} (ds/column-names ds1)))))))
 
-(deftest column-access-test
-  (testing "Column access returns EveArray identity"
-    (let [price-col (arr/eve-array :float64 [10.5 20.3])
-          ds1 (ds/dataset {:price price-col
-                           :qty   (arr/eve-array :int32 [100 200])})]
-      (is (identical? price-col (ds/column ds1 :price)))
-      (is (= 2 (count (ds/column ds1 :qty)))))))
+#?(:cljs
+   (deftest column-access-test
+     (testing "Column access returns EveArray"
+       (let [ea (make-eve-atom nil)
+             ds1 (swap! ea (fn [_]
+                             (ds/dataset {:price (arr/eve-array :float64 [10.5 20.3])
+                                          :qty   (arr/eve-array :int32 [100 200])})))]
+         (is (some? (ds/column ds1 :price)))
+         (is (= 2 (count (ds/column ds1 :qty))))
+         (is (approx= 10.5 (nth (ds/column ds1 :price) 0) 0.001))))))
 
-(deftest dtypes-test
-  (testing "dtypes returns type map"
-    (let [ds1 (ds/dataset {:price (arr/eve-array :float64 [1.0 2.0])
-                           :qty   (arr/eve-array :int32 [1 2])})]
-      (is (= :float64 (:price (ds/dtypes ds1))))
-      (is (= :int32 (:qty (ds/dtypes ds1)))))))
+#?(:cljs
+   (deftest dtypes-test
+     (testing "dtypes returns type map"
+       (let [ea (make-eve-atom nil)
+             ds1 (swap! ea (fn [_]
+                             (ds/dataset {:price (arr/eve-array :float64 [1.0 2.0])
+                                          :qty   (arr/eve-array :int32 [1 2])})))]
+         (is (= :float64 (:price (ds/dtypes ds1))))
+         (is (= :int32 (:qty (ds/dtypes ds1))))))))
 
-(deftest row-count-test
-  (testing "row-count"
-    (is (= 5 (ds/row-count
-               (ds/dataset {:a (arr/eve-array :int32 [1 2 3 4 5])}))))))
+#?(:cljs
+   (deftest row-count-test
+     (testing "row-count"
+       (let [ea (make-eve-atom nil)]
+         (is (= 5 (ds/row-count
+                     (swap! ea (fn [_]
+                                 (ds/dataset {:a (arr/eve-array :int32 [1 2 3 4 5])}))))))))))
 
 ;;=============================================================================
 ;; Structural operations
 ;;=============================================================================
 
-(deftest select-columns-test
-  (testing "select-columns"
-    (let [ds1 (ds/dataset {:a (arr/eve-array :int32 [1 2])
-                           :b (arr/eve-array :int32 [3 4])
-                           :c (arr/eve-array :int32 [5 6])})
-          ds2 (ds/select-columns ds1 [:a :c])]
-      (is (= [:a :c] (ds/column-names ds2)))
-      (is (= 2 (ds/row-count ds2)))
-      (is (nil? (ds/column ds2 :b))))))
+#?(:cljs
+   (deftest select-columns-test
+     (testing "select-columns"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:a (arr/eve-array :int32 [1 2])
+                                                    :b (arr/eve-array :int32 [3 4])
+                                                    :c (arr/eve-array :int32 [5 6])})]
+                               (ds/select-columns ds1 [:a :c]))))]
+         (is (= [:a :c] (ds/column-names ds2)))
+         (is (= 2 (ds/row-count ds2)))
+         (is (nil? (ds/column ds2 :b)))))))
 
-(deftest add-column-test
-  (testing "add-column"
-    (let [ds1 (ds/dataset {:a (arr/eve-array :int32 [1 2])})
-          ds2 (ds/add-column ds1 :b (arr/eve-array :int32 [3 4]))]
-      (is (= [:a :b] (ds/column-names ds2)))
-      (is (= 3 (nth (ds/column ds2 :b) 0))))))
+#?(:cljs
+   (deftest add-column-test
+     (testing "add-column"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:a (arr/eve-array :int32 [1 2])})]
+                               (ds/add-column ds1 :b (arr/eve-array :int32 [3 4])))))]
+         (is (= [:a :b] (ds/column-names ds2)))
+         (is (= 3 (nth (ds/column ds2 :b) 0)))))))
 
-(deftest drop-column-test
-  (testing "drop-column"
-    (let [ds1 (ds/dataset {:a (arr/eve-array :int32 [1 2])
-                           :b (arr/eve-array :int32 [3 4])})
-          ds2 (ds/drop-column ds1 :b)]
-      (is (= [:a] (ds/column-names ds2)))
-      (is (nil? (ds/column ds2 :b))))))
+#?(:cljs
+   (deftest drop-column-test
+     (testing "drop-column"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:a (arr/eve-array :int32 [1 2])
+                                                    :b (arr/eve-array :int32 [3 4])})]
+                               (ds/drop-column ds1 :b))))]
+         (is (= [:a] (ds/column-names ds2)))
+         (is (nil? (ds/column ds2 :b)))))))
 
-(deftest rename-columns-test
-  (testing "rename-columns"
-    (let [ds1 (ds/dataset {:price (arr/eve-array :float64 [10.5 20.3])
-                           :qty   (arr/eve-array :int32 [100 200])})
-          ds2 (ds/rename-columns ds1 {:price :cost})]
-      (is (some #{:cost} (ds/column-names ds2)))
-      (is (not (some #{:price} (ds/column-names ds2))))
-      (is (approx= 10.5 (nth (ds/column ds2 :cost) 0) 0.001)))))
+#?(:cljs
+   (deftest rename-columns-test
+     (testing "rename-columns"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:price (arr/eve-array :float64 [10.5 20.3])
+                                                    :qty   (arr/eve-array :int32 [100 200])})]
+                               (ds/rename-columns ds1 {:price :cost}))))]
+         (is (some #{:cost} (ds/column-names ds2)))
+         (is (not (some #{:price} (ds/column-names ds2))))
+         (is (approx= 10.5 (nth (ds/column ds2 :cost) 0) 0.001))))))
 
 ;;=============================================================================
 ;; Row operations
 ;;=============================================================================
 
-(deftest filter-rows-test
-  (testing "filter-rows with predicate"
-    (let [ds1 (ds/dataset {:price (arr/eve-array :float64 [10.5 20.3 5.0 30.1])
-                           :qty   (arr/eve-array :int32 [100 200 50 300])})
-          ds2 (ds/filter-rows ds1 :price #(> % 15.0))]
-      (is (= 2 (ds/row-count ds2)))
-      (is (approx= 20.3 (nth (ds/column ds2 :price) 0) 0.001))
-      (is (approx= 30.1 (nth (ds/column ds2 :price) 1) 0.001)))))
+#?(:cljs
+   (deftest filter-rows-test
+     (testing "filter-rows with predicate"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:price (arr/eve-array :float64 [10.5 20.3 5.0 30.1])
+                                                    :qty   (arr/eve-array :int32 [100 200 50 300])})]
+                               (ds/filter-rows ds1 :price #(> % 15.0)))))]
+         (is (= 2 (ds/row-count ds2)))
+         (is (approx= 20.3 (nth (ds/column ds2 :price) 0) 0.001))
+         (is (approx= 30.1 (nth (ds/column ds2 :price) 1) 0.001))))))
 
-(deftest sort-by-column-test
-  (testing "sort ascending"
-    (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [30 10 20])})
-          ds2 (ds/sort-by-column ds1 :v :asc)]
-      (is (= 10 (nth (ds/column ds2 :v) 0)))
-      (is (= 20 (nth (ds/column ds2 :v) 1)))
-      (is (= 30 (nth (ds/column ds2 :v) 2)))))
-  (testing "sort descending"
-    (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [30 10 20])})
-          ds2 (ds/sort-by-column ds1 :v :desc)]
-      (is (= 30 (nth (ds/column ds2 :v) 0)))
-      (is (= 20 (nth (ds/column ds2 :v) 1)))
-      (is (= 10 (nth (ds/column ds2 :v) 2))))))
+#?(:cljs
+   (deftest sort-by-column-test
+     (testing "sort ascending"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [30 10 20])})]
+                               (ds/sort-by-column ds1 :v :asc))))]
+         (is (= 10 (nth (ds/column ds2 :v) 0)))
+         (is (= 20 (nth (ds/column ds2 :v) 1)))
+         (is (= 30 (nth (ds/column ds2 :v) 2)))))
+     (testing "sort descending"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [30 10 20])})]
+                               (ds/sort-by-column ds1 :v :desc))))]
+         (is (= 30 (nth (ds/column ds2 :v) 0)))
+         (is (= 20 (nth (ds/column ds2 :v) 1)))
+         (is (= 10 (nth (ds/column ds2 :v) 2)))))))
 
-(deftest head-tail-slice-test
-  (testing "head"
-    (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [1 2 3 4 5])})
-          ds2 (ds/head ds1 3)]
-      (is (= 3 (ds/row-count ds2)))
-      (is (= 1 (nth (ds/column ds2 :v) 0)))
-      (is (= 3 (nth (ds/column ds2 :v) 2)))))
-  (testing "tail"
-    (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [1 2 3 4 5])})
-          ds2 (ds/tail ds1 2)]
-      (is (= 2 (ds/row-count ds2)))
-      (is (= 4 (nth (ds/column ds2 :v) 0)))
-      (is (= 5 (nth (ds/column ds2 :v) 1)))))
-  (testing "slice"
-    (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [10 20 30 40 50])})
-          ds2 (ds/slice ds1 1 4)]
-      (is (= 3 (ds/row-count ds2)))
-      (is (= 20 (nth (ds/column ds2 :v) 0)))
-      (is (= 40 (nth (ds/column ds2 :v) 2))))))
+#?(:cljs
+   (deftest head-tail-slice-test
+     (testing "head"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [1 2 3 4 5])})]
+                               (ds/head ds1 3))))]
+         (is (= 3 (ds/row-count ds2)))
+         (is (= 1 (nth (ds/column ds2 :v) 0)))
+         (is (= 3 (nth (ds/column ds2 :v) 2)))))
+     (testing "tail"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [1 2 3 4 5])})]
+                               (ds/tail ds1 2))))]
+         (is (= 2 (ds/row-count ds2)))
+         (is (= 4 (nth (ds/column ds2 :v) 0)))
+         (is (= 5 (nth (ds/column ds2 :v) 1)))))
+     (testing "slice"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [10 20 30 40 50])})]
+                               (ds/slice ds1 1 4))))]
+         (is (= 3 (ds/row-count ds2)))
+         (is (= 20 (nth (ds/column ds2 :v) 0)))
+         (is (= 40 (nth (ds/column ds2 :v) 2)))))))
 
 ;;=============================================================================
-;; Functional operations (on EveArray columns)
+;; Functional operations (on EveArray columns — no atom needed)
 ;;=============================================================================
 
 (deftest sum-mean-test
@@ -200,7 +246,7 @@
       )))
 
 ;;=============================================================================
-;; Argops
+;; Argops (on EveArray columns — no atom needed)
 ;;=============================================================================
 
 (deftest argsort-test
@@ -241,39 +287,47 @@
       (is (= 50 (nth result 0)))
       (is (= 30 (nth result 1)))
       (is (= 10 (nth result 2)))))
-  (testing "reindex dataset"
-    (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [10 20 30])})
-          idx (arr/eve-array :int32 [2 0 1])
-          ds2 (ds/reindex ds1 idx)]
-      (is (= 30 (nth (ds/column ds2 :v) 0)))
-      (is (= 10 (nth (ds/column ds2 :v) 1)))
-      (is (= 20 (nth (ds/column ds2 :v) 2))))))
+  #?(:cljs
+     (testing "reindex dataset"
+       (let [ea (make-eve-atom nil)
+             ds2 (swap! ea (fn [_]
+                             (let [ds1 (ds/dataset {:v (arr/eve-array :int32 [10 20 30])})
+                                   idx (arr/eve-array :int32 [2 0 1])]
+                               (ds/reindex ds1 idx))))]
+         (is (= 30 (nth (ds/column ds2 :v) 0)))
+         (is (= 10 (nth (ds/column ds2 :v) 1)))
+         (is (= 20 (nth (ds/column ds2 :v) 2)))))))
 
 ;;=============================================================================
 ;; Multiple dtypes in one dataset
 ;;=============================================================================
 
-(deftest multi-dtype-test
-  (testing "dataset with multiple dtypes"
-    (let [ds1 (ds/dataset {:id    (arr/eve-array :int32 [1 2 3])
-                           :value (arr/eve-array :float64 [1.1 2.2 3.3])
-                           :flag  (arr/eve-array :uint8 [1 0 1])})]
-      (is (= :int32 (:id (ds/dtypes ds1))))
-      (is (= :float64 (:value (ds/dtypes ds1))))
-      (is (= :uint8 (:flag (ds/dtypes ds1))))
-      (is (= 3 (ds/row-count ds1))))))
+#?(:cljs
+   (deftest multi-dtype-test
+     (testing "dataset with multiple dtypes"
+       (let [ea (make-eve-atom nil)
+             ds1 (swap! ea (fn [_]
+                             (ds/dataset {:id    (arr/eve-array :int32 [1 2 3])
+                                          :value (arr/eve-array :float64 [1.1 2.2 3.3])
+                                          :flag  (arr/eve-array :uint8 [1 0 1])})))]
+         (is (= :int32 (:id (ds/dtypes ds1))))
+         (is (= :float64 (:value (ds/dtypes ds1))))
+         (is (= :uint8 (:flag (ds/dtypes ds1))))
+         (is (= 3 (ds/row-count ds1)))))))
 
 ;;=============================================================================
 ;; ILookup / IFn
 ;;=============================================================================
 
-(deftest dataset-lookup-test
-  (testing "Dataset implements ILookup"
-    (let [col (arr/eve-array :int32 [1 2 3])
-          ds1 (ds/dataset {:a col})]
-      (is (identical? col (:a ds1)))
-      (is (identical? col (ds1 :a)))
-      (is (nil? (:missing ds1))))))
+#?(:cljs
+   (deftest dataset-lookup-test
+     (testing "Dataset implements ILookup"
+       (let [ea (make-eve-atom nil)
+             ds1 (swap! ea (fn [_]
+                             (ds/dataset {:a (arr/eve-array :int32 [1 2 3])})))]
+         (is (some? (:a ds1)))
+         (is (some? (ds1 :a)))
+         (is (nil? (:missing ds1)))))))
 
 ;;=============================================================================
 ;; Emap

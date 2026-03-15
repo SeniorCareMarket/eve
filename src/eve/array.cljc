@@ -256,6 +256,9 @@
       (-write writer " ..."))
     (-write writer "]"))
 
+  d/IDirectSerialize
+  (-direct-serialize [_] block-start)
+
   d/ISabStorable
   (-sab-tag [_] :eve/array)
   (-sab-encode [_this _s-atom-env]

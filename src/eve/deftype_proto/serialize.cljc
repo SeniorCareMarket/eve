@@ -376,12 +376,20 @@
   (.setInt32 sab-ptr-dv 3 offset true)
   sab-ptr-buf)
 
-(def ^:private sab-tag->fast-tag
-  "Map from ISabStorable tag keywords to SAB pointer fast-tag bytes."
-  {:eve-map  FAST_TAG_SAB_MAP
-   :hash-set FAST_TAG_SAB_SET
-   :eve-vec  FAST_TAG_SAB_VEC
-   :eve-list FAST_TAG_SAB_LIST})
+;; Mutable map from ISabStorable tag keywords to SAB pointer fast-tag bytes.
+;; Extended by eve-deftype types at load time via register-sab-fast-tag!.
+(defonce ^:private sab-tag->fast-tag*
+  (atom {:eve-map   FAST_TAG_SAB_MAP
+         :hash-set  FAST_TAG_SAB_SET
+         :eve-vec   FAST_TAG_SAB_VEC
+         :eve-list  FAST_TAG_SAB_LIST
+         :eve/array FAST_TAG_EVE_ARRAY}))
+
+(defn register-sab-fast-tag!
+  "Register a SAB tag keyword → fast-tag byte mapping.
+   Called by eve-deftype macro output at namespace load time."
+  [tag-kw fast-tag-byte]
+  (swap! sab-tag->fast-tag* assoc tag-kw fast-tag-byte))
 
 (defn encode-eve-pointer
   "Encode an Eve collection instance as a SAB pointer.
@@ -390,7 +398,7 @@
   [eve-inst]
   (let [offset (d/-direct-serialize eve-inst)
         tag-kw (d/-sab-tag eve-inst)
-        fast-tag (get sab-tag->fast-tag tag-kw)]
+        fast-tag (get @sab-tag->fast-tag* tag-kw)]
     (encode-sab-pointer fast-tag offset)))
 
 ;;-----------------------------------------------------------------------------
@@ -1088,8 +1096,12 @@
                     (recur (+ pos 4 elen) (inc i) (conj! v elem))))))
 
             :else
-            ;; Unknown tag — unsupported
-            nil))
+            ;; Unknown tag — check registered constructors (eve-deftype types)
+            (let [ctor (.get sab-type-constructors tag)]
+              (when ctor
+                (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
+                      offset (.getInt32 dv 3 true)]
+                  (ctor (:sab s-atom-env) offset))))))
         ;; No magic prefix — unsupported legacy format
         nil))))
 

@@ -12,15 +12,10 @@
 ;; Helpers
 ;;-----------------------------------------------------------------------------
 
-(defn make-env
-  "Get the SAB env from the global atom (bootstrapped by test runner)."
-  []
-  (atom/get-env atom/*global-atom-instance*))
-
 (defn build-tree
   "Insert a sequence of values into an empty tree."
-  [env vals]
-  (reduce (fn [tree v] (rb-insert env tree v)) nil vals))
+  [vals]
+  (reduce (fn [tree v] (rb-insert tree v)) nil vals))
 
 ;;-----------------------------------------------------------------------------
 ;; Basic construction
@@ -35,8 +30,7 @@
 
 (deftest single-insert-test
   (testing "Insert one element"
-    (let [env (make-env)
-          t (rb-insert env nil 42)]
+    (let [t (rb-insert nil 42)]
       (is (some? t))
       (is (= BLACK (:color t)) "root must be black")
       (is (nil? (:left t)))
@@ -47,18 +41,16 @@
 
 (deftest two-insert-test
   (testing "Insert two elements"
-    (let [env (make-env)
-          t (-> nil
-                (as-> t (rb-insert env t 10))
-                (as-> t (rb-insert env t 20)))]
+    (let [t (-> nil
+                (as-> t (rb-insert t 10))
+                (as-> t (rb-insert t 20)))]
       (is (= 2 (rb-count t)))
       (is (rb-valid? t))
       (is (= [10 20] (vec (rb-seq t)))))))
 
 (deftest three-insert-test
   (testing "Insert three elements — triggers first balance"
-    (let [env (make-env)
-          t (build-tree (make-env) [10 20 30])]
+    (let [t (build-tree [10 20 30])]
       (is (= 3 (rb-count t)))
       (is (rb-valid? t))
       (is (= [10 20 30] (vec (rb-seq t)))))))
@@ -69,8 +61,7 @@
 
 (deftest member-test
   (testing "Membership queries"
-    (let [env (make-env)
-          t (build-tree env [5 3 8 1 4 7 9])]
+    (let [t (build-tree [5 3 8 1 4 7 9])]
       (is (rb-member? t 5))
       (is (rb-member? t 1))
       (is (rb-member? t 9))
@@ -80,8 +71,7 @@
 
 (deftest find-test
   (testing "Find returns the value or nil"
-    (let [env (make-env)
-          t (build-tree env [10 20 30])]
+    (let [t (build-tree [10 20 30])]
       (is (= 10 (rb-find t 10)))
       (is (= 30 (rb-find t 30)))
       (is (nil? (rb-find t 15))))))
@@ -92,16 +82,14 @@
 
 (deftest sorted-seq-test
   (testing "In-order traversal is sorted regardless of insertion order"
-    (let [env (make-env)
-          vals [7 3 18 10 22 8 11 26 2 6 13]
-          t (build-tree env vals)]
+    (let [vals [7 3 18 10 22 8 11 26 2 6 13]
+          t (build-tree vals)]
       (is (= (sort vals) (vec (rb-seq t)))))))
 
 (deftest duplicate-insert-test
   (testing "Inserting duplicates doesn't change the tree"
-    (let [env (make-env)
-          t1 (build-tree env [1 2 3 4 5])
-          t2 (rb-insert env t1 3)]
+    (let [t1 (build-tree [1 2 3 4 5])
+          t2 (rb-insert t1 3)]
       (is (= 5 (rb-count t2)) "count unchanged after duplicate insert")
       (is (= [1 2 3 4 5] (vec (rb-seq t2)))))))
 
@@ -112,23 +100,20 @@
 (deftest invariants-small-test
   (testing "RB invariants hold for small trees"
     (doseq [n (range 1 8)]
-      (let [env (make-env)
-            t (build-tree env (range n))]
+      (let [t (build-tree (range n))]
         (is (rb-valid? t) (str "valid for " n " elements"))
         (is (= n (rb-count t)))))))
 
 (deftest invariants-medium-test
   (testing "RB invariants hold for 100 sequential inserts"
-    (let [env (make-env)
-          t (build-tree env (range 100))]
+    (let [t (build-tree (range 100))]
       (is (rb-valid? t))
       (is (= 100 (rb-count t)))
       (is (= (vec (range 100)) (vec (rb-seq t)))))))
 
 (deftest invariants-reverse-test
   (testing "RB invariants hold for reverse-order inserts"
-    (let [env (make-env)
-          t (build-tree env (reverse (range 50)))]
+    (let [t (build-tree (reverse (range 50)))]
       (is (rb-valid? t))
       (is (= 50 (rb-count t)))
       (is (= (vec (range 50)) (vec (rb-seq t)))))))
@@ -139,9 +124,8 @@
 
 (deftest height-bound-test
   (testing "Height is bounded by 2*log2(n+1) for a valid RB tree"
-    (let [env (make-env)
-          n 100
-          t (build-tree env (range n))
+    (let [n 100
+          t (build-tree (range n))
           h (rb-height t)
           max-h (* 2 (Math/ceil (/ (Math/log (inc n)) (Math/log 2))))]
       (is (<= h max-h)
@@ -149,8 +133,7 @@
 
 (deftest black-height-test
   (testing "Black-height is consistent across all paths"
-    (let [env (make-env)
-          t (build-tree env (range 50))
+    (let [t (build-tree (range 50))
           bh (rb-black-height t)]
       (is (pos? bh) "black-height should be positive for non-empty tree")
       (is (not= -1 bh) "black-height should be uniform"))))
@@ -161,9 +144,8 @@
 
 (deftest string-values-test
   (testing "RB tree with string values"
-    (let [env (make-env)
-          words ["fig" "date" "apple" "cherry" "banana" "elderberry"]
-          t (build-tree env words)]
+    (let [words ["fig" "date" "apple" "cherry" "banana" "elderberry"]
+          t (build-tree words)]
       (is (rb-valid? t))
       (is (= (sort words) (vec (rb-seq t))))
       (is (rb-member? t "cherry"))
@@ -171,9 +153,8 @@
 
 (deftest keyword-values-test
   (testing "RB tree with keyword values"
-    (let [env (make-env)
-          ks [:z :a :m :f :b :q]
-          t (build-tree env ks)]
+    (let [ks [:z :a :m :f :b :q]
+          t (build-tree ks)]
       (is (rb-valid? t))
       (is (= (sort ks) (vec (rb-seq t))))
       (is (= 6 (rb-count t))))))
@@ -184,8 +165,7 @@
 
 (deftest print-test
   (testing "RBNode prints readable representation"
-    (let [env (make-env)
-          t (rb-insert env nil 42)]
+    (let [t (rb-insert nil 42)]
       (is (string? (pr-str t))))))
 
 ;;-----------------------------------------------------------------------------

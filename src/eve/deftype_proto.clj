@@ -60,7 +60,7 @@
    :int32 4, :uint32 4, :float32 4, :float64 8,
    :ref 4})
 
-(defn- parse-field
+(defn parse-field
   "Parse a field symbol with metadata into a field spec."
   [field-sym]
   (let [m (meta field-sym)
@@ -84,11 +84,11 @@
                    :else :primitive) ;; default to primitive
      :mutability mutability}))
 
-(defn- align-offset [offset alignment]
+(defn align-offset [offset alignment]
   (let [rem (mod offset alignment)]
     (if (zero? rem) offset (+ offset (- alignment rem)))))
 
-(defn- compute-layout
+(defn compute-layout
   "Compute field offsets. Returns {:fields [...] :total-size n}."
   [parsed-fields]
   ;; First byte reserved for type-id
@@ -126,7 +126,7 @@
 ;;         ... field bindings ...]
 ;;     body)
 
-(defn- read-fn-for-type
+(defn read-fn-for-type
   "Return the read expression for a field type.
    Uses slab-dv__ and slab-base__ bound at method entry."
   [{:keys [type-hint type-class mutability]} _sab-expr offset-expr field-offset]
@@ -155,7 +155,7 @@
         ;; Default to int32
         (list '.getInt32 'slab-dv__ abs-offset true)))))
 
-(defn- write-fn-for-type
+(defn write-fn-for-type
   "Return the write expression for a field type.
    Uses slab-dv__ and slab-base__ bound at method/constructor entry."
   [{:keys [type-hint type-class mutability]} _sab-expr offset-expr field-offset val-expr]
@@ -184,7 +184,7 @@
         ;; Default to int32
         (list '.setInt32 'slab-dv__ abs-offset val-expr true)))))
 
-(defn- field-bindings
+(defn field-bindings
   "Generate let-bindings for reading all fields."
   [fields _sab-expr offset-expr]
   (vec (mapcat (fn [f]
@@ -192,10 +192,10 @@
                   (read-fn-for-type f nil offset-expr (:offset f))])
                fields)))
 
-(defn- has-volatile-fields? [fields]
+(defn has-volatile-fields? [fields]
   (some #(= :volatile-mutable (:mutability %)) fields))
 
-(defn- rewrite-set!-forms
+(defn rewrite-set!-forms
   "Rewrite (set! field val) to slab write operations."
   [form field-map _sab-expr offset-expr]
   (cond
@@ -244,7 +244,7 @@
                (meta form))
     :else form))
 
-(defn- transform-method-body
+(defn transform-method-body
   "Transform method body with slab resolve + field bindings + set!/cas! rewriting.
    Wraps body in:
      (let [slab-base__ (eve-alloc/resolve-dv! offset__)
@@ -274,7 +274,7 @@
       rewritten
       (list (apply list 'let all-bindings (vec rewritten))))))
 
-(defn- parse-protocol-impls [body]
+(defn parse-protocol-impls [body]
   (loop [remaining body
          current-proto nil
          result []]
@@ -294,7 +294,7 @@
                    result)
             (recur (rest remaining) current-proto result)))))))
 
-(defn- user-provides-protocol? [parsed-protos proto-sym]
+(defn user-provides-protocol? [parsed-protos proto-sym]
   (some #(= proto-sym (:protocol %)) parsed-protos))
 
 ;;-----------------------------------------------------------------------------
@@ -307,7 +307,7 @@
 ;; The deftype stores [^long slab-off__ sio__] instead of [offset__].
 ;; ISlabIO methods handle class/block resolution internally.
 
-(defn- jvm-read-fn-for-type
+(defn jvm-read-fn-for-type
   "Return the JVM read expression for a field type.
    sio__ and slab-off__ are bound from deftype fields."
   [{:keys [type-hint type-class]} slab-off-expr field-offset]
@@ -345,7 +345,7 @@
     ;; default
     (list 'eve.deftype-proto.alloc/-sio-read-i32 'sio__ slab-off-expr field-offset)))
 
-(defn- jvm-write-fn-for-type
+(defn jvm-write-fn-for-type
   "Return the JVM write expression for a field type."
   [{:keys [type-hint type-class]} slab-off-expr field-offset val-expr]
   (case type-class
@@ -377,7 +377,7 @@
     (list 'eve.deftype-proto.alloc/-sio-write-i32! 'sio__ slab-off-expr field-offset
           (list 'int val-expr))))
 
-(defn- jvm-field-bindings
+(defn jvm-field-bindings
   "Generate let-bindings for reading all fields on JVM."
   [fields slab-off-expr]
   (vec (mapcat (fn [f]
@@ -385,7 +385,7 @@
                   (jvm-read-fn-for-type f slab-off-expr (:offset f))])
                fields)))
 
-(defn- jvm-rewrite-set!-forms
+(defn jvm-rewrite-set!-forms
   "Rewrite (set! field val) to JVM ISlabIO write operations."
   [form field-map slab-off-expr]
   (cond
@@ -423,7 +423,7 @@
                (meta form))
     :else form))
 
-(defn- jvm-transform-method-body
+(defn jvm-transform-method-body
   "Transform method body for JVM deftype. slab-off__ and sio__ are deftype fields,
    accessible directly in method bodies."
   [body fields field-map]
@@ -434,7 +434,7 @@
       rewritten
       (list (apply list 'let field-read-bindings (vec rewritten))))))
 
-(defn- jvm-transform-extend-method-body
+(defn jvm-transform-extend-method-body
   "Transform method body for JVM extend-type. Binds slab-off__ and sio__
    from the this reference since extend-type methods don't have field access."
   [body fields field-map this-sym type-name]
