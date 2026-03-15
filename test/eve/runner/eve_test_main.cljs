@@ -196,6 +196,13 @@
   (t/run-tests 'eve.mmap-atom-test))
 
 (defn- run-mmap-atom-e2e! []
+  (let [fs   (js/require "fs")
+        path (js/require "path")
+        worker (.resolve path "target/eve-test/mmap-worker.js")]
+    (when-not (.existsSync fs worker)
+      (println "ERROR: mmap-worker.js not found at" worker)
+      (println "  Compile it first: npx shadow-cljs compile mmap-worker")
+      (exit! 1)))
   (load-native-addon!)
   (t/run-tests 'eve.mmap-atom-e2e-test))
 

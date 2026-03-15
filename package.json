@@ -4,6 +4,7 @@
   "description": "Shared-memory persistent data structures for ClojureScript — native addon",
   "scripts": {
     "build:addon": "node-gyp build",
+    "test:compile": "npx shadow-cljs compile eve-test mmap-worker",
     "install": "node-gyp-build"
   },
   "dependencies": {
