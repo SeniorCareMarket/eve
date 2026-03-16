@@ -418,13 +418,8 @@
   (bench-tensor-ops! 100489)  ;; 317x317
   (bench-pipeline! 100000)
 
-  ;; Large scale (1M)
-  (bench-array-arithmetic! 1000000)
-  (bench-comparison-ops! 1000000)
-  (bench-argops! 1000000)
-  (bench-dataset-ops! 1000000)
-  (bench-tensor-ops! 1000000) ;; 1000x1000
-  (bench-pipeline! 1000000)
+  ;; NOTE: SAB memory (~256MB) limits max scale; cumulative allocations across
+  ;; warmup + timed runs exhaust it at >100K. Two tiers suffice to show crossover.
 
   (println)
   (println "==============================================================")
