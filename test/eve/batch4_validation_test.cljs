@@ -3,7 +3,7 @@
    Tests SAB transfer, SharedAtom API, slab infrastructure."
   (:require
    [cljs.test :refer-macros [deftest testing is]]
-   [eve.shared-atom :as a]
+   [eve.atom :as a]
    [eve.map :as sm]
    [eve.set :as ss]))
 

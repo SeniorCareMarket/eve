@@ -12,14 +12,12 @@
      (seq my-set)               ;; sorted traversal
      (count my-set)             ;; element count
 
-   The SAB environment is obtained automatically from the global atom
-   instance — users never need to pass env explicitly."
+   The SAB environment is obtained automatically from the slab allocator —
+   users never need to pass env explicitly."
   (:refer-clojure :exclude [sorted-set])
   (:require-macros [eve.deftype])
   (:require
-   [eve.deftype]
-   [eve.deftype.runtime :as rt]
-   [eve.shared-atom :as atom]))
+   [eve.deftype]))
 
 ;;-----------------------------------------------------------------------------
 ;; Constants
@@ -43,13 +41,13 @@
 ;;-----------------------------------------------------------------------------
 
 (eve.deftype/eve-deftype RBNode
-  [^:int32 color ^:RBNode left ^:RBNode right value]
+                         [^:int32 color ^:RBNode left ^:RBNode right value]
 
-  ILookup
-  (-lookup [this k]
-    (case k :color color :left left :right right :value value nil))
-  (-lookup [this k not-found]
-    (case k :color color :left left :right right :value value not-found)))
+                         ILookup
+                         (-lookup [this k]
+                                  (case k :color color :left left :right right :value value nil))
+                         (-lookup [this k not-found]
+                                  (case k :color color :left left :right right :value value not-found)))
 
 ;;-----------------------------------------------------------------------------
 ;; Core operations (no pattern matching — just cond chains)
@@ -58,79 +56,79 @@
 (defn- balance
   "Okasaki balance: given components of a node, check for the 4 red-red
    violation cases and restructure if needed. Always returns a new node."
-  [env color left val right]
+  [color left val right]
   (if (== color BLACK)
     (cond
       ;; Case 1: B(R(R(a,x,b),y,c),z,d)
       (and (some? left) (== RED (:color left))
            (some? (:left left)) (== RED (:color (:left left))))
       (let [ll (:left left)]
-        (->RBNode env RED
-                  (->RBNode env BLACK (:left ll) (:right ll) (:value ll))
-                  (->RBNode env BLACK (:right left) right val)
+        (->RBNode RED
+                  (->RBNode BLACK (:left ll) (:right ll) (:value ll))
+                  (->RBNode BLACK (:right left) right val)
                   (:value left)))
 
       ;; Case 2: B(R(a,x,R(b,y,c)),z,d)
       (and (some? left) (== RED (:color left))
            (some? (:right left)) (== RED (:color (:right left))))
       (let [lr (:right left)]
-        (->RBNode env RED
-                  (->RBNode env BLACK (:left left) (:left lr) (:value left))
-                  (->RBNode env BLACK (:right lr) right val)
+        (->RBNode RED
+                  (->RBNode BLACK (:left left) (:left lr) (:value left))
+                  (->RBNode BLACK (:right lr) right val)
                   (:value lr)))
 
       ;; Case 3: B(a,x,R(R(b,y,c),z,d))
       (and (some? right) (== RED (:color right))
            (some? (:left right)) (== RED (:color (:left right))))
       (let [rl (:left right)]
-        (->RBNode env RED
-                  (->RBNode env BLACK left (:left rl) val)
-                  (->RBNode env BLACK (:right rl) (:right right) (:value right))
+        (->RBNode RED
+                  (->RBNode BLACK left (:left rl) val)
+                  (->RBNode BLACK (:right rl) (:right right) (:value right))
                   (:value rl)))
 
       ;; Case 4: B(a,x,R(b,y,R(c,z,d)))
       (and (some? right) (== RED (:color right))
            (some? (:right right)) (== RED (:color (:right right))))
       (let [rr (:right right)]
-        (->RBNode env RED
-                  (->RBNode env BLACK left (:left right) val)
-                  (->RBNode env BLACK (:left rr) (:right rr) (:value rr))
+        (->RBNode RED
+                  (->RBNode BLACK left (:left right) val)
+                  (->RBNode BLACK (:left rr) (:right rr) (:value rr))
                   (:value right)))
 
       ;; No violation — pass through
       :else
-      (->RBNode env color left right val))
+      (->RBNode color left right val))
 
     ;; Red node — no balancing
-    (->RBNode env color left right val)))
+    (->RBNode color left right val)))
 
 (defn- ins
   "Insert helper. Recurses down the tree, creating new nodes on the path.
    Uses `compare` for ordering so any Comparable value works."
-  [env tree x]
+  [tree x]
   (if (nil? tree)
     ;; New leaf is always red
-    (->RBNode env RED nil nil x)
+    (->RBNode RED nil nil x)
     (let [c (:color tree)
           l (:left tree)
           v (:value tree)
           r (:right tree)
           cmp (compare x v)]
       (cond
-        (neg? cmp) (balance env c (ins env l x) v r)
-        (pos? cmp) (balance env c l v (ins env r x))
+        (neg? cmp) (balance c (ins l x) v r)
+        (pos? cmp) (balance c l v (ins r x))
         ;; Already present — return as-is
         :else tree))))
 
 (defn rb-insert
   "Insert value x into red-black tree rooted at `tree`.
    Returns a new root node (always black). `tree` may be nil (empty)."
-  [env tree x]
-  (let [node (ins env tree x)]
+  [tree x]
+  (let [node (ins tree x)]
     ;; Blacken the root (Okasaki invariant)
     (if (== BLACK (:color node))
       node
-      (->RBNode env BLACK (:left node) (:right node) (:value node)))))
+      (->RBNode BLACK (:left node) (:right node) (:value node)))))
 
 (defn rb-member?
   "Returns true if value x is in the tree."
@@ -189,8 +187,8 @@
 ;;-----------------------------------------------------------------------------
 
 ;; Phantom colors (only exist transiently during deletion; never stored in SAB).
-(def ^:private DB  2)   ; double-black (black-height deficit)
-(def ^:private NB -1)   ; negative-black (used to absorb a double-black)
+(def ^:private DB 2) ; double-black (black-height deficit)
+(def ^:private NB -1) ; negative-black (used to absorb a double-black)
 
 (defn- phantom-color? [c] (or (== c DB) (== c NB)))
 
@@ -202,53 +200,53 @@
 
 (defn- blacken-node
   "Increment the color of a node (R→B, B→BB) or :BB-nil → :BB-nil."
-  [env node]
+  [node]
   (cond
-    (nil? node)       :BB-nil
-    (= node :BB-nil)  :BB-nil
-    :else (->RBNode env (inc (:color node))
+    (nil? node) :BB-nil
+    (= node :BB-nil) :BB-nil
+    :else (->RBNode (inc (:color node))
                     (:left node) (:right node) (:value node))))
 
 (defn- redden-node
   "Decrement the color of a node (B→R, R→NB, BB→B) or :BB-nil → nil."
-  [env node]
+  [node]
   (cond
     (= node :BB-nil) nil
-    (nil? node)      nil
-    :else (->RBNode env (dec (:color node))
+    (nil? node) nil
+    :else (->RBNode (dec (:color node))
                     (:left node) (:right node) (:value node))))
 
 (declare del-balance)
 
 (defn- rotate-left
   "Left rotation: used when right child absorbs a double-black from left sibling."
-  [env color left val right]
+  [color left val right]
   ;; right is RED, left is BB — standard left rotation then fix
   (let [rl (:left right)
         rr (:right right)
         rv (:value right)]
-    (->RBNode env (:color right)
-              (del-balance env color left val rl)
+    (->RBNode (:color right)
+              (del-balance color left val rl)
               rv
               rr)))
 
 (defn- rotate-right
   "Right rotation: used when left child absorbs a double-black from right sibling."
-  [env color left val right]
+  [color left val right]
   (let [ll (:left left)
         lr (:right left)
         lv (:value left)]
-    (->RBNode env (:color left)
+    (->RBNode (:color left)
               ll
               lv
-              (del-balance env color lr val right))))
+              (del-balance color lr val right))))
 
 (defn- del-balance
   "Extended balance function for deletion.
    Handles original 4 insertion cases plus 6 cases where one child is
    double-black, eliminating the BB by redistribution or propagation."
-  [env color left val right]
-  (let [lc (when (and (some? left) (not= left :BB-nil))  (:color left))
+  [color left val right]
+  (let [lc (when (and (some? left) (not= left :BB-nil)) (:color left))
         rc (when (and (some? right) (not= right :BB-nil)) (:color right))]
     (cond
       ;; ===== Original 4 insertion cases (BLACK parent) =====
@@ -256,46 +254,46 @@
            (some? left) (== RED lc)
            (some? (:left left)) (== RED (:color (:left left))))
       (let [ll (:left left)]
-        (->RBNode env RED
-                  (->RBNode env BLACK (:left ll) (:right ll) (:value ll))
+        (->RBNode RED
+                  (->RBNode BLACK (:left ll) (:right ll) (:value ll))
                   (:value left)
-                  (->RBNode env BLACK (:right left) right val)))
+                  (->RBNode BLACK (:right left) right val)))
 
       (and (== color BLACK)
            (some? left) (== RED lc)
            (some? (:right left)) (== RED (:color (:right left))))
       (let [lr (:right left)]
-        (->RBNode env RED
-                  (->RBNode env BLACK (:left left) (:left lr) (:value left))
+        (->RBNode RED
+                  (->RBNode BLACK (:left left) (:left lr) (:value left))
                   (:value lr)
-                  (->RBNode env BLACK (:right lr) right val)))
+                  (->RBNode BLACK (:right lr) right val)))
 
       (and (== color BLACK)
            (some? right) (== RED rc)
            (some? (:left right)) (== RED (:color (:left right))))
       (let [rl (:left right)]
-        (->RBNode env RED
-                  (->RBNode env BLACK left (:left rl) val)
+        (->RBNode RED
+                  (->RBNode BLACK left (:left rl) val)
                   (:value rl)
-                  (->RBNode env BLACK (:right rl) (:right right) (:value right))))
+                  (->RBNode BLACK (:right rl) (:right right) (:value right))))
 
       (and (== color BLACK)
            (some? right) (== RED rc)
            (some? (:right right)) (== RED (:color (:right right))))
       (let [rr (:right right)]
-        (->RBNode env RED
-                  (->RBNode env BLACK left (:left right) val)
+        (->RBNode RED
+                  (->RBNode BLACK left (:left right) val)
                   (:value right)
-                  (->RBNode env BLACK (:left rr) (:right rr) (:value rr))))
+                  (->RBNode BLACK (:left rr) (:right rr) (:value rr))))
 
       ;; ===== Deletion cases: left child is double-black =====
 
       ;; Case D1: BB-left, BLACK parent, RED right sibling
       ;; Rotate left to bring right's black child as new right sibling
       (and (is-bb? left) (some? right) (== RED rc))
-      (let [rl (:left right)  rr (:right right)  rv (:value right)]
-        (->RBNode env BLACK
-                  (del-balance env color left val rl)
+      (let [rl (:left right) rr (:right right) rv (:value right)]
+        (->RBNode BLACK
+                  (del-balance color left val rl)
                   rv
                   rr))
 
@@ -303,10 +301,10 @@
       (and (is-bb? left)
            (some? right) (== BLACK rc)
            (some? (:right right)) (== RED (:color (:right right))))
-      (->RBNode env color
-                (->RBNode env BLACK (redden-node env left) val (:left right))
+      (->RBNode color
+                (->RBNode BLACK (redden-node left) val (:left right))
                 (:value right)
-                (->RBNode env BLACK (:left (:right right)) (:right (:right right)) (:value (:right right))))
+                (->RBNode BLACK (:left (:right right)) (:right (:right right)) (:value (:right right))))
 
       ;; Case D3: BB-left, BLACK parent, BLACK right sibling with RED left nephew only
       (and (is-bb? left)
@@ -314,40 +312,40 @@
            (some? (:left right)) (== RED (:color (:left right)))
            (or (nil? (:right right)) (not= RED (:color (:right right)))))
       (let [rl (:left right)]
-        (->RBNode env color
-                  (->RBNode env BLACK (redden-node env left) val (:left rl))
+        (->RBNode color
+                  (->RBNode BLACK (redden-node left) val (:left rl))
                   (:value rl)
-                  (->RBNode env BLACK (:right rl) (:right right) (:value right))))
+                  (->RBNode BLACK (:right rl) (:right right) (:value right))))
 
       ;; Case D4: BB-left, any parent, BLACK right sibling with no red nephews
       ;; Push blackness up: right becomes RED, parent absorbs one black
       (and (is-bb? left)
            (some? right) (== BLACK rc)
-           (or (nil? (:left right))  (not= RED (:color (:left right))))
+           (or (nil? (:left right)) (not= RED (:color (:left right))))
            (or (nil? (:right right)) (not= RED (:color (:right right)))))
-      (->RBNode env (inc color)
-                (redden-node env left)
+      (->RBNode (inc color)
+                (redden-node left)
                 val
-                (->RBNode env RED (:left right) (:right right) (:value right)))
+                (->RBNode RED (:left right) (:right right) (:value right)))
 
       ;; ===== Deletion cases: right child is double-black =====
 
       ;; Case D5: BB-right, BLACK parent, RED left sibling
       (and (is-bb? right) (some? left) (== RED lc))
-      (let [ll (:left left)  lr (:right left)  lv (:value left)]
-        (->RBNode env BLACK
+      (let [ll (:left left) lr (:right left) lv (:value left)]
+        (->RBNode BLACK
                   ll
                   lv
-                  (del-balance env color lr val right)))
+                  (del-balance color lr val right)))
 
       ;; Case D6: BB-right, BLACK parent, BLACK left sibling with RED left nephew
       (and (is-bb? right)
            (some? left) (== BLACK lc)
            (some? (:left left)) (== RED (:color (:left left))))
-      (->RBNode env color
-                (->RBNode env BLACK (:left (:left left)) (:right (:left left)) (:value (:left left)))
+      (->RBNode color
+                (->RBNode BLACK (:left (:left left)) (:right (:left left)) (:value (:left left)))
                 (:value left)
-                (->RBNode env BLACK (:right left) val (redden-node env right)))
+                (->RBNode BLACK (:right left) val (redden-node right)))
 
       ;; Case D7: BB-right, BLACK parent, BLACK left sibling with RED right nephew only
       (and (is-bb? right)
@@ -355,28 +353,28 @@
            (some? (:right left)) (== RED (:color (:right left)))
            (or (nil? (:left left)) (not= RED (:color (:left left)))))
       (let [lr (:right left)]
-        (->RBNode env color
-                  (->RBNode env BLACK (:left left) (:left lr) (:value left))
+        (->RBNode color
+                  (->RBNode BLACK (:left left) (:left lr) (:value left))
                   (:value lr)
-                  (->RBNode env BLACK (:right lr) val (redden-node env right))))
+                  (->RBNode BLACK (:right lr) val (redden-node right))))
 
       ;; Case D8: BB-right, any parent, BLACK left sibling with no red nephews
       (and (is-bb? right)
            (some? left) (== BLACK lc)
-           (or (nil? (:left left))  (not= RED (:color (:left left))))
+           (or (nil? (:left left)) (not= RED (:color (:left left))))
            (or (nil? (:right left)) (not= RED (:color (:right left)))))
-      (->RBNode env (inc color)
-                (->RBNode env RED (:left left) (:right left) (:value left))
+      (->RBNode (inc color)
+                (->RBNode RED (:left left) (:right left) (:value left))
                 val
-                (redden-node env right))
+                (redden-node right))
 
       ;; No rebalancing needed — construct node as-is
       :else
       (if (= left :BB-nil)
-        (->RBNode env color nil val right)
+        (->RBNode color nil val right)
         (if (= right :BB-nil)
-          (->RBNode env color left val nil)
-          (->RBNode env color left val right))))))
+          (->RBNode color left val nil)
+          (->RBNode color left val right))))))
 
 (defn- rb-min-val
   "Return the minimum value in subtree rooted at tree."
@@ -388,7 +386,7 @@
 (defn- del-leftmost
   "Remove the leftmost (minimum) node from tree.
    Returns [min-value new-tree] where new-tree may contain a double-black node."
-  [env tree]
+  [tree]
   (let [l (:left tree)
         v (:value tree)
         r (:right tree)
@@ -397,67 +395,67 @@
       ;; This is the leftmost node
       (cond
         ;; Red leaf — just remove
-        (== RED c)  [v nil]
+        (== RED c) [v nil]
         ;; Black leaf — remove and mark double-black-nil
-        (and (== BLACK c) (nil? r))  [v :BB-nil]
+        (and (== BLACK c) (nil? r)) [v :BB-nil]
         ;; Black node with a red right child — replace with blackened child
         (and (== BLACK c) (some? r) (== RED (:color r)))
-        [v (->RBNode env BLACK (:left r) (:right r) (:value r))]
+        [v (->RBNode BLACK (:left r) (:right r) (:value r))]
         ;; Shouldn't happen in a valid RB tree, but be safe
         :else [v r])
       ;; Recurse left
-      (let [[min-v new-l] (del-leftmost env l)]
-        [min-v (del-balance env c new-l v r)]))))
+      (let [[min-v new-l] (del-leftmost l)]
+        [min-v (del-balance c new-l v r)]))))
 
 (defn- del
   "Internal delete helper. Returns a tree that may contain a phantom
    double-black node if a black node was removed."
-  [env tree x]
+  [tree x]
   (if (nil? tree)
     nil
-    (let [l  (:left tree)
-          v  (:value tree)
-          r  (:right tree)
-          c  (:color tree)
+    (let [l (:left tree)
+          v (:value tree)
+          r (:right tree)
+          c (:color tree)
           cmp (compare x v)]
       (cond
         ;; x < v — delete from left subtree
         (neg? cmp)
-        (del-balance env c (del env l x) v r)
+        (del-balance c (del l x) v r)
 
         ;; x > v — delete from right subtree
         (pos? cmp)
-        (del-balance env c l v (del env r x))
+        (del-balance c l v (del r x))
 
         ;; x == v — remove this node
         :else
         (cond
           ;; Red leaf — just remove
-          (and (== RED c) (nil? l) (nil? r))  nil
+          (and (== RED c) (nil? l) (nil? r)) nil
 
           ;; Red node with only right child (left nil) — replace with right
           (and (== RED c) (nil? l))
-          (->RBNode env BLACK (:left r) (:right r) (:value r))
+          (->RBNode BLACK (:left r) (:right r) (:value r))
 
           ;; Red node with only left child (right nil) — replace with left
           (and (== RED c) (nil? r))
-          (->RBNode env BLACK (:left l) (:right l) (:value l))
+          (->RBNode BLACK (:left l) (:right l) (:value l))
 
           ;; Black leaf — produce double-black-nil
-          (and (== BLACK c) (nil? l) (nil? r))  :BB-nil
+          (and (== BLACK c) (nil? l) (nil? r)) :BB-nil
 
           ;; Black node, one red child on right
           (and (== BLACK c) (nil? l) (some? r) (== RED (:color r)))
-          (->RBNode env BLACK (:left r) (:right r) (:value r))
+          (->RBNode BLACK (:left r) (:right r) (:value r))
 
           ;; Black node, one red child on left
           (and (== BLACK c) (some? l) (nil? r) (== RED (:color l)))
-          (->RBNode env BLACK (:left l) (:right l) (:value l))
+          (->RBNode BLACK (:left l) (:right l) (:value l))
 
           ;; Both children present — replace with in-order successor
           (and (some? l) (some? r))
-          (let [[succ-val new-r] (del-leftmost env r)]
-            (del-balance env c l succ-val new-r))
+          (let [[succ-val new-r] (del-leftmost r)]
+            (del-balance c l succ-val new-r))
 
           :else nil)))))
 
@@ -467,8 +465,8 @@
 
    Uses Germane & Might's persistent deletion algorithm: O(log n) path-copying
    with 'double-black' phantom nodes to maintain red-black invariants."
-  [env tree x]
-  (let [result (del env tree x)]
+  [tree x]
+  (let [result (del tree x)]
     (cond
       ;; Double-black-nil at root: tree is now empty
       (= result :BB-nil) nil
@@ -476,10 +474,10 @@
       (nil? result) nil
       ;; Blacken root (eliminates any phantom double-black at root)
       (== DB (:color result))
-      (->RBNode env BLACK (:left result) (:right result) (:value result))
+      (->RBNode BLACK (:left result) (:right result) (:value result))
       ;; Red root (from NB absorption) — blacken it
       (== RED (:color result))
-      (->RBNode env BLACK (:left result) (:right result) (:value result))
+      (->RBNode BLACK (:left result) (:right result) (:value result))
       :else result)))
 
 (defn rb-black-height
@@ -526,23 +524,12 @@
              (no-red-red? tree))))))
 
 ;;-----------------------------------------------------------------------------
-;; Environment access — automatically gets env from global atom
-;;-----------------------------------------------------------------------------
-
-(defn- get-env
-  "Get the SAB environment from the global atom instance.
-   This is the key abstraction that hides SAB from users."
-  []
-  (when-let [global-atom atom/*global-atom-instance*]
-    (.-s-atom-env ^js global-atom)))
-
-;;-----------------------------------------------------------------------------
 ;; SortedSet — user-facing wrapper implementing CLJS collection protocols
 ;;-----------------------------------------------------------------------------
 
-(deftype SortedSet [env root mta]
+(deftype SortedSet [root mta]
   IWithMeta
-  (-with-meta [_ m] (SortedSet. env root m))
+  (-with-meta [_ m] (SortedSet. root m))
 
   IMeta
   (-meta [_] mta)
@@ -551,11 +538,11 @@
   (-count [_] (rb-count root))
 
   IEmptyableCollection
-  (-empty [_] (SortedSet. env nil nil))
+  (-empty [_] (SortedSet. nil nil))
 
   ICollection
   (-conj [_ v]
-    (SortedSet. env (rb-insert env root v) mta))
+    (SortedSet. (rb-insert root v) mta))
 
   ISeqable
   (-seq [_] (rb-seq root))
@@ -576,7 +563,7 @@
 
   ISet
   (-disjoin [_ v]
-    (SortedSet. env (rb-delete env root v) mta))
+    (SortedSet. (rb-delete root v) mta))
 
   IEquiv
   (-equiv [this other]
@@ -605,12 +592,9 @@
 
 (defn sorted-set
   "Create an EVE sorted set backed by a red-black tree in SharedArrayBuffer.
-   The SAB environment is obtained automatically from the global atom instance."
+   Must be called inside an Eve atom swap!."
   ([]
-   (let [env (get-env)]
-     (when-not env
-       (throw (js/Error. "sorted-set: No global atom instance. Call t/atom or eve/atom-domain first.")))
-     (SortedSet. env nil nil)))
+   (SortedSet. nil nil))
   ([& vals]
    (reduce conj (sorted-set) vals)))
 

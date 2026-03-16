@@ -24,8 +24,8 @@ These must pass before any code change.
 # Build native addon (only if mmap_cas.cc changes)
 npm run build:addon
 
-# Compile test bundle
-npx shadow-cljs compile eve-test
+# Compile test bundles (eve-test + mmap-worker for e2e tests)
+npm run test:compile
 
 # Run test suites
 node target/eve-test/all.js epoch-gc
@@ -126,8 +126,8 @@ Slab class sizes: `[32, 64, 128, 256, 512, 1024]` bytes.
 ## Build Commands
 
 ```bash
-# Compile test bundle
-npx shadow-cljs compile eve-test
+# Compile test bundles (eve-test + mmap-worker for e2e tests)
+npm run test:compile
 
 # Run specific test suite
 node target/eve-test/all.js <suite>

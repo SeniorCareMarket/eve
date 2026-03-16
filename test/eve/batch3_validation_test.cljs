@@ -10,7 +10,7 @@
      23 (85de974) — worker swap! smoke test (existence + structure check)"
   (:require
    [cljs.test :refer-macros [deftest testing is]]
-   [eve.shared-atom :as a]
+   [eve.atom :as a]
    [eve.wasm-mem :as wasm]
    [eve.map :as sm]
    [eve.set :as ss]))

@@ -77,6 +77,14 @@
 ;; Layout: [0x1E][pad:u8][schema-len:u16][schema-bytes...][field-data aligned to 4...]
 (def ^:const EVE_OBJ_SLAB_TYPE_ID 0x1E)
 
+;; Dataset slab block type-id — columnar table with named EveArray columns.
+;; Layout: [0x1F][pad:u8][pad:u16][row-count:i32][ncols:i32][col-list-off:i32]
+(def ^:const EVE_DATASET_SLAB_TYPE_ID 0x1F)
+
+;; Tensor slab block type-id — N-dimensional view over an EveArray.
+;; Layout: [0x20][pad:u8][pad:u16][rank:i32][dtype:i32][data-off:i32][elem-offset:i32][strides+dims...]
+(def ^:const EVE_TENSOR_SLAB_TYPE_ID 0x20)
+
 ;; Typed array subtype codes
 (def ^:const TYPED_ARRAY_UINT8         0x01)
 (def ^:const TYPED_ARRAY_INT8          0x02)
@@ -263,6 +271,17 @@
   [encoder]
   (set! typed-array-encoder encoder))
 
+;; Typed array resolver: resolves a slab-qualified offset to a SAB buffer and byte offset.
+;; Set by alloc.cljc at init time (needs access to slab resolution).
+;; (fn [slab-offset] -> {:sab ArrayBuffer, :base int}) or nil
+(def ^:private ^:mutable typed-array-resolver nil)
+
+(defn set-typed-array-resolver!
+  "Set the typed array resolver function. Called by alloc.cljc at init.
+   resolver: (fn [slab-qualified-offset] -> {:sab ArrayBuffer :base int}) or nil"
+  [resolver]
+  (set! typed-array-resolver resolver))
+
 ;; Record registries (two-part for encode/decode):
 ;;   record-tag-by-ctor: constructor-fn → tag-str  (for encoding: look up tag by type)
 ;;   record-ctor-by-tag: tag-str → map->fn         (for decoding: reconstruct from tag)
@@ -368,12 +387,20 @@
   (.setInt32 sab-ptr-dv 3 offset true)
   sab-ptr-buf)
 
-(def ^:private sab-tag->fast-tag
-  "Map from ISabStorable tag keywords to SAB pointer fast-tag bytes."
-  {:eve-map  FAST_TAG_SAB_MAP
-   :hash-set FAST_TAG_SAB_SET
-   :eve-vec  FAST_TAG_SAB_VEC
-   :eve-list FAST_TAG_SAB_LIST})
+;; Mutable map from ISabStorable tag keywords to SAB pointer fast-tag bytes.
+;; Extended by eve-deftype types at load time via register-sab-fast-tag!.
+(defonce ^:private sab-tag->fast-tag*
+  (atom {:eve-map   FAST_TAG_SAB_MAP
+         :hash-set  FAST_TAG_SAB_SET
+         :eve-vec   FAST_TAG_SAB_VEC
+         :eve-list  FAST_TAG_SAB_LIST
+         :eve/array FAST_TAG_EVE_ARRAY}))
+
+(defn register-sab-fast-tag!
+  "Register a SAB tag keyword → fast-tag byte mapping.
+   Called by eve-deftype macro output at namespace load time."
+  [tag-kw fast-tag-byte]
+  (swap! sab-tag->fast-tag* assoc tag-kw fast-tag-byte))
 
 (defn encode-eve-pointer
   "Encode an Eve collection instance as a SAB pointer.
@@ -382,7 +409,7 @@
   [eve-inst]
   (let [offset (d/-direct-serialize eve-inst)
         tag-kw (d/-sab-tag eve-inst)
-        fast-tag (get sab-tag->fast-tag tag-kw)]
+        fast-tag (get @sab-tag->fast-tag* tag-kw)]
     (encode-sab-pointer fast-tag offset)))
 
 ;;-----------------------------------------------------------------------------
@@ -1004,19 +1031,25 @@
             (let [data-len (.-byteLength bytes)]
               (if (== data-len 7)
                 ;; SAB pointer format (16-byte header)
-                (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
-                      sab-offset (.getInt32 dv 3 true)
-                      ;; Get SAB from s-atom-env or fall back to *parent-atom*
-                      sab-u8 (or (:data-view s-atom-env)
-                                 (when-let [^js parent d/*parent-atom*]
-                                   (let [env (.-s-atom-env ^js (or (.-parent-atom-domain parent) parent))]
-                                     (:data-view env))))]
-                  (when sab-u8
-                    (let [sab (.-buffer sab-u8)
-                          sab-dv (js/DataView. sab)
-                          subtype (.getUint8 sab-dv sab-offset)
-                          byte-len (.getUint32 sab-dv (+ sab-offset 8) true)  ;; byte-len at offset+8
-                          data-start (+ sab-offset 16)  ;; data at offset+16
+                (let [ptr-dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
+                      slab-offset (.getInt32 ptr-dv 3 true)
+                      ;; Try slab resolver first (slab-qualified offsets), then legacy s-atom-env
+                      resolved (when typed-array-resolver (typed-array-resolver slab-offset))
+                      sab (if resolved
+                            (:sab resolved)
+                            (when-let [u8 (or (:data-view s-atom-env)
+                                              (when-let [^js parent d/*parent-atom*]
+                                                (let [env (.-s-atom-env ^js (or (.-parent-atom-domain parent) parent))]
+                                                  (:data-view env))))]
+                              (.-buffer u8)))
+                      raw-base (if resolved (:base resolved) slab-offset)
+                      ;; Apply same 16-byte alignment as encoder
+                      base-offset (bit-and (+ raw-base 15) (bit-not 15))]
+                  (when sab
+                    (let [sab-dv (js/DataView. sab)
+                          subtype (.getUint8 sab-dv base-offset)
+                          byte-len (.getUint32 sab-dv (+ base-offset 8) true)
+                          data-start (+ base-offset 16)
                           in-transaction? (some? d/*parent-atom*)]
                       (if in-transaction?
                         ;; In transaction: return mutable view directly into SAB (always aligned)
@@ -1034,7 +1067,8 @@
                           0x0B (when (exists? js/BigUint64Array) (js/BigUint64Array. sab data-start (/ byte-len 8)))
                           nil)
                         ;; Outside transaction: copy bytes to fresh ArrayBuffer
-                        (let [src (.subarray sab-u8 data-start (+ data-start byte-len))
+                        (let [sab-u8 (js/Uint8Array. sab)
+                              src (.subarray sab-u8 data-start (+ data-start byte-len))
                               dst (js/Uint8Array. byte-len)]
                           (.set dst src)
                           (let [ab (.-buffer dst)]
@@ -1080,8 +1114,12 @@
                     (recur (+ pos 4 elen) (inc i) (conj! v elem))))))
 
             :else
-            ;; Unknown tag — unsupported
-            nil))
+            ;; Unknown tag — check registered constructors (eve-deftype types)
+            (let [ctor (.get sab-type-constructors tag)]
+              (when ctor
+                (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
+                      offset (.getInt32 dv 3 true)]
+                  (ctor (:sab s-atom-env) offset))))))
         ;; No magic prefix — unsupported legacy format
         nil))))
 

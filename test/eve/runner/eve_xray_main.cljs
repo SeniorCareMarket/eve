@@ -10,7 +10,7 @@
      npx shadow-cljs compile eve-xray
      node target/thread-test/xray.js"
   (:require
-   [eve.shared-atom :as a]
+   [eve.atom :as a]
    [eve.data :as d]
    [eve.deftype-proto.alloc :as alloc]
    ;; sab_map must be loaded so direct-map-encoder is registered

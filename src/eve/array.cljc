@@ -21,7 +21,7 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:cljs [[eve.shared-atom :as atom]
+   #?@(:cljs [[eve.atom :as atom]
               [eve.wasm-mem :as wasm]
               [eve.deftype-proto.wasm :as proto-wasm]]
        :clj  [[eve.mem :as mem]])))
@@ -88,6 +88,15 @@
     7 :uint32
     8 :float32
     9 :float64))
+
+;;-----------------------------------------------------------------------------
+;; Portable accessors (work on both platforms)
+;;-----------------------------------------------------------------------------
+
+(defn array-subtype-code
+  "Return the subtype code of an EveArray (portable across CLJS and JVM)."
+  [arr]
+  (.-subtype-code arr))
 
 ;;=============================================================================
 ;; CLJS implementation — SharedArrayBuffer + Atomics
@@ -247,14 +256,17 @@
       (-write writer " ..."))
     (-write writer "]"))
 
+  d/IDirectSerialize
+  (-direct-serialize [_] block-start)
+
   d/ISabStorable
   (-sab-tag [_] :eve/array)
   (-sab-encode [_this _s-atom-env]
     (ser/encode-sab-pointer ser/FAST_TAG_EVE_ARRAY block-start))
   (-sab-dispose [this s-atom-env]
-    ;; Free the array's SAB block (header + data).
-    (when (and (some? descriptor-idx) (>= descriptor-idx 0))
-      (atom/retire-block! s-atom-env descriptor-idx)))
+    ;; Free the array's slab block.
+    (when (and (some? block-start) (not= block-start alloc/NIL_OFFSET))
+      (alloc/free! block-start)))
 
   d/IsEve
   (-eve? [_] true))
@@ -264,9 +276,9 @@
 ;;-----------------------------------------------------------------------------
 
 (defn- alloc-eve-region
-  "Allocate a SAB region for n elements of the given subtype.
+  "Allocate a slab region for n elements of the given subtype.
    Writes the 8-byte header and aligns data to element size boundary.
-   Returns {:sab sab :offset data-offset :descriptor-idx idx}."
+   Returns {:sab sab :slab-off slab-qualified-offset :offset data-byte-offset}."
   [subtype-code n]
   (let [elem-shift (subtype->elem-shift subtype-code)
         elem-size (bit-shift-left 1 elem-shift)
@@ -274,28 +286,26 @@
         ;; Over-allocate by (elem-size - 1) for worst-case alignment padding
         max-padding (dec elem-size)
         total-size (+ HEADER_SIZE max-padding data-byte-size)
-        eve-env (if atom/*global-atom-instance*
-                  (atom/get-env atom/*global-atom-instance*)
-                  (throw (js/Error. "No global atom instance. Call (eve.atom/atom-domain {}) first.")))
-        alloc-result (atom/alloc eve-env total-size)]
-    (if (:error alloc-result)
-      (throw (js/Error. (str "Failed to allocate eve-array: " (:error alloc-result))))
-      (let [block-start (:offset alloc-result)
-            ;; Align data-offset to element size boundary
-            raw-data-start (+ block-start HEADER_SIZE)
-            data-offset (bit-and (+ raw-data-start (dec elem-size))
-                                 (bit-not (dec elem-size)))
-            sab (:sab eve-env)
-            dv (js/DataView. sab)]
-        ;; Write header: [subtype:u8][pad:3][count:u32LE]
-        (.setUint8 dv block-start subtype-code)
-        (.setUint8 dv (+ block-start 1) 0)
-        (.setUint16 dv (+ block-start 2) 0 true)
-        (.setUint32 dv (+ block-start 4) n true)
-        {:sab sab
-         :block-start block-start
-         :offset data-offset
-         :descriptor-idx (:descriptor-idx alloc-result)}))))
+        slab-off (alloc/alloc-offset total-size)
+        ;; Resolve to the slab instance's DataView and byte offset
+        class-idx (alloc/decode-class-idx slab-off)
+        inst (proto-wasm/get-slab-instance class-idx)
+        base (alloc/resolve-dv! slab-off)
+        dv alloc/resolved-dv
+        sab (.-buffer ^js (:u8 inst))
+        ;; Data offset relative to sab start (for TypedArray view creation)
+        raw-data-start (+ base HEADER_SIZE)
+        data-offset (bit-and (+ raw-data-start (dec elem-size))
+                             (bit-not (dec elem-size)))]
+    ;; Write header: [subtype:u8][pad:3][count:u32LE]
+    (.setUint8 dv base subtype-code)
+    (.setUint8 dv (+ base 1) 0)
+    (.setUint16 dv (+ base 2) 0 true)
+    (.setUint32 dv (+ base 4) n true)
+    {:sab sab
+     :block-start slab-off
+     :offset data-offset
+     :descriptor-idx -1}))
 
 ;;-----------------------------------------------------------------------------
 ;; Internal constructors
@@ -670,16 +680,12 @@
 ;;-----------------------------------------------------------------------------
 
 (defn retire!
-  "Mark this array's block as retired for GC.
-   Call when replacing this array with a new version.
-   Returns true if successfully retired, false if already being processed."
+  "Mark this array's slab block as retired for GC.
+   Call when replacing this array with a new version."
   [^EveArray arr]
-  (when-let [desc-idx (.-descriptor-idx arr)]
-    (when (>= desc-idx 0)
-      (let [eve-env (when atom/*global-atom-instance*
-                      (atom/get-env atom/*global-atom-instance*))]
-        (when eve-env
-          (atom/retire-block! eve-env desc-idx))))))
+  (let [slab-off (.-block-start arr)]
+    (when (and (some? slab-off) (not= slab-off alloc/NIL_OFFSET))
+      (alloc/free! slab-off))))
 
 ;;-----------------------------------------------------------------------------
 ;; SIMD-Accelerated Operations (:int32 only)
@@ -820,18 +826,21 @@
               ;; Over-allocate by 15 to guarantee 16-byte alignment headroom:
               ;; worst case raw_offset % 16 == 1 → shift 15 bytes to align.
               alloc-size (+ header-size byte-len 15)
-              ;; Get parent atom from dynamic binding or global
-              parent-atom (or d/*parent-atom* atom/*global-atom-instance*)
-              eve-env (when parent-atom (atom/get-env parent-atom))
-              alloc-result (when eve-env (atom/alloc eve-env alloc-size))]
-          (if (and alloc-result (not (:error alloc-result)))
-            ;; SAB-backed: write block at aligned position, return 7-byte pointer
-            (let [raw-offset (:offset alloc-result)
+              ;; Allocate from slab (available when parent-atom or global is set)
+              has-slab? (or (some? d/*parent-atom*) (some? atom/*global-atom-instance*))
+              alloc-result (when has-slab?
+                             (let [r (alloc/alloc alloc-size)]
+                               (when-not (:error r) r)))]
+          (if alloc-result
+            ;; Slab-backed: write block at aligned position, return 7-byte pointer
+            (let [slab-off (:offset alloc-result)
+                  base (alloc/resolve-dv! slab-off)
+                  dv alloc/resolved-dv
                   ;; Align header to 16-byte boundary
-                  aligned-offset (bit-and (+ raw-offset 15) (bit-not 15))
-                  sab (:sab eve-env)
-                  dv (js/DataView. sab)
-                  u8 (js/Uint8Array. sab)]
+                  aligned-offset (bit-and (+ base 15) (bit-not 15))
+                  class-idx (alloc/decode-class-idx slab-off)
+                  inst (proto-wasm/get-slab-instance class-idx)
+                  u8 (:u8 inst)]
               ;; Write header: [subtype:u8][reserved:7][byte-len:u32LE][reserved:4]
               (.setUint8 dv aligned-offset subtype)
               ;; reserved bytes 1-7 are implicitly zero from allocation
@@ -839,8 +848,8 @@
               ;; reserved bytes 12-15 are implicitly zero
               ;; Write data at offset+16
               (.set u8 byte-view (+ aligned-offset 16))
-              ;; Return 7-byte pointer with aligned offset
-              (ser/encode-sab-pointer ser/FAST_TAG_TYPED_ARRAY aligned-offset))
+              ;; Return 7-byte pointer with slab-qualified offset
+              (ser/encode-sab-pointer ser/FAST_TAG_TYPED_ARRAY slab-off))
             ;; Fallback for pre-init: inline blob (old 8-byte format for compatibility)
             (let [buf (js/Uint8Array. (+ 8 byte-len))
                   dv (js/DataView. (.-buffer buf))]
@@ -909,23 +918,24 @@
 
 (ser/register-sab-type-constructor!
   ser/FAST_TAG_EVE_ARRAY
-  (fn [sab block-offset]
-    ;; sab may be nil when deserializing from HAMT context (s-atom-env is {}).
-    ;; Use *parent-atom* (bound during deref/swap!) or fall back to global.
-    (let [sab (or sab (when-let [parent (or d/*parent-atom* atom/*global-atom-instance*)]
-                        (:sab (atom/get-env parent))))
-          dv (js/DataView. sab)
-          subtype (.getUint8 dv block-offset)
-          elem-count (.getUint32 dv (+ block-offset 4) true)
+  (fn [_sab slab-off]
+    ;; slab-off is a slab-qualified offset. Resolve to DataView and backing buffer.
+    (let [base (alloc/resolve-dv! slab-off)
+          dv alloc/resolved-dv
+          class-idx (alloc/decode-class-idx slab-off)
+          inst (proto-wasm/get-slab-instance class-idx)
+          sab (.-buffer ^js (:u8 inst))
+          subtype (.getUint8 dv base)
+          elem-count (.getUint32 dv (+ base 4) true)
           elem-shift (subtype->elem-shift subtype)
           ;; Align data-offset to element size boundary (must match alloc-eve-region)
           align (bit-shift-left 1 elem-shift)
-          raw-data-start (+ block-offset HEADER_SIZE)
+          raw-data-start (+ base HEADER_SIZE)
           data-offset (bit-and (+ raw-data-start (dec align))
                                (bit-not (dec align)))
           atomic (subtype->atomic? subtype)
           view (make-typed-view sab subtype)]
-      (EveArray. sab block-offset data-offset elem-count -1 subtype elem-shift atomic view nil nil))))
+      (EveArray. sab slab-off data-offset elem-count -1 subtype elem-shift atomic view nil nil))))
 
 )) ;; end #?(:cljs (do ...))
 
@@ -941,6 +951,9 @@
                            ^long subtype-code
                            sio              ;; ISlabIO context
                            ^:unsynchronized-mutable _hash_val]
+
+       d/IEveRoot
+       (-root-header-off [_] slab-off)
 
        clojure.lang.Counted
        (count [_] (int cnt))
@@ -1024,7 +1037,25 @@
                    (and (== cnt (.-cnt o))
                         (== subtype-code (.-subtype-code o))
                         (every? true? (map = (seq this) (seq o)))))))
-       (hashCode [this] (.hasheq this)))
+       (hashCode [this] (.hasheq this))
+
+       eve.deftype-proto.data/IBulkAccess
+       (-as-double-array [_]
+         (when (== subtype-code 9)
+           (let [raw (alloc/-sio-read-bytes sio slab-off 8 (* cnt 8))
+                 bb  (doto (java.nio.ByteBuffer/wrap raw)
+                       (.order java.nio.ByteOrder/LITTLE_ENDIAN))
+                 out (double-array cnt)]
+             (.get (.asDoubleBuffer bb) out)
+             out)))
+       (-as-int-array [_]
+         (when (== subtype-code 6)
+           (let [raw (alloc/-sio-read-bytes sio slab-off 8 (* cnt 4))
+                 bb  (doto (java.nio.ByteBuffer/wrap raw)
+                       (.order java.nio.ByteOrder/LITTLE_ENDIAN))
+                 out (int-array cnt)]
+             (.get (.asIntBuffer bb) out)
+             out))))
 
      (defmethod print-method JvmEveArray [^JvmEveArray a ^java.io.Writer w]
        (.write w (str "#eve/array " (subtype->type-kw (.-subtype-code a)) " "))
@@ -1036,5 +1067,188 @@
        (let [subtype (long (alloc/-sio-read-u8 sio slab-off 1))
              cnt     (alloc/-sio-read-i32 sio slab-off 4)]
          (JvmEveArray. cnt slab-off subtype sio nil)))
+
+;;-----------------------------------------------------------------------------
+;; JVM heap-backed EveArray (no slab required)
+;;-----------------------------------------------------------------------------
+
+     (deftype JvmHeapEveArray [^long cnt
+                                ^long subtype-code
+                                backing         ;; Java array (int[], double[], etc.)
+                                ^:unsynchronized-mutable _hash_val]
+
+       clojure.lang.Counted
+       (count [_] (int cnt))
+
+       clojure.lang.Indexed
+       (nth [this i]
+         (if (and (>= i 0) (< i cnt))
+           (case (int subtype-code)
+             (1 3) (bit-and (long (clojure.core/aget ^bytes backing i)) 0xFF)
+             2     (long (clojure.core/aget ^bytes backing i))
+             4     (long (clojure.core/aget ^shorts backing i))
+             5     (bit-and (long (clojure.core/aget ^shorts backing i)) 0xFFFF)
+             6     (long (clojure.core/aget ^ints backing i))
+             7     (bit-and (long (clojure.core/aget ^ints backing i)) 0xFFFFFFFF)
+             8     (double (clojure.core/aget ^floats backing i))
+             9     (clojure.core/aget ^doubles backing i))
+           (throw (IndexOutOfBoundsException. (str "Index " i " out of bounds for length " cnt)))))
+       (nth [this i not-found]
+         (if (and (>= i 0) (< i cnt))
+           (.nth this i)
+           not-found))
+
+       clojure.lang.ILookup
+       (valAt [this k] (.nth this (int k)))
+       (valAt [this k not-found] (.nth this (int k) not-found))
+
+       clojure.lang.Seqable
+       (seq [this]
+         (when (pos? cnt)
+           (letfn [(arr-seq [i]
+                     (when (< i cnt)
+                       (lazy-seq (cons (.nth this i) (arr-seq (inc i))))))]
+             (arr-seq 0))))
+
+       clojure.lang.IReduce
+       (reduce [this f]
+         (if (zero? cnt)
+           (f)
+           (loop [i 1 acc (.nth this 0)]
+             (if (or (>= i cnt) (reduced? acc))
+               (unreduced acc)
+               (recur (inc i) (f acc (.nth this i)))))))
+
+       clojure.lang.IReduceInit
+       (reduce [this f init]
+         (loop [i 0 acc init]
+           (if (or (>= i cnt) (reduced? acc))
+             (unreduced acc)
+             (recur (inc i) (f acc (.nth this i))))))
+
+       clojure.lang.IFn
+       (invoke [this i] (.nth this (int i)))
+       (invoke [this i not-found] (.nth this (int i) not-found))
+
+       java.lang.Iterable
+       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+
+       clojure.lang.IHashEq
+       (hasheq [this]
+         (if _hash_val
+           _hash_val
+           (let [h (loop [i 0 h (int (+ 1 (* 31 subtype-code)))]
+                     (if (< i cnt)
+                       (recur (inc i) (unchecked-int (+ (* 31 h) (clojure.lang.Util/hasheq (.nth this i)))))
+                       h))]
+             (set! _hash_val h)
+             h)))
+
+       java.lang.Object
+       (toString [this]
+         (str "#eve/array " (subtype->type-kw subtype-code) " " (vec (seq this))))
+       (equals [this other]
+         (cond
+           (identical? this other) true
+           (not (or (instance? JvmHeapEveArray other)
+                    (instance? JvmEveArray other))) false
+           :else (and (== cnt (count other))
+                      (== subtype-code (.-subtype-code ^JvmHeapEveArray other))
+                      (every? true? (map = (seq this) (seq other))))))
+       (hashCode [this] (.hasheq this))
+
+       eve.deftype-proto.data/IBackingArray
+       (-backing-array [_] backing)
+
+       eve.deftype-proto.data/IBulkAccess
+       (-as-double-array [_]
+         (when (== subtype-code 9) backing))
+       (-as-int-array [_]
+         (when (== subtype-code 6) backing)))
+
+     (defmethod print-method JvmHeapEveArray [^JvmHeapEveArray a ^java.io.Writer w]
+       (.write w (str "#eve/array " (subtype->type-kw (.-subtype-code a)) " "))
+       (print-method (vec (seq a)) w))
+
+     (defn- make-jvm-backing-array
+       "Create a Java array of the right type for subtype-code."
+       [subtype-code ^long n]
+       (case (int subtype-code)
+         (1 2 3) (byte-array n)
+         (4 5)   (short-array n)
+         (6 7)   (int-array n)
+         8       (float-array n)
+         9       (double-array n)))
+
+     (defn- jvm-heap-aset!
+       "Write a value into a JvmHeapEveArray's backing array."
+       [^JvmHeapEveArray arr ^long idx val]
+       (let [backing (.-backing arr)
+             sc (.-subtype-code arr)]
+         (case (int sc)
+           (1 2 3) (clojure.core/aset ^bytes backing (int idx) (byte (int val)))
+           (4 5)   (clojure.core/aset ^shorts backing (int idx) (short (int val)))
+           (6 7)   (clojure.core/aset ^ints backing (int idx) (int val))
+           8       (clojure.core/aset ^floats backing (int idx) (float (double val)))
+           9       (clojure.core/aset ^doubles backing (int idx) (double val)))
+         val))
+
+     (defn eve-array
+       "Create a heap-backed typed array on JVM.
+        (eve-array :int32 10)          ;; 10 zero-filled
+        (eve-array :float64 10 0.0)    ;; 10 filled with 0.0
+        (eve-array :uint8 [1 2 3])     ;; from collection"
+       ([type-kw size-or-coll]
+        (if (number? size-or-coll)
+          (eve-array type-kw (int size-or-coll) nil)
+          (let [sc (type-kw->subtype type-kw)
+                coll (vec size-or-coll)
+                n (count coll)
+                backing (make-jvm-backing-array sc n)
+                arr (JvmHeapEveArray. n sc backing nil)]
+            (dotimes [i n]
+              (jvm-heap-aset! arr i (nth coll i)))
+            arr)))
+       ([type-kw n init-val]
+        (let [sc (type-kw->subtype type-kw)
+              backing (make-jvm-backing-array sc (int n))
+              arr (JvmHeapEveArray. (long n) sc backing nil)]
+          (when init-val
+            (dotimes [i n]
+              (jvm-heap-aset! arr i init-val)))
+          arr)))
+
+     (defn aset!
+       "Write element at index in a heap-backed EveArray."
+       [arr idx val]
+       (jvm-heap-aset! arr idx val))
+
+     (defn from-double-array
+       "Wrap a double[] directly as a JvmHeapEveArray. Zero-copy."
+       ^JvmHeapEveArray [^doubles arr]
+       (JvmHeapEveArray. (alength arr) 9 arr nil))
+
+     (defn from-int-array
+       "Wrap an int[] directly as a JvmHeapEveArray. Zero-copy."
+       ^JvmHeapEveArray [^ints arr]
+       (JvmHeapEveArray. (alength arr) 6 arr nil))
+
+     (defn from-byte-array
+       "Wrap a byte[] directly as a JvmHeapEveArray with :uint8 subtype. Zero-copy."
+       ^JvmHeapEveArray [^bytes arr]
+       (JvmHeapEveArray. (alength arr) 1 arr nil))
+
+     ;; Register JVM type constructor for EveArray slab pointer tags.
+     ;; 0x1D = EVE_ARRAY_SLAB_TYPE_ID — inline slab block pointer (from value+sio->eve-bytes)
+     ;; 0x1C = FAST_TAG_EVE_ARRAY — SAB-style pointer tag (from CLJS, cross-compat)
+     (ser/register-jvm-type-constructor!
+       ser/EVE_ARRAY_SLAB_TYPE_ID  ;; 0x1D
+       (fn [header-off]
+         (jvm-eve-array-from-offset alloc/*jvm-slab-ctx* header-off)))
+
+     (ser/register-jvm-type-constructor!
+       ser/FAST_TAG_EVE_ARRAY  ;; 0x1C
+       (fn [header-off]
+         (jvm-eve-array-from-offset alloc/*jvm-slab-ctx* header-off)))
 
      )) ;; end #?(:clj (do ...))
