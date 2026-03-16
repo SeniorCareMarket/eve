@@ -9,7 +9,7 @@
    [cljs.test :as t]
    [clojure.string :as str]
    [eve.deftype-proto.alloc :as eve-alloc]
-   [eve.shared-atom :as a]
+   [eve.atom :as a]
    [eve.data :as d]
 
    ;; Pool reset modules (for isolated test namespace support)

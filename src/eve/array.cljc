@@ -21,7 +21,7 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:cljs [[eve.shared-atom :as atom]
+   #?@(:cljs [[eve.atom :as atom]
               [eve.wasm-mem :as wasm]
               [eve.deftype-proto.wasm :as proto-wasm]]
        :clj  [[eve.mem :as mem]])))
@@ -264,9 +264,9 @@
   (-sab-encode [_this _s-atom-env]
     (ser/encode-sab-pointer ser/FAST_TAG_EVE_ARRAY block-start))
   (-sab-dispose [this s-atom-env]
-    ;; Free the array's SAB block (header + data).
-    (when (and (some? descriptor-idx) (>= descriptor-idx 0))
-      (atom/retire-block! s-atom-env descriptor-idx)))
+    ;; Free the array's slab block.
+    (when (and (some? block-start) (not= block-start alloc/NIL_OFFSET))
+      (alloc/free! block-start)))
 
   d/IsEve
   (-eve? [_] true))
@@ -276,9 +276,9 @@
 ;;-----------------------------------------------------------------------------
 
 (defn- alloc-eve-region
-  "Allocate a SAB region for n elements of the given subtype.
+  "Allocate a slab region for n elements of the given subtype.
    Writes the 8-byte header and aligns data to element size boundary.
-   Returns {:sab sab :offset data-offset :descriptor-idx idx}."
+   Returns {:sab sab :slab-off slab-qualified-offset :offset data-byte-offset}."
   [subtype-code n]
   (let [elem-shift (subtype->elem-shift subtype-code)
         elem-size (bit-shift-left 1 elem-shift)
@@ -286,28 +286,26 @@
         ;; Over-allocate by (elem-size - 1) for worst-case alignment padding
         max-padding (dec elem-size)
         total-size (+ HEADER_SIZE max-padding data-byte-size)
-        eve-env (if atom/*global-atom-instance*
-                  (atom/get-env atom/*global-atom-instance*)
-                  (throw (js/Error. "No global atom instance. Call (eve.atom/atom-domain {}) first.")))
-        alloc-result (atom/alloc eve-env total-size)]
-    (if (:error alloc-result)
-      (throw (js/Error. (str "Failed to allocate eve-array: " (:error alloc-result))))
-      (let [block-start (:offset alloc-result)
-            ;; Align data-offset to element size boundary
-            raw-data-start (+ block-start HEADER_SIZE)
-            data-offset (bit-and (+ raw-data-start (dec elem-size))
-                                 (bit-not (dec elem-size)))
-            sab (:sab eve-env)
-            dv (js/DataView. sab)]
-        ;; Write header: [subtype:u8][pad:3][count:u32LE]
-        (.setUint8 dv block-start subtype-code)
-        (.setUint8 dv (+ block-start 1) 0)
-        (.setUint16 dv (+ block-start 2) 0 true)
-        (.setUint32 dv (+ block-start 4) n true)
-        {:sab sab
-         :block-start block-start
-         :offset data-offset
-         :descriptor-idx (:descriptor-idx alloc-result)}))))
+        slab-off (alloc/alloc-offset total-size)
+        ;; Resolve to the slab instance's DataView and byte offset
+        class-idx (alloc/decode-class-idx slab-off)
+        inst (proto-wasm/get-slab-instance class-idx)
+        base (alloc/resolve-dv! slab-off)
+        dv alloc/resolved-dv
+        sab (.-buffer ^js (:u8 inst))
+        ;; Data offset relative to sab start (for TypedArray view creation)
+        raw-data-start (+ base HEADER_SIZE)
+        data-offset (bit-and (+ raw-data-start (dec elem-size))
+                             (bit-not (dec elem-size)))]
+    ;; Write header: [subtype:u8][pad:3][count:u32LE]
+    (.setUint8 dv base subtype-code)
+    (.setUint8 dv (+ base 1) 0)
+    (.setUint16 dv (+ base 2) 0 true)
+    (.setUint32 dv (+ base 4) n true)
+    {:sab sab
+     :block-start slab-off
+     :offset data-offset
+     :descriptor-idx -1}))
 
 ;;-----------------------------------------------------------------------------
 ;; Internal constructors
@@ -682,16 +680,12 @@
 ;;-----------------------------------------------------------------------------
 
 (defn retire!
-  "Mark this array's block as retired for GC.
-   Call when replacing this array with a new version.
-   Returns true if successfully retired, false if already being processed."
+  "Mark this array's slab block as retired for GC.
+   Call when replacing this array with a new version."
   [^EveArray arr]
-  (when-let [desc-idx (.-descriptor-idx arr)]
-    (when (>= desc-idx 0)
-      (let [eve-env (when atom/*global-atom-instance*
-                      (atom/get-env atom/*global-atom-instance*))]
-        (when eve-env
-          (atom/retire-block! eve-env desc-idx))))))
+  (let [slab-off (.-block-start arr)]
+    (when (and (some? slab-off) (not= slab-off alloc/NIL_OFFSET))
+      (alloc/free! slab-off))))
 
 ;;-----------------------------------------------------------------------------
 ;; SIMD-Accelerated Operations (:int32 only)
@@ -832,18 +826,21 @@
               ;; Over-allocate by 15 to guarantee 16-byte alignment headroom:
               ;; worst case raw_offset % 16 == 1 → shift 15 bytes to align.
               alloc-size (+ header-size byte-len 15)
-              ;; Get parent atom from dynamic binding or global
-              parent-atom (or d/*parent-atom* atom/*global-atom-instance*)
-              eve-env (when parent-atom (atom/get-env parent-atom))
-              alloc-result (when eve-env (atom/alloc eve-env alloc-size))]
-          (if (and alloc-result (not (:error alloc-result)))
-            ;; SAB-backed: write block at aligned position, return 7-byte pointer
-            (let [raw-offset (:offset alloc-result)
+              ;; Allocate from slab (available when parent-atom or global is set)
+              has-slab? (or (some? d/*parent-atom*) (some? atom/*global-atom-instance*))
+              alloc-result (when has-slab?
+                             (let [r (alloc/alloc alloc-size)]
+                               (when-not (:error r) r)))]
+          (if alloc-result
+            ;; Slab-backed: write block at aligned position, return 7-byte pointer
+            (let [slab-off (:offset alloc-result)
+                  base (alloc/resolve-dv! slab-off)
+                  dv alloc/resolved-dv
                   ;; Align header to 16-byte boundary
-                  aligned-offset (bit-and (+ raw-offset 15) (bit-not 15))
-                  sab (:sab eve-env)
-                  dv (js/DataView. sab)
-                  u8 (js/Uint8Array. sab)]
+                  aligned-offset (bit-and (+ base 15) (bit-not 15))
+                  class-idx (alloc/decode-class-idx slab-off)
+                  inst (proto-wasm/get-slab-instance class-idx)
+                  u8 (:u8 inst)]
               ;; Write header: [subtype:u8][reserved:7][byte-len:u32LE][reserved:4]
               (.setUint8 dv aligned-offset subtype)
               ;; reserved bytes 1-7 are implicitly zero from allocation
@@ -851,8 +848,8 @@
               ;; reserved bytes 12-15 are implicitly zero
               ;; Write data at offset+16
               (.set u8 byte-view (+ aligned-offset 16))
-              ;; Return 7-byte pointer with aligned offset
-              (ser/encode-sab-pointer ser/FAST_TAG_TYPED_ARRAY aligned-offset))
+              ;; Return 7-byte pointer with slab-qualified offset
+              (ser/encode-sab-pointer ser/FAST_TAG_TYPED_ARRAY slab-off))
             ;; Fallback for pre-init: inline blob (old 8-byte format for compatibility)
             (let [buf (js/Uint8Array. (+ 8 byte-len))
                   dv (js/DataView. (.-buffer buf))]
@@ -921,23 +918,24 @@
 
 (ser/register-sab-type-constructor!
   ser/FAST_TAG_EVE_ARRAY
-  (fn [sab block-offset]
-    ;; sab may be nil when deserializing from HAMT context (s-atom-env is {}).
-    ;; Use *parent-atom* (bound during deref/swap!) or fall back to global.
-    (let [sab (or sab (when-let [parent (or d/*parent-atom* atom/*global-atom-instance*)]
-                        (:sab (atom/get-env parent))))
-          dv (js/DataView. sab)
-          subtype (.getUint8 dv block-offset)
-          elem-count (.getUint32 dv (+ block-offset 4) true)
+  (fn [_sab slab-off]
+    ;; slab-off is a slab-qualified offset. Resolve to DataView and backing buffer.
+    (let [base (alloc/resolve-dv! slab-off)
+          dv alloc/resolved-dv
+          class-idx (alloc/decode-class-idx slab-off)
+          inst (proto-wasm/get-slab-instance class-idx)
+          sab (.-buffer ^js (:u8 inst))
+          subtype (.getUint8 dv base)
+          elem-count (.getUint32 dv (+ base 4) true)
           elem-shift (subtype->elem-shift subtype)
           ;; Align data-offset to element size boundary (must match alloc-eve-region)
           align (bit-shift-left 1 elem-shift)
-          raw-data-start (+ block-offset HEADER_SIZE)
+          raw-data-start (+ base HEADER_SIZE)
           data-offset (bit-and (+ raw-data-start (dec align))
                                (bit-not (dec align)))
           atomic (subtype->atomic? subtype)
           view (make-typed-view sab subtype)]
-      (EveArray. sab block-offset data-offset elem-count -1 subtype elem-shift atomic view nil nil))))
+      (EveArray. sab slab-off data-offset elem-count -1 subtype elem-shift atomic view nil nil))))
 
 )) ;; end #?(:cljs (do ...))
 

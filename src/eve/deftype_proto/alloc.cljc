@@ -981,8 +981,10 @@
 
      (def ^:private ^:mutable initialized? false)
 
+     (declare init-sab-coalesc!)
+
      (defn init!
-       "Initialize all 6 slab classes + root SAB.
+       "Initialize all 6 slab classes + class 6 coalesc + root SAB.
         Returns a Promise that resolves when all WASM upgrades are done."
        [& {:keys [capacities force] :or {capacities {}}}]
        (if (and initialized? (not force))
@@ -995,6 +997,22 @@
                      (let [cap (get capacities i (d/default-capacity-for-class i))]
                        (init-slab! i :capacity cap))))]
              (init-root-sab!)
+             ;; Initialize SAB-backed class 6 coalesc for overflow (>1024 byte) allocations
+             (init-sab-coalesc!)
+             ;; Register typed array resolver for deserializer
+             (ser/set-typed-array-resolver!
+               (fn [slab-offset]
+                 (let [class-idx (decode-class-idx slab-offset)
+                       block-idx (decode-block-idx slab-offset)
+                       inst      (wasm/get-slab-instance class-idx)
+                       sab       (when inst (.-buffer ^js (:u8 inst)))]
+                   (when sab
+                     (let [block-size (aget d/SLAB_SIZES class-idx)
+                           data-off   (aget slab-data-offsets class-idx)
+                           base       (+ data-off (* block-idx block-size))
+                           ;; Apply same 16-byte alignment as typed-array encoder
+                           aligned    (bit-and (+ base 15) (bit-not 15))]
+                       {:sab sab :base aligned})))))
              (js/Promise.all slab-promises)))))
 
      (defn reset-all-slabs!
@@ -1744,5 +1762,30 @@
        (set! mmap-coalesc-region nil)
        (set! mmap-coalesc-path nil)
        (set! mmap-coalesc-max-data-size 0)
-       (set! mmap-coalesc-cached-data-size 0))))
+       (set! mmap-coalesc-cached-data-size 0))
+
+     (defn init-sab-coalesc!
+       "Initialize a WASM-Memory-backed class 6 coalescing allocator.
+        Uses WebAssembly.Memory (growable, shared) like the other slab classes.
+        For SAB (in-memory) domains that need overflow allocation (>1024 bytes)."
+       [& {:keys [initial-data-size max-desc]
+            :or   {initial-data-size coalesc/INITIAL_DATA_SIZE
+                   max-desc          coalesc/MAX_DESCRIPTORS}}]
+       (let [layout      (coalesc/coalesc-layout initial-data-size max-desc)
+             total-bytes (:total-bytes layout)
+             data-offset (:data-offset layout)
+             wasm-memory (wasm/create-slab-memory total-bytes)
+             sab         (if (instance? js/SharedArrayBuffer wasm-memory)
+                           wasm-memory
+                           (.-buffer wasm-memory))
+             region      (mem/js-sab-region sab)]
+         (coalesc/init-coalesc-region! region initial-data-size max-desc)
+         (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
+         (aset slab-bitmap-offsets OVERFLOW_CLASS_IDX (:desc-table-offset layout))
+         (aset slab-total-blocks OVERFLOW_CLASS_IDX max-desc)
+         (set! mmap-coalesc-path nil)
+         (set! mmap-coalesc-max-data-size 0)
+         (set! mmap-coalesc-cached-data-size initial-data-size)
+         (wasm/register-slab-instance-from-sab! OVERFLOW_CLASS_IDX sab)
+         (set! mmap-coalesc-region region)))))
 

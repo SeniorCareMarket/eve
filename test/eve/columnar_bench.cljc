@@ -17,7 +17,7 @@
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
    [eve.tensor :as tensor]
-   #?@(:cljs [[eve.shared-atom :as sa]]
+   #?@(:cljs [[eve.atom :as sa]]
        :clj  [[eve.atom :as eve-atom]
               [eve.deftype-proto.alloc :as alloc]])))
 

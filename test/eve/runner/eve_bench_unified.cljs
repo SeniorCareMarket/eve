@@ -18,7 +18,7 @@
    [cljs-thread.future]
    [cljs-thread.injest]
    [eve.runner.thread-test-runner]
-   [eve.shared-atom :as a]
+   [eve.atom :as a]
    [clojure.string :as str]
    ;; Pull in test namespace with alias to prevent DCE
    #_{:clj-kondo/ignore [:unused-namespace]}

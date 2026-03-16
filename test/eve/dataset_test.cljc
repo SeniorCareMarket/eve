@@ -6,7 +6,7 @@
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
-   #?(:cljs [eve.shared-atom :as sa])))
+   #?(:cljs [eve.atom :as sa])))
 
 (defn- approx= [expected actual tolerance]
   (< #?(:cljs (abs (- expected actual))

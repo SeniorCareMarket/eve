@@ -192,16 +192,26 @@
        (-exchange-i32! [_ byte-off val]
          (js/Atomics.exchange -i32 (byte-off->i32-idx byte-off) val))
 
-       (-load-i64 [_ _byte-off]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
-       (-store-i64! [_ _byte-off _val]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
+       (-load-i64 [_ byte-off]
+         ;; Emulate i64 load via two i32 loads (little-endian).
+         ;; Sufficient for single-process SAB use (no cross-process atomicity).
+         (let [lo (unsigned-bit-shift-right
+                    (js/Atomics.load -i32 (byte-off->i32-idx byte-off)) 0)
+               hi (unsigned-bit-shift-right
+                    (js/Atomics.load -i32 (byte-off->i32-idx (+ byte-off 4))) 0)]
+           (+ (* hi 0x100000000) lo)))
+       (-store-i64! [_ byte-off val]
+         ;; Emulate i64 store via two i32 stores (little-endian).
+         (let [lo (bit-and val 0xFFFFFFFF)
+               hi (unsigned-bit-shift-right val 32)]
+           (js/Atomics.store -i32 (byte-off->i32-idx byte-off) lo)
+           (js/Atomics.store -i32 (byte-off->i32-idx (+ byte-off 4)) hi)))
        (-cas-i64! [_ _byte-off _expected _desired]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
+         (throw (ex-info "JsSabRegion does not support atomic i64 CAS" {})))
        (-add-i64! [_ _byte-off _delta]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
+         (throw (ex-info "JsSabRegion does not support atomic i64 add" {})))
        (-sub-i64! [_ _byte-off _delta]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
+         (throw (ex-info "JsSabRegion does not support atomic i64 sub" {})))
 
        (-wait-i32! [_ byte-off expected timeout-ms]
          (wait-result->kw

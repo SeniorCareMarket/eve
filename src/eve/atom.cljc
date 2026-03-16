@@ -30,6 +30,7 @@
       [eve.deftype-proto.serialize :as ser]
       [eve.mem :as mem]
       [eve.map :as eve-map]
+      [eve.wasm-mem :as wasm-mem]
       [eve.vec]
       [eve.set]
       [eve.list])
@@ -46,8 +47,7 @@
       [eve.list]
       [eve.array :as eve-array]
       [eve.obj :as eve-obj]
-      [eve.perf :as perf]))
-)
+      [eve.perf :as perf])))
 
 #?(:bb nil :clj (import '[eve.map EveHashMap]))
 
@@ -316,13 +316,63 @@
             :retire-q (cljs.core/atom [])
             :flush-ts (doto (make-array 1) (aset 0 0))})))
 
+     (defn- cljs-open-sab-domain!
+       "Create an in-memory SAB-backed atom domain on CLJS.
+        Uses SharedArrayBuffers for slab backing (same as the existing WASM slab
+        allocator) plus a SAB-backed root region and rmap region.
+        Returns domain-state map compatible with cljs-mmap-deref/cljs-mmap-swap!.
+        NOTE: Replaces the module-level slab instances unless :skip-init true."
+       [& {:keys [capacities skip-init] :or {capacities {} skip-init false}}]
+       ;; 1. Initialize 6 slab classes backed by SABs (via existing init!)
+       ;;    init! calls init-slab! for each class which creates WASM-backed SABs.
+       ;;    If skip-init is true, assume slabs were already initialized by caller.
+       (let [slab-promises (when-not skip-init
+                             (alloc/init! :capacities capacities :force true))]
+         ;; 2. Create root region as SAB-backed JsSabRegion
+         (let [root-sab (js/SharedArrayBuffer. ROOT_BYTES)
+               root-r (mem/js-sab-region root-sab)
+               rmap-sab (js/SharedArrayBuffer. READER_MAP_BYTES)
+               rmap-r (mem/js-sab-region rmap-sab)]
+           ;; 3. Write .root header (V2 format — multi-atom with atom table)
+           (mem/store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
+           (mem/store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0)
+           (mem/store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
+           (mem/store-i32! root-r d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
+           (mem/store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
+           (mem/store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
+           ;; 4. Init worker slots
+           (dotimes [slot d/MAX_WORKERS]
+             (mem/store-i32! root-r
+                             (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
+                             d/WORKER_STATUS_INACTIVE))
+           ;; 4b. Write atom table header and init all slots
+           (mem/store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
+           (mem/store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
+           (dotimes [s d/MAX_ATOM_SLOTS]
+             (mem/store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET)
+                             alloc/NIL_OFFSET)
+             (mem/store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
+           ;; Init slot 0 (registry atom)
+           (mem/store-i32! root-r (d/atom-slot-offset 0 d/ATOM_SLOT_PTR_OFFSET)
+                           alloc/NIL_OFFSET)
+           ;; 5. Claim a worker slot (no heartbeat needed — single process in-memory)
+           (let [slot-idx (mmap-claim-slot! root-r)]
+             (write-heartbeat! root-r slot-idx)
+             {:root-r root-r :rmap-r rmap-r :base-path nil
+              :slot-idx slot-idx :timer-id nil
+              :retire-q (cljs.core/atom [])
+              :flush-ts (doto (make-array 1) (aset 0 0))
+              ;; Keep SABs for transfer to workers
+              :root-sab root-sab :rmap-sab rmap-sab
+              :slab-promises slab-promises}))))
+
      (defn- cljs-mmap-deref
        "Read the current atom value from the .root file.
         Pins epoch before reading root ptr to protect against epoch GC.
         Returns an Eve type instance (or nil) based on the header type-id byte."
-       [{:keys [root-r slot-idx]} atom-slot-idx]
-       ;; Refresh slab regions in case another process grew them
-       (alloc/refresh-mmap-slabs!)
+       [{:keys [root-r slot-idx base-path]} atom-slot-idx]
+       ;; Refresh slab regions in case another process grew them (mmap only)
+       (when base-path (alloc/refresh-mmap-slabs!))
        (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
          (mmap-pin-epoch! root-r slot-idx epoch)
          (try
@@ -400,13 +450,13 @@
         still references.  cljs-mmap-deref is NOT used here because it unpins in
         its finally block, which is too early — applying f to the lazy old-val would
         access slab data with the epoch unpinned."
-       [{:keys [root-r slot-idx retire-q flush-ts] :as domain-state} atom-slot-idx f args]
+       [{:keys [root-r slot-idx retire-q flush-ts base-path] :as domain-state} atom-slot-idx f args]
        (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
          (loop [attempt 0]
            (when (>= attempt d/MAX_SWAP_RETRIES)
              (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
-         ;; Refresh slab regions in case another process grew them
-           (alloc/refresh-mmap-slabs!)
+         ;; Refresh slab regions in case another process grew them (mmap only)
+           (when base-path (alloc/refresh-mmap-slabs!))
          ;; Pin epoch for the entire iteration — protects lazy old-val reads
            (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
              (mmap-pin-epoch! root-r slot-idx epoch)
@@ -869,7 +919,7 @@
                                           (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs
                                                                  (Integer/valueOf (int old-ptr)))]
                                             (.add ^java.util.Queue retire-q {:offsets (or old-log [old-ptr])
-                                                                              :epoch (inc new-epoch)}))))))
+                                                                             :epoch (inc new-epoch)}))))))
                        ;; Store new tree's alloc-log for future retire (non-Eve types only)
                        #?(:bb
                           (when (and (not eve-passthru?) cur-log (not= new-ptr alloc/NIL_OFFSET))
@@ -910,7 +960,12 @@
      (-swap! [_ f a b] (cljs-mmap-swap! domain-state atom-slot-idx f [a b]))
      (-swap! [_ f a b xs] (cljs-mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
      IReset
-     (-reset! [this v] (-swap! this (constantly v)))))
+     (-reset! [this v] (-swap! this (constantly v)))
+     IPrintWithWriter
+     (-pr-writer [_ writer _opts]
+       (-write writer (str "#eve/shared-atom {:id " atom-slot-idx
+                           " :idx " atom-slot-idx "}")))))
+
 
 ;; ---------------------------------------------------------------------------
 ;; MmapAtom — JVM / bb
@@ -943,6 +998,9 @@
      (swap [_ f a b xs] (jvm-mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
      (reset [_ v] (jvm-mmap-swap! domain-state atom-slot-idx (constantly v) []))))
 
+;; SharedAtom compat alias (for tests referencing a/SharedAtom)
+#?(:cljs (def SharedAtom MmapAtom))
+
 ;; ---------------------------------------------------------------------------
 ;; MmapAtomDomain — CLJS
 ;; ---------------------------------------------------------------------------
@@ -951,6 +1009,13 @@
    (deftype MmapAtomDomain [domain-state registry-cache]
      IDeref
      (-deref [_] (cljs-mmap-deref domain-state 0))
+     ISwap
+     (-swap! [_ f] (cljs-mmap-swap! domain-state 0 f []))
+     (-swap! [_ f a] (cljs-mmap-swap! domain-state 0 f [a]))
+     (-swap! [_ f a b] (cljs-mmap-swap! domain-state 0 f [a b]))
+     (-swap! [_ f a b xs] (cljs-mmap-swap! domain-state 0 f (concat [a b] xs)))
+     IReset
+     (-reset! [this v] (-swap! this (constantly v)))
      ILookup
      (-lookup [this k] (-lookup this k nil))
      (-lookup [_ k not-found]
@@ -1024,10 +1089,10 @@
                             (cljs-open-mmap-domain! base-path :capacities capacities))
                           (cljs.core/atom {}))
                    :default (MmapAtomDomain.
-                              (if exists?
-                                (jvm-join-mmap-domain! base-path)
-                                (jvm-open-mmap-domain! base-path :capacities capacities))
-                              (clojure.core/atom {})))]
+                             (if exists?
+                               (jvm-join-mmap-domain! base-path)
+                               (jvm-open-mmap-domain! base-path :capacities capacities))
+                             (clojure.core/atom {})))]
           (swap! domain-cache assoc base-path d)
           d))))
 
@@ -1340,3 +1405,307 @@
                           (str (namespace id) "/" (name id))
                           (str "__anon__/" (swap! anon-counter inc)))]
              (lookup-or-create-mmap-atom! domain kw-str value)))))))
+
+;; ---------------------------------------------------------------------------
+;; SAB-backed (non-persistent) atom — CLJS only
+;; ---------------------------------------------------------------------------
+
+#?(:cljs
+   (do
+     (def ^:private sab-domain-cache
+       "Cache of SAB domains by id (keyword or nil for default)."
+       (cljs.core/atom {}))
+
+     (defn- resolve-sab-domain
+       "Get or create an SAB-backed MmapAtomDomain for the given id (nil = default)."
+       [id]
+       (or (get @sab-domain-cache id)
+           (let [ds (cljs-open-sab-domain! :skip-init true)
+                 d (MmapAtomDomain. ds (cljs.core/atom {}))]
+             (swap! sab-domain-cache assoc id d)
+             d)))
+
+     (defn atom
+       "Create or look up an atom (CLJS).
+
+        Mirrors the JVM eve.atom/atom API:
+
+          (atom ::counter 0)                     - SAB-backed (in-memory)
+          (atom {:id ::counter} 0)               - SAB-backed (in-memory)
+          (atom {:id ::counter :persistent \"./db\"} 0)  - mmap-backed (on disk)
+          (atom 0)                               - anonymous SAB-backed
+
+        Without :persistent, creates an in-memory SAB-backed atom (replaces
+        the old eve.shared-atom). With :persistent, delegates to
+        persistent-atom for mmap-backed cross-process atoms."
+       [& args]
+       (let [{:keys [value opts]} (parse-persistent-atom-args args)]
+         (if (:persistent opts)
+           (apply persistent-atom args)
+           (let [domain (resolve-sab-domain (:id opts))
+                 id (:id opts)
+                 kw-str (if id
+                          (str (namespace id) "/" (name id))
+                          (str "__anon__/" (swap! anon-counter inc)))]
+             (lookup-or-create-mmap-atom! domain kw-str value)))))))
+
+;; ---------------------------------------------------------------------------
+;; Backward-compat API — bridges callers that used eve.shared-atom's API
+;; These shims let array.cljc and obj.cljc compile during the transition.
+;; ---------------------------------------------------------------------------
+
+(def ^:dynamic *global-atom-instance*
+  "Dynamic var for the global atom instance.
+   Bound during swap!/reset! and by atom-domain initialization.
+   Used by array.cljc and obj.cljc to locate the slab allocation context."
+  nil)
+
+(defn- create-atom-domain!
+  "Internal: create a domain, store initial value, set global."
+  [domain initial-value]
+  (let [kw-str "__atom-domain__/root"
+        _a (lookup-or-create-mmap-atom! domain kw-str initial-value)]
+    ;; Set the global so array.cljc / obj.cljc can find the slab context
+    (set! *global-atom-instance* domain)
+    domain))
+
+#?(:cljs
+   (do
+     (defn get-env
+       "Return the slab allocation environment map.
+        For backward compatibility with callers that used eve.shared-atom/get-env.
+        In the slab-backed system, the 'env' is the domain-state map
+        augmented with :sab pointing to the class 0 slab's SAB."
+       [obj]
+       (let [ds (cond
+                  (instance? MmapAtom obj) (.-domain-state ^js obj)
+                  (instance? MmapAtomDomain obj) (.-domain-state ^js obj)
+                  (map? obj) obj
+                  :else (.-domain-state ^js obj))
+             ;; Add :sab compat key from slab class 0
+             sabs (try (alloc/get-all-slab-sabs) (catch :default _ nil))
+             sab (when (and sabs (pos? (alength sabs))) (aget sabs 0))]
+         (if sab
+           (assoc ds :sab sab)
+           ds)))
+
+     (defn alloc
+       "Allocate a block of size-bytes via the slab allocator.
+        For backward compatibility with eve.shared-atom/alloc callers.
+        Returns {:offset slab-qualified-offset :descriptor-idx slab-offset}.
+        descriptor-idx is set to the slab offset for unique identification."
+       [_env size-bytes]
+       (let [result (alloc/alloc size-bytes)]
+         (if (:error result)
+           result
+           (let [off (:offset result)]
+             {:offset off
+              :descriptor-idx off}))))
+
+     (defn free
+       "Free a slab-allocated block.
+        For backward compatibility with eve.shared-atom/free callers."
+       [_env slab-offset]
+       (alloc/free! slab-offset))
+
+     (defn shared-atom?
+       "Returns true if obj is an Eve atom (MmapAtom or MmapAtomDomain)."
+       [obj]
+       (or (instance? MmapAtom obj) (instance? MmapAtomDomain obj)))
+
+     (defn atom-serialize
+       "Serialize a value for atom storage (compat shim).
+        In the slab-backed system, this converts a CLJS value to an Eve type."
+       [v]
+       (ser/convert-to-sab v))
+
+     (defn atom-deserialize
+       "Deserialize a value from atom storage (compat shim).
+        In the slab-backed system, Eve types are already lazy — just return as-is."
+       [v]
+       v)
+
+     (defn eve->cljs
+       "Convert an Eve type to a plain CLJS value (compat shim).
+        Recursively materializes lazy slab-backed types into plain CLJS data."
+       [v]
+       (cond
+         (nil? v) v
+         (or (string? v) (number? v) (boolean? v) (keyword? v) (symbol? v)) v
+         (satisfies? IMap v) (into {} (map (fn [[k v]] [(eve->cljs k) (eve->cljs v)])) v)
+         (satisfies? IVector v) (into [] (map eve->cljs) v)
+         (satisfies? ISet v) (into #{} (map eve->cljs) v)
+         (satisfies? ISequential v) (into [] (map eve->cljs) v)
+         :else v))
+
+     (defn init-worker-cache!
+       "Initialize module-level cached views for a worker thread.
+        For backward compatibility with eve.shared-atom/init-worker-cache!.
+        In the slab system, initializes wasm-mem views from slab class 0 SAB."
+       [_env]
+       (let [sabs (alloc/get-all-slab-sabs)]
+         (when (and sabs (pos? (alength sabs)))
+           (wasm-mem/init-views-from-sab! (aget sabs 0)))))
+
+     (defn reset-alloc-cursor!
+       "Reset the allocation cursor (compat shim — no-op in slab system)."
+       ([] nil)
+       ([_pos] nil))
+
+     (defn sab-transfer-data
+       "Return the SABs for transferring to a worker.
+        Returns map with :sab (class 0 slab SAB), :reader-map-sab (rmap SAB),
+        :slab-sabs (all 6 slab SABs), :root-sab."
+       ([] (sab-transfer-data nil))
+       ([obj]
+        (let [sabs (alloc/get-all-slab-sabs)
+              sab (when (and sabs (pos? (alength sabs))) (aget sabs 0))
+              ds (when obj
+                   (cond
+                     (instance? MmapAtomDomain obj) (.-domain-state ^js obj)
+                     (instance? MmapAtom obj) (.-domain-state ^js obj)
+                     :else nil))
+              rmap-sab (when-let [rmap-r (when ds (:rmap-r ds))]
+                         (.-sab ^js rmap-r))]
+          {:sab sab
+           :reader-map-sab rmap-sab
+           :slab-sabs sabs
+           :root-sab (alloc/get-root-sab)})))
+
+     (defn atom-domain
+       "Create an SAB-backed atom domain (CLJS).
+        For backward compatibility with eve.shared-atom/atom-domain.
+        Creates a fresh SAB-backed domain with the given initial value.
+        Returns an MmapAtomDomain."
+       [initial-value & {:as _opts}]
+       (let [ds (cljs-open-sab-domain! :skip-init true)
+             domain (MmapAtomDomain. ds (cljs.core/atom {}))]
+         ;; Initialize wasm-mem cached views from slab class 0 SAB
+         (let [sabs (alloc/get-all-slab-sabs)]
+           (when (and sabs (pos? (alength sabs)))
+             (wasm-mem/init-views-from-sab! (aget sabs 0))))
+         (create-atom-domain! domain initial-value)
+         domain))
+
+     ;; -----------------------------------------------------------------------
+     ;; Epoch-GC public API — shims for epoch_gc_test.cljs
+     ;; These delegate to the private worker-slot helpers on the root IMemRegion.
+     ;; The `env` parameter is a domain-state map (from get-env).
+     ;; -----------------------------------------------------------------------
+
+     (defn register-worker!
+       "Register a worker in the root worker registry. Returns slot index."
+       [env _worker-id]
+       (let [root-r (:root-r env)
+             slot (mmap-claim-slot! root-r)]
+         (write-heartbeat! root-r slot)
+         slot))
+
+     (defn unregister-worker!
+       "Unregister a worker slot."
+       [env slot-idx]
+       (mmap-release-slot! (:root-r env) slot-idx))
+
+     (defn update-heartbeat!
+       "Update worker heartbeat timestamp."
+       [env slot-idx]
+       (write-heartbeat! (:root-r env) slot-idx))
+
+     (defn check-worker-liveness
+       "Check if a worker's heartbeat is fresh (not stale)."
+       [env slot-idx]
+       (not (heartbeat-stale? (:root-r env) slot-idx)))
+
+     (defn get-current-epoch
+       "Read the current global epoch."
+       [env]
+       (mem/-load-i32 (:root-r env) d/ROOT_EPOCH_OFFSET))
+
+     (defn increment-epoch!
+       "Atomically increment the global epoch. Returns new epoch."
+       [env]
+       (inc (mem/-add-i32! (:root-r env) d/ROOT_EPOCH_OFFSET 1)))
+
+     (defn begin-read!
+       "Pin the current epoch for reading. Returns the epoch."
+       [env slot-idx]
+       (let [root-r (:root-r env)
+             epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+         (mmap-pin-epoch! root-r slot-idx epoch)
+         epoch))
+
+     (defn end-read-epoch!
+       "Unpin the read epoch for a worker slot."
+       [env slot-idx]
+       (mmap-unpin-epoch! (:root-r env) slot-idx))
+
+     (defn with-read-epoch
+       "Execute f within a pinned read epoch. Returns result of f."
+       [env slot-idx f]
+       (let [epoch (begin-read! env slot-idx)]
+         (try
+           (f epoch)
+           (finally
+             (end-read-epoch! env slot-idx)))))
+
+     (defn get-min-active-epoch
+       "Find the minimum epoch being read by any active worker."
+       [env]
+       (mmap-min-safe-epoch (:root-r env)))
+
+     (def ^:private retired-blocks-registry
+       "Track retired blocks for epoch-based GC compat.
+        Maps descriptor-idx to {:epoch N :slab-offset M}."
+       (cljs.core/atom {}))
+
+     (defn retire-block!
+       "Retire a block at the current epoch.
+        Returns true on success."
+       ([env descriptor-idx]
+        (let [epoch (get-current-epoch env)]
+          (swap! retired-blocks-registry assoc descriptor-idx
+                 {:epoch epoch :slab-offset (:offset (get @retired-blocks-registry descriptor-idx))})
+          true))
+       ([slab-offset]
+        (when (not= slab-offset alloc/NIL_OFFSET)
+          (alloc/free! slab-offset))))
+
+     (defn try-free-retired!
+       "Try to free a retired block. Checks if min-active-epoch > retired-epoch.
+        Returns :freed, :has-readers, or :not-retired."
+       [env descriptor-idx]
+       (if-let [entry (get @retired-blocks-registry descriptor-idx)]
+         (let [min-epoch (get-min-active-epoch env)
+               retired-epoch (:epoch entry)]
+           (if (or (nil? min-epoch) (> min-epoch retired-epoch))
+             (do
+               (swap! retired-blocks-registry dissoc descriptor-idx)
+               :freed)
+             :has-readers))
+         :not-retired))
+
+     (defn sweep-retired-blocks!
+       "Sweep retired blocks. Frees all blocks whose epoch is safe."
+       [env]
+       (let [min-epoch (get-min-active-epoch env)
+             entries @retired-blocks-registry
+             freeable (filter (fn [[_ {:keys [epoch]}]]
+                                (or (nil? min-epoch) (> min-epoch epoch)))
+                              entries)]
+         (doseq [[desc-idx _] freeable]
+           (swap! retired-blocks-registry dissoc desc-idx))
+         (count freeable)))
+
+     (defn mark-stale-workers!
+       "Mark stale workers. Returns count of stale workers found."
+       [env]
+       (let [root-r (:root-r env)]
+         (loop [i 0 count 0]
+           (if (>= i d/MAX_WORKERS)
+             count
+             (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
+               (if (and (== status d/WORKER_STATUS_ACTIVE)
+                        (heartbeat-stale? root-r i))
+                 (recur (inc i) (inc count))
+                 (recur (inc i) count)))))))))
+

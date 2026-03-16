@@ -1,6 +1,6 @@
 (ns eve.array-debug
   (:require
-   [eve.shared-atom :as atom]
+   [eve.atom :as atom]
    [eve.array :as arr]
    [eve.deftype-proto.serialize :as ser]))
 

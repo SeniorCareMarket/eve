@@ -4,7 +4,7 @@
       :clj  [clojure.test :refer [deftest testing is]])
    [eve.array :as arr]
    [eve.tensor :as tensor]
-   #?(:cljs [eve.shared-atom :as sa])))
+   #?(:cljs [eve.atom :as sa])))
 
 (defn- approx= [expected actual tolerance]
   (< #?(:cljs (abs (- expected actual))

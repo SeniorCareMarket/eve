@@ -1,7 +1,7 @@
 (ns eve.deftype.rb-tree-test
   (:require
    [cljs.test :refer-macros [deftest testing is]]
-   [eve.shared-atom :as atom]
+   [eve.atom :as atom]
    [eve.deftype.rb-tree :as rb :refer [rb-insert rb-member?
                                                     rb-find rb-seq rb-count
                                                     rb-height rb-black-height

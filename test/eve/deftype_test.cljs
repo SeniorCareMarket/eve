@@ -4,7 +4,7 @@
   (:require
    [cljs.test :refer [deftest testing is]]
    [eve.alpha :as eve]
-   [eve.shared-atom :as atom]
+   [eve.atom :as atom]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.alloc :as alloc]
    ;; Required so collection serializers are registered for serialized field tests
