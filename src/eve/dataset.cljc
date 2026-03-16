@@ -51,30 +51,26 @@
   (-col-map [_] col-map)
   (-row-count [_] nrows)
 
-  eve.deftype-proto.data/ISabStorable
-  (-sab-tag [_] :eve-deftype/Dataset)
-  (-sab-encode [_ _env]
-    (ser/encode-sab-pointer Dataset-type-id offset__))
-  (-sab-dispose [_ _env]
-    ;; Dispose each EveArray in col-map
-    (let [#?@(:cljs [slab-base__ (alloc/resolve-dv! offset__)
-                     slab-dv__ alloc/resolved-dv])
-          cm #?(:cljs (slab-rt/slab-read-serialized offset__ 8)
-                :clj  (slab-rt/slab-read-serialized sio__ slab-off__ 8))]
-      (doseq [[_ arr-val] cm]
-        (when (satisfies? d/ISabStorable arr-val)
-          (d/-sab-dispose arr-val _env))))
-    ;; Free serialized field data blocks
-    #?(:cljs (do (slab-rt/slab-free-serialized! offset__ 4)
-                 (slab-rt/slab-free-serialized! offset__ 8))
-       :clj  (do (slab-rt/slab-free-serialized! sio__ slab-off__ 4)
-                  (slab-rt/slab-free-serialized! sio__ slab-off__ 8)))
-    ;; Free the instance block itself
-    #?(:cljs (alloc/free! offset__)
-       :clj  nil))
-
   #?@(:cljs
-      [ICounted
+      [eve.deftype-proto.data/ISabStorable
+       (-sab-tag [_] :eve-deftype/Dataset)
+       (-sab-encode [_ _env]
+         (ser/encode-sab-pointer Dataset-type-id offset__))
+       (-sab-dispose [_ _env]
+         ;; Dispose each EveArray in col-map
+         (let [slab-base__ (alloc/resolve-dv! offset__)
+               slab-dv__ alloc/resolved-dv
+               cm (slab-rt/slab-read-serialized offset__ 8)]
+           (doseq [[_ arr-val] cm]
+             (when (satisfies? d/ISabStorable arr-val)
+               (d/-sab-dispose arr-val _env))))
+         ;; Free serialized field data blocks
+         (slab-rt/slab-free-serialized! offset__ 4)
+         (slab-rt/slab-free-serialized! offset__ 8)
+         ;; Free the instance block itself
+         (alloc/free! offset__))
+
+       ICounted
        (-count [_] nrows)
 
        ILookup

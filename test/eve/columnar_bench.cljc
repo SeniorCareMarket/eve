@@ -5,7 +5,7 @@
    enough computation that atom overhead is amortized and you see the actual
    data-structure performance difference.
 
-   Eve side:  shared-atom (CLJS) or standard atom (JVM) with EveArray/Dataset/Tensor
+   Eve side:  mmap-backed persistent atom with EveArray/Dataset/Tensor
    Stock side: standard atom with plain Clojure vectors/maps
 
    Run via:
@@ -17,7 +17,9 @@
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
    [eve.tensor :as tensor]
-   #?(:cljs [eve.shared-atom :as sa])))
+   #?@(:cljs [[eve.shared-atom :as sa]]
+       :clj  [[eve.atom :as eve-atom]
+              [eve.deftype-proto.alloc :as alloc]])))
 
 ;;=============================================================================
 ;; Timing infrastructure
@@ -80,9 +82,16 @@
 ;; Eve atom constructor (platform-specific)
 ;;=============================================================================
 
+(def ^:private bench-counter
+  #?(:cljs (cljs.core/atom 0)
+     :clj  (clojure.core/atom 0)))
+
 (defn- make-eve-atom [initial-val]
   #?(:cljs (sa/atom initial-val)
-     :clj  (atom initial-val)))
+     :clj  (let [n (swap! bench-counter inc)
+                 path (str "/tmp/eve-bench-" n "/")]
+             (.mkdirs (java.io.File. path))
+             (eve-atom/atom {:persistent path} initial-val))))
 
 ;;=============================================================================
 ;; 1. COLUMN STATISTICS — compute 5 aggregates in one swap
@@ -349,6 +358,12 @@
   (bench-argops-chain! 100000)
   (bench-tensor-pipeline! 100000) ;; 316x316
   (bench-full-pipeline! 100000)
+
+  ;; 1M — big data territory
+  (bench-column-stats! 1000000)
+  (bench-column-pipeline! 1000000)
+  (bench-argops-chain! 1000000)
+  (bench-tensor-pipeline! 1000000) ;; 1000x1000
 
   (println)
   (println "==============================================================")

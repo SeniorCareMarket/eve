@@ -13,7 +13,9 @@
    because they use the same slab allocator API as eve-slab-deftype."
   (:require
    [eve.deftype-proto.serialize :as ser]
-   #?(:cljs [eve.deftype-proto.alloc :as alloc])))
+   #?(:cljs [eve.deftype-proto.alloc :as alloc]
+      :clj  [eve.deftype-proto.alloc :as alloc])
+   #?(:clj [eve.mem :as mem])))
 
 #?(:cljs
    (do
@@ -83,20 +85,38 @@
         slab-off: slab offset of the type instance.
         field-offset: byte offset of the field slot."
        [sio slab-off field-offset]
-       ;; TODO: JVM implementation via ISlabIO
-       (throw (UnsupportedOperationException.
-               "JVM serialized field read not yet implemented")))
+       (let [ser-off (alloc/-sio-read-i32 sio slab-off field-offset)]
+         (when (not= ser-off -1)
+           (let [data-len (alloc/-sio-read-i32 sio ser-off 0)
+                 raw      (alloc/-sio-read-bytes sio ser-off 4 data-len)]
+             (mem/eve-bytes->value raw)))))
 
      (defn slab-write-serialized!
-       "Write a serialized field (JVM)."
+       "Write a serialized field (JVM).
+        sio: ISlabIO instance.
+        slab-off: slab offset of the type instance.
+        field-offset: byte offset of the field slot.
+        val: the Clojure value to serialize and store.
+        Returns the slab-qualified offset of the serialized data block."
        [sio slab-off field-offset val]
-       ;; TODO: JVM implementation via ISlabIO
-       (throw (UnsupportedOperationException.
-               "JVM serialized field write not yet implemented")))
+       (if (nil? val)
+         ;; Write -1 sentinel
+         (do (alloc/-sio-write-i32! sio slab-off field-offset -1)
+             -1)
+         ;; Serialize, allocate block, write bytes, store offset
+         (let [^bytes encoded (mem/value->eve-bytes val)
+               byte-len      (alength encoded)
+               ser-off       (alloc/-sio-alloc! sio (+ 4 byte-len))]
+           ;; Write length + bytes into the serialized data block
+           (alloc/-sio-write-i32! sio ser-off 0 byte-len)
+           (alloc/-sio-write-bytes! sio ser-off 4 encoded)
+           ;; Write the block offset into the parent type's field slot
+           (alloc/-sio-write-i32! sio slab-off field-offset ser-off)
+           ser-off)))
 
      (defn slab-free-serialized!
        "Free a serialized field's data block (JVM)."
        [sio slab-off field-offset]
-       ;; TODO: JVM implementation via ISlabIO
-       (throw (UnsupportedOperationException.
-               "JVM serialized field free not yet implemented")))))
+       (let [ser-off (alloc/-sio-read-i32 sio slab-off field-offset)]
+         (when (not= ser-off -1)
+           (alloc/-sio-free! sio ser-off))))))

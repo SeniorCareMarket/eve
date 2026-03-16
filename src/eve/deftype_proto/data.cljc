@@ -393,6 +393,11 @@
    EVE objects without walking into their internals."
   (-eve? [this]))
 
+(defprotocol IBackingArray
+  "Protocol for Eve array types that expose a raw platform array for slab storage.
+   Used by value+sio->eve-bytes to serialize JvmHeapEveArray without circular deps."
+  (-backing-array [this] "Return the underlying platform array (e.g. int[], double[])."))
+
 ;;=============================================================================
 ;; Dynamic Vars
 ;;=============================================================================

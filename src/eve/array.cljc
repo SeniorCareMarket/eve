@@ -1136,7 +1136,10 @@
            :else (and (== cnt (count other))
                       (== subtype-code (.-subtype-code ^JvmHeapEveArray other))
                       (every? true? (map = (seq this) (seq other))))))
-       (hashCode [this] (.hasheq this)))
+       (hashCode [this] (.hasheq this))
+
+       eve.deftype-proto.data/IBackingArray
+       (-backing-array [_] backing))
 
      (defmethod print-method JvmHeapEveArray [^JvmHeapEveArray a ^java.io.Writer w]
        (.write w (str "#eve/array " (subtype->type-kw (.-subtype-code a)) " "))

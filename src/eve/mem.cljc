@@ -1864,6 +1864,11 @@
              (jvm-sab-pointer-bytes 0x12 (write-vec! sio (partial value+sio->eve-bytes sio) v))
              (throw (ex-info "value+sio->eve-bytes: :vec writer not registered" {:value v})))
 
+           (satisfies? d/IBackingArray v)
+           (if-let [write-arr! (get writers :array)]
+             (jvm-sab-pointer-bytes 0x1D (write-arr! sio nil (d/-backing-array v)))
+             (throw (ex-info "value+sio->eve-bytes: :array writer not registered" {:value v})))
+
            (.isArray (class v))
            (if-let [write-arr! (get writers :array)]
              (jvm-sab-pointer-bytes 0x1D (write-arr! sio nil v))
