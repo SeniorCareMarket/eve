@@ -1,7 +1,8 @@
 (ns eve.columnar-bench
-  "Comprehensive benchmarks: Eve atom + columnar data vs stock Clojure atom + vectors.
+  "Comprehensive benchmarks: Eve persistent atom + columnar data vs stock Clojure atom + vectors.
 
    Each benchmark does a realistic multi-step workload inside a single swap!.
+   Eve atoms are persistent (durable to disk). Stock atoms are heap-only.
    Runs at 3 scales (10K, 100K, 1M) to show scaling behavior.
 
    Run via:
@@ -64,6 +65,21 @@
   (vec (repeatedly n #(int (* (rand) max-val)))))
 
 ;;=============================================================================
+;; Bench path helper
+;;=============================================================================
+
+(def ^:private bench-counter (clojure.core/atom 0))
+
+(defn- bench-path []
+  (let [dir (str #?(:cljs "/tmp/eve-bench-node-" :clj "/tmp/eve-bench-jvm-")
+                 (swap! bench-counter inc))]
+    #?(:cljs (let [fs (js/require "fs")]
+               (when-not (.existsSync fs dir)
+                 (.mkdirSync fs dir #js {:recursive true})))
+       :clj  (.mkdirs (java.io.File. dir)))
+    (str dir "/")))
+
+;;=============================================================================
 ;; Results collection
 ;;=============================================================================
 
@@ -102,7 +118,9 @@
   (let [prices (random-doubles n 100.0)
         qtys   (random-doubles n 50.0)
         costs  (random-doubles n 2000.0)
-        eve-a  (e/atom {:price (arr/eve-array :float64 prices)
+        path   (bench-path)
+        eve-a  (e/atom {:persistent path}
+                       {:price (arr/eve-array :float64 prices)
                         :qty   (arr/eve-array :float64 qtys)
                         :cost  (arr/eve-array :float64 costs)})
         stock-a (clojure.core/atom {:price prices :qty qtys :cost costs})]
@@ -116,7 +134,8 @@
         #(swap! stock-a (fn [s]
            (let [p (:price s) q (:qty s) c (:cost s)
                  margin (mapv (fn [pi qi ci] (- (* pi qi) ci)) p q c)]
-             (assoc s :result (reduce + 0.0 margin)))))))))
+             (assoc s :result (reduce + 0.0 margin)))))))
+    (e/close! eve-a)))
 
 ;;=============================================================================
 ;; 2. FILTER + AGGREGATE — filter rows, then compute multiple stats
@@ -126,7 +145,9 @@
 (defn- bench-filter-aggregate! [n]
   (let [prices (random-doubles n 100.0)
         gt50   (fn [x] (> x 50.0))
-        eve-a  (e/atom {:price (arr/eve-array :float64 prices)})
+        path   (bench-path)
+        eve-a  (e/atom {:persistent path}
+                       {:price (arr/eve-array :float64 prices)})
         stock-a (clojure.core/atom {:price prices})]
     (record! "Filter + Aggregate" n
       (bench
@@ -147,7 +168,8 @@
                {:sum  (reduce + 0.0 filt)
                 :mean (/ (reduce + 0.0 filt) (count filt))
                 :min  (reduce min filt)
-                :max  (reduce max filt)}))))))))
+                :max  (reduce max filt)}))))))
+    (e/close! eve-a)))
 
 ;;=============================================================================
 ;; 3. SORT + TOP-N — argsort, take top 100, aggregate
@@ -156,7 +178,9 @@
 
 (defn- bench-sort-topn! [n]
   (let [prices (random-doubles n 1000.0)
-        eve-a  (e/atom {:price (arr/eve-array :float64 prices)})
+        path   (bench-path)
+        eve-a  (e/atom {:persistent path}
+                       {:price (arr/eve-array :float64 prices)})
         stock-a (clojure.core/atom {:price prices})]
     (record! "Sort + Top-N" n
       (bench
@@ -171,7 +195,8 @@
            (let [c (:price s)
                  sorted (vec (sort (fn [a b] (compare b a)) c))
                  top (subvec sorted 0 (min 100 (count sorted)))]
-             (assoc s :result (/ (reduce + 0.0 top) (count top))))))))))
+             (assoc s :result (/ (reduce + 0.0 top) (count top))))))))
+    (e/close! eve-a)))
 
 ;;=============================================================================
 ;; 4. DATASET PIPELINE — multi-column realistic analytics
@@ -185,7 +210,9 @@
         cats   (random-ints n 10)
         ids    (vec (range n))
         gt500  (fn [x] (> x 500.0))
-        eve-a  (e/atom {:price (arr/eve-array :float64 prices)
+        path   (bench-path)
+        eve-a  (e/atom {:persistent path}
+                       {:price (arr/eve-array :float64 prices)
                         :qty   (arr/eve-array :float64 qtys)
                         :cat   (arr/eve-array :int32 cats)
                         :id    (arr/eve-array :int32 ids)})
@@ -221,7 +248,8 @@
                  top-p   (subvec sorted-p 0 take-n)]
              (assoc s :result
                {:rev-sum    (reduce + 0.0 top-rev)
-                :price-mean (/ (reduce + 0.0 top-p) (count top-p))}))))))))
+                :price-mean (/ (reduce + 0.0 top-p) (count top-p))}))))))
+    (e/close! eve-a)))
 
 ;;=============================================================================
 ;; 5. TENSOR TRANSFORM — emap → transpose → flatten → reduce
@@ -237,7 +265,9 @@
         total (* side side)
         data  (random-doubles total 100.0)
         double-fn (fn [x] (* x 2.0))
-        eve-a  (e/atom {:data (arr/eve-array :float64 data) :side side})
+        path  (bench-path)
+        eve-a  (e/atom {:persistent path}
+                       {:data (arr/eve-array :float64 data) :side side})
         stock-a (clojure.core/atom {:t (vec (map vec (partition side data)))})]
     (record! "Tensor Pipeline" total
       (bench
@@ -254,7 +284,8 @@
                  t2 (mapv (fn [row] (mapv double-fn row)) t)
                  t3 (apply mapv vector t2)
                  flat (vec (apply concat t3))]
-             (assoc s :result (reduce + 0.0 flat)))))))))
+             (assoc s :result (reduce + 0.0 flat)))))))
+    (e/close! eve-a)))
 
 ;;=============================================================================
 ;; Summary table
@@ -310,6 +341,7 @@
   (println "==============================================================")
   (println (str "  Eve Columnar Benchmarks — " platform))
   (println "  Each swap! does a multi-step pipeline of real work")
+  (println "  Eve atoms are persistent (durable to disk)")
   (println "  7 timed runs (trimmed mean of middle 5)")
   (println "==============================================================")
   (println)
