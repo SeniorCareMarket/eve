@@ -377,13 +377,25 @@
                                   (f (clojure.core/aget src-view (+ src-base data-idx))))))))))
         :clj
         (if-let [^doubles src (d/-as-double-array (-data t))]
-          (let [eo (-elem-offset t)
+          (let [eo (int (-elem-offset t))
                 ^doubles dst (d/-backing-array out-arr)]
             (if (contiguous? t)
               (dotimes [i n] (aset dst i (double (f (aget src (+ eo i))))))
               (let [st (-strides t)]
-                (dotimes [i n]
-                  (aset dst i (double (f (aget src (flat-idx->multi sh st eo i)))))))))
+                (if (== 2 (count sh))
+                  (let [rows (int (nth sh 0)) cols (int (nth sh 1))
+                        rs   (int (nth st 0))  cs   (int (nth st 1))]
+                    (loop [r (int 0) out-i (int 0)]
+                      (when (< r rows)
+                        (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
+                          (loop [c (int 0)]
+                            (when (< c cols)
+                              (aset dst (unchecked-add-int out-i c)
+                                    (double (f (aget src (unchecked-add-int row-start (unchecked-multiply-int c cs))))))
+                              (recur (unchecked-inc-int c)))))
+                        (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
+                  (dotimes [i n]
+                    (aset dst i (double (f (aget src (int (flat-idx->multi sh st eo i)))))))))))
           (dotimes [i n]
             (arr/aset! out-arr i (f (flat-get t i))))))
      (from-array out-arr sh)))
@@ -417,14 +429,30 @@
               ^doubles s2 (d/-as-double-array (-data t2))]
           (if (and s1 s2)
             (let [^doubles dst (d/-backing-array out-arr)
-                  eo1 (-elem-offset t1) eo2 (-elem-offset t2)]
+                  eo1 (int (-elem-offset t1)) eo2 (int (-elem-offset t2))]
               (if (and (contiguous? t1) (contiguous? t2))
                 (dotimes [i n]
                   (aset dst i (double (f (aget s1 (+ eo1 i)) (aget s2 (+ eo2 i))))))
                 (let [st1 (-strides t1) st2 (-strides t2) sh2 (-shape t2)]
-                  (dotimes [i n]
-                    (aset dst i (double (f (aget s1 (flat-idx->multi sh st1 eo1 i))
-                                           (aget s2 (flat-idx->multi sh2 st2 eo2 i)))))))))
+                  (if (and (== 2 (count sh)) (== 2 (count sh2)))
+                    ;; 2D fast path
+                    (let [rows (int (nth sh 0)) cols (int (nth sh 1))
+                          rs1  (int (nth st1 0)) cs1  (int (nth st1 1))
+                          rs2  (int (nth st2 0)) cs2  (int (nth st2 1))]
+                      (loop [r (int 0) out-i (int 0)]
+                        (when (< r rows)
+                          (let [base1 (unchecked-add-int eo1 (unchecked-multiply-int r rs1))
+                                base2 (unchecked-add-int eo2 (unchecked-multiply-int r rs2))]
+                            (loop [c (int 0)]
+                              (when (< c cols)
+                                (aset dst (unchecked-add-int out-i c)
+                                      (double (f (aget s1 (unchecked-add-int base1 (unchecked-multiply-int c cs1)))
+                                                 (aget s2 (unchecked-add-int base2 (unchecked-multiply-int c cs2))))))
+                                (recur (unchecked-inc-int c)))))
+                          (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
+                    (dotimes [i n]
+                      (aset dst i (double (f (aget s1 (int (flat-idx->multi sh st1 eo1 i)))
+                                             (aget s2 (int (flat-idx->multi sh2 st2 eo2 i)))))))))))
             (dotimes [i n]
               (arr/aset! out-arr i (f (flat-get t1 i) (flat-get t2 i)))))))
      (from-array out-arr sh))))
@@ -469,15 +497,29 @@
                    acc))))))
        :clj
        (if-let [^doubles da (d/-as-double-array (-data t))]
-         (let [eo (-elem-offset t)]
+         (let [eo (int (-elem-offset t))]
            (if (contiguous? t)
              (loop [i 0 acc init]
                (if (< i n) (recur (inc i) (f acc (aget da (+ eo i)))) acc))
              (let [st (-strides t)]
-               (loop [i 0 acc init]
-                 (if (< i n)
-                   (recur (inc i) (f acc (aget da (flat-idx->multi sh st eo i))))
-                   acc)))))
+               (if (== 2 (count sh))
+                 ;; 2D fast path
+                 (let [rows (int (nth sh 0)) cols (int (nth sh 1))
+                       rs   (int (nth st 0))  cs   (int (nth st 1))
+                       acc-v (volatile! init)]
+                   (loop [r (int 0)]
+                     (when (< r rows)
+                       (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
+                         (loop [c (int 0)]
+                           (when (< c cols)
+                             (vswap! acc-v f (aget da (unchecked-add-int row-start (unchecked-multiply-int c cs))))
+                             (recur (unchecked-inc-int c)))))
+                       (recur (unchecked-inc-int r))))
+                   @acc-v)
+                 (loop [i 0 acc init]
+                   (if (< i n)
+                     (recur (inc i) (f acc (aget da (int (flat-idx->multi sh st eo i)))))
+                     acc))))))
          (loop [i 0 acc init]
            (if (< i n)
              (recur (inc i) (f acc (flat-get t i)))
@@ -517,13 +559,27 @@
                                  (clojure.core/aget sv (+ sb data-idx)))))))))
        :clj
        (if-let [^doubles src (d/-as-double-array (-data t))]
-         (let [eo (-elem-offset t)
+         (let [eo (int (-elem-offset t))
                ^doubles dst (d/-backing-array out)]
            (if (contiguous? t)
-             (System/arraycopy src eo dst 0 n)
+             (System/arraycopy src (int eo) dst 0 n)
              (let [st (-strides t)]
-               (dotimes [i n]
-                 (aset dst i (aget src (flat-idx->multi sh st eo i)))))))
+               (if (== 2 (count sh))
+                 ;; 2D fast path: nested primitive loops (no rem/quot)
+                 (let [rows (int (nth sh 0)) cols (int (nth sh 1))
+                       rs   (int (nth st 0))  cs   (int (nth st 1))]
+                   (loop [r (int 0) out-i (int 0)]
+                     (when (< r rows)
+                       (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
+                         (loop [c (int 0)]
+                           (when (< c cols)
+                             (aset dst (unchecked-add-int out-i c)
+                                   (aget src (unchecked-add-int row-start (unchecked-multiply-int c cs))))
+                             (recur (unchecked-inc-int c)))))
+                       (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
+                 ;; General ND path
+                 (dotimes [i n]
+                   (aset dst i (aget src (int (flat-idx->multi sh st eo i)))))))))
          (dotimes [i n]
            (arr/aset! out i (flat-get t i)))))
     out))

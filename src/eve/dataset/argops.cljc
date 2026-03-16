@@ -30,48 +30,111 @@
            (dotimes [i n] (aset out i (int (nth col i))))
            out))))
 
+;;-----------------------------------------------------------------------------
+;; JVM quicksort on int[] with primitive array comparisons (no boxing)
+;;-----------------------------------------------------------------------------
+
+#?(:clj
+   (defn- qsort-doubles-asc!
+     "In-place quicksort of int[] indices by double[] values, ascending."
+     [^ints idx ^doubles vals ^long lo ^long hi]
+     (when (< lo hi)
+       (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
+         (loop [i (int lo) j (int hi)]
+           (let [i (int (loop [i i] (if (and (<= i j) (< (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
+                 j (int (loop [j j] (if (and (<= i j) (> (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+             (if (<= i j)
+               (let [tmp (aget idx i)]
+                 (aset idx i (aget idx j))
+                 (aset idx j tmp)
+                 (recur (unchecked-inc-int i) (unchecked-dec-int j)))
+               (do (when (< lo j) (qsort-doubles-asc! idx vals lo j))
+                   (when (< i hi) (qsort-doubles-asc! idx vals i hi))))))))))
+
+#?(:clj
+   (defn- qsort-doubles-desc!
+     "In-place quicksort of int[] indices by double[] values, descending."
+     [^ints idx ^doubles vals ^long lo ^long hi]
+     (when (< lo hi)
+       (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
+         (loop [i (int lo) j (int hi)]
+           (let [i (int (loop [i i] (if (and (<= i j) (> (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
+                 j (int (loop [j j] (if (and (<= i j) (< (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+             (if (<= i j)
+               (let [tmp (aget idx i)]
+                 (aset idx i (aget idx j))
+                 (aset idx j tmp)
+                 (recur (unchecked-inc-int i) (unchecked-dec-int j)))
+               (do (when (< lo j) (qsort-doubles-desc! idx vals lo j))
+                   (when (< i hi) (qsort-doubles-desc! idx vals i hi))))))))))
+
+#?(:clj
+   (defn- qsort-ints-asc!
+     "In-place quicksort of int[] indices by int[] values, ascending."
+     [^ints idx ^ints vals ^long lo ^long hi]
+     (when (< lo hi)
+       (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
+         (loop [i (int lo) j (int hi)]
+           (let [i (int (loop [i i] (if (and (<= i j) (< (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
+                 j (int (loop [j j] (if (and (<= i j) (> (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+             (if (<= i j)
+               (let [tmp (aget idx i)]
+                 (aset idx i (aget idx j))
+                 (aset idx j tmp)
+                 (recur (unchecked-inc-int i) (unchecked-dec-int j)))
+               (do (when (< lo j) (qsort-ints-asc! idx vals lo j))
+                   (when (< i hi) (qsort-ints-asc! idx vals i hi))))))))))
+
+#?(:clj
+   (defn- qsort-ints-desc!
+     "In-place quicksort of int[] indices by int[] values, descending."
+     [^ints idx ^ints vals ^long lo ^long hi]
+     (when (< lo hi)
+       (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
+         (loop [i (int lo) j (int hi)]
+           (let [i (int (loop [i i] (if (and (<= i j) (> (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
+                 j (int (loop [j j] (if (and (<= i j) (< (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+             (if (<= i j)
+               (let [tmp (aget idx i)]
+                 (aset idx i (aget idx j))
+                 (aset idx j tmp)
+                 (recur (unchecked-inc-int i) (unchecked-dec-int j)))
+               (do (when (< lo j) (qsort-ints-desc! idx vals lo j))
+                   (when (< i hi) (qsort-ints-desc! idx vals i hi))))))))))
+
 (defn argsort
   "Return :int32 array of indices that would sort col.
    direction is :asc (default) or :desc."
   ([col] (argsort col :asc))
   ([col direction]
    #?(:clj
-      (let [n    (count col)
-            ^ints ia (d/-as-int-array col)
-            ^doubles da (when-not ia (d/-as-double-array col))]
-        (if (or ia da)
-          ;; Fast path: sort Integer[] indices with typed-array comparisons
-          (let [^"[Ljava.lang.Integer;" idx-arr (make-array Integer n)
-                _ (dotimes [i n] (aset idx-arr i (Integer/valueOf (int i))))
-                cmp (cond
-                      ia (if (= direction :desc)
-                           (reify java.util.Comparator
-                             (compare [_ a b] (Integer/compare (aget ia (.intValue ^Integer b))
-                                                                (aget ia (.intValue ^Integer a)))))
-                           (reify java.util.Comparator
-                             (compare [_ a b] (Integer/compare (aget ia (.intValue ^Integer a))
-                                                                (aget ia (.intValue ^Integer b))))))
-                      :else (if (= direction :desc)
-                              (reify java.util.Comparator
-                                (compare [_ a b] (Double/compare (aget da (.intValue ^Integer b))
-                                                                  (aget da (.intValue ^Integer a)))))
-                              (reify java.util.Comparator
-                                (compare [_ a b] (Double/compare (aget da (.intValue ^Integer a))
-                                                                  (aget da (.intValue ^Integer b)))))))]
-            (java.util.Arrays/sort idx-arr cmp)
-            (let [^ints out (int-array n)]
-              (dotimes [i n] (aset out i (.intValue ^Integer (aget idx-arr i))))
-              (arr/from-int-array out)))
-          ;; Fallback: extract to vec, sort with Clojure sort
-          (let [idxs (vec (range n))
-                cfn  (if (= direction :desc)
-                       (fn [a b] (compare (nth col b) (nth col a)))
-                       (fn [a b] (compare (nth col a) (nth col b))))
-                sorted (sort cfn idxs)
-                ^ints out (int-array n)]
-            (dotimes [i n]
-              (aset out i (int (clojure.core/nth sorted i))))
-            (arr/from-int-array out))))
+      (let [n (count col)]
+        (if (< n 2)
+          (arr/from-int-array (int-array (range n)))
+          (let [^ints ia (d/-as-int-array col)
+                ^doubles da (when-not ia (d/-as-double-array col))]
+            (if (or ia da)
+              ;; Fast path: quicksort on primitive int[] indices
+              (let [^ints idx (int-array n)
+                    _ (dotimes [i n] (aset idx i (int i)))]
+                (cond
+                  ia (if (= direction :desc)
+                       (qsort-ints-desc! idx ia 0 (dec n))
+                       (qsort-ints-asc! idx ia 0 (dec n)))
+                  :else (if (= direction :desc)
+                          (qsort-doubles-desc! idx da 0 (dec n))
+                          (qsort-doubles-asc! idx da 0 (dec n))))
+                (arr/from-int-array idx))
+              ;; Fallback: extract to vec, sort with Clojure sort
+              (let [idxs (vec (range n))
+                    cfn  (if (= direction :desc)
+                           (fn [a b] (compare (nth col b) (nth col a)))
+                           (fn [a b] (compare (nth col a) (nth col b))))
+                    sorted (sort cfn idxs)
+                    ^ints out (int-array n)]
+                (dotimes [i n]
+                  (aset out i (int (clojure.core/nth sorted i))))
+                (arr/from-int-array out))))))
       :cljs
       (let [n    (count col)
             idxs (vec (range n))
