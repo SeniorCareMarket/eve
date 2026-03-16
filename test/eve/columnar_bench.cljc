@@ -16,7 +16,6 @@
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
-   [eve.tensor :as tensor]
    #?(:cljs [eve.shared-atom :as sa])))
 
 ;;=============================================================================
@@ -26,10 +25,6 @@
 (defn- now-ms []
   #?(:cljs (js/Date.now)
      :clj  (System/currentTimeMillis)))
-
-(defn- sqrt-int [n]
-  (int #?(:cljs (js/Math.sqrt n)
-          :clj  (Math/sqrt (double n)))))
 
 (defn- fmt1 [x]
   #?(:cljs (.toFixed (js/Number. x) 1)
@@ -227,40 +222,7 @@
              (assoc s :result (count above)))))))))
 
 ;;=============================================================================
-;; 5. TENSOR PIPELINE — create view, emap, transpose, reduce
-;;    "Double all elements, transpose, sum all"
-;;=============================================================================
-
-(defn bench-tensor-pipeline! [n]
-  (let [side  (sqrt-int n)
-        total (* side side)]
-    (println (str "\n=== Tensor Pipeline (" side "x" side " = " total " elems) ==="))
-    (println "    Work per swap: emap(*2) -> transpose -> materialize -> sum")
-    (let [data (random-doubles total 100.0)
-          double-fn (fn [x] (* x 2.0))
-          eve-a (make-eve-atom {:data (arr/eve-array :float64 data) :side side})
-          stock-a (atom {:t (vec (map vec (partition side data)))})]
-      (print-comparison
-        (str "emap->transpose->sum " side "x" side)
-        (bench "eve-tensor"
-          #(swap! eve-a (fn [s]
-             (let [t  (tensor/from-array (:data s) [(:side s) (:side s)])
-                   t2 (tensor/emap double-fn t)
-                   t3 (tensor/transpose t2)]
-               (assoc s :result (tensor/ereduce + 0.0 t3))))))
-        (bench "stock-tensor"
-          #(swap! stock-a (fn [s]
-             (let [t  (:t s)
-                   ;; emap *2
-                   t2 (mapv (fn [row] (mapv double-fn row)) t)
-                   ;; transpose
-                   t3 (apply mapv vector t2)
-                   ;; reduce sum
-                   total (reduce (fn [acc row] (reduce + acc row)) 0.0 t3)]
-               (assoc s :result total)))))))))
-
-;;=============================================================================
-;; 6. FULL ANALYTICS PIPELINE
+;; 5. FULL ANALYTICS PIPELINE
 ;;    "Build 4-column dataset, compute derived column, filter, sort, slice,
 ;;     then aggregate two columns"
 ;;=============================================================================
@@ -339,7 +301,6 @@
   (bench-column-pipeline! 10000)
   (bench-dataset-analytics! 10000)
   (bench-argops-chain! 10000)
-  (bench-tensor-pipeline! 10000) ;; 100x100
   (bench-full-pipeline! 10000)
 
   ;; 100K — work clearly dominates atom overhead
@@ -347,7 +308,6 @@
   (bench-column-pipeline! 100000)
   (bench-dataset-analytics! 100000)
   (bench-argops-chain! 100000)
-  (bench-tensor-pipeline! 100000) ;; 316x316
   (bench-full-pipeline! 100000)
 
   (println)
