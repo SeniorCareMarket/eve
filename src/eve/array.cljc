@@ -1037,7 +1037,25 @@
                    (and (== cnt (.-cnt o))
                         (== subtype-code (.-subtype-code o))
                         (every? true? (map = (seq this) (seq o)))))))
-       (hashCode [this] (.hasheq this)))
+       (hashCode [this] (.hasheq this))
+
+       eve.deftype-proto.data/IBulkAccess
+       (-as-double-array [_]
+         (when (== subtype-code 9)
+           (let [raw (alloc/-sio-read-bytes sio slab-off 8 (* cnt 8))
+                 bb  (doto (java.nio.ByteBuffer/wrap raw)
+                       (.order java.nio.ByteOrder/LITTLE_ENDIAN))
+                 out (double-array cnt)]
+             (.get (.asDoubleBuffer bb) out)
+             out)))
+       (-as-int-array [_]
+         (when (== subtype-code 6)
+           (let [raw (alloc/-sio-read-bytes sio slab-off 8 (* cnt 4))
+                 bb  (doto (java.nio.ByteBuffer/wrap raw)
+                       (.order java.nio.ByteOrder/LITTLE_ENDIAN))
+                 out (int-array cnt)]
+             (.get (.asIntBuffer bb) out)
+             out))))
 
      (defmethod print-method JvmEveArray [^JvmEveArray a ^java.io.Writer w]
        (.write w (str "#eve/array " (subtype->type-kw (.-subtype-code a)) " "))
@@ -1140,7 +1158,13 @@
        (hashCode [this] (.hasheq this))
 
        eve.deftype-proto.data/IBackingArray
-       (-backing-array [_] backing))
+       (-backing-array [_] backing)
+
+       eve.deftype-proto.data/IBulkAccess
+       (-as-double-array [_]
+         (when (== subtype-code 9) backing))
+       (-as-int-array [_]
+         (when (== subtype-code 6) backing)))
 
      (defmethod print-method JvmHeapEveArray [^JvmHeapEveArray a ^java.io.Writer w]
        (.write w (str "#eve/array " (subtype->type-kw (.-subtype-code a)) " "))
@@ -1198,6 +1222,21 @@
        "Write element at index in a heap-backed EveArray."
        [arr idx val]
        (jvm-heap-aset! arr idx val))
+
+     (defn from-double-array
+       "Wrap a double[] directly as a JvmHeapEveArray. Zero-copy."
+       ^JvmHeapEveArray [^doubles arr]
+       (JvmHeapEveArray. (alength arr) 9 arr nil))
+
+     (defn from-int-array
+       "Wrap an int[] directly as a JvmHeapEveArray. Zero-copy."
+       ^JvmHeapEveArray [^ints arr]
+       (JvmHeapEveArray. (alength arr) 6 arr nil))
+
+     (defn from-byte-array
+       "Wrap a byte[] directly as a JvmHeapEveArray with :uint8 subtype. Zero-copy."
+       ^JvmHeapEveArray [^bytes arr]
+       (JvmHeapEveArray. (alength arr) 1 arr nil))
 
      ;; Register JVM type constructor for EveArray slab pointer tags.
      ;; 0x1D = EVE_ARRAY_SLAB_TYPE_ID — inline slab block pointer (from value+sio->eve-bytes)

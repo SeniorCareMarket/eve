@@ -288,7 +288,7 @@
         new-shape (vec (concat (subvec sh 0 axis)
                                (subvec sh (inc axis))))
         new-strides (vec (concat (subvec st 0 axis)
-                                  (subvec st (inc axis))))]
+                                 (subvec st (inc axis))))]
     (->NDBuffer new-offset (-data t) new-shape new-strides)))
 
 ;;-----------------------------------------------------------------------------
@@ -360,12 +360,10 @@
               [src-view src-base] (get-view-and-base data)
               [dst-view dst-base] (get-view-and-base out-arr)]
           (if (contiguous? t)
-            ;; Fast path: flat iteration index == data index
             (let [eo (-elem-offset t)]
               (dotimes [i n]
                 (direct-write dst-view dst-base i
                               (f (direct-read src-view src-base (+ eo i))))))
-            ;; Stride path: use 2D stride iteration when possible
             (let [st (-strides t)
                   eo (-elem-offset t)]
               (if (= 2 (count sh))
@@ -378,8 +376,16 @@
                     (direct-write dst-view dst-base i
                                   (f (clojure.core/aget src-view (+ src-base data-idx))))))))))
         :clj
-        (dotimes [i n]
-          (arr/aset! out-arr i (f (flat-get t i)))))
+        (if-let [^doubles src (d/-as-double-array (-data t))]
+          (let [eo (-elem-offset t)
+                ^doubles dst (d/-backing-array out-arr)]
+            (if (contiguous? t)
+              (dotimes [i n] (aset dst i (double (f (aget src (+ eo i))))))
+              (let [st (-strides t)]
+                (dotimes [i n]
+                  (aset dst i (double (f (aget src (flat-idx->multi sh st eo i)))))))))
+          (dotimes [i n]
+            (arr/aset! out-arr i (f (flat-get t i))))))
      (from-array out-arr sh)))
   ([f t1 t2]
    (let [sh (-shape t1)
@@ -407,8 +413,20 @@
                               (f (strided-read d1 sh st1 eo1 i)
                                  (strided-read d2 sh2 st2 eo2 i)))))))
         :clj
-        (dotimes [i n]
-          (arr/aset! out-arr i (f (flat-get t1 i) (flat-get t2 i)))))
+        (let [^doubles s1 (d/-as-double-array (-data t1))
+              ^doubles s2 (d/-as-double-array (-data t2))]
+          (if (and s1 s2)
+            (let [^doubles dst (d/-backing-array out-arr)
+                  eo1 (-elem-offset t1) eo2 (-elem-offset t2)]
+              (if (and (contiguous? t1) (contiguous? t2))
+                (dotimes [i n]
+                  (aset dst i (double (f (aget s1 (+ eo1 i)) (aget s2 (+ eo2 i))))))
+                (let [st1 (-strides t1) st2 (-strides t2) sh2 (-shape t2)]
+                  (dotimes [i n]
+                    (aset dst i (double (f (aget s1 (flat-idx->multi sh st1 eo1 i))
+                                           (aget s2 (flat-idx->multi sh2 st2 eo2 i)))))))))
+            (dotimes [i n]
+              (arr/aset! out-arr i (f (flat-get t1 i) (flat-get t2 i)))))))
      (from-array out-arr sh))))
 
 (defn ereduce
@@ -450,10 +468,20 @@
                      (recur (inc i) (f acc (clojure.core/aget view (+ base data-idx)))))
                    acc))))))
        :clj
-       (loop [i 0 acc init]
-         (if (< i n)
-           (recur (inc i) (f acc (flat-get t i)))
-           acc)))))
+       (if-let [^doubles da (d/-as-double-array (-data t))]
+         (let [eo (-elem-offset t)]
+           (if (contiguous? t)
+             (loop [i 0 acc init]
+               (if (< i n) (recur (inc i) (f acc (aget da (+ eo i)))) acc))
+             (let [st (-strides t)]
+               (loop [i 0 acc init]
+                 (if (< i n)
+                   (recur (inc i) (f acc (aget da (flat-idx->multi sh st eo i))))
+                   acc)))))
+         (loop [i 0 acc init]
+           (if (< i n)
+             (recur (inc i) (f acc (flat-get t i)))
+             acc))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Materialization
@@ -488,8 +516,16 @@
                    (direct-write dv db i
                                  (clojure.core/aget sv (+ sb data-idx)))))))))
        :clj
-       (dotimes [i n]
-         (arr/aset! out i (flat-get t i))))
+       (if-let [^doubles src (d/-as-double-array (-data t))]
+         (let [eo (-elem-offset t)
+               ^doubles dst (d/-backing-array out)]
+           (if (contiguous? t)
+             (System/arraycopy src eo dst 0 n)
+             (let [st (-strides t)]
+               (dotimes [i n]
+                 (aset dst i (aget src (flat-idx->multi sh st eo i)))))))
+         (dotimes [i n]
+           (arr/aset! out i (flat-get t i)))))
     out))
 
 (defn to-dataset

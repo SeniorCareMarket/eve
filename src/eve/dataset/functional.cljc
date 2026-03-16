@@ -5,7 +5,8 @@
    Arithmetic ops return new EveArrays. Aggregations return scalars.
    Comparison ops return :uint8 mask arrays (0/1)."
   (:require
-   [eve.array :as arr]))
+   [eve.array :as arr]
+   #?(:clj [eve.deftype-proto.data :as d])))
 
 ;;-----------------------------------------------------------------------------
 ;; Internal helpers
@@ -36,38 +37,128 @@
 (defn add
   "Element-wise addition. Either arg may be a scalar."
   [a b]
-  (let [n (min (arr-count a) (arr-count b))
-        out (arr/eve-array (result-type a b) n)]
-    (dotimes [i n]
-      (arr/aset! out i (+ (arr-get a i) (arr-get b i))))
-    out))
+  #?(:clj
+     (let [da (when-not (number? a) (d/-as-double-array a))
+           db (when-not (number? b) (d/-as-double-array b))]
+       (if (and (or da (number? a)) (or db (number? b)))
+         ;; Fast path: double[] aget loops
+         (let [n  (int (min (arr-count a) (arr-count b)))
+               ^doubles out (double-array n)]
+           (cond
+             (and da db)
+             (let [^doubles x da ^doubles y db]
+               (dotimes [i n] (aset out i (+ (aget x i) (aget y i)))))
+             da
+             (let [^doubles x da bv (double b)]
+               (dotimes [i n] (aset out i (+ (aget x i) bv))))
+             :else
+             (let [av (double a) ^doubles y db]
+               (dotimes [i n] (aset out i (+ av (aget y i))))))
+           (arr/from-double-array out))
+         ;; Fallback
+         (let [n (int (min (arr-count a) (arr-count b)))
+               out (arr/eve-array (result-type a b) n)]
+           (dotimes [i n] (arr/aset! out i (+ (arr-get a i) (arr-get b i))))
+           out)))
+     :cljs
+     (let [n (min (arr-count a) (arr-count b))
+           out (arr/eve-array (result-type a b) n)]
+       (dotimes [i n]
+         (arr/aset! out i (+ (arr-get a i) (arr-get b i))))
+       out)))
 
 (defn sub
   "Element-wise subtraction."
   [a b]
-  (let [n (min (arr-count a) (arr-count b))
-        out (arr/eve-array (result-type a b) n)]
-    (dotimes [i n]
-      (arr/aset! out i (- (arr-get a i) (arr-get b i))))
-    out))
+  #?(:clj
+     (let [da (when-not (number? a) (d/-as-double-array a))
+           db (when-not (number? b) (d/-as-double-array b))]
+       (if (and (or da (number? a)) (or db (number? b)))
+         (let [n  (int (min (arr-count a) (arr-count b)))
+               ^doubles out (double-array n)]
+           (cond
+             (and da db)
+             (let [^doubles x da ^doubles y db]
+               (dotimes [i n] (aset out i (- (aget x i) (aget y i)))))
+             da
+             (let [^doubles x da bv (double b)]
+               (dotimes [i n] (aset out i (- (aget x i) bv))))
+             :else
+             (let [av (double a) ^doubles y db]
+               (dotimes [i n] (aset out i (- av (aget y i))))))
+           (arr/from-double-array out))
+         (let [n (int (min (arr-count a) (arr-count b)))
+               out (arr/eve-array (result-type a b) n)]
+           (dotimes [i n] (arr/aset! out i (- (arr-get a i) (arr-get b i))))
+           out)))
+     :cljs
+     (let [n (min (arr-count a) (arr-count b))
+           out (arr/eve-array (result-type a b) n)]
+       (dotimes [i n]
+         (arr/aset! out i (- (arr-get a i) (arr-get b i))))
+       out)))
 
 (defn mul
   "Element-wise multiplication. Either arg may be a scalar."
   [a b]
-  (let [n (min (arr-count a) (arr-count b))
-        out (arr/eve-array (result-type a b) n)]
-    (dotimes [i n]
-      (arr/aset! out i (* (arr-get a i) (arr-get b i))))
-    out))
+  #?(:clj
+     (let [da (when-not (number? a) (d/-as-double-array a))
+           db (when-not (number? b) (d/-as-double-array b))]
+       (if (and (or da (number? a)) (or db (number? b)))
+         (let [n  (int (min (arr-count a) (arr-count b)))
+               ^doubles out (double-array n)]
+           (cond
+             (and da db)
+             (let [^doubles x da ^doubles y db]
+               (dotimes [i n] (aset out i (* (aget x i) (aget y i)))))
+             da
+             (let [^doubles x da bv (double b)]
+               (dotimes [i n] (aset out i (* (aget x i) bv))))
+             :else
+             (let [av (double a) ^doubles y db]
+               (dotimes [i n] (aset out i (* av (aget y i))))))
+           (arr/from-double-array out))
+         (let [n (int (min (arr-count a) (arr-count b)))
+               out (arr/eve-array (result-type a b) n)]
+           (dotimes [i n] (arr/aset! out i (* (arr-get a i) (arr-get b i))))
+           out)))
+     :cljs
+     (let [n (min (arr-count a) (arr-count b))
+           out (arr/eve-array (result-type a b) n)]
+       (dotimes [i n]
+         (arr/aset! out i (* (arr-get a i) (arr-get b i))))
+       out)))
 
 (defn div
   "Element-wise division."
   [a b]
-  (let [n (min (arr-count a) (arr-count b))
-        out (arr/eve-array :float64 n)]
-    (dotimes [i n]
-      (arr/aset! out i (/ (double (arr-get a i)) (double (arr-get b i)))))
-    out))
+  #?(:clj
+     (let [da (when-not (number? a) (d/-as-double-array a))
+           db (when-not (number? b) (d/-as-double-array b))]
+       (if (and (or da (number? a)) (or db (number? b)))
+         (let [n  (int (min (arr-count a) (arr-count b)))
+               ^doubles out (double-array n)]
+           (cond
+             (and da db)
+             (let [^doubles x da ^doubles y db]
+               (dotimes [i n] (aset out i (/ (aget x i) (aget y i)))))
+             da
+             (let [^doubles x da bv (double b)]
+               (dotimes [i n] (aset out i (/ (aget x i) bv))))
+             :else
+             (let [av (double a) ^doubles y db]
+               (dotimes [i n] (aset out i (/ av (aget y i))))))
+           (arr/from-double-array out))
+         (let [n (int (min (arr-count a) (arr-count b)))
+               out (arr/eve-array :float64 n)]
+           (dotimes [i n] (arr/aset! out i (/ (double (arr-get a i)) (double (arr-get b i)))))
+           out)))
+     :cljs
+     (let [n (min (arr-count a) (arr-count b))
+           out (arr/eve-array :float64 n)]
+       (dotimes [i n]
+         (arr/aset! out i (/ (double (arr-get a i)) (double (arr-get b i)))))
+       out)))
 
 ;;-----------------------------------------------------------------------------
 ;; Aggregations (return scalar)
@@ -76,11 +167,24 @@
 (defn sum
   "Sum all elements."
   [col]
-  (let [n (count col)]
-    (loop [i 0 acc 0.0]
-      (if (< i n)
-        (recur (inc i) (+ acc (double (nth col i))))
-        acc))))
+  #?(:clj
+     (if-let [^doubles da (d/-as-double-array col)]
+       (let [n (alength da)]
+         (loop [i 0 acc 0.0]
+           (if (< i n) (recur (inc i) (+ acc (aget da i))) acc)))
+       (if-let [^ints ia (d/-as-int-array col)]
+         (let [n (alength ia)]
+           (loop [i 0 acc (long 0)]
+             (if (< i n) (recur (inc i) (+ acc (long (aget ia i)))) (double acc))))
+         (let [n (count col)]
+           (loop [i 0 acc 0.0]
+             (if (< i n) (recur (inc i) (+ acc (double (nth col i)))) acc)))))
+     :cljs
+     (let [n (count col)]
+       (loop [i 0 acc 0.0]
+         (if (< i n)
+           (recur (inc i) (+ acc (double (nth col i))))
+           acc)))))
 
 (defn mean
   "Arithmetic mean."
@@ -91,24 +195,50 @@
 (defn min-val
   "Minimum value."
   [col]
-  (let [n (count col)]
-    (when (pos? n)
-      (loop [i 1 m (nth col 0)]
-        (if (< i n)
-          (let [v (nth col i)]
-            (recur (inc i) (if (< v m) v m)))
-          m)))))
+  #?(:clj
+     (if-let [^doubles da (d/-as-double-array col)]
+       (when (pos? (alength da))
+         (loop [i 1 m (aget da 0)]
+           (if (< i (alength da))
+             (let [v (aget da i)] (recur (inc i) (if (< v m) v m)))
+             m)))
+       (let [n (count col)]
+         (when (pos? n)
+           (loop [i 1 m (nth col 0)]
+             (if (< i n)
+               (let [v (nth col i)] (recur (inc i) (if (< v m) v m)))
+               m)))))
+     :cljs
+     (let [n (count col)]
+       (when (pos? n)
+         (loop [i 1 m (nth col 0)]
+           (if (< i n)
+             (let [v (nth col i)] (recur (inc i) (if (< v m) v m)))
+             m))))))
 
 (defn max-val
   "Maximum value."
   [col]
-  (let [n (count col)]
-    (when (pos? n)
-      (loop [i 1 m (nth col 0)]
-        (if (< i n)
-          (let [v (nth col i)]
-            (recur (inc i) (if (> v m) v m)))
-          m)))))
+  #?(:clj
+     (if-let [^doubles da (d/-as-double-array col)]
+       (when (pos? (alength da))
+         (loop [i 1 m (aget da 0)]
+           (if (< i (alength da))
+             (let [v (aget da i)] (recur (inc i) (if (> v m) v m)))
+             m)))
+       (let [n (count col)]
+         (when (pos? n)
+           (loop [i 1 m (nth col 0)]
+             (if (< i n)
+               (let [v (nth col i)] (recur (inc i) (if (> v m) v m)))
+               m)))))
+     :cljs
+     (let [n (count col)]
+       (when (pos? n)
+         (loop [i 1 m (nth col 0)]
+           (if (< i n)
+             (let [v (nth col i)] (recur (inc i) (if (> v m) v m)))
+             m))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Comparison (return EveArray :uint8 of 0/1)
@@ -117,11 +247,27 @@
 (defn gt
   "Element-wise greater-than. Returns :uint8 mask."
   [a b]
-  (let [n (min (arr-count a) (arr-count b))
-        out (arr/eve-array :uint8 n)]
-    (dotimes [i n]
-      (arr/aset! out i (if (> (arr-get a i) (arr-get b i)) 1 0)))
-    out))
+  #?(:clj
+     (let [da (when-not (number? a) (d/-as-double-array a))]
+       (if (and da (number? b))
+         (let [^doubles x da
+               n   (alength x)
+               bv  (double b)
+               ^bytes out (byte-array n)]
+           (dotimes [i n]
+             (aset out i (byte (if (> (aget x i) bv) 1 0))))
+           (arr/from-byte-array out))
+         (let [n (int (min (arr-count a) (arr-count b)))
+               out (arr/eve-array :uint8 n)]
+           (dotimes [i n]
+             (arr/aset! out i (if (> (arr-get a i) (arr-get b i)) 1 0)))
+           out)))
+     :cljs
+     (let [n (min (arr-count a) (arr-count b))
+           out (arr/eve-array :uint8 n)]
+       (dotimes [i n]
+         (arr/aset! out i (if (> (arr-get a i) (arr-get b i)) 1 0)))
+       out)))
 
 (defn lt
   "Element-wise less-than. Returns :uint8 mask."
@@ -149,12 +295,24 @@
   "Map f over elements, returning new array of same type.
    f receives (elem)."
   [f col]
-  (let [n (count col)
-        type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
-        out (arr/eve-array type-kw n)]
-    (dotimes [i n]
-      (arr/aset! out i (f (nth col i))))
-    out))
+  #?(:clj
+     (if-let [^doubles da (d/-as-double-array col)]
+       (let [n (alength da)
+             ^doubles out (double-array n)]
+         (dotimes [i n] (aset out i (double (f (aget da i)))))
+         (arr/from-double-array out))
+       (let [n (count col)
+             type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
+             out (arr/eve-array type-kw n)]
+         (dotimes [i n] (arr/aset! out i (f (nth col i))))
+         out))
+     :cljs
+     (let [n (count col)
+           type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
+           out (arr/eve-array type-kw n)]
+       (dotimes [i n]
+         (arr/aset! out i (f (nth col i))))
+       out)))
 
 (defn emap2
   "Map f over pairs of elements from two arrays.
