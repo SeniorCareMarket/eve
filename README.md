@@ -15,7 +15,7 @@ atomically mutate Clojure data structures via mmap files on disk.
 - **In-browser shared memory** — `SharedArrayBuffer`-backed atoms let web workers share and atomically mutate persistent data structures without `postMessage` serialization.
 - **Four platforms, one format** — browser (CLJS), Node.js (CLJS), JVM (Clojure), and Babashka all use identical on-disk/in-memory layouts, hash functions, and CAS protocols. A domain created by one platform can be joined by any other.
 - **Epoch-based GC** — cooperative garbage collection ensures old HAMT nodes are freed only after every reader has moved past them. No stop-the-world pauses.
-- **Zero-copy reads** — `deref` walks mmap'd/SAB memory directly. No deserialization into intermediate heap objects.
+- **Zero-copy reads** — `swap!` walks mmap'd/SAB memory directly. No deserialization into intermediate heap objects.
 
 ## Performance
 
