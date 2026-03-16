@@ -51,6 +51,13 @@
               "-Dio.netty.tryReflectionSetAccessible=true"
               "-Xmx1g"]
    :main-opts ["-m" "eve.data-bench"]}
+  :columnar-bench
+  {:extra-paths ["test"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx1g"]
+   :main-opts ["-m" "eve.columnar-bench"]}
   :contention-bench
   {:extra-paths ["bench"]
    :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
