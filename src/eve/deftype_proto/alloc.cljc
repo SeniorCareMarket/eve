@@ -81,19 +81,19 @@
    slab-offset is always a slab-qualified offset [class:3 | block:29].
    field-off   is a byte offset within the block (relative to block start)."
 
-  (-sio-read-u8 [ctx slab-offset field-off]
+  (-sio-read-u8   [ctx slab-offset field-off]
     "Read one unsigned byte from slab-offset+field-off.")
 
-  (-sio-write-u8! [ctx slab-offset field-off val]
+  (-sio-write-u8!  [ctx slab-offset field-off val]
     "Write one byte to slab-offset+field-off.")
 
-  (-sio-read-u16 [ctx slab-offset field-off]
+  (-sio-read-u16  [ctx slab-offset field-off]
     "Read a little-endian u16 from slab-offset+field-off.")
 
   (-sio-write-u16! [ctx slab-offset field-off val]
     "Write a little-endian u16 to slab-offset+field-off.")
 
-  (-sio-read-i32 [ctx slab-offset field-off]
+  (-sio-read-i32  [ctx slab-offset field-off]
     "Read a little-endian i32 from slab-offset+field-off.")
 
   (-sio-write-i32! [ctx slab-offset field-off val]
@@ -106,11 +106,11 @@
   (-sio-write-bytes! [ctx slab-offset field-off src]
     "Write src bytes to slab-offset+field-off.")
 
-  (-sio-alloc! [ctx size-bytes]
+  (-sio-alloc!    [ctx size-bytes]
     "Allocate a block of at least size-bytes. Returns slab-qualified offset.
      Throws on OOM.")
 
-  (-sio-free! [ctx slab-offset]
+  (-sio-free!     [ctx slab-offset]
     "Free a block. Returns true if freed, false on double-free.")
 
   (-sio-copy-block! [ctx dst-slab-offset dst-field-off src-slab-offset src-field-off len]
@@ -135,47 +135,6 @@
 
 #?(:clj
    (do
-     ;; --- Zero-alloc Unsafe region helpers ---
-     ;; These read primitives directly from JVM region memory without allocating
-     ;; intermediate byte arrays. Works for both mmap (native) and heap regions.
-     (def ^:private ^sun.misc.Unsafe ALLOC_UNSAFE
-       (let [f (.getDeclaredField sun.misc.Unsafe "theUnsafe")]
-         (.setAccessible f true)
-         (.get f nil)))
-
-     (def ^:private HEAP_BASE
-       (long (.arrayBaseOffset ALLOC_UNSAFE (Class/forName "[B"))))
-
-     (defn- region-read-u8
-       "Read a single unsigned byte from region at byte-off. Zero allocation."
-       ^long [region ^long byte-off]
-       (if (instance? eve.mem.JvmHeapRegion region)
-         (bit-and (long (.getByte ALLOC_UNSAFE
-                                  (.-backing ^eve.mem.JvmHeapRegion region)
-                                  (+ HEAP_BASE byte-off)))
-                  0xFF)
-         ;; JvmMmapRegion or LustreJvmMmapRegion — native memory
-         (let [addr (if (instance? eve.mem.JvmMmapRegion region)
-                      (.-base-addr ^eve.mem.JvmMmapRegion region)
-                      (.-base-addr ^eve.mem.LustreJvmMmapRegion region))]
-           (bit-and (long (.getByte ALLOC_UNSAFE nil (+ addr byte-off)))
-                    0xFF))))
-
-     (defn- region-read-u16-le
-       "Read an unsigned 16-bit little-endian value from region. Zero allocation."
-       ^long [region ^long byte-off]
-       (if (instance? eve.mem.JvmHeapRegion region)
-         (let [backing (.-backing ^eve.mem.JvmHeapRegion region)
-               b0 (bit-and (long (.getByte ALLOC_UNSAFE backing (+ HEAP_BASE byte-off))) 0xFF)
-               b1 (bit-and (long (.getByte ALLOC_UNSAFE backing (+ HEAP_BASE byte-off 1))) 0xFF)]
-           (bit-or b0 (bit-shift-left b1 8)))
-         (let [addr (if (instance? eve.mem.JvmMmapRegion region)
-                      (.-base-addr ^eve.mem.JvmMmapRegion region)
-                      (.-base-addr ^eve.mem.LustreJvmMmapRegion region))
-               b0 (bit-and (long (.getByte ALLOC_UNSAFE nil (+ addr byte-off))) 0xFF)
-               b1 (bit-and (long (.getByte ALLOC_UNSAFE nil (+ addr byte-off 1))) 0xFF)]
-           (bit-or b0 (bit-shift-left b1 8)))))
-
      (def ^:dynamic *jvm-slab-ctx*
        "The current JVM slab I/O context (JvmSlabCtx).
         Bind this (via clojure.core/binding) before calling collection
@@ -223,101 +182,90 @@
          (.add log slab-off)))
 
      (deftype JvmSlabCtx
-              [^objects regions ;; IMemRegion[6+] — one per slab class (data files)
-               ^objects bitmap-regions ;; IMemRegion[6+] — one per slab class (bitmap files)
-               ^ints data-offsets ;; byte offset of data region per class
-               ^ints bitmap-offsets ;; byte offset of bitmap per class (0 for split files)
-               ^ints total-blocks ;; total blocks per class
-               ^ints block-sizes ;; block size per class [32 64 128 256 512 1024]
-               ^objects file-paths ;; String[6+] — data file paths for lazy growth
-               ^objects bitmap-paths ;; String[6+] — bitmap file paths for lazy growth
-               ^ints max-blocks] ;; max blocks per class (growth cap)
+       [^objects regions         ;; IMemRegion[6+] — one per slab class (data files)
+        ^objects bitmap-regions  ;; IMemRegion[6+] — one per slab class (bitmap files)
+        ^ints    data-offsets    ;; byte offset of data region per class
+        ^ints    bitmap-offsets  ;; byte offset of bitmap per class (0 for split files)
+        ^ints    total-blocks    ;; total blocks per class
+        ^ints    block-sizes     ;; block size per class [32 64 128 256 512 1024]
+        ^objects file-paths      ;; String[6+] — data file paths for lazy growth
+        ^objects bitmap-paths    ;; String[6+] — bitmap file paths for lazy growth
+        ^ints    max-blocks]     ;; max blocks per class (growth cap)
 
        ISlabIO
 
        (-sio-read-u8 [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (+ (aget data-offsets class-idx)
-                       (* block-idx (aget block-sizes class-idx)))
-               region (aget regions class-idx)]
-           (region-read-u8 region (+ base field-off))))
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)
+               b         (mem/-read-bytes region (+ base field-off) 1)]
+           (bit-and (aget ^bytes b 0) 0xFF)))
 
        (-sio-write-u8! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (long (+ (aget data-offsets class-idx)
-                             (* block-idx (aget block-sizes class-idx))))
-               region (aget regions class-idx)
-               abs-off (+ base (long field-off))]
-           (if (instance? eve.mem.JvmHeapRegion region)
-             (.putByte ALLOC_UNSAFE
-                       (.-backing ^eve.mem.JvmHeapRegion region)
-                       (+ HEAP_BASE abs-off)
-                       (unchecked-byte val))
-             (let [addr (if (instance? eve.mem.JvmMmapRegion region)
-                          (.-base-addr ^eve.mem.JvmMmapRegion region)
-                          (.-base-addr ^eve.mem.LustreJvmMmapRegion region))]
-               (.putByte ALLOC_UNSAFE nil (+ addr abs-off) (unchecked-byte val))))))
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)
+               b         (byte-array 1)]
+           (aset b 0 (unchecked-byte val))
+           (mem/-write-bytes! region (+ base field-off) b)))
 
        (-sio-read-u16 [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (+ (aget data-offsets class-idx)
-                       (* block-idx (aget block-sizes class-idx)))
-               region (aget regions class-idx)]
-           (region-read-u16-le region (+ base (long field-off)))))
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)
+               b         (mem/-read-bytes region (+ base field-off) 2)]
+           ;; Little-endian u16
+           (bit-or (bit-and (aget ^bytes b 0) 0xFF)
+                   (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8))))
 
        (-sio-write-u16! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (long (+ (aget data-offsets class-idx)
-                             (* block-idx (aget block-sizes class-idx))))
-               region (aget regions class-idx)
-               abs-off (+ base (long field-off))
-               b0 (unchecked-byte (bit-and val 0xFF))
-               b1 (unchecked-byte (bit-and (unsigned-bit-shift-right val 8) 0xFF))]
-           (if (instance? eve.mem.JvmHeapRegion region)
-             (let [backing (.-backing ^eve.mem.JvmHeapRegion region)]
-               (.putByte ALLOC_UNSAFE backing (+ HEAP_BASE abs-off) b0)
-               (.putByte ALLOC_UNSAFE backing (+ HEAP_BASE abs-off 1) b1))
-             (let [addr (if (instance? eve.mem.JvmMmapRegion region)
-                          (.-base-addr ^eve.mem.JvmMmapRegion region)
-                          (.-base-addr ^eve.mem.LustreJvmMmapRegion region))]
-               (.putByte ALLOC_UNSAFE nil (+ addr abs-off) b0)
-               (.putByte ALLOC_UNSAFE nil (+ addr abs-off 1) b1)))))
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)
+               b         (byte-array 2)]
+           (aset b 0 (unchecked-byte (bit-and val 0xFF)))
+           (aset b 1 (unchecked-byte (bit-and (unsigned-bit-shift-right val 8) 0xFF)))
+           (mem/-write-bytes! region (+ base field-off) b)))
 
        (-sio-read-i32 [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (+ (aget data-offsets class-idx)
-                       (* block-idx (aget block-sizes class-idx)))
-               region (aget regions class-idx)]
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)]
            ;; -load-i32 is atomic acquire — fine for reading HAMT nodes
            (mem/-load-i32 region (+ base field-off))))
 
        (-sio-write-i32! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (+ (aget data-offsets class-idx)
-                       (* block-idx (aget block-sizes class-idx)))
-               region (aget regions class-idx)]
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)]
            (mem/-store-i32! region (+ base field-off) val)))
 
        (-sio-read-bytes [_ slab-offset field-off len]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (+ (aget data-offsets class-idx)
-                       (* block-idx (aget block-sizes class-idx)))
-               region (aget regions class-idx)]
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)]
            (mem/-read-bytes region (+ base field-off) len)))
 
        (-sio-write-bytes! [_ slab-offset field-off src]
          (let [class-idx (decode-class-idx slab-offset)
                block-idx (decode-block-idx slab-offset)
-               base (+ (aget data-offsets class-idx)
-                       (* block-idx (aget block-sizes class-idx)))
-               region (aget regions class-idx)]
+               base      (+ (aget data-offsets class-idx)
+                            (* block-idx (aget block-sizes class-idx)))
+               region    (aget regions class-idx)]
            (mem/-write-bytes! region (+ base field-off) src)))
 
        (-sio-alloc! [ctx size-bytes]
@@ -333,33 +281,33 @@
                                     (loop [attempts 0]
                                       (let [grew? (locking regions
                                                     (let [result (coalesc/grow-coalesc-region!
-                                                                  (aget regions OVERFLOW_CLASS_IDX)
-                                                                  coalesc/DEFAULT_DATA_SIZE)]
+                                                                   (aget regions OVERFLOW_CLASS_IDX)
+                                                                   coalesc/DEFAULT_DATA_SIZE)]
                                                       (when result
                                                         (let [data-off (long (aget data-offsets OVERFLOW_CLASS_IDX))
-                                                              fpath (aget file-paths OVERFLOW_CLASS_IDX)
-                                                              new-r (if fpath
-                                                                      (mem/open-mmap-region
-                                                                       fpath (+ data-off result))
+                                                              fpath    (aget file-paths OVERFLOW_CLASS_IDX)
+                                                              new-r    (if fpath
+                                                                         (mem/open-mmap-region
+                                                                           fpath (+ data-off result))
                                                                          ;; Heap-backed: create larger region and copy
-                                                                      (let [old-r (aget regions OVERFLOW_CLASS_IDX)
-                                                                            old-sz (mem/-byte-length old-r)
-                                                                            new-sz (+ data-off result)
-                                                                            new-rgn (mem/make-heap-region new-sz)]
-                                                                        (mem/copy-region! old-r 0 new-rgn 0 old-sz)
-                                                                        new-rgn))]
+                                                                         (let [old-r   (aget regions OVERFLOW_CLASS_IDX)
+                                                                               old-sz  (mem/-byte-length old-r)
+                                                                               new-sz  (+ data-off result)
+                                                                               new-rgn (mem/make-heap-region new-sz)]
+                                                                           (mem/copy-region! old-r 0 new-rgn 0 old-sz)
+                                                                           new-rgn))]
                                                           (aset regions OVERFLOW_CLASS_IDX new-r))
                                                         true)))]
                                         (if-let [result (try
                                                           (coalesc/coalesc-alloc!
-                                                           (aget regions OVERFLOW_CLASS_IDX) size-bytes)
+                                                            (aget regions OVERFLOW_CLASS_IDX) size-bytes)
                                                           (catch Exception _ nil))]
                                           result
                                           (if (and grew? (< attempts 20))
                                             (recur (inc attempts))
                                             (throw (ex-info "coalesc-alloc!: out of memory after growth"
                                                             {:size size-bytes}))))))))
-                       slab-off (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)]
+                       slab-off  (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)]
                    (when-let [^java.util.List log (.get jvm-alloc-log-tl)]
                      (.add log slab-off))
                    slab-off)
@@ -369,7 +317,7 @@
              (letfn [(try-alloc [ci]
                        (let [bm-rgn (aget bitmap-regions ci)
                              bm-off (aget bitmap-offsets ci)
-                             total (aget total-blocks ci)
+                             total  (aget total-blocks ci)
                              ;; Lustre bitmap regions: bulk-read to avoid per-word fcntl lock
                              find-free (bitmap-find-free-fn bm-rgn)
                              cursor (mem/-load-i32 (aget regions ci) d/SLAB_HDR_ALLOC_CURSOR)]
@@ -392,38 +340,38 @@
 
                                :else nil)))))
                      (remap-jvm! [ci n-blocks]
-                       (let [blk-size (long (aget block-sizes ci))
-                             path (aget file-paths ci)
-                             bm-path (aget bitmap-paths ci)
+                       (let [blk-size   (long (aget block-sizes ci))
+                             path       (aget file-paths ci)
+                             bm-path    (aget bitmap-paths ci)
                              data-bytes (+ (long d/SLAB_HEADER_SIZE) (* n-blocks blk-size))
-                             bm-bytes (d/bitmap-byte-size n-blocks)
+                             bm-bytes   (d/bitmap-byte-size n-blocks)
                              ;; Infer lustre mode from existing region type —
                              ;; *lustre-mode* may not be bound on remap threads.
-                             lustre? (lustre-region? (aget regions ci))]
+                             lustre?    (lustre-region? (aget regions ci))]
                          (binding [mem/*lustre-mode* lustre?]
                            (let [new-region (mem/open-mmap-region path data-bytes)
-                                 new-bm (mem/open-mmap-region bm-path bm-bytes)]
+                                 new-bm     (mem/open-mmap-region bm-path bm-bytes)]
                              (aset regions ci new-region)
                              (aset bitmap-regions ci new-bm)
                              (aset total-blocks ci (int n-blocks))))))
                      (grow! [ci]
                        (locking regions ;; serialize growth across JVM threads
                          (when-let [path (aget file-paths ci)]
-                           (let [cached (long (aget total-blocks ci))
+                           (let [cached    (long (aget total-blocks ci))
                                  ;; Infer lustre mode from existing region type
-                                 lustre? (lustre-region? (aget regions ci))
+                                 lustre?   (lustre-region? (aget regions ci))
                                  ;; Peek header to detect external growth
-                                 peek-r (binding [mem/*lustre-mode* lustre?]
-                                          (mem/open-mmap-region path 64))
+                                 peek-r    (binding [mem/*lustre-mode* lustre?]
+                                             (mem/open-mmap-region path 64))
                                  hdr-total (long (mem/-load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS))]
                              (if (> hdr-total cached)
                                ;; Another process/thread grew — re-map at header size
                                (do (remap-jvm! ci hdr-total) true)
                                ;; Try to be growth leader via CAS on total_blocks
                                (let [new-total (* 2 hdr-total)
-                                     added (- new-total hdr-total)
-                                     witness (int (mem/-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
-                                                                 (int hdr-total) (int new-total)))]
+                                     added     (- new-total hdr-total)
+                                     witness   (int (mem/-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
+                                                      (int hdr-total) (int new-total)))]
                                  (if (== witness (int hdr-total))
                                    ;; Won CAS — extend both files
                                    (do (remap-jvm! ci new-total)
@@ -445,24 +393,24 @@
                              (let [byte-off (coalesc/coalesc-alloc!
                                              region size-bytes)
                                    slab-off (encode-slab-offset
-                                             OVERFLOW_CLASS_IDX byte-off)]
+                                              OVERFLOW_CLASS_IDX byte-off)]
                                (when-let [^java.util.List log
                                           (.get jvm-alloc-log-tl)]
                                  (.add log slab-off))
                                slab-off)
                              (throw
-                              (ex-info "JvmSlabCtx: all slab classes full"
-                                       {:class-idx ci}))))))))))))
+                               (ex-info "JvmSlabCtx: all slab classes full"
+                                        {:class-idx ci}))))))))))))
 
        (-sio-copy-block! [_ dst-slab-offset dst-field-off src-slab-offset src-field-off len]
-         (let [src-ci (decode-class-idx src-slab-offset)
-               src-bi (decode-block-idx src-slab-offset)
+         (let [src-ci  (decode-class-idx src-slab-offset)
+               src-bi  (decode-block-idx src-slab-offset)
                src-base (+ (aget data-offsets src-ci) (* src-bi (aget block-sizes src-ci)))
-               src-rgn (aget regions src-ci)
-               dst-ci (decode-class-idx dst-slab-offset)
-               dst-bi (decode-block-idx dst-slab-offset)
+               src-rgn  (aget regions src-ci)
+               dst-ci  (decode-class-idx dst-slab-offset)
+               dst-bi  (decode-block-idx dst-slab-offset)
                dst-base (+ (aget data-offsets dst-ci) (* dst-bi (aget block-sizes dst-ci)))
-               dst-rgn (aget regions dst-ci)]
+               dst-rgn  (aget regions dst-ci)]
            (mem/copy-region! src-rgn (+ src-base (long src-field-off))
                              dst-rgn (+ dst-base (long dst-field-off))
                              len)))
@@ -472,15 +420,15 @@
            (if (== class-idx OVERFLOW_CLASS_IDX)
              ;; Coalescing free (class 6)
              (let [byte-off (decode-block-idx slab-offset)
-                   region (aget regions OVERFLOW_CLASS_IDX)]
+                   region   (aget regions OVERFLOW_CLASS_IDX)]
                (if region
                  (coalesc/coalesc-free! region byte-off)
                  false))
              ;; Bitmap free (class 0-5)
              (let [block-idx (decode-block-idx slab-offset)
-                   bm-rgn (aget bitmap-regions class-idx)
-                   bm-off (aget bitmap-offsets class-idx)
-                   freed? (mem/imr-bitmap-free! bm-rgn bm-off block-idx)]
+                   bm-rgn    (aget bitmap-regions class-idx)
+                   bm-off    (aget bitmap-offsets class-idx)
+                   freed?    (mem/imr-bitmap-free! bm-rgn bm-off block-idx)]
                (when freed?
                  (mem/-add-i32! (aget regions class-idx) d/SLAB_HDR_FREE_COUNT 1))
                freed?)))))
@@ -493,21 +441,21 @@
        ([regions-vec bm-regions-vec]
         (make-jvm-slab-ctx regions-vec bm-regions-vec nil nil nil))
        ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec]
-        (let [n (count regions-vec)
-              data-offs (int-array n)
-              bm-offs (int-array n)
-              tot-blocks (int-array n)
-              blk-sizes (int-array n)
-              fpaths (object-array n)
-              bm-fpaths (object-array n)
-              max-blks (int-array n)]
+        (let [n           (count regions-vec)
+              data-offs   (int-array n)
+              bm-offs     (int-array n)
+              tot-blocks  (int-array n)
+              blk-sizes   (int-array n)
+              fpaths      (object-array n)
+              bm-fpaths   (object-array n)
+              max-blks    (int-array n)]
           (dotimes [i n]
             (let [region (nth regions-vec i)]
               (when region
-                (aset data-offs i (int (mem/-load-i32 region d/SLAB_HDR_DATA_OFFSET)))
-                (aset bm-offs i (int (mem/-load-i32 region d/SLAB_HDR_BITMAP_OFFSET)))
+                (aset data-offs  i (int (mem/-load-i32 region d/SLAB_HDR_DATA_OFFSET)))
+                (aset bm-offs    i (int (mem/-load-i32 region d/SLAB_HDR_BITMAP_OFFSET)))
                 (aset tot-blocks i (int (mem/-load-i32 region d/SLAB_HDR_TOTAL_BLOCKS)))
-                (aset blk-sizes i (int (mem/-load-i32 region d/SLAB_HDR_BLOCK_SIZE)))))
+                (aset blk-sizes  i (int (mem/-load-i32 region d/SLAB_HDR_BLOCK_SIZE)))))
             (when paths-vec
               (aset fpaths i (nth paths-vec i nil)))
             (when bm-paths-vec
@@ -515,142 +463,9 @@
             (when max-caps-vec
               (aset max-blks i (int (nth max-caps-vec i 0)))))
           (JvmSlabCtx.
-           (into-array regions-vec)
-           (into-array bm-regions-vec)
-           data-offs bm-offs tot-blocks blk-sizes fpaths bm-fpaths max-blks))))
-
-;; jvm-slab-write-bytes-n! removed — direct-write-header+i{32,64}-le! replaces it
-
-     (defn- direct-write-header+i32-le!
-       "Write 7 bytes [0xEE 0xDB tag i32-LE] directly into slab. Zero heap alloc.
-        Resolves slab address once, writes via Unsafe."
-       [^JvmSlabCtx sio slab-off field-off tag v]
-       (let [slab-off (long slab-off)
-             field-off (long field-off)
-             tag (long tag)
-             v (long v)
-             class-idx (decode-class-idx slab-off)
-             block-idx (decode-block-idx slab-off)
-             base (+ (long (aget (.-data-offsets sio) class-idx))
-                     (* (long block-idx) (long (aget (.-block-sizes sio) class-idx))))
-             region (aget (.-regions sio) class-idx)
-             abs (+ base field-off)]
-         (if (instance? eve.mem.JvmHeapRegion region)
-           (let [backing (.-backing ^eve.mem.JvmHeapRegion region)
-                 a (+ HEAP_BASE abs)]
-             (.putByte ALLOC_UNSAFE backing a (unchecked-byte 0xEE))
-             (.putByte ALLOC_UNSAFE backing (+ a 1) (unchecked-byte 0xDB))
-             (.putByte ALLOC_UNSAFE backing (+ a 2) (unchecked-byte tag))
-             (.putByte ALLOC_UNSAFE backing (+ a 3) (unchecked-byte (bit-and v 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 4) (unchecked-byte (bit-and (unsigned-bit-shift-right v 8) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 5) (unchecked-byte (bit-and (unsigned-bit-shift-right v 16) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 6) (unchecked-byte (bit-and (unsigned-bit-shift-right v 24) 0xFF))))
-           (let [a (+ (if (instance? eve.mem.JvmMmapRegion region)
-                        (.-base-addr ^eve.mem.JvmMmapRegion region)
-                        (.-base-addr ^eve.mem.LustreJvmMmapRegion region))
-                      abs)]
-             (.putByte ALLOC_UNSAFE nil a (unchecked-byte 0xEE))
-             (.putByte ALLOC_UNSAFE nil (+ a 1) (unchecked-byte 0xDB))
-             (.putByte ALLOC_UNSAFE nil (+ a 2) (unchecked-byte tag))
-             (.putByte ALLOC_UNSAFE nil (+ a 3) (unchecked-byte (bit-and v 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 4) (unchecked-byte (bit-and (unsigned-bit-shift-right v 8) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 5) (unchecked-byte (bit-and (unsigned-bit-shift-right v 16) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 6) (unchecked-byte (bit-and (unsigned-bit-shift-right v 24) 0xFF)))))))
-
-     (defn- direct-write-header+i64-le!
-       "Write 11 bytes [0xEE 0xDB tag i64-LE] directly into slab. Zero heap alloc."
-       [^JvmSlabCtx sio slab-off field-off tag v]
-       (let [slab-off (long slab-off)
-             field-off (long field-off)
-             tag (long tag)
-             v (long v)
-             class-idx (decode-class-idx slab-off)
-             block-idx (decode-block-idx slab-off)
-             base (+ (long (aget (.-data-offsets sio) class-idx))
-                     (* (long block-idx) (long (aget (.-block-sizes sio) class-idx))))
-             region (aget (.-regions sio) class-idx)
-             abs (+ base field-off)]
-         (if (instance? eve.mem.JvmHeapRegion region)
-           (let [backing (.-backing ^eve.mem.JvmHeapRegion region)
-                 a (+ HEAP_BASE abs)]
-             (.putByte ALLOC_UNSAFE backing a (unchecked-byte 0xEE))
-             (.putByte ALLOC_UNSAFE backing (+ a 1) (unchecked-byte 0xDB))
-             (.putByte ALLOC_UNSAFE backing (+ a 2) (unchecked-byte tag))
-             (.putByte ALLOC_UNSAFE backing (+ a 3) (unchecked-byte (bit-and v 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 4) (unchecked-byte (bit-and (unsigned-bit-shift-right v 8) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 5) (unchecked-byte (bit-and (unsigned-bit-shift-right v 16) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 6) (unchecked-byte (bit-and (unsigned-bit-shift-right v 24) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 7) (unchecked-byte (bit-and (unsigned-bit-shift-right v 32) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 8) (unchecked-byte (bit-and (unsigned-bit-shift-right v 40) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 9) (unchecked-byte (bit-and (unsigned-bit-shift-right v 48) 0xFF)))
-             (.putByte ALLOC_UNSAFE backing (+ a 10) (unchecked-byte (bit-and (unsigned-bit-shift-right v 56) 0xFF))))
-           (let [a (+ (if (instance? eve.mem.JvmMmapRegion region)
-                        (.-base-addr ^eve.mem.JvmMmapRegion region)
-                        (.-base-addr ^eve.mem.LustreJvmMmapRegion region))
-                      abs)]
-             (.putByte ALLOC_UNSAFE nil a (unchecked-byte 0xEE))
-             (.putByte ALLOC_UNSAFE nil (+ a 1) (unchecked-byte 0xDB))
-             (.putByte ALLOC_UNSAFE nil (+ a 2) (unchecked-byte tag))
-             (.putByte ALLOC_UNSAFE nil (+ a 3) (unchecked-byte (bit-and v 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 4) (unchecked-byte (bit-and (unsigned-bit-shift-right v 8) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 5) (unchecked-byte (bit-and (unsigned-bit-shift-right v 16) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 6) (unchecked-byte (bit-and (unsigned-bit-shift-right v 24) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 7) (unchecked-byte (bit-and (unsigned-bit-shift-right v 32) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 8) (unchecked-byte (bit-and (unsigned-bit-shift-right v 40) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 9) (unchecked-byte (bit-and (unsigned-bit-shift-right v 48) 0xFF)))
-             (.putByte ALLOC_UNSAFE nil (+ a 10) (unchecked-byte (bit-and (unsigned-bit-shift-right v 56) 0xFF)))))))
-
-     (defn write-eve-bytes-into!
-       "Serialize v and write directly into slab at node-off + byte-off.
-        For fixed-size types, writes via Unsafe into the slab (zero heap alloc).
-        For cached types (nil/bool/small-int/keyword), writes cached byte array.
-        For variable-length types, falls back to value->eve-bytes (allocating).
-        Returns the number of bytes written."
-       [^JvmSlabCtx sio ^long node-off ^long byte-off v]
-       (cond
-         (nil? v) 0
-
-         (instance? Boolean v)
-         (do (-sio-write-bytes! sio node-off byte-off
-                                (if v mem/BYTES-TRUE mem/BYTES-FALSE))
-             3)
-
-         (or (instance? Long v) (instance? Integer v)
-             (instance? Short v) (instance? Byte v))
-         (let [n (long v)]
-           (if (and (>= n Integer/MIN_VALUE) (<= n Integer/MAX_VALUE))
-             (if (and (>= n -128) (<= n 127))
-               (do (-sio-write-bytes! sio node-off byte-off
-                                      (aget ^objects mem/small-int-cache (+ (int n) 128)))
-                   7)
-               (do (direct-write-header+i32-le! sio node-off byte-off 0x03 n) 7))
-             (do (direct-write-header+i64-le! sio node-off byte-off 0x0F n) 11)))
-
-         (or (instance? Double v) (instance? Float v))
-         (do (direct-write-header+i64-le! sio node-off byte-off 0x04
-                                          (Double/doubleToRawLongBits (double v)))
-             11)
-
-         (instance? java.util.Date v)
-         (do (direct-write-header+i64-le! sio node-off byte-off 0x0E
-                                          (Double/doubleToRawLongBits (double (.getTime ^java.util.Date v))))
-             11)
-
-         (instance? java.util.UUID v)
-         ;; UUID is 19 bytes — fall back to allocating since it needs two i64 writes
-         ;; and isn't common enough to warrant a dedicated direct-write helper
-         (let [b (mem/value->eve-bytes v)]
-           (-sio-write-bytes! sio node-off byte-off b)
-           19)
-
-         ;; For all other types (string, keyword, symbol, collections)
-         ;; fall back to value->eve-bytes (allocating)
-         :else
-         (let [b (mem/value->eve-bytes v)
-               len (count b)]
-           (when (pos? len)
-             (-sio-write-bytes! sio node-off byte-off b))
-           len)))
+            (into-array regions-vec)
+            (into-array bm-regions-vec)
+            data-offs bm-offs tot-blocks blk-sizes fpaths bm-fpaths max-blks))))
 
      (defn refresh-jvm-slab-regions!
        "Re-map any JVM slab regions whose header total_blocks exceeds the
@@ -659,72 +474,72 @@
         0-arity: uses *jvm-slab-ctx*.  1-arity: explicit sio."
        ([] (refresh-jvm-slab-regions! *jvm-slab-ctx*))
        ([^JvmSlabCtx sio]
-        (let [regions (.-regions sio)
-              total-blocks (.-total-blocks sio)
-              file-paths (.-file-paths sio)
-              data-offsets (.-data-offsets sio)
+       (let [regions        (.-regions sio)
+             total-blocks   (.-total-blocks sio)
+             file-paths     (.-file-paths sio)
+             data-offsets   (.-data-offsets sio)
              ;; Fast path: lockless scan for growth in classes 0-5
-              any-grew?
-              (loop [ci 0]
-                (cond
-                  (>= ci (int d/NUM_SLAB_CLASSES)) false
-                  (nil? (aget file-paths ci)) (recur (inc ci))
-                  :else
-                  (let [cached (long (aget total-blocks ci))
-                        cur-r (aget regions ci)
-                        hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                    (if (> hdr-total cached)
-                      true
-                      (recur (inc ci))))))
+             any-grew?
+             (loop [ci 0]
+               (cond
+                 (>= ci (int d/NUM_SLAB_CLASSES)) false
+                 (nil? (aget file-paths ci)) (recur (inc ci))
+                 :else
+                 (let [cached    (long (aget total-blocks ci))
+                       cur-r     (aget regions ci)
+                       hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                   (if (> hdr-total cached)
+                     true
+                     (recur (inc ci))))))
              ;; Check coalesc (class 6) growth without lock
-              coalesc-grew?
-              (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
-                (let [cur-region (aget regions OVERFLOW_CLASS_IDX)]
-                  (if (nil? cur-region)
-                    true ;; never opened — must check
-                    (let [data-off (long (aget data-offsets OVERFLOW_CLASS_IDX))
-                          hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
-                          cur-size (- (long (mem/-byte-length cur-region)) data-off)]
-                      (> hdr-data-sz cur-size)))))]
-          (when (or any-grew? coalesc-grew?)
+             coalesc-grew?
+             (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+               (let [cur-region (aget regions OVERFLOW_CLASS_IDX)]
+                 (if (nil? cur-region)
+                   true ;; never opened — must check
+                   (let [data-off    (long (aget data-offsets OVERFLOW_CLASS_IDX))
+                         hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                         cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                     (> hdr-data-sz cur-size)))))]
+         (when (or any-grew? coalesc-grew?)
            ;; Infer lustre mode from any existing region in the array.
            ;; *lustre-mode* may not be bound on remap/refresh threads.
-            (let [lustre? (some lustre-region? (seq regions))
-                  bitmap-regions (.-bitmap-regions sio)
-                  block-sizes (.-block-sizes sio)
-                  bitmap-paths (.-bitmap-paths sio)]
-              (binding [mem/*lustre-mode* (boolean lustre?)]
-                (locking regions
-                  (when any-grew?
-                    (dotimes [ci d/NUM_SLAB_CLASSES]
-                      (when-let [path (aget file-paths ci)]
-                        (let [cached (long (aget total-blocks ci))
-                              cur-r (aget regions ci)
-                              hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                          (when (> hdr-total cached)
-                            (let [blk-size (long (aget block-sizes ci))
-                                  data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
-                                  bm-bytes (d/bitmap-byte-size hdr-total)
-                                  new-region (mem/open-mmap-region path data-bytes)
-                                  new-bm (mem/open-mmap-region (aget bitmap-paths ci) bm-bytes)]
-                              (aset regions ci new-region)
-                              (aset bitmap-regions ci new-bm)
-                              (aset total-blocks ci (int hdr-total))))))))
-                  (when coalesc-grew?
-                    (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
-                      (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
-                            data-off (long (aget data-offsets OVERFLOW_CLASS_IDX))]
-                        (if (nil? cur-region)
-                          (let [peek-r (mem/open-mmap-region path 64)
-                                hdr-data-sz (long (mem/-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
-                            (when (pos? hdr-data-sz)
-                              (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
-                                (aset regions OVERFLOW_CLASS_IDX new-r))))
-                          (let [hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
-                                cur-size (- (long (mem/-byte-length cur-region)) data-off)]
-                            (when (> hdr-data-sz cur-size)
-                              (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
-                                (aset regions OVERFLOW_CLASS_IDX new-r)))))))))))))))
+           (let [lustre? (some lustre-region? (seq regions))
+                 bitmap-regions (.-bitmap-regions sio)
+                 block-sizes    (.-block-sizes sio)
+                 bitmap-paths   (.-bitmap-paths sio)]
+             (binding [mem/*lustre-mode* (boolean lustre?)]
+               (locking regions
+                 (when any-grew?
+                   (dotimes [ci d/NUM_SLAB_CLASSES]
+                     (when-let [path (aget file-paths ci)]
+                       (let [cached    (long (aget total-blocks ci))
+                             cur-r     (aget regions ci)
+                             hdr-total (long (mem/-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                         (when (> hdr-total cached)
+                           (let [blk-size   (long (aget block-sizes ci))
+                                 data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
+                                 bm-bytes   (d/bitmap-byte-size hdr-total)
+                                 new-region (mem/open-mmap-region path data-bytes)
+                                 new-bm     (mem/open-mmap-region (aget bitmap-paths ci) bm-bytes)]
+                             (aset regions ci new-region)
+                             (aset bitmap-regions ci new-bm)
+                             (aset total-blocks ci (int hdr-total))))))))
+                 (when coalesc-grew?
+                   (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+                     (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
+                           data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
+                       (if (nil? cur-region)
+                         (let [peek-r      (mem/open-mmap-region path 64)
+                               hdr-data-sz (long (mem/-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
+                           (when (pos? hdr-data-sz)
+                             (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
+                               (aset regions OVERFLOW_CLASS_IDX new-r))))
+                         (let [hdr-data-sz (long (mem/-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                               cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                           (when (> hdr-data-sz cur-size)
+                             (let [new-r (mem/open-mmap-region path (+ data-off hdr-data-sz))]
+                               (aset regions OVERFLOW_CLASS_IDX new-r)))))))))))))))
 
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)
@@ -742,11 +557,11 @@
        "Create a single in-memory slab for class-idx using JvmHeapRegion.
         Writes the slab header and returns the initialized JvmHeapRegion."
        [class-idx & {:keys [capacity]}]
-       (let [capacity (long (or capacity (* 1 1024 1024))) ; default 1 MB
+       (let [capacity   (long (or capacity (* 1 1024 1024)))   ; default 1 MB
              block-size (nth d/SLAB_SIZES class-idx)
-             layout (d/slab-layout block-size capacity)
+             layout     (d/slab-layout block-size capacity)
              {:keys [total-bytes bitmap-offset bitmap-size data-offset total-blocks]} layout
-             region (mem/make-heap-region total-bytes)]
+             region     (mem/make-heap-region total-bytes)]
          (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
          (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
          (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS total-blocks)
@@ -790,8 +605,8 @@
         (jvm-alloc-scalar-block! *jvm-slab-ctx* v))
        ([sio v]
         (let [ev-bytes (mem/value->eve-bytes v)
-              n (inc (alength ^bytes ev-bytes))
-              blk-off (-sio-alloc! sio n)]
+              n        (inc (alength ^bytes ev-bytes))
+              blk-off  (-sio-alloc! sio n)]
           (-sio-write-u8! sio blk-off 0 ser/SCALAR_BLOCK_TYPE_ID)
           (-sio-write-bytes! sio blk-off 1 ev-bytes)
           blk-off)))
@@ -803,8 +618,8 @@
         (jvm-read-scalar-block *jvm-slab-ctx* slab-off))
        ([sio slab-off]
         (let [class-idx (decode-class-idx slab-off)
-              blk-size (long (nth d/SLAB_SIZES class-idx))
-              ev-bytes (-sio-read-bytes sio slab-off 1 (dec blk-size))]
+              blk-size  (long (nth d/SLAB_SIZES class-idx))
+              ev-bytes  (-sio-read-bytes sio slab-off 1 (dec blk-size))]
           (mem/eve-bytes->value ev-bytes))))
 
      ;;-----------------------------------------------------------------------
@@ -817,9 +632,9 @@
        ^long [^long code]
        (case code
          (0x01 0x02 0x03) 1
-         (0x04 0x05) 2
+         (0x04 0x05)      2
          (0x06 0x07 0x08) 4
-         0x09 8
+         0x09             8
          (throw (ex-info "unknown subtype" {:code code}))))
 
      (defn- jvm-array->subtype+bytes
@@ -828,7 +643,7 @@
        (cond
          (instance? (type (int-array 0)) arr)
          (let [ia ^ints arr
-               n (alength ia)
+               n  (alength ia)
                bb (doto (java.nio.ByteBuffer/allocate (* 4 n))
                     (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
            (dotimes [i n] (.putInt bb (aget ia i)))
@@ -836,7 +651,7 @@
 
          (instance? (type (double-array 0)) arr)
          (let [da ^doubles arr
-               n (alength da)
+               n  (alength da)
                bb (doto (java.nio.ByteBuffer/allocate (* 8 n))
                     (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
            (dotimes [i n] (.putDouble bb (aget da i)))
@@ -844,7 +659,7 @@
 
          (instance? (type (float-array 0)) arr)
          (let [fa ^floats arr
-               n (alength fa)
+               n  (alength fa)
                bb (doto (java.nio.ByteBuffer/allocate (* 4 n))
                     (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
            (dotimes [i n] (.putFloat bb (aget fa i)))
@@ -852,7 +667,7 @@
 
          (instance? (type (short-array 0)) arr)
          (let [sa ^shorts arr
-               n (alength sa)
+               n  (alength sa)
                bb (doto (java.nio.ByteBuffer/allocate (* 2 n))
                     (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
            (dotimes [i n] (.putShort bb (aget sa i)))
@@ -870,24 +685,24 @@
         Returns slab-qualified offset."
        [sio arr]
        (let [[subtype ^bytes raw-bytes] (jvm-array->subtype+bytes arr)
-             cnt (java.lang.reflect.Array/getLength arr)
+             cnt     (java.lang.reflect.Array/getLength arr)
              blk-off (-sio-alloc! sio (+ 8 (alength raw-bytes)))]
-         (-sio-write-u8! sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
-         (-sio-write-u8! sio blk-off 1 subtype)
-         (-sio-write-u16! sio blk-off 2 0)
-         (-sio-write-i32! sio blk-off 4 cnt)
+         (-sio-write-u8!    sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
+         (-sio-write-u8!    sio blk-off 1 subtype)
+         (-sio-write-u16!   sio blk-off 2 0)
+         (-sio-write-i32!   sio blk-off 4 cnt)
          (-sio-write-bytes! sio blk-off 8 raw-bytes)
          blk-off))
 
      (defn jvm-read-eve-array
        "Read a 0x1D slab block, return a Clojure vector of numbers."
        [sio slab-off]
-       (let [subtype (long (-sio-read-u8 sio slab-off 1))
-             cnt (-sio-read-i32 sio slab-off 4)
-             elem-sz (jvm-subtype-elem-size subtype)
-             raw (-sio-read-bytes sio slab-off 8 (* cnt elem-sz))
-             bb (doto (java.nio.ByteBuffer/wrap raw)
-                  (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
+       (let [subtype  (long (-sio-read-u8 sio slab-off 1))
+             cnt      (-sio-read-i32 sio slab-off 4)
+             elem-sz  (jvm-subtype-elem-size subtype)
+             raw      (-sio-read-bytes sio slab-off 8 (* cnt elem-sz))
+             bb       (doto (java.nio.ByteBuffer/wrap raw)
+                        (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
          (case subtype
            (0x01 0x03)
            (mapv (fn [i] (bit-and (long (aget ^bytes raw i)) 0xFF)) (range cnt))
@@ -940,8 +755,8 @@
                              schema)]
          (loop [fs (seq sorted) off 0 layout {}]
            (if-let [e (first fs)]
-             (let [ft (val e)
-                   sz (get obj-type-sizes ft 4)
+             (let [ft   (val e)
+                   sz   (get obj-type-sizes ft 4)
                    algn (get obj-type-alignments ft 4)
                    aoff (jvm-align off algn)]
                (recur (next fs) (+ aoff sz)
@@ -950,12 +765,12 @@
 
      (defn- jvm-encode-obj-schema ^bytes [schema]
        (let [fields (seq schema)
-             parts (mapv (fn [e]
-                           (let [nm (.getBytes (name (key e)) "UTF-8")]
-                             {:nm nm :tc (get obj-type-kw->code (val e))}))
-                         fields)
-             total (+ 1 (reduce + 0 (map #(+ 2 (count (:nm %))) parts)))
-             buf (byte-array total)]
+             parts  (mapv (fn [e]
+                            (let [nm (.getBytes (name (key e)) "UTF-8")]
+                              {:nm nm :tc (get obj-type-kw->code (val e))}))
+                          fields)
+             total  (+ 1 (reduce + 0 (map #(+ 2 (count (:nm %))) parts)))
+             buf    (byte-array total)]
          (aset buf 0 (unchecked-byte (count fields)))
          (loop [pos 1 ps (seq parts)]
            (when ps
@@ -972,8 +787,8 @@
          (loop [i 0 pos (inc start) fm (array-map)]
            (if (< i n)
              (let [nlen (bit-and (long (aget raw pos)) 0xFF)
-                   nm (String. raw (int (inc pos)) (int nlen) "UTF-8")
-                   tc (bit-and (long (aget raw (+ pos 1 nlen))) 0xFF)]
+                   nm   (String. raw (int (inc pos)) (int nlen) "UTF-8")
+                   tc   (bit-and (long (aget raw (+ pos 1 nlen))) 0xFF)]
                (recur (inc i) (+ pos 2 nlen)
                       (assoc fm (keyword nm) (get obj-code->type-kw tc))))
              fm))))
@@ -982,17 +797,17 @@
        "Write a field-value map as a 0x1E slab block. Returns slab-qualified offset.
         schema is {kw → type-kw}, values is {kw → number}."
        [sio schema values]
-       (let [sbytes (jvm-encode-obj-schema schema)
-             slen (alength sbytes)
-             layout (jvm-obj-layout schema)
-             data-sz (:total-size layout)
-             blk-off (-sio-alloc! sio (+ 4 slen data-sz))]
-         (-sio-write-u8! sio blk-off 0 ser/EVE_OBJ_SLAB_TYPE_ID)
-         (-sio-write-u8! sio blk-off 1 0)
-         (-sio-write-u16! sio blk-off 2 slen)
+       (let [sbytes   (jvm-encode-obj-schema schema)
+             slen     (alength sbytes)
+             layout   (jvm-obj-layout schema)
+             data-sz  (:total-size layout)
+             blk-off  (-sio-alloc! sio (+ 4 slen data-sz))]
+         (-sio-write-u8!    sio blk-off 0 ser/EVE_OBJ_SLAB_TYPE_ID)
+         (-sio-write-u8!    sio blk-off 1 0)
+         (-sio-write-u16!   sio blk-off 2 slen)
          (-sio-write-bytes! sio blk-off 4 sbytes)
          (doseq [[fk {:keys [type offset]}] (:fields layout)]
-           (let [v (get values fk 0)
+           (let [v       (get values fk 0)
                  fld-off (+ 4 slen offset)]
              (case type
                (:int8 :uint8)
@@ -1003,11 +818,11 @@
                (-sio-write-i32! sio blk-off fld-off (int v))
                :float32
                (-sio-write-i32! sio blk-off fld-off
-                                (Float/floatToRawIntBits (float v)))
+                 (Float/floatToRawIntBits (float v)))
                :float64
                (let [bits (Double/doubleToRawLongBits (double v))
-                     lo (unchecked-int (bit-and bits 0xFFFFFFFF))
-                     hi (unchecked-int (unsigned-bit-shift-right bits 32))]
+                     lo   (unchecked-int (bit-and bits 0xFFFFFFFF))
+                     hi   (unchecked-int (unsigned-bit-shift-right bits 32))]
                  (-sio-write-i32! sio blk-off fld-off lo)
                  (-sio-write-i32! sio blk-off (+ fld-off 4) hi)))))
          blk-off))
@@ -1015,44 +830,45 @@
      (defn jvm-read-obj
        "Read a 0x1E slab block. Returns {:schema {kw→type-kw} :values {kw→val}}."
        [sio slab-off]
-       (let [slen (-sio-read-u16 sio slab-off 2)
-             s-raw (-sio-read-bytes sio slab-off 4 slen)
+       (let [slen   (-sio-read-u16 sio slab-off 2)
+             s-raw  (-sio-read-bytes sio slab-off 4 slen)
              schema (jvm-decode-obj-schema s-raw 0)
              layout (jvm-obj-layout schema)]
          {:schema schema
           :values
           (into {}
-                (map (fn [e]
-                       (let [fk (key e)
-                             ft (:type (val e))
-                             fld-off (+ 4 slen (:offset (val e)))]
-                         [fk (case ft
-                               :int8 (let [b (-sio-read-u8 sio slab-off fld-off)]
-                                       (if (> b 127) (- b 256) b))
-                               :uint8 (-sio-read-u8 sio slab-off fld-off)
-                               :int16 (let [v (-sio-read-u16 sio slab-off fld-off)]
-                                        (if (> v 32767) (- v 65536) v))
-                               :uint16 (-sio-read-u16 sio slab-off fld-off)
-                               :int32 (-sio-read-i32 sio slab-off fld-off)
-                               :uint32 (bit-and (long (-sio-read-i32 sio slab-off fld-off))
-                                                0xFFFFFFFF)
-                               (:obj :array)
-                               (-sio-read-i32 sio slab-off fld-off)
-                               :float32
-                               (Float/intBitsToFloat (-sio-read-i32 sio slab-off fld-off))
-                               :float64
-                               (let [lo (bit-and (long (-sio-read-i32 sio slab-off fld-off))
-                                                 0xFFFFFFFF)
-                                     hi (bit-and (long (-sio-read-i32 sio slab-off (+ fld-off 4)))
-                                                 0xFFFFFFFF)]
-                                 (Double/longBitsToDouble
-                                  (bit-or (bit-shift-left hi 32) lo))))]))
-                     (:fields layout)))}))
+            (map (fn [e]
+                   (let [fk      (key e)
+                         ft      (:type (val e))
+                         fld-off (+ 4 slen (:offset (val e)))]
+                     [fk (case ft
+                           :int8    (let [b (-sio-read-u8 sio slab-off fld-off)]
+                                      (if (> b 127) (- b 256) b))
+                           :uint8   (-sio-read-u8 sio slab-off fld-off)
+                           :int16   (let [v (-sio-read-u16 sio slab-off fld-off)]
+                                      (if (> v 32767) (- v 65536) v))
+                           :uint16  (-sio-read-u16 sio slab-off fld-off)
+                           :int32   (-sio-read-i32 sio slab-off fld-off)
+                           :uint32  (bit-and (long (-sio-read-i32 sio slab-off fld-off))
+                                             0xFFFFFFFF)
+                           (:obj :array)
+                           (-sio-read-i32 sio slab-off fld-off)
+                           :float32
+                           (Float/intBitsToFloat (-sio-read-i32 sio slab-off fld-off))
+                           :float64
+                           (let [lo (bit-and (long (-sio-read-i32 sio slab-off fld-off))
+                                             0xFFFFFFFF)
+                                 hi (bit-and (long (-sio-read-i32 sio slab-off (+ fld-off 4)))
+                                             0xFFFFFFFF)]
+                             (Double/longBitsToDouble
+                               (bit-or (bit-shift-left hi 32) lo))))]))
+                 (:fields layout)))}))
 
      ;; Register array writer so value+sio->eve-bytes can serialize Java arrays
      (mem/register-jvm-collection-writer! :array
-                                          (fn [sio _serialize-elem arr]
-                                            (jvm-write-eve-array! sio arr)))))
+       (fn [sio _serialize-elem arr]
+         (jvm-write-eve-array! sio arr)))))
+
 
 ;; CLJS no-op for log-replaced-node! (CLJ/bb version is in the #?(:clj ...) block above)
 #?(:cljs (defn log-replaced-node! [_slab-off] nil))
@@ -1072,19 +888,19 @@
 
      ;; Cached per-slab layout info (set during init-slab!)
      ;; Slots 0-5: slab classes. Slot 6: overflow (legacy SAB).
-     (def ^:private slab-data-offsets #js [0 0 0 0 0 0 0])
+     (def ^:private slab-data-offsets   #js [0 0 0 0 0 0 0])
      (def ^:private slab-bitmap-offsets #js [0 0 0 0 0 0 0])
-     (def ^:private slab-total-blocks #js [0 0 0 0 0 0 0])
+     (def ^:private slab-total-blocks   #js [0 0 0 0 0 0 0])
      ;; File paths for mmap-backed slabs (needed for lazy growth)
-     (def ^:private slab-file-paths #js [nil nil nil nil nil nil nil])
+     (def ^:private slab-file-paths     #js [nil nil nil nil nil nil nil])
      ;; Bitmap file paths for mmap split-file slabs
-     (def ^:private slab-bitmap-paths #js [nil nil nil nil nil nil nil])
+     (def ^:private slab-bitmap-paths   #js [nil nil nil nil nil nil nil])
 
      (defn slab-offset->byte-offset
        "Convert a slab-qualified offset to the actual byte offset within the slab's SAB."
        ^number [^number slab-offset]
-       (let [class-idx (decode-class-idx slab-offset)
-             block-idx (decode-block-idx slab-offset)
+       (let [class-idx  (decode-class-idx slab-offset)
+             block-idx  (decode-block-idx slab-offset)
              block-size (aget d/SLAB_SIZES class-idx)]
          (+ (aget slab-data-offsets class-idx) (* block-idx block-size))))
 
@@ -1143,16 +959,16 @@
        "Initialize a single slab for a given class index.
         Returns a Promise that resolves when the slab (+ optional WASM) is ready."
        [class-idx & {:keys [capacity]}]
-       (let [capacity (or capacity (d/default-capacity-for-class class-idx))
+       (let [capacity   (or capacity (d/default-capacity-for-class class-idx))
              block-size (aget d/SLAB_SIZES class-idx)
-             layout (d/slab-layout block-size capacity)
+             layout     (d/slab-layout block-size capacity)
              {:keys [total-bytes bitmap-offset bitmap-size data-offset total-blocks]} layout
              wasm-memory (wasm/create-slab-memory total-bytes)
-             sab (if (instance? js/SharedArrayBuffer wasm-memory)
-                   wasm-memory
-                   (.-buffer wasm-memory))
+             sab         (if (instance? js/SharedArrayBuffer wasm-memory)
+                           wasm-memory
+                           (.-buffer wasm-memory))
              slab-region (mem/js-sab-region sab)
-             u8-view (js/Uint8Array. sab)]
+             u8-view     (js/Uint8Array. sab)]
          ;; Write slab header via IMemRegion
          (mem/store-i32! slab-region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
          (mem/store-i32! slab-region d/SLAB_HDR_BLOCK_SIZE block-size)
@@ -1185,26 +1001,26 @@
            (set! initialized? true)
            (let [slab-promises
                  (into-array
-                  (for [i (range d/NUM_SLAB_CLASSES)]
-                    (let [cap (get capacities i (d/default-capacity-for-class i))]
-                      (init-slab! i :capacity cap))))]
+                   (for [i (range d/NUM_SLAB_CLASSES)]
+                     (let [cap (get capacities i (d/default-capacity-for-class i))]
+                       (init-slab! i :capacity cap))))]
              (init-root-sab!)
              ;; Initialize SAB-backed class 6 coalesc for overflow (>1024 byte) allocations
              (init-sab-coalesc!)
              ;; Register typed array resolver for deserializer
              (ser/set-typed-array-resolver!
-              (fn [slab-offset]
-                (let [class-idx (decode-class-idx slab-offset)
-                      block-idx (decode-block-idx slab-offset)
-                      inst (wasm/get-slab-instance class-idx)
-                      sab (when inst (.-buffer ^js (:u8 inst)))]
-                  (when sab
-                    (let [block-size (aget d/SLAB_SIZES class-idx)
-                          data-off (aget slab-data-offsets class-idx)
-                          base (+ data-off (* block-idx block-size))
+               (fn [slab-offset]
+                 (let [class-idx (decode-class-idx slab-offset)
+                       block-idx (decode-block-idx slab-offset)
+                       inst      (wasm/get-slab-instance class-idx)
+                       sab       (when inst (.-buffer ^js (:u8 inst)))]
+                   (when sab
+                     (let [block-size (aget d/SLAB_SIZES class-idx)
+                           data-off   (aget slab-data-offsets class-idx)
+                           base       (+ data-off (* block-idx block-size))
                            ;; Apply same 16-byte alignment as typed-array encoder
-                          aligned (bit-and (+ base 15) (bit-not 15))]
-                      {:sab sab :base aligned})))))
+                           aligned    (bit-and (+ base 15) (bit-not 15))]
+                       {:sab sab :base aligned})))))
              (js/Promise.all slab-promises)))))
 
      (defn reset-all-slabs!
@@ -1212,11 +1028,11 @@
        []
        (dotimes [class-idx d/NUM_SLAB_CLASSES]
          (when-let [inst (wasm/get-slab-instance class-idx)]
-           (let [region (:region inst)
-                 u8-view (:u8 inst)
+           (let [region   (:region inst)
+                 u8-view  (:u8 inst)
                  bm-offset (aget slab-bitmap-offsets class-idx)
-                 total (aget slab-total-blocks class-idx)
-                 bm-size (quot (+ total 7) 8)]
+                 total     (aget slab-total-blocks class-idx)
+                 bm-size   (quot (+ total 7) 8)]
              (.fill u8-view 0 bm-offset (+ bm-offset bm-size))
              (mem/store-i32! region d/SLAB_HDR_FREE_COUNT total)
              (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)))))
@@ -1225,8 +1041,8 @@
      ;; Root SAB (control plane)
      ;; -----------------------------------------------------------------------
 
-     (defonce ^:private root-sab (cljs.core/atom nil))
-     (defonce ^:private root-i32 (cljs.core/atom nil))
+     (defonce ^:private root-sab    (cljs.core/atom nil))
+     (defonce ^:private root-i32    (cljs.core/atom nil))
      (defonce ^:private root-region (cljs.core/atom nil))
 
      (defn init-root-sab!
@@ -1277,10 +1093,10 @@
      (defn populate-slab-caches-from-header!
        "Read a slab's header and populate module-level caches."
        [class-idx sab]
-       (let [sab-region (mem/js-sab-region sab)
-             data-offset (mem/load-i32 sab-region d/SLAB_HDR_DATA_OFFSET)
+       (let [sab-region    (mem/js-sab-region sab)
+             data-offset   (mem/load-i32 sab-region d/SLAB_HDR_DATA_OFFSET)
              bitmap-offset (mem/load-i32 sab-region d/SLAB_HDR_BITMAP_OFFSET)
-             total-blocks (mem/load-i32 sab-region d/SLAB_HDR_TOTAL_BLOCKS)]
+             total-blocks  (mem/load-i32 sab-region d/SLAB_HDR_TOTAL_BLOCKS)]
          (aset slab-data-offsets class-idx data-offset)
          (aset slab-bitmap-offsets class-idx bitmap-offset)
          (aset slab-total-blocks class-idx total-blocks)))
@@ -1305,13 +1121,13 @@
        "Try to allocate a block from a specific slab class.
         Returns {:offset :class-idx :block-idx} or {:error :out-of-memory}."
        [class-idx]
-       (let [bm-offset (aget slab-bitmap-offsets class-idx)
+       (let [bm-offset  (aget slab-bitmap-offsets class-idx)
              total-bits (aget slab-total-blocks class-idx)
-             inst (wasm/get-slab-instance class-idx)
-             region (:region inst)
-             cursor (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)]
+             inst       (wasm/get-slab-instance class-idx)
+             region     (:region inst)
+             cursor     (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)]
          (loop [start-bit cursor
-                wrapped? false]
+                wrapped?  false]
            (let [candidate (wasm/bitmap-find-free class-idx bm-offset total-bits start-bit)]
              (cond
                (not= candidate -1)
@@ -1360,8 +1176,8 @@
                (let [result (overflow-alloc-fn size-bytes)]
                  (if (:error result)
                    {:error :overflow-oom :size size-bytes}
-                   (let [byte-off (:offset result)
-                         desc-idx (:descriptor-idx result)
+                   (let [byte-off    (:offset result)
+                         desc-idx    (:descriptor-idx result)
                          slab-offset (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)]
                      (.set overflow-desc-map byte-off desc-idx)
                      (when alloc-hook (alloc-hook slab-offset))
@@ -1423,9 +1239,9 @@
                      false)))
                (let [block-idx (decode-block-idx slab-offset)
                      bm-offset (aget slab-bitmap-offsets class-idx)
-                     inst (wasm/get-slab-instance class-idx)
-                     region (:region inst)
-                     freed? (wasm/bitmap-free! class-idx bm-offset block-idx)]
+                     inst      (wasm/get-slab-instance class-idx)
+                     region    (:region inst)
+                     freed?    (wasm/bitmap-free! class-idx bm-offset block-idx)]
                  (when freed?
                    (mem/add-i32! region d/SLAB_HDR_FREE_COUNT 1))
                  freed?))))))
@@ -1433,12 +1249,12 @@
      (defn- batch-alloc-once
        "Single-pass batch allocation without growth. Returns a JS array."
        [class-idx max-count]
-       (let [bm-offset (aget slab-bitmap-offsets class-idx)
+       (let [bm-offset  (aget slab-bitmap-offsets class-idx)
              total-bits (aget slab-total-blocks class-idx)
-             inst (wasm/get-slab-instance class-idx)
-             region (:region inst)
-             cursor (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)
-             results #js []]
+             inst       (wasm/get-slab-instance class-idx)
+             region     (:region inst)
+             cursor     (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)
+             results    #js []]
          (loop [start-bit cursor wrapped? false]
            (when (< (.-length results) max-count)
              (let [candidate (wasm/bitmap-find-free class-idx bm-offset total-bits start-bit)]
@@ -1455,7 +1271,7 @@
                  :else nil))))
          (when (pos? (.-length results))
            (let [last-offset (aget results (dec (.-length results)))
-                 last-block (decode-block-idx last-offset)]
+                 last-block  (decode-block-idx last-offset)]
              (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR
                              (mod (inc last-block) total-bits))
              (mem/sub-i32! region d/SLAB_HDR_FREE_COUNT (.-length results))))
@@ -1496,12 +1312,12 @@
         Sets module-level resolved-dv and resolved-base for subsequent reads.
         Returns the base byte offset."
        ^number [^number slab-offset]
-       (let [class-idx (decode-class-idx slab-offset)
-             block-idx (decode-block-idx slab-offset)
+       (let [class-idx  (decode-class-idx slab-offset)
+             block-idx  (decode-block-idx slab-offset)
              block-size (aget d/SLAB_SIZES class-idx)
-             data-off (aget slab-data-offsets class-idx)
-             base (+ data-off (* block-idx block-size))
-             dv (wasm/slab-data-view class-idx)]
+             data-off   (aget slab-data-offsets class-idx)
+             base       (+ data-off (* block-idx block-size))
+             dv         (wasm/slab-data-view class-idx)]
          (when (nil? dv)
            (js/console.error "[resolve-dv! ERROR] nil DataView slab-offset:" slab-offset
                              "class:" class-idx "block:" block-idx
@@ -1514,12 +1330,12 @@
      (defn resolve-u8!
        "Like resolve-dv! but also sets resolved-u8 (Uint8Array) for byte ops."
        ^number [^number slab-offset]
-       (let [class-idx (decode-class-idx slab-offset)
-             block-idx (decode-block-idx slab-offset)
+       (let [class-idx  (decode-class-idx slab-offset)
+             block-idx  (decode-block-idx slab-offset)
              block-size (aget d/SLAB_SIZES class-idx)
-             base (+ (aget slab-data-offsets class-idx) (* block-idx block-size))]
-         (set! resolved-u8 (wasm/slab-u8-view class-idx))
-         (set! resolved-dv (wasm/slab-data-view class-idx))
+             base       (+ (aget slab-data-offsets class-idx) (* block-idx block-size))]
+         (set! resolved-u8   (wasm/slab-u8-view class-idx))
+         (set! resolved-dv   (wasm/slab-data-view class-idx))
          (set! resolved-base base)
          base))
 
@@ -1527,8 +1343,8 @@
        "Read a byte from a slab-qualified offset + byte offset within block."
        ^number [^number slab-offset ^number byte-off]
        (let [class-idx (decode-class-idx slab-offset)
-             u8 (wasm/slab-u8-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             u8        (wasm/slab-u8-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (aget u8 (+ base byte-off))))
 
      (defn read-header-type-byte
@@ -1541,56 +1357,56 @@
        "Write a byte to a slab-qualified offset + byte offset within block."
        [^number slab-offset ^number byte-off ^number val]
        (let [class-idx (decode-class-idx slab-offset)
-             u8 (wasm/slab-u8-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             u8        (wasm/slab-u8-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (aset u8 (+ base byte-off) val)))
 
      (defn read-i32
        "Read an i32 from a slab-qualified offset + byte offset within block."
        ^number [^number slab-offset ^number byte-off]
        (let [class-idx (decode-class-idx slab-offset)
-             dv (wasm/slab-data-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             dv        (wasm/slab-data-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (.getInt32 dv (+ base byte-off) true)))
 
      (defn write-i32!
        "Write an i32 to a slab-qualified offset + byte offset within block."
        [^number slab-offset ^number byte-off ^number val]
        (let [class-idx (decode-class-idx slab-offset)
-             dv (wasm/slab-data-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             dv        (wasm/slab-data-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (.setInt32 dv (+ base byte-off) val true)))
 
      (defn read-u16
        "Read a u16 from a slab-qualified offset."
        ^number [^number slab-offset ^number byte-off]
        (let [class-idx (decode-class-idx slab-offset)
-             dv (wasm/slab-data-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             dv        (wasm/slab-data-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (.getUint16 dv (+ base byte-off) true)))
 
      (defn write-u16!
        "Write a u16 to a slab-qualified offset."
        [^number slab-offset ^number byte-off ^number val]
        (let [class-idx (decode-class-idx slab-offset)
-             dv (wasm/slab-data-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             dv        (wasm/slab-data-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (.setUint16 dv (+ base byte-off) val true)))
 
      (defn read-bytes
        "Read a Uint8Array slice from a slab-qualified offset."
        [^number slab-offset ^number byte-off ^number len]
        (let [class-idx (decode-class-idx slab-offset)
-             u8 (wasm/slab-u8-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             u8        (wasm/slab-u8-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (.subarray u8 (+ base byte-off) (+ base byte-off len))))
 
      (defn write-bytes!
        "Write a Uint8Array to a slab-qualified offset."
        [^number slab-offset ^number byte-off ^js src-bytes]
        (let [class-idx (decode-class-idx slab-offset)
-             u8 (wasm/slab-u8-view class-idx)
-             base (slab-offset->byte-offset slab-offset)]
+             u8        (wasm/slab-u8-view class-idx)
+             base      (slab-offset->byte-offset slab-offset)]
          (.set u8 src-bytes (+ base byte-off))))
 
      (defn copy-within-slab!
@@ -1599,9 +1415,9 @@
         ^number src-slab-offset ^number src-byte-off
         ^number len]
        (let [class-idx (decode-class-idx dst-slab-offset)
-             u8 (wasm/slab-u8-view class-idx)
-             dst-base (slab-offset->byte-offset dst-slab-offset)
-             src-base (slab-offset->byte-offset src-slab-offset)]
+             u8        (wasm/slab-u8-view class-idx)
+             dst-base  (slab-offset->byte-offset dst-slab-offset)
+             src-base  (slab-offset->byte-offset src-slab-offset)]
          (.copyWithin u8 (+ dst-base dst-byte-off) (+ src-base src-byte-off)
                       (+ src-base src-byte-off len))))
 
@@ -1620,8 +1436,8 @@
         Returns slab-qualified offset."
        [v]
        (let [ev-bytes (ser/serialize-element v)
-             n (inc (.-length ev-bytes)) ;; 1 type-id byte + EVE bytes
-             blk-off (alloc-offset n)]
+             n        (inc (.-length ev-bytes))   ;; 1 type-id byte + EVE bytes
+             blk-off  (alloc-offset n)]
          (resolve-dv! blk-off)
          (.setUint8 resolved-dv resolved-base ser/SCALAR_BLOCK_TYPE_ID)
          (dotimes [i (.-length ev-bytes)]
@@ -1642,16 +1458,16 @@
 
      (deftype CljsSlabIO []
        ISlabIO
-       (-sio-read-u8 [_ slab-offset field-off] (read-u8 slab-offset field-off))
-       (-sio-write-u8! [_ slab-offset field-off val] (write-u8! slab-offset field-off val))
-       (-sio-read-u16 [_ slab-offset field-off] (read-u16 slab-offset field-off))
+       (-sio-read-u8   [_ slab-offset field-off]  (read-u8  slab-offset field-off))
+       (-sio-write-u8!  [_ slab-offset field-off val] (write-u8!  slab-offset field-off val))
+       (-sio-read-u16  [_ slab-offset field-off]  (read-u16 slab-offset field-off))
        (-sio-write-u16! [_ slab-offset field-off val] (write-u16! slab-offset field-off val))
-       (-sio-read-i32 [_ slab-offset field-off] (read-i32 slab-offset field-off))
+       (-sio-read-i32  [_ slab-offset field-off]  (read-i32 slab-offset field-off))
        (-sio-write-i32! [_ slab-offset field-off val] (write-i32! slab-offset field-off val))
        (-sio-read-bytes [_ slab-offset field-off len] (read-bytes slab-offset field-off len))
        (-sio-write-bytes! [_ slab-offset field-off src] (write-bytes! slab-offset field-off src))
-       (-sio-alloc! [_ size-bytes] (alloc-offset size-bytes))
-       (-sio-free! [_ slab-offset] (free! slab-offset))
+       (-sio-alloc!    [_ size-bytes] (alloc-offset size-bytes))
+       (-sio-free!     [_ slab-offset] (free! slab-offset))
        (-sio-copy-block! [_ dst-slab-offset dst-field-off src-slab-offset src-field-off len]
          (if (== (decode-class-idx dst-slab-offset) (decode-class-idx src-slab-offset))
            (copy-within-slab! dst-slab-offset dst-field-off src-slab-offset src-field-off len)
@@ -1716,7 +1532,7 @@
        "Release a worker slot."
        [slot-idx]
        (when (and (>= slot-idx 0) (< slot-idx d/MAX_WORKERS))
-         (let [rgn @root-region
+         (let [rgn          @root-region
                slot-byte-off (worker-slot-byte-offset slot-idx)]
            (mem/store-i32! rgn (+ slot-byte-off d/OFFSET_WS_CURRENT_EPOCH) 0)
            (mem/store-i32! rgn slot-byte-off d/WORKER_STATUS_INACTIVE))))
@@ -1728,14 +1544,14 @@
      (defn slab-stats
        "Return stats for a slab class."
        [class-idx]
-       (let [inst (wasm/get-slab-instance class-idx)
+       (let [inst   (wasm/get-slab-instance class-idx)
              region (:region inst)
-             total (aget slab-total-blocks class-idx)
-             free (mem/load-i32 region d/SLAB_HDR_FREE_COUNT)]
-         {:block-size (aget d/SLAB_SIZES class-idx)
+             total  (aget slab-total-blocks class-idx)
+             free   (mem/load-i32 region d/SLAB_HDR_FREE_COUNT)]
+         {:block-size   (aget d/SLAB_SIZES class-idx)
           :total-blocks total
-          :free-count free
-          :used-count (- total free)}))
+          :free-count   free
+          :used-count   (- total free)}))
 
      (defn all-slab-stats
        "Return stats for all slab classes."
@@ -1752,15 +1568,15 @@
         data file (header + blocks) and bitmap file.
         bitmap-offset is 0 within the bitmap file, data-offset is SLAB_HEADER_SIZE."
        [class-idx path & {:keys [capacity]}]
-       (let [capacity (or capacity (d/initial-capacity-for-class class-idx))
-             block-size (aget d/SLAB_SIZES class-idx)
-             layout (d/mmap-slab-layout block-size capacity)
+       (let [capacity    (or capacity (d/initial-capacity-for-class class-idx))
+             block-size  (aget d/SLAB_SIZES class-idx)
+             layout      (d/mmap-slab-layout block-size capacity)
              total-blocks (:total-blocks layout)
-             data-bytes (:data-bytes layout)
+             data-bytes   (:data-bytes layout)
              bitmap-bytes (:bitmap-bytes layout)
-             bm-path (str path ".bm")
-             region (mem/open-mmap-region path data-bytes)
-             bm-region (mem/open-mmap-region bm-path bitmap-bytes)]
+             bm-path      (str path ".bm")
+             region       (mem/open-mmap-region path data-bytes)
+             bm-region    (mem/open-mmap-region bm-path bitmap-bytes)]
          ;; Write slab header
          (mem/store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
          (mem/store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
@@ -1785,14 +1601,14 @@
         Reads the slab header to determine block count, opens both files,
         and populates the module-level layout caches."
        [class-idx path]
-       (let [peek-region (mem/open-mmap-region path 64)
+       (let [peek-region  (mem/open-mmap-region path 64)
              total-blocks (mem/load-i32 peek-region d/SLAB_HDR_TOTAL_BLOCKS)
-             block-size (aget d/SLAB_SIZES class-idx)
-             data-bytes (+ d/SLAB_HEADER_SIZE (* total-blocks block-size))
-             bm-path (str path ".bm")
-             bm-bytes (d/bitmap-byte-size total-blocks)
-             region (mem/open-mmap-region path data-bytes)
-             bm-region (mem/open-mmap-region bm-path bm-bytes)]
+             block-size   (aget d/SLAB_SIZES class-idx)
+             data-bytes   (+ d/SLAB_HEADER_SIZE (* total-blocks block-size))
+             bm-path      (str path ".bm")
+             bm-bytes     (d/bitmap-byte-size total-blocks)
+             region       (mem/open-mmap-region path data-bytes)
+             bm-region    (mem/open-mmap-region bm-path bm-bytes)]
          ;; Cache layout info + paths for lazy growth
          (aset slab-data-offsets class-idx d/SLAB_HEADER_SIZE)
          (aset slab-bitmap-offsets class-idx 0)
@@ -1805,13 +1621,13 @@
      (defn- remap-mmap-slab!
        "Re-mmap both data + bitmap files for class-idx at the given total blocks."
        [class-idx total-blocks]
-       (let [path (aget slab-file-paths class-idx)
-             bm-path (aget slab-bitmap-paths class-idx)
+       (let [path       (aget slab-file-paths class-idx)
+             bm-path    (aget slab-bitmap-paths class-idx)
              block-size (aget d/SLAB_SIZES class-idx)
              data-bytes (+ d/SLAB_HEADER_SIZE (* total-blocks block-size))
-             bm-bytes (d/bitmap-byte-size total-blocks)
-             region (mem/open-mmap-region path data-bytes)
-             bm-region (mem/open-mmap-region bm-path bm-bytes)]
+             bm-bytes   (d/bitmap-byte-size total-blocks)
+             region     (mem/open-mmap-region path data-bytes)
+             bm-region  (mem/open-mmap-region bm-path bm-bytes)]
          (aset slab-total-blocks class-idx total-blocks)
          (wasm/register-mmap-slab-instance! class-idx region bm-region)))
 
@@ -1821,24 +1637,24 @@
         Both data and bitmap files are grown independently.
         Returns true if grown/refreshed, false if already at max."
        [class-idx]
-       (let [path (aget slab-file-paths class-idx)
+       (let [path         (aget slab-file-paths class-idx)
              cached-total (aget slab-total-blocks class-idx)
              ;; Peek header — use small region to read current state
-             peek-r (mem/open-mmap-region path 64)
-             hdr-total (mem/load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS)]
+             peek-r       (mem/open-mmap-region path 64)
+             hdr-total    (mem/load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS)]
          (if (> hdr-total cached-total)
            ;; Another process grew — just re-map at the header's size
            (do (remap-mmap-slab! class-idx hdr-total)
                true)
            ;; Try to be the growth leader via CAS on total_blocks
            (let [new-blocks (* 2 hdr-total)
-                 added (- new-blocks hdr-total)
-                 witness (mem/-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
-                                        hdr-total new-blocks)]
+                 added      (- new-blocks hdr-total)
+                 witness    (mem/-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
+                              hdr-total new-blocks)]
              (if (== witness hdr-total)
                ;; We won — extend both files and re-map
                (do (remap-mmap-slab! class-idx new-blocks)
-                   (let [inst (wasm/get-slab-instance class-idx)
+                   (let [inst   (wasm/get-slab-instance class-idx)
                          region (:region inst)]
                      (mem/add-i32! region d/SLAB_HDR_FREE_COUNT added))
                    true)
@@ -1876,15 +1692,15 @@
         Registers the region for mmap overflow allocation.
         Uses initial-data-size for the file and max-data-size for growth cap."
        [path & {:keys [initial-data-size max-data-size max-desc]
-                :or {initial-data-size coalesc/INITIAL_DATA_SIZE
-                     max-data-size coalesc/DEFAULT_DATA_SIZE
-                     max-desc coalesc/MAX_DESCRIPTORS}}]
+                :or   {initial-data-size coalesc/INITIAL_DATA_SIZE
+                       max-data-size     coalesc/DEFAULT_DATA_SIZE
+                       max-desc          coalesc/MAX_DESCRIPTORS}}]
        ;; Descriptor table is sized for max-desc; data region starts after it.
        ;; Use max-desc layout to compute fixed offsets (desc table + data-offset).
-       (let [layout (coalesc/coalesc-layout initial-data-size max-desc)
+       (let [layout      (coalesc/coalesc-layout initial-data-size max-desc)
              total-bytes (:total-bytes layout)
              data-offset (:data-offset layout)
-             region (mem/open-mmap-region path total-bytes)]
+             region      (mem/open-mmap-region path total-bytes)]
          (coalesc/init-coalesc-region! region initial-data-size max-desc)
          ;; Cache layout info so slab-offset->byte-offset works for class 6
          (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
@@ -1901,14 +1717,14 @@
      (defn open-mmap-coalesc!
        "Open an existing .slab6 file for the coalescing allocator."
        [path]
-       (let [peek-region (mem/open-mmap-region path 64)
-             data-offset (mem/load-i32 peek-region d/SLAB_HDR_DATA_OFFSET)
-             dt-offset (mem/load-i32 peek-region d/SLAB_HDR_BITMAP_OFFSET)
-             max-desc (mem/load-i32 peek-region d/SLAB_HDR_TOTAL_BLOCKS)
-             cur-data-sz (mem/load-i64 peek-region coalesc/COALESC_HDR_DATA_SIZE)
+       (let [peek-region  (mem/open-mmap-region path 64)
+             data-offset  (mem/load-i32 peek-region d/SLAB_HDR_DATA_OFFSET)
+             dt-offset    (mem/load-i32 peek-region d/SLAB_HDR_BITMAP_OFFSET)
+             max-desc     (mem/load-i32 peek-region d/SLAB_HDR_TOTAL_BLOCKS)
+             cur-data-sz  (mem/load-i64 peek-region coalesc/COALESC_HDR_DATA_SIZE)
              ;; Map the file at current data size (will grow via grow-mmap-coalesc!)
-             total-bytes (+ data-offset cur-data-sz)
-             region (mem/open-mmap-region path total-bytes)]
+             total-bytes  (+ data-offset cur-data-sz)
+             region       (mem/open-mmap-region path total-bytes)]
          (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
          (aset slab-bitmap-offsets OVERFLOW_CLASS_IDX dt-offset)
          (aset slab-total-blocks OVERFLOW_CLASS_IDX max-desc)
@@ -1924,12 +1740,12 @@
        []
        (when (and mmap-coalesc-region mmap-coalesc-path)
          (let [result (coalesc/grow-coalesc-region!
-                       mmap-coalesc-region mmap-coalesc-max-data-size)]
+                        mmap-coalesc-region mmap-coalesc-max-data-size)]
            (when result
              (let [data-offset (aset slab-data-offsets OVERFLOW_CLASS_IDX
                                      (aget slab-data-offsets OVERFLOW_CLASS_IDX))
                    total-bytes (+ (aget slab-data-offsets OVERFLOW_CLASS_IDX) result)
-                   region (mem/open-mmap-region mmap-coalesc-path total-bytes)]
+                   region      (mem/open-mmap-region mmap-coalesc-path total-bytes)]
                (set! mmap-coalesc-cached-data-size result)
                (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
                (set! mmap-coalesc-region region)
@@ -1943,7 +1759,7 @@
            (when (> hdr-data-sz mmap-coalesc-cached-data-size)
              (let [total-bytes (+ (aget slab-data-offsets OVERFLOW_CLASS_IDX)
                                   hdr-data-sz)
-                   region (mem/open-mmap-region mmap-coalesc-path total-bytes)]
+                   region      (mem/open-mmap-region mmap-coalesc-path total-bytes)]
                (set! mmap-coalesc-cached-data-size hdr-data-sz)
                (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
                (set! mmap-coalesc-region region))))))
@@ -1961,13 +1777,13 @@
         Uses a fixed-size SAB large enough for all overflow allocations (>1024 bytes).
         Default is 1GB — the OS only commits physical pages on first touch."
        [& {:keys [initial-data-size max-desc]
-           :or {initial-data-size (* 1024 1024 1024) ;; 1GB
-                max-desc coalesc/MAX_DESCRIPTORS}}]
-       (let [layout (coalesc/coalesc-layout initial-data-size max-desc)
+            :or   {initial-data-size (* 1024 1024 1024) ;; 1GB
+                   max-desc          coalesc/MAX_DESCRIPTORS}}]
+       (let [layout      (coalesc/coalesc-layout initial-data-size max-desc)
              total-bytes (:total-bytes layout)
              data-offset (:data-offset layout)
-             sab (js/SharedArrayBuffer. total-bytes)
-             region (mem/js-sab-region sab)]
+             sab         (js/SharedArrayBuffer. total-bytes)
+             region      (mem/js-sab-region sab)]
          (coalesc/init-coalesc-region! region initial-data-size max-desc)
          (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
          (aset slab-bitmap-offsets OVERFLOW_CLASS_IDX (:desc-table-offset layout))
@@ -1977,5 +1793,7 @@
          (set! mmap-coalesc-cached-data-size initial-data-size)
          (set! sab-coalesc-wasm-memory wasm-memory)
          (wasm/register-slab-instance-from-sab! OVERFLOW_CLASS_IDX sab)
-         (set! mmap-coalesc-region region)))))
+         (set! mmap-coalesc-region region)))
+
+     ))
 

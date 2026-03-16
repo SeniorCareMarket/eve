@@ -58,11 +58,6 @@
 ;; Platform-specific helpers
 ;;=============================================================================
 
-;; CLJ-only: wraps a raw value + pre-computed serialized length for direct slab
-;; writes via write-eve-bytes-into!, bypassing intermediate byte[] allocation.
-#?(:clj (deftype DirectVal [val ^long len])
-   :cljs nil)
-
 (defn- serialize-key-bytes
   "Serialize a key to bytes (platform-specific)."
   [k]
@@ -70,16 +65,10 @@
      :clj (value->eve-bytes k)))
 
 (defn- serialize-val-bytes
-  "Serialize a value to bytes or DirectVal (platform-specific).
-   On JVM CLJ, returns a DirectVal for fixed-size types (zero alloc),
-   falling back to byte[] for variable-length types."
+  "Serialize a value to bytes (platform-specific)."
   [v]
   #?(:cljs (ser/serialize-val v)
-     :bb (value+sio->eve-bytes v)
-     :clj (let [l (mem/eve-bytes-length v)]
-            (if (>= l 0)
-              (DirectVal. v l)
-              (value+sio->eve-bytes v)))))
+     :clj (value+sio->eve-bytes v)))
 
 (defn- deserialize-value-bytes
   "Deserialize value bytes (platform-specific).
@@ -102,33 +91,10 @@
      :clj (java.util.Arrays/equals ^bytes a ^bytes b)))
 
 (defn- bytes-length
-  "Get byte array or DirectVal length."
+  "Get byte array length."
   ^long [ba]
   #?(:cljs (.-length ba)
-     :clj (if (instance? DirectVal ba)
-            (.-len ^DirectVal ba)
-            (alength ^bytes ba))))
-
-(defn- slab-write-val!
-  "Write serialized value (byte[] or DirectVal) to slab memory.
-   For DirectVal on CLJ, writes directly via Unsafe (zero alloc).
-   For byte[], delegates to -sio-write-bytes!."
-  [sio node-off pos ba]
-  #?(:cljs (-sio-write-bytes! sio node-off pos ba)
-     :clj (if (instance? DirectVal ba)
-            (alloc/write-eve-bytes-into! sio node-off pos (.-val ^DirectVal ba))
-            (-sio-write-bytes! sio node-off pos ba))))
-
-(defn- val-bytes-equal?
-  "Compare value representations for equality.
-   On CLJ, handles DirectVal by materializing to byte[] for comparison.
-   Used to detect unchanged values in HAMT assoc (skip path-copy when same)."
-  [a b]
-  #?(:cljs (bytes-equal? a b)
-     :clj (let [ab (if (instance? DirectVal b)
-                     (mem/value->eve-bytes (.-val ^DirectVal b))
-                     b)]
-            (java.util.Arrays/equals ^bytes a ^bytes ab))))
+     :clj (alength ^bytes ba)))
 
 ;;=============================================================================
 ;; Computed node layout helpers
@@ -170,8 +136,7 @@
         (bytes-equal? stored-bytes kb)))))
 
 (defn- write-kv!
-  "Write a KV pair at pos within node. Returns offset after written data.
-   kb is always byte[]. vb may be byte[] or DirectVal (CLJ)."
+  "Write a KV pair at pos within node. Returns offset after written data."
   [sio node-off pos kb vb]
   (let [klen (bytes-length kb)
         vlen (bytes-length vb)]
@@ -181,7 +146,7 @@
     (let [val-off (+ pos 4 klen)]
       (-sio-write-i32! sio node-off val-off vlen)
       (when (pos? vlen)
-        (slab-write-val! sio node-off (+ val-off 4) vb))
+        (-sio-write-bytes! sio node-off (+ val-off 4) vb))
       (+ val-off 4 vlen))))
 
 (defn- read-kv-bytes-at
@@ -337,7 +302,7 @@
         (-sio-write-i32! sio dst-off kv-pos (bytes-length kb))
         (-sio-write-bytes! sio dst-off (+ kv-pos 4) kb)
         (-sio-write-i32! sio dst-off (+ kv-pos 4 (bytes-length kb)) (bytes-length vb))
-        (slab-write-val! sio dst-off (+ kv-pos 4 (bytes-length kb) 4) vb)
+        (-sio-write-bytes! sio dst-off (+ kv-pos 4 (bytes-length kb) 4) vb)
         (-sio-write-i32! sio dst-off (+ (hashes-start-off node-bm) (* data-idx 4)) kh)
         dst-off)
       ;; Different size — rebuild with splice
@@ -570,7 +535,7 @@
                         val-off (+ pos 4 kl)
                         vl (-sio-read-i32 sio root-off val-off)
                         old-vb (-sio-read-bytes sio root-off (+ val-off 4) vl)]
-                    (if (val-bytes-equal? old-vb vb)
+                    (if (bytes-equal? old-vb vb)
                       [root-off false]
                       [(copy-node-replace-kv! sio root-off data-bm node-bm data-idx kh kb vb)
                        false]))
@@ -640,7 +605,7 @@
                   (let [[ekb evb next-pos] (read-kv-bytes-at sio root-off pos)]
                     (if (bytes-equal? ekb kb)
                       ;; Key matches — check value
-                      (if (val-bytes-equal? evb vb)
+                      (if (bytes-equal? evb vb)
                         [root-off false]
                         ;; Replace value, collect remaining
                         (let [remaining (loop [j (inc i) p next-pos acc []]
@@ -1600,7 +1565,7 @@
            entries (map (fn [[k v]]
                           (let [kb (value->eve-bytes k)
                                 kh (portable-hash-bytes kb)
-                                vb (serialize-val-bytes v)]
+                                vb (value+sio->eve-bytes sio v)]
                             [kh kb vb]))
                         m)]
        (if (empty? entries)
