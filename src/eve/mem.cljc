@@ -137,7 +137,7 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:cljs (defonce ^:dynamic *lustre-mode* false)
-   :clj  (def ^:dynamic *lustre-mode* false))
+   :clj (def ^:dynamic *lustre-mode* false))
 
 ;; ---------------------------------------------------------------------------
 ;; CLJS implementations
@@ -156,9 +156,9 @@
        "Coerce the string returned by Atomics.wait to a keyword."
        [s]
        (case s
-         "ok"         :ok
-         "not-equal"  :not-equal
-         "timed-out"  :timed-out
+         "ok" :ok
+         "not-equal" :not-equal
+         "timed-out" :timed-out
          :timed-out))
 
      ;; --- JsSabRegion — SharedArrayBuffer + Atomics ---
@@ -167,8 +167,8 @@
      ;; API provides the necessary synchronisation.
 
      (deftype JsSabRegion [^js sab
-                           ^js -i32   ; cached Int32Array view — atomic ops
-                           ^js -u8]   ; cached Uint8Array view  — byte I/O
+                           ^js -i32 ; cached Int32Array view — atomic ops
+                           ^js -u8] ; cached Uint8Array view  — byte I/O
        IMemRegion
        (-byte-length [_]
          (.-byteLength sab))
@@ -196,9 +196,9 @@
          ;; Emulate i64 load via two i32 loads (little-endian).
          ;; Sufficient for single-process SAB use (no cross-process atomicity).
          (let [lo (unsigned-bit-shift-right
-                    (js/Atomics.load -i32 (byte-off->i32-idx byte-off)) 0)
+                   (js/Atomics.load -i32 (byte-off->i32-idx byte-off)) 0)
                hi (unsigned-bit-shift-right
-                    (js/Atomics.load -i32 (byte-off->i32-idx (+ byte-off 4))) 0)]
+                   (js/Atomics.load -i32 (byte-off->i32-idx (+ byte-off 4))) 0)]
            (+ (* hi 0x100000000) lo)))
        (-store-i64! [_ byte-off val]
          ;; Emulate i64 store via two i32 stores (little-endian).
@@ -269,7 +269,7 @@
         Returns the addon or nil if not available."
        []
        (try
-         (let [ngb  (js/require "node-gyp-build")
+         (let [ngb (js/require "node-gyp-build")
                path (js/require "path")
                pkg-root (try
                           ;; Strategy 1: npm dep — resolve via node module resolution
@@ -300,8 +300,8 @@
            (try-auto-load-addon!)
            (throw (ex-info "mmap_cas native addon not found — run npm install to build it" {}))))
 
-     (deftype NodeMmapRegion [^js buf   ; Node.js Buffer from addon open()
-                              size]     ; byte length
+     (deftype NodeMmapRegion [^js buf ; Node.js Buffer from addon open()
+                              size] ; byte length
        IMemRegion
        (-byte-length [_]
          size)
@@ -394,9 +394,9 @@
      ;; CAS — slower than hardware CAS (~50-200us vs ~10ns on Lustre) but
      ;; correct across nodes via the Lustre LDLM.
 
-     (deftype LustreMmapRegion [^js buf   ; Node.js Buffer (mmap'd page)
-                                 fd        ; file descriptor (kept open for fcntl)
-                                 size]     ; byte length
+     (deftype LustreMmapRegion [^js buf ; Node.js Buffer (mmap'd page)
+                                fd ; file descriptor (kept open for fcntl)
+                                size] ; byte length
        IMemRegion
        (-byte-length [_] size)
 
@@ -445,7 +445,7 @@
                (cond
                  (not= cur expected) :not-equal
                  (>= (js/Date.now) deadline) :timed-out
-                 :else (do (.nanosleep (native) 100000)  ; 100µs
+                 :else (do (.nanosleep (native) 100000) ; 100µs
                            (recur)))))))
 
        (-notify-i32! [_ _byte-off _n] 0)
@@ -556,8 +556,8 @@
            (loop []
              (let [cur (locking bb-lock (.getInt mbb (int byte-off)))]
                (cond
-                 (not= cur (int expected))                  :not-equal
-                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 (not= cur (int expected)) :not-equal
+                 (>= (System/currentTimeMillis) deadline) :timed-out
                  :else (do (Thread/sleep 1)
                            (recur)))))))
 
@@ -582,16 +582,16 @@
        "Open (or create) a file-backed shared memory region at path-str.
         Uses MappedByteBuffer (compatible with Babashka/GraalVM native-image)."
        [path-str size-bytes]
-       (let [size  (long size-bytes)
-             _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
-                     (try (when (< (.length raf) size) (.setLength raf size))
-                          (finally (.close raf))))
-             path  (Paths/get ^String path-str (into-array String []))
+       (let [size (long size-bytes)
+             _ (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
+                 (try (when (< (.length raf) size) (.setLength raf size))
+                      (finally (.close raf))))
+             path (Paths/get ^String path-str (into-array String []))
              ^FileChannel fc
              (FileChannel/open path
-               (into-array OpenOption
-                 [StandardOpenOption/READ
-                  StandardOpenOption/WRITE]))
+                               (into-array OpenOption
+                                           [StandardOpenOption/READ
+                                            StandardOpenOption/WRITE]))
              ^MappedByteBuffer mbb (.map fc FileChannel$MapMode/READ_WRITE 0 size)]
          (.close fc)
          (.order mbb ByteOrder/LITTLE_ENDIAN)
@@ -670,8 +670,8 @@
            (loop []
              (let [cur (locking bb-lock (.getInt bb-buf (int byte-off)))]
                (cond
-                 (not= cur (int expected))                  :not-equal
-                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 (not= cur (int expected)) :not-equal
+                 (>= (System/currentTimeMillis) deadline) :timed-out
                  :else (do (Thread/sleep 1)
                            (recur)))))))
 
@@ -690,7 +690,7 @@
        "Create an IMemRegion backed by a zero-initialized heap byte array.
         Uses ByteBuffer.wrap for int32/int64 ops (Babashka-compatible)."
        [size-bytes]
-       (let [ba  (byte-array (int size-bytes))
+       (let [ba (byte-array (int size-bytes))
              buf (doto (ByteBuffer/wrap ba) (.order ByteOrder/LITTLE_ENDIAN))]
          (BbHeapRegion. buf ba (long size-bytes))))))
 
@@ -714,6 +714,100 @@
      ;; defined after JvmHeapRegion but referenced in open-mmap-region.
      (declare open-lustre-region)
 
+     ;; --- Panama futex binding (Linux only) ---
+     ;; futex(uaddr, FUTEX_WAIT, val, timeout, ...) = syscall 202 on x86_64
+     ;; futex(uaddr, FUTEX_WAKE, val, ...)           = syscall 202
+     ;; We use FUTEX_WAIT_PRIVATE (128) and FUTEX_WAKE_PRIVATE (129) since
+     ;; mmap MAP_SHARED pages are visible to all processes sharing the file.
+     ;; Actually: FUTEX_WAIT=0 and FUTEX_WAKE=1 for cross-process; PRIVATE variants
+     ;; only work for same-process. We use the non-private versions.
+
+     (def ^:private futex-available?
+       (try
+         (and (= "Linux" (System/getProperty "os.name"))
+              (Class/forName "java.lang.foreign.Linker")
+              true)
+         (catch Exception _ false)))
+
+     (def ^:private futex-syscall-handle
+       "MethodHandle for syscall(long nr, ...) via Panama Linker.
+       Returns nil on non-Linux or if Panama FFM is unavailable."
+       (when futex-available?
+         (try
+           (let [linker (java.lang.foreign.Linker/nativeLinker)
+                 sym (.find (.defaultLookup linker) "syscall")
+                ;; Pass all args as JAVA_LONG on x86_64 (ABI-compatible).
+                ;; FUTEX_WAIT: syscall(202, uaddr, 0, val, timeout_ptr)
+                ;; FUTEX_WAKE: syscall(202, uaddr, 1, val)
+                 wait-fd (java.lang.foreign.FunctionDescriptor/of
+                          java.lang.foreign.ValueLayout/JAVA_LONG ;; return
+                          (into-array java.lang.foreign.MemoryLayout
+                                      [java.lang.foreign.ValueLayout/JAVA_LONG ;; syscall nr
+                                       java.lang.foreign.ValueLayout/JAVA_LONG ;; uaddr
+                                       java.lang.foreign.ValueLayout/JAVA_LONG ;; op
+                                       java.lang.foreign.ValueLayout/JAVA_LONG ;; val
+                                       java.lang.foreign.ValueLayout/JAVA_LONG])) ;; timeout (0=NULL)
+                 wake-fd (java.lang.foreign.FunctionDescriptor/of
+                          java.lang.foreign.ValueLayout/JAVA_LONG
+                          (into-array java.lang.foreign.MemoryLayout
+                                      [java.lang.foreign.ValueLayout/JAVA_LONG ;; syscall nr
+                                       java.lang.foreign.ValueLayout/JAVA_LONG ;; uaddr
+                                       java.lang.foreign.ValueLayout/JAVA_LONG ;; op
+                                       java.lang.foreign.ValueLayout/JAVA_LONG]))] ;; val
+             {:wait (.downcallHandle linker (.get sym) wait-fd)
+              :wake (.downcallHandle linker (.get sym) wake-fd)})
+           (catch Exception _ nil))))
+
+     (def ^:private ^:const FUTEX_SYSCALL_NR 202) ;; x86_64 Linux
+     (def ^:private ^:const FUTEX_WAIT 0)
+     (def ^:private ^:const FUTEX_WAKE 1)
+
+     (defn- futex-wait
+       "Call futex(FUTEX_WAIT) on a native memory address.
+       Returns :ok, :not-equal (EAGAIN), or :timed-out (ETIMEDOUT).
+       timeout-ms <= 0 means wait indefinitely (NULL timeout)."
+       [^long addr expected ^long timeout-ms]
+       (let [expected (long expected)]
+         (if-let [handle (:wait futex-syscall-handle)]
+           (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+             (loop []
+               (let [;; syscall(202, addr, FUTEX_WAIT=0, expected, NULL=0)
+                     result (try
+                              (long (.invoke ^java.lang.invoke.MethodHandle handle
+                                             (long FUTEX_SYSCALL_NR)
+                                             addr
+                                             (long FUTEX_WAIT)
+                                             expected
+                                             (long 0)))
+                              (catch Exception _ -1))]
+                 (cond
+                   (>= result 0) :ok
+                   (not= (.getIntVolatile UNSAFE nil addr) (unchecked-int expected)) :not-equal
+                   (>= (System/currentTimeMillis) deadline) :timed-out
+                   :else (recur)))))
+          ;; Fallback to polling if futex not available
+           (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+             (loop []
+               (let [cur (.getIntVolatile UNSAFE nil addr)]
+                 (cond
+                   (not= cur (unchecked-int expected)) :not-equal
+                   (>= (System/currentTimeMillis) deadline) :timed-out
+                   :else (do (Thread/sleep 0 100000) (recur)))))))))
+
+     (defn- futex-wake
+       "Call futex(FUTEX_WAKE) on a native memory address. Returns woken count."
+       ^long [^long addr n]
+       (let [n (long n)]
+         (if-let [handle (:wake futex-syscall-handle)]
+           (try
+             (long (.invoke ^java.lang.invoke.MethodHandle handle
+                            (long FUTEX_SYSCALL_NR)
+                            addr
+                            (long FUTEX_WAKE)
+                            n))
+             (catch Exception _ 0))
+           0)))
+
      ;; JvmMmapRegion stores the MemorySegment (for bulk copy) and its base native
      ;; address (for Unsafe ops, avoiding a .address() call on every atomic op).
      (deftype JvmMmapRegion [^MemorySegment seg ^long base-addr ^long size]
@@ -735,7 +829,7 @@
          ;; sun.misc.Unsafe only has compareAndSwapInt (returns bool), so:
          ;; success → return expected; failure → read current value as witness.
          (let [addr (+ base-addr (long byte-off))
-               exp  (unchecked-int expected)]
+               exp (unchecked-int expected)]
            (if (.compareAndSwapInt UNSAFE nil addr exp (unchecked-int desired))
              exp
              (.getIntVolatile UNSAFE nil addr))))
@@ -760,7 +854,7 @@
 
        (-cas-i64! [_ byte-off expected desired]
          (let [addr (+ base-addr (long byte-off))
-               exp  (long expected)]
+               exp (long expected)]
            (if (.compareAndSwapLong UNSAFE nil addr exp (long desired))
              exp
              (.getLongVolatile UNSAFE nil addr))))
@@ -772,20 +866,10 @@
          (.getAndAddLong UNSAFE nil (+ base-addr (long byte-off)) (long (- delta))))
 
        (-wait-i32! [_ byte-off expected timeout-ms]
-         ;; Polling fallback — no JNI futex yet.
-         (let [addr     (+ base-addr (long byte-off))
-               deadline (+ (System/currentTimeMillis) (long timeout-ms))]
-           (loop []
-             (let [cur (.getIntVolatile UNSAFE nil addr)]
-               (cond
-                 (not= cur (int expected))                  :not-equal
-                 (>= (System/currentTimeMillis) deadline)   :timed-out
-                 :else (do (Thread/sleep 0 100000)           ; 100 µs park
-                           (recur)))))))
+         (futex-wait (+ base-addr (long byte-off)) (int expected) (long timeout-ms)))
 
-       (-notify-i32! [_ _byte-off _n]
-         ;; No-op on JVM polling path — threads self-wake via the loop above.
-         0)
+       (-notify-i32! [_ byte-off n]
+         (futex-wake (+ base-addr (long byte-off)) (int n)))
 
        (-supports-watch? [_]
          ;; JVM regions cannot be passed to Atomics.waitAsync.
@@ -817,22 +901,22 @@
        [path-str size-bytes]
        (if *lustre-mode*
          (open-lustre-region path-str size-bytes)
-         (let [size  (long size-bytes)
+         (let [size (long size-bytes)
                ;; Ensure the file exists and is at least size-bytes long.
                ;; Only grow the file — never truncate an existing larger file
              ;; (e.g. a 1 MB domain file peeked at 4096 bytes must not be truncated).
-             _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
-                     (try (when (< (.length raf) size) (.setLength raf size))
-                          (finally (.close raf))))
+               _ (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
+                   (try (when (< (.length raf) size) (.setLength raf size))
+                        (finally (.close raf))))
              ;; Map the file using FileChannel.map (available Java 21+).
              ;; MemorySegment.map was added in Java 22 and is NOT available in Java 21.
-             path  (Paths/get ^String path-str (into-array String []))
-             arena (Arena/ofShared)
-             seg   (with-open [^FileChannel fc
+               path (Paths/get ^String path-str (into-array String []))
+               arena (Arena/ofShared)
+               seg (with-open [^FileChannel fc
                                (FileChannel/open path
-                                 (into-array OpenOption
-                                   [StandardOpenOption/READ
-                                    StandardOpenOption/WRITE]))]
+                                                 (into-array OpenOption
+                                                             [StandardOpenOption/READ
+                                                              StandardOpenOption/WRITE]))]
                      (.map fc FileChannel$MapMode/READ_WRITE 0 size arena))]
            (JvmMmapRegion. seg (.address seg) size))))
 
@@ -863,64 +947,64 @@
 
        (-load-i32 [_ byte-off]
          (.getIntVolatile UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))))
+                          (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))))
 
        (-store-i32! [_ byte-off val]
          (.putIntVolatile UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int val))
+                          (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int val))
          nil)
 
        (-cas-i32! [_ byte-off expected desired]
          (let [addr (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))
-               exp  (unchecked-int expected)]
+               exp (unchecked-int expected)]
            (if (.compareAndSwapInt UNSAFE backing addr exp (unchecked-int desired))
              exp
              (.getIntVolatile UNSAFE backing addr))))
 
        (-add-i32! [_ byte-off delta]
          (.getAndAddInt UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int delta)))
+                        (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int delta)))
 
        (-sub-i32! [_ byte-off delta]
          (.getAndAddInt UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int (- delta))))
+                        (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int (- delta))))
 
        (-exchange-i32! [_ byte-off val]
          (.getAndSetInt UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int val)))
+                        (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (unchecked-int val)))
 
        (-load-i64 [_ byte-off]
          (.getLongVolatile UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))))
+                           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))))
 
        (-store-i64! [_ byte-off val]
          (.putLongVolatile UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (long val))
+                           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (long val))
          nil)
 
        (-cas-i64! [_ byte-off expected desired]
          (let [addr (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))
-               exp  (long expected)]
+               exp (long expected)]
            (if (.compareAndSwapLong UNSAFE backing addr exp (long desired))
              exp
              (.getLongVolatile UNSAFE backing addr))))
 
        (-add-i64! [_ byte-off delta]
          (.getAndAddLong UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (long delta)))
+                         (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (long delta)))
 
        (-sub-i64! [_ byte-off delta]
          (.getAndAddLong UNSAFE backing
-           (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (long (- delta))))
+                         (+ BYTE_ARRAY_BASE_OFFSET (long byte-off)) (long (- delta))))
 
        (-wait-i32! [_ byte-off expected timeout-ms]
-         (let [addr     (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))
+         (let [addr (+ BYTE_ARRAY_BASE_OFFSET (long byte-off))
                deadline (+ (System/currentTimeMillis) (long timeout-ms))]
            (loop []
              (let [cur (.getIntVolatile UNSAFE backing addr)]
                (cond
-                 (not= cur (int expected))                  :not-equal
-                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 (not= cur (int expected)) :not-equal
+                 (>= (System/currentTimeMillis) deadline) :timed-out
                  :else (do (Thread/sleep 0 100000)
                            (recur)))))))
 
@@ -960,12 +1044,12 @@
      ;; The FileChannel.lock() handles inter-process coordination.
 
      (deftype LustreJvmMmapRegion
-       [^MemorySegment seg
-        ^long base-addr
-        ^long size
-        ^FileChannel lock-channel
-        ^MappedByteBuffer mapped-buf
-        ^ReentrantLock thread-lock]
+              [^MemorySegment seg
+               ^long base-addr
+               ^long size
+               ^FileChannel lock-channel
+               ^MappedByteBuffer mapped-buf
+               ^ReentrantLock thread-lock]
 
        IMemRegion
 
@@ -999,7 +1083,7 @@
            (let [fl (.lock lock-channel (long byte-off) 4 false)]
              (try
                (let [addr (+ base-addr (long byte-off))
-                     cur  (.getIntVolatile UNSAFE nil addr)]
+                     cur (.getIntVolatile UNSAFE nil addr)]
                  (when (= cur (unchecked-int expected))
                    (.putIntVolatile UNSAFE nil addr (unchecked-int desired))
                    (.force mapped-buf (int byte-off) 4))
@@ -1013,8 +1097,8 @@
            (let [fl (.lock lock-channel (long byte-off) 4 false)]
              (try
                (let [addr (+ base-addr (long byte-off))
-                     old  (.getIntVolatile UNSAFE nil addr)
-                     nv   (unchecked-int (+ old (unchecked-int delta)))]
+                     old (.getIntVolatile UNSAFE nil addr)
+                     nv (unchecked-int (+ old (unchecked-int delta)))]
                  (.putIntVolatile UNSAFE nil addr nv)
                  (.force mapped-buf (int byte-off) 4)
                  old)
@@ -1027,8 +1111,8 @@
            (let [fl (.lock lock-channel (long byte-off) 4 false)]
              (try
                (let [addr (+ base-addr (long byte-off))
-                     old  (.getIntVolatile UNSAFE nil addr)
-                     nv   (unchecked-int (- old (unchecked-int delta)))]
+                     old (.getIntVolatile UNSAFE nil addr)
+                     nv (unchecked-int (- old (unchecked-int delta)))]
                  (.putIntVolatile UNSAFE nil addr nv)
                  (.force mapped-buf (int byte-off) 4)
                  old)
@@ -1041,7 +1125,7 @@
            (let [fl (.lock lock-channel (long byte-off) 4 false)]
              (try
                (let [addr (+ base-addr (long byte-off))
-                     old  (.getIntVolatile UNSAFE nil addr)]
+                     old (.getIntVolatile UNSAFE nil addr)]
                  (.putIntVolatile UNSAFE nil addr (unchecked-int val))
                  (.force mapped-buf (int byte-off) 4)
                  old)
@@ -1076,7 +1160,7 @@
            (let [fl (.lock lock-channel (long byte-off) 8 false)]
              (try
                (let [addr (+ base-addr (long byte-off))
-                     cur  (.getLongVolatile UNSAFE nil addr)]
+                     cur (.getLongVolatile UNSAFE nil addr)]
                  (when (= cur (long expected))
                    (.putLongVolatile UNSAFE nil addr (long desired))
                    (.force mapped-buf (int byte-off) 8))
@@ -1090,8 +1174,8 @@
            (let [fl (.lock lock-channel (long byte-off) 8 false)]
              (try
                (let [addr (+ base-addr (long byte-off))
-                     old  (.getLongVolatile UNSAFE nil addr)
-                     nv   (+ old (long delta))]
+                     old (.getLongVolatile UNSAFE nil addr)
+                     nv (+ old (long delta))]
                  (.putLongVolatile UNSAFE nil addr nv)
                  (.force mapped-buf (int byte-off) 8)
                  old)
@@ -1104,8 +1188,8 @@
            (let [fl (.lock lock-channel (long byte-off) 8 false)]
              (try
                (let [addr (+ base-addr (long byte-off))
-                     old  (.getLongVolatile UNSAFE nil addr)
-                     nv   (- old (long delta))]
+                     old (.getLongVolatile UNSAFE nil addr)
+                     nv (- old (long delta))]
                  (.putLongVolatile UNSAFE nil addr nv)
                  (.force mapped-buf (int byte-off) 8)
                  old)
@@ -1119,8 +1203,8 @@
            (loop []
              (let [cur (-load-i32 this byte-off)]
                (cond
-                 (not= cur (int expected))                  :not-equal
-                 (>= (System/currentTimeMillis) deadline)   :timed-out
+                 (not= cur (int expected)) :not-equal
+                 (>= (System/currentTimeMillis) deadline) :timed-out
                  :else (do (Thread/sleep 0 100000)
                            (recur)))))))
 
@@ -1145,25 +1229,25 @@
         locking. Uses a ReentrantLock for intra-JVM thread serialization.
         Returns a LustreJvmMmapRegion."
        [path-str size-bytes]
-       (let [size  (long size-bytes)
-             _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
-                     (try (when (< (.length raf) size) (.setLength raf size))
-                          (finally (.close raf))))
-             path  (Paths/get ^String path-str (into-array String []))
+       (let [size (long size-bytes)
+             _ (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
+                 (try (when (< (.length raf) size) (.setLength raf size))
+                      (finally (.close raf))))
+             path (Paths/get ^String path-str (into-array String []))
              ;; Map as MappedByteBuffer for scoped force(index, length).
              ;; Wrap as MemorySegment for Unsafe native address access.
              ^FileChannel map-ch (FileChannel/open path
-                                   (into-array OpenOption
-                                     [StandardOpenOption/READ
-                                      StandardOpenOption/WRITE]))
+                                                   (into-array OpenOption
+                                                               [StandardOpenOption/READ
+                                                                StandardOpenOption/WRITE]))
              ^MappedByteBuffer mbb (.map map-ch FileChannel$MapMode/READ_WRITE 0 size)
-             seg   (MemorySegment/ofBuffer mbb)
+             seg (MemorySegment/ofBuffer mbb)
              ;; Separate FileChannel kept open for fcntl locking —
              ;; MUST NOT be closed until the region is disposed.
              lock-ch (FileChannel/open path
-                       (into-array OpenOption
-                         [StandardOpenOption/READ
-                          StandardOpenOption/WRITE]))]
+                                       (into-array OpenOption
+                                                   [StandardOpenOption/READ
+                                                    StandardOpenOption/WRITE]))]
          (LustreJvmMmapRegion. seg (.address seg) size
                                lock-ch mbb
                                (ReentrantLock.))))))
@@ -1172,22 +1256,22 @@
 ;; Dispatch wrappers — work against IMemRegion on both platforms
 ;; ---------------------------------------------------------------------------
 
-(defn load-i32       [r byte-off]           (-load-i32       r byte-off))
-(defn store-i32!     [r byte-off val]       (-store-i32!     r byte-off val))
-(defn cas-i32!       [r byte-off exp des]   (-cas-i32!       r byte-off exp des))
-(defn add-i32!       [r byte-off delta]     (-add-i32!       r byte-off delta))
-(defn sub-i32!       [r byte-off delta]     (-sub-i32!       r byte-off delta))
-(defn exchange-i32!  [r byte-off val]       (-exchange-i32!  r byte-off val))
-(defn load-i64       [r byte-off]           (-load-i64       r byte-off))
-(defn store-i64!     [r byte-off val]       (-store-i64!     r byte-off val))
-(defn cas-i64!       [r byte-off exp des]   (-cas-i64!       r byte-off exp des))
-(defn add-i64!       [r byte-off delta]     (-add-i64!       r byte-off delta))
-(defn sub-i64!       [r byte-off delta]     (-sub-i64!       r byte-off delta))
-(defn wait-i32!      [r byte-off exp t]     (-wait-i32!      r byte-off exp t))
-(defn notify-i32!    [r byte-off n]         (-notify-i32!    r byte-off n))
-(defn supports-watch? [r]                   (-supports-watch? r))
-(defn read-bytes     [r byte-off len]       (-read-bytes     r byte-off len))
-(defn write-bytes!   [r byte-off src]       (-write-bytes!   r byte-off src))
+(defn load-i32 [r byte-off] (-load-i32 r byte-off))
+(defn store-i32! [r byte-off val] (-store-i32! r byte-off val))
+(defn cas-i32! [r byte-off exp des] (-cas-i32! r byte-off exp des))
+(defn add-i32! [r byte-off delta] (-add-i32! r byte-off delta))
+(defn sub-i32! [r byte-off delta] (-sub-i32! r byte-off delta))
+(defn exchange-i32! [r byte-off val] (-exchange-i32! r byte-off val))
+(defn load-i64 [r byte-off] (-load-i64 r byte-off))
+(defn store-i64! [r byte-off val] (-store-i64! r byte-off val))
+(defn cas-i64! [r byte-off exp des] (-cas-i64! r byte-off exp des))
+(defn add-i64! [r byte-off delta] (-add-i64! r byte-off delta))
+(defn sub-i64! [r byte-off delta] (-sub-i64! r byte-off delta))
+(defn wait-i32! [r byte-off exp t] (-wait-i32! r byte-off exp t))
+(defn notify-i32! [r byte-off n] (-notify-i32! r byte-off n))
+(defn supports-watch? [r] (-supports-watch? r))
+(defn read-bytes [r byte-off len] (-read-bytes r byte-off len))
+(defn write-bytes! [r byte-off src] (-write-bytes! r byte-off src))
 
 #?(:bb
    (defn copy-region!
@@ -1223,21 +1307,21 @@
    Returns the block index (absolute bit position), or -1 if bitmap is full."
   [region bm-byte-offset total-bits start-bit]
   (let [word-count (unsigned-bit-shift-right (+ total-bits 31) 5)]
-    (loop [word-idx    (unsigned-bit-shift-right start-bit 5)
+    (loop [word-idx (unsigned-bit-shift-right start-bit 5)
            bit-in-word (bit-and start-bit 31)]
       (if (>= word-idx word-count)
         -1
-        (let [word     (-load-i32 region (+ bm-byte-offset (* word-idx 4)))
+        (let [word (-load-i32 region (+ bm-byte-offset (* word-idx 4)))
               inverted (bit-xor word -1)
-              masked   (if (pos? bit-in-word)
-                         (bit-and inverted (bit-shift-left -1 bit-in-word))
-                         inverted)]
+              masked (if (pos? bit-in-word)
+                       (bit-and inverted (bit-shift-left -1 bit-in-word))
+                       inverted)]
           (if (not (zero? masked))
             (let [bit-pos (loop [b 0]
                             (if (>= b 32) 32
-                              (if (not (zero? (bit-and masked (bit-shift-left 1 b))))
-                                b
-                                (recur (inc b)))))
+                                (if (not (zero? (bit-and masked (bit-shift-left 1 b))))
+                                  b
+                                  (recur (inc b)))))
                   abs-bit (+ (bit-shift-left word-idx 5) bit-pos)]
               (if (< abs-bit total-bits)
                 abs-bit
@@ -1254,19 +1338,19 @@
       imr-bitmap-alloc-cas! which uses a proper CAS."
      [region bm-byte-offset total-bits start-bit]
      (let [word-count (int (unsigned-bit-shift-right (+ total-bits 31) 5))
-           byte-len   (* word-count 4)
+           byte-len (* word-count 4)
            ^bytes raw (-read-bytes region bm-byte-offset byte-len)
-           buf        (-> (java.nio.ByteBuffer/wrap raw)
-                          (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
-       (loop [word-idx    (int (unsigned-bit-shift-right start-bit 5))
+           buf (-> (java.nio.ByteBuffer/wrap raw)
+                   (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
+       (loop [word-idx (int (unsigned-bit-shift-right start-bit 5))
               bit-in-word (int (bit-and start-bit 31))]
          (if (>= word-idx word-count)
            -1
-           (let [word     (.getInt buf (* word-idx 4))
+           (let [word (.getInt buf (* word-idx 4))
                  inverted (bit-xor word -1)
-                 masked   (if (pos? bit-in-word)
-                            (bit-and inverted (bit-shift-left -1 bit-in-word))
-                            inverted)]
+                 masked (if (pos? bit-in-word)
+                          (bit-and inverted (bit-shift-left -1 bit-in-word))
+                          inverted)]
              (if (not (zero? masked))
                (let [bit-pos (Integer/numberOfTrailingZeros masked)
                      abs-bit (+ (bit-shift-left word-idx 5) bit-pos)]
@@ -1280,7 +1364,7 @@
    Returns true on success, false if bit was already set (lost CAS race)."
   [region bm-byte-offset bit-idx]
   (let [word-byte-off (+ bm-byte-offset (* (unsigned-bit-shift-right bit-idx 5) 4))
-        bit-mask      (bit-shift-left 1 (bit-and bit-idx 31))]
+        bit-mask (bit-shift-left 1 (bit-and bit-idx 31))]
     (loop []
       (let [old-word (-load-i32 region word-byte-off)]
         (if (not (zero? (bit-and old-word bit-mask)))
@@ -1295,14 +1379,14 @@
    Returns true if bit was set (valid free), false if already clear (double-free)."
   [region bm-byte-offset bit-idx]
   (let [word-byte-off (+ bm-byte-offset (* (unsigned-bit-shift-right bit-idx 5) 4))
-        bit-pos       (bit-and bit-idx 31)
-        clear-mask    (bit-xor (bit-shift-left 1 bit-pos) -1)
-        old-word      (loop []
-                        (let [cur     (-load-i32 region word-byte-off)
-                              new-val (bit-and cur clear-mask)]
-                          (if (== cur (-cas-i32! region word-byte-off cur new-val))
-                            cur
-                            (recur))))]
+        bit-pos (bit-and bit-idx 31)
+        clear-mask (bit-xor (bit-shift-left 1 bit-pos) -1)
+        old-word (loop []
+                   (let [cur (-load-i32 region word-byte-off)
+                         new-val (bit-and cur clear-mask)]
+                     (if (== cur (-cas-i32! region word-byte-off cur new-val))
+                       cur
+                       (recur))))]
     (not (zero? (bit-and (unsigned-bit-shift-right old-word bit-pos) 1)))))
 
 ;; ---------------------------------------------------------------------------
@@ -1316,38 +1400,37 @@
      (def ^:private ^:const MAGIC-0 (unchecked-byte 0xEE))
      (def ^:private ^:const MAGIC-1 (unchecked-byte 0xDB))
      ;; Byte-typed write-side constants for value->eve-bytes
-     (def ^:private ^:const TAG-FALSE          (unchecked-byte 0x01))
-     (def ^:private ^:const TAG-TRUE           (unchecked-byte 0x02))
-     (def ^:private ^:const TAG-INT32          (unchecked-byte 0x03))
-     (def ^:private ^:const TAG-FLOAT64        (unchecked-byte 0x04))
-     (def ^:private ^:const TAG-STRING-SHORT   (unchecked-byte 0x05))
-     (def ^:private ^:const TAG-STRING-LONG    (unchecked-byte 0x06))
-     (def ^:private ^:const TAG-KEYWORD-SHORT  (unchecked-byte 0x07))
-     (def ^:private ^:const TAG-KEYWORD-LONG   (unchecked-byte 0x08))
-     (def ^:private ^:const TAG-KW-NS-SHORT    (unchecked-byte 0x09))
-     (def ^:private ^:const TAG-KW-NS-LONG     (unchecked-byte 0x0A))
-     (def ^:private ^:const TAG-UUID           (unchecked-byte 0x0B))
-     (def ^:private ^:const TAG-SYMBOL-SHORT   (unchecked-byte 0x0C))
-     (def ^:private ^:const TAG-SYM-NS-SHORT   (unchecked-byte 0x0D))
-     (def ^:private ^:const TAG-DATE           (unchecked-byte 0x0E))
-     (def ^:private ^:const TAG-INT64          (unchecked-byte 0x0F))
+     (def ^:private ^:const TAG-FALSE (unchecked-byte 0x01))
+     (def ^:private ^:const TAG-TRUE (unchecked-byte 0x02))
+     (def ^:private ^:const TAG-INT32 (unchecked-byte 0x03))
+     (def ^:private ^:const TAG-FLOAT64 (unchecked-byte 0x04))
+     (def ^:private ^:const TAG-STRING-SHORT (unchecked-byte 0x05))
+     (def ^:private ^:const TAG-STRING-LONG (unchecked-byte 0x06))
+     (def ^:private ^:const TAG-KEYWORD-SHORT (unchecked-byte 0x07))
+     (def ^:private ^:const TAG-KEYWORD-LONG (unchecked-byte 0x08))
+     (def ^:private ^:const TAG-KW-NS-SHORT (unchecked-byte 0x09))
+     (def ^:private ^:const TAG-KW-NS-LONG (unchecked-byte 0x0A))
+     (def ^:private ^:const TAG-UUID (unchecked-byte 0x0B))
+     (def ^:private ^:const TAG-SYMBOL-SHORT (unchecked-byte 0x0C))
+     (def ^:private ^:const TAG-SYM-NS-SHORT (unchecked-byte 0x0D))
+     (def ^:private ^:const TAG-DATE (unchecked-byte 0x0E))
+     (def ^:private ^:const TAG-INT64 (unchecked-byte 0x0F))
      ;; Flat collection tags — cross-process binary encoding (no SAB pointers)
-     (def ^:private ^:const TAG-FLAT-MAP       (unchecked-byte 0xED))
-     (def ^:private ^:const TAG-FLAT-SET       (unchecked-byte 0xEE))
-     (def ^:private ^:const TAG-FLAT-VEC       (unchecked-byte 0xEF))
+     (def ^:private ^:const TAG-FLAT-MAP (unchecked-byte 0xED))
+     (def ^:private ^:const TAG-FLAT-SET (unchecked-byte 0xEE))
+     (def ^:private ^:const TAG-FLAT-VEC (unchecked-byte 0xEF))
 
-
-     ;; --- OBJ-7: Keyword serialization caches ---
+;; --- OBJ-7: Keyword serialization caches ---
      ;; ConcurrentHashMap caches for keyword↔bytes, mirroring CLJS kw-ser-cache.
      ;; bb: use plain HashMap (single-threaded).
      ;; Evicts when size exceeds 4096 to bound memory.
 
      (def ^:private kw-encode-cache
-       #?(:bb  (java.util.HashMap. 256)
+       #?(:bb (java.util.HashMap. 256)
           :clj (java.util.concurrent.ConcurrentHashMap. 256)))
 
      (def ^:private kw-decode-cache
-       #?(:bb  (java.util.HashMap. 256)
+       #?(:bb (java.util.HashMap. 256)
           :clj (java.util.concurrent.ConcurrentHashMap. 256)))
 
      (def ^:private ^:const KW_CACHE_MAX 4096)
@@ -1392,13 +1475,13 @@
      ;; --- LE write helpers (eliminates ByteBuffer alloc for fixed-size types) ---
 
      (defn- put-i32-le! [^bytes b ^long off ^long v]
-       (aset b off       (unchecked-byte v))
+       (aset b off (unchecked-byte v))
        (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
        (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
        (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24))))
 
      (defn- put-i64-le! [^bytes b ^long off ^long v]
-       (aset b off       (unchecked-byte v))
+       (aset b off (unchecked-byte v))
        (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
        (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
        (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24)))
@@ -1412,13 +1495,13 @@
 
      ;; --- Cached constant byte arrays for zero-alloc serialization ---
 
-     (def ^:private ^bytes BYTES-NIL     (byte-array 0))
-     (def ^:private ^bytes BYTES-FALSE   (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 TAG-FALSE)))
-     (def ^:private ^bytes BYTES-TRUE    (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 TAG-TRUE)))
+     (def BYTES-NIL (byte-array 0))
+     (def BYTES-FALSE (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 TAG-FALSE)))
+     (def BYTES-TRUE (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 TAG-TRUE)))
 
      ;; Small integer cache [-128, 127] — mirrors java.lang.Integer cache range.
      ;; Each entry is a pre-built 7-byte INT32 array.
-     (def ^:private small-int-cache
+     (def small-int-cache
        (let [^objects arr (object-array 256)]
          (dotimes [i 256]
            (let [n (- i 128)
@@ -1459,123 +1542,123 @@
             :else
             (let [tag (bit-and (aget b 2) 0xFF)]
               (condp = tag
-               0x01 false   ; TAG-FALSE
-               0x02 true    ; TAG-TRUE
-               0x03 (read-i32-le b 3)   ; TAG-INT32
-               0x0F (read-i64-le b 3)   ; TAG-INT64
-               0x04 (read-f64-le b 3)   ; TAG-FLOAT64
-               0x0E (Date. (long (read-f64-le b 3)))  ; TAG-DATE
+                0x01 false ; TAG-FALSE
+                0x02 true ; TAG-TRUE
+                0x03 (read-i32-le b 3) ; TAG-INT32
+                0x0F (read-i64-le b 3) ; TAG-INT64
+                0x04 (read-f64-le b 3) ; TAG-FLOAT64
+                0x0E (Date. (long (read-f64-le b 3))) ; TAG-DATE
 
-               0x05  ; TAG-STRING-SHORT
-               (read-utf8 b 4 (read-u8 b 3))
+                0x05 ; TAG-STRING-SHORT
+                (read-utf8 b 4 (read-u8 b 3))
 
-               0x06  ; TAG-STRING-LONG
-               (read-utf8 b 7 (read-u32-le b 3))
+                0x06 ; TAG-STRING-LONG
+                (read-utf8 b 7 (read-u32-le b 3))
 
-               0x07  ; TAG-KEYWORD-SHORT
-               (keyword (read-utf8 b 4 (read-u8 b 3)))
+                0x07 ; TAG-KEYWORD-SHORT
+                (keyword (read-utf8 b 4 (read-u8 b 3)))
 
-               0x08  ; TAG-KEYWORD-LONG
-               (keyword (read-utf8 b 7 (read-u32-le b 3)))
+                0x08 ; TAG-KEYWORD-LONG
+                (keyword (read-utf8 b 7 (read-u32-le b 3)))
 
-               0x09  ; TAG-KW-NS-SHORT
-               (let [ns-len  (read-u8 b 3)
-                     ns-str  (read-utf8 b 4 ns-len)
-                     name-off (+ 4 ns-len)
-                     name-len (read-u8 b name-off)
-                     name-str (read-utf8 b (+ name-off 1) name-len)]
-                 (keyword ns-str name-str))
+                0x09 ; TAG-KW-NS-SHORT
+                (let [ns-len (read-u8 b 3)
+                      ns-str (read-utf8 b 4 ns-len)
+                      name-off (+ 4 ns-len)
+                      name-len (read-u8 b name-off)
+                      name-str (read-utf8 b (+ name-off 1) name-len)]
+                  (keyword ns-str name-str))
 
-               0x0A  ; TAG-KW-NS-LONG
-               (let [ns-len  (read-u32-le b 3)
-                     ns-str  (read-utf8 b 7 ns-len)
-                     name-off (+ 7 ns-len)
-                     name-len (read-u32-le b name-off)
-                     name-str (read-utf8 b (+ name-off 4) name-len)]
-                 (keyword ns-str name-str))
+                0x0A ; TAG-KW-NS-LONG
+                (let [ns-len (read-u32-le b 3)
+                      ns-str (read-utf8 b 7 ns-len)
+                      name-off (+ 7 ns-len)
+                      name-len (read-u32-le b name-off)
+                      name-str (read-utf8 b (+ name-off 4) name-len)]
+                  (keyword ns-str name-str))
 
-               0x0C  ; TAG-SYMBOL-SHORT
-               (symbol (read-utf8 b 4 (read-u8 b 3)))
+                0x0C ; TAG-SYMBOL-SHORT
+                (symbol (read-utf8 b 4 (read-u8 b 3)))
 
-               0x0D  ; TAG-SYM-NS-SHORT
-               (let [ns-len  (read-u8 b 3)
-                     ns-str  (read-utf8 b 4 ns-len)
-                     name-off (+ 4 ns-len)
-                     name-len (read-u8 b name-off)
-                     name-str (read-utf8 b (+ name-off 1) name-len)]
-                 (symbol ns-str name-str))
+                0x0D ; TAG-SYM-NS-SHORT
+                (let [ns-len (read-u8 b 3)
+                      ns-str (read-utf8 b 4 ns-len)
+                      name-off (+ 4 ns-len)
+                      name-len (read-u8 b name-off)
+                      name-str (read-utf8 b (+ name-off 1) name-len)]
+                  (symbol ns-str name-str))
 
-               0x0B  ; TAG-UUID — 16 raw bytes in big-endian order
-               (let [msb (Long/reverseBytes (read-i64-le b 3))
-                     lsb (Long/reverseBytes (read-i64-le b 11))]
-                 (UUID. msb lsb))
+                0x0B ; TAG-UUID — 16 raw bytes in big-endian order
+                (let [msb (Long/reverseBytes (read-i64-le b 3))
+                      lsb (Long/reverseBytes (read-i64-le b 11))]
+                  (UUID. msb lsb))
 
                ;; SAB pointer types — collection values in slab memory.
                ;; Prefer registry lookup (mirrors CLJS pattern); fall back to
                ;; legacy coll-factory callback for backward compat.
-               0x10 (let [ctor (or (ser/get-jvm-type-constructor 0x10)
-                                   (when coll-factory (fn [off] (coll-factory 0x10 sio off))))]
-                      (if ctor (ctor (read-i32-le b 3))
-                        (throw (UnsupportedOperationException. "EVE SAB_MAP: no constructor registered."))))
-               0x11 (let [ctor (or (ser/get-jvm-type-constructor 0x11)
-                                   (when coll-factory (fn [off] (coll-factory 0x11 sio off))))]
-                      (if ctor (ctor (read-i32-le b 3))
-                        (throw (UnsupportedOperationException. "EVE SAB_SET: no constructor registered."))))
-               0x12 (let [ctor (or (ser/get-jvm-type-constructor 0x12)
-                                   (when coll-factory (fn [off] (coll-factory 0x12 sio off))))]
-                      (if ctor (ctor (read-i32-le b 3))
-                        (throw (UnsupportedOperationException. "EVE SAB_VEC: no constructor registered."))))
-               0x13 (let [ctor (or (ser/get-jvm-type-constructor 0x13)
-                                   (when coll-factory (fn [off] (coll-factory 0x13 sio off))))]
-                      (if ctor (ctor (read-i32-le b 3))
-                        (throw (UnsupportedOperationException. "EVE SAB_LIST: no constructor registered."))))
-               0x1C (let [ctor (or (ser/get-jvm-type-constructor 0x1C)
-                                   (when coll-factory (fn [off] (coll-factory 0x1C sio off))))]
-                      (if ctor (ctor (read-i32-le b 3))
-                        (throw (UnsupportedOperationException. "EVE ARRAY (0x1C): no constructor registered."))))
-               0x1D (let [ctor (or (ser/get-jvm-type-constructor 0x1D)
-                                   (when coll-factory (fn [off] (coll-factory 0x1D sio off))))]
-                      (if ctor (ctor (read-i32-le b 3))
-                        (throw (UnsupportedOperationException. "EVE ARRAY: no constructor registered."))))
-               0x1E (let [ctor (or (ser/get-jvm-type-constructor 0x1E)
-                                   (when coll-factory (fn [off] (coll-factory 0x1E sio off))))]
-                      (if ctor (ctor (read-i32-le b 3))
-                        (throw (UnsupportedOperationException. "EVE OBJ: no constructor registered."))))
+                0x10 (let [ctor (or (ser/get-jvm-type-constructor 0x10)
+                                    (when coll-factory (fn [off] (coll-factory 0x10 sio off))))]
+                       (if ctor (ctor (read-i32-le b 3))
+                           (throw (UnsupportedOperationException. "EVE SAB_MAP: no constructor registered."))))
+                0x11 (let [ctor (or (ser/get-jvm-type-constructor 0x11)
+                                    (when coll-factory (fn [off] (coll-factory 0x11 sio off))))]
+                       (if ctor (ctor (read-i32-le b 3))
+                           (throw (UnsupportedOperationException. "EVE SAB_SET: no constructor registered."))))
+                0x12 (let [ctor (or (ser/get-jvm-type-constructor 0x12)
+                                    (when coll-factory (fn [off] (coll-factory 0x12 sio off))))]
+                       (if ctor (ctor (read-i32-le b 3))
+                           (throw (UnsupportedOperationException. "EVE SAB_VEC: no constructor registered."))))
+                0x13 (let [ctor (or (ser/get-jvm-type-constructor 0x13)
+                                    (when coll-factory (fn [off] (coll-factory 0x13 sio off))))]
+                       (if ctor (ctor (read-i32-le b 3))
+                           (throw (UnsupportedOperationException. "EVE SAB_LIST: no constructor registered."))))
+                0x1C (let [ctor (or (ser/get-jvm-type-constructor 0x1C)
+                                    (when coll-factory (fn [off] (coll-factory 0x1C sio off))))]
+                       (if ctor (ctor (read-i32-le b 3))
+                           (throw (UnsupportedOperationException. "EVE ARRAY (0x1C): no constructor registered."))))
+                0x1D (let [ctor (or (ser/get-jvm-type-constructor 0x1D)
+                                    (when coll-factory (fn [off] (coll-factory 0x1D sio off))))]
+                       (if ctor (ctor (read-i32-le b 3))
+                           (throw (UnsupportedOperationException. "EVE ARRAY: no constructor registered."))))
+                0x1E (let [ctor (or (ser/get-jvm-type-constructor 0x1E)
+                                    (when coll-factory (fn [off] (coll-factory 0x1E sio off))))]
+                       (if ctor (ctor (read-i32-le b 3))
+                           (throw (UnsupportedOperationException. "EVE OBJ: no constructor registered."))))
 
                ;; Flat map — cross-process binary map encoding
-               0xED
-               (let [cnt (read-i32-le b 3)]
-                 (loop [pos 7 i 0 m (transient {})]
-                   (if (>= i cnt)
-                     (persistent! m)
-                     (let [klen (read-i32-le b pos)
-                           k    (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ pos 4)) (int (+ pos 4 klen))))
-                           voff (+ pos 4 klen)
-                           vlen (read-i32-le b voff)
-                           v    (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ voff 4)) (int (+ voff 4 vlen))))]
-                       (recur (+ voff 4 vlen) (inc i) (assoc! m k v))))))
+                0xED
+                (let [cnt (read-i32-le b 3)]
+                  (loop [pos 7 i 0 m (transient {})]
+                    (if (>= i cnt)
+                      (persistent! m)
+                      (let [klen (read-i32-le b pos)
+                            k (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ pos 4)) (int (+ pos 4 klen))))
+                            voff (+ pos 4 klen)
+                            vlen (read-i32-le b voff)
+                            v (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ voff 4)) (int (+ voff 4 vlen))))]
+                        (recur (+ voff 4 vlen) (inc i) (assoc! m k v))))))
 
                ;; Flat set — cross-process binary set encoding
-               0xEE
-               (let [cnt (read-i32-le b 3)]
-                 (loop [pos 7 i 0 s (transient #{})]
-                   (if (>= i cnt)
-                     (persistent! s)
-                     (let [elen (read-i32-le b pos)
-                           elem (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ pos 4)) (int (+ pos 4 elen))))]
-                       (recur (+ pos 4 elen) (inc i) (conj! s elem))))))
+                0xEE
+                (let [cnt (read-i32-le b 3)]
+                  (loop [pos 7 i 0 s (transient #{})]
+                    (if (>= i cnt)
+                      (persistent! s)
+                      (let [elen (read-i32-le b pos)
+                            elem (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ pos 4)) (int (+ pos 4 elen))))]
+                        (recur (+ pos 4 elen) (inc i) (conj! s elem))))))
 
                ;; Flat vec — cross-process binary vector encoding
-               0xEF
-               (let [cnt (read-i32-le b 3)]
-                 (loop [pos 7 i 0 v (transient [])]
-                   (if (>= i cnt)
-                     (persistent! v)
-                     (let [elen (read-i32-le b pos)
-                           elem (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ pos 4)) (int (+ pos 4 elen))))]
-                       (recur (+ pos 4 elen) (inc i) (conj! v elem))))))
+                0xEF
+                (let [cnt (read-i32-le b 3)]
+                  (loop [pos 7 i 0 v (transient [])]
+                    (if (>= i cnt)
+                      (persistent! v)
+                      (let [elen (read-i32-le b pos)
+                            elem (eve-bytes->value (java.util.Arrays/copyOfRange b (int (+ pos 4)) (int (+ pos 4 elen))))]
+                        (recur (+ pos 4 elen) (inc i) (conj! v elem))))))
 
-               (throw (ex-info "Unknown EVE type tag" {:tag tag}))))))))
+                (throw (ex-info "Unknown EVE type tag" {:tag tag}))))))))
 
      ;; --- EVE binary format — serializer (primitive types only) ---
 
@@ -1591,12 +1674,12 @@
        "Encode a Clojure set as a FLAT_SET byte[].
         Format: [0xEE][0xDB][0xEE][count:i32LE]([e-len:i32LE][e-bytes])*"
        ^bytes [s]
-       (let [items   (seq s)
-             cnt     (count s)
+       (let [items (seq s)
+             cnt (count s)
              encoded (mapv value->eve-bytes items)
-             body    (reduce + (map #(+ 4 (alength ^bytes %)) encoded))
-             b       (byte-array (+ 7 body))
-             bb      (doto (ByteBuffer/wrap b) (.order ByteOrder/LITTLE_ENDIAN))]
+             body (reduce + (map #(+ 4 (alength ^bytes %)) encoded))
+             b (byte-array (+ 7 body))
+             bb (doto (ByteBuffer/wrap b) (.order ByteOrder/LITTLE_ENDIAN))]
          (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-SET)
          (.position bb 3)
          (.putInt bb (int cnt))
@@ -1609,12 +1692,12 @@
        "Encode a Clojure sequential as a FLAT_VEC byte[].
         Format: [0xEE][0xDB][0xEF][count:i32LE]([e-len:i32LE][e-bytes])*"
        ^bytes [coll]
-       (let [items   (seq coll)
-             count   (count coll)
+       (let [items (seq coll)
+             count (count coll)
              encoded (mapv value->eve-bytes items)
-             body    (reduce + (map #(+ 4 (alength ^bytes %)) encoded))
-             b       (byte-array (+ 7 body))
-             bb      (doto (ByteBuffer/wrap b) (.order ByteOrder/LITTLE_ENDIAN))]
+             body (reduce + (map #(+ 4 (alength ^bytes %)) encoded))
+             b (byte-array (+ 7 body))
+             bb (doto (ByteBuffer/wrap b) (.order ByteOrder/LITTLE_ENDIAN))]
          (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-VEC)
          (.position bb 3)
          (.putInt bb (int count))
@@ -1627,12 +1710,12 @@
        "Encode a Clojure map as a FLAT_MAP byte[].
         Format: [0xEE][0xDB][0xED][count:i32LE]([k-len:i32LE][k-bytes][v-len:i32LE][v-bytes])*"
        ^bytes [m]
-       (let [count   (count m)
+       (let [count (count m)
              encoded (mapv (fn [[k v]] [(value->eve-bytes k) (value->eve-bytes v)]) m)
-             body    (reduce (fn [acc [kb vb]] (+ acc 4 (alength ^bytes kb) 4 (alength ^bytes vb)))
-                             0 encoded)
-             b       (byte-array (+ 7 body))
-             bb      (doto (ByteBuffer/wrap b) (.order ByteOrder/LITTLE_ENDIAN))]
+             body (reduce (fn [acc [kb vb]] (+ acc 4 (alength ^bytes kb) 4 (alength ^bytes vb)))
+                          0 encoded)
+             b (byte-array (+ 7 body))
+             bb (doto (ByteBuffer/wrap b) (.order ByteOrder/LITTLE_ENDIAN))]
          (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-MAP)
          (.position bb 3)
          (.putInt bb (int count))
@@ -1713,8 +1796,8 @@
 
          (keyword? v)
          (or (.get kw-encode-cache v)
-             (let [ns-str  (namespace v)
-                   nm-str  (name v)
+             (let [ns-str (namespace v)
+                   nm-str (name v)
                    result
                    (if (nil? ns-str)
                      (let [^bytes utf8 (.getBytes ^String nm-str "UTF-8")
@@ -1756,7 +1839,7 @@
              ;; Simple symbol
              (let [^bytes utf8 (.getBytes ^String nm-str "UTF-8")
                    slen (alength utf8)
-                   b    (byte-array (+ 4 slen))]
+                   b (byte-array (+ 4 slen))]
                (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-SYMBOL-SHORT)
                (aset b 3 (unchecked-byte slen))
                (System/arraycopy utf8 0 b 4 slen) b)
@@ -1795,6 +1878,25 @@
 
          :else
          (throw (ex-info "value->eve-bytes: unsupported type" {:type (type v) :value v}))))
+
+     (defn eve-bytes-length
+       "Return the serialized byte length of v WITHOUT allocating.
+        Returns the length for fixed-size and cached types. For types whose
+        length requires encoding (uncached strings, symbols), returns -1."
+       ^long [v]
+       (cond
+         (nil? v) 0
+         (instance? Boolean v) 3
+         (or (instance? Long v) (instance? Integer v)
+             (instance? Short v) (instance? Byte v))
+         (let [n (long v)]
+           (if (and (>= n Integer/MIN_VALUE) (<= n Integer/MAX_VALUE)) 7 11))
+         (or (instance? Double v) (instance? Float v)) 11
+         (instance? Date v) 11
+         (instance? UUID v) 19
+         (keyword? v) (let [cached (.get kw-encode-cache v)]
+                        (if cached (alength ^bytes cached) -1))
+         :else -1))
 
      ;; --- JVM slab collection serialization ---
 
@@ -1845,55 +1947,55 @@
        (^bytes [v]
         (value+sio->eve-bytes @(resolve 'eve.deftype-proto.alloc/*jvm-slab-ctx*) v))
        (^bytes [sio v]
-       (let [writers @jvm-coll-writers]
-         (cond
-           (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
-               (keyword? v) (symbol? v)
-               (instance? java.util.UUID v) (instance? java.util.Date v))
-           (value->eve-bytes v)
+        (let [writers @jvm-coll-writers]
+          (cond
+            (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
+                (keyword? v) (symbol? v)
+                (instance? java.util.UUID v) (instance? java.util.Date v))
+            (value->eve-bytes v)
 
            ;; Already slab-backed Eve type — return pointer to existing header
-           (satisfies? d/IEveRoot v)
-           (let [off (d/-root-header-off v)
-                 tag (cond
-                       (map? v)    0x10
-                       (set? v)    0x11
-                       (vector? v) 0x12
-                       (list? v)   0x13
-                       :else       0x1D)]
-             (jvm-sab-pointer-bytes tag off))
+            (satisfies? d/IEveRoot v)
+            (let [off (d/-root-header-off v)
+                  tag (cond
+                        (map? v) 0x10
+                        (set? v) 0x11
+                        (vector? v) 0x12
+                        (list? v) 0x13
+                        :else 0x1D)]
+              (jvm-sab-pointer-bytes tag off))
 
-           (map? v)
-           (if-let [write-map! (get writers :map)]
-             (jvm-sab-pointer-bytes 0x10 (write-map! sio (partial value+sio->eve-bytes sio) v))
-             (throw (ex-info "value+sio->eve-bytes: :map writer not registered" {:value v})))
+            (map? v)
+            (if-let [write-map! (get writers :map)]
+              (jvm-sab-pointer-bytes 0x10 (write-map! sio (partial value+sio->eve-bytes sio) v))
+              (throw (ex-info "value+sio->eve-bytes: :map writer not registered" {:value v})))
 
-           (set? v)
-           (if-let [write-set! (get writers :set)]
-             (jvm-sab-pointer-bytes 0x11 (write-set! sio (partial value+sio->eve-bytes sio) v))
-             (throw (ex-info "value+sio->eve-bytes: :set writer not registered" {:value v})))
+            (set? v)
+            (if-let [write-set! (get writers :set)]
+              (jvm-sab-pointer-bytes 0x11 (write-set! sio (partial value+sio->eve-bytes sio) v))
+              (throw (ex-info "value+sio->eve-bytes: :set writer not registered" {:value v})))
 
-           (list? v)
-           (if-let [write-list! (get writers :list)]
-             (jvm-sab-pointer-bytes 0x13 (write-list! sio (partial value+sio->eve-bytes sio) v))
-             (throw (ex-info "value+sio->eve-bytes: :list writer not registered" {:value v})))
+            (list? v)
+            (if-let [write-list! (get writers :list)]
+              (jvm-sab-pointer-bytes 0x13 (write-list! sio (partial value+sio->eve-bytes sio) v))
+              (throw (ex-info "value+sio->eve-bytes: :list writer not registered" {:value v})))
 
-           (or (vector? v) (sequential? v))
-           (if-let [write-vec! (get writers :vec)]
-             (jvm-sab-pointer-bytes 0x12 (write-vec! sio (partial value+sio->eve-bytes sio) v))
-             (throw (ex-info "value+sio->eve-bytes: :vec writer not registered" {:value v})))
+            (or (vector? v) (sequential? v))
+            (if-let [write-vec! (get writers :vec)]
+              (jvm-sab-pointer-bytes 0x12 (write-vec! sio (partial value+sio->eve-bytes sio) v))
+              (throw (ex-info "value+sio->eve-bytes: :vec writer not registered" {:value v})))
 
-           (satisfies? d/IBackingArray v)
-           (if-let [write-arr! (get writers :array)]
-             (jvm-sab-pointer-bytes 0x1D (write-arr! sio nil (d/-backing-array v)))
-             (throw (ex-info "value+sio->eve-bytes: :array writer not registered" {:value v})))
+            (satisfies? d/IBackingArray v)
+            (if-let [write-arr! (get writers :array)]
+              (jvm-sab-pointer-bytes 0x1D (write-arr! sio nil (d/-backing-array v)))
+              (throw (ex-info "value+sio->eve-bytes: :array writer not registered" {:value v})))
 
-           (.isArray (class v))
-           (if-let [write-arr! (get writers :array)]
-             (jvm-sab-pointer-bytes 0x1D (write-arr! sio nil v))
-             (throw (ex-info "value+sio->eve-bytes: :array writer not registered" {:value v})))
+            (.isArray (class v))
+            (if-let [write-arr! (get writers :array)]
+              (jvm-sab-pointer-bytes 0x1D (write-arr! sio nil v))
+              (throw (ex-info "value+sio->eve-bytes: :array writer not registered" {:value v})))
 
-           :else
-           (throw (ex-info "value+sio->eve-bytes: unsupported type"
-                           {:type (type v) :value v}))))))))
+            :else
+            (throw (ex-info "value+sio->eve-bytes: unsupported type"
+                            {:type (type v) :value v}))))))))
 
