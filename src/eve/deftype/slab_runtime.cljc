@@ -104,7 +104,7 @@
          (do (alloc/-sio-write-i32! sio slab-off field-offset -1)
              -1)
          ;; Serialize, allocate block, write bytes, store offset
-         (let [^bytes encoded (mem/value->eve-bytes val)
+         (let [^bytes encoded (mem/value+sio->eve-bytes sio val)
                byte-len      (alength encoded)
                ser-off       (alloc/-sio-alloc! sio (+ 4 byte-len))]
            ;; Write length + bytes into the serialized data block

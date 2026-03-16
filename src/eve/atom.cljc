@@ -1324,7 +1324,7 @@
                        (alloc/init-jvm-heap-slab! i :capacity cap)))
                    (range d/NUM_SLAB_CLASSES))
              ;; Class 6: coalescing overflow (heap-backed)
-             coalesc-init-sz (* 64 1024) ;; 64 KB initial
+             coalesc-init-sz (* 64 1024) ;; 64 KB initial — grows on demand
              coalesc-layout (coalesc/coalesc-layout coalesc-init-sz
                                                     coalesc/MAX_DESCRIPTORS)
              coalesc-r (mem/make-heap-region (:total-bytes coalesc-layout))

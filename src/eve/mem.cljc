@@ -1529,6 +1529,10 @@
                                    (when coll-factory (fn [off] (coll-factory 0x13 sio off))))]
                       (if ctor (ctor (read-i32-le b 3))
                         (throw (UnsupportedOperationException. "EVE SAB_LIST: no constructor registered."))))
+               0x1C (let [ctor (or (ser/get-jvm-type-constructor 0x1C)
+                                   (when coll-factory (fn [off] (coll-factory 0x1C sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE ARRAY (0x1C): no constructor registered."))))
                0x1D (let [ctor (or (ser/get-jvm-type-constructor 0x1D)
                                    (when coll-factory (fn [off] (coll-factory 0x1D sio off))))]
                       (if ctor (ctor (read-i32-le b 3))
@@ -1855,7 +1859,8 @@
                        (map? v)    0x10
                        (set? v)    0x11
                        (vector? v) 0x12
-                       :else       0x13)]
+                       (list? v)   0x13
+                       :else       0x1D)]
              (jvm-sab-pointer-bytes tag off))
 
            (map? v)

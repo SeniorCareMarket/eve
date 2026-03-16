@@ -952,6 +952,9 @@
                            sio              ;; ISlabIO context
                            ^:unsynchronized-mutable _hash_val]
 
+       d/IEveRoot
+       (-root-header-off [_] slab-off)
+
        clojure.lang.Counted
        (count [_] (int cnt))
 
@@ -1195,5 +1198,18 @@
        "Write element at index in a heap-backed EveArray."
        [arr idx val]
        (jvm-heap-aset! arr idx val))
+
+     ;; Register JVM type constructor for EveArray slab pointer tags.
+     ;; 0x1D = EVE_ARRAY_SLAB_TYPE_ID — inline slab block pointer (from value+sio->eve-bytes)
+     ;; 0x1C = FAST_TAG_EVE_ARRAY — SAB-style pointer tag (from CLJS, cross-compat)
+     (ser/register-jvm-type-constructor!
+       ser/EVE_ARRAY_SLAB_TYPE_ID  ;; 0x1D
+       (fn [header-off]
+         (jvm-eve-array-from-offset alloc/*jvm-slab-ctx* header-off)))
+
+     (ser/register-jvm-type-constructor!
+       ser/FAST_TAG_EVE_ARRAY  ;; 0x1C
+       (fn [header-off]
+         (jvm-eve-array-from-offset alloc/*jvm-slab-ctx* header-off)))
 
      )) ;; end #?(:clj (do ...))

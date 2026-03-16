@@ -286,8 +286,16 @@
                                                       (when result
                                                         (let [data-off (long (aget data-offsets OVERFLOW_CLASS_IDX))
                                                               fpath    (aget file-paths OVERFLOW_CLASS_IDX)
-                                                              new-r    (mem/open-mmap-region
-                                                                         fpath (+ data-off result))]
+                                                              new-r    (if fpath
+                                                                         (mem/open-mmap-region
+                                                                           fpath (+ data-off result))
+                                                                         ;; Heap-backed: create larger region and copy
+                                                                         (let [old-r   (aget regions OVERFLOW_CLASS_IDX)
+                                                                               old-sz  (mem/-byte-length old-r)
+                                                                               new-sz  (+ data-off result)
+                                                                               new-rgn (mem/make-heap-region new-sz)]
+                                                                           (mem/copy-region! old-r 0 new-rgn 0 old-sz)
+                                                                           new-rgn))]
                                                           (aset regions OVERFLOW_CLASS_IDX new-r))
                                                         true)))]
                                         (if-let [result (try
