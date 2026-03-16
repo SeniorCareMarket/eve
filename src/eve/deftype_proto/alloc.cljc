@@ -1765,19 +1765,16 @@
        (set! mmap-coalesc-cached-data-size 0))
 
      (defn init-sab-coalesc!
-       "Initialize a WASM-Memory-backed class 6 coalescing allocator.
-        Uses WebAssembly.Memory (growable, shared) like the other slab classes.
-        For SAB (in-memory) domains that need overflow allocation (>1024 bytes)."
+       "Initialize a SharedArrayBuffer-backed class 6 coalescing allocator.
+        Uses a fixed-size SAB large enough for all overflow allocations (>1024 bytes).
+        Default is 1GB — the OS only commits physical pages on first touch."
        [& {:keys [initial-data-size max-desc]
-            :or   {initial-data-size coalesc/INITIAL_DATA_SIZE
+            :or   {initial-data-size (* 1024 1024 1024) ;; 1GB
                    max-desc          coalesc/MAX_DESCRIPTORS}}]
        (let [layout      (coalesc/coalesc-layout initial-data-size max-desc)
              total-bytes (:total-bytes layout)
              data-offset (:data-offset layout)
-             wasm-memory (wasm/create-slab-memory total-bytes)
-             sab         (if (instance? js/SharedArrayBuffer wasm-memory)
-                           wasm-memory
-                           (.-buffer wasm-memory))
+             sab         (js/SharedArrayBuffer. total-bytes)
              region      (mem/js-sab-region sab)]
          (coalesc/init-coalesc-region! region initial-data-size max-desc)
          (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
@@ -1786,6 +1783,9 @@
          (set! mmap-coalesc-path nil)
          (set! mmap-coalesc-max-data-size 0)
          (set! mmap-coalesc-cached-data-size initial-data-size)
+         (set! sab-coalesc-wasm-memory wasm-memory)
          (wasm/register-slab-instance-from-sab! OVERFLOW_CLASS_IDX sab)
-         (set! mmap-coalesc-region region)))))
+         (set! mmap-coalesc-region region)))
+
+     ))
 

@@ -206,8 +206,12 @@
                hi (unsigned-bit-shift-right val 32)]
            (js/Atomics.store -i32 (byte-off->i32-idx byte-off) lo)
            (js/Atomics.store -i32 (byte-off->i32-idx (+ byte-off 4)) hi)))
-       (-cas-i64! [_ _byte-off _expected _desired]
-         (throw (ex-info "JsSabRegion does not support atomic i64 CAS" {})))
+       (-cas-i64! [this byte-off expected desired]
+         ;; Single-process emulation: read, compare, write if match
+         (let [current (-load-i64 this byte-off)]
+           (when (== current expected)
+             (-store-i64! this byte-off desired))
+           current))
        (-add-i64! [_ _byte-off _delta]
          (throw (ex-info "JsSabRegion does not support atomic i64 add" {})))
        (-sub-i64! [_ _byte-off _delta]
