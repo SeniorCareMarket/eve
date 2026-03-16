@@ -56,7 +56,7 @@
    :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
               "--enable-native-access=ALL-UNNAMED"
               "-Dio.netty.tryReflectionSetAccessible=true"
-              "-Xmx1g"]
+              "-Xmx4g"]
    :main-opts ["-m" "eve.columnar-bench"]}
   :contention-bench
   {:extra-paths ["bench"]

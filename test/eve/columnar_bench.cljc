@@ -7,15 +7,14 @@
    Run via:
      Node:  node target/eve-test/all.js columnar-bench
      JVM:   clojure -M:columnar-bench"
+  (:refer-clojure :exclude [atom])
   (:require
    [eve.array :as arr]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
    [eve.tensor :as tensor]
-   #?@(:cljs [[eve.atom :as sa]]
-       :clj  [[eve.atom :as eve-atom]
-              [eve.deftype-proto.alloc :as alloc]])))
+   [eve.atom :as e]))
 
 ;;=============================================================================
 ;; Platform + timing infrastructure
@@ -65,25 +64,10 @@
   (vec (repeatedly n #(int (* (rand) max-val)))))
 
 ;;=============================================================================
-;; Eve atom constructor (platform-specific)
-;;=============================================================================
-
-(def ^:private bench-counter
-  #?(:cljs (cljs.core/atom 0)
-     :clj  (clojure.core/atom 0)))
-
-(defn- make-eve-atom [initial-val]
-  #?(:cljs (sa/atom initial-val)
-     :clj  (let [n (swap! bench-counter inc)
-                 path (str "/tmp/eve-bench-" n "/")]
-             (.mkdirs (java.io.File. path))
-             (eve-atom/atom {:persistent path} initial-val))))
-
-;;=============================================================================
 ;; Results collection
 ;;=============================================================================
 
-(def ^:private results (atom []))
+(def ^:private results (clojure.core/atom []))
 
 (defn- record! [category n eve-result stock-result]
   (let [speedup (if (pos? (:mean-ms eve-result))
@@ -118,10 +102,10 @@
   (let [prices (random-doubles n 100.0)
         qtys   (random-doubles n 50.0)
         costs  (random-doubles n 2000.0)
-        eve-a  (make-eve-atom {:price (arr/eve-array :float64 prices)
-                               :qty   (arr/eve-array :float64 qtys)
-                               :cost  (arr/eve-array :float64 costs)})
-        stock-a (atom {:price prices :qty qtys :cost costs})]
+        eve-a  (e/atom {:price (arr/eve-array :float64 prices)
+                        :qty   (arr/eve-array :float64 qtys)
+                        :cost  (arr/eve-array :float64 costs)})
+        stock-a (clojure.core/atom {:price prices :qty qtys :cost costs})]
     (record! "Column Arithmetic" n
       (bench
         #(swap! eve-a (fn [s]
@@ -142,8 +126,8 @@
 (defn- bench-filter-aggregate! [n]
   (let [prices (random-doubles n 100.0)
         gt50   (fn [x] (> x 50.0))
-        eve-a  (make-eve-atom {:price (arr/eve-array :float64 prices)})
-        stock-a (atom {:price prices})]
+        eve-a  (e/atom {:price (arr/eve-array :float64 prices)})
+        stock-a (clojure.core/atom {:price prices})]
     (record! "Filter + Aggregate" n
       (bench
         #(swap! eve-a (fn [s]
@@ -172,8 +156,8 @@
 
 (defn- bench-sort-topn! [n]
   (let [prices (random-doubles n 1000.0)
-        eve-a  (make-eve-atom {:price (arr/eve-array :float64 prices)})
-        stock-a (atom {:price prices})]
+        eve-a  (e/atom {:price (arr/eve-array :float64 prices)})
+        stock-a (clojure.core/atom {:price prices})]
     (record! "Sort + Top-N" n
       (bench
         #(swap! eve-a (fn [s]
@@ -201,11 +185,11 @@
         cats   (random-ints n 10)
         ids    (vec (range n))
         gt500  (fn [x] (> x 500.0))
-        eve-a  (make-eve-atom {:price (arr/eve-array :float64 prices)
-                               :qty   (arr/eve-array :float64 qtys)
-                               :cat   (arr/eve-array :int32 cats)
-                               :id    (arr/eve-array :int32 ids)})
-        stock-a (atom {:price prices :qty qtys :cat cats :id ids})]
+        eve-a  (e/atom {:price (arr/eve-array :float64 prices)
+                        :qty   (arr/eve-array :float64 qtys)
+                        :cat   (arr/eve-array :int32 cats)
+                        :id    (arr/eve-array :int32 ids)})
+        stock-a (clojure.core/atom {:price prices :qty qtys :cat cats :id ids})]
     (record! "Dataset Pipeline" n
       (bench
         #(swap! eve-a (fn [s]
@@ -253,8 +237,8 @@
         total (* side side)
         data  (random-doubles total 100.0)
         double-fn (fn [x] (* x 2.0))
-        eve-a  (make-eve-atom {:data (arr/eve-array :float64 data) :side side})
-        stock-a (atom {:t (vec (map vec (partition side data)))})]
+        eve-a  (e/atom {:data (arr/eve-array :float64 data) :side side})
+        stock-a (clojure.core/atom {:t (vec (map vec (partition side data)))})]
     (record! "Tensor Pipeline" total
       (bench
         #(swap! eve-a (fn [s]
