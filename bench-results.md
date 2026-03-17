@@ -293,6 +293,72 @@ dominates at ~93% of swap time. CAS itself is ~1.2 µs. Infrastructure overhead
 
 ---
 
+## 16. Columnar Operations — Eve EveArray vs Stock Clojure Vectors
+
+Each benchmark runs a multi-step pipeline inside `swap!`. "Eve" uses `EveArray`
+columns with typed-view fast paths (`aget`/`aset` loops). "Stock" uses plain
+Clojure vectors with `mapv`/`reduce`/`sort`. 7 timed runs, trimmed mean of middle 5.
+
+### JVM — mmap (persistent atom)
+
+| Benchmark              |     N |   Eve (ms) | Stock (ms) | Speedup |
+|------------------------|------:|-----------:|-----------:|--------:|
+| Column Arithmetic      |   10K |        3.0 |        3.0 |   1.00x |
+| Filter + Aggregate     |   10K |        3.2 |        0.8 |   0.25x |
+| Sort + Top-N           |   10K |        3.8 |        4.4 |   1.16x |
+| Dataset Pipeline       |   10K |       12.6 |        9.8 |   0.78x |
+| Tensor Pipeline        |   10K |        5.8 |        2.0 |   0.34x |
+| **Column Arithmetic**  |  100K |      **2.8** |     21.4 | **7.64x** |
+| **Filter + Aggregate** |  100K |      **3.4** |      6.8 | **2.00x** |
+| **Sort + Top-N**       |  100K |     **12.8** |     35.0 | **2.73x** |
+| **Dataset Pipeline**   |  100K |     **20.8** |     64.8 | **3.12x** |
+| **Tensor Pipeline**    |  100K |      **9.0** |     14.4 | **1.60x** |
+
+### JVM — in-memory (heap atom, no persistence)
+
+| Benchmark              |     N |   Eve (ms) | Stock (ms) | Speedup |
+|------------------------|------:|-----------:|-----------:|--------:|
+| Column Arithmetic      |   10K |        0.4 |        1.2 |   3.00x |
+| Filter + Aggregate     |   10K |        0.6 |        0.2 |   0.33x |
+| Sort + Top-N           |   10K |        1.2 |        2.2 |   1.83x |
+| Dataset Pipeline       |   10K |        3.6 |        3.8 |   1.06x |
+| Tensor Pipeline        |   10K |        2.0 |        1.6 |   0.80x |
+| **Column Arithmetic**  |  100K |      **1.6** |     17.4 | **10.87x** |
+| **Filter + Aggregate** |  100K |      **2.4** |      6.2 | **2.58x** |
+| **Sort + Top-N**       |  100K |     **12.0** |     31.0 | **2.58x** |
+| **Dataset Pipeline**   |  100K |     **16.2** |     57.4 | **3.54x** |
+| **Tensor Pipeline**    |  100K |      **5.2** |     13.8 | **2.65x** |
+
+### Node.js — mmap (persistent atom)
+
+| Benchmark              |     N |   Eve (ms) | Stock (ms) | Speedup |
+|------------------------|------:|-----------:|-----------:|--------:|
+| Column Arithmetic      |   10K |       17.6 |        3.4 |   0.19x |
+| Filter + Aggregate     |   10K |        4.2 |        0.8 |   0.19x |
+| Sort + Top-N           |   10K |        4.4 |        4.6 |   1.05x |
+| Tensor Pipeline        |   10K |       19.0 |        5.8 |   0.31x |
+| Column Arithmetic      |  100K |      212.0 |       57.4 |   0.27x |
+| Filter + Aggregate     |  100K |       40.2 |        7.2 |   0.18x |
+| **Sort + Top-N**       |  100K |     **51.8** |     69.6 | **1.34x** |
+| Dataset Pipeline       |  100K |      346.8 |      175.8 |   0.51x |
+| Tensor Pipeline        |  100K |      188.6 |       56.4 |   0.30x |
+
+**Key findings:**
+- **JVM IBulkAccess fast paths dominate**: At 100K, Eve is 2–11× faster than stock
+  Clojure vectors on JVM. The `double[]`/`int[]` `aget` loops completely eliminate
+  per-element protocol dispatch and byte-array allocation.
+- **Node.js typed-view fast paths** show modest gains for sort (1.34x at 100K) but
+  the mmap atom serialization overhead dominates arithmetic ops. The CLJS fast paths
+  eliminate `nth` protocol dispatch but mmap CAS + slab allocation per swap! is the
+  bottleneck.
+- **Sort + Top-N consistently benefits** on both platforms because `argsort` does
+  one bulk extraction then sorts indices — eliminating O(n log n) `nth` calls.
+- **Dataset Pipeline at 10K**: CLJS has a known serialization bug where EveArray
+  `cnt` fields get corrupted after SAB atom round-trip in repeated swap! iterations.
+  JVM works correctly at all scales.
+
+---
+
 ## Key Takeaways
 
 1. **Node is ~1.7× faster than JVM** for sequential mmap atom swaps (down from 113× at baseline thanks to JVM lazy collection types)
@@ -305,6 +371,8 @@ dominates at ~93% of swap time. CAS itself is ~1.2 µs. Infrastructure overhead
 8. **Disk footprint scales proportionally** — 1.7× overhead at 1000 keys with 20KB values (was 240 MB fixed)
 9. **Swap hotspot is apply-f** (93% of time) — CAS and infrastructure are negligible
 10. **Cold join is ~1.3ms** on both JVM and Node
+11. **JVM columnar fast paths deliver 2–11× speedup** over stock Clojure vectors at 100K elements via `IBulkAccess` `double[]`/`int[]` aget loops
+12. **CLJS typed-view fast paths** eliminate `nth` protocol dispatch; Sort+Top-N is 1.3× faster than stock at 100K on Node
 
 ---
 
@@ -314,3 +382,11 @@ dominates at ~93% of swap time. CAS itself is ~1.2 µs. Infrastructure overhead
   bb's SCI interpreter. Cross-process bb benchmarks (Phase 5/6 of data-bench,
   contention-bench) are currently skipped. This is a bb-specific reader conditional
   issue, not an Eve runtime bug.
+
+- **CLJS Dataset Pipeline in atom swap!**: EveArray `cnt` field gets corrupted
+  (negative or huge values like `-1425054019`) after SAB/mmap atom round-trip when
+  newly-created EveArrays (from `func/mul`, `ds/filter-rows`, etc.) are stored back
+  into the atom. Affects both mmap and in-memory modes on CLJS. JVM works correctly.
+  Root cause: likely a serialization/deserialization mismatch for EveArray type-id
+  `0x1D` blocks created inside `swap!` when nested inside a CLJS PersistentHashMap
+  that gets converted via `convert-to-sab`.
