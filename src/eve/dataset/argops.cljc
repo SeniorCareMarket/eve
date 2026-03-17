@@ -149,7 +149,7 @@
                      (fn [a b] (- (clojure.core/aget vals b) (clojure.core/aget vals a)))
                      (fn [a b] (- (clojure.core/aget vals a) (clojure.core/aget vals b))))]
           (.sort idx-arr cmp)
-          (let [out (arr/eve-array :int32 n)
+          (let [out (arr/eve-array-uninit :int32 n)
                 vo  (arr/get-typed-view out)]
             (dotimes [i n]
               (clojure.core/aset vo i (clojure.core/aget idx-arr i)))
@@ -202,7 +202,7 @@
          (when (pred (clojure.core/aget tv i))
            (.push matches i)))
        (let [m (.-length matches)
-             out (arr/eve-array :int32 m)
+             out (arr/eve-array-uninit :int32 m)
              vo  (arr/get-typed-view out)]
          (dotimes [i m]
            (clojure.core/aset vo i (clojure.core/aget matches i)))
@@ -267,14 +267,43 @@
 (defn arggroup
   "Return map of {value → :int32 EveArray of indices}."
   [col]
-  (let [n (count col)
-        groups (reduce (fn [m i]
-                         (let [v (nth col i)]
-                           (update m v (fnil conj []) i)))
-                       {} (range n))]
-    (into {} (map (fn [[k idxs]]
-                    [k (arr/eve-array :int32 idxs)])
-                  groups))))
+  #?(:cljs
+     (let [tv (arr/get-typed-view col)
+           n  (.-length tv)
+           groups (js/Map.)]
+       (dotimes [i n]
+         (let [v (clojure.core/aget tv i)]
+           (if-let [arr (.get groups v)]
+             (.push arr i)
+             (.set groups v #js [i]))))
+       (let [result (transient {})]
+         (.forEach groups
+           (fn [idxs k _]
+             (let [m   (.-length idxs)
+                   out (arr/eve-array-uninit :int32 m)
+                   vo  (arr/get-typed-view out)]
+               (dotimes [i m]
+                 (clojure.core/aset vo i (clojure.core/aget idxs i)))
+               (conj! result [k out]))))
+         (persistent! result)))
+     :clj
+     (let [n (count col)
+           groups (java.util.HashMap.)]
+       (dotimes [i n]
+         (let [v (nth col i)
+               ^java.util.ArrayList lst (or (.get groups v)
+                                            (let [l (java.util.ArrayList.)]
+                                              (.put groups v l)
+                                              l))]
+           (.add lst (int i))))
+       (into {}
+         (map (fn [[k ^java.util.ArrayList lst]]
+                (let [m (.size lst)
+                      ^ints out (int-array m)]
+                  (dotimes [i m]
+                    (aset out i (int (.get lst i))))
+                  [k (arr/from-int-array out)])))
+         groups))))
 
 (defn take-indices
   "Gather: return new array with elements at given indices.
@@ -304,7 +333,7 @@
            n      (.-length tv-idx)
            tv-col (arr/get-typed-view col)
            type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
-           out    (arr/eve-array type-kw n)
+           out    (arr/eve-array-uninit type-kw n)
            vo     (arr/get-typed-view out)]
        (dotimes [i n]
          (clojure.core/aset vo i (clojure.core/aget tv-col (clojure.core/aget tv-idx i))))

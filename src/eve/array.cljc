@@ -464,9 +464,20 @@
   (let [subtype (type-kw->subtype type-kw)
         slab-off (alloc-eve-region sio subtype n)
         fill-val (or init-val 0)]
-    (dotimes [i n]
-      (write-element! sio slab-off i subtype fill-val))
-    (make-eve-array-instance sio slab-off)))
+    #?(:cljs
+       ;; Fast path: use typed-view .fill() instead of element-by-element writes
+       (let [arr (make-eve-array-instance sio slab-off)
+             tv  (.-typed-view__ ^EveArray arr)
+             es  (.-elem-shift__ ^EveArray arr)
+             dbo (.-data-byte-offset__ ^EveArray arr)
+             base (unsigned-bit-shift-right dbo es)]
+         (.fill tv fill-val base (+ base n))
+         arr)
+       :clj
+       (do
+         (dotimes [i n]
+           (write-element! sio slab-off i subtype fill-val))
+         (make-eve-array-instance sio slab-off)))))
 
 (defn- make-eve-array-from [sio type-kw coll]
   (let [v (vec coll)
@@ -475,9 +486,21 @@
       (make-eve-array sio type-kw 0 nil)
       (let [subtype (type-kw->subtype type-kw)
             slab-off (alloc-eve-region sio subtype n)]
-        (dotimes [i n]
-          (write-element! sio slab-off i subtype (nth v i)))
-        (make-eve-array-instance sio slab-off)))))
+        #?(:cljs
+           ;; Fast path: bulk-set via typed view instead of element-by-element writes
+           (let [arr (make-eve-array-instance sio slab-off)
+                 tv  (.-typed-view__ ^EveArray arr)
+                 es  (.-elem-shift__ ^EveArray arr)
+                 dbo (.-data-byte-offset__ ^EveArray arr)
+                 base (unsigned-bit-shift-right dbo es)]
+             (dotimes [i n]
+               (clojure.core/aset tv (+ base i) (nth v i)))
+             arr)
+           :clj
+           (do
+             (dotimes [i n]
+               (write-element! sio slab-off i subtype (nth v i)))
+             (make-eve-array-instance sio slab-off)))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Unified constructor
@@ -502,6 +525,17 @@
        (make-eve-array-from sio type-kw size-or-coll))))
   ([type-kw n init-val]
    (make-eve-array (default-sio) type-kw (int n) init-val)))
+
+(defn eve-array-uninit
+  "Allocate a typed array without zero-filling the data region.
+   Use when the caller will immediately overwrite all elements.
+   On CLJS, SAB memory is zero-initialized by spec, so this is safe even
+   if only partially written."
+  [type-kw n]
+  (let [sio (default-sio)
+        subtype (type-kw->subtype type-kw)
+        slab-off (alloc-eve-region sio subtype n)]
+    (make-eve-array-instance sio slab-off)))
 
 ;;-----------------------------------------------------------------------------
 ;; Backward-compatible aliases for Int32Array

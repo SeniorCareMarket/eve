@@ -75,7 +75,7 @@
      (let [va (get-view a)
            vb (get-view b)
            n  (min (arr-count a) (arr-count b))
-           out (arr/eve-array (result-type a b) n)
+           out (arr/eve-array-uninit (result-type a b) n)
            vo (arr/get-typed-view out)]
        (cond
          (and va vb)
@@ -122,7 +122,7 @@
      (let [va (get-view a)
            vb (get-view b)
            n  (min (arr-count a) (arr-count b))
-           out (arr/eve-array (result-type a b) n)
+           out (arr/eve-array-uninit (result-type a b) n)
            vo (arr/get-typed-view out)]
        (cond
          (and va vb)
@@ -169,7 +169,7 @@
      (let [va (get-view a)
            vb (get-view b)
            n  (min (arr-count a) (arr-count b))
-           out (arr/eve-array (result-type a b) n)
+           out (arr/eve-array-uninit (result-type a b) n)
            vo (arr/get-typed-view out)]
        (cond
          (and va vb)
@@ -216,7 +216,7 @@
      (let [va (get-view a)
            vb (get-view b)
            n  (min (arr-count a) (arr-count b))
-           out (arr/eve-array :float64 n)
+           out (arr/eve-array-uninit :float64 n)
            vo (arr/get-typed-view out)]
        (cond
          (and va vb)
@@ -343,7 +343,7 @@
      :cljs
      (let [va (get-view a)
            n  (min (arr-count a) (arr-count b))
-           out (arr/eve-array :uint8 n)
+           out (arr/eve-array-uninit :uint8 n)
            vo (arr/get-typed-view out)]
        (if (and va (number? b))
          (let [bv b]
@@ -370,7 +370,7 @@
      (let [va (get-view a)
            vb (get-view b)
            n  (min (arr-count a) (arr-count b))
-           out (arr/eve-array :uint8 n)
+           out (arr/eve-array-uninit :uint8 n)
            vo (arr/get-typed-view out)]
        (if (and va vb)
          (dotimes [i n]
@@ -392,7 +392,7 @@
      (let [va (get-view a)
            vb (get-view b)
            n  (min (arr-count a) (arr-count b))
-           out (arr/eve-array :uint8 n)
+           out (arr/eve-array-uninit :uint8 n)
            vo (arr/get-typed-view out)]
        (if (and va vb)
          (dotimes [i n]
@@ -424,7 +424,7 @@
      (let [tv (arr/get-typed-view col)
            n  (.-length tv)
            type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
-           out (arr/eve-array type-kw n)
+           out (arr/eve-array-uninit type-kw n)
            vo (arr/get-typed-view out)]
        (dotimes [i n]
          (clojure.core/aset vo i (f (clojure.core/aget tv i))))
@@ -444,7 +444,7 @@
      (let [tv1 (arr/get-typed-view col1)
            tv2 (arr/get-typed-view col2)
            n   (min (.-length tv1) (.-length tv2))
-           out (arr/eve-array (result-type col1 col2) n)
+           out (arr/eve-array-uninit (result-type col1 col2) n)
            vo  (arr/get-typed-view out)]
        (dotimes [i n]
          (clojure.core/aset vo i (f (clojure.core/aget tv1 i) (clojure.core/aget tv2 i))))

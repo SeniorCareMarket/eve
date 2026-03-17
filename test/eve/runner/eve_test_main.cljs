@@ -48,7 +48,8 @@
    [eve.lustre-bench :as lustre-bench]
    [eve.dataset-test :as dataset-test]
    [eve.tensor-test :as tensor-test]
-   [eve.columnar-bench :as columnar-bench]))
+   [eve.columnar-bench :as columnar-bench]
+   [eve.perf-audit :as perf-audit]))
 
 ;; Anti-DCE exports — namespace aliases as values force the test namespaces to load.
 ;; The undeclared-var warnings here are expected and harmless.
@@ -81,6 +82,7 @@
 (goog/exportSymbol "eve.dataset_test" dataset-test)
 (goog/exportSymbol "eve.tensor_test" tensor-test)
 (goog/exportSymbol "eve.columnar_bench" columnar-bench)
+(goog/exportSymbol "eve.perf_audit" perf-audit)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -235,6 +237,9 @@
 (defn- run-columnar-bench! []
   (columnar-bench/run-all!))
 
+(defn- run-perf-audit! []
+  (perf-audit/run-audit!))
+
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -284,6 +289,7 @@
    "dataset"        run-dataset!
    "tensor"         run-tensor!
    "columnar-bench" run-columnar-bench!
+   "perf-audit"     run-perf-audit!
    "all"            run-all!
    ;; Aliases
    "map-test"        run-slab!
@@ -299,7 +305,7 @@
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
    "mmap-domain" "conformance" "fuzz" "lustre" "lustre-bench"
-   "dataset" "tensor" "columnar-bench"])
+   "dataset" "tensor" "columnar-bench" "perf-audit"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]
