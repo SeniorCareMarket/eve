@@ -2,7 +2,7 @@
   "Tests for the epoch-based cooperative GC infrastructure."
   (:require
    [cljs.test :refer-macros [deftest testing is]]
-   [eve.shared-atom :as atom]
+   [eve.atom :as atom]
    [eve.data :as d]))
 
 ;;-----------------------------------------------------------------------------

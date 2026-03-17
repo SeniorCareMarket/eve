@@ -914,25 +914,58 @@
 ;; Registration
 ;;=============================================================================
 
+;; Collection writer — shared by CLJ and bb
+#?(:cljs nil
+   :default
+   (defn- -write-set-coll!
+     "Serialize a Clojure set to slab as an Eve HAMT set. Returns header offset."
+     [_sio _serialize-elem coll]
+     (let [sio alloc/*jvm-slab-ctx*
+           entries (mapv (fn [v]
+                           (let [^bytes vb (value+sio->eve-bytes sio v)
+                                 vh (portable-hash-bytes vb)]
+                             [vh vb]))
+                         coll)]
+       (if (empty? entries)
+         (write-set-header! sio 0 NIL_OFFSET)
+         (let [root-off (reduce (fn [root [vh vb]]
+                                  (let [[new-root _] (hamt-conj sio root vh vb 0)]
+                                    new-root))
+                                NIL_OFFSET entries)]
+           (write-set-header! sio (count coll) root-off))))))
+
+;; into-hash-set needed by register-eve-type! builder (not for bb)
+#?(:cljs
+   (defn- into-hash-set
+     "Build an EveHashSet from a Clojure set."
+     ([coll] (into-hash-set (alloc/->CljsSlabIO) coll))
+     ([sio coll] (reduce conj (empty-hash-set sio) coll)))
+   :clj
+   (defn- into-hash-set
+     "Build an EveHashSet from a Clojure set."
+     ([coll] (into-hash-set alloc/*jvm-slab-ctx* coll))
+     ([sio coll] (reduce conj (empty-hash-set sio) coll))))
+
+;; Type constructor + disposer + builder + collection writer registrations
+#?(:bb
+   (register-jvm-collection-writer! :set -write-set-coll!)
+   :default
+   (eve/register-eve-type!
+    {:fast-tag     ser/FAST_TAG_SAB_SET
+     :type-id      EveHashSet-type-id
+     :from-header  hash-set-from-header
+     :dispose      dispose!
+     :builder-pred set?
+     :builder-ctor into-hash-set
+     :coll-writer  #?(:clj {:tag :set :fn -write-set-coll!} :cljs nil)
+     :print-fn     #?(:clj (fn [] (defmethod print-method EveHashSet [s ^java.io.Writer w]
+                                    (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w)))
+                      :cljs nil)}))
+
+;; Backward-compat JVM aliases
 #?(:bb nil
    :clj
    (do
-     (register-jvm-collection-writer! :set
-       (fn [sio serialize-val coll]
-         (let [entries (mapv (fn [v]
-                               (let [^bytes vb (value+sio->eve-bytes v)
-                                     vh (portable-hash-bytes vb)]
-                                 [vh vb]))
-                             coll)]
-           (if (empty? entries)
-             (write-set-header! sio 0 NIL_OFFSET)
-             (let [root-off (reduce (fn [root [vh vb]]
-                                      (let [[new-root _] (hamt-conj sio root vh vb 0)]
-                                        new-root))
-                                    NIL_OFFSET entries)]
-               (write-set-header! sio (count coll) root-off))))))
-
-     ;; Backward-compat JVM aliases
      (defn jvm-write-set!
        "Serialize a Clojure set to slab. Returns header offset.
         Backward-compat alias for the registered :set writer."
@@ -944,43 +977,6 @@
         Backward-compat alias. coll-factory arg is ignored (registry-based)."
        ([sio header-off] (hash-set-from-header sio header-off))
        ([sio header-off _coll-factory] (hash-set-from-header sio header-off)))))
-
-#?(:bb
-   ;; bb: register collection writer only (no deftype, no registry constructors)
-   (register-jvm-collection-writer! :set
-     (fn [_sio _serialize-elem coll]
-       (let [sio alloc/*jvm-slab-ctx*
-             entries (mapv (fn [v]
-                             (let [^bytes vb (value+sio->eve-bytes v)
-                                   vh (portable-hash-bytes vb)]
-                               [vh vb]))
-                           coll)]
-         (if (empty? entries)
-           (write-set-header! sio 0 NIL_OFFSET)
-           (let [root-off (reduce (fn [root [vh vb]]
-                                    (let [[new-root _] (hamt-conj sio root vh vb 0)]
-                                      new-root))
-                                  NIL_OFFSET entries)]
-             (write-set-header! sio (count coll) root-off))))))
-   :default
-(do
-(defn- into-hash-set
-  "Build an EveHashSet from a Clojure set."
-  ([coll] (into-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
-  ([sio coll] (reduce conj (empty-hash-set sio) coll)))
-
-;; Type constructor + disposer + builder registrations
-(eve/register-eve-type!
-  {:fast-tag    ser/FAST_TAG_SAB_SET
-   :type-id     EveHashSet-type-id
-   :from-header hash-set-from-header
-   :dispose     dispose!
-   :builder-pred set?
-   :builder-ctor into-hash-set
-   :print-fn    #?(:clj (fn [] (defmethod print-method EveHashSet [s ^java.io.Writer w]
-                                  (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w)))
-                   :cljs nil)})
-)) ;; end #?(:bb nil :default ...)
 
 
 ;; No-op pool stub — pool system removed, kept for backward compat

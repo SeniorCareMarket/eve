@@ -9,7 +9,7 @@
    [cljs.test :as t]
    [clojure.string :as str]
    [eve.deftype-proto.alloc :as eve-alloc]
-   [eve.shared-atom :as a]
+   [eve.atom :as a]
    [eve.data :as d]
 
    ;; Pool reset modules (for isolated test namespace support)
@@ -45,7 +45,10 @@
    [eve.conformance-test :as conformance-test]
    [eve.fuzz-test :as fuzz-test]
    [eve.lustre-test :as lustre-test]
-   [eve.lustre-bench :as lustre-bench]))
+   [eve.lustre-bench :as lustre-bench]
+   [eve.dataset-test :as dataset-test]
+   [eve.tensor-test :as tensor-test]
+   [eve.columnar-bench :as columnar-bench]))
 
 ;; Anti-DCE exports — namespace aliases as values force the test namespaces to load.
 ;; The undeclared-var warnings here are expected and harmless.
@@ -75,6 +78,9 @@
 (goog/exportSymbol "eve.fuzz_test" fuzz-test)
 (goog/exportSymbol "eve.lustre_test" lustre-test)
 (goog/exportSymbol "eve.lustre_bench" lustre-bench)
+(goog/exportSymbol "eve.dataset_test" dataset-test)
+(goog/exportSymbol "eve.tensor_test" tensor-test)
+(goog/exportSymbol "eve.columnar_bench" columnar-bench)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -192,6 +198,13 @@
   (t/run-tests 'eve.mmap-atom-test))
 
 (defn- run-mmap-atom-e2e! []
+  (let [fs   (js/require "fs")
+        path (js/require "path")
+        worker (.resolve path "target/eve-test/mmap-worker.js")]
+    (when-not (.existsSync fs worker)
+      (println "ERROR: mmap-worker.js not found at" worker)
+      (println "  Compile it first: npx shadow-cljs compile mmap-worker")
+      (exit! 1)))
   (load-native-addon!)
   (t/run-tests 'eve.mmap-atom-e2e-test))
 
@@ -212,6 +225,16 @@
 (defn- run-lustre-bench! []
   (load-native-addon!)
   (lustre-bench/run-all-benches!))
+
+(defn- run-dataset! []
+  (t/run-tests 'eve.dataset-test))
+
+(defn- run-tensor! []
+  (t/run-tests 'eve.tensor-test))
+
+(defn- run-columnar-bench! []
+  (columnar-bench/run-all!))
+
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
@@ -228,7 +251,9 @@
     'eve.batch4-validation-test
     'eve.deftype.int-map-test
     'eve.deftype.rb-tree-test
-    'eve.typed-array-test))
+    'eve.typed-array-test
+    'eve.dataset-test
+    'eve.tensor-test))
 
 ;; Suite registry
 (def ^:private suite-runners
@@ -256,7 +281,10 @@
    "fuzz"          run-fuzz!
    "lustre"        run-lustre!
    "lustre-bench"  run-lustre-bench!
-   "all"           run-all!
+   "dataset"        run-dataset!
+   "tensor"         run-tensor!
+   "columnar-bench" run-columnar-bench!
+   "all"            run-all!
    ;; Aliases
    "map-test"        run-slab!
    "vec-test"        run-slab!
@@ -270,7 +298,8 @@
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "obj"
    "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
-   "mmap-domain" "conformance" "fuzz" "lustre" "lustre-bench"])
+   "mmap-domain" "conformance" "fuzz" "lustre" "lustre-bench"
+   "dataset" "tensor" "columnar-bench"])
 
 ;; Summary reporter
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]

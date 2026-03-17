@@ -3,7 +3,7 @@
    Run via: node target/thread-test/all.js mmap-domain"
   (:require [cljs.test :refer [deftest testing is]]
             [eve.atom :as atom]
-            [eve.shared-atom :as sa]))
+            [eve.atom :as sa]))
 
 (def ^:private test-base (str "/tmp/eve-domain-test-" (js/Date.now)))
 

@@ -10,7 +10,7 @@
    2. Running allocations (sequential first, then concurrent)
    3. Checking that FREE capacity + ALLOC capacity = total data region
    4. Detecting any 'lost' memory (gaps in coverage)"
-  (:require [eve.shared-atom :as a]
+  (:require [eve.atom :as a]
             [eve.data :as d]
             [eve.util :as u]))
 

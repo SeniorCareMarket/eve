@@ -17,7 +17,7 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:cljs [[eve.shared-atom :as atom]
+   #?@(:cljs [[eve.atom :as atom]
               [eve.array :as arr]
               [eve.wasm-mem :as wasm]
               [eve.deftype-proto.wasm :as proto-wasm]]
@@ -310,15 +310,15 @@
 
 (defn- alloc-obj-region [schema]
   (let [byte-size (:size schema)
-        eve-env (if atom/*global-atom-instance*
-                  (atom/get-env atom/*global-atom-instance*)
-                  (throw (js/Error. "No global atom instance.")))
-        alloc-result (atom/alloc eve-env byte-size)]
-    (if (:error alloc-result)
-      (throw (js/Error. (str "Failed to allocate eve-obj: " (:error alloc-result))))
-      {:sab (:sab eve-env)
-       :offset (:offset alloc-result)
-       :descriptor-idx (:descriptor-idx alloc-result)})))
+        slab-off (alloc/alloc-offset byte-size)
+        class-idx (alloc/decode-class-idx slab-off)
+        inst (proto-wasm/get-slab-instance class-idx)
+        sab (.-buffer ^js (:u8 inst))
+        base (alloc/slab-offset->byte-offset slab-off)]
+    {:sab sab
+     :offset base
+     :descriptor-idx -1
+     :slab-off slab-off}))
 
 (defn obj
   "Create a new typed object from a schema and initial values."
@@ -485,10 +485,9 @@
 ;;=============================================================================
 
 (defn retire! [^Obj obj]
-  (when-let [desc-idx (.-descriptor-idx obj)]
-    (let [eve-env (when atom/*global-atom-instance*
-                    (atom/get-env atom/*global-atom-instance*))]
-      (when eve-env (atom/retire-block! eve-env desc-idx)))))
+  ;; In slab system, we don't use descriptor-idx. Use the offset directly.
+  ;; TODO: Obj should store slab-off for proper free.
+  nil)
 
 ;;=============================================================================
 ;; Slab-backed atom root registration

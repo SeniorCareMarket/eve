@@ -192,16 +192,30 @@
        (-exchange-i32! [_ byte-off val]
          (js/Atomics.exchange -i32 (byte-off->i32-idx byte-off) val))
 
-       (-load-i64 [_ _byte-off]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
-       (-store-i64! [_ _byte-off _val]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
-       (-cas-i64! [_ _byte-off _expected _desired]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
+       (-load-i64 [_ byte-off]
+         ;; Emulate i64 load via two i32 loads (little-endian).
+         ;; Sufficient for single-process SAB use (no cross-process atomicity).
+         (let [lo (unsigned-bit-shift-right
+                    (js/Atomics.load -i32 (byte-off->i32-idx byte-off)) 0)
+               hi (unsigned-bit-shift-right
+                    (js/Atomics.load -i32 (byte-off->i32-idx (+ byte-off 4))) 0)]
+           (+ (* hi 0x100000000) lo)))
+       (-store-i64! [_ byte-off val]
+         ;; Emulate i64 store via two i32 stores (little-endian).
+         (let [lo (bit-and val 0xFFFFFFFF)
+               hi (unsigned-bit-shift-right val 32)]
+           (js/Atomics.store -i32 (byte-off->i32-idx byte-off) lo)
+           (js/Atomics.store -i32 (byte-off->i32-idx (+ byte-off 4)) hi)))
+       (-cas-i64! [this byte-off expected desired]
+         ;; Single-process emulation: read, compare, write if match
+         (let [current (-load-i64 this byte-off)]
+           (when (== current expected)
+             (-store-i64! this byte-off desired))
+           current))
        (-add-i64! [_ _byte-off _delta]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
+         (throw (ex-info "JsSabRegion does not support atomic i64 add" {})))
        (-sub-i64! [_ _byte-off _delta]
-         (throw (ex-info "JsSabRegion does not support i64 ops" {})))
+         (throw (ex-info "JsSabRegion does not support atomic i64 sub" {})))
 
        (-wait-i32! [_ byte-off expected timeout-ms]
          (wait-result->kw
@@ -1515,6 +1529,10 @@
                                    (when coll-factory (fn [off] (coll-factory 0x13 sio off))))]
                       (if ctor (ctor (read-i32-le b 3))
                         (throw (UnsupportedOperationException. "EVE SAB_LIST: no constructor registered."))))
+               0x1C (let [ctor (or (ser/get-jvm-type-constructor 0x1C)
+                                   (when coll-factory (fn [off] (coll-factory 0x1C sio off))))]
+                      (if ctor (ctor (read-i32-le b 3))
+                        (throw (UnsupportedOperationException. "EVE ARRAY (0x1C): no constructor registered."))))
                0x1D (let [ctor (or (ser/get-jvm-type-constructor 0x1D)
                                    (when coll-factory (fn [off] (coll-factory 0x1D sio off))))]
                       (if ctor (ctor (read-i32-le b 3))
@@ -1841,7 +1859,8 @@
                        (map? v)    0x10
                        (set? v)    0x11
                        (vector? v) 0x12
-                       :else       0x13)]
+                       (list? v)   0x13
+                       :else       0x1D)]
              (jvm-sab-pointer-bytes tag off))
 
            (map? v)
@@ -1863,6 +1882,11 @@
            (if-let [write-vec! (get writers :vec)]
              (jvm-sab-pointer-bytes 0x12 (write-vec! sio (partial value+sio->eve-bytes sio) v))
              (throw (ex-info "value+sio->eve-bytes: :vec writer not registered" {:value v})))
+
+           (satisfies? d/IBackingArray v)
+           (if-let [write-arr! (get writers :array)]
+             (jvm-sab-pointer-bytes 0x1D (write-arr! sio nil (d/-backing-array v)))
+             (throw (ex-info "value+sio->eve-bytes: :array writer not registered" {:value v})))
 
            (.isArray (class v))
            (if-let [write-arr! (get writers :array)]

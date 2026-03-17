@@ -286,8 +286,16 @@
                                                       (when result
                                                         (let [data-off (long (aget data-offsets OVERFLOW_CLASS_IDX))
                                                               fpath    (aget file-paths OVERFLOW_CLASS_IDX)
-                                                              new-r    (mem/open-mmap-region
-                                                                         fpath (+ data-off result))]
+                                                              new-r    (if fpath
+                                                                         (mem/open-mmap-region
+                                                                           fpath (+ data-off result))
+                                                                         ;; Heap-backed: create larger region and copy
+                                                                         (let [old-r   (aget regions OVERFLOW_CLASS_IDX)
+                                                                               old-sz  (mem/-byte-length old-r)
+                                                                               new-sz  (+ data-off result)
+                                                                               new-rgn (mem/make-heap-region new-sz)]
+                                                                           (mem/copy-region! old-r 0 new-rgn 0 old-sz)
+                                                                           new-rgn))]
                                                           (aset regions OVERFLOW_CLASS_IDX new-r))
                                                         true)))]
                                         (if-let [result (try
@@ -901,6 +909,18 @@
        [class-idx]
        (aget slab-data-offsets class-idx))
 
+     (defn resolve-slab-mem-region
+       "Resolve the IMemRegion and absolute byte offset for a slab block field.
+        Returns [region absolute-byte-off].
+        Used by EveArray atomic ops (cas!, add!, wait!, notify!) to route
+        through IMemRegion without assuming SAB or mmap backing."
+       [^number slab-offset ^number field-off]
+       (let [class-idx (decode-class-idx slab-offset)
+             inst (wasm/get-slab-instance class-idx)
+             region (:region inst)
+             byte-base (slab-offset->byte-offset slab-offset)]
+         [region (+ byte-base field-off)]))
+
      ;; Overflow (class 6) — pluggable alloc/free callbacks
      (def ^:private ^:mutable overflow-alloc-fn nil)
      (def ^:private ^:mutable overflow-free-fn nil)
@@ -981,8 +1001,10 @@
 
      (def ^:private ^:mutable initialized? false)
 
+     (declare init-sab-coalesc!)
+
      (defn init!
-       "Initialize all 6 slab classes + root SAB.
+       "Initialize all 6 slab classes + class 6 coalesc + root SAB.
         Returns a Promise that resolves when all WASM upgrades are done."
        [& {:keys [capacities force] :or {capacities {}}}]
        (if (and initialized? (not force))
@@ -995,6 +1017,22 @@
                      (let [cap (get capacities i (d/default-capacity-for-class i))]
                        (init-slab! i :capacity cap))))]
              (init-root-sab!)
+             ;; Initialize SAB-backed class 6 coalesc for overflow (>1024 byte) allocations
+             (init-sab-coalesc!)
+             ;; Register typed array resolver for deserializer
+             (ser/set-typed-array-resolver!
+               (fn [slab-offset]
+                 (let [class-idx (decode-class-idx slab-offset)
+                       block-idx (decode-block-idx slab-offset)
+                       inst      (wasm/get-slab-instance class-idx)
+                       sab       (when inst (.-buffer ^js (:u8 inst)))]
+                   (when sab
+                     (let [block-size (aget d/SLAB_SIZES class-idx)
+                           data-off   (aget slab-data-offsets class-idx)
+                           base       (+ data-off (* block-idx block-size))
+                           ;; Apply same 16-byte alignment as typed-array encoder
+                           aligned    (bit-and (+ base 15) (bit-not 15))]
+                       {:sab sab :base aligned})))))
              (js/Promise.all slab-promises)))))
 
      (defn reset-all-slabs!
@@ -1157,27 +1195,27 @@
                      (when alloc-hook (alloc-hook slab-offset))
                      {:offset slab-offset :class-idx OVERFLOW_CLASS_IDX :block-idx byte-off})))
                {:error :overflow-no-legacy-env :size size-bytes}))
-           ;; Slab path — try alloc, grow on OOM, spill to next class
+           ;; Slab path — try alloc, grow on OOM (loop up to 20x), spill to next class
            (loop [ci class-idx]
              (let [result (alloc-from-slab ci)]
                (if-not (:error result)
                  result
-                 ;; OOM — try to grow if mmap-backed
-                 (if (and (aget slab-file-paths ci)
-                          (grow-mmap-slab! ci))
-                   (let [retry (alloc-from-slab ci)]
-                     (if-not (:error retry)
-                       retry
-                       ;; Still full — spill to next class
-                       (if (< ci 5)
-                         (recur (inc ci))
-                         {:error :all-slab-classes-full
-                          :size size-bytes})))
-                   ;; Can't grow — spill to next class
-                   (if (< ci 5)
-                     (recur (inc ci))
-                     {:error :all-slab-classes-full
-                      :size size-bytes}))))))))
+                 ;; OOM — try to grow in a loop if mmap-backed
+                 (let [grew-and-allocated
+                       (when (aget slab-file-paths ci)
+                         (loop [attempts 0]
+                           (when (and (< attempts 20) (grow-mmap-slab! ci))
+                             (let [retry (alloc-from-slab ci)]
+                               (if-not (:error retry)
+                                 retry
+                                 (recur (inc attempts)))))))]
+                   (if grew-and-allocated
+                     grew-and-allocated
+                     ;; Can't grow or still full — spill to next class
+                     (if (< ci 5)
+                       (recur (inc ci))
+                       {:error :all-slab-classes-full
+                        :size size-bytes})))))))))
 
      (defn alloc-offset
        "Like alloc but returns just the slab-qualified offset, or throws on error."
@@ -1744,5 +1782,30 @@
        (set! mmap-coalesc-region nil)
        (set! mmap-coalesc-path nil)
        (set! mmap-coalesc-max-data-size 0)
-       (set! mmap-coalesc-cached-data-size 0))))
+       (set! mmap-coalesc-cached-data-size 0))
+
+     (defn init-sab-coalesc!
+       "Initialize a SharedArrayBuffer-backed class 6 coalescing allocator.
+        Uses a fixed-size SAB large enough for all overflow allocations (>1024 bytes).
+        Default is 1GB — the OS only commits physical pages on first touch."
+       [& {:keys [initial-data-size max-desc]
+            :or   {initial-data-size (* 1024 1024 1024) ;; 1GB
+                   max-desc          coalesc/MAX_DESCRIPTORS}}]
+       (let [layout      (coalesc/coalesc-layout initial-data-size max-desc)
+             total-bytes (:total-bytes layout)
+             data-offset (:data-offset layout)
+             sab         (js/SharedArrayBuffer. total-bytes)
+             region      (mem/js-sab-region sab)]
+         (coalesc/init-coalesc-region! region initial-data-size max-desc)
+         (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
+         (aset slab-bitmap-offsets OVERFLOW_CLASS_IDX (:desc-table-offset layout))
+         (aset slab-total-blocks OVERFLOW_CLASS_IDX max-desc)
+         (set! mmap-coalesc-path nil)
+         (set! mmap-coalesc-max-data-size 0)
+         (set! mmap-coalesc-cached-data-size initial-data-size)
+         (set! sab-coalesc-wasm-memory wasm-memory)
+         (wasm/register-slab-instance-from-sab! OVERFLOW_CLASS_IDX sab)
+         (set! mmap-coalesc-region region)))
+
+     ))
 

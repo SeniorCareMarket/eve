@@ -13,7 +13,7 @@
    6. High key-count maps (deep HAMT trees)"
   (:require
    [cljs.test :refer-macros [deftest testing is]]
-   [eve.shared-atom :as a]))
+   [eve.atom :as a]))
 
 ;;-----------------------------------------------------------------------------
 ;; Test infrastructure
