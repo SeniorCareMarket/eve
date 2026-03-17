@@ -51,6 +51,13 @@ if ! command -v clojure &>/dev/null; then
   curl -sL https://download.clojure.org/install/linux-install-1.12.0.1530.sh | bash
 fi
 
+# ── 1b. Install Babashka if missing ──────────────────────────────────────
+if ! command -v bb &>/dev/null; then
+  echo "[ccweb-setup] Installing Babashka..."
+  curl -sLO https://raw.githubusercontent.com/babashka/babashka/master/install \
+    && chmod +x install && ./install --dir /usr/local/bin && rm -f install
+fi
+
 # ── 2. Download Clojure deps (maven cache) ────────────────────────────────
 echo "[ccweb-setup] Downloading Clojure deps..."
 cd "$PROJECT_DIR"
