@@ -189,16 +189,14 @@
 ;;-----------------------------------------------------------------------------
 
 (defn- require-atomic! [arr op]
-  (let [subtype (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)]
-    (when-not (subtype->atomic? subtype)
-      (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-              (str op " requires an integer-typed array (not supported on :float32/:float64)"))))))
+  (when-not (.-atomic?__ arr)
+    (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+            (str op " requires an integer-typed array (not supported on :float32/:float64)")))))
 
 (defn- require-int32! [arr op]
-  (let [subtype (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)]
-    (when (not= subtype ser/TYPED_ARRAY_INT32)
-      (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-              (str op " only supported on :int32 arrays"))))))
+  (when (not= (.-subtype__ arr) ser/TYPED_ARRAY_INT32)
+    (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+            (str op " only supported on :int32 arrays")))))
 
 ;;-----------------------------------------------------------------------------
 ;; EveArray deftype (via eve/deftype — fields: [sio__ offset__])
@@ -210,7 +208,13 @@
 ;; Subtype is in header byte 1, read manually as needed.
 ;;-----------------------------------------------------------------------------
 
-(eve/deftype EveArray [^:int32 cnt]
+(eve/deftype EveArray [^:int32 cnt
+                      ^:cached subtype__
+                      ^:cached elem-shift__
+                      ^:cached atomic?__
+                      ^:cached ^:mutable hash-cache__
+                      #?@(:cljs [^:cached typed-view__
+                                 ^:cached data-byte-offset__])]
 
   clojure.lang.Counted
   (count [_] #?(:cljs cnt :clj (int cnt)))
@@ -218,12 +222,20 @@
   clojure.lang.Indexed
   (nth [this n]
     (if (and (>= n 0) (< n cnt))
-      (read-element sio__ offset__ n (-sio-read-u8 sio__ offset__ 1))
+      #?(:cljs (let [idx (+ (unsigned-bit-shift-right data-byte-offset__ elem-shift__) n)]
+                 (if atomic?__
+                   (js/Atomics.load typed-view__ idx)
+                   (clojure.core/aget typed-view__ idx)))
+         :clj  (read-element sio__ offset__ n subtype__))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index out of bounds: " n " for length " cnt)))))
   (nth [this n not-found]
     (if (and (>= n 0) (< n cnt))
-      (read-element sio__ offset__ n (-sio-read-u8 sio__ offset__ 1))
+      #?(:cljs (let [idx (+ (unsigned-bit-shift-right data-byte-offset__ elem-shift__) n)]
+                 (if atomic?__
+                   (js/Atomics.load typed-view__ idx)
+                   (clojure.core/aget typed-view__ idx)))
+         :clj  (read-element sio__ offset__ n subtype__))
       not-found))
 
   clojure.lang.ILookup
@@ -237,12 +249,15 @@
   clojure.lang.Seqable
   (seq [this]
     (when (pos? cnt)
-      (let [sio sio__ off offset__
-            sub (-sio-read-u8 sio off 1)]
-        #?(:cljs (map #(read-element sio off % sub) (range cnt))
-           :clj  (letfn [(arr-seq [i]
+      #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__]
+                 (map (fn [i]
+                        (let [idx (+ (unsigned-bit-shift-right dbo es) i)]
+                          (if a? (js/Atomics.load tv idx) (clojure.core/aget tv idx))))
+                      (range cnt)))
+         :clj  (let [sub subtype__]
+                 (letfn [(arr-seq [i]
                            (when (< i cnt)
-                             (lazy-seq (cons (read-element sio off i sub) (arr-seq (inc i))))))]
+                             (lazy-seq (cons (read-element sio__ offset__ i sub) (arr-seq (inc i))))))]
                    (arr-seq 0))))))
 
   clojure.lang.IMeta
@@ -255,72 +270,84 @@
   (reduce [this f]
     (if (zero? cnt)
       (f)
-      (let [sio sio__ off offset__
-            sub (-sio-read-u8 sio off 1)]
-        (loop [i 1
-               acc (read-element sio off 0 sub)]
-          (if (< i cnt)
-            (let [result (f acc (read-element sio off i sub))]
-              (if (reduced? result)
-                @result
-                (recur (inc i) result)))
-            acc)))))
+      #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__
+                      base-idx (unsigned-bit-shift-right dbo es)]
+                 (loop [i 1
+                        acc (if a? (js/Atomics.load tv base-idx) (clojure.core/aget tv base-idx))]
+                   (if (< i cnt)
+                     (let [idx (+ base-idx i)
+                           result (f acc (if a? (js/Atomics.load tv idx) (clojure.core/aget tv idx)))]
+                       (if (reduced? result) @result (recur (inc i) result)))
+                     acc)))
+         :clj  (let [sub subtype__]
+                 (loop [i 1 acc (read-element sio__ offset__ 0 sub)]
+                   (if (< i cnt)
+                     (let [result (f acc (read-element sio__ offset__ i sub))]
+                       (if (reduced? result) @result (recur (inc i) result)))
+                     acc))))))
 
   clojure.lang.IReduceInit
   (reduce [this f start]
-    (let [sio sio__ off offset__
-          sub (-sio-read-u8 sio off 1)]
-      (loop [i 0
-             acc start]
-        (if (< i cnt)
-          (let [result (f acc (read-element sio off i sub))]
-            (if (reduced? result)
-              @result
-              (recur (inc i) result)))
-          acc))))
+    #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__
+                    base-idx (unsigned-bit-shift-right dbo es)]
+               (loop [i 0 acc start]
+                 (if (< i cnt)
+                   (let [idx (+ base-idx i)
+                         result (f acc (if a? (js/Atomics.load tv idx) (clojure.core/aget tv idx)))]
+                     (if (reduced? result) @result (recur (inc i) result)))
+                   acc)))
+       :clj  (let [sub subtype__]
+               (loop [i 0 acc start]
+                 (if (< i cnt)
+                   (let [result (f acc (read-element sio__ offset__ i sub))]
+                     (if (reduced? result) @result (recur (inc i) result)))
+                   acc)))))
 
   clojure.lang.IHashEq
   (hasheq [this]
-    (let [sio sio__ off offset__
-          sub (-sio-read-u8 sio off 1)]
-      (loop [i 0 h (#?(:cljs +  :clj unchecked-int)
-                     (+ 1 (* 31 sub)))]
-        (if (< i cnt)
-          (recur (inc i) (#?(:cljs + :clj unchecked-int)
-                          (+ (* 31 h) (#?(:cljs hash :clj clojure.lang.Util/hasheq)
-                                        (read-element sio off i sub)))))
-          h))))
+    (if hash-cache__
+      hash-cache__
+      (let [sub subtype__
+            h #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__
+                              base-idx (unsigned-bit-shift-right dbo es)]
+                         (loop [i 0 h (+ 1 (* 31 sub))]
+                           (if (< i cnt)
+                             (let [idx (+ base-idx i)
+                                   v (if a? (js/Atomics.load tv idx) (clojure.core/aget tv idx))]
+                               (recur (inc i) (+ (* 31 h) (hash v))))
+                             h)))
+                  :clj  (loop [i 0 h (unchecked-int (+ 1 (* 31 sub)))]
+                          (if (< i cnt)
+                            (recur (inc i) (unchecked-int (+ (* 31 h) (clojure.lang.Util/hasheq (read-element sio__ offset__ i sub)))))
+                            h)))]
+        (set! hash-cache__ h)
+        h)))
 
   clojure.lang.IPersistentCollection
   (equiv [this other]
     (cond
       (identical? this other) true
       (not (instance? EveArray other)) false
-      (not= (-sio-read-u8 sio__ offset__ 1)
-             (-sio-read-u8 (.-sio__ other) (.-offset__ other) 1)) false
+      (not= subtype__ (.-subtype__ ^EveArray other)) false
       (not= cnt (count other)) false
-      :else (let [sio sio__ off offset__
-                  sub (-sio-read-u8 sio off 1)]
-              (loop [i 0]
-                (if (< i cnt)
-                  (if (= (read-element sio off i sub) (nth other i))
-                    (recur (inc i))
-                    false)
-                  true)))))
+      :else (loop [i 0]
+              (if (< i cnt)
+                (if (= (nth this i) (nth other i))
+                  (recur (inc i))
+                  false)
+                true))))
 
   #?@(:cljs [IPrintWithWriter
              (-pr-writer [this writer opts]
-                         (let [sio sio__ off offset__
-                               sub (-sio-read-u8 sio off 1)]
-                           (-write writer (str "#eve/array " (subtype->type-kw sub) " ["))
-                           (loop [i 0]
-                             (when (< i (min 20 cnt))
-                               (when (pos? i) (-write writer " "))
-                               (-write writer (str (read-element sio off i sub)))
-                               (recur (inc i))))
-                           (when (> cnt 20)
-                             (-write writer " ..."))
-                           (-write writer "]")))])
+                         (-write writer (str "#eve/array " (subtype->type-kw subtype__) " ["))
+                         (loop [i 0]
+                           (when (< i (min 20 cnt))
+                             (when (pos? i) (-write writer " "))
+                             (-write writer (str (nth this i)))
+                             (recur (inc i))))
+                         (when (> cnt 20)
+                           (-write writer " ..."))
+                         (-write writer "]"))])
 
   d/IDirectSerialize
   (-direct-serialize [_] offset__)
@@ -349,21 +376,20 @@
 
        java.lang.Object
        (toString [this]
-                 (str "#eve/array " (subtype->type-kw (-sio-read-u8 sio__ offset__ 1))
+                 (str "#eve/array " (subtype->type-kw subtype__)
                       " " (vec (seq this))))
        (equals [this other]
                (cond
                  (identical? this other) true
                  (not (instance? EveArray other)) false
                  :else (and (== cnt (count other))
-                            (== (-sio-read-u8 sio__ offset__ 1)
-                                (-sio-read-u8 (.-sio__ ^EveArray other) (.-offset__ ^EveArray other) 1))
+                            (== subtype__ (.-subtype__ ^EveArray other))
                             (every? true? (map = (seq this) (seq other))))))
        (hashCode [this] (.hasheq this))
 
        eve.deftype-proto.data/IBulkAccess
        (-as-double-array [_]
-         (when (== (-sio-read-u8 sio__ offset__ 1) 9)
+         (when (== subtype__ 9)
            (let [raw (-sio-read-bytes sio__ offset__ 8 (* cnt 8))
                  bb  (doto (java.nio.ByteBuffer/wrap raw)
                        (.order java.nio.ByteOrder/LITTLE_ENDIAN))
@@ -371,7 +397,7 @@
              (.get (.asDoubleBuffer bb) out)
              out)))
        (-as-int-array [_]
-         (when (== (-sio-read-u8 sio__ offset__ 1) 6)
+         (when (== subtype__ 6)
            (let [raw (-sio-read-bytes sio__ offset__ 8 (* cnt 4))
                  bb  (doto (java.nio.ByteBuffer/wrap raw)
                        (.order java.nio.ByteOrder/LITTLE_ENDIAN))
@@ -400,6 +426,37 @@
     slab-off))
 
 ;;-----------------------------------------------------------------------------
+;; Cached-field constructor helper
+;;-----------------------------------------------------------------------------
+
+#?(:cljs
+(defn- resolve-typed-view
+  "Create a JS typed array view over the entire backing buffer for a given subtype."
+  [sio offset subtype-code]
+  (let [class-idx (alloc/decode-class-idx offset)
+        inst (proto-wasm/get-slab-instance class-idx)
+        buf (.-buffer ^js (:u8 inst))]
+    (make-typed-view buf subtype-code))))
+
+#?(:cljs
+(defn- resolve-data-byte-offset
+  "Compute the absolute byte offset of the data region for a slab-backed array."
+  [offset]
+  (+ (alloc/slab-offset->byte-offset offset) HEADER_SIZE)))
+
+(defn- make-eve-array-instance
+  "Construct an EveArray with all cached fields computed from slab header.
+   Reads subtype from slab once, derives elem-shift, atomic?, and (CLJS) typed-view."
+  [sio slab-off]
+  (let [subtype (-sio-read-u8 sio slab-off 1)
+        elem-shift (subtype->elem-shift subtype)
+        atomic? (subtype->atomic? subtype)]
+    #?(:cljs (let [typed-view (resolve-typed-view sio slab-off subtype)
+                   data-byte-offset (resolve-data-byte-offset slab-off)]
+               (EveArray. sio slab-off subtype elem-shift atomic? nil typed-view data-byte-offset))
+       :clj  (EveArray. sio slab-off subtype elem-shift atomic? nil))))
+
+;;-----------------------------------------------------------------------------
 ;; Internal constructors
 ;;-----------------------------------------------------------------------------
 
@@ -409,7 +466,7 @@
         fill-val (or init-val 0)]
     (dotimes [i n]
       (write-element! sio slab-off i subtype fill-val))
-    (EveArray. sio slab-off)))
+    (make-eve-array-instance sio slab-off)))
 
 (defn- make-eve-array-from [sio type-kw coll]
   (let [v (vec coll)
@@ -420,7 +477,7 @@
             slab-off (alloc-eve-region sio subtype n)]
         (dotimes [i n]
           (write-element! sio slab-off i subtype (nth v i)))
-        (EveArray. sio slab-off)))))
+        (make-eve-array-instance sio slab-off)))))
 
 ;;-----------------------------------------------------------------------------
 ;; Unified constructor
@@ -465,26 +522,30 @@
 ;;-----------------------------------------------------------------------------
 
 (defn aget
-  "Read element at index through ISlabIO."
+  "Read element at index. Uses cached typed-view on CLJS for direct access."
   [^EveArray arr idx]
-  (let [sio (.-sio__ arr)
-        offset (.-offset__ arr)
-        cnt (-sio-read-i32 sio offset 4)]
+  (let [cnt (count arr)]
     (when (or (< idx 0) (>= idx cnt))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index out of bounds: " idx))))
-    (read-element sio offset idx (-sio-read-u8 sio offset 1))))
+    #?(:cljs (let [base-idx (+ (unsigned-bit-shift-right (.-data-byte-offset__ arr) (.-elem-shift__ arr)) idx)]
+               (if (.-atomic?__ arr)
+                 (js/Atomics.load (.-typed-view__ arr) base-idx)
+                 (clojure.core/aget (.-typed-view__ arr) base-idx)))
+       :clj  (read-element (.-sio__ arr) (.-offset__ arr) idx (.-subtype__ arr)))))
 
 (defn aset!
-  "Write element at index through ISlabIO. Returns the value written."
+  "Write element at index. Uses cached typed-view on CLJS for direct access. Returns the value written."
   [^EveArray arr idx val]
-  (let [sio (.-sio__ arr)
-        offset (.-offset__ arr)
-        cnt (-sio-read-i32 sio offset 4)]
+  (let [cnt (count arr)]
     (when (or (< idx 0) (>= idx cnt))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index out of bounds: " idx))))
-    (write-element! sio offset idx (-sio-read-u8 sio offset 1) val)
+    #?(:cljs (let [base-idx (+ (unsigned-bit-shift-right (.-data-byte-offset__ arr) (.-elem-shift__ arr)) idx)]
+               (if (.-atomic?__ arr)
+                 (js/Atomics.store (.-typed-view__ arr) base-idx val)
+                 (clojure.core/aset (.-typed-view__ arr) base-idx val)))
+       :clj  (write-element! (.-sio__ arr) (.-offset__ arr) idx (.-subtype__ arr) val))
     val))
 
 #?(:cljs
@@ -577,7 +638,7 @@
   (bit-shift-left 1 (subtype->elem-shift subtype)))
 
 (defn- bounds-check! [arr idx op]
-  (let [cnt (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)]
+  (let [cnt (count arr)]
     (when (or (< idx 0) (>= idx cnt))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str op ": index out of bounds: " idx " for length " cnt))))))
@@ -588,7 +649,7 @@
   [^EveArray arr idx expected new-val]
   (require-atomic! arr "cas!")
   (bounds-check! arr idx "cas!")
-  (let [subtype (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)
+  (let [subtype (.-subtype__ arr)
         [region byte-off] (resolve-element-region arr idx subtype)
         es (elem-size-for-subtype subtype)]
     (if (== es 4)
@@ -602,7 +663,7 @@
   [^EveArray arr idx new-val]
   (require-atomic! arr "exchange!")
   (bounds-check! arr idx "exchange!")
-  (let [subtype (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)
+  (let [subtype (.-subtype__ arr)
         [region byte-off] (resolve-element-region arr idx subtype)
         es (elem-size-for-subtype subtype)]
     (if (== es 4)
@@ -615,7 +676,7 @@
   [^EveArray arr idx delta]
   (require-atomic! arr "add!")
   (bounds-check! arr idx "add!")
-  (let [subtype (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)
+  (let [subtype (.-subtype__ arr)
         [region byte-off] (resolve-element-region arr idx subtype)
         es (elem-size-for-subtype subtype)]
     (if (== es 4)
@@ -628,7 +689,7 @@
   [^EveArray arr idx delta]
   (require-atomic! arr "sub!")
   (bounds-check! arr idx "sub!")
-  (let [subtype (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)
+  (let [subtype (.-subtype__ arr)
         [region byte-off] (resolve-element-region arr idx subtype)
         es (elem-size-for-subtype subtype)]
     (if (== es 4)
@@ -685,11 +746,9 @@
    (wait! arr idx expected ##Inf))
   ([^EveArray arr idx expected timeout-ms]
    (require-int32! arr "wait!")
-   (let [cnt (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)]
-     (when (or (< idx 0) (>= idx cnt))
-       (throw (js/Error. (str "Index out of bounds: " idx))))
-     (let [[region byte-off] (resolve-element-region arr idx)]
-       (mem/-wait-i32! region byte-off expected timeout-ms)))))
+   (bounds-check! arr idx "wait!")
+   (let [[region byte-off] (resolve-element-region arr idx (.-subtype__ arr))]
+     (mem/-wait-i32! region byte-off expected timeout-ms))))
 
 (defn wait-async
   "Async version of wait!. Returns a promise that resolves to :ok, :not-equal, or :timed-out.
@@ -699,11 +758,9 @@
    (wait-async arr idx expected ##Inf))
   ([^EveArray arr idx expected timeout-ms]
    (require-int32! arr "wait-async")
-   (let [cnt (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)]
-     (when (or (< idx 0) (>= idx cnt))
-       (throw (js/Error. (str "Index out of bounds: " idx))))
-     (let [[region byte-off] (resolve-element-region arr idx)]
-       (js/Promise.resolve (mem/-wait-i32! region byte-off expected timeout-ms))))))
+   (bounds-check! arr idx "wait-async")
+   (let [[region byte-off] (resolve-element-region arr idx (.-subtype__ arr))]
+     (js/Promise.resolve (mem/-wait-i32! region byte-off expected timeout-ms)))))
 
 (defn notify!
   "Wake up waiting agents on the value at index.
@@ -714,11 +771,9 @@
    (notify! arr idx ##Inf))
   ([^EveArray arr idx n]
    (require-int32! arr "notify!")
-   (let [cnt (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)]
-     (when (or (< idx 0) (>= idx cnt))
-       (throw (js/Error. (str "Index out of bounds: " idx))))
-     (let [[region byte-off] (resolve-element-region arr idx)]
-       (mem/-notify-i32! region byte-off n)))))
+   (bounds-check! arr idx "notify!")
+   (let [[region byte-off] (resolve-element-region arr idx (.-subtype__ arr))]
+     (mem/-notify-i32! region byte-off n))))
 
 )) ;; end CLJS-only: atomic ops, wait/notify
 
@@ -731,7 +786,7 @@
    f is (fn [acc idx val] ...).
    Returns the final accumulated value."
   [^EveArray arr init f]
-  (let [len (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)]
+  (let [len (count arr)]
     (loop [i 0
            acc init]
       (if (< i len)
@@ -745,10 +800,8 @@
   "Map f over array indices, returning a new array of the same type.
    f is (fn [idx current-val] ...) and must return a value of the right type."
   [^EveArray arr f]
-  (let [sio (.-sio__ arr)
-        offset (.-offset__ arr)
-        len (-sio-read-i32 sio offset 4)
-        type-kw (subtype->type-kw (-sio-read-u8 sio offset 1))
+  (let [len (count arr)
+        type-kw (subtype->type-kw (.-subtype__ arr))
         result (eve-array type-kw len)]
     (dotimes [i len]
       (aset! result i (f i (aget arr i))))
@@ -759,7 +812,7 @@
    f is (fn [idx current-val] ...).
    Returns the array."
   [^EveArray arr f]
-  (let [len (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)]
+  (let [len (count arr)]
     (dotimes [i len]
       (aset! arr i (f i (aget arr i))))
     arr))
@@ -768,11 +821,11 @@
   "Fill array with value, optionally in range [start, end).
    Returns the array."
   ([^EveArray arr val]
-   (afill! arr val 0 (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)))
+   (afill! arr val 0 (count arr)))
   ([^EveArray arr val start]
-   (afill! arr val start (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)))
+   (afill! arr val start (count arr)))
   ([^EveArray arr val start end]
-   (let [len (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)
+   (let [len (count arr)
          end (min end len)]
      (loop [i start]
        (when (< i end)
@@ -796,7 +849,7 @@
 (defn array-type
   "Get the type keyword for this array (:int32, :float64, etc.)."
   [^EveArray arr]
-  (subtype->type-kw (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)))
+  (subtype->type-kw (.-subtype__ ^EveArray arr)))
 
 (defn retire!
   "Mark this array's slab block as retired for GC.
@@ -830,26 +883,20 @@
   "Get a raw JS typed array view of this array's data region.
    Useful for bulk operations. Handle with care."
   [^EveArray arr]
-  (let [sio (.-sio__ arr)
-        offset (.-offset__ arr)
-        subtype (-sio-read-u8 sio offset 1)
-        cnt (-sio-read-i32 sio offset 4)
-        buf (get-sab arr)
-        data-off (get-offset arr)
-        view (make-typed-view buf subtype)
-        es (subtype->elem-shift subtype)
-        base (unsigned-bit-shift-right data-off es)]
-    (.subarray view base (+ base cnt))))
+  (let [tv (.-typed-view__ arr)
+        es (.-elem-shift__ arr)
+        dbo (.-data-byte-offset__ arr)
+        cnt (count arr)
+        base (unsigned-bit-shift-right dbo es)]
+    (.subarray tv base (+ base cnt))))
 
 (defn get-int32-view
   "Get a raw Int32Array view of the data region.
    Only valid for :int32 arrays."
   [^EveArray arr]
-  (let [sio (.-sio__ arr)
-        offset (.-offset__ arr)
-        cnt (-sio-read-i32 sio offset 4)
+  (let [cnt (count arr)
         buf (get-sab arr)
-        data-off (get-offset arr)]
+        data-off (.-data-byte-offset__ arr)]
     (js/Int32Array. buf data-off cnt)))
 
 (defn get-descriptor-idx
@@ -877,7 +924,7 @@
   "Fill :int32 array with value using SIMD (4 elements at a time).
    WARNING: Does not use Atomics. Only use before sharing with other threads."
   ([^EveArray arr val]
-   (afill-simd! arr val 0 (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)))
+   (afill-simd! arr val 0 (count arr)))
   ([^EveArray arr val start end]
    (require-int32! arr "afill-simd!")
    (let [byte-start (array-data-byte-offset arr start)
@@ -904,7 +951,7 @@
   "Sum all elements in :int32 array using SIMD.
    Safe to use on shared arrays (read-only)."
   ([^EveArray arr]
-   (asum-simd arr 0 (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)))
+   (asum-simd arr 0 (count arr)))
   ([^EveArray arr start end]
    (require-int32! arr "asum-simd")
    (let [byte-start (array-data-byte-offset arr start)
@@ -918,7 +965,7 @@
    Safe to use on shared arrays (read-only).
    Returns INT32_MAX for empty arrays."
   ([^EveArray arr]
-   (amin-simd arr 0 (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)))
+   (amin-simd arr 0 (count arr)))
   ([^EveArray arr start end]
    (require-int32! arr "amin-simd")
    (let [byte-start (array-data-byte-offset arr start)
@@ -932,7 +979,7 @@
    Safe to use on shared arrays (read-only).
    Returns INT32_MIN for empty arrays."
   ([^EveArray arr]
-   (amax-simd arr 0 (-sio-read-i32 (.-sio__ arr) (.-offset__ arr) 4)))
+   (amax-simd arr 0 (count arr)))
   ([^EveArray arr start end]
    (require-int32! arr "amax-simd")
    (let [byte-start (array-data-byte-offset arr start)
@@ -947,8 +994,8 @@
   [^EveArray arr1 ^EveArray arr2]
   (require-int32! arr1 "aequal-simd?")
   (require-int32! arr2 "aequal-simd?")
-  (let [len1 (-sio-read-i32 (.-sio__ arr1) (.-offset__ arr1) 4)
-        len2 (-sio-read-i32 (.-sio__ arr2) (.-offset__ arr2) 4)]
+  (let [len1 (count arr1)
+        len2 (count arr2)]
     (if (not= len1 len2)
       false
       (if (and (wasm/ready?) (pos? len1))
@@ -971,7 +1018,7 @@
         ;; Bulk copy element bytes into the data region
         byte-view (js/Uint8Array. (.-buffer elem) (.-byteOffset elem) (.-byteLength elem))]
     (-sio-write-bytes! sio slab-off HEADER_SIZE byte-view)
-    (EveArray. sio slab-off)))
+    (make-eve-array-instance sio slab-off)))
 
 ;;-----------------------------------------------------------------------------
 ;; Typed array encoder registration (called by serializer for native typed arrays)
@@ -1044,7 +1091,7 @@
 (defn- eve-array-from-header
   "Reconstruct an EveArray from an existing 0x1D header offset."
   [sio header-off]
-  (EveArray. sio header-off))
+  (make-eve-array-instance sio header-off))
 
 (defn- dispose-eve-array!
   "Free an EveArray's slab block."
@@ -1059,9 +1106,9 @@
   (fn [^EveArray arr]
     (let [sio (.-sio__ arr)
           offset (.-offset__ arr)
-          subtype (-sio-read-u8 sio offset 1)
-          n (-sio-read-i32 sio offset 4)
-          es (subtype->elem-shift subtype)
+          subtype (.-subtype__ arr)
+          n (count arr)
+          es (.-elem-shift__ arr)
           byte-len (bit-shift-left n es)
           blk-off (alloc/alloc-offset (+ HEADER_SIZE byte-len))]
       (alloc/write-u8!  blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
@@ -1078,7 +1125,7 @@
 (ser/register-header-constructor!
   ser/EVE_ARRAY_SLAB_TYPE_ID
   (fn [_sab blk-off]
-    (EveArray. (alloc/->CljsSlabIO) blk-off)))
+    (make-eve-array-instance (alloc/->CljsSlabIO) blk-off)))
 
 ;; Disposer: free the single slab block (element data is embedded, no sub-blocks)
 (ser/register-header-disposer!
@@ -1104,7 +1151,7 @@
         ;; Old format: convert header in-place
         (alloc/write-u8! slab-off 0 EveArray-type-id)
         (alloc/write-u8! slab-off 1 byte0)))
-    (EveArray. (alloc/->CljsSlabIO) slab-off)))
+    (make-eve-array-instance (alloc/->CljsSlabIO) slab-off)))
 
 )) ;; end CLJS-only: low-level access, SIMD, typed array, serialization
 
@@ -1117,13 +1164,13 @@
 
      ;; print-method for the unified EveArray on JVM
      (defmethod print-method EveArray [^EveArray a ^java.io.Writer w]
-       (.write w (str "#eve/array " (subtype->type-kw (-sio-read-u8 (.-sio__ a) (.-offset__ a) 1)) " "))
+       (.write w (str "#eve/array " (subtype->type-kw (.-subtype__ a)) " "))
        (print-method (vec (seq a)) w))
 
      (defn eve-array-from-offset
        "Construct an EveArray from a slab-qualified offset of a 0x1D block."
        [sio slab-off]
-       (EveArray. sio slab-off))
+       (make-eve-array-instance sio slab-off))
 
 ;;-----------------------------------------------------------------------------
 ;; JVM heap-backed EveArray (no slab required)
@@ -1318,7 +1365,7 @@
   "Return the subtype code of an EveArray (portable across CLJS and JVM).
    Works for both slab-backed EveArray and heap-backed JvmHeapEveArray."
   [arr]
-  #?(:cljs (-sio-read-u8 (.-sio__ arr) (.-offset__ arr) 1)
+  #?(:cljs (.-subtype__ ^EveArray arr)
      :clj  (if (instance? EveArray arr)
-              (-sio-read-u8 (.-sio__ ^EveArray arr) (.-offset__ ^EveArray arr) 1)
+              (.-subtype__ ^EveArray arr)
               (.-subtype-code arr))))

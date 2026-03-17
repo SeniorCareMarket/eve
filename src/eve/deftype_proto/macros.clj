@@ -50,11 +50,13 @@
     (list write-fn 'sio__ offset-sym field-offset val-expr)))
 
 (defn- field-bindings
-  "Generate let-bindings that read all fields from slab via ISlabIO."
+  "Generate let-bindings that read all fields from slab via ISlabIO.
+   Cached fields are skipped — they are direct type fields, not slab-backed."
   [fields]
   (vec (mapcat (fn [f]
-                 [(symbol (:name f))
-                  (sio-read-expr f 'offset__ (:offset f))])
+                 (when-not (:cached? f)
+                   [(symbol (:name f))
+                    (sio-read-expr f 'offset__ (:offset f))]))
                fields)))
 
 ;;=============================================================================
@@ -74,7 +76,10 @@
           val-expr (rewrite-set!-forms (nth form 2) field-map)]
       (when (= :immutable (:mutability field-spec))
         (throw (ex-info (str "Cannot set! immutable field: " (:name field-spec)) {})))
-      (sio-write-expr field-spec 'offset__ (:offset field-spec) val-expr))
+      (if (:cached? field-spec)
+        ;; Cached fields use normal set! (they're real JVM/JS fields)
+        form
+        (sio-write-expr field-spec 'offset__ (:offset field-spec) val-expr)))
 
     ;; Recurse into forms
     (seq? form)
@@ -237,9 +242,15 @@
   [type-name fields parsed-protos type-id total-size emit-type-id-def? type-key]
   (let [field-map (into {} (map (fn [f] [(:name f) f]) fields))
         translated (cljs-emit-protocols parsed-protos fields field-map)
-        boilerplate (cljs-boilerplate type-name parsed-protos type-key)]
+        boilerplate (cljs-boilerplate type-name parsed-protos type-key)
+        cached-fields (mapv (fn [f]
+                              (let [sym (symbol (:name f))]
+                                (if (= :mutable (:mutability f))
+                                  (with-meta sym {:mutable true})
+                                  sym)))
+                            (filter :cached? fields))]
     `(do
-       (~'deftype ~type-name [~'sio__ ~'offset__]
+       (~'deftype ~type-name [~'sio__ ~'offset__ ~@cached-fields]
                   ~@boilerplate
                   ~@translated)
 
@@ -312,9 +323,20 @@
   [type-name fields parsed-protos type-id _total-size emit-type-id-def? type-key]
   (let [field-map (into {} (map (fn [f] [(:name f) f]) fields))
         translated (clj-emit-protocols parsed-protos fields field-map)
-        boilerplate (clj-boilerplate type-name parsed-protos type-key)]
+        boilerplate (clj-boilerplate type-name parsed-protos type-key)
+        cached-fields (mapv (fn [f]
+                              (let [sym (symbol (:name f))
+                                    ;; Apply type hints for JVM performance
+                                    sym (case (:type-hint f)
+                                          (:int32 :uint32 :int16 :uint16 :int8 :uint8)
+                                          (with-meta sym {:tag 'long})
+                                          sym)]
+                                (if (= :mutable (:mutability f))
+                                  (with-meta sym (assoc (meta sym) :unsynchronized-mutable true))
+                                  sym)))
+                            (filter :cached? fields))]
     `(do
-       (~'deftype ~type-name [~'sio__ ~(with-meta 'offset__ {:tag 'long})]
+       (~'deftype ~type-name [~'sio__ ~(with-meta 'offset__ {:tag 'long}) ~@cached-fields]
                   ~@boilerplate
                   ~@translated)
 
