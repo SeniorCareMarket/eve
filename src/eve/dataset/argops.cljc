@@ -137,15 +137,23 @@
                 (arr/from-int-array out))))))
       :cljs
       (let [n    (count col)
-            idxs (vec (range n))
-            cmp  (if (= direction :desc)
-                   (fn [a b] (compare (nth col b) (nth col a)))
-                   (fn [a b] (compare (nth col a) (nth col b))))
-            sorted (sort cmp idxs)
-            out  (arr/eve-array :int32 n)]
-        (dotimes [i n]
-          (arr/aset! out i (int (clojure.core/nth sorted i))))
-        out))))
+            ;; Extract to JS array once for O(1) comparisons
+            tv   (arr/get-typed-view col)
+            vals (js/Float64Array. n)]
+        (dotimes [i n] (clojure.core/aset vals i (clojure.core/aget tv i)))
+        (let [idxs (js/Int32Array. n)
+              _    (dotimes [i n] (clojure.core/aset idxs i i))
+              ;; Sort using JS Array.prototype.sort on a regular array
+              idx-arr (js/Array.from idxs)
+              cmp  (if (= direction :desc)
+                     (fn [a b] (- (clojure.core/aget vals b) (clojure.core/aget vals a)))
+                     (fn [a b] (- (clojure.core/aget vals a) (clojure.core/aget vals b))))]
+          (.sort idx-arr cmp)
+          (let [out (arr/eve-array :int32 n)
+                vo  (arr/get-typed-view out)]
+            (dotimes [i n]
+              (clojure.core/aset vo i (clojure.core/aget idx-arr i)))
+            out))))))
 
 (defn argfilter
   "Return :int32 array of indices where (pred elem) is truthy."
@@ -187,15 +195,17 @@
                    (aset out i (int (.get buf i))))
                  (arr/from-int-array out)))))))
      :cljs
-     (let [n (count col)
+     (let [tv (arr/get-typed-view col)
+           n  (.-length tv)
            matches #js []]
        (dotimes [i n]
-         (when (pred (nth col i))
+         (when (pred (clojure.core/aget tv i))
            (.push matches i)))
        (let [m (.-length matches)
-             out (arr/eve-array :int32 m)]
+             out (arr/eve-array :int32 m)
+             vo  (arr/get-typed-view out)]
          (dotimes [i m]
-           (arr/aset! out i (int (clojure.core/aget matches i))))
+           (clojure.core/aset vo i (clojure.core/aget matches i)))
          out))))
 
 (defn argmin
@@ -217,11 +227,12 @@
                  (if (< v best-val) (recur (inc i) i v) (recur (inc i) best best-val)))
                best)))))
      :cljs
-     (let [n (count col)]
+     (let [tv (arr/get-typed-view col)
+           n  (.-length tv)]
        (when (pos? n)
-         (loop [i 1 best 0 best-val (nth col 0)]
+         (loop [i 1 best 0 best-val (clojure.core/aget tv 0)]
            (if (< i n)
-             (let [v (nth col i)]
+             (let [v (clojure.core/aget tv i)]
                (if (< v best-val) (recur (inc i) i v) (recur (inc i) best best-val)))
              best))))))
 
@@ -244,11 +255,12 @@
                  (if (> v best-val) (recur (inc i) i v) (recur (inc i) best best-val)))
                best)))))
      :cljs
-     (let [n (count col)]
+     (let [tv (arr/get-typed-view col)
+           n  (.-length tv)]
        (when (pos? n)
-         (loop [i 1 best 0 best-val (nth col 0)]
+         (loop [i 1 best 0 best-val (clojure.core/aget tv 0)]
            (if (< i n)
-             (let [v (nth col i)]
+             (let [v (clojure.core/aget tv i)]
                (if (> v best-val) (recur (inc i) i v) (recur (inc i) best best-val)))
              best))))))
 
@@ -288,9 +300,12 @@
                (arr/aset! out i (nth col (int (nth idx-arr i)))))
              out))))
      :cljs
-     (let [n (count idx-arr)
+     (let [tv-idx (arr/get-typed-view idx-arr)
+           n      (.-length tv-idx)
+           tv-col (arr/get-typed-view col)
            type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
-           out (arr/eve-array type-kw n)]
+           out    (arr/eve-array type-kw n)
+           vo     (arr/get-typed-view out)]
        (dotimes [i n]
-         (arr/aset! out i (nth col (int (nth idx-arr i)))))
+         (clojure.core/aset vo i (clojure.core/aget tv-col (clojure.core/aget tv-idx i))))
        out)))

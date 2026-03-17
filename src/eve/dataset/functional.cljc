@@ -31,6 +31,17 @@
   (if (number? x) x (nth x i)))
 
 ;;-----------------------------------------------------------------------------
+;; CLJS typed-view helpers
+;;-----------------------------------------------------------------------------
+
+#?(:cljs
+   (defn- get-view
+     "Extract typed array view for an EveArray. Returns nil for non-EveArray."
+     [x]
+     (when-not (number? x)
+       (arr/get-typed-view x))))
+
+;;-----------------------------------------------------------------------------
 ;; Arithmetic (return new EveArray)
 ;;-----------------------------------------------------------------------------
 
@@ -61,10 +72,26 @@
            (dotimes [i n] (arr/aset! out i (+ (arr-get a i) (arr-get b i))))
            out)))
      :cljs
-     (let [n (min (arr-count a) (arr-count b))
-           out (arr/eve-array (result-type a b) n)]
-       (dotimes [i n]
-         (arr/aset! out i (+ (arr-get a i) (arr-get b i))))
+     (let [va (get-view a)
+           vb (get-view b)
+           n  (min (arr-count a) (arr-count b))
+           out (arr/eve-array (result-type a b) n)
+           vo (arr/get-typed-view out)]
+       (cond
+         (and va vb)
+         (dotimes [i n]
+           (clojure.core/aset vo i (+ (clojure.core/aget va i) (clojure.core/aget vb i))))
+         va
+         (let [bv b]
+           (dotimes [i n]
+             (clojure.core/aset vo i (+ (clojure.core/aget va i) bv))))
+         vb
+         (let [av a]
+           (dotimes [i n]
+             (clojure.core/aset vo i (+ av (clojure.core/aget vb i)))))
+         :else
+         (dotimes [i n]
+           (arr/aset! out i (+ (arr-get a i) (arr-get b i)))))
        out)))
 
 (defn sub
@@ -92,10 +119,26 @@
            (dotimes [i n] (arr/aset! out i (- (arr-get a i) (arr-get b i))))
            out)))
      :cljs
-     (let [n (min (arr-count a) (arr-count b))
-           out (arr/eve-array (result-type a b) n)]
-       (dotimes [i n]
-         (arr/aset! out i (- (arr-get a i) (arr-get b i))))
+     (let [va (get-view a)
+           vb (get-view b)
+           n  (min (arr-count a) (arr-count b))
+           out (arr/eve-array (result-type a b) n)
+           vo (arr/get-typed-view out)]
+       (cond
+         (and va vb)
+         (dotimes [i n]
+           (clojure.core/aset vo i (- (clojure.core/aget va i) (clojure.core/aget vb i))))
+         va
+         (let [bv b]
+           (dotimes [i n]
+             (clojure.core/aset vo i (- (clojure.core/aget va i) bv))))
+         vb
+         (let [av a]
+           (dotimes [i n]
+             (clojure.core/aset vo i (- av (clojure.core/aget vb i)))))
+         :else
+         (dotimes [i n]
+           (arr/aset! out i (- (arr-get a i) (arr-get b i)))))
        out)))
 
 (defn mul
@@ -123,10 +166,26 @@
            (dotimes [i n] (arr/aset! out i (* (arr-get a i) (arr-get b i))))
            out)))
      :cljs
-     (let [n (min (arr-count a) (arr-count b))
-           out (arr/eve-array (result-type a b) n)]
-       (dotimes [i n]
-         (arr/aset! out i (* (arr-get a i) (arr-get b i))))
+     (let [va (get-view a)
+           vb (get-view b)
+           n  (min (arr-count a) (arr-count b))
+           out (arr/eve-array (result-type a b) n)
+           vo (arr/get-typed-view out)]
+       (cond
+         (and va vb)
+         (dotimes [i n]
+           (clojure.core/aset vo i (* (clojure.core/aget va i) (clojure.core/aget vb i))))
+         va
+         (let [bv b]
+           (dotimes [i n]
+             (clojure.core/aset vo i (* (clojure.core/aget va i) bv))))
+         vb
+         (let [av a]
+           (dotimes [i n]
+             (clojure.core/aset vo i (* av (clojure.core/aget vb i)))))
+         :else
+         (dotimes [i n]
+           (arr/aset! out i (* (arr-get a i) (arr-get b i)))))
        out)))
 
 (defn div
@@ -154,10 +213,26 @@
            (dotimes [i n] (arr/aset! out i (/ (double (arr-get a i)) (double (arr-get b i)))))
            out)))
      :cljs
-     (let [n (min (arr-count a) (arr-count b))
-           out (arr/eve-array :float64 n)]
-       (dotimes [i n]
-         (arr/aset! out i (/ (double (arr-get a i)) (double (arr-get b i)))))
+     (let [va (get-view a)
+           vb (get-view b)
+           n  (min (arr-count a) (arr-count b))
+           out (arr/eve-array :float64 n)
+           vo (arr/get-typed-view out)]
+       (cond
+         (and va vb)
+         (dotimes [i n]
+           (clojure.core/aset vo i (/ (clojure.core/aget va i) (clojure.core/aget vb i))))
+         va
+         (let [bv b]
+           (dotimes [i n]
+             (clojure.core/aset vo i (/ (clojure.core/aget va i) bv))))
+         vb
+         (let [av a]
+           (dotimes [i n]
+             (clojure.core/aset vo i (/ av (clojure.core/aget vb i)))))
+         :else
+         (dotimes [i n]
+           (arr/aset! out i (/ (double (arr-get a i)) (double (arr-get b i))))))
        out)))
 
 ;;-----------------------------------------------------------------------------
@@ -180,10 +255,11 @@
            (loop [i 0 acc 0.0]
              (if (< i n) (recur (inc i) (+ acc (double (nth col i)))) acc)))))
      :cljs
-     (let [n (count col)]
+     (let [tv (arr/get-typed-view col)
+           n (.-length tv)]
        (loop [i 0 acc 0.0]
          (if (< i n)
-           (recur (inc i) (+ acc (double (nth col i))))
+           (recur (inc i) (+ acc (clojure.core/aget tv i)))
            acc)))))
 
 (defn mean
@@ -209,11 +285,12 @@
                (let [v (nth col i)] (recur (inc i) (if (< v m) v m)))
                m)))))
      :cljs
-     (let [n (count col)]
+     (let [tv (arr/get-typed-view col)
+           n (.-length tv)]
        (when (pos? n)
-         (loop [i 1 m (nth col 0)]
+         (loop [i 1 m (clojure.core/aget tv 0)]
            (if (< i n)
-             (let [v (nth col i)] (recur (inc i) (if (< v m) v m)))
+             (let [v (clojure.core/aget tv i)] (recur (inc i) (if (< v m) v m)))
              m))))))
 
 (defn max-val
@@ -233,11 +310,12 @@
                (let [v (nth col i)] (recur (inc i) (if (> v m) v m)))
                m)))))
      :cljs
-     (let [n (count col)]
+     (let [tv (arr/get-typed-view col)
+           n (.-length tv)]
        (when (pos? n)
-         (loop [i 1 m (nth col 0)]
+         (loop [i 1 m (clojure.core/aget tv 0)]
            (if (< i n)
-             (let [v (nth col i)] (recur (inc i) (if (> v m) v m)))
+             (let [v (clojure.core/aget tv i)] (recur (inc i) (if (> v m) v m)))
              m))))))
 
 ;;-----------------------------------------------------------------------------
@@ -263,29 +341,65 @@
              (arr/aset! out i (if (> (arr-get a i) (arr-get b i)) 1 0)))
            out)))
      :cljs
-     (let [n (min (arr-count a) (arr-count b))
-           out (arr/eve-array :uint8 n)]
-       (dotimes [i n]
-         (arr/aset! out i (if (> (arr-get a i) (arr-get b i)) 1 0)))
+     (let [va (get-view a)
+           n  (min (arr-count a) (arr-count b))
+           out (arr/eve-array :uint8 n)
+           vo (arr/get-typed-view out)]
+       (if (and va (number? b))
+         (let [bv b]
+           (dotimes [i n]
+             (clojure.core/aset vo i (if (> (clojure.core/aget va i) bv) 1 0))))
+         (let [vb (get-view b)]
+           (if (and va vb)
+             (dotimes [i n]
+               (clojure.core/aset vo i (if (> (clojure.core/aget va i) (clojure.core/aget vb i)) 1 0)))
+             (dotimes [i n]
+               (arr/aset! out i (if (> (arr-get a i) (arr-get b i)) 1 0))))))
        out)))
 
 (defn lt
   "Element-wise less-than. Returns :uint8 mask."
   [a b]
-  (let [n (min (arr-count a) (arr-count b))
-        out (arr/eve-array :uint8 n)]
-    (dotimes [i n]
-      (arr/aset! out i (if (< (arr-get a i) (arr-get b i)) 1 0)))
-    out))
+  #?(:clj
+     (let [n (min (arr-count a) (arr-count b))
+           out (arr/eve-array :uint8 n)]
+       (dotimes [i n]
+         (arr/aset! out i (if (< (arr-get a i) (arr-get b i)) 1 0)))
+       out)
+     :cljs
+     (let [va (get-view a)
+           vb (get-view b)
+           n  (min (arr-count a) (arr-count b))
+           out (arr/eve-array :uint8 n)
+           vo (arr/get-typed-view out)]
+       (if (and va vb)
+         (dotimes [i n]
+           (clojure.core/aset vo i (if (< (clojure.core/aget va i) (clojure.core/aget vb i)) 1 0)))
+         (dotimes [i n]
+           (arr/aset! out i (if (< (arr-get a i) (arr-get b i)) 1 0))))
+       out)))
 
 (defn eq
   "Element-wise equality. Returns :uint8 mask."
   [a b]
-  (let [n (min (arr-count a) (arr-count b))
-        out (arr/eve-array :uint8 n)]
-    (dotimes [i n]
-      (arr/aset! out i (if (== (arr-get a i) (arr-get b i)) 1 0)))
-    out))
+  #?(:clj
+     (let [n (min (arr-count a) (arr-count b))
+           out (arr/eve-array :uint8 n)]
+       (dotimes [i n]
+         (arr/aset! out i (if (== (arr-get a i) (arr-get b i)) 1 0)))
+       out)
+     :cljs
+     (let [va (get-view a)
+           vb (get-view b)
+           n  (min (arr-count a) (arr-count b))
+           out (arr/eve-array :uint8 n)
+           vo (arr/get-typed-view out)]
+       (if (and va vb)
+         (dotimes [i n]
+           (clojure.core/aset vo i (if (== (clojure.core/aget va i) (clojure.core/aget vb i)) 1 0)))
+         (dotimes [i n]
+           (arr/aset! out i (if (== (arr-get a i) (arr-get b i)) 1 0))))
+       out)))
 
 ;;-----------------------------------------------------------------------------
 ;; Mapping
@@ -307,19 +421,31 @@
          (dotimes [i n] (arr/aset! out i (f (nth col i))))
          out))
      :cljs
-     (let [n (count col)
+     (let [tv (arr/get-typed-view col)
+           n  (.-length tv)
            type-kw (arr/subtype->type-kw (arr/array-subtype-code col))
-           out (arr/eve-array type-kw n)]
+           out (arr/eve-array type-kw n)
+           vo (arr/get-typed-view out)]
        (dotimes [i n]
-         (arr/aset! out i (f (nth col i))))
+         (clojure.core/aset vo i (f (clojure.core/aget tv i))))
        out)))
 
 (defn emap2
   "Map f over pairs of elements from two arrays.
    f receives (a b). Output type is promoted."
   [f col1 col2]
-  (let [n (min (count col1) (count col2))
-        out (arr/eve-array (result-type col1 col2) n)]
-    (dotimes [i n]
-      (arr/aset! out i (f (nth col1 i) (nth col2 i))))
-    out))
+  #?(:clj
+     (let [n (min (count col1) (count col2))
+           out (arr/eve-array (result-type col1 col2) n)]
+       (dotimes [i n]
+         (arr/aset! out i (f (nth col1 i) (nth col2 i))))
+       out)
+     :cljs
+     (let [tv1 (arr/get-typed-view col1)
+           tv2 (arr/get-typed-view col2)
+           n   (min (.-length tv1) (.-length tv2))
+           out (arr/eve-array (result-type col1 col2) n)
+           vo  (arr/get-typed-view out)]
+       (dotimes [i n]
+         (clojure.core/aset vo i (f (clojure.core/aget tv1 i) (clojure.core/aget tv2 i))))
+       out)))

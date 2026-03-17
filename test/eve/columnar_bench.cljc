@@ -1,8 +1,10 @@
 (ns eve.columnar-bench
-  "Comprehensive benchmarks: Eve persistent mmap atom + columnar data vs stock Clojure atom + vectors.
+  "Comprehensive benchmarks: Eve atom + columnar data vs stock Clojure atom + vectors.
 
    Each benchmark does a realistic multi-step workload inside a single swap!.
-   Eve atoms are mmap-backed persistent atoms (`:persistent` flag).
+   Runs in two modes:
+     :mmap       — mmap-backed persistent atoms (cross-process capable)
+     :in-memory  — SAB-backed (CLJS) / heap-backed (JVM) atoms (in-process only)
    Runs at 3 scales (10K, 100K, 1M) to show scaling behavior.
 
    Run via:
@@ -56,7 +58,7 @@
     {:mean-ms mean :min-ms (first sorted) :max-ms (last sorted)}))
 
 ;;=============================================================================
-;; Persistent atom helpers — create, close, cleanup
+;; Atom helpers — create, close, cleanup
 ;;=============================================================================
 
 (def ^:private bench-counter (clojure.core/atom 0))
@@ -82,23 +84,30 @@
              (let [f (io/file (str base-path ext))]
                (when (.exists f) (.delete f))))))
 
-(defn- with-persistent-atom
-  "Create a persistent mmap-backed atom with a seed fn that builds the initial
-   value AFTER the domain slabs are open (so EveArrays allocate in mmap slabs).
-   Runs (f eve-atom), then closes and cleans up. Returns the result of (f eve-atom)."
-  [label seed-fn f]
-  (let [path (bench-path label)
-        _    (cleanup-persistent-files! path)
-        a    (e/atom {:id (keyword "eve.columnar-bench" label)
-                      :persistent path}
-                     nil)]
-    ;; Seed the atom with EveArrays created in the mmap domain context
-    (reset! a (seed-fn))
-    (try
-      (f a)
-      (finally
-        (e/close! a)
-        (cleanup-persistent-files! path)))))
+(defn- with-eve-atom
+  "Create an Eve atom (mmap or in-memory), seed it, run (f atom), close & cleanup.
+   mode is :mmap or :in-memory."
+  [mode label seed-fn f]
+  (if (= mode :mmap)
+    ;; mmap-backed persistent atom
+    (let [path (bench-path label)
+          _    (cleanup-persistent-files! path)
+          a    (e/atom {:id (keyword "eve.columnar-bench" label)
+                        :persistent path}
+                       nil)]
+      (reset! a (seed-fn))
+      (try
+        (f a)
+        (finally
+          (e/close! a)
+          (cleanup-persistent-files! path))))
+    ;; in-memory atom (SAB on CLJS, heap on JVM)
+    (let [a (e/atom {:id (keyword "eve.columnar-bench" (str label "-mem"))} nil)]
+      (reset! a (seed-fn))
+      (try
+        (f a)
+        (finally
+          (e/close! a))))))
 
 ;;=============================================================================
 ;; Data generation
@@ -116,13 +125,14 @@
 
 (def ^:private results (clojure.core/atom []))
 
-(defn- record! [category n eve-result stock-result]
+(defn- record! [category n mode eve-result stock-result]
   (let [speedup (if (pos? (:mean-ms eve-result))
                   (/ (:mean-ms stock-result) (:mean-ms eve-result))
                   ##Inf)]
     (swap! results conj
       {:category category
        :n n
+       :mode mode
        :platform platform
        :eve-ms (:mean-ms eve-result)
        :stock-ms (:mean-ms stock-result)
@@ -132,7 +142,7 @@
        :stock-min (:min-ms stock-result)
        :stock-max (:max-ms stock-result)})
     ;; Print as we go
-    (println (str "  " category " (n=" n ")"))
+    (println (str "  " category " [" (name mode) "] (n=" n ")"))
     (println (str "    Eve:   " (fmt1 (:mean-ms eve-result)) "ms"
                   "  [" (:min-ms eve-result) "-" (:max-ms eve-result) "]"))
     (println (str "    Stock: " (fmt1 (:mean-ms stock-result)) "ms"
@@ -145,13 +155,13 @@
 ;;    revenue = price * qty, margin = revenue - cost, total = sum(margin)
 ;;=============================================================================
 
-(defn- bench-column-arithmetic! [n]
+(defn- bench-column-arithmetic! [n mode]
   (let [prices (random-doubles n 100.0)
         qtys   (random-doubles n 50.0)
         costs  (random-doubles n 2000.0)
         stock-a (clojure.core/atom {:price prices :qty qtys :cost costs})]
-    (record! "Column Arithmetic" n
-      (with-persistent-atom (str "col-arith-" n)
+    (record! "Column Arithmetic" n mode
+      (with-eve-atom mode (str "col-arith-" n)
         (fn [] {:price (arr/eve-array :float64 prices)
                 :qty   (arr/eve-array :float64 qtys)
                 :cost  (arr/eve-array :float64 costs)})
@@ -172,12 +182,12 @@
 ;;    filter(price > 50) → sum + mean + min + max on filtered
 ;;=============================================================================
 
-(defn- bench-filter-aggregate! [n]
+(defn- bench-filter-aggregate! [n mode]
   (let [prices (random-doubles n 100.0)
         gt50   (fn [x] (> x 50.0))
         stock-a (clojure.core/atom {:price prices})]
-    (record! "Filter + Aggregate" n
-      (with-persistent-atom (str "filt-agg-" n)
+    (record! "Filter + Aggregate" n mode
+      (with-eve-atom mode (str "filt-agg-" n)
         (fn [] {:price (arr/eve-array :float64 prices)})
         (fn [eve-a]
           (bench
@@ -205,11 +215,11 @@
 ;;    sort(price desc) → top 100 → mean
 ;;=============================================================================
 
-(defn- bench-sort-topn! [n]
+(defn- bench-sort-topn! [n mode]
   (let [prices (random-doubles n 1000.0)
         stock-a (clojure.core/atom {:price prices})]
-    (record! "Sort + Top-N" n
-      (with-persistent-atom (str "sort-topn-" n)
+    (record! "Sort + Top-N" n mode
+      (with-eve-atom mode (str "sort-topn-" n)
         (fn [] {:price (arr/eve-array :float64 prices)})
         (fn [eve-a]
           (bench
@@ -232,15 +242,15 @@
 ;;    → sort(revenue desc) → head(200) → sum + mean
 ;;=============================================================================
 
-(defn- bench-dataset-pipeline! [n]
+(defn- bench-dataset-pipeline! [n mode]
   (let [prices (random-doubles n 100.0)
         qtys   (random-doubles n 20.0)
         cats   (random-ints n 10)
         ids    (vec (range n))
         gt500  (fn [x] (> x 500.0))
         stock-a (clojure.core/atom {:price prices :qty qtys :cat cats :id ids})]
-    (record! "Dataset Pipeline" n
-      (with-persistent-atom (str "ds-pipe-" n)
+    (record! "Dataset Pipeline" n mode
+      (with-eve-atom mode (str "ds-pipe-" n)
         (fn [] {:price (arr/eve-array :float64 prices)
                 :qty   (arr/eve-array :float64 qtys)
                 :cat   (arr/eve-array :int32 cats)
@@ -287,14 +297,14 @@
   (int #?(:cljs (js/Math.sqrt n)
           :clj  (Math/sqrt (double n)))))
 
-(defn- bench-tensor-pipeline! [n]
+(defn- bench-tensor-pipeline! [n mode]
   (let [side  (sqrt-int n)
         total (* side side)
         data  (random-doubles total 100.0)
         double-fn (fn [x] (* x 2.0))
         stock-a (clojure.core/atom {:t (vec (map vec (partition side data)))})]
-    (record! "Tensor Pipeline" total
-      (with-persistent-atom (str "tensor-" total)
+    (record! "Tensor Pipeline" total mode
+      (with-eve-atom mode (str "tensor-" total)
         (fn [] {:data (arr/eve-array :float64 data) :side side})
         (fn [eve-a]
           (bench
@@ -333,8 +343,9 @@
     (>= n 1000) (str (quot n 1000) "K")
     :else (str n)))
 
-(defn- print-summary-table []
-  (let [rs @results
+(defn- print-summary-table [mode-kw]
+  (let [rs (filterv #(= (:mode %) mode-kw) @results)
+        mode-label (name mode-kw)
         hdr (str "| " (pad-right "Benchmark" 22)
                  " | " (pad-left "N" 5)
                  " | " (pad-left "Eve (ms)" 10)
@@ -346,7 +357,7 @@
                  "|" (apply str (repeat 12 "-"))
                  "|" (apply str (repeat 10 "-")) "|")]
     (println)
-    (println (str "## Eve Columnar Benchmark Results (" platform ")"))
+    (println (str "## Eve Columnar Benchmark Results (" platform ", " mode-label ")"))
     (println)
     (println hdr)
     (println sep)
@@ -359,44 +370,50 @@
     (println)))
 
 ;;=============================================================================
-;; Runner
+;; Runner — runs a given tier at a given mode
 ;;=============================================================================
+
+(defn- run-tier! [n mode]
+  (bench-column-arithmetic! n mode)
+  (bench-filter-aggregate! n mode)
+  (bench-sort-topn! n mode)
+  (bench-dataset-pipeline! n mode)
+  (bench-tensor-pipeline! n mode))
 
 (defn run-all! []
   (reset! results [])
   (println "==============================================================")
   (println (str "  Eve Columnar Benchmarks — " platform))
   (println "  Each swap! does a multi-step pipeline of real work")
-  (println "  Eve atoms are mmap-backed persistent atoms")
+  (println "  Modes: mmap (persistent) + in-memory (SAB/heap)")
   (println "  7 timed runs (trimmed mean of middle 5)")
   (println "==============================================================")
   (println)
 
-  ;; Medium: 10K
+  ;; --- MMAP mode ---
+  (println "=== MMAP (persistent) ===")
+  (println)
   (println "--- 10K (medium) ---")
-  (bench-column-arithmetic! 10000)
-  (bench-filter-aggregate! 10000)
-  (bench-sort-topn! 10000)
-  (bench-dataset-pipeline! 10000)
-  (bench-tensor-pipeline! 10000)
-
-  ;; Large: 100K
+  (run-tier! 10000 :mmap)
   (println "--- 100K (large) ---")
-  (bench-column-arithmetic! 100000)
-  (bench-filter-aggregate! 100000)
-  (bench-sort-topn! 100000)
-  (bench-dataset-pipeline! 100000)
-  (bench-tensor-pipeline! 100000)
-
-  ;; Very large: 1M
+  (run-tier! 100000 :mmap)
   (println "--- 1M (very large) ---")
-  (bench-column-arithmetic! 1000000)
-  (bench-filter-aggregate! 1000000)
-  (bench-sort-topn! 1000000)
-  (bench-dataset-pipeline! 1000000)
-  (bench-tensor-pipeline! 1000000)
+  (run-tier! 1000000 :mmap)
 
-  (print-summary-table)
+  (print-summary-table :mmap)
+
+  ;; --- In-memory mode ---
+  (println "=== IN-MEMORY (SAB/heap) ===")
+  (println)
+  (println "--- 10K (medium) ---")
+  (run-tier! 10000 :in-memory)
+  (println "--- 100K (large) ---")
+  (run-tier! 100000 :in-memory)
+  (println "--- 1M (very large) ---")
+  (run-tier! 1000000 :in-memory)
+
+  (print-summary-table :in-memory)
+
   (println "==============================================================")
   (println "  Benchmarks complete.")
   (println "=============================================================="))
