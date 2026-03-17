@@ -760,7 +760,7 @@
                   (ctor ptr)
                   ;; Try array/obj constructors
                   (case (int type-id)
-                    0x1D (eve-array/jvm-eve-array-from-offset sio ptr)
+                    0x1D (eve-array/eve-array-from-offset sio ptr)
                     0x1E (eve-obj/jvm-obj-from-offset sio ptr)
                     (throw (ex-info "jvm-mmap-deref: unknown root type-id"
                                     {:type-id type-id :ptr ptr})))))))))

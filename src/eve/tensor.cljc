@@ -311,8 +311,9 @@
    (defn- get-view-and-base
      "Return [typed-view base-element-index] for an EveArray."
      [^js arr]
-     [(.-typed-view arr)
-      (unsigned-bit-shift-right (.-offset arr) (.-elem-shift arr))]))
+     (let [view (eve.array/get-typed-view arr)]
+       ;; get-typed-view returns a subarray already based at element 0
+       [view 0])))
 
 (defn- strided-read
   "Read element at flat iteration index using stride translation.

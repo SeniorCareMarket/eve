@@ -909,6 +909,18 @@
        [class-idx]
        (aget slab-data-offsets class-idx))
 
+     (defn resolve-slab-mem-region
+       "Resolve the IMemRegion and absolute byte offset for a slab block field.
+        Returns [region absolute-byte-off].
+        Used by EveArray atomic ops (cas!, add!, wait!, notify!) to route
+        through IMemRegion without assuming SAB or mmap backing."
+       [^number slab-offset ^number field-off]
+       (let [class-idx (decode-class-idx slab-offset)
+             inst (wasm/get-slab-instance class-idx)
+             region (:region inst)
+             byte-base (slab-offset->byte-offset slab-offset)]
+         [region (+ byte-base field-off)]))
+
      ;; Overflow (class 6) — pluggable alloc/free callbacks
      (def ^:private ^:mutable overflow-alloc-fn nil)
      (def ^:private ^:mutable overflow-free-fn nil)
