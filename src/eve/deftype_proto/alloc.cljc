@@ -1195,27 +1195,27 @@
                      (when alloc-hook (alloc-hook slab-offset))
                      {:offset slab-offset :class-idx OVERFLOW_CLASS_IDX :block-idx byte-off})))
                {:error :overflow-no-legacy-env :size size-bytes}))
-           ;; Slab path — try alloc, grow on OOM, spill to next class
+           ;; Slab path — try alloc, grow on OOM (loop up to 20x), spill to next class
            (loop [ci class-idx]
              (let [result (alloc-from-slab ci)]
                (if-not (:error result)
                  result
-                 ;; OOM — try to grow if mmap-backed
-                 (if (and (aget slab-file-paths ci)
-                          (grow-mmap-slab! ci))
-                   (let [retry (alloc-from-slab ci)]
-                     (if-not (:error retry)
-                       retry
-                       ;; Still full — spill to next class
-                       (if (< ci 5)
-                         (recur (inc ci))
-                         {:error :all-slab-classes-full
-                          :size size-bytes})))
-                   ;; Can't grow — spill to next class
-                   (if (< ci 5)
-                     (recur (inc ci))
-                     {:error :all-slab-classes-full
-                      :size size-bytes}))))))))
+                 ;; OOM — try to grow in a loop if mmap-backed
+                 (let [grew-and-allocated
+                       (when (aget slab-file-paths ci)
+                         (loop [attempts 0]
+                           (when (and (< attempts 20) (grow-mmap-slab! ci))
+                             (let [retry (alloc-from-slab ci)]
+                               (if-not (:error retry)
+                                 retry
+                                 (recur (inc attempts)))))))]
+                   (if grew-and-allocated
+                     grew-and-allocated
+                     ;; Can't grow or still full — spill to next class
+                     (if (< ci 5)
+                       (recur (inc ci))
+                       {:error :all-slab-classes-full
+                        :size size-bytes})))))))))
 
      (defn alloc-offset
        "Like alloc but returns just the slab-qualified offset, or throws on error."
