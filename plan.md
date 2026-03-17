@@ -1,233 +1,204 @@
-# Fix EveArray Performance Regressions in Unified Slab-Backed Implementation
+# Restore EveArray Performance While Preserving eve/deftype Unification
 
-## Context
+## Situation
 
-Commit `cf5b7e8` (on `KmdoW`) rebuilt EveArray using `eve/deftype` for unified
-CLJS+JVM slab-backed arrays. This eliminated SAB-specific code but introduced
-severe CLJS performance regressions AND correctness bugs.
+The KmdoW branch successfully unified CLJS and JVM EveArray under a single
+`eve/deftype EveArray [^:int32 cnt]` definition. This was the culmination of
+a multi-phase effort to eliminate separate `EveArray` (CLJS, 11 fields) and
+`JvmEveArray` (JVM, 5 fields) types.
 
-The original agent's regression analysis (Regressions 1–8) is accurate.
-This revised plan addresses those regressions plus two additional bugs found
-during review:
-- **Bug A**: CLJS deftype has only `offset__`, but free functions reference
-  nonexistent `sio__` field (macro emits `(deftype EveArray [offset__])` for CLJS)
-- **Bug B**: `wait!` calls `(resolve-element-region arr idx)` with 2 args,
-  but the function requires 3 (arr, idx, subtype)
+The unification is correct and desirable. But it regressed performance because
+`eve/deftype` emits only `[sio__ offset__]` — every field access goes through
+ISlabIO reads from the slab on every call.
 
-## Approach: CLJS Manual Deftype + Cached Fields; JVM Unchanged
-
-The `eve/deftype` macro on CLJS emits `(deftype T [offset__])` — a single field.
-There is no mechanism for extra cached CLJS fields. Rather than modifying the
-macro, we use a manual `deftype` on CLJS (inside `#?(:cljs ...)`) that:
-
-1. Keeps `offset__` for serialization/ISlabIO compatibility
-2. Caches all performance-critical values as fields
-3. Works with **both** SAB-backed and mmap-backed slab memory
-
-On JVM, `JvmEveArray` (with `sio__` and `slab-off__`) is already correct and
-not regressed. No JVM changes needed.
-
-### Key Insight: TypedArray Views Work for Both SAB and mmap
-
-- SAB slab: buffer is `SharedArrayBuffer` → TypedArray views + `Atomics.*` (fast, thread-safe)
-- mmap slab: buffer is `ArrayBuffer` (from Node.js `Buffer`) → TypedArray views + `aget`/`aset` (fast, no Atomics)
-- The `atomic?` flag encodes this: `(and (subtype->atomic? subtype) (instance? js/SharedArrayBuffer buf))`
-- For atomic ops on mmap, route through `IMemRegion` (native addon provides `cas32`, `load32`, etc.)
-
-## CLJS EveArray Deftype (Step 1)
+### What was fast before (CLJS)
 
 ```clojure
-#?(:cljs
-(deftype EveArray [^number offset__        ;; slab-qualified offset (serialization key)
-                   ^number length          ;; cached element count (immutable)
-                   ^number subtype-code    ;; cached subtype byte
-                   ^number elem-shift      ;; cached log2(elem-size)
-                   ^boolean atomic?        ;; SAB + integer type → use Atomics
-                   ^js typed-view          ;; cached TypedArray over slab buffer
-                   ^number data-elem-base  ;; (>>> data-byte-offset elem-shift)
-                   ^js region              ;; cached IMemRegion (for atomic ops)
-                   ^number data-byte-off   ;; absolute byte offset of data start
-                   ^:mutable __hash
-                   ^IPersistentMap _meta]
-  ;; ... protocols ...
-))
+(deftype EveArray [sab block-start offset length descriptor-idx
+                   subtype-code elem-shift atomic? typed-view __hash _meta]
+  IIndexed
+  (-nth [this n]
+    ;; One aget — all values are cached JS fields
+    (let [idx (+ (>>> offset elem-shift) n)]
+      (if atomic? (Atomics.load typed-view idx) (aget typed-view idx)))))
 ```
 
-### Construction (alloc-eve-region + make-eve-array)
-
-At construction time, resolve all cached fields once:
+### What was fast before (JVM)
 
 ```clojure
-(let [slab-off  (alloc/alloc-offset total-size)
-      class-idx (alloc/decode-class-idx slab-off)
-      inst      (wasm/get-slab-instance class-idx)
-      buf       (.-buffer (:u8 inst))      ;; SAB or ArrayBuffer
-      region    (:region inst)              ;; IMemRegion
-      byte-base (alloc/slab-offset->byte-offset slab-off)
-      data-off  (+ byte-base HEADER_SIZE)
-      ;; Write header via alloc fns (stateless on CLJS, no sio__ needed)
-      _ (alloc/write-u8!  slab-off 0 EveArray-type-id)
-      _ (alloc/write-u8!  slab-off 1 subtype)
-      _ (alloc/write-u16! slab-off 2 0)
-      _ (alloc/write-i32! slab-off 4 n)
-      ;; Cached fields
-      es        (subtype->elem-shift subtype)
-      atomic?   (and (subtype->atomic? subtype)
-                     (instance? js/SharedArrayBuffer buf))
-      view      (make-typed-view buf subtype)
-      base-idx  (unsigned-bit-shift-right data-off es)]
-  ;; Fill via TypedArray (fast)
-  (if atomic?
-    (dotimes [i n] (js/Atomics.store view (+ base-idx i) fill-val))
-    (dotimes [i n] (clojure.core/aset view (+ base-idx i) fill-val)))
-  (EveArray. slab-off n subtype es atomic? view base-idx region data-off nil nil))
+(deftype JvmEveArray [^long cnt ^long slab-off ^long subtype-code sio _hash]
+  clojure.lang.Indexed
+  (nth [this i]
+    ;; subtype-code is a cached field — one case dispatch + one ISlabIO read
+    (let [es (subtype->elem-size subtype-code)
+          raw (-sio-read-bytes sio slab-off (+ 8 (* i es)) es)
+          bb (ByteBuffer/wrap raw)]
+      (case (int subtype-code) ...))))
 ```
 
-## Hot-Path Restorations (Steps 2–8)
-
-### Step 2: -nth (IIndexed)
+### What's slow now (unified)
 
 ```clojure
-(-nth [_ n]
-  (if (and (>= n 0) (< n length))
-    (let [idx (+ data-elem-base n)]
+(eve/deftype EveArray [^:int32 cnt]
+  clojure.lang.Indexed
+  (nth [this n]
+    ;; Must read subtype from slab EVERY call, then dispatch through read-element
+    (read-element sio__ offset__ n (-sio-read-u8 sio__ offset__ 1))))
+```
+
+Every `nth`:
+1. Reads subtype byte from slab via ISlabIO (CLJS: protocol dispatch + DataView)
+2. Inside `read-element`: computes elem-shift, computes field offset
+3. Dispatches on subtype via `case`
+4. For float types: allocates temp byte array + ByteBuffer/DataView per element
+5. On CLJS: lost the direct `typed-view` access entirely — no more `aget`
+
+## Strategy
+
+**Don't fight the macro. Work alongside it.**
+
+The `eve/deftype` macro owns the type definition and field layout. We don't
+modify the macro. Instead, we cache performance-critical derived values in
+a mutable wrapper or protocol extension that's computed once at construction
+time.
+
+### Approach: Platform-specific constructor wrapper with cached fields
+
+On CLJS, after constructing the `eve/deftype EveArray`, we attach cached
+performance fields via a closure or JS object stored in a `^:mutable` slot
+(or, since the macro doesn't support extra mutable fields, via `goog.object/set`
+on the instance, or a WeakMap, or a wrapper type).
+
+Actually, the cleanest approach: **extend the `eve/deftype` macro** to support
+an optional `^:cached` field annotation that adds extra non-slab fields to the
+generated deftype. These fields are not stored in the slab — they're regular
+JS/JVM fields computed at construction time.
+
+But that's macro surgery. The simpler, less invasive approach:
+
+**Add cached fields directly in array.cljc's protocol implementations by
+reading once and closing over the values.** But since `eve/deftype` generates
+the type with fixed fields `[sio__ offset__]`, we can't add fields to the type
+itself without changing the macro.
+
+### Chosen approach: Extend the macro to support `^:cached` fields
+
+Add support for fields annotated with `^:cached` in the `eve/deftype` macro.
+These fields:
+- Are added to the generated deftype's field list (after `sio__` and `offset__`)
+- Are NOT stored in the slab
+- Are passed as constructor arguments
+- Are available in method bodies like regular fields
+
+This is a small, additive change to the macro. It doesn't affect existing types
+(map, vec, set, list) that don't use `^:cached`.
+
+For EveArray:
+```clojure
+(eve/deftype EveArray [^:int32 cnt
+                       ^:cached subtype     ;; read once at construction
+                       ^:cached elem-shift  ;; computed once
+                       ^:cached atomic?     ;; computed once
+                       #?@(:cljs [^:cached typed-view])]  ;; CLJS only
+  ...)
+```
+
+## Implementation Steps
+
+### Step 1: Merge KmdoW into our branch
+
+Cherry-pick or merge the KmdoW commits (cf5b7e8, 1dc4821) that contain
+the unified EveArray and supporting infrastructure.
+
+### Step 2: Add `^:cached` field support to `eve/deftype` macro
+
+File: `src/eve/deftype_proto/macros.clj`
+
+In `parse-field`: detect `^:cached` metadata and mark the field as cached.
+
+In `compute-layout`: skip cached fields (they don't consume slab bytes).
+
+In `emit-cljs` and `emit-clj`: include cached fields in the deftype field
+list after `sio__` and `offset__`.
+
+In `field-bindings` (the let-binding generation for method bodies): skip
+cached fields — they're already available as direct type fields.
+
+In `transform-method-body`: allow cached field symbols to pass through
+without rewriting to ISlabIO reads.
+
+### Step 3: Rewrite EveArray to use `^:cached` fields
+
+File: `src/eve/array.cljc`
+
+Change the deftype to:
+```clojure
+(eve/deftype EveArray [^:int32 cnt
+                       ^:cached subtype
+                       ^:cached elem-shift
+                       ^:cached atomic?
+                       ^:cached ^:mutable __hash
+                       #?@(:cljs [^:cached typed-view])]
+  ...)
+```
+
+Rewrite `nth` (CLJS) to use cached `typed-view`:
+```clojure
+(-nth [this n]
+  (if (and (>= n 0) (< n cnt))
+    (let [idx (+ (unsigned-bit-shift-right data-byte-offset elem-shift) n)]
       (if atomic?
         (js/Atomics.load typed-view idx)
         (clojure.core/aget typed-view idx)))
-    (throw (js/Error. (str "Index out of bounds: " n " for length " length)))))
+    (throw ...)))
 ```
 
-~3 ops vs ~20 in the regressed version.
-
-### Step 3: aget / aset!
-
-Use cached `typed-view`, `data-elem-base`, `atomic?`, `length` directly.
-No protocol dispatch, no slab decode, no DataView.
-
-### Step 4: Atomic ops (cas!, add!, sub!, exchange!, band!, bor!, bxor!)
-
-Branch on backing store:
-
-- **SAB + int32**: Direct `Atomics.compareExchange` / `Atomics.add` / etc. on `typed-view`.
-  One field read + one Atomics call. Done.
-- **SAB + sub-word integer**: CAS loop on containing Int32 word using `Atomics.compareExchange`
-  on an Int32Array view (obtained from region or created from buffer).
-- **mmap (any integer type)**: Route through `IMemRegion` protocol
-  (`mem/-cas-i32!`, `mem/-add-i32!`, etc.) which uses native addon.
-  Compute byte offset from cached `data-byte-off` + `idx * elem-size`.
-
-For SAB + int32 (the dominant case), this is 1 Atomics call vs
-~10+ ops (3 slab decodes + protocol dispatch + vector allocation).
-
-### Step 5: wait! / notify! (fix arity bug)
-
-Fix: pass subtype arg to resolve-element-region, and branch on backing store:
-- SAB: direct `Atomics.wait` / `Atomics.notify` on cached Int32Array
-- mmap: `mem/-wait-i32!` / `mem/-notify-i32!` through IMemRegion
-
-### Step 6: require-atomic! / require-int32! / bounds-check!
-
-Use cached `atomic?`, `subtype-code`, `length` fields.
-Zero memory reads. Zero slab decodes.
-
-### Step 7: reduce / hash / equiv / print
-
-All use cached fields. No per-element `-sio-read-u8` for subtype.
-No per-element DataView reads.
-
-### Step 8: get-typed-view / get-sab / get-offset / get-int32-view
-
-Use cached fields:
-- `get-typed-view`: `.subarray typed-view data-elem-base (+ data-elem-base length)`
-- `get-sab`: `(.-buffer typed-view)` — the buffer backing the cached view
-- `get-offset`: `data-byte-off`
-
-No re-decode, no new TypedArray allocation.
-
-### Step 9: Functional ops (areduce, amap, amap!, afill!, acopy!)
-
-Use cached `length` and call fast `aget`/`aset!`.
-
-### Step 10: SIMD ops
-
-Use cached `data-byte-off` for byte offset calculations.
-Use cached `length` instead of slab decode.
-Use cached `subtype-code` for `require-int32!`.
-
-### Step 11: Serialization / Deserialization
-
-- `ISabStorable.-sab-encode`: use `offset__` (slab-qualified offset)
-- `ISabStorable.-sab-dispose`: `(alloc/free! offset__)`
-- `IDirectSerialize.-direct-serialize`: return `offset__`
-- `IEveRoot.-root-header-off`: return `offset__`
-- Header constructor (slab block → EveArray): resolve cached fields from slab-off
-- SAB type constructor (FAST_TAG_EVE_ARRAY): resolve cached fields from SAB block offset
-- CLJS-to-SAB builder (EveArray → slab block): use cached `subtype-code`, `length`, `elem-shift`,
-  get source bytes via `(js/Uint8Array. (.-buffer typed-view) data-byte-off byte-len)`
-
-### Step 12: from-typed-array
-
-Allocate slab block, write bytes via alloc functions, resolve cached fields.
-
-## JVM Path
-
-**No changes needed.** The `JvmEveArray` on KmdoW uses `ISlabIO` correctly:
-- `sio__` is the JVM slab context (bound via `*jvm-slab-ctx*`)
-- `slab-off__` is the slab-qualified offset
-- Field access via `-sio-read-*` is fast enough on JVM (JIT-compiled virtual dispatch)
-
-Keep the existing `eve/deftype EveArray [^:int32 cnt]` for JVM, or use the manual
-`JvmEveArray` deftype — whichever is already working on KmdoW.
-
-Wait, the KmdoW `eve/deftype` approach has a naming mismatch: JVM field is `slab-off__`
-but shared free functions reference `offset__`. Fix: make free functions
-platform-specific via `#?(:cljs ... :clj ...)` since the CLJS manual deftype and
-JVM deftype have different field names and different fast-path strategies.
-
-## Files to Modify
-
-- `src/eve/array.cljc` — Main rewrite (CLJS manual deftype + all free functions)
-
-## Files to Merge from KmdoW (infrastructure, not array)
-
-All other KmdoW changes are infrastructure that the unified array depends on:
-- `src/eve/atom.cljc` — SAB domain support
-- `src/eve/mem.cljc` — i64 emulation, JsSabRegion, NodeMmapRegion
-- `src/eve/deftype_proto/alloc.cljc` — ISlabIO, CljsSlabIO, SAB coalescence
-- `src/eve/deftype_proto/data.cljc` — new protocols/constants
-- `src/eve/deftype_proto/serialize.cljc` — typed-array resolver
-- `src/eve/deftype_proto.clj` — slab macro (JVM path)
-- `src/eve/deftype.clj` — SAB macro updates
-- Other files (map.cljc, vec.cljc, set.cljc, list.cljc, etc.)
-
-## Verification
-
-```bash
-npx shadow-cljs compile eve-test
-
-# Core array tests
-node target/eve-test/all.js typed-array 2>&1 | tee /tmp/typed-array-test.txt
-
-# Slab/mmap tests
-node target/eve-test/all.js slab 2>&1 | tee /tmp/slab-test.txt
-node target/eve-test/all.js mmap 2>&1 | tee /tmp/mmap-test.txt
-node target/eve-test/all.js mmap-slab 2>&1 | tee /tmp/mmap-slab-test.txt
-node target/eve-test/all.js mmap-atom 2>&1 | tee /tmp/mmap-atom-test.txt
-node target/eve-test/all.js mmap-atom-e2e 2>&1 | tee /tmp/mmap-atom-e2e-test.txt
-
-# Broader tests
-node target/eve-test/all.js batch2 2>&1 | tee /tmp/batch2-test.txt
-node target/eve-test/all.js batch3 2>&1 | tee /tmp/batch3-test.txt
-node target/eve-test/all.js batch4 2>&1 | tee /tmp/batch4-test.txt
-node target/eve-test/all.js obj 2>&1 | tee /tmp/obj-test.txt
-node target/eve-test/all.js epoch-gc 2>&1 | tee /tmp/epoch-gc-test.txt
-node target/eve-test/all.js int-map 2>&1 | tee /tmp/int-map-test.txt
-node target/eve-test/all.js rb-tree 2>&1 | tee /tmp/rb-tree-test.txt
-node target/eve-test/all.js mem 2>&1 | tee /tmp/mem-test.txt
-
-# JVM tests
-clojure -M:jvm-test 2>&1 | tee /tmp/jvm-test.txt
-
-# Full green baseline
-node target/eve-test/all.js all 2>&1 | tee /tmp/all-test.txt
+Rewrite `nth` (JVM) to use cached subtype:
+```clojure
+(nth [this i]
+  (if (and (>= i 0) (< i cnt))
+    (let [es (bit-shift-left 1 elem-shift)
+          raw (-sio-read-bytes sio__ offset__ (+ 8 (* i es)) es)
+          bb (doto (ByteBuffer/wrap raw) (.order LE))]
+      (case (int subtype)
+        (1 3) (bit-and ...) ...))
+    (throw ...)))
 ```
+
+Update constructor functions (`eve-array`, `eve-array-from-offset`) to
+compute and pass cached values.
+
+### Step 4: Restore CLJS-specific fast paths
+
+- `aget`/`aset!`: Use `typed-view` directly instead of going through `read-element`
+- `cas!`, `add!`, `sub!`, etc.: Use `typed-view` + `Atomics` directly
+- `afill-simd!`, `asum-simd`: Use `typed-view` for WASM SIMD calls
+- `reduce`: Use cached `typed-view` in tight loop
+
+### Step 5: Restore JVM-specific fast paths
+
+- `IBulkAccess`: Use cached `subtype` instead of reading from slab each time
+- `nth`: Use cached `subtype` and `elem-shift` — one fewer ISlabIO call per access
+
+### Step 6: Verify all tests pass
+
+Run the full green baseline from CLAUDE.md. The unification is preserved —
+same type on both platforms — but hot paths are fast again.
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/eve/deftype_proto/macros.clj` | Add `^:cached` field support |
+| `src/eve/array.cljc` | Use `^:cached` fields, restore fast paths |
+| `src/eve/deftype_proto/macros/registry.clj` | Handle cached in `parse-field` |
+
+No changes to: `atom.cljc`, `mem.cljc`, `alloc.cljc`, `serialize.cljc`,
+`map.cljc`, `vec.cljc`, `set.cljc`, `list.cljc`.
+
+## What this does NOT do
+
+- Does not revert the unification — `EveArray` stays as one `eve/deftype`
+- Does not introduce a separate CLJS type — same type definition, both platforms
+- Does not change the slab layout — cached fields are JS/JVM-only, not serialized
+- Does not change any other Eve data structure
