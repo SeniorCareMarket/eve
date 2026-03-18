@@ -1228,6 +1228,23 @@
 )) ;; end CLJS-only: low-level access, SIMD, typed array, serialization
 
 ;;=============================================================================
+;; ISabRetirable — lets atom swap retirement free old EveArray slab blocks
+;;=============================================================================
+
+#?(:bb nil
+   :default
+(extend-type EveArray
+  d/ISabRetirable
+  (-sab-retire-diff! [this new-value _slab-env mode]
+    (let [old-off (#?(:cljs .-offset__ :clj .offset__) this)]
+      ;; If the new value is an EveArray at the same offset, no-op (shared block)
+      (when-not (and (instance? EveArray new-value)
+                     (== old-off (#?(:cljs .-offset__ :clj .offset__) new-value)))
+        ;; Free the old block
+        (when (and (some? old-off) (not= old-off alloc/NIL_OFFSET))
+          (-sio-free! (#?(:cljs .-sio__ :clj .sio__) this) old-off)))))))
+
+;;=============================================================================
 ;; JVM-only: print-method, JvmHeapEveArray, from-* helpers, JVM registrations
 ;;=============================================================================
 
