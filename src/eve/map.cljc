@@ -1391,6 +1391,61 @@
 
 #?(:bb nil
    :default
+(defn scan-node-value-sab-ptrs
+  "Scan a HAMT bitmap node's inline values for SAB pointer tags (0x10-0x13).
+   Returns a vector of [tag nested-offset] pairs for each nested Eve collection."
+  [sio ^long node-off]
+  (let [node-type (-sio-read-u8 sio node-off 0)]
+    (when (== node-type NODE_TYPE_BITMAP)
+      (let [data-bm (-sio-read-i32 sio node-off 4)
+            node-bm (-sio-read-i32 sio node-off 8)
+            dc (popcount32 data-bm)
+            kv-off (kv-data-start-off data-bm node-bm)]
+        (loop [i 0 pos kv-off result (transient [])]
+          (if (>= i dc)
+            (persistent! result)
+            (let [klen (-sio-read-i32 sio node-off pos)
+                  val-pos (+ pos 4 klen)
+                  vlen (-sio-read-i32 sio node-off val-pos)
+                  val-data-pos (+ val-pos 4)
+                  next-pos (+ val-data-pos vlen)
+                  result (if (>= vlen 7)
+                           (let [m0 (-sio-read-u8 sio node-off val-data-pos)
+                                 m1 (-sio-read-u8 sio node-off (+ val-data-pos 1))]
+                             (if (and (== m0 0xEE) (== m1 0xDB))
+                               (let [tag (-sio-read-u8 sio node-off (+ val-data-pos 2))]
+                                 (if (and (>= tag 0x10) (<= tag 0x13))
+                                   (let [nested-off (-sio-read-i32 sio node-off (+ val-data-pos 3))]
+                                     (conj! result [tag nested-off]))
+                                   result))
+                               result))
+                           result)]
+              (recur (inc i) next-pos result)))))))))
+
+#?(:bb nil
+   :default
+(defn collect-all-tree-sab-ptrs
+  "Walk entire HAMT tree and collect all SAB pointer offsets from inline values.
+   Returns a set of nested-offset values."
+  [sio ^long root-off]
+  (if (== root-off NIL_OFFSET)
+    #{}
+    (let [result (volatile! (transient #{}))]
+      (letfn [(walk [off]
+                (when (not= off NIL_OFFSET)
+                  (let [node-type (-sio-read-u8 sio off 0)]
+                    (when (== node-type NODE_TYPE_BITMAP)
+                      (doseq [[_tag nested-off] (scan-node-value-sab-ptrs sio off)]
+                        (vswap! result conj! nested-off))
+                      (let [node-bm (-sio-read-i32 sio off 8)
+                            cc (popcount32 node-bm)]
+                        (dotimes [i cc]
+                          (walk (-sio-read-i32 sio off (+ NODE_HEADER_SIZE (* i 4))))))))))]
+        (walk root-off))
+      (persistent! @result)))))
+
+#?(:bb nil
+   :default
 (defn collect-retire-diff-offsets
   "Collect all slab offsets that would be freed by -sab-retire-diff!.
    Includes both HAMT tree nodes and the header block.

@@ -71,7 +71,7 @@
       (-sio-write-i32! sio node-off (* i 4) NIL_OFFSET))
     node-off))
 
-(defn- node-get [sio node-off i]
+(defn node-get [sio node-off i]
   (-sio-read-i32 sio node-off (* i 4)))
 
 (defn- node-set! [sio node-off i val]
@@ -606,6 +606,93 @@
                  old-child (node-get sio old-off child-idx)
                  new-child (node-get sio new-off child-idx)]
              (recur old-child new-child (- sh SHIFT_STEP)))))))))
+
+;;=============================================================================
+;; Offset Collection (for epoch-based retirement in mmap atoms)
+;;=============================================================================
+
+(defn collect-trie-offsets
+  "Recursively collect all slab offsets in a trie node and its descendants."
+  [sio node-slab-off shift-val result]
+  (when (not= node-slab-off NIL_OFFSET)
+    (vswap! result conj! node-slab-off)
+    (if (zero? shift-val)
+      ;; Leaf node — collect value block offsets
+      (dotimes [i NODE_SIZE]
+        (let [val-off (node-get sio node-slab-off i)]
+          (when (not= val-off NIL_OFFSET)
+            (vswap! result conj! val-off))))
+      ;; Internal node — recurse into children
+      (dotimes [i NODE_SIZE]
+        (let [child-off (node-get sio node-slab-off i)]
+          (when (not= child-off NIL_OFFSET)
+            (collect-trie-offsets sio child-off (- shift-val SHIFT_STEP) result)))))))
+
+(defn- collect-trie-diff-offsets
+  "Collect old trie path nodes that differ from the new trie.
+   At leaf level (shift=0), also collects differing value block offsets."
+  [sio old-root new-root shift-val result]
+  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+    (letfn [(walk [old-off new-off sh]
+              (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+                (vswap! result conj! old-off)
+                (if (zero? sh)
+                  ;; Leaf level — collect differing value blocks
+                  (dotimes [i NODE_SIZE]
+                    (let [old-val-off (node-get sio old-off i)
+                          new-val-off (node-get sio new-off i)]
+                      (when (and (not= old-val-off NIL_OFFSET) (not= old-val-off new-val-off))
+                        (vswap! result conj! old-val-off))))
+                  ;; Internal node — recurse into children
+                  (dotimes [i NODE_SIZE]
+                    (let [old-child (node-get sio old-off i)
+                          new-child (node-get sio new-off i)]
+                      (when (and (not= old-child NIL_OFFSET) (not= old-child new-child))
+                        (walk old-child new-child (- sh SHIFT_STEP))))))))]
+      (walk old-root new-root shift-val))))
+
+#?(:bb nil
+   :default
+(defn collect-retire-diff-offsets
+  "Collect all slab offsets that would be freed by -sab-retire-diff!.
+   Returns a vector of offsets to free when the epoch is safe."
+  [old-vec new-value]
+  (let [sio        (#?(:cljs .-sio__ :clj .sio__) #?(:cljs ^js old-vec :clj old-vec))
+        header-off (#?(:cljs .-offset__ :clj .offset__) #?(:cljs ^js old-vec :clj old-vec))
+        root-off   (-sio-read-i32 sio header-off SABVECROOT_ROOT_OFFSET)
+        tail-off   (-sio-read-i32 sio header-off SABVECROOT_TAIL_OFFSET)
+        shift-val  (-sio-read-i32 sio header-off SABVECROOT_SHIFT_OFFSET)
+        result     (volatile! (transient []))]
+    (if (instance? EveVector new-value)
+      ;; Both are EveVector — diff trie paths
+      (let [new-hdr      (#?(:cljs .-offset__ :clj .offset__) new-value)
+            new-root-off (-sio-read-i32 sio new-hdr SABVECROOT_ROOT_OFFSET)
+            new-tail-off (-sio-read-i32 sio new-hdr SABVECROOT_TAIL_OFFSET)]
+        (collect-trie-diff-offsets sio root-off new-root-off shift-val result)
+        ;; Collect old tail if it differs from new tail
+        (when (and (not= tail-off NIL_OFFSET) (not= tail-off new-tail-off))
+          (vswap! result conj! tail-off)
+          ;; Also collect differing value blocks in the tail
+          (when (not= new-tail-off NIL_OFFSET)
+            (dotimes [i NODE_SIZE]
+              (let [old-val-off (node-get sio tail-off i)
+                    new-val-off (node-get sio new-tail-off i)]
+                (when (and (not= old-val-off NIL_OFFSET) (not= old-val-off new-val-off))
+                  (vswap! result conj! old-val-off)))))))
+      ;; Different type — collect entire old trie
+      (do
+        (collect-trie-offsets sio root-off shift-val result)
+        (when (not= tail-off NIL_OFFSET)
+          ;; Collect tail node + its value blocks
+          (vswap! result conj! tail-off)
+          (dotimes [i NODE_SIZE]
+            (let [val-off (node-get sio tail-off i)]
+              (when (not= val-off NIL_OFFSET)
+                (vswap! result conj! val-off)))))))
+    ;; Always include header
+    (when (and header-off (not= header-off NIL_OFFSET))
+      (vswap! result conj! header-off))
+    (persistent! @result))))
 
 ;;=============================================================================
 ;; ISabRetirable

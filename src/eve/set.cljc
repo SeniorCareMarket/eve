@@ -831,6 +831,69 @@
           (if (reduced? result) @result result))))))
 
 ;;=============================================================================
+;; Offset Collection (for epoch-based retirement in mmap atoms)
+;;=============================================================================
+
+(defn collect-hamt-offsets
+  "Recursively collect all slab offsets in a HAMT node tree."
+  [sio slab-off result]
+  (when (not= slab-off NIL_OFFSET)
+    (vswap! result conj! slab-off)
+    (let [node-type (-sio-read-u8 sio slab-off 0)]
+      (when (== node-type NODE_TYPE_BITMAP)
+        (let [node-bm (-sio-read-i32 sio slab-off 8)
+              child-count (popcount32 node-bm)]
+          (dotimes [i child-count]
+            (let [child-off (-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* i 4)))]
+              (collect-hamt-offsets sio child-off result))))))))
+
+(defn- collect-hamt-diff-offsets
+  "Collect old HAMT nodes that differ from the new tree."
+  [sio old-root new-root result]
+  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+    (letfn [(walk [old-off new-off]
+              (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+                (vswap! result conj! old-off)
+                (let [old-type (-sio-read-u8 sio old-off 0)]
+                  (when (== old-type NODE_TYPE_BITMAP)
+                    (let [old-node-bm (-sio-read-i32 sio old-off 8)
+                          new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
+                          new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                                        (-sio-read-i32 sio new-off 8))]
+                      (loop [remaining old-node-bm
+                             old-idx 0]
+                        (when (not (zero? remaining))
+                          (let [bit (bit-and remaining (- remaining))
+                                old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
+                                new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
+                                            (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
+                                              (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
+                                            NIL_OFFSET)]
+                            (walk old-child new-child)
+                            (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
+      (walk old-root new-root))))
+
+#?(:bb nil
+   :default
+(defn collect-retire-diff-offsets
+  "Collect all slab offsets that would be freed by -sab-retire-diff!.
+   Returns a vector of offsets to free when the epoch is safe."
+  [old-set new-value]
+  (let [sio (#?(:cljs .-sio__ :clj .sio__) #?(:cljs ^js old-set :clj old-set))
+        header-off (#?(:cljs .-offset__ :clj .offset__) #?(:cljs ^js old-set :clj old-set))
+        root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)
+        result (volatile! (transient []))]
+    (if (instance? EveHashSet new-value)
+      (let [new-root-off (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) SABSETROOT_ROOT_OFF_OFFSET)]
+        (collect-hamt-diff-offsets sio root-off new-root-off result))
+      ;; Different type — collect entire old tree
+      (collect-hamt-offsets sio root-off result))
+    ;; Always include header
+    (when (not= header-off NIL_OFFSET)
+      (vswap! result conj! header-off))
+    (persistent! @result))))
+
+;;=============================================================================
 ;; ISabRetirable
 ;;=============================================================================
 

@@ -1228,6 +1228,23 @@
 )) ;; end CLJS-only: low-level access, SIMD, typed array, serialization
 
 ;;=============================================================================
+;; Offset Collection (for epoch-based retirement in mmap atoms)
+;;=============================================================================
+
+#?(:bb nil
+   :default
+(defn collect-retire-diff-offsets
+  "Collect slab offsets for an old EveArray. Single block allocation."
+  [old-array new-value]
+  (let [old-off (#?(:cljs .-offset__ :clj .offset__) old-array)]
+    (if (and (instance? EveArray new-value)
+             (== old-off (#?(:cljs .-offset__ :clj .offset__) new-value)))
+      [] ;; Same block — no-op
+      (if (and (some? old-off) (not= old-off alloc/NIL_OFFSET))
+        [old-off]
+        [])))))
+
+;;=============================================================================
 ;; ISabRetirable — lets atom swap retirement free old EveArray slab blocks
 ;;=============================================================================
 

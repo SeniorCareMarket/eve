@@ -31,9 +31,9 @@
       [eve.mem :as mem]
       [eve.map :as eve-map]
       [eve.wasm-mem :as wasm-mem]
-      [eve.vec]
-      [eve.set]
-      [eve.list])
+      [eve.vec :as eve-vec]
+      [eve.set :as eve-set]
+      [eve.list :as eve-list])
      :clj
      (:require
       [eve.deftype-proto.coalesc :as coalesc]
@@ -42,14 +42,18 @@
       [eve.deftype-proto.serialize :as ser]
       [eve.mem :as mem]
       [eve.map :as eve-map]
-      [eve.set]
-      [eve.vec]
-      [eve.list]
+      [eve.set :as eve-set]
+      [eve.vec :as eve-vec]
+      [eve.list :as eve-list]
       [eve.array :as eve-array]
       [eve.obj :as eve-obj]
       [eve.perf :as perf])))
 
-#?(:bb nil :clj (import '[eve.map EveHashMap]))
+#?(:bb nil :clj (import '[eve.map EveHashMap]
+                         '[eve.vec EveVector]
+                         '[eve.set EveHashSet]
+                         '[eve.list EveList]
+                         '[eve.array EveArray]))
 
 ;; ---------------------------------------------------------------------------
 ;; B2 constants
@@ -416,6 +420,109 @@
                    (alloc/free! off))))
              (reset! retire-q (or still-live []))))))
 
+     (defn- collect-nested-collection-offsets
+       "Given a sio, SAB tag (0x10-0x13), and nested offset, collect ALL slab
+        offsets owned by that nested collection (full tree disposal)."
+       [sio tag nested-off]
+       (case tag
+         0x10 ;; EveHashMap
+         (let [root-off (alloc/-sio-read-i32 sio nested-off eve-map/SABMAPROOT_ROOT_OFF_OFFSET)
+               tree-offs (eve-map/collect-tree-diff-offsets sio root-off alloc/NIL_OFFSET)
+               ;; Also recursively scan the nested map's nodes for SAB ptrs
+               deeper (mapcat
+                       (fn [node-off]
+                         (mapcat (fn [[t o]] (collect-nested-collection-offsets sio t o))
+                                 (eve-map/scan-node-value-sab-ptrs sio node-off)))
+                       tree-offs)]
+           (into (conj tree-offs nested-off) deeper))
+
+         0x11 ;; EveHashSet — full tree disposal
+         (let [root-off (alloc/-sio-read-i32 sio nested-off eve-set/SABSETROOT_ROOT_OFF_OFFSET)
+               result (volatile! (transient []))]
+           (eve-set/collect-hamt-offsets sio root-off result)
+           (conj (persistent! @result) nested-off))
+
+         0x12 ;; EveVector — full tree disposal
+         (let [root-off (alloc/-sio-read-i32 sio nested-off eve-vec/SABVECROOT_ROOT_OFFSET)
+               tail-off (alloc/-sio-read-i32 sio nested-off eve-vec/SABVECROOT_TAIL_OFFSET)
+               shift-val (alloc/-sio-read-i32 sio nested-off eve-vec/SABVECROOT_SHIFT_OFFSET)
+               result (volatile! (transient [nested-off]))]
+           (eve-vec/collect-trie-offsets sio root-off shift-val result)
+           (when (not= tail-off alloc/NIL_OFFSET)
+             (vswap! result conj! tail-off)
+             (dotimes [i 32]
+               (let [val-off (eve-vec/node-get sio tail-off i)]
+                 (when (not= val-off alloc/NIL_OFFSET)
+                   (vswap! result conj! val-off)))))
+           (persistent! @result))
+
+         0x13 ;; EveList — walk chain
+         (loop [off nested-off result [nested-off]]
+           (if (== off alloc/NIL_OFFSET)
+             result
+             (let [next-off (alloc/-sio-read-i32 sio off 8)]
+               (recur next-off (if (not= next-off alloc/NIL_OFFSET)
+                                 (conj result next-off)
+                                 result)))))
+
+         ;; Unknown tag — just the offset
+         [nested-off]))
+
+     (defn- collect-map-nested-sab-diffs
+       "For a map-to-map transition, find nested SAB pointers in retired nodes
+        that are no longer live in the new tree. Returns additional offsets to free."
+       [sio old-header new-header retired-node-offsets]
+       (let [;; Collect [tag offset] pairs from retired old nodes
+             old-pairs (into [] (mapcat #(eve-map/scan-node-value-sab-ptrs sio %))
+                             retired-node-offsets)
+             ;; Collect SAB pointer offsets still live in the new tree
+             new-root (alloc/-sio-read-i32 sio new-header eve-map/SABMAPROOT_ROOT_OFF_OFFSET)
+             live-nested (eve-map/collect-all-tree-sab-ptrs sio new-root)
+             ;; Orphaned = in old but not in new
+             orphaned (remove (fn [[_tag off]] (contains? live-nested off)) old-pairs)]
+         (into [] (mapcat (fn [[tag nested-off]]
+                            (collect-nested-collection-offsets sio tag nested-off)))
+               orphaned)))
+
+     (defn- collect-old-value-offsets
+       "Collect all slab offsets owned by old-val that should be retired after a
+        successful CAS. Dispatches to type-specific collectors. new-val is used
+        for same-type diff (only retire changed nodes). For type transitions or
+        unknown types, falls back to [old-ptr].
+        Also recursively collects offsets for nested Eve collections in map values."
+       [old-val new-val old-ptr]
+       (cond
+         (instance? eve-map/EveHashMap old-val)
+         (let [base-offsets (eve-map/collect-retire-diff-offsets old-val new-val)
+               sio (.-sio__ ^js old-val)
+               header-off (.-offset__ ^js old-val)
+               ;; Filter to just node offsets (not the header)
+               retired-nodes (filterv #(not= % header-off) base-offsets)]
+           (if (instance? eve-map/EveHashMap new-val)
+             ;; Map-to-map: diff nested SAB pointers
+             (let [new-header (.-offset__ ^js new-val)
+                   nested-offs (collect-map-nested-sab-diffs sio header-off new-header retired-nodes)]
+               (into base-offsets nested-offs))
+             ;; Map-to-other: all nested SAB pointers are orphaned
+             (let [nested-offs (into [] (mapcat (fn [node-off]
+                                                  (mapcat (fn [[tag off]]
+                                                            (collect-nested-collection-offsets sio tag off))
+                                                          (eve-map/scan-node-value-sab-ptrs sio node-off))))
+                                       retired-nodes)]
+               (into base-offsets nested-offs))))
+
+         (instance? eve-vec/EveVector old-val)
+         (eve-vec/collect-retire-diff-offsets old-val new-val)
+
+         (instance? eve-set/EveHashSet old-val)
+         (eve-set/collect-retire-diff-offsets old-val new-val)
+
+         (instance? eve-list/EveList old-val)
+         (eve-list/collect-retire-diff-offsets old-val new-val)
+
+         ;; EveArray and unknown types — just the header block
+         :else [old-ptr]))
+
      (defn- cljs-resolve-new-ptr
        "Resolve the slab-qualified offset for a new atom root value.
         Returns alloc/NIL_OFFSET for nil, header-off for IEveRoot types,
@@ -486,9 +593,7 @@
                               (not= old-ptr CLAIMED_SENTINEL))
                    ;; Collect offsets to free NOW (both trees are live),
                    ;; but defer the actual freeing until the epoch is safe.
-                     (let [offsets (if (instance? eve-map/EveHashMap old-val)
-                                     (eve-map/collect-retire-diff-offsets old-val new-val)
-                                     [old-ptr])]
+                     (let [offsets (collect-old-value-offsets old-val new-val old-ptr)]
                      ;; Untrack from debug-set immediately so subsequent allocs
                      ;; don't false-positive when these offsets are re-used
                        (doseq [off offsets]
@@ -501,11 +606,8 @@
                                 (not= new-ptr old-ptr))
                      ;; CAS failed — free the abandoned new value immediately.
                      ;; The new nodes were never published, so no reader can see them.
-                       (if (instance? eve-map/EveHashMap new-val)
-                         (d/-sab-retire-diff! new-val
-                                              (when (instance? eve-map/EveHashMap old-val) old-val)
-                                              nil :free)
-                       ;; Non-Eve type was converted to fresh tree — just free header
+                       (if (satisfies? d/ISabRetirable new-val)
+                         (d/-sab-retire-diff! new-val old-val nil :free)
                          (alloc/free! new-ptr)))
                      (cas-backoff! attempt)
                      (recur (inc attempt)))))))))))
@@ -804,6 +906,24 @@
                    #?(:bb (.add ^java.util.List retire-q entry)
                       :clj (.add ^java.util.Queue retire-q entry)))))))))
 
+     (defn- jvm-collect-old-value-offsets
+       "Collect slab offsets owned by old-val for retirement (JVM).
+        Dispatches to type-specific collectors."
+       [old-val new-val old-ptr]
+       (cond
+         (instance? EveVector old-val)
+         (eve-vec/collect-retire-diff-offsets old-val new-val)
+
+         (instance? EveHashSet old-val)
+         (eve-set/collect-retire-diff-offsets old-val new-val)
+
+         (instance? EveList old-val)
+         (eve-list/collect-retire-diff-offsets old-val new-val)
+
+         ;; EveHashMap is handled separately via replaced-log
+         ;; EveArray and unknown types — just the header block
+         :else [old-ptr]))
+
      (defn- jvm-resolve-new-ptr
        "Resolve the slab-qualified offset for a new atom root value (JVM/bb).
         If new-val is already a slab-backed Eve type, returns its header-off
@@ -898,27 +1018,36 @@
                                    (when (and (not= old-ptr alloc/NIL_OFFSET)
                                               (not= old-ptr CLAIMED_SENTINEL))
                                      #?(:bb
-                              ;; bb: use replaced-log for Eve→Eve (structural sharing),
-                              ;; fall back to tree-logs for type changes
-                                        (if (and (satisfies? d/IEveRoot old-val)
-                                                 (satisfies? d/IEveRoot new-val))
+                              ;; bb: use replaced-log for Map→Map (structural sharing),
+                              ;; collect offsets for other Eve types
+                                        (if (and (instance? eve-map/BbEveHashMap old-val)
+                                                 (instance? eve-map/BbEveHashMap new-val))
                                           (let [offs (conj (or replaced-log []) old-ptr)]
                                             (.add ^java.util.List retire-q
                                                   {:offsets offs :epoch (inc new-epoch)}))
-                                          (let [old-key (Integer/valueOf (int old-ptr))
-                                                old-log (.remove ^java.util.HashMap tree-logs old-key)]
+                                          (let [offsets (if (instance? eve-map/BbEveHashMap old-val)
+                                                          (eve-map/collect-retire-diff-offsets old-val new-val)
+                                                          (let [old-key (Integer/valueOf (int old-ptr))
+                                                                old-log (.remove ^java.util.HashMap tree-logs old-key)]
+                                                            (or old-log [old-ptr])))]
                                             (.add ^java.util.List retire-q
-                                                  {:offsets (or old-log [old-ptr])
-                                                   :epoch (inc new-epoch)})))
+                                                  {:offsets offsets :epoch (inc new-epoch)})))
                                         :clj
                                         (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
                                 ;; Map->Map: replaced nodes were collected during path-copy
                                           (let [offs (conj (or replaced-log []) old-ptr)]
                                             (.add ^java.util.Queue retire-q {:offsets offs :epoch (inc new-epoch)}))
-                                ;; Other types: use alloc-log if available, else just header
-                                          (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs
-                                                                 (Integer/valueOf (int old-ptr)))]
-                                            (.add ^java.util.Queue retire-q {:offsets (or old-log [old-ptr])
+                                ;; Other Eve types: collect offsets via type-specific walk
+                                          (let [offsets (cond
+                                                          (instance? EveHashMap old-val)
+                                                          (eve-map/collect-retire-diff-offsets old-val new-val)
+                                                          (satisfies? d/IEveRoot old-val)
+                                                          (jvm-collect-old-value-offsets old-val new-val old-ptr)
+                                                          :else
+                                                          (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs
+                                                                                 (Integer/valueOf (int old-ptr)))]
+                                                            (or old-log [old-ptr])))]
+                                            (.add ^java.util.Queue retire-q {:offsets offsets
                                                                              :epoch (inc new-epoch)}))))))
                        ;; Store new tree's alloc-log for future retire (non-Eve types only)
                        #?(:bb

@@ -295,6 +295,27 @@
            (-sio-free! sio node-off)
            (recur next-off)))))))
 
+(defn collect-retire-diff-offsets
+  "Collect all slab offsets that would be freed by -sab-retire-diff!.
+   Returns a vector of offsets to free when the epoch is safe."
+  [old-list new-value]
+  (let [sio (#?(:cljs .-sio__ :clj .sio__) old-list)
+        hdr (#?(:cljs .-offset__ :clj .offset__) old-list)
+        old-head (-sio-read-i32 sio hdr LIST_HEAD_OFFSET)
+        new-head (when (instance? EveList new-value)
+                   (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) LIST_HEAD_OFFSET))
+        result (volatile! (transient []))]
+    ;; Collect chain nodes that differ
+    (loop [node-off old-head]
+      (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))
+        (vswap! result conj! node-off)
+        (recur (read-node-next sio node-off))))
+    ;; If no new-head (type change), also include header
+    ;; Always include header for old list
+    (when (and hdr (not= hdr NIL_OFFSET))
+      (vswap! result conj! hdr))
+    (persistent! @result)))
+
 ;; ISabRetirable
 (extend-type EveList
   d/ISabRetirable
