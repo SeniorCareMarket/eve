@@ -421,10 +421,13 @@
              (reset! retire-q (or still-live []))))))
 
      (defn- collect-nested-collection-offsets
-       "Given a sio, SAB tag (0x10-0x13), and nested offset, collect ALL slab
+       "Given a sio, SAB tag (0x10-0x13, 0x1C), and nested offset, collect ALL slab
         offsets owned by that nested collection (full tree disposal)."
        [sio tag nested-off]
        (case tag
+         0x1C ;; EveArray — single slab block
+         [nested-off]
+
          0x10 ;; EveHashMap
          (let [root-off (alloc/-sio-read-i32 sio nested-off eve-map/SABMAPROOT_ROOT_OFF_OFFSET)
                tree-offs (eve-map/collect-tree-diff-offsets sio root-off alloc/NIL_OFFSET)

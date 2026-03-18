@@ -1414,7 +1414,8 @@
                                  m1 (-sio-read-u8 sio node-off (+ val-data-pos 1))]
                              (if (and (== m0 0xEE) (== m1 0xDB))
                                (let [tag (-sio-read-u8 sio node-off (+ val-data-pos 2))]
-                                 (if (and (>= tag 0x10) (<= tag 0x13))
+                                 (if (or (and (>= tag 0x10) (<= tag 0x13))
+                                        (== tag 0x1C))
                                    (let [nested-off (-sio-read-i32 sio node-off (+ val-data-pos 3))]
                                      (conj! result [tag nested-off]))
                                    result))
