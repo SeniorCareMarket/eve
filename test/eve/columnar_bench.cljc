@@ -5,7 +5,7 @@
    Runs in two modes:
      :mmap       — mmap-backed persistent atoms (cross-process capable)
      :in-memory  — SAB-backed (CLJS) / heap-backed (JVM) atoms (in-process only)
-   Runs at 2 scales (10K, 100K) to show scaling behavior.
+   Runs at 3 scales (10K, 100K, 1M) to show scaling behavior.
 
    Run via:
      Node:  node target/eve-test/all.js columnar-bench
@@ -41,19 +41,19 @@
 
 (defn- bench
   "Run f repeatedly, return {:mean-ms :min-ms :max-ms}.
-   3 warmup runs discarded, 7 timed runs."
+   2 warmup runs discarded, 5 timed runs, report trimmed mean of middle 3."
   [f]
-  (dotimes [_ 3] (f))
+  (dotimes [_ 2] (f))
   (let [times (loop [i 0 acc []]
-                (if (>= i 7)
+                (if (>= i 5)
                   acc
                   (let [t0 (now-ms)
                         _ (f)
                         elapsed (- (now-ms) t0)]
                     (recur (inc i) (conj acc elapsed)))))
         sorted (sort times)
-        ;; Drop highest and lowest, average the middle 5
-        trimmed (subvec (vec sorted) 1 6)
+        ;; Drop highest and lowest, average the middle 3
+        trimmed (subvec (vec sorted) 1 4)
         mean (/ (double (reduce + 0 trimmed)) (count trimmed))]
     {:mean-ms mean :min-ms (first sorted) :max-ms (last sorted)}))
 
@@ -403,34 +403,50 @@
                     #?(:cljs (.-message e) :clj (.getMessage e))))
       (println))))
 
-(defn run-all! []
-  (reset! results [])
+(defn- bench-header! []
   (println "==============================================================")
   (println (str "  Eve Columnar Benchmarks — " platform))
   (println "  Each swap! does a multi-step pipeline of real work")
-  (println "  Modes: in-memory (SAB/heap) + mmap (persistent)")
-  (println "  7 timed runs (trimmed mean of middle 5)")
+  (println "  2 warmup + 5 timed runs (trimmed mean of middle 3)")
   (println "==============================================================")
-  (println)
+  (println))
 
-  ;; --- MMAP mode (run first — has best slab isolation) ---
+(defn run-mmap! []
+  (reset! results [])
+  (bench-header!)
   (println "=== MMAP (persistent) ===")
   (println)
-  (println "--- 10K ---")
-  (safe-run-tier! 10000 :mmap)
-  (println "--- 100K ---")
-  (safe-run-tier! 100000 :mmap)
+  (doseq [n [10000 100000 1000000]]
+    (println (str "--- " (format-n n) " ---"))
+    (safe-run-tier! n :mmap))
+  (print-summary-table :mmap))
 
-  (print-summary-table :mmap)
-
-  ;; --- In-memory mode (SAB-backed on CLJS, heap on JVM) ---
+(defn run-inmem! []
+  (reset! results [])
+  (bench-header!)
   (println "=== IN-MEMORY (SAB/heap) ===")
   (println)
-  (println "--- 10K ---")
-  (safe-run-tier! 10000 :in-memory)
-  (println "--- 100K ---")
-  (safe-run-tier! 100000 :in-memory)
+  (doseq [n [10000 100000 1000000]]
+    (println (str "--- " (format-n n) " ---"))
+    (safe-run-tier! n :in-memory))
+  (print-summary-table :in-memory))
 
+(defn run-all! []
+  (reset! results [])
+  (bench-header!)
+
+  (println "=== MMAP (persistent) ===")
+  (println)
+  (doseq [n [10000 100000 1000000]]
+    (println (str "--- " (format-n n) " ---"))
+    (safe-run-tier! n :mmap))
+  (print-summary-table :mmap)
+
+  (println "=== IN-MEMORY (SAB/heap) ===")
+  (println)
+  (doseq [n [10000 100000 1000000]]
+    (println (str "--- " (format-n n) " ---"))
+    (safe-run-tier! n :in-memory))
   (print-summary-table :in-memory)
 
   (println "==============================================================")

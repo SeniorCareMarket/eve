@@ -313,3 +313,29 @@ Use X-RAY for storage model validation:
 ```
 
 See CLAUDE.md for test commands and suite details.
+
+## Performance
+
+Eve columnar operations on typed arrays significantly outperform stock Clojure
+at 100K+ elements. Below are representative results from the columnar benchmark
+suite (`clojure -M:columnar-bench` / `node target/eve-test/all.js columnar-bench`).
+
+### JVM In-Memory (heap-backed atoms)
+
+| Workload             |   10K |  100K |    1M |
+|----------------------|------:|------:|------:|
+| Column Arithmetic    | 3.00x | 10.0x | 6.11x |
+| Sort + Top-N         | 3.00x | 4.90x | 4.18x |
+| Dataset Pipeline     | 0.87x | 4.82x | 5.71x |
+
+### Node.js In-Memory (SAB-backed atoms)
+
+| Workload             |  100K |
+|----------------------|------:|
+| Column Arithmetic    |  >80x |
+| Filter + Aggregate   |  >30x |
+
+Eve's typed-array backend avoids per-element boxing and allocation, which becomes
+the dominant cost at scale. At 10K elements, Eve's fixed atom serialization
+overhead may exceed the savings. See [bench-results.md](bench-results.md) for
+full results across all platforms, modes, and scales.

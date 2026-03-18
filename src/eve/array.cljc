@@ -199,6 +199,31 @@
             (str op " only supported on :int32 arrays")))))
 
 ;;-----------------------------------------------------------------------------
+;; Typed-view freshness helper (CLJS only)
+;;
+;; When the coalesc allocator (class 6) grows, it opens a new mmap region with
+;; a new ArrayBuffer.  EveArray instances created before the growth still hold
+;; a cached typed-view over the OLD buffer, which may be detached/stale.
+;;
+;; resolve-live-tv checks: for regular slab classes (0-5) the buffer is fixed,
+;; so the cached view is always valid.  For overflow class (6) it re-resolves
+;; from the current slab instance.
+;;-----------------------------------------------------------------------------
+
+#?(:cljs
+(defn- resolve-live-tv
+  "Return a valid typed view for the given EveArray fields.
+   For regular slab classes the cached view is returned directly.
+   For overflow/coalesc class, resolves fresh from the current slab instance."
+  [cached-tv offset subtype-code]
+  (let [class-idx (alloc/decode-class-idx offset)]
+    (if (== class-idx alloc/OVERFLOW_CLASS_IDX)
+      (let [inst (proto-wasm/get-slab-instance class-idx)
+            buf (.-buffer ^js (:u8 inst))]
+        (make-typed-view buf subtype-code))
+      cached-tv))))
+
+;;-----------------------------------------------------------------------------
 ;; EveArray deftype (via eve/deftype — fields: [sio__ offset__])
 ;;
 ;; Block layout (type-id 0x1D):
@@ -222,19 +247,21 @@
   clojure.lang.Indexed
   (nth [this n]
     (if (and (>= n 0) (< n cnt))
-      #?(:cljs (let [idx (+ (unsigned-bit-shift-right data-byte-offset__ elem-shift__) n)]
+      #?(:cljs (let [tv (resolve-live-tv typed-view__ offset__ subtype__)
+                     idx (+ (unsigned-bit-shift-right data-byte-offset__ elem-shift__) n)]
                  (if atomic?__
-                   (js/Atomics.load typed-view__ idx)
-                   (clojure.core/aget typed-view__ idx)))
+                   (js/Atomics.load tv idx)
+                   (clojure.core/aget tv idx)))
          :clj  (read-element sio__ offset__ n subtype__))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index out of bounds: " n " for length " cnt)))))
   (nth [this n not-found]
     (if (and (>= n 0) (< n cnt))
-      #?(:cljs (let [idx (+ (unsigned-bit-shift-right data-byte-offset__ elem-shift__) n)]
+      #?(:cljs (let [tv (resolve-live-tv typed-view__ offset__ subtype__)
+                     idx (+ (unsigned-bit-shift-right data-byte-offset__ elem-shift__) n)]
                  (if atomic?__
-                   (js/Atomics.load typed-view__ idx)
-                   (clojure.core/aget typed-view__ idx)))
+                   (js/Atomics.load tv idx)
+                   (clojure.core/aget tv idx)))
          :clj  (read-element sio__ offset__ n subtype__))
       not-found))
 
@@ -249,7 +276,8 @@
   clojure.lang.Seqable
   (seq [this]
     (when (pos? cnt)
-      #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__]
+      #?(:cljs (let [tv (resolve-live-tv typed-view__ offset__ subtype__)
+                     es elem-shift__ dbo data-byte-offset__ a? atomic?__]
                  (map (fn [i]
                         (let [idx (+ (unsigned-bit-shift-right dbo es) i)]
                           (if a? (js/Atomics.load tv idx) (clojure.core/aget tv idx))))
@@ -270,7 +298,8 @@
   (reduce [this f]
     (if (zero? cnt)
       (f)
-      #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__
+      #?(:cljs (let [tv (resolve-live-tv typed-view__ offset__ subtype__)
+                      es elem-shift__ dbo data-byte-offset__ a? atomic?__
                       base-idx (unsigned-bit-shift-right dbo es)]
                  (loop [i 1
                         acc (if a? (js/Atomics.load tv base-idx) (clojure.core/aget tv base-idx))]
@@ -288,7 +317,8 @@
 
   clojure.lang.IReduceInit
   (reduce [this f start]
-    #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__
+    #?(:cljs (let [tv (resolve-live-tv typed-view__ offset__ subtype__)
+                    es elem-shift__ dbo data-byte-offset__ a? atomic?__
                     base-idx (unsigned-bit-shift-right dbo es)]
                (loop [i 0 acc start]
                  (if (< i cnt)
@@ -308,7 +338,8 @@
     (if hash-cache__
       hash-cache__
       (let [sub subtype__
-            h #?(:cljs (let [tv typed-view__ es elem-shift__ dbo data-byte-offset__ a? atomic?__
+            h #?(:cljs (let [tv (resolve-live-tv typed-view__ offset__ subtype__)
+                              es elem-shift__ dbo data-byte-offset__ a? atomic?__
                               base-idx (unsigned-bit-shift-right dbo es)]
                          (loop [i 0 h (+ 1 (* 31 sub))]
                            (if (< i cnt)
@@ -562,10 +593,11 @@
     (when (or (< idx 0) (>= idx cnt))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index out of bounds: " idx))))
-    #?(:cljs (let [base-idx (+ (unsigned-bit-shift-right (.-data-byte-offset__ arr) (.-elem-shift__ arr)) idx)]
+    #?(:cljs (let [tv (resolve-live-tv (.-typed-view__ arr) (.-offset__ arr) (.-subtype__ arr))
+                    base-idx (+ (unsigned-bit-shift-right (.-data-byte-offset__ arr) (.-elem-shift__ arr)) idx)]
                (if (.-atomic?__ arr)
-                 (js/Atomics.load (.-typed-view__ arr) base-idx)
-                 (clojure.core/aget (.-typed-view__ arr) base-idx)))
+                 (js/Atomics.load tv base-idx)
+                 (clojure.core/aget tv base-idx)))
        :clj  (read-element (.-sio__ arr) (.-offset__ arr) idx (.-subtype__ arr)))))
 
 (defn aset!
@@ -575,10 +607,11 @@
     (when (or (< idx 0) (>= idx cnt))
       (throw (#?(:cljs js/Error. :clj IndexOutOfBoundsException.)
               (str "Index out of bounds: " idx))))
-    #?(:cljs (let [base-idx (+ (unsigned-bit-shift-right (.-data-byte-offset__ arr) (.-elem-shift__ arr)) idx)]
+    #?(:cljs (let [tv (resolve-live-tv (.-typed-view__ arr) (.-offset__ arr) (.-subtype__ arr))
+                    base-idx (+ (unsigned-bit-shift-right (.-data-byte-offset__ arr) (.-elem-shift__ arr)) idx)]
                (if (.-atomic?__ arr)
-                 (js/Atomics.store (.-typed-view__ arr) base-idx val)
-                 (clojure.core/aset (.-typed-view__ arr) base-idx val)))
+                 (js/Atomics.store tv base-idx val)
+                 (clojure.core/aset tv base-idx val)))
        :clj  (write-element! (.-sio__ arr) (.-offset__ arr) idx (.-subtype__ arr) val))
     val))
 
@@ -915,9 +948,14 @@
 
 (defn get-typed-view
   "Get a raw JS typed array view of this array's data region.
+   Always resolves from the current slab instance to handle coalesc buffer growth.
    Useful for bulk operations. Handle with care."
   [^EveArray arr]
-  (let [tv (.-typed-view__ arr)
+  (let [offset (.-offset__ arr)
+        class-idx (alloc/decode-class-idx offset)
+        inst (proto-wasm/get-slab-instance class-idx)
+        buf (.-buffer ^js (:u8 inst))
+        tv (make-typed-view buf (.-subtype__ arr))
         es (.-elem-shift__ arr)
         dbo (.-data-byte-offset__ arr)
         cnt (count arr)

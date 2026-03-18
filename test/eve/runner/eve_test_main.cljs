@@ -49,7 +49,8 @@
    [eve.dataset-test :as dataset-test]
    [eve.tensor-test :as tensor-test]
    [eve.columnar-bench :as columnar-bench]
-   [eve.perf-audit :as perf-audit]))
+   [eve.perf-audit :as perf-audit]
+   [eve.repro-test :as repro-test]))
 
 ;; Anti-DCE exports — namespace aliases as values force the test namespaces to load.
 ;; The undeclared-var warnings here are expected and harmless.
@@ -83,6 +84,7 @@
 (goog/exportSymbol "eve.tensor_test" tensor-test)
 (goog/exportSymbol "eve.columnar_bench" columnar-bench)
 (goog/exportSymbol "eve.perf_audit" perf-audit)
+(goog/exportSymbol "eve.repro_test" repro-test)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -237,8 +239,18 @@
 (defn- run-columnar-bench! []
   (columnar-bench/run-all!))
 
+(defn- run-columnar-bench-mmap! []
+  (columnar-bench/run-mmap!))
+
+(defn- run-columnar-bench-inmem! []
+  (columnar-bench/run-inmem!))
+
 (defn- run-perf-audit! []
   (perf-audit/run-audit!))
+
+(defn- run-repro! []
+  (load-native-addon!)
+  (repro-test/run-repro!))
 
 (defn- run-all! []
   (t/run-tests
@@ -289,7 +301,10 @@
    "dataset"        run-dataset!
    "tensor"         run-tensor!
    "columnar-bench" run-columnar-bench!
+   "columnar-mmap"  run-columnar-bench-mmap!
+   "columnar-inmem" run-columnar-bench-inmem!
    "perf-audit"     run-perf-audit!
+   "repro"          run-repro!
    "all"            run-all!
    ;; Aliases
    "map-test"        run-slab!
