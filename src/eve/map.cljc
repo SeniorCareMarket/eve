@@ -1541,15 +1541,16 @@
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
     (let [sio (#?(:cljs .-sio__ :clj .sio__) this)
-          old-root (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) this) SABMAPROOT_ROOT_OFF_OFFSET)]
+          old-hdr (#?(:cljs .-offset__ :clj .offset__) this)
+          old-root (-sio-read-i32 sio old-hdr SABMAPROOT_ROOT_OFF_OFFSET)]
       (if (instance? EveHashMap new-value)
         (let [new-root (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) SABMAPROOT_ROOT_OFF_OFFSET)]
           (retire-tree-diff! sio old-root new-root))
         (when (not= old-root NIL_OFFSET)
           (free-hamt-node! sio old-root)))
       ;; Free the header block
-      (when (not= (#?(:cljs .-offset__ :clj .offset__) this) NIL_OFFSET)
-        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this)))))))
+      (when (not= old-hdr NIL_OFFSET)
+        (-sio-free! sio old-hdr))))))
 
 ;;=============================================================================
 ;; Registration

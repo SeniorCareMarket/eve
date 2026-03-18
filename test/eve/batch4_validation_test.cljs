@@ -5,7 +5,9 @@
    [cljs.test :refer-macros [deftest testing is]]
    [eve.atom :as a]
    [eve.map :as sm]
-   [eve.set :as ss]))
+   [eve.set :as ss]
+   [eve.array :as arr]
+   [eve.deftype-proto.alloc :as alloc]))
 
 ;; Platform detection — filesystem tests are node-only
 (def ^:private node?
@@ -126,7 +128,6 @@
           (is (re-find #"record!" content)
               "Bench framework should define record! for timing"))))))
 
-
 ;;=============================================================================
 ;; SharedAtom API tests
 ;;=============================================================================
@@ -196,3 +197,25 @@
       (is (= 30 (get @a1 :age)) "a1 should be unchanged")
       (is (= 26 (get @a2 :age)) "a2 should be updated")
       (is (= 5 (get @a3 :level)) "a3 should be unchanged"))))
+
+;;=============================================================================
+;; Epoch-deferred retirement: HAMT structural nodes go to retire queue
+;;=============================================================================
+
+(deftest swap-retires-hamt-nodes-via-epoch-queue-test
+  (testing "swap! queues old HAMT structural nodes in retire-q (epoch-deferred)"
+    (fresh-env)
+    ;; Swap 1: populate the atom
+    (swap! a/*global-atom-instance* assoc :data (arr/eve-array :float64 [1 2 3]))
+    (let [ds (.-domain-state a/*global-atom-instance*)
+          rq (:retire-q ds)]
+      ;; Swap 2: replace value — old HAMT nodes should be queued
+      (swap! a/*global-atom-instance* assoc :data (arr/eve-array :float64 [4 5 6]))
+      (is (pos? (count @rq))
+          "Retire queue should have entries after swap")
+      (is (every? #(contains? % :offsets) @rq)
+          "Each retire entry should have :offsets")
+      (is (every? #(contains? % :epoch) @rq)
+          "Each retire entry should have :epoch")
+      (is (= 4.0 (first (get @a/*global-atom-instance* :data)))
+          "Value should be updated"))))
