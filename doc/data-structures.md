@@ -322,41 +322,42 @@ Datasets are columnar data frames: named columns (EveArrays) with atom-native
 storage. Built with `eve/deftype` — lives inside Eve atoms, backed by slab memory.
 
 ```clojure
-(require '[eve.alpha :as e])
+(require '[eve.alpha :as e]
+         '[eve.alpha.ds :as ds])
 
 ;; Inside swap! — datasets must be created in atom context
 (swap! my-atom (fn [_]
-  (e/dataset {:price (e/eve-array :float64 [10.5 20.3 15.0])
-              :qty   (e/eve-array :int32 [100 200 150])})))
+  (ds/dataset {:price (e/eve-array :float64 [10.5 20.3 15.0])
+               :qty   (e/eve-array :int32 [100 200 150])})))
 ```
 
 ### Column Access (zero-copy)
 
 ```clojure
-(e/ds-column ds :price)          ;; → EveArray
-(e/ds-column-names ds)           ;; → [:price :qty]
-(e/ds-row-count ds)              ;; → 3
-(e/ds-dtypes ds)                 ;; → {:price :float64 :qty :int32}
+(ds/column my-ds :price)      ;; → EveArray
+(ds/column-names my-ds)       ;; → [:price :qty]
+(ds/row-count my-ds)          ;; → 3
+(ds/dtypes my-ds)             ;; → {:price :float64 :qty :int32}
 ```
 
 ### Structural Operations
 
 ```clojure
-(e/ds-select-columns ds [:price])
-(e/ds-add-column ds :total some-array)
-(e/ds-drop-column ds :qty)
-(e/ds-rename-columns ds {:price :cost})
-(e/ds-head ds 10)
-(e/ds-tail ds 10)
-(e/ds-slice ds 5 15)
+(ds/select-columns my-ds [:price])
+(ds/add-column my-ds :total some-array)
+(ds/drop-column my-ds :qty)
+(ds/rename-columns my-ds {:price :cost})
+(ds/head my-ds 10)
+(ds/tail my-ds 10)
+(ds/slice my-ds 5 15)
 ```
 
 ### Row Operations
 
 ```clojure
-(e/ds-filter-rows ds :price #(> % 12.0))
-(e/ds-sort-by-column ds :price :asc)
-(e/ds-reindex ds idx-array)
+(ds/filter-rows my-ds :price #(> % 12.0))
+(ds/sort-by-column my-ds :price :asc)
+(ds/reindex my-ds idx-array)
 ```
 
 ## Tensor — N-Dimensional Arrays
@@ -365,45 +366,46 @@ Tensors are N-dimensional views over EveArrays. Shape/strides enable zero-copy
 reshaping, transposing, and slicing.
 
 ```clojure
-(require '[eve.alpha :as e])
+(require '[eve.alpha :as e]
+         '[eve.alpha.tensor :as tensor])
 
 ;; Inside swap!
 (swap! my-atom (fn [_]
-  (e/tensor-from-array (e/eve-array :float64 (range 12)) [3 4])))
+  (tensor/from-array (e/eve-array :float64 (range 12)) [3 4])))
 ```
 
 ### Construction
 
 ```clojure
-(e/tensor-from-array arr [3 4])    ;; wrap 12-elem EveArray as 3×4 matrix
-(e/tensor-zeros :float64 [3 4])    ;; allocate + zero-fill
-(e/tensor-ones :int32 [2 3 4])     ;; allocate + fill with 1
+(tensor/from-array arr [3 4])    ;; wrap 12-elem EveArray as 3×4 matrix
+(tensor/zeros :float64 [3 4])    ;; allocate + zero-fill
+(tensor/ones :int32 [2 3 4])     ;; allocate + fill with 1
 ```
 
 ### Shape Operations (zero-copy)
 
 ```clojure
-(e/tensor-reshape t [4 3])        ;; new shape, same data
-(e/tensor-transpose t)            ;; reverse axis order
-(e/tensor-slice-axis t 0 1)       ;; select row 1 → rank-1 view
+(tensor/reshape t [4 3])        ;; new shape, same data
+(tensor/transpose t)            ;; reverse axis order
+(tensor/slice-axis t 0 1)       ;; select row 1 → rank-1 view
 ```
 
 ### Element Access
 
 ```clojure
-(e/tensor-mget t 1 2)             ;; get element at [1,2]
-(e/tensor-mset! t 1 2 42.0)       ;; set element at [1,2]
-(e/tensor-shape t)                 ;; → [3 4]
-(e/tensor-rank t)                  ;; → 2
+(tensor/mget t 1 2)             ;; get element at [1,2]
+(tensor/mset! t 1 2 42.0)       ;; set element at [1,2]
+(tensor/shape t)                 ;; → [3 4]
+(tensor/rank t)                  ;; → 2
 ```
 
 ### Bulk Operations
 
 ```clojure
-(e/tensor-emap f t)                ;; element-wise map
-(e/tensor-ereduce f init t)        ;; reduce all elements
-(e/tensor-to-array t)              ;; flatten to EveArray
-(e/tensor-to-dataset t [:a :b :c]) ;; 2D tensor → Dataset
+(tensor/emap f t)                ;; element-wise map
+(tensor/ereduce f init t)        ;; reduce all elements
+(tensor/to-array t)              ;; flatten to EveArray
+(tensor/to-dataset t [:a :b :c]) ;; 2D tensor → Dataset
 ```
 
 ## Columnar Operations — Argops & Functional
@@ -411,48 +413,52 @@ reshaping, transposing, and slicing.
 Element-wise and index-space operations on EveArrays. These work on standalone
 arrays and dataset columns (columns ARE EveArrays).
 
+```clojure
+(require '[eve.alpha.col :as col])
+```
+
 ### Arithmetic (element-wise, return new EveArray)
 
 ```clojure
-(e/col-add a b)     ;; element-wise addition (either arg may be scalar)
-(e/col-sub a b)     ;; subtraction
-(e/col-mul a b)     ;; multiplication
-(e/col-div a b)     ;; division
+(col/add a b)     ;; element-wise addition (either arg may be scalar)
+(col/sub a b)     ;; subtraction
+(col/mul a b)     ;; multiplication
+(col/div a b)     ;; division
 ```
 
 ### Aggregations (return scalars)
 
 ```clojure
-(e/col-sum col)        ;; sum all elements
-(e/col-mean col)       ;; arithmetic mean
-(e/col-min-val col)    ;; minimum
-(e/col-max-val col)    ;; maximum
+(col/sum my-col)       ;; sum all elements
+(col/mean my-col)      ;; arithmetic mean
+(col/min-val my-col)   ;; minimum
+(col/max-val my-col)   ;; maximum
 ```
 
 ### Comparisons (return `:uint8` mask arrays)
 
 ```clojure
-(e/col-gt a b)      ;; element-wise greater-than
-(e/col-lt a b)      ;; less-than
-(e/col-eq a b)      ;; equality
+(col/gt a b)      ;; element-wise greater-than
+(col/lt a b)      ;; less-than
+(col/eq a b)      ;; equality
 ```
 
 ### Element-wise Map
 
 ```clojure
-(e/col-emap f col)       ;; map f over elements → new array
-(e/col-emap2 f a b)      ;; map f over pairs → new array
+(col/emap f my-col)      ;; map f over elements → new array
+(col/emap2 f a b)        ;; map f over pairs → new array
 ```
 
 ### Index-Space Operations
 
 ```clojure
-(e/argsort col :asc)           ;; indices that would sort col
-(e/argfilter pred col)         ;; indices where pred is true
-(e/argmin col)                 ;; index of minimum
-(e/argmax col)                 ;; index of maximum
-(e/arggroup col)               ;; {value → index-array}
-(e/take-indices col idx-arr)   ;; gather by index array
+(col/argsort my-col :asc)       ;; indices that would sort col
+(col/argfilter pred my-col)     ;; indices where pred is true
+(col/argmin my-col)             ;; index of minimum
+(col/argmax my-col)             ;; index of maximum
+(col/arggroup my-col)           ;; {value → index-array}
+(col/take-indices my-col idx)   ;; gather by index array
 ```
 
 ## Performance
