@@ -1391,6 +1391,62 @@
 
 #?(:bb nil
    :default
+(defn scan-node-value-sab-ptrs
+  "Scan a HAMT bitmap node's inline values for SAB pointer tags (0x10-0x13).
+   Returns a vector of [tag nested-offset] pairs for each nested Eve collection."
+  [sio ^long node-off]
+  (let [node-type (-sio-read-u8 sio node-off 0)]
+    (when (== node-type NODE_TYPE_BITMAP)
+      (let [data-bm (-sio-read-i32 sio node-off 4)
+            node-bm (-sio-read-i32 sio node-off 8)
+            dc (popcount32 data-bm)
+            kv-off (kv-data-start-off data-bm node-bm)]
+        (loop [i 0 pos kv-off result (transient [])]
+          (if (>= i dc)
+            (persistent! result)
+            (let [klen (-sio-read-i32 sio node-off pos)
+                  val-pos (+ pos 4 klen)
+                  vlen (-sio-read-i32 sio node-off val-pos)
+                  val-data-pos (+ val-pos 4)
+                  next-pos (+ val-data-pos vlen)
+                  result (if (>= vlen 7)
+                           (let [m0 (-sio-read-u8 sio node-off val-data-pos)
+                                 m1 (-sio-read-u8 sio node-off (+ val-data-pos 1))]
+                             (if (and (== m0 0xEE) (== m1 0xDB))
+                               (let [tag (-sio-read-u8 sio node-off (+ val-data-pos 2))]
+                                 (if (or (and (>= tag 0x10) (<= tag 0x13))
+                                        (== tag 0x1C))
+                                   (let [nested-off (-sio-read-i32 sio node-off (+ val-data-pos 3))]
+                                     (conj! result [tag nested-off]))
+                                   result))
+                               result))
+                           result)]
+              (recur (inc i) next-pos result)))))))))
+
+#?(:bb nil
+   :default
+(defn collect-all-tree-sab-ptrs
+  "Walk entire HAMT tree and collect all SAB pointer offsets from inline values.
+   Returns a set of nested-offset values."
+  [sio ^long root-off]
+  (if (== root-off NIL_OFFSET)
+    #{}
+    (let [result (volatile! (transient #{}))]
+      (letfn [(walk [off]
+                (when (not= off NIL_OFFSET)
+                  (let [node-type (-sio-read-u8 sio off 0)]
+                    (when (== node-type NODE_TYPE_BITMAP)
+                      (doseq [[_tag nested-off] (scan-node-value-sab-ptrs sio off)]
+                        (vswap! result conj! nested-off))
+                      (let [node-bm (-sio-read-i32 sio off 8)
+                            cc (popcount32 node-bm)]
+                        (dotimes [i cc]
+                          (walk (-sio-read-i32 sio off (+ NODE_HEADER_SIZE (* i 4))))))))))]
+        (walk root-off))
+      (persistent! @result)))))
+
+#?(:bb nil
+   :default
 (defn collect-retire-diff-offsets
   "Collect all slab offsets that would be freed by -sab-retire-diff!.
    Includes both HAMT tree nodes and the header block.
@@ -1541,44 +1597,62 @@
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
     (let [sio (#?(:cljs .-sio__ :clj .sio__) this)
-          old-root (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) this) SABMAPROOT_ROOT_OFF_OFFSET)]
+          old-hdr (#?(:cljs .-offset__ :clj .offset__) this)
+          old-root (-sio-read-i32 sio old-hdr SABMAPROOT_ROOT_OFF_OFFSET)]
       (if (instance? EveHashMap new-value)
         (let [new-root (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) SABMAPROOT_ROOT_OFF_OFFSET)]
           (retire-tree-diff! sio old-root new-root))
         (when (not= old-root NIL_OFFSET)
           (free-hamt-node! sio old-root)))
       ;; Free the header block
-      (when (not= (#?(:cljs .-offset__ :clj .offset__) this) NIL_OFFSET)
-        (-sio-free! sio (#?(:cljs .-offset__ :clj .offset__) this)))))))
+      (when (not= old-hdr NIL_OFFSET)
+        (-sio-free! sio old-hdr))))))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
+;; Collection writer — shared by CLJ and bb
+#?(:cljs nil
+   :default
+   (defn- -write-map-coll!
+     "Serialize a Clojure map to slab as an Eve HAMT map. Returns header offset."
+     [_sio _serialize-elem m]
+     (let [sio alloc/*jvm-slab-ctx*
+           entries (map (fn [[k v]]
+                          (let [kb (value->eve-bytes k)
+                                kh (portable-hash-bytes kb)
+                                vb (value+sio->eve-bytes sio v)]
+                            [kh kb vb]))
+                        m)]
+       (if (empty? entries)
+         (write-map-header! sio 0 NIL_OFFSET)
+         (let [root-off (reduce (fn [root [kh kb vb]]
+                                  (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
+                                    new-root))
+                                NIL_OFFSET entries)]
+           (write-map-header! sio (count m) root-off))))))
+
+;; Type constructor + disposer + builder + collection writer registrations
+#?(:bb
+   (register-jvm-collection-writer! :map -write-map-coll!)
+   :default
+   (eve/register-eve-type!
+    {:fast-tag    ser/FAST_TAG_SAB_MAP
+     :type-id     EveHashMap-type-id
+     :from-header hash-map-from-header
+     :dispose     dispose!
+     :builder-pred map?
+     :builder-ctor into-hash-map
+     :coll-writer #?(:clj {:tag :map :fn -write-map-coll!} :cljs nil)
+     :print-fn    #?(:clj (fn [] (defmethod print-method EveHashMap [m ^java.io.Writer w]
+                                   (#'clojure.core/print-map m print-method w)))
+                     :cljs nil)}))
+
+;; Backward-compat JVM aliases
 #?(:bb nil
    :clj
    (do
-     ;; Register collection writer so mem/value+sio->eve-bytes routes maps here
-     (register-jvm-collection-writer! :map
-                                      (fn [_sio _serialize-elem m]
-         ;; Build HAMT from Clojure map, return header offset
-                                        (let [sio alloc/*jvm-slab-ctx*
-                                              entries (map (fn [[k v]]
-                                                             (let [kb (value->eve-bytes k)
-                                                                   kh (portable-hash-bytes kb)
-                                                                   vb (value+sio->eve-bytes v)]
-                                                               [kh kb vb]))
-                                                           m)]
-                                          (if (empty? entries)
-                                            (write-map-header! sio 0 NIL_OFFSET)
-             ;; Build HAMT from entries
-                                            (let [root-off (reduce (fn [root [kh kb vb]]
-                                                                     (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
-                                                                       new-root))
-                                                                   NIL_OFFSET entries)]
-                                              (write-map-header! sio (count m) root-off))))))
-
-     ;; Backward-compat JVM aliases
      (defn jvm-write-map!
        "Serialize a Clojure map to slab. Returns header offset.
         Backward-compat alias for the registered :map writer."
@@ -1596,35 +1670,4 @@
         (hash-map-from-header sio header-off))
        ([sio header-off _coll-factory]
         (hash-map-from-header sio header-off)))))
-
-;; Type constructor + disposer + builder registrations
-#?(:bb
-   ;; bb: register collection writer only (no deftype, no registry constructors)
-   (register-jvm-collection-writer! :map
-                                    (fn [_sio _serialize-elem m]
-                                      (let [sio alloc/*jvm-slab-ctx*
-                                            entries (map (fn [[k v]]
-                                                           (let [kb (value->eve-bytes k)
-                                                                 kh (portable-hash-bytes kb)
-                                                                 vb (value+sio->eve-bytes sio v)]
-                                                             [kh kb vb]))
-                                                         m)]
-                                        (if (empty? entries)
-                                          (write-map-header! sio 0 NIL_OFFSET)
-                                          (let [root-off (reduce (fn [root [kh kb vb]]
-                                                                   (let [[new-root _] (hamt-assoc sio root kh kb vb 0)]
-                                                                     new-root))
-                                                                 NIL_OFFSET entries)]
-                                            (write-map-header! sio (count m) root-off))))))
-   :default
-   (eve/register-eve-type!
-    {:fast-tag ser/FAST_TAG_SAB_MAP
-     :type-id EveHashMap-type-id
-     :from-header hash-map-from-header
-     :dispose dispose!
-     :builder-pred map?
-     :builder-ctor into-hash-map
-     :print-fn #?(:clj (fn [] (defmethod print-method EveHashMap [m ^java.io.Writer w]
-                                (#'clojure.core/print-map m print-method w)))
-                  :cljs nil)}))
 

@@ -831,6 +831,69 @@
           (if (reduced? result) @result result))))))
 
 ;;=============================================================================
+;; Offset Collection (for epoch-based retirement in mmap atoms)
+;;=============================================================================
+
+(defn collect-hamt-offsets
+  "Recursively collect all slab offsets in a HAMT node tree."
+  [sio slab-off result]
+  (when (not= slab-off NIL_OFFSET)
+    (vswap! result conj! slab-off)
+    (let [node-type (-sio-read-u8 sio slab-off 0)]
+      (when (== node-type NODE_TYPE_BITMAP)
+        (let [node-bm (-sio-read-i32 sio slab-off 8)
+              child-count (popcount32 node-bm)]
+          (dotimes [i child-count]
+            (let [child-off (-sio-read-i32 sio slab-off (+ NODE_HEADER_SIZE (* i 4)))]
+              (collect-hamt-offsets sio child-off result))))))))
+
+(defn- collect-hamt-diff-offsets
+  "Collect old HAMT nodes that differ from the new tree."
+  [sio old-root new-root result]
+  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+    (letfn [(walk [old-off new-off]
+              (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+                (vswap! result conj! old-off)
+                (let [old-type (-sio-read-u8 sio old-off 0)]
+                  (when (== old-type NODE_TYPE_BITMAP)
+                    (let [old-node-bm (-sio-read-i32 sio old-off 8)
+                          new-type (when (not= new-off NIL_OFFSET) (-sio-read-u8 sio new-off 0))
+                          new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                                        (-sio-read-i32 sio new-off 8))]
+                      (loop [remaining old-node-bm
+                             old-idx 0]
+                        (when (not (zero? remaining))
+                          (let [bit (bit-and remaining (- remaining))
+                                old-child (-sio-read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
+                                new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
+                                            (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
+                                              (-sio-read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
+                                            NIL_OFFSET)]
+                            (walk old-child new-child)
+                            (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
+      (walk old-root new-root))))
+
+#?(:bb nil
+   :default
+(defn collect-retire-diff-offsets
+  "Collect all slab offsets that would be freed by -sab-retire-diff!.
+   Returns a vector of offsets to free when the epoch is safe."
+  [old-set new-value]
+  (let [sio (#?(:cljs .-sio__ :clj .sio__) #?(:cljs ^js old-set :clj old-set))
+        header-off (#?(:cljs .-offset__ :clj .offset__) #?(:cljs ^js old-set :clj old-set))
+        root-off (-sio-read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)
+        result (volatile! (transient []))]
+    (if (instance? EveHashSet new-value)
+      (let [new-root-off (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) SABSETROOT_ROOT_OFF_OFFSET)]
+        (collect-hamt-diff-offsets sio root-off new-root-off result))
+      ;; Different type — collect entire old tree
+      (collect-hamt-offsets sio root-off result))
+    ;; Always include header
+    (when (not= header-off NIL_OFFSET)
+      (vswap! result conj! header-off))
+    (persistent! @result))))
+
+;;=============================================================================
 ;; ISabRetirable
 ;;=============================================================================
 
@@ -914,25 +977,58 @@
 ;; Registration
 ;;=============================================================================
 
+;; Collection writer — shared by CLJ and bb
+#?(:cljs nil
+   :default
+   (defn- -write-set-coll!
+     "Serialize a Clojure set to slab as an Eve HAMT set. Returns header offset."
+     [_sio _serialize-elem coll]
+     (let [sio alloc/*jvm-slab-ctx*
+           entries (mapv (fn [v]
+                           (let [^bytes vb (value+sio->eve-bytes sio v)
+                                 vh (portable-hash-bytes vb)]
+                             [vh vb]))
+                         coll)]
+       (if (empty? entries)
+         (write-set-header! sio 0 NIL_OFFSET)
+         (let [root-off (reduce (fn [root [vh vb]]
+                                  (let [[new-root _] (hamt-conj sio root vh vb 0)]
+                                    new-root))
+                                NIL_OFFSET entries)]
+           (write-set-header! sio (count coll) root-off))))))
+
+;; into-hash-set needed by register-eve-type! builder (not for bb)
+#?(:cljs
+   (defn- into-hash-set
+     "Build an EveHashSet from a Clojure set."
+     ([coll] (into-hash-set (alloc/->CljsSlabIO) coll))
+     ([sio coll] (reduce conj (empty-hash-set sio) coll)))
+   :clj
+   (defn- into-hash-set
+     "Build an EveHashSet from a Clojure set."
+     ([coll] (into-hash-set alloc/*jvm-slab-ctx* coll))
+     ([sio coll] (reduce conj (empty-hash-set sio) coll))))
+
+;; Type constructor + disposer + builder + collection writer registrations
+#?(:bb
+   (register-jvm-collection-writer! :set -write-set-coll!)
+   :default
+   (eve/register-eve-type!
+    {:fast-tag     ser/FAST_TAG_SAB_SET
+     :type-id      EveHashSet-type-id
+     :from-header  hash-set-from-header
+     :dispose      dispose!
+     :builder-pred set?
+     :builder-ctor into-hash-set
+     :coll-writer  #?(:clj {:tag :set :fn -write-set-coll!} :cljs nil)
+     :print-fn     #?(:clj (fn [] (defmethod print-method EveHashSet [s ^java.io.Writer w]
+                                    (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w)))
+                      :cljs nil)}))
+
+;; Backward-compat JVM aliases
 #?(:bb nil
    :clj
    (do
-     (register-jvm-collection-writer! :set
-       (fn [sio serialize-val coll]
-         (let [entries (mapv (fn [v]
-                               (let [^bytes vb (value+sio->eve-bytes v)
-                                     vh (portable-hash-bytes vb)]
-                                 [vh vb]))
-                             coll)]
-           (if (empty? entries)
-             (write-set-header! sio 0 NIL_OFFSET)
-             (let [root-off (reduce (fn [root [vh vb]]
-                                      (let [[new-root _] (hamt-conj sio root vh vb 0)]
-                                        new-root))
-                                    NIL_OFFSET entries)]
-               (write-set-header! sio (count coll) root-off))))))
-
-     ;; Backward-compat JVM aliases
      (defn jvm-write-set!
        "Serialize a Clojure set to slab. Returns header offset.
         Backward-compat alias for the registered :set writer."
@@ -944,43 +1040,6 @@
         Backward-compat alias. coll-factory arg is ignored (registry-based)."
        ([sio header-off] (hash-set-from-header sio header-off))
        ([sio header-off _coll-factory] (hash-set-from-header sio header-off)))))
-
-#?(:bb
-   ;; bb: register collection writer only (no deftype, no registry constructors)
-   (register-jvm-collection-writer! :set
-     (fn [_sio _serialize-elem coll]
-       (let [sio alloc/*jvm-slab-ctx*
-             entries (mapv (fn [v]
-                             (let [^bytes vb (value+sio->eve-bytes v)
-                                   vh (portable-hash-bytes vb)]
-                               [vh vb]))
-                           coll)]
-         (if (empty? entries)
-           (write-set-header! sio 0 NIL_OFFSET)
-           (let [root-off (reduce (fn [root [vh vb]]
-                                    (let [[new-root _] (hamt-conj sio root vh vb 0)]
-                                      new-root))
-                                  NIL_OFFSET entries)]
-             (write-set-header! sio (count coll) root-off))))))
-   :default
-(do
-(defn- into-hash-set
-  "Build an EveHashSet from a Clojure set."
-  ([coll] (into-hash-set #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
-  ([sio coll] (reduce conj (empty-hash-set sio) coll)))
-
-;; Type constructor + disposer + builder registrations
-(eve/register-eve-type!
-  {:fast-tag    ser/FAST_TAG_SAB_SET
-   :type-id     EveHashSet-type-id
-   :from-header hash-set-from-header
-   :dispose     dispose!
-   :builder-pred set?
-   :builder-ctor into-hash-set
-   :print-fn    #?(:clj (fn [] (defmethod print-method EveHashSet [s ^java.io.Writer w]
-                                  (#'clojure.core/print-sequential "#{" #'clojure.core/pr-on " " "}" (seq s) w)))
-                   :cljs nil)})
-)) ;; end #?(:bb nil :default ...)
 
 
 ;; No-op pool stub — pool system removed, kept for backward compat

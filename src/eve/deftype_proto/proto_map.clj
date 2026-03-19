@@ -50,6 +50,10 @@
     {:cljs-proto IFn
      :methods {invoke {:cljs-name -invoke :arities [[_ a] [_ a b]]}}}
 
+    clojure.lang.IReduce
+    {:cljs-proto IReduce
+     :methods {reduce {:cljs-name -reduce :arities [[_ f]]}}}
+
     clojure.lang.IReduceInit
     {:cljs-proto IReduce
      :methods {reduce {:cljs-name -reduce :arities [[_ f init]]}}}

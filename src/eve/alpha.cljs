@@ -2,19 +2,21 @@
   "Eve public API.
 
    Provides shared-memory persistent data structures and atoms.
-   Re-exports core functionality for standalone library consumption."
+   Re-exports core functionality for standalone library consumption.
+
+   Columnar subsystems are in separate namespaces:
+     eve.alpha.ds      — Dataset (columnar data frames)
+     eve.alpha.tensor  — Tensor (N-dimensional arrays)
+     eve.alpha.col     — Columnar ops (element-wise + index-space)"
   (:refer-clojure :exclude [atom aget aset hash-map hash-set])
   (:require
-   [eve.shared-atom :as a]
+   [eve.atom :as a]
    [eve.array :as arr]
    [eve.deftype-proto.alloc :as eve-alloc]
    [eve.map :as eve-map]
    [eve.vec]
    [eve.set :as eve-set]
    [eve.list]))
-
-;; Cross-module registrations (avoids circular deps between map ↔ shared-atom)
-(a/register-xray-hamt-validator! eve-map/validate-from-header-offset)
 
 ;; Auto-initialize slab allocator on namespace load
 (defonce ^:private init-promise (eve-alloc/init!))

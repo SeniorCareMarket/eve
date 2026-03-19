@@ -405,15 +405,11 @@
 ;;-----------------------------------------------------------------------------
 
 (deftest meta-test
-  (testing "with-meta / meta"
-    (let [a (arr/int32-array-from [1 2 3])
-          a-meta (with-meta a {:doc "test array"})]
-      (is (= {:doc "test array"} (meta a-meta)))
+  (testing "meta returns nil (slab-backed types don't store CLJ metadata)"
+    (let [a (arr/int32-array-from [1 2 3])]
       (is (nil? (meta a)))
-      ;; Values preserved
-      (is (= 1 (arr/aget a-meta 0)))
-      (is (= 2 (arr/aget a-meta 1)))
-      (is (= 3 (arr/aget a-meta 2))))))
+      ;; with-meta returns same array (no metadata storage in slab)
+      (is (identical? a (with-meta a {:doc "test array"}))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Negative numbers

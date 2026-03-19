@@ -12,8 +12,7 @@
   (:require-macros [eve.deftype])
   (:require
    [eve.deftype]
-   [eve.deftype.runtime :as rt]
-   [eve.shared-atom :as atom]))
+   [eve.deftype-proto.alloc :as alloc]))
 
 ;;-----------------------------------------------------------------------------
 ;; Forward declarations
@@ -66,7 +65,7 @@
   [n]
   ;; de Bruijn table for 32-bit
   (let [table #js [0 1 28 2 29 14 24 3 30 22 20 15 25 17 4 8
-                    31 27 13 23 21 19 16 7 26 12 18 6 11 5 10 9]]
+                   31 27 13 23 21 19 16 7 26 12 18 6 11 5 10 9]]
     (aget table (bit-and (unsigned-bit-shift-right
                           (imul (bit-and n (- n)) 0x077CB531)
                           27)
@@ -93,13 +92,13 @@
 ;;-----------------------------------------------------------------------------
 
 (eve.deftype/eve-deftype IntMapLeaf
-  [^:int32 key value]
+                         [^:int32 key value]
 
-  ILookup
-  (-lookup [this k]
-    (case k :key key :value value nil))
-  (-lookup [this k not-found]
-    (case k :key key :value value not-found)))
+                         ILookup
+                         (-lookup [this k]
+                                  (case k :key key :value value nil))
+                         (-lookup [this k not-found]
+                                  (case k :key key :value value not-found)))
 
 ;;-----------------------------------------------------------------------------
 ;; IntMapBranch — 16-way branching internal node
@@ -112,27 +111,27 @@
 ;;-----------------------------------------------------------------------------
 
 (eve.deftype/eve-deftype IntMapBranch
-  [^:int32 prefix
-   ^:int32 bit-offset
-   ^:int32 epoch
-   ^:int32 c0  ^:int32 c1  ^:int32 c2  ^:int32 c3
-   ^:int32 c4  ^:int32 c5  ^:int32 c6  ^:int32 c7
-   ^:int32 c8  ^:int32 c9  ^:int32 c10 ^:int32 c11
-   ^:int32 c12 ^:int32 c13 ^:int32 c14 ^:int32 c15]
+                         [^:int32 prefix
+                          ^:int32 bit-offset
+                          ^:int32 epoch
+                          ^:int32 c0 ^:int32 c1 ^:int32 c2 ^:int32 c3
+                          ^:int32 c4 ^:int32 c5 ^:int32 c6 ^:int32 c7
+                          ^:int32 c8 ^:int32 c9 ^:int32 c10 ^:int32 c11
+                          ^:int32 c12 ^:int32 c13 ^:int32 c14 ^:int32 c15]
 
-  ILookup
-  (-lookup [this k]
-    (case k
-      :prefix prefix :bit-offset bit-offset :epoch epoch
-      :c0 c0 :c1 c1 :c2 c2 :c3 c3 :c4 c4 :c5 c5 :c6 c6 :c7 c7
-      :c8 c8 :c9 c9 :c10 c10 :c11 c11 :c12 c12 :c13 c13 :c14 c14 :c15 c15
-      nil))
-  (-lookup [this k not-found]
-    (case k
-      :prefix prefix :bit-offset bit-offset :epoch epoch
-      :c0 c0 :c1 c1 :c2 c2 :c3 c3 :c4 c4 :c5 c5 :c6 c6 :c7 c7
-      :c8 c8 :c9 c9 :c10 c10 :c11 c11 :c12 c12 :c13 c13 :c14 c14 :c15 c15
-      not-found)))
+                         ILookup
+                         (-lookup [this k]
+                                  (case k
+                                    :prefix prefix :bit-offset bit-offset :epoch epoch
+                                    :c0 c0 :c1 c1 :c2 c2 :c3 c3 :c4 c4 :c5 c5 :c6 c6 :c7 c7
+                                    :c8 c8 :c9 c9 :c10 c10 :c11 c11 :c12 c12 :c13 c13 :c14 c14 :c15 c15
+                                    nil))
+                         (-lookup [this k not-found]
+                                  (case k
+                                    :prefix prefix :bit-offset bit-offset :epoch epoch
+                                    :c0 c0 :c1 c1 :c2 c2 :c3 c3 :c4 c4 :c5 c5 :c6 c6 :c7 c7
+                                    :c8 c8 :c9 c9 :c10 c10 :c11 c11 :c12 c12 :c13 c13 :c14 c14 :c15 c15
+                                    not-found)))
 
 ;;-----------------------------------------------------------------------------
 ;; IntMapBinaryBranch — top-level split for negative/positive keys
@@ -142,67 +141,29 @@
 ;;-----------------------------------------------------------------------------
 
 (eve.deftype/eve-deftype IntMapBinaryBranch
-  [^:int32 neg-off ^:int32 pos-off]
+                         [^:int32 neg-off ^:int32 pos-off]
 
-  ILookup
-  (-lookup [this k]
-    (case k :neg-off neg-off :pos-off pos-off nil))
-  (-lookup [this k not-found]
-    (case k :neg-off neg-off :pos-off pos-off not-found)))
-
-;;-----------------------------------------------------------------------------
-;; Environment access — automatically gets env from global atom
-;;-----------------------------------------------------------------------------
-
-(defn- get-env
-  "Get the SAB environment from the global atom instance.
-   This is the key abstraction that hides SAB from users."
-  []
-  (when-let [global-atom atom/*global-atom-instance*]
-    (.-s-atom-env ^js global-atom)))
+                         ILookup
+                         (-lookup [this k]
+                                  (case k :neg-off neg-off :pos-off pos-off nil))
+                         (-lookup [this k not-found]
+                                  (case k :neg-off neg-off :pos-off pos-off not-found)))
 
 ;;-----------------------------------------------------------------------------
 ;; Polymorphic node loading — read type-id byte to pick constructor
 ;;-----------------------------------------------------------------------------
 
-(def ^:private leaf-type-id (volatile! -1))
-(def ^:private branch-type-id (volatile! -1))
-(def ^:private binary-branch-type-id (volatile! -1))
-(def ^:private initialized? (volatile! false))
-
-(defn- ensure-initialized!
-  "Lazily initialize type-ids on first use. Called automatically."
-  [env]
-  (when-not @initialized?
-    (let [dv (js/DataView. (:sab env))
-          ;; Create sentinel instances to discover type-ids
-          leaf (->IntMapLeaf env 0 nil)
-          branch (->IntMapBranch env 0 0 0
-                                 -1 -1 -1 -1 -1 -1 -1 -1
-                                 -1 -1 -1 -1 -1 -1 -1 -1)
-          bb (->IntMapBinaryBranch env -1 -1)]
-      (vreset! leaf-type-id (.getUint8 dv (.-eve-offset leaf)))
-      (vreset! branch-type-id (.getUint8 dv (.-eve-offset branch)))
-      (vreset! binary-branch-type-id (.getUint8 dv (.-eve-offset bb)))
-      (vreset! initialized? true))))
-
-(defn init-int-map!
-  "Initialize int-map type-ids for the given env. This is called automatically
-   on first use, but can be called explicitly in worker threads to ensure
-   type-ids are discovered before concurrent operations begin."
-  [env]
-  (ensure-initialized! env))
-
 (defn load-node
-  "Given env and a raw int32 offset, reconstruct the appropriate node type.
+  "Given a slab-qualified offset, reconstruct the appropriate node type.
    Returns nil if offset is -1."
-  [env offset]
+  [offset]
   (when (not= -1 offset)
-    (let [type-id (.getUint8 (js/DataView. (:sab env)) offset)]
+    (let [base (alloc/resolve-dv! offset)
+          type-id (.getUint8 alloc/resolved-dv base)]
       (condp == type-id
-        @leaf-type-id          (IntMapLeaf. env offset)
-        @branch-type-id        (IntMapBranch. env offset)
-        @binary-branch-type-id (IntMapBinaryBranch. env offset)
+        IntMapLeaf-type-id (IntMapLeaf. offset)
+        IntMapBranch-type-id (IntMapBranch. offset)
+        IntMapBinaryBranch-type-id (IntMapBinaryBranch. offset)
         (throw (js/Error. (str "Unknown int-map node type-id: " type-id
                                " at offset " offset)))))))
 
@@ -219,32 +180,32 @@
 
 (defn- branch-child
   "Load the child node at index i from a branch. Returns nil if empty."
-  [env branch i]
-  (load-node env
-    (case (int i)
-      0  (:c0 branch)  1  (:c1 branch)  2  (:c2 branch)  3  (:c3 branch)
-      4  (:c4 branch)  5  (:c5 branch)  6  (:c6 branch)  7  (:c7 branch)
-      8  (:c8 branch)  9  (:c9 branch)  10 (:c10 branch) 11 (:c11 branch)
-      12 (:c12 branch) 13 (:c13 branch) 14 (:c14 branch) 15 (:c15 branch))))
+  [branch i]
+  (load-node
+   (case (int i)
+     0 (:c0 branch) 1 (:c1 branch) 2 (:c2 branch) 3 (:c3 branch)
+     4 (:c4 branch) 5 (:c5 branch) 6 (:c6 branch) 7 (:c7 branch)
+     8 (:c8 branch) 9 (:c9 branch) 10 (:c10 branch) 11 (:c11 branch)
+     12 (:c12 branch) 13 (:c13 branch) 14 (:c14 branch) 15 (:c15 branch))))
 
 (defn- branch-child-offset
   "Get the raw offset of child at index i."
   [branch i]
   (case (int i)
-    0  (:c0 branch)  1  (:c1 branch)  2  (:c2 branch)  3  (:c3 branch)
-    4  (:c4 branch)  5  (:c5 branch)  6  (:c6 branch)  7  (:c7 branch)
-    8  (:c8 branch)  9  (:c9 branch)  10 (:c10 branch) 11 (:c11 branch)
+    0 (:c0 branch) 1 (:c1 branch) 2 (:c2 branch) 3 (:c3 branch)
+    4 (:c4 branch) 5 (:c5 branch) 6 (:c6 branch) 7 (:c7 branch)
+    8 (:c8 branch) 9 (:c9 branch) 10 (:c10 branch) 11 (:c11 branch)
     12 (:c12 branch) 13 (:c13 branch) 14 (:c14 branch) 15 (:c15 branch)))
 
 (defn- make-branch-with-children
   "Create a new Branch with 16 child offsets given as a JS array."
-  [env prefix bit-offset epoch children]
-  (->IntMapBranch env prefix bit-offset epoch
-                  (aget children 0)  (aget children 1)
-                  (aget children 2)  (aget children 3)
-                  (aget children 4)  (aget children 5)
-                  (aget children 6)  (aget children 7)
-                  (aget children 8)  (aget children 9)
+  [prefix bit-offset epoch children]
+  (->IntMapBranch prefix bit-offset epoch
+                  (aget children 0) (aget children 1)
+                  (aget children 2) (aget children 3)
+                  (aget children 4) (aget children 5)
+                  (aget children 6) (aget children 7)
+                  (aget children 8) (aget children 9)
                   (aget children 10) (aget children 11)
                   (aget children 12) (aget children 13)
                   (aget children 14) (aget children 15)))
@@ -253,11 +214,11 @@
   "Copy all 16 child offsets from a branch into a new JS Int32Array."
   [branch]
   (let [a (js/Int32Array. 16)]
-    (aset a 0  (:c0 branch))  (aset a 1  (:c1 branch))
-    (aset a 2  (:c2 branch))  (aset a 3  (:c3 branch))
-    (aset a 4  (:c4 branch))  (aset a 5  (:c5 branch))
-    (aset a 6  (:c6 branch))  (aset a 7  (:c7 branch))
-    (aset a 8  (:c8 branch))  (aset a 9  (:c9 branch))
+    (aset a 0 (:c0 branch)) (aset a 1 (:c1 branch))
+    (aset a 2 (:c2 branch)) (aset a 3 (:c3 branch))
+    (aset a 4 (:c4 branch)) (aset a 5 (:c5 branch))
+    (aset a 6 (:c6 branch)) (aset a 7 (:c7 branch))
+    (aset a 8 (:c8 branch)) (aset a 9 (:c9 branch))
     (aset a 10 (:c10 branch)) (aset a 11 (:c11 branch))
     (aset a 12 (:c12 branch)) (aset a 13 (:c13 branch))
     (aset a 14 (:c14 branch)) (aset a 15 (:c15 branch))
@@ -271,9 +232,9 @@
     a))
 
 (defn- node-offset
-  "Get the SAB offset from a node, or -1 if nil."
+  "Get the slab-qualified offset from a node, or -1 if nil."
   [node]
-  (if (nil? node) -1 (.-eve-offset ^js node)))
+  (if (nil? node) -1 (.-offset__ ^js node)))
 
 ;;-----------------------------------------------------------------------------
 ;; IIntMapNode implementations
@@ -295,24 +256,21 @@
       (cond
         (== k node-key)
         (let [v' (if (nil? merge-fn) v (merge-fn (:value node) v))]
-          (->IntMapLeaf (.-eve-env node) k v'))
+          (->IntMapLeaf k v'))
 
         ;; Different sign — need BinaryBranch
         (and (neg? node-key) (>= k 0))
-        (->IntMapBinaryBranch (.-eve-env node)
-                              (.-eve-offset node)
-                              (.-eve-offset (->IntMapLeaf (.-eve-env node) k v)))
+        (->IntMapBinaryBranch (.-offset__ node)
+                              (.-offset__ (->IntMapLeaf k v)))
 
         (and (neg? k) (>= node-key 0))
-        (->IntMapBinaryBranch (.-eve-env node)
-                              (.-eve-offset (->IntMapLeaf (.-eve-env node) k v))
-                              (.-eve-offset node))
+        (->IntMapBinaryBranch (.-offset__ (->IntMapLeaf k v))
+                              (.-offset__ node))
 
         :else
-        (let [env (.-eve-env node)
-              boff (branching-offset k node-key)
+        (let [boff (branching-offset k node-key)
               children (empty-children)
-              branch (make-branch-with-children env k boff epoch children)]
+              branch (make-branch-with-children k boff epoch children)]
           (-> branch
               (-im-assoc node-key epoch merge-fn (:value node))
               (-im-assoc k epoch merge-fn v))))))
@@ -325,7 +283,7 @@
   (-im-update [node k epoch f]
     (let [node-key (:key node)]
       (if (== k node-key)
-        (->IntMapLeaf (.-eve-env node) k (f (:value node)))
+        (->IntMapLeaf k (f (:value node)))
         (-im-assoc node k epoch nil (f nil)))))
 
   (-im-merge [node other epoch f]
@@ -356,36 +314,33 @@
     (loop [i 0 cnt 0]
       (if (== i 16)
         cnt
-        (let [child (branch-child (.-eve-env branch) branch i)]
+        (let [child (branch-child branch i)]
           (recur (inc i) (if child (+ cnt (-im-count child)) cnt))))))
 
   (-im-get [branch k default-val]
-    (let [child (branch-child (.-eve-env branch) branch (branch-index-of branch k))]
+    (let [child (branch-child branch (branch-index-of branch k))]
       (if (nil? child)
         default-val
         (-im-get child k default-val))))
 
   (-im-assoc [branch k epoch merge-fn v]
-    (let [env (.-eve-env branch)
-          prefix (:prefix branch)
+    (let [prefix (:prefix branch)
           boff (:bit-offset branch)
           offset-prime (branching-offset k prefix)]
       (cond
         ;; Different signs — need BinaryBranch
         (and (neg? prefix) (>= k 0))
-        (->IntMapBinaryBranch env
-                              (.-eve-offset branch)
-                              (.-eve-offset (->IntMapLeaf env k v)))
+        (->IntMapBinaryBranch (.-offset__ branch)
+                              (.-offset__ (->IntMapLeaf k v)))
 
         (and (neg? k) (>= prefix 0))
-        (->IntMapBinaryBranch env
-                              (.-eve-offset (->IntMapLeaf env k v))
-                              (.-eve-offset branch))
+        (->IntMapBinaryBranch (.-offset__ (->IntMapLeaf k v))
+                              (.-offset__ branch))
 
         ;; Need a new branch above this one
         (> offset-prime boff)
         (let [children (empty-children)
-              new-branch (make-branch-with-children env k offset-prime epoch children)]
+              new-branch (make-branch-with-children k offset-prime epoch children)]
           (-> new-branch
               (-im-merge branch epoch nil)
               (-im-assoc k epoch merge-fn v)))
@@ -393,24 +348,23 @@
         ;; At or below our level
         :else
         (let [idx (branch-index-of branch k)
-              child (branch-child env branch idx)]
+              child (branch-child branch idx)]
           (if (nil? child)
             ;; Empty slot — insert leaf
             (let [children (copy-children branch)]
-              (aset children idx (.-eve-offset (->IntMapLeaf env k v)))
-              (make-branch-with-children env prefix boff epoch children))
+              (aset children idx (.-offset__ (->IntMapLeaf k v)))
+              (make-branch-with-children prefix boff epoch children))
             ;; Recurse into child
             (let [child-prime (-im-assoc child k epoch merge-fn v)]
               (if (identical? child child-prime)
                 branch
                 (let [children (copy-children branch)]
                   (aset children idx (node-offset child-prime))
-                  (make-branch-with-children env prefix boff epoch children)))))))))
+                  (make-branch-with-children prefix boff epoch children)))))))))
 
   (-im-dissoc [branch k epoch]
-    (let [env (.-eve-env branch)
-          idx (branch-index-of branch k)
-          child (branch-child env branch idx)]
+    (let [idx (branch-index-of branch k)
+          child (branch-child branch idx)]
       (if (nil? child)
         branch
         (let [child-prime (-im-dissoc child k epoch)]
@@ -424,137 +378,130 @@
                   (cond
                     (zero? remaining) nil
                     (== remaining 1) only-child ;; collapse singleton
-                    :else (make-branch-with-children env (:prefix branch)
+                    :else (make-branch-with-children (:prefix branch)
                                                      (:bit-offset branch)
                                                      epoch children))
                   (let [off (aget children i)]
                     (if (not= off -1)
-                      (recur (inc i) (inc remaining) (load-node env off))
+                      (recur (inc i) (inc remaining) (load-node off))
                       (recur (inc i) remaining only-child)))))))))))
 
   (-im-update [branch k epoch f]
-    (let [env (.-eve-env branch)
-          prefix (:prefix branch)
+    (let [prefix (:prefix branch)
           boff (:bit-offset branch)
           offset-prime (branching-offset k prefix)]
       (cond
         (and (neg? prefix) (>= k 0))
-        (->IntMapBinaryBranch env
-                              (.-eve-offset branch)
-                              (.-eve-offset (->IntMapLeaf env k (f nil))))
+        (->IntMapBinaryBranch (.-offset__ branch)
+                              (.-offset__ (->IntMapLeaf k (f nil))))
 
         (and (neg? k) (>= prefix 0))
-        (->IntMapBinaryBranch env
-                              (.-eve-offset (->IntMapLeaf env k (f nil)))
-                              (.-eve-offset branch))
+        (->IntMapBinaryBranch (.-offset__ (->IntMapLeaf k (f nil)))
+                              (.-offset__ branch))
 
         (> offset-prime boff)
         (let [children (empty-children)
-              new-branch (make-branch-with-children env k offset-prime epoch children)]
+              new-branch (make-branch-with-children k offset-prime epoch children)]
           (-> new-branch
               (-im-merge branch epoch nil)
               (-im-update k epoch f)))
 
         :else
         (let [idx (branch-index-of branch k)
-              child (branch-child env branch idx)]
+              child (branch-child branch idx)]
           (if (nil? child)
             (let [children (copy-children branch)]
-              (aset children idx (.-eve-offset (->IntMapLeaf env k (f nil))))
-              (make-branch-with-children env prefix boff epoch children))
+              (aset children idx (.-offset__ (->IntMapLeaf k (f nil))))
+              (make-branch-with-children prefix boff epoch children))
             (let [child-prime (-im-update child k epoch f)]
               (if (identical? child child-prime)
                 branch
                 (let [children (copy-children branch)]
                   (aset children idx (node-offset child-prime))
-                  (make-branch-with-children env prefix boff epoch children)))))))))
+                  (make-branch-with-children prefix boff epoch children)))))))))
 
   (-im-merge [branch other epoch f]
-    (let [env (.-eve-env branch)]
-      (cond
-        (instance? IntMapBranch other)
-        (let [other-prefix (:prefix other)
-              other-boff (:bit-offset other)
-              boff (:bit-offset branch)
-              prefix (:prefix branch)
-              offset-prime (branching-offset prefix other-prefix)]
-          (cond
-            ;; Sign mismatch
-            (and (neg? other-prefix) (>= prefix 0))
-            (->IntMapBinaryBranch env (.-eve-offset other) (.-eve-offset branch))
+    (cond
+      (instance? IntMapBranch other)
+      (let [other-prefix (:prefix other)
+            other-boff (:bit-offset other)
+            boff (:bit-offset branch)
+            prefix (:prefix branch)
+            offset-prime (branching-offset prefix other-prefix)]
+        (cond
+          ;; Sign mismatch
+          (and (neg? other-prefix) (>= prefix 0))
+          (->IntMapBinaryBranch (.-offset__ other) (.-offset__ branch))
 
-            (and (neg? prefix) (>= other-prefix 0))
-            (->IntMapBinaryBranch env (.-eve-offset branch) (.-eve-offset other))
+          (and (neg? prefix) (>= other-prefix 0))
+          (->IntMapBinaryBranch (.-offset__ branch) (.-offset__ other))
 
-            ;; Need higher branch
-            (and (> offset-prime boff) (> offset-prime other-boff))
-            (let [children (empty-children)
-                  new-branch (make-branch-with-children env prefix offset-prime epoch children)]
-              (-> new-branch
-                  (-im-merge branch epoch (or f default-merge))
-                  (-im-merge other epoch (or f default-merge))))
+          ;; Need higher branch
+          (and (> offset-prime boff) (> offset-prime other-boff))
+          (let [children (empty-children)
+                new-branch (make-branch-with-children prefix offset-prime epoch children)]
+            (-> new-branch
+                (-im-merge branch epoch (or f default-merge))
+                (-im-merge other epoch (or f default-merge))))
 
-            ;; We contain the other
-            (> boff other-boff)
-            (let [idx (branch-index-of branch other-prefix)
-                  children (copy-children branch)
-                  child (branch-child env branch idx)]
-              (aset children idx
-                    (node-offset (if child (-im-merge child other epoch f) other)))
-              (make-branch-with-children env prefix boff epoch children))
+          ;; We contain the other
+          (> boff other-boff)
+          (let [idx (branch-index-of branch other-prefix)
+                children (copy-children branch)
+                child (branch-child branch idx)]
+            (aset children idx
+                  (node-offset (if child (-im-merge child other epoch f) other)))
+            (make-branch-with-children prefix boff epoch children))
 
-            ;; Other contains us
-            (< boff other-boff)
-            (-im-merge other branch epoch (invert-fn (or f default-merge)))
+          ;; Other contains us
+          (< boff other-boff)
+          (-im-merge other branch epoch (invert-fn (or f default-merge)))
 
-            ;; Same level — merge children pairwise
-            :else
-            (let [children (js/Int32Array. 16)]
-              (dotimes [i 16]
-                (let [n (branch-child env branch i)
-                      n-prime (branch-child env other i)]
-                  (aset children i
-                        (cond
-                          (nil? n)       (node-offset n-prime)
-                          (nil? n-prime) (node-offset n)
-                          :else          (node-offset (-im-merge n n-prime epoch f))))))
-              (make-branch-with-children env prefix boff epoch children))))
+          ;; Same level — merge children pairwise
+          :else
+          (let [children (js/Int32Array. 16)]
+            (dotimes [i 16]
+              (let [n (branch-child branch i)
+                    n-prime (branch-child other i)]
+                (aset children i
+                      (cond
+                        (nil? n) (node-offset n-prime)
+                        (nil? n-prime) (node-offset n)
+                        :else (node-offset (-im-merge n n-prime epoch f))))))
+            (make-branch-with-children prefix boff epoch children))))
 
-        ;; Other is a Leaf or BinaryBranch — flip and merge
-        :else
-        (-im-merge other branch epoch (invert-fn (or f default-merge))))))
+      ;; Other is a Leaf or BinaryBranch — flip and merge
+      :else
+      (-im-merge other branch epoch (invert-fn (or f default-merge)))))
 
   (-im-reduce [branch f init]
     (loop [i 0 acc init]
       (if (or (== i 16) (reduced? acc))
         acc
-        (let [child (branch-child (.-eve-env branch) branch i)]
+        (let [child (branch-child branch i)]
           (recur (inc i) (if child (-im-reduce child f acc) acc))))))
 
   (-im-kvreduce [branch f init]
     (loop [i 0 acc init]
       (if (or (== i 16) (reduced? acc))
         acc
-        (let [child (branch-child (.-eve-env branch) branch i)]
+        (let [child (branch-child branch i)]
           (recur (inc i) (if child (-im-kvreduce child f acc) acc))))))
 
   (-im-seq [branch]
-    (let [env (.-eve-env branch)]
-      (mapcat (fn [i]
-                (when-let [child (branch-child env branch i)]
-                  (-im-seq child)))
-              (cljs.core/range 0 16))))
+    (mapcat (fn [i]
+              (when-let [child (branch-child branch i)]
+                (-im-seq child)))
+            (cljs.core/range 0 16)))
 
   (-im-seq-reverse [branch]
-    (let [env (.-eve-env branch)]
-      (mapcat (fn [i]
-                (when-let [child (branch-child env branch i)]
-                  (-im-seq-reverse child)))
-              (cljs.core/range 15 -1 -1))))
+    (mapcat (fn [i]
+              (when-let [child (branch-child branch i)]
+                (-im-seq-reverse child)))
+            (cljs.core/range 15 -1 -1)))
 
   (-im-range [branch min-k max-k]
-    (let [env (.-eve-env branch)
-          prefix (:prefix branch)
+    (let [prefix (:prefix branch)
           boff (:bit-offset branch)
           ;; Compute the range of this node's keyspace
           node-mask (if (< boff 28)
@@ -580,8 +527,8 @@
             (if (== i 16)
               (cond
                 (zero? num-children) nil
-                (== num-children 1) (load-node env only-child-off)
-                :else (make-branch-with-children env prefix boff (:epoch branch) children))
+                (== num-children 1) (load-node only-child-off)
+                :else (make-branch-with-children prefix boff (:epoch branch) children))
               (let [child-off (branch-child-offset branch i)]
                 (if (== child-off -1)
                   (do (aset children i -1)
@@ -589,8 +536,8 @@
                   (let [child (if (or (< i min-i) (> i max-i))
                                 nil ;; outside range
                                 (if (and (< min-i i) (< i max-i))
-                                  (load-node env child-off) ;; fully inside
-                                  (-im-range (load-node env child-off) min-k max-k)))
+                                  (load-node child-off) ;; fully inside
+                                  (-im-range (load-node child-off) min-k max-k)))
                         c-off (node-offset child)]
                     (aset children i c-off)
                     (if (not= c-off -1)
@@ -602,166 +549,154 @@
 (extend-type IntMapBinaryBranch
   IIntMapNode
   (-im-count [bb]
-    (let [env (.-eve-env bb)
-          a (load-node env (:neg-off bb))
-          b (load-node env (:pos-off bb))]
+    (let [a (load-node (:neg-off bb))
+          b (load-node (:pos-off bb))]
       (+ (if a (-im-count a) 0)
          (if b (-im-count b) 0))))
 
   (-im-get [bb k default-val]
-    (let [env (.-eve-env bb)
-          child (load-node env (if (neg? k) (:neg-off bb) (:pos-off bb)))]
+    (let [child (load-node (if (neg? k) (:neg-off bb) (:pos-off bb)))]
       (if child (-im-get child k default-val) default-val)))
 
   (-im-assoc [bb k epoch merge-fn v]
-    (let [env (.-eve-env bb)]
-      (if (neg? k)
-        (let [a (load-node env (:neg-off bb))
-              a-prime (if a (-im-assoc a k epoch merge-fn v) (->IntMapLeaf env k v))]
-          (if (and a (identical? a a-prime))
-            bb
-            (->IntMapBinaryBranch env (node-offset a-prime) (:pos-off bb))))
-        (let [b (load-node env (:pos-off bb))
-              b-prime (if b (-im-assoc b k epoch merge-fn v) (->IntMapLeaf env k v))]
-          (if (and b (identical? b b-prime))
-            bb
-            (->IntMapBinaryBranch env (:neg-off bb) (node-offset b-prime)))))))
+    (if (neg? k)
+      (let [a (load-node (:neg-off bb))
+            a-prime (if a (-im-assoc a k epoch merge-fn v) (->IntMapLeaf k v))]
+        (if (and a (identical? a a-prime))
+          bb
+          (->IntMapBinaryBranch (node-offset a-prime) (:pos-off bb))))
+      (let [b (load-node (:pos-off bb))
+            b-prime (if b (-im-assoc b k epoch merge-fn v) (->IntMapLeaf k v))]
+        (if (and b (identical? b b-prime))
+          bb
+          (->IntMapBinaryBranch (:neg-off bb) (node-offset b-prime))))))
 
   (-im-dissoc [bb k epoch]
-    (let [env (.-eve-env bb)]
-      (if (neg? k)
-        (let [a (load-node env (:neg-off bb))
-              a-prime (when a (-im-dissoc a k epoch))]
-          (cond
-            (nil? a-prime) (load-node env (:pos-off bb))
-            (identical? a a-prime) bb
-            :else (->IntMapBinaryBranch env (node-offset a-prime) (:pos-off bb))))
-        (let [b (load-node env (:pos-off bb))
-              b-prime (when b (-im-dissoc b k epoch))]
-          (cond
-            (nil? b-prime) (load-node env (:neg-off bb))
-            (identical? b b-prime) bb
-            :else (->IntMapBinaryBranch env (:neg-off bb) (node-offset b-prime)))))))
+    (if (neg? k)
+      (let [a (load-node (:neg-off bb))
+            a-prime (when a (-im-dissoc a k epoch))]
+        (cond
+          (nil? a-prime) (load-node (:pos-off bb))
+          (identical? a a-prime) bb
+          :else (->IntMapBinaryBranch (node-offset a-prime) (:pos-off bb))))
+      (let [b (load-node (:pos-off bb))
+            b-prime (when b (-im-dissoc b k epoch))]
+        (cond
+          (nil? b-prime) (load-node (:neg-off bb))
+          (identical? b b-prime) bb
+          :else (->IntMapBinaryBranch (:neg-off bb) (node-offset b-prime))))))
 
   (-im-update [bb k epoch f]
-    (let [env (.-eve-env bb)]
-      (if (neg? k)
-        (let [a (load-node env (:neg-off bb))
-              a-prime (if a (-im-update a k epoch f) (->IntMapLeaf env k (f nil)))]
-          (if (and a (identical? a a-prime))
-            bb
-            (->IntMapBinaryBranch env (node-offset a-prime) (:pos-off bb))))
-        (let [b (load-node env (:pos-off bb))
-              b-prime (if b (-im-update b k epoch f) (->IntMapLeaf env k (f nil)))]
-          (if (and b (identical? b b-prime))
-            bb
-            (->IntMapBinaryBranch env (:neg-off bb) (node-offset b-prime)))))))
+    (if (neg? k)
+      (let [a (load-node (:neg-off bb))
+            a-prime (if a (-im-update a k epoch f) (->IntMapLeaf k (f nil)))]
+        (if (and a (identical? a a-prime))
+          bb
+          (->IntMapBinaryBranch (node-offset a-prime) (:pos-off bb))))
+      (let [b (load-node (:pos-off bb))
+            b-prime (if b (-im-update b k epoch f) (->IntMapLeaf k (f nil)))]
+        (if (and b (identical? b b-prime))
+          bb
+          (->IntMapBinaryBranch (:neg-off bb) (node-offset b-prime))))))
 
   (-im-merge [bb other epoch f]
-    (let [env (.-eve-env bb)]
-      (cond
-        (instance? IntMapBinaryBranch other)
-        (let [a (load-node env (:neg-off bb))
-              a2 (load-node env (:neg-off other))
-              b (load-node env (:pos-off bb))
-              b2 (load-node env (:pos-off other))]
-          (->IntMapBinaryBranch env
-            (node-offset (cond
-                           (nil? a) a2
-                           (nil? a2) a
-                           :else (-im-merge a a2 epoch f)))
-            (node-offset (cond
-                           (nil? b) b2
-                           (nil? b2) b
-                           :else (-im-merge b b2 epoch f)))))
+    (cond
+      (instance? IntMapBinaryBranch other)
+      (let [a (load-node (:neg-off bb))
+            a2 (load-node (:neg-off other))
+            b (load-node (:pos-off bb))
+            b2 (load-node (:pos-off other))]
+        (->IntMapBinaryBranch
+         (node-offset (cond
+                        (nil? a) a2
+                        (nil? a2) a
+                        :else (-im-merge a a2 epoch f)))
+         (node-offset (cond
+                        (nil? b) b2
+                        (nil? b2) b
+                        :else (-im-merge b b2 epoch f)))))
 
-        (instance? IntMapBranch other)
-        (let [other-prefix (:prefix other)]
-          (if (neg? other-prefix)
-            (let [a (load-node env (:neg-off bb))
-                  a-prime (if a (-im-merge a other epoch f) other)]
-              (->IntMapBinaryBranch env (node-offset a-prime) (:pos-off bb)))
-            (let [b (load-node env (:pos-off bb))
-                  b-prime (if b (-im-merge b other epoch f) other)]
-              (->IntMapBinaryBranch env (:neg-off bb) (node-offset b-prime)))))
+      (instance? IntMapBranch other)
+      (let [other-prefix (:prefix other)]
+        (if (neg? other-prefix)
+          (let [a (load-node (:neg-off bb))
+                a-prime (if a (-im-merge a other epoch f) other)]
+            (->IntMapBinaryBranch (node-offset a-prime) (:pos-off bb)))
+          (let [b (load-node (:pos-off bb))
+                b-prime (if b (-im-merge b other epoch f) other)]
+            (->IntMapBinaryBranch (:neg-off bb) (node-offset b-prime)))))
 
-        ;; Leaf — delegate
-        :else
-        (-im-merge other bb epoch (invert-fn (or f default-merge))))))
+      ;; Leaf — delegate
+      :else
+      (-im-merge other bb epoch (invert-fn (or f default-merge)))))
 
   (-im-reduce [bb f init]
-    (let [env (.-eve-env bb)
-          a (load-node env (:neg-off bb))
+    (let [a (load-node (:neg-off bb))
           acc (if a (-im-reduce a f init) init)]
       (if (reduced? acc)
         acc
-        (let [b (load-node env (:pos-off bb))]
+        (let [b (load-node (:pos-off bb))]
           (if b (-im-reduce b f acc) acc)))))
 
   (-im-kvreduce [bb f init]
-    (let [env (.-eve-env bb)
-          a (load-node env (:neg-off bb))
+    (let [a (load-node (:neg-off bb))
           acc (if a (-im-kvreduce a f init) init)]
       (if (reduced? acc)
         acc
-        (let [b (load-node env (:pos-off bb))]
+        (let [b (load-node (:pos-off bb))]
           (if b (-im-kvreduce b f acc) acc)))))
 
   (-im-seq [bb]
-    (let [env (.-eve-env bb)
-          a (load-node env (:neg-off bb))
-          b (load-node env (:pos-off bb))]
+    (let [a (load-node (:neg-off bb))
+          b (load-node (:pos-off bb))]
       (concat (when a (-im-seq a))
               (when b (-im-seq b)))))
 
   (-im-seq-reverse [bb]
-    (let [env (.-eve-env bb)
-          a (load-node env (:neg-off bb))
-          b (load-node env (:pos-off bb))]
+    (let [a (load-node (:neg-off bb))
+          b (load-node (:pos-off bb))]
       (concat (when b (-im-seq-reverse b))
               (when a (-im-seq-reverse a)))))
 
   (-im-range [bb min-k max-k]
-    (let [env (.-eve-env bb)]
-      (if (> max-k 0) ;; was: max < 0 for negative-only
-        (if (>= min-k 0)
-          ;; Positive only
-          (let [b (load-node env (:pos-off bb))]
-            (when b (-im-range b min-k max-k)))
-          ;; Spans both
-          (let [a (load-node env (:neg-off bb))
-                b (load-node env (:pos-off bb))
-                a-prime (when a (-im-range a min-k max-k))
-                b-prime (when b (-im-range b min-k max-k))]
-            (cond
-              (and (nil? a-prime) (nil? b-prime)) nil
-              (nil? a-prime) b-prime
-              (nil? b-prime) a-prime
-              :else (->IntMapBinaryBranch env
-                                          (node-offset a-prime)
-                                          (node-offset b-prime)))))
-        ;; Negative only
-        (let [a (load-node env (:neg-off bb))]
-          (when a (-im-range a min-k max-k)))))))
+    (if (> max-k 0) ;; was: max < 0 for negative-only
+      (if (>= min-k 0)
+        ;; Positive only
+        (let [b (load-node (:pos-off bb))]
+          (when b (-im-range b min-k max-k)))
+        ;; Spans both
+        (let [a (load-node (:neg-off bb))
+              b (load-node (:pos-off bb))
+              a-prime (when a (-im-range a min-k max-k))
+              b-prime (when b (-im-range b min-k max-k))]
+          (cond
+            (and (nil? a-prime) (nil? b-prime)) nil
+            (nil? a-prime) b-prime
+            (nil? b-prime) a-prime
+            :else (->IntMapBinaryBranch (node-offset a-prime)
+                                        (node-offset b-prime)))))
+      ;; Negative only
+      (let [a (load-node (:neg-off bb))]
+        (when a (-im-range a min-k max-k))))))
 
 ;;-----------------------------------------------------------------------------
 ;; PersistentIntMap — user-facing wrapper implementing CLJS collection protocols
 ;;-----------------------------------------------------------------------------
 
-(deftype PersistentIntMap [env root-offset ^:mutable epoch mta]
+(deftype PersistentIntMap [root-offset ^:mutable epoch mta]
   IWithMeta
-  (-with-meta [_ m] (PersistentIntMap. env root-offset epoch m))
+  (-with-meta [_ m] (PersistentIntMap. root-offset epoch m))
 
   IMeta
   (-meta [_] mta)
 
   ICounted
   (-count [_]
-    (let [root (load-node env root-offset)]
+    (let [root (load-node root-offset)]
       (if root (-im-count root) 0)))
 
   IEmptyableCollection
-  (-empty [_] (PersistentIntMap. env -1 0 nil))
+  (-empty [_] (PersistentIntMap. -1 0 nil))
 
   ICollection
   (-conj [this o]
@@ -792,19 +727,19 @@
 
   ISeqable
   (-seq [_]
-    (let [root (load-node env root-offset)]
+    (let [root (load-node root-offset)]
       (when root (seq (-im-seq root)))))
 
   IReversible
   (-rseq [_]
-    (let [root (load-node env root-offset)]
+    (let [root (load-node root-offset)]
       (when root (seq (-im-seq-reverse root)))))
 
   ILookup
   (-lookup [this k]
     (-lookup this k nil))
   (-lookup [_ k not-found]
-    (let [root (load-node env root-offset)]
+    (let [root (load-node root-offset)]
       (if root (-im-get root (int k) not-found) not-found)))
 
   IAssociative
@@ -814,19 +749,19 @@
   (-assoc [this k v]
     (let [k (int k)
           epoch' (inc epoch)
-          root (load-node env root-offset)
+          root (load-node root-offset)
           root' (if root
                   (-im-assoc root k epoch' default-merge v)
-                  (->IntMapLeaf env k v))]
-      (PersistentIntMap. env (node-offset root') epoch' mta)))
+                  (->IntMapLeaf k v))]
+      (PersistentIntMap. (node-offset root') epoch' mta)))
 
   IMap
   (-dissoc [this k]
     (let [k (int k)
           epoch' (inc epoch)
-          root (load-node env root-offset)
+          root (load-node root-offset)
           root' (when root (-im-dissoc root k epoch'))]
-      (PersistentIntMap. env (node-offset root') epoch' mta)))
+      (PersistentIntMap. (node-offset root') epoch' mta)))
 
   IFn
   (-invoke [this k]
@@ -836,19 +771,19 @@
 
   IKVReduce
   (-kv-reduce [_ f init]
-    (let [root (load-node env root-offset)
+    (let [root (load-node root-offset)
           result (if root (-im-kvreduce root f init) init)]
       (if (reduced? result) @result result)))
 
   IReduce
   (-reduce [this f]
-    (let [root (load-node env root-offset)]
+    (let [root (load-node root-offset)]
       (if root
         (let [result (-im-reduce root f (f))]
           (if (reduced? result) @result result))
         (f))))
   (-reduce [this f init]
-    (let [root (load-node env root-offset)
+    (let [root (load-node root-offset)
           result (if root (-im-reduce root f init) init)]
       (if (reduced? result) @result result)))
 
@@ -864,13 +799,9 @@
 
 (defn int-map
   "Create an integer map. Call with no arguments or with alternating keys/values.
-   The SAB environment is obtained automatically from the global atom instance."
+   Must be called inside an Eve atom swap!."
   ([]
-   (let [env (get-env)]
-     (when-not env
-       (throw (js/Error. "int-map: No global atom instance. Call eve.atom/init! first.")))
-     (ensure-initialized! env)
-     (PersistentIntMap. env -1 0 nil)))
+   (PersistentIntMap. -1 0 nil))
   ([k v]
    (assoc (int-map) k v))
   ([k v & kvs]
@@ -879,15 +810,15 @@
 (defn merge-with
   "Merge two int-maps using f to resolve value conflicts."
   ([f ^js a ^js b]
-   (let [root-a (load-node (.-env a) (.-root-offset a))
-         root-b (load-node (.-env b) (.-root-offset b))
+   (let [root-a (load-node (.-root-offset a))
+         root-b (load-node (.-root-offset b))
          epoch' (inc (max (.-epoch a) (.-epoch b)))]
      (cond
        (nil? root-a) b
        (nil? root-b) a
        :else
        (let [merged (-im-merge root-a root-b epoch' f)]
-         (PersistentIntMap. (.-env a) (node-offset merged) epoch' nil)))))
+         (PersistentIntMap. (node-offset merged) epoch' nil)))))
   ([f a b & rest]
    (reduce #(merge-with f %1 %2) (list* a b rest))))
 
@@ -899,20 +830,18 @@
 (defn update
   "Update the value at key k by applying f."
   ([^js m k f]
-   (let [env (.-env m)
-         epoch' (inc (.-epoch m))
-         root (load-node env (.-root-offset m))
+   (let [epoch' (inc (.-epoch m))
+         root (load-node (.-root-offset m))
          root' (if root
                  (-im-update root (int k) epoch' f)
-                 (->IntMapLeaf env (int k) (f nil)))]
-     (PersistentIntMap. env (node-offset root') epoch' (.-mta m))))
+                 (->IntMapLeaf (int k) (f nil)))]
+     (PersistentIntMap. (node-offset root') epoch' (.-mta m))))
   ([m k f & args]
    (update m k #(apply f % args))))
 
 (defn range
   "Return an int-map with only entries in [min-k, max-k] inclusive."
   [^js m min-k max-k]
-  (let [env (.-env m)
-        root (load-node env (.-root-offset m))
+  (let [root (load-node (.-root-offset m))
         root' (when root (-im-range root (int min-k) (int max-k)))]
-    (PersistentIntMap. env (node-offset root') (.-epoch m) (.-mta m))))
+    (PersistentIntMap. (node-offset root') (.-epoch m) (.-mta m))))

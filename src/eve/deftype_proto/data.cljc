@@ -393,6 +393,19 @@
    EVE objects without walking into their internals."
   (-eve? [this]))
 
+(defprotocol IBackingArray
+  "Protocol for Eve array types that expose a raw platform array for slab storage.
+   Used by value+sio->eve-bytes to serialize JvmHeapEveArray without circular deps."
+  (-backing-array [this] "Return the underlying platform array (e.g. int[], double[])."))
+
+#?(:clj
+   (defprotocol IBulkAccess
+     "Protocol for bulk typed-array access to EveArray data.
+      Returns a primitive Java array for the entire column in one shot,
+      enabling aget/aset loops with zero per-element overhead."
+     (-as-double-array [this] "Return double[] of all elements, or nil if not float64.")
+     (-as-int-array    [this] "Return int[] of all elements, or nil if not int32.")))
+
 ;;=============================================================================
 ;; Dynamic Vars
 ;;=============================================================================

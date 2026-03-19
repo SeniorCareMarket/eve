@@ -43,20 +43,23 @@
 
 (defn parse-field [field-sym]
   (let [m (meta field-sym)
+        cached?   (:cached m)
         mutability (cond
                      (:volatile-mutable m) :volatile-mutable
                      (:mutable m)          :mutable
                      :else                 :immutable)
         hint-keys (disj (set (keys m))
-                        :mutable :volatile-mutable :tag
+                        :cached :mutable :volatile-mutable :tag
                         :file :line :column :end-line :end-column :source)
         type-hint (first hint-keys)
         type-class (cond
+                     cached?                     :cached
                      (nil? type-hint)            :serialized
                      (primitive-type? type-hint)  :primitive
                      :else                        :eve-type)]
     {:name       (name field-sym)
      :sym        field-sym
+     :cached?    (boolean cached?)
      :mutability mutability
      :type-hint  type-hint
      :type-class type-class}))
@@ -72,14 +75,19 @@
     (if (empty? fields)
       {:fields result
        :total-size (align-offset offset 4)}
-      (let [f (first fields)
-            sz (if (= :eve-type (:type-class f))
-                 4
-                 (field-size (:type-hint f)))
-            alignment (if (= :eve-type (:type-class f))
-                        4
-                        (field-alignment (:type-hint f)))
-            aligned-offset (align-offset offset alignment)]
-        (recur (rest fields)
-               (+ aligned-offset sz)
-               (conj result (assoc f :offset aligned-offset :size sz)))))))
+      (let [f (first fields)]
+        (if (:cached? f)
+          ;; Cached fields don't consume slab space — no offset, no size
+          (recur (rest fields)
+                 offset
+                 (conj result (assoc f :offset nil :size 0)))
+          (let [sz (if (= :eve-type (:type-class f))
+                     4
+                     (field-size (:type-hint f)))
+                alignment (if (= :eve-type (:type-class f))
+                            4
+                            (field-alignment (:type-hint f)))
+                aligned-offset (align-offset offset alignment)]
+            (recur (rest fields)
+                   (+ aligned-offset sz)
+                   (conj result (assoc f :offset aligned-offset :size sz)))))))))
