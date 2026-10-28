@@ -1,0 +1,17 @@
+# run m-node-mmap on 3bf96a37d eve tree fe8fa45c3d19584602611a7a7cd74ca983707914
+# cmd (in eve/) bash -c node target/eve-test/all.js mmap
+# start 2026-10-23 2:24:19 PM ET load 1.51 1.58 1.37 mem-in-use 935 MB
+=== Eve Test Runner ===
+Suite: mmap
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.mmap-test
+
+Testing eve.mmap-worker-test
+
+Ran 15 tests containing 27 assertions.
+0 failures, 0 errors.
+# end 2026-10-23 2:24:21 PM ET exit 0 wall 2s peak-mem-in-use 1044 MB peak-process-tree-rss 166 MB load 1.51 1.58 1.37

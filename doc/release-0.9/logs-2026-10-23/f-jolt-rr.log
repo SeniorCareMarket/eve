@@ -1,0 +1,19 @@
+# run f-jolt-rr on 1c631db56 eve tree 0f2bf9dca171e207499d6dcb5d89860f0c56ebb9
+# cmd (in eve/) bash -c bb test:jolt eve.read-region-test eve.tally-test
+# start 2026-10-23 4:20:30 PM ET load 1.06 1.17 1.43 mem-in-use 908 MB
+done #'eve.read-region-test/deref-in-a-region-is-the-stored-value 14ms
+done #'eve.read-region-test/a-lazy-result-is-realized-and-materialized 17ms
+done #'eve.read-region-test/what-a-region-read-is-not-freed-while-it-runs 1435ms
+done #'eve.read-region-test/a-region-inside-another-joins-it 18ms
+done #'eve.read-region-test/the-pins-go-when-the-body-throws 15ms
+done #'eve.tally-test/a-value-two-atoms-hold-is-freed-by-the-last 5154ms
+done #'eve.tally-test/a-value-moved-between-keys-of-one-atom-stays 2394ms
+done #'eve.tally-test/an-unshared-atom-frees-exactly-what-a-write-replaces 5705ms
+done #'eve.tally-test/an-eve-deftype-value-two-atoms-hold 1488ms
+done #'eve.tally-test/a-reference-field-written-in-place-keeps-its-counts 17ms
+done #'eve.tally-test/an-int-map-is-counted-node-by-node 1807ms
+done #'eve.tally-test/an-rrb-vector-is-counted-node-by-node 1691ms
+
+Ran 12 tests. 234 assertions passed, 0 failures, 0 errors.
+:summary {:test 12, :pass 234, :fail 0, :error 0}
+# end 2026-10-23 4:21:16 PM ET exit 0 wall 46s peak-mem-in-use 1150 MB peak-process-tree-rss 382 MB load 1.03 1.14 1.41

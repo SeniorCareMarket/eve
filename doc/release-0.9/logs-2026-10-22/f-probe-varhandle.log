@@ -1,0 +1,9 @@
+# run f-probe-varhandle on 6067b379b eve tree 55c37382a225ef006d3ff4eee4745b23e66820db
+# cmd (in eve/) bash -c java -cp "$(clojure -Spath)" clojure.main /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/probes/jvm_varhandle.clj
+# start 2026-10-22 1:14:52 AM ET load 1.15 1.43 1.59 mem-in-use 1050 MB
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=41583 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+eve.mem/-load-i32 (volatile get, spread handle): 19.1 ns
+eve.mem/-cas-i32! (spread handle): 48.9 ns
+volatile get by invokeWithArguments: 139.8 ns
+java 21.0.12.1
+# end 2026-10-22 1:14:58 AM ET exit 0 wall 6s peak-mem-in-use 2061 MB peak-process-tree-rss 1083 MB load 1.14 1.42 1.59

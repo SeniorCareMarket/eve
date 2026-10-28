@@ -1,0 +1,75 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) over dart:io (ClojureDart): the clock, sleep, a periodic timer,
+   files' existence, their exclusive creation and directories, identity hashes, the OS's entropy and standard
+   input's lines. A Dart isolate is one thread: thread-id is the isolate's. Its timers are the event loop's, which
+   runs only between synchronous work (a program blocked in stdin's readLineSync runs none), and dart:io has no hook
+   at normal exit: on-process-exit! keeps f and never calls it."
+  (:refer-clojure :exclude [read-line])
+  (:require ["dart:async" :as async]
+            ["dart:convert" :as convert]
+            ["dart:io" :as io]
+            ["dart:isolate" :as isolate]
+            ["dart:math" :as math]))
+
+(defn now-ms [] (.-millisecondsSinceEpoch (DateTime.now)))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under: this isolate's"
+  []
+  (.-hashCode (isolate/Isolate.current)))
+
+(defn sleep-ms!
+  "Block this isolate for about ms milliseconds."
+  [ms]
+  (io/sleep (Duration .milliseconds (.toInt ^num ms))))
+
+(defn start-timer!
+  "Call f every period-ms (on the event loop) until stop-timer!. Returns the timer."
+  [period-ms f]
+  (async/Timer.periodic (Duration .milliseconds (.toInt ^num period-ms)) (fn [_] (f))))
+
+(defn stop-timer! [h] (when h (.cancel ^async/Timer h)))
+
+(def ^:private exit-hooks (atom []))
+
+(defn on-process-exit!
+  "dart:io has no hook at normal exit: f is kept, never called."
+  [f]
+  (swap! exit-hooks conj f)
+  nil)
+
+(defn file-exists? [path] (.existsSync (io/File (str path))))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step against every other process: true for the
+   process that created it, false when it already existed."
+  [path]
+  (try
+    (.createSync (io/File (str path)) .exclusive true)
+    true
+    (catch io/FileSystemException _ false)))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
+  [base-path]
+  (let [dir (.-parent (io/File (str base-path ".root")))]
+    (when-not (.existsSync dir) (.createSync dir .recursive true))))
+
+(defn identity-hash
+  "An object's identity hash: equal for one object, whatever its own equality or hash."
+  [x]
+  (dart:core/identityHashCode x))
+
+(def ^:private rng (delay (math/Random.secure)))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (dart:math Random.secure), as a vector of 0..255"
+  [n]
+  (let [^math/Random r @rng]
+    (into [] (map (fn [_] (.nextInt r 256))) (range n))))
+
+(defn read-line
+  "the next line of the process's standard input (UTF-8), its line end dropped; nil at the end of the input.
+   Blocking"
+  []
+  (.readLineSync io/stdin .encoding convert/utf8))

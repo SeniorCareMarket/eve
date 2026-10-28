@@ -1,0 +1,13 @@
+# run f-leak-probe on d608026cb eve tree 53368de18ed50e449f2bf6e8db66bae63a37dca8
+# cmd (in eve/) bash -c java -cp "$(clojure -Spath -M:jvm-test)" clojure.main bench/eve/leak_probe.clj
+# start 2026-10-21 11:26:16 PM ET load 1.71 1.51 1.80 mem-in-use 1029 MB
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=41583 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+path-copies blocks in use after N swaps: [[20 3012] [40 5170] [80 10778] [160 20588]]
+one-assoc blocks in use after N swaps: [[20 119] [40 184] [80 107] [160 156]]
+host-data blocks in use after N swaps: [[20 650] [40 488] [80 704] [160 326]]
+int-map-build blocks in use after N swaps: [[20 836] [40 1253] [80 836] [160 1253]]
+sorted-set-build blocks in use after N swaps: [[20 605] [40 605] [80 605] [160 605]]
+int-map-transient blocks in use after N swaps: [[20 439] [40 459] [80 3418] [160 996]]
+int-map-assoc blocks in use after N swaps: [[20 560] [40 700] [80 531] [160 636]]
+sorted-set-disj-conj blocks in use after N swaps: [[20 1110] [40 1589] [80 1610] [160 2549]]
+# end 2026-10-21 11:26:26 PM ET exit 0 wall 10s peak-mem-in-use 1577 MB peak-process-tree-rss 720 MB load 1.83 1.55 1.81

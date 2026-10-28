@@ -1,0 +1,143 @@
+(ns eve.runner.lpy-main
+  "EVE on basilisp: the shared (.cljc) tests, run from the source tree.
+
+     PYTHONPYCACHEPREFIX=target/lpycache-test basilisp run -p test -p src -n eve.runner.lpy-main test [ns ...]
+
+   (src first: basilisp puts the last -p first on sys.path, and a namespace
+   that is also a directory — eve.deftype — must be found as src's file, not
+   as test's directory of the same name; see package-paths!.)
+
+   basilisp's deftest is a function answering {:failures [...]}; each is
+   run, its failures and errors printed. Exits non-zero on a failure. The
+   shared tests not listed here need eve.array's typed arrays (coalesc-align,
+   array-hosts, dataset, tensor), which are the JVM's, bb's and
+   ClojureScript's so far."
+  (:require [basilisp.test]
+            [clojure.string :as str])
+  (:import importlib os.path sys time))
+
+(def ^:private assertions
+  "Assertions run: basilisp.test counts failures only, so every is counts
+   here (a pass is an assertion that did not fail)."
+  (volatile! 0))
+
+;; every (is ...) compiled after this counts itself (the tests are required
+;; after it; a namespace compiled before it from basilisp's cache would not
+;; count — the cache is the runner's own, target/lpycache-test). basilisp's
+;; (is expr) expands to (is expr msg), so only the two-argument form counts:
+;; counting both counted a message-less assertion twice (3 assertions read 5).
+(let [v (resolve 'basilisp.test/is)
+      is* @v]
+  (.bind-root v (fn [&env &form & args]
+                  (if (= 1 (count args))
+                    (apply is* &env &form args)
+                    `(do (vswap! @(var eve.runner.lpy-main/assertions) inc)
+                         ~(apply is* &env &form args))))))
+
+(def shared-tests
+  "The test namespaces basilisp runs as written, by default. Not
+   eve.rrb-vector-test: core.rrb-vector's suite runs for hours on basilisp
+   (measured 2026-10-16: a 40,000-element vector takes 100 s to build and an
+   assoc 55 ms, and test-assoc alone does 40,000 assocs); it runs when named,
+   whole or by test (eve.rrb-vector-test/test-seq). Nor eve.net.crypto-fast-path-test: it times each native row
+   against the portable one, and the portable rows run for minutes on basilisp (2026-10-23 ET: big-integer-rows 508 s,
+   one 1,000-byte AES-256-GCM 57.7 s); it runs when named."
+  '[eve.hamt-util-test eve.eve-bytes-fixture-test eve.deftype.type-id-test
+    eve.deftype.rb-tree-test eve.numeric-tags-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.tally-test eve.domain-open-test eve.deftype.int-map-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-net-test eve.thread-fold-test eve.thread-fold-group-test
+    ;; the eve-chat capstone's client core (eve/capstone/eve-chat)
+    eve.aegis.chat-test])
+
+(defn- package-paths!
+  "Test namespace n's parents as basilisp finds n: a namespace that is also a
+   directory (eve.deftype: src/eve/deftype.cljc and src/eve/deftype/) is a
+   Python package whose submodules are looked for only in the directory beside
+   the file it was found in, so the test tree's directory of the same name
+   (test/eve/deftype/, holding eve.deftype.type-id-test) is added to it."
+  [n]
+  (let [parts (str/split (.replace (str n) "-" "_") #"\.")]
+    (doseq [i (range 1 (count parts))
+            :let [pkg (str/join "." (take i parts))
+                  m (importlib/import-module pkg)
+                  path (python/getattr m "__path__" nil)]
+            :when (and path (seq path))
+            root sys/path
+            :let [d (python/str (apply os.path/join root (take i parts)))]
+            :when (and (os.path/isdir d) (not (some #(= d %) path)))]
+      (.append path d))))
+
+(defn- join-fixtures
+  "clojure.test's fixtures, (fn [f] ... (f) ...), as one, the first
+   outermost. The shared tests write them so; basilisp.test's own fixtures
+   are zero-argument functions, and it records either kind in the
+   namespace's metadata (:basilisp.test/each-fixtures, once-fixtures)."
+  [fixtures]
+  (reduce (fn [outer fixture] (fn [f] (outer (fn [] (fixture f)))))
+          (fn [f] (f))
+          fixtures))
+
+(defn- run-test
+  "Runs test var v (named s, of ns n) inside the each-fixture into totals."
+  [totals n s v each]
+  (swap! totals update :test inc)
+  (try
+    (let [r (volatile! nil)
+          t0 (time/perf-counter)
+          _ (each (fn [] (vreset! r (@v))))
+          failures (:failures @r)
+          ;; one line per test as it ends: basilisp runs the larger suites
+          ;; for many minutes
+          _ (println (if (seq failures) "not ok" "ok") (str n "/" s)
+                     (format "%.1fs" (- (time/perf-counter) t0)))
+          {fails :failure errs :error} (group-by :type failures)]
+      (swap! totals update :fail + (count fails))
+      (swap! totals update :error + (count errs))
+      ;; an is whose expression threw: an assertion, not a pass
+      (swap! totals update :is-errors (fnil + 0) (count errs))
+      (doseq [f failures]
+        (println (if (= :error (:type f)) "ERROR in" "FAIL in") (str n "/" s)
+                 (pr-str (select-keys f [:message :expected :actual :test-section])))))
+    (catch python/Exception e
+      (swap! totals update :error inc)
+      (println "ERROR in" (str n "/" s) (python/repr e)))))
+
+(defn- run-ns
+  "Runs ns's tests (or the one test ns/name) into totals: {:test :pass :fail
+   :error}."
+  [totals sym]
+  (let [n (symbol (or (namespace sym) (name sym)))
+        only (when (namespace sym) (symbol (name sym)))]
+    (package-paths! n)
+    (when-let [tests (try (require n)
+                          (filter (fn [[s v]] (and (:basilisp.test/test (meta v))
+                                                   (or (nil? only) (= only s))))
+                                  (sort-by (comp str key) (ns-interns (find-ns n))))
+                          (catch python/Exception e
+                            (swap! totals update :error inc)
+                            (println "ERROR loading" n (python/repr e))
+                            nil))]
+      (let [m (meta (find-ns n))
+            once (join-fixtures (:basilisp.test/once-fixtures m))
+            each (join-fixtures (:basilisp.test/each-fixtures m))]
+        (once (fn [] (doseq [[s v] tests] (run-test totals n s v each))))))
+    (println "Ran" sym)))
+
+(defn -main [& [cmd & args]]
+  (case cmd
+    "test"
+    (let [nses (if (seq args) (map symbol args) shared-tests)
+          totals (atom {:test 0 :fail 0 :error 0})]
+      (doseq [n nses] (run-ns totals n))
+      (println :summary (-> @totals
+                            (assoc :pass (- @assertions (:fail @totals) (:is-errors @totals 0)))
+                            (dissoc :is-errors)))
+      (sys/exit (if (and (zero? (:fail @totals)) (zero? (:error @totals))) 0 1)))
+    "perf"
+    (do (require 'eve.perf-suite)
+        ((resolve 'eve.perf-suite/run!) {:budget-ms (some-> (first args) read-string)})
+        (sys/exit 0))
+    (do (println "usage: -n eve.runner.lpy-main test [ns ...] | perf [budget-ms]")
+        (sys/exit 2))))
+
+;; basilisp run -n loads the namespace with *main-ns* naming it
+(when (= *main-ns* 'eve.runner.lpy-main)
+  (apply -main *command-line-args*))

@@ -1,0 +1,10 @@
+# run f-bbm-slab-io on 2116f567b eve tree 1aa4b359a27547a4c255ee19b95049eab66fcfd4
+# cmd (in eve/) bash -c bb -cp "$(bb classpath bb-minimal):adapters/slab-io/test:test" -m eve.runner.bb-main test eve.slab-io-test
+# start 2026-10-21 11:40:10 PM ET load 0.60 0.95 1.29 mem-in-use 992 MB
+
+Testing eve.slab-io-test
+
+Ran 4 tests containing 51 assertions.
+0 failures, 0 errors.
+:summary {:test 4, :pass 51, :fail 0, :error 0}
+# end 2026-10-21 11:40:12 PM ET exit 0 wall 2s peak-mem-in-use 1009 MB peak-process-tree-rss 36 MB load 0.56 0.93 1.28

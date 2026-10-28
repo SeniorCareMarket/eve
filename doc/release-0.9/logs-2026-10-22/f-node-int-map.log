@@ -1,0 +1,15 @@
+# run f-node-int-map on 6c60337d4 eve tree 4250dd484f0ff6bbfef965857e662ccd738efd43
+# cmd (in eve/) node target/eve-test/all.js int-map
+# start 2026-10-21 11:07:39 PM ET load 1.61 1.83 2.67 mem-in-use 1065 MB
+=== Eve Test Runner ===
+Suite: int-map
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.deftype.int-map-test
+
+Ran 23 tests containing 373 assertions.
+0 failures, 0 errors.
+# end 2026-10-21 11:07:41 PM ET exit 0 wall 2s peak-mem-in-use 1065 MB peak-process-tree-rss 28 MB load 1.64 1.84 2.67

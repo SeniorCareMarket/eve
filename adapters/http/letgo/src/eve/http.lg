@@ -1,0 +1,24 @@
+(ns eve.http
+  "eve's http feature (adapters/README.md) on let-go (lg-eve): Go's net/http through lg-eve's native
+   (eve.host-native/http-request, impls/let-go/evenative/host.go) — let-go's own http/request sends a string body only,
+   and the network atom posts bytes. `platform` answers what this host lends eve.net (eve/src/eve/net/run.cljc):
+   {:request f :request-all g}, f taking {:method :url :headers :body :as :body-as} and answering {:status :headers
+   :body} SYNCHRONOUSLY. :body-as :b64 sends the bytes its base64 :body names, :body-as :bytes the byte array :body is;
+   :as :b64 answers the response body as base64, :as :bytes as a byte array; otherwise bodies are UTF-8 text. A
+   transport failure answers {:error message}. request-all runs a batch in turn."
+  (:require [eve.encoding :as e]))
+
+(defn request
+  [{:keys [method url headers body as body-as]}]
+  (eve.host-native/http-request (or method "GET") (str url) (or headers {})
+                                (cond (nil? body) nil
+                                      (= :b64 body-as) (e/b64->bytes body)
+                                      :else body)
+                                (case as :b64 "b64" :bytes "bytes" "text")))
+
+(defn request-all
+  "every request in turn"
+  [reqs]
+  (mapv request reqs))
+
+(defn platform [] {:request request :request-all request-all})

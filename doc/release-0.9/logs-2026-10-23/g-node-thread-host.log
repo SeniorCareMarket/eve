@@ -1,0 +1,17 @@
+# run g-node-thread-host on 699340a70 eve tree 6a4d1701e6f8fc55102652adc8679c25bd684564
+# cmd (in eve/) bash -c node target/eve-test/all.js thread-host
+# start 2026-10-23 11:25:16 AM ET load 2.14 1.51 1.07 mem-in-use 863 MB
+=== Eve Test Runner ===
+Suite: thread-host
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.thread-host-test
+eve.thread-host round trips: :cljs ms per 100 (5 batches, sorted): [23 25 28 37 45]
+
+Ran 13 tests containing 54 assertions.
+0 failures, 0 errors.
+Worker start: 1187 ms (the last worker's, eve.thread-host/driving)
+# end 2026-10-23 11:25:32 AM ET exit 0 wall 16s peak-mem-in-use 1440 MB peak-process-tree-rss 772 MB load 2.23 1.56 1.10

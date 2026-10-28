@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cclsp": {
+      "command": "cclsp",
+      "env": {
+        "CCLSP_CONFIG_PATH": "/home/user/eve/cclsp.json"
+      }
+    },
+    "clojure-mcp": {
+      "command": "/bin/sh",
+      "args": ["-c", "cd /home/user/eve && clojure -X:mcp clojure-mcp.main/start :start-nrepl-cmd '[\"clojure\" \"-M:nrepl\"]' :config-profile :cli-assist"]
+    }
+  }
+}
