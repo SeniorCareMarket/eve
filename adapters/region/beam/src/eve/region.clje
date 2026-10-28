@@ -1,0 +1,84 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2)
+   over the BEAM (clojerl): native memory through eve's NIF (eve.clje-nif,
+   adapters/core/beam): a file mapped MAP_SHARED or heap memory, seq-cst
+   atomics, futex wait/wake and fcntl locks.
+
+   make-heap-region and open-mmap-region open them; lustre-region? says
+   whether a region's atomics are fcntl byte-range locks (a Lustre mount)."
+  (:refer-clojure :exclude [aget aset alength byte-array int-array long-array object-array
+                            into-array unchecked-byte unchecked-int unchecked-long
+                            unchecked-inc-int unsigned-bit-shift-right long double class
+                            locking transient persistent! conj! assoc! bytes objects
+                            const-bytes const-objects])
+  (:require
+   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
+                     into-array unchecked-byte unchecked-int unchecked-long
+                     unchecked-inc-int unsigned-bit-shift-right long double class locking
+                     transient persistent! conj! assoc! bytes objects const-bytes
+                     const-objects]]
+   [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
+                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]
+   [eve.clje-nif :as nif]
+   [eve.host :as h]))
+
+;; Every region has atomic RMW unless it says otherwise.
+(extend-protocol mem/IHostAtomics
+  default
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _byte-off f] (f)))
+
+   ;; clojerl (the BEAM): a region is eve's NIF's (eve.clje-nif,
+   ;; native/eve_clje_nif.c, built on first load) — the file mapped MAP_SHARED, or
+   ;; heap memory — with seq-cst atomics and futex wait/wake; its bytes go in and
+   ;; out as eve.host's byte arrays, which are the same NIF's heap memory.
+
+(deftype CljeRegion [r]
+  mem/IMemRegion
+  (-byte-length [_] (nif/byte-length r))
+  (-load-i32 [_ off] (nif/load-i32 r off))
+  (-store-i32! [_ off v] (nif/store-i32! r off v) nil)
+  (-cas-i32! [_ off expected desired] (nif/cas-i32! r off expected desired))
+  (-add-i32! [_ off delta] (nif/add-i32! r off delta))
+  (-sub-i32! [_ off delta] (nif/add-i32! r off (- delta)))
+  (-exchange-i32! [_ off v] (nif/exchange-i32! r off v))
+  (-load-i64 [_ off] (nif/load-i64 r off))
+  (-store-i64! [_ off v] (nif/store-i64! r off v) nil)
+  (-cas-i64! [_ off expected desired] (nif/cas-i64! r off expected desired))
+  (-add-i64! [_ off delta] (nif/add-i64! r off delta))
+  (-sub-i64! [_ off delta] (nif/add-i64! r off (- delta)))
+  (-wait-i32! [_ off expected timeout-ms] (nif/wait-i32! r off expected (long timeout-ms)))
+  (-notify-i32! [_ off n] (nif/notify-i32! r off n))
+  (-supports-watch? [_] true)
+  (-read-bytes [_ off len] (h/region->bytes (nif/slice r off len)))
+  (-write-bytes! [_ off src]
+    (nif/copy! (h/byte-region src) 0 r off (alength src))
+    nil))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed MAP_SHARED region of size-bytes at
+   path-str. The file grows to size-bytes when it is shorter and is never
+   truncated."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes opts]
+   (when (:lustre? opts)
+     (throw (ex-info "eve on clojerl: no lustre regions" {:path path-str})))
+   (let [r (nif/open path-str size-bytes)]
+     (when (erlang/is_tuple r)
+       (throw (ex-info (str "open-mmap-region " path-str ": " (erlang/element 2 r)
+                            " errno " (erlang/element 3 r))
+                       {:path path-str})))
+     (CljeRegion. r))))
+
+(defn make-heap-region
+  "An IMemRegion over size-bytes of zeroed native memory, shared by the
+   node's processes."
+  [size-bytes]
+  (CljeRegion. (nif/heap size-bytes)))
+
+(defn lustre-region?
+  "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
+  [_r]
+  false)

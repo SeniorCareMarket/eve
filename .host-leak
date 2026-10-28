@@ -1,0 +1,6 @@
+# eve/scripts/check-host-leak's baseline: what in eve/src still names a host.
+# Shrink-only; the goal is 0 for each. Lowered in the commit that removes them.
+conditionals 0
+predicates 0
+host-files 1
+net-interop 0

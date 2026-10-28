@@ -1,0 +1,77 @@
+(ns eve.thread-host
+  "eve's thread feature (HOST-CONTRACT §11) over BEAM processes (clojerl): a thread is a process, its mailbox the
+   process's own (erlang/send, receive* … after). A message is copied, closures with it (a fun is a term: its
+   environment travels by value), so ships-closures? is true; the binding frame is clojerl's own, copied likewise
+   (20 vars, 3,101 bytes in clojure.main's frame: a round trip carrying it measured 6.5 µs). A started process is
+   monitored by its starter (spawn_monitor): its end, however it comes — the entry returned, threw, or the process was
+   killed — is a 'DOWN' message, which receive! answers as {:eve.thread/exit addr :reason r}.")
+
+(defn parallelism [] (erlang/system_info :schedulers))
+
+(defn ships-closures? [] true)
+
+(defn driving
+  "The declared driving properties: a blocked process costs little; schedulers run in parallel; eve's NIF region
+   waits on a futex."
+  []
+  {:block :cheap :parallel true :closures true :eval true :wake :futex
+   :spawn-ms 0 :max-threads nil :runtime :clje})
+
+(defn self [] (erlang/self))
+
+(defn error-data [e]
+  {:class (str (type e)) :message (or (ex-message e) (str e)) :data (ex-data e)})
+
+(defn- run-entry
+  "The process body: the entry's end as the process's exit reason — normal, or the error as data, which the
+   starter's monitor reads."
+  [f boot]
+  (let [r (try (f boot) nil (catch _ e (error-data e)))]
+    (when r (erlang/exit {:eve.thread/error r}))))
+
+(defn start-threads!
+  "Start n processes, each running ((resolve entry) (assoc boot :self pid)), each monitored by this process; their
+   addresses."
+  [n entry boot _opts]
+  (require (symbol (namespace entry)))
+  (let [f (resolve entry)]
+    (vec (for [_ (range n)]
+           (erlang/element 1 (erlang/spawn_monitor (fn [] (run-entry f (assoc boot :self (erlang/self))))))))))
+
+(defn send! [addr msg] (erlang/send addr msg) nil)
+
+(defn- down-reason [r]
+  (cond (= :normal r) :normal
+        (and (map? r) (contains? r :eve.thread/error)) (:eve.thread/error r)
+        :else {:class "exit" :message (str r) :data nil}))
+
+(defn- as-message
+  "A monitor's 'DOWN' tuple as the contract's exit notice; every other message as it came."
+  [m]
+  (if (and (erlang/is_tuple m) (= 5 (erlang/tuple_size m)) (= :DOWN (erlang/element 1 m)))
+    {:eve.thread/exit (erlang/element 4 m) :reason (down-reason (erlang/element 5 m))}
+    m))
+
+(defn receive!
+  "The calling process's next message; :eve.thread/timeout after ms milliseconds (ms < 0: wait for ever; 0: poll)."
+  [ms]
+  (if (neg? ms)
+    (receive* m (as-message m))
+    (receive* m (as-message m) (after ms :eve.thread/timeout))))
+
+(defn stop-threads!
+  "Ask each process to end: the message :eve.thread/stop (a request its loop honours, never a kill)."
+  [addrs]
+  (doseq [a addrs] (send! a :eve.thread/stop)))
+
+(defn attempt [f] (try [true (f)] (catch _ e [false e])))
+
+(defn capture-frame [] (get-thread-bindings))
+(defn call-with-frame [frame f] (if frame (with-bindings* frame f) (f)))
+
+(defn var-symbol
+  "A var's qualified name (clojerl's (symbol v) fails on a var; its metadata has the name)."
+  [v]
+  (let [m (meta v)] (symbol (str (ns-name (:ns m))) (str (:name m)))))
+
+(defn eval-form [form] (eval form))

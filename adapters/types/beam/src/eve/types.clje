@@ -1,0 +1,428 @@
+(ns eve.types
+  "eve's types on clojerl (the BEAM): its protocols, its mutable fields as
+   cells; it prints a type through str.
+   The entry points eve's macros call (every eve.types has them):
+     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     existing-def, rename-fields, reader-of, print-form, vector-types."
+  (:require [clojure.string :as str]
+            [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
+                                                 cljs-protocol? rename-syms parse-protocol-impls
+                                                 cljs-translate-protocol]]
+            [eve.deftype-proto.sio :as sio]))
+
+;; clojerl: the JVM's interface names on clojerl's protocols
+;; clojerl (Clojure on the BEAM) has protocols where the JVM has interfaces
+;; (clojerl.ICounted/count, clojerl.ILookup/get, clojerl.IColl/cons, ...). A
+;; type is written with the JVM's names (ClojureScript's are translated to them
+;; first) and translated here, at expansion:
+;;   - each JVM method onto the clojerl protocol method it is, pooled by name
+;;     as a JVM deftype pools them: valAt is get, hasheq hash, withMeta
+;;     with_meta, invoke IFn's apply (by the argument count), kvreduce
+;;     kv-reduce, toString str, the chunked seq's chunked_first/_next/_more; a
+;;     vector's assoc is its assocN; seq brings to_list, a map's without keys
+;;     and vals; Sequential, IPersistentVector and the seqs are clojerl's
+;;     markers;
+;;   - clojerl has no transients: IEditableCollection and the ITransient
+;;     interfaces go onto eve.core's protocols, through which eve.core's
+;;     transient, persistent!, conj!, ... answer;
+;;   - a collection is printed (str) as the Clojure data it equals;
+;;   - in the bodies, a JVM method called by name, (.valAt m k), is the
+;;     clojure.core call it stands for; what the derived methods name of the
+;;     JVM (PersistentList/EMPTY, Cons, MapEntry, the exceptions) is clojerl's;
+;;     type hints are dropped (clojerl resolves a hint where it is used, and
+;;     a JVM class name is not one of its types);
+;;   - clojerl's deftype has no mutable field: a hash cache (__hash, ...) is
+;;     never set there (the hash is computed each time); any other mutable
+;;     field holds a cell (eve.host's volatile!) that the type's ->T factory
+;;     makes, its reads deref it and its set! vreset!s it — so such a type is
+;;     built with ->T, on every host.
+
+(def ^:private clje-call-renames
+  (merge v/jvm-method->core
+         '{chunkedFirst clojure.core/chunk-first chunkedMore clojure.core/chunk-rest
+           chunkedNext clojure.core/chunk-next assocN clojure.core/assoc
+           kvreduce clojure.core/reduce-kv}))
+
+(defn- clje-exception?
+  "(SomeException. msg) of the JVM's (a class name ending in Exception)."
+  [sym]
+  (and (symbol? sym) (str/ends-with? (name sym) "Exception.")))
+
+(def ^:private clje-host-math
+  "The integer and cast names a generated body calls that clojerl's core lacks:
+   a call of one goes to eve.host's (the same function wherever it is
+   defined)."
+  '#{long double class unchecked-byte unchecked-short unchecked-int unchecked-long
+     unchecked-add-int unchecked-multiply-int unchecked-dec-int unchecked-add
+     unchecked-multiply unchecked-inc unsigned-bit-shift-right
+     bytes shorts ints longs floats doubles objects booleans})
+
+(defn- clje-rewrite
+  "A body as clojerl takes it (see above)."
+  [form]
+  (let [untag (fn [x] (if (:tag (meta x)) (vary-meta x dissoc :tag) x))]
+    (cond
+      (and (seq? form) (contains? '#{quote var} (first form))) form
+      ;; () is a value, not a call (taken apart below it would be (nil))
+      (and (seq? form) (empty? form)) form
+      (= form 'clojure.lang.PersistentList/EMPTY) ()
+      (= form 'unchecked-inc-int) 'clojure.core/inc
+      (symbol? form) (untag form)
+      (seq? form)
+      (let [[f & args] form
+            args (map clje-rewrite args)
+            n (when (symbol? f) (name f))]
+        (cond
+          (= f 'clojure.lang.Cons.) (list* 'clojure.core/cons args)
+          (= f 'clojure.lang.MapEntry/create) (vec args)
+          (= f 'clojure.lang.AFn/applyToHelper) (list 'clojure.core/apply (first args) (second args))
+          (= f 'System/identityHashCode) (list 'erlang/phash2 (first args))
+          (clje-exception? f) (list 'clojure.core/ex-info
+                                    (or (first args) (subs n 0 (dec (count n))))
+                                    {:eve/host-exception (list 'quote (symbol (subs n 0 (dec (count n)))))})
+          (and n (str/starts-with? n ".") (not (str/starts-with? n ".-")) (> (count n) 1)
+               (contains? clje-call-renames (symbol (subs n 1))))
+          (let [m (symbol (subs n 1))]
+            (case m
+              ;; (.reduce coll f init) is (reduce f init coll)
+              reduce (let [[coll f & init] args] (apply list 'clojure.core/reduce f (concat init [coll])))
+              kvreduce (let [[coll f init] args] (list 'clojure.core/reduce-kv f init coll))
+              (apply list (get clje-call-renames m) args)))
+          (= f '.invoke) (apply list args)
+          (contains? clje-host-math f) (apply list (symbol "eve.host" n) args)
+          :else (with-meta (apply list (clje-rewrite f) args) (dissoc (meta form) :tag))))
+      (vector? form) (with-meta (mapv clje-rewrite form) (dissoc (meta form) :tag))
+      (map? form) (with-meta (into {} (map (fn [[k v]] [(clje-rewrite k) (clje-rewrite v)])) form)
+                    (meta form))
+      :else form)))
+
+(def ^:private clje-markers
+  '{clojure.lang.Sequential clojerl.ISequential clojure.lang.IPersistentList clojerl.ISequential
+    clojure.lang.ISeq clojerl.ISequential clojure.lang.IPersistentVector clojerl.IVector
+    clojure.lang.IType clojerl.IType clojure.lang.IRecord clojerl.IRecord})
+
+(defn clje-translate-protos
+  "Parsed protocol impls ([{:protocol :methods}], JVM names) as a clojerl
+   deftype takes them (see above)."
+  [impls]
+  (let [iface? (fn [{:keys [protocol]}] (interface-sym? protocol))
+        jvm-ifaces (set (map :protocol (filter iface? impls)))
+        i? #(contains? jvm-ifaces %)
+        transient? (some #(str/starts-with? (str %) "clojure.lang.ITransient") jvm-ifaces)
+        vector? (i? 'clojure.lang.IPersistentVector)
+        rw (fn [m] (-> m (update :args clje-rewrite) (update :body #(map clje-rewrite %))))
+        ms (map rw (mapcat :methods (filter iface? impls)))
+        by-name (group-by :name ms)
+        one (fn [n] (first (get by-name n)))
+        arity (fn [n k] (some #(when (= k (count (:args %))) %) (get by-name n)))
+        as (fn [nm m] (when m (assoc m :name nm)))
+        proto (fn [p & methods]
+                (let [methods (remove nil? (flatten methods))]
+                  (when (seq methods) {:protocol p :methods (vec methods)})))
+        apply-of (fn [arities]
+                   (when (seq arities)
+                     (let [self (gensym "self") args (gensym "args")]
+                       {:name 'apply :args [self args]
+                        :body [(concat
+                                (list 'clojure.core/case (list 'clojure.core/count args))
+                                (mapcat (fn [{a :args body :body}]
+                                          [(dec (count a))
+                                           (list* 'clojure.core/let
+                                                  (vec (concat [(first a) self]
+                                                               (mapcat (fn [i s] [s (list 'clojure.core/nth args i)])
+                                                                       (range) (rest a))))
+                                                  body)])
+                                        (sort-by (comp count :args) arities))
+                                [(list 'throw (list 'clojure.core/ex-info "wrong number of arguments"
+                                                    {:args (list 'clojure.core/count args)}))])]})))
+        print-as (cond
+                   (i? 'clojure.lang.IPersistentMap) '(clojure.core/into {} (clojure.core/seq this))
+                   (i? 'clojure.lang.IPersistentSet) '(clojure.core/set (clojure.core/seq this))
+                   vector? '(clojure.core/vec (clojure.core/seq this))
+                   (or (i? 'clojure.lang.ISeq) (i? 'clojure.lang.IPersistentList))
+                   '(clojure.core/apply clojure.core/list (clojure.core/seq this)))
+        translated
+        (remove
+         nil?
+         (concat
+          [(proto 'clojerl.ICounted (as 'count (one 'count)))
+           (proto 'clojerl.IIndexed (map #(as 'nth %) (get by-name 'nth)))
+           (proto 'clojerl.ILookup (map #(as 'get %) (get by-name 'valAt)))
+           (proto 'clojerl.ISeqable
+                  (as 'seq (one 'seq))
+                  (when (one 'seq)
+                    ;; through into: a seq's seq is itself, whose to_list this is
+                    {:name 'to_list :args '[this] :body '[(clj_rt/to_list (clojure.core/into [] this))]}))
+           (proto 'clojerl.IEquiv (as 'equiv (or (one 'equiv) (one 'equals))))
+           (proto 'clojerl.IHash (as 'hash (or (one 'hasheq) (one 'hashCode))))
+           (proto 'clojerl.IMeta (as 'meta (one 'meta)) (as 'with_meta (one 'withMeta)))
+           (proto 'clojerl.IFn (apply-of (get by-name 'invoke)))
+           (proto 'clojerl.IReduce (map #(as 'reduce %) (get by-name 'reduce)))
+           (proto 'clojerl.IKVReduce (as 'kv-reduce (one 'kvreduce)))
+           (proto 'clojerl.IReversible (as 'rseq (one 'rseq)))
+           (proto 'clojerl.IChunkedSeq (as 'chunked_first (one 'chunkedFirst))
+                  (as 'chunked_next (one 'chunkedNext)) (as 'chunked_more (one 'chunkedMore)))
+           (proto 'clojerl.IDeref (as 'deref (one 'deref)))
+           ;; IAtom: eve.host's (clojerl's swap! reaches its own atom only)
+           (when (i? 'clojure.lang.IAtom)
+             (proto 'eve.host/IAtom
+                    (when-let [arities (seq (get by-name 'swap))]
+                      (let [self (gensym "self") f (gensym "f") args (gensym "args")]
+                        (let [{fixed false rest-arity true}
+                              (group-by #(= 5 (count (:args %))) arities)
+                              bind (fn [a extra-binds] (vec (concat [(first a) self (second a) f] extra-binds)))]
+                          {:name '-swap :args [self f args]
+                           :body [(concat
+                                   (list 'clojure.core/case (list 'clojure.core/count args))
+                                   ;; [this f], [this f x], [this f x y]: by the count
+                                   (mapcat (fn [{a :args body :body}]
+                                             [(- (count a) 2)
+                                              (list* 'clojure.core/let
+                                                     (bind a (mapcat (fn [i s] [s (list 'clojure.core/nth args i)])
+                                                                     (range) (drop 2 a)))
+                                                     body)])
+                                           (sort-by (comp count :args) fixed))
+                                   ;; [this f x y xs]: any more
+                                   [(if-let [{a :args body :body} (first rest-arity)]
+                                      (list* 'clojure.core/let
+                                             (bind a [(nth a 2) (list 'clojure.core/nth args 0)
+                                                      (nth a 3) (list 'clojure.core/nth args 1)
+                                                      (nth a 4) (list 'clojure.core/nthnext args 2)])
+                                             body)
+                                      (list 'throw (list 'clojure.core/ex-info "swap!: wrong number of arguments" {})))])]})))
+                    (as '-reset (one 'reset))
+                    (as '-compare-and-set (one 'compareAndSet))))
+           (proto 'clojerl.IPending (as 'realized? (one 'isRealized)))
+           (proto 'clojerl.IStringable
+                  (if print-as
+                    {:name 'str :args '[this] :body [(list 'clojure.core/pr-str print-as)]}
+                    (as 'str (one 'toString))))]
+          (if transient?
+            [(proto 'eve.core/ITransientCollection
+                    (as '-conj! (arity 'conj 2)) (as '-persistent! (one 'persistent)))
+             (proto 'eve.core/ITransientAssociative
+                    (as '-assoc! (if (i? 'clojure.lang.ITransientVector)
+                                   (or (arity 'assocN 3) (arity 'assoc 3))
+                                   (arity 'assoc 3))))
+             (when (i? 'clojure.lang.ITransientMap) (proto 'eve.core/ITransientMap (as '-dissoc! (arity 'without 2))))
+             (when (i? 'clojure.lang.ITransientVector)
+               (proto 'eve.core/ITransientVector
+                      (as '-assoc-n! (or (arity 'assocN 3) (arity 'assoc 3))) (as '-pop! (one 'pop))))
+             (when (i? 'clojure.lang.ITransientSet) (proto 'eve.core/ITransientSet (as '-disjoin! (arity 'disjoin 2))))]
+            [(proto 'clojerl.ISeq (as 'first (one 'first)) (as 'next (one 'next)) (as 'more (one 'more)))
+             (proto 'clojerl.IColl (as 'cons (arity 'cons 2)) (as 'empty (one 'empty)))
+             (proto 'clojerl.IAssociative
+                    (as 'contains_key (one 'containsKey)) (as 'entry_at (one 'entryAt))
+                    (as 'assoc (if vector? (or (arity 'assocN 3) (arity 'assoc 3)) (arity 'assoc 3))))
+             (when (i? 'clojure.lang.IPersistentMap)
+               (proto 'clojerl.IMap
+                      (as 'without (arity 'without 2))
+                      {:name 'keys :args '[this] :body '[(clojure.core/seq (clojure.core/map clojure.core/first (clojure.core/seq this)))]}
+                      {:name 'vals :args '[this] :body '[(clojure.core/seq (clojure.core/map clojure.core/second (clojure.core/seq this)))]}))
+             (when (i? 'clojure.lang.IPersistentSet)
+               (proto 'clojerl.ISet (as 'disjoin (arity 'disjoin 2)) (as 'contains (arity 'contains 2))))
+             (proto 'clojerl.IStack (as 'peek (one 'peek)) (as 'pop (one 'pop)))
+             (proto 'eve.core/IEditableCollection (as '-as-transient (one 'asTransient)))])
+          (map (fn [m] {:protocol m :methods []}) (distinct (keep clje-markers jvm-ifaces)))
+          ;; the type's own protocols as written (their bodies rewritten)
+          (keep (fn [impl] (when-not (iface? impl) (update impl :methods #(mapv rw %)))) impls)))]
+    (vec translated)))
+
+(def clje-hash-caches
+  "Mutable fields that only cache a hash: clojerl never sets them."
+  '#{__hash hash__ __hasheq hasheq__ _hash_val hash-cache__})
+
+(defn- clje-mutable? [f]
+  (let [m (meta f)] (or (:mutable m) (:unsynchronized-mutable m) (:volatile-mutable m))))
+
+(defn- binding-syms
+  "The symbols a binding form (a symbol, or a destructuring vector or map)
+   binds."
+  [b]
+  (cond (symbol? b) (if (= '& b) [] [b])
+        (vector? b) (mapcat binding-syms b)
+        (map? b) (concat (mapcat binding-syms (remove keyword? (keys b)))
+                         (mapcat (fn [[k v]] (when (#{:keys :syms :strs} k) (map #(symbol (name %)) v))) b)
+                         (when-let [a (:as b)] [a]))
+        :else []))
+
+(defn- clje-cells
+  "A method body with the cell fields read through deref and set! through
+   vreset!, and a hash cache's set! dropped (its value returned): a name a
+   let, loop, fn or method argument binds is left alone where it is bound."
+  [form cells caches]
+  (letfn [(walk [form shadow]
+            (cond
+              (and (symbol? form) (contains? cells form) (not (contains? shadow form)))
+              (list 'clojure.core/deref form)
+
+              (not (seq? form))
+              (cond (vector? form) (with-meta (mapv #(walk % shadow) form) (meta form))
+                    (map? form) (with-meta (into {} (map (fn [[k v]] [(walk k shadow) (walk v shadow)])) form)
+                                  (meta form))
+                    :else form)
+
+              (contains? '#{quote var} (first form)) form
+
+              (and (= 'set! (first form)) (symbol? (second form)) (not (contains? shadow (second form))))
+              (let [[_ f v] form v (walk v shadow)]
+                (cond (contains? cells f) (list 'clojure.core/vreset! f v)
+                      (contains? caches f) v
+                      :else (list 'set! f v)))
+
+              (contains? '#{let let* loop loop* when-let if-let when-some if-some when-first binding} (first form))
+              (let [[op bvec & body] form
+                    [bs shadow'] (reduce (fn [[acc sh] [b init]]
+                                           [(conj acc b (walk init sh)) (into sh (binding-syms b))])
+                                         [[] shadow] (partition 2 bvec))]
+                (with-meta (list* op bs (map #(walk % shadow') body)) (meta form)))
+
+              (contains? '#{fn fn*} (first form))
+              (let [[op & more] form
+                    [nm more] (if (symbol? (first more)) [(first more) (rest more)] [nil more])
+                    arities (if (vector? (first more)) [more] more)
+                    sh (cond-> shadow nm (conj nm))]
+                (with-meta (concat (cond-> [op] nm (conj nm))
+                                   (if (vector? (first more))
+                                     (let [[args & body] more sh (into sh (binding-syms args))]
+                                       (cons args (map #(walk % sh) body)))
+                                     (map (fn [[args & body]]
+                                            (let [sh (into sh (binding-syms args))]
+                                              (list* args (map #(walk % sh) body))))
+                                          arities)))
+                  (meta form)))
+
+              :else (with-meta (apply list (map #(walk % shadow) form)) (meta form))))]
+    (walk form #{})))
+
+(defn clje-cell-fields
+  "The fields that hold a cell on clojerl: the mutable ones, less hash caches."
+  [fields]
+  (set (remove #(contains? clje-hash-caches %) (filter clje-mutable? fields))))
+
+(defn clje-deftype
+  "The clojerl forms for a type of JVM-named impls: its deftype and, when a
+   field holds a cell, its ->T factory (see above). fields: the JVM's (meta
+   marks a mutable one)."
+  [type-name fields impls]
+  (let [mutable (set (filter clje-mutable? fields))
+        caches (set (filter #(contains? clje-hash-caches %) mutable))
+        cells (clje-cell-fields fields)
+        fields' (mapv #(with-meta % (dissoc (meta %) :mutable :unsynchronized-mutable :volatile-mutable :tag))
+                      fields)
+        field-names (set fields')
+        impls (mapv (fn [impl]
+                      (update impl :methods
+                              (fn [ms] (mapv (fn [m]
+                                               (let [shadow (set (binding-syms (:args m)))
+                                                     m (update m :body
+                                                               (fn [b] (map #(clje-cells % (apply disj cells shadow)
+                                                                                         (apply disj caches shadow))
+                                                                            b)))
+                                                     ;; a parameter named as a field shadows it on
+                                                     ;; the JVM; clojerl binds both in one function
+                                                     ;; head (a duplicate variable), so the
+                                                     ;; parameter is renamed and rebound over the body
+                                                     clash (filter #(and (symbol? %) (contains? field-names %))
+                                                                   (:args m))]
+                                                 (if (seq clash)
+                                                   (let [ren (into {} (map (fn [a] [a (gensym (str (name a) "__arg"))]))
+                                                                   clash)]
+                                                     (assoc m
+                                                            :args (mapv #(get ren % %) (:args m))
+                                                            :body [(list* 'clojure.core/let (vec (mapcat identity ren))
+                                                                          (:body m))]))
+                                                   m)))
+                                             ms))))
+                    (clje-translate-protos impls))]
+    (concat
+     [`(clojure.core/deftype ~type-name ~fields' ~@(impls->forms impls))]
+     (when (seq cells)
+       (let [args (mapv #(symbol (str "a" %)) (range (count fields')))]
+         [`(defn ~(symbol (str "->" (name type-name))) ~args
+             (new ~type-name ~@(map (fn [f a] (if (contains? cells f) (list 'eve.host/volatile! a) a))
+                                    fields' args)))])))))
+
+(defn- hooks
+  "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
+   value as a literal, which a map of functions is not)."
+  []
+  {:normalize v/jvm-translate-protos
+   :define (fn [type-name fields impls _forms print]
+             (concat (clje-deftype type-name fields impls)
+                     (when print [(sio/print-method-form type-name print)])))
+   ;; through ->T when a field holds a cell, as ->T makes it
+   :build (fn [type-name fields _new-name args]
+            (if (seq (clje-cell-fields fields))
+              (list* (symbol (str "->" (name type-name))) args)
+              (list* 'new type-name args)))
+   :factory-via-var? false
+   :slab-prepare (fn [parsed _type-name] parsed)
+   :object-boilerplate? true
+   :slab-define (fn [type-name fields forms] (clje-deftype type-name fields (parse-protocol-impls forms)))})
+
+(defn host-type
+  "A plain type written with the JVM's names (host-deftype)."
+  [_env type-name fields parsed]
+  `(do ~@(clje-deftype type-name fields parsed) ~type-name))
+
+(defn plain-type
+  "A plain type (eve.deftype/deftype)."
+  [_env type-name fields parsed]
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)
+        {:keys [impls print]} (v/jvm-translate-protos parsed)]
+    `(do ~@(clje-deftype type-name fields impls)
+         ~@(when print [(sio/print-method-form type-name print)])
+         ~type-name)))
+
+(defn- host-math-calls
+  "form with each call of a clje-host-math name going to eve.host's — what the
+   expansion emits outside a type's bodies too (a constructor writes an eve-type
+   field as (unchecked-int off), which clojerl's core lacks)."
+  [form]
+  (cond
+    (and (seq? form) (contains? '#{quote var} (first form))) form
+    (and (seq? form) (empty? form)) form
+    (seq? form)
+    (let [[f & args] form
+          f (if (contains? clje-host-math f) (symbol "eve.host" (name f)) (host-math-calls f))]
+      (with-meta (apply list f (map host-math-calls args)) (meta form)))
+    (vector? form) (with-meta (mapv host-math-calls form) (meta form))
+    (map? form) (with-meta (into {} (map (fn [[k v]] [(host-math-calls k) (host-math-calls v)])) form)
+                  (meta form))
+    :else form))
+
+(defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (host-math-calls (sio/slab-type m (hooks))))
+(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (host-math-calls (sio/eve-type ctx (hooks))))
+(defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
+
+(defn existing-def
+  "{:value v} when the namespace being compiled already defines sym (its
+   value evaluated: a var of the namespace being compiled has no function to
+   deref yet), else nil."
+  [_env sym]
+  (when (resolve sym) {:value (eval sym)}))
+
+(defn rename-fields
+  "An eve-deftype's fields and body with the field names the JVM reserves
+   renamed (__hash): [fields body]."
+  [_env fields body]
+  (sio/eve-renames fields body))
+
+(defn reader-of
+  "What a registered eve collection reads as on this host: its eve type
+   (from-header; host-value is for a host whose types cannot stand in for its
+   collections)."
+  [from-header _host-value]
+  from-header)
+
+(defn print-form
+  "The printer of a registered eve collection: none — clojerl (its IStringable) prints it by
+   its own."
+  [_env _type-name _spec]
+  nil)
+
+(defn vector-types
+  "clojerl's own vector types: its vector and its subvec."
+  [_env]
+  '[clojerl.Vector clojerl.Subvec])

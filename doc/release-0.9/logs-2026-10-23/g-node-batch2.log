@@ -1,0 +1,15 @@
+# run g-node-batch2 on 699340a70 eve tree 6a4d1701e6f8fc55102652adc8679c25bd684564
+# cmd (in eve/) bash -c node target/eve-test/all.js batch2
+# start 2026-10-23 11:16:43 AM ET load 2.89 1.71 0.85 mem-in-use 705 MB
+=== Eve Test Runner ===
+Suite: batch2
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.batch2-validation-test
+
+Ran 10 tests containing 73 assertions.
+0 failures, 0 errors.
+# end 2026-10-23 11:16:45 AM ET exit 0 wall 2s peak-mem-in-use 777 MB peak-process-tree-rss 162 MB load 2.74 1.70 0.85

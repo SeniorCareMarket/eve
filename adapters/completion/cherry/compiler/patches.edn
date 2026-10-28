@@ -1,0 +1,36 @@
+;; cherry's compiler completion (adapters/completion/cherry, as glojure's go/*.patch): what eve's shared code needs of
+;; cherry-cljs 0.6.38's compiler that it does not do, applied by eve/capstone/eve-swarm/cherry.clj to the installed
+;; package's compiled lib/compiler.js. Each :find must occur exactly once (else the build stops: a different cherry);
+;; a file already holding its :replace is left as it is.
+[{:file "lib/compiler.js"
+  :why "A local binding shadows a macro and a special form, as in ClojureScript (and Clojure): cherry's emit-list
+        (src/cherry/compiler.cljc) looks a list's head up as a macro, a special, an infix or a unary operator before
+        asking whether the head is a local, so (let [{:keys [int]} ops] (int 2)) compiles to (2 | 0) — eve.net.edwards'
+        field ops, whose int is the ops' own. The head is a local when the env's :var->ident (let, loop and fn
+        parameters, destructured or not) holds it; such a list is a call of the local."
+  ;; vfa is emit-list; hC the :var->ident keyword; nE.l(oE, env, expr) emit-special 'funcall, as its (seq? expr) arm
+  :find "if($APP.x(a)instanceof $APP.u){e=$APP.x(a);var f=iE(e);"
+  :replace "if($APP.x(a)instanceof $APP.u){e=$APP.x(a);var evl=hC.j(c);if(evl!=null&&evl.cljs$core$ILookup$_lookup$arity$2(null,e)!=null)return nE.l(oE,c,a);var f=iE(e);"}
+ {:file "lib/compiler.js"
+  :why "A var named as one of its namespace's :require aliases is exported under its own name, as in ClojureScript
+        (whose vars and aliases never meet): squint's def renames such a var to a gensym (G__n) so it does not clash
+        with the alias's import binding, and records it in the namespace's :var-renames, but cherry's export line
+        (compile-string's `export { ... }`, src/cherry/compiler.cljc) lists the var's own name — which is the alias's
+        module object, not the var. eve.aegis.chat.client's session function beside its [eve.aegis.session :as
+        session] was exported as the module. The export now names the renamed binding: `G__n as session`."
+  ;; t the namespace's :vars; $APP.sA :ns-state, $APP.Hd deref, $APP.Go.l get-in, nC current-ns, vD :var-renames;
+  ;; $APP.no.h map, $APP.$r.h clojure.string/join
+  :find "w=$APP.$r.h(\", \",w),cx.h?cx.h(\"\\nexport { %s }\\n\",w)"
+  :replace "w=$APP.$r.h(\", \",$APP.no.h(function(v){var rn=$APP.Go.l($APP.Hd($APP.sA.j(c)),new $APP.E(null,3,5,$APP.H,[nC(c),vD,v],null),null);return rn!=null?rn+\" as \"+v:v},w)),cx.h?cx.h(\"\\nexport { %s }\\n\",w)"}
+ {:file "lib/compiler.js"
+  :why "A core-qualified head names core even where a local holds its bare name, as in ClojureScript: cherry reads
+        clojure.core/x and cljs.core/x by the bare name x (iE), so after the local-head patch above
+        (let [{:keys [mod]} ops] (clojure.core/mod b 128)) called the local — eve.net.edwards' make, whose mod is the
+        ops' BigInt one, decoded no point and multiplied by no scalar (every key image, ring signature and X25519 on
+        cherry: a ring vote threw `an attestation's principal commitment is 32 bytes`). Such a list, its bare head no
+        macro, special, infix or unary operator, is a call of (js* \"<core alias>.<munged name>\")."
+  ;; applied after the patch above (its :find is that patch's tail): f the stripped head; Mj not=; kE the core macros,
+  ;; qfa the specials, Dea the infix ops, tfa/ufa the unary ones; wC :core-alias, dx munge, $APP.Yj name, Wca the
+  ;; symbol cljs.core/js*, $APP.lg cons, $APP.qd rest, $APP.ge with-meta, $APP.he meta
+  :find "return nE.l(oE,c,a);var f=iE(e);"
+  :replace "return nE.l(oE,c,a);var f=iE(e);if(evl!=null&&$APP.Mj.h(f,e)&&evl.cljs$core$ILookup$_lookup$arity$2(null,f)!=null&&!$APP.m(kE.j?kE.j(f):kE.call(null,f))&&!$APP.m(qfa(f))&&!$APP.m(Dea(c,f))&&!$APP.Qe(tfa,f)&&!$APP.Qe(ufa,f)){var cal=wC.j(c);return nE.l(oE,c,$APP.ge($APP.lg($APP.lg(Wca,$APP.lg(($APP.m(cal)?\"\"+$APP.K.j(cal)+\".\":\"\")+$APP.K.j(dx($APP.Yj(f))),null)),$APP.qd(a)),$APP.he(a)))}"}]

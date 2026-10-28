@@ -1,0 +1,20 @@
+# run f-node-perf-2 on f0cd69853 eve tree d1e67c882f895d3fb17bd4d710c521138b536168
+# cmd (in eve/) node target/eve-test/all.js perf
+# start 2026-10-21 11:18:57 PM ET load 1.34 1.34 1.95 mem-in-use 1247 MB
+=== Eve Test Runner ===
+Suite: perf
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+{:perf :atom-swap-counter, :ops 32768, :ms 1420, :ns-per-op 43334}
+{:perf :atom-deref-small, :ops 131072, :ms 1292, :ns-per-op 9857}
+{:perf :atom-swap-map-1k, :ops 131072, :ms 1392, :ns-per-op 10620}
+{:perf :atom-deref-map-1k, :ops 1024, :ms 1941, :ns-per-op 1895507}
+{:perf :atom-$-get-map-1k, :ops 262144, :ms 2013, :ns-per-op 7678}
+{:perf :atom-reset-vec-1k, :ops 128, :ms 1404, :ns-per-op 10968750}
+{:perf :sorted-set-build-200, :ops 32, :ms 1152, :ns-per-op 36000000}
+{:perf :int-map-build-200, :ops 128, :ms 1137, :ns-per-op 8882812}
+{:perf :disk-swap-counter, :ops 32768, :ms 1551, :ns-per-op 47332}
+{:perf :thread-submit-64, :ops 256, :ms 1905, :ns-per-op 7441406}
+# end 2026-10-21 11:19:31 PM ET exit 0 wall 34s peak-mem-in-use 2729 MB peak-process-tree-rss 1822 MB load 1.49 1.37 1.94

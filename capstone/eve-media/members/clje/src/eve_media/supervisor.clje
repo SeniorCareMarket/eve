@@ -1,0 +1,176 @@
+(ns eve-media.supervisor
+  "The run's supervisor on the BEAM (clojerl): every other process of a run — the gateway, each member, the browser —
+   started and kept alive by OTP. A top supervisor (one-for-one) holds a supervisor per child; each of those holds one
+   worker, transient, restarted at most eve-media.supervise/intensity times in its period, after which that child is
+   given up on (its supervisor ends, the top does not start it again). A worker owns its child's OS process through a
+   port (/bin/sh exec'ing the child's command, its output appended to the run's logs) and ends when the process ends:
+   abnormally — so OTP starts it again — unless the process exited cleanly or the run is stopping.
+
+   The main process keeps the notes (eve-media.supervise, the control atom): a worker asks it before starting (it
+   answers once the servers the child waits for are up, with the start's number), reports the OS pid and the exit; it
+   takes the coordinator's restart asks by killing the child's process (OTP restarts it), marks a child given up on,
+   and on the run's stop lets the members end, kills what is left (the browser), and halts.
+
+     clojerl -pa <roots> -m eve-media.supervisor <base>
+
+   It is no runtime of the job atom and runs no jobs."
+  (:require [eve.process :as proc]
+            [eve-media.domain :as domain]
+            [eve-media.supervise :as sv]))
+
+(defn- cl "A charlist of x's text (what open_port and os:cmd take)." [x] (erlang/binary_to_list (str x)))
+
+(defn- os-pid [] (erlang/list_to_integer (os/getpid)))
+
+(defn- kill-9! [pid] (when pid (os/cmd (cl (str "kill -9 " pid)))))
+
+(defn- log [& xs] (println (pr-str (vec xs))))
+
+;; ---------------------------------------------------------------------------
+;; OTP: the supervisors' init callback and the workers
+;; ---------------------------------------------------------------------------
+
+(defn init
+  "OTP's supervisor callback: #erl[:top rids] — one supervisor per child, each temporary (one that gives up stays
+   down); #erl[:child rid] — that child's worker, transient, intensity restarts in period."
+  [arg]
+  (if (= :top (erlang/element 1 arg))
+    #erl[:ok #erl[#erl[:one_for_one 0 1]
+                  (clj_rt/to_list
+                   (mapv (fn [rid]
+                           #erl[rid #erl[:supervisor :start_link (clj_rt/to_list [:eve-media.supervisor #erl[:child rid]])]
+                                :temporary :infinity :supervisor (clj_rt/to_list [:eve-media.supervisor])])
+                         (seq (erlang/element 2 arg))))]]
+    (let [rid (erlang/element 2 arg)]
+      #erl[:ok #erl[#erl[:one_for_one sv/intensity (quot sv/period-ms 1000)]
+                    (clj_rt/to_list
+                     [#erl[rid #erl[:eve-media.supervisor :start-worker (clj_rt/to_list [rid])]
+                           :transient 5000 :worker (clj_rt/to_list [:eve-media.supervisor])]])]])))
+
+(defn- open-child
+  "Child rid's OS process (its start n) behind a port: /bin/sh exec'ing its command in its directory, with its
+   environment and its logs."
+  [rid child n]
+  (let [out (sv/log-path child rid n)
+        env (assoc (or (:env child) {}) "EVE_LOG" out "EVE_ERR" (str out ".err"))
+        args (concat ["-c" (sv/sh-script)] (:cmd child))]
+    (erlang/open_port #erl[:spawn_executable (cl "/bin/sh")]
+                      (clj_rt/to_list [#erl[:args (clj_rt/to_list (mapv cl args))]
+                                       #erl[:env (clj_rt/to_list (mapv (fn [[k v]] #erl[(cl k) (cl v)]) env))]
+                                       #erl[:cd (cl (:dir child))]
+                                       :exit_status
+                                       :nouse_stdio]))))
+
+(defn- await-go
+  "The notes' go for child rid: [child n]. The ask is sent again every 2 s until the go comes (a duplicate ask is
+   harmless: the notes answer each one, and a go this worker no longer waits for stays unread) — verify's full run,
+   2026-10-22 2:12 PM ET, lost babashka's start between its ask and its go, with no crash or log to say where."
+  [rid]
+  (erlang/send :eve_media_notes #erl[:start rid (erlang/self)])
+  (let [r (receive* #erl[:go c k] [c k] (after 2000 nil))]
+    (if r r (await-go rid))))
+
+(defn- worker
+  "A child's worker: asks the notes when to start, starts the child's process, waits for its end, and ends as the
+   notes say (:normal: not started again; otherwise OTP starts this worker again)."
+  [rid]
+  (let [[child n] (await-go rid)
+        port (open-child rid child n)
+        pid (erlang/element 2 (erlang/port_info port :os_pid))]
+    (erlang/send :eve_media_notes #erl[:started rid pid n])
+    (let [code (receive* #erl[_ #erl[:exit_status c]] c)]
+      (erlang/send :eve_media_notes #erl[:exited rid code (erlang/self)])
+      (erlang/exit (receive* #erl[:exit-as how] how)))))
+
+(defn start-worker
+  "OTP's start function for a child's worker: #erl[:ok pid], the worker linked to its supervisor."
+  [rid]
+  #erl[:ok (erlang/spawn_link (fn [] (worker rid)))])
+
+;; ---------------------------------------------------------------------------
+;; The notes
+;; ---------------------------------------------------------------------------
+
+(defn- live-supervisors
+  "The ids of the children whose supervisor is running under top."
+  [top]
+  (set (keep (fn [t] (when (erlang/is_pid (erlang/element 2 t)) (erlang/element 1 t)))
+             (seq (supervisor/which_children top)))))
+
+(defn- stop!
+  "The run is stopping: the members end on their own (they read :stop) — waited for up to grace-ms; then whatever
+   still runs (the browser: Chromium does not end on the stop) is killed, and the BEAM halts."
+  [control grace-ms]
+  (let [t0 (proc/now-ms)
+        running (fn [] (keep (fn [[rid m]] (when (= :running (:state m)) [rid (:pid m) (:host m)]))
+                             (:members (sv/value control))))]
+    (loop []
+      (when (and (some (fn [[_ _ h]] (not= :browser h)) (running)) (< (- (proc/now-ms) t0) grace-ms))
+        (timer/sleep 300)
+        (recur)))
+    (doseq [[rid pid] (running)]
+      (log :killed-at-stop rid pid)
+      (kill-9! pid))
+    (log :stopped)
+    (erlang/halt 0)))
+
+(defn- notes!
+  "The main loop: the workers' messages, and every 300 ms the stop, the coordinator's asks, the waiting starts and the
+   children given up on."
+  [control top children]
+  (loop [waiting {} stopping false]
+    (let [msg (receive* m m (after 300 :tick))
+          now (proc/now-ms)]
+      (cond
+        (and (erlang/is_tuple msg) (= :start (erlang/element 1 msg)))
+        (do (when-not (contains? waiting (erlang/element 2 msg)) (log :asks (erlang/element 2 msg)))
+            (recur (assoc waiting (erlang/element 2 msg) (erlang/element 3 msg)) stopping))
+
+        (and (erlang/is_tuple msg) (= :started (erlang/element 1 msg)))
+        (let [rid (erlang/element 2 msg)]
+          (sv/started! control rid (get children rid) (erlang/element 3 msg) (erlang/element 4 msg) now)
+          (log :started rid (erlang/element 3 msg) (erlang/element 4 msg))
+          (recur waiting stopping))
+
+        (and (erlang/is_tuple msg) (= :exited (erlang/element 1 msg)))
+        (let [rid (erlang/element 2 msg)
+              code (erlang/element 3 msg)
+              stop? (or stopping (sv/stopping? control))]
+          (sv/exited! control rid code now)
+          (log :exited rid code)
+          (erlang/send (erlang/element 4 msg)
+                       #erl[:exit-as (if (or stop? (= 0 code)) :normal #erl[:exited code])])
+          (recur waiting stop?))
+
+        :else
+        (let [stopping (or stopping (sv/stopping? control))]
+          (when stopping (stop! control 20000))
+          ;; the coordinator's asks: the child's process killed, its worker started again by OTP
+          (doseq [[rid pid] (sv/asked control)]
+            (log :restart-asked rid pid)
+            (sv/restarting! control rid now)
+            (kill-9! pid))
+          ;; a child whose supervisor ended has been given up on
+          (let [live (live-supervisors top)]
+            (doseq [[rid m] (:members (sv/value control))
+                    :when (and (contains? children rid) (not (contains? live rid))
+                               (not (contains? #{:stopped :gave-up} (:state m))))]
+              (log :gave-up rid)
+              (sv/gave-up! control rid now)))
+          ;; the starts that wait for a server
+          (let [ready (filter (fn [[rid _]] (sv/ready? control (get children rid))) waiting)]
+            (doseq [[rid w] ready]
+              (log :go rid)
+              (erlang/send w #erl[:go (get children rid) (sv/next-start control rid)]))
+            (recur (apply dissoc waiting (map first ready)) stopping)))))))
+
+(defn -main [base]
+  (let [{:keys [control]} (domain/open-atoms base)
+        children (sv/children control)
+        rids (vec (sort (keys children)))]
+    (erlang/register :eve_media_notes (erlang/self))
+    (erlang/process_flag :trap_exit true)
+    (sv/up! control :clje (os-pid) (proc/now-ms))
+    (log :supervising rids)
+    (let [r (supervisor/start_link :eve-media.supervisor #erl[:top (clj_rt/to_list rids)])]
+      (notes! control (erlang/element 2 r) children))))

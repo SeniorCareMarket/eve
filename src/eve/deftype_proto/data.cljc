@@ -1,0 +1,628 @@
+(ns eve.deftype-proto.data
+  "Slab allocator constants and layout definitions.
+
+   ARCHITECTURE:
+   ═══════════════════════════════════════════════════════════════
+
+   Instead of one SAB with a flat descriptor table + coalescing,
+   we use MULTIPLE SharedArrayBuffers — one per size class.
+   Each slab SAB contains only fixed-size blocks, so:
+   - No coalescing ever needed (all blocks same size)
+   - Free tracking via a bitmap (1 bit per block)
+   - SIMD scans 128 blocks per v128 load (vs 4 descriptors before)
+   - Each slab can grow independently via memory.grow
+
+   SIZE CLASSES (power-of-2 + HAMT-optimal):
+   ═══════════════════════════════════════════════════════════════
+
+   Slab  Block   Typical contents
+   ────  ──────  ────────────────────────────────────
+    0     32B    Tiny: 0-1 children, 1 small KV, list nodes
+    1     64B    Common: 2-3 children, 1-2 KVs
+    2    128B    Medium: 4-8 children, 2-4 KVs
+    3    256B    Dense: 8-16 children, multiple KVs
+    4    512B    Very dense or collision nodes
+    5   1024B    Large collision nodes, big KV payloads
+
+   Requests > 1024B go to an overflow slab that uses the old
+   exact-fit allocator (fallback to eve.atom behavior).
+
+   SLAB MEMORY LAYOUT (each slab SAB):
+   ═══════════════════════════════════════════════════════════════
+
+   ┌──────────────────────────────────────────────────────┐
+   │ Slab Header (64 bytes, cache-line aligned)           │
+   │   [0..3]   magic: 0x534C4142 ('SLAB')               │
+   │   [4..7]   block_size: u32                           │
+   │   [8..11]  total_blocks: u32                         │
+   │   [12..15] free_count: u32 (atomic)                  │
+   │   [16..19] alloc_cursor: u32 (per-worker hint)       │
+   │   [20..23] slab_class_idx: u32                       │
+   │   [24..27] bitmap_offset: u32                        │
+   │   [28..31] data_offset: u32                          │
+   │   [32..63] reserved                                  │
+   ├──────────────────────────────────────────────────────┤
+   │ Bitmap Region (1 bit per block, 16-byte aligned)     │
+   │   bit=0 → free, bit=1 → allocated                   │
+   │   Size: ceil(total_blocks / 8) bytes, padded to 16B  │
+   ├──────────────────────────────────────────────────────┤
+   │ Data Region (block_size × total_blocks bytes)        │
+   │   All blocks are contiguous, uniformly sized.        │
+   │   Block N starts at: data_offset + N * block_size    │
+   └──────────────────────────────────────────────────────┘
+
+   ROOT POINTER SAB (separate, shared by all workers):
+   ═══════════════════════════════════════════════════════════════
+   Stores the atom root pointer, epoch counter, worker registry.
+   Root pointer value is now:  [slab_class_idx:u8 block_idx:u24]
+   packed into a single i32 so the root CAS stays a single atomic.
+
+   BITMAP SCANNING (WASM + SIMD):
+   ═══════════════════════════════════════════════════════════════
+   v128.load bitmap bytes → v128.not → find first non-zero byte
+   via i8x16.bitmask + ctz. Scans 128 bits (128 blocks) per
+   SIMD iteration. For a 1MB slab with 64B blocks (16384 blocks),
+   the full bitmap is 2KB = 128 v128 loads worst case."
+  (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes])
+  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes extend-default]]))
+
+;;=============================================================================
+;; Size Classes
+;;=============================================================================
+
+(def ^:const NUM_SLAB_CLASSES 6)
+
+;; Block sizes for each slab class (bytes)
+(def ^:const SLAB_SIZE_0 32)
+(def ^:const SLAB_SIZE_1 64)
+(def ^:const SLAB_SIZE_2 128)
+(def ^:const SLAB_SIZE_3 256)
+(def ^:const SLAB_SIZE_4 512)
+(def ^:const SLAB_SIZE_5 1024)
+
+;; Lookup table: class index → block size
+;; Index 6 = overflow (legacy SAB): block_size=1 so block_idx * 1 = byte_offset
+(def SLAB_SIZES [32 64 128 256 512 1024 1])
+
+(defn slab-size
+  "The block size of slab class class-idx (SLAB_SIZES' entry)."
+  [class-idx]
+  (case (int class-idx)
+    0 32 1 64 2 128 3 256 4 512 5 1024 6 1))
+
+;; Max block size handled by slab allocator
+;; Anything larger goes to the overflow (old-style) allocator
+(def ^:const SLAB_MAX_BLOCK_SIZE 1024)
+
+;; Default max capacity per bitmap slab (bytes of data region).
+;; Bitmap slabs use i32 header fields; the practical limit is the packed
+;; slab pointer (block_idx:u24 = 16M blocks).  2 GB is the fallback for
+;; out-of-range class indices.
+(def ^:const DEFAULT_SLAB_CAPACITY (* 2 1024 1024 1024)) ;; 2GB
+
+;; Per-class max capacities sized for production workloads.
+;; Bitmap and data offsets are computed for max capacity at init time so the
+;; data region never moves during growth.  On Linux/macOS, sparse files and
+;; lazy mmap page commit mean untouched bitmap/data pages cost zero physical
+;; memory or disk — only virtual address space.  Growth doubles lazily via
+;; CAS on the header's total_blocks field.
+;;
+;; Class 0 (32B):    1GB =   32M blocks  (HAMT bitmap nodes — heaviest use)
+;; Class 1 (64B):    1GB =   16M blocks  (HAMT nodes, small values)
+;; Class 2 (128B):   1GB =    8M blocks  (vec trie nodes, larger HAMT nodes)
+;; Class 3 (256B): 512MB =    2M blocks  (collision nodes, serialized values)
+;; Class 4 (512B): 256MB =  512K blocks  (less common)
+;; Class 5 (1024B):256MB =  256K blocks  (least common)
+(def ^:private SLAB_CLASS_CAPACITIES
+  [(* 1024 1024 1024)      ;; Class 0: 1GB
+   (* 1024 1024 1024)      ;; Class 1: 1GB
+   (* 1024 1024 1024)      ;; Class 2: 1GB
+   (* 512 1024 1024)       ;; Class 3: 512MB
+   (* 256 1024 1024)       ;; Class 4: 256MB
+   (* 256 1024 1024)])     ;; Class 5: 256MB
+
+;; Initial (small) capacities for lazy slab growth.
+;; Files start at these sizes and grow on demand up to max capacities.
+;; Total initial data: ~224KB (grows lazily to GB/TB-scale max).
+;; Note: bitmap region is sized for max capacity but sparse-file semantics
+;; mean untouched bitmap pages cost zero physical memory/disk.
+(def ^:private SLAB_CLASS_INITIAL_CAPACITIES
+  [(* 64 1024)     ;; Class 0 (32B):  64KB = 2K blocks
+   (* 64 1024)     ;; Class 1 (64B):  64KB = 1K blocks
+   (* 32 1024)     ;; Class 2 (128B): 32KB = 256 blocks
+   (* 32 1024)     ;; Class 3 (256B): 32KB = 128 blocks
+   (* 16 1024)     ;; Class 4 (512B): 16KB = 32 blocks
+   (* 16 1024)])   ;; Class 5 (1024B):16KB = 16 blocks
+
+(defn default-capacity-for-class
+  "Get the default (max) capacity for a slab class index."
+  [class-idx]
+  (let [caps SLAB_CLASS_CAPACITIES
+        len  (count caps)]
+    (if (and (>= class-idx 0) (< class-idx len))
+      (nth caps class-idx)
+      DEFAULT_SLAB_CAPACITY)))
+
+(defn initial-capacity-for-class
+  "Get the initial (small) capacity for a slab class index.
+   Files start at this size and grow on demand."
+  [class-idx]
+  (let [caps SLAB_CLASS_INITIAL_CAPACITIES
+        len  (count caps)]
+    (if (and (>= class-idx 0) (< class-idx len))
+      (nth caps class-idx)
+      (* 64 1024))))
+
+
+;;=============================================================================
+;; Slab Header Layout (64 bytes, cache-line aligned)
+;;=============================================================================
+
+(def ^:const SLAB_HEADER_SIZE 64)
+
+;; Byte offsets within slab header
+(def ^:const SLAB_HDR_MAGIC 0)           ;; u32: 0x534C4142
+(def ^:const SLAB_HDR_BLOCK_SIZE 4)      ;; u32: block size in bytes
+(def ^:const SLAB_HDR_TOTAL_BLOCKS 8)    ;; u32: number of blocks in this slab
+(def ^:const SLAB_HDR_FREE_COUNT 12)     ;; u32: atomic free block counter
+(def ^:const SLAB_HDR_ALLOC_CURSOR 16)   ;; u32: hint for next scan start
+(def ^:const SLAB_HDR_CLASS_IDX 20)      ;; u32: which size class (0-5)
+(def ^:const SLAB_HDR_BITMAP_OFFSET 24)  ;; u32: byte offset where bitmap starts
+(def ^:const SLAB_HDR_DATA_OFFSET 28)    ;; u32: byte offset where data region starts
+;; 32..63 reserved for future use (epoch, generation, etc.)
+
+(def ^:const SLAB_MAGIC 0x534C4142)      ;; 'SLAB' in ASCII
+
+;;=============================================================================
+;; Bitmap Layout
+;;=============================================================================
+
+;; Bitmap is packed: 1 bit per block, 0=free, 1=allocated.
+;; Aligned to 16 bytes for SIMD v128 loads.
+(def ^:const BITMAP_ALIGNMENT 16)
+
+(defn bitmap-byte-size
+  "Calculate bitmap size in bytes for n blocks, padded to 16-byte alignment."
+  [total-blocks]
+  (let [raw-bytes (quot (+ total-blocks 7) 8)
+        padded    (* (quot (+ raw-bytes (dec BITMAP_ALIGNMENT)) BITMAP_ALIGNMENT)
+                     BITMAP_ALIGNMENT)]
+    padded))
+
+;;=============================================================================
+;; Descriptor Table Layout
+;;=============================================================================
+
+;; Every block of a bitmap class has a descriptor: per-field COLUMNS, the same layout discipline as class 6's
+;; coalescing columns and ValueScript's kernel (VS's src/vs/kernel/wasm/alloc.vs; one layout
+;; and one implementation, 2026-10-22; columns since 2026-10-25). A column exists where a
+;; class reads it: eve's bitmap allocator reads and writes a block's COUNT and FLAGS, and eve.digest reads
+;; and stamps its POINTER (the digest-cache side-block pointer, coalesc/DESC_DIGEST_PTR — a collection root
+;; header is a bitmap-class block, so the claim the row form kept at @16 lives here as the third column),
+;; so an eve bitmap class carries those three columns (the kernel's bitmap classes carry STATUS, SIDE and
+;; EPOCH columns beside their own). The columns are block i's management record and never split or merge.
+;; A heap or SAB slab carries them between its bitmap and its data (the columns end where the blocks begin,
+;; as on a kernel page); an mmap slab carries each column in its own file beside the .bm
+;; ({base}.slabN.desc-count / .desc-flags / .desc-pointer), so a class's growth — re-mapping its files
+;; bigger — never moves an entry.
+
+(defn desc-table-byte-size
+  "The descriptor columns' bytes for n blocks in ONE buffer (a heap/SAB slab carries the COUNT, FLAGS
+   and POINTER columns between its bitmap and its data): 12 bytes a block, padded to 16 bytes (the
+   data region after it stays 16-aligned)."
+  [total-blocks]
+  (let [raw (* total-blocks 12)]
+    (* (quot (+ raw (dec BITMAP_ALIGNMENT)) BITMAP_ALIGNMENT) BITMAP_ALIGNMENT)))
+
+(defn desc-column-byte-size
+  "One descriptor column's bytes for n blocks: a flat i32 array, 4 bytes a block. An mmap slab carries
+   each column in its own file ({base}.slabN.desc-count / .desc-flags / .desc-pointer), so growth stays
+   append-only: re-mapping a bigger file never moves an entry."
+  [total-blocks]
+  (* total-blocks 4))
+
+(defn slab-desc-offset
+  "Where a heap or SAB slab's descriptor columns start: right after its bitmap."
+  [bitmap-offset total-blocks]
+  (+ bitmap-offset (bitmap-byte-size total-blocks)))
+
+(defn desc-col-addr
+  "The byte offset of a bitmap descriptor column entry in ONE buffer: the COUNT column starts at
+   desc-offset, the FLAGS column right after it (desc-offset + 4 * total-blocks), the POINTER column
+   after that (desc-offset + 8 * total-blocks); block idx's entry is 4 * idx into its column."
+  [desc-offset total-blocks col idx]
+  (+ desc-offset (* total-blocks 4 col) (* idx 4)))
+
+;; The three columns an eve bitmap class carries, as desc-col-addr's col argument.
+(def ^:const DESC_COL_COUNT 0)
+(def ^:const DESC_COL_FLAGS 1)
+(def ^:const DESC_COL_POINTER 2)
+
+(defn slab-layout
+  "Calculate layout for a slab with given block-size and capacity.
+   Returns {:total-bytes :bitmap-offset :bitmap-size :desc-offset :data-offset :total-blocks}.
+   Used for SAB/heap slabs where bitmap, descriptor columns and data share one buffer:
+   [header 64][bitmap][descriptor columns][data]."
+  [block-size capacity-bytes]
+  (let [total-blocks  (quot capacity-bytes block-size)
+        bitmap-offset SLAB_HEADER_SIZE
+        bm-size       (bitmap-byte-size total-blocks)
+        desc-offset   (+ bitmap-offset bm-size)
+        data-offset   (+ desc-offset (desc-table-byte-size total-blocks))
+        total-bytes   (+ data-offset (* total-blocks block-size))]
+    {:total-bytes   total-bytes
+     :bitmap-offset bitmap-offset
+     :bitmap-size   bm-size
+     :desc-offset   desc-offset
+     :data-offset   data-offset
+     :total-blocks  total-blocks}))
+
+(defn mmap-slab-layout
+  "Calculate split-file layout for an mmap slab.
+   Bitmap, descriptor table and data live in separate files so data_offset is always
+   SLAB_HEADER_SIZE. Returns {:data-bytes :bitmap-bytes :desc-column-bytes :total-blocks}."
+  [block-size capacity-bytes]
+  (let [total-blocks (quot capacity-bytes block-size)]
+    {:data-bytes   (+ SLAB_HEADER_SIZE (* total-blocks block-size))
+     :bitmap-bytes (bitmap-byte-size total-blocks)
+     :desc-column-bytes (desc-column-byte-size total-blocks)
+     :total-blocks total-blocks}))
+
+(defn slab-bitmap-path
+  "Return the bitmap file path for a slab class, e.g. \"/tmp/eve.slab0.bm\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx ".bm"))
+
+(defn slab-desc-count-path
+  "Return the COUNT column file path for a slab class, e.g. \"/tmp/eve.slab0.desc-count\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx ".desc-count"))
+
+(defn slab-desc-flags-path
+  "Return the FLAGS column file path for a slab class, e.g. \"/tmp/eve.slab0.desc-flags\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx ".desc-flags"))
+
+(defn slab-desc-pointer-path
+  "Return the POINTER column file path for a slab class, e.g. \"/tmp/eve.slab0.desc-pointer\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx ".desc-pointer"))
+
+(defn slab-data-path
+  "Return the data file path for a slab class, e.g. \"/tmp/eve.slab0\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx))
+
+;;=============================================================================
+;; Size-Class Routing
+;;=============================================================================
+
+(defn size->class-idx
+  "Given a requested byte size, return the slab class index (0-5).
+   Returns -1 if the size exceeds SLAB_MAX_BLOCK_SIZE (use overflow allocator)."
+  [size-bytes]
+  (cond
+    (<= size-bytes SLAB_SIZE_0) 0
+    (<= size-bytes SLAB_SIZE_1) 1
+    (<= size-bytes SLAB_SIZE_2) 2
+    (<= size-bytes SLAB_SIZE_3) 3
+    (<= size-bytes SLAB_SIZE_4) 4
+    (<= size-bytes SLAB_SIZE_5) 5
+    :else -1))
+
+;;=============================================================================
+;; Packed Slab Pointer (for root pointer CAS)
+;;=============================================================================
+;; A slab pointer packs [class_idx:u8 | block_idx:u24] into one i32.
+;; This lets the root pointer CAS remain a single atomic i32 operation.
+;; Max block index: 2^24 - 1 = 16,777,215 (plenty for 1MB slabs)
+
+(def ^:const SLAB_PTR_NIL -1)  ;; sentinel for "no value" / empty
+
+(defn pack-slab-ptr
+  "Pack a slab class index and block index into a single i32."
+  [class-idx block-idx]
+  (bit-or (bit-shift-left (bit-and class-idx 0xFF) 24)
+          (bit-and block-idx 0xFFFFFF)))
+
+(defn unpack-slab-class
+  "Extract the slab class index (0-5) from a packed slab pointer."
+  [slab-ptr]
+  (bit-and (unsigned-bit-shift-right slab-ptr 24) 0xFF))
+
+(defn unpack-slab-block-idx
+  "Extract the block index from a packed slab pointer."
+  [slab-ptr]
+  (bit-and slab-ptr 0xFFFFFF))
+
+;;=============================================================================
+;; Root/Control SAB Layout
+;;=============================================================================
+;; The root SAB stores global state shared across workers:
+;; - Atom root pointer (packed slab ptr)
+;; - Global epoch counter
+;; - Worker registry
+
+(def ^:const SIZE_OF_INT32 4)
+
+(def ^:const ROOT_SAB_HEADER_SIZE 64)   ;; cache-line aligned header
+
+(def ^:const ROOT_MAGIC_OFFSET 0)         ;; u32: 0x524F4F54 ('ROOT')
+(def ^:const ROOT_ATOM_PTR_OFFSET 4)      ;; i32: packed slab ptr (class|block)
+(def ^:const ROOT_EPOCH_OFFSET 8)         ;; u32: global epoch counter
+(def ^:const ROOT_WORKER_REG_OFFSET 12)   ;; u32: byte offset to worker registry start
+;; Bytes 16..63 reserved
+
+(def ^:const ROOT_MAGIC 0x524F4F54)       ;; 'ROOT' in ASCII
+
+;; Worker registry begins at byte 64 (right after header)
+(def ^:const ROOT_WORKER_REGISTRY_START ROOT_SAB_HEADER_SIZE)
+
+;; Worker registry config (same as eve.data)
+(def ^:const MAX_WORKERS 256)
+(def ^:const WORKER_SLOT_SIZE 24)
+(def ^:const WORKER_REGISTRY_SIZE (* MAX_WORKERS WORKER_SLOT_SIZE))
+
+;; Total root SAB size
+(def ^:const ROOT_SAB_SIZE (+ ROOT_SAB_HEADER_SIZE WORKER_REGISTRY_SIZE))
+
+;; Worker status values
+(def ^:const WORKER_STATUS_INACTIVE 0)
+(def ^:const WORKER_STATUS_ACTIVE 1)
+(def ^:const WORKER_STATUS_STALE 2)
+
+;; Worker slot layout (24 bytes per worker)
+(def ^:const OFFSET_WS_STATUS 0)
+(def ^:const OFFSET_WS_CURRENT_EPOCH 4)
+(def ^:const OFFSET_WS_HEARTBEAT_LO 8)
+(def ^:const OFFSET_WS_HEARTBEAT_HI 12)
+(def ^:const OFFSET_WS_WORKER_ID 16)
+(def ^:const OFFSET_WS_RESERVED 20)
+
+(def ^:const HEARTBEAT_TIMEOUT_MS 30000)
+
+;;=============================================================================
+;; Atom Slot Table (multi-atom domain support)
+;;=============================================================================
+;; Appended after the worker registry in .root files (V2 format).
+;; 256 slots × 8 bytes each = 2048 bytes + 64-byte table header.
+;; Slot 0 is reserved for the registry atom (keyword→slot-idx HAMT).
+
+(def ^:const ROOT_MAGIC_V2 0x524F4F55)       ;; bumped from 0x524F4F54
+
+;; Atom table header starts right after the worker registry
+(def ^:const ATOM_TABLE_HEADER_START (+ ROOT_SAB_HEADER_SIZE WORKER_REGISTRY_SIZE))
+(def ^:const ATOM_TABLE_HEADER_SIZE 64)
+(def ^:const ATOM_TABLE_MAGIC 0x41544F4D)    ;; 'ATOM' in ASCII
+
+;; Atom slots start after the table header
+(def ^:const ATOM_TABLE_START (+ ATOM_TABLE_HEADER_START ATOM_TABLE_HEADER_SIZE))
+(def ^:const ATOM_SLOT_SIZE 8)
+(def ^:const MAX_ATOM_SLOTS 256)
+(def ^:const ATOM_SLOT_PTR_OFFSET 0)         ;; i32: slab-qualified CAS target
+(def ^:const ATOM_SLOT_HASH_OFFSET 4)        ;; u32: FNV-1a hash of keyword name
+
+;; Total V2 root file size
+(def ^:const ROOT_FILE_SIZE_V2
+  (+ ATOM_TABLE_START (* MAX_ATOM_SLOTS ATOM_SLOT_SIZE)))
+
+;; Header field for atom table offset (byte 16 in .root header)
+(def ^:const ROOT_ATOM_TABLE_OFFSET 16)
+;; Header field for atom table capacity (byte 20 in .root header)
+(def ^:const ROOT_ATOM_TABLE_CAPACITY 20)
+
+;; The exclusive-hold protocol (bytes 24 and 28 of the .root header; zero in
+;; every domain written before it, which is how a domain without a lock-only
+;; participant behaves exactly as before). A host with no atomic
+;; read-modify-write on shared memory (babashka: no MethodHandles, so no
+;; VarHandle CAS — measured 2026-10-15) still takes part in the CAS protocol:
+;;   * ROOT_HOLD     i32: 0, or 1 + the worker slot of the lock-only participant
+;;                   whose swap is in progress. That participant serialises
+;;                   against its own kind with a byte-range file lock on this
+;;                   word, then stores the hold, then waits for ROOT_INFLIGHT
+;;                   to reach 0, then runs its whole swap with plain loads and
+;;                   stores (nothing else is writing), then clears the hold.
+;;   * ROOT_INFLIGHT i32: the number of lock-free swaps in progress. A
+;;                   lock-free host adds 1 before its swap and subtracts 1
+;;                   after; if it sees ROOT_HOLD set after adding, it subtracts
+;;                   again and waits for the hold to clear before retrying.
+;; eve/doc/unification/FORMAT-DECISIONS.md names the proof and the one gap
+;; (a participant that does not implement the two words — the wasm host at
+;; the time of writing — races a lock-only participant, never a lock-free one).
+(def ^:const ROOT_HOLD_OFFSET 24)
+(def ^:const ROOT_INFLIGHT_OFFSET 28)
+
+;; Byte 32 of the .root header is reserved (zero). The count-pages tally of the 0.9 line kept its directory in
+;; this word (1 + the slab offset of the directory block, for the domain's life); the descriptor-row count
+;; (eve.tally) keeps every count on the block's own descriptor row and reads no directory, so the word is never
+;; written — a domain whose header carries a nonzero word here simply has it ignored.
+(def ^:const ROOT_SLOT_HINT_OFFSET 36)     ;; FORMAT-DECISIONS §12: the next-free atom slot hint; word 20 is the capacity
+
+(defn atom-slot-offset
+  "Byte offset of a field within the atom slot table in the .root file."
+  [slot-idx field-offset]
+  (+ ATOM_TABLE_START (* slot-idx ATOM_SLOT_SIZE) field-offset))
+
+;; Block status (for epoch-GC on the bitmap: we only need 1-bit allocated,
+;; but for retirement we track status per-block in a separate status byte array.
+;; However, the slab design simplifies this: most blocks are either free or allocated.
+;; Retired blocks get their bitmap bit set but are tracked in a retired-list.)
+(def ^:const STATUS_FREE 0)
+(def ^:const STATUS_ALLOCATED 1)
+(def ^:const STATUS_RETIRED 2)
+
+;;=============================================================================
+;; Protocols (interface-compatible with eve.data)
+;;=============================================================================
+
+(defprotocol IEveRoot
+  "Marks an Eve type that can live at the atom root.
+   Implement (-root-header-off this) to return the slab-qualified offset of the
+   type's header block. That one method is sufficient for atom swap! to work."
+  (-root-header-off [this]))
+
+(defprotocol IEveSio
+  "The slab I/O a slab-backed value reads through (its domain). nil for a
+   value that is not slab-backed. eve.atom uses it to refuse a value from a
+   foreign domain at the root."
+  (-eve-sio [this]))
+
+(extend-default IEveSio
+  (-eve-sio [_] nil))
+
+(defprotocol IDirectSerialize
+  (-direct-serialize [this]))
+
+(defprotocol ISabStorable
+  (-sab-tag [this])
+  (-sab-encode [this slab-env])
+  (-sab-dispose [this slab-env]))
+
+(defprotocol ISabRetirable
+  (-sab-retire-diff! [old-value new-value slab-env mode]))
+
+(defprotocol IRetireDiff
+  "An eve-deftype value that is a tree of eve blocks (an int-map, a sorted
+   collection), walked by its own structure: what it holds that new does not
+   (new nil, or another kind: everything it holds), as [blocks values] —
+   values the [old new] serialized-value blocks among blocks (new -1 where
+   new holds none at that place), for a caller that diffs a value that is a
+   collection. The tree's own walk serves its transients: a transient frees
+   what each of its writes superseded through it. Since 9.31 eve.atom retires
+   every kind through eve.retire, not through this walk."
+  (-retire-diff [old new]))
+
+(defprotocol ISabpType
+  (-sabp-type-key [this]))
+
+(defprotocol IsEve
+  "Marker protocol for EVE types. Used by serialization to detect
+   EVE objects without walking into their internals."
+  (-eve? [this]))
+
+(defprotocol IBackingArray
+  "Protocol for Eve array types that expose a raw platform array for slab storage.
+   Used by value+sio->eve-bytes to serialize JvmHeapEveArray without circular deps."
+  (-backing-array [this] "Return the underlying platform array (e.g. int[], double[]).")
+  (-backing-subtype [this] "The element subtype code (1-9): a byte[] may hold :uint8 or :int8."))
+
+(defprotocol IPlain
+  "Materialize a slab-backed Eve value into plain Clojure data.
+   Implementations must recursively materialize children via eve->clj.
+   Called with the epoch pinned (atom deref pins it for the read)."
+  (-plain [this]))
+
+(defn eve->clj
+  "Recursively materialize an Eve value into plain Clojure data.
+   Portable: works on JVM and (once IPlain is implemented there) CLJS.
+   Scalars and already-plain values pass through unchanged; Eve collections
+   become persistent maps/sets/vectors/lists. Idempotent."
+  [v]
+  (cond
+    (nil? v) nil
+    (or (string? v) (number? v) (boolean? v)
+        (keyword? v) (symbol? v) (char? v)) v
+    (satisfies? IPlain v) (-plain v)
+    (map? v) (into {} (map (fn [[k x]] [(eve->clj k) (eve->clj x)])) v)
+    (set? v) (into #{} (map eve->clj) v)
+    (vector? v) (mapv eve->clj v)
+    (list? v) (apply list (map eve->clj v))
+    (sequential? v) (doall (map eve->clj v))
+    :else v))
+
+(defprotocol IBulkAccess
+  "Bulk typed-array access to EveArray data: the host's primitive array of
+   the whole column in one shot (a JVM double[] or int[]), for aget/aset
+   loops with no per-element overhead. A host whose arrays have none
+   implements nothing."
+  (-as-double-array [this] "The double array of all elements, or nil if not float64.")
+  (-as-int-array    [this] "The int array of all elements, or nil if not int32."))
+
+;;=============================================================================
+;; Dynamic Vars
+;;=============================================================================
+
+;; *parent-atom* marks the dynamic extent of a swap's f (bound by
+;; eve.atom/swap-attempt! on every host; read by the typed-array codec path,
+;; eve.array has-slab? and the deftype constructor guard). *worker-id* is the
+;; CLJS worker identity of the legacy SAB atom (eve.shared-atom). The former
+;; *persistent?*, *worker-slot-idx* and *read-epoch* had no reader anywhere
+;; and are gone (UNIFICATION-REPORT.md §5).
+(def ^:dynamic *parent-atom* nil)
+(def ^:dynamic *worker-id* nil)
+
+;; *domain-sio* is the slab domain a constructor allocates in while a swap!'s
+;; f runs: the attempt's logging sio over the atom's domain (bound by
+;; eve.atom/swap-attempt!). Outside a swap it is nil and constructors use the
+;; process's own domain — see eve.deftype-proto.alloc/current-sio. Users of
+;; deftype, eve-array, dataset, tensor and the collections never pass an sio.
+(def ^:dynamic *domain-sio* nil)
+
+;;=============================================================================
+;; HAMT Node Constants (same as eve.data)
+;;=============================================================================
+
+(def ^:const HAMT_BITMAP_NODE_TYPE 3)
+(def ^:const HAMT_COLLISION_NODE_TYPE 4)
+(def ^:const HAMT_BITMAP_NODE_COLUMNAR_TYPE 6)
+(def ^:const HAMT_BITMAP_NODE_HEADER_SIZE 10)
+(def ^:const HAMT_COLLISION_NODE_HEADER_SIZE 8)
+
+;;=============================================================================
+;; Serialization Tags (same as eve.data)
+;;=============================================================================
+
+(def ^:const TAG_JS_ARRAY "js/Array")
+(def ^:const TAG_UINT8_ARRAY "js/Uint8Array")
+(def ^:const TAG_INT8_ARRAY "js/Int8Array")
+(def ^:const TAG_UINT8_CLAMPED_ARRAY "js/Uint8ClampedArray")
+(def ^:const TAG_INT16_ARRAY "js/Int16Array")
+(def ^:const TAG_UINT16_ARRAY "js/Uint16Array")
+(def ^:const TAG_INT32_ARRAY "js/Int32Array")
+(def ^:const TAG_UINT32_ARRAY "js/Uint32Array")
+(def ^:const TAG_FLOAT32_ARRAY "js/Float32Array")
+(def ^:const TAG_FLOAT64_ARRAY "js/Float64Array")
+(def ^:const TAG_BIGINT64_ARRAY "js/BigInt64Array")
+(def ^:const TAG_BIGUINT64_ARRAY "js/BigUint64Array")
+(def ^:const TAG_REGEX "regex")
+(def ^:const TAG_URI "uri")
+(def ^:const TAG_CHAR "char")
+(def ^:const TAG_BIGINT "bigint")
+(def ^:const TAG_RECORD "record")
+
+(def ^:const TAG_SABP_LINKED_LIST_STATE "eve/SabpListStateV1")
+(def ^:const TAG_SABP_CHUNKED_LIST_STATE "eve/SabpChunkedListV1")
+(def ^:const TAG_SABP_CHUNKED_VEC_STATE "eve/SabpChunkedVecV1")
+(def ^:const TAG_SABP_MAP_STATE "eve/SabpMapStateV1")
+(def ^:const TAG_SABP_SET_STATE "eve/SabpSetStateV1")
+
+(def ^:const DIRECT_MAGIC_0 0xEE)
+(def ^:const DIRECT_MAGIC_1 0xDB)
+(def ^:const DIRECT_MARKER_MAP 0xED)
+;; Linked list constants
+(def ^:const OFFSET_LL_NODE_VALUE 0)
+(def ^:const LL_NODE_NEXT_OFFSET_SIZE_BYTES SIZE_OF_INT32)
+
+;; Chunked list
+(def ^:const CHUNKED_LIST_CHUNK_SIZE 32)
+
+;; Max swap retries for CAS loops
+(def ^:const MAX_SWAP_RETRIES 1000)
+
+;; Canonical byte order (eve/doc/unification/FORMAT-DECISIONS.md §2): a flat
+;; set's elements and a flat map's entries are written in ascending order of
+;; their encoded bytes, so two writers encode equal values to equal bytes.
+(defn compare-bytes
+  "Compare two byte sequences (Uint8Array on CLJS, byte[] on the JVM and bb,
+   the host's byte array elsewhere) unsigned and lexicographically, a shorter
+   prefix first. Negative, zero or positive like `compare`."
+  [a b]
+  (let [la (alength ^bytes a)
+        lb (alength ^bytes b)
+        n  (if (< la lb) la lb)]
+    (loop [i 0]
+      (if (< i n)
+        (let [x (bit-and (aget ^bytes a i) 0xFF)
+              y (bit-and (aget ^bytes b i) 0xFF)]
+          (if (== x y) (recur (inc i)) (- x y)))
+        (- la lb)))))

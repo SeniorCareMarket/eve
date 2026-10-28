@@ -1,0 +1,25 @@
+(ns clojure.edn
+  "clojure.edn on glojure (part of its core completion, adapters/completion/glojure: glojure v0.7.22 ships no
+   clojure.edn): read-string and read over glojure's reader with *read-eval* off, opts' :readers and :default as
+   Clojure's. #inst and #uuid are glojure's own tags."
+  (:require [clojure.string]))
+
+(defn read-string
+  "One object from string s, as EDN; nil for a blank string."
+  ([s] (read-string {} s))
+  ([opts s]
+   (when-not (clojure.string/blank? s)
+     (binding [*read-eval* false
+               *data-readers* (merge *data-readers* (:readers opts))
+               *default-data-reader-fn* (or (:default opts) *default-data-reader-fn*)]
+       (clojure.core/read-string s)))))
+
+(defn read
+  "One object from reader rdr (a PushbackReader), as EDN."
+  ([] (read *in*))
+  ([rdr] (read {} rdr))
+  ([opts rdr]
+   (binding [*read-eval* false
+             *data-readers* (merge *data-readers* (:readers opts))
+             *default-data-reader-fn* (or (:default opts) *default-data-reader-fn*)]
+     (clojure.core/read rdr))))

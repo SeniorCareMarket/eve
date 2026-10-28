@@ -1,0 +1,21 @@
+;; clje_costs.clje — clojerl's costs behind doc/hosts/clojerl.md: an eve long-array's aset and aget (each a NIF call),
+;; and the binding frame a message carries (its vars, its size as a term) with a bare round trip carrying it to a BEAM
+;; process and back. Timed inside a defn: clojerl interprets what a top-level expression makes. Run by -m (a file
+;; argument after -pa is read as one more code path).
+(ns clje-costs (:require [eve.host :as h]))
+(defn now [] (erlang/monotonic_time :nanosecond))
+(defn echo [] (receive* #erl[from m] (do (erlang/send from m) (echo))))
+(defn run []
+  (let [n 200000 a (h/long-array 64)
+        t0 (now) _ (dotimes [i n] (h/aset a 7 i))
+        t1 (now) _ (dotimes [_ n] (h/aget a 7))
+        t2 (now) _ (dotimes [_ n] nil)
+        t3 (now) loop-ns (- t3 t2)]
+    (println "an eve long-array's aset:" (/ (- (- t1 t0) loop-ns) n 1000.0) "us; aget:" (/ (- (- t2 t1) loop-ns) n 1000.0) "us"))
+  (let [frame (get-thread-bindings) m 20000 me (erlang/self) p (erlang/spawn (fn [] (echo)))
+        t0 (now)
+        _ (dotimes [_ m] (erlang/send p #erl[me frame]) (receive* x x))
+        t1 (now)]
+    (println "the binding frame:" (count frame) "vars," (erlang/byte_size (erlang/term_to_binary frame)) "bytes as a term;"
+             "a round trip carrying it:" (/ (- t1 t0) m 1000.0) "us")))
+(defn -main [& _] (run))

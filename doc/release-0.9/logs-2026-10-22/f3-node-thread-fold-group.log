@@ -1,0 +1,16 @@
+# run f3-node-thread-fold-group on 0a8cb2d45 eve tree 615d038b86486252043746bf7f626170b3ad2f70
+# cmd (in eve/) bash -c node target/eve-test/all.js thread-fold-group
+# start 2026-10-22 10:56:06 AM ET load 1.93 1.74 1.42 mem-in-use 907 MB
+=== Eve Test Runner ===
+Suite: thread-fold-group
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.thread-fold-group-test
+
+Ran 3 tests containing 49 assertions.
+0 failures, 0 errors.
+Worker start: 1531 ms (the last worker's, eve.thread-host/driving)
+# end 2026-10-22 10:56:31 AM ET exit 0 wall 25s peak-mem-in-use 2306 MB peak-process-tree-rss 1640 MB load 2.86 1.97 1.50

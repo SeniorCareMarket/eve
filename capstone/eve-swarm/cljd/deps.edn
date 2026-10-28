@@ -1,0 +1,19 @@
+;; the eve-swarm seat compiled by ClojureDart into a plain Dart program (no Flutter): eve's src and hosts.edn's :cljd
+;; roots (the same list, in the same order; outside this project, which the clojure CLI warns of and accepts), then this
+;; directory's main. Built by build.sh (clojure -M:cljd compile, then dart compile exe into
+;; eve/target/eve-swarm/seat-cljd), run by the launcher's :cljd row. The :cljd alias runs ClojureDart's build through
+;; compiler/eve_swarm/cljd_build.clj, which reads the JVM's type hints in eve's shared code as Dart's dynamic
+{:paths ["src"
+         "../../../src"
+         "../../../adapters/http/dart/src" "../../../adapters/crypto/dart/src" "../../../adapters/core/dart/src"
+         "../../../adapters/completion/dart/src" "../../../adapters/encoding/dart/src"
+         "../../../adapters/int32/portable/src" "../../../adapters/codec/byte-array/src"
+         "../../../adapters/process/dart/src" "../../../adapters/thread/none/src"]
+ :deps {tensegritics/clojuredart
+        {:git/url "https://github.com/tensegritics/ClojureDart.git"
+         :tag "0.9.20261002"
+         :sha "247b3c2c5f2af8378e49a8f1271fb4e45e4a6982"}}
+ :aliases {:cljd {:extra-paths ["compiler"]
+                  :main-opts ["-m" "eve-swarm.cljd-build"]}}
+ :cljd/opts {:kind :dart
+             :main eve-swarm.cljd-seat}}

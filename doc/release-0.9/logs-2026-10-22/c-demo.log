@@ -1,0 +1,65 @@
+# run c-demo on 016ef35f5 eve tree e8c822c5c2b1d2b2bc54fd3305c599800e6b6e74
+# cmd (in eve/) bash -c bb eve-media demo --headless
+# start 2026-10-22 12:05:30 PM ET load 0.55 0.91 1.39 mem-in-use 804 MB
+[eve-media 16:05:45.646411047] build: the Node member (shadow-cljs release eve-media-node)
+[eve-media 16:06:21.295251691] build: the page (shadow-cljs release eve-media-page)
+[eve-media 16:06:56.148528863] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 16:06:56.200327987] run /root/.eve-media/runs/2026-10-22T16-06-56-199 window /dev/shm/eve-media/2026-10-22T16-06-56-199
+[eve-media 16:06:56.521890987] started the supervisor: clje pid 22509
+[eve-media 16:07:33.446196546] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 16:07:33.449339335] progress {} coordinator jvm supervisor clje
+[eve-media 16:07:38.631840430] progress {} coordinator jvm supervisor clje
+[eve-media 16:07:43.789955461] progress {} coordinator jvm supervisor clje
+[eve-media 16:07:49.014488880] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:07:54.257549631] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:07:59.515854987] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:04.773895136] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:09.987220042] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:15.201907668] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:20.398699743] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:25.585605825] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:30.764278844] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:35.939243827] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:41.123526231] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:46.295674517] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:51.475670474] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:08:56.685482217] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:01.855881802] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:07.023607247] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:12.209471160] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:17.381998460] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:22.557664077] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:27.740835080] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:32.910351320] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 16:09:38.014845223] progress {:planned 9, :new 1} coordinator jvm supervisor clje
+[eve-media 16:09:43.355241329] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:09:48.504465606] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:09:53.779581629] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:09:59.089757598] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:04.653340144] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:09.976034011] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:15.387922216] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:20.948090202] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:26.302475653] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:31.539006179] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:36.925641435] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:42.181247114] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:47.363197476] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:52.769640949] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:10:57.917201829] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 16:11:03.293933814] progress {:done 3, :planned 7} coordinator jvm supervisor clje
+[eve-media 16:11:08.738282372] progress {:done 3, :planned 7} coordinator jvm supervisor clje
+[eve-media 16:11:14.110381137] progress {:done 4, :planned 6} coordinator jvm supervisor clje
+[eve-media 16:11:19.420132236] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 16:11:24.755863332] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 16:11:30.037825688] progress {:done 6, :planned 4} coordinator jvm supervisor clje
+[eve-media 16:11:35.420824233] progress {:done 6, :planned 4} coordinator jvm supervisor clje
+[eve-media 16:11:40.711093834] progress {:done 7, :planned 3} coordinator jvm supervisor clje
+[eve-media 16:11:45.783159383] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 16:11:51.100171701] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 16:11:56.329170023] progress {:done 10} coordinator jvm supervisor clje
+[eve-media 16:12:18.868320721] browser check received screenshot /root/.eve-media/runs/2026-10-22T16-06-56-199/page.png 10 of 10 rows
+[eve-media 16:12:21.752804140] complete in 266060 ms
+[eve-media 16:12:21.761876919] report /root/.eve-media/runs/2026-10-22T16-06-56-199/report.edn
+{:kill nil, :drop nil, :checks {:mp4s-h264-aac true, :supervised true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :browser-library-and-requeue true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :ran-on #{"browser" "jolt" "glj" "bb" "jvm" "node"}, :supervisor "clje", :coordinator "jvm", :ok true, :wall-ms 266060, :members #{"browser" "jolt" "glj" "bb" "jvm" "node"}}
+# end 2026-10-22 12:12:42 PM ET exit 0 wall 432s peak-mem-in-use 5724 MB peak-process-tree-rss 5625 MB load 8.90 6.67 3.75

@@ -1,0 +1,27 @@
+;; A plain read-eval-print loop for basilisp (capstone/eve-chat/launcher.clj and atom.broker's
+;; test/aegis/repl_chat_e2e_test.mjs run it as `basilisp run -p … repl_loop.lpy`).
+;;
+;; Why not `basilisp repl`: its prompt_toolkit front end, with no terminal behind it, prints its prompt and then the
+;; redraw of an empty line, so a program typing into it never sees the output end at a prompt. Why not `read` on *in*:
+;; each call buffers ahead and the next form loses characters. So: Python's sys.stdin.readline (an empty string only at
+;; the end of the input), lines joined until basilisp's reader has a whole form, the form evaluated in basilisp.user,
+;; its value printed unless nil, an exception printed as `error: …` and the loop kept, `user=> ` before each form.
+(import sys)
+
+(loop [buf ""]
+  (when (= buf "") (print "user=> ") (flush))
+  (let [raw (.readline sys/stdin)]
+    (when-not (= raw "")
+      (let [text (str buf raw)
+            r (if (= "" (.strip text))
+                [:blank]
+                (try [:form (read-string text)]
+                     (catch basilisp.lang.reader/UnexpectedEOFError _ [:more])
+                     (catch python/Exception e [:error e])))
+            k (first r)]
+        (when (= k :error) (println (str "error: " (second r))))
+        (when (= k :form)
+          (try (let [v (eval (second r))] (when-not (nil? v) (prn v)))
+               (catch python/Exception e (println (str "error: " e))))
+          (flush))
+        (recur (if (= k :more) text ""))))))

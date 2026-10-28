@@ -1,0 +1,15 @@
+# run f-node-batch2 on 685f004fe eve tree 993d2145900ef8634b580531c51823a761770d03
+# cmd (in eve/) node target/eve-test/all.js batch2
+# start 2026-10-21 11:07:44 PM ET load 1.64 1.84 2.67 mem-in-use 1019 MB
+=== Eve Test Runner ===
+Suite: batch2
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.batch2-validation-test
+
+Ran 10 tests containing 73 assertions.
+0 failures, 0 errors.
+# end 2026-10-21 11:07:46 PM ET exit 0 wall 2s peak-mem-in-use 1019 MB peak-process-tree-rss 29 MB load 1.51 1.81 2.66

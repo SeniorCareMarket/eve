@@ -1,0 +1,9 @@
+{
+  "servers": [
+    {
+      "extensions": ["clj", "cljs", "cljc", "edn"],
+      "command": ["clojure-lsp"],
+      "rootDir": "/home/user/eve"
+    }
+  ]
+}

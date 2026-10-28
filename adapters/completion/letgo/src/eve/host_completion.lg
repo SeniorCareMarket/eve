@@ -1,0 +1,53 @@
+(ns eve.host-completion
+  "let-go's completion of its core to Clojure's, loaded first by eve.host (adapters/core/clojure): the names eve's
+   shared code and adapters call that let-go 1.13.0 lacks, interned into its core so every namespace compiled after this
+   resolves them (measured: each was \"Can't resolve\" on lg-eve). The binding frame is the current thread's own —
+   let-go conveys no frame between threads (thread/none's capture and call run on one thread).")
+
+(defn- intern-core [sym f]
+  (when-not (resolve (symbol "clojure.core" (name sym)))
+    (intern 'clojure.core sym f)))
+
+;; Clojure's own (clojure.lang.Murmur3's mixing over the element hashes)
+(defn- mix-k1 [k1]
+  (unchecked-multiply-int (let [k (unchecked-multiply-int k1 (unchecked-int 0xcc9e2d51))]
+                            (bit-or (unchecked-int (bit-shift-left k 15)) (unsigned-bit-shift-right (bit-and k 0xFFFFFFFF) 17)))
+                          (unchecked-int 0x1b873593)))
+
+(defn- mix-h1 [h1 k1]
+  (let [h (bit-xor h1 k1)
+        h (bit-or (unchecked-int (bit-shift-left h 13)) (unsigned-bit-shift-right (bit-and h 0xFFFFFFFF) 19))]
+    (unchecked-int (+ (unchecked-multiply-int h 5) (unchecked-int 0xe6546b64)))))
+
+(defn- fmix [h1 n]
+  (let [h (bit-xor h1 n)
+        h (bit-xor h (unsigned-bit-shift-right (bit-and h 0xFFFFFFFF) 16))
+        h (unchecked-multiply-int h (unchecked-int 0x85ebca6b))
+        h (bit-xor h (unsigned-bit-shift-right (bit-and h 0xFFFFFFFF) 13))
+        h (unchecked-multiply-int h (unchecked-int 0xc2b2ae35))]
+    (unchecked-int (bit-xor h (unsigned-bit-shift-right (bit-and h 0xFFFFFFFF) 16)))))
+
+(defn- mix-collection-hash* [hash-basis count] (fmix (mix-h1 0 (mix-k1 hash-basis)) count))
+
+(intern-core 'mix-collection-hash mix-collection-hash*)
+(intern-core 'hash-ordered-coll
+             (fn [coll] (let [[h n] (reduce (fn [[h n] x] [(unchecked-int (+ (unchecked-multiply-int 31 h) (hash x))) (inc n)])
+                                            [1 0] coll)]
+                          (mix-collection-hash* h n))))
+(intern-core 'hash-unordered-coll
+             (fn [coll] (let [[h n] (reduce (fn [[h n] x] [(unchecked-int (+ h (hash x))) (inc n)]) [0 0] coll)]
+                          (mix-collection-hash* h n))))
+(intern-core 'get-thread-bindings (fn [] {}))
+(intern-core 'with-bindings* (fn [_frame f & args] (apply f args)))
+(intern-core 'uuid (fn [s] (UUID/fromString s)))
+
+;; let-go's into and select-keys answer without the target's metadata (measured, lg-eve 1.13.0); Clojure's keep it — and
+;; an attested record's attestation is its metadata (eve.net.codec/attest), so a record placed by into lost its header
+(defn- keep-meta [src r] (let [m (meta src)] (if (and m (not= m (meta r))) (with-meta r m) r)))
+(alter-var-root #'clojure.core/into
+  (fn [core] (fn ([] []) ([to] to) ([to from] (keep-meta to (core to from))) ([to xf from] (keep-meta to (core to xf from))))))
+(alter-var-root #'clojure.core/select-keys (fn [core] (fn [m ks] (keep-meta m (core m ks)))))
+
+;; let-go's bitwise ops take exactly two arguments; Clojure's take two or more
+(doseq [v [#'clojure.core/bit-and #'clojure.core/bit-or #'clojure.core/bit-xor]]
+  (alter-var-root v (fn [core] (fn ([a b] (core a b)) ([a b & more] (reduce core (core a b) more))))))

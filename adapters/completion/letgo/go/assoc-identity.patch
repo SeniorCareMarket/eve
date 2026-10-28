@@ -1,0 +1,72 @@
+diff -ruN a/pkg/vm/persistent_map.go b/pkg/vm/persistent_map.go
+--- a/pkg/vm/persistent_map.go	2026-10-26 14:10:26.682760355 +0000
++++ b/pkg/vm/persistent_map.go	2026-10-26 14:10:31.041761321 +0000
+@@ -204,7 +204,7 @@
+ 		if valueEquiv(key, existingKey) {
+ 			// Same key — replace value
+ 			existingVal := valOrNode.(Value)
+-			if valueEquiv(existingVal, val) {
++			if valueSame(existingVal, val) {
+ 				return n
+ 			}
+ 			return n.cloneAndSet(2*idx+1, val)
+@@ -389,7 +389,7 @@
+ 		existingKey := keyOrNil.(Value)
+ 		if valueEquiv(key, existingKey) {
+ 			existingVal := valOrNode.(Value)
+-			if valueEquiv(existingVal, val) {
++			if valueSame(existingVal, val) {
+ 				return n
+ 			}
+ 			return n.editAndSet(edit, 2*idx+1, val)
+@@ -516,7 +516,7 @@
+ 		idx := n.findIndex(key)
+ 		if idx >= 0 {
+ 			// Key exists — replace value
+-			if valueEquiv(n.array[idx+1].(Value), val) {
++			if valueSame(n.array[idx+1].(Value), val) {
+ 				return n
+ 			}
+ 			newArray := make([]any, len(n.array))
+@@ -868,7 +868,7 @@
+ 	}
+ 	if m.ordered() {
+ 		if i := m.okvsIndex(key); i >= 0 {
+-			if valueEquiv(m.okvs[i+1], val) {
++			if valueSame(m.okvs[i+1], val) {
+ 				return m
+ 			}
+ 			kvs := make([]Value, len(m.okvs))
+diff -ruN a/pkg/vm/value_same.go b/pkg/vm/value_same.go
+--- a/pkg/vm/value_same.go	1970-01-01 00:00:00.000000000 +0000
++++ b/pkg/vm/value_same.go	2026-10-26 14:10:44.096231427 +0000
+@@ -0,0 +1,29 @@
++package vm
++
++// valueSame: may assoc keep the map when the key already holds existing and the new value is val? Clojure's maps keep
++// it only for the identical value (PersistentArrayMap / PersistentHashMap.assoc test ==), never for a merely equal
++// one: an equal value carrying other metadata must replace the old (eve's attested records ride in their metadata).
++// Scalars without metadata compare by type and value; anything else is never the same.
++func valueSame(existing, val Value) bool {
++	switch e := existing.(type) {
++	case Int:
++		v, ok := val.(Int)
++		return ok && e == v
++	case Keyword:
++		v, ok := val.(Keyword)
++		return ok && e == v
++	case String:
++		v, ok := val.(String)
++		return ok && e == v
++	case Boolean:
++		v, ok := val.(Boolean)
++		return ok && e == v
++	case Char:
++		v, ok := val.(Char)
++		return ok && e == v
++	case *Nil:
++		_, ok := val.(*Nil)
++		return ok
++	}
++	return false
++}

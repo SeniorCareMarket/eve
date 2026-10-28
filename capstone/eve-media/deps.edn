@@ -1,0 +1,9 @@
+;; eve-media's JVM member: its maven libraries only. Its classpath is composed by the launcher (launcher.clj): these
+;; jars (clojure -Spath here), eve's src and hosts.edn's :jvm roots, eve-media's shared src and members/jvm/src.
+{:paths []
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        org.apache.tika/tika-core {:mvn/version "2.9.2"}
+        org.apache.tika/tika-parser-audiovideo-module {:mvn/version "2.9.2"}
+        org.apache.tika/tika-parser-image-module {:mvn/version "2.9.2"}
+        com.drewnoakes/metadata-extractor {:mvn/version "2.19.0"}
+        org.slf4j/slf4j-nop {:mvn/version "2.0.13"}}}

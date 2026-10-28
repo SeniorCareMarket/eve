@@ -1,0 +1,15 @@
+# run f3-node-typed-array on 4af23d1cc eve tree 4f6943b0231f2de6e9813f37b782ab19d9f08ba9
+# cmd (in eve/) bash -c node target/eve-test/all.js typed-array
+# start 2026-10-22 10:50:03 AM ET load 1.77 1.47 1.24 mem-in-use 786 MB
+=== Eve Test Runner ===
+Suite: typed-array
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.typed-array-test
+
+Ran 9 tests containing 70 assertions.
+0 failures, 0 errors.
+# end 2026-10-22 10:50:06 AM ET exit 0 wall 3s peak-mem-in-use 832 MB peak-process-tree-rss 154 MB load 1.77 1.47 1.24

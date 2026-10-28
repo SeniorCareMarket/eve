@@ -1,0 +1,15 @@
+# run f3-node-tensor on 2df27ea17 eve tree c37e7346fecf2130b0e4401ead834cb36f68840b
+# cmd (in eve/) bash -c node target/eve-test/all.js tensor
+# start 2026-10-22 10:56:40 AM ET load 2.49 1.92 1.49 mem-in-use 763 MB
+=== Eve Test Runner ===
+Suite: tensor
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.tensor-test
+
+Ran 15 tests containing 59 assertions.
+0 failures, 0 errors.
+# end 2026-10-22 10:56:42 AM ET exit 0 wall 2s peak-mem-in-use 866 MB peak-process-tree-rss 161 MB load 2.29 1.89 1.48

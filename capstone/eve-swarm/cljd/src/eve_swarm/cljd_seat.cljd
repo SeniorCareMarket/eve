@@ -1,0 +1,7 @@
+(ns eve-swarm.cljd-seat
+  "the eve-swarm seat compiled by ClojureDart: eve.aegis.chat.seat's loop as a plain Dart program's main.
+   eve.host-completion is compiled first: the build resolves what cljd.core lacks there (compiler/eve_swarm/cljd_build.clj)"
+  (:require [eve.host-completion]
+            [eve.aegis.chat.seat :as seat]))
+
+(defn main [] (seat/-main))
