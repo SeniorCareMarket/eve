@@ -24,6 +24,7 @@
    [eve.encoding :as enc]
    [eve.int32 :as i32]
    [eve.process :as proc]
+   [eve.journal-file :as jf]
    [eve.read-region :as rr]
    [eve.deftype-proto.data :as d]
    [eve.slab-io :as slab]
@@ -410,7 +411,7 @@
           :else (do (when (> i 100) (proc/sleep-ms! 1)) (recur (inc i))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Commit journal (durability spike, variant J) — JVM host
+;; Commit journal (durability spike, variant J)
 ;;
 ;; A per-domain append-only file, <base>.journal, beside the .root.
 ;; Records carry COMMIT METADATA ONLY — never values:
@@ -426,162 +427,13 @@
 ;; processes exactly as without it; it records which epochs are
 ;; durable. Appends serialize on the journal file's own lock, held
 ;; across a flush (append + force), never across the live CAS path.
-;; Both hosts write the identical byte format (cross-host recovery
-;; verified: a Node opener recovers a JVM-written journal).
+;; Every host writes the identical byte format (cross-host recovery
+;; verified: a Node opener recovers a JVM-written journal; the
+;; ClojureCLR and Basilisp seats write records the JVM reader
+;; recovers). The file itself — its lock, its record codec, its
+;; forces — is the host's adapter, eve.journal-file; everything below
+;; is the host-free sequence over it: lock, sweep, append, force.
 ;; ---------------------------------------------------------------------------
-
-(def ^:private journal-magic (unchecked-int 0x45564A31)) ;; "EVJ1"
-(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
-
-#?(:clj
-   (defn- journal-record-bytes
-     "One flush record for the root region's current epoch + atom table."
-     [root-r]
-     (let [table (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)
-           epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
-           len   (+ 4 4 journal-table-bytes 4)
-           buf   (java.nio.ByteBuffer/allocate (+ 8 len))]
-       (.putInt buf (int journal-magic))
-       (.putInt buf (int len))
-       (.putInt buf (int epoch))
-       (.putInt buf (int journal-table-bytes))
-       (.put buf ^bytes table)
-       (let [crc (java.util.zip.CRC32.)]
-         (.update crc (.array buf) 8 (+ 4 4 journal-table-bytes))
-         (.putInt buf (unchecked-int (.getValue crc))))
-       (.flip buf)
-       buf)))
-
-#?(:clj
-   (defn- journal-scan
-     "Parse a journal channel's whole content (checkpointing truncates
-      the journal at sync!/close, so this stays small). A record that
-      fails framing or CRC is torn: skipped by its length when the
-      length still frames, else the scan stops there.
-      Returns {:newest {:epoch :table} :torn? bool}."
-     [fc]
-     (let [size (.size fc)]
-       (if (zero? size)
-         {:newest nil :torn? false}
-         (let [buf (java.nio.ByteBuffer/allocate (int size))]
-           (.position fc 0)
-           (while (.hasRemaining buf) (.read fc buf))
-           (.flip buf)
-           (loop [newest nil oldest nil torn? false]
-             (if (< (.remaining buf) 8)
-               {:newest newest :oldest oldest
-                :torn? (or torn? (pos? (.remaining buf)))}
-               (let [magic (.getInt buf) len (.getInt buf)]
-                 (if (or (not= magic (int journal-magic))
-                         (not (pos? len)) (> len (.remaining buf)))
-                   {:newest newest :oldest oldest :torn? true}
-                   (let [payload (byte-array len)]
-                     (.get buf payload)
-                     (let [pb     (java.nio.ByteBuffer/wrap payload)
-                           epoch  (.getInt pb)
-                           tlen   (.getInt pb)
-                           table  (byte-array tlen)
-                           _      (.get pb table)
-                           stored (.getInt pb)
-                           crc    (java.util.zip.CRC32.)]
-                       (.update crc payload 0 (+ 4 4 tlen))
-                       (if (== stored (unchecked-int (.getValue crc)))
-                         (recur {:epoch epoch :table table}
-                                (or oldest epoch) torn?)
-                         (recur newest oldest true)))))))))))))
-
-(defn- journal-with-lock
-  "Run f holding the journal file's lock (and this process's monitor on
-   the channel, so the OS lock never overlaps within one JVM)."
-  [journal f]
-  #?(:clj (let [fc (:fc journal)]
-            (locking fc
-              (let [fl (.lock fc)]
-                (try (f) (finally (.release fl))))))
-     :cljs nil))
-
-;; --- Node (CLJS) journal host ops: the same byte format over fs. The
-;; lock is a lock directory (mkdir is atomic on POSIX): held across a
-;; flush/recovery/checkpoint, never across the live CAS path. A holder
-;; that dies leaves the directory; recovery of a stale lock is the
-;; same heartbeat question as the domain's and is out of spike scope —
-;; the lock is only ever held for one flush's duration.
-
-#?(:cljs
-   (def ^:private crc-table
-     (let [t (js/Uint32Array. 256)]
-       (dotimes [n 256]
-         (loop [c n i 0]
-           (if (< i 8)
-             (recur (if (odd? c)
-                      (bit-xor 0xEDB88320 (unsigned-bit-shift-right c 1))
-                      (unsigned-bit-shift-right c 1))
-                    (inc i))
-             (aset t n c))))
-       t)))
-
-#?(:cljs
-   (defn- crc32-of
-     "CRC-32/ISO-HDLC over bytes[off, off+len) — java.util.zip.CRC32's
-      value, as signed 32-bit bits."
-     [^js bytes off len]
-     (loop [crc (unchecked-int 0xFFFFFFFF) i 0]
-       (if (< i len)
-         (recur (bit-xor (unsigned-bit-shift-right crc 8)
-                         (aget crc-table (bit-and (bit-xor crc (aget bytes (+ off i))) 0xFF)))
-                (inc i))
-         (bit-xor crc (unchecked-int 0xFFFFFFFF))))))
-
-#?(:cljs
-   (defn- journal-record-bytes-js
-     [root-r]
-     (let [table (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)
-           epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
-           len   (+ 4 4 journal-table-bytes 4)
-           out   (js/Uint8Array. (+ 8 len))
-           dv    (js/DataView. (.-buffer out))]
-       (.setInt32 dv 0 (int journal-magic))
-       (.setInt32 dv 4 (int len))
-       (.setInt32 dv 8 (int epoch))
-       (.setInt32 dv 12 (int journal-table-bytes))
-       (.set out table 16)
-       (.setInt32 dv (+ 16 journal-table-bytes) (crc32-of out 8 (+ 4 4 journal-table-bytes)))
-       out)))
-
-#?(:cljs
-   (defn- journal-scan-js
-     [^js data]
-     (let [dv (js/DataView. (.-buffer data) (.-byteOffset data) (.-byteLength data))]
-       (loop [pos 0 newest nil oldest nil torn? false]
-         (if (< (- (.-byteLength data) pos) 8)
-           {:newest newest :oldest oldest
-            :torn? (or torn? (pos? (- (.-byteLength data) pos)))}
-           (let [magic (.getInt32 dv pos)
-                 len   (.getInt32 dv (+ pos 4))]
-             (if (or (not= magic (int journal-magic))
-                     (not (pos? len)) (> len (- (.-byteLength data) pos 8)))
-               {:newest newest :oldest oldest :torn? true}
-               (let [epoch (.getInt32 dv (+ pos 8))
-                     tlen  (.getInt32 dv (+ pos 12))
-                     table (.slice data (+ pos 16) (+ pos 16 tlen))
-                     stored (.getInt32 dv (+ pos 16 tlen))]
-                 (if (== stored (crc32-of data (+ pos 8) (+ 4 4 tlen)))
-                   (recur (+ pos 8 len) {:epoch epoch :table table}
-                          (or oldest epoch) torn?)
-                   (recur (+ pos 8 len) newest oldest true))))))))))
-
-#?(:cljs
-   (defn- journal-with-lock-js
-     [journal f]
-     (let [fs   (js/require "fs")
-           dir  (str (get-in journal [:fc :path]) ".lock")
-           sab  (js/SharedArrayBuffer. 4)
-           view (js/Int32Array. sab)]
-       (loop [tries 0]
-         (let [got (try (.mkdirSync fs dir) true (catch :default _ false))]
-           (cond got (try (f) (finally (try (.rmdirSync fs dir) (catch :default _ nil))))
-                 (> tries 6000) (throw (ex-info "journal lock timeout" {:dir dir}))
-                 :else (do (js/Atomics.wait view 0 0 5) (recur (inc tries)))))))))
 
 (def ^:dynamic *flush-timing*
   "When bound to an atom, journal-flush! conjs each flush's wall time
@@ -592,10 +444,10 @@
 (defn- now-ms []
   ;; eve.process/now-ms is the portable wall clock (per-host adapter);
   ;; System/currentTimeMillis exists only on the JVM — the CLR and
-  ;; Basilisp seats take :clj branches but have no java.lang.System,
-  ;; and journal-note-commit! threw there once the batch/window path
-  ;; first ran on them (phase 3).
-  #?(:clj (proc/now-ms) :cljs (js/Date.now) :default (proc/now-ms)))
+  ;; Basilisp seats have no java.lang.System, and journal-note-commit!
+  ;; threw there once the batch/window path first ran on them
+  ;; (phase 3). The adapter's now-ms is the one clock on every host.
+  (proc/now-ms))
 
 (def ^:dynamic *flush-log*
   "When bound to an atom, journal-flush! conjs {:at <wall-ms> :ms
@@ -612,30 +464,21 @@
   [ds sweep?]
   (let [journal (:journal ds)
         ;; the epoch the appended record will carry (read again
-        ;; inside the lock by journal-record-bytes; epochs are
+        ;; inside the lock by jf/journal-record; epochs are
         ;; monotone, so this earlier read never exceeds it)
         floor-epoch (when journal
                       (mem/-load-i32 (:root-r ds) d/ROOT_EPOCH_OFFSET))
         t0 (when (and journal *flush-timing*)
              (now-ms))]
     (when journal
-      #?(:clj (journal-with-lock journal
-                (fn []
-                  (when sweep? (alloc/sync-sio! (:sio ds)))
-                  (let [fc  (:fc journal)
-                        buf (journal-record-bytes (:root-r ds))]
-                    (.position fc (.size fc))
-                    (while (.hasRemaining buf) (.write fc buf))
-                    ;; fdatasync form: the record bytes and the file size
-                    ;; they need are durable; timestamps are not metadata
-                    ;; recovery reads.
-                    (.force fc false))))
-         :cljs (journal-with-lock-js journal
-                 (fn []
-                   (when sweep? (alloc/sync-sio! (:sio ds)))
-                   (let [fs (js/require "fs")]
-                     (.writeSync fs (get-in journal [:fc :fd]) (journal-record-bytes-js (:root-r ds)))
-                     (.fsyncSync fs (get-in journal [:fc :fd])))))))
+      (jf/with-journal-lock (:file journal)
+        (fn []
+          (when sweep? (alloc/sync-sio! (:sio ds)))
+          (jf/journal-append! (:file journal)
+                              (jf/journal-record (:root-r ds)))
+          ;; data force: the record bytes and the file size they need
+          ;; are durable; timestamps are not metadata recovery reads.
+          (jf/journal-force! (:file journal) false))))
     (when journal
       ;; RETENTION FLOOR — FLUSH-ADVANCE (John's ruling 2026-10-27,
       ;; after the sweep reconciliation measured the checkpoint-only
@@ -712,101 +555,32 @@
    journal of a fresh domain."
   [root-r journal create?]
   (when journal
-    #?(:clj (journal-with-lock journal
-              (fn []
-                (let [fc (:fc journal)]
-                  (if create?
-                    (do (.truncate fc 0) (.force fc true))
-                    (let [{:keys [newest oldest torn?]} (journal-scan fc)
-                          e-map (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-                      ;; RETENTION FLOOR (fix (b)): the oldest epoch
-                      ;; recovery may still install — the journal's
-                      ;; oldest surviving record, or the root's own
-                      ;; epoch when no record survives. Set for live
-                      ;; joiners too (read-only): their retire flush
-                      ;; must honor it like anyone's.
-                      (when (:floor journal)
-                        (reset! (:floor journal) (or oldest e-map)))
-                      (when-not (domain-live? root-r)
-                        (let [install? (and newest (not= (:epoch newest) e-map))]
-                          (when install?
-                            (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
-                            (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
-                            (mem/sync-region! root-r))
-                          (when (or torn? install?)
-                            (.truncate fc 0)
-                            (when newest
-                              (let [buf (journal-record-bytes root-r)]
-                                (.position fc 0)
-                                (while (.hasRemaining buf) (.write fc buf))))
-                            (.force fc true)))))))))
-       :cljs (journal-with-lock-js journal
-               (fn []
-                 (let [fs (js/require "fs")
-                       fd (get-in journal [:fc :fd])]
-                   (if create?
-                     (do (.ftruncateSync fs fd 0) (.fsyncSync fs fd))
-                     (let [data (try (.readFileSync fs (get-in journal [:fc :path]))
-                                     (catch :default _ (js/Uint8Array. 0)))
-                           {:keys [newest oldest torn?]} (journal-scan-js data)
-                           e-map (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-                       ;; RETENTION FLOOR (fix (b)) — as the JVM branch.
-                       (when (:floor journal)
-                         (reset! (:floor journal) (or oldest e-map)))
-                       (when-not (domain-live? root-r)
-                         (let [install? (and newest (not= (:epoch newest) e-map))]
-                           (when install?
-                             (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
-                             (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
-                             (mem/sync-region! root-r))
-                           (when (or torn? install?)
-                             (.ftruncateSync fs fd 0)
-                             (when newest
-                               (.writeSync fs fd (journal-record-bytes-js root-r)))
-                             (.fsyncSync fs fd))))))))))))
-
-(defn- journal-open!
-  [base-path]
-  #?(:clj (java.nio.channels.FileChannel/open
-           (java.nio.file.Paths/get (str base-path ".journal")
-                                    (into-array String []))
-           (into-array java.nio.file.OpenOption
-                       [java.nio.file.StandardOpenOption/CREATE
-                        java.nio.file.StandardOpenOption/READ
-                        java.nio.file.StandardOpenOption/WRITE]))
-     :cljs (let [path (str base-path ".journal")
-                 fs   (js/require "fs")]
-             {:fd (.openSync fs path "a+") :path path})))
-
-(defn- journal-record-bytes-of
-  "A journal record's bytes for an explicit epoch + table (the
-  anchor rewrite regenerates the checkpoint record from the scan's
-  newest, rather than re-reading the root region)."
-  [epoch table]
-  #?(:clj (let [tlen (alength table)
-                len  (+ 4 4 tlen 4)
-                buf  (java.nio.ByteBuffer/allocate (+ 8 len))]
-            (.putInt buf (int journal-magic))
-            (.putInt buf (int len))
-            (.putInt buf (int epoch))
-            (.putInt buf (int tlen))
-            (.put buf table)
-            (let [crc (java.util.zip.CRC32.)]
-              (.update crc (.array buf) 8 (+ 4 4 tlen))
-              (.putInt buf (unchecked-int (.getValue crc))))
-            (.flip buf)
-            buf)
-     :cljs (let [tlen (.-length table)
-                 len  (+ 4 4 tlen 4)
-                 out  (js/Uint8Array. (+ 8 len))
-                 dv   (js/DataView. (.-buffer out))]
-             (.setInt32 dv 0 (int journal-magic))
-             (.setInt32 dv 4 (int len))
-             (.setInt32 dv 8 (int epoch))
-             (.setInt32 dv 12 (int tlen))
-             (.set out table 16)
-             (.setInt32 dv (+ 16 tlen) (crc32-of out 8 (+ 4 4 tlen)))
-             out)))
+    (jf/with-journal-lock (:file journal)
+      (fn []
+        (let [h (:file journal)]
+          (if create?
+            (do (jf/journal-truncate! h) (jf/journal-force! h true))
+            (let [{:keys [newest oldest torn?]} (jf/journal-scan h)
+                  e-map (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+              ;; RETENTION FLOOR (fix (b)): the oldest epoch
+              ;; recovery may still install — the journal's
+              ;; oldest surviving record, or the root's own
+              ;; epoch when no record survives. Set for live
+              ;; joiners too (read-only): their retire flush
+              ;; must honor it like anyone's.
+              (when (:floor journal)
+                (reset! (:floor journal) (or oldest e-map)))
+              (when-not (domain-live? root-r)
+                (let [install? (and newest (not= (:epoch newest) e-map))]
+                  (when install?
+                    (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
+                    (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
+                    (mem/sync-region! root-r))
+                  (when (or torn? install?)
+                    (jf/journal-truncate! h)
+                    (when newest
+                      (jf/journal-write-at! h (jf/journal-record root-r) 0))
+                    (jf/journal-force! h true)))))))))))
 
 (defn- journal-anchor!
   "Checkpoint's tail — RECOVERY FLOOR FIX (a) (John's ruling,
@@ -822,38 +596,20 @@
   domain) is left empty."
   [journal]
   (when journal
-    #?(:clj (journal-with-lock journal
-              (fn [] (let [fc (:fc journal)
-                           {:keys [newest]} (journal-scan fc)]
-                       (when newest
-                         (let [buf (journal-record-bytes-of
-                                    (:epoch newest) (:table newest))]
-                           (.truncate fc 0)
-                           (.position fc 0)
-                           (while (.hasRemaining buf) (.write fc buf))
-                           (.force fc true)
-                           (when (:floor journal)
-                             (reset! (:floor journal) (:epoch newest))))))))
-       :cljs (journal-with-lock-js journal
-               (fn [] (let [fs (js/require "fs")
-                            fd (get-in journal [:fc :fd])
-                            data (try (.readFileSync fs (get-in journal [:fc :path]))
-                                      (catch :default _ (js/Uint8Array. 0)))
-                            {:keys [newest]} (journal-scan-js data)]
-                        (when newest
-                          (let [bytes (journal-record-bytes-of
-                                       (:epoch newest) (:table newest))]
-                            (.ftruncateSync fs fd 0)
-                            (.writeSync fs fd bytes 0 (.-length bytes) 0)
-                            (.fsyncSync fs fd)
-                            (when (:floor journal)
-                              (reset! (:floor journal) (:epoch newest)))))))))))
+    (jf/with-journal-lock (:file journal)
+      (fn [] (let [h (:file journal)
+                   {:keys [newest]} (jf/journal-scan h)]
+               (when newest
+                 (jf/journal-truncate! h)
+                 (jf/journal-write-at! h (jf/journal-record-of
+                                           (:epoch newest) (:table newest)) 0)
+                 (jf/journal-force! h true)
+                 (when (:floor journal)
+                   (reset! (:floor journal) (:epoch newest)))))))))
 
 (defn- journal-close! [journal]
   (when journal
-    #?(:clj (try (.close (:fc journal)) (catch Throwable _ nil))
-       :cljs (try (.closeSync (js/require "fs") (get-in journal [:fc :fd]))
-                  (catch :default _ nil)))))
+    (jf/journal-close! (:file journal))))
 
 (defn- open-mmap-domain!
   "Create (create? true) or join the mmap domain at base-path. Returns the
@@ -871,7 +627,7 @@
                                         {:lustre? lustre?})]
     (when create? (init-domain-root! root-r))
     (let [journal  (when (:journal? opts)
-                     {:fc      (journal-open! base-path)
+                     {:file    (jf/open-journal (str base-path ".journal"))
                       :limit   (or (:journal-batch opts) 1)
                       :pending (clojure.core/atom 0)
                       ;; RETENTION FLOOR (fix (b)): the epoch the

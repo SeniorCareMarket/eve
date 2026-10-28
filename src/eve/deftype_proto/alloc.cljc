@@ -1035,14 +1035,15 @@
 (defn sync-sio!
   "Force every file-backed region a domain's slab I/O holds to durable
    storage: the host slab's :sync-domain-sio! when it registers one (the
-   Node module slabs), else the JVM slab ctx's slab, bitmap and
-   descriptor regions (sync-jvm-slab-regions!). A region that cannot
-   force answers nil (eve.mem/sync-region!), so a heap domain is a no-op."
+   Node module slabs), else the slab ctx's slab, bitmap and descriptor
+   regions (sync-jvm-slab-regions!) — the same unconditional fallback
+   refresh! takes: every non-CLJS host's ctx is that ctx, and a region
+   that cannot force answers nil (eve.mem/sync-region!), so a heap
+   domain is a no-op."
   [sio]
   (if-let [f (host-op :sync-domain-sio!)]
     (f sio)
-    #?(:clj (sync-jvm-slab-regions! (sio-root sio))
-       :cljs nil)))
+    (sync-jvm-slab-regions! (sio-root sio))))
 
 (defn init-domain-views!
   "Ready the process slab's own views of a heap domain (nothing for a

@@ -97,6 +97,22 @@
   (-read-bytes [_ off len] (array/array "b" (ctypes/string-at (+ base off) len)))
   (-write-bytes! [_ off src]
     (ctypes/memmove (+ base off) (python/bytes src) (alength src))
+    nil)
+  mem/ISyncableRegion
+  ;; The mapping's own flush (msync under CPython's mmap). A heap
+  ;; region (owner's first is its bytearray) has nothing to force.
+  ;; Before this, mem/sync-region! answered nil for every basilisp
+  ;; region, so the journal flush's slab sweep and the recovery root
+  ;; force were silent no-ops on this host.
+  (-sync! [_]
+    (when (python/isinstance (first owner) mmap/mmap)
+      (.flush (first owner)))
+    nil)
+  (-sync-range! [_ off len]
+    (when (python/isinstance (first owner) mmap/mmap)
+      (let [page mmap/PAGESIZE
+            a    (- off (mod off page))]
+        (.flush (first owner) a (+ (- off a) len))))
     nil))
 
 (defn open-mmap-region

@@ -5,12 +5,13 @@
 {:jvm  ["adapters/slab-io/protocol/src" "adapters/http/java/src" "adapters/http-server/jdk/src" "adapters/crypto/java/src"
         "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src"
         "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
-        "adapters/types/jvm/src" "adapters/types/js/src"]
+        "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/java/src"]
  :cljs ["adapters/slab-io/protocol/src" "adapters/slab-io/cljs-compiler/src" "adapters/http/node/src" "adapters/http-server/node/src"
         "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
         "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
         "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
         "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/thread/node/src"
+        "adapters/journal-file/node/src"
         ;; the compiler's own Clojure, a JVM (its macros run there and load
         ;; eve's JVM runtime): the JVM's adapters, .clj files ClojureScript
         ;; never reads (the byte-array codec's .cljc yields to the .cljs one)
@@ -27,15 +28,15 @@
            "adapters/thread/browser/src"
            "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src"
            "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
-           "adapters/types/jvm/src" "adapters/types/js/src"]
+           "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/node/src"]
  :bb   ["adapters/slab-io/protocol/src" "adapters/http/java/src" "adapters/http-server/httpkit/src" "adapters/crypto/java/src"
         "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/region/jvm-nio-lock/src"
         "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
-        "adapters/types/bb/src"]
+        "adapters/types/bb/src" "adapters/journal-file/java/src"]
  :nbb  ["adapters/slab-io/protocol/src" "adapters/http/node/src" "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
         "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/nbb/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
         "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/thread/node/src"
-        "adapters/types/js/src" "adapters/types/nbb/src"]
+        "adapters/types/js/src" "adapters/types/nbb/src" "adapters/journal-file/node/src"]
  ;; Scittle (SCI in a browser, interpreted from source like nbb; a page's loader reads these roots
  ;; over HTTP in a cross-origin isolated page's worker): nbb's interpreted-ClojureScript adapters with the browser's
  ;; http, crypto and threads. Run: an aegis chat seat's 43 namespaces, in a page;
@@ -44,7 +45,7 @@
            "adapters/crypto/js-bigint/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
            "adapters/coll/nbb/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
            "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src"
-           "adapters/thread/browser/src" "adapters/types/js/src" "adapters/types/nbb/src"]
+           "adapters/thread/browser/src" "adapters/types/js/src" "adapters/types/nbb/src" "adapters/journal-file/node/src"]
  ;; cherry (npm cherry-cljs): ClojureScript compiled file by file to ES modules over cherry's own cljs.core, run on
  ;; Node — ClojureScript's Node adapters with eve.host's functions over that core module (adapters/core/cherry) and
  ;; cherry's completion (clojure.edn; its compiler's local shadowing, applied at the build); the current thread only
@@ -53,23 +54,23 @@
  :cherry ["adapters/slab-io/protocol/src" "adapters/http/node/src" "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
           "adapters/core/cherry/src" "adapters/completion/cherry/src" "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src"
           "adapters/region/js/src" "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src"
-          "adapters/process/node/src" "adapters/thread/none/src" "adapters/types/js/src"]
+          "adapters/process/node/src" "adapters/thread/none/src" "adapters/types/js/src" "adapters/journal-file/node/src"]
  :cljr ["adapters/slab-io/protocol/src" "adapters/http/clr/src" "adapters/crypto/clr/src"
         "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/clr/src"
         "adapters/encoding/clr/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/clr/src" "adapters/thread/clr/src"
-        "adapters/types/clr/src"]
+        "adapters/types/clr/src" "adapters/journal-file/clr/src"]
  :lpy  ["adapters/slab-io/protocol/src" "adapters/http/python/src" "adapters/crypto/python/src"
         "adapters/core/clojure/src" "adapters/completion/basilisp/src" "adapters/coll/basilisp/src" "adapters/slab/heap/src" "adapters/region/ctypes/src"
         "adapters/encoding/python/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/python/src" "adapters/thread/python/src"
-        "adapters/types/basilisp/src"]
+        "adapters/types/basilisp/src" "adapters/journal-file/python/src"]
  :jolt ["adapters/slab-io/protocol/src" "adapters/http/socket/src" "adapters/crypto/jolt/src"
         "adapters/core/clojure/src" "adapters/completion/jolt/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jolt-ffi/src"
         "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
-        "adapters/types/jvm/src" "adapters/types/js/src"]
+        "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/unsupported/src"]
  :clje ["adapters/slab-io/protocol/src" "adapters/http/beam/src" "adapters/crypto/beam/src"
         "adapters/core/beam/src" "adapters/coll/beam/src" "adapters/slab/heap/src" "adapters/region/beam/src"
         "adapters/encoding/beam/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/beam/src" "adapters/thread/beam/src"
-        "adapters/types/beam/src"]
+        "adapters/types/beam/src" "adapters/journal-file/unsupported/src"]
  ;; ValueScript (vs compile, then wasmtime; bb test:vs): slab I/O, regions, the allocator, the codec, the HAMT
  ;; functions; eve.core is babashka's protocols adapter and eve.types translates a type onto it (VS's core never reaches
  ;; a deftype's interfaces). eve/deftype's expansion waits on a builder carrying EM4's held half (VS's analyzer lets a
@@ -81,14 +82,14 @@
  ;; bb test:vs-serve)
  :vs   ["adapters/slab-io/vs/src" "adapters/http/vs/src" "adapters/http-server/vs/src" "adapters/core/vs/src" "adapters/completion/clojure/src" "adapters/slab/heap/src"
         "adapters/region/vs/src" "adapters/encoding/vs/src" "adapters/int32/vs/src" "adapters/codec/byte-array/src"
-        "adapters/process/vs/src" "adapters/coll/protocols/src" "adapters/types/vs/src" "adapters/crypto/vs/src"]
+        "adapters/process/vs/src" "adapters/coll/protocols/src" "adapters/types/vs/src" "adapters/crypto/vs/src" "adapters/journal-file/unsupported/src"]
  ;; glojure, run as glj-eve (impls/glojure/build.sh: glojure v0.7.22 with eve's Go packages and its completion's
  ;; patches): its regions over eve's Go region package, its core completed (deftype, reify, satisfies?, ...), eve's
  ;; types as records on eve.core's protocols (babashka's coll adapter), the network atom's adapters among them
  :glj  ["adapters/slab-io/protocol/src" "adapters/http/go/src" "adapters/crypto/go/src"
         "adapters/core/clojure/src" "adapters/completion/glojure/src" "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/region/glojure/src"
         "adapters/encoding/go/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/go/src" "adapters/thread/glojure/src"
-        "adapters/types/glojure/src"]
+        "adapters/types/glojure/src" "adapters/journal-file/unsupported/src"]
  ;; let-go, run as lg-eve (impls/let-go: let-go v1.13.0 with eve's Go package, evenative — `go build -o
  ;; target/lg-eve/lg-eve .` there): the network atom's set — http, crypto and encoding over lg-eve's Go natives
  ;; (evenative/host.go), the process feature's clock, entropy and stdin, no threads (thread/none). Not yet eve memory:
@@ -110,4 +111,4 @@
               "adapters/types/bb/src"
               "adapters/slab-io/protocol/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
               "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/int32/portable/src"
-              "adapters/codec/byte-array/src" "adapters/crypto/portable/src" "adapters/thread/none/src"]}
+              "adapters/codec/byte-array/src" "adapters/crypto/portable/src" "adapters/thread/none/src" "adapters/journal-file/java/src"]}

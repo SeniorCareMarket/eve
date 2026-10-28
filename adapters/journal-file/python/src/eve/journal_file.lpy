@@ -1,0 +1,161 @@
+(ns eve.journal-file
+  "The commit journal's file handle (eve.atom's durability mode): an
+   append-only per-domain file beside the domain root, holding commit
+   records only. This host: basilisp — an os fd, positioned with
+   lseek; the journal's lock is an fcntl POSIX lock (LOCK_EX). Measured
+   on this kernel, a classic POSIX lock excludes and is excluded by
+   the JVM FileChannel's OFD lock on the same path, so seats of
+   different hosts serialize on the journal.
+
+   Record format (identical bytes on every host):
+     [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
+   magic = \"EVJ1\" (0x45564A31); all integers big-endian; len counts the
+   bytes after itself (epoch + table-len + table + crc); the CRC-32
+   covers the epoch..table-end bytes. The commit point is lock, write
+   blocks, force slab, append record, force journal — eve.atom runs
+   that sequence over this file.
+
+   zlib.crc32 returns the UNSIGNED checksum; the record stores the
+   signed i32, so conversions happen at the boundary (to-signed)."
+  (:require [eve.host :refer [locking]]
+            [eve.mem :as mem]
+            [eve.deftype-proto.data :as d])
+  (:import os fcntl struct zlib))
+
+(def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
+(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+
+(defn- to-signed
+  "An unsigned 32-bit CRC value as the signed i32 the record stores."
+  [u]
+  (if (>= u 2147483648) (- u 4294967296) u))
+
+(defn- bytes-slice
+  "Python bytes slicing through __getitem__ (basilisp has no aget for
+   Python bytes)."
+  [b a z]
+  ((python/getattr b "__getitem__") (python/slice a z)))
+
+(defn open-journal
+  "Open (creating if needed) the journal file at PATH for read+write.
+   Returns the file handle {:fd :path}."
+  [path]
+  {:fd (os/open (str path) (bit-or os/O_RDWR os/O_CREAT) 420)   ;; 0644
+   :path (str path)})
+
+(defn with-journal-lock
+  "Run F holding the journal file's exclusive lock: an fcntl POSIX
+   lock on the journal fd."
+  [{:keys [fd]} f]
+  (locking fd
+    (fcntl/lockf fd fcntl/LOCK_EX)
+    (try (f) (finally (fcntl/lockf fd fcntl/LOCK_UN)))))
+
+(defn journal-record-of
+  "The commit record for an explicit EPOCH and TABLE (Python bytes)."
+  [epoch table]
+  (let [tlen (.-length table)
+        len  (+ 4 4 tlen 4)
+        out  (bytearray)]
+    (.extend out (struct/pack ">iiii" journal-magic len (int epoch) tlen))
+    (.extend out table)
+    (.extend out (struct/pack ">i" (to-signed (zlib/crc32 (bytes-slice (python/bytes out) 8 (+ 16 tlen))))))
+    (python/bytes out)))
+
+(defn journal-record
+  "The commit record for ROOT-R's CURRENT epoch and atom table."
+  [root-r]
+  (journal-record-of (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                     (python/bytes (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes))))
+
+(defn- read-all
+  "The journal file's whole content as Python bytes."
+  [{:keys [fd]}]
+  (let [size (.-st_size (os/fstat fd))
+        buf  (bytearray)]
+    (os/lseek fd 0 os/SEEK_SET)
+    (loop [left size]
+      (if (pos? left)
+        (let [chunk (os/read fd (min left 1048576))]
+          (if (zero? (.-length chunk))
+            (python/bytes buf)
+            (do (.extend buf chunk)
+                (recur (- left (.-length chunk))))))
+        (python/bytes buf)))))
+
+(defn journal-scan
+  "Scan the journal's records in order. Returns {:newest {:epoch :table}
+   :oldest epoch :torn? bool} — a record is accepted iff its framing
+   survives (magic + length in range) and its CRC matches; a record whose
+   framing survives but whose CRC fails is SKIPPED (its length still
+   advances the scan); a framing failure ends the scan. The table is
+   Python bytes, ready for eve.mem/-write-bytes!."
+  [h]
+  (let [data (read-all h)
+        total (.-length data)]
+    (loop [pos 0 newest nil oldest nil torn? false]
+      (let [remaining (- total pos)]
+        (cond
+          (< remaining 8)
+          {:newest newest :oldest oldest
+           :torn? (or torn? (pos? remaining))}
+
+          :else
+          (let [magic (first (struct/unpack_from ">i" data pos))
+                len   (first (struct/unpack_from ">i" data (+ pos 4)))]
+            (if (or (not= magic journal-magic)
+                    (not (pos? len))
+                    (> len (- remaining 8)))
+              {:newest newest :oldest oldest :torn? true}
+              (let [epoch (first (struct/unpack_from ">i" data (+ pos 8)))
+                    tlen  (first (struct/unpack_from ">i" data (+ pos 12)))]
+                (if (> (+ 4 4 tlen 4) len)
+                  {:newest newest :oldest oldest :torn? true}
+                  (let [stored (first (struct/unpack_from ">i" data (+ pos 16 tlen)))
+                        calc   (to-signed (zlib/crc32 (bytes-slice data (+ pos 8) (+ pos 16 tlen))))]
+                    (if (= stored calc)
+                      (recur (+ pos 8 len)
+                             {:epoch epoch
+                              :table (bytes-slice data (+ pos 16) (+ pos 16 tlen))}
+                             (or oldest epoch)
+                             torn?)
+                      (recur (+ pos 8 len) newest oldest true))))))))))))
+
+(defn- write-all
+  "Write all of Python-bytes B to FD at its current position."
+  [fd b]
+  (let [total (.-length b)]
+    (loop [off 0]
+      (when (< off total)
+        (recur (+ off (os/write fd (bytes-slice b off total))))))))
+
+(defn journal-append!
+  "Write BYTES (Python bytes) at the end of the journal file. Does not
+   force — the caller forces at the commit point."
+  [{:keys [fd]} b]
+  (os/lseek fd 0 os/SEEK_END)
+  (write-all fd b))
+
+(defn journal-write-at!
+  "Write BYTES (Python bytes) at absolute offset POS."
+  [{:keys [fd]} b pos]
+  (os/lseek fd (int pos) os/SEEK_SET)
+  (write-all fd b))
+
+(defn journal-truncate!
+  "Truncate the journal file to zero length (no force; the caller
+   forces as part of its checkpoint/recovery sequence)."
+  [{:keys [fd]}]
+  (os/ftruncate fd 0))
+
+(defn journal-force!
+  "Force the journal file to storage. os.fsync forces data and
+   metadata alike — FULL? is ignored (the stronger force is taken on
+   both paths)."
+  [{:keys [fd]} full?]
+  (os/fsync fd))
+
+(defn journal-close!
+  "Close the journal file; never throws."
+  [{:keys [fd]}]
+  (try (os/close fd) (catch python/Exception _ nil)))
