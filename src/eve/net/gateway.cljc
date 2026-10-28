@@ -42,6 +42,7 @@
             [eve.net.bytes :as b]
             [eve.net.codec :as codec]
             [eve.net.json :as json]
+            [eve.net.presign :as presign]
             [eve.net.run :as r]))
 
 ;; ---------------------------------------------------------------------------
@@ -55,24 +56,11 @@
   (str/replace (str/replace aid "%2F" "/") "%2f" "/"))
 
 ;; ---------------------------------------------------------------------------
-;; The dev presigner: HMAC-SHA-256 over key, mode and expiry (a store checks it: hmac-ok?)
+;; The dev presigner (eve.net.presign: a broker and a store need it, and neither needs eve.atom)
 ;; ---------------------------------------------------------------------------
 
-(defn- sig [secret k mode exp]
-  (b/hex (prim/hmac-sha256 (b/utf8 secret) (b/utf8 (str k "|" mode "|" exp)))))
-
-(defn hmac-presigner
-  "A presigner for a store at url that checks HMAC-SHA-256 signatures under secret (a stand-in for an S3 store's
-   SigV4: the store holds the secret, the client only the URL). now-ms: the clock (the expiry is now + ttl s)."
-  [{:keys [url secret now-ms]}]
-  (fn [k mode ttl]
-    (let [exp (+ (quot (now-ms) 1000) (or ttl 300))]
-      (str url k "?mode=" mode "&exp=" exp "&sig=" (sig secret k mode exp)))))
-
-(defn hmac-ok?
-  "Does a presigned request carry a valid signature for key k and the method's mode, unexpired at now-s?"
-  [secret k mode exp signature now-s]
-  (and (string? signature) (some? exp) (> exp now-s) (= signature (sig secret k mode exp))))
+(def hmac-presigner presign/hmac-presigner)
+(def hmac-ok? presign/hmac-ok?)
 
 ;; ---------------------------------------------------------------------------
 ;; The handler
