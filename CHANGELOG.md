@@ -9,13 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **aegis's clear-evaluation primitives, mainlined** (2026-10-23): `eve.aegis.claims` (with the reroute's spec id
-  `SHA-256(spec bytes ‖ release hash)`, a group's `:anonymity` `:ballot` / `:ring`, `:commitFn "sha256"`, key-assoc
-  roots bound to a broker's stored map, ballot spends held to the issuer's signed per-scope count, claim builders and
-  signers, `next-state` / `next-frontier`, the JSON wire), `eve.aegis.ballot` (+ `request-message`, `sign-statement`),
+- **aegis's cryptographic primitives** (2026-10-23): `eve.aegis.ballot` (+ `request-message`, `sign-statement`),
   `rsabssa`, `clsag`, `h2c`, `merkle`, `session`, `commit`. Their suites joined the babashka and JVM batteries
   (`bb-minimal` names them out: its portable crypto signs the issuer's RSA row past 30 min). `crypto/vs-kernel`, a
-  crypto implementation for ValueScript programs that build the kernel's ed25519.wasm. `test/eve/aegis/claims_bench.cljc`.
+  crypto implementation for ValueScript programs that build the kernel's ed25519.wasm.
 
 ### Changed
 
