@@ -63,3 +63,14 @@ running on this box; timing under contention is worthless.
   crash-comp-*.txt in the runs dir). B counter 9/9, B kb64 9/9 —
   18 points, 0 violations so far. J1 cells in flight.
   byform-cut still running; bench still waiting on it.
+- 03:5x ET — CRASH SUITE COMPLETE on the composed tree:
+  B counter 9/9 · B kb64 9/9 · J1 counter 17/17 · J1 kb64
+  17/17 · J10 counter 10/10 · J10 kb64 10/10 = 72 points,
+  0 violations (evidence crash-comp-*.txt, banked under
+  eve/doc/journals-composition-evidence/). Meets both parent
+  lanes' 72/72 bars cell-for-cell on the composed tree.
+- 03:5x ET — JVM SUITES on the composed tree: 47 tests,
+  419 assertions, 0 failures, 0 errors (jvm-suites-composed.txt,
+  banked) — the prototype's bar met exactly.
+  REMAINING: the bench (warm 300 / 5000, J1000 counter) — waits
+  for the re-mint lane's byform-cut to finish; then the report.

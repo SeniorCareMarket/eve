@@ -1,0 +1,11 @@
+# crash-suite variant=B size=counter manifest={0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
+point p0-checkpoint: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point c1-after-slab-force: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point c1-after-root-force: PASS (expect {'value': 1} got {'value': 1} rc=0)
+point c2-after-slab-force: PASS (expect {'value': 1} got {'value': 1} rc=0)
+point c2-after-root-force: PASS (expect {'value': 2} got {'value': 2} rc=0)
+point c3-after-slab-force: PASS (expect {'value': 2} got {'value': 2} rc=0)
+point c3-after-root-force: PASS (expect {'value': 3} got {'value': 3} rc=0)
+point c4-after-slab-force: PASS (expect {'value': 3} got {'value': 3} rc=0)
+point c4-after-root-force: PASS (expect {'value': 4} got {'value': 4} rc=0)
+# totals: 9 pass, 0 violations
