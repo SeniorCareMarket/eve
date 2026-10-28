@@ -79,6 +79,41 @@
                           ((:stop srv))
                           (print out) (flush)
                           (when-not (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out) (System/exit 1))))}
+  test:vs-serve {:doc "eve.http-server on ValueScript (adapters/http-server/vs): a VS program serves eve.net.broker and eve.net.store on one port under Node's vs-serve-node.mjs ($VS_SERVE_NODE, default the monorepo's vs/term/hosts/node/vs-serve-node.mjs), and a babashka network atom derefs and swaps through them"
+                 :requires ([babashka.process :as p] [eve.http :as http] [eve.net.atom :as na] [eve.process :as proc])
+                 :task (let [wasm (str (fs/absolutize "target/vs/net_serve_vs.wasm"))
+                             port (with-open [s (java.net.ServerSocket. 0)] (.getLocalPort s))
+                             base (str "http://127.0.0.1:" port "/")
+                             host (or (System/getenv "VS_SERVE_NODE") (str (fs/absolutize "../vs/term/hosts/node/vs-serve-node.mjs")))
+                             results (atom [])
+                             check (fn [label ok? got] (swap! results conj ok?) (println (if ok? "ok  " "FAIL") label (if ok? "" (pr-str got))))]
+                         (fs/create-dirs "target/vs")
+                         (shell {:extra-env {"VS_CLJ_ROOTS" (str/join ":" (roots :vs "adapters/http-server/vs/test"))}}
+                                "vs" "compile" "adapters/http-server/vs/test/eve/net_serve_vs.vs" "-o" wasm)
+                         (let [srv (p/process ["node" host "--port" (str port) "--env" (str "EVE_BASE=" base)
+                                               "--env" "EVE_SECRET=vs-serve" "--env" "EVE_API_KEY=k" wasm]
+                                              {:err :pipe :out :inherit})
+                               rdr (java.io.BufferedReader. (java.io.InputStreamReader. (:err srv)))]
+                           (try
+                             (loop [] (let [l (.readLine rdr)]
+                                        (when-not l (throw (ex-info "vs-serve-node ended before it listened" {})))
+                                        (when-not (str/includes? l "listening on") (recur))))
+                             (let [cfg {:endpoint (subs base 0 (dec (count base))) :domain-id "d1" :atom-id "a1" :api-key "k"}
+                                   ra (na/remote-atom cfg (merge (http/platform) {:sleep proc/sleep-ms! :now-ms proc/now-ms :seed 1}))
+                                   made (http/request {:method "POST" :url (str base "v1/domains/d1/atoms/a1/create")
+                                                       :headers {"Authorization" "Bearer k"} :body "{\"atom_id\":\"a1\"}"})]
+                               (check "create answers 200" (= 200 (:status made)) made)
+                               (check "a new atom derefs to {}" (= {} (na/deref ra)) nil)
+                               (check "swap! commits through the VS broker and store" (= {:n 1 :v [1 2 3]} (na/swap! ra assoc :n 1 :v [1 2 3])) nil)
+                               (check "a second swap! reads the first" (= {:n 2 :v [1 2 3]} (na/swap! ra update :n inc)) nil)
+                               (let [rb (na/remote-atom cfg (merge (http/platform) {:sleep proc/sleep-ms! :now-ms proc/now-ms :seed 2}))]
+                                 (check "another network atom derefs the value" (= {:n 2 :v [1 2 3]} (na/deref rb)) nil)
+                                 (na/release! rb))
+                               (na/release! ra))
+                             (finally (p/destroy-tree srv)))
+                           (let [n (count (filter true? (deref results)))]
+                             (println (str n " passed, " (- (count (deref results)) n) " failed"))
+                             (when-not (= n (count (deref results))) (System/exit 1)))))}
   test:jolt {:doc "The shared (.cljc) tests on jolt (namespaces named after the task run alone)"
              :task (apply shell "jolt" "-Scp" (str/join ":" (roots :jolt "test")) "-m" "eve.runner.jolt-main" "test"
                           *command-line-args*)}

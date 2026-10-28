@@ -1,6 +1,6 @@
 (ns eve.net.store
   "The store role: blobs behind presigned URLs — the part an S3-compatible object store plays for a broker. A network
-   atom's blocks go here direct, by URLs its broker signs (eve.net.gateway's :presign, hmac-presigner); the broker
+   atom's blocks go here direct, by URLs its broker signs (eve.net.presign/hmac-presigner, a broker's :presign); the broker
    never carries a blob. Any eve host can be a store: the handler is plain shared code, served by eve.http-server/serve!
    where the host has one, or called in process.
 
@@ -8,7 +8,7 @@
      ((:handle s) {:method \"PUT\" :url <presigned> :body-b64 <bytes as base64>})
      (eve.http-server/serve! {:port 9100} (:handle s))
 
-   Each request's signature is checked (eve.net.gateway/hmac-ok?: the presigner and the store share :secret; a client
+   Each request's signature is checked (eve.net.presign/hmac-ok?: the presigner and the store share :secret; a client
    holds only the URL): PUT stores, GET answers the bytes, HEAD answers 200 when held, DELETE forgets. A bad or expired
    signature, or a mode that is not the method's, answers 403. A body arrives as :body-b64 (a server adapter's) or as
    base64 :body (eve.net.run's :body-as :b64, a client in the same process); a GET answers base64 with :body-as :b64,
@@ -19,7 +19,7 @@
    :blobs (an atom of key -> the blob as base64 text, kept as it arrived and answered as it is; default a fresh one:
    the blobs live as long as the process), :log? (true keeps [method key signed?] per request in :log)."
   (:require [clojure.string :as str]
-            [eve.net.gateway :as gw]))
+            [eve.net.presign :as presign]))
 
 (defn- param [q k]
   (some (fn [kv] (let [i (str/index-of kv "=")] (when (and i (= k (subs kv 0 i))) (subs kv (inc i)))))
@@ -48,7 +48,7 @@
         mode (param q "mode")
         exp (some-> (param q "exp") parse-long*)
         ok? (and i (not= k "") (= mode (get modes method))
-                 (gw/hmac-ok? (:secret st) k mode exp (param q "sig") (quot ((:now-ms st)) 1000)))]
+                 (presign/hmac-ok? (:secret st) k mode exp (param q "sig") (quot ((:now-ms st)) 1000)))]
     (when (and (:log st) (not= "OPTIONS" method)) (swap! (:log st) conj [method k (boolean ok?)]))
     (cond
       (= "OPTIONS" method) (answer 204 {})
