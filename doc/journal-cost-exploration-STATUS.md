@@ -218,3 +218,26 @@ at small scale. Deliverable: `eve/doc/journal-cost-exploration-2026-10-28.md`.
   jvm-atom-retire-test = 47 tests, 419 assertions, 0 failures,
   0 errors (evidence jvm-suites-after.txt). Probe1-after and
   bench-after next; crash-suite cells after that.
+- 03:2x ET — PROBE1-AFTER (evidence probe1-after.txt): with the
+  floor pinned and every entry ineligible, a flush costs 9–27 µs
+  at queue 500 / 1000 / 2000 / 4000 — FLAT (before: 2,369 →
+  22,158 µs, linear). The head-peek fast path is the whole story:
+  ~11 µs is safe-fn + a deref. Free path freed 4000/4000 (its
+  per-entry timings in the after runs, 35–55 µs, are polluted by
+  the resumed scratch slab + box load; the free path's work is the
+  unchanged reduce, priced clean in the before runs at
+  5.6–7.3 µs/entry). NOTE on the probe itself: its scratch
+  "directory" is a file PREFIX (domain files are probe1.root,
+  probe1.slab0, … siblings), so delete-recursively never fired and
+  every run after the first RESUMED the previous domain — the
+  journal floor seeded at recovery is why later runs' phase 0 no
+  longer self-cleans. Attempt 1 (fresh) holds the true no-floor
+  sanity (queue 2 after 2000 swaps). Phases 1–2 are per-process
+  and unaffected.
+- 03:3x ET — BENCH AFTER (same invocation; evidence
+  bench-after.txt): warm 300 n 3000 = 759 µs/op (before 13,204 —
+  17×); warm 5000 n 3000 = 417 µs/op (before 36,778 — 88×). FLAT:
+  the deep window is at phase-1's no-floor J1000 price (410) on
+  the checkpoint floor, semantics unchanged. Crash-suite cells
+  (J10/J1, path-patched copy of the spike's crash_suite.py against
+  this worktree) running to confirm the correctness bar.
