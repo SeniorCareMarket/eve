@@ -16,6 +16,7 @@
          '[eve.atom :as ea]
          '[eve.http-server :as hs]
          '[eve.net.broker :as broker]
+         '[eve.net.broker-disk :as broker-disk]
          '[eve.net.gateway :as gw]
          '[eve.net.json :as json]
          '[eve.net.store :as es]
@@ -96,7 +97,7 @@
                                                                 (fn [] {"puts" (count (filter (fn [[m _ ok?]] (and (= "PUT" m) ok?)) @(:log store)))})))
       b (broker/broker (cond-> {:api-key key :domain-id did
                                 :presign (gw/hmac-presigner {:url store-url :secret secret :now-ms proc/now-ms})}
-                         domain (assoc :rows (broker/disk-rows domain))))
+                         domain (assoc :rows (broker-disk/disk-rows domain))))
       b-srv (hs/serve! {:port port :threads 16} (with-health "broker" (:handle b)
                                                           (fn [] (select-keys @(:state b) [:requests :conflicts]))))
       _ (fs/create-dirs (fs/file public "js"))
