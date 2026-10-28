@@ -193,3 +193,28 @@ at small scale. Deliverable: `eve/doc/journal-cost-exploration-2026-10-28.md`.
   Outputs: ~/workspace/jcost-runs/probe1-before.txt (run 3),
   probe2-before.txt. Bench-size BEFORE runs (recon invocation)
   in flight.
+- 02:5x ET — BENCH BEFORE (recon invocation, this box tonight;
+  evidence bench-before.txt): J1000 counter warm 300 n 3000 =
+  13,204 µs/op; warm 5000 n 3000 = 36,778 µs/op (recon night:
+  5,446 / 36,964 — the deep window agrees; the early window is
+  box-pricing, as documented across VM instances). Flush latency
+  tonight mean ~18 ms — not the variable, again.
+- 03:0x ET — P3 (floor-advance tree, probe3 = probe2's shape +
+  floor/last-epoch sampling; evidence probe3-floor-advance.txt):
+  standing queue 3 → 1,003 at window 1 and 1,003 at EVERY window
+  through window 7 (8,000 commits) — BOUNDED at exactly one batch
+  (+3). Floor advances 1001→7001. Cost plateaus ~10.1–12.9 ms/op
+  (µs: 10,136–12,885) with no trend: the plateau IS the whole-queue
+  scan of the bounded queue (~11 µs/entry/commit tonight on that
+  tree). So (b) = floor fixes the queue's SIZE, the scan fixes its
+  PRICE; both are needed for flat-at-raw.
+- 03:0x ET — PROTOTYPE banked @ efeab102bb9 (tally.cljc flush!
+  only): safe sampled once at entry; head peek — head stamp >= safe
+  answers 0 without draining; else CAS-drain, split at first stamp
+  >= safe, the EXISTING reduce over the prefix only, restore in one
+  swap! as stays ++ suffix ++ parks. Per-entry freeing test
+  untouched. JVM suites on the prototype: tally-test +
+  jvm-atom-test + jvm-atom-cas-test + jvm-atom-lost-attempt-test +
+  jvm-atom-retire-test = 47 tests, 419 assertions, 0 failures,
+  0 errors (evidence jvm-suites-after.txt). Probe1-after and
+  bench-after next; crash-suite cells after that.
