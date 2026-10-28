@@ -255,3 +255,14 @@ at small scale. Deliverable: `eve/doc/journal-cost-exploration-2026-10-28.md`.
   the brief is done: probes 1–3 banked, prototype banked, JVM
   suites 47/419/0, bench before/after banked, report written.
   The lane declares when J10 kb64 lands.
+- 04:2x ET — J10 kb64 DONE: 10 pass, 0 violations. CRASH BAR
+  COMPLETE on the prototype: B 9/9 + 9/9, J1 17/17 + 17/17,
+  J10 10/10 + 10/10 = 72 points, 0 violations — the
+  floor-advance branch's 72/72 met cell-for-cell. Small
+  correction to the P3 entry above: the plateau range across
+  windows 2–7 is 8,846–12,586 µs/op (8.8–12.6 ms/op), not
+  10,136–12,885; the report now carries the file's range.
+  LANE COMPLETE. Deliverable:
+  eve/doc/journal-cost-exploration-2026-10-28.md (ranked options
+  + prototype + all numbers); prototype = tally.cljc flush!
+  @ efeab102bb9; nothing landed to main.

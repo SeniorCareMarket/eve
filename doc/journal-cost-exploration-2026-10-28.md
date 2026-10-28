@@ -63,8 +63,8 @@ are this one line.
 **Boundedness (probe3, floor-advance tree).** Same sampling on
 `claude/eve-floor-advance`: the queue goes 3 → 1,003 at window 1
 and stays 1,003 through window 7 (8,000 commits); the floor
-advances 1001→7001. Cost plateaus at 10.1–12.9 ms/op with no
-trend. So the flush-advance floor fixes the queue's **size**
+advances 1001→7001. Cost plateaus across windows 2–7 at
+8.8–12.6 ms/op with no trend. So the flush-advance floor fixes the queue's **size**
 (bounded at one batch) but not its **price**: the plateau is the
 whole-queue scan of the bounded queue, ~11 µs/entry/commit on
 that tree. Charge (b)'s residual growth under flush-advance is
@@ -154,14 +154,13 @@ queue of 500–4,000 entries now flushes in 9–27 µs at every length
 (`jvm-suites-after.txt`). Journal crash-suite cells against this
 tree (the spike's `crash_suite.py`, a path-patched copy pointed
 at this worktree; the floor-advance branch's 72/72 is the bar):
-Crash cells completed on this tree: **B counter 9/9, B kb64
-9/9, J1 counter 17/17, J1 kb64 17/17, J10 counter 10/10 — 62
-points, 0 violations** (`crash-proto-*.txt`). The last cell,
-J10 kb64 (10 points in the spike's partition of the 72), was
-still running when this was banked; its result is in the STATUS
-log. (An earlier draft of this section read "J10 counter 20/20":
-20 is J10's two-cell total in the spike's accounting, not the
-counter cell's. Corrected.)
+Crash cells on this tree — all six: **B counter 9/9, B kb64
+9/9, J1 counter 17/17, J1 kb64 17/17, J10 counter 10/10, J10
+kb64 10/10 — 72 points, 0 violations** (`crash-proto-*.txt`),
+the floor-advance branch's 72/72 bar met cell-for-cell on the
+spike base plus this change. (An earlier draft of this section
+read "J10 counter 20/20": 20 is J10's two-cell total in the
+spike's accounting, not the counter cell's. Corrected.)
 
 ## 5. Caveats
 
