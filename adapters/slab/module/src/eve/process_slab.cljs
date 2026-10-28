@@ -1345,8 +1345,24 @@
                                   (bit-shift-left 1 (bit-and bi 31)))))))
       (some? (desc-of sio slab-offset)))))
 
+(defn- sync-domain-sio!
+  "Force the module slabs' file-backed regions — an mmap domain's slab,
+   bitmap and descriptor regions per class, and the coalescing region —
+   to durable storage (eve.mem/sync-region!: a SAB region, the module's
+   own slabs, has nothing to force). Registered as :sync-domain-sio!."
+  [_sio]
+  (dotimes [i d/NUM_SLAB_CLASSES]
+    (when-let [inst (wasm/get-slab-instance i)]
+      (mem/sync-region! (:region inst))
+      (mem/sync-region! (:bitmap-region inst)))
+    (when-let [dr (aget slab-desc-regions i)]
+      (mem/sync-region! dr)))
+  (when mmap-coalesc-region
+    (mem/sync-region! mmap-coalesc-region)))
+
 (alloc/register-host-slab!
  {:default-sio cljs-sio
+  :sync-domain-sio! sync-domain-sio!
   :desc-of desc-of
   :allocated? allocated?
   :refresh! (fn [_sio] (when (aget slab-file-paths 0) (refresh-mmap-slabs!)))

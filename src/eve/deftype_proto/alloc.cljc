@@ -704,6 +704,21 @@
                                (aset regions OVERFLOW_CLASS_IDX new-r)
                                (slab/regions-changed! ctx)))))))))))))))
 
+     (defn sync-jvm-slab-regions!
+       "Force every region the JVM slab ctx holds — the slab data regions,
+        the allocator bitmap regions and the descriptor-table regions — to
+        durable storage (eve.mem/sync-region!: a region that cannot force,
+        a heap region, answers nil). The durability spike's commit ordering
+        calls this before a root pointer is published; eve.atom/sync!
+        calls it for the whole domain."
+       [sio]
+       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
+         (doseq [^objects arr [(.-regions ctx) (.-bitmap-regions ctx) (.-desc-regions ctx)]
+                 :when arr
+                 r arr
+                 :when r]
+           (mem/sync-region! r))))
+
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)
      ;; -----------------------------------------------------------------------
@@ -1016,6 +1031,18 @@
    with it)."
   [sio mmap?]
   (when-let [f (host-op :release-domain-sio!)] (f sio mmap?)))
+
+(defn sync-sio!
+  "Force every file-backed region a domain's slab I/O holds to durable
+   storage: the host slab's :sync-domain-sio! when it registers one (the
+   Node module slabs), else the JVM slab ctx's slab, bitmap and
+   descriptor regions (sync-jvm-slab-regions!). A region that cannot
+   force answers nil (eve.mem/sync-region!), so a heap domain is a no-op."
+  [sio]
+  (if-let [f (host-op :sync-domain-sio!)]
+    (f sio)
+    #?(:clj (sync-jvm-slab-regions! (sio-root sio))
+       :cljs nil)))
 
 (defn init-domain-views!
   "Ready the process slab's own views of a heap domain (nothing for a

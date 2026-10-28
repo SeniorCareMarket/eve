@@ -266,6 +266,17 @@
     ;; Buffer.copy for zero-extra-copy semantics
     (let [src-buf (js/Buffer.from (.-buffer src) (.-byteOffset src) (.-byteLength src))]
       (.copy src-buf buf byte-off))
+    nil)
+
+  ;; --- durability (eve.mem/ISyncableRegion): the addon's msync — the
+  ;; same primitive its Lustre fcntl ops apply to a write's page ---
+  mem/ISyncableRegion
+  (-sync! [_]
+    (.msync ^js (native) buf 0 size)
+    nil)
+
+  (-sync-range! [_ byte-off len]
+    (.msync ^js (native) buf byte-off len)
     nil))
 
 (declare ->LustreMmapRegion)

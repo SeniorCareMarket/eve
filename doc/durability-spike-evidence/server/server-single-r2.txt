@@ -1,0 +1,29 @@
+{:mode :single, :variant "J1000", :size :counter, :iters 3000, :ms 428.035772, :us-per-op 142.67859066666668, :ops-sec 7008.760006161354}
+{:mode :flush-latency, :variant "J1000", :size :counter, :flushes 3, :mean-ms 8.037885333333334, :max-ms 12.506968}
+{:mode :single, :variant "J1000", :size :kb, :iters 1000, :ms 1009.973365, :us-per-op 1009.973365, :ops-sec 990.1251207748435}
+{:mode :flush-latency, :variant "J1000", :size :kb, :flushes 1, :mean-ms 4.57799, :max-ms 4.57799}
+{:mode :single, :variant "J1000", :size :kb64, :iters 300, :ms 200.451103, :us-per-op 668.1703433333333, :ops-sec 1496.6243413487227}
+{:mode :single, :variant "J100", :size :counter, :iters 3000, :ms 554.828328, :us-per-op 184.94277600000004, :ops-sec 5407.07791690117}
+{:mode :flush-latency, :variant "J100", :size :counter, :flushes 33, :mean-ms 5.439667454545455, :max-ms 17.400796}
+{:mode :single, :variant "J100", :size :kb, :iters 1000, :ms 998.776026, :us-per-op 998.776026, :ops-sec 1001.2254739482503}
+{:mode :flush-latency, :variant "J100", :size :kb, :flushes 11, :mean-ms 3.9724711818181815, :max-ms 4.932699}
+{:mode :single, :variant "J100", :size :kb64, :iters 300, :ms 261.054692, :us-per-op 870.1823066666666, :ops-sec 1149.1844781705745}
+{:mode :flush-latency, :variant "J100", :size :kb64, :flushes 3, :mean-ms 13.615791, :max-ms 17.771247}
+{:mode :single, :variant "J10", :size :counter, :iters 3000, :ms 1506.715004, :us-per-op 502.2383346666667, :ops-sec 1991.086563839647}
+{:mode :flush-latency, :variant "J10", :size :counter, :flushes 330, :mean-ms 3.9337184909090914, :max-ms 11.423627}
+{:mode :single, :variant "J10", :size :kb, :iters 1000, :ms 1329.550496, :us-per-op 1329.550496, :ops-sec 752.1339001478586}
+{:mode :flush-latency, :variant "J10", :size :kb, :flushes 110, :mean-ms 3.207324754545454, :max-ms 8.743818}
+{:mode :single, :variant "J10", :size :kb64, :iters 300, :ms 316.962352, :us-per-op 1056.5411733333333, :ops-sec 946.4846474889864}
+{:mode :flush-latency, :variant "J10", :size :kb64, :flushes 33, :mean-ms 4.290769545454546, :max-ms 5.905528}
+{:mode :single, :variant "J1", :size :counter, :iters 3000, :ms 10261.977569, :us-per-op 3420.659189666667, :ops-sec 292.34131334125897}
+{:mode :flush-latency, :variant "J1", :size :counter, :flushes 3300, :mean-ms 1.3412988542424256, :max-ms 14.023817}
+{:mode :single, :variant "J1", :size :kb, :iters 1000, :ms 3366.202995, :us-per-op 3366.202995, :ops-sec 297.07061680039885}
+{:mode :flush-latency, :variant "J1", :size :kb, :flushes 1100, :mean-ms 1.3487574418181811, :max-ms 4.687649}
+{:mode :single, :variant "J1", :size :kb64, :iters 300, :ms 1070.253174, :us-per-op 3567.5105799999997, :ops-sec 280.30750787570196}
+{:mode :flush-latency, :variant "J1", :size :kb64, :flushes 330, :mean-ms 1.348228081818183, :max-ms 3.859089}
+{:mode :single, :variant "B", :size :counter, :iters 3000, :ms 7708.307609, :us-per-op 2569.435869666667, :ops-sec 389.1904879998932}
+{:mode :single, :variant "B", :size :kb, :iters 1000, :ms 2668.247071, :us-per-op 2668.247071, :ops-sec 374.7778872760918}
+{:mode :single, :variant "B", :size :kb64, :iters 300, :ms 782.676507, :us-per-op 2608.92169, :ops-sec 383.30012120831424}
+{:mode :single, :variant "A", :size :counter, :iters 3000, :ms 818.38342, :us-per-op 272.79447333333337, :ops-sec 3665.7634144152134}
+{:mode :single, :variant "A", :size :kb, :iters 1000, :ms 1130.700513, :us-per-op 1130.700513, :ops-sec 884.4074876615891}
+{:mode :single, :variant "A", :size :kb64, :iters 300, :ms 252.293354, :us-per-op 840.9778466666667, :ops-sec 1189.0919647451356}

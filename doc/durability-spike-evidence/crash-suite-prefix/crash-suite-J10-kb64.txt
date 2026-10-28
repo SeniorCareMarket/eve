@@ -1,0 +1,12 @@
+# crash-suite variant=J10 size=kb64 manifest={0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 2068, 11: 2068}
+point p0-checkpoint: PASS (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {'count': 2200, 'elem': 30, 'fills': 'zzz'} rc=0)
+point window-c1-nothing-forced: PASS (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {'count': 2200, 'elem': 30, 'fills': 'zzz'} rc=0)
+point window-c5-nothing-forced: PASS (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {'count': 2200, 'elem': 30, 'fills': 'zzz'} rc=0)
+point window-c9-nothing-forced: PASS (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {'count': 2200, 'elem': 30, 'fills': 'zzz'} rc=0)
+point flush-after-sweep: VIOLATION (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {} rc=1 err=/tmp/clojure-14292274101196596031.edn)
+point flush-torn-100b: VIOLATION (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {} rc=1 err=/tmp/clojure-11760230358744505965.edn)
+point flush-torn-1030b: VIOLATION (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {} rc=1 err=/tmp/clojure-12968239555041735251.edn)
+point flush-done: PASS (expect {'count': 2200, 'elem': 30, 'fills': 'kkk'} got {'count': 2200, 'elem': 30, 'fills': 'kkk'} rc=0)
+point post-flush-window-c11: PASS (expect {'count': 2200, 'elem': 30, 'fills': 'kkk'} got {'count': 2200, 'elem': 30, 'fills': 'kkk'} rc=0)
+point window-c5-root-ahead: VIOLATION (expect {'count': 2200, 'elem': 30, 'fills': 'zzz'} got {} rc=1 err=/tmp/clojure-13477856844888180680.edn)
+# totals: 6 pass, 4 violations

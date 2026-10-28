@@ -20,7 +20,8 @@
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
                      -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
                      -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
+                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
+                     -sync! -sync-range!]])
   (:import
    [java.io RandomAccessFile]
    [java.lang.invoke MethodHandle MethodHandles MethodType VarHandle VarHandle$AccessMode]
@@ -360,6 +361,19 @@
     ;; Absolute bulk put — immediately visible to other processes
     ;; sharing the same MAP_SHARED mapping.
     (.put buf (int byte-off) ^bytes src 0 (alength ^bytes src))
+    nil)
+
+  ;; --- durability (eve.mem/ISyncableRegion): a mapped buffer forces; a
+  ;; heap buffer (make-heap-region) has nothing to force ---
+  mem/ISyncableRegion
+  (-sync! [_]
+    (when (instance? MappedByteBuffer buf)
+      (.force ^MappedByteBuffer buf))
+    nil)
+
+  (-sync-range! [_ byte-off len]
+    (when (instance? MappedByteBuffer buf)
+      (.force ^MappedByteBuffer buf (int byte-off) (int len)))
     nil))
 
 (defn open-mmap-region
@@ -593,6 +607,16 @@
 
   (-write-bytes! [_ byte-off src]
     (.put ^MappedByteBuffer mapped-buf (int byte-off) ^bytes src 0 (alength ^bytes src))
+    nil)
+
+  ;; --- durability (eve.mem/ISyncableRegion): the mapped buffer forces ---
+  mem/ISyncableRegion
+  (-sync! [_]
+    (.force ^MappedByteBuffer mapped-buf)
+    nil)
+
+  (-sync-range! [_ byte-off len]
+    (.force ^MappedByteBuffer mapped-buf (int byte-off) (int len))
     nil))
 
 (defn open-lustre-region

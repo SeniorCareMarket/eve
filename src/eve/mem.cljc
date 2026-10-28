@@ -121,6 +121,28 @@
     "Copy all bytes from src into the region at byte-off.
      Non-atomic — callers are responsible for any needed synchronisation."))
 
+(defprotocol ISyncableRegion
+  "A region that can force its written bytes to durable storage — a
+   file-backed mapping whose host offers force/msync. Regions that cannot
+   (heap, SAB, another host's) simply do not implement it; sync-region!
+   no-ops for them."
+  (-sync! [r]
+    "Force the region's whole mapped range to durable storage.")
+  (-sync-range! [r byte-off len]
+    "Force the range [byte-off, byte-off+len) of the region to durable
+     storage."))
+
+(defn sync-region!
+  "Force r (or a range of it) to durable storage when r's host supports it
+   (ISyncableRegion); a no-op otherwise — in-process regions, and hosts
+   whose sync port has not landed, answer nil."
+  ([r]
+   (when (and r (satisfies? ISyncableRegion r))
+     (-sync! r)))
+  ([r byte-off len]
+   (when (and r (satisfies? ISyncableRegion r))
+     (-sync-range! r byte-off len))))
+
 (defprotocol IHostAtomics
   "What a host's region can promise about its read-modify-write ops."
   (-atomic-rmw? [r]

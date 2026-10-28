@@ -13,11 +13,41 @@
             [vs.mmap :as vmm]))
 
 (def ^:private sizes (atom {}))   ;; a region's address -> its byte length
+(def ^:private file-backed (atom #{}))   ;; the addresses that are file windows (open-mmap-region), not heap windows
+
+;; one scratch word the file-lock spin waits on (its value never changes: wait-i32's timeout is the sleep)
+(def ^:private lock-wait-word (mmap/reserve! 65536))
+
+(defn- file-lock!
+  "Spin (5 ms naps, 30 s bound — the Node journal lock's shape) until this process holds the host's exclusive
+   lock on r's file at byte-off, 4 bytes."
+  [r byte-off]
+  (loop [tries 0]
+    (cond (vmm/flock! r byte-off 4) true
+          (> tries 6000) (throw (ex-info "eve.region: file lock timeout" {:region r :byte-off byte-off}))
+          :else (do (mmap/wait-i32 lock-wait-word 0 0.005) (recur (inc tries))))))
 
 (extend-protocol mem/IHostAtomics
   Object
   (-atomic-rmw? [_] true)
-  (-with-file-lock [_ _byte-off f] (f)))
+  (-with-file-lock [_ _byte-off f] (f))
+
+  Long
+  (-with-file-lock [r byte-off f]
+    ;; A file window's lock is real (durability spike, 2026-10-27): the doorbell host holds an OFD fcntl lock on
+    ;; the region's file — the mechanism measured to exclude the JVM seat's FileChannel.lock in both directions.
+    ;; A heap window exists in this process only: no other seat can contend for it, and f runs directly.
+    (if (contains? @file-backed r)
+      (do (file-lock! r byte-off)
+          (try (f) (finally (vmm/funlock! r byte-off 4))))
+      (f))))
+
+(extend-protocol mem/ISyncableRegion
+  Long
+  ;; The force the other seats' regions answer (durability spike, 2026-10-27): the doorbell host's msync over
+  ;; the region's file window. A heap region has no file: nothing to force, as on every host.
+  (-sync! [r] (when (contains? @file-backed r) (vmm/sync! r (get @sizes r))))
+  (-sync-range! [r byte-off len] (when (contains? @file-backed r) (vmm/sync! (+ r byte-off) len))))
 
 (defn- xchg32 [a v]
   (loop [] (let [o (mmap/load-i32 a)] (if (= o (mmap/cas-i32! a o v)) o (recur)))))
@@ -74,6 +104,7 @@
   ([path-str size-bytes _opts]
    (let [w (:addr (vmm/map-file! path-str size-bytes {:min size-bytes :create? true}))]
      (swap! sizes assoc w size-bytes)
+     (swap! file-backed conj w)
      w)))
 
 (defn lustre-region?

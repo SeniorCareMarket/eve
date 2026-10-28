@@ -63,6 +63,20 @@
    :modules {:main {:init-fn eve.net.local-page/init}}
    :compiler-options {:optimizations :simple :output-wrapper false}}
 
+  ;; Durability spike bench (2026-10-27): node target/durability-bench/main.js <mode> ...
+  :durability-bench
+  {:target :node-script
+   :main eve.durability-bench/main
+   :output-to "target/durability-bench/main.js"
+   :compiler-options {:warnings {:undeclared-var false}}}
+
+  ;; Durability spike phase-3 workload writer (Node form)
+  :durability-workload
+  {:target :node-script
+   :main eve.durability-workload-node/main
+   :output-to "target/durability-workload/main.js"
+   :compiler-options {:warnings {:undeclared-var false}}}
+
   ;; Standalone mmap-atom worker for cross-process e2e tests
   :mmap-worker
   {:target    :node-script
