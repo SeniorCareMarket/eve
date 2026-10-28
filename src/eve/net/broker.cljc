@@ -215,8 +215,8 @@
 
 (defn dispatch
   "{:status :body m} of op on atom aid (nil for release-reader, renew-lease, presign) with the JSON body req — the
-   broker's routes after routing and :authorize, for a host that routes its own paths (a Durable Object behind its
-   Worker). http-req reaches :validate under :http. nil when op is not a route"
+   broker's routes after routing and :authorize, for a host that routes its own paths (a store
+   behind its own front end). http-req reaches :validate under :http. nil when op is not a route"
   [b op aid req http-req]
   (swap! (:state b) update :requests inc)
   (tick! b)
