@@ -57,3 +57,9 @@ running on this box; timing under contention is worthless.
   result 1,062 lines = the incoming file exactly). Committed-tree
   marker sweep: 10 files at HEAD = 10 at base — no new markers.
   Next: crash suite, six cells, sequential.
+- 03:3x ET — crash suite running (driver copy
+  ~/workspace/journals-composition-runs/crash_suite_comp.py,
+  EVE pointed at this worktree; cells sequential, evidence
+  crash-comp-*.txt in the runs dir). B counter 9/9, B kb64 9/9 —
+  18 points, 0 violations so far. J1 cells in flight.
+  byform-cut still running; bench still waiting on it.
