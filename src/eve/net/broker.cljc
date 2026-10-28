@@ -139,6 +139,8 @@
 
 (defn- reply [status m] {:status status :headers (assoc CORS "content-type" "application/json") :body (json/write-str m)})
 
+(defn- answer [status m] {:status status :body m})
+
 (defn- put-some [m k v] (if (nil? v) m (assoc m k v)))
 
 (defn- put-row
@@ -169,12 +171,12 @@
   (if-let [row (-row (:rows b) aid)]
     (let [ttl (:lease-ttl b)
           lid (-lease! (:rows b) aid (:epoch row) (+ ((:now-ms b)) (* 1000 ttl)))]
-      (reply 200 (put-row {"root_key" (:root_key row) "epoch" (:epoch row) "lease_id" lid "lease_ttl" ttl} row ROOT-FIELDS)))
-    (reply 404 {"status" "not-found"})))
+      (answer 200 (put-row {"root_key" (:root_key row) "epoch" (:epoch row) "lease_id" lid "lease_ttl" ttl} row ROOT-FIELDS)))
+    (answer 404 {"status" "not-found"})))
 
 (defn- conflict [b row]
   (swap! (:state b) update :conflicts inc)
-  (reply 409 (put-row {"status" "conflict" "current_key" (:root_key row) "current_epoch" (:epoch row)}
+  (answer 409 (put-row {"status" "conflict" "current_key" (:root_key row) "current_epoch" (:epoch row)}
                       row (remove #{:root_count} ROOT-FIELDS))))
 
 (defn- cas-route
@@ -185,7 +187,7 @@
     (if (not= old-key (:root_key row))
       (conflict b row)
       (if-let [why (when-let [v (:validate b)] (v (assoc req :http http-req) row))]
-        (reply 403 {"status" "denied" "reason" (:reason why) "detail" (:detail why)})
+        (answer 403 {"status" "denied" "reason" (:reason why) "detail" (:detail why)})
         (let [retired (vec (get req "retired_keys"))
               [won? row] (-cas! (:rows b) aid old-key
                                 (merge {:root_key (get req "new_key") :retired retired}
@@ -195,7 +197,7 @@
                 (when (and (seq retired) (:on-retire b))
                   (swap! (:state b) update :retiring conj {:atom-id aid :epoch (:epoch row) :keys retired})
                   (tick! b))
-                (reply 200 {"status" "ok" "epoch" (:epoch row)}))
+                (answer 200 {"status" "ok" "epoch" (:epoch row)}))
             (conflict b row)))))))
 
 (defn- presign-route [b req]
@@ -203,45 +205,55 @@
     (let [ks (take 100 (get req "keys"))
           mode (get req "mode")
           ttl (or (get req "ttl") 300)]
-      (reply 200 {"urls" (into {} (map (fn [k] [k (p k mode ttl)])) ks) "ttl" ttl}))
-    (reply 503 {"error" "Domain bucket not provisioned"})))
+      (answer 200 {"urls" (into {} (map (fn [k] [k (p k mode ttl)])) ks) "ttl" ttl}))
+    (answer 503 {"error" "Domain bucket not provisioned"})))
 
 (defn- bearer?
   "the default :authorize: the request's bearer is :api-key"
   [b {:keys [headers]}]
   (= (str "Bearer " (:api-key b)) (or (get headers "Authorization") (get headers "authorization"))))
 
+(defn dispatch
+  "{:status :body m} of op on atom aid (nil for release-reader, renew-lease, presign) with the JSON body req — the
+   broker's routes after routing and :authorize, for a host that routes its own paths (a Durable Object behind its
+   Worker). http-req reaches :validate under :http. nil when op is not a route"
+  [b op aid req http-req]
+  (swap! (:state b) update :requests inc)
+  (tick! b)
+  (cond
+    (and aid (= op "create")) (answer 200 {"status" "ok" "epoch" (:epoch (-create! (:rows b) aid (get req "initial_root_key")))})
+    (and aid (= op "deref")) (deref-route b aid)
+    (and aid (= op "cas-root")) (cas-route b aid req http-req)
+    (= op "presign") (presign-route b req)
+    (= op "release-reader")
+    (let [lid (get req "lease_id")]
+      (-release! (:rows b) lid)
+      (swap! (:state b) (fn [s] (let [r (conj (:released s) lid)]
+                                  (assoc s :released (if (> (count r) RELEASED-MAX) (subvec r (quot RELEASED-MAX 2)) r)))))
+      (tick! b)
+      (answer 200 {"status" "ok"}))
+    (= op "renew-lease")
+    (let [lid (get req "lease_id")
+          ttl (:lease-ttl b)
+          now ((:now-ms b))
+          ok? (-renew! (:rows b) lid now (+ now (* 1000 ttl)))]
+      (if ok? (answer 200 {"status" "ok" "lease_ttl" ttl}) (answer 404 {"status" "not-found"})))
+    :else nil))
+
 (defn- handle [b {:keys [method url body] :as http-req}]
   (let [[did aid op] (route url)
         req (or (json/read-str-or-nil (or body "")) {})]
-    (swap! (:state b) update :requests inc)
-    (tick! b)
     (cond
       (= "OPTIONS" method) {:status 204 :headers CORS :body ""}
       (nil? op) (reply 404 {"error" "Not found"})
       (not (if-let [a (:authorize b)] (a http-req) (bearer? b http-req))) (reply 401 {"error" "Unauthorized"})
       (and (:domain-id b) (not= did (:domain-id b))) (reply 404 {"error" "no such domain"})
-      (and aid (= op "create")) (reply 200 {"status" "ok" "epoch" (:epoch (-create! (:rows b) aid (get req "initial_root_key")))})
-      (and aid (= op "deref")) (deref-route b aid)
-      (and aid (= op "cas-root")) (cas-route b aid req http-req)
-      (= op "presign") (presign-route b req)
-      (= op "release-reader")
-      (let [lid (get req "lease_id")]
-          (-release! (:rows b) lid)
-          (swap! (:state b) (fn [s] (let [r (conj (:released s) lid)]
-                                      (assoc s :released (if (> (count r) RELEASED-MAX) (subvec r (quot RELEASED-MAX 2)) r)))))
-          (tick! b)
-          (reply 200 {"status" "ok"}))
-      (= op "renew-lease")
-      (let [lid (get req "lease_id")
-            ttl (:lease-ttl b)
-            now ((:now-ms b))
-            ok? (-renew! (:rows b) lid now (+ now (* 1000 ttl)))]
-        (if ok? (reply 200 {"status" "ok" "lease_ttl" ttl}) (reply 404 {"status" "not-found"})))
-      :else (reply 404 {"error" "Not found"}))))
+      :else (if-let [r (dispatch b op aid req http-req)]
+              (reply (:status r) (:body r))
+              (reply 404 {"error" "Not found"})))))
 
 (defn broker
-  "A passive broker: {:handle (fn [req] resp) :state :rows}. opts: :api-key, :domain-id (when given, the only one it
+  "A passive broker: {:handle (fn [req] resp) :state :rows} (dispatch for a host that routes its own paths). opts: :api-key, :domain-id (when given, the only one it
    answers), :presign (fn [key mode ttl] url), :rows (an IAtomRows; default mem-rows over :state), :lease-ttl (s, 60),
    :now-ms (the clock), :validate (fn [req row] nil-or-{:reason :detail}; req the JSON body, the HTTP request under
    :http), :on-retire (fn [{:atom-id :epoch :keys}]), :on-commit (fn [{:atom-id :epoch :row}]), :authorize (fn
