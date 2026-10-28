@@ -152,9 +152,16 @@ queue of 500–4,000 entries now flushes in 9–27 µs at every length
 `eve.jvm-atom-lost-attempt-test`, `eve.jvm-atom-retire-test`:
 47 tests, 419 assertions, **0 failures, 0 errors**
 (`jvm-suites-after.txt`). Journal crash-suite cells against this
-tree (spike's `crash_suite.py`, path-patched copy): see STATUS
-log tail / `crash-proto-*.txt` evidence — the floor-advance
-branch's 72/72 is the bar.
+tree (the spike's `crash_suite.py`, a path-patched copy pointed
+at this worktree; the floor-advance branch's 72/72 is the bar):
+Crash cells completed on this tree: **B counter 9/9, B kb64
+9/9, J1 counter 17/17, J1 kb64 17/17, J10 counter 10/10 — 62
+points, 0 violations** (`crash-proto-*.txt`). The last cell,
+J10 kb64 (10 points in the spike's partition of the 72), was
+still running when this was banked; its result is in the STATUS
+log. (An earlier draft of this section read "J10 counter 20/20":
+20 is J10's two-cell total in the spike's accounting, not the
+counter cell's. Corrected.)
 
 ## 5. Caveats
 

@@ -241,3 +241,17 @@ at small scale. Deliverable: `eve/doc/journal-cost-exploration-2026-10-28.md`.
   the checkpoint floor, semantics unchanged. Crash-suite cells
   (J10/J1, path-patched copy of the spike's crash_suite.py against
   this worktree) running to confirm the correctness bar.
+- 04:0x ET — CRASH CELLS on the prototype (path-patched
+  crash_suite.py against this worktree; evidence crash-proto-*.txt
+  in journal-cost-evidence/): B counter 9/9 · B kb64 9/9 · J1
+  counter 17/17 · J1 kb64 17/17 · J10 counter 10/10 — 62 points,
+  0 violations. CORRECTION to the 03:3x entry's implication and
+  the report's first draft: J10 counter is 10 points, not 20 —
+  20 is J10's two-cell total in the spike's 72-point partition
+  (B 18 = 9+9, J1 34 = 17+17, J10 20 = 10+10). Report text fixed.
+  REMAINING, exactly one leg: the J10 kb64 cell (10 points
+  expected) — still running in the sequential chain (cells run
+  one at a time so their JVMs don't contend); everything else in
+  the brief is done: probes 1–3 banked, prototype banked, JVM
+  suites 47/419/0, bench before/after banked, report written.
+  The lane declares when J10 kb64 lands.
