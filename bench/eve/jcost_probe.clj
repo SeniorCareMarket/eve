@@ -101,3 +101,29 @@
                             :epoch (cur-epoch ds)})))))
     (atom/close-atom-domain! dom)
     (println :probe2-done)))
+
+(defn probe3
+  "P3 (boundedness): probe2's shape run against the FLOOR-ADVANCE tree
+   (invoke with this bench dir on the classpath from that tree's eve/).
+   Samples the standing queue across 8 windows of 1000: bounded
+   (levels off) or creeping (still +1000/window)?"
+  [windows window-size]
+  (let [dir (str runs-dir "/probe3-fa")
+        _ (delete-recursively! (io/file dir))
+        dom (atom/persistent-atom-domain dir {:journal? true :journal-batch 1000})
+        ds (.-domain-state dom)
+        a (atom/persistent-atom {:id :eve/main :persistent dir} 0)
+        rq (:retire-q ds)
+        floor (:floor (:journal ds))
+        last-ep (:last-epoch (:journal ds))]
+    (dotimes [w windows]
+      (let [t0 (System/nanoTime)]
+        (dotimes [_ window-size] (swap! a inc))
+        (let [ms (/ (double (- (System/nanoTime) t0)) 1e6)]
+          (println (pr-str {:probe :p3 :window w
+                            :us-per-op (/ (* ms 1000.0) window-size)
+                            :queue (count @rq) :floor @floor
+                            :last-epoch (some-> last-ep deref)
+                            :epoch (cur-epoch ds)})))))
+    (atom/close-atom-domain! dom)
+    (println :probe3-done)))

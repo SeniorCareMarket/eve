@@ -438,21 +438,58 @@
       (if freed? 1 0))))
 
 (defn flush!
-  "One flush of zero queue q (an atom of [{:off :kind :epoch} …]): every entry is looked at once, on its block's
-   own two words.
+  "One flush of zero queue q (an atom of a vector of [{:off :kind :epoch} …]).
+
+   Entries stand in epoch order — every park stamps the epoch at park time
+   and the restore below preserves the order — so the flush examines only
+   the epoch-eligible PREFIX of the queue: the entries stamped below
+   safe-epoch. When the head entry is already at or above safe-epoch
+   (safe-epoch non-nil) no entry can pass the epoch test, and the flush
+   answers 0 without draining the queue at all. (An entry stranded behind
+   a disordered head simply waits for a later flush; a flush only ever
+   delays a free.)
+
+   Each prefix entry is looked at once, on its block's own two words:
    - no longer QUEUED, or claimed by another flush: it leaves (freed by another path, or served);
    - taken back and held: QUEUED and TAKEN go — a drop that zeroed it meanwhile saw QUEUED and queued nothing, so it
      is parked again here;
    - TAKEN (taken back and dropped again since the entry's epoch): queued again at the epoch now;
    - still 0, its epoch below safe-epoch (the oldest pinned reader's; nil: none pinned): claimed and freed;
    - else it stays.
-   (ep-fn) is the domain's epoch now, (safe-fn) its safe epoch. With no reader pinned, the flush runs again over the
-   blocks it parked, so a dropped tree is freed whole. Answers the blocks freed."
+
+   The restore writes the queue back as stays ++ unexamined suffix ++
+   parks: stays carry the smallest stamps, the suffix keeps the order it
+   had, and every park — this scan's, or a concurrent conj's — carries
+   the epoch now, the largest stamp there is, so the queue stands in
+   epoch order again for the next flush.
+
+   (ep-fn) is the domain's epoch now, (safe-fn) its safe epoch, sampled
+   once at entry: a pin registered after the sample carries an epoch at
+   or above the sampled safe epoch (a pin is the root epoch its reader
+   observed, and the root epoch never goes back), so sampling before the
+   drain is never less conservative than sampling after it. With no
+   reader pinned (safe-epoch nil) the whole queue is eligible, and the
+   flush runs again over the blocks it parked, so a dropped tree is
+   freed whole. Answers the blocks freed."
   [sio q ep-fn safe-fn]
-  (loop [rounds 0 freed 0]
-    (let [entries (loop [] (let [v @q] (if (compare-and-set! q v []) v (recur))))
-          safe (safe-fn)
-          parked (volatile! 0)
+  (let [safe (safe-fn)
+        head (first @q)]
+    (if (and (some? safe) (some? head) (not (< (:epoch head) safe)))
+      0
+      (loop [rounds 0 freed 0]
+        (let [entries (loop [] (let [v @q] (if (compare-and-set! q v []) v (recur))))
+              ;; the epoch-eligible prefix: the entries stamped below
+              ;; safe (the whole queue when safe is nil)
+              k (if (nil? safe)
+                  (count entries)
+                  (loop [i 0]
+                    (if (and (< i (count entries))
+                             (< (:epoch (nth entries i)) safe))
+                      (recur (inc i))
+                      i)))
+              prefix (subvec entries 0 k)
+              suffix (subvec entries k)
+              parked (volatile! 0)
           park! (fn [o k] (vswap! parked inc) (swap! q conj {:off o :kind k :epoch (ep-fn)}))
           stay (volatile! [])
           n (reduce
@@ -477,8 +514,12 @@
                    :else
                    (do (clear-flags! row (bit-or F_QUEUED F_PUB))
                        (+ n (free-claimed! sio off kind row t park!))))))
-             0 entries)]
-      (when (seq @stay) (swap! q into @stay))
-      (if (and (nil? safe) (pos? @parked) (< rounds 4096))
-        (recur (inc rounds) (+ freed n))
-        (+ freed n)))))
+             0 prefix)]
+          ;; restore in epoch order: stays, then the unexamined
+          ;; suffix, then whatever this scan (park!) or a concurrent
+          ;; conj put on q since the drain — all stamped at the
+          ;; epoch now, behind everything else
+          (swap! q (fn [parks] (into [] (concat @stay suffix parks))))
+          (if (and (nil? safe) (pos? @parked) (< rounds 4096))
+            (recur (inc rounds) (+ freed n))
+            (+ freed n)))))))
