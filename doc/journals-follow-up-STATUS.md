@@ -152,3 +152,21 @@ grow inline arms. Instead:
   every image recovered by the JVM reader. Plus the CLR smoke
   (counter=3, records independently parsed), JVM suites 47/419/0,
   host-leak gate green.
+- 2026-10-28 BASILISP FIXED AT SOURCE (operator directive 2:52 PM;
+  the runs/lpy-shadow scaffolding is retired, not shipped):
+  (1) adapters/completion/basilisp host_completion.lpy — the
+  /and_-style symbols basilisp 0.5.1's reader rejects reverted to
+  operator/ spellings (8 hunks, operator call sites only).
+  (2) The same file now patches core aset for Python-bytearray
+  targets (mask to the low 8 bits on store — Clojure's aset-byte
+  semantics; all other targets delegate to core aset unchanged):
+  eve.encoding's make-bytes answers a bytearray on this host, so
+  (aset ba i (unchecked-byte v)) threw for every v past 127 —
+  eve.hamt-util's xxh3 secret build was the first casualty,
+  eve.keyring's xor loop has the same shape. Also fixed in my own
+  journal_file.lpy: (.-length x) is not a Python bytes property —
+  (python/len x) everywhere. RESULT (runs/lpy-smoke-write3.log):
+  eve loads end-to-end on basilisp 0.5.1, real tree, no shadow;
+  J1 journal domain writes counter=3 + exits unclean; journal
+  8272 B = 4 records x 2068, independently parsed (epochs 3-6,
+  CRCs valid); lpy recovery reads counter=3. Lpy crash cells next.

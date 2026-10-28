@@ -54,7 +54,7 @@
 (defn journal-record-of
   "The commit record for an explicit EPOCH and TABLE (Python bytes)."
   [epoch table]
-  (let [tlen (.-length table)
+  (let [tlen (python/len table)
         len  (+ 4 4 tlen 4)
         out  (bytearray)]
     (.extend out (struct/pack ">iiii" journal-magic len (int epoch) tlen))
@@ -77,10 +77,10 @@
     (loop [left size]
       (if (pos? left)
         (let [chunk (os/read fd (min left 1048576))]
-          (if (zero? (.-length chunk))
+          (if (zero? (python/len chunk))
             (python/bytes buf)
             (do (.extend buf chunk)
-                (recur (- left (.-length chunk))))))
+                (recur (- left (python/len chunk))))))
         (python/bytes buf)))))
 
 (defn journal-scan
@@ -92,7 +92,7 @@
    Python bytes, ready for eve.mem/-write-bytes!."
   [h]
   (let [data (read-all h)
-        total (.-length data)]
+        total (python/len data)]
     (loop [pos 0 newest nil oldest nil torn? false]
       (let [remaining (- total pos)]
         (cond
@@ -124,7 +124,7 @@
 (defn- write-all
   "Write all of Python-bytes B to FD at its current position."
   [fd b]
-  (let [total (.-length b)]
+  (let [total (python/len b)]
     (loop [off 0]
       (when (< off total)
         (recur (+ off (os/write fd (bytes-slice b off total))))))))

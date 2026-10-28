@@ -42,8 +42,8 @@
 ;; and basilisp.core's bit-and, >= and - are variadic (a seq per call).
 (defn- wrap [bits]
   (let [m (dec (bit-shift-left 1 bits)) half (bit-shift-left 1 (dec bits)) full (bit-shift-left 1 bits)]
-    (fn [x] (let [u (/and_ (python/int x) m)]
-              (if (/ge u half) (/sub u full) u)))))
+    (fn [x] (let [u (operator/and_ (python/int x) m)]
+              (if (operator/ge u half) (operator/sub u full) u)))))
 
 (def ^:private i8 (wrap 8))
 (def ^:private i16 (wrap 16))
@@ -77,6 +77,25 @@
 (patch! 'unchecked-inc (fn [a] (i64 (inc a))))
 (patch! 'unchecked-dec (fn [a] (i64 (dec a))))
 
+;; --- aset into a bytearray ---------------------------------------------------
+;; Clojure's aset on a byte array stores the value's low 8 bits (a signed
+;; byte on the JVM). basilisp.core's aset is operator/setitem, and a Python
+;; bytearray — what eve.encoding's make-bytes/bytes-of answer on this host —
+;; accepts only 0..255, so (aset ba i (unchecked-byte v)) throws for every
+;; v past 127 (measured 2026-10-28: eve.hamt-util's xxh3 secret build, and
+;; eve.keyring's xor loop has the same shape). Mask on store for bytearray
+;; targets only; every other target (the codec's signed array('b'), Python
+;; lists, object arrays) goes to core's aset unchanged.
+(def ^:private core-aset @(ns-resolve 'basilisp.core 'aset))
+
+(patch! 'aset
+        (fn ([arr i v]
+             (if (instance? python/bytearray arr)
+               (do (operator/setitem arr i (operator/and_ (python/int v) 0xFF)) v)
+               (core-aset arr i v)))
+          ([arr i j & idxs]
+             (apply core-aset arr i j idxs))))
+
 ;; --- inlined functions that name their argument twice -----------------------
 ;; basilisp compiles a call to a ^:inline function by putting the argument's
 ;; form into the function's body, so a body that names its parameter twice
@@ -98,13 +117,13 @@
 (let [str1 (python/getattr core-module (munge "str"))]
   (patch! 'str (fn ([] "")
                  ([x] (str1 x))
-                 ([a b] (/add (str1 a) (str1 b)))
+                 ([a b] (operator/add (str1 a) (str1 b)))
                  ([a b c] (.join "" #py [(str1 a) (str1 b) (str1 c)]))
                  ([a b c d] (.join "" #py [(str1 a) (str1 b) (str1 c) (str1 d)]))
                  ([a b c d & more] (.join "" (python/map str1 (cons a (cons b (cons c (cons d more))))))))))
 
 (core! 'unsigned-bit-shift-right
-       (fn [x n] (/rshift (/and_ x 0xFFFFFFFFFFFFFFFF) n)))
+       (fn [x n] (operator/rshift (operator/and_ x 0xFFFFFFFFFFFFFFFF) n)))
 
 ;; --- comparison, arithmetic and bit ops at a fixed arity ------------------------
 ;; basilisp.core's =, <, >, <=, >=, bit-and, bit-or and bit-xor take their second
@@ -181,12 +200,12 @@
   [zero]
   (fn ([n-or-coll]
        (if (number? n-or-coll)
-         (/mul (python/list [zero]) (python/int n-or-coll))
+         (operator/mul (python/list [zero]) (python/int n-or-coll))
          (python/list (or (seq n-or-coll) []))))
     ([n init]
      (if (number? init)
-       (/mul (python/list [init]) (python/int n))
-       (let [a (/mul (python/list [zero]) (python/int n))]
+       (operator/mul (python/list [init]) (python/int n))
+       (let [a (operator/mul (python/list [zero]) (python/int n))]
          (doseq [[i x] (map-indexed vector (take n init))]
            (aset a i x))
          a)))))
@@ -371,10 +390,10 @@
 (import bisect)
 
 (defn- tuple-insert [t i x]
-  (/add (/add (aget t (python/slice nil i)) (python/tuple [x])) (aget t (python/slice i nil))))
+  (operator/add (operator/add (aget t (python/slice nil i)) (python/tuple [x])) (aget t (python/slice i nil))))
 
 (defn- tuple-remove [t i]
-  (/add (aget t (python/slice nil i)) (aget t (python/slice (inc i) nil))))
+  (operator/add (aget t (python/slice nil i)) (aget t (python/slice (inc i) nil))))
 
 (deftype SortedMap [ks m kf mta]
   ^:abstract basilisp.lang.interfaces/IPersistentMap
