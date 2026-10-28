@@ -79,12 +79,12 @@
                           ((:stop srv))
                           (print out) (flush)
                           (when-not (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out) (System/exit 1))))}
-  test:vs-serve {:doc "eve.http-server on ValueScript (adapters/http-server/vs): a VS program serves eve.net.broker and eve.net.store on one port under Node's vs-serve-node.mjs ($VS_SERVE_NODE, default the monorepo's vs/term/hosts/node/vs-serve-node.mjs), and a babashka network atom derefs and swaps through them"
+  test:vs-serve {:doc "eve.http-server on ValueScript (adapters/http-server/vs): a VS program serves eve.net.broker and eve.net.store on one port under Node's vs-serve-node.mjs ($VS_SERVE_NODE, or vs-serve-node.mjs on PATH), and a babashka network atom derefs and swaps through them"
                  :requires ([babashka.process :as p] [eve.http :as http] [eve.net.atom :as na] [eve.process :as proc])
                  :task (let [wasm (str (fs/absolutize "target/vs/net_serve_vs.wasm"))
                              port (with-open [s (java.net.ServerSocket. 0)] (.getLocalPort s))
                              base (str "http://127.0.0.1:" port "/")
-                             host (or (System/getenv "VS_SERVE_NODE") (str (fs/absolutize "../vs/term/hosts/node/vs-serve-node.mjs")))
+                             host (or (System/getenv "VS_SERVE_NODE") (some-> (fs/which "vs-serve-node.mjs") str) "vs-serve-node.mjs")
                              results (atom [])
                              check (fn [label ok? got] (swap! results conj ok?) (println (if ok? "ok  " "FAIL") label (if ok? "" (pr-str got))))]
                          (fs/create-dirs "target/vs")

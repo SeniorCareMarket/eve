@@ -1,7 +1,7 @@
 (ns eve.http-server
   "eve's http-server feature (adapters/README.md) on ValueScript, over the vs.host bridge's HTTP in (VS's
    src/vs/host.vs next-request / respond!, looped by vs.http.server/serve): the host owns the listener — Node's
-   vs/term/hosts/node/vs-serve-node.mjs (--port N), a Cloudflare Worker — and hands the program each request it took
+   vs-serve-node.mjs (--port N), a Cloudflare Worker — and hands the program each request it took
    as an `http` event; the answer goes back as the host's `respond` op.
 
    (serve! opts handler) serves until the host closes its end of the bridge, then answers {:port nil :stop f}: a VS
