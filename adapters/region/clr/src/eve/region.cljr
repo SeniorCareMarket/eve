@@ -135,13 +135,13 @@
       (Marshal/Copy src 0 (at base off) (int (alength src))))
     nil)
   mem/ISyncableRegion
-  ;; msync(2) = 227 on x86-64, MS_SYNC = 4. A heap region (owner's first
+  ;; msync(2) = 26 on x86-64, MS_SYNC = 4. A heap region (owner's first
   ;; is its byte[]) has nothing to force. Before this, mem/sync-region!
   ;; answered nil for every CLR region, so the journal flush's slab
   ;; sweep and the recovery root force were silent no-ops on this host.
   (-sync! [_]
     (when (instance? FileStream (first owner))
-      (let [r (.Invoke syscall6 fp-syscall 227 (.ToInt64 base) (long size) 4 0 0)]
+      (let [r (.Invoke syscall6 fp-syscall 26 (.ToInt64 base) (long size) 4 0 0)]
         (when-not (zero? r)
           (throw (Exception. (str "msync failed, errno "
                                   (int (Marshal/GetLastSystemError))))))))
@@ -150,7 +150,7 @@
     (when (instance? FileStream (first owner))
       (let [start (+ (.ToInt64 base) (long off))
             aligned (bit-and start (long -4096))
-            r (.Invoke syscall6 fp-syscall 227 aligned
+            r (.Invoke syscall6 fp-syscall 26 aligned
                        (long (- (+ start (long len)) aligned)) 4 0 0)]
         (when-not (zero? r)
           (throw (Exception. (str "msync failed, errno "

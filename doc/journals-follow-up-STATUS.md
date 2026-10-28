@@ -106,3 +106,29 @@ grow inline arms. Instead:
 - 2026-10-28 probes complete (above); design settled on the
   adapter route per eve/CLAUDE.md; sync-sio!/ISyncableRegion gaps
   found and folded into scope.
+- 2026-10-28 IMPLEMENTED (commit 51fcc328c51): eve.journal-file
+  adapters (java/node/clr/python/unsupported), hosts.edn + deps.edn
+  roots, atom.cljc journal section host-free, sync-sio! ungated,
+  ISyncableRegion for ClrRegion (msync — x86-64 syscall 26; an
+  initial 227 was clock_settime, EINVAL, diagnosed via futex
+  control + /proc/self/maps) and LpyRegion (mmap.flush).
+  check-host-leak GREEN (0/0/1/0, was 16 conditionals).
+  JVM suites 47 tests / 419 assertions / 0 failures (runs/jvm-suites.log).
+- 2026-10-28 CLR smoke GREEN (runs/clr-smoke*): J1 domain, sync! +
+  3 inc swaps exit-unclean; journal 8272 B = 4 records x 2068;
+  independent Python parse: epochs 3-6, all CRCs valid; CLR recovery
+  read-back counter=3.
+- 2026-10-28 LPY BLOCKED (pre-existing, on pristine main): basilisp
+  0.5.1 (PyPI latest; eve's pin) cannot load eve at all on current
+  main — (1) adapters/completion/basilisp host_completion.lpy uses
+  /and_-style symbols (commit 226ac4cfa3c) its reader rejects
+  ("'/' character disallowed in names", line 45); eve.host requires
+  the completion, so every eve namespace is unreachable. (2) With a
+  spelling-shadowed completion copy (runs/lpy-shadow, verification
+  scaffolding only), eve.hamt-util then throws in core aset
+  (unchecked-byte negative into bytearray). Both reproduce with no
+  journal code involved. journal_file.lpy itself parses cleanly
+  under the 0.5.1 reader (17 forms) and its primitives were probed
+  green at lane start (fcntl lock exclusion both directions,
+  struct/zlib/bytes). End-to-end lpy cells wait on the host load
+  defect, which is outside this lane's files.
