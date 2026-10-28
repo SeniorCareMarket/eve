@@ -118,8 +118,7 @@ grow inline arms. Instead:
   3 inc swaps exit-unclean; journal 8272 B = 4 records x 2068;
   independent Python parse: epochs 3-6, all CRCs valid; CLR recovery
   read-back counter=3.
-- 2026-10-28 LPY BLOCKED (pre-existing, on pristine main): basilisp
-  0.5.1 (PyPI latest; eve's pin) cannot load eve at all on current
+- 2026-10-28 LPY BLOCKED (pre-existing, on pristine main): basilisp  0.5.1 (PyPI latest; eve's pin) cannot load eve at all on current
   main — (1) adapters/completion/basilisp host_completion.lpy uses
   /and_-style symbols (commit 226ac4cfa3c) its reader rejects
   ("'/' character disallowed in names", line 45); eve.host requires
@@ -132,3 +131,15 @@ grow inline arms. Instead:
   green at lane start (fcntl lock exclusion both directions,
   struct/zlib/bytes). End-to-end lpy cells wait on the host load
   defect, which is outside this lane's files.
+- 2026-10-28 CLR crash cell J1/counter GREEN: 17 pass, 0 violations
+  (runs/crash-clr-j1-counter.log) — CLR recorder
+  (test/eve/durability_crash_recorder_cljr.clj, new) writes the
+  journal, JVM reader recovers every materialized crash point.
+  Manifest journal-lens 2068/4136/6204/8272/10340 (one record per
+  J1 commit).
+- 2026-10-28 CLR crash cell J1/kb64 GREEN: 17 pass, 0 violations
+  (runs/crash-clr-j1-kb64.log). CLR crash cell J10/counter GREEN:
+  10 pass, 0 violations (runs/crash-clr-j10-counter.log).
+- 2026-10-28 2:28 PM: J10/kb64 RUNNING (7 points in, all PASS so
+  far; driver + JVM reader alive). Item 3 (VS-seat re-check on pair
+  02c86f56a24efd4e) starts when it lands; item 4 after.

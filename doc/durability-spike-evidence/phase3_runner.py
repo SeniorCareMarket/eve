@@ -82,10 +82,13 @@ def writer_cmds(cell_dir, variant):
                       "-m", "eve.durability-workload",
                       os.path.join(d, "wl-config.json")], EVE))
     wid = "cljr"
-    # Jn in a J cell: the journal's append branch is #?(:clj ...) Java
-    # code — dead on the :cljr/:lpy reader features (measured), so
-    # cljr/lpy join J cells as non-journal participants, like jolt.
-    d, log = cfg(wid, "A" if variant == "A" else "Jn", 4001)
+    # Journal arm live on cljr since the journals-follow-up lane
+    # (eve.journal-file/clr + ISyncableRegion msync): cljr seats run
+    # the J arm itself. lpy's journal arm is written too
+    # (eve.journal-file/python) but the lpy seat is down on current
+    # main — eve.host-completion is unreadable by the pinned
+    # basilisp's reader — so lpy still joins as Jn until that lands.
+    d, log = cfg(wid, "A" if variant == "A" else "J", 4001)
     env_note = os.path.join(d, "env.txt")
     out.append((wid, ["cljr", "-m", "eve.durability-workload-cljr",
                       os.path.join(d, "wl-config.edn")], d))
