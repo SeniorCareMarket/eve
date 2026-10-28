@@ -143,3 +143,12 @@ grow inline arms. Instead:
 - 2026-10-28 2:28 PM: J10/kb64 RUNNING (7 points in, all PASS so
   far; driver + JVM reader alive). Item 3 (VS-seat re-check on pair
   02c86f56a24efd4e) starts when it lands; item 4 after.
+- 2026-10-28 ITEM 1 VERIFIED COMPLETE: J10/kb64 finished — 10
+  unique points, all PASS, 0 violations (the log's final totals
+  line reads 11: the interrupted first run's PASS line for
+  window-c5-root-ahead was written twice across the resume; unique
+  points are 10). CLR crash cells total: J1/counter 17, J1/kb64 17,
+  J10/counter 10, J10/kb64 10 — 54 unique points, 0 violations,
+  every image recovered by the JVM reader. Plus the CLR smoke
+  (counter=3, records independently parsed), JVM suites 47/419/0,
+  host-leak gate green.
