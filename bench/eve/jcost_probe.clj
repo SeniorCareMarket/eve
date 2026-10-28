@@ -6,7 +6,7 @@
    Scratch domains live under ~/workspace/jcost-runs/."
   (:require [eve.atom :as atom]
             [eve.mem :as mem]
-            [eve.data :as d]
+            [eve.deftype-proto.data :as d]
             [clojure.java.io :as io]))
 
 (def ^:private runs-dir "/home/hatch/workspace/jcost-runs")
@@ -59,8 +59,11 @@
     ;; the safe-epoch scan alone (256 worker slots)
     (let [us (time-us #(@#'eve.atom/mmap-min-safe-epoch (:root-r ds)) 1000)]
       (println (pr-str {:probe :p1 :phase :safe-scan :us us})))
-    ;; phase 2: floor to 0 -> one flush frees (nearly) everything
-    (reset! floor 0)
+    ;; phase 2: floor past every stamp -> one flush frees (nearly)
+    ;; everything. (Entries free when stamp < safe; the floor is a
+    ;; lower bound on safe, so freeing all means floor ABOVE the
+    ;; stamps, not 0.)
+    (reset! floor Long/MAX_VALUE)
     (let [q0 (count @rq)
           t0 (System/nanoTime)
           freed (@#'eve.atom/flush-zero-queue! ds)
