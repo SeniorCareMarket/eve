@@ -170,3 +170,24 @@ grow inline arms. Instead:
   J1 journal domain writes counter=3 + exits unclean; journal
   8272 B = 4 records x 2068, independently parsed (epochs 3-6,
   CRCs valid); lpy recovery reads counter=3. Lpy crash cells next.
+- 2026-10-28 ITEM 3 (VS wall re-check) — NO VERDICT YET, two
+  attempts banked: attempt 1 (runs/vs-reqatom-compile.log) failed
+  EARLIER than the wall on my own config error — main's :vs
+  hosts.edn roots lack a thread root; the spike's compile included
+  adapters/thread/none/src, now added. Attempt 2
+  (runs/vs-reqatom-compile2.log) hit the 2400 s timeout with an
+  EMPTY log under a loaded box (CLR + lpy + JVM work concurrent) —
+  the batch compile writes its trace only at process end, so a
+  timeout banks zero evidence; the wall is neither confirmed nor
+  cleared on the current pair (02c86f56a24efd4e/8f09c2cfcaae599a).
+  DIAGNOSIS for attempt 3 (two-attempt rule): the variable is box
+  contention, not the probe; attempt 3 runs in the quiet window
+  after the lpy cells + local phase-3 cell, same corrected roots.
+  The spike's own traces (doc/durability-spike-evidence/vs-seat/
+  reqatom-compile.txt: dies at form 18161, "macroexpand: Unable to
+  resolve symbol: translate-protos") stand as the last measurement
+  until then. NOTE also: main's :vs row lacking a thread root is a
+  real gap the spike worked around — record for the report.
+- 2026-10-28 JVM suites re-run after ALL changes incl. the
+  basilisp completion fix: 47 tests / 419 assertions / 0 failures
+  (runs/jvm-suites2.log). CLR cells untouched by the lpy work.
