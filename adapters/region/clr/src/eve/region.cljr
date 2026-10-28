@@ -1,0 +1,168 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2)
+   over .NET (ClojureCLR): a MemoryMappedFile, its atomics Interlocked over the
+   mapped pointer, wait/notify the futex syscall.
+
+   make-heap-region and open-mmap-region open them; lustre-region? says
+   whether a region's atomics are fcntl byte-range locks (a Lustre mount)."
+  (:refer-clojure :exclude [aget aset alength byte-array int-array long-array object-array
+                            into-array unchecked-byte unchecked-int unchecked-long
+                            unchecked-inc-int unsigned-bit-shift-right long double class
+                            locking transient persistent! conj! assoc! bytes objects
+                            const-bytes const-objects])
+  (:require
+   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
+                     into-array unchecked-byte unchecked-int unchecked-long
+                     unchecked-inc-int unsigned-bit-shift-right long double class locking
+                     transient persistent! conj! assoc! bytes objects const-bytes
+                     const-objects]]
+   [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
+                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
+  (:import
+   [System.IO.MemoryMappedFiles MemoryMappedFile MemoryMappedFileAccess]
+   [System.IO FileStream FileMode FileAccess FileShare HandleInheritability]
+   [System.Threading Interlocked Volatile]
+   [System.Runtime.InteropServices Marshal GCHandle GCHandleType NativeLibrary]
+   [System.Reflection.Emit DynamicMethod OpCodes]))
+
+;; Every region has atomic RMW unless it says otherwise.
+(extend-protocol mem/IHostAtomics
+  Object
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _byte-off f] (f)))
+
+   ;; ClojureCLR — ClrRegion over a pinned byte[] (heap) or a mapped file view
+   ;; .NET's atomics (Interlocked, Volatile) take a `ref int`, and ClojureCLR's
+   ;; by-ref reaches only a local, so each op is a DynamicMethod of four to six
+   ;; instructions: the region address (an IntPtr) passed where the BCL method
+   ;; expects `ref T`, then call, ret. Wait / notify are futex(2) on the shared
+   ;; word, through libc's syscall() called with calli. Measured on the CLR
+   ;; (2026-10-16, impls/README.md): exact across two processes on one
+   ;; MAP_SHARED file.
+
+(defn- func-type [& ts]
+  (.MakeGenericType (Type/GetType (str "System.Func`" (count ts))) (into-array Type ts)))
+
+(defn- ref-op
+  "A delegate (IntPtr p, args...) -> (cls.mname (ref *(T*)p) args...)."
+  [cls mname rt & ats]
+  (let [mi (.GetMethod ^Type cls ^String mname (into-array Type (cons (.MakeByRefType ^Type rt) ats)))
+        void? (= mname "Write")
+        dm (DynamicMethod. (str "eve-" mname) (if void? Int32 rt) (into-array Type (cons IntPtr ats)) Interlocked true)
+        il (.GetILGenerator dm)]
+    (.Emit il OpCodes/Ldarg_0)
+    (doseq [i (range (count ats))] (.Emit il OpCodes/Ldarg_S (byte (inc i))))
+    (.Emit il OpCodes/Call mi)
+    (when void? (.Emit il OpCodes/Ldc_I4_0))
+    (.Emit il OpCodes/Ret)
+    (.CreateDelegate dm (apply func-type IntPtr (concat ats [(if void? Int32 rt)])))))
+
+(def ^:private ^{:tag "System.Func`4[System.IntPtr,System.Int32,System.Int32,System.Int32]"} cas32*
+  (ref-op Interlocked "CompareExchange" Int32 Int32 Int32))
+(def ^:private ^{:tag "System.Func`3[System.IntPtr,System.Int32,System.Int32]"} add32*
+  (ref-op Interlocked "Add" Int32 Int32))
+(def ^:private ^{:tag "System.Func`3[System.IntPtr,System.Int32,System.Int32]"} xchg32*
+  (ref-op Interlocked "Exchange" Int32 Int32))
+(def ^:private ^{:tag "System.Func`2[System.IntPtr,System.Int32]"} load32*
+  (ref-op Volatile "Read" Int32))
+(def ^:private ^{:tag "System.Func`3[System.IntPtr,System.Int32,System.Int32]"} store32*
+  (ref-op Volatile "Write" Int32 Int32))
+(def ^:private ^{:tag "System.Func`4[System.IntPtr,System.Int64,System.Int64,System.Int64]"} cas64*
+  (ref-op Interlocked "CompareExchange" Int64 Int64 Int64))
+(def ^:private ^{:tag "System.Func`3[System.IntPtr,System.Int64,System.Int64]"} add64*
+  (ref-op Interlocked "Add" Int64 Int64))
+(def ^:private ^{:tag "System.Func`2[System.IntPtr,System.Int64]"} load64*
+  (ref-op Volatile "Read" Int64))
+(def ^:private ^{:tag "System.Func`3[System.IntPtr,System.Int64,System.Int32]"} store64*
+  (ref-op Volatile "Write" Int64 Int64))
+
+;; futex(2): syscall 202 on x86-64; FUTEX_WAIT 0 / FUTEX_WAKE 1, shared (not PRIVATE)
+(def ^:private ^{:tag "System.Func`8[System.IntPtr,System.Int64,System.Int64,System.Int64,System.Int64,System.Int64,System.Int64,System.Int64]"} syscall6
+  (let [dm (DynamicMethod. "eve-syscall6" Int64 (into-array Type [IntPtr Int64 Int64 Int64 Int64 Int64 Int64]) Interlocked true)
+        il (.GetILGenerator dm)]
+    (doseq [i (range 1 7)] (.Emit il OpCodes/Ldarg_S (byte i)))
+    (.Emit il OpCodes/Ldarg_0)
+    (.EmitCalli il OpCodes/Calli System.Runtime.InteropServices.CallingConvention/Cdecl Int64
+                (into-array Type (repeat 6 Int64)))
+    (.Emit il OpCodes/Ret)
+    (.CreateDelegate dm (apply func-type IntPtr (repeat 7 Int64)))))
+(def ^:private ^IntPtr fp-syscall
+  (NativeLibrary/GetExport (NativeLibrary/Load "libc.so.6") "syscall"))
+
+;; base + off (a macro: ClojureCLR takes no value-type hint on a fn's
+;; parameters, and in a ClrRegion method base is the typed field)
+(defmacro ^:private at [base off] `(IntPtr/Add ~base (int ~off)))
+
+(deftype ClrRegion [^IntPtr base ^long size owner]
+  mem/IMemRegion
+  (-byte-length [_] size)
+  (-load-i32 [_ off] (.Invoke load32* (at base off)))
+  (-store-i32! [_ off v] (.Invoke store32* (at base off) (unchecked-int v)) nil)
+  (-cas-i32! [_ off expected desired]
+    (.Invoke cas32* (at base off) (unchecked-int desired) (unchecked-int expected)))
+  (-add-i32! [_ off delta]
+    (let [d (unchecked-int delta)] (unchecked-int (- (.Invoke add32* (at base off) d) d))))
+  (-sub-i32! [this off delta] (.-add-i32! this off (- delta)))
+  (-exchange-i32! [_ off v] (.Invoke xchg32* (at base off) (unchecked-int v)))
+  (-load-i64 [_ off] (.Invoke load64* (at base off)))
+  (-store-i64! [_ off v] (.Invoke store64* (at base off) (long v)) nil)
+  (-cas-i64! [_ off expected desired]
+    (.Invoke cas64* (at base off) (long desired) (long expected)))
+  (-add-i64! [_ off delta] (let [d (long delta)] (- (.Invoke add64* (at base off) d) d)))
+  (-sub-i64! [this off delta] (.-add-i64! this off (- delta)))
+  (-wait-i32! [_ off expected timeout-ms]
+    (let [ts (Marshal/AllocHGlobal 16)]
+      (try
+        (Marshal/WriteInt64 ts 0 (long (quot timeout-ms 1000)))
+        (Marshal/WriteInt64 ts 8 (long (* 1000000 (mod timeout-ms 1000))))
+        (let [r (.Invoke syscall6 fp-syscall 202 (.ToInt64 (at base off)) 0
+                         (long (unchecked-int expected)) (.ToInt64 ts) 0)]
+          (if (zero? r)
+            :ok
+            (case (int (Marshal/GetLastSystemError)) 11 :not-equal 110 :timed-out :ok)))
+        (finally (Marshal/FreeHGlobal ts)))))
+  (-notify-i32! [_ off n]
+    (int (.Invoke syscall6 fp-syscall 202 (.ToInt64 (at base off)) 1 (long n) 0 0)))
+  (-supports-watch? [_] true)
+  (-read-bytes [_ off len]
+    (let [b (byte-array (int len))]
+      (Marshal/Copy (at base off) b 0 (int len))
+      b))
+  (-write-bytes! [_ off src]
+    (let [^bytes src src]
+      (Marshal/Copy src 0 (at base off) (int (alength src))))
+    nil))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed MAP_SHARED region of size-bytes at
+   path-str. The file grows to size-bytes when it is shorter and is never
+   truncated: the mapping takes the file's length, the view the first
+   size-bytes of it."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes opts]
+   (when (:lustre? opts)
+     (throw (NotSupportedException. "eve on ClojureCLR: no lustre regions")))
+   (let [size (long size-bytes)
+         fs (FileStream. ^String path-str FileMode/OpenOrCreate FileAccess/ReadWrite FileShare/ReadWrite)
+         _ (when (< (.Length fs) size) (.SetLength fs size))
+         mmf (MemoryMappedFile/CreateFromFile fs nil 0 MemoryMappedFileAccess/ReadWrite
+                                              HandleInheritability/None true)
+         acc (.CreateViewAccessor mmf 0 size)
+         base (IntPtr/Add (.DangerousGetHandle (.SafeMemoryMappedViewHandle acc))
+                          (int (.PointerOffset acc)))]
+     (ClrRegion. base size [fs mmf acc]))))
+
+(defn make-heap-region
+  "An IMemRegion over a zero-initialized byte[] of size-bytes, pinned for
+   the process's lifetime, shared by its threads."
+  [size-bytes]
+  (let [b (byte-array (int size-bytes))
+        h (GCHandle/Alloc b GCHandleType/Pinned)]
+    (ClrRegion. (.AddrOfPinnedObject h) (long size-bytes) [b h])))
+
+(defn lustre-region?
+  "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
+  [_r]
+  false)

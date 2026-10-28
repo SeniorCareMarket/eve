@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""check-host-leak — eve's shared code is written once, against eve's host
+interface; a host plugs in by implementing that interface outside the shared
+code (adapters/README.md, "eve is portable"). This gate counts what in eve/src still
+names a host, and holds the count to the baseline in eve/.host-leak:
+
+  conditionals  reader conditionals with a host's feature as a key
+                (:clj :cljs :bb :cljr :lpy :clje :jolt :glj :org.babashka/nbb ...)
+  predicates    calls that branch on the host (clje?, bb?, cljs-target?, ...)
+  host-files    files under eve/src that only one host reads (.clj .cljs .clje
+                .lpy .cljr .glj .bb — everything but .cljc)
+  net-interop   host method calls — (.method x) — in eve/src/eve/net, the
+                network atom's portable core: a host's string or array method
+                there is a host leak no reader conditional shows (`.indexOf`
+                ran on the JVM and JavaScript and failed on basilisp,
+                2026-10-17); eve's own types' methods are elsewhere in eve/src
+
+A count above its baseline fails (shared code grew a host); a count below it
+fails too until eve/.host-leak is lowered to it in the same commit (the shrink
+is banked). The goal is 0 0 0 0.
+
+  eve/scripts/check-host-leak            # check (exit 0 OK, 1 FAILED)
+  eve/scripts/check-host-leak --report   # the counts, per file
+"""
+import glob
+import os
+import re
+import sys
+
+EVE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(EVE, "src")
+BASELINE = os.path.join(EVE, ".host-leak")
+HOSTS = {":clj", ":cljs", ":bb", ":cljr", ":lpy", ":clje", ":jolt", ":glj",
+         ":org.babashka/nbb", ":cljd", ":phel", ":jank", ":let-go", ":squint"}
+METHOD = re.compile(r"\(\.[A-Za-z_][\w\-]*[\s)]")
+NET = os.path.join(SRC, "eve", "net") + os.sep
+PRED = re.compile(r"\((?:[\w.\-]+/)?(?:clje|glj|lpy|cljr|bb|jolt|nbb|cljs-target)\?[\s)]")
+
+
+def conditionals(s):
+    """The key lists of every reader conditional in s."""
+    out, i = [], 0
+    opener = re.compile(r"#\?@?\(")
+    while True:
+        m = opener.search(s, i)
+        if not m:
+            return out
+        st = m.end() - 1
+        depth, j = 0, st
+        while j < len(s):
+            c = s[j]
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+                if depth == 0:
+                    break
+            elif c == '"':
+                j += 1
+                while s[j] != '"':
+                    if s[j] == "\\":
+                        j += 1
+                    j += 1
+            elif c == ";":
+                while j < len(s) and s[j] != "\n":
+                    j += 1
+            elif c == "\\":
+                j += 1
+            j += 1
+        body, keys, depth, k = s[st + 1:j], [], 0, 0
+        while k < len(body):
+            c = body[k]
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif c == '"':
+                k += 1
+                while body[k] != '"':
+                    if body[k] == "\\":
+                        k += 1
+                    k += 1
+            elif c == ";":
+                while k < len(body) and body[k] != "\n":
+                    k += 1
+            elif c == "\\":
+                k += 1
+            elif c == ":" and depth == 0 and (k == 0 or body[k - 1] in " \n\t("):
+                mm = re.match(r":[\w./\-]+", body[k:])
+                if mm:
+                    keys.append(mm.group(0))
+                    k += len(mm.group(0))
+                    continue
+            k += 1
+        out.append((s[:m.start()].count("\n") + 1, keys))
+        i = m.end()
+
+
+def measure():
+    per = {}
+    counts = {"conditionals": 0, "predicates": 0, "host-files": 0, "net-interop": 0}
+    for p in sorted(glob.glob(os.path.join(SRC, "**", "*"), recursive=True)):
+        if os.path.isdir(p):
+            continue
+        rel = os.path.relpath(p, EVE)
+        ext = os.path.splitext(p)[1]
+        if ext in (".clj", ".cljs", ".clje", ".lpy", ".cljr", ".glj", ".bb"):
+            counts["host-files"] += 1
+            per.setdefault(rel, [0, 0, 1])
+        if ext not in (".clj", ".cljs", ".cljc", ".clje", ".lpy", ".cljr", ".glj", ".bb"):
+            continue
+        s = open(p, encoding="utf-8").read()
+        c = sum(1 for _, keys in conditionals(s) if any(k in HOSTS for k in keys))
+        q = len(PRED.findall(s))
+        if c or q:
+            row = per.setdefault(rel, [0, 0, 0])
+            row[0] += c
+            row[1] += q
+        counts["conditionals"] += c
+        counts["predicates"] += q
+        if p.startswith(NET):
+            counts["net-interop"] += len(METHOD.findall(s))
+    return counts, per
+
+
+def main():
+    counts, per = measure()
+    if "--report" in sys.argv:
+        for rel, (c, q, f) in sorted(per.items(), key=lambda kv: -sum(kv[1])):
+            print(f"{c:5} {q:4} {'host-file' if f else '':9} {rel}")
+    base = {}
+    if os.path.exists(BASELINE):
+        for line in open(BASELINE):
+            line = line.split("#")[0].strip()
+            if line:
+                k, v = line.split()
+                base[k] = int(v)
+    now = " ".join(f"{k} {v}" for k, v in counts.items())
+    bad = []
+    for k, v in counts.items():
+        b = base.get(k)
+        if b is None:
+            bad.append(f"{k}: no baseline in eve/.host-leak")
+        elif v > b:
+            bad.append(f"{k}: {v} > baseline {b} — shared code gained a host; move it into the host's adapter")
+        elif v < b:
+            bad.append(f"{k}: {v} < baseline {b} — bank the shrink: set {k} {v} in eve/.host-leak")
+    if bad:
+        print("check-host-leak FAILED (" + now + ")", file=sys.stderr)
+        for b in bad:
+            print("  " + b, file=sys.stderr)
+        sys.exit(1)
+    print("check-host-leak OK: " + now + " (goal: 0 0 0 0)")
+
+
+if __name__ == "__main__":
+    main()

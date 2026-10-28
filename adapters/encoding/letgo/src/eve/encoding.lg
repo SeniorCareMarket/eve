@@ -1,0 +1,237 @@
+(ns eve.encoding
+  "eve's encoding primitives (HOST-CONTRACT §3-4) on let-go (lg-eve): UTF-8, IEEE-754 bits, the host's numbers,
+   instants, uuids, exceptions, map entries, small caches, typed arrays — and the network atom's (a string's UTF-16
+   units, the string of code points, base64 and hex; eve/doc/network-atoms/ADAPTERS.md §2). What would be a
+   byte-at-a-time loop in let-go's VM is lg-eve's Go natives (eve.host-native, impls/let-go/evenative/host.go).
+   let-go's byte array is a Go []byte: a byte reads back 0..255, as on ClojureScript; its numbers are int64, float64,
+   math/big's Int (BigInt) and a decimal (BigDecimal); it has no java.util.Date (an instant is its inst), no short
+   array (16-bit typed arrays are int arrays) and its float array holds float64s."
+  (:refer-clojure :exclude [ratio? write!])
+  (:require [clojure.string]))
+
+(def ^:private BIG (type 1N))
+(def ^:private DEC (type 1.5M))
+
+(defn throw-index-out-of-bounds [msg] (throw (ex-info (str "index out of bounds: " msg) {:eve/error :index-out-of-bounds})))
+
+(defn throw-unsupported [] (throw (ex-info "unsupported" {:eve/error :unsupported})))
+
+(defn unsupported "The host's unsupported-operation exception, with message msg." [msg] (ex-info msg {:eve/error :unsupported}))
+
+(defn map-entry "A map entry [k v] (what seq on a map answers)." [k v] (first {k v}))
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff."
+  [src soff dst doff len]
+  (System/arraycopy src soff dst doff len))
+
+(defn copy-of-range
+  "A new byte array of b's bytes [from, to)."
+  [b from to]
+  (let [n (- to from) out (byte-array n)]
+    (arraycopy b from out 0 n)
+    out))
+
+(defn utf8-bytes "The UTF-8 bytes of string s." [s] (eve.host-native/utf8-bytes s))
+
+(defn utf8-string "The string len UTF-8 bytes of b encode, from off." [b off len] (eve.host-native/utf8-string b off len))
+
+(defn long-bits->double "The double whose IEEE-754 bits are x." [x] (eve.host-native/long-bits->double x))
+
+(defn double->long-bits "The IEEE-754 bits of the double d, as a long (NaN payloads kept)." [d]
+  (eve.host-native/double->long-bits (double d)))
+
+(defn big-integer?
+  "An integer of an arbitrary-precision type (let-go's BigInt): eve.codec writes it by its magnitude — INT32 or INT64
+   when it fits, else BIGINT."
+  [v]
+  (= BIG (type v)))
+
+(defn fixed-integer? "An integer of the host's fixed-width type (let-go's int64)." [v] (int? v))
+
+(defn floating? "A floating-point number (FLOAT64)." [v] (float? v))
+
+(defn integer->twos
+  "Integer n's minimal two's-complement bytes, big-endian, as a vector of 0..255 (by arithmetic: floor mod and exact
+   quotient)."
+  [n]
+  (loop [x n acc ()]
+    (let [b (long (mod x 256))
+          x (quot (-' x b) 256)]
+      (if (or (and (zero? x) (< b 128)) (and (= -1 x) (>= b 128)))
+        (vec (cons b acc))
+        (recur x (cons b acc))))))
+
+(defn twos->integer
+  "The integer whose minimal two's-complement big-endian bytes are bs (0..255 each): a BigInt where it needs one."
+  [bs]
+  (let [u (reduce (fn [acc b] (+' (*' acc 256) b)) 0N bs)]
+    (bigint (if (and (seq bs) (>= (first bs) 128))
+              (-' u (reduce *' 1N (repeat (count bs) 256)))
+              u))))
+
+(defn ratio? "A ratio (RATIO)." [v] (clojure.core/ratio? v))
+
+(defn ratio-parts "[numerator denominator] of a ratio: lowest terms, the denominator positive." [r]
+  [(numerator r) (denominator r)])
+
+(defn make-ratio "The ratio n/d (n, d integers in lowest terms, d > 1)." [n d] (/ (bigint n) (bigint d)))
+
+(defn bigdec? "An arbitrary-precision decimal (BIGDEC)." [v] (= DEC (type v)))
+
+(defn bigdec-parts
+  "[unscaled scale] of decimal d in its canonical form: trailing zeros stripped down to scale 0, never a negative
+   scale — read from its text."
+  [d]
+  (let [[_ sign ip fp ex] (re-matches #"([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?" (str d))
+        fp (or fp "")
+        scale (- (count fp) (if ex (parse-long (clojure.string/replace ex "+" "")) 0))
+        u (bigint (str (if (= sign "-") "-" "") (if (= "" (str ip fp)) "0" (str ip fp))))]
+    (loop [u u scale scale]
+      (cond (neg? scale) [(*' u (reduce *' 1N (repeat (- scale) 10))) 0]
+            (and (pos? scale) (zero? (mod u 10))) (recur (quot u 10) (dec scale))
+            :else [u scale]))))
+
+(defn make-bigdec
+  "The decimal unscaled × 10^-scale."
+  [unscaled scale]
+  (let [u (bigint unscaled) neg (neg? u) digits (str (if neg (-' u) u))
+        digits (if (clojure.string/ends-with? digits "N") (subs digits 0 (dec (count digits))) digits)
+        k (long scale)
+        digits (if (<= (count digits) k) (str (apply str (repeat (- (inc k) (count digits)) "0")) digits) digits)
+        ip (subs digits 0 (- (count digits) k)) fp (subs digits (- (count digits) k))]
+    (bigdec (str (if neg "-" "") ip (when (pos? k) (str "." fp))))))
+
+(defn date? "The host's instant type (let-go's inst)." [v] (boolean (try (inst? v) (catch Throwable _ false))))
+
+(defn date-ms "Milliseconds since the Unix epoch of an instant." [d] (inst-ms d))
+
+(defn ms->date "The host's instant at ms milliseconds since the Unix epoch (UTC)." [ms] (Instant/ofEpochMilli (long ms)))
+
+(defn uuid->bytes!
+  "Write uuid u's 16 bytes, big-endian (network order), into b at off."
+  [u b off]
+  (let [bs (eve.host-native/hex->bytes (clojure.string/replace (str u) "-" ""))]
+    (dotimes [i 16] (aset b (+ off i) (nth bs i)))))
+
+(defn bytes->uuid
+  "The uuid whose 16 big-endian bytes are at off in b."
+  [b off]
+  (let [h (eve.host-native/bytes->hex (copy-of-range b off (+ off 16)))]
+    (UUID/fromString (str (subs h 0 8) "-" (subs h 8 12) "-" (subs h 12 16) "-" (subs h 16 20) "-" (subs h 20)))))
+
+(defn utf16-units "The UTF-16 code units of string s, as integers." [s] (eve.host-native/utf16-units s))
+
+(defn host-char? "A character of the host's own char type (let-go's char is a rune)." [v] (char? v))
+
+(defn host-array? "A host array (let-go's Array)." [v] (= (type (byte-array 0)) (type v)))
+
+(defn new-cache "A concurrent map for small caches (cache-get / cache-put!): an atom of a map." [] (atom {}))
+
+(defn cache-get [c k] (get @c k))
+
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (swap! c (fn [m] (assoc (if (> (count m) max) {} m) k v)))
+  v)
+
+(defn bytes= "Two byte arrays equal, byte for byte." [a b] (eve.host-native/bytes= a b))
+
+(defn illegal-argument "The host's illegal-argument exception, with message msg." [msg] (ex-info msg {:eve/error :illegal-argument}))
+
+(defn index-out-of-bounds "The host's index-out-of-bounds exception." [msg] (ex-info (str msg) {:eve/error :index-out-of-bounds}))
+
+(defn read-f32-le "The float32 at byte off of b (little-endian), as a double." [b off] (eve.host-native/read-f32-le b off))
+
+(defn read-f64-le "The float64 at byte off of b (little-endian)." [b off] (eve.host-native/read-f64-le b off))
+
+(defn f32-le-bytes "The 4 little-endian bytes of v as a float32." [v] (eve.host-native/f32-le-bytes (double v)))
+
+(defn f64-le-bytes "The 8 little-endian bytes of v as a float64." [v] (eve.host-native/f64-le-bytes (double v)))
+
+(defn make-bytes "n zeroed bytes (the host's byte array, as eve's codec holds bytes)." [n] (byte-array n))
+
+(defn bytes-of "The bytes xs (each 0..255, or its signed byte), as a byte array." [xs] (eve.host-native/byte-array-of xs))
+
+(defn bytes-copy "A copy of byte array b." [b] (aclone b))
+
+(defn map-hash-code
+  "The host's object hash of a map m (java.util.Map's: the sum of each entry's key hash xor value hash, as an int)."
+  [m]
+  (reduce (fn [h [k v]] (unchecked-int (+ h (bit-xor (hash k) (hash v))))) 0 m))
+
+(defn write! "Write s (str of it) to the host's writer w." [w s] (binding [*out* w] (print (str s))))
+
+(defn f64s-le
+  "The n float64s little-endian in b from byte off, as the host's double array."
+  [b off n]
+  (double-array (map (fn [i] (read-f64-le b (+ off (* 8 i)))) (range n))))
+
+(defn i32s-le
+  "The n int32s little-endian in b from byte off, as the host's int array."
+  [b off n]
+  (int-array (map (fn [i] (let [o (+ off (* 4 i))
+                                u (bit-or (aget b o) (bit-shift-left (aget b (+ o 1)) 8)
+                                          (bit-shift-left (aget b (+ o 2)) 16) (bit-shift-left (aget b (+ o 3)) 24))]
+                            (unchecked-int u)))
+                  (range n))))
+
+(defn f64s->bytes-le
+  "The little-endian bytes of the doubles in da, 8 each."
+  [da]
+  (eve.host-native/byte-array-of (mapcat (fn [d] (seq (f64-le-bytes d))) da)))
+
+(defn i32s->bytes-le
+  "The little-endian bytes of the ints in ia, 4 each."
+  [ia]
+  (eve.host-native/byte-array-of
+   (mapcat (fn [x] [(bit-and x 0xFF) (bit-and (bit-shift-right x 8) 0xFF) (bit-and (bit-shift-right x 16) 0xFF)
+                    (bit-and (bit-shift-right x 24) 0xFF)])
+           ia)))
+
+(defn array-subtype+bytes
+  "[subtype little-endian-bytes] of a host typed array: let-go's arrays carry no element type eve can read, so a byte
+   array is int8 (2) and any other is not one (nil)."
+  [a]
+  (when (host-array? a)
+    (let [s (seq a)]
+      (when (every? (fn [x] (and (int? x) (<= 0 x 255))) s) [2 a]))))
+
+(defn typed-array
+  "n zeroed elements of eve.array subtype code: a byte array for the 8-bit subtypes, an int array for the 16- and
+   32-bit integers, a double array for the floats."
+  [subtype n]
+  (case (long subtype)
+    (1 2 3) (byte-array n)
+    (4 5 6 7) (int-array n)
+    (8 9) (double-array n)))
+
+(defn typed-aget
+  "Element i of typed array a of subtype code, as eve.array reads it."
+  [a subtype i]
+  (case (long subtype)
+    (1 3) (aget a i)
+    2     (let [x (aget a i)] (if (> x 127) (- x 256) x))
+    4     (let [x (bit-and (aget a i) 0xFFFF)] (if (> x 32767) (- x 65536) x))
+    5     (bit-and (aget a i) 0xFFFF)
+    6     (unchecked-int (aget a i))
+    7     (bit-and (aget a i) 0xFFFFFFFF)
+    (8 9) (double (aget a i))))
+
+(defn typed-aset!
+  "Write v as element i of typed array a of subtype code. Answers v."
+  [a subtype i v]
+  (case (long subtype)
+    (1 2 3) (aset a i (bit-and (long v) 0xFF))
+    (4 5)   (aset a i (unchecked-short (long v)))
+    (6 7)   (aset a i (unchecked-int (long v)))
+    (8 9)   (aset a i (double v)))
+  v)
+
+(defn code-points->string "The string of a sequence of Unicode code points." [cps] (eve.host-native/code-points->string cps))
+
+(defn bytes->b64 "standard base64 (padded) of a byte sequence" [bs] (eve.host-native/bytes->b64 bs))
+(defn b64->bytes "the bytes of base64 text, as a vector of 0..255" [s] (eve.host-native/b64->bytes s))
+(defn bytes->hex "lower-case hex of a byte sequence" [bs] (eve.host-native/bytes->hex bs))
+(defn hex->bytes "the bytes of hex text, as a vector of 0..255" [s] (eve.host-native/hex->bytes s))

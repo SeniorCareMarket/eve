@@ -1,0 +1,126 @@
+(ns eve.core
+  "EVE's collection vocabulary (adapters/README.md, coll) on basilisp: its
+   types implement basilisp's collection interfaces (eve.types), so the
+   vocabulary is basilisp's core made Clojure's (eve.host-completion), and
+   (count x) and (e/count x) are the same call. ClojureScript's protocol fns
+   (-count, -nth, -conj!, ...), which a type written with ClojureScript's
+   names calls, are the core's too. An ordered collection hashes as
+   basilisp's own, so an eve vector and basilisp's equal one hash alike."
+  (:refer-clojure :exclude [count nth get seq first next rest conj into empty
+                            contains? disj subvec meta with-meta reduce
+                            sequential? counted? hash-ordered-coll hash-unordered-coll
+                            assoc dissoc pop peek rseq reduce-kv transient persistent!
+                            conj! assoc! pop!
+                            object-array dissoc! disj! long])
+  (:require [eve.host :refer [object-array dissoc! disj! long]]
+            [eve.encoding :as enc]))
+
+(defn count
+  [coll] (clojure.core/count coll))
+(defn nth
+  ([coll n] (clojure.core/nth coll n))
+  ([coll n not-found] (clojure.core/nth coll n not-found)))
+(defn get
+  ([o k] (clojure.core/get o k))
+  ([o k not-found] (clojure.core/get o k not-found)))
+(def seq clojure.core/seq)
+(def first clojure.core/first)
+(def next clojure.core/next)
+(def rest clojure.core/rest)
+(def conj clojure.core/conj)
+(def into clojure.core/into)
+(def empty clojure.core/empty)
+(def contains? clojure.core/contains?)
+(def disj clojure.core/disj)
+(def subvec clojure.core/subvec)
+(def meta clojure.core/meta)
+(def with-meta clojure.core/with-meta)
+(defn invoke
+  ([f] (f)) ([f a] (f a)) ([f a b] (f a b)) ([f a b c] (f a b c)))
+(def reduce clojure.core/reduce)
+(def assoc clojure.core/assoc)
+(def dissoc clojure.core/dissoc)
+(def pop clojure.core/pop)
+(def peek clojure.core/peek)
+(def rseq clojure.core/rseq)
+(def reduce-kv clojure.core/reduce-kv)
+(def transient clojure.core/transient)
+(def persistent! clojure.core/persistent!)
+(def conj! clojure.core/conj!)
+(def assoc! clojure.core/assoc!)
+(def pop! clojure.core/pop!)
+(defn equiv [x y] (clojure.core/= x y))
+(def sequential? clojure.core/sequential?)
+(def counted? clojure.core/counted?)
+(defn hash-ordered-coll [coll] (clojure.core/hash-ordered-coll coll))
+(defn hash-unordered-coll [coll] (clojure.core/hash-unordered-coll coll))
+(defn array [& xs] (object-array xs))
+
+;; ClojureScript's protocol fns, answered by the host's interfaces (an EVE
+;; type written with ClojureScript's names implements those)
+(defn -count
+  [coll] (clojure.core/count coll))
+(defn -nth
+  ([coll n] (clojure.core/nth coll n))
+  ([coll n not-found] (clojure.core/nth coll n not-found)))
+(defn -lookup
+  ([o k] (clojure.core/get o k))
+  ([o k not-found] (clojure.core/get o k not-found)))
+(defn -seq [o] (clojure.core/seq o))
+(defn -conj [coll o] (clojure.core/conj coll o))
+(defn -empty [coll] (clojure.core/empty coll))
+(defn -equiv [o other] (clojure.core/= o other))
+(defn -hash [o] (clojure.core/hash o))
+(defn -meta [o] (clojure.core/meta o))
+(defn -with-meta [o m] (clojure.core/with-meta o m))
+(defn -invoke
+  ([f] (f)) ([f a] (f a)) ([f a b] (f a b)) ([f a b c] (f a b c))
+  ([f a b c d & more] (apply f a b c d more)))
+(defn -reduce ([coll f] (clojure.core/reduce f coll))
+  ([coll f start] (clojure.core/reduce f start coll)))
+(defn -kv-reduce [coll f init] (clojure.core/reduce-kv f init coll))
+(defn -contains-key? [coll k] (clojure.core/contains? coll k))
+(defn -assoc [coll k v] (clojure.core/assoc coll k v))
+(defn -dissoc [coll k] (dissoc coll k))
+(defn -disjoin [coll v] (clojure.core/disj coll v))
+(defn -peek [coll] (clojure.core/peek coll))
+(defn -pop [coll] (clojure.core/pop coll))
+(defn -assoc-n [coll n v] (clojure.core/assoc coll n v))
+(defn -first [coll] (clojure.core/first coll))
+(defn -rest [coll] (clojure.core/rest coll))
+(defn -next [coll] (clojure.core/next coll))
+(defn -rseq [coll] (clojure.core/rseq coll))
+(defn -compare [x y] (compare x y))
+(defn -as-transient [coll] (clojure.core/transient coll))
+(defn -conj! [tcoll v] (clojure.core/conj! tcoll v))
+(defn -persistent! [tcoll] (clojure.core/persistent! tcoll))
+(defn -assoc! [tcoll k v] (clojure.core/assoc! tcoll k v))
+(defn -dissoc! [tcoll k] (dissoc! tcoll k))
+(defn -assoc-n! [tcoll n v] (clojure.core/assoc! tcoll n v))
+(defn -pop! [tcoll] (clojure.core/pop! tcoll))
+(defn -disjoin! [tcoll v] (disj! tcoll v))
+(defn -chunked-first [coll] (chunk-first coll))
+(defn -chunked-rest [coll] (chunk-rest coll))
+(defn -chunked-next [coll] (chunk-next coll))
+(defn -key [e] (key e))
+(defn -val [e] (val e))
+(defn -deref [o] (deref o))
+
+;; printing: print-method and the host's writer (eve.encoding's)
+(defn -write [w s] (enc/write! w s))
+(defn -pr-writer [o w _opts] (print-method o w))
+(defn pr-writer [x w _opts] (print-method x w))
+(defn pr-str* [x] (pr-str x))
+
+(defmacro caching-hash [coll hash-fn hash-key]
+  `(let [h# ~hash-key]
+     (if-not (nil? h#)
+       h#
+       (let [h# (~hash-fn ~coll)]
+         (set! ~hash-key h#)
+         h#))))
+
+(defn array-chunk
+  "A chunk of host array arr's n values: a vector."
+  [arr n]
+  (vec arr))

@@ -1,0 +1,42 @@
+--- a/pkg/runtime/evalast.go
++++ b/pkg/runtime/evalast.go
+@@ -107,6 +107,8 @@
+ 		return env.EvalASTHostCall(n)
+ 	case ast.OpHostInterop:
+ 		return env.EvalASTHostInterop(n)
++	case ast.OpHostField:
++		return env.EvalASTHostField(n)
+ 	case ast.OpMaybeHostForm:
+ 		return env.EvalASTMaybeHostForm(n)
+ 	case ast.OpIf:
+@@ -488,6 +490,30 @@
+ 	}
+ }
+ 
++// EvalASTHostField reads a field, (.-f x) / (. x -f): a record's field by
++// name (a defrecord's fields, which (:f x) also reads), else the host value's
++// own field (lang.FieldOrMethod). Never a call: a field holding a function is
++// returned, not applied. (eve's glj-eve build: the analyzer emits
++// OpHostField, the interpreter had no case for it.)
++func (env *environment) EvalASTHostField(n *ast.Node) (interface{}, error) {
++	hostFieldNode := n.Sub.(*ast.HostFieldNode)
++	tgtVal, err := env.EvalAST(hostFieldNode.Target)
++	if err != nil {
++		return nil, err
++	}
++	name := hostFieldNode.Field.Name()
++	if record, ok := tgtVal.(lang.RecordValue); ok {
++		if index, found := record.RecordType().FieldIndex(lang.NewKeyword(name)); found {
++			return record.RecordField(index), nil
++		}
++	}
++	val, ok := lang.FieldOrMethod(tgtVal, name)
++	if !ok {
++		return nil, fmt.Errorf("no such field on %T: %s", tgtVal, name)
++	}
++	return val, nil
++}
++
+ func (env *environment) EvalASTGo(n *ast.Node) (interface{}, error) {
+ 	goNode := n.Sub.(*ast.GoNode)
+ 

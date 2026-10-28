@@ -1,0 +1,10 @@
+# run f-bbm-thread-host on f2f353347 eve tree a2e051f0c9070ef714d3ea2c3b2cc2af1dfbf241
+# cmd (in eve/) bb test:bb-minimal eve.thread-host-test
+# start 2026-10-21 11:40:15 PM ET load 0.56 0.93 1.28 mem-in-use 1034 MB
+
+Testing eve.thread-host-test
+
+Ran 13 tests containing 30 assertions.
+0 failures, 0 errors.
+:summary {:test 13, :pass 30, :fail 0, :error 0}
+# end 2026-10-21 11:40:17 PM ET exit 0 wall 2s peak-mem-in-use 1043 MB peak-process-tree-rss 56 MB load 0.51 0.91 1.28

@@ -1,0 +1,11 @@
+;; basilisp: the crypto feature's fast-path rows (adapters/crypto/python: Python int, pow) against values the JVM adapter
+;; computed for the same inputs (the conformance suite's portable comparison takes minutes per row there):
+;;   basilisp run -p <hosts.edn :lpy roots, last first> -p src test/eve/runner/lpy_fast_probe.lpy
+(require '[eve.crypto :as c] '[eve.net.bytes :as b] '[eve.process :as process])
+(def n (b/unhex "c83fb7147829e46dd390787e89787f957aaac2c7af034cbb426af6f5d31aeb959325afdada136a4355ea830c07f96f35ec0bcfbfe22bb7831a784fb779de64c3")) (def a (b/unhex "1f40fc92da241694750979ee6cf582f2d5d7d28e18335de05abc54d0560e0f5302860c652bf08d560252aa5e74210546f369fbbbce8c12cfc7957b2652fe9a75")) (def e (b/unhex "87c568e037a5fa50b1bc911e8ee19a77c4dd3c22bce9932f86fdd8a216afe1681c89737fada6859e91047eece711ec16da62d6ccb9fd0de2c51f132347350d8c")) (def s (b/unhex "14415fedcc7fb216986cd96b4c8ef43ae69530fd505518d4b2ee0810dac8a706")) (def pk (b/unhex "eb7c5202a88723d0fcb08fdc7af56c754f435f0888ee0cffc88b3d52e6f3e0b9")) (def pk2 (b/unhex "aecfc4d5f45f4762fe07e031d8c8ba885828e2f24114e0feca6fd2df48b32a83"))
+(println :sha384 (= "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7" (b/hex (c/sha384 (b/utf8 "abc")))))
+(println :modpow (= "c26da0b2f56034b0f92f9ddddcc7ecf851f7e3ce3f28fd2fdbfe999e2c538d9e18ad63681650ddc816f28e0112a7c5b8ae1df6d3f46e253edba9046ed0339302" (b/hex (c/modpow a e n))))
+(println :modmul (= "b119063b68a3514e877f04267b15df3e98fa76149a2817dd7449f2b2fa0192a4db1dc5ca5b11cb6c954b9169b97ce3cf483d3e140c1e4d4b5da211abe6ce941b" (b/hex (c/modmul a e n))))
+(println :modinv (= "2d67b974a8594e5930ae8602de96869f7dfce2c3baa06b323584d1576a509dff0be068ace439ea6c3752e50b443f2561e21f2c791a4ac4b3cbac62821b371d06" (b/hex (c/modinv a n))))
+(println :scalarmult (= "15958b2ca36b7003aeb8657061cbc5d8419394f169af2ca9034a43926c2b22e9" (b/hex (c/ed25519-scalarmult s pk))))
+(let [t0 (process/now-ms) r (c/ed25519-mul-add s pk e pk2) t1 (process/now-ms)] (println :mul-add (= "561fb0b9cf627d44ab55ddf84e6aa1809ee1a2acf95e39df99690cfbcce3393a" (b/hex r)) :ms (- t1 t0)))

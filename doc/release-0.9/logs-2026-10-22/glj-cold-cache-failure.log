@@ -1,0 +1,7 @@
+# run glj on f47c3a88 eve tree c0d4165ee3e16a50318af76138b22087f566fb00
+# cmd (in eve/) bb test:glj
+# start 2026-10-21 8:29:16 PM ET load 0.93 0.99 0.88 mem-in-use 556 MB
+$ cp -r  glojure; patch -p1 < each of /home/user/atom.broker/eve/adapters/completion/glojure/go/*.patch
+cp: cannot stat '': No such file or directory
+Error while executing task: glj-eve
+# end 2026-10-21 8:29:16 PM ET exit 1 wall 0s peak-mem-in-use 556 MB load 0.93 0.99 0.88

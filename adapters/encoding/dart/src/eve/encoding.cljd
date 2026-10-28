@@ -1,0 +1,267 @@
+(ns eve.encoding
+  "eve's encoding primitives (HOST-CONTRACT §3-4) over Dart's core, dart:convert and dart:typed_data (ClojureDart):
+   UTF-8, IEEE-754 bits, the host's numbers, instants, uuids, exceptions, map entries, small caches, and the byte
+   codec slot. A byte array is eve.host's, an Int8List. Dart has no ratio and no arbitrary-precision decimal: ratio?
+   and bigdec? answer false and their constructors refuse (the codec reads RATIO and BIGDEC as unsupported here);
+   an integer past 64 bits is a BigInt."
+  (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                            long class double bytes])
+  (:require ["dart:convert" :as convert]
+            ["dart:typed_data" :as td]
+            [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                              long class double bytes]]))
+
+(defn throw-index-out-of-bounds [msg] (throw (RangeError (str msg))))
+
+(defn throw-unsupported [] (throw (UnsupportedError "Unsupported operation")))
+
+(defn unsupported "The host's unsupported-operation exception, with message msg." [msg] (UnsupportedError (str msg)))
+
+(defn map-entry "A map entry [k v] (what seq on a map answers)." [k v] (MapEntry k v))
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff (overlapping ranges of one list copy as memmove)."
+  [^List src soff ^List dst doff len]
+  (.setRange dst doff (+ doff len) src soff))
+
+(defn copy-of-range "A new byte array of b's bytes [from, to)." [^List b from to] (.sublist b from to))
+
+(defn- ^td/Int8List as-int8 [^td/Uint8List u]
+  (.asInt8List (.-buffer u) (.-offsetInBytes u) (.-length u)))
+
+(defn- ^td/Uint8List as-uint8
+  "b's bytes [off, off+len) as a Uint8List view (a copy when b is no typed list)"
+  [b off len]
+  (if (dart/is? b td/TypedData)
+    (let [^td/TypedData t b]
+      (.asUint8List (.-buffer t) (+ (.-offsetInBytes t) off) len))
+    (td/Uint8List.fromList (.sublist ^List b off (+ off len)))))
+
+(defn utf8-bytes "The UTF-8 bytes of string s." [s] (as-int8 (.encode convert/utf8 (str s))))
+
+(defn utf8-string
+  "The string len UTF-8 bytes of b encode, from off (a malformed sequence as U+FFFD, as the JVM's String)."
+  [b off len]
+  (.decode convert/utf8 (as-uint8 b off len) .allowMalformed true))
+
+(defn long-bits->double "The double whose IEEE-754 bits are x." [x]
+  (let [bd (td/ByteData 8)] (.setInt64 bd 0 (long x)) (.getFloat64 bd 0)))
+
+(defn double->long-bits "The IEEE-754 bits of the double d, as a long (NaN payloads kept)." [d]
+  (let [bd (td/ByteData 8)] (.setFloat64 bd 0 (double d)) (.getInt64 bd 0)))
+
+(defn fixed-integer? "An integer of a fixed-width host type (Dart's int)." [v] (dart/is? v int))
+
+(defn floating? "A floating-point number (FLOAT64)." [v] (dart/is? v dart:core/double))
+
+(defn big-integer? "An integer of an arbitrary-precision type (Dart's BigInt)." [v] (dart/is? v BigInt))
+
+(defn- ^BigInt ->big [n] (if (dart/is? n BigInt) n (BigInt.from n)))
+
+(defn integer->twos
+  "Integer n's minimal two's-complement bytes, big-endian, as a vector of 0..255 (by arithmetic, over BigInt)."
+  [n]
+  (let [b256 (BigInt.from 256)]
+    (loop [^BigInt x (->big n) acc ()]
+      (let [b (.toInt ^BigInt (. x "%" b256))
+            ^BigInt x (. ^BigInt (. x "-" (BigInt.from b)) "~/" b256)]
+        (if (or (and (.-isValidInt x) (= 0 (.toInt x)) (< b 128))
+                (and (.-isValidInt x) (= -1 (.toInt x)) (>= b 128)))
+          (vec (cons b acc))
+          (recur x (cons b acc)))))))
+
+(defn twos->integer
+  "The integer whose minimal two's-complement big-endian bytes are bs (0..255 each), a BigInt."
+  [bs]
+  (let [^BigInt b256 (BigInt.from 256)
+        ^BigInt u (reduce (fn [^BigInt acc b] (. ^BigInt (. acc "*" b256) "+" (BigInt.from b))) (BigInt.from 0) bs)]
+    (if (and (seq bs) (>= (first bs) 128))
+      (. u "-" (.pow b256 (count bs)))
+      u)))
+
+(defn ratio? "A ratio: Dart has none." [_v] false)
+(defn ratio-parts [r] (throw (UnsupportedError (str "eve.encoding: no ratio on Dart: " r))))
+(defn make-ratio [n d] (throw (UnsupportedError (str "eve.encoding: no ratio on Dart: " n "/" d))))
+
+(defn bigdec? "An arbitrary-precision decimal: Dart has none." [_v] false)
+(defn bigdec-parts [d] (throw (UnsupportedError (str "eve.encoding: no bigdec on Dart: " d))))
+(defn make-bigdec [unscaled scale]
+  (throw (UnsupportedError (str "eve.encoding: no bigdec on Dart: " unscaled "e-" scale))))
+
+(defn date? "The host's instant type (DateTime)." [v] (dart/is? v DateTime))
+(defn date-ms "Milliseconds since the Unix epoch of a date." [^DateTime d] (.-millisecondsSinceEpoch d))
+(defn ms->date "The instant at ms milliseconds since the Unix epoch (UTC)." [ms]
+  (DateTime.fromMillisecondsSinceEpoch (long ms) .isUtc true))
+
+(defn uuid->bytes!
+  "Write uuid u's 16 bytes, big-endian (network order), into b at off (cljd's uuid is its text)."
+  [u ^List b off]
+  (let [^String h (.replaceAll (str u) "-" "")]
+    (dotimes [i 16]
+      (aset b (+ off i) (unchecked-byte (int/parse (.substring h (* 2 i) (+ 2 (* 2 i))) .radix 16))))))
+
+(defn bytes->uuid
+  "The uuid whose 16 big-endian bytes are at off in b."
+  [^List b off]
+  (let [sb (StringBuffer)]
+    (dotimes [i 16]
+      (when (#{4 6 8 10} i) (.write sb "-"))
+      (.write sb (.padLeft (.toRadixString (bit-and (aget b (+ off i)) 0xFF) 16) 2 "0")))
+    (uuid (.toString sb))))
+
+(defn utf16-units "The UTF-16 code units of string s, as integers." [^String s] (vec (.-codeUnits s)))
+
+(defn host-char? "A character of the host's own char type: Dart has none (a one-character string)." [_v] false)
+
+(defn host-array?
+  "A host array the codec writes as an eve array: a typed list (a cljd collection is not one)."
+  [v]
+  (dart/is? v td/TypedData))
+
+(defn new-cache "A map for small caches (cache-get / cache-put!): one isolate, one thread." [] (volatile! {}))
+(defn cache-get [c k] (get @c k))
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (vreset! c (assoc (if (> (count @c) max) {} @c) k v))
+  v)
+
+(defn bytes=
+  "Two byte arrays equal, byte for byte."
+  [^List a ^List b]
+  (and (== (.-length a) (.-length b))
+       (loop [i 0]
+         (cond (>= i (.-length a)) true
+               (not (== (aget a i) (aget b i))) false
+               :else (recur (inc i))))))
+
+(defn illegal-argument [msg] (ArgumentError (str msg)))
+(defn index-out-of-bounds [msg] (RangeError (str msg)))
+
+(defn- ^td/ByteData view [b] (let [^td/TypedData t b] (.asByteData (.-buffer t) (.-offsetInBytes t) (.-lengthInBytes t))))
+
+(defn read-f32-le [b off] (.getFloat32 (view b) off td/Endian.little))
+(defn read-f64-le [b off] (.getFloat64 (view b) off td/Endian.little))
+(defn f32-le-bytes [v] (let [b (byte-array 4)] (.setFloat32 (view b) 0 (double v) td/Endian.little) b))
+(defn f64-le-bytes [v] (let [b (byte-array 8)] (.setFloat64 (view b) 0 (double v) td/Endian.little) b))
+
+(defn make-bytes "n zeroed bytes (the host's byte array)." [n] (byte-array (long n)))
+
+(defn bytes-of "The bytes xs (each 0..255, or its signed byte), as a byte array." [xs] (byte-array xs))
+
+(defn bytes-copy "A copy of byte array b, in b's own representation." [^List b] (.sublist b 0))
+
+(defn map-hash-code "The host's object hash of a map m." [m] (hash-unordered-coll m))
+
+(defn write! "Write s (str of it) to the host's writer w (a StringSink)." [^StringSink w s] (.write w (str s)))
+
+(defn f64s-le [b off n] (.asFloat64List (.-buffer (td/Uint8List.fromList (as-uint8 b off (* 8 n))))))
+(defn i32s-le [b off n] (.asInt32List (.-buffer (td/Uint8List.fromList (as-uint8 b off (* 4 n))))))
+(defn f64s->bytes-le [da] (as-int8 (.asUint8List (.-buffer (td/Float64List.fromList (vec da))))))
+(defn i32s->bytes-le [ia] (as-int8 (.asUint8List (.-buffer (td/Int32List.fromList (vec ia))))))
+
+(defn array-subtype+bytes
+  "[subtype little-endian-bytes] of a host typed list — eve.array's subtype codes: int8 2, int16 4, int32 6,
+   float32 8, float64 9 — nil for any other value."
+  [a]
+  (cond
+    (dart/is? a td/Int8List) [2 a]
+    (dart/is? a td/Int32List) [6 (i32s->bytes-le a)]
+    (dart/is? a td/Float64List) [9 (f64s->bytes-le a)]
+    (dart/is? a td/Float32List) [8 (as-int8 (.asUint8List (.-buffer (td/Float32List.fromList a))))]
+    (dart/is? a td/Int16List) [4 (as-int8 (.asUint8List (.-buffer (td/Int16List.fromList a))))]
+    :else nil))
+
+(defn typed-array
+  "n zeroed elements of eve.array subtype code as the host's typed list."
+  [subtype n]
+  (case (long subtype)
+    (1 2 3) (td/Int8List n)
+    (4 5) (td/Int16List n)
+    (6 7) (td/Int32List n)
+    8 (td/Float32List n)
+    9 (td/Float64List n)))
+
+(defn typed-aget
+  "Element i of typed list a of subtype code (an unsigned subtype's value from its two's-complement bits)."
+  [a subtype i]
+  (let [x (aget a i)]
+    (case (long subtype)
+      (1 3) (bit-and x 0xFF)
+      5 (bit-and x 0xFFFF)
+      7 (bit-and x 0xFFFFFFFF)
+      x)))
+
+(defn typed-aset!
+  "Write v as element i of typed list a of subtype code (a typed list stores the value's low bits). Answers v."
+  [a subtype i v]
+  (case (long subtype)
+    (8 9) (aset a i (double v))
+    (aset a i (long v)))
+  v)
+
+(defn code-points->string
+  "The string of a sequence of Unicode code points (one past U+FFFF as its UTF-16 surrogate pair)."
+  [cps]
+  (String.fromCharCodes (into-array (map long cps))))
+
+;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
+;; dart:convert's base64 and a pair loop for hex. The contract is eve.net.bytes' portable semantics: base64 decoding
+;; SKIPS any character outside the alphabet and decodes a tail of one digit as one byte of four times the digit
+;; (dart:convert refuses both), so the text is cleaned and that digit decoded here, as the JVM adapter does.
+
+(def ^:private b64-alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+(def ^:private hex-chars "0123456789abcdef")
+
+(defn- ints-of [^List u] (into [] (map (fn [b] (bit-and b 0xFF))) u))
+
+(defn bytes->b64
+  "standard base64 (padded) of a byte sequence — dart:convert"
+  [bs]
+  (.encode convert/base64 (td/Uint8List.fromList (into-array (map (fn [x] (bit-and x 0xFF)) bs)))))
+
+(defn b64->bytes
+  "the bytes of base64 text, eve.net.bytes' contract over dart:convert (see the section note)"
+  [^String s]
+  (let [^String clean (.replaceAll s (RegExp "[^A-Za-z0-9+/]") "")
+        n (.-length clean)
+        r (mod n 4)
+        body (if (= r 1) (.substring clean 0 (dec n)) clean)
+        padded (str body (case (long (mod (count body) 4)) 2 "==" 3 "=" ""))
+        out (ints-of (.decode convert/base64 padded))]
+    (if (= r 1)
+      (conj out (* 4 (.indexOf ^String b64-alphabet (.substring clean (dec n)))))
+      out)))
+
+(defn bytes->hex
+  "lower-case hex of a byte sequence — a StringBuffer loop"
+  [bs]
+  (let [sb (StringBuffer)]
+    (doseq [b bs]
+      (let [b (bit-and b 0xFF)]
+        (.write sb (nth hex-chars (quot b 16)))
+        (.write sb (nth hex-chars (mod b 16)))))
+    (.toString sb)))
+
+(defn- hex-digit [^int c]
+  (cond (and (>= c 48) (<= c 57)) (- c 48)
+        (and (>= c 97) (<= c 102)) (- c 87)
+        (and (>= c 65) (<= c 70)) (- c 55)
+        :else -1))
+
+(defn hex->bytes
+  "the bytes of hex text (even length), eve.net.bytes' contract: throws on odd length and on a non-digit"
+  [^String s]
+  (let [n (.-length s)]
+    (when (odd? n) (throw (ex-info "hex text of odd length" {:len n})))
+    (let [m (quot n 2)]
+      (loop [i 0 out (transient [])]
+        (if (< i m)
+          (let [j (* 2 i)
+                hi (hex-digit (.codeUnitAt s j))
+                lo (hex-digit (.codeUnitAt s (inc j)))]
+            (when (or (neg? hi) (neg? lo))
+              (let [bad (if (neg? hi) (.substring s j (inc j)) (.substring s (inc j) (+ 2 j)))]
+                (throw (ex-info (str "not a hex digit: " bad) {:char bad}))))
+            (recur (inc i) (conj! out (+ (* 16 hi) lo))))
+          (persistent! out))))))

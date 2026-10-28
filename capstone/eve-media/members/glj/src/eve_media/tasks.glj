@@ -1,0 +1,62 @@
+(ns eve-media.tasks
+  "The Go member's jobs (glojure, run as glj-eve-media: glj-eve with eve-media's media package, glj/build.sh): the media
+   server — Go's net/http serving the outputs with range requests, the page, and the gateway's routes proxied
+   (glj/media/media.go) — the folder watcher, which adds every new media file of the watched folder to the library
+   (eve-media.core/add-files, one swap), and the :publish job: a transcode asked of the server by a range request,
+   recorded with the URL the page plays it from."
+  (:refer-clojure :exclude [swap!])
+  (:require [eve.host :refer [swap!]]
+            [eve.process :as proc]
+            [eve.thread :as t]
+            [eve-media.core :as em]
+            [eve-media.state :as st]
+            [eve-media.work :as work]))
+
+(def caps #{:serve})
+(def pools {:publish 1})
+(def options {})
+
+(defn attempt [f] (try [true (f)] (catch go/any e [false e])))
+(defn exit! [code] (os.Exit code))
+
+(def ^:private served
+  "{:port :watcher}: the media server's port and the watcher's timer, set by init!"
+  (atom {}))
+
+(defn- stat [path]
+  (let [[fi err] (os.Stat path)]
+    (when (nil? err) {:path path :size (.Size fi) :mtime (str (.UnixMilli (.ModTime fi)))})))
+
+(defn- watch-once!
+  "The watched folder's media files the library does not hold yet, added (nothing written when there are none)."
+  [{:keys [library rid]} dir]
+  (let [held (:files @library)
+        fresh (keep (fn [p] (when (and (em/media-kind p) (not (contains? held p))) (stat p))) (eveglj:media.ListDir dir))]
+    (when (seq fresh)
+      (swap! library em/add-files fresh rid)
+      (println (pr-str {:step :watcher-added :rid rid :files (mapv :path fresh) :t (proc/now-ms)})))))
+
+(defn init!
+  "Start the media server on the launcher's port (the control atom's :config), proxying the gateway's routes, and the
+   folder watcher (once a second)."
+  [{:keys [control out rid] :as ctx}]
+  (let [{:keys [media-port gateway-port page watch]} (:config @control)
+        port (eveglj:media.Serve (str "127.0.0.1:" (or media-port 0)) out (or page out)
+                                 (if gateway-port (str "http://127.0.0.1:" gateway-port) ""))]
+    (when (neg? port) (throw (ex-info "the media server did not start" {:port media-port})))
+    (swap! control assoc-in [:servers :media] {:port port :rid rid :t (proc/now-ms)})
+    (println (pr-str {:step :media-server :rid rid :port port :watch watch}))
+    (reset! served {:port port
+                    :watcher (when watch
+                               (proc/start-timer! 1000 (fn [] (watch-once! ctx watch))))})
+    (when watch (watch-once! ctx watch))
+    nil))
+
+(t/deftask publish [{:keys [path id]}]
+  (let [rel (str "/media/web/" id ".mp4")
+        url (str "http://127.0.0.1:" (:port @served) rel)
+        [status n] (eveglj:media.RangeCheck url 1024)
+        size (:size (stat (str (:out @st/ctx) "/web/" id ".mp4")))]
+    (when-not (= 206 status)
+      (throw (ex-info "publish: the media server did not answer a range request" {:url url :status status})))
+    (work/record! path :publish {:url rel :status status :bytes n :size size :range-ok true})))

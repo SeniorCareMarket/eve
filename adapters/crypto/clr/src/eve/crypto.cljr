@@ -1,0 +1,108 @@
+(ns eve.crypto
+  "eve's crypto feature (adapters/README.md) over .NET's System.Security.Cryptography — ClojureCLR: SHA-256
+   (SHA256.HashData), HMAC-SHA256 (HMACSHA256.HashData), AES-256-CTR (AES's single-block transform over the counter
+   blocks — .NET has no CTR mode — the whole 16-byte counter incremented big-endian, as SP 800-38A F.5.5 and
+   eve.net.aes), AES-256-GCM (AesGcm), SHA-512. .NET has no XXH3 and no Ed25519: XXH3 and Ed25519 verify are
+   eve.net.portable-crypto's, the Ed25519 public key and signature RFC 8032 over System.Numerics.BigInteger and
+   SHA512.HashData (eve.net.edwards/ed25519-rows); random bytes are the process feature's (RandomNumberGenerator). Bytes are vectors of 0..255 in and out; eve/test/eve/net/crypto_test.cljc holds
+   this adapter to the portable code."
+  (:import [System.Security.Cryptography SHA256 HMACSHA256 Aes AesGcm PaddingMode CryptographicException])
+  (:require [eve.net.bigops :as bo]
+            [eve.net.edwards :as edw]
+            [eve.net.portable-crypto :as p]
+            [eve.process :as process]))
+
+(defn- arr [bs]
+  (let [v (vec bs) a (make-array System.Byte (count v))]
+    (dotimes [i (count v)] (aset a i (System.Convert/ToByte (int (nth v i)))))
+    a))
+(defn- v [a] (mapv int a))
+
+(defn sha256 "the 32-byte digest" [bs] (v (SHA256/HashData ^|System.Byte[]| (arr bs))))
+
+(defn hmac-sha256 "RFC 2104 over SHA-256" [key msg]
+  (v (HMACSHA256/HashData ^|System.Byte[]| (arr key) ^|System.Byte[]| (arr msg))))
+
+(defn- counter-blocks
+  "the CTR counter blocks from iv for n bytes: iv, iv+1, … (the whole 16 bytes a big-endian integer, mod 2^128)"
+  [iv n]
+  (let [blocks (quot (+ n 15) 16)]
+    (loop [i 0 ctr (vec iv) out (transient [])]
+      (if (= i blocks)
+        (persistent! out)
+        (recur (inc i)
+               (loop [j 15 c ctr] (if (< j 0) c (let [x (inc (nth c j))] (if (= x 256) (recur (dec j) (assoc c j 0)) (assoc c j x)))))
+               (reduce conj! out ctr))))))
+
+(defn aes256-ctr "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key" [key iv data]
+  (let [data (vec data) n (count data)]
+    (if (zero? n)
+      []
+      (let [aes (Aes/Create)]
+        (set! (.Key aes) (arr key))
+        (let [ks (v (.EncryptEcb aes ^|System.Byte[]| (arr (counter-blocks iv n)) PaddingMode/None))]
+          (mapv (fn [x k] (bit-xor x k)) data ks))))))
+
+(defn xxh3-128 "the 16-byte XXH3-128 digest, big-endian hi then lo (portable: .NET has none in the box)" [bs] (p/xxh3-128 bs))
+(defn random-bytes "n bytes of the operating system's entropy" [n] (process/random-bytes n))
+(declare ED-ROWS)
+(defn ed25519-public-key "the 32-byte public key of a 32-byte secret seed (RFC 8032 over BigInteger: .NET has none)" [seed]
+  ((:public-key ED-ROWS) seed))
+(defn ed25519-sign "the 64-byte signature of the message under a 32-byte secret seed (RFC 8032 over BigInteger)" [seed msg]
+  ((:sign ED-ROWS) seed msg))
+(defn ed25519-verify "is sig a valid signature of the message under the 32-byte public key (portable)" [pub msg sig]
+  (p/ed25519-verify pub msg sig))
+
+;; ── the aegis clear-evaluation rows: SHA-384 (SHA384.HashData), the big-integer and
+;; edwards25519 rows over System.Numerics.BigInteger through eve.net.bigops / eve.net.edwards (ModPow native; the
+;; inverse is bigops' extended Euclid — .NET has no ModInverse). Proven on ClojureCLR 1.12.6 / .NET 8: REPORT.md §8.
+(defn- big "a non-negative BigInteger of big-endian bytes (the byte[] constructor reads little-endian two's complement:
+   reversed, a zero sign byte appended)" ^System.Numerics.BigInteger [bs]
+  (System.Numerics.BigInteger. ^|System.Byte[]| (arr (conj (vec (rseq (vec bs))) 0))))
+(defn- unbig "the big-endian len bytes of a non-negative BigInteger (ToByteArray is little-endian two's complement)"
+  [^System.Numerics.BigInteger x len]
+  (let [v (vec (rseq (v (.ToByteArray x))))            ; big-endian, possibly with a leading sign byte 0
+        v (loop [v v] (if (and (> (count v) len) (zero? (first v))) (recur (subvec v 1)) v))
+        v (if (> (count v) len) (subvec v (- (count v) len)) v)]
+    (into (vec (repeat (- len (count v)) 0)) v)))
+(def ^:private OPS
+  (bo/complete
+   {:int (fn [n] (System.Numerics.BigInteger. (long n)))
+    :from-be big :to-be unbig
+    :add (fn [a b] (System.Numerics.BigInteger/Add a b))
+    :sub (fn [a b] (System.Numerics.BigInteger/Subtract a b))
+    :mul (fn [a b] (System.Numerics.BigInteger/Multiply a b))
+    :quot (fn [a b] (System.Numerics.BigInteger/Divide a b))
+    :mod (fn [a m] (let [r (System.Numerics.BigInteger/Remainder a m)] (if (neg? (.Sign r)) (System.Numerics.BigInteger/Add r m) r)))
+    :modpow (fn [b e m] (System.Numerics.BigInteger/ModPow b e m))
+    :even? (fn [a] (.IsEven a)) :zero? (fn [a] (.IsZero a)) :eq (fn [a b] (System.Numerics.BigInteger/op_Equality a b))}))
+(def ^:private ED (edw/make OPS))
+(defn sha384 "the 48-byte SHA-384 digest" [bs] (v (System.Security.Cryptography.SHA384/HashData ^|System.Byte[]| (arr bs))))
+(defn modpow "base^exp mod n over big-endian bytes; the result is as long as n" [base exp n] (bo/modpow-bytes OPS base exp n))
+(defn modmul "a·b mod n over big-endian bytes; the result is as long as n" [a b n] (bo/modmul-bytes OPS a b n))
+(defn modinv "a^-1 mod n over big-endian bytes, or nil when gcd(a, n) ≠ 1" [a n] (bo/modinv-bytes OPS a n))
+(defn ed25519-scalarmult "the encoding of [s]P: s 32 little-endian bytes, P a 32-byte encoding" [s p] ((:scalarmult ED) s p))
+(defn ed25519-mul-add "the encoding of [a]P + [b]Q" [a p b q] ((:mul-add ED) a p b q))
+(defn x25519 "X25519 (RFC 7748): the 32-byte u-coordinate of [k]u, k and u 32 little-endian bytes" [k u] ((:x25519 ED) k u))
+(defn sha512 "the 64-byte SHA-512 digest" [bs] (v (System.Security.Cryptography.SHA512/HashData ^|System.Byte[]| (arr bs))))
+(def ^:private ED-ROWS (edw/ed25519-rows OPS ED sha512))
+(defn aes256-gcm-seal "AES-256-GCM (AesGcm, a 12-byte iv): ciphertext ‖ 16-byte tag" [key iv aad pt]
+  (let [pt (arr pt) ct (make-array System.Byte (alength pt)) tag (make-array System.Byte 16)]
+    (with-open [g (AesGcm. ^|System.Byte[]| (arr key) (int 16))]
+      (.Encrypt g ^|System.Byte[]| (arr iv) ^|System.Byte[]| pt ^|System.Byte[]| ct ^|System.Byte[]| tag ^|System.Byte[]| (arr aad)))
+    (into (v ct) (v tag))))
+(defn aes256-gcm-open "the plaintext of AES-256-GCM ciphertext ‖ tag (AesGcm), or nil when it does not authenticate" [key iv aad sealed]
+  (let [s (vec sealed) n (- (count s) 16)]
+    (when (>= n 0)
+      (let [ct (arr (subvec s 0 n)) tag (arr (subvec s n)) pt (make-array System.Byte n)]
+        (try
+          (with-open [g (AesGcm. ^|System.Byte[]| (arr key) (int 16))]
+            (.Decrypt g ^|System.Byte[]| (arr iv) ^|System.Byte[]| ct ^|System.Byte[]| tag ^|System.Byte[]| pt ^|System.Byte[]| (arr aad)))
+          (v pt)
+          (catch CryptographicException _ nil))))))
+
+(defn ed25519-map-to-point
+  "the 32-byte encoding of clear_cofactor(map_to_curve(u0) + map_to_curve(u1)) on edwards25519 (RFC 9380 G.2.1–G.2.2),
+   u0 and u1 32 little-endian bytes (bit 255 dropped) — eve.net.portable-crypto's map over this adapter's modpow"
+  [u0 u1]
+  (p/ed25519-map-to-point u0 u1 modpow))

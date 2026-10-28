@@ -1,0 +1,373 @@
+(ns eve.encoding
+  "eve's encoding primitives (HOST-CONTRACT §3-4): what eve's codec and types
+   take from the host where hosts' APIs differ — UTF-8, IEEE-754 bits, the
+   host's numbers, instants, uuids, exceptions, map entries, small caches —
+   over the BEAM's, through eve's NIF where it has none (clojerl)."
+  (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                            long class double bytes])
+  (:require [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                              long class double bytes]]
+            [eve.host :as h]
+            [eve.clje-nif :as nif]))
+
+(defn throw-index-out-of-bounds
+  "Throw an index-out-of-bounds error."
+  [msg]
+  (throw (ex-info msg {:eve/index-out-of-bounds true})))
+
+(defn throw-unsupported
+  "Throw an unsupported-operation error."
+  []
+  (throw (ex-info "Unsupported operation" {:eve/unsupported true})))
+
+(defn unsupported
+  "The host's unsupported-operation exception, with message msg."
+  [msg]
+  (ex-info msg {:eve/unsupported true}))
+
+(defn map-entry
+  "A map entry [k v] (what seq on a map answers), on every host."
+  [k v]
+  ;; clojerl's map entries are two-element vectors
+  [k v])
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff."
+  [src soff dst doff len]
+  (h/arraycopy src soff dst doff len))
+
+(defn copy-of-range
+  "A new byte array of b's bytes [from, to)."
+  ^bytes [^bytes b from to]
+  (let [n (- to from) out (byte-array n)]
+    (arraycopy b from out 0 n)
+    out))
+
+(defn utf8-bytes
+  "The UTF-8 bytes of string s."
+  ^bytes [s]
+  ;; a clojerl string is its UTF-8 binary
+  (h/region->bytes (nif/from-binary s)))
+
+(defn utf8-string
+  "The string len UTF-8 bytes of b encode, from off."
+  [^bytes b off len]
+  (nif/read-bytes (h/byte-region b) off len))
+
+(defn long-bits->double
+  "The double whose IEEE-754 bits are x."
+  ^double [^long x]
+  (nif/bits-double x))
+
+(defn double->long-bits
+  "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
+  ^long [^double d]
+  (nif/double-bits d))
+
+(defn fixed-integer?
+  "An integer of a fixed-width host type — the ones eve's format carries as
+   INT32 or INT64. A BigInt is not one: the format has no tag for it."
+  [v]
+  ;; the BEAM's integers are unbounded too
+  (and (integer? v) (<= -9223372036854775808 v 9223372036854775807)))
+
+(defn floating?
+  "A floating-point number (FLOAT64)."
+  [v]
+  (float? v))
+
+;; The numbers past a fixed width (FORMAT-DECISIONS.md §8): what they are on
+;; this host, and their parts as eve.codec writes them (it lays out the bytes)
+
+(defn big-integer?
+  "An integer past the fixed-width types: eve.codec writes it by its magnitude —
+   INT32 or INT64 when it fits, else BIGINT."
+  [v]
+  (and (integer? v) (not (<= -9223372036854775808 v 9223372036854775807))))
+
+(defn integer->twos
+  "Integer n's minimal two's-complement bytes, big-endian, as a vector of 0..255."
+  [n]
+  (let [n n
+        k (loop [k 1 lim (+ 0 128)]
+            (if (and (< n lim) (>= n (- lim))) k (recur (inc k) (* lim 256))))
+        m (loop [i 0 p (+ 0 1)] (if (< i k) (recur (inc i) (* p 256)) p))]
+    (loop [i 0 u (if (neg? n) (+ n m) n) acc ()]
+      (if (< i k) (recur (inc i) (quot u 256) (conj acc (int (mod u 256)))) (vec acc)))))
+
+(defn twos->integer
+  "The integer whose minimal two's-complement big-endian bytes are bs (0..255 each)."
+  [bs]
+  (let [u (reduce (fn [acc b] (+ (* acc 256) b)) 0 bs)]
+    (if (and (seq bs) (>= (first bs) 128))
+      (- u (reduce (fn [p _] (* p 256)) (+ 0 1) bs))
+      u)))
+
+(defn ratio? "clojerl has no ratio." [_] false)
+(defn ratio-parts [_] (throw (unsupported "eve: clojerl has no ratio")))
+(defn make-ratio [_ _] (throw (unsupported "eve: a ratio has no representation on clojerl")))
+(defn bigdec? "clojerl has no arbitrary-precision decimal." [_] false)
+(defn bigdec-parts [_] (throw (unsupported "eve: clojerl has no arbitrary-precision decimal")))
+(defn make-bigdec [_ _] (throw (unsupported "eve: an arbitrary-precision decimal has no representation on clojerl")))
+
+(defn date?
+  "The host's instant type, the one eve's DATE tag reads back as."
+  [v]
+  (inst? v))
+
+(defn date-ms
+  "Milliseconds since the Unix epoch of a date."
+  ^long [d]
+  (inst-ms d))
+
+(defn ms->date
+  "The host's instant at ms milliseconds since the Unix epoch (UTC)."
+  [ms]
+  ;; clojerl's instant counts whole seconds: the milliseconds are lost
+  (erlang.util.Date. (quot ms 1000)))
+
+(defn uuid->bytes!
+  "Write uuid u's 16 bytes, big-endian (network order), into b at off."
+  [u ^bytes b off]
+  ;; its canonical text read as one hexadecimal integer (a clojerl
+  ;; char is a one-character string: no int of it)
+  (let [x (erlang/binary_to_integer (apply str (remove #{"-"} (str u))) 16)]
+    (dotimes [i 16]
+      (aset b (+ off i) (unchecked-byte (bit-shift-right x (* 8 (- 15 i))))))))
+
+(defn bytes->uuid
+  "The uuid whose 16 big-endian bytes are at off in b."
+  [^bytes b off]
+  (let [hex "0123456789abcdef"
+        h (apply str (map (fn [i] (let [x (bit-and (long (aget b (+ off i))) 0xFF)]
+                                    (str (nth hex (quot x 16)) (nth hex (mod x 16)))))
+                          (range 16)))]
+    (erlang.util.UUID.
+     (str (subs h 0 8) "-" (subs h 8 12) "-" (subs h 12 16) "-"
+          (subs h 16 20) "-" (subs h 20 32)))))
+
+(defn utf16-units
+  "The UTF-16 code units of string s, as integers (what a JVM or
+   JavaScript string holds; a clojerl string is UTF-8, so a code point
+   above U+FFFF is two units there, a surrogate pair)."
+  [s]
+  (vec (mapcat (fn [cp] (if (< cp 0x10000)
+                          [cp]
+                          (let [v (- cp 0x10000)]
+                            [(+ 0xD800 (bit-shift-right v 10)) (+ 0xDC00 (bit-and v 0x3FF))])))
+               (unicode/characters_to_list s))))
+
+(defn host-char?
+  "A character of the host's own char type. basilisp and clojerl have none: a
+   one-character string answers char? there, and is a string, as in
+   ClojureScript."
+  [v]
+  false)
+
+(defn host-array?
+  "A host array (a Java or CLR array; on clojerl one of eve.host's)."
+  [v]
+  (satisfies? h/IHostArray v))
+
+(defn new-cache
+  "A concurrent map for small caches (cache-get / cache-put!)."
+  []
+  (atom {}))
+
+(defn cache-get [c k]
+  (get @c k))
+
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (swap! c (fn [m] (assoc (if (> (count m) max) {} m) k v)))
+  v)
+
+(defn bytes=
+  "Two byte arrays equal, byte for byte."
+  [a b]
+  (and (== (eve.host/alength ^bytes a) (eve.host/alength ^bytes b))
+       (loop [i 0]
+         (if (>= i (eve.host/alength ^bytes a))
+           true
+           (if (not= (aget ^bytes a i) (aget ^bytes b i)) false (recur (inc i)))))))
+
+(defn illegal-argument
+  "The host's illegal-argument exception, with message msg."
+  [msg]
+  (ex-info msg {:eve/illegal-argument true}))
+
+(defn index-out-of-bounds
+  "The host's index-out-of-bounds exception, with message msg."
+  [msg]
+  (ex-info msg {:eve/index-out-of-bounds true}))
+
+(defn- le-unsigned
+  "The n bytes of b from off, little-endian, as a non-negative integer."
+  [b off n]
+  (reduce (fn [acc i] (+ (* acc 256) (bit-and (aget b (+ off i)) 0xFF)))
+          0 (range (dec n) -1 -1)))
+
+(defn read-f64-le
+  "The float64 at byte off of b (little-endian)."
+  [b off]
+  (let [u (le-unsigned b off 8)]
+    (long-bits->double (if (>= u 9223372036854775808) (- u 18446744073709551616) u))))
+
+(defn read-f32-le
+  "The float32 at byte off of b (little-endian), as a double: its bits made
+   a float64's (exact)."
+  [b off]
+  (let [u (le-unsigned b off 4)
+        s (bit-and (bit-shift-right u 31) 1)
+        e (bit-and (bit-shift-right u 23) 0xFF)
+        m (bit-and u 0x7FFFFF)
+        sign (if (zero? s) 1.0 -1.0)]
+    (cond
+      (== e 0xFF) (if (zero? m)
+                    (* sign (long-bits->double 0x7FF0000000000000))
+                    (long-bits->double 0x7FF8000000000000))
+      ;; subnormal (or zero): m * 2^-149
+      (zero? e) (* sign (* m 1.401298464324817E-45))
+      :else (let [bits (bit-or (bit-shift-left (+ (- e 127) 1023) 52) (bit-shift-left m 29))]
+              (* sign (long-bits->double bits))))))
+
+(defn- be-binary->le-bytes
+  "A big-endian binary's bytes, reversed, as an eve byte array."
+  [bin n]
+  (let [b (byte-array n)]
+    (dotimes [i n] (aset b i (unchecked-byte (binary/at bin (- (dec n) i)))))
+    b))
+
+(defn f32-le-bytes
+  "The 4 little-endian bytes of v as a float32 (the BEAM rounds it)."
+  [v]
+  (let [f (double v)]
+    (be-binary->le-bytes #bin[[f :type :float :size 32]] 4)))
+
+(defn f64-le-bytes
+  "The 8 little-endian bytes of v as a float64."
+  [v]
+  (let [f (double v)]
+    (be-binary->le-bytes #bin[[f :type :float :size 64]] 8)))
+
+(defn make-bytes
+  "n zeroed bytes (the host's byte array, as eve's codec holds bytes)."
+  [n]
+  (byte-array n))
+
+(defn bytes-of
+  "The bytes xs (each 0..255, or its signed byte), as a byte array."
+  [xs]
+  (let [xs (vec xs) b (byte-array (count xs))] (dotimes [i (count xs)] (aset b i (unchecked-byte (nth xs i)))) b))
+
+(defn bytes-copy
+  "A copy of byte array b, in b's own representation (what the host's region
+   and codec read: a read's bytes, changed, handed on as read)."
+  [b]
+  (h/aclone b))
+
+(defn map-hash-code
+  "The host's object hash of a map m (its hash of an unordered collection)."
+  [m]
+  (hash-unordered-coll m))
+
+(defn write!
+  "Write s (str of it) to the host's writer w (erlang.io.IWriter): what a printer writes to."
+  [w s]
+  (.write w (str s)))
+
+(defn f64s-le
+  "The n float64s little-endian in b from byte off, as the host's double array."
+  [b off n]
+  (let [out (eve.host/double-array n)]
+    (dotimes [i n] (aset out i (read-f64-le b (+ off (* 8 i)))))
+    out))
+
+(defn i32s-le
+  "The n int32s little-endian in b from byte off, as the host's int array."
+  [b off n]
+  (let [out (eve.host/int-array n)
+        u (fn [j] (bit-and (aget b j) 0xFF))]
+    (dotimes [i n]
+      (let [j (+ off (* 4 i))
+            x (bit-or (bit-or (u j) (bit-shift-left (u (+ j 1)) 8))
+                      (bit-or (bit-shift-left (u (+ j 2)) 16) (bit-shift-left (u (+ j 3)) 24)))]
+        (aset out i (if (>= x 2147483648) (- x 4294967296) x))))
+    out))
+
+(defn f64s->bytes-le
+  "The little-endian bytes of the doubles in da (the host's double array), 8 each."
+  [da]
+  (let [n (count da)
+        b (eve.host/byte-array (* 8 n))]
+    (dotimes [i n]
+      (let [eb (f64-le-bytes (nth da i))]
+        (dotimes [k 8] (aset b (+ (* 8 i) k) (aget eb k)))))
+    b))
+
+(defn i32s->bytes-le
+  "The little-endian bytes of the ints in ia (the host's int array), 4 each."
+  [ia]
+  (let [n (count ia)
+        b (eve.host/byte-array (* 4 n))]
+    (dotimes [i n]
+      (let [x (nth ia i)]
+        (dotimes [k 4]
+          (aset b (+ (* 4 i) k) (unchecked-byte (bit-and (bit-shift-right x (* 8 k)) 0xFF))))))
+    b))
+
+(defn- elems->bytes-le
+  "The little-endian bytes of a's elements, width each (elem-bytes: one
+   element's)."
+  [a width elem-bytes]
+  (let [n (count a)
+        b (eve.host/byte-array (* width n))]
+    (dotimes [i n]
+      (let [eb (elem-bytes (nth a i))]
+        (dotimes [k width] (aset b (+ (* width i) k) (aget eb k)))))
+    b))
+
+(defn- int-le-bytes [width]
+  (fn [x]
+    (let [b (eve.host/byte-array width)]
+      (dotimes [k width] (aset b k (unchecked-byte (bit-and (bit-shift-right x (* 8 k)) 0xFF))))
+      b)))
+
+(defn array-subtype+bytes
+  "[subtype little-endian-bytes] of one of eve.host's typed arrays — eve.array's
+   subtype codes: int8 2, int16 4, int32 6, float32 8, float64 9 — nil for any
+   other value."
+  [a]
+  (cond
+    (instance? eve.host.IntArray a) [6 (i32s->bytes-le a)]
+    (instance? eve.host.DoubleArray a) [9 (f64s->bytes-le a)]
+    (instance? eve.host.FloatArray a) [8 (elems->bytes-le a 4 f32-le-bytes)]
+    (instance? eve.host.ShortArray a) [4 (elems->bytes-le a 2 (int-le-bytes 2))]
+    (instance? eve.host.ByteArray a) [2 (elems->bytes-le a 1 (int-le-bytes 1))]
+    :else nil))
+
+(defn typed-array
+  "n elements of eve.array subtype code as the host's typed array: none here
+   (a fresh eve array is slab-backed; typed-aget and typed-aset! are never
+   reached)."
+  [_subtype _n]
+  nil)
+
+(defn typed-aget "Never reached here (typed-array)." [_a _subtype _i] nil)
+
+(defn typed-aset! "Never reached here (typed-array)." [_a _subtype _i v] v)
+
+(defn code-points->string
+  "The string of a sequence of Unicode code points (a clojerl string is UTF-8: one character per code point) — the
+   inverse of utf16-units."
+  [cps]
+  (unicode/characters_to_binary (clj->erl (apply list cps))))
+
+;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
+;; nil on this host for now: the portable from-b64 reads its digits by index (6 ms for 5 KB here since ET-3's
+;; fix), and an Erlang base64 plug has not been measured against it; the portable implementations answer.
+(def bytes->b64 nil)
+(def b64->bytes nil)
+(def bytes->hex nil)
+(def hex->bytes nil)

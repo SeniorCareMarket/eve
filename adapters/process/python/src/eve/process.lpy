@@ -1,0 +1,80 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) over Python's (basilisp): the clock, a
+   thread's identity, sleep, a periodic timer, a hook at normal exit, and
+   files' existence, their exclusive creation and directories, and standard input's lines."
+  (:refer-clojure :exclude [read-line])
+  (:import atexit os os.path sys threading time))
+
+(defn now-ms []
+  (python/int (* 1000 (time/time))))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under (threads share a worker slot)."
+  []
+  (threading/get-ident))
+
+(defn sleep-ms!
+  "Block this thread for about ms milliseconds."
+  [ms]
+  (time/sleep (/ ms 1000.0)))
+
+(defn start-timer!
+  "Call f every period-ms until stop-timer!. Returns the host's handle."
+  [period-ms f]
+  ;; basilisp: the handle is the Event that stops the thread
+  (let [stop (threading/Event)
+        t (threading/Thread
+           ** :name "eve-heartbeat" :daemon true
+           :target (fn []
+                     (loop []
+                       (when-not (.wait stop (/ period-ms 1000.0))
+                         (f)
+                         (recur)))))]
+    (.start t)
+    stop))
+
+(defn stop-timer! [h]
+  (when h
+    (.set h)))
+
+(defn on-process-exit!
+  "Run f when the process exits normally."
+  [f]
+  (atexit/register f))
+
+(defn file-exists? [path]
+  (os.path/exists path))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step
+   against every other process: true for the process that created it, false
+   when it already existed (an mmap domain's creator is the one that gets true).
+   Here: os.open O_CREAT|O_EXCL."
+  [path]
+  (try (os/close (os/open path (bit-or os/O_CREAT os/O_EXCL os/O_WRONLY))) true
+       (catch python/FileExistsError _ false)))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
+  [base-path]
+  (let [root-file (str base-path ".root")]
+    (os/makedirs (os.path/dirname (os.path/abspath root-file)) ** :exist-ok true)))
+
+(defn identity-hash
+  "An object's identity hash: equal for one object, whatever its own equality
+   or hash (a host object may answer none) — what eve's reference table keys
+   by (FORMAT-DECISIONS.md §9)."
+  [x]
+  (python/id x))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (os.urandom), as a vector of 0..255 — the one crypto input no portable
+   code can supply (eve.crypto/random-bytes)"
+  [n]
+  (vec (os/urandom n)))
+
+(defn read-line
+  "the next line of the process's standard input, its line end dropped; nil at the end of the input. Blocking"
+  []
+  (let [l (.readline sys/stdin)]
+    (when (pos? (python/len l)) (.rstrip l "\r\n"))))

@@ -1,0 +1,90 @@
+diff -ru a/pkg/rt/lang.go b/pkg/rt/lang.go
+--- a/pkg/rt/lang.go	2026-10-16 02:43:19.866844021 +0000
++++ b/pkg/rt/lang.go	2026-10-16 05:45:39.093104922 +0000
+@@ -2629,7 +2629,7 @@
+ 		if len(vs) < 2 {
+ 			return vm.NIL, fmt.Errorf("wrong number of arguments %d", len(vs))
+ 		}
+-		at, ok := vs[0].(*vm.Atom)
++		at, ok := vs[0].(vm.IAtom)
+ 		if !ok {
+ 			return vm.NIL, fmt.Errorf("swap expected Atom")
+ 		}
+@@ -2649,7 +2649,7 @@
+ 		if len(vs) < 2 {
+ 			return vm.NIL, fmt.Errorf("wrong number of arguments %d", len(vs))
+ 		}
+-		at, ok := vs[0].(*vm.Atom)
++		at, ok := vs[0].(vm.IAtom)
+ 		if !ok {
+ 			return vm.NIL, fmt.Errorf("swap-vals! expected Atom")
+ 		}
+@@ -5975,6 +5975,12 @@
+ 			s = s.Disj(v)
+ 		}
+ 		return s, nil
++	case vm.IDisj:
++		var r vm.Value = s
++		for _, v := range vs[1:] {
++			r = r.(vm.IDisj).Disj(v)
++		}
++		return r, nil
+ 	default:
+ 		return vm.NIL, fmt.Errorf("disj expected Set")
+ 	}
+@@ -6341,7 +6347,7 @@
+ 	if len(vs) != 2 {
+ 		return vm.NIL, fmt.Errorf("wrong number of arguments %d", len(vs))
+ 	}
+-	at, ok := vs[0].(*vm.Atom)
++	at, ok := vs[0].(vm.IAtom)
+ 	if !ok {
+ 		return vm.NIL, fmt.Errorf("reset expected Atom")
+ 	}
+@@ -6354,7 +6360,7 @@
+ 	if len(vs) != 3 {
+ 		return vm.NIL, fmt.Errorf("compare-and-set! expected 3 arguments, got %d", len(vs))
+ 	}
+-	at, ok := vs[0].(*vm.Atom)
++	at, ok := vs[0].(vm.IAtom)
+ 	if !ok {
+ 		return vm.NIL, fmt.Errorf("compare-and-set! expected Atom")
+ 	}
+@@ -6374,7 +6380,7 @@
+ 	if len(vs) != 2 {
+ 		return vm.NIL, fmt.Errorf("wrong number of arguments %d", len(vs))
+ 	}
+-	at, ok := vs[0].(*vm.Atom)
++	at, ok := vs[0].(vm.IAtom)
+ 	if !ok {
+ 		return vm.NIL, fmt.Errorf("reset-vals! expected Atom")
+ 	}
+diff -ru a/pkg/vm/value.go b/pkg/vm/value.go
+--- a/pkg/vm/value.go	2026-10-16 02:43:19.891468697 +0000
++++ b/pkg/vm/value.go	2026-10-16 05:45:39.091161997 +0000
+@@ -104,6 +104,25 @@
+ 	Contains(Value) Boolean
+ }
+ 
++// IAtom is what swap!/swap-vals!/reset!/reset-vals!/compare-and-set! need
++// from a reference. *Atom satisfies it unchanged (atom.go Reset/Swap/
++// CompareAndSet/Deref). PROPOSAL (EVE port): lets a type defined
++// outside pkg/vm be an atom.
++type IAtom interface {
++	Value
++	Deref() Value
++	Swap(fn Fn, args []Value) (Value, error)
++	Reset(newVal Value) (Value, error)
++	CompareAndSet(oldVal, newVal Value) (bool, error)
++}
++
++// IDisj is what disj needs from a set type defined outside pkg/vm.
++// PROPOSAL (EVE port).
++type IDisj interface {
++	Value
++	Disj(Value) Value
++}
++
+ type Receiver interface {
+ 	Value
+ 	InvokeMethod(Symbol, []Value) (Value, error)

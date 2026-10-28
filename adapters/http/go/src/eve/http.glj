@@ -1,0 +1,47 @@
+(ns eve.http
+  "eve's http feature (adapters/README.md) over Go's net/http — glojure. `platform` answers what this host lends eve.net
+   (eve/src/eve/net/run.cljc): {:request f :request-all g}, f taking {:method :url :headers :body :as :body-as} and
+   answering {:status :headers :body} SYNCHRONOUSLY (http.Client.Do), as on every host. The body conventions are
+   eve.net.run's: :body-as :b64 sends the bytes its base64 :body names, :body-as :bytes the byte array :body is; :as
+   :b64 answers the response body as base64, :as :bytes as a byte array (glojure's []int8, the body's own memory:
+   eve.codec reads it as it came); otherwise bodies are UTF-8 text. A transport failure answers {:error message}. request-all runs a batch at once (a future each)."
+  (:require [clojure.string :as str]
+            [eve.net.bytes :as b]))
+
+(defn- slice [bs]
+  (let [v (vec bs) s (go/make (go/slice-of go/byte) (count v))]
+    (dotimes [i (count v)] (aset s i (unchecked-byte (nth v i))))
+    s))
+
+(defn request
+  [{:keys [method url headers body as body-as]}]
+  (let [payload (cond (nil? body) nil
+                      (= :bytes body-as) (eveglj:host.ByteSlice body)
+                      (= :b64 body-as) (slice (b/from-b64 body))
+                      :else (slice (b/utf8 body)))
+        [req err] (net:http.NewRequest (or method "GET") url (if payload (bytes.NewReader payload) nil))]
+    (if err
+      {:error (.Error err)}
+      (do
+        (doseq [[k v] headers] (.Set (.Header req) (name k) (str v)))
+        (let [[resp err] (.Do net:http.DefaultClient req)]
+          (if err
+            {:error (.Error err)}
+            (let [[raw err] (io.ReadAll (.Body resp))
+                  _ (.Close (.Body resp))
+                  hs (.Header resp)]
+              (if err
+                {:error (.Error err)}
+                {:status (.StatusCode resp)
+                 :headers (into {} (map (fn [k] [(str/lower-case k) (.Get hs k)]) (keys hs)))
+                 :body (case as
+                         :b64 (b/to-b64 (vec raw))
+                         :bytes (eveglj:host.Int8Slice raw)
+                         (eveglj:host.Utf8String (eveglj:host.Int8Slice raw) 0 (count raw)))}))))))))
+
+(defn request-all
+  "every request at once, each on its own goroutine (glojure's future); the caller blocks until all are in"
+  [reqs]
+  (mapv deref (mapv (fn [req] (future (request req))) reqs)))
+
+(defn platform [] {:request request :request-all request-all})

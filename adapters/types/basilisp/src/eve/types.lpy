@@ -1,0 +1,470 @@
+(ns eve.types
+  "eve's types on basilisp: its collection interfaces
+   (basilisp.lang.interfaces) are Python abstract classes with Python's
+   names; a type written with the JVM's is translated onto them here, at
+   expansion.
+   The entry points eve's macros call (every eve.types has them):
+     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     existing-def, rename-fields, reader-of, print-form, vector-types."
+  (:require [clojure.string :as str]
+            [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
+                                                 cljs-protocol? rename-syms parse-protocol-impls
+                                                 cljs-translate-protocol]]
+            [eve.deftype-proto.sio :as sio]))
+
+;; basilisp: the JVM's interface names on basilisp's interfaces
+;; basilisp's collection interfaces (basilisp.lang.interfaces) are Python
+;; abstract classes with Python's names: a type is written with the JVM's and
+;; translated here, at expansion:
+;;   - each JVM interface onto the basilisp one it is (IPersistentMap onto
+;;     IPersistentMap, Counted onto ICounted, ...), declared ^:abstract — the
+;;     compiler then admits the members basilisp's interfaces inherit without
+;;     declaring them abstract (IPersistentVector's rseq, a transient set's
+;;     cons_transient); one a declared interface already extends is left out
+;;     (Python refuses the base before the subclass);
+;;   - each method onto basilisp's: count is __len__, valAt val_at, equiv
+;;     __eq__, hasheq __hash__, toString __str__ and __repr__, invoke __call__,
+;;     first and more the ISeq properties first and rest; where basilisp's
+;;     method takes its arguments as a rest (assoc, cons, dissoc, disj, nth,
+;;     val_at, the transients'), the JVM's arities are dispatched by count;
+;;   - what basilisp's interfaces require that the JVM's derive (a map's
+;;     __iter__ over its keys and __getitem__, a seq's is_empty) is generated;
+;;   - a call in a body to a JVM method by name, (.valAt m k), is the
+;;     clojure.core function it stands for (basilisp's methods have other
+;;     names); java.* interfaces are dropped with their methods.
+
+(def ^:private lpy-ifaces
+  '{clojure.lang.IPersistentMap basilisp.lang.interfaces/IPersistentMap
+    clojure.lang.IPersistentVector basilisp.lang.interfaces/IPersistentVector
+    clojure.lang.IPersistentSet basilisp.lang.interfaces/IPersistentSet
+    clojure.lang.IPersistentList basilisp.lang.interfaces/IPersistentList
+    clojure.lang.ISeq basilisp.lang.interfaces/ISeq
+    clojure.lang.IChunkedSeq basilisp.lang.interfaces/ISeq
+    clojure.lang.IPersistentStack basilisp.lang.interfaces/IPersistentStack
+    clojure.lang.Associative basilisp.lang.interfaces/IAssociative
+    clojure.lang.IPersistentCollection basilisp.lang.interfaces/IPersistentCollection
+    clojure.lang.ILookup basilisp.lang.interfaces/ILookup
+    clojure.lang.Indexed basilisp.lang.interfaces/IIndexed
+    clojure.lang.Counted basilisp.lang.interfaces/ICounted
+    clojure.lang.Seqable basilisp.lang.interfaces/ISeqable
+    clojure.lang.Sequential basilisp.lang.interfaces/ISequential
+    clojure.lang.IMeta basilisp.lang.interfaces/IMeta
+    clojure.lang.IObj basilisp.lang.interfaces/IWithMeta
+    clojure.lang.IDeref basilisp.lang.interfaces/IDeref
+    clojure.lang.IReduceInit basilisp.lang.interfaces/IReduce
+    clojure.lang.IReduce basilisp.lang.interfaces/IReduce
+    clojure.lang.IKVReduce basilisp.lang.interfaces/IReduceKV
+    clojure.lang.IMapEntry basilisp.lang.interfaces/IMapEntry
+    clojure.lang.IEditableCollection basilisp.lang.interfaces/IEvolveableCollection
+    clojure.lang.ITransientMap basilisp.lang.interfaces/ITransientMap
+    clojure.lang.ITransientVector basilisp.lang.interfaces/ITransientVector
+    clojure.lang.ITransientSet basilisp.lang.interfaces/ITransientSet
+    clojure.lang.ITransientAssociative basilisp.lang.interfaces/ITransientAssociative
+    clojure.lang.ITransientCollection basilisp.lang.interfaces/ITransientCollection
+    clojure.lang.Reversible basilisp.lang.interfaces/IReversible})
+
+(defn- lpy-mangled?
+  "A symbol Python would mangle inside a class body: its munged name starts
+   with two underscores (->Type is __GT_Type) and does not end with them."
+  [sym]
+  (let [n (name sym)]
+    (and (or (str/starts-with? n "->") (str/starts-with? n "--"))
+         (not (contains? #{"->" "->>" "--"} n)))))
+
+(defn- lpy-rewrite-calls [form]
+  (cond
+    (and (seq? form) (contains? '#{var quote} (first form))) form
+
+    ;; ->Type inside a deftype method reaches the factory through its var
+    ;; (a module attribute named __GT_Type would be mangled there)
+    (and (symbol? form) (lpy-mangled? form))
+    (list 'clojure.core/deref (list 'var form))
+
+    (and (seq? form) (symbol? (first form))
+         (let [n (name (first form))]
+           (and (str/starts-with? n ".") (not (str/starts-with? n ".-")) (> (count n) 1)
+                (contains? v/jvm-method->core (symbol (subs n 1))))))
+    (let [m (symbol (subs (name (first form)) 1))
+          args (map lpy-rewrite-calls (rest form))]
+      (case m
+        ;; (.reduce coll f init) is (reduce f init coll)
+        reduce (let [[coll f & init] args] (apply list 'clojure.core/reduce f (concat init [coll])))
+        (apply list (get v/jvm-method->core m) args)))
+    (seq? form) (with-meta (apply list (map lpy-rewrite-calls form)) (meta form))
+    (vector? form) (with-meta (mapv lpy-rewrite-calls form) (meta form))
+    (map? form) (with-meta (into {} (map (fn [[k v]] [(lpy-rewrite-calls k) (lpy-rewrite-calls v)])) form)
+                  (meta form))
+    :else form))
+
+(defn- lpy-dispatch
+  "A basilisp method (name [self & args]) running, by (count args), the JVM
+   arity of that many arguments (after this): [{:args :body}]."
+  [name arities]
+  (let [self (gensym "self") args (gensym "args")]
+    (list name [self '& args]
+          (concat
+           (list 'clojure.core/case (list 'clojure.core/count args))
+           (mapcat (fn [{a :args body :body}]
+                     [(dec (count a))
+                      (list* 'clojure.core/let
+                             (vec (concat [(first a) self]
+                                          (mapcat (fn [i s] [s (list 'clojure.core/nth args i)])
+                                                  (range) (rest a))))
+                             body)])
+                   (sort-by (comp count :args) arities))
+           [(list 'throw (list 'python/TypeError (str name ": wrong number of arguments")))]))))
+
+(defn- lpy-nth
+  "IIndexed's nth as basilisp calls it: basilisp.lang.runtime/nth passes
+   notfound by keyword always (IIndexed's NTH_SENTINEL when none was given),
+   a call by name passes it positionally. The JVM arities, by the count of
+   the arguments given."
+  [arities]
+  (let [args (gensym "args") kw (gensym "kw") nf (gensym "nf")
+        [_ [self _ rest-sym] dispatch] (lpy-dispatch 'nth arities)]
+    (list (vary-meta 'nth assoc :kwargs :collect) [self '& args]
+          (list 'clojure.core/let
+                [kw (list 'clojure.core/last args)
+                 nf (list 'clojure.core/get kw :notfound
+                          '(.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed))
+                 rest-sym (list 'clojure.core/let [args (list 'clojure.core/vec (list 'clojure.core/butlast args))]
+                                (list 'if (list 'clojure.core/identical? nf
+                                                '(.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed))
+                                      args
+                                      (list 'clojure.core/conj args nf)))]
+                dispatch))))
+
+(defn- lpy-fold
+  "A basilisp method (name [self & xs]) taking any number of step-argument
+   groups of size k: the JVM arity's body for one group, and for more, step
+   (a clojure.core fn) over this and each group."
+  [name {a :args body :body} k step]
+  (let [self (gensym "self") xs (gensym "xs")]
+    (list name [self '& xs]
+          (list 'if (list 'clojure.core/== k (list 'clojure.core/count xs))
+                (list* 'clojure.core/let
+                       (vec (concat [(first a) self]
+                                    (mapcat (fn [i s] [s (list 'clojure.core/nth xs i)]) (range) (rest a))))
+                       body)
+                (list 'clojure.core/reduce
+                      (list 'clojure.core/fn ['acc 'g] (list 'clojure.core/apply step 'acc 'g))
+                      self (list 'clojure.core/partition k xs))))))
+
+(defn- lpy-method [name {a :args body :body}] (list* name a body))
+
+(defn- lpy-swap
+  "IAtom's swap as basilisp calls it, (swap [self f & args]): the JVM arity of
+   (count args) extra arguments, the [this f a b xs] one taking the rest as xs."
+  [arities]
+  (let [self (gensym "self") f (gensym "f") args (gensym "args")
+        by-n (into {} (map (fn [m] [(- (count (:args m)) 2) m])) arities)
+        bind (fn [{a :args body :body} rest?]
+               (list* 'clojure.core/let
+                      (vec (concat [(first a) self (second a) f]
+                                   (mapcat (fn [i s] [s (if (and rest? (= i (- (count a) 3)))
+                                                          (list 'clojure.core/drop i args)
+                                                          (list 'clojure.core/nth args i))])
+                                           (range) (drop 2 a))))
+                      body))]
+    (list 'swap [self f '& args]
+          (concat (list 'clojure.core/case (list 'clojure.core/count args))
+                  (mapcat (fn [n] (when-let [m (get by-n n)] [n (bind m false)])) [0 1 2])
+                  [(if-let [m (get by-n 3)]
+                     (bind m true)
+                     (list 'throw (list 'python/TypeError "swap: wrong number of arguments")))]))))
+
+(defn- lpy-prop [name m] (lpy-method (vary-meta name assoc :property true) m))
+
+(defn lpy-translate-protos
+  "Parsed protocol impls ([{:protocol :methods}], JVM names) as a basilisp
+   deftype takes them (see above): [{:protocol :methods}], methods as forms."
+  [impls]
+  (let [jvm-ifaces (set (keep (fn [{:keys [protocol]}] (when (interface-sym? protocol) protocol)) impls))
+        transient? (some #(str/starts-with? (str %) "clojure.lang.ITransient") jvm-ifaces)
+        ;; basilisp's ITransientAssociative (contains_transient, entry_transient)
+        ;; is its transient map's and vector's, not its transient set's
+        transient-assoc? (some jvm-ifaces '[clojure.lang.ITransientMap clojure.lang.ITransientVector
+                                            clojure.lang.ITransientAssociative])
+        map? (contains? jvm-ifaces 'clojure.lang.IPersistentMap)
+        vector? (contains? jvm-ifaces 'clojure.lang.IPersistentVector)
+        associative? (and (not transient?)
+                          (some jvm-ifaces '[clojure.lang.Associative clojure.lang.IPersistentMap
+                                             clojure.lang.IPersistentVector]))
+        ;; the JVM methods, pooled (a JVM deftype pools them), by name
+        by-name (group-by :name (mapcat :methods (filter #(interface-sym? (:protocol %)) impls)))
+        one (fn [n] (first (get by-name n)))
+        arity (fn [n k] (some #(when (= k (count (:args %))) %) (get by-name n)))
+        methods
+        (concat
+         (when-let [m (one 'count)] [(lpy-method '__len__ m)])
+         (when (get by-name 'nth) [(lpy-nth (get by-name 'nth))])
+         (when (get by-name 'valAt) [(lpy-dispatch 'val-at (get by-name 'valAt))])
+         (when-let [m (one 'seq)] [(lpy-method 'seq m)])
+         ;; IChunkedSeq: no basilisp interface; eve.host-completion's chunk-first,
+         ;; chunk-rest and chunk-next call these
+         (when-let [m (one 'chunkedFirst)] [(lpy-method 'chunked-first m)])
+         (when-let [m (one 'chunkedMore)] [(lpy-method 'chunked-rest m)])
+         (when-let [m (one 'chunkedNext)] [(lpy-method 'chunked-next m)])
+         (when-let [m (one 'empty)] [(lpy-method 'empty m)])
+         (when-let [m (or (one 'equiv) (one 'equals))] [(lpy-method '__eq__ m)])
+         (when-let [m (or (one 'hasheq) (one 'hashCode))] [(lpy-method '__hash__ m)])
+         ;; a collection prints (and is a string) as basilisp's own does; another
+         ;; type's toString is its __str__ (eve's collections' toString is
+         ;; pr-str, which basilisp answers through __repr__)
+         (cond
+           map? (let [r '(__repr__ [this] (clojure.core/pr-str (clojure.core/into {} (.seq this))))]
+                  [r (cons '__str__ (rest r))])
+           (contains? jvm-ifaces 'clojure.lang.IPersistentSet)
+           (let [r '(__repr__ [this] (clojure.core/pr-str (clojure.core/set (.seq this))))]
+             [r (cons '__str__ (rest r))])
+           vector? (let [r '(__repr__ [this] (clojure.core/pr-str (clojure.core/vec (.seq this))))]
+                     [r (cons '__str__ (rest r))])
+           (some jvm-ifaces '[clojure.lang.ISeq clojure.lang.IPersistentList])
+           (let [r '(__repr__ [this] (clojure.core/pr-str (clojure.core/apply clojure.core/list (.seq this))))]
+             [r (cons '__str__ (rest r))])
+           :else (when-let [m (one 'toString)] [(lpy-method '__str__ m)]))
+         (when (get by-name 'invoke) [(lpy-dispatch '__call__ (get by-name 'invoke))])
+         (when-let [m (one 'meta)] [(lpy-prop 'meta m)])
+         (when-let [m (one 'withMeta)] [(lpy-method 'with-meta m)])
+         (when-let [m (one 'deref)] [(lpy-method 'deref m)])
+         ;; IAtom: no basilisp interface; basilisp's swap!, reset! and
+         ;; compare-and-set! call the atom's swap, reset and compare_and_set
+         (when (get by-name 'swap) [(lpy-swap (get by-name 'swap))])
+         (when-let [m (one 'reset)] [(lpy-method 'reset m)])
+         (when-let [m (one 'compareAndSet)] [(lpy-method 'compare-and-set m)])
+         (when (get by-name 'reduce)
+           [(let [r2 (arity 'reduce 2) r3 (arity 'reduce 3)
+                  self (gensym "self") f (gensym "f") init (gensym "init")]
+              (list 'reduce [self f '& init]
+                    (list 'if (list 'clojure.core/seq init)
+                          (if r3
+                            (list* 'clojure.core/let [(first (:args r3)) self (second (:args r3)) f
+                                                      (nth (:args r3) 2) (list 'clojure.core/first init)]
+                                   (:body r3))
+                            (list 'clojure.core/reduce f (list 'clojure.core/first init) (list 'clojure.core/seq self)))
+                          (if r2
+                            (list* 'clojure.core/let [(first (:args r2)) self (second (:args r2)) f] (:body r2))
+                            (list 'clojure.core/reduce f (list 'clojure.core/seq self))))))])
+         (when-let [m (one 'kvreduce)] [(lpy-method 'reduce-kv m)])
+         (when-let [m (one 'key)] [(lpy-prop 'key m)])
+         (when-let [m (one 'val)] [(lpy-prop 'value m)])
+         (when-let [m (one 'rseq)] [(lpy-method 'rseq m)])
+         (when-let [m (one 'peek)] [(lpy-method 'peek m)])
+         (if transient?
+           (concat
+            (when-let [m (if (contains? jvm-ifaces 'clojure.lang.ITransientVector)
+                           (or (arity 'assocN 3) (arity 'assoc 3))
+                           (or (arity 'assoc 3) (arity 'assocN 3)))]
+              [(lpy-fold 'assoc-transient m 2 'clojure.core/assoc!)])
+            (when-let [m (arity 'conj 2)] [(lpy-fold 'cons-transient m 1 'clojure.core/conj!)])
+            (when-let [m (arity 'without 2)] [(lpy-fold 'dissoc-transient m 1 'clojure.core/dissoc!)])
+            (when-let [m (arity 'disjoin 2)] [(lpy-fold 'disj-transient m 1 'clojure.core/disj!)])
+            (when-let [m (one 'pop)] [(lpy-method 'pop-transient m)])
+            (when-let [m (one 'persistent)] [(lpy-method 'to-persistent m)])
+            (when-let [m (one 'containsKey)] [(lpy-method 'contains-transient m)])
+            (when-let [m (one 'entryAt)] [(lpy-method 'entry-transient m)]))
+           (concat
+            ;; a vector's assoc delegates to assocN, the one that writes
+            (when-let [m (if vector?
+                           (or (arity 'assocN 3) (arity 'assoc 3))
+                           (or (arity 'assoc 3) (arity 'assocN 3)))]
+              [(lpy-fold 'assoc m 2 'clojure.core/assoc)])
+            (when-let [m (arity 'cons 2)]
+              (if (contains? jvm-ifaces 'clojure.lang.ISeq)
+                [(lpy-fold 'cons m 1 'clojure.core/conj)]
+                [(lpy-fold 'cons m 1 'clojure.core/conj)]))
+            (when-let [m (arity 'without 2)] [(lpy-fold 'dissoc m 1 'clojure.core/dissoc)])
+            (when-let [m (arity 'disjoin 2)] [(lpy-fold 'disj m 1 'clojure.core/disj)])
+            (when-let [m (one 'pop)] [(lpy-method 'pop m)])
+            (when-let [m (one 'containsKey)] [(lpy-method 'contains m)])
+            (when-let [m (one 'entryAt)] [(lpy-method 'entry m)])
+            (when-let [m (arity 'contains 2)] [(lpy-method '__contains__ m)])
+            (when-let [m (one 'asTransient)] [(lpy-method 'to-transient m)])))
+         (when-let [m (one 'first)] [(lpy-prop 'first m)])
+         (when-let [m (one 'more)] [(lpy-prop 'rest m)]))
+        defined (set (map (fn [m] (str (first m))) methods))
+        has? #(contains? defined %)
+        derived
+        (concat
+         ;; (a seq's seq is itself: basilisp's ISeq walks first/rest)
+         (when (and (or (has? "seq") (seq jvm-ifaces)) (not (has? "__iter__"))
+                    (not (contains? jvm-ifaces 'clojure.lang.ISeq)))
+           [(list '__iter__ '[this]
+                  (if map?
+                    '(python/iter (clojure.core/map clojure.core/key (clojure.core/or (.seq this) [])))
+                    '(python/iter (clojure.core/or (.seq this) []))))])
+         (when (and map? (not (has? "__getitem__")))
+           [(list '__getitem__ '[this k]
+                  '(clojure.core/let [v (.val-at this k ::absent)]
+                     (if (clojure.core/= v ::absent) (throw (python/KeyError k)) v)))])
+         (when (and vector? (not (has? "__getitem__")))
+           [(list '__getitem__ '[this i] '(.nth this i))])
+         (when (and (contains? jvm-ifaces 'clojure.lang.ISeq) (not (has? "is-empty")))
+           [(list (vary-meta 'is-empty assoc :property true) '[this] '(clojure.core/nil? (.seq this)))])
+         (when (and transient-assoc? (has? "val-at") (not (has? "contains-transient")))
+           [(list 'contains-transient '[this k]
+                  '(clojure.core/not (clojure.core/= ::absent (.val-at this k ::absent))))])
+         (when (and transient-assoc? (has? "val-at") (not (has? "entry-transient")))
+           [(list 'entry-transient '[this k]
+                  '(clojure.core/let [v (.val-at this k ::absent)]
+                     (when-not (clojure.core/= v ::absent) (clojure.core/map-entry k v))))])
+         (when (and associative? (has? "val-at") (not (has? "contains")))
+           [(list 'contains '[this k]
+                  '(clojure.core/not (clojure.core/= ::absent (.val-at this k ::absent))))])
+         (when (and associative? (has? "val-at") (not (has? "entry")))
+           [(list 'entry '[this k]
+                  '(clojure.core/let [v (.val-at this k ::absent)]
+                     (when-not (clojure.core/= v ::absent) (clojure.core/map-entry k v))))]))
+        ;; the JVM's bodies call JVM methods by name; the derived ones call
+        ;; this type's own basilisp methods
+        methods (concat (map lpy-rewrite-calls methods) derived)
+        ;; the basilisp interfaces, less any another one extends
+        types (distinct (keep #(get lpy-ifaces %) jvm-ifaces))
+        ;; basilisp's ITransientSet and ILookup share no class (their MROs put
+        ;; ABC and Generic in opposite orders: Python refuses the pair, measured
+        ;; 2026-10-18): a transient set keeps its val-at as its own member
+        lookup-dropped? (and (some #{'basilisp.lang.interfaces/ITransientSet} types)
+                             (some #{'basilisp.lang.interfaces/ILookup} types))
+        types (if lookup-dropped? (remove #{'basilisp.lang.interfaces/ILookup} types) types)
+        ifaces-module (.get (.-modules (python/__import__ "sys")) "basilisp.lang.interfaces")
+        cls (fn [s] (python/getattr ifaces-module (name s)))
+        types (remove (fn [t] (some #(and (not= % t) (python/issubclass (cls %) (cls t))) types)) types)
+        protocols (keep (fn [{:keys [protocol] :as impl}]
+                          (when-not (interface-sym? protocol)
+                            (update impl :methods
+                                    (fn [ms] (mapv #(update % :body (fn [b] (map lpy-rewrite-calls b))) ms)))))
+                        impls)]
+    ;; protocols first: basilisp dispatches a protocol fn by the type's
+    ;; MRO, and a type's own protocol impl must win over an extension of
+    ;; an interface it has (eve.rrb-vector's to IPersistentVector)
+    (vec (concat
+          protocols
+          ;; ^:abstract admits the members the interfaces inherit; the
+          ;; chunked seq's are no interface's, so they are named
+          (when (seq types)
+            (let [extra (->> methods
+                             (map first)
+                             (filter (cond-> '#{chunked-first chunked-rest chunked-next
+                                                swap reset compare-and-set}
+                                       lookup-dropped? (conj 'val-at)))
+                             (map #(str/replace (name %) "-" "_"))
+                             set)]
+              [{:protocol (vary-meta (first types)
+                                     (fn [m] (cond-> (assoc m :abstract true)
+                                               (seq extra) (assoc :abstract-members extra))))
+                :forms methods}]))
+          (map (fn [t] {:protocol (vary-meta t assoc :abstract true) :forms []}) (rest types))
+          ;; basilisp's deftype takes methods anywhere in its body (and
+          ;; adds python/object itself)
+          (when (and (empty? types) (seq methods))
+            [{:protocol nil :forms methods}])))))
+
+(defn lpy-impls->forms
+  "lpy-translate-protos' result as the flat body of a deftype."
+  [impls]
+  (mapcat (fn [{:keys [protocol methods forms]}]
+            (cond->> (or forms (map (fn [{:keys [name args body]}] (list* name args body)) methods))
+              protocol (cons protocol)))
+          impls))
+
+(defn lpy-field
+  "A field symbol as basilisp's deftype takes it: a mutable field is
+   ^:mutable there (it knows neither of the JVM's), and every field carries
+   metadata (basilisp 0.5.1 reads a field with none as one with a default,
+   and then refuses a field without one after it)."
+  [sym]
+  (let [m (meta sym)]
+    (vary-meta sym (fn [m]
+                     (cond-> (assoc m :eve/field true)
+                       (or (:mutable m) (:unsynchronized-mutable m) (:volatile-mutable m))
+                       (-> (dissoc :unsynchronized-mutable :volatile-mutable) (assoc :mutable true)))))))
+
+(def lpy-field-renames
+  "Field names a member of a basilisp type takes (a Python class has one
+   namespace for both; basilisp's IMeta meta is a property, as are ISeq's
+   first and rest and IMapEntry's key): the name such a field takes there.
+   Only the methods' arguments and bodies are renamed (not the method names);
+   another instance's (.-meta v) reads the property."
+  '{meta meta__f first first__f rest rest__f key key__f})
+
+(defn lpy-rename-methods
+  "Method forms (name [args] & body), and the protocol names between them,
+   with the fields renamed per renames in each method's arguments and body."
+  [body renames]
+  (if (empty? renames)
+    body
+    (map (fn [f] (if (seq? f) (cons (first f) (rename-syms (rest f) renames)) f)) body)))
+
+(defn- hooks
+  "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
+   value as a literal, which a map of functions is not)."
+  []
+  {:normalize v/jvm-translate-protos
+   ;; the host's own deftype, the body translated already (a namespace may
+   ;; refer eve.deftype's as deftype)
+   :define (fn [type-name fields impls _forms print]
+             (concat [`(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+                         ~@(lpy-impls->forms (lpy-translate-protos impls)))]
+                     (when print [(sio/print-method-form type-name print)])))
+   :build (fn [type-name _fields _new-name args] (list* 'new type-name args))
+   :factory-via-var? false
+   :slab-prepare (fn [parsed _type-name] parsed)
+   :object-boilerplate? true
+   :slab-define (fn [type-name fields forms]
+                  [`(~'deftype ~type-name ~(mapv lpy-field fields)
+                     ~@(lpy-impls->forms (lpy-translate-protos (parse-protocol-impls forms))))])})
+
+(defn host-type
+  "A plain type written with the JVM's names (host-deftype)."
+  [_env type-name fields parsed]
+  `(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+     ~@(lpy-impls->forms (lpy-translate-protos parsed))))
+
+(defn plain-type
+  "A plain type (eve.deftype/deftype): also the fields a member's name takes
+   renamed (lpy-field-renames)."
+  [_env type-name fields parsed]
+  (let [[fields parsed] (sio/plain-renames fields parsed lpy-field-renames)
+        {:keys [impls print]} (v/jvm-translate-protos parsed)]
+    `(do (clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+           ~@(lpy-impls->forms (lpy-translate-protos impls)))
+         ~@(when print [(sio/print-method-form type-name print)])
+         ~type-name)))
+
+(defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
+(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
+
+(defn existing-def
+  "{:value v} when the namespace being compiled already defines sym, else nil."
+  [_env sym]
+  (when-let [v (resolve sym)] {:value @v}))
+
+(defn rename-fields
+  "An eve-deftype's fields and body with the field names the JVM reserves
+   renamed (__hash), and the fields a member's name takes (lpy-field-renames)
+   in the methods' arguments and bodies: [fields body]."
+  [_env fields body]
+  (let [lpy (select-keys lpy-field-renames fields)
+        [fields body] (sio/eve-renames fields body)]
+    [(mapv (fn [f] (with-meta (get lpy f f) (meta f))) fields)
+     (lpy-rename-methods body lpy)]))
+
+(defn reader-of
+  "What a registered eve collection reads as on this host: its eve type
+   (from-header; host-value is for a host whose types cannot stand in for its
+   collections)."
+  [from-header _host-value]
+  from-header)
+
+(defn print-form
+  "The printer of a registered eve collection: none — basilisp (its __repr__) prints it by
+   its own."
+  [_env _type-name _spec]
+  nil)
+
+(defn vector-types
+  "basilisp's own vector types: its IPersistentVector's implementors (the
+   core completion names basilisp's interface clojure.lang.IPersistentVector)."
+  [_env]
+  '[clojure.lang.IPersistentVector])
