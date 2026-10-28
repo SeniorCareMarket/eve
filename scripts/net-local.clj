@@ -155,8 +155,9 @@
   (say "broker " broker-url " (domain " did ", API key " key ")")
   (say "store  " (str base (inc port)))
   (doseq [[i u] (map-indexed vector thread-urls)] (say (str "thread t" i " ") u (str "(" (nth hosts i) ")") (if (zero? i) " + the page" "")))
-  (println (pr-str {:step :ready :broker broker-url :store (str base (inc port)) :threads thread-urls :app (first thread-urls)
-                    :domain did :api-key key :hosts hosts :pids (mapv (fn [pr] (.pid ^Process (:proc pr))) procs)}))
+  (println (pr-str (array-map :step :ready :broker broker-url :store (str base (inc port)) :threads thread-urls
+                               :app (first thread-urls) :domain did :api-key key :hosts hosts
+                               :pids (mapv (fn [pr] (.pid ^Process (:proc pr))) procs))))
   (flush)
   (when-not (:no-open o)
     (try (p/process ["xdg-open" (str (first thread-urls) "/")]) (catch Exception _ (say "open" (str (first thread-urls) "/")))))
