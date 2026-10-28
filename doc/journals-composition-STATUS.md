@@ -41,3 +41,19 @@ running on this box; timing under contention is worthless.
   restart; repaired, clean at e1b0f6c2e0b). Box: byform-cut
   RUNNING (re-mint lane), load ~5 — crash cells may proceed,
   bench waits.
+- 03:1x ET — housekeeping banked @ 5074757fb87: banked
+  crash-proto-J10-counter.txt replaced with the complete file
+  (10 points + "# totals: 10 pass, 0 violations"); replacement
+  noted in the commit message.
+- 03:2x ET — COMPOSITION banked @ 65c5e13dddd (cherry-pick of
+  dad4e4b0f90). The CODE composed clean: atom.cljc applied with
+  no conflict and is byte-identical to the floor-advance
+  branch's version (0 diff lines); tally.cljc is byte-identical
+  to the prototype tip (0 diff lines). The one collision was
+  documentary: eve/doc/durability-spike-STATUS.md — HEAD's copy
+  (831 lines) ends where the floor-advance lineage appends the
+  sweep + floor-advance sections (231 lines); resolved by
+  composition (shared prefix untouched, append taken whole;
+  result 1,062 lines = the incoming file exactly). Committed-tree
+  marker sweep: 10 files at HEAD = 10 at base — no new markers.
+  Next: crash suite, six cells, sequential.
