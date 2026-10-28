@@ -62,7 +62,7 @@
                                             "-W" "exceptions=y" "-W" "max-wasm-stack=67108864" wasm))]
                        (print out) (flush)
                        (when-not (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out) (System/exit 1))))}
-  test:vs-http {:doc "eve.http on ValueScript (adapters/http/vs) against a local eve.net.store served here: PUT and GET through the vs.host bridge's fetch, under vs-term --bridge ($VS_TERM, default the monorepo's vs/term/hosts/wasmtime/vs-term)"
+  test:vs-http {:doc "eve.http on ValueScript (adapters/http/vs) against a local eve.net.store served here: PUT and GET through the vs.host bridge's fetch, under vs-term --bridge ($VS_TERM, or vs-term on PATH)"
                 :requires ([eve.http-server :as hs] [eve.net.store :as store] [eve.net.gateway :as gw])
                 :task (let [wasm (str (fs/absolutize "target/vs/http_vs_check.wasm"))
                             now (fn [] (System/currentTimeMillis))
@@ -70,7 +70,7 @@
                             srv (hs/serve! {:port 0} (:handle st))
                             base (str "http://127.0.0.1:" (:port srv) "/blobs/")
                             sign (gw/hmac-presigner {:url base :secret "vs-http" :now-ms now})
-                            vs-term (or (System/getenv "VS_TERM") (str (fs/absolutize "../vs/term/hosts/wasmtime/vs-term")))]
+                            vs-term (or (System/getenv "VS_TERM") (some-> (fs/which "vs-term") str) "vs-term")]
                         (fs/create-dirs "target/vs")
                         (shell {:extra-env {"VS_CLJ_ROOTS" (str/join ":" (roots :vs "adapters/http/vs/test"))}}
                                "vs" "compile" "adapters/http/vs/test/eve/http_vs_check.vs" "-o" wasm)

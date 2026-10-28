@@ -21,7 +21,7 @@
             [eve.encoding :as enc]))
 
 ;; This namespace's own vocabulary declared before its first defprotocol: ValueScript refuses a def of a name the ns
-;; excludes from clojure.core once the namespace holds a protocol (docs/vsv2-cutover/BUGS.md B-12); declared first, the
+;; excludes from clojure.core once the namespace holds a protocol; declared first, the
 ;; vars exist and every later defn fills one.
 (declare count nth get seq first next rest conj into empty contains? disj subvec meta with-meta reduce
          sequential? counted? hash-ordered-coll hash-unordered-coll assoc dissoc pop peek rseq reduce-kv
