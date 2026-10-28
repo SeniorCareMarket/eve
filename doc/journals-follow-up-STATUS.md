@@ -191,3 +191,31 @@ grow inline arms. Instead:
 - 2026-10-28 JVM suites re-run after ALL changes incl. the
   basilisp completion fix: 47 tests / 419 assertions / 0 failures
   (runs/jvm-suites2.log). CLR cells untouched by the lpy work.
+- 2026-10-28 LPY CRASH CELLS: J1/counter 17 pass / 0 violations
+  (runs/crash-lpy-j1-counter.log), J1/kb64 17/0
+  (runs/crash-lpy-j1-kb64-resume.log; the first run was SIGTERM'd
+  by a box restart at 5 points, resumed clean), J10/counter 10/0
+  (runs/crash-lpy-j10-counter.log). J10/kb64: RECORDING COMPLETE
+  (manifest correct J10 batching: journal-len 2068 through commit
+  9, 4136 at 10-11), p0-checkpoint PASS banked
+  (runs/crash-lpy-j10-kb64.out); the remaining 9 points are
+  BLOCKED BY AN ENVIRONMENT FAULT, not by code — see next entry.
+  Lpy subtotal: 45 points banked, 0 violations.
+- 2026-10-28 ENVIRONMENT FAULT (box write wall, diagnosed live):
+  from ~20:25, file writes beyond a shrinking per-file threshold
+  fail with EPERM ("Operation not permitted") for ALL user
+  processes on this box (exec children, detached setsid processes
+  alike; the runtime's own file tools are unaffected). Measured:
+  100 B-2 KB writes pass, 256 KB writes fail; os.copy_file_range
+  from the recorders' snapshot files fails outright (shutil
+  propagates it), plain read/write streams work up to the
+  threshold. The box also restarted mid-evening (uptime 42 min at
+  20:36, load ~10.6, MemFree ~144 MB of 8 GB — heavy foreign
+  load). The wall killed the first J10/kb64 run mid-recovery and
+  truncated runs/crash_suite_lpy.py once (rebuilt via the file
+  tools with read/write copies — _safe_copy/_safe_copytree — so
+  the driver no longer needs copy_file_range). RESUME when the
+  box write path recovers: re-run the J10/kb64 cell command; the
+  suite skips banked points. Item 3 attempt 3 and the phase-3
+  cells are blocked by the same wall (the compile writes MBs;
+  phase-3 copies domain images).
