@@ -84,3 +84,16 @@ running on this box; timing under contention is worthless.
   and warm 5000 n 3000 — the exploration lane's bench-after
   invocation. Evidence →
   ~/workspace/journals-composition-runs/bench-composed.txt.
+
+- 04:1x ET — CLOSEOUT (by the coordinator, after two stalls).
+  Composition agent stalled on a dead wait condition (the re-mint
+  cut it waited on had been abandoned; two taps unregistered);
+  its closeout successor stalled on toolchain discovery. The
+  coordinator ran the bench directly: bench-size J1000 counter,
+  warm 300 n 3000 = 530 µs/op (1,888 ops/s); warm 5000 n 3000 =
+  187 µs/op (5,339 ops/s). Evidence bench-composed.txt (banked
+  under eve/doc/journals-composition-evidence/). Final report:
+  eve/doc/journals-composition-2026-10-28.md. LANE COMPLETE:
+  composition clean, crash 72/72, JVM 47/419/0, bench flat and
+  below both single-fix numbers at both windows. Adoption is the
+  operator's decision; nothing landed to main.
