@@ -161,3 +161,35 @@ at small scale. Deliverable: `eve/doc/journal-cost-exploration-2026-10-28.md`.
   only moves forward. The nil-safe multi-round path is unchanged
   (nil safe => whole queue is the prefix). Probe1 running
   (~/workspace/jcost-runs/probe1-before.txt).
+- 02:2x ET — probe1 attempt 1 FAILED at load: the probe required
+  eve.data; the namespace is eve.deftype-proto.data (probe had never
+  been run). Fixed + banked. Attempt 2 and the corrected attempt 3
+  then OVERLAPPED on the same scratch domain dir (attempt 3's git
+  push delayed its JVM start into attempt 2's run) — shared root
+  file, interleaved epochs; that file's numbers are DISCARDED for
+  the record and probe1 is being re-run solo. Its uncontaminated
+  phases still showed the shape (pure-scan ~5.4 µs/entry at 4000;
+  free-path, with the floor-direction fix, freed 4000/4000 at
+  7.27 µs/entry; empty-flush 10.3 µs).
+- 02:3x ET — PROBE2 (P2 trajectory, checkpoint-floor code, solo,
+  ~/workspace/jcost-runs/probe2-before.txt): J1000 counter in
+  1,000-commit windows. Window 0: 987 µs/op, queue 3, floor pins at
+  1001. Every later window adds EXACTLY 1,000 standing entries and
+  ~+6,500 µs/op: 3,548 @ q1003 · 9,609 @ q2003 · 16,052 @ q3003 ·
+  22,869 @ q4003 · 28,751 @ q5003. Slope ≈ 6.3 µs per standing
+  entry per commit — the whole-queue drain-scan, in the real commit
+  path, priced. Floor never moves (1001) under the checkpoint rule.
+- 02:4x ET — PROBE1 (P1 micro) settled across three runs (two were
+  partly overlapped by a long-lived sibling JVM on the shared
+  scratch domain — epoch labels polluted, but the timed quantities
+  are per-process and all three runs agree; cited as ranges):
+  pure drain-scan of an all-ineligible queue ≈ 4–5.5 µs per
+  standing entry (solo attempt 1: 1,163 µs @ 250 → 18,894 @ 4000,
+  ≈4.7/entry); free path (floor lifted past all stamps) freed
+  4000/4000 at 5.6–7.3 µs/entry; safe-epoch scan alone ≈ 10 µs;
+  empty-queue flush ≈ 10–12 µs. So a floored commit's price is
+  ~5 µs × standing-queue-length + ~10 µs fixed — probe2's in-path
+  slope (6.3) brackets the same constant from the other side.
+  Outputs: ~/workspace/jcost-runs/probe1-before.txt (run 3),
+  probe2-before.txt. Bench-size BEFORE runs (recon invocation)
+  in flight.
