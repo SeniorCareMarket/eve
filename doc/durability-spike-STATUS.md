@@ -829,3 +829,234 @@ Phase 3 proper (smoke-2 TypeError diagnosis, then the A / J-5s
   The worst measured flush anywhere: 1.14 s (J10, contention,
   this disk) — the ceiling arithmetic in the report rests on
   it.
+
+## Journal window sweep (2026-10-27 late, branch claude/eve-journal-window-sweep)
+
+Follow-on lane (operator's questions): the spike measured fixed
+count batches under contention (phase 1) and exactly ONE windowed
+point uncontended-never / 5 s window under the 8-writer mix
+(phase 3). Open: is the windowed journal at raw speed with the
+1,000-epoch scaling still on, is a 100-epoch window competitive
+under contention, and where is the knee per contention profile.
+This lane sweeps flush triggers x profiles on THIS box (the slow
+disk, comparability with phases 1+3). Fast-disk subset only on
+the coordinator's explicit clearance.
+
+- Harness: phase3_sweep_runner.py (extends phase3_runner.py).
+  Configs: A / Jc100 / Jc1000 / Jc10000 (count-only) / Jw1s /
+  Jw5s (window, 1e6 backstop) / J1000or1s (whichever first).
+  Trigger reaches the domain via the writer config (:jbatch
+  always, :jwindow only when set) — workloads (clj + cljs)
+  extended to read it; plumbing verified present in atom.cljc
+  (journal-note-commit!: flush when pending >= limit OR window
+  elapsed, checked on the commit path). Node build rebuilt
+  (shadow release :durability-workload, sweep-aware main.js).
+  Setup domain reused unchanged from phase 3.
+- ENGAGEMENT GATE (operator steer, applies to every J cell): a
+  cell's speed counts only if its own artifacts prove the journal
+  engaged — journal records present in the pre-verify copy,
+  flush events in the op logs, and a WOUNDED second copy (root
+  epoch reset to 1, counter slot zeroed at 6272 — the crash-suite
+  wound) recovering to the journal's newest epoch and the
+  verified counter by journal recovery alone
+  (eve.durability-recovery-probe). A silent journal = FAILED
+  cell with that diagnosis, never a fast time (the phase-2
+  window-drop failure shape).
+- Gate order: profile (a) FIRST (single writer, counter):
+  A vs Jw5s vs Jw1s vs Jc1000, interleaved rounds — the
+  disambiguation the spike never ran (windowed journal,
+  uncontended, current code). Its result banks as its own
+  entry the moment it lands. Then the grid: profiles (b)
+  4 writers counter, (c) 8 writers phase-3 mix, all configs,
+  60 s cells, phase-3 kill/recovery protocol.
+
+- GATE RESULT — profile (a), single JVM writer, counter only,
+  3 interleaved rounds (order rotated), 60 s cells, medians
+  (evidence: sweep-cell-a1-*.json in the evidence dir):
+  A 9,326 ops/s (9,770 / 9,243 / 9,326) · Jw5s 86.3
+  (75.1 / 86.5 / 86.3; 11 flushes, 456 epochs/flush, flush
+  mean 117–181 ms) · Jw1s 82.6 (78.0 / 82.6 / 85.4; 54
+  flushes, 92–95 epochs/flush, flush mean 98–104 ms) ·
+  Jc1000 86.1 (83.4 / 86.1 / 86.1; 5 flushes, exactly 1,000
+  epochs/flush, flush mean 197–283 ms).
+  ANSWER TO THE OPERATOR'S QUESTION: NO — uncontended, the
+  windowed journal on the current code does NOT return to
+  raw speed on this disk: ~86 ops/s against ~9,300 raw,
+  ~0.9% (~108x slower), and the trigger choice moves it by
+  less than 10%. Every J cell passed the engagement gate
+  (journal records on disk; the wounded copy recovered to
+  the journal's newest epoch and the verified counter by
+  journal alone) and every cell recovered correctly
+  (counter within [confirmed, total], 0 record violations).
+  MECHANISM, from the cells' own numbers: flush time is not
+  the cost — Jw1s spends ~5.4 s of its 60 s inside flushes,
+  Jc1000 ~1.2 s, Jw5s ~1.5 s; the other ~55 s runs at
+  ~86 commits/s, i.e. ~11.5 ms of per-commit cost. A
+  journal domain's commits are durable commits
+  (:durable-commits? on by construction): every swap forces
+  its ranges and the root around the publish, window or no
+  window. The trigger only prices the ADDITIONAL batched
+  sweep+record+force. (Consistent with phase 1: under
+  contention the raw mode slows toward this same per-commit
+  floor, and on fast disks the per-commit force is cheap,
+  hence parity there.)
+  Harness note: round 1's epochs/flush was miscomputed by a
+  runner bug (root epoch word is little-endian, journal
+  ints big-endian); fixed in the runner, r1 values
+  recomputed from the same files (Jc1000 1,000.0, Jw1s
+  86.6, Jw5s 397.8 in r1). Speeds and verdicts unaffected.
+
+- PROFILE (b) — 4 writers (JVM x2 + Node x2), counter only,
+  60 s cells (evidence: sweep-cell-b4-*.json):
+  A 5,951 ops/s · Jc100 132.3 (79 flushes, 100.5
+  epochs/flush, flush mean 109 ms) · J1000or1s 127.1
+  (106, 71.6, 114 ms) · Jc10000 126.0 (SEE BELOW) ·
+  Jc1000 120.2 (6, 1,019.5, 241 ms) · Jw5s 112.7 (22,
+  297.6, 133 ms) · Jw1s 106.3 (105, 60.7, 120 ms).
+  All J cells recovered correctly (counter in bounds, 0
+  violations). The J spread is 106–132 ops/s — the trigger
+  is again not the lever; four writers buy the journal
+  almost nothing over one (86 -> ~120 aggregate): the
+  per-commit force serializes across processes on the
+  shared disk.
+  Jc10000 FAILED THE ENGAGEMENT GATE — reported as a
+  failed cell, not a fast time: it committed 7,561 epochs
+  in the cell, fewer than its 10,000-epoch batch, so the
+  trigger never fired: 0 journal records, 0 flushes, the
+  wounded copy could not be journal-recovered. Its
+  126 ops/s is the speed of a journal that never
+  journaled. (Its ordinary recovery still verified —
+  SIGKILL leaves the page cache intact; nothing was
+  journal-carried because there was nothing in the
+  journal.) Lesson the table must carry: batch depth is
+  only meaningful against the achieved commit rate — at
+  ~126 epochs/s, a 10,000-epoch batch is a >60 s loss
+  window, indistinguishable from no journal inside the
+  cell.
+
+## Sweep reconciliation (2026-10-27, ~22:35 ET) — phase-1 J1000 ≈ A vs the gate's J ≈ 0.9% of A: NOT the same code
+
+The operator flagged the contradiction and ordered it reconciled
+from source + a matched pair before any more grid cells. Verdict:
+**the two measurements ran different code. Phase 1's perf tables
+were measured before the recovery floor fixes; the sweep runs
+after them. The single commit between them that touches the
+commit path is the difference.**
+
+CORRECTION to my gate and profile-(b) entries above: the
+mechanism I banked there ("per-commit durable force of a journal
+domain; ~11.5 ms/commit; the force serializes across processes")
+is WRONG and is superseded by this entry. Source, current tree
+(eve/src/eve/atom.cljc, swap-attempt!): for a journal batch > 1
+the pre-CAS whole-slab sweep is explicitly skipped — "(or (nil?
+journal) (<= (:limit journal) 1))", comment "a journal domain
+with a batch (J10) defers even this sweep to its flush" — and
+journal-note-commit! per commit is a pending-counter inc, with
+the flush (sweep + record + force) only at batch/window. The
+gate's flush accounting already showed this (Jc1000: 5 flushes,
+~1.4 s of the 60 s cell); the other ~55 s is NOT forces. The
+speeds in the gate/(b) entries stand as measurements of current
+code; only their mechanism sentences are retracted.
+
+The source-level difference (git, firsthand): the bench file
+eve/bench/eve/durability_bench.clj is byte-identical at
+06cf2244a56 (the commit that banked phase 1's final perf tables)
+and at f596fcb9511 (spike tip, the sweep's branch point). Between
+them, eve/src/eve/atom.cljc changes in four commits; one touches
+the commit/retire path: **aaf2fde5370, the recovery floor fixes**.
+Its part (b) makes the retire path's min-safe-epoch
+min(reader pins, journal :floor); :floor is pinned at the first
+flush into an empty journal ("later appends never lower it;
+checkpoint is the only advance" — journal-flush!) and advances
+only at checkpoint (journal-anchor!, from sync!/close). Neither
+the bench nor a sweep cell checkpoints mid-run, so the floor
+stays at the first flush's epoch for the whole run and every
+block retired after it is unreclaimable until close: the
+reclamation backlog grows with cumulative commits, and
+per-commit cost grows with the backlog. (The exact O(N) locus
+inside the retire/alloc path is not isolated; the growth shape
+is measured, see below. The floor fix is a CORRECTNESS fix — it
+closed the phase-2 recovery-floor finding, crash suite 72/72 —
+its perf price was never measured until tonight.)
+
+Matched pair — phase 1's own bench, same box, same night, same
+parameters, only the code revision varies (raw:
+evidence/recon-bench-2026-10-27.txt). J1000, counter, single
+writer, fresh tiny domain:
+
+  rev 06cf2244a56 (pre-floor-fix): warm 300/n 3000 = 535 µs/op;
+    warm 5000/n 3000 = 199 µs/op (flat at 8,000 commits;
+    flush means 82–185 ms — same flush pricing as current code,
+    so the disk is not the variable).
+  rev aaf2fde5370 (floor fix alone): warm 300/n 3000 =
+    9,658 µs/op.
+  rev f596fcb9511 (current code): warm 300/n 3000 = 5,446 µs/op;
+    warm 5000/n 3000 = 36,964 µs/op (per-commit cost grows with
+    cumulative commits — and the gate cell's own journal-size
+    crossings show the same shape in the sweep harness: a1-Jc1000
+    per-1,000-commit batch times ~1 s (first), 8, 11, 16, 19 s).
+
+So phase 1's J1000 ≈ A (410 µs/op evening, 61.4 µs Mac, 368 vs
+294 ops/s under contention) is TRUE of the pre-floor-fix code and
+reproduces tonight on that code. It does not hold of current
+code.
+
+**The journal's real uncontended price on this disk, current
+code:** there is no steady-state rate for a journal domain that
+never checkpoints — per-commit cost starts at phase-1 levels and
+grows ~linearly with commits since the floor epoch. Measured:
+~184 ops/s averaged over the first ~3,300 commits (bench,
+batch 1000), ~27 ops/s over commits 5,000–8,000, ~86 ops/s
+sustained-average across the sweep's 60 s single-writer cells.
+A writer that checkpoints periodically (sync! advances the
+floor via journal-anchor!) should bound the backlog; that rate
+is NOT measured yet — it is the open measurement this finding
+creates, and it reframes the sweep: on current code every J
+config's number is dominated by floor backlog, not by its flush
+trigger, which is why the trigger looked like "not the lever"
+in profiles (a) and (b). The grid resumes on this footing; the
+final table carries this reconciliation beside the profile-(a)
+answer.
+
+## Flush-advance floor (2026-10-27, ~23:55 ET) — lane opened on John's approval
+
+Branch `claude/eve-floor-advance` off the sweep tip 7ef8fbfe045.
+John approved the design the reconciliation created the question
+for: the retention floor does not need to wait for a checkpoint.
+Recovery installs the newest valid journal record; appends are
+sequential and forced per flush, so a crash can tear only the
+tail append and recovery falls back at most one record. The
+floor's protection therefore only needs to cover the two newest
+durable records.
+
+THE CHANGE (smallest form): the journal state gains a
+`:last-epoch` atom — the epoch of the newest record THIS process
+has durably appended. In journal-flush!, after the append is
+forced: if the floor was never set it pins at this record's epoch
+(as today, fresh journal); otherwise the floor advances to the
+previous flush's epoch (monotone — never backward, never above
+the stored previous epoch). Form note: "previous flush" is
+counted over this process's own appends. That is provably the
+conservative side of the global rule — records land in the
+journal in epoch order under the journal lock, so the record
+immediately before this process's newest append has an epoch
+>= this process's previous append; a per-process floor at the
+own-previous epoch never exceeds the global second-newest
+durable record's epoch. Floors were already per-process state
+whose staleness "only ever makes this process's flush more
+conservative" (fix (b)'s own docstring); reader pins still apply
+via the same min.
+
+NOT touched, deliberately: journal-anchor! (the checkpoint's
+journal-file anchor rule and its floor reset to the anchor epoch
+stay exactly as they are — the anchor is a different mechanism
+from the retire floor: it decides what the journal FILE holds,
+the floor decides what reclamation may free), journal-recover!'s
+floor seeding at open (oldest surviving record — still the right
+initial value before this process has appended anything), and
+flush-zero-queue! (reads the floor the same way).
+
+Legs: (1) crash suite 72/72 + a new never-checkpoint kill case;
+(2) phase-1 bench J1000 single writer to >=8,000 commits —
+success shape FLAT; (3) sweep 4-writer J1000 cell; (4) the c8
+remainder only if 1–3 hold.

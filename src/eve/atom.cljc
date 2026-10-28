@@ -370,8 +370,10 @@
   The journal pins that epoch the way a slow reader pins its read
   epoch: blocks reachable from it are not recycled while its record
   survives. The floor is per-process state set at recovery and
-  advanced only at checkpoint, so a stale local floor only ever
-  makes this process's flush more conservative."
+  advanced at every flush (to the previous flush's epoch — the
+  FLUSH-ADVANCE rule below, journal-flush!) and at checkpoint, so
+  a stale local floor only ever makes this process's flush more
+  conservative."
   [{:keys [root-r sio retire-q journal]}]
   (tally/flush! sio retire-q
                 (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
@@ -635,11 +637,34 @@
                      (.writeSync fs (get-in journal [:fc :fd]) (journal-record-bytes-js (:root-r ds)))
                      (.fsyncSync fs (get-in journal [:fc :fd])))))))
     (when journal
-      ;; first append into an empty journal pins the retention
-      ;; floor at that record's epoch (later appends never lower
-      ;; it; checkpoint is the only advance)
-      (when (and (:floor journal) (nil? @(:floor journal)))
-        (reset! (:floor journal) floor-epoch))
+      ;; RETENTION FLOOR — FLUSH-ADVANCE (John's ruling 2026-10-27,
+      ;; after the sweep reconciliation measured the checkpoint-only
+      ;; floor's price): the floor advances at EVERY flush, not only
+      ;; at checkpoint. Recovery installs the newest valid record;
+      ;; appends are sequential and forced per flush, so a crash can
+      ;; tear only the tail append and recovery falls back at most
+      ;; one record — protection only needs to cover the two newest
+      ;; durable records. So: a first append into a floor-less
+      ;; journal pins the floor at that record's epoch (the journal's
+      ;; only record is the oldest installable); every later append
+      ;; advances the floor to the PREVIOUS append's epoch.
+      ;; :last-epoch tracks this process's own appends; records land
+      ;; in epoch order under the journal lock, so the record before
+      ;; this process's newest append has an epoch >= its own
+      ;; previous one — the own-previous epoch never exceeds the
+      ;; global second-newest durable record's epoch, and the floor
+      ;; stays conservative. (journal-anchor!'s reset of the floor
+      ;; to the anchor epoch at checkpoint is a separate mechanism —
+      ;; the anchor decides what the journal FILE holds — and is
+      ;; unchanged; the max keeps the floor monotone across it.)
+      (when (:floor journal)
+        (if (nil? @(:floor journal))
+          (reset! (:floor journal) floor-epoch)
+          (when (and (:last-epoch journal) @(:last-epoch journal))
+            (reset! (:floor journal)
+                    (max @(:floor journal) @(:last-epoch journal))))))
+      (when (:last-epoch journal)
+        (reset! (:last-epoch journal) floor-epoch))
       (when (:last-flush journal) (reset! (:last-flush journal) (now-ms)))
       (when *flush-log*
         (swap! *flush-log* conj
@@ -852,8 +877,14 @@
                       ;; RETENTION FLOOR (fix (b)): the epoch the
                       ;; journal pins against reclamation, set at
                       ;; recovery (journal-recover!) and advanced
-                      ;; only at checkpoint (journal-anchor!).
-                      :floor   (clojure.core/atom nil)})
+                      ;; at every flush (journal-flush!, to the
+                      ;; previous flush's epoch) and at checkpoint
+                      ;; (journal-anchor!, to the anchor epoch).
+                      :floor   (clojure.core/atom nil)
+                      ;; FLUSH-ADVANCE: the epoch of the newest
+                      ;; record THIS process has durably appended —
+                      ;; the next flush advances :floor to it.
+                      :last-epoch (clojure.core/atom nil)})
           _        (when journal (journal-recover! root-r journal create?))
           journal  (cond-> journal
                      (:journal-window-ms opts)
