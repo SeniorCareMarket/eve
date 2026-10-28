@@ -1,0 +1,12 @@
+# run f3-gate-bb on 0ed56aefb eve tree 16f19d25f7a047cbf0e67fd93ba6dc5bb6ab8813
+# cmd (in eve/) bb test:bb eve.thread-net-test eve.thread-domain-test
+# start 2026-10-22 9:27:26 AM ET load 0.14 0.11 0.04 mem-in-use 504 MB
+
+Testing eve.thread-net-test
+
+Testing eve.thread-domain-test
+
+Ran 12 tests containing 143 assertions.
+0 failures, 0 errors.
+:summary {:test 12, :pass 143, :fail 0, :error 0}
+# end 2026-10-22 9:27:39 AM ET exit 0 wall 13s peak-mem-in-use 646 MB peak-process-tree-rss 229 MB load 0.25 0.14 0.05

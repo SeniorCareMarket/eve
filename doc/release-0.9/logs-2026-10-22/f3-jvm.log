@@ -1,0 +1,56 @@
+# run f3-jvm on e62b63020 eve tree 9911e168b93b8cbfa9f3539af511f77f023ea71f
+# cmd (in eve/) bash -c clojure -M:jvm-test
+# start 2026-10-22 11:03:01 AM ET load 1.29 1.41 1.39 mem-in-use 703 MB
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=38147 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+Cloning: https://github.com/cognitect-labs/test-runner.git
+Checking out: https://github.com/cognitect-labs/test-runner.git at 48c3c67f98362ba1e20526db4eeb6996209c050a
+Error building classpath. Failed to read artifact descriptor for org.clojure:tools.namespace:jar:1.1.0
+org.eclipse.aether.resolution.ArtifactDescriptorException: Failed to read artifact descriptor for org.clojure:tools.namespace:jar:1.1.0
+	at org.apache.maven.repository.internal.DefaultArtifactDescriptorReader.loadPom(DefaultArtifactDescriptorReader.java:255)
+	at org.apache.maven.repository.internal.DefaultArtifactDescriptorReader.readArtifactDescriptor(DefaultArtifactDescriptorReader.java:171)
+	at org.eclipse.aether.internal.impl.DefaultRepositorySystem.readArtifactDescriptor(DefaultRepositorySystem.java:263)
+	at clojure.tools.deps.extensions.maven$read_descriptor.invokeStatic(maven.clj:115)
+	at clojure.tools.deps.extensions.maven$fn__1322.invokeStatic(maven.clj:143)
+	at clojure.tools.deps.extensions.maven$fn__1322.invoke(maven.clj:143)
+	at clojure.lang.MultiFn.invoke(MultiFn.java:244)
+	at clojure.tools.deps$expand_deps$children_task__929$fn__931$fn__932.invoke(deps.clj:416)
+	at clojure.lang.AFn.applyToHelper(AFn.java:152)
+	at clojure.lang.AFn.applyTo(AFn.java:144)
+	at clojure.core$apply.invokeStatic(core.clj:667)
+	at clojure.core$with_bindings_STAR_.invokeStatic(core.clj:1990)
+	at clojure.core$with_bindings_STAR_.doInvoke(core.clj:1990)
+	at clojure.lang.RestFn.invoke(RestFn.java:428)
+	at clojure.lang.AFn.applyToHelper(AFn.java:156)
+	at clojure.lang.RestFn.applyTo(RestFn.java:135)
+	at clojure.core$apply.invokeStatic(core.clj:671)
+	at clojure.core$bound_fn_STAR_$fn__5837.doInvoke(core.clj:2020)
+	at clojure.lang.RestFn.invoke(RestFn.java:400)
+	at clojure.lang.AFn.call(AFn.java:18)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: org.eclipse.aether.resolution.ArtifactResolutionException: Could not transfer artifact org.clojure:tools.namespace:pom:1.1.0 from/to central (https://repo1.maven.org/maven2/): status code: 429, reason phrase: Too Many Requests (429)
+	at org.eclipse.aether.internal.impl.DefaultArtifactResolver.resolve(DefaultArtifactResolver.java:431)
+	at org.eclipse.aether.internal.impl.DefaultArtifactResolver.resolveArtifacts(DefaultArtifactResolver.java:235)
+	at org.eclipse.aether.internal.impl.DefaultArtifactResolver.resolveArtifact(DefaultArtifactResolver.java:212)
+	at org.apache.maven.repository.internal.DefaultArtifactDescriptorReader.loadPom(DefaultArtifactDescriptorReader.java:240)
+	... 23 more
+Caused by: org.eclipse.aether.transfer.ArtifactTransferException: Could not transfer artifact org.clojure:tools.namespace:pom:1.1.0 from/to central (https://repo1.maven.org/maven2/): status code: 429, reason phrase: Too Many Requests (429)
+	at org.eclipse.aether.connector.basic.ArtifactTransportListener.transferFailed(ArtifactTransportListener.java:52)
+	at org.eclipse.aether.connector.basic.BasicRepositoryConnector$TaskRunner.run(BasicRepositoryConnector.java:401)
+	at org.eclipse.aether.util.concurrency.RunnableErrorForwarder.lambda$wrap$0(RunnableErrorForwarder.java:73)
+	at org.eclipse.aether.connector.basic.BasicRepositoryConnector$DirectExecutor.execute(BasicRepositoryConnector.java:669)
+	at org.eclipse.aether.connector.basic.BasicRepositoryConnector.get(BasicRepositoryConnector.java:290)
+	at org.eclipse.aether.internal.impl.DefaultArtifactResolver.performDownloads(DefaultArtifactResolver.java:520)
+	at org.eclipse.aether.internal.impl.DefaultArtifactResolver.resolve(DefaultArtifactResolver.java:408)
+	... 26 more
+Caused by: org.apache.http.client.HttpResponseException: status code: 429, reason phrase: Too Many Requests (429)
+	at org.eclipse.aether.transport.http.HttpTransporter.handleStatus(HttpTransporter.java:541)
+	at org.eclipse.aether.transport.http.HttpTransporter.execute(HttpTransporter.java:363)
+	at org.eclipse.aether.transport.http.HttpTransporter.implGet(HttpTransporter.java:294)
+	at org.eclipse.aether.spi.connector.transport.AbstractTransporter.get(AbstractTransporter.java:72)
+	at org.eclipse.aether.connector.basic.BasicRepositoryConnector$GetTaskRunner.runTask(BasicRepositoryConnector.java:496)
+	at org.eclipse.aether.connector.basic.BasicRepositoryConnector$TaskRunner.run(BasicRepositoryConnector.java:396)
+	... 31 more
+# end 2026-10-22 11:03:06 AM ET exit 1 wall 5s peak-mem-in-use 810 MB peak-process-tree-rss 161 MB load 1.43 1.44 1.39

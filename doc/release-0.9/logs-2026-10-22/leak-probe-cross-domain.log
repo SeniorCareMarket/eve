@@ -1,0 +1,16 @@
+# run leak-probe on ce06eb343 eve tree 2f28d07fc634d032ed416b25f4348ddc6334634b
+# cmd (in eve/) bash -c java -cp "$(clojure -Spath -M:jvm-test)" clojure.main bench/eve/leak_probe.clj
+# start 2026-10-21 10:10:21 PM ET load 1.18 1.06 1.01 mem-in-use 586 MB
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=41583 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+path-copies blocks in use after N swaps: [[20 2746] [40 5436] [80 10094] [160 20854]]
+one-assoc blocks in use after N swaps: [[20 120] [40 183] [80 108] [160 159]]
+host-data blocks in use after N swaps: [[20 272] [40 380] [80 56] [160 380]]
+int-map-build blocks in use after N swaps: [[20 2921] [40 1670] [80 2921] [160 1670]]
+sorted-set-build blocks in use after N swaps: [[20 605] [40 3017] [80 3017] [160 2414]]
+int-map-transient blocks in use after N swaps: [[20 3775] [40 2127] [80 1333] [160 579]]
+Execution error (ExceptionInfo) at eve.codec/value+sio->eve-bytes (codec.cljc:687).
+An Eve value allocated in a different slab domain cannot be put in this one; build it inside swap! (or with the atom's domain sio, eve.atom/atom-sio)
+
+Full report at:
+/tmp/clojure-2175813501487806855.edn
+# end 2026-10-21 10:10:31 PM ET exit 1 wall 10s peak-mem-in-use 1292 MB load 1.30 1.09 1.02

@@ -1,0 +1,246 @@
+# run f-columnar-bb on f5faffaec eve tree af6cb7cfd347064bfc6b4d7c387a77d46c5412c3
+# cmd (in eve/) bb bench:bb
+# start 2026-10-21 11:41:14 PM ET load 0.72 0.90 1.25 mem-in-use 966 MB
+==============================================================
+  Eve Columnar Benchmarks — jvm
+  Each swap! does a multi-step pipeline of real work
+  2 warmup + 5 timed runs (trimmed mean of middle 3)
+==============================================================
+
+=== MMAP (persistent) ===
+
+--- 10K ---
+  Column Arithmetic [mmap] (n=10000)
+    Eve:   3.7ms  [3-4]
+    Stock: 2.0ms  [1-3]
+    Eve/Stock: 0.55x
+    Result: match
+
+  Filter + Aggregate [mmap] (n=10000)
+    Eve:   5.0ms  [5-6]
+    Stock: 0.7ms  [0-1]
+    Eve/Stock: 0.13x
+    Result: match
+
+  Sort + Top-N [mmap] (n=10000)
+    Eve:   44.3ms  [41-47]
+    Stock: 6.0ms  [5-7]
+    Eve/Stock: 0.14x
+    Result: match
+
+  Dataset Pipeline [mmap] (n=10000)
+    Eve:   39.0ms  [29-99]
+    Stock: 16.3ms  [16-18]
+    Eve/Stock: 0.42x
+    Result: match
+
+  Tensor Pipeline [mmap] (n=10000)
+    Eve:   7.3ms  [6-34]
+    Stock: 3.3ms  [3-4]
+    Eve/Stock: 0.45x
+    Result: match
+
+--- 100K ---
+  Column Arithmetic [mmap] (n=100000)
+    Eve:   33.0ms  [32-34]
+    Stock: 20.7ms  [19-30]
+    Eve/Stock: 0.63x
+    Result: match
+
+  Filter + Aggregate [mmap] (n=100000)
+    Eve:   44.7ms  [43-51]
+    Stock: 9.0ms  [8-11]
+    Eve/Stock: 0.20x
+    Result: match
+
+  Sort + Top-N [mmap] (n=100000)
+    Eve:   531.7ms  [497-554]
+    Stock: 76.0ms  [74-84]
+    Eve/Stock: 0.14x
+    Result: match
+
+  Dataset Pipeline [mmap] (n=100000)
+    Eve:   304.0ms  [286-362]
+    Stock: 243.7ms  [223-269]
+    Eve/Stock: 0.80x
+    Result: match
+
+  Tensor Pipeline [mmap] (n=99856)
+    Eve:   57.3ms  [43-116]
+    Stock: 27.7ms  [23-54]
+    Eve/Stock: 0.48x
+    Result: match
+
+--- 1M ---
+  Column Arithmetic [mmap] (n=1000000)
+    Eve:   339.0ms  [320-379]
+    Stock: 484.7ms  [402-534]
+    Eve/Stock: 1.43x
+    Result: match
+
+  Filter + Aggregate [mmap] (n=1000000)
+    Eve:   461.7ms  [416-519]
+    Stock: 86.3ms  [76-160]
+    Eve/Stock: 0.19x
+    Result: match
+
+  Sort + Top-N [mmap] (n=1000000)
+    Eve:   6401.7ms  [6117-6621]
+    Stock: 1190.3ms  [1047-1292]
+    Eve/Stock: 0.19x
+    Result: match
+
+  Dataset Pipeline [mmap] (n=1000000)
+    Eve:   3533.3ms  [3159-3706]
+    Stock: 3388.3ms  [3260-3567]
+    Eve/Stock: 0.96x
+    Result: match
+
+  Tensor Pipeline [mmap] (n=1000000)
+    Eve:   429.3ms  [394-466]
+    Stock: 384.0ms  [329-490]
+    Eve/Stock: 0.89x
+    Result: match
+
+
+## Eve Columnar Benchmark Results (jvm, mmap)
+
+| Benchmark              |     N |   Eve (ms) | Stock (ms) |  Speedup |
+|------------------------|-------|------------|------------|----------|
+| Column Arithmetic      |   10K |        3.7 |        2.0 |    0.55x |
+| Filter + Aggregate     |   10K |        5.0 |        0.7 |    0.13x |
+| Sort + Top-N           |   10K |       44.3 |        6.0 |    0.14x |
+| Dataset Pipeline       |   10K |       39.0 |       16.3 |    0.42x |
+| Tensor Pipeline        |   10K |        7.3 |        3.3 |    0.45x |
+| Column Arithmetic      |  100K |       33.0 |       20.7 |    0.63x |
+| Filter + Aggregate     |  100K |       44.7 |        9.0 |    0.20x |
+| Sort + Top-N           |  100K |      531.7 |       76.0 |    0.14x |
+| Dataset Pipeline       |  100K |      304.0 |      243.7 |    0.80x |
+| Tensor Pipeline        |   99K |       57.3 |       27.7 |    0.48x |
+| Column Arithmetic      |    1M |      339.0 |      484.7 |    1.43x |
+| Filter + Aggregate     |    1M |      461.7 |       86.3 |    0.19x |
+| Sort + Top-N           |    1M |     6401.7 |     1190.3 |    0.19x |
+| Dataset Pipeline       |    1M |     3533.3 |     3388.3 |    0.96x |
+| Tensor Pipeline        |    1M |      429.3 |      384.0 |    0.89x |
+
+=== IN-MEMORY (SAB/heap) ===
+
+--- 10K ---
+  Column Arithmetic [in-memory] (n=10000)
+    Eve:   3.3ms  [3-4]
+    Stock: 2.0ms  [1-2]
+    Eve/Stock: 0.60x
+    Result: match
+
+  Filter + Aggregate [in-memory] (n=10000)
+    Eve:   5.3ms  [5-6]
+    Stock: 1.0ms  [0-1]
+    Eve/Stock: 0.19x
+    Result: match
+
+  Sort + Top-N [in-memory] (n=10000)
+    Eve:   45.0ms  [43-49]
+    Stock: 9.0ms  [8-9]
+    Eve/Stock: 0.20x
+    Result: match
+
+  Dataset Pipeline [in-memory] (n=10000)
+    Eve:   45.7ms  [33-83]
+    Stock: 15.3ms  [15-17]
+    Eve/Stock: 0.34x
+    Result: match
+
+  Tensor Pipeline [in-memory] (n=10000)
+    Eve:   7.3ms  [7-44]
+    Stock: 2.3ms  [2-4]
+    Eve/Stock: 0.32x
+    Result: match
+
+--- 100K ---
+  Column Arithmetic [in-memory] (n=100000)
+    Eve:   34.7ms  [33-39]
+    Stock: 20.3ms  [19-27]
+    Eve/Stock: 0.59x
+    Result: match
+
+  Filter + Aggregate [in-memory] (n=100000)
+    Eve:   42.0ms  [40-49]
+    Stock: 7.0ms  [7-8]
+    Eve/Stock: 0.17x
+    Result: match
+
+  Sort + Top-N [in-memory] (n=100000)
+    Eve:   532.0ms  [508-579]
+    Stock: 97.3ms  [81-125]
+    Eve/Stock: 0.18x
+    Result: match
+
+  Dataset Pipeline [in-memory] (n=100000)
+    Eve:   326.0ms  [294-355]
+    Stock: 233.3ms  [220-262]
+    Eve/Stock: 0.72x
+    Result: match
+
+  Tensor Pipeline [in-memory] (n=99856)
+    Eve:   62.7ms  [43-111]
+    Stock: 32.0ms  [24-62]
+    Eve/Stock: 0.51x
+    Result: match
+
+--- 1M ---
+  Column Arithmetic [in-memory] (n=1000000)
+    Eve:   360.0ms  [339-411]
+    Stock: 432.7ms  [399-490]
+    Eve/Stock: 1.20x
+    Result: match
+
+  Filter + Aggregate [in-memory] (n=1000000)
+    Eve:   507.0ms  [470-634]
+    Stock: 116.7ms  [86-133]
+    Eve/Stock: 0.23x
+    Result: match
+
+  Sort + Top-N [in-memory] (n=1000000)
+    Eve:   6868.7ms  [6622-7263]
+    Stock: 1074.7ms  [1051-1199]
+    Eve/Stock: 0.16x
+    Result: match
+
+  Dataset Pipeline [in-memory] (n=1000000)
+    Eve:   3463.0ms  [3234-3653]
+    Stock: 3455.0ms  [3315-3607]
+    Eve/Stock: 1.00x
+    Result: match
+
+  Tensor Pipeline [in-memory] (n=1000000)
+    Eve:   488.7ms  [421-631]
+    Stock: 364.7ms  [320-423]
+    Eve/Stock: 0.75x
+    Result: match
+
+
+## Eve Columnar Benchmark Results (jvm, in-memory)
+
+| Benchmark              |     N |   Eve (ms) | Stock (ms) |  Speedup |
+|------------------------|-------|------------|------------|----------|
+| Column Arithmetic      |   10K |        3.3 |        2.0 |    0.60x |
+| Filter + Aggregate     |   10K |        5.3 |        1.0 |    0.19x |
+| Sort + Top-N           |   10K |       45.0 |        9.0 |    0.20x |
+| Dataset Pipeline       |   10K |       45.7 |       15.3 |    0.34x |
+| Tensor Pipeline        |   10K |        7.3 |        2.3 |    0.32x |
+| Column Arithmetic      |  100K |       34.7 |       20.3 |    0.59x |
+| Filter + Aggregate     |  100K |       42.0 |        7.0 |    0.17x |
+| Sort + Top-N           |  100K |      532.0 |       97.3 |    0.18x |
+| Dataset Pipeline       |  100K |      326.0 |      233.3 |    0.72x |
+| Tensor Pipeline        |   99K |       62.7 |       32.0 |    0.51x |
+| Column Arithmetic      |    1M |      360.0 |      432.7 |    1.20x |
+| Filter + Aggregate     |    1M |      507.0 |      116.7 |    0.23x |
+| Sort + Top-N           |    1M |     6868.7 |     1074.7 |    0.16x |
+| Dataset Pipeline       |    1M |     3463.0 |     3455.0 |    1.00x |
+| Tensor Pipeline        |    1M |      488.7 |      364.7 |    0.75x |
+
+==============================================================
+  Benchmarks complete.
+  Failures: 0
+==============================================================
+# end 2026-10-21 11:47:45 PM ET exit 0 wall 391s peak-mem-in-use 1983 MB peak-process-tree-rss 1390 MB load 1.01 1.00 1.16

@@ -1,0 +1,194 @@
+# run f3-nbb on 570e45a72 eve tree df5fadc8df344fd85792562440fe3ceb933f562a
+# cmd (in eve/) bash -c bb test:nbb
+# start 2026-10-22 11:16:57 AM ET load 0.92 1.00 1.14 mem-in-use 718 MB
+
+Testing eve.hamt-util-test
+
+Testing eve.coalesc-align-test
+
+Testing eve.eve-bytes-fixture-test
+eve-bytes fixtures on cljs: 52 rows, 19 skipped
+
+Testing eve.array-hosts-test
+
+Testing eve.dataset-test
+
+Testing eve.tensor-test
+
+Testing eve.deftype.rb-tree-test
+
+Testing eve.numeric-tags-test
+
+Testing eve.collection-hash-test
+
+Testing eve.reference-tag-test
+
+Testing eve.big-value-test
+
+Testing eve.sorted-coll-test
+
+Testing eve.keyring-test
+
+Testing eve.value-buffer-test
+
+Testing eve.vec-retire-test
+
+Testing eve.reclaim-test
+
+Testing eve.tally-test
+
+Testing eve.domain-open-test
+
+Testing eve.deftype.int-map-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.rrb-vector-test
+
+Testing eve.thread-host-test
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+eve.thread-host round trips: :nbb ms per 100 (5 batches, sorted): [27 29 34 36 36]
+true
+true
+
+Testing eve.thread-test
+eve.thread S1 identity: :nbb [[:binding 10] [:binding-task [10 20 30]] [:error [false eve.thread: task failed: boom {:x 7}]] [:future 3] [:future-local 21] [:laziness 7] [:nested 7] [:nested-pool-of-1 6] [:nested-task 112] [:pcalls [1 4]] [:pmap-2colls [11 22 33]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [3 6 9 12]] [:pvalues [3 12 ab]] [:with-pool [:p :q :p]]]
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+eve.thread round trips: :nbb :routed ms per 100 futures (median of 5): 93 · the adapter alone, ms per 100: 23 · a host operation, µs: 1 · bar: 230
+true
+true
+
+Testing eve.thread-meta-test
+
+Testing eve.thread-domain-test
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+
+Testing eve.thread-net-test
+(node:10291) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+
+Testing eve.thread-fold-test
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+
+Testing eve.thread-fold-group-test
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+:summary {:test 242, :pass 4617, :fail 0, :error 0}
+:worker-start-ms 5013
+# end 2026-10-22 11:28:21 AM ET exit 0 wall 684s peak-mem-in-use 5383 MB peak-process-tree-rss 4718 MB load 4.32 3.11 2.06

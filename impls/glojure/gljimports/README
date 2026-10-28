@@ -1,0 +1,3 @@
+gljimports.go is generated into the build dir by build.sh (glojure's own
+generator, cmd/gen-import-interop -packages
+syscall,unsafe,eveglj/region,eveglj/types,eveglj/host); it is not kept here.

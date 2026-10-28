@@ -1,0 +1,2 @@
+EVE-KERNEL: FATAL codec:     2: wasm trap: wasm `unreachable` instruction executed
+exit=1 wall=144s

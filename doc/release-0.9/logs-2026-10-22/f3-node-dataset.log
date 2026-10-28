@@ -1,0 +1,15 @@
+# run f3-node-dataset on 674de0539 eve tree 7a7ba6e0956324f891e0beecc8a8f62013740d3c
+# cmd (in eve/) bash -c node target/eve-test/all.js dataset
+# start 2026-10-22 10:56:34 AM ET load 2.71 1.95 1.50 mem-in-use 851 MB
+=== Eve Test Runner ===
+Suite: dataset
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.dataset-test
+
+Ran 23 tests containing 98 assertions.
+0 failures, 0 errors.
+# end 2026-10-22 10:56:37 AM ET exit 0 wall 3s peak-mem-in-use 892 MB peak-process-tree-rss 157 MB load 2.49 1.92 1.49

@@ -1,0 +1,21 @@
+# run node-deftype on e027a5f0 eve tree 5f8a0af64363686cea735f3700b3f085729ab989
+# cmd (in eve/) node target/eve-test/all.js deftype
+# start 2026-10-21 8:16:07 PM ET load 1.35 1.17 0.64 mem-in-use 604 MB
+=== Eve Test Runner ===
+Suite: deftype
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.deftype-test
+
+Testing eve.deftype.int-map-test
+
+Testing eve.deftype.rb-tree-test
+
+Testing eve.deftype.type-id-test
+
+Ran 63 tests containing 710 assertions.
+0 failures, 0 errors.
+# end 2026-10-21 8:16:09 PM ET exit 0 wall 2s peak-mem-in-use 605 MB load 1.35 1.17 0.64

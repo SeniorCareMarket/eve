@@ -1,0 +1,17 @@
+--- a/pkg/lang/var.go
++++ b/pkg/lang/var.go
+@@ -465,6 +465,14 @@
+ 	return goid.Get()
+ }
+ 
++// GoroutineID is the calling goroutine's id, as glojure keeps its thread
++// bindings under it (eve's glj-eve build: the identity eve's process adapter
++// keeps a thread's pinned epochs under; a stack trace's first line costs
++// tens of microseconds in an interpreted stack).
++func GoroutineID() int64 {
++	return goid.Get()
++}
++
+ func PushThreadBindings(bindings IPersistentMap) {
+ 	gid := getGoroutineID()
+ 

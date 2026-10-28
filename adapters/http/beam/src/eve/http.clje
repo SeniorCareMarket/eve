@@ -1,0 +1,83 @@
+(ns eve.http
+  "eve's http feature (adapters/README.md) over OTP's httpc (inets) — clojerl. `platform` answers what this host lends
+   eve.net (eve/src/eve/net/run.cljc): {:request f :request-all g}, f taking {:method :url :headers :body :as :body-as}
+   and answering {:status :headers :body} SYNCHRONOUSLY, as on every host; g sends a batch at once (httpc's async mode)
+   and the calling process receives every answer before it returns. The body conventions are eve.net.run's: :body-as
+   :b64 sends the bytes its base64 :body names, :body-as :bytes the byte array :body is; :as :b64 answers the response
+   body as base64, :as :bytes as a byte array (eve.host's, over the body's binary: eve.codec reads it); otherwise bodies
+   are UTF-8 text (a clojerl string is its UTF-8 binary). A transport failure answers {:error message}."
+  (:require [clojure.string :as str]
+            [eve.host :as h]))
+
+(defn- array->bin "a byte array's bytes as a binary" [a]
+  (erlang/list_to_binary (clj->erl (apply list (map (fn [i] (bit-and (h/aget a i) 0xFF)) (range (h/alength a)))))))
+
+(def TIMEOUT-MS 120000)
+
+;; inets and ssl started on each call (ensure_all_started is idempotent and cheap; clojerl's def takes no delay)
+(defn- start! [] (application/ensure_all_started :inets) (application/ensure_all_started :ssl))
+
+(defn- chars* [s] (erlang/binary_to_list (str s)))
+
+(defn- method [m] (keyword (str/lower-case (or m "GET"))))
+
+;; httpc takes a request with a body ({Url, Headers, ContentType, Body}) for post, put and patch only, and answers
+;; {error, invalid_request} to one without it — so a POST with no body (a network atom client's /deref) sends an empty
+;; body, as every other host's client does
+(def ^:private BODY-METHODS #{:post :put :patch})
+
+(defn- request-tuple [m {:keys [url headers body body-as]}]
+  (let [ctype (some (fn [[k v]] (when (= "content-type" (str/lower-case (name k))) (str v))) headers)
+        hs (clj->erl (apply list (keep (fn [[k v]] (when-not (= "content-type" (str/lower-case (name k)))
+                                                     #erl[(chars* (name k)) (chars* v)]))
+                                       headers)))]
+    (if (and (nil? body) (not (contains? BODY-METHODS m)))
+      #erl[(chars* url) hs]
+      #erl[(chars* url) hs (chars* (or ctype "application/octet-stream"))
+           (cond (nil? body) "" (= :b64 body-as) (base64/decode body) (= :bytes body-as) (array->bin body) :else body)])))
+
+(defn- answer [result as]
+  ;; result: #erl[#erl[version status reason] headers body], or #erl[:error reason]
+  (if (= :error (erlang/element 1 result))
+    {:error (str (erlang/element 2 result))}
+    (let [status-line (erlang/element 1 result)
+          body (erlang/element 3 result)]
+      {:status (erlang/element 2 status-line)
+       :headers (into {} (map (fn [h] [(str/lower-case (erlang/list_to_binary (erlang/element 1 h)))
+                                      (erlang/list_to_binary (erlang/element 2 h))])
+                              (erlang/element 2 result)))
+       :body (case as :b64 (base64/encode body) :bytes (h/const-bytes (erlang/binary_to_list body)) body)})))
+
+(defn request [req]
+  (start!)
+  (let [r (httpc/request (method (:method req)) (request-tuple (method (:method req)) req) #erl(#erl[:timeout TIMEOUT-MS])
+                         #erl(#erl[:body_format :binary]))]
+    (if (= :ok (erlang/element 1 r))
+      (answer (erlang/element 2 r) (:as req))
+      (answer r (:as req)))))
+
+(defn request-all
+  "every request sent at once (httpc's async mode); the calling process receives every answer, in their order"
+  [reqs]
+  (start!)
+  (let [ids (mapv (fn [req]
+                    (let [r (httpc/request (method (:method req)) (request-tuple (method (:method req)) req) #erl(#erl[:timeout TIMEOUT-MS])
+                                           #erl(#erl[:sync false] #erl[:body_format :binary]))]
+                      (if (= :ok (erlang/element 1 r)) (erlang/element 2 r) {:error (str (erlang/element 2 r))})))
+                  reqs)
+        pending (set (remove map? ids))
+        got (loop [left pending acc {}]
+              (if (empty? left)
+                acc
+                (let [[rid result] (receive* #erl[:http #erl[rid result]] [rid result]
+                                             (after TIMEOUT-MS [nil nil]))]
+                  (if (nil? rid)
+                    acc
+                    (recur (disj left rid) (assoc acc rid result))))))]
+    (mapv (fn [req id]
+            (cond (map? id) id
+                  (contains? got id) (answer (get got id) (:as req))
+                  :else {:error (str "no answer within " TIMEOUT-MS " ms")}))
+          reqs ids)))
+
+(defn platform [] {:request request :request-all request-all})

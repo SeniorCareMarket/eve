@@ -1,0 +1,18 @@
+# run f-node-thread-domain on 0597010ad eve tree 0e3f361f9a0edef0547b652efedbf7a4d0def055
+# cmd (in eve/) node target/eve-test/all.js thread-domain
+# start 2026-10-21 11:11:08 PM ET load 2.21 1.88 2.50 mem-in-use 971 MB
+=== Eve Test Runner ===
+Suite: thread-domain
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.thread-domain-test
+
+Testing eve.thread-net-test
+
+Ran 12 tests containing 146 assertions.
+0 failures, 0 errors.
+Worker start: 991 ms (the last worker's, eve.thread-host/driving)
+# end 2026-10-21 11:11:44 PM ET exit 0 wall 36s peak-mem-in-use 2640 MB peak-process-tree-rss 1620 MB load 1.69 1.78 2.45

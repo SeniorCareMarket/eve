@@ -1,0 +1,90 @@
+# run m-bb on 7ab89d8c2 eve tree 2b80d8aa990520826d98e7223b64d49454ebafb4
+# cmd (in eve/) bash -c bb test:bb
+# start 2026-10-23 2:51:18 PM ET load 2.49 1.88 1.63 mem-in-use 977 MB
+
+Testing eve.hamt-util-test
+
+Testing eve.coalesc-align-test
+
+Testing eve.eve-bytes-fixture-test
+eve-bytes fixtures on bb: 71 rows, 0 skipped
+
+Testing eve.array-hosts-test
+
+Testing eve.dataset-test
+
+Testing eve.tensor-test
+
+Testing eve.deftype.rb-tree-test
+
+Testing eve.numeric-tags-test
+
+Testing eve.collection-hash-test
+
+Testing eve.reference-tag-test
+
+Testing eve.big-value-test
+
+Testing eve.sorted-coll-test
+
+Testing eve.keyring-test
+
+Testing eve.value-buffer-test
+
+Testing eve.vec-retire-test
+
+Testing eve.reclaim-test
+
+Testing eve.descriptor-table-test
+
+Testing eve.tally-test
+
+Testing eve.read-region-test
+
+Testing eve.domain-open-test
+
+Testing eve.deftype.int-map-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.rrb-vector-test
+
+Testing eve.thread-host-test
+eve.thread-host round trips: :bb ms per 100 (5 batches, sorted): [5 5 6 6 8]
+
+Testing eve.thread-test
+eve.thread round trips: :bb :local ms per 100 futures (median of 5): 15 · the adapter alone, ms per 100: 5 · a host operation, µs: 1 · bar: 100
+eve.thread S1 identity: :bb [[:binding 10] [:binding-task [10 20 30]] [:error [false eve.thread: task failed: boom {:x 7}]] [:future 3] [:future-local 21] [:laziness 7] [:nested 7] [:nested-pool-of-1 6] [:nested-task 112] [:pcalls [1 4]] [:pmap-2colls [11 22 33]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [3 6 9 12]] [:pvalues [3 12 ab]] [:with-pool [:p :q :p]]]
+
+Testing eve.thread-meta-test
+
+Testing eve.thread-domain-test
+
+Testing eve.thread-net-test
+
+Testing eve.thread-fold-test
+
+Testing eve.thread-fold-group-test
+
+Testing eve.aegis.rsabssa-test
+
+Testing eve.aegis.h2c-test
+
+Testing eve.aegis.merkle-test
+
+Testing eve.aegis.clsag-test
+clsag verify ring 8: 1218 ms (through eve.crypto's ed25519-mul-add rows)
+clsag verify ring 16: 2258 ms (through eve.crypto's ed25519-mul-add rows)
+clsag verify ring 32: 5244 ms (through eve.crypto's ed25519-mul-add rows)
+clsag verify ring 64: 11991 ms (through eve.crypto's ed25519-mul-add rows)
+
+Testing eve.aegis.claims-test
+
+Testing eve.net.crypto-fast-path-test
+ed25519-mul-add: adapter 58.2 ms
+ed25519-mul-add: portable 831 ms
+
+Ran 300 tests containing 6189 assertions.
+0 failures, 0 errors.
+:summary {:test 300, :pass 6189, :fail 0, :error 0}
+# end 2026-10-23 3:04:12 PM ET exit 0 wall 774s peak-mem-in-use 1090 MB peak-process-tree-rss 384 MB load 1.00 1.09 1.31

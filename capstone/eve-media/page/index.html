@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eve-media</title>
+<style>
+  :root { --bg: #fafafa; --fg: #1c1c1c; --muted: #666; --line: #ddd; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #e8e8e8; --muted: #9a9a9a; --line: #333; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  h2 { font-size: 15px; margin: 16px 0 4px; }
+  header p, small { color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; vertical-align: middle; }
+  .chip { display: inline-block; color: #fff; border-radius: 10px; padding: 1px 8px; margin: 1px; font-size: 12px; }
+  .chip .on { opacity: 0.85; }
+  .rt { display: inline-block; color: #fff; border-radius: 4px; padding: 0 5px; font-size: 11px; font-weight: 600; }
+  header h1 { display: inline; margin-right: 10px; }
+  .sub { display: inline; font-size: 13px; color: var(--fg); }
+  .wait { color: #e65100; }
+  .explain { margin: 6px 0 8px; font-size: 13px; }
+  .explain .lead { margin: 0; }
+  .explain summary { cursor: pointer; color: var(--muted); }
+  .explain ol { margin: 4px 0; padding-left: 20px; max-width: 980px; }
+  .explain code { font-size: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+  .card { border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 5px; padding: 4px 6px;
+          font-size: 12px; line-height: 1.35; cursor: default; }
+  .card .head { display: flex; gap: 5px; align-items: center; }
+  .card .head small { color: var(--muted); }
+  .card .st { margin-left: auto; }
+  .card .role { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now .job { font-weight: 600; }
+  .feed { list-style: none; padding: 0; margin: 8px 0 0; max-height: 7.6em; overflow-y: auto; font-size: 12px;
+          border: 1px solid var(--line); border-radius: 5px; }
+  .feed li { padding: 1px 6px; border-bottom: 1px solid var(--line); }
+  .feed .t { font-variant-numeric: tabular-nums; color: var(--muted); }
+  #requeues ul { margin: 6px 0; font-size: 12px; }
+  .chip { font-size: 11px; padding: 0 6px; }
+  td button { font-size: 11px; padding: 0 4px; }
+  .err { color: #c62828; }
+  button { font: inherit; font-size: 12px; margin: 1px; cursor: pointer; }
+  #app { overflow-x: auto; }
+</style>
+</head>
+<body>
+<div id="app">loading…</div>
+<script src="/js/main.js"></script>
+</body>
+</html>

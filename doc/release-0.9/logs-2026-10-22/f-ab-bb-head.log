@@ -1,0 +1,68 @@
+# run f-ab-bb-head on a707ebc61 eve tree d2f48a52391c96e655ba664717c03bb8fbe26e23
+# cmd (in eve/) bash -c bb test:bb
+# start 2026-10-22 5:07:31 AM ET load 1.18 2.61 3.92 mem-in-use 891 MB
+
+Testing eve.hamt-util-test
+
+Testing eve.coalesc-align-test
+
+Testing eve.eve-bytes-fixture-test
+eve-bytes fixtures on bb: 71 rows, 0 skipped
+
+Testing eve.array-hosts-test
+
+Testing eve.dataset-test
+
+Testing eve.tensor-test
+
+Testing eve.deftype.rb-tree-test
+
+Testing eve.numeric-tags-test
+
+Testing eve.collection-hash-test
+
+Testing eve.reference-tag-test
+
+Testing eve.big-value-test
+
+Testing eve.sorted-coll-test
+
+Testing eve.keyring-test
+
+Testing eve.value-buffer-test
+
+Testing eve.vec-retire-test
+
+Testing eve.reclaim-test
+
+Testing eve.tally-test
+
+Testing eve.domain-open-test
+
+Testing eve.deftype.int-map-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.rrb-vector-test
+
+Testing eve.thread-host-test
+eve.thread-host round trips: :bb ms per 100 (5 batches, sorted): [4 5 5 6 8]
+
+Testing eve.thread-test
+eve.thread round trips: :bb :local ms per 100 futures (median of 5): 15 · the adapter alone, ms per 100: 5 · a host operation, µs: 0 · bar: 100
+eve.thread S1 identity: :bb [[:binding 10] [:binding-task [10 20 30]] [:error [false eve.thread: task failed: boom {:x 7}]] [:future 3] [:future-local 21] [:laziness 7] [:nested 7] [:nested-pool-of-1 6] [:nested-task 112] [:pcalls [1 4]] [:pmap-2colls [11 22 33]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [3 6 9 12]] [:pvalues [3 12 ab]] [:with-pool [:p :q :p]]]
+
+Testing eve.thread-meta-test
+
+Testing eve.thread-domain-test
+
+Testing eve.thread-net-test
+
+Testing eve.thread-fold-test
+
+Testing eve.thread-fold-group-test
+
+Ran 247 tests containing 4748 assertions.
+0 failures, 0 errors.
+:summary {:test 247, :pass 4748, :fail 0, :error 0}
+# end 2026-10-22 5:14:22 AM ET exit 0 wall 411s peak-mem-in-use 1045 MB peak-process-tree-rss 293 MB load 1.22 1.44 2.88

@@ -1,0 +1,239 @@
+(ns eve.jvm-map-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.mem :as mem]
+            [eve.map  :as eve-map]
+            [eve.vec  :as eve-vec]
+            [eve.set  :as eve-set]
+            [eve.list :as eve-list]))
+
+(defmacro with-heap-slab [& body]
+  `(let [~'sio (alloc/make-jvm-heap-slab-ctx {})]
+     ~@body))
+
+(deftest empty-map-roundtrip
+  (testing "empty map"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= {} (into {} m)))
+        (is (zero? (count m)))))))
+
+(deftest primitive-kv-roundtrip
+  (testing "map with primitive keys and values"
+    (with-heap-slab
+      (let [src {:a 1 :b "hello" :c true :d nil}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= src (into {} m)))
+        (is (= 4 (count m)))
+        (is (= 1 (get m :a)))
+        (is (= "hello" (get m :b)))))))
+
+(deftest keyword-lookup
+  (testing "get returns correct value or default"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {:x 42})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= 42 (get m :x)))
+        (is (nil? (get m :missing)))
+        (is (= :default (get m :missing :default)))))))
+
+(deftest map-reduce
+  (testing "kvreduce visits all entries"
+    (with-heap-slab
+      (let [src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            result (reduce-kv (fn [acc k v] (assoc acc k v)) {} m)]
+        (is (= src result))))))
+
+(deftest large-map-roundtrip
+  (testing "map with 100 entries"
+    (with-heap-slab
+      (let [src (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 100)))
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= src (into {} m)))))))
+
+(deftest map-seq
+  (testing "seq returns all key-value pairs"
+    (with-heap-slab
+      (let [src {:p 10 :q 20}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= (set src) (set (seq m))))))))
+
+(deftest nested-map-with-vec-value
+  (testing "map value is a vector — exercises value+sio->eve-bytes nested path"
+    (with-heap-slab
+      (let [src {:nums [1 2 3] :tags [:a :b]}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= src (into {} m)))))))
+
+(deftest nested-map-with-map-value
+  (testing "map value is itself a map — exercises recursive slab allocation"
+    (with-heap-slab
+      (let [src {:outer {:inner 42}}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= src (into {} m)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 2a: Native dissoc tests
+;; ---------------------------------------------------------------------------
+
+(deftest dissoc-returns-eve-hash-map
+  (testing "dissoc returns EveHashMap, not PersistentHashMap"
+    (with-heap-slab
+      (let [src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (dissoc m :b)]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= {:a 1 :c 3} (into {} m2)))
+        (is (= 2 (count m2)))))))
+
+(deftest dissoc-missing-key
+  (testing "dissoc on missing key returns same map"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {:x 1})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (dissoc m :missing)]
+        (is (identical? m m2))))))
+
+(deftest dissoc-all-keys
+  (testing "dissoc-ing all keys produces empty map"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {:a 1 :b 2})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (-> m (dissoc :a) (dissoc :b))]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (zero? (count m2)))
+        (is (= {} (into {} m2)))))))
+
+(deftest dissoc-roundtrip-large
+  (testing "assoc N keys, dissoc some, verify remaining"
+    (with-heap-slab
+      (let [src  (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 50)))
+            hdr  (eve-map/jvm-write-map! sio src)
+            m    (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            ks   (take 20 (keys src))
+            m2   (reduce dissoc m ks)
+            exp  (apply dissoc src ks)]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= (count exp) (count m2)))
+        (is (= exp (into {} m2)))))))
+
+(deftest assoc-collision-native
+  (testing "assoc into collision node stays as EveHashMap"
+    (with-heap-slab
+      (let [;; Build a large map that likely has collision nodes
+            src (into {} (map (fn [i] [(keyword (str "collision-" i)) i]) (range 200)))
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (assoc m :new-key 999)]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= 999 (get m2 :new-key)))
+        (is (= 201 (count m2)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 3: IFn tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-ifn
+  (testing "EveHashMap implements IFn"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {:a 1 :b 2})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= 1 (m :a)))
+        (is (= 2 (m :b)))
+        (is (nil? (m :c)))
+        (is (= :default (m :c :default)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 4: IHashEq + print-method tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-hasheq
+  (testing "hash of EveHashMap equals hash of equivalent Clojure map"
+    (with-heap-slab
+      (let [src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= (hash src) (hash m)))))))
+
+(deftest map-print-method
+  (testing "pr-str prints as map literal"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {:a 1})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)]
+        (is (= "{:a 1}" (pr-str m)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 5a: IReduceInit / IReduce tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-reduce-init
+  (testing "reduce with init collects all entries"
+    (with-heap-slab
+      (let [src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            result (reduce conj [] m)]
+        (is (= (set src) (set result)))))))
+
+(deftest map-reduce-no-init
+  (testing "reduce without init works"
+    (with-heap-slab
+      (let [src {:a 1 :b 2 :c 3}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            result (reduce (fn [acc e] (conj acc e)) m)]
+        (is (some? result))))))
+
+(deftest map-reduce-early-termination
+  (testing "reduce with reduced stops early"
+    (with-heap-slab
+      (let [src (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 20)))
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            result (reduce (fn [acc _] (if (>= (count acc) 5) (reduced acc) (conj acc 1)))
+                           [] m)]
+        (is (= 5 (count result)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 6a: Transient tests
+;; ---------------------------------------------------------------------------
+
+(deftest map-transient-roundtrip
+  (testing "transient -> assoc! -> persistent! roundtrip"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {:a 1})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (persistent! (assoc! (transient m) :b 2))]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= {:a 1 :b 2} (into {} m2)))))))
+
+(deftest map-transient-batch-assoc
+  (testing "batch assoc! builds correct map"
+    (with-heap-slab
+      (let [hdr (eve-map/jvm-write-map! sio {})
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (persistent! (reduce (fn [t i] (assoc! t (keyword (str "k" i)) i))
+                                     (transient m) (range 50)))]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= 50 (count m2)))
+        (doseq [i (range 50)]
+          (is (= i (get m2 (keyword (str "k" i)))) (str "key k" i)))))))
+
+(deftest map-transient-dissoc
+  (testing "dissoc! removes keys"
+    (with-heap-slab
+      (let [src {:a 1 :b 2 :c 3 :d 4}
+            hdr (eve-map/jvm-write-map! sio src)
+            m   (eve-map/jvm-eve-hash-map-from-offset sio hdr)
+            m2  (persistent! (-> (transient m) (dissoc! :b) (dissoc! :d)))]
+        (is (instance? eve.map.EveHashMap m2))
+        (is (= {:a 1 :c 3} (into {} m2)))))))

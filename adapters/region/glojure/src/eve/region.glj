@@ -1,0 +1,108 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2) on glojure, over eve's Go region package
+   compiled into glj-eve (eve/impls/glojure/region, its build: impls/glojure/build.sh): a byte slice in Go's heap, or a
+   file mapped MAP_SHARED; the atomics Go's sync/atomic (sequentially consistent), wait/notify the futex syscall (outside Linux a 100 µs poll: impls/glojure/region/wait_other.go), bulk
+   bytes glojure's byte arrays ([]int8).
+
+   make-heap-region and open-mmap-region open them; lustre-region? says whether a region's atomics are fcntl byte-range
+   locks (a Lustre mount: open-mmap-region with {:lustre? true}, whose read-modify-writes each take the 4 bytes' lock).
+   A region is a record (glojure's own type: it has no deftype) extended to eve.mem's protocols."
+  (:require [eve.mem :as mem]))
+
+(extend-protocol mem/IHostAtomics
+  go/any
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _byte-off f] (f)))
+
+(defrecord GljRegion [r size])
+
+(extend-type GljRegion
+  mem/IMemRegion
+  (-byte-length [this] (:size this))
+  (-load-i32 [this off] (eveglj:region.Load32 (:r this) off))
+  (-store-i32! [this off v] (eveglj:region.Store32 (:r this) off v) nil)
+  (-cas-i32! [this off expected desired] (eveglj:region.CAS32 (:r this) off expected desired))
+  (-add-i32! [this off delta] (eveglj:region.Add32 (:r this) off delta))
+  (-sub-i32! [this off delta] (eveglj:region.Add32 (:r this) off (- delta)))
+  (-exchange-i32! [this off v] (eveglj:region.Exchange32 (:r this) off v))
+  (-load-i64 [this off] (eveglj:region.Load64 (:r this) off))
+  (-store-i64! [this off v] (eveglj:region.Store64 (:r this) off v) nil)
+  (-cas-i64! [this off expected desired] (eveglj:region.CAS64 (:r this) off expected desired))
+  (-add-i64! [this off delta] (eveglj:region.Add64 (:r this) off delta))
+  (-sub-i64! [this off delta] (eveglj:region.Add64 (:r this) off (- delta)))
+  (-wait-i32! [this off expected timeout-ms]
+    (case (eveglj:region.Wait32 (:r this) off expected timeout-ms) 1 :not-equal 2 :timed-out :ok))
+  (-notify-i32! [this off n] (eveglj:region.Notify32 (:r this) off n))
+  (-supports-watch? [_] true)
+  (-read-bytes [this off len] (eveglj:region.ReadBytes (:r this) off len))
+  (-write-bytes! [this off src] (eveglj:region.WriteBytes (:r this) off src) nil))
+
+;; A Lustre mount's region: its read-modify-writes take the fcntl lock on the 4 (or 8) bytes they change, so they are
+;; atomic against every process honouring the lock; loads, stores and bytes are the plain region's.
+(defrecord GljLockedRegion [r size])
+
+(defn- under-lock [this off n f]
+  (let [r (:r this) err (eveglj:region.Lock r off n)]
+    (when err (throw (ex-info (str "eve.region: fcntl lock: " err) {:offset off})))
+    (try (f r) (finally (eveglj:region.Unlock r off n)))))
+
+(extend-type GljLockedRegion
+  mem/IMemRegion
+  (-byte-length [this] (:size this))
+  (-load-i32 [this off] (eveglj:region.Load32 (:r this) off))
+  (-store-i32! [this off v] (eveglj:region.Store32 (:r this) off v) nil)
+  (-cas-i32! [this off expected desired]
+    (under-lock this off 4 (fn [r] (let [cur (eveglj:region.Load32 r off)]
+                                     (when (== cur expected) (eveglj:region.Store32 r off desired))
+                                     cur))))
+  (-add-i32! [this off delta]
+    (under-lock this off 4 (fn [r] (let [cur (eveglj:region.Load32 r off)]
+                                     (eveglj:region.Store32 r off (+ cur delta))
+                                     cur))))
+  (-sub-i32! [this off delta] (mem/-add-i32! this off (- delta)))
+  (-exchange-i32! [this off v]
+    (under-lock this off 4 (fn [r] (let [cur (eveglj:region.Load32 r off)] (eveglj:region.Store32 r off v) cur))))
+  (-load-i64 [this off] (eveglj:region.Load64 (:r this) off))
+  (-store-i64! [this off v] (eveglj:region.Store64 (:r this) off v) nil)
+  (-cas-i64! [this off expected desired]
+    (under-lock this off 8 (fn [r] (let [cur (eveglj:region.Load64 r off)]
+                                     (when (== cur expected) (eveglj:region.Store64 r off desired))
+                                     cur))))
+  (-add-i64! [this off delta]
+    (under-lock this off 8 (fn [r] (let [cur (eveglj:region.Load64 r off)]
+                                     (eveglj:region.Store64 r off (+ cur delta))
+                                     cur))))
+  (-sub-i64! [this off delta] (mem/-add-i64! this off (- delta)))
+  ;; no futex across a lock-only mount: a bounded poll, and a notify that wakes nobody (0 is a legal answer, §2.3)
+  (-wait-i32! [this off expected timeout-ms]
+    (let [deadline (+ (.UnixMilli (time.Now)) (if (neg? timeout-ms) 1000000000000 timeout-ms))]
+      (loop []
+        (cond (not (== expected (eveglj:region.Load32 (:r this) off))) :not-equal
+              (>= (.UnixMilli (time.Now)) deadline) :timed-out
+              :else (do (time.Sleep (time.Duration 1000000)) (recur))))))
+  (-notify-i32! [_ _off _n] 0)
+  (-supports-watch? [_] false)
+  (-read-bytes [this off len] (eveglj:region.ReadBytes (:r this) off len))
+  (-write-bytes! [this off src] (eveglj:region.WriteBytes (:r this) off src) nil))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed MAP_SHARED region of size-bytes at path-str. The file grows to size-bytes when it is
+   shorter and is never truncated."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes opts]
+   (let [[r err] (if (:lustre? opts)
+                   (eveglj:region.MmapLocked path-str size-bytes)
+                   (eveglj:region.Mmap path-str size-bytes))]
+     (when err (throw (ex-info (str "eve.region: " err) {:path path-str})))
+     (if (:lustre? opts) (->GljLockedRegion r size-bytes) (->GljRegion r size-bytes)))))
+
+(defn make-heap-region
+  "An IMemRegion over size-bytes of zeroed memory in Go's heap, shared by the process's goroutines (never freed: a
+   region lives as long as its domain)."
+  [size-bytes]
+  (->GljRegion (eveglj:region.Heap size-bytes) size-bytes))
+
+(defn lustre-region?
+  "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
+  [r]
+  (instance? GljLockedRegion r))

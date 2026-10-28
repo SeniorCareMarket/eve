@@ -1,0 +1,110 @@
+;; eve's hosts: each one's adapter roots, after eve's src (adapters/README.md).
+;; A host is the adapters for its capabilities; hosts with the same capability
+;; share its adapter. bb.edn's tasks and the coop capstone read this file;
+;; deps.edn (the JVM's :paths, ClojureScript's :node-test, the browser's :browser-test) lists the same roots.
+{:jvm  ["adapters/slab-io/protocol/src" "adapters/http/java/src" "adapters/http-server/jdk/src" "adapters/crypto/java/src"
+        "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src"
+        "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
+        "adapters/types/jvm/src" "adapters/types/js/src"]
+ :cljs ["adapters/slab-io/protocol/src" "adapters/slab-io/cljs-compiler/src" "adapters/http/node/src" "adapters/http-server/node/src"
+        "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
+        "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
+        "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
+        "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/thread/node/src"
+        ;; the compiler's own Clojure, a JVM (its macros run there and load
+        ;; eve's JVM runtime): the JVM's adapters, .clj files ClojureScript
+        ;; never reads (the byte-array codec's .cljc yields to the .cljs one)
+        "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src"
+        "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
+        "adapters/types/jvm/src" "adapters/types/js/src"]
+ ;; ClojureScript in a browser: ClojureScript's adapters, the browser's threads (its main thread cannot block, and
+ ;; a worker reads no port synchronously), synchronous XHR for the network atom and the portable crypto (WebCrypto is
+ ;; promise-only); built and run by bb test:browser
+ :browser ["adapters/slab-io/protocol/src" "adapters/slab-io/cljs-compiler/src" "adapters/http/browser/src"
+           "adapters/crypto/browser/src" "adapters/crypto/js-bigint/src" "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
+           "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
+           "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src"
+           "adapters/thread/browser/src"
+           "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src"
+           "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
+           "adapters/types/jvm/src" "adapters/types/js/src"]
+ :bb   ["adapters/slab-io/protocol/src" "adapters/http/java/src" "adapters/http-server/httpkit/src" "adapters/crypto/java/src"
+        "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/region/jvm-nio-lock/src"
+        "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
+        "adapters/types/bb/src"]
+ :nbb  ["adapters/slab-io/protocol/src" "adapters/http/node/src" "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
+        "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/nbb/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
+        "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/thread/node/src"
+        "adapters/types/js/src" "adapters/types/nbb/src"]
+ ;; Scittle (SCI in a browser, interpreted from source like nbb; a page's loader reads these roots
+ ;; over HTTP in a cross-origin isolated page's worker): nbb's interpreted-ClojureScript adapters with the browser's
+ ;; http, crypto and threads. Run: an aegis chat seat's 43 namespaces, in a page;
+ ;; the slab collections (types, regions, slabs) have not been run on it
+ :scittle ["adapters/slab-io/protocol/src" "adapters/http/browser/src" "adapters/crypto/browser/src"
+           "adapters/crypto/js-bigint/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
+           "adapters/coll/nbb/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
+           "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src"
+           "adapters/thread/browser/src" "adapters/types/js/src" "adapters/types/nbb/src"]
+ ;; cherry (npm cherry-cljs): ClojureScript compiled file by file to ES modules over cherry's own cljs.core, run on
+ ;; Node — ClojureScript's Node adapters with eve.host's functions over that core module (adapters/core/cherry) and
+ ;; cherry's completion (clojure.edn; its compiler's local shadowing, applied at the build); the current thread only
+ ;; (thread/none: the Node thread adapter's #queue needs a PersistentQueue cherry's core does not export, and its
+ ;; entry lookup Closure's goog); a program built file by file with cherry's compiler
+ :cherry ["adapters/slab-io/protocol/src" "adapters/http/node/src" "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
+          "adapters/core/cherry/src" "adapters/completion/cherry/src" "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src"
+          "adapters/region/js/src" "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src"
+          "adapters/process/node/src" "adapters/thread/none/src" "adapters/types/js/src"]
+ :cljr ["adapters/slab-io/protocol/src" "adapters/http/clr/src" "adapters/crypto/clr/src"
+        "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/clr/src"
+        "adapters/encoding/clr/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/clr/src" "adapters/thread/clr/src"
+        "adapters/types/clr/src"]
+ :lpy  ["adapters/slab-io/protocol/src" "adapters/http/python/src" "adapters/crypto/python/src"
+        "adapters/core/clojure/src" "adapters/completion/basilisp/src" "adapters/coll/basilisp/src" "adapters/slab/heap/src" "adapters/region/ctypes/src"
+        "adapters/encoding/python/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/python/src" "adapters/thread/python/src"
+        "adapters/types/basilisp/src"]
+ :jolt ["adapters/slab-io/protocol/src" "adapters/http/socket/src" "adapters/crypto/jolt/src"
+        "adapters/core/clojure/src" "adapters/completion/jolt/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jolt-ffi/src"
+        "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
+        "adapters/types/jvm/src" "adapters/types/js/src"]
+ :clje ["adapters/slab-io/protocol/src" "adapters/http/beam/src" "adapters/crypto/beam/src"
+        "adapters/core/beam/src" "adapters/coll/beam/src" "adapters/slab/heap/src" "adapters/region/beam/src"
+        "adapters/encoding/beam/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/beam/src" "adapters/thread/beam/src"
+        "adapters/types/beam/src"]
+ ;; ValueScript (vs compile, then wasmtime; bb test:vs): slab I/O, regions, the allocator, the codec, the HAMT
+ ;; functions; eve.core is babashka's protocols adapter and eve.types translates a type onto it (VS's core never reaches
+ ;; a deftype's interfaces). eve/deftype's expansion waits on a builder carrying EM4's held half (VS's analyzer lets a
+ ;; namespace replace a macro named deftype; its macro evaluator runs macro-time atoms and 64-bit integer words).
+ ;; eve.crypto is crypto/vs: the kernel's
+ ;; SHA-256, the big-integer and edwards25519 rows over VS's BigInt tower, the rest portable (eve.net.portable-crypto)
+ :vs   ["adapters/slab-io/vs/src" "adapters/core/vs/src" "adapters/completion/clojure/src" "adapters/slab/heap/src"
+        "adapters/region/vs/src" "adapters/encoding/vs/src" "adapters/int32/vs/src" "adapters/codec/byte-array/src"
+        "adapters/process/vs/src" "adapters/coll/protocols/src" "adapters/types/vs/src" "adapters/crypto/vs/src"]
+ ;; glojure, run as glj-eve (impls/glojure/build.sh: glojure v0.7.22 with eve's Go packages and its completion's
+ ;; patches): its regions over eve's Go region package, its core completed (deftype, reify, satisfies?, ...), eve's
+ ;; types as records on eve.core's protocols (babashka's coll adapter), the network atom's adapters among them
+ :glj  ["adapters/slab-io/protocol/src" "adapters/http/go/src" "adapters/crypto/go/src"
+        "adapters/core/clojure/src" "adapters/completion/glojure/src" "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/region/glojure/src"
+        "adapters/encoding/go/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/go/src" "adapters/thread/glojure/src"
+        "adapters/types/glojure/src"]
+ ;; let-go, run as lg-eve (impls/let-go: let-go v1.13.0 with eve's Go package, evenative — `go build -o
+ ;; target/lg-eve/lg-eve .` there): the network atom's set — http, crypto and encoding over lg-eve's Go natives
+ ;; (evenative/host.go), the process feature's clock, entropy and stdin, no threads (thread/none). Not yet eve memory:
+ ;; no region, slab, coll or types root (evenative/region.go's natives wait on a region/letgo adapter)
+ :lg   ["adapters/http/letgo/src" "adapters/crypto/letgo/src" "adapters/core/clojure/src" "adapters/completion/letgo/src"
+        "adapters/encoding/letgo/src" "adapters/codec/byte-array/src" "adapters/process/letgo/src" "adapters/thread/none/src"]
+ ;; ClojureDart, compiled to Dart and run by the Dart VM (a plain Dart program, no Flutter):
+ ;; the network client's adapters — the chat seat's closure — over Dart's typed lists (eve.host, eve.encoding),
+ ;; dart:io's synchronous socket (eve.http) and process calls, package:crypto's digests and Dart's BigInt (eve.crypto),
+ ;; and the portable int32 and thread rows; no region, slab-io, coll or types adapter yet, so eve's memory-level
+ ;; atoms are not on it. ClojureDart reads a root's .cljd and .cljc files with the :cljd feature
+ :cljd ["adapters/http/dart/src" "adapters/crypto/dart/src" "adapters/core/dart/src" "adapters/completion/dart/src"
+        "adapters/encoding/dart/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src"
+        "adapters/process/dart/src" "adapters/thread/none/src"]
+ ;; not a shipped host: babashka on the minimal set and the inbuilt set only (doc/adopting-eve-minimal.md) — its four
+ ;; host roots (region, encoding, process, types), then the nine portable ones every host may take as they are. What a
+ ;; new language starts from; bb test:bb-minimal runs the shared suites on it (all but eve.net's, which need http)
+ :bb-minimal ["adapters/region/jvm-nio-lock/src" "adapters/encoding/java/src" "adapters/process/java/src"
+              "adapters/types/bb/src"
+              "adapters/slab-io/protocol/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
+              "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/int32/portable/src"
+              "adapters/codec/byte-array/src" "adapters/crypto/portable/src" "adapters/thread/none/src"]}

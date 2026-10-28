@@ -1,0 +1,236 @@
+;; EVE's value types on jank, a start: five
+;; tiny lazy types over a calloc'd byte region (a stand-in slab), each a C++
+;; struct deriving jank::runtime::object (jank/runtime/object.hpp:411) with a
+;; call log; plus the two subclass routes (obj::atom, obj::persistent_hash_map)
+;; and the port's own entry points (p_assoc ...). Called as cpp/eve_t.<fn>.
+;; Loaded with  jank --module-path <impls/jank/src> ... (require 'eve.types)
+(ns eve.types)
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <cstdlib>
+#include <string>
+#include <stdexcept>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/seq.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/core/math.hpp>
+#include <jank/runtime/obj/nil.hpp>
+#include <jank/runtime/obj/persistent_vector.hpp>
+#include <jank/runtime/obj/persistent_hash_map.hpp>
+#include <jank/runtime/obj/atom.hpp>
+#include <jank/runtime/behavior/associatively_writable.hpp>
+#include <jank/runtime/behavior/conjable.hpp>
+#include <jank/runtime/behavior/countable.hpp>
+#include <jank/runtime/behavior/map_like.hpp>
+#include <jank/runtime/behavior/set_like.hpp>
+namespace eve_t {
+  using namespace jank::runtime;
+  static std::string calls;
+  static void L(char const *s) { calls += s; calls += ' '; }
+  std::string take() { std::string r = calls; calls.clear(); return r; }
+
+  /* the stand-in slab: a value is (base, off); a segment is [n:i32][items...] */
+  static int32_t *W(long b, long off) { return reinterpret_cast<int32_t *>(reinterpret_cast<uint8_t *>(b) + off); }
+  long region(long size) { return reinterpret_cast<long>(::calloc((size_t)size, 1)); }
+  static object_ref I(long v) { return make_box(static_cast<jank::i64>(v)); }
+  static long K(object_ref o) { return (long)to_int(o); }
+  /* a persistent write copies the segment into a fresh block (never touches the old one) */
+  static long grow_copy(long b, long off, long item_bytes, long extra) {
+    int32_t n = *W(b, off);
+    long nb = region(4 + (n + extra) * item_bytes + 16);
+    std::memcpy(reinterpret_cast<void *>(nb), reinterpret_cast<void *>(b + off), 4 + n * item_bytes);
+    return nb;
+  }
+  static object_ref vec_seq(long b, long off, long stride, bool pairs) {
+    object_ref v = make_box<obj::persistent_vector>();
+    int32_t n = *W(b, off);
+    for(int32_t i = 0; i < n; ++i) {
+      if(pairs) v = conj(v, make_box<obj::persistent_vector>(std::in_place, I(*W(b, off + 4 + stride * i)), I(*W(b, off + 8 + stride * i))));
+      else v = conj(v, I(*W(b, off + 4 + stride * i)));
+    }
+    return seq(v);
+  }
+
+  /* ---------------- map: [n][k0 v0][k1 v1]... ---------------- */
+  struct emap : object {
+    static constexpr object_type obj_type{ object_type::opaque_box };
+    static constexpr object_behavior obj_behaviors{ object_behavior::get | object_behavior::find | object_behavior::seqable };
+    static constexpr bool pointer_free{ false };
+    static constexpr bool is_map_like{ true };
+    long b, off;
+    emap(long bb, long oo) : object{ obj_type, obj_behaviors }, b{ bb }, off{ oo } {}
+    int32_t n() const { return *W(b, off); }
+    long idx(long k) const { for(int32_t i = 0; i < n(); ++i) if(*W(b, off + 4 + 8 * i) == k) return i; return -1; }
+    object_ref get(object_ref k) const override { L(\"get\"); long i = idx(K(k)); if(i < 0) return jank_nil; return I(*W(b, off + 8 + 8 * i)); }
+    object_ref get(object_ref k, object_ref fb) const override { L(\"get\"); long i = idx(K(k)); if(i < 0) return fb; return I(*W(b, off + 8 + 8 * i)); }
+    bool contains(object_ref k) const override { L(\"contains\"); return idx(K(k)) >= 0; }
+    object_ref find(object_ref k) const override { L(\"find\"); long i = idx(K(k)); if(i < 0) return jank_nil; return make_box<obj::persistent_vector>(std::in_place, k, I(*W(b, off + 8 + 8 * i))); }
+    object_ref seq() const override { L(\"seq\"); return vec_seq(b, off, 8, true); }
+    object_ref fresh_seq() const override { L(\"seq\"); return vec_seq(b, off, 8, true); }
+    jtl::immutable_string to_code_string() const override { return \"#eve/map\"; }
+    jtl::immutable_string to_string() const override { return \"#eve/map\"; }
+    void to_string(jtl::string_builder &sb) const override { sb(\"#eve/map\"); }
+    /* what behavior::associatively_writable / countable / conjable / map_like look for */
+    object_ref assoc(object_ref k, object_ref v) const {
+      L(\"assoc\"); long kk = K(k), i = idx(kk); long nb = grow_copy(b, off, 8, 1);
+      if(i < 0) { i = n(); *W(nb, 0) = n() + 1; *W(nb, 4 + 8 * i) = (int32_t)kk; }
+      *W(nb, 8 + 8 * i) = (int32_t)K(v);
+      return make_box<emap>(nb, 0);
+    }
+    object_ref dissoc(object_ref k) const {
+      L(\"dissoc\"); long kk = K(k); long nb = region(4 + 8 * n() + 16); int32_t m = 0;
+      for(int32_t i = 0; i < n(); ++i) if(*W(b, off + 4 + 8 * i) != kk) { *W(nb, 4 + 8 * m) = *W(b, off + 4 + 8 * i); *W(nb, 8 + 8 * m) = *W(b, off + 8 + 8 * i); ++m; }
+      *W(nb, 0) = m; return make_box<emap>(nb, 0);
+    }
+    object_ref conj(object_ref e) const { L(\"conj\"); return assoc(jank::runtime::nth(e, I(0)), jank::runtime::nth(e, I(1))); }
+    jank::usize count() const { L(\"count\"); return (jank::usize)n(); }
+  };
+  static_assert(behavior::associatively_writable<emap>);
+  static_assert(behavior::countable<emap>);
+  static_assert(behavior::conjable<emap>);
+  static_assert(behavior::map_like<emap>);
+
+  /* ---------------- vector: [n][x0][x1]... ---------------- */
+  struct evec : object {
+    static constexpr object_type obj_type{ object_type::opaque_box };
+    static constexpr object_behavior obj_behaviors{ object_behavior::indexable | object_behavior::seqable };
+    static constexpr bool pointer_free{ false };
+    long b, off;
+    evec(long bb, long oo) : object{ obj_type, obj_behaviors }, b{ bb }, off{ oo } {}
+    int32_t n() const { return *W(b, off); }
+    object_ref nth(object_ref i) const override { L(\"nth\"); long x = K(i); if(x < 0 || x >= n()) throw std::runtime_error(\"evec: index out of bounds\"); return I(*W(b, off + 4 + 4 * x)); }
+    object_ref nth(object_ref i, object_ref fb) const override { L(\"nth\"); long x = K(i); if(x < 0 || x >= n()) return fb; return I(*W(b, off + 4 + 4 * x)); }
+    object_ref seq() const override { L(\"seq\"); return vec_seq(b, off, 4, false); }
+    object_ref fresh_seq() const override { L(\"seq\"); return vec_seq(b, off, 4, false); }
+    jtl::immutable_string to_code_string() const override { return \"#eve/vec\"; }
+    jtl::immutable_string to_string() const override { return \"#eve/vec\"; }
+    void to_string(jtl::string_builder &sb) const override { sb(\"#eve/vec\"); }
+    object_ref conj(object_ref x) const { L(\"conj\"); long nb = grow_copy(b, off, 4, 1); *W(nb, 4 + 4 * n()) = (int32_t)K(x); *W(nb, 0) = n() + 1; return make_box<evec>(nb, 0); }
+    jank::usize count() const { L(\"count\"); return (jank::usize)n(); }
+  };
+  static_assert(behavior::conjable<evec>);
+  static_assert(behavior::countable<evec>);
+
+  /* ---------------- set: [n][x0][x1]... ---------------- */
+  struct eset : object {
+    static constexpr object_type obj_type{ object_type::opaque_box };
+    static constexpr object_behavior obj_behaviors{ object_behavior::get | object_behavior::seqable };
+    static constexpr bool pointer_free{ false };
+    static constexpr bool is_set_like{ true };
+    long b, off;
+    eset(long bb, long oo) : object{ obj_type, obj_behaviors }, b{ bb }, off{ oo } {}
+    int32_t n() const { return *W(b, off); }
+    long idx(long k) const { for(int32_t i = 0; i < n(); ++i) if(*W(b, off + 4 + 4 * i) == k) return i; return -1; }
+    object_ref get(object_ref k) const override { L(\"get\"); return idx(K(k)) < 0 ? object_ref{ jank_nil } : k; }
+    object_ref get(object_ref k, object_ref fb) const override { L(\"get\"); return idx(K(k)) < 0 ? fb : k; }
+    bool contains(object_ref k) const override { L(\"contains\"); return idx(K(k)) >= 0; }
+    object_ref seq() const override { L(\"seq\"); return vec_seq(b, off, 4, false); }
+    object_ref fresh_seq() const override { L(\"seq\"); return vec_seq(b, off, 4, false); }
+    jtl::immutable_string to_code_string() const override { return \"#eve/set\"; }
+    jtl::immutable_string to_string() const override { return \"#eve/set\"; }
+    void to_string(jtl::string_builder &sb) const override { sb(\"#eve/set\"); }
+    object_ref conj(object_ref x) const { L(\"conj\"); if(idx(K(x)) >= 0) return make_box<eset>(b, off); long nb = grow_copy(b, off, 4, 1); *W(nb, 4 + 4 * n()) = (int32_t)K(x); *W(nb, 0) = n() + 1; return make_box<eset>(nb, 0); }
+    object_ref disj(object_ref x) const { L(\"disj\"); long kk = K(x); long nb = region(4 + 4 * n() + 16); int32_t m = 0; for(int32_t i = 0; i < n(); ++i) if(*W(b, off + 4 + 4 * i) != kk) *W(nb, 4 + 4 * m++) = *W(b, off + 4 + 4 * i); *W(nb, 0) = m; return make_box<eset>(nb, 0); }
+    jank::usize count() const { L(\"count\"); return (jank::usize)n(); }
+  };
+  static_assert(behavior::set_like<eset>);
+
+  /* ---------------- list: [n][x0][x1]... read from index i ---------------- */
+  struct elist : object {
+    static constexpr object_type obj_type{ object_type::opaque_box };
+    static constexpr object_behavior obj_behaviors{ object_behavior::seqable | object_behavior::sequence_like };
+    static constexpr bool pointer_free{ false };
+    long b, off, i;
+    elist(long bb, long oo, long ii) : object{ obj_type, obj_behaviors }, b{ bb }, off{ oo }, i{ ii } {}
+    int32_t n() const { return *W(b, off); }
+    object_ref first() const override { L(\"first\"); if(i >= n()) return jank_nil; return I(*W(b, off + 4 + 4 * i)); }
+    object_ref next() const override { L(\"next\"); if(i + 1 >= n()) return jank_nil; return make_box<elist>(b, off, i + 1); }
+    object_ref seq() const override { L(\"seq\"); if(i >= n()) return jank_nil; return make_box<elist>(b, off, i); }
+    object_ref fresh_seq() const override { L(\"seq\"); if(i >= n()) return jank_nil; return make_box<elist>(b, off, i); }
+    jtl::immutable_string to_code_string() const override { return \"#eve/list\"; }
+    jtl::immutable_string to_string() const override { return \"#eve/list\"; }
+    void to_string(jtl::string_builder &sb) const override { sb(\"#eve/list\"); }
+    object_ref conj(object_ref x) const { L(\"conj\"); int32_t m = n() - (int32_t)i; long nb = region(4 + 4 * (m + 1) + 16); *W(nb, 0) = m + 1; *W(nb, 4) = (int32_t)K(x); std::memcpy(reinterpret_cast<void *>(nb + 8), reinterpret_cast<void *>(b + off + 4 + 4 * i), 4 * m); return make_box<elist>(nb, 0, 0); }
+    jank::usize count() const { L(\"count\"); return (jank::usize)(n() - i); }
+  };
+  static_assert(behavior::conjable<elist>);
+
+  /* ---------------- atom: one i32 root ---------------- */
+  struct eatom : object {
+    static constexpr object_type obj_type{ object_type::opaque_box };
+    static constexpr object_behavior obj_behaviors{ object_behavior::deref };
+    static constexpr bool pointer_free{ false };
+    long b, off;
+    eatom(long bb, long oo) : object{ obj_type, obj_behaviors }, b{ bb }, off{ oo } {}
+    int32_t *root() const { return W(b, off); }
+    object_ref deref() override { L(\"deref\"); return I(__atomic_load_n(root(), __ATOMIC_SEQ_CST)); }
+    jtl::immutable_string to_code_string() const override { return \"#eve/atom\"; }
+    jtl::immutable_string to_string() const override { return \"#eve/atom\"; }
+    void to_string(jtl::string_builder &sb) const override { sb(\"#eve/atom\"); }
+    /* the shape of obj::atom's own swap / reset / compare_and_set (obj/atom.hpp:33-51), as a CAS loop on the slab root */
+    object_ref swap(object_ref fn) { L(\"swap\"); for(;;) { int32_t o = __atomic_load_n(root(), __ATOMIC_SEQ_CST); int32_t nv = (int32_t)K(fn.call(I(o))); if(__atomic_compare_exchange_n(root(), &o, nv, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) return I(nv); } }
+    object_ref reset(object_ref v) { L(\"reset\"); __atomic_store_n(root(), (int32_t)K(v), __ATOMIC_SEQ_CST); return v; }
+    object_ref compare_and_set(object_ref o, object_ref nv) { L(\"compare_and_set\"); int32_t e = (int32_t)K(o); return make_box(__atomic_compare_exchange_n(root(), &e, (int32_t)K(nv), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)); }
+  };
+
+  /* ---------------- route: subclass jank's own obj::atom (inherits object_type::atom) ---------------- */
+  struct eatom_sub : obj::atom {
+    long b, off;
+    eatom_sub(long bb, long oo) : obj::atom{ I(*W(bb, oo)) }, b{ bb }, off{ oo } {}
+    object_ref deref() override { L(\"deref\"); return I(__atomic_load_n(W(b, off), __ATOMIC_SEQ_CST)); }
+  };
+  object_ref make_atom_sub(long b, long off) { return make_box<eatom_sub>(b, off); }
+  /* the watch a port would add: mirror the new value into the slab after jank's own atom committed it */
+  object_ref mirror(object_ref a, object_ref v) { L(\"watch\"); auto *s = static_cast<eatom_sub *>(a.ptr()); __atomic_store_n(W(s->b, s->off), (int32_t)K(v), __ATOMIC_SEQ_CST); return v; }
+
+  /* ---------------- route: subclass jank's own obj::persistent_hash_map, lazy (base data left empty) ---------------- */
+  struct emap_sub : obj::persistent_hash_map {
+    long b, off;
+    emap_sub(long bb, long oo) : obj::persistent_hash_map{}, b{ bb }, off{ oo } {}
+    int32_t n() const { return *W(b, off); }
+    long idx(long k) const { for(int32_t i = 0; i < n(); ++i) if(*W(b, off + 4 + 8 * i) == k) return i; return -1; }
+    object_ref get(object_ref k) const override { L(\"get\"); long i = idx(K(k)); if(i < 0) return jank_nil; return I(*W(b, off + 8 + 8 * i)); }
+    object_ref get(object_ref k, object_ref fb) const override { L(\"get\"); long i = idx(K(k)); if(i < 0) return fb; return I(*W(b, off + 8 + 8 * i)); }
+    bool contains(object_ref k) const override { L(\"contains\"); return idx(K(k)) >= 0; }
+    object_ref seq() const override { L(\"seq\"); return vec_seq(b, off, 8, true); }
+    object_ref fresh_seq() const override { L(\"seq\"); return vec_seq(b, off, 8, true); }
+  };
+  object_ref make_map_sub(long b, long off) { return make_box<emap_sub>(b, off); }
+
+  /* constructors and the port's own entry points (what eve/assoc etc. would call) */
+  object_ref make_map(long b, long off) { return make_box<emap>(b, off); }
+  object_ref make_vec(long b, long off) { return make_box<evec>(b, off); }
+  object_ref make_set(long b, long off) { return make_box<eset>(b, off); }
+  object_ref make_list(long b, long off) { return make_box<elist>(b, off, 0); }
+  object_ref make_atom(long b, long off) { return make_box<eatom>(b, off); }
+  void put(long b, long off, long v) { *W(b, off) = (int32_t)v; }
+  long kind(object_ref o) {
+    if(o.get_type() != object_type::opaque_box) return 0;
+    object *p = o.ptr();
+    if(dynamic_cast<emap *>(p)) return 1; if(dynamic_cast<evec *>(p)) return 2; if(dynamic_cast<eset *>(p)) return 3;
+    if(dynamic_cast<elist *>(p)) return 4; if(dynamic_cast<eatom *>(p)) return 5; return 0;
+  }
+  object_ref p_assoc(object_ref m, object_ref k, object_ref v) { return static_cast<emap *>(m.ptr())->assoc(k, v); }
+  object_ref p_dissoc(object_ref m, object_ref k) { return static_cast<emap *>(m.ptr())->dissoc(k); }
+  object_ref p_conj(object_ref c, object_ref x) {
+    switch(kind(c)) { case 1: return static_cast<emap *>(c.ptr())->conj(x); case 2: return static_cast<evec *>(c.ptr())->conj(x);
+                      case 3: return static_cast<eset *>(c.ptr())->conj(x); case 4: return static_cast<elist *>(c.ptr())->conj(x); }
+    throw std::runtime_error(\"p_conj: not an eve collection\");
+  }
+  object_ref p_disj(object_ref s, object_ref x) { return static_cast<eset *>(s.ptr())->disj(x); }
+  long p_count(object_ref c) {
+    switch(kind(c)) { case 1: return (long)static_cast<emap *>(c.ptr())->count(); case 2: return (long)static_cast<evec *>(c.ptr())->count();
+                      case 3: return (long)static_cast<eset *>(c.ptr())->count(); case 4: return (long)static_cast<elist *>(c.ptr())->count(); }
+    throw std::runtime_error(\"p_count: not an eve collection\");
+  }
+  object_ref p_swap(object_ref a, object_ref fn) { return static_cast<eatom *>(a.ptr())->swap(fn); }
+  object_ref p_reset(object_ref a, object_ref v) { return static_cast<eatom *>(a.ptr())->reset(v); }
+  object_ref p_cas(object_ref a, object_ref o, object_ref nv) { return static_cast<eatom *>(a.ptr())->compare_and_set(o, nv); }
+  long raw_ptr(long b) { return b; }
+  void *raw_void(long b) { return reinterpret_cast<void *>(b); }
+  long peek(long b, long off) { return *W(b, off); }
+}
+")

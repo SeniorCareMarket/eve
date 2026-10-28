@@ -1,0 +1,16 @@
+# run g-node-mmap-atom on 699340a70 eve tree 6a4d1701e6f8fc55102652adc8679c25bd684564
+# cmd (in eve/) bash -c node target/eve-test/all.js mmap-atom
+# start 2026-10-23 11:17:04 AM ET load 2.34 1.67 0.85 mem-in-use 899 MB
+=== Eve Test Runner ===
+Suite: mmap-atom
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.mmap-atom-test
+    mappings: + 35 over the first 500 derefs, + 1 over the next 1500
+
+Ran 7 tests containing 8 assertions.
+0 failures, 0 errors.
+# end 2026-10-23 11:17:06 AM ET exit 0 wall 2s peak-mem-in-use 900 MB peak-process-tree-rss 152 MB load 2.24 1.66 0.85
