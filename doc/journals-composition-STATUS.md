@@ -74,3 +74,13 @@ running on this box; timing under contention is worthless.
   banked) — the prototype's bar met exactly.
   REMAINING: the bench (warm 300 / 5000, J1000 counter) — waits
   for the re-mint lane's byform-cut to finish; then the report.
+- 04:1x ET — CLOSEOUT lane takes over the final leg (predecessor
+  stalled on the bench). Inherited state verified firsthand:
+  branch tip 7a03b010146 = ls-remote; both fixes present in this
+  tree (tally.cljc:440 prefix-bounded flush!, commit efeab102bb9;
+  atom.cljc :last-epoch flush-advance floor, commit 65c5e13dddd).
+  Box checked idle (2 cores, no competing load). BENCH STARTING:
+  eve.durability-bench bench-size, J1000 counter, warm 300 n 3000
+  and warm 5000 n 3000 — the exploration lane's bench-after
+  invocation. Evidence →
+  ~/workspace/journals-composition-runs/bench-composed.txt.
