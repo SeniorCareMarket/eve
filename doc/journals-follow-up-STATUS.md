@@ -46,8 +46,63 @@ seats cljr/lpy in J cells as "Jn" non-journal participants.
   OFD fcntl on this box): the CLR/lpy journal lock must exclude a
   JVM holder and vice versa, or the port does not count.
 
+## Design (settled 2026-10-28, after probes + eve/CLAUDE.md)
+
+eve/CLAUDE.md's first rule: shared code names no host; a host plugs
+in through an adapter. The spike's inline #? arms are why
+scripts/check-host-leak is RED on current main (conditionals 16 >
+baseline 0; 15 in atom.cljc + 1 in alloc.cljc). So the port does NOT
+grow inline arms. Instead:
+
+- New adapter feature eve.journal-file (same-namespace per-host
+  files, the eve.process / eve.process-slab pattern):
+  adapters/journal-file/{java,node,clr,python,unsupported}.
+  Surface: open-journal, with-journal-lock, journal-append!,
+  journal-force! (full? — JVM .force false for appends, true at
+  truncate/checkpoint), journal-scan, journal-truncate!,
+  journal-write-at!, journal-close!, journal-record (codec, from a
+  root region), journal-record-of (codec, explicit epoch+table).
+  atom.cljc's journal section becomes host-free over it (flush /
+  recover / anchor / floor logic unchanged); hosts.edn gains one
+  root per host (jolt/clje/glj/vs get the unsupported stub — a
+  :journal? open there fails honestly instead of silently no-oping).
+- The force chain has two more dead links on cljr/lpy, both in the
+  brief's "force slab" scope: (a) ClrRegion/LpyRegion do not
+  implement eve.mem/ISyncableRegion, so mem/sync-region! (the root
+  force in journal-recover!, the slab sweep) no-ops there — add
+  -sync!/-sync-range!: CLR via msync(227) through region.cljr's
+  existing syscall6 emitter (file-backed regions only), lpy via
+  mmap.flush. (b) alloc/sync-sio!'s fallback is #?(:clj …)-gated
+  while its sibling refresh! calls the identical fallback
+  unconditionally — ungate it (mem/sync-region! already no-ops on
+  regions that cannot force, so other hosts are unaffected).
+  Expected end state: check-host-leak back at baseline (0/0/1/0).
+
+## Probe results (2026-10-28, runs/ in this worktree)
+
+- Lock exclusion, measured cross-process both directions:
+  CLR FileStream.Lock blocks behind a JVM FileChannel.lock and a
+  JVM tryLock fails against a CLR-held Lock (same OFD lock space);
+  lpy fcntl.lockf LOCK_EX likewise excludes/is excluded by the JVM
+  lock (classic POSIX and OFD locks conflict on this kernel).
+  CLR Lock accepts a 0-length file and a 2^62 length — lock [0, 2^62).
+- CLR bytes: byte[] aget is unsigned; CRC-32 must mask to 32 bits
+  each step (ClojureCLR bit ops widen to long; the naive JS port
+  reads -232181308 for "123456789", the masked port reads the
+  correct -873187034). FileStream SetLength/Write/Read/Position/
+  Flush(true) all verified, round-trip CRC intact.
+- lpy bytes: (:import os fcntl zlib struct) all resolve;
+  (python/__import__ "os") works from shared-code position (the
+  :cljs arms' inline js/require pattern); struct BE pack/unpack_from,
+  zlib/crc32 (= 3421780262 for the check vector, convert to signed),
+  bytearray extend over array("b") via python/bytes, os
+  write/fsync/ftruncate/fstat/lseek all verified.
+
 ## Log
 
 - 2026-10-28 lane open: base verified, worktree + branch created,
   journal surface mapped (all host ops live in eve/src/eve/atom.cljc,
   lines ~413–870), reader features re-measured on both hosts.
+- 2026-10-28 probes complete (above); design settled on the
+  adapter route per eve/CLAUDE.md; sync-sio!/ISyncableRegion gaps
+  found and folded into scope.
