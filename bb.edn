@@ -1,0 +1,84 @@
+;; :paths is src and hosts.edn's :bb roots, in that order (bb -e and load-file tasks run on it; a task that shells
+;; with -cp composes its own classpath from hosts.edn, which replaces this one)
+{:paths ["src" "adapters/slab-io/protocol/src" "adapters/http/java/src" "adapters/http-server/httpkit/src"
+         "adapters/crypto/java/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
+         "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/region/jvm-nio-lock/src"
+         "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src"
+         "adapters/process/java/src" "adapters/thread/jvm/src" "adapters/types/bb/src"]
+ :tasks
+ {:requires ([babashka.fs :as fs] [clojure.edn :as edn] [clojure.string :as str])
+  :init (defn roots
+          "eve's src, then host's adapter roots (hosts.edn), then more; absolute."
+          [host & more]
+          (map (fn [p] (str (fs/absolutize p)))
+               (concat ["src"] (get (edn/read-string (slurp "hosts.edn")) host) more)))
+  classpath {:doc "Print a host's classpath (src + its hosts.edn roots, absolute): bb classpath <host>, e.g. bb, jvm, glj, bb-minimal"
+             :task (println (str/join ":" (roots (keyword (first *command-line-args*)))))}
+  eve-media {:doc "eve-media, the capstone (capstone/eve-media/README.md): bb eve-media demo|scan <dir>|verify [--set core|extended]"
+             :task (apply shell "bb" "-cp" (str/join ":" (roots :bb "capstone/eve-media/src")) "capstone/eve-media/launcher.clj"
+                          *command-line-args*)}
+  eve-swarm {:doc "eve-swarm, the chat room as a swarm of eve's dialects and the browser (capstone/eve-swarm/README.md): bb eve-swarm seat --host <dialect> | hosts"
+             :task (apply shell "bb" "capstone/eve-swarm/launcher.clj" *command-line-args*)}
+  eve-swarm:cherry {:doc "Build the cherry seat (cherry-cljs into target/eve-swarm/cherry, the seat's namespaces compiled to ES modules there)"
+                    :task (shell "bb" "capstone/eve-swarm/cherry.clj")}
+  eve-chat  {:doc "eve-chat, the aegis chat from a REPL (capstone/eve-chat/README.md): bb eve-chat repl [--host bb|jvm|nbb|cljr|lpy|glj|clje] [invite link] | hosts | local"
+             :task (apply shell "bb" "capstone/eve-chat/launcher.clj" *command-line-args*)}
+  atom-swap {:doc "Run bb atom swap example"
+             :task (load-file "examples/bb_atom_swap.clj")}
+  test:bb   {:doc "The shared (.cljc) tests on babashka (namespaces named after the task run alone)"
+             :task (apply shell "bb" "-cp" (str/join ":" (roots :bb "test")) "-m" "eve.runner.bb-main" "test"
+                          *command-line-args*)}
+  test:bb-minimal {:doc "The shared (.cljc) tests on babashka composed from the minimal set and the inbuilt set only (hosts.edn :bb-minimal, doc/adopting-eve-minimal.md): every namespace of bb's runner but eve.net's, which need the http feature, and aegis's (eve.aegis.* and the crypto fast-path rows: on the minimal set's portable crypto the issuer's RSA-2048 row runs past 30 min, aegis/docs/simple-spike/REPORT.md §2; name them to run them)"
+                   :task (let [forms (read-string (str "[" (slurp "test/eve/runner/bb_main.clj") "]"))
+                               shared (some (fn [f] (when (and (seq? f) (= 'def (first f)) (= 'shared-tests (second f)))
+                                                      (second (last f))))
+                                            forms)
+                               nses (or (seq *command-line-args*)
+                                        (map str (remove (fn [n] (or (= 'eve.thread-net-test n)
+                                                                     (str/starts-with? (str n) "eve.aegis.")
+                                                                     (= 'eve.net.crypto-fast-path-test n)))
+                                                         shared)))]
+                           (apply shell "bb" "-cp" (str/join ":" (roots :bb-minimal "test")) "-m" "eve.runner.bb-main" "test"
+                                  nses))}
+  bench:bb  {:doc "The columnar bench on babashka"
+             :task (shell "bb" "-cp" (str/join ":" (roots :bb "test")) "-m" "eve.runner.bb-main" "bench")}
+  test:nbb  {:doc "The shared (.cljc) tests on nbb (namespaces named after the task run alone)"
+             :task (apply shell "nbb" "--classpath" (str/join ":" (roots :nbb "test")) "-m" "eve.runner.nbb-main" "test"
+                          *command-line-args*)}
+  bench:nbb {:doc "The columnar bench on nbb"
+             :task (shell "nbb" "--classpath" (str/join ":" (roots :nbb "test")) "-m" "eve.runner.nbb-main" "bench")}
+  test:cljr {:doc "The shared (.cljc) tests on ClojureCLR (namespaces named after the task run alone)"
+             :task (apply shell {:extra-env {"CLOJURE_LOAD_PATH" (str/join ":" (roots :cljr "test"))}}
+                          "cljr" "-m" "eve.runner.cljr-main" "test" *command-line-args*)}
+  test:lpy  {:doc "The shared (.cljc) tests on basilisp, compiled afresh into target/lpycache-test (basilisp's namespace cache checks a namespace's own source, not the macros it expanded). Its roots are given in reverse: basilisp searches the last -p first, and src must come before test (test/eve/deftype/ would otherwise make eve.deftype an empty namespace package)"
+             :task (let [cache (str (fs/absolutize "target/lpycache-test"))]
+                     (fs/delete-tree cache)
+                     (apply shell {:extra-env {"PYTHONPYCACHEPREFIX" cache}}
+                            "basilisp" "run" (concat (mapcat (fn [r] ["-p" r]) (reverse (roots :lpy "test")))
+                                                     ["-n" "eve.runner.lpy-main" "test"] *command-line-args*)))}
+  test:vs   {:doc "The shared (.cljc) tests that compile on ValueScript and the slab-io feature's own (test/eve/runner/vs_main.vs), compiled by the installed vs over hosts.edn's :vs roots and run under wasmtime"
+             :task (let [wasm (str (fs/absolutize "target/vs/vs_main.wasm"))]
+                     (fs/create-dirs "target/vs")
+                     (shell {:extra-env {"VS_CLJ_ROOTS" (str/join ":" (roots :vs "adapters/slab-io/test" "test"))}}
+                            "vs" "compile" "test/eve/runner/vs_main.vs" "-o" wasm)
+                     (let [out (:out (shell {:out :string :continue true} "wasmtime" "run" "--dir" "." "-W" "threads=y" "-W" "shared-memory=y"
+                                            "-W" "exceptions=y" "-W" "max-wasm-stack=67108864" wasm))]
+                       (print out) (flush)
+                       (when-not (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out) (System/exit 1))))}
+  test:jolt {:doc "The shared (.cljc) tests on jolt (namespaces named after the task run alone)"
+             :task (apply shell "jolt" "-Scp" (str/join ":" (roots :jolt "test")) "-m" "eve.runner.jolt-main" "test"
+                          *command-line-args*)}
+  glj-eve   {:doc "Build glj-eve (glojure with eve's Go packages and its completion's patches) into target/glj-eve, unless its source stamp is current"
+             :task (shell "bash" "impls/glojure/build.sh" (str (fs/absolutize "target/glj-eve")))}
+  lg-eve    {:doc "Build lg-eve (let-go with eve's Go package and its completion's patches) into target/lg-eve, unless its source stamp is current"
+             :task (shell "bash" "impls/let-go/build.sh" (str (fs/absolutize "target/lg-eve")))}
+  test:glj  {:doc "The shared (.cljc) tests on glojure (glj-eve)"
+             :depends [glj-eve]
+             :task (shell {:extra-env {"GLJ_CLASSPATH" (str/join ":" (roots :glj "test"))}}
+                          "target/glj-eve/glj-eve" "-e" (str "(require 'eve.runner.glj-main) (apply eve.runner.glj-main/-main '"
+                                                             (pr-str (cons "test" *command-line-args*)) ")"))}
+  test:browser {:doc "The thread feature's conformance in headless Chromium (hosts.edn :browser; scripts/test-browser.clj)"
+                :task (load-file "scripts/test-browser.clj")}
+  test:clje {:doc "The shared (.cljc) tests on clojerl (eve's NIF is built on first load into adapters/core/beam/target/clje/)"
+             :task (apply shell "clojerl" (concat (mapcat (fn [r] ["-pa" r]) (roots :clje "test"))
+                                                  ["-m" "eve.runner.clje-main" "test"] *command-line-args*))}}}

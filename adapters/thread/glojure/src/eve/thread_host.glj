@@ -1,0 +1,110 @@
+(ns eve.thread-host
+  "eve's thread feature (HOST-CONTRACT §11) over goroutines (glojure): a thread is a goroutine started by glojure's
+   own agent submit (lang.AgentSubmit — what future runs on, without future's binding conveyance, so a thread starts
+   with the root frame as a JVM thread does); a mailbox is an atom holding a queue and, while its thread waits, a
+   promise the next sender delivers (glojure's core has no blocking queue). One Go heap: a message carries closures
+   and host values by reference, and the binding frame is glojure's own. A started thread's end, normal or not, is a
+   message to the thread that started it."
+  (:require [clojure.string]))
+
+(def ^:private boxes
+  "address → that thread's mailbox (an atom of {:q :w}), while the thread runs."
+  (atom {}))
+(def ^:private next-id (atom 0))
+
+(def ^:dynamic ^:private *self*
+  "The calling goroutine's address: bound by each goroutine this adapter starts (and kept out of captured frames)."
+  nil)
+
+(defn- box! []
+  (let [id (swap! next-id inc)]
+    (swap! boxes assoc id (atom {:q clojure.lang.PersistentQueue/EMPTY :w nil}))
+    id))
+
+(def ^:private main-addr (box!))
+
+(defn parallelism [] (runtime.NumCPU))
+
+(defn ships-closures? [] true)
+
+(defn driving
+  "The declared driving properties: a blocked goroutine costs little; goroutines run in parallel; glojure's regions
+   wait and notify by futex (eve.region, adapters/region/glojure)."
+  []
+  {:block :cheap :parallel true :closures true :eval true :wake :futex
+   :spawn-ms 0 :max-threads nil :runtime :glj})
+
+(defn self [] (or *self* main-addr))
+
+(defn error-data
+  "glojure's ex-message carries its interpreter stack after the message (\"…\\n\\nGLJ Stack:…\"): the message alone."
+  [e]
+  (let [m (ex-message e)
+        i (when m (clojure.string/index-of m "\n\nGLJ Stack:"))]
+    {:class (str (type e)) :message (if i (subs m 0 i) m) :data (ex-data e)}))
+
+(defn send!
+  "Enqueue msg for the thread at addr; never blocks. A thread that has ended has no mailbox: the message is dropped."
+  [addr msg]
+  (when-let [b (get @boxes addr)]
+    (swap! b update :q conj msg)
+    (when-let [w (:w @b)] (deliver w true)))
+  nil)
+
+(defn start-threads!
+  "Start n goroutines, each running ((resolve entry) (assoc boot :self addr)); their addresses. When a thread's entry
+   ends — it returned, or threw — its starter receives {:eve.thread/exit addr :reason r}: r :normal, or the error as
+   error-data."
+  [n entry boot _opts]
+  (let [f (requiring-resolve entry)
+        starter (self)]
+    (vec (for [_ (range n)]
+           (let [id (box!)]
+             (github.com:glojurelang:glojure:pkg:lang.AgentSubmit
+              (fn []
+                (binding [*self* id]
+                  (let [reason (try (f (assoc boot :self id)) :normal
+                                    (catch go/any e (error-data e)))]
+                    (swap! boxes dissoc id)
+                    (send! starter {:eve.thread/exit id :reason reason})))))
+             id)))))
+
+(defn receive!
+  "The calling thread's next message; :eve.thread/timeout after ms milliseconds (ms < 0: wait for ever; 0: poll)."
+  [ms]
+  (let [b (get @boxes (self))
+        deadline (when (pos? ms) (+ (.UnixMilli (time.Now)) ms))]
+    (loop []
+      (let [cur @b]
+        (if-let [m (peek (:q cur))]
+          (if (compare-and-set! b cur (assoc cur :q (pop (:q cur)) :w nil))
+            m
+            (recur))
+          (if (zero? ms)
+            :eve.thread/timeout
+            (let [p (promise)]
+              (if (compare-and-set! b cur (assoc cur :w p))
+                (if deadline
+                  (let [left (- deadline (.UnixMilli (time.Now)))]
+                    (if (<= left 0)
+                      :eve.thread/timeout
+                      (do (deref p left nil) (recur))))
+                  (do (deref p) (recur)))
+                (recur)))))))))
+
+(defn stop-threads!
+  "Ask each thread to end: the message :eve.thread/stop (a request its loop honours, never a kill)."
+  [addrs]
+  (doseq [a addrs] (send! a :eve.thread/stop)))
+
+(defn attempt [f] (try [true (f)] (catch go/any e [false e])))
+
+(defn capture-frame [] (dissoc (get-thread-bindings) #'*self*))
+(defn call-with-frame [frame f] (if frame (with-bindings* frame f) (f)))
+
+(defn var-symbol
+  "A var's qualified name (glojure's var metadata carries no :name; (symbol v) answers it)."
+  [v]
+  (symbol v))
+
+(defn eval-form [form] (eval form))

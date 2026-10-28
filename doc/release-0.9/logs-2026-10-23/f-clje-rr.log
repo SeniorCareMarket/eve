@@ -1,0 +1,25 @@
+# run f-clje-rr on 0857b9319 eve tree ea2bee78689c252b75fb4a798b8da7e4795fc3aa
+# cmd (in eve/) bash -c bb test:clje eve.read-region-test eve.tally-test
+# start 2026-10-23 4:22:04 PM ET load 1.31 1.20 1.42 mem-in-use 934 MB
+/home/user/atom.broker/eve/test/eve/read_region_test.cljc:83:16: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+
+Testing eve.read-region-test
+done #'eve.read-region-test/a-lazy-result-is-realized-and-materialized 22ms
+done #'eve.read-region-test/a-region-inside-another-joins-it 13ms
+done #'eve.read-region-test/deref-in-a-region-is-the-stored-value 24ms
+done #'eve.read-region-test/the-pins-go-when-the-body-throws 15ms
+done #'eve.read-region-test/what-a-region-read-is-not-freed-while-it-runs 2800ms
+
+Testing eve.tally-test
+done #'eve.tally-test/an-rrb-vector-is-counted-node-by-node 4924ms
+done #'eve.tally-test/a-reference-field-written-in-place-keeps-its-counts 10ms
+done #'eve.tally-test/an-unshared-atom-frees-exactly-what-a-write-replaces 25595ms
+done #'eve.tally-test/a-value-two-atoms-hold-is-freed-by-the-last 18920ms
+done #'eve.tally-test/an-eve-deftype-value-two-atoms-hold 5619ms
+done #'eve.tally-test/an-int-map-is-counted-node-by-node 6927ms
+done #'eve.tally-test/a-value-moved-between-keys-of-one-atom-stays 10076ms
+
+Ran 12 tests containing 234 assertions.
+0 failures, 0 errors.
+:summary {:error 0, :test 12, :pass 234, :fail 0}
+# end 2026-10-23 4:24:05 PM ET exit 0 wall 121s peak-mem-in-use 1242 MB peak-process-tree-rss 508 MB load 1.34 1.23 1.40

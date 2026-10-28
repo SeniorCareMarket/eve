@@ -1,0 +1,260 @@
+# run f-capstone-verify on 7f4bbee15 eve tree 4878113338b9ec318f730c6139adc6b1f5c543a1
+# cmd (in eve/) bash -c bb eve-media verify
+# start 2026-10-22 4:43:12 AM ET load 1.50 1.37 1.34 mem-in-use 718 MB
+[eve-media 08:43:14.884454136] === verify run core [:bb :jvm :node :glj :browser] 
+[eve-media 08:43:14.888563361] build: the Node member (shadow-cljs release eve-media-node)
+[eve-media 08:43:57.486229973] build: the page (shadow-cljs release eve-media-page)
+[eve-media 08:44:40.409610221] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 08:44:59.520222432] run /root/.eve-media/runs/2026-10-22T08-44-59-519 window /dev/shm/eve-media/2026-10-22T08-44-59-519
+[eve-media 08:45:05.306994849] started the gateway, pid 16812
+[eve-media 08:45:05.328452325] started bb bb pid 16814
+[eve-media 08:45:05.347184504] started jvm jvm pid 16821
+[eve-media 08:45:05.376458027] started node node pid 16830
+[eve-media 08:45:05.412793068] started glj glj pid 16848
+[eve-media 08:45:20.870631392] started browser browser pid 16957
+[eve-media 08:45:20.870759814] the Go member's watcher scans /root/.eve-media/runs/2026-10-22T08-44-59-519/media
+[eve-media 08:45:20.973756022] progress {:new 10} leader jvm
+[eve-media 08:45:26.099237434] progress {:new 10} leader jvm
+[eve-media 08:45:31.910529239] progress {:done 1, :planned 9} leader jvm
+[eve-media 08:45:37.524646552] progress {:done 1, :planned 9} leader jvm
+[eve-media 08:45:43.081947630] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:45:48.204112056] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:45:53.862693855] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:45:59.408875845] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:04.734918] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:10.358208239] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:16.009387449] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:21.433320919] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:27.073599316] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:32.754942299] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:38.056865138] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:43.435757594] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:49.338955235] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:46:54.744935301] progress {:done 2, :planned 8} leader jvm
+[eve-media 08:47:00.165291376] progress {:done 4, :planned 6} leader jvm
+[eve-media 08:47:05.624025440] progress {:done 5, :planned 5} leader jvm
+[eve-media 08:47:10.836014848] progress {:done 5, :planned 5} leader jvm
+[eve-media 08:47:16.002011807] progress {:done 6, :planned 4} leader jvm
+[eve-media 08:47:21.426539795] progress {:done 8, :planned 2} leader jvm
+[eve-media 08:47:26.644256264] progress {:done 10} leader jvm
+[eve-media 08:47:28.354543747] dropped /root/.eve-media/runs/2026-10-22T08-44-59-519/media/f11-dropped.wav into the watched folder
+[eve-media 08:47:28.694423833] progress {:done 10, :new 1} leader jvm
+[eve-media 08:47:34.138938115] progress {:done 10, :planned 1} leader jvm
+[eve-media 08:47:39.546070496] progress {:done 11} leader jvm
+[eve-media 08:47:40.377549067] the dropped file picked up in 267 ms ; index complete
+[eve-media 08:47:50.938103886] browser check received screenshot /root/.eve-media/runs/2026-10-22T08-44-59-519/page.png 11 of 11 rows
+[eve-media 08:47:54.142167740] complete in 127364 ms
+[eve-media 08:47:54.148144496] report /root/.eve-media/runs/2026-10-22T08-44-59-519/report.edn
+{:ok true, :checks {:mp4s-h264-aac true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :browser-library-and-requeue true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :watcher-new-file true, :every-runtime-in-meta true}, :leader "jvm", :members #{"browser" "glj" "bb" "jvm" "node"}, :ran-on #{"browser" "glj" "bb" "jvm" "node"}, :kill nil, :drop {:ok true, :file "/root/.eve-media/runs/2026-10-22T08-44-59-519/media/f11-dropped.wav", :id "f11", :found-by "glj", :status :done, :picked-up-ms 267, :ms 12092}, :wall-ms 127364}
+[eve-media 08:47:58.945462101] === verify run core-kill [:bb :jvm :node :glj] kill transcode
+[eve-media 08:47:58.957162445] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 08:47:59.013937488] run /root/.eve-media/runs/2026-10-22T08-47-59-013 window /dev/shm/eve-media/2026-10-22T08-47-59-013
+[eve-media 08:47:59.086922661] started the gateway, pid 19179
+[eve-media 08:47:59.097974850] started bb bb pid 19180
+[eve-media 08:47:59.114238880] started jvm jvm pid 19187
+[eve-media 08:47:59.133968124] started node node pid 19193
+[eve-media 08:47:59.155210093] started glj glj pid 19207
+[eve-media 08:47:59.155651457] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 08:47:59.161759062] progress {} leader 
+[eve-media 08:48:04.286515731] progress {} leader 
+[eve-media 08:48:09.430332842] progress {} leader 
+[eve-media 08:48:14.700422494] progress {:new 10} leader jvm
+[eve-media 08:48:18.935295745] kill -9 jvm pid 19187 mid-transcode of d2 f02
+[eve-media 08:48:20.063320117] progress {:planned 10} leader jvm
+[eve-media 08:48:25.355075477] progress {:planned 10} leader jvm
+[eve-media 08:48:30.561309212] progress {:planned 10} leader jvm
+[eve-media 08:48:35.632647058] progress {:planned 10} leader jvm
+[eve-media 08:48:40.780667145] progress {:planned 10} leader jvm
+[eve-media 08:48:46.144534618] progress {:planned 10} leader jvm
+[eve-media 08:48:50.927586356] restart asked by the coordinator: jvm
+[eve-media 08:48:51.116786665] started jvm jvm pid 20134
+[eve-media 08:48:51.524599110] progress {:planned 10} leader bb
+[eve-media 08:48:56.793342237] progress {:planned 10} leader bb
+[eve-media 08:49:02.321756625] progress {:planned 10} leader bb
+[eve-media 08:49:07.780022436] progress {:planned 10} leader bb
+[eve-media 08:49:13.071706056] progress {:planned 10} leader bb
+[eve-media 08:49:18.190543312] progress {:planned 8, :done 2} leader bb
+[eve-media 08:49:23.593993246] progress {:planned 6, :done 4} leader bb
+[eve-media 08:49:28.825521140] progress {:planned 6, :done 4} leader bb
+[eve-media 08:49:34.085839566] progress {:planned 5, :done 5} leader bb
+[eve-media 08:49:39.297373880] progress {:planned 3, :done 7} leader bb
+[eve-media 08:49:44.465919791] progress {:planned 3, :done 7} leader bb
+[eve-media 08:49:49.813230356] progress {:planned 1, :done 9} leader bb
+[eve-media 08:49:55.185488479] progress {:done 10} leader bb
+[eve-media 08:49:59.337524957] complete in 117425 ms
+[eve-media 08:49:59.339830199] report /root/.eve-media/runs/2026-10-22T08-47-59-013/report.edn
+{:ok true, :checks {:mp4s-h264-aac true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :kill-attempts-2 true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :leader "bb", :members #{"glj" "bb" "jvm" "node"}, :ran-on #{"glj" "bb" "jvm" "node"}, :kill {:file "f02", :killed "jvm", :attempts 2, :sha256 "b5c39b36033fce6156e192f77ca742f7b80cdf918f5d00a71d5ca3d7b22f659a", :ok true}, :drop nil, :wall-ms 117425}
+[eve-media 08:50:00.958323123] === verify run core+beam [:bb :jvm :node :glj :clje] 
+[eve-media 08:50:01.368521959] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 08:50:01.411147570] run /root/.eve-media/runs/2026-10-22T08-50-01-410 window /dev/shm/eve-media/2026-10-22T08-50-01-410
+[eve-media 08:50:01.488149435] started the gateway, pid 21890
+[eve-media 08:50:01.503180321] started bb bb pid 21891
+[eve-media 08:50:01.516304230] started jvm jvm pid 21898
+[eve-media 08:50:01.539404015] started node node pid 21904
+[eve-media 08:50:01.625646331] started glj glj pid 21922
+[eve-media 08:50:01.655904091] started clje clje pid 21940
+[eve-media 08:50:01.656206790] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 08:50:01.664276566] progress {} leader 
+[eve-media 08:50:06.884384709] progress {} leader 
+[eve-media 08:50:12.099140056] progress {} leader 
+[eve-media 08:50:17.411832055] progress {:new 10} leader 
+[eve-media 08:50:22.449228996] progress {:new 10} leader 
+[eve-media 08:50:27.734559400] progress {:new 10} leader 
+[eve-media 08:50:32.993418770] progress {:new 10} leader 
+[eve-media 08:50:38.243111128] progress {:new 10} leader 
+[eve-media 08:50:43.537040806] progress {:new 10} leader 
+[eve-media 08:50:48.816358508] progress {:new 10} leader 
+[eve-media 08:50:54.042943880] progress {:new 10} leader 
+[eve-media 08:50:59.267540146] progress {:new 10} leader 
+[eve-media 08:51:04.512706600] progress {:new 10} leader 
+[eve-media 08:51:09.746820928] progress {:new 10} leader 
+[eve-media 08:51:14.996449718] progress {:new 10} leader 
+[eve-media 08:51:20.609298605] progress {:planned 8, :new 2} leader clje
+[eve-media 08:51:25.971037548] progress {:done 3, :planned 7} leader clje
+[eve-media 08:51:31.084485725] progress {:done 3, :planned 7} leader clje
+[eve-media 08:51:36.332700472] progress {:done 4, :planned 6} leader clje
+[eve-media 08:51:41.796790663] progress {:done 5, :planned 5} leader clje
+[eve-media 08:51:46.889051205] progress {:done 7, :planned 3} leader clje
+[eve-media 08:51:52.227454337] progress {:done 7, :planned 3} leader clje
+[eve-media 08:51:57.460817723] progress {:done 7, :planned 3} leader clje
+[eve-media 08:52:02.611730511] progress {:done 10} leader clje
+[eve-media 08:52:08.767110376] complete in 124410 ms
+[eve-media 08:52:08.768448670] report /root/.eve-media/runs/2026-10-22T08-50-01-410/report.edn
+{:ok true, :checks {:mp4s-h264-aac true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :leader "clje", :members #{"clje" "glj" "bb" "jvm" "node"}, :ran-on #{"clje" "glj" "bb" "jvm" "node"}, :kill nil, :drop nil, :wall-ms 124410}
+[eve-media 08:52:09.425812390] === verify run extended [:bb :jvm :node :glj :clje :jolt :browser] 
+[eve-media 08:52:09.849741388] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 08:52:09.892696319] run /root/.eve-media/runs/2026-10-22T08-52-09-892 window /dev/shm/eve-media/2026-10-22T08-52-09-892
+[eve-media 08:52:09.979266174] started the gateway, pid 24317
+[eve-media 08:52:09.988978996] started bb bb pid 24318
+[eve-media 08:52:10.000387690] started jvm jvm pid 24321
+[eve-media 08:52:10.020890942] started node node pid 24328
+[eve-media 08:52:10.044377545] started glj glj pid 24348
+[eve-media 08:52:10.091640448] started clje clje pid 24365
+[eve-media 08:52:10.145276402] started jolt jolt pid 24382
+[eve-media 08:52:28.559865987] started browser browser pid 24527
+[eve-media 08:52:28.565233986] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 08:52:28.592829727] progress {:new 10} leader 
+[eve-media 08:52:33.723814911] progress {:new 10} leader 
+[eve-media 08:52:38.926861344] progress {:new 10} leader 
+[eve-media 08:52:44.082993691] progress {:new 10} leader 
+[eve-media 08:52:49.134462488] progress {:new 10} leader 
+[eve-media 08:52:54.225250963] progress {:new 10} leader 
+[eve-media 08:52:59.499027619] progress {:new 10} leader 
+[eve-media 08:53:04.781065605] progress {:new 10} leader 
+[eve-media 08:53:10.040541635] progress {:new 10} leader 
+[eve-media 08:53:15.324885182] progress {:new 10} leader 
+[eve-media 08:53:20.595104925] progress {:new 10} leader 
+[eve-media 08:53:25.867545004] progress {:new 10} leader 
+[eve-media 08:53:31.138934631] progress {:new 10} leader jvm
+[eve-media 08:53:36.400733876] progress {:new 10} leader jvm
+[eve-media 08:53:41.656626043] progress {:new 10} leader jvm
+[eve-media 08:53:46.938062737] progress {:new 10} leader clje
+[eve-media 08:53:52.813503941] progress {:planned 7, :new 3} leader clje
+[eve-media 08:53:58.666728377] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:04.767148820] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:10.182484932] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:15.676874379] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:21.377098303] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:26.677114698] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:32.083662912] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:37.370966013] progress {:planned 8, :done 2} leader clje
+[eve-media 08:54:42.838391798] progress {:done 3, :planned 7} leader clje
+[eve-media 08:54:48.555030819] progress {:done 3, :planned 7} leader clje
+[eve-media 08:54:53.838363896] progress {:done 4, :planned 6} leader clje
+[eve-media 08:54:59.390124891] progress {:done 4, :planned 6} leader clje
+[eve-media 08:55:04.698488484] progress {:done 5, :planned 5} leader clje
+[eve-media 08:55:09.856527536] progress {:done 6, :planned 4} leader clje
+[eve-media 08:55:14.966843599] progress {:done 7, :planned 3} leader clje
+[eve-media 08:55:20.126588730] progress {:done 9, :planned 1} leader clje
+[eve-media 08:55:25.352227433] progress {:done 10} leader clje
+[eve-media 08:55:41.564345410] browser check received screenshot /root/.eve-media/runs/2026-10-22T08-52-09-892/page.png 10 of 10 rows
+[eve-media 08:55:45.093340604] complete in 179784 ms
+[eve-media 08:55:45.094007992] report /root/.eve-media/runs/2026-10-22T08-52-09-892/report.edn
+{:ok true, :checks {:mp4s-h264-aac true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :browser-library-and-requeue true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :leader "clje", :members #{"clje" "browser" "jolt" "glj" "bb" "jvm" "node"}, :ran-on #{"clje" "browser" "jolt" "glj" "bb" "jvm" "node"}, :kill nil, :drop nil, :wall-ms 179784}
+[eve-media 08:55:49.688514637] === verify run extended-kill [:bb :jvm :node :glj :clje :jolt] kill transcode
+[eve-media 08:55:50.099989890] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 08:55:50.142280195] run /root/.eve-media/runs/2026-10-22T08-55-50-141 window /dev/shm/eve-media/2026-10-22T08-55-50-141
+[eve-media 08:55:50.208180094] started the gateway, pid 26842
+[eve-media 08:55:50.217455184] started bb bb pid 26843
+[eve-media 08:55:50.225726532] started jvm jvm pid 26845
+[eve-media 08:55:50.234305327] started node node pid 26852
+[eve-media 08:55:50.256583305] started glj glj pid 26864
+[eve-media 08:55:50.279568212] started clje clje pid 26876
+[eve-media 08:55:50.317090767] started jolt jolt pid 26892
+[eve-media 08:55:50.319699697] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 08:55:50.325915824] progress {} leader 
+[eve-media 08:55:55.582949679] progress {} leader 
+[eve-media 08:56:00.928598842] progress {} leader 
+[eve-media 08:56:06.197731425] progress {:new 10} leader 
+[eve-media 08:56:11.284407133] progress {:new 10} leader 
+[eve-media 08:56:16.552010982] progress {:new 10} leader 
+[eve-media 08:56:21.677154353] progress {:new 10} leader 
+[eve-media 08:56:26.970554613] progress {:new 10} leader 
+[eve-media 08:56:32.212701281] progress {:new 10} leader 
+[eve-media 08:56:37.382333576] progress {:new 10} leader 
+[eve-media 08:56:42.582595910] progress {:new 10} leader 
+[eve-media 08:56:47.837112202] progress {:new 10} leader 
+[eve-media 08:56:53.040545207] progress {:new 10} leader 
+[eve-media 08:56:58.234575314] progress {:new 10} leader 
+[eve-media 08:57:03.383785215] progress {:new 10} leader 
+[eve-media 08:57:08.542932879] progress {:new 10} leader 
+[eve-media 08:57:12.320324160] kill -9 jolt pid 26892 mid-transcode of d2 f02
+[eve-media 08:57:14.136880366] progress {:planned 6, :new 4} leader clje
+[eve-media 08:57:19.521559664] progress {:planned 8, :done 2} leader clje
+[eve-media 08:57:24.714052178] progress {:planned 8, :done 2} leader clje
+[eve-media 08:57:29.838803249] progress {:planned 8, :done 2} leader clje
+[eve-media 08:57:35.076441770] progress {:planned 8, :done 2} leader clje
+[eve-media 08:57:40.474731216] progress {:planned 8, :done 2} leader clje
+[eve-media 08:57:40.816415840] restart asked by the coordinator: jolt
+[eve-media 08:57:41.131253832] started jolt jolt pid 28099
+[eve-media 08:57:45.873542174] progress {:planned 8, :done 2} leader clje
+[eve-media 08:57:51.300291757] progress {:planned 8, :done 2} leader clje
+[eve-media 08:57:56.494494656] progress {:planned 8, :done 2} leader clje
+[eve-media 08:58:01.762529365] progress {:planned 8, :done 2} leader clje
+[eve-media 08:58:07.121194053] progress {:planned 8, :done 2} leader clje
+[eve-media 08:58:12.343318375] progress {:planned 8, :done 2} leader clje
+[eve-media 08:58:17.639493226] progress {:planned 8, :done 2} leader clje
+[eve-media 08:58:22.956226978] progress {:planned 7, :done 3} leader clje
+[eve-media 08:58:28.508319627] progress {:planned 7, :done 3} leader clje
+[eve-media 08:58:33.756730005] progress {:planned 4, :done 6} leader clje
+[eve-media 08:58:38.866348215] progress {:planned 4, :done 6} leader clje
+[eve-media 08:58:44.056554219] progress {:planned 4, :done 6} leader clje
+[eve-media 08:58:49.222779114] progress {:planned 4, :done 6} leader clje
+[eve-media 08:58:54.278708934] progress {:done 10} leader clje
+[eve-media 08:58:59.432131038] complete in 186116 ms
+[eve-media 08:58:59.432762344] report /root/.eve-media/runs/2026-10-22T08-55-50-141/report.edn
+{:ok true, :checks {:mp4s-h264-aac true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :kill-attempts-2 true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :leader "clje", :members #{"clje" "jolt" "glj" "bb" "jvm" "node"}, :ran-on #{"clje" "jolt" "glj" "bb" "jvm" "node"}, :kill {:file "f02", :killed "jolt", :attempts 2, :sha256 "dc36e3c4f798038e0b4d733626a2709a71e13a11473fbf695c982cfbada6f602", :ok true}, :drop nil, :wall-ms 186116}
+[eve-media 08:59:00.980022339] === verify run extended-no-beam [:bb :jvm :node :glj :jolt] 
+[eve-media 08:59:00.992201977] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 08:59:01.034901330] run /root/.eve-media/runs/2026-10-22T08-59-01-034 window /dev/shm/eve-media/2026-10-22T08-59-01-034
+[eve-media 08:59:01.125660963] started the gateway, pid 28697
+[eve-media 08:59:01.134338788] started bb bb pid 28698
+[eve-media 08:59:01.148375622] started jvm jvm pid 28705
+[eve-media 08:59:01.159446801] started node node pid 28707
+[eve-media 08:59:01.174358130] started glj glj pid 28717
+[eve-media 08:59:01.198834349] started jolt jolt pid 28739
+[eve-media 08:59:01.199047270] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 08:59:01.202299463] progress {} leader 
+[eve-media 08:59:06.453132222] progress {} leader 
+[eve-media 08:59:11.706108962] progress {} leader 
+[eve-media 08:59:17.127680996] progress {:new 10} leader 
+[eve-media 08:59:22.177217042] progress {:new 10} leader jvm
+[eve-media 08:59:27.477330995] progress {:new 10} leader jvm
+[eve-media 08:59:32.708793713] progress {:new 10} leader jvm
+[eve-media 08:59:37.979054473] progress {:new 10} leader jvm
+[eve-media 08:59:43.486151566] progress {:planned 2, :new 8} leader jvm
+[eve-media 08:59:49.278650653] progress {:planned 8, :done 2} leader jvm
+[eve-media 08:59:54.792768111] progress {:done 4, :planned 6} leader jvm
+[eve-media 09:00:00.093222232] progress {:done 5, :planned 5} leader jvm
+[eve-media 09:00:05.266395013] progress {:done 5, :planned 5} leader jvm
+[eve-media 09:00:10.676974273] progress {:done 5, :planned 5} leader jvm
+[eve-media 09:00:15.998351845] progress {:done 6, :planned 4} leader jvm
+[eve-media 09:00:21.376516152] progress {:done 8, :planned 2} leader jvm
+[eve-media 09:00:26.868480738] progress {:done 8, :planned 2} leader jvm
+[eve-media 09:00:32.150593652] progress {:done 10} leader jvm
+[eve-media 09:00:35.228529323] complete in 91294 ms
+[eve-media 09:00:35.229295045] report /root/.eve-media/runs/2026-10-22T08-59-01-034/report.edn
+{:ok true, :checks {:mp4s-h264-aac true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :leader "jvm", :members #{"jolt" "glj" "bb" "jvm" "node"}, :ran-on #{"jolt" "glj" "bb" "jvm" "node"}, :kill nil, :drop nil, :wall-ms 91294}
+[eve-media 09:00:37.132579079] verify PASSED /root/.eve-media/verify-2026-10-22T09-00-37-131832412.edn
+{:ok true, :rows {:core+beam-same-outputs true, :core-without-beam-other-leads true, :core+beam-beam-leads true, :core-checks true, :core-kill-attempts-2-same-checksum true, :extended-kill-attempts-2-same-checksum true, :extended-no-beam-same-outputs true, :extended-no-beam-other-leads true, :extended-checks true, :extended-beam-leads true}, :run-checks {"core" true, "core-kill" true, "core+beam" true, "extended" true, "extended-kill" true, "extended-no-beam" true}}
+# end 2026-10-22 5:00:38 AM ET exit 0 wall 1046s peak-mem-in-use 5065 MB peak-process-tree-rss 5663 MB load 6.71 7.23 5.55

@@ -1,0 +1,180 @@
+(ns eve.host
+  "eve's host interface (eve/CLAUDE.md, 'eve is portable'; doc/unification/HOST-CONTRACT.md §10) on ClojureDart,
+   compiled to Dart: cljd.core has the cells, transients and List ops, and lacks the JVM's fixed-width arrays,
+   unchecked ops, casts and locking — those are here. A byte array is an Int8List (signed, as the JVM's: the codec
+   compares a read byte with (unchecked-byte 0xEE)); the numeric arrays are Dart's typed lists, which wrap a stored
+   value to their width as the JVM's arrays do; an object array is cljd's List<Object?>. Dart's native ints are 64-bit
+   two's complement and wrap, so the long ops are Dart's own and the narrower ones are toSigned. A Dart isolate is
+   one thread: locking runs its body."
+  (:refer-clojure :exclude [aget aset alength aclone byte-array short-array int-array
+                            long-array float-array double-array object-array into-array
+                            to-array unchecked-byte unchecked-short unchecked-int
+                            unchecked-long unchecked-add-int unchecked-multiply-int
+                            unchecked-inc-int unchecked-dec-int unchecked-add
+                            unchecked-multiply unchecked-inc unsigned-bit-shift-right
+                            long double class volatile! volatile? vswap! locking
+                            transient persistent! conj! assoc! dissoc! disj! pop!
+                            bytes shorts ints longs floats doubles objects booleans
+                            swap! reset! compare-and-set!])
+  (:require ["dart:typed_data" :as td]
+            [eve.host-completion]))
+
+;; --- fixed-width integers: Dart's ints are 64-bit and wrap; the narrower widths are toSigned ---
+
+(defn ^int long
+  "x as an integer (a double truncated toward zero, as the JVM's long cast)"
+  [x]
+  (if (dart/is? x int) x (.toInt ^num x)))
+
+(defn double [x] (.toDouble ^num x))
+
+(defn ^int unchecked-byte [x] (.toSigned (long x) 8))
+(defn ^int unchecked-short [x] (.toSigned (long x) 16))
+(defn ^int unchecked-int [x] (.toSigned (long x) 32))
+(defn ^int unchecked-long [x] (long x))
+(defn ^int unchecked-add-int [^int a ^int b] (.toSigned (+ a b) 32))
+(defn ^int unchecked-multiply-int [^int a ^int b] (.toSigned (* a b) 32))
+(defn ^int unchecked-inc-int [^int a] (.toSigned (inc a) 32))
+(defn ^int unchecked-dec-int [^int a] (.toSigned (dec a) 32))
+(defn unchecked-add [a b] (+ a b))
+(defn unchecked-multiply [a b] (* a b))
+(defn unchecked-inc [a] (inc a))
+
+(defn ^int unsigned-bit-shift-right
+  "x as 64 unsigned bits, shifted right by n (mod 64) — the JVM's >>>"
+  {:inline (fn [x n] `(cljd.core/unsigned-bit-shift-right ~x ~n))
+   :inline-arities #{2}}
+  [^int x n]
+  (cljd.core/unsigned-bit-shift-right x n))
+
+(defn class [x] (.-runtimeType ^Object x))
+
+(defn token "a fresh cell, identical? only to itself" [] (cljd.core/volatile! nil))
+
+;; --- arrays: Dart's typed lists ---
+
+(defn- fill!
+  "a, its elements from seq xs, in order; a"
+  [^List a xs]
+  (loop [i 0 s (seq xs)]
+    (when s
+      (. a "[]=" i (first s))
+      (recur (inc i) (next s))))
+  a)
+
+(defn- seq-count [xs] (count xs))
+
+(defn byte-array
+  ([size-or-seq]
+   (if (number? size-or-seq)
+     (td/Int8List (long size-or-seq))
+     (fill! (td/Int8List (seq-count size-or-seq)) size-or-seq)))
+  ([size init]
+   (if (number? init)
+     (let [a (td/Int8List (long size))] (.fillRange a 0 (long size) init) a)
+     (fill! (td/Int8List (long size)) (take size init)))))
+
+(defn short-array [size-or-seq]
+  (if (number? size-or-seq)
+    (td/Int16List (long size-or-seq))
+    (fill! (td/Int16List (seq-count size-or-seq)) size-or-seq)))
+
+(defn int-array [size-or-seq]
+  (if (number? size-or-seq)
+    (td/Int32List (long size-or-seq))
+    (fill! (td/Int32List (seq-count size-or-seq)) size-or-seq)))
+
+(defn long-array [size-or-seq]
+  (if (number? size-or-seq)
+    (td/Int64List (long size-or-seq))
+    (fill! (td/Int64List (seq-count size-or-seq)) size-or-seq)))
+
+(defn float-array [size-or-seq]
+  (if (number? size-or-seq)
+    (td/Float32List (long size-or-seq))
+    (fill! (td/Float32List (seq-count size-or-seq)) (map double size-or-seq))))
+
+(defn double-array [size-or-seq]
+  (if (number? size-or-seq)
+    (td/Float64List (long size-or-seq))
+    (fill! (td/Float64List (seq-count size-or-seq)) (map double size-or-seq))))
+
+(defn object-array [size-or-seq] (cljd.core/object-array size-or-seq))
+
+(defn into-array ([coll] (cljd.core/object-array (vec coll))) ([_type coll] (cljd.core/object-array (vec coll))))
+(defn to-array [coll] (cljd.core/object-array (vec coll)))
+
+(defn aget
+  {:inline (fn [a i] `(cljd.core/aget ~a ~i))
+   :inline-arities #{2}}
+  ([^List a ^int i] (cljd.core/aget a i))
+  ([a i & is] (apply aget (aget a i) is)))
+
+(defn aset
+  {:inline (fn [a i v] `(cljd.core/aset ~a ~i ~v))
+   :inline-arities #{3}}
+  ([^List a ^int i v] (cljd.core/aset a i v))
+  ([a i j & more] (apply aset (aget a i) j more)))
+
+(defn ^int alength
+  {:inline (fn [a] `(cljd.core/alength ~a))
+   :inline-arities #{1}}
+  [^List a]
+  (.-length a))
+
+(defn aclone
+  "a copy of array a, of a's own kind (a typed list's sublist is one)"
+  [^List a]
+  (.sublist a 0))
+
+;; the array casts, which are also the type hints ^bytes, ^longs, ...: nothing to do
+(defn bytes [a] a)
+(defn shorts [a] a)
+(defn ints [a] a)
+(defn longs [a] a)
+(defn floats [a] a)
+(defn doubles [a] a)
+(defn objects [a] a)
+(defn booleans [a] a)
+
+(defn const-bytes [xs] (byte-array (map unchecked-byte xs)))
+(defn const-objects [xs] (object-array (vec xs)))
+
+(defmacro defdelay [nm & body] `(def ~nm (delay ~@body)))
+
+;; --- cells, locks, collections built in place: cljd.core's ---
+
+(defn volatile! [x] (cljd.core/volatile! x))
+(defn volatile? [x] (cljd.core/volatile? x))
+(defmacro vswap!
+  "(vswap! v f args...): (vreset! v (f @v args...)), one expansion (f may be a macro, as conj! is elsewhere)"
+  [v f & more]
+  (let [sym (gensym "vol")]
+    `(let [~sym ~v] (cljd.core/vreset! ~sym (~f (cljd.core/deref ~sym) ~@more)))))
+
+(defmacro locking
+  "a Dart isolate is one thread: x is evaluated, then the body"
+  [x & body]
+  `(do ~x ~@body))
+
+(defn transient [coll] (cljd.core/transient coll))
+(defn persistent! [coll] (cljd.core/persistent! coll))
+(defn conj! ([] (cljd.core/transient [])) ([coll] coll) ([coll x] (cljd.core/conj! coll x)))
+(defn assoc! [coll k v] (cljd.core/assoc! coll k v))
+(defn dissoc! [coll k] (cljd.core/dissoc! coll k))
+(defn disj! [coll x] (cljd.core/disj! coll x))
+(defn pop! [coll] (cljd.core/pop! coll))
+
+(defn swap!
+  ([a f] (cljd.core/swap! a f))
+  ([a f x] (cljd.core/swap! a f x))
+  ([a f x y] (cljd.core/swap! a f x y))
+  ([a f x y & more] (apply cljd.core/swap! a f x y more)))
+(defn reset! [a v] (cljd.core/reset! a v))
+(defn compare-and-set! [a old new] (cljd.core/compare-and-set! a old new))
+
+(defmacro extend-default
+  "(extend-protocol proto nil impls... fallback impls...): proto for every value, nil included (ClojureDart's root
+   type is fallback)"
+  [proto & impls]
+  `(extend-protocol ~proto ~'fallback ~@impls))

@@ -1,0 +1,80 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) over the BEAM's (clojerl): the clock, a
+   thread's identity, sleep, a periodic timer, a hook at normal exit, and
+   files' existence, their exclusive creation and directories, and standard input's lines."
+  (:refer-clojure :exclude [long read-line])
+  (:require [clojure.string]
+            [eve.host :refer [long]]))
+
+(defn now-ms []
+  (erlang/system_time :millisecond))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under (threads share a worker slot)."
+  []
+  ;; the BEAM's process
+  (erlang/self))
+
+(defn sleep-ms!
+  "Block this thread for about ms milliseconds."
+  [ms]
+  (timer/sleep (long ms)))
+
+(defn start-timer!
+  "Call f every period-ms until stop-timer!. Returns the host's handle."
+  [period-ms f]
+  ;; clojerl: a BEAM process; the handle is its pid
+  (erlang/spawn (fn [] (loop [] (timer/sleep (long period-ms)) (f) (recur)))))
+
+(defn stop-timer! [h]
+  (when h
+    (erlang/exit h :kill)))
+
+(defn on-process-exit!
+  "Run f when the process exits normally."
+  [f]
+  ;; the BEAM runs nothing at a normal exit: the slot is released when its
+  ;; heartbeat goes stale (HEARTBEAT_TIMEOUT_MS), as for a killed process
+  nil)
+
+(defn file-exists? [path]
+  (filelib/is_regular (erlang/binary_to_list path)))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step
+   against every other process: true for the process that created it, false
+   when it already existed (an mmap domain's creator is the one that gets true).
+   Here: file:open [write, exclusive]: O_CREAT|O_EXCL."
+  [path]
+  (let [r (file/open (erlang/binary_to_list path) #erl(:write :exclusive))]
+    (cond (= :ok (erlang/element 1 r)) (do (file/close (erlang/element 2 r)) true)
+          (= :eexist (erlang/element 2 r)) false
+          :else (throw (ex-info (str "create-exclusive! " path ": " (erlang/element 2 r)) {:path path})))))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
+  [base-path]
+  (let [root-file (str base-path ".root")]
+    (filelib/ensure_dir (erlang/binary_to_list root-file))))
+
+(defn identity-hash
+  "An object's identity hash: equal for one object, whatever its own equality
+   or hash (a host object may answer none) — what eve's reference table keys
+   by (FORMAT-DECISIONS.md §9)."
+  [x]
+  ;; the BEAM has no object identity: a structural hash, the table compares by identical?
+  (erlang/phash2 x))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (crypto:strong_rand_bytes), as a vector of 0..255 — the one crypto
+   input no portable code can supply (eve.crypto/random-bytes)"
+  [n]
+  (vec (erlang/binary_to_list (crypto/strong_rand_bytes n))))
+
+(defn read-line
+  "the next line of the process's standard input, its line end dropped; nil at the end of the input. Blocking: io:get_line on
+   standard_io, a binary or the atom eof"
+  []
+  (let [l (io/get_line "")]
+    (when-not (= l :eof)
+      (let [t (str l)] (if (clojure.string/ends-with? t "\n") (subs t 0 (dec (count t))) t)))))

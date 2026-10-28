@@ -1,0 +1,50 @@
+--- a/pkg/lang/record.go
++++ b/pkg/lang/record.go
+@@ -140,6 +140,25 @@
+ 	_ IReduceInit = (*Record)(nil)
+ )
+ 
++// recordFactories: a record type whose instances another constructor makes
++// (eve's glj-eve build: a type that stands in for a map is a Go value of
++// eve's own, made by the factory its type registers). new and ->T consult it.
++var recordFactories sync.Map
++
++// SetRecordFactory makes f the constructor of recordType's instances, for
++// (new T ...) and ->T alike.
++func SetRecordFactory(recordType *RecordType, f func(values ...any) any) {
++	recordFactories.Store(recordType, f)
++}
++
++// RecordFactoryFor is recordType's registered constructor, or nil.
++func RecordFactoryFor(recordType *RecordType) func(values ...any) any {
++	if f, ok := recordFactories.Load(recordType); ok {
++		return f.(func(values ...any) any)
++	}
++	return nil
++}
++
+ func NewRecord(recordType *RecordType, values ...any) *Record {
+ 	if recordType == nil {
+ 		panic(NewIllegalArgumentError("record type is nil"))
+@@ -290,6 +309,9 @@
+ 
+ func (c *RecordConstructor) Invoke(args ...any) any {
+ 	if !c.fromMap {
++		if f := RecordFactoryFor(c.recordType); f != nil {
++			return f(args...)
++		}
+ 		return NewRecord(c.recordType, args...)
+ 	}
+ 	if len(args) != 1 {
+--- a/pkg/runtime/evalast.go
++++ b/pkg/runtime/evalast.go
+@@ -1110,6 +1110,9 @@
+ 	}
+ 	switch classVal := classVal.(type) {
+ 	case *lang.RecordType:
++		if f := lang.RecordFactoryFor(classVal); f != nil {
++			return f(args...), nil
++		}
+ 		return lang.NewRecord(classVal, args...), nil
+ 	case reflect.Type:
+ 		return lang.NewHostInstance(classVal, args...), nil

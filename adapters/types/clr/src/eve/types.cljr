@@ -1,0 +1,260 @@
+(ns eve.types
+  "eve's types on ClojureCLR: its clojure.lang interfaces carry the JVM's
+   names; what differs is translated here, at expansion, against the CLR's
+   own types.
+   The entry points eve's macros call (every eve.types has them):
+     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     existing-def, rename-fields, reader-of, print-form, vector-types."
+  (:refer-clojure :exclude [into-array])
+  (:require [clojure.string :as str]
+            [eve.host :refer [into-array]]
+            [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
+                                                 cljs-protocol? rename-syms parse-protocol-impls
+                                                 cljs-translate-protocol]]
+            [eve.deftype-proto.sio :as sio]))
+
+;; ClojureCLR: the JVM's interface names on the CLR
+;; ClojureCLR's clojure.lang interfaces carry the JVM's names. What differs is
+;; translated here, at expansion, against the CLR's own types:
+;;   - Object's methods are Equals, GetHashCode and ToString;
+;;   - java.lang.Iterable is the CLR's IEnumerable: GetEnumerator is generated
+;;     over the type's seq (for every Seqable type: ClojureCLR's vec and into
+;;     take an IEnumerable), and so is the generic IEnumerable<T> an interface
+;;     brings (IPersistentMap's IEnumerable<IMapEntry>);
+;;   - java.util.Map is a read-only IDictionary + ICollection (ClojureCLR's
+;;     maps compare equal only to an IDictionary);
+;;   - a type with IReduceInit gets IReduce's reduce without an init (the JVM
+;;     reaches that through Iterable; ClojureCLR's coll-reduce through IReduce);
+;;   - an interface or class the CLR does not have (java.util.Map, ...) is
+;;     dropped with its methods;
+;;   - where two of the type's interfaces declare one method name and arity
+;;     with different return types (Associative / IPersistentMap assoc,
+;;     IPersistentCollection / IPersistentVector cons), ClojureCLR's deftype
+;;     takes one definition per return type, hinted with it (measured
+;;     2026-10-16: unhinted, "Must hint overloaded method: assoc");
+;;   - the exceptions a body throws are the CLR's.
+
+(defn- clr-type
+  "The CLR type a symbol names, or nil."
+  [sym]
+  (try (let [t (clojure.lang.RT/classForName (str sym))] (when (instance? Type t) t))
+       (catch Exception _ nil)))
+
+(defn- clr-protocol?
+  "A Clojure protocol (its var holds the protocol map)."
+  [sym]
+  (let [v (try (resolve sym) (catch Exception _ nil))]
+    (and (var? v) (map? @v) (contains? @v :on-interface))))
+
+(defn- type-sym
+  "A symbol naming CLR type t the way ClojureCLR reads a type name
+   (Name`1[Arg] for a generic type)."
+  [^Type t]
+  (symbol (if (.IsGenericType t)
+            (str (.FullName (.GetGenericTypeDefinition t)) "["
+                 (apply str (interpose "," (map #(str (type-sym %)) (.GetGenericArguments t)))) "]")
+            (.FullName t))))
+
+(defn- interface-closure [types]
+  (distinct (mapcat (fn [^Type t] (cons t (seq (.GetInterfaces t)))) types)))
+
+(defn- return-types
+  "The distinct return types of the methods named mname with arity n that
+   the interfaces declare."
+  [ifaces mname n]
+  (distinct (for [^Type i ifaces
+                  ^System.Reflection.MethodInfo m (.GetMethods i)
+                  :when (and (= (.Name m) (str mname)) (== (count (.GetParameters m)) n))]
+              (.ReturnType m))))
+
+(def ^:private cljr-body-renames
+  '{RuntimeException. Exception.
+    UnsupportedOperationException. NotSupportedException.
+    IllegalArgumentException. ArgumentException.
+    IllegalStateException. InvalidOperationException.
+    IndexOutOfBoundsException. IndexOutOfRangeException.
+    ClassCastException. InvalidCastException.
+    java.util.NoSuchElementException. InvalidOperationException.
+    clojure.lang.SeqIterator. clojure.lang.SeqEnumerator.
+    System/identityHashCode System.Runtime.CompilerServices.RuntimeHelpers/GetHashCode
+    Throwable Exception})
+
+(def ^:private cljr-object-renames '{equals Equals hashCode GetHashCode toString ToString})
+
+(defn cljr-translate-protos
+  "Parsed protocol impls ([{:protocol :methods}]) as ClojureCLR's deftype takes
+   them (see above); unchanged on every other host."
+  [impls]
+  (let [java-iterable? (some #(contains? '#{java.lang.Iterable Iterable java.util.Collection java.util.List
+                                           java.util.Set java.util.Map}
+                                         (:protocol %))
+                             impls)
+        java-map? (some #(= 'java.util.Map (:protocol %)) impls)
+        reduce-init? (some #(= 'clojure.lang.IReduceInit (:protocol %)) impls)
+        reduce? (some #(= 'clojure.lang.IReduce (:protocol %)) impls)
+        impls (keep (fn [{:keys [protocol] :as impl}]
+                      (cond
+                        (contains? '#{Object java.lang.Object} protocol)
+                        (-> impl (assoc :protocol 'Object)
+                            (update :methods #(mapv (fn [m] (update m :name (fn [n] (get cljr-object-renames n n)))) %)))
+                        (= 'java.lang.Iterable protocol) nil
+                        (or (clr-type protocol) (clr-protocol? protocol)) impl
+                        :else nil))
+                    impls)
+        ifaces (interface-closure (keep (fn [{:keys [protocol]}]
+                                          (let [t (clr-type protocol)] (when (and t (.IsInterface ^Type t)) t)))
+                                        impls))
+        ;; a seqable type is enumerable: ClojureCLR's vec, into and
+        ;; RT.toArray take an IEnumerable, not a Seqable
+        enumerable? (or java-iterable?
+                        (some #(contains? #{System.Collections.IEnumerable clojure.lang.Seqable} %) ifaces))
+        generic-enums (filter (fn [^Type t] (and (.IsGenericType t)
+                                                  (= (.GetGenericTypeDefinition t)
+                                                     (clojure.lang.RT/classForName "System.Collections.Generic.IEnumerable`1"))))
+                              ifaces)
+        expand (fn [{:keys [name args] :as m}]
+                 (let [rts (return-types ifaces name (dec (count args)))]
+                   (if (> (count rts) 1)
+                     (map (fn [rt] (assoc m :name (with-meta name {:tag (type-sym rt)}))) rts)
+                     [m])))
+        ;; a method pooled under an interface entry that none of the
+        ;; type's CLR interfaces declares (getKey, call, run: the JVM's
+        ;; Map$Entry, Callable, Runnable) has nothing to implement here
+        declared (set (for [^Type i ifaces ^System.Reflection.MethodInfo m (.GetMethods i)] (.Name m)))
+        impls (mapv (fn [{:keys [protocol] :as impl}]
+                      (let [t (clr-type protocol)
+                            keep? (if (and t (.IsInterface ^Type t))
+                                    #(contains? declared (str (:name %)))
+                                    (constantly true))]
+                        (update impl :methods
+                                (fn [ms] (vec (mapcat (fn [m] (expand (update m :body #(rename-syms % cljr-body-renames))))
+                                                      (filter keep? ms)))))))
+                    impls)
+        enumerators
+        (when (or enumerable? (seq generic-enums))
+          [{:protocol 'System.Collections.IEnumerable
+            :methods (vec (cons {:name (if (or (seq generic-enums) java-map?)
+                                          (with-meta 'GetEnumerator {:tag 'System.Collections.IEnumerator})
+                                          'GetEnumerator)
+                                 :args '[this]
+                                 :body '((clojure.lang.SeqEnumerator. (clojure.core/seq this)))}
+                                (for [^Type g generic-enums
+                                      :let [t (first (.GetGenericArguments g))]]
+                                  {:name (with-meta 'GetEnumerator
+                                           {:tag (type-sym (.MakeGenericType (clojure.lang.RT/classForName "System.Collections.Generic.IEnumerator`1")
+                                                                             (into-array Type [t])))})
+                                   :args '[this]
+                                   :body (list (list 'new (type-sym (.MakeGenericType (clojure.lang.RT/classForName "clojure.lang.TypedSeqEnumerator`1")
+                                                                                      (into-array Type [t])))
+                                                     '(clojure.core/seq this)))})))}])
+        ;; java.util.Map is IDictionary (read-only) and ICollection: what
+        ;; ClojureCLR's maps require of a map they compare equal to
+        dictionary
+        (when java-map?
+          (let [ro '((throw (NotSupportedException. "an eve map is immutable")))]
+            [{:protocol 'System.Collections.IDictionary
+              :methods [{:name 'get_IsFixedSize :args '[_] :body '(true)}
+                        {:name 'get_IsReadOnly :args '[_] :body '(true)}
+                        {:name 'get_Item :args '[this k] :body '((clojure.core/get this k))}
+                        {:name 'set_Item :args '[_ k v] :body ro}
+                        {:name 'get_Keys :args '[this] :body '((clojure.core/to-array (clojure.core/keys this)))}
+                        {:name 'get_Values :args '[this] :body '((clojure.core/to-array (clojure.core/vals this)))}
+                        {:name 'Add :args '[_ k v] :body ro}
+                        {:name 'Clear :args '[_] :body ro}
+                        {:name 'Contains :args '[this k] :body '((clojure.core/contains? this k))}
+                        {:name 'Remove :args '[_ k] :body ro}
+                        {:name (with-meta 'GetEnumerator {:tag 'System.Collections.IDictionaryEnumerator})
+                         :args '[this] :body '((clojure.lang.MapEnumerator. this))}]}
+             {:protocol 'System.Collections.ICollection
+              :methods [{:name 'CopyTo :args '[this arr idx]
+                         :body '((clojure.core/loop [s (clojure.core/seq this) i (clojure.core/int idx)]
+                                   (clojure.core/when s
+                                     (.SetValue ^System.Array arr (clojure.core/first s) i)
+                                     (recur (clojure.core/next s) (clojure.core/unchecked-inc-int i)))))}
+                        {:name 'get_Count :args '[this] :body '((clojure.core/count this))}
+                        {:name 'get_IsSynchronized :args '[_] :body '(true)}
+                        {:name 'get_SyncRoot :args '[this] :body '(this)}]}]))
+        ;; reduce without an init: the JVM reaches it through Iterable,
+        ;; ClojureCLR's coll-reduce through IReduce
+        reduce1 (when (and reduce-init? (not reduce?))
+                  [{:protocol 'clojure.lang.IReduce
+                    :methods [{:name 'reduce :args '[this__ f__]
+                               :body '((clojure.core/reduce f__ (clojure.core/seq this__)))}]}])]
+    (vec (concat (remove #(= 'System.Collections.IEnumerable (:protocol %)) impls)
+                 enumerators dictionary reduce1))))
+
+(defn- define [type-name fields forms]
+  [`(~'deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos (parse-protocol-impls forms))))])
+
+(defn- hooks
+  "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
+   value as a literal, which a map of functions is not)."
+  []
+  {:normalize v/jvm-translate-protos
+   :define (fn [type-name fields _impls forms print]
+             (concat (define type-name fields forms)
+                     (when print [(sio/print-method-form type-name print)])))
+   :build (fn [type-name _fields _new-name args] (list* 'new type-name args))
+   :factory-via-var? false
+   :slab-prepare (fn [parsed _type-name] parsed)
+   :object-boilerplate? true
+   :slab-define define})
+
+(defn host-type
+  "A plain type written with the JVM's names (host-deftype)."
+  [_env type-name fields parsed]
+  `(clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos parsed))))
+
+(defn plain-type
+  "A plain type (eve.deftype/deftype)."
+  [_env type-name fields parsed]
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)
+        {:keys [impls print]} (v/jvm-translate-protos parsed)]
+    `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos impls)))
+         ~@(when print [(sio/print-method-form type-name print)])
+         ~type-name)))
+
+(defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
+(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
+
+(defn existing-def
+  "{:value v} when the namespace being compiled already defines sym, else nil."
+  [_env sym]
+  (when-let [v (resolve sym)] {:value @v}))
+
+(defn rename-fields
+  "An eve-deftype's fields and body with the field names the JVM reserves
+   renamed (__hash): [fields body]."
+  [_env fields body]
+  (sio/eve-renames fields body))
+
+(defn reader-of
+  "What a registered eve collection reads as on this host: its eve type
+   (from-header; host-value is for a host whose types cannot stand in for its
+   collections)."
+  [from-header _host-value]
+  from-header)
+
+(defn print-form
+  "The printer of a registered eve collection of shape spec ({:open :close}
+   for a sequential one, :map for a map): print-method through clojure.core's
+   own printers, as Clojure prints its collections."
+  [_env type-name spec]
+  (cond
+    (= :map spec)
+    (when (resolve 'clojure.core/print-map)
+      (let [m (gensym "m") w (gensym "w")]
+        `(defmethod print-method ~type-name [~m ~w]
+           ((var clojure.core/print-map) ~m print-method ~w))))
+    :else
+    (when (resolve 'clojure.core/print-sequential)
+      (let [v (gensym "v") w (gensym "w")]
+        `(defmethod print-method ~type-name [~v ~w]
+           ((var clojure.core/print-sequential) ~(:open spec) (var clojure.core/pr-on) " "
+            ~(:close spec) (seq ~v) ~w))))))
+
+(defn vector-types
+  "ClojureCLR's own vector types: IPersistentVector's implementors."
+  [_env]
+  '[clojure.lang.IPersistentVector])

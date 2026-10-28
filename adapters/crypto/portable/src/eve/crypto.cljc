@@ -1,0 +1,36 @@
+(ns eve.crypto
+  "eve's crypto feature (adapters/README.md), portable: every primitive from eve.net.portable-crypto (SHA-256,
+   HMAC-SHA256, AES-256-CTR, XXH3-128, Ed25519), and random bytes from the host's process feature — the adapter of a
+   host with no native digest or cipher. Bytes are vectors of 0..255 in and out."
+  (:require [eve.net.portable-crypto :as p]
+            [eve.process :as process]))
+
+(defn sha256 "the 32-byte digest" [bs] (p/sha256 bs))
+(defn hmac-sha256 "RFC 2104 over SHA-256" [key msg] (p/hmac-sha256 key msg))
+(defn aes256-ctr "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key" [key iv data]
+  (p/aes256-ctr key iv data))
+(defn xxh3-128 "the 16-byte XXH3-128 digest, big-endian hi then lo" [bs] (p/xxh3-128 bs))
+(defn random-bytes "n bytes of the operating system's entropy" [n] (process/random-bytes n))
+(defn ed25519-public-key "the 32-byte public key of a 32-byte secret seed" [seed] (p/ed25519-public-key seed))
+(defn ed25519-sign "the 64-byte signature of the message under a 32-byte secret seed" [seed msg] (p/ed25519-sign seed msg))
+(defn ed25519-verify "is sig a valid signature of the message under the 32-byte public key" [pub msg sig]
+  (p/ed25519-verify pub msg sig))
+
+;; ── the aegis clear-evaluation rows (aegis/docs/simple-spike/REPORT.md): SHA-384 and the big-integer trio, portable here
+;; (this adapter is the portable reference; a host with native integers takes its own row: REPORT.md §8)
+(defn sha384 "the 48-byte SHA-384 digest" [bs] (p/sha384 bs))
+(defn modpow "base^exp mod n over big-endian bytes" [base exp n] (p/modpow base exp n))
+(defn modmul "a·b mod n over big-endian bytes" [a b n] (p/modmul a b n))
+(defn modinv "a^-1 mod n over big-endian bytes, or nil" [a n] (p/modinv a n))
+(defn ed25519-scalarmult "the encoding of [s]P (portable)" [s p] (p/ed25519-scalarmult s p))
+(defn ed25519-mul-add "the encoding of [a]P + [b]Q (portable)" [a p b q] (p/ed25519-mul-add a p b q))
+(defn x25519 "X25519 (RFC 7748, portable)" [k u] (p/x25519 k u))
+(defn sha512 "the 64-byte SHA-512 digest (portable)" [bs] (p/sha512 bs))
+(defn aes256-gcm-seal "AES-256-GCM (portable)" [key iv aad pt] (p/aes256-gcm-seal key iv aad pt))
+(defn aes256-gcm-open "the plaintext of AES-256-GCM ciphertext ‖ tag, or nil (portable)" [key iv aad sealed] (p/aes256-gcm-open key iv aad sealed))
+
+(defn ed25519-map-to-point
+  "the 32-byte encoding of clear_cofactor(map_to_curve(u0) + map_to_curve(u1)) on edwards25519 (RFC 9380 G.2.1–G.2.2),
+   u0 and u1 32 little-endian bytes (bit 255 dropped) — eve.net.portable-crypto's map over this adapter's modpow"
+  [u0 u1]
+  (p/ed25519-map-to-point u0 u1 modpow))

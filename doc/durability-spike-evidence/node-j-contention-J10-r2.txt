@@ -1,0 +1,8 @@
+variant=J10 n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 3087.1572940000333
+4325.366109999828
+4414.539463000372
+3766.305425000377
+makespan-ms: 4414.539463000372
+total-swaps: 400  aggregate-ops-sec: 90.6
+final: :value 400 (expected :value 400)

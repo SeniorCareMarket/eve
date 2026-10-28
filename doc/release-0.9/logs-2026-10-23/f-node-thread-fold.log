@@ -1,0 +1,16 @@
+# run f-node-thread-fold on 40a2d56ec eve tree 1ffe98309e33d0d51d78f23e3f9eed44f8e32522
+# cmd (in eve/) bash -c node target/eve-test/all.js thread-fold
+# start 2026-10-23 3:42:11 PM ET load 1.72 1.80 1.53 mem-in-use 937 MB
+=== Eve Test Runner ===
+Suite: thread-fold
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.thread-fold-test
+
+Ran 7 tests containing 332 assertions.
+0 failures, 0 errors.
+Worker start: 1459 ms (the last worker's, eve.thread-host/driving)
+# end 2026-10-23 3:42:30 PM ET exit 0 wall 19s peak-mem-in-use 2667 MB peak-process-tree-rss 1757 MB load 2.22 1.91 1.58

@@ -1,0 +1,9 @@
+# run f-na1-bb on 3d2d8fb22 eve tree 9c2cfceaaf4768803385885d994f4cb7169b9de1
+# cmd (in eve/) bash -c d=$(mktemp -d); bb -cp "$(bb classpath bb)" /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/probes/na1.cljc $d
+# start 2026-10-21 11:47:48 PM ET load 1.01 1.00 1.16 mem-in-use 1036 MB
+{:n 0}
+{:n 1}
+{:n 2}
+{:n 2}
+{:requests 12, :commits 1, :conflicts 0, :by-atom {app/counter 4}}
+# end 2026-10-21 11:47:50 PM ET exit 0 wall 2s peak-mem-in-use 1036 MB peak-process-tree-rss 30 MB load 1.01 1.00 1.16

@@ -1,0 +1,83 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) over .NET's (ClojureCLR): the clock, a
+   thread's identity, sleep, a periodic timer, a hook at normal exit, and
+   files' existence, their exclusive creation and directories, and standard input's lines."
+  (:refer-clojure :exclude [read-line]))
+
+(defn now-ms []
+  (.ToUnixTimeMilliseconds DateTimeOffset/UtcNow))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under (threads share a worker slot)."
+  []
+  (.ManagedThreadId System.Threading.Thread/CurrentThread))
+
+(defn sleep-ms!
+  "Block this thread for about ms milliseconds."
+  [ms]
+  (System.Threading.Thread/Sleep (int ms)))
+
+(defn start-timer!
+  "Call f every period-ms until stop-timer!. Returns the host's handle."
+  [period-ms f]
+  (let [t (System.Threading.Thread.
+           (gen-delegate System.Threading.ThreadStart []
+             (loop []
+               (when (try (System.Threading.Thread/Sleep (int period-ms))
+                          true
+                          (catch System.Threading.ThreadInterruptedException _ false))
+                 (f)
+                 (recur)))))]
+    (set! (.IsBackground t) true)
+    (set! (.Name t) "eve-heartbeat")
+    (.Start t)
+    t))
+
+(defn stop-timer! [h]
+  (when h
+    (.Interrupt ^System.Threading.Thread h)))
+
+(defn on-process-exit!
+  "Run f when the process exits normally."
+  [f]
+  (.add_ProcessExit AppDomain/CurrentDomain
+                    (gen-delegate EventHandler [_ _] (f))))
+
+(defn file-exists? [path]
+  (System.IO.File/Exists ^String path))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step
+   against every other process: true for the process that created it, false
+   when it already existed (an mmap domain's creator is the one that gets true).
+   Here: FileMode/CreateNew."
+  [path]
+  (try (.Dispose (System.IO.File/Open ^String path System.IO.FileMode/CreateNew)) true
+       (catch System.IO.IOException e
+         (if (System.IO.File/Exists ^String path) false (throw e)))))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
+  [base-path]
+  (let [root-file (str base-path ".root")]
+    (let [dir (System.IO.Path/GetDirectoryName (System.IO.Path/GetFullPath ^String root-file))]
+      (when-not (System.IO.Directory/Exists dir)
+        (System.IO.Directory/CreateDirectory dir)))))
+
+(defn identity-hash
+  "An object's identity hash: equal for one object, whatever its own equality
+   or hash (a host object may answer none) — what eve's reference table keys
+   by (FORMAT-DECISIONS.md §9)."
+  [x]
+  (System.Runtime.CompilerServices.RuntimeHelpers/GetHashCode x))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (System.Security.Cryptography.RandomNumberGenerator), as a vector of
+   0..255 — the one crypto input no portable code can supply (eve.crypto/random-bytes)"
+  [n]
+  (mapv int (System.Security.Cryptography.RandomNumberGenerator/GetBytes (int n))))
+
+(defn read-line
+  "the next line of the process's standard input, its line end dropped; nil at the end of the input. Blocking"
+  []
+  (.ReadLine Console/In))

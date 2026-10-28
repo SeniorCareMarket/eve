@@ -1,0 +1,12 @@
+# the Dart package ClojureDart compiles the eve-swarm seat into (made by clojure -M:cljd init; build.sh). crypto: the
+# Dart team's digests, which eve's crypto adapter for Dart takes (adapters/crypto/dart)
+name: cljd
+description: eve-swarm's seat, eve's chat client compiled by ClojureDart into a Dart command-line program.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  crypto: ^3.0.6

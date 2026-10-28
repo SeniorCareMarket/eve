@@ -1,0 +1,128 @@
+;; the JVM: eve's shared code and the JVM's adapters (hosts.edn :jvm)
+{:paths ["src" "adapters/slab-io/protocol/src" "adapters/http/java/src" "adapters/http-server/jdk/src" "adapters/crypto/java/src" "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src"
+         "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src"
+         "adapters/process/java/src" "adapters/thread/jvm/src" "adapters/types/jvm/src" "adapters/types/js/src"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
+ :aliases
+ {;; the eve-swarm seat on SCI as a library (capstone/eve-swarm/sci): SCI loads eve's src and the babashka host's
+  ;; roots itself, from source — only the main and sci are on the JVM's classpath (clojure -M:sci-seat -m
+  ;; eve-swarm.sci-seat)
+  :sci-seat
+  {:replace-paths ["capstone/eve-swarm/sci"]
+   :extra-deps {org.babashka/sci {:mvn/version "0.15.59"}}}
+  :node-test
+  ;; ClojureScript: eve's shared code and ClojureScript's adapters (hosts.edn :cljs)
+  {:replace-paths ["src" "adapters/slab-io/protocol/src" "adapters/slab-io/cljs-compiler/src" "adapters/http/node/src"
+                   "adapters/http-server/node/src" "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
+                   "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
+                   "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src"
+                   "adapters/region/js/src" "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src"
+                   "adapters/process/node/src" "adapters/thread/node/src"
+                   ;; the compiler's own Clojure (a JVM)
+                   "adapters/coll/jvm/src" "adapters/slab/heap/src"
+                   "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src" "adapters/int32/jvm/src"
+                   "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
+                   "adapters/types/jvm/src" "adapters/types/js/src"]
+   :extra-paths ["test"]
+   :extra-deps {thheller/shadow-cljs {:mvn/version "3.3.6"}
+                org.clojure/test.check {:mvn/version "1.1.1"}}}
+  ;; ClojureScript in a browser (hosts.edn :browser): the browser's threads in place of Node's; the
+  ;; thread feature's conformance page (bb test:browser runs shadow through this alias)
+  :browser-test
+  {:replace-paths ["src" "adapters/slab-io/protocol/src" "adapters/slab-io/cljs-compiler/src" "adapters/http/browser/src"
+                   "adapters/crypto/browser/src" "adapters/crypto/js-bigint/src" "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
+                   "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
+                   "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src"
+                   "adapters/thread/browser/src"
+                   "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src"
+                   "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src"
+                   "adapters/thread/jvm/src" "adapters/types/jvm/src" "adapters/types/js/src"]
+   :extra-paths ["test"]
+   :extra-deps {thheller/shadow-cljs {:mvn/version "3.3.6"}}}
+  ;; eve-media, the capstone (capstone/eve-media): its ClojureScript sources — the Node member's, added to :node-test,
+  ;; and the page's (the browser runtime and its view, rendered with reagami as the cljs-thread reagami-counter
+  ;; example is), added to :browser-test; each has its own eve-media.tasks
+  :eve-media-node
+  {:extra-paths ["capstone/eve-media/src" "capstone/eve-media/members/node/src"]}
+  :eve-media-page
+  {:extra-paths ["capstone/eve-media/src" "capstone/eve-media/page/src"]
+   :extra-deps {io.github.borkdude/reagami {:git/tag "v0.0.36" :git/sha "562cf3d"}}}
+  :jvm-test
+  {:extra-paths ["test"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"]
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
+                io.github.cognitect-labs/test-runner
+                {:git/tag "v0.5.0" :git/sha "48c3c67"}}
+   :main-opts ["-m" "cognitect.test-runner" "-d" "test"]}
+  ;; eve's performance suite on the JVM (test/eve/perf_suite.cljc; every host's runner has a perf command too):
+  ;; clojure -M:perf
+  :perf
+  {:extra-paths ["test"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED" "--enable-native-access=ALL-UNNAMED"]
+   :main-opts ["-e" "(require 'eve.perf-suite) (eve.perf-suite/run! {}) (System/exit 0)"]}
+  :jvm-e2e-test
+  {:extra-paths ["test" "test-e2e"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"]
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
+                io.github.cognitect-labs/test-runner
+                {:git/tag "v0.5.0" :git/sha "48c3c67"}}
+   :main-opts ["-m" "cognitect.test-runner" "-d" "test-e2e"]}
+  :native-build-atom
+  {:extra-paths ["bench"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx1g"]
+   :main-opts ["-m" "eve.build-atom"]}
+  :native-x-stress-atom
+  {:extra-paths ["bench"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx1g"]
+   :main-opts ["-m" "eve.stress-atom"]}
+  :native-profiled-stress
+  {:extra-paths ["bench"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx1g"]
+   :main-opts ["-m" "eve.profiled-stress"]}
+  :native-data-bench
+  {:extra-paths ["bench"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx1g"]
+   :main-opts ["-m" "eve.data-bench"]}
+  :columnar-bench
+  {:extra-paths ["test"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx4g"]
+   :main-opts ["-m" "eve.columnar-bench"]}
+  :perf-audit
+  {:extra-paths ["test"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx4g"]
+   :main-opts ["-m" "eve.perf-audit"]}
+  :contention-bench
+  {:extra-paths ["bench"]
+   :jvm-opts ["--add-opens" "java.base/java.lang=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dio.netty.tryReflectionSetAccessible=true"
+              "-Xmx1g"]
+   :main-opts ["-m" "eve.contention-bench"]}
+  :mcp {:extra-deps {io.github.bhauman/clojure-mcp {:git/tag "v0.2.6" :git/sha "35a660b"}}
+        :exec-fn clojure-mcp.main/start
+        :exec-args {:config-profile :cli-assist}}
+  :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.3.1"}
+                       cider/cider-nrepl {:mvn/version "0.50.3"}}
+          :main-opts ["-m" "nrepl.cmdline" "--middleware" "[cider.nrepl/cider-middleware]"]}}}

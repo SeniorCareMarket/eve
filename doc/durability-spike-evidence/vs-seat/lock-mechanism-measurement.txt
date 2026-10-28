@@ -1,0 +1,15 @@
+LOCK MECHANISM MEASUREMENT (2026-10-27, this box, Linux)
+Holder: JVM process, FileChannel.lock() (whole file) on test.lock — the
+exact call eve.atom/journal-with-lock makes. Contenders in a second
+process (try_locks.py):
+  fcntl F_SETLK (classic POSIX) whole-file: BLOCKED/DENIED errno=11
+  fcntl F_OFD_SETLK (OFD) whole-file:       BLOCKED/DENIED errno=11
+  flock(2) LOCK_EX:                         ACQUIRED (no exclusion!)
+  python lockf (F_SETLK):                   BLOCKED/DENIED errno=11
+  mkdir lock-dir (Node's journal lock):     ACQUIRED (no exclusion!)
+Reverse (hold_ofd.py holds; try_lock.clj JVM tryLock):
+  OFD holder:     JAVA-TRYLOCK: BLOCKED/DENIED
+  classic holder: JAVA-TRYLOCK: BLOCKED/DENIED
+Conclusion: fcntl byte-range locks exclude the JVM seat in both
+directions; flock(2) and mkdir live in separate lock domains and do
+not interact with FileChannel.lock at all.

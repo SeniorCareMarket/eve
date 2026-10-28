@@ -1,0 +1,294 @@
+(ns eve.host
+  "eve's host interface on clojerl (eve/CLAUDE.md, 'eve is portable'): the
+   BEAM's core has no mutable arrays, cells, locks or transients and its
+   integers are unbounded, so every name is implemented here — the arrays in
+   native memory (eve.clje-nif's heap regions; an object array is a term
+   array), a cell clojerl's process value, a lock the BEAM's global lock on the
+   locked value, a collection built in place the persistent one, and the
+   integer ops wrapping as the JVM's do."
+  (:refer-clojure :exclude [aget aset alength aclone byte-array short-array int-array
+                            long-array float-array double-array object-array into-array
+                            to-array unchecked-byte unchecked-short unchecked-int
+                            unchecked-long unchecked-add-int unchecked-multiply-int
+                            unchecked-inc-int unchecked-dec-int unchecked-add
+                            unchecked-multiply unchecked-inc unsigned-bit-shift-right
+                            long double class volatile! volatile? vswap! locking
+                            transient persistent! conj! assoc! dissoc! disj! pop!
+                            bytes shorts ints longs floats doubles objects booleans
+                            swap! reset! compare-and-set!])
+  (:require [eve.clje-nif :as nif]))
+
+;; clojerl's arrays answer this (a protocol at top level: clojerl's
+;; defprotocol inside a do fails, "Could not dereference ... There is no Erlang
+;; function to back it up")
+(defprotocol IHostArray
+  (-aget [a i])
+  (-aset [a i v])
+  (-alength [a])
+  (-aclone [a]))
+
+;; clojerl's swap!, reset! and compare-and-set! reach clojerl's own atom only
+;; (hinted ^clojerl.Atom, they call its module), and its alter-var-root is
+;; unsupported: an atom of another type answers these, which the deftype
+;; macros translate the JVM's clojure.lang.IAtom onto (eve's mmap atom)
+(defprotocol IAtom
+  (-swap [a f args])
+  (-reset [a v])
+  (-compare-and-set [a old new]))
+
+(nif/load!)
+
+;; --- fixed-width integers: the BEAM's are unbounded; these wrap ---
+
+(defn- trunc [x] (if (float? x) (erlang/trunc x) x))
+
+(defn unchecked-byte [x]
+  (let [u (bit-and (trunc x) 0xFF)] (if (< u 0x80) u (- u 0x100))))
+(defn unchecked-short [x]
+  (let [u (bit-and (trunc x) 0xFFFF)] (if (< u 0x8000) u (- u 0x10000))))
+(defn unchecked-int [x]
+  (let [u (bit-and (trunc x) 0xFFFFFFFF)] (if (< u 0x80000000) u (- u 0x100000000))))
+(defn unchecked-long [x]
+  (let [u (bit-and (trunc x) 0xFFFFFFFFFFFFFFFF)]
+    (if (< u 0x8000000000000000) u (- u 0x10000000000000000))))
+(defn unchecked-add-int [a b] (unchecked-int (+ a b)))
+(defn unchecked-multiply-int [a b] (unchecked-int (* a b)))
+(defn unchecked-inc-int [a] (unchecked-int (inc a)))
+(defn unchecked-dec-int [a] (unchecked-int (dec a)))
+(defn unchecked-add [a b] (unchecked-long (+ a b)))
+(defn unchecked-multiply [a b] (unchecked-long (* a b)))
+(defn unchecked-inc [a] (unchecked-long (inc a)))
+(defn unsigned-bit-shift-right
+  "x as 64 unsigned bits, shifted right by n (mod 64) — the JVM's >>>."
+  [x n]
+  (unchecked-long (bit-shift-right (bit-and x 0xFFFFFFFFFFFFFFFF) (bit-and n 63))))
+(defn long [x] (trunc x))
+(defn double [x] (erlang/float x))
+(defn class [x] (type x))
+(defn token [] (erlang/make_ref))
+
+;; --- arrays: native memory, one element per width; objects in a term array ---
+
+;; count, nth and seq answer on an array, as on the JVM's
+(defn- array-seq* [a] (let [n (-alength a)] (when (pos? n) (map #(-aget a %) (range n)))))
+
+(defmacro ^:private defarray
+  "A host array type over a heap region, width bytes an element."
+  [tname width load store]
+  `(deftype ~tname [~'r]
+     IHostArray
+     (-aget [_# i#] (~load ~'r (* ~width i#)))
+     (-aset [_# i# v#] (~store ~'r (* ~width i#) v#) v#)
+     (-alength [_#] (quot (nif/byte-length ~'r) ~width))
+     (-aclone [_#] (new ~tname (nif/slice ~'r 0 (nif/byte-length ~'r))))
+     clojerl.ICounted
+     (~'count [this#] (-alength this#))
+     clojerl.IIndexed
+     (~'nth [this# i#] (-aget this# i#))
+     (~'nth [this# i# nf#] (if (and (<= 0 i#) (< i# (-alength this#))) (-aget this# i#) nf#))
+     clojerl.ISeqable
+     (~'seq [this#] (array-seq* this#))
+     (~'to_list [this#] (clj_rt/to_list (array-seq* this#)))))
+
+(defarray ByteArray 1 nif/load-i8 nif/store-i8!)
+(defarray ShortArray 2 nif/load-i16 nif/store-i16!)
+(defarray IntArray 4 nif/load-i32 nif/store-i32!)
+(defarray LongArray 8 nif/load-i64 nif/store-i64!)
+(defarray FloatArray 4 nif/load-f32 nif/store-f32!)
+(defarray DoubleArray 8 nif/load-f64 nif/store-f64!)
+
+(deftype ObjectArray [t]
+  IHostArray
+  (-aget [_ i] (nif/tget t i))
+  (-aset [_ i v] (nif/tset! t i v) v)
+  (-alength [_] (nif/tlength t))
+  (-aclone [this]
+    (let [n (nif/tlength t) c (nif/tarray n)]
+      (dotimes [i n] (nif/tset! c i (nif/tget t i)))
+      (ObjectArray. c)))
+  clojerl.ICounted
+  (count [this] (-alength this))
+  clojerl.IIndexed
+  (nth [this i] (-aget this i))
+  (nth [this i nf] (if (and (<= 0 i) (< i (-alength this))) (-aget this i) nf))
+  clojerl.ISeqable
+  (seq [this] (array-seq* this))
+  (to_list [this] (clj_rt/to_list (array-seq* this))))
+
+;; An array written once and held by a top-level def: a clojerl def's value
+;; is compiled into its module as a literal, which native memory is not;
+;; these hold their elements as a binary and a vector instead
+(deftype ConstByteArray [bin]
+  IHostArray
+  (-aget [_ i] (let [u (binary/at bin i)] (if (< u 128) u (- u 256))))
+  (-aset [_ _ _] (throw (ex-info "eve.host: a const array is never written" {})))
+  (-alength [_] (erlang/byte_size bin))
+  (-aclone [_] (ByteArray. (nif/from-binary bin)))
+  clojerl.ICounted
+  (count [this] (-alength this))
+  clojerl.IIndexed
+  (nth [this i] (-aget this i))
+  (nth [this i nf] (if (and (<= 0 i) (< i (-alength this))) (-aget this i) nf))
+  clojerl.ISeqable
+  (seq [this] (array-seq* this))
+  (to_list [this] (clj_rt/to_list (array-seq* this))))
+
+(deftype ConstObjectArray [v]
+  IHostArray
+  (-aget [_ i] (nth v i))
+  (-aset [_ _ _] (throw (ex-info "eve.host: a const array is never written" {})))
+  (-alength [_] (count v))
+  (-aclone [_]
+    (let [t (nif/tarray (count v))]
+      (dotimes [i (count v)] (nif/tset! t i (nth v i)))
+      (ObjectArray. t)))
+  clojerl.ICounted
+  (count [_] (count v))
+  clojerl.IIndexed
+  (nth [_ i] (nth v i))
+  (nth [_ i nf] (nth v i nf))
+  clojerl.ISeqable
+  (seq [_] (seq v))
+  (to_list [_] (clj_rt/to_list v)))
+
+(defn const-bytes [xs]
+  (ConstByteArray. (erlang/list_to_binary (clj_rt/to_list (mapv #(bit-and % 0xFF) xs)))))
+(defn const-objects [xs] (ConstObjectArray. (vec xs)))
+
+(defn byte-region
+  "A byte array's region (eve.mem's regions and eve.platform copy
+   through it): a const array's bytes are copied into one."
+  [b]
+  (if (instance? ConstByteArray b) (nif/from-binary (.-bin b)) (.-r b)))
+
+(defn region->bytes "A byte array over region r." [r] (ByteArray. r))
+
+(defn- filled
+  "An array of ctor's kind: n zeroed elements, or the elements of a seq."
+  [width ctor size-or-seq]
+  (if (number? size-or-seq)
+    (ctor (nif/heap (* width size-or-seq)))
+    (let [xs (vec size-or-seq) a (ctor (nif/heap (* width (count xs))))]
+      (dotimes [i (count xs)] (-aset a i (nth xs i)))
+      a)))
+
+(defn byte-array
+  ([size-or-seq] (filled 1 #(ByteArray. %) size-or-seq))
+  ([size init] (let [a (byte-array size)] (dotimes [i size] (-aset a i (nth init i 0))) a)))
+(defn short-array [size-or-seq] (filled 2 #(ShortArray. %) size-or-seq))
+(defn int-array [size-or-seq] (filled 4 #(IntArray. %) size-or-seq))
+(defn long-array [size-or-seq] (filled 8 #(LongArray. %) size-or-seq))
+(defn float-array [size-or-seq] (filled 4 #(FloatArray. %) size-or-seq))
+(defn double-array [size-or-seq] (filled 8 #(DoubleArray. %) size-or-seq))
+(defn object-array [size-or-seq]
+  (if (number? size-or-seq)
+    (ObjectArray. (nif/tarray size-or-seq))
+    (let [xs (vec size-or-seq) a (ObjectArray. (nif/tarray (count xs)))]
+      (dotimes [i (count xs)] (-aset a i (nth xs i)))
+      a)))
+(defn into-array ([coll] (object-array (seq coll))) ([_type coll] (object-array (seq coll))))
+(defn to-array [coll] (object-array (seq coll)))
+
+(defn aget
+  ([a i] (-aget a i))
+  ([a i & is] (apply aget (-aget a i) is)))
+(defn aset
+  ([a i v] (-aset a i v))
+  ([a i j & more] (apply aset (-aget a i) j more)))
+(defn alength [a] (-alength a))
+(defn aclone [a] (-aclone a))
+
+;; the array casts, which are also the type hints ^bytes, ^longs, ...: a
+;; hint's symbol must resolve on clojerl, and a cast has nothing to do
+(defn bytes [a] a)
+(defn shorts [a] a)
+(defn ints [a] a)
+(defn longs [a] a)
+(defn floats [a] a)
+(defn doubles [a] a)
+(defn objects [a] a)
+(defn booleans [a] a)
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff (memmove
+   between two arrays of one numeric kind)."
+  [src soff dst doff len]
+  (let [w (fn [a] (condp instance? a ByteArray 1 ShortArray 2 IntArray 4 FloatArray 4
+                         LongArray 8 DoubleArray 8 nil))
+        ws (w src)]
+    (if (and ws (= ws (w dst)) (= (type src) (type dst)))
+      (nif/copy! (.-r src) (* ws soff) (.-r dst) (* ws doff) (* ws len))
+      (if (and (= src dst) (< soff doff))
+        (loop [i (dec len)] (when (>= i 0) (-aset dst (+ doff i) (-aget src (+ soff i))) (recur (dec i))))
+        (dotimes [i len] (-aset dst (+ doff i) (-aget src (+ soff i))))))))
+
+;; A process-global value computed on its first deref. A clojerl def holds
+;; a literal, which a delay is not: the def holds this handle, and the
+;; value, once computed (under the global lock on its key), is kept in
+;; the node's persistent_term.
+(deftype GlobalDelay [k init]
+  clojerl.IDeref
+  (deref [_]
+    (let [v (persistent_term/get k ::none)]
+      (if (not= v ::none)
+        v
+        (global/trans #erl[k (erlang/self)]
+                      (fn []
+                        (let [v (persistent_term/get k ::none)]
+                          (if (not= v ::none)
+                            v
+                            (let [v ((resolve init))] (persistent_term/put k v) v))))
+                      #erl((erlang/node)))))))
+
+(defmacro defdelay [nm & body]
+  (let [init (symbol (str (name nm) "__init"))
+        q (fn [s] (list 'quote (symbol (str *ns*) (name s))))]
+    `(do (defn ~init [] ~@body)
+         (def ~nm (new eve.host.GlobalDelay ~(q nm) ~(q init))))))
+
+;; --- cells, locks, collections built in place ---
+
+(defn swap!
+  ([a f] (if (instance? clojerl.Atom a) (clojure.core/swap! a f) (-swap a f [])))
+  ([a f x] (if (instance? clojerl.Atom a) (clojure.core/swap! a f x) (-swap a f [x])))
+  ([a f x y] (if (instance? clojerl.Atom a) (clojure.core/swap! a f x y) (-swap a f [x y])))
+  ([a f x y & more]
+   (if (instance? clojerl.Atom a)
+     (apply clojure.core/swap! a f x y more)
+     (-swap a f (into [x y] more)))))
+(defn reset! [a v] (if (instance? clojerl.Atom a) (clojure.core/reset! a v) (-reset a v)))
+(defn compare-and-set! [a old new]
+  (if (instance? clojerl.Atom a)
+    (clojure.core/compare-and-set! a old new)
+    (-compare-and-set a old new)))
+
+(defn volatile! [x] (process-val! x))
+(defn volatile? [x] (process-val? x))
+(defmacro vswap!
+  "(vswap! v f args...): (vreset! v (f @v args...))."
+  [v f & more]
+  (let [sym (gensym "vol")]
+    `(let [~sym ~v] (clojure.core/vreset! ~sym (~f (clojure.core/deref ~sym) ~@more)))))
+
+(defn locking*
+  "f, holding the BEAM's global lock on x (reentrant for one process)."
+  [x f]
+  (global/trans #erl[x (erlang/self)] f #erl((erlang/node))))
+
+(defmacro locking [x & body] `(locking* ~x (fn [] ~@body)))
+
+;; clojerl has no transients: a collection built in place is built
+;; persistently, each op returning the next (as a transient's op does)
+(defn transient [coll] coll)
+(defn persistent! [coll] coll)
+(defn conj! ([] []) ([coll] coll) ([coll x] (conj coll x)))
+(defn assoc! [coll k v] (assoc coll k v))
+(defn dissoc! [coll k] (dissoc coll k))
+(defn disj! [coll x] (disj coll x))
+(defn pop! [coll] (pop coll))
+
+(defmacro extend-default
+  "(extend-protocol proto nil impls... default impls...): proto for every
+   value, nil included (clojerl's root type is default)."
+  [proto & impls]
+  `(extend-protocol ~proto nil ~@impls ~'default ~@impls))

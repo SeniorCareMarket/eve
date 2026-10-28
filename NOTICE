@@ -1,0 +1,55 @@
+eve
+Copyright (c) 2022 John Newman
+Licensed under the MIT License (LICENSE), except as noted below.
+
+------------------------------------------------------------------------------
+Third-party code distributed with eve
+------------------------------------------------------------------------------
+
+1. core.rrb-vector (ClojureScript sources), Eclipse Public License 1.0
+
+   Files:  src/eve/rrb_vector.cljc
+           src/eve/rrb_vector/interop.cljc
+           src/eve/rrb_vector/macros.cljc
+           src/eve/rrb_vector/nodes.cljc
+           src/eve/rrb_vector/protocols.cljc
+           src/eve/rrb_vector/rrbt.cljc
+           src/eve/rrb_vector/transients.cljc
+           src/eve/rrb_vector/trees.cljc
+   Upstream: https://github.com/clojure/core.rrb-vector
+   Copyright (c) Rich Hickey and contributors. All rights reserved.
+   These files are distributed under the Eclipse Public License 1.0, whose
+   text is in epl-v10.html at the root of this distribution, as each file's
+   header states. eve's changes put the vector in eve memory (eve-deftype);
+   the headers are kept as written.
+
+------------------------------------------------------------------------------
+Algorithms ported into eve's portable code (provenance as each file states)
+------------------------------------------------------------------------------
+
+2. src/eve/net/ed25519.cljc — Ed25519 after TweetNaCl's construction
+   (https://tweetnacl.cr.yp.to/, released into the public domain by its
+   authors).
+
+3. src/eve/net/xxh3.cljc — XXH3-128, ported from the ValueScript kernel's
+   xxhash.vs (atom.broker). The algorithm is xxHash's
+   (https://github.com/Cyan4973/xxHash, Yann Collet).
+
+4. src/eve/net/poseidon2.cljc, src/eve/net/bn254.cljc — Poseidon2 over BN254;
+   the round constants were copied mechanically from the Noir poseidon2
+   package vendored in atom.broker (aegis/noir/vendor/poseidon2), whose
+   upstream is https://github.com/TaceoLabs/noir-poseidon (constants from
+   https://github.com/HorizenLabs/poseidon2). No license file was vendored
+   with that package; the release manager confirms its upstream license
+   before eve is published.
+
+5. src/eve/net/sha256.cljc, src/eve/net/sha512.cljc, src/eve/net/aes.cljc —
+   written from FIPS 180-4 and FIPS 197.
+
+------------------------------------------------------------------------------
+Not part of the eve distribution
+------------------------------------------------------------------------------
+
+.claude/bundled/clojure-mcp-light/ is Bruce Hauman's clojure-mcp-light
+(Eclipse Public License 2.0, its own LICENSE.md), kept for editor and agent
+tooling. It is excluded from eve's release artifacts.

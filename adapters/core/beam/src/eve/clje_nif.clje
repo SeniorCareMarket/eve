@@ -1,0 +1,98 @@
+(ns eve.clje-nif
+  "clojerl's side of eve's NIF (native/eve_clje_nif.c): native memory for eve
+   on the BEAM — regions (a file mapped MAP_SHARED, or heap memory) with
+   seq-cst atomics, futex wait/wake (a poll outside Linux) and fcntl locks, and term arrays. eve.mem's
+   region and eve.host's arrays are written over these.
+
+   clojerl compiles this namespace to the Erlang module 'eve.clje-nif'; every
+   defn below except load! is a stub that erlang:load_nif/2 replaces with the C
+   function of the same name and arity. load_nif must be called from code in
+   this module, so eve.host calls (load!) when it loads. The library is built
+   on first use, and again whenever its source is newer, into
+   target/clje/eve_clje_nif.so in this adapter's root, beside its src/ and
+   native/ (gcc and the BEAM's erl_nif.h).")
+
+(defn- path [& parts] (erlang/binary_to_list (apply str parts)))
+
+(defn- mtime
+  "Seconds of a file's last modification; 0 when there is none."
+  [p]
+  (let [t (filelib/last_modified (path p))]
+    (if (= 0 t) 0 (calendar/datetime_to_gregorian_seconds t))))
+
+(defn- eve-root
+  "The directory above the src/ on the code path that holds this namespace's
+   source (this adapter's root, adapters/core/beam)."
+  []
+  (or (some (fn [d]
+              (let [d (erlang/list_to_binary d)]
+                (when (filelib/is_regular (path d "/eve/clje_nif.clje"))
+                  (erlang/list_to_binary (filename/dirname (path d))))))
+            (code/get_path))
+      (throw (ex-info "eve.clje-nif: adapters/core/beam/src is not on the code path" {}))))
+
+(defn- build!
+  "Compile the NIF into so (through a temporary file renamed into place, so a
+   process loading it never sees a partial library)."
+  [c so]
+  (filelib/ensure_dir (path so))
+  (let [tmp (str so "." (erlang/list_to_binary (os/getpid)))
+        inc (str (erlang/list_to_binary (code/root_dir)) "/usr/include")
+        ;; macOS links a NIF against nothing: the BEAM's enif_* resolve when it loads the library
+        link (if (= :darwin (erlang/element 2 (os/type))) " -undefined dynamic_lookup" "")
+        out (os/cmd (path "gcc -O2 -fPIC -shared" link " -I'" inc "' -o '" tmp "' '" c "' 2>&1"))]
+    (when-not (filelib/is_regular (path tmp))
+      (throw (ex-info (str "eve.clje-nif: building " c " failed: " (erlang/list_to_binary out))
+                      {:source c})))
+    (file/rename (path tmp) (path so))))
+
+(defn load!
+  "Load the NIF (building it first when needed). :ok, or the load error."
+  []
+  (let [root (eve-root)
+        c (str root "/native/eve_clje_nif.c")
+        so (str root "/target/clje/eve_clje_nif.so")]
+    (when (< (mtime so) (mtime c)) (build! c so))
+    (let [r (erlang/load_nif (path (subs so 0 (- (count so) 3))) 0)]
+      (if (= r :ok)
+        :ok
+        ;; a second load of the same library into this module is not an error
+        (if (and (erlang/is_tuple r) (= :reload (erlang/element 1 (erlang/element 2 r))))
+          :ok
+          r)))))
+
+(defn open [path size] (erlang/nif_error :nif-not-loaded))
+(defn heap [size] (erlang/nif_error :nif-not-loaded))
+(defn from-binary [bin] (erlang/nif_error :nif-not-loaded))
+(defn slice [r off len] (erlang/nif_error :nif-not-loaded))
+(defn copy! [src soff dst doff len] (erlang/nif_error :nif-not-loaded))
+(defn byte-length [r] (erlang/nif_error :nif-not-loaded))
+(defn load-i8 [r off] (erlang/nif_error :nif-not-loaded))
+(defn store-i8! [r off v] (erlang/nif_error :nif-not-loaded))
+(defn load-i16 [r off] (erlang/nif_error :nif-not-loaded))
+(defn store-i16! [r off v] (erlang/nif_error :nif-not-loaded))
+(defn load-f32 [r off] (erlang/nif_error :nif-not-loaded))
+(defn store-f32! [r off v] (erlang/nif_error :nif-not-loaded))
+(defn load-i32 [r off] (erlang/nif_error :nif-not-loaded))
+(defn store-i32! [r off v] (erlang/nif_error :nif-not-loaded))
+(defn cas-i32! [r off expected desired] (erlang/nif_error :nif-not-loaded))
+(defn add-i32! [r off delta] (erlang/nif_error :nif-not-loaded))
+(defn exchange-i32! [r off v] (erlang/nif_error :nif-not-loaded))
+(defn load-i64 [r off] (erlang/nif_error :nif-not-loaded))
+(defn store-i64! [r off v] (erlang/nif_error :nif-not-loaded))
+(defn cas-i64! [r off expected desired] (erlang/nif_error :nif-not-loaded))
+(defn add-i64! [r off delta] (erlang/nif_error :nif-not-loaded))
+(defn load-f64 [r off] (erlang/nif_error :nif-not-loaded))
+(defn store-f64! [r off v] (erlang/nif_error :nif-not-loaded))
+(defn double-bits [d] (erlang/nif_error :nif-not-loaded))
+(defn bits-double [b] (erlang/nif_error :nif-not-loaded))
+(defn read-bytes [r off n] (erlang/nif_error :nif-not-loaded))
+(defn write-bytes! [r off bin] (erlang/nif_error :nif-not-loaded))
+(defn lock! [r off len] (erlang/nif_error :nif-not-loaded))
+(defn unlock! [r off len] (erlang/nif_error :nif-not-loaded))
+(defn wait-i32! [r off expected timeout-ms] (erlang/nif_error :nif-not-loaded))
+(defn notify-i32! [r off n] (erlang/nif_error :nif-not-loaded))
+(defn tarray [n] (erlang/nif_error :nif-not-loaded))
+(defn tget [t i] (erlang/nif_error :nif-not-loaded))
+(defn tset! [t i v] (erlang/nif_error :nif-not-loaded))
+(defn tlength [t] (erlang/nif_error :nif-not-loaded))

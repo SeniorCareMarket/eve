@@ -1,0 +1,83 @@
+;; eve byte fixtures — eve/doc/unification/FORMAT-DECISIONS.md §5.
+;; One row per line: {:note .. :value .. :bytes "hex" :hash int :hosts #{..}}.
+;; :bytes and :hash were produced from the JVM codec (eve.codec/value->eve-bytes,
+;; eve.hamt-util/portable-hash-bytes) by the lane's gen-fixtures.clj and reviewed
+;; by hand against the tag table (§2, §4). A row without :hosts runs on
+;; every host; :hosts names the hosts that represent the value (:clj, :bb and
+;; :cljr share the JVM's number model and chars, :cljs has neither; :clje has
+;; the 64-bit integers and the integral double, no chars, dates in whole
+;; seconds, and keywords of 255 characters at most: they are Erlang atoms).
+[
+{:note "nil" :value nil :bytes ""}
+{:note "false" :value false :bytes "eedb01"}
+{:note "true" :value true :bytes "eedb02"}
+{:note "int32 0" :value 0 :bytes "eedb0300000000" :hash -1981046296}
+{:note "int32 1" :value 1 :bytes "eedb0301000000"}
+{:note "int32 -1" :value -1 :bytes "eedb03ffffffff"}
+{:note "int32 127 (JVM small-int cache edge)" :value 127 :bytes "eedb037f000000"}
+{:note "int32 128" :value 128 :bytes "eedb0380000000"}
+{:note "int32 -128" :value -128 :bytes "eedb0380ffffff"}
+{:note "int32 -129" :value -129 :bytes "eedb037fffffff"}
+{:note "int32 max" :value 2147483647 :bytes "eedb03ffffff7f"}
+{:note "int32 min" :value -2147483648 :bytes "eedb0300000080"}
+{:note "int64 2^31" :value 2147483648 :bytes "eedb0f0000008000000000"}
+{:note "int64 -2^31-1" :value -2147483649 :bytes "eedb0fffffff7fffffffff"}
+{:note "int64 2^53-1 (largest CLJS safe integer)" :value 9007199254740991 :bytes "eedb0fffffffffffff1f00" :hash -1924334852}
+{:note "int64 2^53+1 — not representable on CLJS" :value 9007199254740993 :bytes "eedb0f0100000000002000" :hosts #{:clj :bb :cljr :clje}}
+{:note "int64 min" :value -9223372036854775808 :bytes "eedb0f0000000000000080" :hosts #{:clj :bb :cljr :clje}}
+{:note "float64 1.5" :value 1.5 :bytes "eedb04000000000000f83f" :hash -915117709}
+{:note "float64 -2.25" :value -2.25 :bytes "eedb0400000000000002c0"}
+{:note "float64 1e300 (integral double past 2^53: float64 on CLJS too)" :value 1e300 :bytes "eedb049c7500883ce4377e"}
+{:note "float64 1.0 — an integral double is int32 on CLJS (host number model, §4)" :value 1.0 :bytes "eedb04000000000000f03f" :hosts #{:clj :bb :cljr :clje}}
+{:note "string empty" :value "" :bytes "eedb0500"}
+{:note "string short" :value "hello" :bytes "eedb050568656c6c6f" :hash -1972574304}
+{:note "string utf-8 multibyte" :value "héllo wörld ✓ 日本" :bytes "eedb051868c3a96c6c6f2077c3b6726c6420e29c9320e697a5e69cac"}
+{:note "string short 255 bytes (last short)" :value "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss" :bytes "eedb05ff737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373"}
+{:note "string long 256 bytes (first long)" :value "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL" :bytes "eedb06000100004c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"}
+{:note "keyword" :value :a :bytes "eedb070161" :hash 1302890146}
+{:note "keyword long name (300)" :value :kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk :bytes "eedb082c0100006b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b" :hosts #{:cljs :clj :bb :cljr :lpy}}
+{:note "keyword namespaced" :value :ns/k :bytes "eedb09026e73016b" :hash -1690426615}
+{:note "keyword namespaced long (300/300)" :value :nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn/kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk :bytes "eedb0a2c0100006e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e2c0100006b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b" :hosts #{:cljs :clj :bb :cljr :lpy}}
+{:note "symbol" :value sym :bytes "eedb0c0373796d"}
+{:note "symbol namespaced" :value my.ns/sym :bytes "eedb0d056d792e6e730373796d"}
+{:note "uuid" :value #uuid "550e8400-e29b-41d4-a716-446655440000" :bytes "eedb0b550e8400e29b41d4a716446655440000" :hash 1650745567}
+{:note "date" :value #inst "2024-01-02T03:04:05.678Z" :bytes "eedb0e00e0b20d82cc7842" :hosts #{:cljs :clj :bb :cljr :lpy}}
+{:note "date, whole seconds (clojerl's dates have no milliseconds)" :value #inst "2024-01-02T03:04:05.000Z" :bytes "eedb0e0080880d82cc7842"}
+{:note "flat map empty" :value {} :bytes "eedbed00000000"}
+{:note "flat set empty" :value #{} :bytes "eedbee00000000"}
+{:note "flat vec empty" :value [] :bytes "eedbef00000000"}
+{:note "flat vec from a list" :value () :bytes "eedbef00000000"}
+{:note "flat map one entry" :value {:a 1} :bytes "eedbed0100000005000000eedb07016107000000eedb0301000000" :hash -1209283870}
+{:note "flat map entries in key-byte order, not insertion order" :value {:b 2 :a 1} :bytes "eedbed0200000005000000eedb07016107000000eedb030100000005000000eedb07016207000000eedb0302000000" :hash 1807697429}
+{:note "flat map mixed key types ordered by bytes: nil < int32 < string < keyword" :value {:three 3.5 "two" 2 1 "one" nil true} :bytes "eedbed040000000000000003000000eedb0207000000eedb030100000007000000eedb05036f6e6507000000eedb050374776f07000000eedb030200000009000000eedb070574687265650b000000eedb040000000000000c40"}
+{:note "flat set elements in byte order (round 2 K3)" :value #{3 1 2} :bytes "eedbee0300000007000000eedb030100000007000000eedb030200000007000000eedb0303000000" :hash -1121884291}
+{:note "flat set mixed element types" :value #{"b" "a" :k 1} :bytes "eedbee0400000007000000eedb030100000005000000eedb05016105000000eedb05016205000000eedb07016b"}
+{:note "flat vec keeps its order" :value [3 1 2] :bytes "eedbef0300000007000000eedb030300000007000000eedb030100000007000000eedb0302000000" :hash -1321390109}
+{:note "flat vec with nil and scalars" :value [1 "x" :k nil true 1.5] :bytes "eedbef0600000007000000eedb030100000005000000eedb05017805000000eedb07016b0000000003000000eedb020b000000eedb04000000000000f83f"}
+{:note "vector key, flat on every host (round 2 K1)" :value {[1 2] :v} :bytes "eedbed010000001d000000eedbef0200000007000000eedb030100000007000000eedb030200000005000000eedb070176" :hash -2129328967}
+{:note "set key" :value {#{1 2} :s} :bytes "eedbed010000001d000000eedbee0200000007000000eedb030100000007000000eedb030200000005000000eedb070173"}
+{:note "map key" :value {{:a 1} :m} :bytes "eedbed010000001b000000eedbed0100000005000000eedb07016107000000eedb030100000005000000eedb07016d"}
+{:note "collections nested in a vec" :value [{:a 1} #{1}] :bytes "eedbef020000001b000000eedbed0100000005000000eedb07016107000000eedb030100000012000000eedbee0100000007000000eedb0301000000"}
+{:note "set of sets, ordered by bytes (the count word orders them)" :value #{#{1 2} #{3}} :bytes "eedbee0200000012000000eedbee0100000007000000eedb03030000001d000000eedbee0200000007000000eedb030100000007000000eedb0302000000"}
+{:note "deep nesting" :value {:a {:b {:c [1 #{2}]}}} :bytes "eedbed0100000005000000eedb07016150000000eedbed0100000005000000eedb0701623c000000eedbed0100000005000000eedb07016328000000eedbef0200000007000000eedb030100000012000000eedbee0100000007000000eedb0302000000"}
+{:note "nested flat collections in canonical order" :value {:k [#{3 1 2} {:z 1 :y 2}]} :bytes "eedbed0100000005000000eedb07016b66000000eedbef0200000028000000eedbee0300000007000000eedb030100000007000000eedb030200000007000000eedb03030000002f000000eedbed0200000005000000eedb07017907000000eedb030200000005000000eedb07017a07000000eedb0301000000"}
+{:note "empties nested" :value [[] {} #{}] :bytes "eedbef0300000007000000eedbef0000000007000000eedbed0000000007000000eedbee00000000"}
+{:note "int64 and float64 inside a set, ordered by bytes" :value #{2147483648 1.5 -1} :bytes "eedbee0300000007000000eedb03ffffffff0b000000eedb04000000000000f83f0b000000eedb0f0000008000000000"}
+{:note "character \\a [utf16:u16LE] (§4, 2026-10-16) — ClojureScript has no char: it reads a one-character string" :value \a :bytes "eedb146100" :hash -396117810 :hosts #{:clj :bb :cljr}}
+{:note "character #char \"a\" [utf16:u16LE] (§4) — the tagged denotation of the same char: the JVM reads a Character, ClojureScript its EveChar; both write the char tag" :value #char "a" :bytes "eedb146100" :hash -396117810 :hosts #{:clj :bb :cljr :cljs}}
+{:note "integer 5N: an integer is written by its magnitude (§8), so a BigInt in int32 is INT32 — (= 5 5N), one key" :value 5N :bytes "eedb0305000000" :hosts #{:clj :bb :cljr :lpy}}
+{:note "integer 2^63, past int64: BIGINT 0x16 [len:u32LE][two's complement, big-endian, minimal] (§8)" :value 9223372036854775808N :bytes "eedb1609000000008000000000000000" :hosts #{:clj :bb :cljr :lpy}}
+{:note "integer -2^63-1: BIGINT" :value -9223372036854775809N :bytes "eedb1609000000ff7fffffffffffffff" :hosts #{:clj :bb :cljr :lpy}}
+{:note "integer 2^64: BIGINT" :value 18446744073709551616N :bytes "eedb1609000000010000000000000000" :hosts #{:clj :bb :cljr :lpy}}
+{:note "integer -2^64: BIGINT" :value -18446744073709551616N :bytes "eedb1609000000ff0000000000000000" :hosts #{:clj :bb :cljr :lpy}}
+{:note "ratio 1/2: RATIO 0x17 [len:u32LE][numerator][len:u32LE][denominator], lowest terms, denominator positive (§8)" :value 1/2 :bytes "eedb1701000000010100000002" :hosts #{:clj :bb :cljr :lpy}}
+{:note "ratio -3/4: the sign on the numerator" :value -3/4 :bytes "eedb1701000000fd0100000004" :hosts #{:clj :bb :cljr :lpy}}
+{:note "ratio 1/128: a denominator past 127 takes a sign byte" :value 1/128 :bytes "eedb170100000001020000000080" :hosts #{:clj :bb :cljr :lpy}}
+{:note "decimal 1.5M: BIGDEC 0x18 [scale:i32LE][len:u32LE][unscaled, two's complement, big-endian, minimal] (§8)" :value 1.5M :bytes "eedb1801000000010000000f" :hosts #{:clj :bb :cljr :lpy}}
+{:note "decimal 1.50M: (= 1.5M 1.50M), so the same bytes — trailing zeros stripped down to scale 0" :value 1.50M :bytes "eedb1801000000010000000f" :hosts #{:clj :bb :cljr :lpy}}
+{:note "decimal 100M: scale 0, never negative (1E+2M writes these bytes too)" :value 100M :bytes "eedb18000000000100000064" :hosts #{:clj :bb :cljr :lpy}}
+{:note "decimal -0.001M" :value -0.001M :bytes "eedb180300000001000000ff" :hosts #{:clj :bb :cljr :lpy}}
+{:note "decimal 0M" :value 0M :bytes "eedb18000000000100000000" :hosts #{:clj :bb :cljr :lpy}}
+{:note "decimal 0.0M: (= 0M 0.0M), the same bytes" :value 0.0M :bytes "eedb18000000000100000000" :hosts #{:clj :bb :cljr :lpy}}
+{:note "decimal past int64 unscaled" :value 12345678901234567890.5M :bytes "eedb18010000000900000006b14e9f812f366c39" :hosts #{:clj :bb :cljr :lpy}}
+]

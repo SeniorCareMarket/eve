@@ -1,0 +1,92 @@
+(ns eve.thread-host
+  "eve's thread feature (HOST-CONTRACT §11) over Python's threading (basilisp): a thread is a threading.Thread, its
+   mailbox a queue.Queue; threads share one heap, so a message carries closures and host values by reference and the
+   binding frame is basilisp's own (get-thread-bindings). Under the GIL threads do not run Python in parallel
+   (measured: 4 threads ran 4 CPU loads in 1.11x the serial time), which (driving) declares as :parallel false. A
+   started thread's end, normal or not, is a message to the thread that started it."
+  (:import os queue sys threading))
+
+(def ^:private boxes
+  "address → that thread's mailbox, while the thread runs."
+  (atom {}))
+(def ^:private next-id (atom 0))
+(def ^:private local (threading/local))
+
+(defn- box! []
+  (let [id (swap! next-id inc)]
+    (swap! boxes assoc id (queue/Queue))
+    id))
+
+(defn- gil? []
+  (let [f (python/getattr sys "_is_gil_enabled" nil)]
+    (if f (boolean (f)) true)))
+
+(defn parallelism [] (os/cpu-count))
+
+(defn ships-closures? [] true)
+
+(defn driving
+  "The declared driving properties: a blocked waiter costs an OS thread; threads run Python one at a time while the
+   GIL is on; eve's ctypes region waits on a futex."
+  []
+  {:block :thread :parallel (not (gil?)) :closures true :eval true :wake :futex
+   :spawn-ms 0 :max-threads nil :runtime :lpy})
+
+(defn self
+  "The calling thread's address (a thread this adapter did not start gets one on first call)."
+  []
+  (or (python/getattr local "eve_addr" nil)
+      (let [id (box!)] (set! (.-eve-addr local) id) id)))
+
+(defn error-data [e]
+  (let [t (python/type e)]
+    {:class (str (.-__module__ t) "." (.-__qualname__ t)) :message (ex-message e) :data (ex-data e)}))
+
+(defn send!
+  "Enqueue msg for the thread at addr; never blocks. A thread that has ended has no mailbox: the message is dropped."
+  [addr msg]
+  (when-let [q (get @boxes addr)]
+    (.put q msg))
+  nil)
+
+(defn start-threads!
+  "Start n threads, each running ((resolve entry) (assoc boot :self addr)); their addresses. opts: :name. When a
+   thread's entry ends — it returned, or threw — its starter receives {:eve.thread/exit addr :reason r}: r :normal,
+   or the error as error-data."
+  [n entry boot opts]
+  (require (symbol (namespace entry)))
+  (let [f (resolve entry)
+        starter (self)
+        tname (or (:name opts) "eve-thread")]
+    (vec (for [i (range n)]
+           (let [id (box!)
+                 r (fn []
+                     (set! (.-eve-addr local) id)
+                     (let [reason (try (f (assoc boot :self id)) :normal
+                                       (catch python/BaseException e (error-data e)))]
+                       (swap! boxes dissoc id)
+                       (send! starter {:eve.thread/exit id :reason reason})))]
+             (.start (threading/Thread ** :target r :daemon true :name (str tname "-" i)))
+             id)))))
+
+(defn receive!
+  "The calling thread's next message; :eve.thread/timeout after ms milliseconds (ms < 0: wait for ever; 0: poll)."
+  [ms]
+  (let [q (get @boxes (self))]
+    (cond (neg? ms) (.get q)
+          (zero? ms) (try (.get-nowait q) (catch queue/Empty _ :eve.thread/timeout))
+          :else (try (.get q ** :block true :timeout (/ ms 1000.0)) (catch queue/Empty _ :eve.thread/timeout)))))
+
+(defn stop-threads!
+  "Ask each thread to end: the message :eve.thread/stop (a request its loop honours, never a kill)."
+  [addrs]
+  (doseq [a addrs] (send! a :eve.thread/stop)))
+
+(defn attempt [f] (try [true (f)] (catch python/BaseException e [false e])))
+
+(defn capture-frame [] (get-thread-bindings))
+(defn call-with-frame [frame f] (if frame (with-bindings* frame f) (f)))
+
+(defn var-symbol [v] (let [m (meta v)] (symbol (str (ns-name (:ns m))) (str (:name m)))))
+
+(defn eval-form [form] (eval form))

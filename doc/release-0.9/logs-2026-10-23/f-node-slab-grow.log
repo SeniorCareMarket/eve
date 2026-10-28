@@ -1,0 +1,52 @@
+# run f-node-slab-grow on 40a2d56ec eve tree 1ffe98309e33d0d51d78f23e3f9eed44f8e32522
+# cmd (in eve/) bash -c node target/eve-test/all.js slab-grow
+# start 2026-10-23 3:41:02 PM ET load 1.87 1.86 1.53 mem-in-use 898 MB
+=== Eve Test Runner ===
+Suite: slab-grow
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.batch2-validation-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.map-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.vec-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.vec-retire-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.reclaim-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.tally-test
+
+ERROR in (an-eve-deftype-value-two-atoms-hold) (Error:NaN:NaN)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #object[Error Error: No protocol method ISlabIO.-sio-read-i32 defined for type null: ]
+
+ERROR in (a-reference-field-written-in-place-keeps-its-counts) (Error:NaN:NaN)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #object[Error Error: No protocol method ISlabIO.-sio-read-i32 defined for type null: ]
+  Resetting slab pools for isolated namespace...
+
+Testing eve.read-region-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.list-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.set-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.large-scale-test
+
+Ran 111 tests containing 29107 assertions.
+0 failures, 2 errors.
+# end 2026-10-23 3:41:40 PM ET exit 1 wall 38s peak-mem-in-use 2053 MB peak-process-tree-rss 1154 MB load 1.66 1.80 1.52

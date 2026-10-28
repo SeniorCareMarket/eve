@@ -1,0 +1,206 @@
+(ns eve.crypto
+  "eve's crypto feature (adapters/README.md) over CPython — basilisp: SHA-256 (hashlib), HMAC-SHA256 (hmac.digest), and,
+   through the system's OpenSSL libcrypto by ctypes, AES-256-CTR (EVP_aes_256_ctr: the whole 16-byte counter incremented
+   big-endian, as SP 800-38A F.5.5 and eve.net.aes), AES-256-GCM (EVP_aes_256_gcm, a 12-byte iv) and Ed25519 (EVP's raw-key EdDSA; verify first refuses what
+   eve.net.ed25519/well-formed? refuses) — CPython's standard library has neither. Where no libcrypto loads, those are
+   eve.net.portable-crypto's; so is XXH3 (CPython has none); random bytes are the process feature's. Bytes are vectors
+   of 0..255 in and out; eve/test/eve/net/crypto_test.cljc holds this adapter to the portable code."
+  (:import ctypes ctypes.util hashlib hmac)
+  (:require [eve.net.bigops :as bo]
+            [eve.net.edwards :as edw]
+            [eve.net.gcm :as gcm]
+            [eve.net.portable-crypto :as p]
+            [eve.net.ed25519 :as ed]
+            [eve.process :as process]))
+
+(defn- b [bs] (python/bytes (python/list bs)))
+
+(defn sha256 "the 32-byte digest" [bs] (vec (.digest (hashlib/sha256 (b bs)))))
+
+(defn hmac-sha256 "RFC 2104 over SHA-256" [key msg] (vec (hmac/digest (b key) (b msg) "sha256")))
+
+(defn- cfn [lib nm argtypes restype]
+  (let [f (python/getattr lib nm)]
+    (set! (.-argtypes f) (python/list argtypes))
+    (set! (.-restype f) restype)
+    f))
+
+(def ^:private evp
+  ;; the EVP calls of the system's libcrypto, or nil where none loads
+  (delay
+    (try
+      (let [path (ctypes.util/find-library "crypto")
+            lib (when path (ctypes/CDLL path))]
+        (when lib
+          {:new (cfn lib "EVP_CIPHER_CTX_new" [] ctypes/c-void-p)
+           :free (cfn lib "EVP_CIPHER_CTX_free" [ctypes/c-void-p] nil)
+           :ctr (cfn lib "EVP_aes_256_ctr" [] ctypes/c-void-p)
+           :init (cfn lib "EVP_EncryptInit_ex" [ctypes/c-void-p ctypes/c-void-p ctypes/c-void-p ctypes/c-char-p ctypes/c-char-p] ctypes/c-int)
+           :update (cfn lib "EVP_EncryptUpdate" [ctypes/c-void-p ctypes/c-char-p (ctypes/POINTER ctypes/c-int) ctypes/c-char-p ctypes/c-int] ctypes/c-int)
+           :final (cfn lib "EVP_EncryptFinal_ex" [ctypes/c-void-p ctypes/c-char-p (ctypes/POINTER ctypes/c-int)] ctypes/c-int)
+           :gcm (cfn lib "EVP_aes_256_gcm" [] ctypes/c-void-p)
+           :ctrl (cfn lib "EVP_CIPHER_CTX_ctrl" [ctypes/c-void-p ctypes/c-int ctypes/c-int ctypes/c-void-p] ctypes/c-int)
+           :dinit (cfn lib "EVP_DecryptInit_ex" [ctypes/c-void-p ctypes/c-void-p ctypes/c-void-p ctypes/c-char-p ctypes/c-char-p] ctypes/c-int)
+           :dupdate (cfn lib "EVP_DecryptUpdate" [ctypes/c-void-p ctypes/c-char-p (ctypes/POINTER ctypes/c-int) ctypes/c-char-p ctypes/c-int] ctypes/c-int)
+           :dfinal (cfn lib "EVP_DecryptFinal_ex" [ctypes/c-void-p ctypes/c-char-p (ctypes/POINTER ctypes/c-int)] ctypes/c-int)}))
+      (catch python/Exception _ nil))))
+
+(defn aes256-ctr "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key" [key iv data]
+  (if-let [e @evp]
+    (let [n (count data)
+          ctx ((:new e))
+          out (ctypes/create-string-buffer (+ n 16))
+          outl (ctypes/c-int 0)]
+      (try
+        (when-not (and (= 1 ((:init e) ctx ((:ctr e)) nil (b key) (b iv)))
+                       (= 1 ((:update e) ctx out (ctypes/byref outl) (b data) n)))
+          (throw (ex-info "libcrypto: AES-256-CTR failed" {})))
+        (subvec (vec (.-raw out)) 0 n)
+        (finally ((:free e) ctx))))
+    (p/aes256-ctr key iv data)))
+
+(defn xxh3-128 "the 16-byte XXH3-128 digest, big-endian hi then lo (portable: CPython has none)" [bs] (p/xxh3-128 bs))
+(defn random-bytes "n bytes of the operating system's entropy" [n] (process/random-bytes n))
+
+(def ^:private edp
+  ;; libcrypto's EdDSA calls (OpenSSL 1.1.1+), or nil where none loads
+  (delay
+    (try
+      (let [path (ctypes.util/find-library "crypto")
+            lib (when path (ctypes/CDLL path))
+            raw-key [ctypes/c-int ctypes/c-void-p ctypes/c-char-p ctypes/c-size-t]
+            init [ctypes/c-void-p ctypes/c-void-p ctypes/c-void-p ctypes/c-void-p ctypes/c-void-p]]
+        (when lib
+          {:private (cfn lib "EVP_PKEY_new_raw_private_key" raw-key ctypes/c-void-p)
+           :public (cfn lib "EVP_PKEY_new_raw_public_key" raw-key ctypes/c-void-p)
+           :raw-public (cfn lib "EVP_PKEY_get_raw_public_key" [ctypes/c-void-p ctypes/c-char-p (ctypes/POINTER ctypes/c-size-t)] ctypes/c-int)
+           :key-free (cfn lib "EVP_PKEY_free" [ctypes/c-void-p] nil)
+           :ctx-new (cfn lib "EVP_MD_CTX_new" [] ctypes/c-void-p)
+           :ctx-free (cfn lib "EVP_MD_CTX_free" [ctypes/c-void-p] nil)
+           :sign-init (cfn lib "EVP_DigestSignInit" init ctypes/c-int)
+           :sign (cfn lib "EVP_DigestSign" [ctypes/c-void-p ctypes/c-char-p (ctypes/POINTER ctypes/c-size-t) ctypes/c-char-p ctypes/c-size-t] ctypes/c-int)
+           :verify-init (cfn lib "EVP_DigestVerifyInit" init ctypes/c-int)
+           :verify (cfn lib "EVP_DigestVerify" [ctypes/c-void-p ctypes/c-char-p ctypes/c-size-t ctypes/c-char-p ctypes/c-size-t] ctypes/c-int)}))
+      (catch python/Exception _ nil))))
+
+(def ^:private EVP-PKEY-ED25519 1087)
+
+(defn- seed-of [seed]
+  (let [seed (vec seed)]
+    (when-not (= 32 (count seed))
+      (throw (ex-info (str "ed25519: a seed is 32 bytes, not " (count seed)) {:count (count seed)})))
+    seed))
+
+(defn ed25519-public-key "the 32-byte public key of a 32-byte secret seed" [seed]
+  (let [seed (seed-of seed)]
+    (if-let [e @edp]
+      (let [k ((:private e) EVP-PKEY-ED25519 nil (b seed) 32)
+            out (ctypes/create-string-buffer 32)
+            outl (ctypes/c-size-t 32)]
+        (try
+          (when-not (and k (= 1 ((:raw-public e) k out (ctypes/byref outl))))
+            (throw (ex-info "libcrypto: Ed25519 public key failed" {})))
+          (vec (.-raw out))
+          (finally (when k ((:key-free e) k)))))
+      (p/ed25519-public-key seed))))
+
+(defn ed25519-sign "the 64-byte signature of the message under a 32-byte secret seed" [seed msg]
+  (let [seed (seed-of seed) msg (vec msg)]
+    (if-let [e @edp]
+      (let [k ((:private e) EVP-PKEY-ED25519 nil (b seed) 32)
+            ctx ((:ctx-new e))
+            out (ctypes/create-string-buffer 64)
+            outl (ctypes/c-size-t 64)]
+        (try
+          (when-not (and k (= 1 ((:sign-init e) ctx nil nil nil k))
+                         (= 1 ((:sign e) ctx out (ctypes/byref outl) (b msg) (count msg))))
+            (throw (ex-info "libcrypto: Ed25519 signing failed" {})))
+          (vec (.-raw out))
+          (finally ((:ctx-free e) ctx) (when k ((:key-free e) k)))))
+      (p/ed25519-sign seed msg))))
+
+(defn ed25519-verify "is sig a valid signature of the message under the 32-byte public key" [pub msg sig]
+  (let [msg (vec msg)]
+    (boolean
+     (and (ed/well-formed? pub sig)
+          (if-let [e @edp]
+            (let [k ((:public e) EVP-PKEY-ED25519 nil (b pub) 32)
+                  ctx ((:ctx-new e))]
+              (try
+                (and k
+                     (= 1 ((:verify-init e) ctx nil nil nil k))
+                     (= 1 ((:verify e) ctx (b sig) 64 (b msg) (count msg))))
+                (finally ((:ctx-free e) ctx) (when k ((:key-free e) k)))))
+            (p/ed25519-verify pub msg sig))))))
+
+;; ── the aegis clear-evaluation rows (aegis/docs/simple-spike/REPORT.md): SHA-384 (hashlib), the big-integer and edwards25519 rows
+;; over Python's int (pow for the exponentiation and the inverse) through eve.net.bigops / eve.net.edwards
+(def ^:private OPS
+  (bo/complete
+   {:int (fn [n] n)
+    :from-be (fn [bs] (reduce (fn [acc b] (+ (* acc 256) b)) 0 bs))
+    :to-be (fn [x len] (bo/to-be-by {:int identity :mod mod :quot quot} identity x len))
+    :add + :sub - :mul * :quot quot :mod mod
+    :modpow (fn [b e m] (python/pow b e m))
+    :modinv (fn [a m] (try (python/pow a -1 m) (catch python/ValueError _ nil)))
+    :even? even? :zero? zero? :eq =}))
+(def ^:private ED (edw/make OPS))
+(defn sha384 "the 48-byte SHA-384 digest" [bs] (vec (.digest (hashlib/sha384 (b bs)))))
+(defn modpow "base^exp mod n over big-endian bytes; the result is as long as n" [base exp n] (bo/modpow-bytes OPS base exp n))
+(defn modmul "a·b mod n over big-endian bytes; the result is as long as n" [a b n] (bo/modmul-bytes OPS a b n))
+(defn modinv "a^-1 mod n over big-endian bytes, or nil when gcd(a, n) ≠ 1" [a n] (bo/modinv-bytes OPS a n))
+(defn ed25519-scalarmult "the encoding of [s]P: s 32 little-endian bytes, P a 32-byte encoding" [s p] ((:scalarmult ED) s p))
+(defn ed25519-mul-add "the encoding of [a]P + [b]Q" [a p b q] ((:mul-add ED) a p b q))
+(defn x25519 "X25519 (RFC 7748): the 32-byte u-coordinate of [k]u, k and u 32 little-endian bytes" [k u] ((:x25519 ED) k u))
+(defn sha512 "the 64-byte SHA-512 digest" [bs] (vec (.digest (hashlib/sha512 (b bs)))))
+;; EVP_CIPHER_CTX_ctrl's GCM codes (openssl/evp.h): EVP_CTRL_GCM_SET_IVLEN, _GET_TAG, _SET_TAG
+(def ^:private GCM-SET-IVLEN 9)
+(def ^:private GCM-GET-TAG 16)
+(def ^:private GCM-SET-TAG 17)
+
+(defn aes256-gcm-seal "AES-256-GCM: ciphertext ‖ 16-byte tag (libcrypto's EVP_aes_256_gcm; eve.net.gcm over the CTR row where none loads)"
+  [key iv aad pt]
+  (if-let [e @evp]
+    (let [pt (vec pt) aad (vec aad) n (count pt)
+          ctx ((:new e))
+          out (ctypes/create-string-buffer (+ n 16))
+          tag (ctypes/create-string-buffer 16)
+          outl (ctypes/c-int 0)]
+      (try
+        (when-not (and (= 1 ((:init e) ctx ((:gcm e)) nil nil nil))
+                       (= 1 ((:ctrl e) ctx GCM-SET-IVLEN (count iv) nil))
+                       (= 1 ((:init e) ctx nil nil (b key) (b iv)))
+                       (or (empty? aad) (= 1 ((:update e) ctx nil (ctypes/byref outl) (b aad) (count aad))))
+                       (= 1 ((:update e) ctx out (ctypes/byref outl) (b pt) n))
+                       (= 1 ((:final e) ctx out (ctypes/byref outl)))
+                       (= 1 ((:ctrl e) ctx GCM-GET-TAG 16 tag)))
+          (throw (ex-info "libcrypto: AES-256-GCM seal failed" {})))
+        (into (subvec (vec (.-raw out)) 0 n) (vec (.-raw tag)))
+        (finally ((:free e) ctx))))
+    (gcm/seal aes256-ctr key iv aad pt)))
+
+(defn aes256-gcm-open "the plaintext of AES-256-GCM ciphertext ‖ tag, or nil when it does not authenticate (libcrypto)"
+  [key iv aad sealed]
+  (if-let [e @evp]
+    (let [s (vec sealed) aad (vec aad) n (- (count s) 16)]
+      (when (>= n 0)
+        (let [ctx ((:new e))
+              out (ctypes/create-string-buffer (+ n 16))
+              outl (ctypes/c-int 0)]
+          (try
+            (when (and (= 1 ((:dinit e) ctx ((:gcm e)) nil nil nil))
+                       (= 1 ((:ctrl e) ctx GCM-SET-IVLEN (count iv) nil))
+                       (= 1 ((:dinit e) ctx nil nil (b key) (b iv)))
+                       (or (empty? aad) (= 1 ((:dupdate e) ctx nil (ctypes/byref outl) (b aad) (count aad))))
+                       (= 1 ((:dupdate e) ctx out (ctypes/byref outl) (b (subvec s 0 n)) n))
+                       (= 1 ((:ctrl e) ctx GCM-SET-TAG 16 (ctypes/create-string-buffer (b (subvec s n)) 16)))
+                       (= 1 ((:dfinal e) ctx out (ctypes/byref outl))))
+              (subvec (vec (.-raw out)) 0 n))
+            (finally ((:free e) ctx))))))
+    (gcm/open aes256-ctr key iv aad sealed)))
+
+(defn ed25519-map-to-point
+  "the 32-byte encoding of clear_cofactor(map_to_curve(u0) + map_to_curve(u1)) on edwards25519 (RFC 9380 G.2.1–G.2.2),
+   u0 and u1 32 little-endian bytes (bit 255 dropped) — eve.net.portable-crypto's map over this adapter's modpow"
+  [u0 u1]
+  (p/ed25519-map-to-point u0 u1 modpow))

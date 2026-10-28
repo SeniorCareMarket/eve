@@ -1,0 +1,357 @@
+(ns eve.encoding
+  "eve's encoding primitives (HOST-CONTRACT §3-4): what eve's codec and types
+   take from the host where hosts' APIs differ — UTF-8, IEEE-754 bits, the
+   host's numbers, instants, uuids, exceptions, map entries, small caches —
+   over Python's (basilisp)."
+  (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                            long class double bytes])
+  (:require [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                              long class double bytes]])
+  (:import base64 copy datetime decimal fractions re struct sys uuid))
+
+(defn throw-index-out-of-bounds
+  "Throw an index-out-of-bounds error."
+  [msg]
+  (throw (python/IndexError msg)))
+
+(defn throw-unsupported
+  "Throw an unsupported-operation error."
+  []
+  (throw (python/NotImplementedError "Unsupported operation")))
+
+(defn unsupported
+  "The host's unsupported-operation exception, with message msg."
+  [msg]
+  (ex-info msg {:eve/unsupported true}))
+
+(defn map-entry
+  "A map entry [k v] (what seq on a map answers), on every host."
+  [k v]
+  (basilisp.core/map-entry k v))
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff."
+  [src soff dst doff len]
+  (.__setitem__ dst (python/slice doff (+ doff len)) (.__getitem__ src (python/slice soff (+ soff len)))))
+
+(defn copy-of-range
+  "A new byte array of b's bytes [from, to), in b's own representation: a slice is a fresh copy, so a bytearray (what
+   bytes-of and make-bytes answer) stays a bytearray and the codec's signed array('b') an array('b'), as bytes-copy
+   keeps them (CPython refuses a bytearray slice into an array('b') slice)."
+  ^bytes [^bytes b from to]
+  (.__getitem__ b (python/slice from to)))
+
+(defn utf8-bytes
+  "The UTF-8 bytes of string s."
+  ^bytes [s]
+  (byte-array (.encode s "utf-8")))
+
+(defn utf8-string
+  "The string len UTF-8 bytes of b encode, from off."
+  [^bytes b off len]
+  (.decode (python/bytes (.__getitem__ b (python/slice off (+ off len)))) "utf-8"))
+
+(defn long-bits->double
+  "The double whose IEEE-754 bits are x."
+  ^double [^long x]
+  (first (struct/unpack "<d" (struct/pack "<q" x))))
+
+(defn double->long-bits
+  "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
+  ^long [^double d]
+  (first (struct/unpack "<q" (struct/pack "<d" d))))
+
+(defn fixed-integer?
+  "An integer of a fixed-width host type — the ones eve's format carries as
+   INT32 or INT64. A BigInt is not one: the format has no tag for it."
+  [v]
+  ;; one integer type, unbounded: fixed-width when it fits 64 bits
+  (and (instance? python/int v) (not (instance? python/bool v))
+       (<= -9223372036854775808 v 9223372036854775807)))
+
+(defn floating?
+  "A floating-point number (FLOAT64)."
+  [v]
+  (instance? python/float v))
+
+;; The numbers past a fixed width (FORMAT-DECISIONS.md §8): Python's int is
+;; one unbounded type, fractions.Fraction its ratio, decimal.Decimal its decimal
+
+(defn big-integer?
+  "An integer past 64 bits (Python's int holds any): eve.codec writes it as
+   BIGINT."
+  [v]
+  (and (instance? python/int v) (not (instance? python/bool v))
+       (not (<= -9223372036854775808 v 9223372036854775807))))
+
+(defn- twos-len [n]
+  (python/max 1 (quot (+ (.bit-length (if (neg? n) (- (- n) 1) n)) 8) 8)))
+
+(defn integer->twos
+  "Integer n's minimal two's-complement bytes, big-endian, as a vector of 0..255."
+  [n]
+  (vec (.to-bytes n (twos-len n) "big" ** :signed true)))
+
+(defn twos->integer
+  "The integer whose minimal two's-complement big-endian bytes are bs (0..255 each)."
+  [bs]
+  (python.int/from-bytes (python/bytes (python/list bs)) "big" ** :signed true))
+
+(defn ratio? "A ratio (RATIO): a fractions.Fraction." [v] (instance? fractions/Fraction v))
+
+(defn ratio-parts
+  "[numerator denominator] of a ratio: lowest terms, the denominator positive."
+  [r]
+  [(.-numerator r) (.-denominator r)])
+
+(defn make-ratio "The ratio n/d (n, d integers in lowest terms, d > 1)." [n d] (fractions/Fraction n d))
+
+(defn bigdec? "An arbitrary-precision decimal (BIGDEC): a decimal.Decimal." [v] (instance? decimal/Decimal v))
+
+(defn bigdec-parts
+  "[unscaled scale] of decimal d in its canonical form: trailing zeros stripped
+   down to scale 0 (so (= 1.5M 1.50M) has one form), never a negative scale."
+  [d]
+  (let [t (.as-tuple d)
+        mag (reduce (fn [acc x] (+ (* acc 10) x)) 0 (.-digits t))
+        u (if (= 1 (.-sign t)) (- mag) mag)]
+    (loop [u u s (- (.-exponent t))]
+      (cond
+        (zero? u) [0 0]
+        (and (pos? s) (zero? (mod u 10))) (recur (quot u 10) (dec s))
+        (neg? s) [(* u (python/pow 10 (- s))) 0]
+        :else [u s]))))
+
+(defn make-bigdec
+  "The decimal unscaled × 10^-scale."
+  [unscaled scale]
+  (decimal/Decimal (str unscaled "E" (- scale))))
+
+(defn date?
+  "The host's instant type, the one eve's DATE tag reads back as."
+  [v]
+  (instance? datetime/datetime v))
+
+(defn date-ms
+  "Milliseconds since the Unix epoch of a date."
+  ^long [d]
+  (let [td (.__sub__ d (datetime/datetime 1970 1 1 ** :tzinfo datetime.timezone/utc))]
+    (+ (* 86400000 (.-days td)) (* 1000 (.-seconds td)) (quot (.-microseconds td) 1000))))
+
+(defn ms->date
+  "The host's instant at ms milliseconds since the Unix epoch (UTC)."
+  [ms]
+  (.__add__ (datetime/datetime 1970 1 1 ** :tzinfo datetime.timezone/utc)
+            (datetime/timedelta ** :milliseconds ms)))
+
+(defn uuid->bytes!
+  "Write uuid u's 16 bytes, big-endian (network order), into b at off."
+  [u ^bytes b off]
+  (dotimes [i 16] (aset b (+ off i) (unchecked-byte (aget (.-bytes u) i)))))
+
+(defn bytes->uuid
+  "The uuid whose 16 big-endian bytes are at off in b."
+  [^bytes b off]
+  (uuid/UUID ** :bytes (python/bytes (map #(bit-and (aget b (+ off %)) 0xFF) (range 16)))))
+
+(defn utf16-units
+  "The UTF-16 code units of string s, as integers (what a JVM or
+   JavaScript string holds; a clojerl string is UTF-8, so a code point
+   above U+FFFF is two units there, a surrogate pair)."
+  [s]
+  ;; a Python string is code points: one past U+FFFF is two units, a surrogate pair. Python's own UTF-16 codec makes
+  ;; them, in the machine's byte order for the 16-bit view (surrogatepass: a lone surrogate a Python string holds stands
+  ;; as itself) — a unit at a time through a lazy seq cost 73 µs a character (an 8 KB string: 585 ms)
+  (vec (.tolist (.cast (python/memoryview (.encode s (if (= sys/byteorder "little") "utf-16-le" "utf-16-be") "surrogatepass"))
+                       "H"))))
+
+(defn host-char?
+  "A character of the host's own char type. basilisp and clojerl have none: a
+   one-character string answers char? there, and is a string, as in
+   ClojureScript."
+  [v]
+  false)
+
+(defn host-array?
+  "A host array (a Java or CLR array; on clojerl one of eve.host's)."
+  [v]
+  false)
+
+(defn new-cache
+  "A concurrent map for small caches (cache-get / cache-put!)."
+  []
+  (atom {}))
+
+(defn cache-get [c k]
+  (get @c k))
+
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (swap! c (fn [m] (assoc (if (> (count m) max) {} m) k v)))
+  v)
+
+(defn bytes=
+  "Two byte arrays equal, byte for byte."
+  [a b]
+  (and (== (eve.host/alength ^bytes a) (eve.host/alength ^bytes b))
+       (loop [i 0]
+         (if (>= i (eve.host/alength ^bytes a))
+           true
+           (if (not= (aget ^bytes a i) (aget ^bytes b i)) false (recur (inc i)))))))
+
+(defn illegal-argument
+  "The host's illegal-argument exception, with message msg."
+  [msg]
+  (python/ValueError msg))
+
+(defn index-out-of-bounds
+  "The host's index-out-of-bounds exception, with message msg."
+  [msg]
+  (python/IndexError msg))
+
+(defn read-f32-le
+  "The float32 at byte off of b (little-endian), as a double."
+  [b off]
+  (first (struct/unpack-from "<f" b off)))
+
+(defn read-f64-le
+  "The float64 at byte off of b (little-endian)."
+  [b off]
+  (first (struct/unpack-from "<d" b off)))
+
+(defn f32-le-bytes
+  "The 4 little-endian bytes of v as a float32."
+  [v]
+  (python/bytearray (struct/pack "<f" v)))
+
+(defn f64-le-bytes
+  "The 8 little-endian bytes of v as a float64."
+  [v]
+  (python/bytearray (struct/pack "<d" v)))
+
+(defn make-bytes
+  "n zeroed bytes (the host's byte array, as eve's codec holds bytes)."
+  [n]
+  (python/bytearray n))
+
+(defn bytes-of
+  "The bytes xs (each 0..255, or its signed byte), as a byte array."
+  [xs]
+  (python/bytearray (python/map #(bit-and % 0xFF) (or xs []))))
+
+(defn bytes-copy
+  "A copy of byte array b, in b's own representation (what the host's region
+   and codec read: a read's bytes, changed, handed on as read)."
+  [b]
+  ;; a bytearray or the codec's signed array('b'), as it came
+  (copy/copy b))
+
+(defn map-hash-code
+  "The host's object hash of a map m (its hash of an unordered collection)."
+  [m]
+  (hash-unordered-coll m))
+
+(defn write!
+  "Write s (str of it) to the host's writer w (a Python text stream): what a printer writes to."
+  [w s]
+  (.write w (str s)))
+
+(defn f64s-le
+  "The n float64s little-endian in b from byte off, as the host's double array."
+  [b off n]
+  (let [out (eve.host/double-array n)]
+    (dotimes [i n] (aset out i (read-f64-le b (+ off (* 8 i)))))
+    out))
+
+(defn i32s-le
+  "The n int32s little-endian in b from byte off, as the host's int array."
+  [b off n]
+  (let [out (eve.host/int-array n)
+        u (fn [j] (bit-and (aget b j) 0xFF))]
+    (dotimes [i n]
+      (let [j (+ off (* 4 i))
+            x (bit-or (bit-or (u j) (bit-shift-left (u (+ j 1)) 8))
+                      (bit-or (bit-shift-left (u (+ j 2)) 16) (bit-shift-left (u (+ j 3)) 24)))]
+        (aset out i (if (>= x 2147483648) (- x 4294967296) x))))
+    out))
+
+(defn f64s->bytes-le
+  "The little-endian bytes of the doubles in da (the host's double array), 8
+   each, as make-bytes holds bytes."
+  [da]
+  (python/bytearray (apply struct/pack (str "<" (count da) "d") (seq da))))
+
+(defn i32s->bytes-le
+  "The little-endian bytes of the ints in ia (the host's int array), 4 each,
+   as make-bytes holds bytes."
+  [ia]
+  (python/bytearray (apply struct/pack (str "<" (count ia) "i") (seq ia))))
+
+(defn array-subtype+bytes
+  "[subtype little-endian-bytes] of a host typed array: none here
+   (host-array?)."
+  [_a]
+  nil)
+
+(defn typed-array
+  "n elements of eve.array subtype code as the host's typed array: none here
+   (a fresh eve array is slab-backed; typed-aget and typed-aset! are never
+   reached)."
+  [_subtype _n]
+  nil)
+
+(defn typed-aget "Never reached here (typed-array)." [_a _subtype _i] nil)
+
+(defn typed-aset! "Never reached here (typed-array)." [_a _subtype _i v] v)
+
+(defn code-points->string
+  "The string of a sequence of Unicode code points (a Python string is code points) — the inverse of utf16-units."
+  [cps]
+  (.join "" (python/map python/chr cps)))
+
+;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
+;; This host's native codecs, plugged where eve.net.bytes dispatches to them: Python's base64 and bytes hex.
+;; The contract is eve.net.bytes' portable semantics, which the fixtures (eve.net.bytes-codec-test) hold these
+;; to byte for byte, and Python's own decoder disagrees with it in three places, each handled here: it stops at
+;; a mid-string '=' where the contract skips any character outside the alphabet (so the text is cleaned to the
+;; alphabet first), it demands padding (so a cleaned 2- or 3-digit tail is padded), and it refuses a tail of
+;; one digit, which the contract decodes as one byte of four times the digit (so that digit is decoded here).
+
+(def ^:private b64-digit-value
+  (into {} (map-indexed (fn [i c] [(str c) i]) "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")))
+
+(defn bytes->b64
+  "standard base64 (padded) of a byte sequence — Python's base64.b64encode"
+  [bs]
+  (.decode (base64/b64encode (python/bytes bs)) "ascii"))
+
+(defn b64->bytes
+  "the bytes of base64 text, eve.net.bytes' contract over Python's base64 (see the section note)"
+  [s]
+  (let [clean (re/sub "[^A-Za-z0-9+/]" "" s)
+        n (count clean)
+        r (mod n 4)
+        body (if (= r 1) (subs clean 0 (dec n)) clean)
+        pad (cond (= r 2) "==" (= r 3) "=" :else "")
+        out (vec (base64/b64decode (str body pad)))]
+    (if (= r 1)
+      (conj out (* 4 (get b64-digit-value (str (nth clean (dec n))))))
+      out)))
+
+(defn bytes->hex
+  "lower-case hex of a byte sequence — Python's bytes.hex"
+  [bs]
+  (.hex (python/bytes bs)))
+
+(def ^:private hex-digit-chars (set "0123456789abcdefABCDEF"))
+
+(defn hex->bytes
+  "the bytes of hex text (even length), eve.net.bytes' contract over Python's bytes.fromhex (which itself
+   accepts spaces, so the text is validated first): throws on odd length and on a non-digit"
+  [s]
+  (when (odd? (count s)) (throw (ex-info "hex text of odd length" {:len (count s)})))
+  (when-not (re/fullmatch "[0-9a-fA-F]*" s)
+    (let [bad (first (filter (fn [c] (not (contains? hex-digit-chars (str c)))) s))]
+      (throw (ex-info (str "not a hex digit: " bad) {:char bad}))))
+  (vec (. python/bytes fromhex s)))

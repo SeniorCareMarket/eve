@@ -1,0 +1,114 @@
+(ns eve.crypto
+  "eve's crypto feature (adapters/README.md) over Dart — ClojureDart: SHA-256, SHA-384, SHA-512 and HMAC-SHA256 from
+   package:crypto (the Dart team's; dart:core has no digest); the big-integer and edwards25519 rows over Dart's BigInt
+   (modPow and modInverse native) through eve.net.bigops / eve.net.edwards; the Ed25519 public key and signature RFC
+   8032 over those and the SHA-512 row (eve.net.edwards/ed25519-rows, as .NET's adapter: Dart has no Ed25519). AES-256-
+   CTR, AES-256-GCM, XXH3 and Ed25519 verify are eve.net.portable-crypto's; random bytes are the process feature's
+   (Random.secure). Bytes are vectors of 0..255 in and out; eve/test/eve/net/crypto_test.cljc holds this adapter to
+   the portable code."
+  (:require ["dart:typed_data" :as td]
+            ["package:crypto/crypto.dart" :as dc]
+            [eve.net.bigops :as bo]
+            [eve.net.edwards :as edw]
+            [eve.net.portable-crypto :as p]
+            [eve.process :as process]))
+
+(defn- ^td/Uint8List u8
+  "a byte vector (0..255) as a Uint8List"
+  [bs]
+  (let [a (td/Uint8List (count bs))]
+    (loop [i 0 s (seq bs)]
+      (when s
+        (aset a i (first s))
+        (recur (inc i) (next s))))
+    a))
+
+(defn- v
+  "a Dart List of ints as a byte vector"
+  [^List xs]
+  (let [n (.-length xs)]
+    (loop [i 0 out (transient [])]
+      (if (< i n)
+        (recur (inc i) (conj! out (aget xs i)))
+        (persistent! out)))))
+
+(defn sha256 "the 32-byte digest" [bs] (v (.-bytes (.convert dc/sha256 (u8 bs)))))
+(defn sha384 "the 48-byte SHA-384 digest" [bs] (v (.-bytes (.convert dc/sha384 (u8 bs)))))
+(defn sha512 "the 64-byte SHA-512 digest" [bs] (v (.-bytes (.convert dc/sha512 (u8 bs)))))
+
+(defn hmac-sha256 "RFC 2104 over SHA-256" [key msg]
+  (v (.-bytes (.convert (dc/Hmac dc/sha256 (u8 key)) (u8 msg)))))
+
+(defn aes256-ctr "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key (portable)" [key iv data]
+  (p/aes256-ctr key iv data))
+(defn xxh3-128 "the 16-byte XXH3-128 digest, big-endian hi then lo (portable)" [bs] (p/xxh3-128 bs))
+(defn random-bytes "n bytes of the operating system's entropy" [n] (process/random-bytes n))
+
+;; ── the aegis clear-evaluation rows (aegis/docs/simple-spike/REPORT.md): the big-integer and edwards25519 rows over
+;; Dart's BigInt through eve.net.bigops / eve.net.edwards (modPow and modInverse native)
+
+(def ^:private hex-digits "0123456789abcdef")
+
+(defn- ^BigInt big
+  "a non-negative BigInt of big-endian bytes"
+  [bs]
+  (if (empty? bs)
+    (BigInt.from 0)
+    (let [sb (StringBuffer)]
+      (doseq [b bs]
+        (.write sb (nth hex-digits (quot b 16)))
+        (.write sb (nth hex-digits (mod b 16))))
+      (BigInt.parse (.toString sb) .radix 16))))
+
+(defn- unbig
+  "the big-endian len bytes of a non-negative BigInt (its low len bytes)"
+  [^BigInt x len]
+  (let [^String h (.padLeft (.toRadixString x 16) (* 2 len) "0")
+        h (.substring h (- (.-length h) (* 2 len)))]
+    (loop [i 0 out (transient [])]
+      (if (< i len)
+        (recur (inc i) (conj! out (int/parse (.substring h (* 2 i) (+ 2 (* 2 i))) .radix 16)))
+        (persistent! out)))))
+
+(def ^:private OPS
+  (bo/complete
+   {:int (fn [n] (BigInt.from n))
+    :from-be big :to-be unbig
+    :add (fn [^BigInt a ^BigInt b] (. a "+" b))
+    :sub (fn [^BigInt a ^BigInt b] (. a "-" b))
+    :mul (fn [^BigInt a ^BigInt b] (. a "*" b))
+    :quot (fn [^BigInt a ^BigInt b] (. a "~/" b))
+    ;; Dart's % on a BigInt is the Euclidean modulo: in [0, m) for m > 0
+    :mod (fn [^BigInt a ^BigInt m] (. a "%" m))
+    :modpow (fn [^BigInt b ^BigInt e ^BigInt m] (.modPow b e m))
+    :modinv (fn [^BigInt a ^BigInt m] (try (.modInverse a m) (catch dynamic _ nil)))
+    :even? (fn [^BigInt a] (.-isEven a))
+    :zero? (fn [^BigInt a] (== 0 (.-sign a)))
+    :eq (fn [^BigInt a ^BigInt b] (. a "==" b))}))
+
+(def ^:private ED (edw/make OPS))
+(def ^:private ED-ROWS (edw/ed25519-rows OPS ED sha512))
+
+(defn modpow "base^exp mod n over big-endian bytes; the result is as long as n" [base exp n] (bo/modpow-bytes OPS base exp n))
+(defn modmul "a·b mod n over big-endian bytes; the result is as long as n" [a b n] (bo/modmul-bytes OPS a b n))
+(defn modinv "a^-1 mod n over big-endian bytes, or nil when gcd(a, n) ≠ 1" [a n] (bo/modinv-bytes OPS a n))
+(defn ed25519-scalarmult "the encoding of [s]P: s 32 little-endian bytes, P a 32-byte encoding" [s p] ((:scalarmult ED) s p))
+(defn ed25519-mul-add "the encoding of [a]P + [b]Q" [a p b q] ((:mul-add ED) a p b q))
+(defn x25519 "X25519 (RFC 7748): the 32-byte u-coordinate of [k]u, k and u 32 little-endian bytes" [k u] ((:x25519 ED) k u))
+
+(defn ed25519-public-key "the 32-byte public key of a 32-byte secret seed (RFC 8032 over BigInt: Dart has none)" [seed]
+  ((:public-key ED-ROWS) seed))
+(defn ed25519-sign "the 64-byte signature of the message under a 32-byte secret seed (RFC 8032 over BigInt)" [seed msg]
+  ((:sign ED-ROWS) seed msg))
+(defn ed25519-verify "is sig a valid signature of the message under the 32-byte public key (portable)" [pub msg sig]
+  (p/ed25519-verify pub msg sig))
+
+(defn aes256-gcm-seal "AES-256-GCM (portable)" [key iv aad pt] (p/aes256-gcm-seal key iv aad pt))
+(defn aes256-gcm-open "the plaintext of AES-256-GCM ciphertext ‖ tag, or nil (portable)" [key iv aad sealed]
+  (p/aes256-gcm-open key iv aad sealed))
+
+(defn ed25519-map-to-point
+  "the 32-byte encoding of clear_cofactor(map_to_curve(u0) + map_to_curve(u1)) on edwards25519 (RFC 9380 G.2.1–G.2.2),
+   u0 and u1 32 little-endian bytes (bit 255 dropped) — eve.net.portable-crypto's map over this adapter's modpow"
+  [u0 u1]
+  (p/ed25519-map-to-point u0 u1 modpow))
