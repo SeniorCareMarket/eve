@@ -11,4 +11,9 @@
   (:require [clojure.test]
             [eve.hamt-util-test]
             [eve.eve-bytes-fixture-test]
-            [eve.slab-io-test]))
+            [eve.slab-io-test]
+            ;; eve.net's client over the in-process broker and store (eve.net.stand-in): no eve.atom, no bridge
+            [eve.net.wire-test]
+            [eve.net.remote-atom-test]
+            ;; the passive broker over its in-memory rows (eve.net.broker-disk's rows need eve.atom)
+            [eve.net.broker-test]))

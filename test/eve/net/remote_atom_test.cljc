@@ -6,7 +6,7 @@
    whose key is its SHA-256; the retired keys."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [eve.alpha :as e]
+            [eve.read-region :as rr]
             [eve.net.atom :as a]
             [eve.net.bytes :as b]
             [eve.net.codec :as codec]
@@ -105,8 +105,10 @@
 (deftest leases-in-a-read-region-are-held-until-it-exits
   (let [[ra s _] (setup)]
     (a/swap! ra assoc :n 1)
-    (let [held (e/$ (a/deref ra) (a/deref ra) (:leases @(:state s)))]
-      (is (= 2 (count held)) "inside eve.alpha/$ each deref's lease is held, the one the second replaced too")
+    ;; eve.alpha/$'s region (eve.atom/$* runs rr/run), entered without eve.alpha: the network atom needs no eve.atom,
+    ;; so this test runs where eve/deftype does not yet (ValueScript); its values are plain data, nothing to materialize
+    (let [held (rr/run (fn [] (a/deref ra) (a/deref ra) (:leases @(:state s))) identity)]
+      (is (= 2 (count held)) "inside a read region ($) each deref's lease is held, the one the second replaced too")
       (is (empty? (:leases @(:state s))) "every one released as the region exits")
       (is (nil? (:lease-id @(:state ra)))))))
 

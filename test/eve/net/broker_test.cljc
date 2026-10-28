@@ -1,16 +1,14 @@
 (ns eve.net.broker-test
   "eve.net.broker, the passive broker, past what eve.net.wire-test drives through eve.net.stand-in: leases that expire,
-   renew-lease, retired keys handed to :on-retire once no lease needs them, :validate's 403, the 409's skeleton, real
-   presigning (eve.net.gateway/hmac-presigner), and rows in an eve disk atom that outlive the broker."
+   renew-lease, retired keys handed to :on-retire once no lease needs them, :validate's 403, the 409's skeleton. No
+   eve.atom: these rows run on ValueScript too (bb test:vs); real presigning and rows in a disk atom are
+   eve.net.broker-disk-test's."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [eve.atom :as ea]
             [eve.net.broker :as broker]
-            [eve.net.gateway :as gw]
             [eve.net.json :as json]
             [eve.net.run :as r]
-            [eve.net.wire :as wire]
-            [eve.thread.rung :as rung]))
+            [eve.net.wire :as wire]))
 
 (def ^:private cfg {:endpoint "https://broker.example" :domain-id "d1" :atom-id "a1" :api-key "k"})
 
@@ -89,32 +87,6 @@
     (is (= 404 (:status ((:handle b) {:method "POST" :url "https://broker.example/v1/domains/d2/atoms/a1/deref"
                                     :headers {"Authorization" "Bearer k"} :body "{}"})))
         "another domain is not found")))
-
-(deftest presigning-is-real
-  (let [p (gw/hmac-presigner {:url "http://store.test/blobs/" :secret "s" :now-ms (fn [] 0)})
-        [b _] (clocked {:presign p})
-        u (get (run b (wire/presign cfg :write ["ab"])) "ab")
-        q (second (str/split u #"\?"))
-        m (into {} (map (fn [kv] (str/split kv #"="))) (str/split q #"&"))
-        exp (json/read-str-or-nil (get m "exp"))]
-    (is (str/starts-with? u "http://store.test/blobs/ab?"))
-    (is (gw/hmac-ok? "s" "ab" "write" exp (get m "sig") 0) "the store accepts its signature")
-    (is (not (gw/hmac-ok? "s" "ab" "read" exp (get m "sig") 0)) "for its mode only")
-    (is (= 503 (first (post! (first (clocked {})) "/presign" {"keys" ["ab"] "mode" "read"}))) "no store: 503")))
-
-(deftest rows-in-a-disk-atom-outlive-the-broker
-  (let [path (rung/place {:name (str "broker-" (rand-int 1000000000)) :placement :window :window-root "/dev/shm/eve-broker-test"})
-        d (ea/persistent-atom-domain path)]
-    (try
-      (let [b1 (broker/broker {:api-key "k" :rows (broker/disk-rows d)})]
-        (run b1 (wire/create cfg))
-        (is (= {:status "ok" :epoch 1} (run b1 (wire/cas-root cfg {:old-key nil :new-key "aa" :root-blob [1 2]}))))
-        (is (= "conflict" (:status (run b1 (wire/cas-root cfg {:old-key "zz" :new-key "bb"}))))))
-      (let [b2 (broker/broker {:api-key "k" :rows (broker/disk-rows d)})
-            v (run b2 (wire/deref-atom cfg))]
-        (is (= ["aa" [1 2] 1] [(:root-key v) (:root-blob v) (:epoch v)]) "a second broker over the rows reads the first's")
-        (is (= {:status "ok" :epoch 2} (run b2 (wire/cas-root cfg {:old-key "aa" :new-key "bb"})))))
-      (finally (ea/close-atom-domain! d)))))
 
 (deftest a-page-reaches-it-cors
   (let [[b _] (clocked {})

@@ -75,8 +75,9 @@
  ;; a deftype's interfaces). eve/deftype's expansion waits on a builder carrying EM4's held half (VS's analyzer lets a
  ;; namespace replace a macro named deftype; its macro evaluator runs macro-time atoms and 64-bit integer words).
  ;; eve.crypto is crypto/vs: the kernel's
- ;; SHA-256, the big-integer and edwards25519 rows over VS's BigInt tower, the rest portable (eve.net.portable-crypto)
- :vs   ["adapters/slab-io/vs/src" "adapters/core/vs/src" "adapters/completion/clojure/src" "adapters/slab/heap/src"
+ ;; SHA-256, the big-integer and edwards25519 rows over VS's BigInt tower, the rest portable (eve.net.portable-crypto).
+ ;; eve.http is http/vs: the vs.host bridge's fetch (a program run under vs-term --bridge, Node, Workers; bb test:vs-http)
+ :vs   ["adapters/slab-io/vs/src" "adapters/http/vs/src" "adapters/core/vs/src" "adapters/completion/clojure/src" "adapters/slab/heap/src"
         "adapters/region/vs/src" "adapters/encoding/vs/src" "adapters/int32/vs/src" "adapters/codec/byte-array/src"
         "adapters/process/vs/src" "adapters/coll/protocols/src" "adapters/types/vs/src" "adapters/crypto/vs/src"]
  ;; glojure, run as glj-eve (impls/glojure/build.sh: glojure v0.7.22 with eve's Go packages and its completion's

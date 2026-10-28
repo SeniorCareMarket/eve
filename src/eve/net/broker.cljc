@@ -24,15 +24,13 @@
    deletes nothing. (:validate req row) answers nil or {:reason :detail}, a 403 (a claim gate attaches there).
 
    The rows sit behind IAtomRows: in memory (mem-rows, the default, in the broker's :state under :atoms) or in one eve
-   disk atom (disk-rows), so a local broker survives a restart.
+   disk atom (eve.net.broker-disk/disk-rows), so a local broker survives a restart. This namespace needs no eve.atom,
+   so it runs wherever eve's portable core does (ValueScript among them).
 
    Threat model. Writer: whoever holds :api-key, refused further only by :validate. What it sees: root keys, root and
    skeleton blobs (ciphertext when clients encrypt), timing; never a block. What it refuses: a stale old_key (409),
    what :validate names (403). It deletes nothing itself."
   (:require [clojure.string :as str]
-            [eve.atom :as ea]
-            [eve.deftype-proto.data :as ed]
-            [eve.host :as host]
             [eve.net.json :as json]
             [eve.process :as process]))
 
@@ -63,7 +61,7 @@
           [new out] (f old)]
       (if (compare-and-set! a old new) out (recur)))))
 
-(defn- row-step
+(defn row-step
   "[rows' out] of -cas! over the map rows"
   [rows aid old-key fields]
   (let [row (or (get rows aid) {:root_key old-key :epoch 0})]
@@ -71,7 +69,7 @@
       (let [n (assoc fields :epoch (inc (:epoch row)))] [(assoc rows aid n) [true n]])
       [rows [false row]])))
 
-(defn- lease-ops
+(defn lease-ops
   "the lease half of IAtomRows over the map at key k of the atom st: {lid {:atom :epoch :expires-at}}, ids
    \"lease-<n>\" from st's :seq (in memory, the leases die with the counter; a durable store mints ids unique across
    restarts)"
@@ -110,30 +108,6 @@
      (-release! [_ lid] ((:release! ls) lid))
      (-renew! [_ lid now expires-at] ((:renew! ls) lid now expires-at))
      (-lease-floor [_ now] ((:floor ls) now))))))
-
-(defn disk-rows
-  "rows as one map in the eve atom named nm (default \"eve.net.broker/rows\") of domain (an eve disk domain): every
-   change one eve swap. The leases stay in memory (a restart outlives every TTL)"
-  ([domain] (disk-rows domain "eve.net.broker/rows"))
-  ([domain nm]
-   (let [a (ea/lookup-or-create-mmap-atom! domain nm {})
-         rows (fn [cur] (or (ed/eve->clj cur) {}))
-         change! (fn [g]
-                   (let [out (host/volatile! nil)]
-                     (host/swap! a (fn [cur] (let [[m o] (g (rows cur))] (vreset! out o) m)))
-                     @out))
-         ls (lease-ops (atom {}) :leases)]
-     (reify IAtomRows
-       (-row [_ aid] (get (ea/read-pinned a rows) aid))
-       (-create! [_ aid initial-key]
-         (change! (fn [m] (if-let [row (get m aid)]
-                            [m row]
-                            (let [row {:root_key initial-key :epoch 0}] [(assoc m aid row) row])))))
-       (-cas! [_ aid old-key fields] (change! (fn [m] (row-step m aid old-key fields))))
-       (-lease! [_ aid epoch expires-at] ((:lease! ls) aid epoch expires-at))
-       (-release! [_ lid] ((:release! ls) lid))
-       (-renew! [_ lid now expires-at] ((:renew! ls) lid now expires-at))
-       (-lease-floor [_ now] ((:floor ls) now))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Leases and retired keys

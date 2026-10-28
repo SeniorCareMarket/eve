@@ -62,6 +62,23 @@
                                             "-W" "exceptions=y" "-W" "max-wasm-stack=67108864" wasm))]
                        (print out) (flush)
                        (when-not (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out) (System/exit 1))))}
+  test:vs-http {:doc "eve.http on ValueScript (adapters/http/vs) against a local eve.net.store served here: PUT and GET through the vs.host bridge's fetch, under vs-term --bridge ($VS_TERM, default the monorepo's vs/term/hosts/wasmtime/vs-term)"
+                :requires ([eve.http-server :as hs] [eve.net.store :as store] [eve.net.gateway :as gw])
+                :task (let [wasm (str (fs/absolutize "target/vs/http_vs_check.wasm"))
+                            now (fn [] (System/currentTimeMillis))
+                            st (store/store {:secret "vs-http" :now-ms now})
+                            srv (hs/serve! {:port 0} (:handle st))
+                            base (str "http://127.0.0.1:" (:port srv) "/blobs/")
+                            sign (gw/hmac-presigner {:url base :secret "vs-http" :now-ms now})
+                            vs-term (or (System/getenv "VS_TERM") (str (fs/absolutize "../vs/term/hosts/wasmtime/vs-term")))]
+                        (fs/create-dirs "target/vs")
+                        (shell {:extra-env {"VS_CLJ_ROOTS" (str/join ":" (roots :vs "adapters/http/vs/test"))}}
+                               "vs" "compile" "adapters/http/vs/test/eve/http_vs_check.vs" "-o" wasm)
+                        (let [out (:out (shell {:out :string :continue true} vs-term "--bridge" wasm
+                                               (sign "k1" "write" 300) (sign "k1" "read" 300) base))]
+                          ((:stop srv))
+                          (print out) (flush)
+                          (when-not (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out) (System/exit 1))))}
   test:jolt {:doc "The shared (.cljc) tests on jolt (namespaces named after the task run alone)"
              :task (apply shell "jolt" "-Scp" (str/join ":" (roots :jolt "test")) "-m" "eve.runner.jolt-main" "test"
                           *command-line-args*)}
