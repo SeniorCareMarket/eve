@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/net-local-check.py — the end-to-end check of eve's local network (bb net:local), from eve/.
 
-    python3 -I scripts/net-local-check.py [--hosts bb,jvm,nbb] [--port 8700] [--no-page]
+    python3 -I scripts/net-local-check.py [--hosts bb,jvm,nbb] [--port 8700] [--no-page] [--no-persist]
 
 Starts `bb net:local --no-open` in a process group of its own and checks, one row a line:
   ready      the launcher printed {:step :ready ...}
@@ -9,6 +9,9 @@ Starts `bb net:local --no-open` in a process group of its own and checks, one ro
   page       (unless --no-page) the page in headless Chromium: every node green, a swap moves the epoch, the store
              logs the PUTs, a pool job runs on a thread server, no page errors
   stop       SIGINT to the launcher leaves no process of the run and frees every port
+  persist    (unless --no-persist) with --dir D: a network atom written (bb net:probe write), the launcher stopped and
+             started again on the same D, the atom read back by a fresh handle equal (bb net:probe read) — the broker's
+             rows and the store's blobs (D/store) both survive the restart
 Exit 0 only when every row passes. The run's logs are under target/net-local/logs.
 """
 import json
@@ -54,7 +57,7 @@ def edn_ready(line):
     """the fields of the launcher's {:step :ready ...} line this check reads"""
     import re
     out = {}
-    for k in ("broker", "store", "app"):
+    for k in ("broker", "store", "app", "domain", "api-key"):
         m = re.search(r":%s \"([^\"]+)\"" % k, line)
         out[k] = m.group(1) if m else None
     m = re.search(r":threads \[([^\]]*)\]", line)
@@ -112,6 +115,62 @@ def page_rows(app):
     return good
 
 
+def launch(port, hosts, extra):
+    """bb net:local in a process group of its own: (process, its ready fields or None)"""
+    pr = subprocess.Popen(["bb", "net:local", "--no-open", "--port", str(port), "--hosts", hosts] + extra,
+                          cwd=EVE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    for line in pr.stdout:
+        print("  | " + line.rstrip(), flush=True)
+        if line.startswith("{:step :ready"):
+            return pr, edn_ready(line)
+    return pr, None
+
+
+def halt(pr):
+    """SIGINT to the launcher's group; SIGKILL if it is still there after 30 s"""
+    try:
+        os.killpg(pr.pid, signal.SIGINT)
+        pr.wait(30)
+    except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
+        os.killpg(pr.pid, signal.SIGKILL)
+        pr.wait(10)
+
+
+def probe(op, ready):
+    r = subprocess.run(["bb", "net:probe", op, ready["broker"], ready["domain"], ready["api-key"], "persist"],
+                       cwd=EVE, capture_output=True, text=True, timeout=300)
+    out = (r.stdout.strip().splitlines() or [""])[-1]
+    return r.returncode == 0 and ":ok true" in out, out or r.stderr.strip()[-300:]
+
+
+def persist_row(port, hosts):
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp(prefix="net-local-persist-")
+    try:
+        pr, ready = launch(port, hosts, ["--no-build", "--dir", d])
+        try:
+            if ready is None:
+                return row("persist", False, "the first run did not get ready")
+            wrote, w = probe("write", ready)
+        finally:
+            halt(pr)
+        files = sum(len(fs) for _, _, fs in os.walk(os.path.join(d, "store")))
+        pr, ready = launch(port, hosts, ["--no-build", "--dir", d])
+        try:
+            if ready is None:
+                return row("persist", False, "the restart did not get ready")
+            read, r = probe("read", ready)
+        finally:
+            halt(pr)
+        return row("persist", wrote and read and files > 0,
+                   f"write {w}; {files} blob files under D/store; after the restart read {r}")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     port = int(arg("--port", "8700"))
     hosts = arg("--hosts", "bb")
@@ -164,6 +223,8 @@ def main():
                     f"group {'alive' if alive else 'gone'}, {len(free)}/{len(ports)} ports free")
         if alive:
             os.killpg(pr.pid, signal.SIGKILL)
+    if ready is not None and "--no-persist" not in sys.argv:
+        good &= persist_row(port, hosts)
     print(f"NET-LOCAL-CHECK hosts={hosts}: {'PASS' if good else 'FAIL'}", flush=True)
     return 0 if good else 1
 

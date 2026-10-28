@@ -5,7 +5,8 @@
 ;;   bb net:local [--port 8700] [--threads 3] [--hosts bb,jvm,nbb] [--dir D] [--no-open] [--no-build]
 ;;
 ;; Ports: the broker at --port, the store at +1, thread server i at +2+i (server 0 is the app host). --dir keeps the
-;; broker's rows in an eve disk atom under D (they survive a restart; the store's blobs do not). --hosts names each
+;; broker's rows in an eve disk atom under D/broker and the store's blobs as files under D/store, one per key (both
+;; read back at start, so a restart keeps every root and its blocks). --hosts names each
 ;; server's host in turn, the last repeated (default bb). Prints the addresses, the domain id and the API key (minted
 ;; for this run), and one EDN line {:step :ready ...}; Ctrl+C (SIGINT/SIGTERM) stops every node it started.
 (require '[babashka.fs :as fs]
@@ -33,6 +34,29 @@
       (#{"--no-open" "--no-build"} a) (recur more (assoc o (keyword (subs a 2)) true))
       (str/starts-with? a "--") (recur (rest more) (assoc o (keyword (subs a 2)) (first more)))
       :else (throw (ex-info (str "net:local: unknown argument " a) {})))))
+
+(defn- file-blobs
+  "The store's blobs kept as files under dir, one per key (its path the key; the base64 text as it arrived): an atom
+   holding what dir holds now, whose every change is written back (a new or changed key written to a temporary file,
+   then moved over its own; a gone key deleted). A key that would leave dir is kept in memory only."
+  [dir]
+  (let [root (fs/absolutize dir)
+        _ (fs/create-dirs root)
+        file-of (fn [k] (when-not (or (str/starts-with? k "/") (some #{".." "."} (str/split k #"/")))
+                          (fs/file root k)))
+        blobs (atom (into {} (for [f (fs/glob root "**") :when (and (fs/regular-file? f) (not (str/ends-with? (str f) ".tmp")))]
+                               [(str/join "/" (map str (fs/relativize root f))) (slurp (fs/file f))])))]
+    (add-watch blobs ::files
+               (fn [_ _ old new]
+                 (doseq [[k v] new :when (not (identical? v (get old k)))]
+                   (when-let [f (file-of k)]
+                     (fs/create-dirs (fs/parent f))
+                     (let [tmp (fs/file (str f "." (random-uuid) ".tmp"))]
+                       (spit tmp v)
+                       (fs/move tmp f {:replace-existing true :atomic-move true}))))
+                 (doseq [k (keys old) :when (not (contains? new k))]
+                   (when-let [f (file-of k)] (fs/delete-if-exists f)))))
+    blobs))
 
 (defn- roots [host & more]
   (map (fn [r] (str (fs/absolutize r))) (concat ["src"] (get (edn/read-string (slurp "hosts.edn")) host) more)))
@@ -92,14 +116,15 @@
       public (str eve "/target/net-local/public")
       secret (str (random-uuid))
       domain (when (:dir o) (fs/create-dirs (:dir o)) (ea/persistent-atom-domain (str (fs/absolutize (:dir o)) "/broker")))
-      store (es/store {:url store-url :secret secret :now-ms proc/now-ms :log? true})
+      store (es/store (cond-> {:url store-url :secret secret :now-ms proc/now-ms :log? true}
+                        (:dir o) (assoc :blobs (file-blobs (fs/file (:dir o) "store")))))
       s-srv (hs/serve! {:port (inc port) :threads 16} (with-health "store" (:handle store)
-                                                                (fn [] {"puts" (count (filter (fn [[m _ ok?]] (and (= "PUT" m) ok?)) @(:log store)))})))
+                                                        (fn [] {"puts" (count (filter (fn [[m _ ok?]] (and (= "PUT" m) ok?)) @(:log store)))})))
       b (broker/broker (cond-> {:api-key key :domain-id did
                                 :presign (gw/hmac-presigner {:url store-url :secret secret :now-ms proc/now-ms})}
                          domain (assoc :rows (broker-disk/disk-rows domain))))
       b-srv (hs/serve! {:port port :threads 16} (with-health "broker" (:handle b)
-                                                          (fn [] (select-keys @(:state b) [:requests :conflicts]))))
+                                                  (fn [] (select-keys @(:state b) [:requests :conflicts]))))
       _ (fs/create-dirs (fs/file public "js"))
       _ (spit (fs/file public "config.json")
               (json/write-str {"domain_id" did "api_key" key "broker" broker-url "store" (str base (inc port))
@@ -113,7 +138,7 @@
                                         "--port" (str (+ port 2 i))]
                                        (when (zero? i) ["--static" public]))]
                       (apply p/process {:dir eve :extra-env {"EVE_API_KEY" key}
-                                  :out (str logs "/t" i ".log") :err (str logs "/t" i ".err")}
+                                        :out (str logs "/t" i ".log") :err (str logs "/t" i ".err")}
                              (cmd (nth hosts i) args))))
                   (range n))
       stop! (fn []
@@ -131,7 +156,7 @@
   (say "store  " (str base (inc port)))
   (doseq [[i u] (map-indexed vector thread-urls)] (say (str "thread t" i " ") u (str "(" (nth hosts i) ")") (if (zero? i) " + the page" "")))
   (println (pr-str {:step :ready :broker broker-url :store (str base (inc port)) :threads thread-urls :app (first thread-urls)
-                    :hosts hosts :pids (mapv (fn [pr] (.pid ^Process (:proc pr))) procs)}))
+                    :domain did :api-key key :hosts hosts :pids (mapv (fn [pr] (.pid ^Process (:proc pr))) procs)}))
   (flush)
   (when-not (:no-open o)
     (try (p/process ["xdg-open" (str (first thread-urls) "/")]) (catch Exception _ (say "open" (str (first thread-urls) "/")))))

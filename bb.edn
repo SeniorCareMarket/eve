@@ -128,6 +128,19 @@
                                                              (pr-str (cons "test" *command-line-args*)) ")"))}
   net:local {:doc "eve's local network in one command: a broker, a store, three thread servers (one the app host) and the page (scripts/net-local.clj; flags --port --threads --hosts --dir --no-open --no-build)"
              :task (apply shell "bb" "-cp" (str/join ":" (roots :bb "net-local/src")) "scripts/net-local.clj" *command-line-args*)}
+  net:probe {:doc "One network atom at a running bb net:local, for scripts/net-local-check.py's persist row: `bb net:probe write|read BROKER DOMAIN API-KEY ATOM-ID`. write creates the atom and resets it to a fixed value of many blocks; read derefs it with a fresh handle; each prints {:op :ok}, :ok when the value is that fixed value"
+             :requires ([eve.http :as http] [eve.net.atom :as na] [eve.process :as proc])
+             :task (let [[op broker did key aid] *command-line-args*
+                         want {:probe "persist" :n 4096 :v (vec (range 4096)) :s (apply str (repeat 512 "eve"))}
+                         cfg {:endpoint broker :domain-id did :atom-id aid :api-key key}
+                         ra (na/remote-atom cfg (merge (http/platform) {:sleep proc/sleep-ms! :now-ms proc/now-ms :seed 1}))]
+                     (case op
+                       "write" (do (http/request {:method "POST" :url (str broker "/v1/domains/" did "/atoms/" aid "/create")
+                                                  :headers {"Authorization" (str "Bearer " key)}
+                                                  :body (str "{\"atom_id\":\"" aid "\"}")})
+                                   (na/reset! ra want)
+                                   (prn {:op :write :ok (= want (na/deref ra))}))
+                       "read" (let [got (na/deref ra)] (prn {:op :read :ok (= want got)}))))}
   test:browser {:doc "The thread feature's conformance in headless Chromium (hosts.edn :browser; scripts/test-browser.clj)"
                 :task (load-file "scripts/test-browser.clj")}
   test:clje {:doc "The shared (.cljc) tests on clojerl (eve's NIF is built on first load into adapters/core/beam/target/clje/)"
