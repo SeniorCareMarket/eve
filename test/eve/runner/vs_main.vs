@@ -16,4 +16,7 @@
             [eve.net.wire-test]
             [eve.net.remote-atom-test]
             ;; the passive broker over its in-memory rows (eve.net.broker-disk's rows need eve.atom)
-            [eve.net.broker-test]))
+            [eve.net.broker-test]
+            ;; the thread host's conformance suite, serial arm: this runner is one instance (no mesh), so it
+            ;; exercises the seat's no-threads rows; the parallel rows run on the mesh (bb test:vs-thread)
+            [eve.thread-host-test]))

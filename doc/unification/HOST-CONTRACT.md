@@ -464,6 +464,7 @@ started it runs that thread's entry and answers true — a launcher's call, neve
 | `thread/beam` | clojerl | a BEAM process, monitored by its starter | the process's own (`erlang/send`, `receive* … after`) | true (funs are terms) | `:cheap` |
 | `thread/python` | basilisp | `threading.Thread` | `queue.Queue` | true | `:thread`, `:parallel` false while the GIL is on |
 | `thread/clr` | ClojureCLR | a background `System.Threading.Thread` | a queue under a monitor (`Monitor.Wait` / `Pulse`) | true | `:thread` |
+| `thread/vs` | ValueScript | one long-lived mesh task per thread (`vs.thread/mesh-spawn` over the wasm instances of one shared memory) | a VS atom holding a vector, plus one futex word in a reserved raw window (`memory.atomic.wait32` is the block) | true (the shared slab carries closures as themselves) | `:thread` |
 | `thread/glojure` | glojure | a goroutine by `lang.AgentSubmit` (`future` without its binding conveyance: a thread starts with the root frame) | an atom holding a queue and a promise the next sender delivers | true | `:cheap` |
 | `thread/none` | a host with no threads | the current thread only | its own queue | true (false on ClojureScript, which has no frame to capture) | — (`:max-threads` 0) |
 

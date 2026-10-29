@@ -62,6 +62,21 @@
                                             "-W" "exceptions=y" "-W" "max-wasm-stack=67108864" wasm))]
                        (print out) (flush)
                        (when-not (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out) (System/exit 1))))}
+  test:vs-thread {:doc "The eve.thread-host conformance suite (test/eve/thread_host_test.cljc) on the ValueScript mesh: compiled by the installed vs over hosts.edn's :vs roots, turned into a mesh program by vs/wasm-threads/transform.py, and run on the wasmtime mesh host with 6 workers. The run counts only when it shows the suite's `N passed, 0 failed` AND a driving line with :parallel true: a silent serial fallback would pass the no-threads rows and prove nothing"
+                  :task (let [dir (fs/absolutize "target/vs-thread")
+                              wasm (str dir "/vs_thread_main.wasm")
+                              threads (str dir "/vs_thread_main.threads.wasm")
+                              repo (fs/absolutize "..")]
+                          (fs/create-dirs dir)
+                          (shell {:extra-env {"VS_CLJ_ROOTS" (str/join ":" (roots :vs "adapters/slab-io/test" "test"))}}
+                                 "vs" "compile" "test/eve/runner/vs_thread_main.vs" "-o" wasm)
+                          (shell "python3" (str repo "/vs/wasm-threads/transform.py") wasm (str dir "/vs_thread_main.names") threads)
+                          (let [out (:out (shell {:out :string :continue true}
+                                                 "python3" (str repo "/vs/term/hosts/wasmtime/vs-mesh") threads "--workers" "6"))]
+                            (print out) (flush)
+                            (when-not (and (re-find (re-pattern "(?m)^\\d+ passed, 0 failed$") out)
+                                           (re-find (re-pattern "driving:.*:parallel true") out))
+                              (System/exit 1))))}
   test:vs-http {:doc "eve.http on ValueScript (adapters/http/vs) against a local eve.net.store served here: PUT and GET through the vs.host bridge's fetch, under vs-term --bridge ($VS_TERM, or vs-term on PATH)"
                 :requires ([eve.http-server :as hs] [eve.net.store :as store] [eve.net.gateway :as gw])
                 :task (let [wasm (str (fs/absolutize "target/vs/http_vs_check.wasm"))
