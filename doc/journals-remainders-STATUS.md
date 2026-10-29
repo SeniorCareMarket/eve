@@ -15,11 +15,19 @@ its runs/ evidence in the follow-up worktree on the hatch box.
   follow-up item 3 died without. eve/deps.edn carries no :vs alias;
   hosts.edn is the only root list for the seat. EDN re-parsed after
   the edit: :vs = 16 roots, thread root present.
-- ITEM 1 (lpy J10/kb64 tail, 9 points) — IN FLIGHT: banked recording
-  (manifest + snap-0..11, p0 PASS) copied from the follow-up
-  worktree; server-adapted copy of runs/crash_suite_lpy.py re-runs
-  the suite, which skips banked points. JVM reader = the suite
-  reader (eve.durability-crash-reader) on this tree.
+- ITEM 1 (lpy J10/kb64 tail, 9 points) — COMPLETE: totals line
+  "10 pass, 0 violations" (server runs dir
+  crash-lpy-j10-kb64.out, copy committed under
+  eve/doc/journals-remainders-evidence/). The 9 re-run points —
+  window-c1/c5/c9-nothing-forced, flush-after-sweep, flush-torn-
+  100b, flush-torn-1030b, flush-done, post-flush-window-c11,
+  window-c5-root-ahead — all PASS, read by the JVM reader from this
+  tree. Basilisp was not needed: the recording was already banked;
+  only the reader runs were missing. Lpy crash cells now stand
+  54/54, 0 violations, matching CLR cell for cell.
+  (John's question answered by measurement: nothing basilisp-
+  specific was broken — the points had simply never run; the
+  harness state writes died on the hatch box EPERM fault.)
 - ITEM 3 (VS-seat writer re-check) — queued behind item 1; probe is
   the spikes reqatom compile (follow-up attempts 1-2 protocol) over
   this branchs corrected roots, against the pair installed on main
