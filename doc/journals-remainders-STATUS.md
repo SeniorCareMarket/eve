@@ -28,10 +28,17 @@ its runs/ evidence in the follow-up worktree on the hatch box.
   (John's question answered by measurement: nothing basilisp-
   specific was broken — the points had simply never run; the
   harness state writes died on the hatch box EPERM fault.)
-- ITEM 3 (VS-seat writer re-check) — queued behind item 1; probe is
-  the spikes reqatom compile (follow-up attempts 1-2 protocol) over
-  this branchs corrected roots, against the pair installed on main
-  at run time (builder sha recorded in the report).
+- ITEM 3 (VS-seat writer re-check) — IN FLIGHT: reqatom compile
+  launched 2026-10-29T00:19Z on this tree (pair in tree
+  02c86f56a24efd4e / 8f09c2cfcaae599a, recorded in the run log
+  header), timeout 3600 s, log
+  ~/journals-remainders-runs/vs-reqatom-compile3.log. The launcher
+  (vs-wasm-leg) works as a recursive window tree and writes its
+  trace only at process end — the same opaque shape as the
+  follow-up lanes attempt 2; the verdict reads off the final
+  X/L line + rc when it lands. (First launch script was mangled
+  by an unquoted heredoc and never ran; rewritten and relaunched —
+  a launcher defect, not a compile attempt.)
 - ITEM 4 (fast-disk phase-3 J cell) — gated on item 3s verdict and
   on the two cuts currently on this box draining; otherwise every
   number is labelled contention-tainted.
