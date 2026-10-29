@@ -217,3 +217,51 @@ wasmtime host is the mesh arm here).
   declares :eval false and eval-form refuses :eval — the contract's own shape, and the suite tests the refusal.
 
 Design confirmed as written in §2. Writing the adapter now.
+
+
+## 7. IMPLEMENTATION + FIRST PROOF ATTEMPTS (Oct 28 ~22:15–22:45 EDT)
+
+Adapter written and committed (abdfc15101): `eve/adapters/thread/vs/src/eve/thread_host.vs` (design as §2, no
+changes), hosts.edn :vs row rewired, `bb test:vs-thread` task + mesh runner added, serial arm added to
+vs_main.vs, README + HOST-CONTRACT §11.2 rows added.
+
+Driver-level mesh proof (small programs, minimal roots, wasmtime mesh host, logs in .work/thread-probes/):
+- driver (2 threads, blocking receives): cross-instance delivery failed — echoes and exit notices timed out.
+- driver2 (1 thread, instrumented entry, main sleeps+polls): FULL PASS — entry boot {:self 2}, ping received,
+  reply polled by main, stop delivered, exit notice {:eve.thread/exit 2 :reason :normal}.
+- driver3 (1 thread, main blocks in receive!): FULL PASS — echo + exit notice.
+- driver4/driver6 (2 threads): exactly ONE wrapper ever runs its entry; which one varies by run.
+- driver8 (two start-threads! n=1 calls): both wrappers enter thread-main; one thread completes fully, the
+  other stalls or dies inside the entry call (one fine-instrumented run: the entry call threw
+  ClassCastException "#object[]" and the exit notice WAS delivered with that error-data).
+- driver5/driver7/driver10 (RAW mesh-spawn, NO adapter code): the same failure — a spawned task intermittently
+  never runs its closure (await answers 4 = thrown, result #object[], the body's marks absent). Rates at load
+  13–15: driver10 6 runs — task failures in 5 of 6 runs (~50% per task); driver5 6 runs — 1 fully clean;
+  the Node mesh host shows the same rates, so it is the transformed module's task machinery under this load,
+  not a host and not the adapter. The corpus's own harness (vs/wasm-threads/tests/run.py) refuses verdicts
+  over a load bound (--max-load) for exactly this class of reason.
+
+Standing conclusion: the adapter is correct wherever a task start lands (every contract behavior exercised
+end-to-end in the passing runs, both directions + exit notices + error path). The mesh conformance SUITE
+(spawns ~a dozen tasks) cannot go green at ~50% per-task-start failure; it needs a load window the box does
+not currently have (the residence landing holds the server's heavy priority — correctly). The raw repros
+(driver5/driver10 sources + logs) are the coordinator's evidence that the blocker is below this lane.
+
+Serial arm — GREEN (Oct 29, server): the thread-runner module (clean committed adapter) under plain
+wasmtime printed the serial driving map (`:parallel false :max-threads 0`) and **30 passed, 0 failed** —
+the suite's serial rows on the :vs seat. Log: .work/thread-probes/serial-arm.log. The full `bb test:vs`
+compile is blocked on main by the standing `vs.jit-wasm` emit-gap (D1/records remainder; the failing unit is
+a toolchain unit this lane never touches, and the thread runner over the same :vs roots links clean) —
+log: .work/thread-probes/serial-compile.log.
+
+Mesh suite attempts (transformed module, 6 workers):
+- Attempt 1, wasmtime host, 900 s timeout, load ~10–13 at launch rising to ~17: **0 bytes of output, killed
+  by its own timeout**. The suite prints only at the end, and its unbounded negative-wait row waits forever
+  for a `:later` message from a sleeper thread — a failed sleeper-task start hangs it silently, which is the
+  observed shape. Log: .work/thread-probes/mesh-suite-attempt1.log (empty by construction of the hang).
+- Attempt 2, Node host (`node --experimental-wasm-exnref mesh.mjs`), 600 s timeout, load ~17.4 at launch:
+  **no suite output** — the log's 1,344 bytes are entirely Node WASI ExperimentalWarnings — killed by its
+  timeout, same shape as attempt 1. Log: .work/thread-probes/mesh-suite-attempt2-node.log.
+
+Per the two-attempt rule, no third mesh attempt runs without a new diagnosis or a quieter load window. The
+mesh suite verdict waits for one of those; it is not an adapter verdict.
