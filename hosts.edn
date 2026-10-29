@@ -82,7 +82,7 @@
  ;; bb test:vs-serve)
  :vs   ["adapters/slab-io/vs/src" "adapters/http/vs/src" "adapters/http-server/vs/src" "adapters/core/vs/src" "adapters/completion/clojure/src" "adapters/slab/heap/src"
         "adapters/region/vs/src" "adapters/encoding/vs/src" "adapters/int32/vs/src" "adapters/codec/byte-array/src"
-        "adapters/process/vs/src" "adapters/coll/protocols/src" "adapters/types/vs/src" "adapters/crypto/vs/src" "adapters/journal-file/unsupported/src"]
+        "adapters/process/vs/src" "adapters/coll/protocols/src" "adapters/types/vs/src" "adapters/crypto/vs/src" "adapters/thread/none/src" "adapters/journal-file/unsupported/src"]
  ;; glojure, run as glj-eve (impls/glojure/build.sh: glojure v0.7.22 with eve's Go packages and its completion's
  ;; patches): its regions over eve's Go region package, its core completed (deftype, reify, satisfies?, ...), eve's
  ;; types as records on eve.core's protocols (babashka's coll adapter), the network atom's adapters among them
