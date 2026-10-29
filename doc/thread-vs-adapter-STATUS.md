@@ -187,3 +187,33 @@ here are seconds-to-minutes; the mesh conformance run is light. Contention label
   (§11), none stub, JVM + Node adapters, conformance suite, `eve.thread`, `vs.thread`, mesh design/hosts,
   `program_runtime.vs` mmap door, existing `.vs` adapters — all read firsthand. STATUS written (this file).
   Probes P1–P6 next.
+
+## 6. PROBE RESULTS (Oct 28 ~22:00 EDT, server, logs in .work/thread-probes/)
+
+All probes run: serial (plain wasmtime, as bb test:vs runs) and on the mesh (transform.py + the wasmtime mesh host
+vs/term/hosts/wasmtime/vs-mesh; native wabt 1.0.39 fetched to .work/wabt-native — the JS wabt build aborts
+assembling a full program WAT, and the server Node 24.4.1 needs --experimental-wasm-exnref for mesh.mjs, so the
+wasmtime host is the mesh arm here).
+
+- P1 ✓ mesh hooks from another namespace: spawn/await/result/worker-id/pool-size all live on the mesh.
+  **mesh-active? is value-unsafe**: transform.py maps it (and prog-h-mesh-init-active?) to the RAW primitives
+  /, which answer a bare i32 where the VS calling convention expects a boxed
+  value — branch-only use works (1 is truthy), but printing/storing the answer traps in the print machinery
+  (backtrace through program/scat). Every other hook maps to a boxed _b variant. The adapter normalizes:
+  (if (th/mesh-active?) true false). FOUND DEFECT, transform-side; named in the report for the coordinator.
+  Also: mesh-await answers the appended primitives status convention (3 = done, 4 = thrown), not vs.thread's
+  VF_POLL table — the adapter never awaits (fire-and-forget spawn + mailboxes), so it does not depend on this.
+- P2 ✓ (resolve sym) works on main and on a worker; var meta {:ns #object[Namespace ..] :name sym}.
+- P3 ✓ ex-info/ex-data/ex-message on main and workers.
+- P4 ✓ get-thread-bindings + with-bindings* across a spawn: frame value re-establishes :bound on the worker;
+  raw read on the worker sees the root; main unaffected.
+- P5 ✓ the raw mmap door across instances: worker blocked in (mmap/wait-i32 base 0 -1), main stored 41 and
+  notify!\d — worker woke (wait answered 0) and read 41. Door vocabulary is ONLY the literal mmap/ prefix
+  (prog:mmap/*): reserve!, load-i32, store-i32!, add-i32!, cas-i32!, wait-i32, notify!. Two traps for the
+  unwary, both hit and diagnosed: (a) calling these through a vs.mmap namespace alias compiles the call to a
+  RUN-TRIP stub (vs.mmap the namespace does not define them); (b) there are no atomic-load-i32/atomic-store-i32!
+  names — load-i32/store-i32! ARE the seq-cst atomic forms.
+- P6 ✗ eval in a compiled program: "eval needs the REPL: this artifact was compiled without it". The adapter
+  declares :eval false and eval-form refuses :eval — the contract's own shape, and the suite tests the refusal.
+
+Design confirmed as written in §2. Writing the adapter now.
