@@ -28,17 +28,29 @@ its runs/ evidence in the follow-up worktree on the hatch box.
   (John's question answered by measurement: nothing basilisp-
   specific was broken — the points had simply never run; the
   harness state writes died on the hatch box EPERM fault.)
-- ITEM 3 (VS-seat writer re-check) — IN FLIGHT: reqatom compile
-  launched 2026-10-29T00:19Z on this tree (pair in tree
-  02c86f56a24efd4e / 8f09c2cfcaae599a, recorded in the run log
-  header), timeout 3600 s, log
-  ~/journals-remainders-runs/vs-reqatom-compile3.log. The launcher
-  (vs-wasm-leg) works as a recursive window tree and writes its
-  trace only at process end — the same opaque shape as the
-  follow-up lanes attempt 2; the verdict reads off the final
-  X/L line + rc when it lands. (First launch script was mangled
-  by an unquoted heredoc and never ran; rewritten and relaunched —
-  a launcher defect, not a compile attempt.)
+- ITEM 3 (VS-seat writer re-check) — COMPLETE, verdict NO, wall
+  MOVED. Reqatom compile on this tree (pair in tree
+  02c86f56a24efd4e / 8f09c2cfcaae599a — the pair installed on main
+  at run time; residence landing had not changed it), roots from
+  the item-2-fixed hosts.edn: ran 18.9 min under load and died
+  rc=75 at form 24209:
+  "X 2 0 24209 macroexpand: Unable to resolve symbol: double? in
+  this context" (log: eve/doc/journals-remainders-evidence/
+  vs-reqatom-compile3.txt). Three blockers, distinguished:
+  (1) thread-host (follow-up attempt 1, form 0) — closed by item 2;
+  this run never names it. (2) translate-protos (spike, form
+  18161) — NOT reproduced: the symbol appears 0 times in the log;
+  the compile passed 24,209 forms, 6,048 past the spikes death
+  point (the graph also grew with the journals landing).
+  (3) NEW: double? — same class (a symbol the shipped builders
+  macro evaluator cannot resolve during an eve macroexpand), new
+  site. double? is written nowhere in eve/libs sources (one
+  test-only hit, test/coop/orchestrator.clj), so it is produced
+  by a macro expansion; naming the exact macro is the follow-ons
+  first step (bisect the graph). Consequence per the spikes
+  design: eve.atom's graph still does not compile on the shipped
+  pair, so the VS seat cannot write + recover a journal on it —
+  the writer stays unbuilt, no workaround attempted.
 - ITEM 4 (fast-disk phase-3 J cell) — gated on item 3s verdict and
   on the two cuts currently on this box draining; otherwise every
   number is labelled contention-tainted.
