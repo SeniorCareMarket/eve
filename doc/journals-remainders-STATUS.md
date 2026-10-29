@@ -51,6 +51,19 @@ its runs/ evidence in the follow-up worktree on the hatch box.
   design: eve.atom's graph still does not compile on the shipped
   pair, so the VS seat cannot write + recover a journal on it —
   the writer stays unbuilt, no workaround attempted.
-- ITEM 4 (fast-disk phase-3 J cell) — gated on item 3s verdict and
-  on the two cuts currently on this box draining; otherwise every
-  number is labelled contention-tainted.
+- ITEM 4 (fast-disk phase-3 J cell) — DEFERRED on the
+  coordinators steer (operator priority: the residence pair
+  landing; the cell was gated on item 3 in any case, and item 3s
+  verdict is a moved wall, not a pass). Not run. Prep banked on
+  the server: adapted runner
+  ~/journals-remainders-runs/phase3_runner_j_server.py (JVM x2
+  writers; no cljr/dotnet on the box). Setup was launched and
+  killed on the steer mid-rec-100m (rc 143); the partial
+  setup-domain was DELETED so the pickup cannot mistake it for
+  ready (the runners setup() skips when the root file exists).
+  No phase-3 numbers exist.
+
+LANE CLOSED 2026-10-28 (ET) — items 1-2 complete, item 3 verdict
+banked (NO; wall moved to double? at form 24209), item 4 deferred
+per steer. Report: eve/doc/journals-remainders-2026-10-28.md.
+No processes of this lane remain on the server.
