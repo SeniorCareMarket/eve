@@ -70,7 +70,7 @@
                 io.github.cognitect-labs/test-runner
                 {:git/tag "v0.5.0" :git/sha "48c3c67"}}
    :main-opts ["-m" "cognitect.test-runner" "-d" "test"
-               "-n" "eve.aegis.claims-test" "-n" "eve.aegis.clsag-test"
+               "-n" "eve.aegis.clsag-test"
                "-n" "eve.aegis.rsabssa-test" "-n" "eve.aegis.h2c-test"
                "-n" "eve.aegis.hpke-test" "-n" "eve.aegis.merkle-test"
                "-n" "eve.aegis.regions-test" "-n" "eve.aegis.regions-claims-test"

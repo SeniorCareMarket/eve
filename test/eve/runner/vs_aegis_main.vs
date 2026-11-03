@@ -7,5 +7,4 @@
   (:require [clojure.test]
             [eve.aegis.merkle-test]
             [eve.aegis.h2c-test]
-            [eve.aegis.rsabssa-test]
-            [eve.aegis.claims-test]))
+            [eve.aegis.rsabssa-test]))

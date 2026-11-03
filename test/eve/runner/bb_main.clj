@@ -16,7 +16,8 @@
     eve.array-hosts-test eve.dataset-test eve.tensor-test eve.deftype.rb-tree-test eve.numeric-tags-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.descriptor-table-test eve.tally-test eve.read-region-test eve.domain-open-test eve.deftype.int-map-test
     eve.deftype.type-id-test eve.rrb-vector-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-net-test eve.thread-fold-test eve.thread-fold-group-test
     ;; aegis's clear-evaluation primitives (the crypto feature's fast-path rows)
-    eve.aegis.rsabssa-test eve.aegis.h2c-test eve.aegis.merkle-test eve.aegis.clsag-test eve.aegis.claims-test
+    ;; the claims test is held back with the chat spec pending the aegis split (release/eve/exclude)
+    eve.aegis.rsabssa-test eve.aegis.h2c-test eve.aegis.merkle-test eve.aegis.clsag-test
     ;; the read-regions spike: HPKE and the regions' lockboxes
     eve.aegis.hpke-test eve.aegis.regions-test eve.aegis.regions-claims-test
     eve.net.crypto-fast-path-test])
@@ -35,7 +36,7 @@
    The same directories' benches and spec files are not tests and are not
    here; eve.aegis.pages-v3-test (block/page IO) carries no crypto
    invariant and stays suite-only."
-  '[eve.aegis.claims-test eve.aegis.clsag-test eve.aegis.rsabssa-test
+  '[eve.aegis.clsag-test eve.aegis.rsabssa-test
     eve.aegis.h2c-test eve.aegis.hpke-test eve.aegis.merkle-test
     eve.aegis.regions-test eve.aegis.regions-claims-test
     eve.keyring-test
