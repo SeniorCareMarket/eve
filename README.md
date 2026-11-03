@@ -1,3 +1,7 @@
+> **Warning: pre-alpha software — do not use in production.** eve 0.9 is published for evaluation and
+> experimentation. Its APIs, its on-disk format and its wire format may change before 1.0 without notice and
+> without a migration path, and data written by this version may not be readable by the next.
+
 # eve
 
 Persistent data structures in shared memory, for Clojure-like languages — the same values, byte for byte, on the JVM,
