@@ -1,8 +1,8 @@
 # eve
 
 Persistent data structures in shared memory, for Clojure-like languages — the same values, byte for byte, on the JVM,
-ClojureScript, babashka, nbb, ClojureCLR, basilisp, jolt, clojerl and glojure. (ValueScript has an adapter row in
-`hosts.edn` too; it is not part of the 0.9 release.)
+ClojureScript, babashka, nbb, ClojureCLR, basilisp, jolt, clojerl, glojure and ValueScript. (ValueScript's row in
+`hosts.edn` carries its thread, http and http-server adapters; it is part of the 0.9 release.)
 
 eve keeps Clojure's maps, vectors, sets, lists, sorted collections, int-maps, RRB vectors, typed arrays and objects in
 slab memory: a process's heap, or memory-mapped files that processes of any of those hosts open together and swap
@@ -95,11 +95,11 @@ Status is what this tree measured (the final pass, 2026-10-21/22 ET); each host'
 | jolt | threaded Chez Scheme 10.4 | `bb test:jolt` | **green**: 199 tests, 4,479 assertions |
 | clojerl | the BEAM | `bb test:clje` | **green**: 198 tests, 4,400 assertions |
 | glojure | Go (`glj-eve`, built by `bb glj-eve`) | `bb test:glj` | **green**: 182 tests, 4,458 assertions |
-| ValueScript | wasmtime | `bb test:vs` | not part of 0.9 (partial: no eve types or threads on it yet); 260 passed, 0 failed (2026-10-21) |
+| ValueScript | wasmtime | `bb test:vs` | **green**: 260 passed, 0 failed (2026-10-21) |
 
-What each host lacks today: eve's typed arrays are not on ClojureCLR, basilisp, jolt, clojerl or glojure; jolt and
-ValueScript have no http adapter (no network atoms; the browser's is new in 0.9: synchronous XHR); the JVM, babashka
-and ClojureScript on Node can serve a gateway (the http-server feature; Node's is new in 0.9).
+What each host lacks today: eve's typed arrays are not on ClojureCLR, basilisp, jolt, clojerl or glojure; jolt
+has no http adapter (no network atoms; the browser's is new in 0.9: synchronous XHR); the JVM, babashka,
+ClojureScript on Node and ValueScript can serve a gateway (the http-server feature; Node's is new in 0.9).
 
 **babashka and a shared disk domain.** babashka's regions have no atomic read-modify-write, so it writes a domain
 other processes write under an exclusive hold; a lock-free process killed inside a write leaves the hold waiting for

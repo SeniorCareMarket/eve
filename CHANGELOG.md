@@ -7,37 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **aegis's cryptographic primitives** (2026-10-23): `eve.aegis.ballot` (+ `request-message`, `sign-statement`),
-  `rsabssa`, `clsag`, `h2c`, `merkle`, `session`, `commit`. Their suites joined the babashka and JVM batteries
-  (`bb-minimal` names them out: its portable crypto signs the issuer's RSA row past 30 min). `crypto/vs-kernel`, a
-  crypto implementation for ValueScript programs that build the kernel's ed25519.wasm.
-
-### Changed
-
-- **`$` is the read-region macro it was designed as** (`eve.alpha/$`). `(e/$ body...)`: inside it `@` of an
-  eve atom answers the stored value, lazy and slab-backed, so a branch of a large atom is reached without the rest
-  being materialized; each domain is pinned on its first read and every pin held until the outermost `$` exits (a
-  network atom's deref keeps its lease the same way); the body's result is materialized as it leaves; a `$` inside
-  another joins it. `src/eve/read_region.cljc`, `test/eve/read_region_test.cljc` (every host). The function the 0.9
-  tree shipped as `eve.atom/$`, `($ a f & args)` (the unification's verdict, `doc/unification/
-  CANDIDATE-VERDICTS.md` §3, `b5c2ffc59`), is renamed `eve.atom/read-pinned`: eve's own bounded reads use it. Not
-  carried from the design: its 30 s lease heartbeat inside a region (production's Worker has no renew route, and
-  `eve.net.atom/renew!` releases a lease the broker does not know) and its read-set tracking (`eve.net.atom`'s named
-  limit: a plain value records no reads).
-- h2c's `C2` / `C1-ED` and clsag's `BASE` / `IDENTITY` are literals, each held to its computation by its test: VS's
-  compiler evaluates a top-level def's init as it compiles, and `C1-ED`'s field square root alone took analysis to the
-  slab's 32,753-page ceiling.
-
-### Fixed
-
-- **A list stored on glojure.** eve's list writer walked its elements with `(reduce f init (rseq elems))`, and
-  glojure's `reduce` has no `coll-reduce` method for a vector's rseq ("No method in multimethod 'coll-reduce' for
-  dispatch value: *lang.apvRSeq"), so storing any list in an eve atom threw there; it walks them back to front by
-  index now — the same nodes in the same order (`src/eve/list.cljc`). Found by main's rewritten tally test, the
-  first to store a list on glojure.
-
 ## [0.9.0] — prepared 2026-10-20, unreleased
 
 0.9 is the API and host contract 1.0 will freeze, published for adopters to build against. Between 0.9 and 1.0 the
@@ -52,17 +21,17 @@ what the tree now contains.
 
 ### Added
 
-- **Ten hosts, one shared source.** eve's shared code (`src/`) names no host but one ClojureScript-only file
+- **Eleven hosts, one shared source.** eve's shared code (`src/`) names no host but one ClojureScript-only file
   (`src/eve/shared_atom.cljs`) — no reader conditional keyed by a host, no branch on the host, no host method call in
   eve.net, each held at 0 by `scripts/check-host-leak` (`.host-leak`) — and a host is a list of adapter roots
   (`hosts.edn`): the JVM, ClojureScript on Node and in a browser, babashka, nbb, ClojureCLR, basilisp, jolt, clojerl,
-  glojure (as `glj-eve`, `impls/glojure/build.sh`). A writer from each of the JVM, ClojureScript on Node, babashka,
+  glojure (as `glj-eve`, `impls/glojure/build.sh`) and ValueScript. A writer from each of the JVM, ClojureScript on Node, babashka,
   nbb, ClojureCLR, basilisp, jolt and clojerl shares one atom (the coop scenario, `test/coop/`).
-  (`hosts.edn` also carries a ValueScript row — partial, no eve types or threads yet; ValueScript is not
+  (`hosts.edn`'s ValueScript row carries its types, thread, http and http-server adapters; ValueScript is
   part of the 0.9 release.)
 - **Adapters by feature** (`adapters/<feature>/<implementation>/`): region, encoding, process, types, core
   (`eve.host`), core completion, coll (`eve.core`), slab, slab-io (the memory seam, `eve.slab-io`), int32, codec,
-  crypto, thread, http, http-server, typed-view — with portable implementations a new host takes as they are
+  crypto, thread, http, http-server, journal-file, typed-view — with portable implementations a new host takes as they are
   (`slab-io/protocol`, `core/clojure`, `coll/protocols`, `slab/heap`, `int32/portable`, `codec/byte-array`,
   `crypto/portable`, `thread/none`). `doc/adopter-tiers.md`, `doc/adopting-eve-minimal.md`,
   `doc/adopting-eve-fast.md`.
@@ -115,6 +84,25 @@ what the tree now contains.
   Chromium as a runtime of its own (a worker pool, over the network rung; the page in reagami) — one disk domain, every
   job a thread descriptor in eve.thread's pools, the coordinator by election.
   `bb eve-media demo | scan <dir> | verify`.
+- **aegis's cryptographic primitives** (2026-10-23): `eve.aegis.ballot` (+ `request-message`, `sign-statement`),
+  `rsabssa`, `clsag`, `h2c`, `merkle`, `session`, `commit`. Their suites joined the babashka and JVM batteries
+  (`bb-minimal` names them out: its portable crypto signs the issuer's RSA row past 30 min). `crypto/vs-kernel`, a
+  crypto implementation for ValueScript programs that build the kernel's ed25519.wasm.
+- **Journal durability for disk domains** (`:journal?`): a flush appends one record — the epoch and the atom table
+  it published — and forces the journal; recovery installs the newest valid record whole. The **retention floor**
+  pins reclamation to the oldest epoch recovery may still install: it is set at recovery, advanced at every flush
+  (flush-advance, to the previous flush's durably appended epoch) and at checkpoint, where truncation rewrites the
+  newest record as the journal's sole anchor. The file, its lock and its forces are the host's adapter seam,
+  `eve.journal-file` (`adapters/journal-file/{java,node,clr,python,unsupported}`); a host with no implementation
+  refuses a journal domain rather than running it undurably.
+- **The ValueScript thread adapter** (`thread/vs` in `hosts.edn :vs`): one long-lived mesh task per thread, a
+  mailbox that is a VS atom plus a futex word, closures carried as themselves in the shared slab; the
+  `eve.thread-host` conformance suite runs on the mesh (`bb test:vs-thread`).
+- **`eve.http-server` and `eve.net.broker` on ValueScript**: a VS program serves the broker and the net store on
+  one port (`adapters/http-server/vs`, `bb test:vs-serve`), and a network atom on another host derefs and swaps
+  through them; `eve.http` runs on VS over the host bridge's fetch (`bb test:vs-http`).
+- **`bb net:local --dir`**: one command stands up eve's local network — a broker, a store, three thread servers
+  and the page — and `--dir` persists the broker's and store's state across runs (`scripts/net-local.clj`).
 
 ### Changed
 
@@ -132,6 +120,19 @@ what the tree now contains.
 - **The tally's format** (9.31): the `.root` header's word at byte 32 (`ROOT_TALLY_OFFSET`) roots count pages, ordinary slab
   blocks (`doc/unification/FORMAT-DECISIONS.md` §11); a write that raises a count commits under the domain's exclusive
   hold.
+- **`$` is the read-region macro it was designed as** (`eve.alpha/$`). `(e/$ body...)`: inside it `@` of an
+  eve atom answers the stored value, lazy and slab-backed, so a branch of a large atom is reached without the rest
+  being materialized; each domain is pinned on its first read and every pin held until the outermost `$` exits (a
+  network atom's deref keeps its lease the same way); the body's result is materialized as it leaves; a `$` inside
+  another joins it. `src/eve/read_region.cljc`, `test/eve/read_region_test.cljc` (every host). The function the 0.9
+  tree shipped as `eve.atom/$`, `($ a f & args)` (the unification's verdict, `doc/unification/
+  CANDIDATE-VERDICTS.md` §3, `b5c2ffc59`), is renamed `eve.atom/read-pinned`: eve's own bounded reads use it. Not
+  carried from the design: its 30 s lease heartbeat inside a region (production's Worker has no renew route, and
+  `eve.net.atom/renew!` releases a lease the broker does not know) and its read-set tracking (`eve.net.atom`'s named
+  limit: a plain value records no reads).
+- h2c's `C2` / `C1-ED` and clsag's `BASE` / `IDENTITY` are literals, each held to its computation by its test: VS's
+  compiler evaluates a top-level def's init as it compiles, and `C1-ED`'s field square root alone took analysis to the
+  slab's 32,753-page ceiling.
 
 ### Removed
 
@@ -250,6 +251,17 @@ what the tree now contains.
   under the domain's exclusive hold. The reachability set two retire arms built over the new value is gone (10.2), and
   the walk follows eve value arrays (an RRB vector's nodes) and array pointers, which it treated as opaque.
 - The perf suite's two build workloads run on their time budget (they stopped at 16 builds).
+- **A list stored on glojure.** eve's list writer walked its elements with `(reduce f init (rseq elems))`, and
+  glojure's `reduce` has no `coll-reduce` method for a vector's rseq ("No method in multimethod 'coll-reduce' for
+  dispatch value: *lang.apvRSeq"), so storing any list in an eve atom threw there; it walks them back to front by
+  index now — the same nodes in the same order (`src/eve/list.cljc`). Found by main's rewritten tally test, the
+  first to store a list on glojure.
+- **basilisp's host load.** eve's basilisp completion did not load as written on 0.5.1: its division spellings
+  now go through `operator/` (0.5.1's reader), `aset` is patched for bytearray targets, and the journal
+  adapter uses Python's `len` — the lpy journal smoke runs green end to end, with no shadow copy.
+- **ClojureCLR regions never forced to disk.** `mem/sync-region!` answered nil for every CLR region, so a journal
+  flush's slab sweep and the recovery root force were silent no-ops there. The CLR region's `ISyncableRegion`
+  now issues the msync syscall (`adapters/region/clr`).
 
 ### Known issues
 
