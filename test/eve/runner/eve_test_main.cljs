@@ -87,7 +87,6 @@
    [eve.net.graft-test :as net-graft-test]
    [eve.net.xxh3-test :as net-xxh3-test]
    [eve.net.codec-fixture-test :as net-codec-fixture-test]
-   [eve.net.poseidon2-test :as net-poseidon2-test]
    [eve.net.wire-test :as net-wire-test]
    [eve.net.broker-test :as net-broker-test]
    [eve.net.broker-disk-test :as net-broker-disk-test]
@@ -161,7 +160,6 @@
 (goog/exportSymbol "eve.net.graft_test" net-graft-test)
 (goog/exportSymbol "eve.net.xxh3_test" net-xxh3-test)
 (goog/exportSymbol "eve.net.codec_fixture_test" net-codec-fixture-test)
-(goog/exportSymbol "eve.net.poseidon2_test" net-poseidon2-test)
 (goog/exportSymbol "eve.net.wire_test" net-wire-test)
 (goog/exportSymbol "eve.net.broker_test" net-broker-test)
 (goog/exportSymbol "eve.net.broker_disk_test" net-broker-disk-test)
@@ -401,7 +399,7 @@
   (t/run-tests 'eve.slab-leak-test))
 
 (defn- run-net! []
-  (t/run-tests 'eve.net.json-test 'eve.net.graft-test 'eve.net.xxh3-test 'eve.net.codec-fixture-test 'eve.net.poseidon2-test 'eve.net.wire-test 'eve.net.broker-test 'eve.net.broker-disk-test 'eve.net.remote-atom-test 'eve.net.crypto-test 'eve.net.ed25519-test 'eve.net.pruned-swap-test))
+  (t/run-tests 'eve.net.json-test 'eve.net.graft-test 'eve.net.xxh3-test 'eve.net.codec-fixture-test 'eve.net.wire-test 'eve.net.broker-test 'eve.net.broker-disk-test 'eve.net.remote-atom-test 'eve.net.crypto-test 'eve.net.ed25519-test 'eve.net.pruned-swap-test))
 
 (defn- run-thread-host! []
   (t/run-tests 'eve.thread-host-test))

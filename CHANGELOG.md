@@ -135,6 +135,7 @@ what the tree now contains.
 
 ### Removed
 
+- eve.net.poseidon2 / bn254 / merkle (the proof era's hash; nothing live calls them).
 - `atom-domain`'s `:sab-size` and `:max-blocks` options (accepted and ignored), watches (`add-watch` on an eve atom),
   the X-RAY diagnostics and `validate-storage-model!` (both only on the unreachable `eve.shared-atom`).
 - The JVM's thread-local allocation logs (one portable `LoggingSlabIO`), the `*lustre-mode*` dynamic var (`:lustre?`

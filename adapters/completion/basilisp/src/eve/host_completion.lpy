@@ -191,8 +191,8 @@
 
 ;; a numeric array starts at zero, as Clojure's: basilisp's int-array, long-array, short-array, float-array and
 ;; double-array are its object-array, n nils (0.5.1, measured 2026-10-21: (long-array 3) is [nil nil nil]), and an
-;; element read before it is written is nil — eve.net.bn254's Montgomery multiply added nil to a product, so every
-;; namespace loading eve.net.poseidon2 (eve.net.codec's, eve.reference-tag-test's) failed at load. Still a Python
+;; element read before it is written is nil — a Montgomery multiply over a fresh array's elements added nil to a
+;; product, so every namespace whose load ran one failed at load. Still a Python
 ;; list, as basilisp's arrays are.
 (defn- numeric-array
   "Clojure's numeric array constructor, zero its element zero: (n) n zeros, (coll) coll's items, (n init) n of the
