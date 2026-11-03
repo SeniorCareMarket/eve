@@ -366,7 +366,7 @@
   "Free the zero queue's entries whose epoch no live reader pins
   (eve.tally/flush!). The safe epoch is the retire path's existing
   input — the minimum pinned reader epoch — with ONE added bound
-  (RETENTION FLOOR, fix (b), John's ruling 2026-10-27): a journal
+  (RETENTION FLOOR, fix (b), decision 2026-10-27): a journal
   domain's floor epoch, the oldest epoch recovery may still install.
   The journal pins that epoch the way a slow reader pins its read
   epoch: blocks reachable from it are not recycled while its record
@@ -480,7 +480,7 @@
           ;; are durable; timestamps are not metadata recovery reads.
           (jf/journal-force! (:file journal) false))))
     (when journal
-      ;; RETENTION FLOOR — FLUSH-ADVANCE (John's ruling 2026-10-27,
+      ;; RETENTION FLOOR — FLUSH-ADVANCE (decision 2026-10-27,
       ;; after the sweep reconciliation measured the checkpoint-only
       ;; floor's price): the floor advances at EVERY flush, not only
       ;; at checkpoint. Recovery installs the newest valid record;
@@ -583,7 +583,7 @@
                     (jf/journal-force! h true)))))))))))
 
 (defn- journal-anchor!
-  "Checkpoint's tail — RECOVERY FLOOR FIX (a) (John's ruling,
+  "Checkpoint's tail — RECOVERY FLOOR FIX (a) (decision,
   2026-10-27): checkpoint truncation never empties the journal. The
   newest valid record — the checkpoint epoch's own — is rewritten as
   the journal's sole record (the anchor); everything older goes.
