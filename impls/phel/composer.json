@@ -2,7 +2,7 @@
     "name": "eve/phel-types",
     "description": "EVE value types for phel, a start: PHP classes implementing phel's collection interfaces over FFI memory. Built with `composer dump-autoload` (no install, no network).",
     "type": "project",
-    "license": "proprietary",
+    "license": "MIT",
     "autoload": {
         "classmap": ["src/"],
         "files": ["bootstrap.php"]

@@ -1,6 +1,6 @@
 {
   "name": "eve-native",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Shared-memory persistent data structures for ClojureScript — native addon",
   "files": [
     "native/",
