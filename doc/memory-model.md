@@ -103,6 +103,12 @@ commit's walk counts it. So a build keeps its tree and the value it began from; 
 
 ## What eve's code does today — and where it diverges
 
+A journal domain adds one more pin to that flush gate: its **retention floor**, the epoch its journal can still
+recover to. Its advance is flush-advance: each flush records the newest durably appended epoch, the next flush advances
+the floor to it, and a checkpoint advances it to the anchor record's epoch — so the flush never frees a block a
+recoverable epoch still needs. The journal itself is the host's `eve.journal-file` adapter; the floor and its
+advance live in the shared code, in `src/eve/atom.cljc`.
+
 eve's reclamation lives in `src/eve/atom.cljc` (the swap, the retire queue, the flush), the collections' own diff walks
 (`eve.retire`; the collections' own `collect-retire-diff-offsets` serve their transients), and the allocator
 (`src/eve/deftype_proto/alloc.cljc`). It follows the model's shape — pinned readers, path-copying writers, a retire

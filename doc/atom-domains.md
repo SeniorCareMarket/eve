@@ -63,6 +63,18 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 A run of the getting-started disk sample left exactly `db.root db.rmap db.slab0 … db.slab5 db.slab0.bm … db.slab5.bm
 db.slab6` [ran].
 
+### Journal durability and the retention floor
+
+A disk domain opened with `:journal?` also carries `<base>.journal`, written through the host's
+`eve.journal-file` adapter (`adapters/journal-file/`): the shared code in `src/eve/atom.cljc` owns the sequence —
+lock, sweep, append, force — and the adapter owns only the file, its lock and its forces. Each record is one epoch
+and the atom table that epoch published, so recovery installs the newest valid record whole. The domain keeps a
+**retention floor**: the epoch the journal pins against reclamation. It is set at recovery, advanced at checkpoint
+— where truncation rewrites the newest valid record as the journal's sole anchor record and moves the floor to the
+anchor's epoch — and advanced by **flush-advance**: every flush records the newest durably appended epoch, and the
+next flush moves the floor to it. Blocks a still-recoverable epoch needs are therefore never reclaimed out from
+under the journal.
+
 ## The domain API
 
 ```clojure
