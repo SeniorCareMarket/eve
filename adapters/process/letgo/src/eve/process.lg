@@ -1,0 +1,70 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) on let-go (lg-eve: eve/impls/let-go, its Go package linked into a
+   custom lg): the clock, sleep, the operating system's entropy and standard input's lines are lg-eve's natives
+   (eve.host-native, impls/let-go/evenative/host.go); a periodic timer runs on a let-go future (a goroutine); files'
+   existence is let-go's os/stat. What let-go reaches no word for — a file's exclusive creation, a signalled exit's
+   hooks, an object's address — throws: a disk domain's creation needs them, the network atom does not
+   (eve/doc/network-atoms/ADAPTERS.md §2)."
+  (:refer-clojure :exclude [read-line file-exists?]))
+
+(defn now-ms [] (eve.host-native/now-ms))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under: let-go's current thread object, as text."
+  []
+  (str (Thread/currentThread)))
+
+(defn sleep-ms!
+  "Block this goroutine for about ms milliseconds."
+  [ms]
+  (eve.host-native/sleep-ms (long ms)))
+
+(defn start-timer!
+  "Call f every period-ms until stop-timer!: a future of its own. Returns the handle (a flag the future reads between
+   periods)."
+  [period-ms f]
+  (let [running (atom true)]
+    (future
+      (loop []
+        (sleep-ms! period-ms)
+        (when @running
+          (try (f) (catch Throwable _ nil))
+          (recur))))
+    running))
+
+(defn stop-timer! [h]
+  (when h (reset! h false)))
+
+(defn on-process-exit!
+  "Refused: let-go gives a program no signal handler."
+  [_f]
+  (throw (ex-info "eve.process/on-process-exit!: not on let-go" {:eve.process/refused :exit-hooks})))
+
+(defn file-exists? [path] (some? (os/stat path)))
+
+(defn create-exclusive!
+  "Refused: let-go opens no file with O_CREAT|O_EXCL (an mmap domain's creator needs it)."
+  [path]
+  (throw (ex-info (str "eve.process/create-exclusive!: not on let-go (" path ")") {:eve.process/refused :exclusive-create})))
+
+(defn ensure-parent-dir!
+  "Refused with create-exclusive!: a disk domain's files are not on let-go."
+  [base-path]
+  (throw (ex-info (str "eve.process/ensure-parent-dir!: not on let-go (" base-path ")") {:eve.process/refused :disk-domain})))
+
+(defn identity-hash
+  "An object's identity hash: let-go's hash (no address is reachable; eve's reference table tells equal values apart by
+   identical?)."
+  [x]
+  (hash x))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (Go's crypto/rand), as a vector of 0..255"
+  [n]
+  (eve.host-native/random-bytes (long n)))
+
+(defn read-line
+  "the next line of the process's standard input, its line end dropped; nil at the end of the input (one bufio.Reader
+   for the process, lg-eve's)"
+  []
+  (eve.host-native/stdin-line))

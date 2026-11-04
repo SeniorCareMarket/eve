@@ -1,0 +1,42 @@
+# run g-node-slab-grow on 699340a70 eve tree 6a4d1701e6f8fc55102652adc8679c25bd684564
+# cmd (in eve/) bash -c node target/eve-test/all.js slab-grow
+# start 2026-10-23 11:23:12 AM ET load 1.26 1.31 0.96 mem-in-use 622 MB
+=== Eve Test Runner ===
+Suite: slab-grow
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.batch2-validation-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.map-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.vec-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.vec-retire-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.reclaim-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.tally-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.read-region-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.list-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.set-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.large-scale-test
+
+Ran 110 tests containing 28920 assertions.
+0 failures, 0 errors.
+# end 2026-10-23 11:23:39 AM ET exit 0 wall 27s peak-mem-in-use 1495 MB peak-process-tree-rss 902 MB load 1.11 1.26 0.95

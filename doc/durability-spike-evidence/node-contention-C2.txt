@@ -1,0 +1,8 @@
+variant=C n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 1330.4954329999164
+1334.4038559999317
+1322.5124679999426
+1333.4580070003867
+makespan-ms: 1334.4038559999317
+total-swaps: 400  aggregate-ops-sec: 299.8
+final: :value 400 (expected :value 400)

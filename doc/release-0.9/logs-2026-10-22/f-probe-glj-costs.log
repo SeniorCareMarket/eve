@@ -1,0 +1,6 @@
+# run f-probe-glj-costs on 61b2b95a6 eve tree 54c34579f1435e123d23f231142bdc6af8c1785a
+# cmd (in eve/) bash -c target/glj-eve/glj-eve doc/release-0.9/logs-2026-10-22/probes/glj_costs.glj
+# start 2026-10-22 4:20:33 AM ET load 1.97 2.03 1.63 mem-in-use 677 MB
+glojure's own protocol call: 3.0587406500000003 us a call (loop included)
+a plain fn call: 0.09950898999999999 us a call (loop included)
+# end 2026-10-22 4:20:35 AM ET exit 0 wall 2s peak-mem-in-use 721 MB peak-process-tree-rss 76 MB load 1.97 2.03 1.63

@@ -1,0 +1,198 @@
+(ns eve.types
+  "eve's types on glojure: a type is the completion's deftype (adapters/completion/glojure: a record extended to its
+   protocols — glojure has no deftype, and its protocols are multimethods on class). A record answers glojure's map
+   interfaces and nothing else of clojure.lang, so a type's interface impls are translated, as on babashka, onto
+   eve.core's protocols (ClojureScript's names: ICounted/-count, IIndexed/-nth, ...), through which eve.core/count
+   and friends answer; IDeref, IAtom, IPending and IBlockingDeref go onto the completion's, through which
+   clojure.core's deref, swap!, reset!, compare-and-set! and realized? reach a type. A registered collection reads as
+   the host's own (glojure's collections, which clojure.core takes).
+   The entry points eve's macros call (every eve.types has them):
+     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     existing-def, rename-fields, reader-of, print-form, vector-types."
+  (:require [clojure.string :as str]
+            [eve.core]
+            [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
+                                                 cljs-protocol? cljs-translate-protocol]]
+            [eve.deftype-proto.sio :as sio]))
+
+(def ^:private eve-core-protocols
+  "The protocols eve.core defines on glojure (adapters/coll/protocols: ClojureScript's names)."
+  '#{ICounted IIndexed ILookup ISeqable ICollection IEmptyableCollection IEquiv
+     IHash IMeta IWithMeta IFn IReduce IKVReduce IAssociative IMap ISet IStack
+     IVector ISeq INext ISequential ASeq IReversible IComparable
+     IEditableCollection ITransientCollection ITransientAssociative ITransientMap
+     ITransientVector ITransientSet IChunkedSeq IChunkedNext IMapEntry IDeref
+     IPrintWithWriter})
+
+(def ^:private completion-interfaces
+  "The JVM interfaces whose impls go onto the completion's protocols (clojure.core's deref, swap!, reset!,
+   compare-and-set!, realized? call them for a type), each method's name there."
+  '{clojure.lang.IDeref {:protocol eve.host-completion/IDeref :methods {deref -deref}}
+    clojure.lang.IBlockingDeref {:protocol eve.host-completion/IBlockingDeref :methods {deref -deref-within}}
+    clojure.lang.IAtom {:protocol eve.host-completion/IAtom
+                        :methods {swap -swap reset -reset compareAndSet -compare-and-set}}
+    clojure.lang.IAtom2 {:protocol eve.host-completion/IAtom2 :methods {swapVals -swap-vals resetVals -reset-vals}}
+    clojure.lang.IPending {:protocol eve.host-completion/IPending :methods {isRealized -realized?}}})
+
+(def ^:private method->eve-core
+  "A JVM method a body calls by name, (.m x ...), and the function that answers it on glojure: x a type (whose record
+   would answer a JVM map method as a map) or a host value (eve.core's protocols fall through to clojure.core)."
+  '{seq eve.core/-seq count eve.core/-count nth eve.core/-nth
+    valAt eve.core/-lookup equiv eve.core/-equiv hasheq eve.core/-hash
+    cons eve.core/-conj empty eve.core/-empty invoke eve.core/-invoke
+    meta eve.core/-meta withMeta eve.core/-with-meta disjoin eve.core/-disjoin
+    reduce eve.core/-reduce kvreduce eve.core/-kv-reduce
+    containsKey eve.core/-contains-key? assoc eve.core/-assoc without eve.core/-dissoc
+    peek eve.core/-peek pop eve.core/-pop assocN eve.core/-assoc-n
+    first eve.core/-first more eve.core/-rest next eve.core/-next
+    chunkedFirst eve.core/-chunked-first chunkedMore eve.core/-chunked-rest chunkedNext eve.core/-chunked-next
+    asTransient eve.core/-as-transient persistent eve.core/-persistent! conj eve.core/-conj!
+    key eve.core/-key val eve.core/-val rseq eve.core/-rseq
+    deref clojure.core/deref swap clojure.core/swap! reset clojure.core/reset!
+    compareAndSet clojure.core/compare-and-set! isRealized clojure.core/realized?
+    equals clojure.core/= hashCode clojure.core/hash toString clojure.core/str})
+
+(defn- rewrite-calls
+  "(.m x args...) → (f x args...) for the methods above (whatever x is)."
+  [form]
+  (let [m (when (and (seq? form) (symbol? (first form)) (next form))
+            (let [n (name (first form))]
+              (when (and (nil? (namespace (first form))) (str/starts-with? n ".") (not (str/starts-with? n ".-")))
+                (method->eve-core (symbol (subs n 1))))))]
+    (cond
+      m (apply list m (map rewrite-calls (rest form)))
+      (and (seq? form) (seq form) (contains? '#{quote} (first form))) form
+      (seq? form) (with-meta (apply list (map rewrite-calls form)) (meta form))
+      (vector? form) (with-meta (mapv rewrite-calls form) (meta form))
+      (map? form) (with-meta (into {} (map (fn [[k v]] [(rewrite-calls k) (rewrite-calls v)])) form) (meta form))
+      :else form)))
+
+(defn glj-translate-protos
+  "A type's impls ([{:protocol :methods}], JVM names) as the completion's deftype takes them: interfaces onto
+   eve.core's protocols (through the ClojureScript table; ones without an eve.core protocol dropped) or the
+   completion's, the type's own protocols as written; Object's toString as a printer when the type has none.
+   JVM-named calls in bodies go through eve.core."
+  [parsed-protos]
+  (let [object? #(contains? '#{Object java.lang.Object} (:protocol %))
+        objects (mapcat :methods (filter object? parsed-protos))
+        translated (->> (remove object? parsed-protos)
+                        (mapcat (fn [impl]
+                                  (cond
+                                    (contains? completion-interfaces (:protocol impl))
+                                    (let [{p :protocol ms :methods} (completion-interfaces (:protocol impl))]
+                                      [{:protocol p
+                                        :methods (vec (keep (fn [m] (when-let [n (ms (:name m))] (assoc m :name n)))
+                                                            (:methods impl)))}])
+
+                                    (interface-sym? (:protocol impl))
+                                    (keep (fn [{:keys [protocol] :as t}]
+                                            (when (contains? eve-core-protocols protocol)
+                                              (assoc t :protocol (symbol "eve.core" (name protocol)))))
+                                          (cljs-translate-protocol impl))
+
+                                    (cljs-protocol? (:protocol impl))
+                                    (let [p (strip-cljs-core (:protocol impl))]
+                                      (when (contains? eve-core-protocols p)
+                                        [(assoc impl :protocol (symbol "eve.core" (name p)))]))
+                                    :else [impl])))
+                        (group-by :protocol)
+                        (mapv (fn [[p impls]] {:protocol p :methods (vec (mapcat :methods impls))})))
+        printed? (some #(= 'eve.core/IPrintWithWriter (:protocol %)) translated)
+        to-string (when-not printed? (first (filter #(= 'toString (:name %)) objects)))]
+    (cond-> (mapv (fn [impl] (update impl :methods
+                                     (fn [ms] (mapv #(update % :body (fn [b] (map rewrite-calls b))) ms))))
+                  translated)
+      to-string (conj {:protocol 'eve.core/IPrintWithWriter
+                       :methods [{:name '-pr-writer :args [(first (:args to-string)) '__w '__opts]
+                                  :body [(list 'eve.core/-write '__w
+                                               (cons 'do (map rewrite-calls (:body to-string))))]}]}))))
+
+(defn- printed? [impls] (some #(= 'eve.core/IPrintWithWriter (:protocol %)) impls))
+
+(defn- hooks
+  "This host's steps for eve.deftype-proto.sio."
+  []
+  {:normalize (fn [parsed] {:impls parsed})
+   ;; a map type stands in for a map here too (:slab-define's rule, below): an eve-deftype map (int-map's) that is a
+   ;; plain record was hashed and compared by glojure's own sets and maps as a record — its fields, the offsets of two
+   ;; equal maps' blocks — so an equal map was not found in a host set (int-map-test's hash-test)
+   :define (fn [type-name fields impls _forms _print]
+             (let [impls (glj-translate-protos impls)
+                   type-name (if (some #(= 'eve.core/IMap (:protocol %)) impls) (vary-meta type-name assoc :eve/map true) type-name)]
+               (concat [`(clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))]
+                       (when (printed? impls) [(sio/print-method-form type-name 'eve.core/-pr-writer)]))))
+   ;; through T__make when a field holds a cell (the completion's deftype makes it; ->T may be an eve-deftype's own
+   ;; constructor), else (T. ...)
+   :build (fn [type-name fields _new-name args]
+            (if (some (fn [f] (let [m (meta f)] (or (:mutable m) (:unsynchronized-mutable m) (:volatile-mutable m))))
+                      fields)
+              (list* (symbol (str (name type-name) "__make")) args)
+              (list* 'new type-name args)))
+   :factory-via-var? false
+   :slab-prepare (fn [parsed _type-name] (glj-translate-protos parsed))
+   :object-boilerplate? false
+   ;; a map type (its impls carry eve.core's IMap: it implemented IPersistentMap) stands in for a map, as babashka's
+   ;; map-mode deftype does: the completion's deftype with ^:eve/map
+   :slab-define (fn [type-name fields forms]
+                  [`(clojure.core/deftype ~(if (some #{'eve.core/IMap} forms) (vary-meta type-name assoc :eve/map true) type-name)
+                      ~fields ~@forms)])})
+
+(defn host-type
+  "A plain type written with the JVM's names (host-deftype)."
+  [_env type-name fields parsed]
+  (let [impls (glj-translate-protos parsed)]
+    `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))
+         ~@(when (printed? impls) [(sio/print-method-form type-name 'eve.core/-pr-writer)])
+         ~type-name)))
+
+(defn plain-type
+  "A plain type (eve.deftype/deftype) on eve.core's protocols."
+  [_env type-name fields parsed]
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)
+        impls (glj-translate-protos parsed)]
+    `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))
+         ~@(when (printed? impls) [(sio/print-method-form type-name 'eve.core/-pr-writer)])
+         ~type-name)))
+
+(defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
+(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
+
+(defn existing-def
+  "{:value v} when the namespace being compiled already defines sym, else nil."
+  [_env sym]
+  (when-let [v (resolve sym)] {:value @v}))
+
+(defn rename-fields
+  "An eve-deftype's fields and body with the field names the JVM reserves renamed (__hash): [fields body]."
+  [_env fields body]
+  (sio/eve-renames fields body))
+
+(defn reader-of
+  "What a registered eve collection reads as on glojure: the host's own collection where one is given (host-value: a
+   type answers eve.core's protocols, not clojure.core's), else its eve type (from-header) — a map, which stands in for
+   glojure's own (the completion's map mode), as on babashka."
+  [from-header host-value]
+  (or host-value from-header))
+
+(defn print-form
+  "The printer of a registered eve collection: none — a value read from eve memory is glojure's own collection."
+  [_env _type-name _spec]
+  nil)
+
+(defn vector-types
+  "glojure's own vector types: IPersistentVector's implementors."
+  [_env]
+  '[clojure.lang.IPersistentVector])
+
+;; = and hash reach a type's own equivalence and hash (the completion's hook): eve.core's
+(eve.host-completion/set-type-equality!
+ {:equiv eve.core/-equiv :hash eve.core/-hash :equiv-proto eve.core/IEquiv :hash-proto eve.core/IHash})
+
+;; a map type's map methods (eve's Go types package, impls/glojure/types): eve.core's, which reach the type's own
+(defn- print-map [m] (pr-str (into {} (eve.core/seq m))))
+
+(eveglj:types.SetMethods
+ {:count eve.core/-count :lookup eve.core/-lookup :assoc eve.core/-assoc :dissoc eve.core/-dissoc :seq eve.core/seq
+  :equiv eve.core/-equiv :hash eve.core/-hash :conj eve.core/-conj :empty eve.core/-empty :meta eve.core/-meta
+  :with-meta eve.core/-with-meta :invoke eve.core/-invoke :str print-map})

@@ -1,0 +1,48 @@
+:init-done
+CONTENTION variant=A tag=jA1 procs=4 swaps-per-proc=100 sync-every=0
+  worker-1 elapsed-ms=1173.269973
+  worker-2 elapsed-ms=1070.714698
+  worker-3 elapsed-ms=987.83559
+  worker-4 elapsed-ms=1071.246165
+  makespan-ms=1173.27 aggregate-ops-sec=340.9 aggregate-us-per-op=2933.2
+:value 400
+:init-done
+CONTENTION variant=J1 tag=jJ11 procs=4 swaps-per-proc=100 sync-every=0
+  worker-1 elapsed-ms=31789.911452
+  worker-2 elapsed-ms=36646.156035
+  worker-3 elapsed-ms=40423.260886
+  worker-4 elapsed-ms=39057.411319
+  makespan-ms=40423.3 aggregate-ops-sec=9.9 aggregate-us-per-op=101058.2
+:value 400
+:init-done
+CONTENTION variant=J10 tag=jJ101 procs=4 swaps-per-proc=100 sync-every=0
+  worker-1 elapsed-ms=4613.320285
+  worker-2 elapsed-ms=4937.979332
+  worker-3 elapsed-ms=4890.683385
+  worker-4 elapsed-ms=4742.018253
+  makespan-ms=4937.98 aggregate-ops-sec=81.0 aggregate-us-per-op=12344.9
+:value 400
+:init-done
+CONTENTION variant=J100 tag=jJ1001 procs=4 swaps-per-proc=100 sync-every=0
+  worker-1 elapsed-ms=2110.62045
+  worker-2 elapsed-ms=2404.568429
+  worker-3 elapsed-ms=2728.89003
+  worker-4 elapsed-ms=1852.304564
+  makespan-ms=2728.89 aggregate-ops-sec=146.6 aggregate-us-per-op=6822.2
+:value 400
+:init-done
+CONTENTION variant=J1000 tag=jJ10001 procs=4 swaps-per-proc=100 sync-every=0
+  worker-1 elapsed-ms=715.072143
+  worker-2 elapsed-ms=563.782862
+  worker-3 elapsed-ms=496.652089
+  worker-4 elapsed-ms=903.182121
+  makespan-ms=903.182 aggregate-ops-sec=442.9 aggregate-us-per-op=2258.0
+:value 400
+:init-done
+CONTENTION variant=B tag=jB1 procs=4 swaps-per-proc=100 sync-every=0
+  worker-1 elapsed-ms=44550.058474
+  worker-2 elapsed-ms=40228.212136
+  worker-3 elapsed-ms=44878.984976
+  worker-4 elapsed-ms=41674.197504
+  makespan-ms=44879 aggregate-ops-sec=8.9 aggregate-us-per-op=112197.5
+:value 400

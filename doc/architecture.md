@@ -1,301 +1,309 @@
 # Eve Architecture
 
-High-level system design and memory model.
+High-level system design. The byte-level detail is `doc/internals.md`; reclamation (epochs, the retire walk, what is
+freed when) is `doc/memory-model.md`; the host contract is `doc/unification/HOST-CONTRACT.md`.
 
 ---
 
 ## Design Goals
 
-1. **Shared-memory persistence** — Clojure persistent data structures living in `SharedArrayBuffer` (in-process) or memory-mapped files (cross-process), accessible with zero-copy semantics.
-2. **Transparent Clojure API** — Standard `swap!`/`reset!`/`deref` on atoms. Regular Clojure maps, vectors, sets, and lists are automatically serialized into Eve's shared-memory equivalents.
-3. **Cross-platform identity** — JVM Clojure and Node.js ClojureScript share identical on-disk formats, byte layouts, hash functions, and CAS protocols. A domain created by one platform can be joined by the other.
-4. **Lock-free concurrency** — All mutations use compare-and-swap (CAS) on a single 32-bit root pointer. No locks, no coordination server.
+1. **Shared-memory persistence** — Clojure persistent data structures in slab memory: in-process (heap regions,
+   SharedArrayBuffers on ClojureScript) or memory-mapped files (cross-process).
+2. **Transparent Clojure API** — standard `swap!` / `reset!` / `deref` on atoms. Regular Clojure maps, vectors, sets
+   and lists are written into eve's own collections when stored; deref reads them back as the host's own.
+3. **One format on every host** — eleven host rows (`eve/hosts.edn`, beside `:bb-minimal`: the JVM,
+   ClojureScript on Node and in a browser, babashka, nbb, ClojureCLR, basilisp, jolt, clojerl, ValueScript, glojure)
+   share identical on-disk bytes, hash functions and CAS protocol. A disk domain one host creates, any host that maps
+   files can join.
+4. **One root word per atom** — every write is a compare-and-swap of the atom's 32-bit root pointer. On hosts with
+   atomic read-modify-write (every host but babashka; a Lustre mount's atomics are per-operation fcntl locks) the swap
+   is lock-free; a lock-only host takes part through the exclusive-hold protocol (below), and a lock-free host takes
+   the same hold by CAS for a write that raises a tally count (`with-held-write*`).
+5. **Portable by construction** — the shared code (`eve/src`) names no host but one file, `src/eve/shared_atom.cljs`
+   (`.host-leak`: conditionals 0, predicates 0, net-interop 0, host-files 1; `scripts/check-host-leak` lets each
+   count only go down). What a host must supply is the adapters under `eve/adapters/`, one row of `hosts.edn` per host
+   (`adapters/README.md`, "eve is portable").
 
 ---
 
 ## System Layers
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  User Code                                                │
-│    (swap! my-atom update :counter inc)                    │
-├──────────────────────────────────────────────────────────┤
-│  eve.alpha                                                │
-│    Public API: e/atom, e/hash-map, e/deftype              │
-├────────────────────┬─────────────────────────────────────┤
-│  eve.shared-atom   │  eve.atom                            │
-│  (SAB atoms, CLJS) │  (mmap atoms, CLJ + CLJS)           │
-├────────────────────┴─────────────────────────────────────┤
-│  Data Structures                                          │
-│    eve.map (HAMT) | eve.vec | eve.set | eve.list          │
-│    eve.deftype.int-map | eve.deftype.rb-tree              │
-│    eve.obj (typed objects)                                │
-├──────────────────────────────────────────────────────────┤
-│  Slab Allocator (eve.deftype-proto.alloc)                 │
-│    6 fixed-size classes + overflow coalescing allocator    │
-├──────────────────────────────────────────────────────────┤
-│  Serializer (eve.deftype-proto.serialize)                 │
-│    Binary encoding for primitives and collections         │
-├──────────────────────────────────────────────────────────┤
-│  IMemRegion (eve.mem)                                     │
-│    Platform-neutral shared memory abstraction             │
-├────────────────────┬─────────────────────────────────────┤
-│  JsSabRegion       │  NodeMmapRegion  │  JvmMmapRegion   │
-│  (SharedArrayBuf)  │  (N-API addon)   │  (Panama FFM)    │
-└────────────────────┴──────────────────┴──────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  User code            (swap! my-atom update :counter inc)                 │
+├──────────────────────────────────────────────────────────────────────────┤
+│  eve.alpha            e/atom, e/atom-domain, e/hash-map, e/deftype, ...    │
+│  eve.atom             atoms and atom domains, in-process or on disk        │
+│  eve.net.atom         network atoms (synchronous, blobs direct to a store) │
+│  eve.thread           the executor service (pools, future, pmap, fold)     │
+├──────────────────────────────────────────────────────────────────────────┤
+│  Data structures      eve.map (HAMT) · eve.vec · eve.set · eve.list        │
+│                       eve.deftype.int-map · eve.deftype.rb-tree ·           │
+│                       eve.sorted · eve.rrb-vector · eve.obj · eve.array     │
+├──────────────────────────────────────────────────────────────────────────┤
+│  eve.codec            values ⇄ EVE bytes      (adapter: codec/byte-array,  │
+│                                                codec/js)                    │
+│  eve.deftype-proto.alloc   the slab allocator: 6 fixed classes + overflow  │
+│  eve.slab-io          the memory seam every slab access goes through       │
+│                       (adapter: slab-io/protocol, slab-io/vs)              │
+├──────────────────────────────────────────────────────────────────────────┤
+│  eve.mem              IMemRegion, IHostAtomics (the region contract)       │
+│  eve.region           a host's regions (adapter: region/<impl>)            │
+├──────────────────────────────────────────────────────────────────────────┤
+│  the host's adapters  eve.host · eve.encoding · eve.process · eve.types ·  │
+│                       eve.core · eve.int32 · eve.crypto · eve.http ·       │
+│                       eve.thread-host · eve.process-slab                    │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## Two Atom Modes
-
-### In-Process (CLJS + CLJ)
-
-Created by `e/atom` **without** `:persistent`. Data lives in memory only — no files on disk.
-
-| | CLJS (browser / Node.js) | CLJ (JVM) |
-|---|---|---|
-| **Backing** | `SharedArrayBuffer` — shared memory visible to all workers/threads in the same process | `byte[]` + `sun.misc.Unsafe` atomics (`JvmHeapRegion`) — heap-allocated, single-process |
-| **Atom container** | `AtomDomain` — a single SAB holding many named atoms | `MmapAtomDomain` backed by heap regions (cached per id) |
-| **Concurrency** | Cross-worker CAS via `Atomics.compareExchange` | In-process CAS via `Unsafe.compareAndSwapInt` |
-| **GC** | Epoch-based — blocks are freed only when no reader holds a reference | Same epoch-based retire queue (no heartbeat needed — single process) |
-
-Both platforms use the same slab allocator, serializer, and HAMT implementation. The only difference is the `IMemRegion` backing store.
-
-### Cross-Process: Memory-Mapped Files (CLJ + CLJS)
-
-- **Backing:** `mmap`'d files on disk — shared memory visible across OS processes.
-- **Created by:** `e/atom` with `:persistent`.
-- **Files:** `.slab0`–`.slab5` (fixed-size), `.slab6` (overflow), `.root` (atom table + worker registry), `.rmap` (reader epoch map).
-- **Concurrency:** Cross-process CAS via Linux `futex(2)` (Node.js) or Panama FFM / `sun.misc.Unsafe` (JVM).
-- **GC:** Epoch-based with heartbeat-driven stale-process detection (30s timeout).
+Every layer above the adapters is one `.cljc` source for every host. `doc/adopter-tiers.md` lists the
+sixteen adapter features, which host takes which implementation, and which a new host must write.
 
 ---
 
-## Memory Model
+## Atom Domains
 
-### The Slab Allocator
+An **atom domain** is a set of regions holding named atoms; it is itself an atom (its slot 0, the registry). Atoms
+are slots in one domain's root region. Two kinds, one implementation (`eve.atom`'s `MmapAtom` and `MmapAtomDomain`
+on every host):
 
-Eve uses a multi-slab allocator. Six size-stratified slabs hold fixed-size blocks; a seventh handles overflow (>1024B):
+### In-process
+
+Created by `e/atom` without `:persistent`. Each `:id` gets its own heap domain, cached in this process. The regions
+are the host's heap regions — on the JVM family a heap `ByteBuffer` with VarHandle atomics
+(`adapters/region/jvm-varhandle`); on ClojureScript and nbb the module slabs' SharedArrayBuffers
+(`adapters/slab/module`), which `eve.sab/sab-transfer-data` hands to a worker. One participant, no heartbeat.
+
+### On disk (cross-process)
+
+Created by `e/atom` with `:persistent`, or `eve.atom/persistent-atom-domain`.
+
+- **Backing:** `mmap`'d files (`MAP_SHARED`) — every mapping of a file sees every write, in and across processes.
+- **Files:** `.slab0`–`.slab5` and their bitmaps `.slab0.bm`–`.slab5.bm`, `.slab6` (overflow), `.root` (header, worker
+  registry, atom table), `.rmap` (262,144 bytes); `.keyring` for an encrypted domain (`eve.keyring`).
+- **Concurrency:** the root pointer's CAS is the host region's atomic: VarHandle on the JVM, `__atomic_*` built-ins in
+  eve's N-API addon on Node (`native/mmap_cas.cc`, which uses `futex(2)` for wait/notify), the platform's atomics
+  through each host's region adapter elsewhere.
+- **Participants:** each process claims one of 256 worker slots in `.root` and writes a heartbeat every 10 s
+  (`eve.process/start-timer!`); a slot whose heartbeat is 30 s old is stale.
+- **Create or join:** the creator is the one process whose exclusive create of `<path>.root` succeeds
+  (`eve.process/create-exclusive!`); every other joins and waits for the root's magic, written last.
+
+### Lock-only hosts
+
+A host whose regions have no atomic read-modify-write (babashka's `region/jvm-nio-lock`) answers
+false to `IHostAtomics/-atomic-rmw?`. It writes under the **exclusive hold**: a byte-range file lock on the root's hold
+word, the hold set, the other participants' in-flight writes drained (lock-free hosts count each write into
+`ROOT_INFLIGHT` and back off while the hold is set), the write done with plain loads and stores, the hold cleared
+(`eve.atom` `with-exclusive-hold*`). Both kinds of host share one domain.
+
+---
+
+## The Slab Allocator
+
+Six size-stratified classes hold fixed-size blocks; a seventh handles overflow (> 1024 B):
 
 | Class | Block Size | Typical Contents |
 |---|---|---|
-| 0 | 32 B | Tiny HAMT bitmap nodes (0-1 children) |
-| 1 | 64 B | Common HAMT nodes (2-3 children, 1-2 KVs) |
-| 2 | 128 B | Medium nodes (4-8 children, vec trie nodes) |
-| 3 | 256 B | Dense nodes, collision nodes, serialized values |
-| 4 | 512 B | Very dense or large collision nodes |
-| 5 | 1024 B | Large collision nodes, big payloads |
-| 6 | Variable | Coalescing allocator (blocks >1024B) |
+| 0 | 32 B | small HAMT bitmap nodes |
+| 1 | 64 B | common HAMT nodes |
+| 2 | 128 B | medium nodes, vector trie nodes |
+| 3 | 256 B | dense nodes, collision nodes, encoded values |
+| 4 | 512 B | very dense or large collision nodes |
+| 5 | 1024 B | large nodes, big payloads |
+| 6 | variable | coalescing overflow allocator (blocks > 1024 B) |
 
-Each slab (classes 0-5) has:
-- A **64-byte header** with magic, block size, total blocks, free count, alloc cursor, class index, bitmap offset, data offset.
-- A **bitmap region** (1 bit per block, 0=free, 1=allocated, 16-byte aligned for SIMD).
-- A **data region** (contiguous, uniformly-sized blocks).
-
-Slab files grow lazily — initial capacities are small (16-64KB), with max capacities up to 1GB per class. On Linux/macOS, sparse files and lazy mmap page commit mean untouched pages cost zero physical memory or disk.
+Each slab (classes 0–5) has a 64-byte header (magic, block size, total blocks, free count, alloc cursor, class index,
+bitmap offset, data offset), a bitmap (1 bit per block, 0 free, 1 allocated) and a data region of uniform blocks. A
+disk domain's slabs start small and double on demand (`:capacities` sets the initial sizes, in bytes); ClojureScript's
+module slabs grow when growable (a browser's default, `:growable? true` on Node), up to `SLAB_CLASS_CAPACITIES`; a
+JVM-family heap domain's classes are fixed (1 MB each unless `:capacities` says otherwise) and a full class spills to
+the next. Sparse files and lazy page commit mean untouched pages cost neither memory nor disk on Linux.
 
 ### Slab-Qualified Offsets
 
-All node references in Eve are 32-bit **slab-qualified offsets**:
+Every node reference is a 32-bit **slab-qualified offset**:
 
 ```
 [class_idx:3 bits | block_idx:29 bits]
 ```
 
-- `class_idx` 0-5: slab classes (32B-1024B)
-- `class_idx` 6: overflow allocator
-- `class_idx` 7: reserved/sentinel
-- `block_idx`: up to 536M blocks per slab
-
-The NIL sentinel is `-1` (all bits set = class 7, block 0x1FFFFFFF).
+- `class_idx` 0–5: the fixed classes; 6: the overflow allocator; 7: reserved.
+- The NIL sentinel is `-1`; a claimed-but-empty atom slot holds `-2`.
 
 ### The Root Pointer
 
-Each atom's state is captured by a single 32-bit root pointer stored in the `.root` file (mmap) or root SAB (SharedArrayBuffer). The root pointer is a slab-qualified offset pointing to the root HAMT node (or scalar block) of the atom's value.
-
-A `swap!` mutates the atom by CAS-ing this single i32 — the entire tree of HAMT nodes is immutable and structurally shared.
+Each atom's state is one 32-bit root pointer in its slot of the root region's atom table. It is a slab-qualified
+offset to the root node (or scalar block) of the atom's value. A `swap!` publishes a new value by CAS-ing this word;
+the trees behind it are immutable and structurally shared.
 
 ---
 
 ## HAMT (Hash Array Mapped Trie)
 
-Eve maps and sets use a 32-way branching HAMT with bitmap-indexed nodes:
+Eve maps and sets are 32-way branching HAMTs with bitmap-indexed nodes:
 
-- **Hash function:** Murmur3_x86_32 over serialized key bytes (identical output on JVM and CLJS).
-- **Node types:** Bitmap nodes (sparse 32-way branch) and collision nodes (same hash, different keys).
-- **Structural sharing:** Updating one key in a 1,000-key map only allocates O(log32 N) new nodes along the root-to-leaf path. The rest of the tree is shared with the previous version.
+- **Hash:** Murmur3_x86_32 over the key's encoded bytes (`eve.hamt-util/portable-hash-bytes`, through `eve.int32`) —
+  the same 32-bit result on every host, so every host builds the same tree shape.
+- **Node types:** bitmap nodes (sparse 32-way branch) and collision nodes (one hash, several keys).
+- **Structural sharing:** updating one key allocates O(log32 N) new nodes along the root-to-leaf path; the rest of
+  the tree is shared with the previous version.
 
-### Node Layout (Bitmap Node)
+### Bitmap Node Layout
 
 ```
-[type:u8][flags:u8][kv_total_size:u16][data_bitmap:u32][node_bitmap:u32]
-[inline KV data...][child offsets...]
+[type:u8][flags:u8][kv_total_size:u16][data_bitmap:u32][node_bitmap:u32]   ; 12-byte header
+[child offsets: 4 × popcount(node_bitmap)]
+[hashes: 4 × popcount(data_bitmap)]
+[inline KV data ...]
 ```
 
-- `data_bitmap`: 32-bit mask indicating which hash prefix slots have inline key-value data.
-- `node_bitmap`: 32-bit mask indicating which slots have child node pointers.
-- Inline KVs are serialized key-value pairs packed after the header.
-- Child offsets are slab-qualified 32-bit pointers.
+(`src/eve/map.cljc`: `NODE_HEADER_SIZE` 12, `hashes-start-off`, `kv-data-start-off`.) `data_bitmap` marks the slots
+holding inline key-value entries, `node_bitmap` those holding children; child offsets are slab-qualified pointers.
 
 ---
 
-## The CAS Loop
+## Reads and the CAS Loop
 
-Every `swap!` follows this protocol:
+**Deref** reads the atom's root pointer under a pinned epoch and **materializes** the value — `d/eve->clj` builds the
+host's own collections — then unpins (`plain-deref`). Slab-backed values do not escape a deref. To work on the value in
+place, use the function passed to `swap!`, or the read region `eve.alpha/$`: inside it a deref answers the slab-backed
+value (`region-deref`), the domain pinned on its first read and every pin held until the outermost `$` exits
+(`eve.read-region`), and the region's result is materialized before they go.
 
-1. **Pin epoch** — announce that this process is reading at the current epoch.
-2. **Read root pointer** — atomic load of the atom's root pointer.
-3. **Deref** — follow the pointer to reconstruct the current value (lazy on both platforms).
-4. **Apply function** — call `(f current-value args...)` to compute the new value.
-5. **Allocate new nodes** — write new HAMT nodes into slabs.
-6. **CAS** — atomically compare-and-swap the root pointer (old -> new).
-7. **On success:** bump epoch, retire old nodes to the GC queue.
-8. **On failure:** free the newly allocated nodes, back off (jittered exponential), retry from step 1.
+**`swap!`** (`mmap-swap!` / `swap-attempt!` in `src/eve/atom.cljc`):
 
-Maximum retries: 1000 (configurable via `MAX_SWAP_RETRIES`).
+1. Pin the current epoch for this thread (the worker slot carries the minimum of its threads' pins).
+2. Load the atom's root pointer.
+3. Read the old value lazily — slab-backed, over a `LoggingSlabIO` that records this attempt's allocations.
+4. Apply `(f old-value args...)`; collections built inside `f` allocate in this domain.
+5. Write the new value (the codec), giving a new root pointer. An identical pointer ends the swap: nothing to publish.
+6. Plan the commit under the pin (`eve.retire/plan`): the walk of the old value against the new gives the blocks to
+   release and the tally counts (`eve.tally`) to raise and lower. A plan that raises a count outside the domain's
+   exclusive hold is undone (its allocations freed) and the write runs again under the hold (`with-held-write*`: a
+   lock-free host takes `ROOT_HOLD` by CAS). The new blocks' counts are written.
+7. CAS the root pointer. **On success:** bump the domain epoch, apply the plan's raises and lowers (`retire/apply!`; a
+   lower that takes a piece's last holder releases it), and queue the released blocks with the new epoch for the
+   flush.
+8. **On failure:** reset the new blocks' counts, free every block this attempt allocated (never published), back off —
+   the first three retries at once, then 1..min(2^(n−3), 8) ms jittered — and retry.
+
+At most 1,000 attempts (`MAX_SWAP_RETRIES`); a lock-only host runs steps 1–8 under the exclusive hold.
 
 ---
 
-## Epoch-Based Garbage Collection
+## Reclamation
 
-Old HAMT nodes can't be freed immediately — another process/worker might still be reading them. Eve uses epoch-based GC:
-
-- Each process/worker claims a **worker slot** (256 available per domain) and writes a periodic heartbeat.
-- Before reading, a process **pins** its current epoch via an atomic write to the reader map.
-- After a successful `swap!`, old nodes are placed in a **retire queue** tagged with the current epoch.
-- Periodically (every 50ms by default), the retire queue is flushed: nodes whose epoch is older than all currently-pinned epochs are freed.
-- Stale processes (no heartbeat for 30s) are ignored during the epoch scan.
-
-This guarantees that no node is freed while any process could still be reading it.
+What a committed write superseded is queued at the write with the epoch it was published at; the queue is flushed
+when its last flush is 50 ms old or it holds more than 64 entries, freeing the entries whose epoch is below every
+live pinned epoch (stale slots are skipped). A freed block is forgotten, never zeroed: its next owner writes every
+field it uses. The model eve follows — and the places eve's code diverges from it today — are
+**`doc/memory-model.md`**.
 
 ---
 
 ## Multi-Atom Domains
 
-A single domain can hold up to **256 named atoms**. The `.root` file contains:
+A domain holds up to **256 atom slots**: slot 0 is the registry (a map from atom name to slot index), so **255 named
+atoms**; each meta-atom (`eve.atom/meta-atom`) is a named atom too. The `.root` file:
 
 | Region | Size | Purpose |
 |---|---|---|
-| Header | 64 B | Magic (`ROOT`/`ROOT` V2), root pointer, epoch counter |
-| Worker Registry | 6,144 B | 256 slots × 24 B (status, epoch, heartbeat, worker ID) |
-| Atom Table Header | 64 B | Magic (`ATOM`), table metadata |
-| Atom Table | 2,048 B | 256 slots × 8 B (root pointer + name hash) |
+| Header | 64 B | magic (`ROOT` V2 = `0x524F4F55`), root pointer, epoch counter, hold and in-flight words, tally word (byte 32) |
+| Worker registry | 6,144 B | 256 slots × 24 B (status, current epoch, heartbeat lo/hi, worker id) |
+| Atom table header | 64 B | magic (`ATOM`), table metadata |
+| Atom table | 2,048 B | 256 slots × 8 B (root pointer, FNV-1a hash of the name) |
 
 **Total root file: 8,320 bytes.**
 
-Slot 0 is reserved for a **registry atom** — an `EveHashMap` that maps keyword name strings to slot indices. When you create a named persistent atom:
-
-1. The domain is opened/joined at the given path.
-2. The keyword name is looked up in the registry via FNV-1a hash.
-3. If found, the existing slot is returned.
-4. If not found, a free slot is claimed, the registry is updated, and the initial value is written.
+Creating a named atom: claim a free slot by CAS (the claimed sentinel `-2`), write the initial value into it, then
+register the name with one swap of the registry. Of two processes creating one name at once exactly one registers
+it; the loser frees its slot and opens the winner's (`create-mmap-atom!`).
 
 ---
 
-## File Layout (Persistent Atoms)
+## File Layout (Disk Domains)
 
 A domain at path `./my-db` creates:
 
 ```
-./my-db.slab0      # 32-byte blocks (HAMT bitmap nodes)
-./my-db.slab0.bm   # Bitmap for slab0
-./my-db.slab1      # 64-byte blocks
-./my-db.slab1.bm   # Bitmap for slab1
-./my-db.slab2      # 128-byte blocks
-./my-db.slab2.bm   # Bitmap for slab2
-./my-db.slab3      # 256-byte blocks
-./my-db.slab3.bm   # Bitmap for slab3
-./my-db.slab4      # 512-byte blocks
-./my-db.slab4.bm   # Bitmap for slab4
-./my-db.slab5      # 1024-byte blocks
-./my-db.slab5.bm   # Bitmap for slab5
-./my-db.slab6      # Variable-size overflow (coalescing allocator)
-./my-db.root        # Root pointers, worker registry, atom table
-./my-db.rmap        # Reader epoch map (256 KB)
+./my-db.slab0      # 32-byte blocks          ./my-db.slab0.bm   # its bitmap
+./my-db.slab1      # 64-byte blocks          ./my-db.slab1.bm
+./my-db.slab2      # 128-byte blocks         ./my-db.slab2.bm
+./my-db.slab3      # 256-byte blocks         ./my-db.slab3.bm
+./my-db.slab4      # 512-byte blocks         ./my-db.slab4.bm
+./my-db.slab5      # 1024-byte blocks        ./my-db.slab5.bm
+./my-db.slab6      # variable-size overflow (coalescing allocator)
+./my-db.root       # root pointers, worker registry, atom table (8,320 B)
+./my-db.rmap       # reader map (262,144 B)
+./my-db.keyring    # only for an encrypted domain (eve.keyring)
 ```
 
-Bitmap and data are in separate files for mmap. The slab header is at the start of each data file; the bitmap is its own file (`.bm`).
+The slab header is at the start of each data file; each bitmap is its own file (`.bm`).
 
 ---
 
-## IMemRegion Protocol
+## IMemRegion
 
-`IMemRegion` is the platform-neutral abstraction over a fixed-size region of shared memory. Eve requires only three things:
+`eve.mem/IMemRegion` is the platform-neutral contract over a fixed-size region (HOST-CONTRACT §1–2): signed i32
+load/store at any alignment, i32 CAS returning the witness, add/sub, i64 load/store/CAS (for the overflow header),
+wait/notify on an i32 (a bounded poll and a 0-returning notify are legal), and bulk byte read/write.
+`IHostAtomics` says whether the region's read-modify-writes are atomic (`-atomic-rmw?`) and gives a file lock
+(`-with-file-lock`) where they are not.
 
-1. **Atomic int32 read/write/CAS/add/sub** — for lock fields, epoch counters, block descriptors.
-2. **Futex-like wait/notify on int32 slots** — for sleep and coordination.
-3. **Bulk non-atomic byte I/O** — for reading and writing serialized values.
+Implementations (`eve.region`, one adapter per host capability):
 
-Implementations:
-
-| Implementation | Platform | Backing |
+| Adapter | Host(s) | Type(s) |
 |---|---|---|
-| `JsSabRegion` | CLJS (browser/Node) | `SharedArrayBuffer` + `Atomics` |
-| `NodeMmapRegion` | CLJS (Node.js) | mmap via native C++ addon |
-| `JvmMmapRegion` | CLJ (JVM) | Panama FFM `MemorySegment` + `Unsafe` atomics |
-| `JvmHeapRegion` | CLJ (JVM) | `byte[]` + `sun.misc.Unsafe` (non-persistent) |
+| `region/jvm-varhandle` | JVM | `JvmByteBufferRegion` (heap `ByteBuffer` or `MappedByteBuffer`, VarHandle atomics), `LustreJvmMmapRegion` |
+| `region/jvm-nio-lock` | babashka | `BbMmapRegion`, `BbHeapRegion` (lock-only: a `FileChannel` byte-range lock) |
+| `region/js` | ClojureScript, nbb | `JsSabRegion` (SharedArrayBuffer + Atomics), `NodeMmapRegion` (eve's N-API addon), `LustreMmapRegion` |
+| `region/clr` | ClojureCLR | `ClrRegion` (`MemoryMappedFile`, `Interlocked`, futex) |
+| `region/ctypes` | basilisp | `LpyRegion` (Python `mmap`, `ctypes` + libatomic, futex) |
+| `region/jolt-ffi` | jolt | `JoltRegion` (`jolt.ffi` over mmap, libatomic, futex) |
+| `region/beam` | clojerl | `CljeRegion` (eve's NIF, `adapters/core/beam/native/eve_clje_nif.c`) |
+| `region/glojure` | glojure | `GljRegion`, `GljLockedRegion` (eve's Go region package in glj-eve) |
+| `region/vs` | ValueScript | an address in the program's linear memory |
 
 ---
 
-## ISlabIO Protocol
+## ISlabIO and the Memory Seam
 
-Higher-level abstraction over slab block I/O, consumed by HAMT algorithms:
+`eve.deftype-proto.alloc/ISlabIO` is the slab-block I/O the data structures are written against:
 
 ```clojure
 (defprotocol ISlabIO
-  (-sio-read-u8   [ctx slab-offset field-off])
-  (-sio-write-u8!  [ctx slab-offset field-off val])
-  (-sio-read-u16  [ctx slab-offset field-off])
-  (-sio-write-u16! [ctx slab-offset field-off val])
-  (-sio-read-i32  [ctx slab-offset field-off])
-  (-sio-write-i32! [ctx slab-offset field-off val])
-  (-sio-read-bytes [ctx slab-offset field-off len])
+  (-sio-read-u8     [ctx slab-offset field-off])
+  (-sio-write-u8!   [ctx slab-offset field-off val])
+  (-sio-read-u16    [ctx slab-offset field-off])
+  (-sio-write-u16!  [ctx slab-offset field-off val])
+  (-sio-read-i32    [ctx slab-offset field-off])
+  (-sio-write-i32!  [ctx slab-offset field-off val])
+  (-sio-cas-i32!    [ctx slab-offset field-off expected desired])
+  (-sio-read-bytes  [ctx slab-offset field-off len])
   (-sio-write-bytes! [ctx slab-offset field-off src])
-  (-sio-alloc!    [ctx size-bytes])
-  (-sio-free!     [ctx slab-offset]))
+  (-sio-alloc!      [ctx size-bytes])
+  (-sio-free!       [ctx slab-offset])
+  (-sio-copy-block! [ctx dst-slab-offset dst-field-off src-slab-offset src-field-off len]))
 ```
 
-- `slab-offset`: always a slab-qualified offset `[class:3 | block:29]`.
-- `field-off`: byte offset within the block (relative to block start).
-- CLJS: `CljsSlabIO` delegates to DataView-based functions.
-- JVM: `JvmSlabCtx` holds one `IMemRegion` per slab file.
+- `slab-offset` is always slab-qualified; `field-off` a byte offset within the block.
+- `JvmSlabCtx` (in alloc, every host) holds one `IMemRegion` per slab class; ClojureScript's module slab registers its
+  own (`CljsSlabIO`, `adapters/slab/module`) with `alloc/register-host-slab!`. `LoggingSlabIO` wraps one to record a
+  swap attempt's allocations.
+- **Shared code never calls these protocol methods directly.** Every slab access goes through `eve.slab-io`
+  (HOST-CONTRACT §12): `adapters/slab-io/protocol` expands each name to the protocol call on every host but
+  ValueScript; `adapters/slab-io/vs` is plain functions over linear memory. `adapters/slab-io/test` is the conformance
+  test both answer.
 
 ---
 
-## Performance Characteristics
+## Performance
 
-### Read Throughput (persistent atoms)
-
-| Map Size | Node.js Ops/s | JVM Ops/s |
-|---|---|---|
-| 1 key | ~590,000 | ~5,100,000 |
-| 100 keys | ~22,500 | ~2,400,000 |
-| 500 keys | ~4,100 | ~1,700,000 |
-
-JVM reads are faster because `EveHashMap` lazily traverses mmap'd memory without N-API crossing overhead.
-
-### Write Throughput (persistent atoms)
-
-| Map Size | Node.js Ops/s | JVM Ops/s |
-|---|---|---|
-| 100 keys | ~3,000 | ~1,000 |
-| 500 keys | ~2,100 | ~720 |
-| 1,000 keys | ~2,000 | ~700 |
-
-### Swap Latency
-
-| Scenario | p50 | p95 | max |
-|---|---|---|---|
-| Node, no contention | 0.12 ms | 0.36 ms | 2.6 ms |
-| Node, 4 writers | 0.19 ms | 2.0 ms | 18.9 ms |
-| JVM, no contention | 0.39 ms | 0.59 ms | 6.5 ms |
-
-### Disk Footprint
-
-| Map Size | Disk Usage |
-|---|---|
-| Empty | ~1 MB |
-| 100 keys | ~1 MB |
-| 500 keys | ~1.4 MB |
-| 1,000 keys | ~2.1 MB |
+This document carries no performance figures: none of those it used to carry had a date, a commit or a command
+behind them. Benchmarks that can measure eve on this tree are the `deps.edn` aliases `:native-build-atom`,
+`:native-profiled-stress`, `:native-x-stress-atom`, `:native-data-bench`, `:contention-bench` and `:columnar-bench`
+(`bench/eve/`, `test/eve/columnar_bench.cljc`), and `bb bench:bb` / `bb bench:nbb`; a figure published from one names
+its date, commit, host and command. The dated tables in the docs are `doc/hosts/`'s per-host performance tables and
+`doc/data-structures.md`'s columnar comparison (both from the final pass, 2026-10-21 ET); `doc/adopting-eve-fast.md`
+dates its seam bench runs.

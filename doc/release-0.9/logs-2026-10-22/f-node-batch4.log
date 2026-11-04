@@ -1,0 +1,15 @@
+# run f-node-batch4 on 1f2d4b38f eve tree 7efe0523313a1477c70aa76a1cd9ca1c3a6e7861
+# cmd (in eve/) node target/eve-test/all.js batch4
+# start 2026-10-21 11:07:53 PM ET load 1.39 1.78 2.64 mem-in-use 1039 MB
+=== Eve Test Runner ===
+Suite: batch4
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.batch4-validation-test
+
+Ran 13 tests containing 34 assertions.
+0 failures, 0 errors.
+# end 2026-10-21 11:07:55 PM ET exit 0 wall 2s peak-mem-in-use 1039 MB peak-process-tree-rss 26 MB load 1.39 1.78 2.64

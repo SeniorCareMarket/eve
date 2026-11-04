@@ -1,0 +1,34 @@
+;; lpy_worker.lpy — the basilisp participant of the capstone (coop.mix): eve.atom under basilisp (CPython; eve's
+;; basilisp regions: an mmap'd file through ctypes, atomics through libatomic, futex through libc's syscall) joins the
+;; mmap atom eve/main at a base path and takes its turn.
+;;
+;;   PYTHONPYCACHEPREFIX=<eve>/target/lpycache \
+;;     basilisp run -p <eve>/test -p <each of eve's :lpy roots in eve/hosts.edn, last first> -p <eve>/src <eve>/test/coop/workers/lpy_worker.lpy <mode> <base> [args...]
+;;     read     <base>                 the value as EDN
+;;     mix-contend <base> <writer> <n> n × swap! coop.mix/mix-op (the capstone); prints {:ops :ms}
+;;     mix-snapshot <base>             prints coop.mix/snapshot of the value
+;;
+;; Not coop.scenario's modes: basilisp cannot read that file's data, whose maps have 1 and true as two keys (one key
+;; in Python, where True == 1 and hash(True) == hash(1)).
+(require '[eve.atom :as atom] '[coop.mix :as mix])
+(import time)
+
+(defn- plain [x]
+  (cond (map? x) (into {} (map (fn [[k v]] [(plain k) (plain v)])) x)
+        (set? x) (into #{} (map plain) x)
+        (vector? x) (mapv plain x)
+        (seq? x) (apply list (map plain x))
+        :else x))
+
+(defn- now-ms [] (python/int (* 1000 (time/time))))
+
+(let [[mode base & more] *command-line-args*
+      d (atom/persistent-atom-domain base)
+      a (atom/lookup-or-create-mmap-atom! d "eve/main" nil)]
+  (case mode
+    "read" (println (pr-str (plain @a)))
+    "mix-contend" (let [w (first more) n (python/int (second more)) t0 (now-ms)]
+                    (dotimes [i n] (swap! a mix/mix-op w i))
+                    (println (pr-str {:ops n :ms (- (now-ms) t0)})))
+    "mix-snapshot" (println (pr-str (mix/snapshot @a))))
+  (atom/close-atom-domain! d))

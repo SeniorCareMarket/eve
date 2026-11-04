@@ -64,3 +64,32 @@
       (reset! a {:n 42})
       (is (= 42 (:n @a)))
       (atom/close-atom-domain! (atom/persistent-atom-domain b)))))
+
+;; --- Mappings held per deref ---
+
+(defn- mapping-count
+  "Lines of /proc/self/maps (one per mapping) on Linux; nil elsewhere."
+  []
+  (try (count (.split (.readFileSync (js/require "fs") "/proc/self/maps" "utf8") "\n"))
+       (catch :default _ nil)))
+
+(deftest test-deref-does-not-leak-mappings
+  (testing "a deref reads the slab headers through the mappings it already holds
+            (refresh-mmap-slabs! opened a 64-byte peek per slab class per call,
+            ~12 mappings per deref, until vm.max_map_count)"
+    (let [b (str test-base "-maps")
+          d (atom/persistent-atom-domain b)
+          a (atom/persistent-atom {:id :eve/main :persistent b} {:x 1})
+          _ @a
+          m0 (mapping-count)
+          _ (dotimes [_ 500] @a)
+          m1 (mapping-count)
+          _ (dotimes [_ 1500] @a)
+          m2 (mapping-count)]
+      (when m0
+        ;; A per-deref leak grows in proportion (the old code: ~6000, then
+        ;; ~18000); the second batch shows whether what remains is one-time.
+        (let [g1 (- m1 m0) g2 (- m2 m1)]
+          (println "    mappings: +" g1 "over the first 500 derefs, +" g2 "over the next 1500")
+          (is (< (+ g1 g2) 1000) (str "mappings grew by " (+ g1 g2) " over 2000 derefs"))))
+      (atom/close-atom-domain! d))))

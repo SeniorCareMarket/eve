@@ -1,0 +1,1 @@
+:contended {:writers [jvm0 jvm1], :ops-each 40}

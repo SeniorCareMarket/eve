@@ -1,0 +1,10 @@
+(import '[java.nio.channels FileChannel] '[java.nio.file Paths StandardOpenOption])
+(let [path (first *command-line-args*)
+      mode (second *command-line-args*)
+      fc (FileChannel/open (Paths/get path (into-array String []))
+                           (into-array StandardOpenOption [StandardOpenOption/CREATE StandardOpenOption/READ StandardOpenOption/WRITE]))
+      fl (if (= mode "range") (.lock fc 0 4 false) (.lock fc))]
+  (println "JAVA-HOLDING" (str fl)) (flush)
+  (Thread/sleep 25000)
+  (.release fl) (.close fc)
+  (println "JAVA-RELEASED") (flush))

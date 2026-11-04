@@ -1,0 +1,34 @@
+# run f3-node-slab on 604cfdd05 eve tree b954bb27c5261c3181a6500dde046f5f864eb825
+# cmd (in eve/) bash -c node target/eve-test/all.js slab
+# start 2026-10-22 10:50:38 AM ET load 1.36 1.40 1.23 mem-in-use 808 MB
+=== Eve Test Runner ===
+Suite: slab
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+  Resetting slab pools for isolated namespace...
+
+Testing eve.map-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.vec-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.vec-retire-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.reclaim-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.tally-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.list-test
+  Resetting slab pools for isolated namespace...
+
+Testing eve.set-test
+
+Ran 63 tests containing 2863 assertions.
+0 failures, 0 errors.
+# end 2026-10-22 10:50:45 AM ET exit 0 wall 7s peak-mem-in-use 1082 MB peak-process-tree-rss 404 MB load 1.50 1.42 1.24

@@ -1,0 +1,64 @@
+# run c-full-4 on c69579ee8 eve tree 62dbcf974b6f7946b50ccddd8326b2916ed42601
+# cmd (in eve/) bash -c bb eve-media verify --only full
+# start 2026-10-22 3:05:07 PM ET load 2.74 3.28 3.46 mem-in-use 1051 MB
+[eve-media 19:05:22.116043489] === verify run full [:bb :jvm :node :glj :jolt :browser]  
+[eve-media 19:05:22.168528621] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 19:05:22.230611653] run /root/.eve-media/runs/2026-10-22T19-05-22-230 window /dev/shm/eve-media/2026-10-22T19-05-22-230
+[eve-media 19:05:22.618527801] started the supervisor: clje pid 10941
+[eve-media 19:05:59.767886167] the Go member's watcher scans /root/.eve-media/runs/2026-10-22T19-05-22-230/media
+[eve-media 19:05:59.774142244] progress {} coordinator jvm supervisor clje
+[eve-media 19:06:04.996292770] progress {} coordinator jvm supervisor clje
+[eve-media 19:06:10.197131032] progress {} coordinator jvm supervisor clje
+[eve-media 19:06:15.402869855] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:20.576337207] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:25.775745701] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:30.972616338] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:36.177823856] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:41.359199537] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:46.559585924] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:51.741644327] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:06:56.902293836] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:02.074068442] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:07.255764597] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:12.427960164] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:17.605290253] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:22.774736298] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:27.945023767] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:33.108933482] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:38.273749484] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:43.452120609] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:48.633011140] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:53.797882020] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:07:58.967330871] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 19:08:04.140957297] progress {:planned 10} coordinator jvm supervisor clje
+[eve-media 19:08:09.304666795] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:14.495290886] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:19.768378061] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:24.977789300] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:30.136855740] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:35.522633640] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:40.628001377] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:45.803386926] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:50.942085163] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:08:56.227521912] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:09:01.459338081] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:09:06.812432625] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 19:09:11.920542896] progress {:done 4, :planned 6} coordinator jvm supervisor clje
+[eve-media 19:09:17.348031139] progress {:done 4, :planned 6} coordinator jvm supervisor clje
+[eve-media 19:09:22.467120937] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 19:09:27.577527613] progress {:done 6, :planned 4} coordinator jvm supervisor clje
+[eve-media 19:09:32.655481944] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 19:09:37.740928062] progress {:done 9, :planned 1} coordinator jvm supervisor clje
+[eve-media 19:09:43.008316511] progress {:done 10} coordinator jvm supervisor clje
+[eve-media 19:09:45.653610003] dropped /root/.eve-media/runs/2026-10-22T19-05-22-230/media/f11-dropped.wav into the watched folder
+[eve-media 19:09:47.314831742] progress {:done 10, :planned 1} coordinator jvm supervisor clje
+[eve-media 19:09:52.471037106] progress {:done 10, :planned 1} coordinator jvm supervisor clje
+[eve-media 19:09:57.594373116] progress {:done 11} coordinator jvm supervisor clje
+[eve-media 19:09:59.097544705] the dropped file picked up in 1546 ms ; index complete
+[eve-media 19:10:09.233121416] browser check received screenshot /root/.eve-media/runs/2026-10-22T19-05-22-230/page.png 11 of 11 rows
+[eve-media 19:10:12.417816681] complete in 225759 ms
+[eve-media 19:10:12.461787141] report /root/.eve-media/runs/2026-10-22T19-05-22-230/report.edn
+{:kill nil, :drop {:ok true, :file "/root/.eve-media/runs/2026-10-22T19-05-22-230/media/f11-dropped.wav", :id "f11", :found-by "glj", :status :done, :picked-up-ms 1546, :ms 13487}, :checks {:mp4s-h264-aac true, :supervised true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :browser-library-and-requeue true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :watcher-new-file true, :every-runtime-in-meta true}, :ran-on #{"browser" "jolt" "glj" "bb" "jvm" "node"}, :supervisor "clje", :coordinator "jvm", :ok true, :wall-ms 225759, :members #{"browser" "jolt" "glj" "bb" "jvm" "node"}}
+[eve-media 19:10:33.212393720] verify PASSED /root/.eve-media/verify-2026-10-22T19-10-33-211924573.edn
+{:ok true, :rows {:full-checks true, :full-supervised-by-clojerl true}, :run-checks {"full" true}}
+# end 2026-10-22 3:10:33 PM ET exit 0 wall 326s peak-mem-in-use 5579 MB peak-process-tree-rss 5912 MB load 5.58 5.48 4.37

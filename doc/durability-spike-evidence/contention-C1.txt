@@ -1,0 +1,8 @@
+:init-done
+CONTENTION variant=C tag=C1 procs=4 swaps-per-proc=400 sync-every=10
+  worker-1 elapsed-ms=6163.833643
+  worker-2 elapsed-ms=6276.746722
+  worker-3 elapsed-ms=6182.702016
+  worker-4 elapsed-ms=6167.223117
+  makespan-ms=6276.75 aggregate-ops-sec=254.9 aggregate-us-per-op=3923.0
+:value 1600

@@ -1,13 +1,31 @@
 {
   "name": "eve-native",
-  "version": "1.0.0",
+  "version": "0.9.0",
+  "license": "0BSD",
   "description": "Shared-memory persistent data structures for ClojureScript — native addon",
+  "files": [
+    "native/",
+    "binding.gyp",
+    "src/",
+    "adapters/",
+    "!adapters/**/target/",
+    "hosts.edn",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "epl-v10.html",
+    "SECURITY.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build:addon": "node-gyp build",
     "test:compile": "npx shadow-cljs compile eve-test mmap-worker",
+    "test:nbb": "bb test:nbb",
+    "bench:nbb": "bb bench:nbb",
     "install": "node-gyp-build"
   },
   "dependencies": {
+    "nbb": "^1.6.214",
     "node-addon-api": "^8.6.0",
     "node-gyp-build": "^4.8.1"
   },

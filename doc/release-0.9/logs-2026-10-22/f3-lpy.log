@@ -1,0 +1,213 @@
+# run f3-lpy on fe9dc0c1d eve tree 37382f7ad3d70e652a95de6442b66f649c6e511f
+# cmd (in eve/) bash -c (bash /tmp/claude-0/-home-user-atom-broker/bb40b66a-ff3f-54be-83cd-8f646ede911f/scratchpad/lpy-sampler.sh > /home/user/atom.broker/eve/doc/release-0.9/logs-2026-10-22/f3-lpy-threads.log 2>&1 &); bb test:lpy
+# start 2026-10-22 9:28:55 AM ET load 0.10 0.12 0.05 mem-in-use 567 MB
+ok eve.hamt-util-test/get-index-rows 0.0s
+ok eve.hamt-util-test/last-level-has-two-bits 0.0s
+ok eve.hamt-util-test/mask-hash-reads-the-32-bit-pattern 0.0s
+ok eve.hamt-util-test/node-bit-rows 0.0s
+ok eve.hamt-util-test/popcount32-rows 0.0s
+Ran eve.hamt-util-test
+eve-bytes fixtures on lpy: 67 rows, 4 skipped
+ok eve.eve-bytes-fixture-test/eve-bytes-fixtures 1.1s
+ok eve.eve-bytes-fixture-test/key-hash-fixtures 0.1s
+ok eve.eve-bytes-fixture-test/long-symbol-has-no-encoding 0.2s
+Ran eve.eve-bytes-fixture-test
+ok eve.deftype.type-id-test/the-same-ids-on-every-host 0.0s
+ok eve.deftype.type-id-test/types-that-share-a-type-id 0.5s
+Ran eve.deftype.type-id-test
+ok eve.deftype.rb-tree-test/black-height-test 4.9s
+ok eve.deftype.rb-tree-test/duplicate-insert-test 0.1s
+ok eve.deftype.rb-tree-test/empty-tree-test 0.0s
+ok eve.deftype.rb-tree-test/find-test 0.0s
+ok eve.deftype.rb-tree-test/height-bound-test 13.3s
+ok eve.deftype.rb-tree-test/invariants-medium-test 12.9s
+ok eve.deftype.rb-tree-test/invariants-reverse-test 5.5s
+ok eve.deftype.rb-tree-test/invariants-small-test 0.7s
+ok eve.deftype.rb-tree-test/keyword-values-test 0.1s
+ok eve.deftype.rb-tree-test/member-test 0.2s
+ok eve.deftype.rb-tree-test/print-test 1.0s
+ok eve.deftype.rb-tree-test/rb-delete-test 49.7s
+ok eve.deftype.rb-tree-test/single-insert-test 0.0s
+ok eve.deftype.rb-tree-test/sorted-seq-test 0.5s
+ok eve.deftype.rb-tree-test/sorted-set-conj-test 0.0s
+ok eve.deftype.rb-tree-test/sorted-set-construction-test 0.4s
+ok eve.deftype.rb-tree-test/sorted-set-disj-test 0.9s
+ok eve.deftype.rb-tree-test/sorted-set-empty-test 0.0s
+ok eve.deftype.rb-tree-test/sorted-set-equality-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-in-an-atom-test 0.5s
+ok eve.deftype.rb-tree-test/sorted-set-keywords-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-lookup-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-meta-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-print-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-strings-test 0.1s
+ok eve.deftype.rb-tree-test/string-values-test 0.1s
+ok eve.deftype.rb-tree-test/three-insert-test 0.1s
+ok eve.deftype.rb-tree-test/two-insert-test 0.0s
+Ran eve.deftype.rb-tree-test
+ok eve.numeric-tags-test/big-integers-round-trip 5.2s
+ok eve.numeric-tags-test/decimals-round-trip 9.8s
+ok eve.numeric-tags-test/one-key-for-equal-integers 0.8s
+ok eve.numeric-tags-test/ratios-round-trip 7.2s
+Ran eve.numeric-tags-test
+ok eve.collection-hash-test/a-map-built-by-its-constructors-holds-its-entries 0.0s
+ok eve.collection-hash-test/an-eve-collection-hashes-as-the-host-value 0.1s
+Ran eve.collection-hash-test
+ok eve.reference-tag-test/a-closure-reads-back-by-identity 1.7s
+ok eve.reference-tag-test/a-foreign-or-unknown-reference-is-refused 0.5s
+ok eve.reference-tag-test/an-mmap-domain-refuses-a-reference 0.5s
+ok eve.reference-tag-test/other-reference-values 2.6s
+ok eve.reference-tag-test/the-wire-refuses-a-reference 0.0s
+Ran eve.reference-tag-test
+ok eve.big-value-test/a-node-past-64-kb-of-values 6.5s
+ok eve.big-value-test/a-value-out-of-line 0.5s
+Ran eve.big-value-test
+ok eve.sorted-coll-test/a-larger-map-stays-ordered-through-churn 109.4s
+ok eve.sorted-coll-test/comparator-sorted-map-and-set-order 1.5s
+ok eve.sorted-coll-test/default-sorted-map-dissoc-and-replace 4.7s
+ok eve.sorted-coll-test/default-sorted-map-orders-and-answers 2.8s
+ok eve.sorted-coll-test/default-sorted-set-conj-disj 2.4s
+ok eve.sorted-coll-test/equal-to-clojure-s-own 1.1s
+ok eve.sorted-coll-test/metadata-and-empty-keep-the-comparator 1.2s
+ok eve.sorted-coll-test/mixed-keys 1.4s
+ok eve.sorted-coll-test/one-canonical-tree 19.1s
+ok eve.sorted-coll-test/rank-and-nth 4.6s
+ok eve.sorted-coll-test/subseq-and-rsubseq 3.0s
+ok eve.sorted-coll-test/transients-round-trip-order-and-contents 4.8s
+Ran eve.sorted-coll-test
+ok eve.keyring-test/a-key-not-stored-is-not-in-the-ring 0.7s
+ok eve.keyring-test/an-encrypted-domain-is-shared 0.5s
+ok eve.keyring-test/f9-1-and-2-an-encrypted-domain-writes-closes-and-reads-back 1.1s
+ok eve.keyring-test/f9-3-the-off-posture-is-plaintext-and-reads-back 0.4s
+ok eve.keyring-test/f9-4-an-explicit-enable-with-the-program-s-key 0.7s
+ok eve.keyring-test/the-epoch-key-ring 0.0s
+ok eve.keyring-test/the-fixtures 0.0s
+ok eve.keyring-test/the-record-is-enc-vs-s 0.0s
+Ran eve.keyring-test
+ok eve.value-buffer-test/a-closure-s-captures 0.0s
+ok eve.value-buffer-test/an-accumulator-grows-in-place-then-by-doubling 0.2s
+Ran eve.value-buffer-test
+ok eve.vec-retire-test/a-fresh-map-or-set-written-keeps-only-its-tree 39.4s
+ok eve.vec-retire-test/an-int32-field-holds-an-offset-past-2-31 3.9s
+ok eve.vec-retire-test/conj-pop-assoc-across-boundaries 101.3s
+ok eve.vec-retire-test/rebuilt-vectors-of-every-depth 200.6s
+ok eve.vec-retire-test/swap-shrinks-a-nested-vector-across-levels 3.9s
+Ran eve.vec-retire-test
+ok eve.reclaim-test/a-constructor-keeps-only-its-tree 70.9s
+ok eve.reclaim-test/a-list-walk-aligns-the-chains 0.6s
+ok eve.reclaim-test/a-transient-build-keeps-its-tree 133.6s
+ok eve.reclaim-test/a-transient-from-a-held-value-frees-only-its-own 20.0s
+ok eve.reclaim-test/a-vector-pop-across-a-trie-level-keeps-only-its-vector 19.2s
+ok eve.reclaim-test/int-map-walk-and-writes 18.9s
+ok eve.reclaim-test/rb-tree-walk-and-writes 108.3s
+ok eve.reclaim-test/sorted-walk-and-writes 64.2s
+Ran eve.reclaim-test
+ok eve.tally-test/a-new-value-stored-twice-in-one-write 11.4s
+ok eve.tally-test/a-piece-of-one-atom-stored-in-another 12.7s
+ok eve.tally-test/a-transient-storing-its-own-value-twice 11.6s
+ok eve.tally-test/a-value-at-two-keys 12.1s
+ok eve.tally-test/a-value-made-from-another-and-stored-beside-it 34.1s
+ok eve.tally-test/plain-data-holding-an-eve-value-reports-the-store 0.5s
+Ran eve.tally-test
+ok eve.domain-open-test/a-reopened-domain-joins-what-it-wrote 0.5s
+ok eve.domain-open-test/one-process-creates-the-file 0.0s
+Ran eve.domain-open-test
+ok eve.deftype.int-map-test/bulk-insert-200-test 2.1s
+ok eve.deftype.int-map-test/bulk-insert-test 1.0s
+ok eve.deftype.int-map-test/conj-test 0.0s
+ok eve.deftype.int-map-test/contains-test 0.0s
+ok eve.deftype.int-map-test/dissoc-test 0.0s
+ok eve.deftype.int-map-test/dissoc-to-empty-test 0.0s
+ok eve.deftype.int-map-test/empty-map-test 0.0s
+ok eve.deftype.int-map-test/equality-test 0.0s
+ok eve.deftype.int-map-test/ifn-test 0.0s
+ok eve.deftype.int-map-test/int-map-in-an-atom-test 0.5s
+ok eve.deftype.int-map-test/into-test 0.0s
+ok eve.deftype.int-map-test/kv-reduce-test 0.0s
+ok eve.deftype.int-map-test/merge-test 0.0s
+ok eve.deftype.int-map-test/merge-with-test 0.0s
+ok eve.deftype.int-map-test/meta-test 0.0s
+ok eve.deftype.int-map-test/multiple-assoc-test 0.0s
+ok eve.deftype.int-map-test/negative-keys-test 0.0s
+ok eve.deftype.int-map-test/overwrite-test 0.0s
+ok eve.deftype.int-map-test/range-test 0.1s
+ok eve.deftype.int-map-test/reduce-test 0.0s
+ok eve.deftype.int-map-test/seq-test 0.0s
+ok eve.deftype.int-map-test/single-assoc-test 0.0s
+ok eve.deftype.int-map-test/update-test 0.0s
+Ran eve.deftype.int-map-test
+ok eve.thread-host-test/a-dead-thread-is-never-silent 0.0s
+ok eve.thread-host-test/a-thread-sends-to-itself 0.0s
+ok eve.thread-host-test/a-thread-starts-a-thread 0.0s
+ok eve.thread-host-test/attempt-and-error-data 0.0s
+ok eve.thread-host-test/binding-frames 0.0s
+ok eve.thread-host-test/closures-in-messages 0.0s
+ok eve.thread-host-test/eval-a-form 0.0s
+ok eve.thread-host-test/receive-times-out 0.1s
+eve.thread-host round trips: :lpy ms per 100 (5 batches, sorted): [20 21 25 27 27]
+ok eve.thread-host-test/round-trips-take-under-a-millisecond 0.1s
+ok eve.thread-host-test/send-and-receive 0.0s
+ok eve.thread-host-test/start-n-threads 0.0s
+ok eve.thread-host-test/stop-ends-each-thread 0.0s
+ok eve.thread-host-test/the-contract-answers 0.0s
+Ran eve.thread-host-test
+ok eve.thread-test/a-dead-threads-descriptors-are-adopted 0.1s
+ok eve.thread-test/cached-pool-grows-and-keeps-alive 0.5s
+ok eve.thread-test/conveyance-across-the-pool 0.1s
+ok eve.thread-test/default-pools 0.1s
+ok eve.thread-test/descriptor-state-machine 0.0s
+ok eve.thread-test/executor-protocol 0.7s
+ok eve.thread-test/fixed-pool-threads 0.2s
+ok eve.thread-test/per-task-pool-runs-tasks-at-once 0.6s
+eve.thread round trips: :lpy :local ms per 100 futures (median of 5): 520 · the adapter alone, ms per 100: 16 · a host operation, µs: 165 · bar: 4950
+ok eve.thread-test/round-trips 3.4s
+eve.thread S1 identity: :lpy [[:binding 10] [:binding-task [10 20 30]] [:error [false "eve.thread: task failed: boom" {:x 7}]] [:future 3] [:future-local 21] [:laziness 7] [:nested 7] [:nested-pool-of-1 6] [:nested-task 112] [:pcalls [1 4]] [:pmap-2colls [11 22 33]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [3 6 9 12]] [:pvalues [3 12 "ab"]] [:with-pool [:p :q :p]]]
+ok eve.thread-test/s1-identity-rows 16.4s
+ok eve.thread-test/scheduled-pool-timer 1.7s
+ok eve.thread-test/single-pool-fifo 0.1s
+ok eve.thread-test/the-future-is-an-eve-type 0.6s
+ok eve.thread-test/the-helping-deref-and-blocked-state 0.7s
+Ran eve.thread-test
+ok eve.thread-meta-test/a-claim-takes-only-what-the-claimer-can-run 0.0s
+ok eve.thread-meta-test/a-runtime-that-leaves-or-expires 0.0s
+ok eve.thread-meta-test/a-slow-runtime-stretches-its-lease 0.0s
+ok eve.thread-meta-test/a-tasks-form-hash-is-the-same-on-every-host 0.0s
+ok eve.thread-meta-test/after-and-scopes 0.0s
+ok eve.thread-meta-test/blocked-work-moves-only-as-a-restart-after-its-lease 0.0s
+ok eve.thread-meta-test/bring-up-in-dependency-order 0.0s
+ok eve.thread-meta-test/claim-is-first-in-first-out-and-batched 0.0s
+ok eve.thread-meta-test/descriptor-moves-are-the-tables-only 12.7s
+ok eve.thread-meta-test/election-by-lease 0.0s
+ok eve.thread-meta-test/leases-at-the-grain-of-the-thread 0.0s
+ok eve.thread-meta-test/pools-in-the-registry 0.0s
+ok eve.thread-meta-test/settled-stays-settled 0.0s
+ok eve.thread-meta-test/transports-and-the-upgrade 0.0s
+Ran eve.thread-meta-test
+ok eve.thread-domain-test/a-dead-runtimes-work-is-adopted-on-lease-expiry 94.4s
+ok eve.thread-domain-test/bring-up-is-a-desired-set-claimed-in-dependency-order 22.7s
+ok eve.thread-domain-test/cancel-and-shutdown 5.0s
+ok eve.thread-domain-test/election-by-lease 21.5s
+ok eve.thread-domain-test/the-meta-atom-is-a-second-atom-of-the-domain 1.2s
+ok eve.thread-domain-test/the-upgrade-from-the-network-rung-to-the-disk 19.2s
+ok eve.thread-domain-test/two-runtimes-one-registry-one-pool 220.8s
+Ran eve.thread-domain-test
+ok eve.thread-net-test/a-domain-is-placed-in-the-window-by-configuration-only 9.8s
+ERROR in eve.thread-net-test/a-domain-pool-over-a-network-atom-at-a-broker basilisp.lang.exception.ExceptionInfo(eve.thread.domain: the ticker did not answer, {:awaiting :ticker-up})
+ERROR in eve.thread-net-test/a-gateway-serves-the-disk-atom-on-eve-net's-routes basilisp.lang.exception.ExceptionInfo(eve.thread.domain: the ticker did not answer, {:awaiting :pumps-started})
+ERROR in eve.thread-net-test/doorbells-ring-and-a-futex-wait-wakes basilisp.lang.exception.ExceptionInfo(eve.thread.domain: pool :g's threads did not start, {:pool :g, :tids ["102"]})
+ERROR in eve.thread-net-test/the-drivers-collect-the-same-results basilisp.lang.exception.ExceptionInfo(eve.thread.domain: pool :g's threads did not start, {:pool :g, :tids ["104"]})
+Ran eve.thread-net-test
+ok eve.thread-fold-test/=>>-equals-->>-on-every-registered-transducer 21.1s
+ok eve.thread-fold-test/=>>-runs-on-the-pool-with-the-bindings-of-the-call 0.2s
+ok eve.thread-fold-test/chunks-are-sized-from-the-measured-swap-cost 5.4s
+ok eve.thread-fold-test/every-registered-transducer-means-what-clojure-means-here 2.4s
+ok eve.thread-fold-test/fold-on-a-threadless-or-single-pool 0.8s
+ok eve.thread-fold-test/fold-over-a-pool-in-a-process 19.8s
+ok eve.thread-fold-test/the-parallel-set-is-corrected 0.4s
+Ran eve.thread-fold-test
+ERROR in eve.thread-fold-group-test/=>>-on-a-group basilisp.lang.exception.ExceptionInfo(eve.thread.domain: pool :g's threads did not start, {:pool :g, :tids ["106" "107"]})
+ERROR in eve.thread-fold-group-test/fold-on-a-group basilisp.lang.exception.ExceptionInfo(eve.thread.domain: pool :g's threads did not start, {:pool :g, :tids ["129" "130"]})
+ERROR in eve.thread-fold-group-test/the-chunks-of-a-group-are-sized-from-its-members-measured-swaps basilisp.lang.exception.ExceptionInfo(eve.thread.domain: pool :g's threads did not start, {:pool :g, :tids ["133" "134"]})
+Ran eve.thread-fold-group-test
+:summary {:pass 4350, :test 180, :fail 0, :error 7}
+Error while executing task: test:lpy
+# end 2026-10-22 10:25:21 AM ET exit 1 wall 3386s peak-mem-in-use 1631 MB peak-process-tree-rss 1169 MB load 1.31 1.23 1.09

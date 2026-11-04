@@ -1,0 +1,50 @@
+--- a/pkg/lang/iteration.go
++++ b/pkg/lang/iteration.go
+@@ -64,6 +64,29 @@
+ 		return NewChar(r), true
+ 	}
+ 
++	// eve's glj-eve build: a Go slice or array (a byte array's []byte, a
++	// []any) is indexed in place, before the seq walk below — which took n
++	// steps and allocated a SliceSeq a step, so (get bs i) and (nth bs i) over
++	// a byte array were quadratic and the collector's work.
++	switch x := x.(type) {
++	case []byte:
++		if n < 0 || n >= len(x) {
++			return nil, false
++		}
++		return x[n], true
++	case []any:
++		if n < 0 || n >= len(x) {
++			return nil, false
++		}
++		return x[n], true
++	}
++	if rv := reflect.ValueOf(x); rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
++		if n < 0 || n >= rv.Len() {
++			return nil, false
++		}
++		return rv.Index(n).Interface(), true
++	}
++
+ 	if seq := Seq(x); seq != nil {
+ 		if seq == x {
+ 			panic(fmt.Errorf("unexpected Seq result equal to input"))
+--- a/pkg/lang/sliceseq.go
++++ b/pkg/lang/sliceseq.go
+@@ -54,6 +54,15 @@
+ 	return s.v.Index(s.i).Interface()
+ }
+ 
++// Nth indexes the slice from the seq's position (Nther: nth on a seq over a
++// slice in one step, not n; eve's glj-eve build).
++func (s *SliceSeq) Nth(n int) (any, bool) {
++	if n < 0 || s.i+n >= s.v.Len() {
++		return nil, false
++	}
++	return s.v.Index(s.i + n).Interface(), true
++}
++
+ func (s *SliceSeq) Next() ISeq {
+ 	nxt := s.i + 1
+ 	if nxt >= s.v.Len() {

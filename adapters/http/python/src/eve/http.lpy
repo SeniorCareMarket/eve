@@ -1,0 +1,44 @@
+(ns eve.http
+  "eve's http feature (adapters/README.md) over Python's urllib — basilisp. `platform` answers what this host lends
+   eve.net (eve/src/eve/net/run.cljc): {:request f}, f taking {:method :url :headers :body :as :body-as} and answering
+   {:status :headers :body} SYNCHRONOUSLY, as on every host. The body conventions are eve.net.run's: :body-as :b64
+   sends the bytes its base64 :body names, :body-as :bytes the byte array :body is; :as :b64 answers the response body
+   as base64, :as :bytes as a byte array (eve.encoding's bytearray, which eve.codec reads); otherwise bodies are UTF-8
+   text. A non-2xx answer is an answer (urllib raises it as an HTTPError, which carries the response); a transport
+   failure answers {:error message}, as eve.net.wire reads it. `request-all` runs a batch on a thread pool and blocks
+   until every answer is in."
+  (:import base64 concurrent.futures urllib.error urllib.request))
+
+(def TIMEOUT-S 120)
+
+(defn- answer [resp as]
+  (let [raw (.read resp)]
+    {:status (.-code resp)
+     :headers (into {} (map (fn [kv] [(.lower (first kv)) (second kv)]) (.items (.-headers resp))))
+     :body (case as :b64 (.decode (base64/b64encode raw) "ascii") :bytes (python/bytearray raw) (.decode raw "utf-8"))}))
+
+(defn request
+  [{:keys [method url headers body as body-as]}]
+  (try
+    (let [data (cond (nil? body) nil
+                     (= :b64 body-as) (base64/b64decode body)
+                     (= :bytes body-as) (python/bytes body)
+                     :else (.encode body "utf-8"))
+          req (urllib.request/Request url ** :data data :method (or method "GET"))]
+      (doseq [[k v] headers] (.add-header req (name k) (str v)))
+      (try
+        (answer (urllib.request/urlopen req ** :timeout TIMEOUT-S) as)
+        (catch urllib.error/HTTPError e
+          (answer e as))))
+    (catch python/Exception e
+      {:error (str e)})))
+
+(def ^:private pool (delay (concurrent.futures/ThreadPoolExecutor ** :max-workers 32)))
+
+(defn request-all
+  "every request run at once on a thread pool (urllib releases the GIL while it waits on the socket); the caller blocks
+   until all are in"
+  [reqs]
+  (vec (.map @pool request (python/list reqs))))
+
+(defn platform [] {:request request :request-all request-all})

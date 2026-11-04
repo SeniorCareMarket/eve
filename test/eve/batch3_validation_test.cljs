@@ -11,6 +11,7 @@
   (:require
    [cljs.test :refer-macros [deftest testing is]]
    [eve.atom :as a]
+   [eve.sab :as sab]
    [eve.wasm-mem :as wasm]
    [eve.map :as sm]
    [eve.set :as ss]))
@@ -28,7 +29,7 @@
   (ss/reset-pools!)
   (set! a/*global-atom-instance*
         (a/atom-domain {}))
-  (a/get-env a/*global-atom-instance*))
+  (sab/get-env a/*global-atom-instance*))
 
 ;;-----------------------------------------------------------------------------
 ;; Commit 18: core.clj macro fix — cached wasm-mem views
@@ -128,14 +129,14 @@
 
 (deftest init-worker-cache-exists-test
   (testing "init-worker-cache! function is defined (commit 22)"
-    (is (fn? a/init-worker-cache!)
+    (is (fn? sab/init-worker-cache!)
         "init-worker-cache! should be a function in atom namespace")))
 
 (deftest init-worker-cache-sets-views-test
   (testing "init-worker-cache! correctly sets cached views (commit 22)"
     (let [env (fresh-env)]
       ;; Call init-worker-cache! as a worker would
-      (a/init-worker-cache! env)
+      (sab/init-worker-cache! env)
       ;; After calling, swap!/deref should still work (cached views set correctly)
       (swap! a/*global-atom-instance* assoc :test-key 42)
       (is (= 42 (get @a/*global-atom-instance* :test-key))

@@ -1,3 +1,8 @@
+> **Historical record** — February 2026 runs of a stock-Clojure baseline beside pre-0.1.0 eve (the SharedArrayBuffer
+> atom before the slab-io seam, the codec unification and the adapter split); no eve code runs in these numbers.
+> Never cite as eve's performance. Current authority: eve 0.9's performance suite (`test/eve/perf_suite.cljc`), its
+> results in `doc/hosts/perf-results.edn` and the tables in `doc/hosts/` (`doc/release-0.9/RELEASE-CHECKLIST.md` §12).
+
 # Stock JVM Clojure — Contention Scaling
 
 ## Metadata

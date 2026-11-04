@@ -186,3 +186,26 @@
                                (is (= i (nth v i))))
                              :done)))]
       (is (= :done result)))))
+
+(deftest transient-test
+  (testing "an eve vector's transient: conj!, assoc!, pop!, persistent!, and
+            into through it (keeping meta's absence)"
+    (let [a (e/atom ::transient-test {})
+          result (swap! a (fn [_]
+                            (let [v (sv/eve-vec [1 2 3])
+                                  t (-> (transient v) (conj! 4) (assoc! 0 :a) (pop!))
+                                  p (persistent! t)]
+                              (is (= [:a 2 3] p))
+                              (is (= 3 (count p)))
+                              (is (= [1 2 3 4 5] (into v [4 5])))
+                              (is (= [1 2 3] v))
+                              :done)))]
+      (is (= :done result)))))
+
+(deftest print-test
+  (testing "an eve vector prints as ClojureScript prints a vector"
+    (let [a (e/atom ::print-test {})
+          result (swap! a (fn [_]
+                            (is (= "[1 2 3]" (pr-str (sv/eve-vec [1 2 3]))))
+                            :done))]
+      (is (= :done result)))))

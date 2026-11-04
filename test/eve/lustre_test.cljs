@@ -3,6 +3,7 @@
    Requires native addon at build/Release/mmap_cas.node (npm run build:addon).
    Tests run on local ext4 — fcntl works locally too, just faster than on Lustre."
   (:require [cljs.test :refer [deftest testing is]]
+            [eve.region :as region]
             [eve.mem :as mem]
             [eve.atom :as atom]))
 
@@ -22,20 +23,20 @@
 (deftest test-lustre-open-creates-file
   (let [path (tmp-path "create")]
     (try
-      (mem/open-lustre-region path 4096)
+      (region/open-lustre-region path 4096)
       (is (true? (.existsSync fs path)))
       (finally (cleanup! path)))))
 
 (deftest test-lustre-byte-length
   (let [path (tmp-path "bl")]
     (try
-      (is (= 4096 (mem/-byte-length (mem/open-lustre-region path 4096))))
+      (is (= 4096 (mem/-byte-length (region/open-lustre-region path 4096))))
       (finally (cleanup! path)))))
 
 (deftest test-lustre-store-load-roundtrip
   (let [path (tmp-path "sl")]
     (try
-      (let [r (mem/open-lustre-region path 4096)]
+      (let [r (region/open-lustre-region path 4096)]
         (mem/-store-i32! r 0 42)
         (is (= 42 (mem/-load-i32 r 0)))
         (mem/-store-i32! r 0 -1)
@@ -48,7 +49,7 @@
 (deftest test-lustre-cas-success
   (let [path (tmp-path "cas-ok")]
     (try
-      (let [r (mem/open-lustre-region path 4096)]
+      (let [r (region/open-lustre-region path 4096)]
         (mem/-store-i32! r 0 10)
         (let [old (mem/-cas-i32! r 0 10 20)]
           (is (= 10 old) "CAS returns old value on success")
@@ -58,7 +59,7 @@
 (deftest test-lustre-cas-failure
   (let [path (tmp-path "cas-fail")]
     (try
-      (let [r (mem/open-lustre-region path 4096)]
+      (let [r (region/open-lustre-region path 4096)]
         (mem/-store-i32! r 0 10)
         (let [old (mem/-cas-i32! r 0 99 20)]
           (is (= 10 old) "CAS returns old value on failure")
@@ -68,7 +69,7 @@
 (deftest test-lustre-add-sub
   (let [path (tmp-path "addsub")]
     (try
-      (let [r (mem/open-lustre-region path 4096)]
+      (let [r (region/open-lustre-region path 4096)]
         (mem/-store-i32! r 0 100)
         (let [old-add (mem/-add-i32! r 0 25)]
           (is (= 100 old-add) "add returns old value")
@@ -81,7 +82,7 @@
 (deftest test-lustre-exchange
   (let [path (tmp-path "xchg")]
     (try
-      (let [r (mem/open-lustre-region path 4096)]
+      (let [r (region/open-lustre-region path 4096)]
         (mem/-store-i32! r 0 42)
         (let [old (mem/-exchange-i32! r 0 99)]
           (is (= 42 old) "exchange returns old value")
@@ -91,7 +92,7 @@
 (deftest test-lustre-i64-ops
   (let [path (tmp-path "i64")]
     (try
-      (let [r (mem/open-lustre-region path 4096)]
+      (let [r (region/open-lustre-region path 4096)]
         ;; store/load
         (mem/-store-i64! r 0 1000000)
         (is (= 1000000 (mem/-load-i64 r 0)))
@@ -116,7 +117,7 @@
 (deftest test-lustre-byte-io
   (let [path (tmp-path "bytes")]
     (try
-      (let [r (mem/open-lustre-region path 4096)
+      (let [r (region/open-lustre-region path 4096)
             src (js/Uint8Array. #js [1 2 3 4 5])]
         (mem/-write-bytes! r 100 src)
         (let [dst (mem/-read-bytes r 100 5)]
@@ -129,7 +130,7 @@
   (testing "imr-bitmap-alloc-cas! and imr-bitmap-free! work through LustreMmapRegion"
     (let [path (tmp-path "bitmap")]
       (try
-        (let [r (mem/open-lustre-region path 4096)
+        (let [r (region/open-lustre-region path 4096)
               bm-off 64]  ; bitmap starts at byte 64
           ;; Clear bitmap word
           (mem/-store-i32! r bm-off 0)

@@ -1,0 +1,15 @@
+# run f3-node-obj on 49553caf9 eve tree 6c9d3a2357a7e8f368bd2f8732d3f1ba97ecbb61
+# cmd (in eve/) bash -c node target/eve-test/all.js obj
+# start 2026-10-22 10:49:30 AM ET load 2.85 1.60 1.28 mem-in-use 709 MB
+=== Eve Test Runner ===
+Suite: obj
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.obj-test
+
+Ran 27 tests containing 2075 assertions.
+0 failures, 0 errors.
+# end 2026-10-22 10:49:32 AM ET exit 0 wall 2s peak-mem-in-use 798 MB peak-process-tree-rss 153 MB load 2.70 1.59 1.27

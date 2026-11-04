@@ -3,8 +3,13 @@
    Proves each fix correctly targets the slab implementation."
   (:require
    [cljs.test :refer-macros [deftest testing is]]
+   [eve.deftype-proto.coalesc :as coalesc]
+   [eve.deftype-proto.data :as d]
    [eve.deftype-proto.wasm :as wasm]
    [eve.map :as sm]
+   [eve.mem :as mem]
+   [eve.process-slab :as ps]
+   [eve.region :as region]
    [eve.util :as util]))
 
 ;;-----------------------------------------------------------------------------
@@ -131,3 +136,61 @@
       (is (= 1 (get hash-map :m1-t))
           "Material type should round-trip"))))
 
+;;-----------------------------------------------------------------------------
+;; 2026-10-20: a slab in a growable SharedArrayBuffer starts small and grows.
+;; A renderer process caps the SharedArrayBuffer bytes it holds by their length
+;; (Chromium: ~16 GB); a kernel's slabs at their full capacities were ~5 GB.
+;;-----------------------------------------------------------------------------
+
+(deftest create-slab-memory-growable-test
+  (testing "given initial-bytes, a SharedArrayBuffer of initial-bytes whose maximum is total-bytes"
+    (if-not (wasm/growable-sabs?)
+      (is true "no growable SharedArrayBuffers here")
+      ;; past a WebAssembly.Memory's maximum: the SharedArrayBuffer path whether or not the module compiled
+      (let [total (* 1100 1024 1024)
+            m     (wasm/create-slab-memory total (* 64 1024))]
+        (is (instance? js/SharedArrayBuffer m))
+        (is (true? (.-growable m)))
+        (is (= (* 64 1024) (.-byteLength m)))
+        (is (= total (.-maxByteLength m)))))))
+
+(deftest a-growable-slab-grows-past-its-blocks-test
+  (testing "allocating past a growable slab's free blocks grows it, and its header never counts past its buffer"
+    (let [class-idx 0
+          inst      (wasm/get-slab-instance class-idx)
+          ^js b     (.-buffer ^js (:u8 inst))
+          r         (:region inst)
+          total     #(mem/load-i32 r d/SLAB_HDR_TOTAL_BLOCKS)
+          fits?     #(<= (+ (mem/load-i32 r d/SLAB_HDR_DATA_OFFSET) (* (total) (d/slab-size class-idx)))
+                         (.-byteLength b))
+          n         (+ 16 (mem/load-i32 r d/SLAB_HDR_FREE_COUNT))]
+      (if (or (not (.-growable b)) (> n (* 1024 1024)))
+        (is true "class 0 is not a small growable slab here")
+        (let [before (total)
+              offs   (into [] (repeatedly n #(ps/alloc-offset 32)))]
+          (is (> (total) before) "the slab grew")
+          (is (fits?) "its header's total fits its buffer")
+          (is (= n (count (set offs))) "every block distinct")
+          (doseq [o offs] (ps/free! o))
+          (is (fits?)))))))
+
+(deftest a-growable-overflow-region-grows-test
+  (testing "an overflow allocation past the class-6 region's data grows it, its tail one free block"
+    (let [inst  (wasm/get-slab-instance 6)
+          ^js b (when inst (.-buffer ^js (:u8 inst)))
+          r     (:region inst)]
+      (if-not (and b (.-growable b))
+        (is true "the overflow region is not a growable SharedArrayBuffer here")
+        (let [before (coalesc/current-data-size r)
+              size   (* 3 before)
+              off    (ps/alloc-offset size)]
+          (is (>= (coalesc/current-data-size r) (* 4 before)) "the region grew")
+          (is (<= (+ (mem/load-i32 r d/SLAB_HDR_DATA_OFFSET) (coalesc/current-data-size r)) (.-byteLength b)))
+          (is (true? (ps/free! off))))))))
+
+(deftest a-sab-region-holds-an-i64-test
+  (testing "JsSabRegion's emulated i64: the high word is the value's, not the low word again"
+    (let [r (region/make-js-sab-region 64)]
+      (doseq [v [0 1 65536 (* 1024 1024 1024) 0xFFFFFFFF 0x100000000 (* 5 0x100000000) (+ 7 (* 3 0x100000000))]]
+        (mem/-store-i64! r 8 v)
+        (is (= v (mem/-load-i64 r 8)) (str v))))))

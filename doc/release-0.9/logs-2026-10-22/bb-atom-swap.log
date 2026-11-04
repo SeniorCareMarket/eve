@@ -1,0 +1,31 @@
+# run bb-atom-swap on ce06eb343 eve tree 2f28d07fc634d032ed416b25f4348ddc6334634b
+# cmd (in eve/) bb run atom-swap
+# start 2026-10-21 10:11:39 PM ET load 0.65 0.96 0.98 mem-in-use 621 MB
+=== Babashka mmap-atom smoke test ===
+
+Domain open:   47.8 ms
+Atom create:   3.7 ms
+
+--- Scalar swaps ---
+100 scalar swaps: 12.6 ms (126 us/swap)
+Counter value: 100
+
+--- Map assoc swaps ---
+50 map assoc swaps: 35.4 ms (0.7 ms/swap)
+Map size: 50
+Sample keys: (:k26 :k43 :k47 :k19 :k8)
+
+--- Deref throughput ---
+1000 map derefs: 678.3 ms (678 us/deref)
+
+--- Set swap ---
+Set value: #{:beta :gamma :alpha}
+
+--- List swap ---
+List value: (:third :second :first)
+
+--- Vec swap ---
+Vec value: ["a" "b" "c"]
+
+Domain closed. Done!
+# end 2026-10-21 10:11:40 PM ET exit 0 wall 1s peak-mem-in-use 622 MB load 0.65 0.96 0.98

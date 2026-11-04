@@ -2,12 +2,19 @@
 
 Thank you for your interest in contributing to Eve!
 
+## The changelog
+
+Every user-visible change — a public namespace's behavior, a host added or changed, a format or wire change, a fixed
+defect an adopter could have hit — adds a line under `## [Unreleased]` in `CHANGELOG.md` in the same commit
+(*Added*, *Changed*, *Removed*, *Fixed*). A release moves those lines under its version. (0.1.0 to 0.9 went seven
+months without an entry;.)
+
 ## Development Setup
 
 ### Prerequisites
 
 - Clojure CLI (1.11+)
-- Java 21+ (for JVM persistent atoms via Panama FFM)
+- Java 21+ (the JVM's regions: `MappedByteBuffer` with `VarHandle` atomics)
 - Node.js (18+)
 - npm
 - A C++ compiler (for the native addon)
@@ -94,7 +101,7 @@ src/eve/
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Write tests for new functionality
-4. Ensure all tests pass (see CLAUDE.md for the full green baseline)
+4. Ensure all tests pass (see doc/testing.md for the full green baseline)
 5. Update documentation if needed
 6. Submit a pull request
 
@@ -109,4 +116,4 @@ Please include:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Zero-Clause BSD License (0BSD).

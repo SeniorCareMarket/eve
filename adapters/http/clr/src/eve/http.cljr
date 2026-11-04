@@ -1,0 +1,53 @@
+(ns eve.http
+  "eve's http feature (adapters/README.md) over .NET's System.Net.Http — ClojureCLR. `platform` answers what this host
+   lends eve.net (eve/src/eve/net/run.cljc): {:request f :request-all g}, f taking {:method :url :headers :body :as
+   :body-as} and answering {:status :headers :body} SYNCHRONOUSLY (HttpClient.Send), as on every host; g sends a batch
+   at once (SendAsync) and blocks until every answer is in. The body conventions are eve.net.run's: :body-as :b64 sends
+   the bytes its base64 :body names, :body-as :bytes the byte array :body is; :as :b64 answers the response body as
+   base64, :as :bytes as a byte array (eve.encoding's, which eve.codec reads); otherwise bodies are UTF-8 text. A
+   header .NET files under the content (Content-Type) goes there. A transport failure answers {:error message}."
+  (:import [System.Net.Http HttpClient HttpRequestMessage HttpMethod ByteArrayContent]
+           [System Convert Uri]
+           [System.Text Encoding]))
+
+(def ^:private client (delay (HttpClient.)))
+
+(defn- build [{:keys [method url headers body body-as]}]
+  (let [m (HttpRequestMessage. (HttpMethod. (or method "GET")) (Uri. url))
+        bytes (cond (nil? body) nil
+                    (= :b64 body-as) (Convert/FromBase64String body)
+                    (= :bytes body-as) body
+                    :else (.GetBytes Encoding/UTF8 ^String body))]
+    (when bytes (set! (.Content m) (ByteArrayContent. bytes)))
+    (doseq [[k v] headers]
+      (let [k (name k) v (str v)]
+        (when-not (.TryAddWithoutValidation (.Headers m) k v)
+          (when (.Content m) (.TryAddWithoutValidation (.Headers (.Content m)) k v)))))
+    m))
+
+(defn- answer [resp as]
+  (let [raw (.Result (.ReadAsByteArrayAsync (.Content resp)))
+        hs (concat (seq (.Headers resp)) (seq (.Headers (.Content resp))))]
+    {:status (Convert/ToInt32 (.StatusCode resp))
+     :headers (into {} (map (fn [kv] [(.ToLower (str (.Key kv))) (first (.Value kv))]) hs))
+     :body (case as :b64 (Convert/ToBase64String raw) :bytes raw (.GetString Encoding/UTF8 raw))}))
+
+(defn- failure [e]
+  (let [e (if (instance? AggregateException e) (or (.InnerException ^Exception e) e) e)]
+    {:error (.Message ^Exception e)}))
+
+(defn request [req]
+  (try (answer (.Send ^HttpClient @client (build req)) (:as req))
+       (catch Exception e (failure e))))
+
+(defn request-all
+  "every request sent at once (SendAsync), the answers awaited in their order — the caller blocks until all are in"
+  [reqs]
+  (let [tasks (mapv (fn [req] (try (.SendAsync ^HttpClient @client (build req)) (catch Exception e e))) reqs)]
+    (mapv (fn [req t]
+            (if (instance? Exception t)
+              (failure t)
+              (try (answer (.Result t) (:as req)) (catch Exception e (failure e)))))
+          reqs tasks)))
+
+(defn platform [] {:request request :request-all request-all})

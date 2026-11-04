@@ -1,20 +1,35 @@
-# eve/obj — Typed Shared Objects
+# eve/obj — Typed Objects
 
-`eve/obj` provides schema-based typed objects backed by `SharedArrayBuffer`. Two representations are available, optimized for different access patterns:
+`eve.obj` provides schema-based typed objects in slab memory, on every host (`src/eve/obj.cljc`; the types and the
+`0x1E` block format are `eve.obj.impl`'s). Two representations, for different access patterns:
 
-- **`eve-obj`** (AoS — Array of Structures): A single object with named typed fields. Good for individual records, tree nodes, and whole-object operations.
-- **`eve-obj-array`** (SoA — Structure of Arrays): A collection of objects stored column-wise. Good for batch processing, SIMD operations, and cache-efficient iteration.
+- **`obj`** (AoS — array of structures): one object with named typed fields, one `0x1E` block. Good for individual
+  records, tree nodes, whole-object operations.
+- **`obj-array`** (SoA — structure of arrays): N objects stored column-wise, one eve array per field. Good for batch
+  processing and cache-efficient iteration.
 
-Both provide full Atomics API for cross-worker access.
+Both reach memory through `eve.slab-io`. `int32`/`uint32` fields (and int32 columns) carry the atomics `cas!`, `add!`,
+`sub!`, `exchange!`; `cas!` and `exchange!` also take `:obj` and `:array` fields.
 
-**Important:** Like all EVE types, typed objects must be used within atoms. They are allocated from the global `AtomDomain`'s shared memory and should be created and manipulated inside `swap!`, `reset!`, or atom construction.
+**Where they live.** Like every eve type, an object allocates in the running `swap!`'s domain, else in this process's
+own slab. Create it inside the function you pass to `swap!` and store it in the atom's value; one built outside
+belongs to another domain and is refused when stored (`doc/collections.md`).
+
+**Reading.** `@atom` materializes: an object reads back as a plain map of its fields. To use the object itself — its
+fields in place, its atomics — work inside `swap!`'s function or inside the read region `eve.alpha/$`, where `@`
+answers the atom's value in place, held until the region exits.
+
+Every sample below was run on babashka 1.13.226 and on the JVM (Clojure 1.12.0, JDK 21) on 2026-10-20, with identical
+output. They read fields through `obj/get` and count with `e/count`: on the JVM and ClojureScript an object also
+answers keyword lookup (`(:key node)`), invocation (`(node :key)`) and `clojure.core/count`; on babashka, whose eve
+types answer eve's protocols rather than the host's interfaces, keyword lookup reads nil and invocation throws.
 
 ## Setup
 
 ```clojure
-(ns my-app.core
-  (:require [eve.alpha :as e]
-            [eve.obj :as obj]))
+(require '[eve.alpha :as e]
+         '[eve.atom :as ea]
+         '[eve.obj :as obj])
 ```
 
 ## Schemas
@@ -23,140 +38,121 @@ A schema defines the shape of an object — like a V8 hidden class. Create once,
 
 ```clojure
 (def node-schema
-  (obj/create-schema {:key   :int32
-                      :left  :int32
-                      :right :int32
-                      :value :float64}))
+  (obj/create-schema {:key :int32 :left :int32 :right :int32 :value :float64}))
 ```
 
 ### Supported Field Types
 
-| Type | Size | Atomic? | Description |
+| Type | Size | Atomic ops | Description |
 |------|------|---------|-------------|
-| `:int8` | 1B | No | Signed 8-bit integer |
-| `:uint8` | 1B | No | Unsigned 8-bit integer |
-| `:int16` | 2B | No | Signed 16-bit integer |
-| `:uint16` | 2B | No | Unsigned 16-bit integer |
-| `:int32` | 4B | Yes | Signed 32-bit integer (Atomics.load/store) |
-| `:uint32` | 4B | Yes | Unsigned 32-bit integer (Atomics.load/store) |
-| `:float32` | 4B | No | 32-bit float |
-| `:float64` | 8B | No | 64-bit float |
-| `:obj` | 4B | Yes | Offset reference to another eve-obj |
-| `:array` | 4B | Yes | Offset reference to an eve-array |
+| `:int8` | 1B | — | Signed 8-bit integer |
+| `:uint8` | 1B | — | Unsigned 8-bit integer |
+| `:int16` | 2B | — | Signed 16-bit integer |
+| `:uint16` | 2B | — | Unsigned 16-bit integer |
+| `:int32` | 4B | `cas!` `add!` `sub!` `exchange!` | Signed 32-bit integer |
+| `:uint32` | 4B | `cas!` `add!` `sub!` `exchange!` | Unsigned 32-bit integer |
+| `:float32` | 4B | — | 32-bit float |
+| `:float64` | 8B | — | 64-bit float |
+| `:obj` | 4B | `cas!` `exchange!` | Offset reference to another object (`obj/get-offset`) |
+| `:array` | 4B | `cas!` `exchange!` | Offset reference to an eve array |
 
-Fields are sorted by alignment (descending) for optimal memory packing.
+Fields are sorted by alignment (descending) for packing.
 
-## Single Objects (eve-obj)
-
-Create and store typed objects inside atom transactions:
+## Single Objects
 
 ```clojure
-(defonce state (e/atom {:tree nil}))
+(def state (e/atom ::state {}))
 
-;; Create a node inside a swap!
-(swap! state assoc :tree
-  (obj/obj node-schema {:key 42 :left -1 :right -1 :value 3.14}))
+;; create the object inside a swap!
+(swap! state (fn [s] (assoc s :tree (obj/obj node-schema {:key 42 :left -1 :right -1 :value 3.14}))))
 ```
 
 ### Field Access
 
-Eve objects implement `ILookup`, `IFn`, and `ISeqable`. Inside a transaction:
-
 ```clojure
-(swap! state
-  (fn [s]
-    (let [node (:tree s)]
-      (println (:key node))      ;=> 42
-      (println (:value node))    ;=> 3.14
-      (println (node :key))      ;=> 42
-      (println (count node))     ;=> 4
-      (println (seq node)))      ;=> ([:key 42] [:value 3.14] [:left -1] [:right -1])
-    s))
+(e/$ (let [node (:tree @state)]
+       [(obj/get node :key) (obj/get node :value) (e/count node) (obj/get node :left)]))
+;=> [42 3.14 4 -1]
+
+@state  ;=> {:tree {:value 3.14, :key 42, :left -1, :right -1}}   — materialized: a plain map
 ```
 
 ### Mutation
 
-Mutation operations should be done within atom transactions or when you have exclusive access:
+`obj/assoc!` writes a field in place; the atomics are lock-free updates of one field's word. Do them inside `swap!`
+(or `$`), or where you otherwise hold the object exclusively:
 
 ```clojure
-(swap! state update :tree
-  (fn [node]
-    (obj/assoc! node :key 100)
-    node))
+(swap! state (fn [s] (obj/assoc! (:tree s) :key 100) s))
+(e/$ (obj/get (:tree @state) :key))                             ;=> 100
 
-;; Atomic operations on int32/uint32 fields:
-;; obj/cas!       — compare-and-swap, returns true if swapped
-;; obj/add!       — atomic add, returns old value
-;; obj/sub!       — atomic subtract, returns old value
-;; obj/exchange!  — atomic exchange, returns old value
+(e/$ (obj/cas! (:tree @state) :key 100 200))                    ;=> true   (swapped)
+(e/$ (obj/add! (:tree @state) :key 10))                         ;=> 200    (the old value)
+(e/$ (obj/sub! (:tree @state) :key 5))                          ;=> 210
+(e/$ (obj/exchange! (:tree @state) :key 999))                   ;=> 205
+(e/$ (obj/get (:tree @state) :key))                             ;=> 999
+
+(e/$ (obj/add! (:tree @state) :value 1))
+;; throws: "add! not supported on :float64 fields"
 ```
 
 ### Inline Schema
 
-If you don't need to reuse the schema, pass the field map directly:
+If you don't reuse the schema, pass the field map directly:
 
 ```clojure
-(swap! state assoc :point
-  (obj/obj {:x :float64 :y :float64} {:x 1.5 :y 2.5}))
+(swap! state (fn [s] (assoc s :point (obj/obj {:x :float64 :y :float64} {:x 1.5 :y 2.5}))))
+(e/$ [(obj/get (:point @state) :x) (obj/get (:point @state) :y)])         ;=> [1.5 2.5]
 ```
 
-## Object Arrays (eve-obj-array)
+## Object Arrays
 
-For batch processing, `obj-array` stores N objects as separate column arrays — one typed array per field. This is cache-efficient and SIMD-friendly:
+`obj-array` stores N objects as one eve array per field:
 
 ```clojure
-(defonce particles (e/atom {:data nil}))
-
-;; Create an array of 1000 nodes inside a swap!
-(swap! particles assoc :data
-  (obj/obj-array 1000 {:x :int32 :y :int32 :velocity :int32}))
+(def particles (e/atom ::particles {}))
+(swap! particles (fn [s] (assoc s :data (obj/obj-array 1000 {:x :int32 :y :int32 :velocity :int32}))))
 ```
 
 ### Element Access
 
 ```clojure
-(swap! particles
-  (fn [s]
-    (let [data (:data s)]
-      ;; Set field at [index, field-key]
-      (obj/assoc-in! data [0 :x] 42)
-      (obj/assoc-in! data [0 :y] 100)
+(swap! particles (fn [s]
+                   (let [data (:data s)]
+                     (obj/assoc-in! data [0 :x] 42)
+                     (obj/assoc-in! data [0 :y] 100)
+                     (obj/assoc-in! data [1 :x] 8))
+                   s))
 
-      ;; Get field at [index, field-key]
-      (println (obj/get-in data [0 :x]))    ;=> 42
-
-      ;; Row view — object-like access to a single row
-      (println (nth data 0))                 ;=> #eve/obj-array-row {:x 42, :y 100, :velocity 0}
-      (println (:x (nth data 0))))           ;=> 42
-    s))
+(e/$ (obj/get-in (:data @particles) [0 :x]))                        ;=> 42
+(e/$ (e/get (e/nth (:data @particles) 0) :x))                       ;=> 42   (a row view)
+(e/$ (obj/add-in! (:data @particles) [0 :velocity] 3))              ;=> 0    (the old value)
 ```
 
-### Column Access (for SIMD / Batch)
+`cas-in!`, `sub-in!` and `exchange-in!` are the other per-element atomics.
+
+### Column Access
+
+`obj/column` answers the field's eve array (an `eve.array` value — on the JVM family a `HeapEveArray`; on
+ClojureScript and nbb `eve.typed-view/get-typed-view` gives a JS TypedArray over its elements):
 
 ```clojure
-(swap! particles
-  (fn [s]
-    (let [data (:data s)]
-      ;; Get the raw Int32Array for a field — use for SIMD or bulk operations
-      (let [x-col (obj/column data :x)]
-        ;; use x-col for SIMD operations
-        )
-
-      ;; Reduce over a single column
-      (obj/column-reduce data :x 0
-        (fn [acc idx val] (+ acc val)))
-
-      ;; Map in-place over a column
-      (obj/column-map! data :x
-        (fn [idx val] (* val 2))))
-    s))
+(e/$ (obj/column-reduce (:data @particles) :x 0 (fn [acc _idx v] (+ acc v))))   ;=> 50
+(swap! particles (fn [s] (obj/column-map! (:data s) :x (fn [_idx v] (* v 2))) s))
+(e/$ [(obj/get-in (:data @particles) [0 :x]) (obj/get-in (:data @particles) [1 :x])])   ;=> [84 16]
 ```
+
+## Low-level
+
+`obj/get-schema` (an object's or array's schema), `obj/get-offset` (the object's block, what an `:obj` field holds),
+`obj/obj-from-offset`, and `obj/retire!` (free the object's block at once, with no epoch gate — only for an object no
+atom's value holds; one stored in an atom is released by the write that drops it).
 
 ## When to Use eve/obj
 
-Most application state should use regular Clojure maps — they're automatically stored as EVE hash-maps inside shared atoms. Use `eve/obj` when you need:
+Most application state should use regular Clojure maps — they're stored as eve hash maps inside atoms. Use `eve.obj`
+when you need:
 
-- **Typed numeric fields** with atomic operations (CAS, add, sub)
-- **SoA layout** for SIMD-friendly batch processing
-- **Fine-grained field-level atomics** across workers
-- **Memory-efficient** storage for large numbers of uniform records
+- **typed numeric fields** with lock-free field updates (CAS, add, sub);
+- **SoA layout** for batch processing;
+- **memory-efficient** storage for many uniform records.

@@ -6,22 +6,19 @@
    Header layout: [type-id:u8 | pad:3 | cnt:i32 | head-off:i32] = 12 bytes
 
    Uses eve/deftype macro: CLJ protocol names, sio threaded everywhere."
+  (:refer-clojure :exclude [alength volatile! vswap! transient persistent! conj! bytes])
   (:require
+   [eve.host :refer [alength volatile! vswap! transient persistent! conj! bytes]]
+   [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
-    :refer [ISlabIO -sio-read-u8 -sio-read-i32
-            -sio-read-bytes -sio-write-u8! -sio-write-i32!
-            -sio-write-bytes! -sio-alloc! -sio-free!
-            NIL_OFFSET]]
+    :refer [NIL_OFFSET]]
    [eve.deftype-proto.data :as d]
+   [eve.core :as ecore]
    [eve.deftype-proto.serialize :as ser]
    [eve.platform :as p]
-   #?@(:bb  [[eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
-                                      register-jvm-collection-writer!]]
-             [eve.perf :as perf]]
-       :clj [[eve.deftype-proto.macros :as eve]
-              [eve.mem :as mem :refer [eve-bytes->value value+sio->eve-bytes
-                                       register-jvm-collection-writer!]]]))
-  #?(:cljs (:require-macros [eve.deftype-proto.macros :as eve])))
+   [eve.deftype-proto.macros :as eve]
+   [eve.codec :as codec]
+   [eve.digest :as dg]))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -42,22 +39,21 @@
 ;; Platform-specific helpers
 ;;=============================================================================
 
-(defn- serialize-element-bytes [v]
-  #?(:cljs (ser/serialize-element v)
-     :clj  (value+sio->eve-bytes v)))
+(defn- serialize-element-bytes [sio v]
+  (codec/encode-value sio v))
 
 (defn- deserialize-element-bytes
-  ([val-bytes]
-   #?(:cljs (ser/deserialize-element {} val-bytes)
-      :clj  (eve-bytes->value val-bytes)))
-  ([val-bytes sio]
-   #?(:cljs (ser/deserialize-element {} val-bytes)
-      :clj  (binding [alloc/*jvm-slab-ctx* sio]
-              (eve-bytes->value val-bytes)))))
+  [val-bytes sio]
+  (codec/decode sio val-bytes))
+
+(defn- default-sio
+  "The slab I/O a constructor given none allocates in: the running swap!'s
+   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+  []
+  (alloc/current-sio))
 
 (defn- bytes-length [ba]
-  #?(:cljs (.-length ba)
-     :clj  (alength ^bytes ba)))
+  (alength ^bytes ba))
 
 ;;=============================================================================
 ;; Node operations (via ISlabIO)
@@ -67,24 +63,24 @@
   "Allocate and write a list node. Returns slab offset."
   [sio next-off val-bytes]
   (let [vlen (bytes-length val-bytes)
-        node-off (-sio-alloc! sio (+ NODE_VDATA_OFFSET vlen))]
-    (-sio-write-i32! sio node-off NODE_NEXT_OFFSET next-off)
-    (-sio-write-i32! sio node-off NODE_VLEN_OFFSET vlen)
+        node-off (slab/alloc! sio (+ NODE_VDATA_OFFSET vlen))]
+    (slab/write-i32! sio node-off NODE_NEXT_OFFSET next-off)
+    (slab/write-i32! sio node-off NODE_VLEN_OFFSET vlen)
     (when (pos? vlen)
-      (-sio-write-bytes! sio node-off NODE_VDATA_OFFSET val-bytes))
+      (slab/write-bytes! sio node-off NODE_VDATA_OFFSET val-bytes))
     node-off))
 
 (defn read-node-value
   "Read and deserialize the value from a list node."
   [sio node-off]
-  (let [vlen (-sio-read-i32 sio node-off NODE_VLEN_OFFSET)
-        vbs  (-sio-read-bytes sio node-off NODE_VDATA_OFFSET vlen)]
+  (let [vlen (slab/read-i32 sio node-off NODE_VLEN_OFFSET)
+        vbs  (slab/read-bytes sio node-off NODE_VDATA_OFFSET vlen)]
     (deserialize-element-bytes vbs sio)))
 
 (defn read-node-next
   "Read the next pointer from a list node."
   [sio node-off]
-  (-sio-read-i32 sio node-off NODE_NEXT_OFFSET))
+  (slab/read-i32 sio node-off NODE_NEXT_OFFSET))
 
 ;;=============================================================================
 ;; Header read/write
@@ -93,17 +89,17 @@
 (defn write-list-header!
   "Allocate and write a list header. Returns slab offset."
   [sio cnt head-off]
-  (let [hdr (-sio-alloc! sio LIST_HEADER_SIZE)]
-    (-sio-write-u8!  sio hdr 0 SabList-type-id)
-    (-sio-write-i32! sio hdr LIST_CNT_OFFSET cnt)
-    (-sio-write-i32! sio hdr LIST_HEAD_OFFSET head-off)
+  (let [hdr (slab/alloc! sio LIST_HEADER_SIZE)]
+    (slab/write-u8!  sio hdr 0 SabList-type-id)
+    (slab/write-i32! sio hdr LIST_CNT_OFFSET cnt)
+    (slab/write-i32! sio hdr LIST_HEAD_OFFSET head-off)
     hdr))
 
 (defn read-list-header
   "Read cnt and head-off from header. Returns [cnt head-off]."
   [sio hdr-off]
-  [(-sio-read-i32 sio hdr-off LIST_CNT_OFFSET)
-   (-sio-read-i32 sio hdr-off LIST_HEAD_OFFSET)])
+  [(slab/read-i32 sio hdr-off LIST_CNT_OFFSET)
+   (slab/read-i32 sio hdr-off LIST_HEAD_OFFSET)])
 
 ;;=============================================================================
 ;; EveList deftype — unified via eve/deftype macro
@@ -112,16 +108,38 @@
 ;; Both platforms: deftype EveList [sio__ offset__]
 ;;=============================================================================
 
-#?(:bb nil :default (declare make-list))
+(declare make-list)
+(declare eve-list?)
 
-#?(:bb nil
-   :default
+(defn- root-digest-verdict
+  "Merkle Phase 4 (§2b) digest seam for equiv — ported from canonical eve
+   (commit 366e9b2). When
+   collection roots carry cached digests (Phase 3's eve layout — an open
+   fork: lists have no root header block at all today, see Phase 3's
+   STATUS), this answers :equal or :unequal for two EveList roots whose
+   digests decide, and :walk for everything else (no digest on either
+   root, a root of any other type, any doubt). equiv calls it only after
+   its own partition gates (sequential? + count) have passed, and falls
+   back to the structural walk on :walk. Wired to the Phase 3 eve cache
+   (eve.digest, layout B-prime) 2026-10-25: the gate below answers :walk
+   unless BOTH roots are EveList roots (an EveVector included in the
+   exclusions: list/vec equality is the walk's, though both are
+   sequential), and eve.digest answers :walk for any root whose content
+   has no digest. (The Phase 4 note above that lists have no root header
+   block was wrong: an EveList's offset__ is its header block, with a
+   descriptor row like every root's.)"
+  [a b]
+  (if (eve-list? b)
+    (dg/digest-verdict (d/-eve-sio a) (d/-root-header-off a) a
+                       (d/-eve-sio b) (d/-root-header-off b) b)
+    :walk))
+
 (eve/deftype EveList [^:int32 cnt ^:int32 head-off]
 
   clojure.lang.Sequential
 
   clojure.lang.Counted
-  (count [_] #?(:cljs cnt :clj (int cnt)))
+  (count [_] (int cnt))
 
   clojure.lang.Seqable
   (seq [this] (when (pos? cnt) this))
@@ -144,26 +162,31 @@
 
   clojure.lang.IPersistentCollection
   (cons [_ v]
-    (let [vb (serialize-element-bytes v)
+    (let [vb (serialize-element-bytes sio__ v)
           node-off (alloc-list-node! sio__ head-off vb)]
       (make-list sio__ (inc cnt) node-off)))
   (empty [_]
     (make-list sio__ 0 NIL_OFFSET))
-  (equiv [_ other]
+  (equiv [this other]
     (cond
       (not (sequential? other)) false
       (not= cnt (count other)) false
       :else
-      (loop [off head-off i 0 os (clojure.core/seq other)]
-        (if (or (>= i cnt) (nil? os))
-          true
-          (let [v (read-node-value sio__ off)]
-            (if (= v (first os))
-              (recur (read-node-next sio__ off) (inc i) (clojure.core/next os))
-              false))))))
+      (let [verdict (root-digest-verdict this other)]
+        (cond
+          (= verdict :equal) true
+          (= verdict :unequal) false
+          :else
+          (loop [off head-off i 0 os (clojure.core/seq other)]
+            (if (or (>= i cnt) (nil? os))
+              true
+              (let [v (read-node-value sio__ off)]
+                (if (= v (first os))
+                  (recur (read-node-next sio__ off) (inc i) (clojure.core/next os))
+                  false))))))))
 
   clojure.lang.IHashEq
-  (hasheq [this] (p/hash-ordered this))
+  (hasheq [this] (dg/root-hash sio__ offset__ (fn [] (p/hash-ordered this))))
 
   clojure.lang.ISeq
   (first [_]
@@ -197,26 +220,25 @@
               nxt (read-node-next sio__ off)]
           (recur nxt (inc i) (f acc v))))))
 
-  ;; CLJS-only: 1-arity reduce (no CLJ equivalent)
-  #?@(:cljs [IReduce
-             (-reduce [_ f]
-               (if (zero? cnt)
-                 (f)
-                 (loop [off (read-node-next sio__ head-off) i 1
-                        acc (read-node-value sio__ head-off)]
-                   (if (or (== off NIL_OFFSET) (>= i cnt))
-                     acc
-                     (let [v (read-node-value sio__ off)
-                           result (f acc v)]
-                       (if (reduced? result) @result
-                         (recur (read-node-next sio__ off) (inc i) result)))))))])
+  clojure.lang.IReduce
+  (reduce [_ f]
+    (if (zero? cnt)
+      (f)
+      (loop [off (read-node-next sio__ head-off) i 1
+             acc (read-node-value sio__ head-off)]
+        (if (or (== off NIL_OFFSET) (>= i cnt))
+          acc
+          (let [v (read-node-value sio__ off)
+                result (f acc v)]
+            (if (reduced? result) @result
+              (recur (read-node-next sio__ off) (inc i) result)))))))
 
   d/IDirectSerialize
   (d/-direct-serialize [this] offset__)
 
   d/ISabStorable
   (d/-sab-tag [_] :eve-list)
-  (d/-sab-encode [this _] #?(:cljs (ser/encode-eve-pointer this) :clj offset__))
+  (d/-sab-encode [this _] (codec/encode-eve-pointer this))
   (d/-sab-dispose [_ _] nil)
 
   d/IsEve
@@ -225,15 +247,10 @@
   d/IEveRoot
   (d/-root-header-off [this] offset__)
 
-  #?@(:cljs [IPrintWithWriter
-             (-pr-writer [this writer _opts]
-               (-write writer "(")
-               (loop [off head-off i 0]
-                 (when (and (< i cnt) (not= off NIL_OFFSET))
-                   (when (pos? i) (-write writer " "))
-                   (-write writer (pr-str (read-node-value sio__ off)))
-                   (recur (read-node-next sio__ off) (inc i))))
-               (-write writer ")"))])
+  d/IEveSio
+  (d/-eve-sio [_] sio__)
+
+  
 
   clojure.lang.IPersistentList
 
@@ -249,14 +266,11 @@
       :else (.equiv this other)))
   (hashCode [this]
     (clojure.lang.Murmur3/hashOrdered this)))
-) ;; end #?(:bb nil :default ...) for deftype
 
 ;;=============================================================================
 ;; Disposal & retirement
 ;;=============================================================================
 
-#?(:bb nil
-   :default
 (do
 (defn- free-list-chain!
   "Free all nodes in a list linked-list chain via ISlabIO."
@@ -264,7 +278,7 @@
   (loop [node-off head-off]
     (when (not= node-off NIL_OFFSET)
       (let [next-off (read-node-next sio node-off)]
-        (-sio-free! sio node-off)
+        (slab/free! sio node-off)
         (recur next-off)))))
 
 (defn dispose!
@@ -274,13 +288,13 @@
    WARNING: After disposal, the list must not be used."
   [eve-list]
   (when (instance? EveList eve-list)
-    (let [sio (#?(:cljs .-sio__ :clj .sio__) eve-list)
-          hdr (#?(:cljs .-offset__ :clj .offset__) eve-list)
-          hd  (when hdr (-sio-read-i32 sio hdr LIST_HEAD_OFFSET))]
+    (let [sio (.-sio__ ^EveList eve-list)
+          hdr (.-offset__ ^EveList eve-list)
+          hd  (when hdr (slab/read-i32 sio hdr LIST_HEAD_OFFSET))]
       (when (and hd (not= hd NIL_OFFSET))
         (free-list-chain! sio hd))
       (when (and hdr (not= hdr NIL_OFFSET))
-        (-sio-free! sio hdr)))))
+        (slab/free! sio hdr)))))
 
 (defn retire-replaced-chain!
   "After an atom swap that replaced a list, retire old nodes not shared
@@ -292,50 +306,58 @@
      (loop [node-off old-head]
        (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))
          (let [next-off (read-node-next sio node-off)]
-           (-sio-free! sio node-off)
+           (slab/free! sio node-off)
            (recur next-off)))))))
-
-(defn collect-retire-diff-offsets
-  "Collect all slab offsets that would be freed by -sab-retire-diff!.
-   Returns a vector of offsets to free when the epoch is safe."
-  [old-list new-value]
-  (let [sio (#?(:cljs .-sio__ :clj .sio__) old-list)
-        hdr (#?(:cljs .-offset__ :clj .offset__) old-list)
-        old-head (-sio-read-i32 sio hdr LIST_HEAD_OFFSET)
-        new-head (when (instance? EveList new-value)
-                   (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) LIST_HEAD_OFFSET))
-        result (volatile! (transient []))]
-    ;; Collect chain nodes that differ
-    (loop [node-off old-head]
-      (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))
-        (vswap! result conj! node-off)
-        (recur (read-node-next sio node-off))))
-    ;; If no new-head (type change), also include header
-    ;; Always include header for old list
-    (when (and hdr (not= hdr NIL_OFFSET))
-      (vswap! result conj! hdr))
-    (persistent! @result)))
 
 ;; ISabRetirable
 (extend-type EveList
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio      (#?(:cljs .-sio__ :clj .sio__) this)
-          hdr      (#?(:cljs .-offset__ :clj .offset__) this)
-          old-head (-sio-read-i32 sio hdr LIST_HEAD_OFFSET)
+    (let [sio      (.-sio__ this)
+          hdr      (.-offset__ this)
+          old-head (slab/read-i32 sio hdr LIST_HEAD_OFFSET)
           new-head (when (instance? EveList new-value)
-                     (-sio-read-i32 sio (#?(:cljs .-offset__ :clj .offset__) new-value) LIST_HEAD_OFFSET))]
+                     (slab/read-i32 sio (d/-root-header-off new-value) LIST_HEAD_OFFSET))]
       (if new-head
         (retire-replaced-chain! sio old-head new-head mode)
         (dispose! this)))))
-)) ;; end #?(:bb nil :default ...) for disposal
+)
+
+;; The retire set of one list replaced by another — portable (never reached
+;; on bb, where eve-list? is false).
+(defn collect-retire-diff-offsets
+  "The blocks old-list holds that new-value does not: its header, and the
+   cells of its chain before the suffix the new list shares. Two lists share a
+   suffix at the same distance from their ends, so the walk aligns the two
+   chains by their counts and steps them together to the first cell they
+   share (a conj shares the whole old chain, a pop all but its head). It
+   walked the old chain to the new list's head cell, which a conj never
+   reaches: every old cell was retired while the new list held it, and a list
+   kept in an atom read back other values' bytes once its blocks were reused
+   (2026-10-21 ET)."
+  [old-list new-value]
+  (let [sio (d/-eve-sio old-list)
+        hdr (d/-root-header-off old-list)
+        [old-cnt old-head] (read-list-header sio hdr)
+        [new-cnt new-head] (if (eve-list? new-value)
+                             (read-list-header sio (d/-root-header-off new-value))
+                             [0 NIL_OFFSET])
+        skip (fn [off n] (if (pos? n) (recur (read-node-next sio off) (dec n)) off))
+        ;; the old cells past the new list's length are its own; then the chains in step
+        result (loop [o old-head n (- old-cnt new-cnt) out (transient [])]
+                 (if (pos? n)
+                   (recur (read-node-next sio o) (dec n) (conj! out o))
+                   (loop [o o m (skip new-head (- new-cnt old-cnt)) out out]
+                     (if (or (== o NIL_OFFSET) (== o m))
+                       out
+                       (recur (read-node-next sio o) (read-node-next sio m) (conj! out o))))))]
+    (persistent! (cond-> result
+                   (and hdr (not= hdr NIL_OFFSET)) (conj! hdr)))))
 
 ;;=============================================================================
 ;; Constructors
 ;;=============================================================================
 
-#?(:bb nil
-   :default
 (do
 (defn- make-list
   "Internal constructor: allocate header, create EveList."
@@ -350,68 +372,82 @@
 
 (defn empty-list
   "Create an empty Eve list.
-   0-arity: uses platform default sio.  1-arity: explicit sio."
-  ([] (empty-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*)))
+   0-arity: uses platform default sio (fresh heap domain on JVM).
+   1-arity: explicit sio."
+  ([] (empty-list (default-sio)))
   ([sio] (make-list sio 0 NIL_OFFSET)))
 
 (defn eve-list
   "Create an Eve list from a collection (reversed, as cons-list)."
-  ([coll] (eve-list #?(:cljs (alloc/->CljsSlabIO) :clj alloc/*jvm-slab-ctx*) coll))
+  ([coll] (eve-list (default-sio) coll))
   ([sio coll]
-   (reduce conj (empty-list sio) (reverse coll))))
+   (reduce ecore/conj (empty-list sio) (reverse coll))))
 
 ;; Backward-compat aliases
 (def empty-sab-list empty-list)
 (def sab-list eve-list)
-)) ;; end #?(:bb nil :default ...) for constructors
+)
+
+(defn eve-list?
+  "True for a slab-backed EveList. On babashka a list read from eve memory is
+   the host's own list (eve.types/reader-of), so one read there is not one."
+  [x]
+  (instance? EveList x))
 
 ;;=============================================================================
 ;; Registration
 ;;=============================================================================
 
-;; Collection writer — shared by CLJ and bb
-#?(:cljs nil
-   :default
-   (defn- -write-list-coll!
-     "Serialize a Clojure list/seq to slab as an Eve linked list. Returns header offset."
-     [_sio _serialize-elem coll]
-     (let [sio alloc/*jvm-slab-ctx*
-           elems (vec coll)
-           cnt (count elems)]
-       (if (zero? cnt)
-         (write-list-header! sio 0 NIL_OFFSET)
-         (let [head-off (reduce (fn [next-off elem]
-                                  (let [vb (value+sio->eve-bytes sio elem)]
-                                    (alloc-list-node! sio next-off vb)))
-                                NIL_OFFSET
-                                (rseq elems))]
-           (write-list-header! sio cnt head-off))))))
+;; Collection writer: a host collection written straight into the slab, for a
+;; codec that writes one directly (eve.codec)
+(defn- -write-list-coll!
+  "Serialize a Clojure list/seq to slab as an Eve linked list. Returns header offset.
+   sio is explicit (first parameter)."
+  [sio _serialize-elem coll]
+  (let [elems (vec coll)
+        cnt (count elems)]
+    (if (zero? cnt)
+      (write-list-header! sio 0 NIL_OFFSET)
+      ;; back to front, each node pointing at the one after it — by index: glojure's reduce has no coll-reduce
+      ;; method for a vector's rseq (main's tally test, the first to store a list there)
+      (let [head-off (loop [i (dec cnt) next-off NIL_OFFSET]
+                       (if (neg? i)
+                         next-off
+                         (recur (dec i) (alloc-list-node! sio next-off (codec/encode-value sio (nth elems i))))))]
+        (write-list-header! sio cnt head-off)))))
 
 ;; Type constructor + disposer + builder + collection writer registrations
-#?(:bb
-   (register-jvm-collection-writer! :list -write-list-coll!)
-   :default
-   (eve/register-eve-type!
+(defn- list->host-value
+  "A list in eve memory as the host's own list: what a host whose types
+   cannot stand in for its collections reads (eve.types/reader-of)."
+  [sio header-off]
+  (let [[cnt head-off] (read-list-header sio header-off)]
+    (loop [off head-off i 0 acc (transient [])]
+      (if (or (>= i cnt) (== off NIL_OFFSET))
+        (apply list (persistent! acc))
+        (recur (read-node-next sio off)
+               (inc i)
+               (conj! acc (read-node-value sio off)))))))
+
+(eve/register-eve-type!
     {:fast-tag     ser/FAST_TAG_SAB_LIST
      :type-id      EveList-type-id
      :from-header  list-from-header
+     :host-value   list->host-value
      :dispose      dispose!
      :builder-pred seq?
      :builder-ctor eve-list
-     :coll-writer  #?(:clj {:tag :list :fn -write-list-coll!} :cljs nil)
-     :print-fn     #?(:clj (fn [] (defmethod print-method EveList [lst ^java.io.Writer w]
-                                    (#'clojure.core/print-sequential "(" #'clojure.core/pr-on " " ")" (seq lst) w)))
-                      :cljs nil)}))
+     :coll-writer  {:tag :list :fn -write-list-coll!}
+     :type         EveList
+     :print        {:open "(" :close ")"}})
 
-;; Backward-compat JVM aliases
-#?(:bb nil
-   :clj
-   (do
+;; Backward-compat aliases
+(do
      (defn jvm-write-list!
        "Serialize a Clojure list/seq to slab. Returns header offset.
         Backward-compat alias for the registered :list writer."
        [sio serialize-val coll]
-       (mem/jvm-write-collection! :list sio coll))
+       (codec/write-collection! :list sio coll))
 
      (defn jvm-sab-list-from-offset
        "Reconstruct an EveList from a header offset.
@@ -419,7 +455,7 @@
        ([sio header-off] (list-from-header sio header-off))
        ([sio header-off _coll-factory] (list-from-header sio header-off)))
 
-     (def SabList EveList)))
+     (def SabList EveList))
 
 ;; No-op pool stub — pool system removed, kept for backward compat
-#?(:cljs (defn reset-pools! [] nil))
+(defn reset-pools! [] nil)

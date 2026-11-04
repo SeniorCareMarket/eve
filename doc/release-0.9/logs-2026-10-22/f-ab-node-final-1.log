@@ -1,0 +1,36 @@
+# run f-ab-node-final-1 on 8ed608f08 eve tree 590c12875ab4ce757259800b5fbbb6fc837004b5
+# cmd (in eve/) bash -c cd /home/user/atom.broker/eve && for b in arith tensor filter dataset; do for m in mmap in-memory; do node target/eve-test/all.js columnar-one $b 1000000 $m 2>&1 | grep -E 'n=1000000|Eve:|Stock:'; done; done
+# start 2026-10-22 12:56:25 AM ET load 1.33 2.19 2.09 mem-in-use 1103 MB
+  Column Arithmetic [mmap] (n=1000000)
+    Eve:   179.0ms  [90-321]
+    Stock: 706.3ms  [622-868]
+    Eve/Stock: 3.95x
+  Column Arithmetic [in-memory] (n=1000000)
+    Eve:   117.7ms  [88-171]
+    Stock: 673.0ms  [619-756]
+    Eve/Stock: 5.72x
+  Tensor Pipeline [mmap] (n=1000000)
+    Eve:   159.0ms  [151-310]
+    Stock: 802.0ms  [724-881]
+    Eve/Stock: 5.04x
+  Tensor Pipeline [in-memory] (n=1000000)
+    Eve:   155.7ms  [140-173]
+    Stock: 746.0ms  [649-825]
+    Eve/Stock: 4.79x
+  Filter + Aggregate [mmap] (n=1000000)
+    Eve:   117.0ms  [87-150]
+    Stock: 86.0ms  [84-92]
+    Eve/Stock: 0.74x
+  Filter + Aggregate [in-memory] (n=1000000)
+    Eve:   122.3ms  [96-191]
+    Stock: 90.0ms  [89-98]
+    Eve/Stock: 0.74x
+  Dataset Pipeline [mmap] (n=1000000)
+    Eve:   475.0ms  [437-498]
+    Stock: 3033.7ms  [2795-3148]
+    Eve/Stock: 6.39x
+  Dataset Pipeline [in-memory] (n=1000000)
+    Eve:   519.7ms  [494-552]
+    Stock: 2933.7ms  [2768-3069]
+    Eve/Stock: 5.65x
+# end 2026-10-22 12:58:16 AM ET exit 0 wall 111s peak-mem-in-use 2424 MB peak-process-tree-rss 1768 MB load 1.45 1.97 2.02

@@ -1,0 +1,48 @@
+variant=J1000 n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 114.08482800005004
+165.6358309998177
+131.53994300030172
+116.27991200005636
+makespan-ms: 165.6358309998177
+total-swaps: 400  aggregate-ops-sec: 2414.9
+final: :value 400 (expected :value 400)
+variant=J100 n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 208.05998699972406
+503.16754600033164
+361.42463200027123
+543.4918709998019
+makespan-ms: 543.4918709998019
+total-swaps: 400  aggregate-ops-sec: 736.0
+final: :value 400 (expected :value 400)
+variant=J10 n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 3087.1572940000333
+4325.366109999828
+4414.539463000372
+3766.305425000377
+makespan-ms: 4414.539463000372
+total-swaps: 400  aggregate-ops-sec: 90.6
+final: :value 400 (expected :value 400)
+variant=J1 n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 41817.10688900016
+40398.72606700007
+40108.933453999925
+40751.13273599977
+makespan-ms: 41817.10688900016
+total-swaps: 400  aggregate-ops-sec: 9.6
+final: :value 400 (expected :value 400)
+variant=B n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 41284.70183599973
+44406.73044099985
+44036.247195000295
+41581.00882600015
+makespan-ms: 44406.73044099985
+total-swaps: 400  aggregate-ops-sec: 9.0
+final: :value 400 (expected :value 400)
+variant=A n-per-worker=100 workers=4 fail=0
+worker-elapsed-ms: 157.63049699971452
+132.61304300045595
+106.80567400017753
+106.5397950001061
+makespan-ms: 157.63049699971452
+total-swaps: 400  aggregate-ops-sec: 2537.6
+final: :value 400 (expected :value 400)

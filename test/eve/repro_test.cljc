@@ -8,6 +8,7 @@
    [eve.dataset.argops :as argops]
    [eve.atom :as e]
    #?(:cljs [eve.deftype-proto.alloc :as alloc])
+   #?(:cljs [eve.process-slab :as ps])
    #?(:clj [clojure.java.io :as io])))
 
 (def domain-extensions
@@ -28,8 +29,8 @@
      [arr-val]
      (when arr-val
        (let [off (.-offset__ arr-val)
-             base (alloc/resolve-dv! off)
-             dv alloc/resolved-dv]
+             base (ps/resolve-dv! off)
+             dv ps/resolved-dv]
          {:type-id (.getUint8 dv base)
           :subtype (.getUint8 dv (+ base 1))
           :cnt (.getInt32 dv (+ base 4) true)

@@ -1,0 +1,185 @@
+(ns eve.http
+  "eve's http feature (adapters/README.md) over dart:io's RawSynchronousSocket — ClojureDart. `platform` answers what
+   this host lends eve.net (eve/src/eve/net/run.cljc): {:request f}, f taking {:method :url :headers :body :as
+   :body-as} and answering {:status :headers :body} SYNCHRONOUSLY, as on every host: HTTP/1.1 written and read here
+   over a blocking socket (dart:io's HttpClient is asynchronous only), one kept-alive connection per host and port,
+   bodies by Content-Length, chunked, or to the close. The body conventions are eve.net.run's: :body-as :b64 sends the
+   bytes its base64 :body names, :body-as :bytes the byte array :body is; :as :b64 answers the response body as
+   base64, :as :bytes as a byte array (eve.host's Int8List, which eve.codec reads); otherwise bodies are UTF-8 text. A
+   non-2xx answer is an answer; a transport failure answers {:error message}, as eve.net.wire reads it. A socket here
+   speaks no TLS: an https URL answers {:error}."
+  (:require ["dart:convert" :as convert]
+            ["dart:io" :as io]
+            ["dart:typed_data" :as td]
+            [clojure.string :as str]))
+
+;; --- a connection: the socket and its read buffer (bytes [start, end) read and not yet taken) ---
+
+(deftype Conn [^io/RawSynchronousSocket sock
+               ^:mutable ^td/Uint8List buf
+               ^:mutable ^int start
+               ^:mutable ^int end])
+
+(defn- open-conn [^String host ^int port]
+  (Conn (io/RawSynchronousSocket.connectSync host port) (td/Uint8List 65536) 0 0))
+
+(defn- fill!
+  "read what the socket has (blocking until some arrives) after the buffered bytes; the count read, 0 at its end"
+  [^Conn c]
+  (when (== (.-start c) (.-end c)) (set! (.-start c) 0) (set! (.-end c) 0))
+  (when (< (- (.-length (.-buf c)) (.-end c)) 16384)
+    (let [live (- (.-end c) (.-start c))
+          ^td/Uint8List nb (if (< (* 2 live) (.-length (.-buf c)))
+                             (.-buf c)
+                             (td/Uint8List (* 2 (.-length (.-buf c)))))]
+      (.setRange nb 0 live (.-buf c) (.-start c))
+      (set! (.-buf c) nb)
+      (set! (.-start c) 0)
+      (set! (.-end c) live)))
+  (let [n (.readIntoSync (.-sock c) (.-buf c) (.-end c) (.-length (.-buf c)))]
+    (set! (.-end c) (+ (.-end c) n))
+    n))
+
+(defn- index-of-crlf
+  "the index of the first \\r\\n (crlf2? \\r\\n\\r\\n) in the buffered bytes, -1 if none"
+  [^Conn c crlf2?]
+  (let [^td/Uint8List b (.-buf c) e (.-end c) w (if crlf2? 4 2)]
+    (loop [i (.-start c)]
+      (cond (> (+ i w) e) -1
+            (and (== 13 (aget b i)) (== 10 (aget b (inc i)))
+                 (or (not crlf2?) (and (== 13 (aget b (+ i 2))) (== 10 (aget b (+ i 3))))))
+            i
+            :else (recur (inc i))))))
+
+(defn- take-text!
+  "the buffered bytes up to i as Latin-1 text, the buffer advanced past i and skip more bytes"
+  [^Conn c ^int i ^int skip]
+  (let [s (.decode convert/latin1 (.sublist (.-buf c) (.-start c) i))]
+    (set! (.-start c) (+ i skip))
+    s))
+
+(defn- read-until-crlf!
+  "the next line (crlf2?: the head, to its blank line); nil when the connection ends first"
+  [^Conn c crlf2?]
+  (loop []
+    (let [i (index-of-crlf c crlf2?)]
+      (if (>= i 0)
+        (take-text! c i (if crlf2? 4 2))
+        (when (pos? (fill! c)) (recur))))))
+
+(defn- read-n!
+  "the next n bytes, a fresh Uint8List"
+  [^Conn c ^int n]
+  (loop []
+    (when (< (- (.-end c) (.-start c)) n)
+      (when-not (pos? (fill! c)) (throw (io/SocketException "eve.http: the connection ended inside a body")))
+      (recur)))
+  (let [out (td/Uint8List.fromList (.sublist (.-buf c) (.-start c) (+ (.-start c) n)))]
+    (set! (.-start c) (+ (.-start c) n))
+    out))
+
+(defn- read-to-end! [^Conn c]
+  (loop [] (when (pos? (fill! c)) (recur)))
+  (read-n! c (- (.-end c) (.-start c))))
+
+(defn- read-chunked! [^Conn c]
+  (let [bb (td/BytesBuilder .copy false)]
+    (loop []
+      (let [line (read-until-crlf! c false)
+            n (int/parse (str/trim (first (str/split (or line "0") #";"))) .radix 16)]
+        (if (zero? n)
+          (do (loop [] (let [t (read-until-crlf! c false)] (when (and t (pos? (count t))) (recur))))
+              (.takeBytes bb))
+          (do (.add bb (read-n! c n))
+              (read-until-crlf! c false)
+              (recur)))))))
+
+;; --- the request ---
+
+(def ^:private conns (volatile! {}))
+
+(defn- ^td/Uint8List body-bytes [body body-as]
+  (cond (nil? body) (td/Uint8List 0)
+        (= :b64 body-as) (.decode convert/base64 body)
+        (= :bytes body-as) (if (dart/is? body td/TypedData)
+                             (let [^td/TypedData t body]
+                               (.asUint8List (.-buffer t) (.-offsetInBytes t) (.-lengthInBytes t)))
+                             (td/Uint8List.fromList (into-array (map (fn [x] (bit-and x 0xFF)) body))))
+        :else (.encode convert/utf8 (str body))))
+
+(defn- exchange!
+  "write the request on c, read its answer: [status headers body-bytes keep-alive?]; nil when c ended before an
+   answer began (a kept-alive connection the server closed)"
+  [^Conn c ^td/Uint8List head ^td/Uint8List payload method]
+  (.writeFromSync (.-sock c) head)
+  (when (pos? (.-length payload)) (.writeFromSync (.-sock c) payload))
+  (when-some [h (read-until-crlf! c true)]
+    (let [[status-line & lines] (str/split h #"\r\n")
+          [proto code] (str/split status-line #" ")
+          headers (into {} (keep (fn [l] (let [i (str/index-of l ":")]
+                                           (when i [(str/lower-case (str/trim (subs l 0 i)))
+                                                    (str/trim (subs l (inc i)))]))))
+                        lines)
+          status (int/parse code)
+          conn-h (str/lower-case (get headers "connection" ""))
+          keep? (if (= proto "HTTP/1.0") (= conn-h "keep-alive") (not= conn-h "close"))
+          te (str/lower-case (get headers "transfer-encoding" ""))
+          cl (get headers "content-length")
+          no-body? (or (= method "HEAD") (= status 204) (= status 304) (< status 200))
+          body (cond no-body? (td/Uint8List 0)
+                     (str/includes? te "chunked") (read-chunked! c)
+                     cl (read-n! c (int/parse cl))
+                     :else (read-to-end! c))]
+      [status headers body (and keep? (or no-body? (some? cl) (str/includes? te "chunked")))])))
+
+(defn- answer [status headers ^td/Uint8List body as]
+  {:status status
+   :headers headers
+   :body (case as
+           :b64 (.encode convert/base64 body)
+           :bytes (.asInt8List (.-buffer body) (.-offsetInBytes body) (.-length body))
+           (.decode convert/utf8 body .allowMalformed true))})
+
+(defn request
+  [{:keys [method url headers body as body-as]}]
+  (try
+    (let [u (Uri/parse url)
+          method (or method "GET")]
+      (if (not= "http" (.-scheme u))
+        {:error (str "eve.http (dart): no TLS on a synchronous socket — " url)}
+        (let [host (.-host u)
+              port (.-port u)
+              target (str (if (str/blank? (.-path u)) "/" (.-path u)) (when (.-hasQuery u) (str "?" (.-query u))))
+              payload (body-bytes body body-as)
+              lines (concat [(str method " " target " HTTP/1.1")
+                             (str "Host: " host ":" port)
+                             "Connection: keep-alive"]
+                            (when (or (some? body) (#{"POST" "PUT" "PATCH"} method))
+                              [(str "Content-Length: " (.-length payload))])
+                            (for [[k v] headers
+                                  :when (not (#{"host" "content-length" "connection"} (str/lower-case (name k))))]
+                              (str (name k) ": " v)))
+              head (.encode convert/utf8 (str (str/join "\r\n" lines) "\r\n\r\n"))
+              k (str host ":" port)
+              attempt (fn [^Conn c]
+                        (try (exchange! c head payload method)
+                             (catch dynamic _ nil)))
+              pooled (get @conns k)
+              r (or (when pooled (attempt pooled))
+                    (do (when pooled (try (.closeSync (.-sock ^Conn pooled)) (catch dynamic _ nil)))
+                        (vswap! conns dissoc k)
+                        (let [c (open-conn host port)
+                              r (exchange! c head payload method)]
+                          (vswap! conns assoc k c)
+                          r)))]
+          (if-not r
+            {:error (str "eve.http (dart): the connection closed before an answer — " url)}
+            (let [[status hs bs keep?] r]
+              (when-not keep?
+                (when-some [^Conn c (get @conns k)] (try (.closeSync (.-sock c)) (catch dynamic _ nil)))
+                (vswap! conns dissoc k))
+              (answer status hs bs as))))))
+    (catch dynamic e
+      {:error (str e)})))
+
+(defn platform [] {:request request})

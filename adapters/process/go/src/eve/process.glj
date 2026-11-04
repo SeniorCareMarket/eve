@@ -1,0 +1,94 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) over Go's (glojure): the clock, a goroutine's identity (eve's Go package
+   in glj-eve reads it: eve/impls/glojure/host), sleep, a periodic timer, hooks at a signalled exit, files' existence,
+   their exclusive creation and directories, an object's identity hash, and the operating system's entropy (the
+   network atom's subset among them: eve/doc/network-atoms/ADAPTERS.md §2), and standard input's lines."
+  (:refer-clojure :exclude [read-line]))
+
+(defn now-ms [] (.UnixMilli (time.Now)))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under: the calling goroutine's id."
+  []
+  (eveglj:host.GoroutineID))
+
+(defn sleep-ms!
+  "Block this goroutine for about ms milliseconds."
+  [ms]
+  (time.Sleep (time.Duration (* (long ms) 1000000))))
+
+(defn start-timer!
+  "Call f every period-ms until stop-timer!: a goroutine of its own. Returns the handle (a flag the goroutine reads
+   between periods)."
+  [period-ms f]
+  (let [running (atom true)]
+    (github.com:glojurelang:glojure:pkg:lang.AgentSubmit
+     (fn []
+       (loop []
+         (sleep-ms! period-ms)
+         (when @running
+           (try (f) (catch go/any _ nil))
+           (recur)))))
+    running))
+
+(defn stop-timer! [h]
+  (when h (reset! h false)))
+
+(def ^:private exit-hooks (atom []))
+
+(defn on-process-exit!
+  "Run f when the process is asked to end (SIGINT or SIGTERM: Go runs no hook on a normal exit, and none on a kill)."
+  [f]
+  (when (empty? (first (swap-vals! exit-hooks conj f)))
+    (let [ch (go/make (go/chan-of os.Signal) 1)]
+      (os:signal.Notify ch os.Interrupt syscall.SIGTERM)
+      (github.com:glojurelang:glojure:pkg:lang.AgentSubmit
+       (fn []
+         (go/recv ch)
+         (doseq [h @exit-hooks] (try (h) (catch go/any _ nil)))
+         (os.Exit 1)))))
+  nil)
+
+(defn file-exists? [path]
+  (let [[_ err] (os.Stat path)] (nil? err)))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step against every other process (O_CREAT|O_EXCL):
+   true for the process that created it, false when it already existed (an mmap domain's creator is the one that gets
+   true)."
+  [path]
+  (let [[f err] (os.OpenFile path (bit-or os.O_CREATE os.O_EXCL os.O_WRONLY) (os.FileMode 0644))]
+    (if err
+      (if (os.IsExist err) false (throw (ex-info (str "create-exclusive! " path ": " err) {:path path})))
+      (do (.Close f) true))))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
+  [base-path]
+  (let [dir (path:filepath.Dir (str base-path ".root"))]
+    (os.MkdirAll dir (os.FileMode 0755))
+    nil))
+
+(defn identity-hash
+  "An object's identity hash: equal for one object, whatever its own equality or hash — what eve's reference table
+   keys by (FORMAT-DECISIONS.md §9): its address (a value without one hashes 0; the table tells those apart by
+   identical?)."
+  [x]
+  (eveglj:host.IdentityHash x))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (/dev/urandom: stock glj carries no crypto/rand), as a vector of
+   0..255 — the one crypto input no portable code can supply (eve.crypto/random-bytes)"
+  [n]
+  (let [[f err] (os.Open "/dev/urandom")]
+    (when err (throw (ex-info (str "random-bytes: " err) {})))
+    (let [buf (go/make (go/slice-of go/byte) n)]
+      (io.ReadFull f buf)
+      (.Close f)
+      (vec buf))))
+
+(defn read-line
+  "the next line of the process's standard input, its line end dropped; nil at the end of the input. Blocking: eve's Go
+   host package's StdinLine (one bufio.Reader for the process)"
+  []
+  (let [[s ok] (eveglj:host.StdinLine)] (when ok s)))

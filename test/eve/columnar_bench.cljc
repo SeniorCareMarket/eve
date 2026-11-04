@@ -13,6 +13,7 @@
   (:refer-clojure :exclude [atom])
   (:require
    [eve.array :as arr]
+   [eve.core :as ec]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
@@ -56,6 +57,11 @@
         trimmed (subvec (vec sorted) 1 4)
         mean (/ (double (reduce + 0 trimmed)) (count trimmed))]
     {:mean-ms mean :min-ms (first sorted) :max-ms (last sorted)}))
+
+(defn- with-value
+  "A bench result with the atom's final :result beside the timings."
+  [a timing]
+  (assoc timing :value (:result @a)))
 
 ;;=============================================================================
 ;; Atom helpers — create, close, cleanup
@@ -125,8 +131,28 @@
 
 (def ^:private results (clojure.core/atom []))
 
+;; Every benchmark also checks its answer: the Eve pipeline's :result must equal
+;; the stock pipeline's (numbers within a relative 1e-9 — sums run in another
+;; order). A mismatch or an exception is a failure, counted and reported; the
+;; run exits non-zero when there is one.
+(def ^:private failures (clojure.core/atom []))
+
+(defn- same-result? [a b]
+  (cond
+    (and (number? a) (number? b))
+    (let [d (abs (- (double a) (double b)))]
+      (<= d (* 1e-9 (max 1.0 (abs (double a)) (abs (double b))))))
+    (and (map? a) (map? b))
+    (and (= (set (keys a)) (set (keys b)))
+         (every? #(same-result? (get a %) (get b %)) (keys a)))
+    :else (= a b)))
+
 (defn- record! [category n mode eve-result stock-result]
-  (let [speedup (if (pos? (:mean-ms eve-result))
+  (let [ok? (same-result? (:value eve-result) (:value stock-result))
+        _ (when-not ok?
+            (swap! failures conj {:category category :n n :mode mode
+                                  :eve (:value eve-result) :stock (:value stock-result)}))
+        speedup (if (pos? (:mean-ms eve-result))
                   (/ (:mean-ms stock-result) (:mean-ms eve-result))
                   ##Inf)]
     (swap! results conj
@@ -148,6 +174,8 @@
     (println (str "    Stock: " (fmt1 (:mean-ms stock-result)) "ms"
                   "  [" (:min-ms stock-result) "-" (:max-ms stock-result) "]"))
     (println (str "    Eve/Stock: " (fmt2 (double speedup)) "x"))
+    (println (str "    Result: " (if ok? "match" (str "MISMATCH eve=" (pr-str (:value eve-result))
+                                                     " stock=" (pr-str (:value stock-result))))))
     (println)))
 
 ;;=============================================================================
@@ -166,16 +194,16 @@
                 :qty   (arr/eve-array :float64 qtys)
                 :cost  (arr/eve-array :float64 costs)})
         (fn [eve-a]
-          (bench
+          (with-value eve-a (bench
             #(swap! eve-a (fn [s]
                (let [revenue (func/mul (:price s) (:qty s))
                      margin  (func/sub revenue (:cost s))]
-                 (assoc s :result (func/sum margin))))))))
-      (bench
+                 (assoc s :result (func/sum margin)))))))))
+      (with-value stock-a (bench
         #(swap! stock-a (fn [s]
            (let [p (:price s) q (:qty s) c (:cost s)
                  margin (mapv (fn [pi qi ci] (- (* pi qi) ci)) p q c)]
-             (assoc s :result (reduce + 0.0 margin)))))))))
+             (assoc s :result (reduce + 0.0 margin))))))))))
 
 ;;=============================================================================
 ;; 2. FILTER + AGGREGATE — filter rows, then compute multiple stats
@@ -190,7 +218,7 @@
       (with-eve-atom mode (str "filt-agg-" n)
         (fn [] {:price (arr/eve-array :float64 prices)})
         (fn [eve-a]
-          (bench
+          (with-value eve-a (bench
             #(swap! eve-a (fn [s]
                (let [c    (:price s)
                      idx  (argops/argfilter c gt50)
@@ -199,8 +227,8 @@
                    {:sum  (func/sum filt)
                     :mean (func/mean filt)
                     :min  (func/min-val filt)
-                    :max  (func/max-val filt)})))))))
-      (bench
+                    :max  (func/max-val filt)}))))))))
+      (with-value stock-a (bench
         #(swap! stock-a (fn [s]
            (let [c    (:price s)
                  filt (filterv gt50 c)]
@@ -208,7 +236,7 @@
                {:sum  (reduce + 0.0 filt)
                 :mean (/ (reduce + 0.0 filt) (count filt))
                 :min  (reduce min filt)
-                :max  (reduce max filt)}))))))))
+                :max  (reduce max filt)})))))))))
 
 ;;=============================================================================
 ;; 3. SORT + TOP-N — argsort, take top 100, aggregate
@@ -222,19 +250,19 @@
       (with-eve-atom mode (str "sort-topn-" n)
         (fn [] {:price (arr/eve-array :float64 prices)})
         (fn [eve-a]
-          (bench
+          (with-value eve-a (bench
             #(swap! eve-a (fn [s]
                (let [c   (:price s)
                      idx (argops/argsort c :desc)
-                     top (argops/take-indices idx (arr/eve-array :int32 (vec (range (min 100 (count idx))))))
+                     top (argops/take-indices idx (arr/eve-array :int32 (vec (range (min 100 (ec/count idx))))))
                      top-vals (argops/take-indices c top)]
-                 (assoc s :result (func/mean top-vals))))))))
-      (bench
+                 (assoc s :result (func/mean top-vals)))))))))
+      (with-value stock-a (bench
         #(swap! stock-a (fn [s]
            (let [c (:price s)
                  sorted (vec (sort (fn [a b] (compare b a)) c))
                  top (subvec sorted 0 (min 100 (count sorted)))]
-             (assoc s :result (/ (reduce + 0.0 top) (count top))))))))))
+             (assoc s :result (/ (reduce + 0.0 top) (count top)))))))))))
 
 ;;=============================================================================
 ;; 4. DATASET PIPELINE — multi-column realistic analytics
@@ -256,7 +284,7 @@
                 :cat   (arr/eve-array :int32 cats)
                 :id    (arr/eve-array :int32 ids)})
         (fn [eve-a]
-          (bench
+          (with-value eve-a (bench
             #(swap! eve-a (fn [s]
                (let [ds1  (ds/dataset {:price (:price s) :qty (:qty s)
                                        :cat (:cat s) :id (:id s)})
@@ -268,8 +296,8 @@
                      ds5  (ds/head ds4 take-n)]
                  (assoc s :result
                    {:rev-sum    (func/sum (ds/column ds5 :revenue))
-                    :price-mean (func/mean (ds/column ds5 :price))})))))))
-      (bench
+                    :price-mean (func/mean (ds/column ds5 :price))}))))))))
+      (with-value stock-a (bench
         #(swap! stock-a (fn [s]
            (let [p (:price s) q (:qty s)
                  rev (mapv * p q)
@@ -286,7 +314,7 @@
                  top-p   (subvec sorted-p 0 take-n)]
              (assoc s :result
                {:rev-sum    (reduce + 0.0 top-rev)
-                :price-mean (/ (reduce + 0.0 top-p) (count top-p))}))))))))
+                :price-mean (/ (reduce + 0.0 top-p) (count top-p))})))))))))
 
 ;;=============================================================================
 ;; 5. TENSOR TRANSFORM — emap → transpose → flatten → reduce
@@ -307,21 +335,21 @@
       (with-eve-atom mode (str "tensor-" total)
         (fn [] {:data (arr/eve-array :float64 data) :side side})
         (fn [eve-a]
-          (bench
+          (with-value eve-a (bench
             #(swap! eve-a (fn [s]
                (let [t  (tensor/from-array (:data s) [(:side s) (:side s)])
                      t2 (tensor/emap double-fn t)
                      t3 (tensor/transpose t2)
                      flat (tensor/to-array t3)]
                  (assoc s :result (tensor/ereduce + 0.0
-                                    (tensor/from-array flat [(count flat)])))))))))
-      (bench
+                                    (tensor/from-array flat [(ec/count flat)]))))))))))
+      (with-value stock-a (bench
         #(swap! stock-a (fn [s]
            (let [t  (:t s)
                  t2 (mapv (fn [row] (mapv double-fn row)) t)
                  t3 (apply mapv vector t2)
                  flat (vec (apply concat t3))]
-             (assoc s :result (reduce + 0.0 flat)))))))))
+             (assoc s :result (reduce + 0.0 flat))))))))))
 
 ;;=============================================================================
 ;; Summary table
@@ -373,23 +401,27 @@
 ;; Runner — runs a given tier at a given mode
 ;;=============================================================================
 
+(def ^:private benches-by-name (clojure.core/atom {}))
+
 (defn- safe-bench!
   "Run a single benchmark fn, catching and reporting errors."
   [bench-fn n mode]
   (try
     (bench-fn n mode)
-    (catch #?(:cljs :default :clj Exception) e
-      (println (str "  [SKIP] " #?(:cljs (.-message e) :clj (.getMessage e))))
+    (catch #?(:cljs :default :lpy python/Exception :default Exception) e
+      (swap! failures conj {:bench (some (fn [[k f]] (when (= f bench-fn) k)) @benches-by-name) :n n :mode mode
+                            :error (ex-message e)})
+      (println (str "  [FAIL] " (ex-message e)))
+      (doseq [l (take 16 #?(:cljs (some-> (.-stack e) (.split "\n"))
+                            :clj (map str (.getStackTrace ^Throwable e))
+                            :default nil))]
+        (println (str "    " l)))
       (println))))
 
 (defn- run-tier! [n mode]
   (safe-bench! bench-column-arithmetic! n mode)
   (safe-bench! bench-filter-aggregate! n mode)
   (safe-bench! bench-sort-topn! n mode)
-  ;; Dataset Pipeline and Tensor Pipeline require nested Eve types in swap!
-  ;; which currently have serialization issues with corrupted EveArray counts
-  ;; after SAB/mmap round-trip in repeated swap! iterations.
-  ;; Run them only in standalone (non-atom) mode when that's supported.
   (safe-bench! bench-dataset-pipeline! n mode)
   (safe-bench! bench-tensor-pipeline! n mode))
 
@@ -398,10 +430,19 @@
   [n mode]
   (try
     (run-tier! n mode)
-    (catch #?(:cljs :default :clj Exception) e
+    (catch #?(:cljs :default :lpy python/Exception :default Exception) e
+      (swap! failures conj {:tier n :mode mode :error (ex-message e)})
       (println (str "  [ERROR] Tier n=" n " mode=" (name mode) " failed: "
-                    #?(:cljs (.-message e) :clj (.getMessage e))))
+                    (ex-message e)))
       (println))))
+
+(defn- report-failures!
+  "Print the failures and answer their count."
+  []
+  (let [fs @failures]
+    (println (str "  Failures: " (count fs)))
+    (doseq [f fs] (println (str "    " (pr-str f))))
+    (count fs)))
 
 (defn- bench-header! []
   (println "==============================================================")
@@ -413,26 +454,48 @@
 
 (defn run-mmap! []
   (reset! results [])
+  (reset! failures [])
   (bench-header!)
   (println "=== MMAP (persistent) ===")
   (println)
   (doseq [n [10000 100000 1000000]]
     (println (str "--- " (format-n n) " ---"))
     (safe-run-tier! n :mmap))
-  (print-summary-table :mmap))
+  (print-summary-table :mmap)
+  (report-failures!))
 
 (defn run-inmem! []
   (reset! results [])
+  (reset! failures [])
   (bench-header!)
   (println "=== IN-MEMORY (SAB/heap) ===")
   (println)
   (doseq [n [10000 100000 1000000]]
     (println (str "--- " (format-n n) " ---"))
     (safe-run-tier! n :in-memory))
-  (print-summary-table :in-memory))
+  (print-summary-table :in-memory)
+  (report-failures!))
+
+(def ^:private benches
+  {"arith" bench-column-arithmetic! "filter" bench-filter-aggregate! "sort" bench-sort-topn!
+   "dataset" bench-dataset-pipeline! "tensor" bench-tensor-pipeline!})
+
+(reset! benches-by-name benches)
+
+(defn run-one!
+  "One benchmark at one scale and mode: (run-one! \"dataset\" 100000 :mmap).
+   Answers the failure count."
+  [bench-name n mode]
+  (reset! results [])
+  (reset! failures [])
+  (if-let [f (get benches bench-name)]
+    (safe-bench! f n mode)
+    (swap! failures conj {:unknown-bench bench-name :known (keys benches)}))
+  (report-failures!))
 
 (defn run-all! []
   (reset! results [])
+  (reset! failures [])
   (bench-header!)
 
   (println "=== MMAP (persistent) ===")
@@ -451,9 +514,13 @@
 
   (println "==============================================================")
   (println "  Benchmarks complete.")
-  (println "=============================================================="))
+  (let [n (report-failures!)]
+    (println "==============================================================")
+    n))
 
 ;; JVM entry point
 #?(:clj
    (defn -main [& _args]
-     (run-all!)))
+     (let [n (run-all!)]
+       (shutdown-agents)
+       (System/exit (if (pos? n) 1 0)))))

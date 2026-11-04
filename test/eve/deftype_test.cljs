@@ -7,6 +7,7 @@
    [eve.atom :as atom]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.alloc :as alloc]
+   [eve.process-slab :as ps]
    ;; Required so collection serializers are registered for serialized field tests
    [eve.map]
    [eve.vec]
@@ -60,8 +61,8 @@
                            (let [c (->Counter 42)]
                              (is (= 42 (count c)))
                              ;; Mutate via slab allocator
-                             (let [base (alloc/resolve-dv! (.-offset__ c))]
-                               (.setInt32 alloc/resolved-dv (+ base 4) 99 true))
+                             (let [base (ps/resolve-dv! (.-offset__ c))]
+                               (.setInt32 ps/resolved-dv (+ base 4) 99 true))
                              (is (= 99 (count c)))
                              :done)))]
       (is (= :done result)))))
@@ -106,8 +107,8 @@
                            (let [c (->AtomicCounter 100)]
                              (is (= 100 @c))
                              ;; Write via Atomics.store on slab
-                             (let [base (alloc/resolve-dv! (.-offset__ c))
-                                   sab (.-buffer alloc/resolved-dv)
+                             (let [base (ps/resolve-dv! (.-offset__ c))
+                                   sab (.-buffer ps/resolved-dv)
                                    idx (unsigned-bit-shift-right (+ base 4) 2)]
                                (js/Atomics.store (js/Int32Array. sab) idx 200))
                              (is (= 200 @c))
@@ -120,8 +121,8 @@
           result (swap! a (fn [_]
                            (let [c (->AtomicCounter 42)]
                              (is (= 42 @c))
-                             (let [base (alloc/resolve-dv! (.-offset__ c))
-                                   sab (.-buffer alloc/resolved-dv)
+                             (let [base (ps/resolve-dv! (.-offset__ c))
+                                   sab (.-buffer ps/resolved-dv)
                                    idx (unsigned-bit-shift-right (+ base 4) 2)
                                    i32 (js/Int32Array. sab)]
                                ;; Successful CAS
@@ -138,8 +139,8 @@
     (let [a (eve/atom ::type-id-check-test {})
           result (swap! a (fn [_]
                            (let [c (->Counter 0)
-                                 base (alloc/resolve-dv! (.-offset__ c))
-                                 type-id (.getUint8 alloc/resolved-dv base)]
+                                 base (ps/resolve-dv! (.-offset__ c))
+                                 type-id (.getUint8 ps/resolved-dv base)]
                              (is (number? type-id))
                              (is (>= type-id 64) "User type IDs start at 64")
                              :done)))]

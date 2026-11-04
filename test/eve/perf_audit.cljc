@@ -4,7 +4,8 @@
   (:require
    [eve.array :as arr]
    [eve.dataset.functional :as func]
-   [eve.dataset.argops :as argops]))
+   [eve.dataset.argops :as argops]
+   #?(:cljs [eve.typed-view :as tv])))
 
 ;;=============================================================================
 ;; Timing infrastructure
@@ -70,7 +71,7 @@
   #?(:cljs
      (let [a (arr/eve-array :float64 (gen-doubles n))]
        (report "get-typed-view"
-         (bench-us #(arr/get-typed-view a))))
+         (bench-us #(tv/get-typed-view a))))
      :clj nil)
 
   ;; Compare: JS Float64Array alloc

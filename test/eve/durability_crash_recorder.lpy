@@ -1,0 +1,49 @@
+(ns eve.durability-crash-recorder-lpy
+  "Crash-suite recording run, basilisp seat — the JVM recorder's twin
+  (eve.durability-crash-recorder) with this host's file copies.
+  Drives a scripted commit sequence on a fresh domain, snapshotting
+  the whole domain after each commit, and prints a manifest:
+    commit <i> journal-len <n>
+  The script ends WITHOUT closing the domain (close would
+  checkpoint).
+  Usage: record <variant J1|J10> <size counter|kb64> <workdir> <n>"
+  (:require [eve.atom :as atom])
+  (:import os shutil))
+
+(defn- opts [variant]
+  (case variant
+    "J1" {:journal? true :journal-batch 1}
+    "J10" {:journal? true :journal-batch 10}
+    {}))
+
+(defn- copy-domain! [parent dst]
+  ;; the domain is a file PREFIX (<parent>/domain.root, .slab*, ...),
+  ;; not a directory: copy every file whose name starts with "domain".
+  (when-not (os.path/exists dst) (os/makedirs dst))
+  (doseq [name (os/listdir parent)
+          :when (.startswith name "domain")]
+    (shutil/copy (os.path/join parent name) (os.path/join dst name))))
+
+(let [[variant size workdir n-str] *command-line-args*
+      n (python/int n-str)
+      dir (str workdir "/domain")
+      snap (fn [i] (copy-domain! workdir (str workdir "/snap-" i)))
+      dom (atom/persistent-atom-domain dir (opts variant))
+      big (fn [ch] (mapv (fn [_] (apply str (repeat 30 ch))) (range 2200)))
+      init (case size "counter" 0 (big \z))
+      a (atom/persistent-atom {:id :eve/main :persistent dir} init)]
+  (atom/sync! a)
+  (snap 0)
+  (println "commit" 0 "journal-len"
+           (let [j (str dir ".journal")]
+             (if (os.path/exists j) (.-st_size (os/stat j)) 0)))
+  (dotimes [i n]
+    (let [k (inc i)]
+      (case size
+        "counter" (swap! a inc)
+        (swap! a (fn [_] (big (char (+ 97 (mod k 26)))))))
+      (snap k)
+      (println "commit" k "journal-len"
+               (let [j (str dir ".journal")]
+                 (if (os.path/exists j) (.-st_size (os/stat j)) 0)))
+      (flush))))

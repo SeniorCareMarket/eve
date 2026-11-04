@@ -11,8 +11,10 @@
      node target/thread-test/xray.js"
   (:require
    [eve.atom :as a]
+   [eve.sab :as sab]
    [eve.data :as d]
    [eve.deftype-proto.alloc :as alloc]
+   [eve.process-slab :as ps]
    ;; sab_map must be loaded so direct-map-encoder is registered
    [eve.map]))
 
@@ -59,9 +61,9 @@
   (reset! the-env (.-s-atom-env the-atom))
   ;; Register overflow callbacks for allocations > 1024 bytes
   (let [env @the-env]
-    (alloc/register-overflow-fns!
-      (fn [size-bytes] (a/alloc env size-bytes))
-      (fn [desc-idx] (a/free env desc-idx))
+    (ps/register-overflow-fns!
+      (fn [size-bytes] (sab/alloc env size-bytes))
+      (fn [desc-idx] (sab/free env desc-idx))
       :sab (:sab env)))
 
   (try
@@ -220,7 +222,7 @@
   (println "Exercises SAB allocator one operation at a time.")
   (println "Stops at the first invariant violation.\n")
   (println "Initializing slab allocator...")
-  (-> (alloc/init!)
+  (-> (ps/init!)
       (.then (fn [_]
                (println "Slabs ready.\n")
                (run-tests!)))

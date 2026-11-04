@@ -1,0 +1,13 @@
+# run clje on 5c19154e3 eve tree b13044a3227635d10fdc7652ae190a1ae81740b3
+# cmd (in eve/) bb test:clje
+# start 2026-10-21 10:09:34 PM ET load 1.00 1.00 0.99 mem-in-use 570 MB
+[error] clojerl.Error: /home/user/atom.broker/eve/src/eve/deftype_proto/serialize.cljc:150:1: Init value for #'eve.deftype-proto.serialize/stored-piece-fn is not a literal: #<clojerl.Atom dcb86562-d795-4710-8205-a31cc2b8950e>
+    clj_emitter/ast.2 (/opt/eve-tools/clojerl/src/erl/clj_emitter.erl:141)
+    clj_emitter/emit.1 (/opt/eve-tools/clojerl/src/erl/clj_emitter.erl:33)
+    clj_compiler/do_analyze_emit_eval.2 (/opt/eve-tools/clojerl/src/erl/clj_compiler.erl:367)
+    clj_reader/read_fold_loop.3 (/opt/eve-tools/clojerl/src/erl/clj_reader.erl:173)
+    clj_compiler/-compile_string/3-fun-1-.7 (/opt/eve-tools/clojerl/src/erl/clj_compiler.erl:263)
+    clj_module/with_context.1 (/opt/eve-tools/clojerl/src/erl/clj_module.erl:108)
+    clj_compiler/compile_string.3 (/opt/eve-tools/clojerl/src/erl/clj_compiler.erl:275)
+Error while executing task: test:clje
+# end 2026-10-21 10:09:42 PM ET exit 1 wall 8s peak-mem-in-use 736 MB load 1.00 1.00 0.99

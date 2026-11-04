@@ -1,0 +1,9 @@
+# run f-bb-swap-args on ae6cbfdb1 eve tree 9439fa9e23cc94889a467bc2461817f2d3c0374c
+# cmd (in eve/) bash -c bb -cp "$(bb classpath bb)" /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/probes/bb_swap_args.clj
+# start 2026-10-21 11:47:53 PM ET load 1.01 1.00 1.16 mem-in-use 1007 MB
+6 extra args: 1
+7 extra args: threw: Cannot call  with 9 arguments
+8 extra args: threw: Cannot call  with 10 arguments
+9 extra args: threw: Cannot call  with 11 arguments
+bb 1.13.226
+# end 2026-10-21 11:47:55 PM ET exit 0 wall 2s peak-mem-in-use 1007 MB peak-process-tree-rss 35 MB load 1.01 1.00 1.16
