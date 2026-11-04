@@ -5,7 +5,7 @@ What eve protects, what it does not, and how to report a problem. Every statemen
 
 ## Reporting a vulnerability
 
-Report privately to John Newman at john.michael.newman@gmail.com. Please do not open a public issue for an unfixed
+Report privately to John Newman at john@seniorcaremarket.com. Please do not open a public issue for an unfixed
 vulnerability.
 
 ## What is encrypted, by default and otherwise

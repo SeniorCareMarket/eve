@@ -89,7 +89,7 @@ At base there was **no SECURITY.md** and no statement of what eve encrypts; `SEC
 | 7.3 The portable crypto | ⚠️ hand-written SHA-256, SHA-512, AES, XXH3, Ed25519, Poseidon2; **not constant-time, said so** ("not a hardened signer", `net/ed25519.cljc:15-17`); it is the **only** crypto on the browser, jolt, glojure and ValueScript (`hosts.edn`: `:browser` takes `crypto/portable` since `4bcd756cc`); no audit | **S**: done (`007d4edc8`): SECURITY.md lists the hosts whose signing is the portable code (`:59`, the browser included); **L** for an external review |
 | 7.4 Entropy | ⚠️ `process/vs`'s `random-bytes` is "clock-seeded, not cryptographically strong" and `crypto/vs`'s refuses (`adapters/README.md`) | **S**: done (`007d4edc8`): SECURITY.md: never mint a group key on ValueScript |
 | 7.5 Ed25519 small-order keys | ✅ eve refuses the 8 small-order encodings on every host (`eve.net.ed25519/well-formed?`); ⚠️ the VS kernel's verifier accepts the identity key (network-atoms/ADAPTERS.md §5), so broker and client can disagree | **M** (VS kernel owner): align `ed25519.vs` |
-| 7.6 Reporting | ✅ SECURITY.md names the disclosure address (operator's choice, 2026-11-03: john.michael.newman@gmail.com) | **S**: SECURITY.md names one (operator's choice) |
+| 7.6 Reporting | ✅ SECURITY.md names the disclosure address (operator's choice, 2026-11-03: john@seniorcaremarket.com) | **S**: SECURITY.md names one (operator's choice) |
 
 ## 8. Support and compatibility policy
 
