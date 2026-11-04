@@ -1,6 +1,0 @@
-:init-done
-:contended {:writers [jvm0 jvm1 jvm2 jvm3], :ops-each 40}
-:snapshot {:counter 160, :checksums {:removes 40, :adds 40, :transforms 40, :transfers 40}, :pool 40, :accounts 10, :balance-sum 10000, :log 8}
-:per-writer {jvm0 40, jvm1 40, jvm2 40, jvm3 40}
-:violations []
-:COOP-VERIFY-OK

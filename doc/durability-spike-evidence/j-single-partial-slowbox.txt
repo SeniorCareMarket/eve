@@ -1,5 +1,0 @@
-{:mode :single, :variant "A", :size :counter, :iters 3000, :ms 2611.220462, :us-per-op 870.4068206666668, :ops-sec 1148.8880558565413}
-{:mode :single, :variant "A", :size :kb, :iters 1000, :ms 2782.401916, :us-per-op 2782.401916, :ops-sec 359.401707657536}
-{:mode :single, :variant "A", :size :kb64, :iters 300, :ms 1911.990264, :us-per-op 6373.30088, :ops-sec 156.90456465629785}
-{:mode :single, :variant "B", :size :counter, :iters 3000, :ms 307390.850445, :us-per-op 102463.616815, :ops-sec 9.75956179455893}
-{:mode :single, :variant "B", :size :kb, :iters 1000, :ms 59754.927694, :us-per-op 59754.927694, :ops-sec 16.735021505187266}

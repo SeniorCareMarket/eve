@@ -1,9 +1,0 @@
-# run f3-lpy-fold-group on 51fdec497 eve tree b298739009c403140cca91612606d534a04b4089
-# cmd (in eve/) bash -c bb test:lpy eve.thread-fold-group-test
-# start 2026-10-22 1:53:29 PM ET load 1.29 1.18 1.50 mem-in-use 717 MB
-ok eve.thread-fold-group-test/=>>-on-a-group 416.6s
-ok eve.thread-fold-group-test/fold-on-a-group 342.1s
-ok eve.thread-fold-group-test/the-chunks-of-a-group-are-sized-from-its-members-measured-swaps 166.8s
-Ran eve.thread-fold-group-test
-:summary {:fail 0, :pass 49, :test 3, :error 0}
-# end 2026-10-22 2:10:25 PM ET exit 0 wall 1016s peak-mem-in-use 822 MB peak-process-tree-rss 176 MB load 1.26 1.41 1.44

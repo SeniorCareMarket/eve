@@ -1,6 +1,0 @@
-# run f-mac-gljmedia-cross on 7d24125ed eve tree 04a446e24cf5429d48fb8550a91a2fa66cc2aa47
-# cmd (in eve/) bash -c rm -rf /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/gljm-darwin && cd capstone/eve-media && GOOS=darwin GOARCH=arm64 bash glj/build.sh /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/gljm-darwin && file /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/gljm-darwin/glj-eve
-# start 2026-10-22 1:13:02 AM ET load 1.98 1.56 1.64 mem-in-use 1247 MB
-glj-eve-media: built /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/gljm-darwin/glj-eve (27754898 bytes, darwin/arm64)
-/tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/gljm-darwin/glj-eve: Mach-O 64-bit arm64 executable, flags:<|DYLDLINK|PIE>
-# end 2026-10-22 1:13:14 AM ET exit 0 wall 12s peak-mem-in-use 1585 MB peak-process-tree-rss 620 MB load 1.83 1.55 1.64

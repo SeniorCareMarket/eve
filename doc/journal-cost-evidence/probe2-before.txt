@@ -1,7 +1,0 @@
-{:probe :p2, :window 0, :us-per-op 986.995295, :queue 3, :floor 1001, :epoch 1003}
-{:probe :p2, :window 1, :us-per-op 3547.995877, :queue 1003, :floor 1001, :epoch 2003}
-{:probe :p2, :window 2, :us-per-op 9609.048699, :queue 2003, :floor 1001, :epoch 3003}
-{:probe :p2, :window 3, :us-per-op 16052.174498, :queue 3003, :floor 1001, :epoch 4003}
-{:probe :p2, :window 4, :us-per-op 22869.352924, :queue 4003, :floor 1001, :epoch 5003}
-{:probe :p2, :window 5, :us-per-op 28750.842372, :queue 5003, :floor 1001, :epoch 6003}
-:probe2-done

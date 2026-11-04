@@ -84,7 +84,7 @@ served by a gateway (`network_atom.cljc`).
 
 A host is a list of adapter roots, one row of [`hosts.edn`](hosts.edn); eve's shared code (`src/`) names none of them
 but one ClojureScript-only file (`src/eve/shared_atom.cljs`, counted in `.host-leak`).
-Status: the JVM and babashka rows are the 0.9.0 release battery (2026-11-03, one Linux box; `doc/release-0.9/REPORT.md`);
+Status: the JVM and babashka rows are the 0.9.0 release battery (2026-11-03, one Linux box; [CHANGELOG.md](CHANGELOG.md));
 the other rows are the final pass of 2026-10-21/22 ET, not re-run for 0.9.0. Each host's page in
 [doc/hosts/](doc/hosts/README.md) has its runs, its performance, how eve is built on it and its gotchas.
 

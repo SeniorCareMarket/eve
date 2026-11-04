@@ -1,5 +1,0 @@
-# run f-probe-build-pod on 5aff43539 eve tree fad60bc60b20a276722469fc8abc70da948b0bdc
-# cmd (in eve/) bash -c cd impls/bb/eve_atomics_pod && go build -o /tmp/eve-atomics-pod-probe . && ls -la /tmp/eve-atomics-pod-probe
-# start 2026-10-22 1:18:44 AM ET load 2.87 1.70 1.63 mem-in-use 1257 MB
--rwxr-xr-x 1 root root 3014609 Oct 22 05:18 /tmp/eve-atomics-pod-probe
-# end 2026-10-22 1:18:46 AM ET exit 0 wall 2s peak-mem-in-use 1257 MB peak-process-tree-rss 17 MB load 2.87 1.70 1.63

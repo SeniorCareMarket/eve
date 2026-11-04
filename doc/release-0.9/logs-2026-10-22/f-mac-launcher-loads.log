@@ -1,7 +1,0 @@
-# run f-mac-launcher-loads on 407e325cd eve tree 5e9affc6529ef10204d433450923011ddd1a4d31
-# cmd (in eve/) bash -c bb eve-media; echo exit $?
-# start 2026-10-22 1:14:46 AM ET load 1.28 1.46 1.60 mem-in-use 1047 MB
-usage: bb eve-media demo|scan <dir>|verify|setup|build [--set core|extended] [--hosts h,...] [--kill transcode] [--no-browser] [--only run,...] [--install]
-Error while executing task: eve-media
-exit 2
-# end 2026-10-22 1:14:48 AM ET exit 0 wall 2s peak-mem-in-use 1086 MB peak-process-tree-rss 34 MB load 1.25 1.46 1.60

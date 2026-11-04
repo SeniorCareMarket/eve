@@ -1,9 +1,0 @@
-{:mode :single, :variant "A", :size :counter, :iters 1000, :ms 68.70211299974471, :us-per-op 68.70211299974471, :ops-sec 14555.59307184214}
-{:mode :single, :variant "A", :size :kb, :iters 200, :ms 424.8798970002681, :us-per-op 2124.3994850013405, :ops-sec 470.7212589064288}
-{:mode :single, :variant "A", :size :kb64, :iters 50, :ms 127.59888800047338, :us-per-op 2551.9777600094676, :ops-sec 391.85294467311115}
-{:mode :single, :variant "B", :size :counter, :iters 300, :ms 29134.615017999895, :us-per-op 97115.38339333299, :ops-sec 10.297029832542991}
-{:mode :single, :variant "B", :size :kb, :iters 200, :ms 11311.92957700044, :us-per-op 56559.647885002196, :ops-sec 17.680449532380628}
-{:mode :single, :variant "B", :size :kb64, :iters 50, :ms 2630.4654480004683, :us-per-op 52609.308960009366, :ops-sec 19.008042868613682}
-{:mode :single, :variant "C", :size :counter, :iters 1000, :ms 9081.30680999998, :us-per-op 9081.30680999998, :ops-sec 110.11631045201987}
-{:mode :single, :variant "C", :size :kb, :iters 200, :ms 1821.8402969995514, :us-per-op 9109.201484997757, :ops-sec 109.77910650532134}
-{:mode :single, :variant "C", :size :kb64, :iters 50, :ms 856.6259029991925, :us-per-op 17132.51805998385, :ops-sec 58.36853616606914}

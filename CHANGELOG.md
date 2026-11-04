@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-04
+
+A re-cut of 0.9.0 on the release checker's export. 0.9.0's tree was the repository's whole `eve/` directory
+(2,302 files): it carried the working records a release leaves behind — agent and tool configuration, the release
+process's own notes, network-atom plans and probes, benchmark run records — 1,682 files `release/eve/exclude` holds
+back. This tree is the 620 files the checker ships. No API change.
+
+### Fixed
+
+- `bb run atom-swap` (the README's example) could not load `eve.journal-file`: `bb.edn`'s `:paths` lacked the
+  `adapters/journal-file/java/src` root the journal-file seam added to `hosts.edn :bb` on 2026-10-28.
+- The README's status line cited a release-process document the release does not ship.
+
 ## [0.9.0] - 2026-11-04
 
 0.9 is the API and host contract 1.0 will freeze, published for adopters to build against. Between 0.9 and 1.0 the
@@ -301,5 +314,6 @@ transient or a constructor, which reclaim — 9.25); **a domain shared with a pa
 - Comprehensive documentation and benchmark results
 
 [Unreleased]: https://github.com/SeniorCareMarket/eve/compare/v0.9.0...HEAD
+[0.9.1]: https://github.com/SeniorCareMarket/eve/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/SeniorCareMarket/eve/compare/v0.1.0...v0.9.0
 [0.1.0]: https://github.com/SeniorCareMarket/eve/releases/tag/v0.1.0

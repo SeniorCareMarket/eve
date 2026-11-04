@@ -1,6 +1,0 @@
-# run f-start-lpy on a485a3f7f eve tree 9b771236d01ad3ce90ca3fe0ef2b633062a2888e
-# cmd (in eve/) bash -c export PYTHONPYCACHEPREFIX=$(mktemp -d); R=$(bb classpath lpy | tr ":" "\n" | tac | sed "s/^/-p /" | tr "\n" " "); for i in cold cached; do s=$(date +%s%N); basilisp run $R -c "(require (quote eve.alpha))"; echo "basilisp require eve.alpha $i: $(( ($(date +%s%N)-s)/1000000 )) ms"; done
-# start 2026-10-22 12:35:04 AM ET load 1.85 2.20 1.77 mem-in-use 993 MB
-basilisp require eve.alpha cold: 50634 ms
-basilisp require eve.alpha cached: 2219 ms
-# end 2026-10-22 12:35:58 AM ET exit 0 wall 54s peak-mem-in-use 1026 MB peak-process-tree-rss 81 MB load 1.41 2.01 1.73

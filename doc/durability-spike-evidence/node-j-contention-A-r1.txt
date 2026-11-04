@@ -1,8 +1,0 @@
-variant=A n-per-worker=100 workers=4 fail=0
-worker-elapsed-ms: 68.82036900008097
-175.2920609996654
-197.14152099983767
-105.98096699966118
-makespan-ms: 197.14152099983767
-total-swaps: 400  aggregate-ops-sec: 2029.0
-final: :value 400 (expected :value 400)

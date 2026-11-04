@@ -1,4 +1,0 @@
-:snapshot {:counter 160, :checksums {:removes 40, :adds 40, :transforms 40, :transfers 40}, :pool 40, :accounts 10, :balance-sum 10000, :log 8}
-:per-writer {jvm0 40, jvm1 40, node0 40, node1 40}
-:violations []
-:COOP-VERIFY-OK

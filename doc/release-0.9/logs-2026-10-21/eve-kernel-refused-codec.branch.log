@@ -1,5 +1,0 @@
-eve-kernel: eve.net.bytes/HEX-VAL calls vs.core/rt-kvmap-own/1: no kernel function (eve-core's callee-table)
-eve-kernel: eve.net.bytes/hex-digit calls vs.core/rt-kvmap-own/1: no kernel function (eve-core's callee-table)
-eve-kernel: eve.net.bytes/unhex calls vs.core/rt-kvmap-own/1: no kernel function (eve-core's callee-table)
-eve-kernel: eve.net.u64/mul calls vs.core/rt-drop-own/1: no kernel function (eve-core's callee-table)
-eve-kernel: eve.net.u64/mul128 calls vs.core/rt-drop-own/1: no kernel function (eve-core's callee-table)

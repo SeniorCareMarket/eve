@@ -1,4 +1,0 @@
-# run f-ab-node-f65b23153-1 on 146c62886 eve tree 6ce00684d51b0c8dab81f14b5bafd3a220c6512c
-# cmd (in eve/) bash -c cd /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/ab/f65b23153/eve && for b in arith tensor filter dataset; do for m in mmap in-memory; do node target/eve-test/all.js columnar-one $b 1000000 $m 2>&1 | grep -E 'n=1000000|Eve:|Stock:'; done; done
-# start 2026-10-22 12:56:15 AM ET load 1.39 2.24 2.10 mem-in-use 1026 MB
-# end 2026-10-22 12:56:23 AM ET exit 1 wall 8s peak-mem-in-use 1181 MB peak-process-tree-rss 133 MB load 1.33 2.19 2.09

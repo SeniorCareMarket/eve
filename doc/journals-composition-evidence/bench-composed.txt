@@ -1,6 +1,0 @@
-== warm 300 n 3000 ==
-{:mode :single, :variant "J1000", :size :counter, :iters 3000, :ms 1589.062906, :us-per-op 529.6876353333334, :ops-sec 1887.9051223665022}
-{:mode :flush-latency, :variant "J1000", :size :counter, :flushes 3, :mean-ms 187, :max-ms 405}
-== warm 5000 n 3000 ==
-{:mode :single, :variant "J1000", :size :counter, :iters 3000, :ms 561.945835, :us-per-op 187.3152783333333, :ops-sec 5338.5928200713515}
-{:mode :flush-latency, :variant "J1000", :size :counter, :flushes 8, :mean-ms 893/8, :max-ms 339}
