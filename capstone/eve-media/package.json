@@ -3,7 +3,7 @@
   "version": "0.9.0",
   "private": true,
   "description": "eve-media, eve 0.9's capstone: the Node member's npm libraries (sharp, music-metadata) and eve's mmap addon",
-  "license": "MIT",
+  "license": "0BSD",
   "dependencies": {
     "eve-native": "file:../..",
     "node-gyp-build": "^4.8.1",

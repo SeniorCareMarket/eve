@@ -170,5 +170,5 @@ numbers are in [doc/hosts/](doc/hosts/README.md). The cost of each seam, portabl
 
 ## License
 
-MIT ([LICENSE](LICENSE)), except core.rrb-vector's ClojureScript sources under `src/eve/rrb_vector*`, which are
+0BSD ([LICENSE](LICENSE)), except core.rrb-vector's ClojureScript sources under `src/eve/rrb_vector*`, which are
 Eclipse Public License 1.0 ([epl-v10.html](epl-v10.html)). See [NOTICE](NOTICE).

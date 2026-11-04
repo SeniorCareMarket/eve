@@ -106,6 +106,8 @@ what the tree now contains.
 
 ### Changed
 
+- **License: 0BSD** (Zero-Clause BSD), no copyright holder (was MIT, © 2022 John Newman). The core.rrb-vector
+  ClojureScript sources under `src/eve/rrb_vector*` remain Eclipse Public License 1.0, as noted in NOTICE.
 - **`e/atom` is `eve.atom`'s atom on every host**: in process, a heap domain per `:id` (on ClojureScript the module's
   SharedArrayBuffers); with `:persistent`, a named atom in a disk domain. The 0.1.0 SharedArrayBuffer atom
   (`eve.shared-atom`) is no longer what `e/atom` returns; nothing in the tree requires it.
