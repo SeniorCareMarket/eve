@@ -5,9 +5,8 @@ What eve protects, what it does not, and how to report a problem. Every statemen
 
 ## Reporting a vulnerability
 
-Report privately to the maintainer named in `LICENSE` (John Newman) through the repository you got eve from. Please do
-not open a public issue for an unfixed vulnerability. *(Release manager: replace this paragraph with the disclosure
-address the project chooses —.)*
+Report privately to John Newman at john.michael.newman@gmail.com. Please do not open a public issue for an unfixed
+vulnerability.
 
 ## What is encrypted, by default and otherwise
 
@@ -51,7 +50,7 @@ address the project chooses —.)*
 ## The cryptographic code
 
 * eve carries **portable implementations** (`src/eve/net/`): SHA-256, SHA-512, HMAC-SHA256, AES-256 / CTR, XXH3-128,
-  Ed25519, Poseidon2 over BN254. They are the reference every native adapter is tested against byte for byte
+  Ed25519. They are the reference every native adapter is tested against byte for byte
   (`test/eve/net/crypto_test.cljc`, `ed25519_test.cljc`).
 * **They are not constant-time**, and say so: "a host's arithmetic and allocation are not constant time: this is the
   reference a native adapter is held to, not a hardened signer" (`src/eve/net/ed25519.cljc`). They have not been
