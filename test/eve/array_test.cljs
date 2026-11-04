@@ -473,11 +473,11 @@
           out (:arr m)]
       (is (some? out))
       (is (= 5 (count out)))
-      (is (= 10 (arr/aget out 0)))
-      (is (= 20 (arr/aget out 1)))
-      (is (= 30 (arr/aget out 2)))
-      (is (= 40 (arr/aget out 3)))
-      (is (= 50 (arr/aget out 4)))
+      (is (= 10 (nth out 0)))
+      (is (= 20 (nth out 1)))
+      (is (= 30 (nth out 2)))
+      (is (= 40 (nth out 3)))
+      (is (= 50 (nth out 4)))
       ;; Clean up
       (swap! _init-atom dissoc :arr))))
 
@@ -488,9 +488,9 @@
           out (:arr m)]
       (is (some? out))
       (is (= 3 (count out)))
-      (is (= 1.5 (arr/aget out 0)))
-      (is (= 2.5 (arr/aget out 1)))
-      (is (= 3.5 (arr/aget out 2)))
+      (is (= 1.5 (nth out 0)))
+      (is (= 2.5 (nth out 1)))
+      (is (= 3.5 (nth out 2)))
       (swap! _init-atom dissoc :arr))))
 
 (deftest sab-storable-uint8-roundtrip-test
@@ -500,9 +500,9 @@
           out (:arr m)]
       (is (some? out))
       (is (= 3 (count out)))
-      (is (= 0 (arr/aget out 0)))
-      (is (= 128 (arr/aget out 1)))
-      (is (= 255 (arr/aget out 2)))
+      (is (= 0 (nth out 0)))
+      (is (= 128 (nth out 1)))
+      (is (= 255 (nth out 2)))
       (swap! _init-atom dissoc :arr))))
 
 (deftest sab-storable-swap-test
@@ -512,9 +512,9 @@
     (swap! _init-atom assoc :counters (arr/eve-array :int32 [1 2 3]))
     (let [out (:counters @_init-atom)]
       (is (= 3 (count out)))
-      (is (= 1 (arr/aget out 0)))
-      (is (= 2 (arr/aget out 1)))
-      (is (= 3 (arr/aget out 2)))
+      (is (= 1 (nth out 0)))
+      (is (= 2 (nth out 1)))
+      (is (= 3 (nth out 2)))
       (swap! _init-atom dissoc :counters))))
 
 (deftest sab-storable-multiple-types-test
@@ -524,13 +524,13 @@
            :floats (arr/eve-array :float64 [1.1 2.2])
            :bytes (arr/eve-array :uint8 [255 0 128]))
     (let [m @_init-atom]
-      (is (= 1 (arr/aget (:ints m) 0)))
-      (is (= 2 (arr/aget (:ints m) 1)))
-      (is (= 1.1 (arr/aget (:floats m) 0)))
-      (is (= 2.2 (arr/aget (:floats m) 1)))
-      (is (= 255 (arr/aget (:bytes m) 0)))
-      (is (= 0 (arr/aget (:bytes m) 1)))
-      (is (= 128 (arr/aget (:bytes m) 2)))
+      (is (= 1 (nth (:ints m) 0)))
+      (is (= 2 (nth (:ints m) 1)))
+      (is (= 1.1 (nth (:floats m) 0)))
+      (is (= 2.2 (nth (:floats m) 1)))
+      (is (= 255 (nth (:bytes m) 0)))
+      (is (= 0 (nth (:bytes m) 1)))
+      (is (= 128 (nth (:bytes m) 2)))
       (swap! _init-atom dissoc :ints :floats :bytes))))
 
 ;;-----------------------------------------------------------------------------
@@ -555,7 +555,7 @@
       (let [out (:arr @a)]
         (is (some? out))
         (is (= 1 (count out)))
-        (is (= 42 (arr/aget out 0)))))))
+        (is (= 42 (nth out 0)))))))
 
 (deftest roundtrip-L1-small-array-test
   (testing "L1: Small array (3 elements) survives atom round-trip"
@@ -564,9 +564,9 @@
       (let [out (:arr @a)]
         (is (some? out))
         (is (= 3 (count out)))
-        (is (= 10 (arr/aget out 0)))
-        (is (= 20 (arr/aget out 1)))
-        (is (= 30 (arr/aget out 2)))))))
+        (is (= 10 (nth out 0)))
+        (is (= 20 (nth out 1)))
+        (is (= 30 (nth out 2)))))))
 
 ;; ---------- Level 2: Multiple derefs of same value ----------
 
@@ -581,9 +581,9 @@
         (is (= 3 (count out1)))
         (is (= 3 (count out2)))
         (is (= 3 (count out3)))
-        (is (= 100 (arr/aget out1 0)))
-        (is (= 200 (arr/aget out2 1)))
-        (is (= 300 (arr/aget out3 2)))))))
+        (is (= 100 (nth out1 0)))
+        (is (= 200 (nth out2 1)))
+        (is (= 300 (nth out3 2)))))))
 
 ;; ---------- Level 3: Sequential swaps replacing array ----------
 
@@ -592,17 +592,17 @@
     (let [a (eve/atom {})]
       ;; First array
       (swap! a assoc :arr (arr/eve-array :int32 [1 2 3]))
-      (is (= 1 (arr/aget (:arr @a) 0)))
+      (is (= 1 (nth (:arr @a) 0)))
       ;; Replace with second array
       (swap! a assoc :arr (arr/eve-array :int32 [4 5 6]))
-      (is (= 4 (arr/aget (:arr @a) 0)))
-      (is (= 5 (arr/aget (:arr @a) 1)))
-      (is (= 6 (arr/aget (:arr @a) 2)))
+      (is (= 4 (nth (:arr @a) 0)))
+      (is (= 5 (nth (:arr @a) 1)))
+      (is (= 6 (nth (:arr @a) 2)))
       ;; Replace with third array (different size)
       (swap! a assoc :arr (arr/eve-array :int32 [7 8]))
       (is (= 2 (count (:arr @a))))
-      (is (= 7 (arr/aget (:arr @a) 0)))
-      (is (= 8 (arr/aget (:arr @a) 1))))))
+      (is (= 7 (nth (:arr @a) 0)))
+      (is (= 8 (nth (:arr @a) 1))))))
 
 (deftest roundtrip-L3-add-remove-array-test
   (testing "L3: Adding and removing array from atom"
@@ -610,14 +610,14 @@
       ;; Add array
       (swap! a assoc :arr (arr/eve-array :int32 [1 2 3]))
       (is (= 123 (:other @a)))
-      (is (= 1 (arr/aget (:arr @a) 0)))
+      (is (= 1 (nth (:arr @a) 0)))
       ;; Remove array
       (swap! a dissoc :arr)
       (is (= 123 (:other @a)))
       (is (nil? (:arr @a)))
       ;; Add back
       (swap! a assoc :arr (arr/eve-array :int32 [9 8 7]))
-      (is (= 9 (arr/aget (:arr @a) 0))))))
+      (is (= 9 (nth (:arr @a) 0))))))
 
 ;; ---------- Level 4: Multiple arrays in same map ----------
 
@@ -628,12 +628,12 @@
              :arr1 (arr/eve-array :int32 [1 2 3])
              :arr2 (arr/eve-array :int32 [4 5 6]))
       (let [m @a]
-        (is (= 1 (arr/aget (:arr1 m) 0)))
-        (is (= 2 (arr/aget (:arr1 m) 1)))
-        (is (= 3 (arr/aget (:arr1 m) 2)))
-        (is (= 4 (arr/aget (:arr2 m) 0)))
-        (is (= 5 (arr/aget (:arr2 m) 1)))
-        (is (= 6 (arr/aget (:arr2 m) 2)))))))
+        (is (= 1 (nth (:arr1 m) 0)))
+        (is (= 2 (nth (:arr1 m) 1)))
+        (is (= 3 (nth (:arr1 m) 2)))
+        (is (= 4 (nth (:arr2 m) 0)))
+        (is (= 5 (nth (:arr2 m) 1)))
+        (is (= 6 (nth (:arr2 m) 2)))))))
 
 (deftest roundtrip-L4-three-arrays-test
   (testing "L4: Three arrays of different types"
@@ -643,12 +643,9 @@
              :floats (arr/eve-array :float64 [1.5 2.5])
              :bytes (arr/eve-array :uint8 [255 128]))
       (let [m @a]
-        (is (= :int32 (arr/array-type (:ints m))))
-        (is (= :float64 (arr/array-type (:floats m))))
-        (is (= :uint8 (arr/array-type (:bytes m))))
-        (is (= 10 (arr/aget (:ints m) 0)))
-        (is (= 1.5 (arr/aget (:floats m) 0)))
-        (is (= 255 (arr/aget (:bytes m) 0)))))))
+        (is (= 10 (nth (:ints m) 0)))
+        (is (= 1.5 (nth (:floats m) 0)))
+        (is (= 255 (nth (:bytes m) 0)))))))
 
 ;; ---------- Level 5: Nested maps containing arrays ----------
 
@@ -662,9 +659,9 @@
         (is (some? nested))
         (is (some? arr))
         (is (= 3 (count arr)))
-        (is (= 1 (arr/aget arr 0)))
-        (is (= 2 (arr/aget arr 1)))
-        (is (= 3 (arr/aget arr 2)))))))
+        (is (= 1 (nth arr 0)))
+        (is (= 2 (nth arr 1)))
+        (is (= 3 (nth arr 2)))))))
 
 (deftest roundtrip-L5-nested-two-levels-test
   (testing "L5: Array nested two levels deep"
@@ -673,9 +670,9 @@
       (let [arr (get-in @a [:level1 :level2 :arr])]
         (is (some? arr))
         (is (= 3 (count arr)))
-        (is (= 99 (arr/aget arr 0)))
-        (is (= 88 (arr/aget arr 1)))
-        (is (= 77 (arr/aget arr 2)))))))
+        (is (= 99 (nth arr 0)))
+        (is (= 88 (nth arr 1)))
+        (is (= 77 (nth arr 2)))))))
 
 (deftest roundtrip-L5-multiple-nested-arrays-test
   (testing "L5: Multiple arrays at different nesting levels"
@@ -685,9 +682,9 @@
              :nested {:arr (arr/eve-array :int32 [2])
                       :deeper {:arr (arr/eve-array :int32 [3])}})
       (let [m @a]
-        (is (= 1 (arr/aget (:top-arr m) 0)))
-        (is (= 2 (arr/aget (get-in m [:nested :arr]) 0)))
-        (is (= 3 (arr/aget (get-in m [:nested :deeper :arr]) 0)))))))
+        (is (= 1 (nth (:top-arr m) 0)))
+        (is (= 2 (nth (get-in m [:nested :arr]) 0)))
+        (is (= 3 (nth (get-in m [:nested :deeper :arr]) 0)))))))
 
 ;; ---------- Level 6: All typed array types through atoms ----------
 
@@ -696,51 +693,46 @@
     (let [a (eve/atom {})]
       (swap! a assoc :arr (arr/eve-array :int8 [-128 0 127]))
       (let [arr (:arr @a)]
-        (is (= :int8 (arr/array-type arr)))
-        (is (= -128 (arr/aget arr 0)))
-        (is (= 0 (arr/aget arr 1)))
-        (is (= 127 (arr/aget arr 2)))))))
+        (is (= -128 (nth arr 0)))
+        (is (= 0 (nth arr 1)))
+        (is (= 127 (nth arr 2)))))))
 
 (deftest roundtrip-L6-int16-test
   (testing "L6: int16 array round-trip"
     (let [a (eve/atom {})]
       (swap! a assoc :arr (arr/eve-array :int16 [-32768 0 32767]))
       (let [arr (:arr @a)]
-        (is (= :int16 (arr/array-type arr)))
-        (is (= -32768 (arr/aget arr 0)))
-        (is (= 0 (arr/aget arr 1)))
-        (is (= 32767 (arr/aget arr 2)))))))
+        (is (= -32768 (nth arr 0)))
+        (is (= 0 (nth arr 1)))
+        (is (= 32767 (nth arr 2)))))))
 
 (deftest roundtrip-L6-uint16-test
   (testing "L6: uint16 array round-trip"
     (let [a (eve/atom {})]
       (swap! a assoc :arr (arr/eve-array :uint16 [0 1000 65535]))
       (let [arr (:arr @a)]
-        (is (= :uint16 (arr/array-type arr)))
-        (is (= 0 (arr/aget arr 0)))
-        (is (= 1000 (arr/aget arr 1)))
-        (is (= 65535 (arr/aget arr 2)))))))
+        (is (= 0 (nth arr 0)))
+        (is (= 1000 (nth arr 1)))
+        (is (= 65535 (nth arr 2)))))))
 
 (deftest roundtrip-L6-uint32-test
   (testing "L6: uint32 array round-trip"
     (let [a (eve/atom {})]
       (swap! a assoc :arr (arr/eve-array :uint32 [0 1000000 4294967295]))
       (let [arr (:arr @a)]
-        (is (= :uint32 (arr/array-type arr)))
-        (is (= 0 (arr/aget arr 0)))
-        (is (= 1000000 (arr/aget arr 1)))
-        (is (= 4294967295 (arr/aget arr 2)))))))
+        (is (= 0 (nth arr 0)))
+        (is (= 1000000 (nth arr 1)))
+        (is (= 4294967295 (nth arr 2)))))))
 
 (deftest roundtrip-L6-float32-test
   (testing "L6: float32 array round-trip"
     (let [a (eve/atom {})]
       (swap! a assoc :arr (arr/eve-array :float32 [1.0 2.5 3.75]))
       (let [arr (:arr @a)]
-        (is (= :float32 (arr/array-type arr)))
         ;; Float32 has limited precision
-        (is (< (js/Math.abs (- 1.0 (arr/aget arr 0))) 0.001))
-        (is (< (js/Math.abs (- 2.5 (arr/aget arr 1))) 0.001))
-        (is (< (js/Math.abs (- 3.75 (arr/aget arr 2))) 0.001))))))
+        (is (< (js/Math.abs (- 1.0 (nth arr 0))) 0.001))
+        (is (< (js/Math.abs (- 2.5 (nth arr 1))) 0.001))
+        (is (< (js/Math.abs (- 3.75 (nth arr 2))) 0.001))))))
 
 ;; ---------- Level 7: Larger arrays ----------
 
@@ -752,7 +744,7 @@
       (let [arr (:arr @a)]
         (is (= 100 (count arr)))
         (doseq [i (range 100)]
-          (is (= i (arr/aget arr i)) (str "index " i)))))))
+          (is (= i (nth arr i)) (str "index " i)))))))
 
 (deftest roundtrip-L7-1000-element-test
   (testing "L7: 1000 element array round-trip"
@@ -762,9 +754,9 @@
       (let [arr (:arr @a)]
         (is (= 1000 (count arr)))
         ;; Spot check
-        (is (= 0 (arr/aget arr 0)))
-        (is (= 500 (arr/aget arr 500)))
-        (is (= 999 (arr/aget arr 999)))))))
+        (is (= 0 (nth arr 0)))
+        (is (= 500 (nth arr 500)))
+        (is (= 999 (nth arr 999)))))))
 
 ;; ---------- Level 8: Stress tests - repeated swaps ----------
 
@@ -774,8 +766,8 @@
       (dotimes [i 10]
         (swap! a assoc :arr (arr/eve-array :int32 [i (* i 2) (* i 3)]))
         (let [arr (:arr @a)]
-          (is (= i (arr/aget arr 0)) (str "iteration " i))
-          (is (= (* i 2) (arr/aget arr 1))))))))
+          (is (= i (nth arr 0)) (str "iteration " i))
+          (is (= (* i 2) (nth arr 1))))))))
 
 (deftest roundtrip-L8-accumulate-arrays-test
   (testing "L8: Accumulate multiple arrays"
@@ -784,7 +776,7 @@
         (swap! a assoc (keyword (str "arr" i)) (arr/eve-array :int32 [i])))
       (let [m @a]
         (dotimes [i 5]
-          (is (= i (arr/aget (get m (keyword (str "arr" i))) 0))))))))
+          (is (= i (nth (get m (keyword (str "arr" i))) 0))))))))
 
 ;; ---------- Level 9: Mixed scalars and arrays ----------
 
@@ -801,9 +793,9 @@
         (is (= 42 (:number m)))
         (is (= "hello" (:string m)))
         (is (= :test (:keyword m)))
-        (is (= 1 (arr/aget (:arr m) 0)))
+        (is (= 1 (nth (:arr m) 0)))
         (is (= 1 (get-in m [:nested :a])))
-        (is (= 1.5 (arr/aget (get-in m [:nested :arr]) 0)))))))
+        (is (= 1.5 (nth (get-in m [:nested :arr]) 0)))))))
 
 ;; ---------- Level 10: Edge cases ----------
 
@@ -813,9 +805,9 @@
       ;; Replace the nested array
       (swap! a update-in [:nested] assoc :arr (arr/eve-array :int32 [4 5 6]))
       (let [arr (get-in @a [:nested :arr])]
-        (is (= 4 (arr/aget arr 0)))
-        (is (= 5 (arr/aget arr 1)))
-        (is (= 6 (arr/aget arr 2)))))))
+        (is (= 4 (nth arr 0)))
+        (is (= 5 (nth arr 1)))
+        (is (= 6 (nth arr 2)))))))
 
 (deftest roundtrip-L10-assoc-in-new-array-test
   (testing "L10: assoc-in adding array to existing nested map"
@@ -823,7 +815,7 @@
       (swap! a assoc-in [:nested :arr] (arr/eve-array :int32 [7 8 9]))
       (let [m @a]
         (is (= 123 (get-in m [:nested :other])))
-        (is (= 7 (arr/aget (get-in m [:nested :arr]) 0)))))))
+        (is (= 7 (nth (get-in m [:nested :arr]) 0)))))))
 
 (deftest roundtrip-L10-fresh-atom-per-swap-test
   (testing "L10: Fresh atom for each test iteration"
@@ -832,7 +824,7 @@
       (let [a (eve/atom {})
             _ (swap! a assoc :arr (arr/eve-array :int32 [(* i 10)]))
             arr (:arr @a)]
-        (is (= (* i 10) (arr/aget arr 0)) (str "iteration " i))))))
+        (is (= (* i 10) (nth arr 0)) (str "iteration " i))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Typed Array Round-Trip Tests
@@ -950,8 +942,7 @@
              :typed-arr (js/Int32Array. #js [4 5 6]))
       (let [m @a]
         ;; EveArray comes back as EveArray
-        (is (= :int32 (arr/array-type (:eve-arr m))))
-        (is (= 1 (arr/aget (:eve-arr m) 0)))
+        (is (= 1 (nth (:eve-arr m) 0)))
         ;; Typed array comes back as typed array
         (is (instance? js/Int32Array (:typed-arr m)))
         (is (= 4 (aget (:typed-arr m) 0)))))))
@@ -1183,8 +1174,7 @@
       (swap! a assoc :eve-arr eve-arr :typed-arr typed-arr)
       (let [m @a]
         ;; EveArray round-trips
-        (is (= :int32 (arr/array-type (:eve-arr m))))
-        (is (= 1 (arr/aget (:eve-arr m) 0)))
+        (is (= 1 (nth (:eve-arr m) 0)))
         ;; TypedArray round-trips
         (is (instance? js/Float64Array (:typed-arr m)))
         (is (= 4.5 (aget (:typed-arr m) 0)))))))

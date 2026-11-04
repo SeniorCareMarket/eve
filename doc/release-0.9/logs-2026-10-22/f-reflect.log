@@ -1,0 +1,296 @@
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=41583 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+true
+Reflection warning, NO_SOURCE_PATH:1:85 - reference to field getPath on java.lang.Object can't be resolved.
+Reflection warning, NO_SOURCE_PATH:1:85 - reference to field getPath can't be resolved.
+hamt_util.cljc:44 recur arg for primitive local: h is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: h
+registry.cljc:175 recur arg for primitive local: offset is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: offset
+registry.cljc:106 recur arg for primitive local: offset is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: offset
+map.cljc:325 recur arg for primitive local: dp is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: dp
+map.cljc:368 recur arg for primitive local: dp is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: dp
+map.cljc:445 recur arg for primitive local: off is not matching primitive, had: Object, needed: long
+map.cljc:486 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+Auto-boxing loop arg: off
+map.cljc:486 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:511 recur arg for primitive local: off is not matching primitive, had: Object, needed: long
+map.cljc:544 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+Auto-boxing loop arg: off
+map.cljc:544 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:668 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:674 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:744 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:776 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:818 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:841 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+map.cljc:1272 recur arg for primitive local: sh is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: sh
+map.cljc:1382 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+bytes.cljc:47 recur arg for primitive local: i is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: i
+bytes.cljc:87 recur arg for primitive local: i is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: i
+ed25519.cljc:50 recur arg for primitive local: c is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: c
+ed25519.cljc:60 recur arg for primitive local: s is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: s
+ed25519.cljc:61 recur arg for primitive local: s is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: s
+ed25519.cljc:86 recur arg for primitive local: borrow is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: borrow
+ed25519.cljc:163 recur arg for primitive local: carry is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: carry
+ed25519.cljc:170 recur arg for primitive local: carry is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: carry
+Performance warning, eve/net/json.cljc:74:24 - case has int tests, but tested expression is not primitive.
+Performance warning, eve/net/wire.cljc:65:21 - case has int tests, but tested expression is not primitive.
+set.cljc:241 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+set.cljc:385 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+set.cljc:393 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+set.cljc:470 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+set.cljc:517 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+retire.cljc:104 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+retire.cljc:292 recur arg for primitive local: oi is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: oi
+impl.cljc:73 recur arg for primitive local: offset is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: offset
+impl.cljc:143 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+bn254.cljc:66 recur arg for primitive local: c is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: c
+bn254.cljc:85 recur arg for primitive local: c is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: c
+codec.cljc:57 recur arg for primitive local: c is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: c
+codec.cljc:1067 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+codec.cljc:1176 recur arg for primitive local: pos is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: pos
+snapshot.cljc:80 recur arg for primitive local: i is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: i
+tensor.cljc:123 recur arg for primitive local: stride is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: stride
+domain.cljc:445 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+domain.cljc:448 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+domain.cljc:457 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+domain.cljc:460 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+domain.cljc:464 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+domain.cljc:465 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+domain.cljc:470 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+domain.cljc:471 recur arg for primitive local: next_beat is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: next-beat
+domain.cljc:667 recur arg for primitive local: b is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: b
+domain.cljc:723 recur arg for primitive local: b is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: b
+domain.cljc:908 recur arg for primitive local: bo is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: bo
+domain.cljc:952 recur arg for primitive local: b is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: b
+domain.cljc:977 recur arg for primitive local: bk is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: bk
+int_map.cljc:89 recur arg for primitive local: x is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: x
+int_map.cljc:295 recur arg for primitive local: cnt is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: cnt
+WARNING: pop! already refers to: #'clojure.core/pop! in namespace: eve.deftype.value-buffer, being replaced by: #'eve.deftype.value-buffer/pop!
+sorted.cljc:226 recur arg for primitive local: acc is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: acc
+WARNING: to-array already refers to: #'clojure.core/to-array in namespace: eve.alpha.tensor, being replaced by: #'eve.alpha.tensor/to-array
+Reflection warning, eve/rrb_vector/nodes.cljc:33:17 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:33:39 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:36:21 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:41:9 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:69:29 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:104:9 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:107:13 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:113:13 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:135:23 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:143:20 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:157:28 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:172:15 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:178:23 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:195:28 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:204:30 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:209:35 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/nodes.cljc:228:18 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:39:23 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:40:29 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:42:22 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:47:39 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:52:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:57:24 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:60:30 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:91:29 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:105:41 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:108:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:116:27 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:124:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:134:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:145:32 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:157:32 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:172:21 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:174:24 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:180:26 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/trees.cljc:190:21 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:18:19 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:20:27 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:26:25 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:53:26 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:60:37 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:68:18 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:102:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:117:40 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:120:25 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:128:21 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:135:33 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:145:25 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:155:26 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:166:23 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:179:21 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:181:24 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/transients.cljc:186:20 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:166:19 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:185:21 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:188:44 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:195:39 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:216:19 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:222:16 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:286:25 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:302:25 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:403:37 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:410:42 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:413:40 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:417:42 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:421:41 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:429:41 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:626:13 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:628:34 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:632:19 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:633:32 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:645:30 - reference to field arr on java.lang.Object can't be resolved.
+rrbt.cljc:546 recur arg for primitive local: i is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: i
+Reflection warning, eve/rrb_vector/rrbt.cljc:601:55 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:608:40 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:609:34 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:460:47 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:466:28 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:469:26 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:358:25 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:361:27 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:366:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:371:28 - reference to field arr on java.lang.Object can't be resolved.
+rrbt.cljc:380 recur arg for primitive local: i is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: i
+Reflection warning, eve/rrb_vector/rrbt.cljc:358:25 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:361:27 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:366:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:371:28 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:665:26 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:670:26 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:681:13 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:691:13 - reference to field arr can't be resolved.
+rrbt.cljc:698 recur arg for primitive local: sbc is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: sbc
+rrbt.cljc:705 recur arg for primitive local: sbc is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: sbc
+Reflection warning, eve/rrb_vector/rrbt.cljc:708:23 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:729:52 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:730:52 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:752:52 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:753:52 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:770:14 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:776:27 - reference to field arr can't be resolved.
+rrbt.cljc:819 recur arg for primitive local: o is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: o
+rrbt.cljc:850 recur arg for primitive local: o is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: o
+Reflection warning, eve/rrb_vector/rrbt.cljc:910:15 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:911:15 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:954:19 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1002:19 - reference to field arr can't be resolved.
+rrbt.cljc:1007 recur arg for primitive local: acc is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: acc
+Reflection warning, eve/rrb_vector/rrbt.cljc:1002:19 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1016:13 - reference to field shift can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1024:18 - reference to field root can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1038:40 - reference to field edit can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1039:26 - reference to field shift can't be resolved.
+rrbt.cljc:1052 recur arg for primitive local: elem_sum is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: elem-sum
+Reflection warning, eve/rrb_vector/rrbt.cljc:1055:35 - reference to field cnt can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1056:43 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1056:54 - reference to field meta can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1076:6 - reference to field shift can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1093:29 - reference to field shift can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1156:14 - reference to field shift can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1157:14 - reference to field shift can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1158:14 - reference to field root can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1159:60 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1161:32 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1176:27 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1178:14 - reference to field root can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1185:54 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1189:42 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1208:64 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1213:32 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1214:26 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1215:53 - reference to field tail can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1242:25 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1245:27 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1250:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1255:28 - reference to field arr on java.lang.Object can't be resolved.
+rrbt.cljc:1264 recur arg for primitive local: i is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: i
+Reflection warning, eve/rrb_vector/rrbt.cljc:1242:25 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1245:27 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1250:31 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1255:28 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1283:9 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1289:39 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1299:42 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1300:43 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1306:44 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1310:43 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1320:50 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1327:9 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1331:40 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1343:9 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1349:41 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1358:9 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1379:50 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1383:45 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1389:30 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1392:46 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1393:52 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1408:9 - reference to field edit on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1422:13 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1424:34 - reference to field arr on java.lang.Object can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1428:19 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1429:32 - reference to field arr can't be resolved.
+Reflection warning, eve/rrb_vector/rrbt.cljc:1441:30 - reference to field arr on java.lang.Object can't be resolved.
+keyring.cljc:96 recur arg for primitive local: h2 is not matching primitive, had: Object, needed: long
+Auto-boxing loop arg: h2
+157
+# end 2026-10-21 11:26:52 PM ET exit 0 wall 6s peak-mem-in-use 1344 MB peak-process-tree-rss 340 MB load 1.85 1.57 1.81

@@ -1,0 +1,8 @@
+:init-done
+CONTENTION variant=A tag=A1 procs=4 swaps-per-proc=400 sync-every=0
+  worker-1 elapsed-ms=2814.519397
+  worker-2 elapsed-ms=2720.936874
+  worker-3 elapsed-ms=2779.604255
+  worker-4 elapsed-ms=2485.845799
+  makespan-ms=2814.52 aggregate-ops-sec=568.5 aggregate-us-per-op=1759.1
+:value 1600

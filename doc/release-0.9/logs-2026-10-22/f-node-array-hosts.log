@@ -1,0 +1,15 @@
+# run f-node-array-hosts on 464722092 eve tree 5c87c244ad0d5352dff63ed39bf2163575df339c
+# cmd (in eve/) node target/eve-test/all.js array-hosts
+# start 2026-10-21 11:12:33 PM ET load 1.31 1.66 2.37 mem-in-use 988 MB
+=== Eve Test Runner ===
+Suite: array-hosts
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.array-hosts-test
+
+Ran 3 tests containing 50 assertions.
+0 failures, 0 errors.
+# end 2026-10-21 11:12:35 PM ET exit 0 wall 2s peak-mem-in-use 988 MB peak-process-tree-rss 27 MB load 1.31 1.66 2.37

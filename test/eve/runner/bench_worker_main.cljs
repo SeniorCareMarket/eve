@@ -12,6 +12,7 @@
    All actions print a single EDN map to stdout with timing results.
    Exits 0 on success, 1 on failure, 2 on unknown action."
   (:require [eve.atom :as atom]
+            [eve.region :as region]
             [eve.mem :as mem]
             [eve.deftype-proto.data :as d]))
 
@@ -20,7 +21,7 @@
 
 (defn- load-addon! []
   (let [addon-path (.resolve (js/require "path") "build/Release/mmap_cas.node")]
-    (mem/load-native-addon! (js/require addon-path))))
+    (region/load-native-addon! (js/require addon-path))))
 
 (defn- slab-file-size [base i]
   (let [fs (js/require "fs")

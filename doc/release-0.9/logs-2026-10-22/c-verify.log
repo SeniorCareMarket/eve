@@ -1,0 +1,238 @@
+# run c-verify on bd8f7fad1 eve tree d37117a2c943f0fb947818b1138e78b5c74806a4
+# cmd (in eve/) bash -c bb eve-media verify
+# start 2026-10-22 12:58:17 PM ET load 0.14 0.04 0.01 mem-in-use 493 MB
+[eve-media 16:58:35.004969166] === verify run full [:bb :jvm :node :glj :jolt :browser]  
+[eve-media 16:58:35.072858090] build: the Node member (shadow-cljs release eve-media-node)
+[eve-media 16:59:15.925546995] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 16:59:16.133374676] run /root/.eve-media/runs/2026-10-22T16-59-16-131 window /dev/shm/eve-media/2026-10-22T16-59-16-131
+[eve-media 16:59:16.830755851] started the supervisor: clje pid 1736
+[eve-media 16:59:55.922886980] the Go member's watcher scans /root/.eve-media/runs/2026-10-22T16-59-16-131/media
+[eve-media 16:59:55.926309805] progress {} coordinator jvm supervisor clje
+[eve-media 17:00:01.155846585] progress {} coordinator jvm supervisor clje
+[eve-media 17:00:06.315615321] progress {} coordinator jvm supervisor clje
+[eve-media 17:00:11.503481731] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:16.749475777] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:22.037663060] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:27.274561671] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:32.498864463] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:37.761331091] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:43.012384305] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:48.296804991] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:53.491997593] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:00:58.676535216] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:03.852011426] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:09.018853660] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:14.183759543] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:19.348719053] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:24.558580929] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:29.720443122] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:34.907208407] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:40.072450309] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:45.240791215] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:50.414848697] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:01:55.585378452] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:02:00.707290403] progress {:planned 9, :new 1} coordinator jvm supervisor clje
+[eve-media 17:02:06.087350429] progress {:planned 10} coordinator jvm supervisor clje
+[eve-media 17:02:11.496623035] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:16.767659031] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:22.241584722] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:27.452799413] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:32.547161375] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:37.724467158] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:43.126968253] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:48.216618632] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:53.486193474] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:02:58.757315163] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:03:03.830675225] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:03:08.959204573] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:03:14.174176582] progress {:done 3, :planned 7} coordinator jvm supervisor clje
+[eve-media 17:03:19.274300899] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 17:03:24.486691863] progress {:done 6, :planned 4} coordinator jvm supervisor clje
+[eve-media 17:03:29.625277917] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 17:03:34.794840792] progress {:done 10} coordinator jvm supervisor clje
+[eve-media 17:03:39.732221011] dropped /root/.eve-media/runs/2026-10-22T16-59-16-131/media/f11-dropped.wav into the watched folder
+[eve-media 17:03:41.029713160] progress {:done 10, :planned 1} coordinator jvm supervisor clje
+[eve-media 17:03:46.256500279] progress {:done 10, :planned 1} coordinator jvm supervisor clje
+[eve-media 17:03:51.026778990] the dropped file picked up in 1155 ms ; index complete
+[eve-media 17:04:03.194201264] browser check received screenshot /root/.eve-media/runs/2026-10-22T16-59-16-131/page.png 11 of 11 rows
+[eve-media 17:04:06.363343687] complete in 223707 ms
+[eve-media 17:04:06.373309182] report /root/.eve-media/runs/2026-10-22T16-59-16-131/report.edn
+{:kill nil, :drop {:ok true, :file "/root/.eve-media/runs/2026-10-22T16-59-16-131/media/f11-dropped.wav", :id "f11", :found-by "glj", :status :done, :picked-up-ms 1155, :ms 11330}, :checks {:mp4s-h264-aac true, :supervised true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :browser-library-and-requeue true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :watcher-new-file true, :every-runtime-in-meta true}, :ran-on #{"browser" "jolt" "glj" "bb" "jvm" "node"}, :supervisor "clje", :coordinator "jvm", :ok true, :wall-ms 223707, :members #{"browser" "jolt" "glj" "bb" "jvm" "node"}}
+[eve-media 17:04:26.910621572] === verify run full-kill [:bb :jvm :node :glj :jolt] kill transcode 
+[eve-media 17:04:26.944610148] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 17:04:26.990140073] run /root/.eve-media/runs/2026-10-22T17-04-26-989 window /dev/shm/eve-media/2026-10-22T17-04-26-989
+[eve-media 17:04:27.325315821] started the supervisor: clje pid 4839
+[eve-media 17:05:04.729501519] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 17:05:04.734470117] progress {} coordinator jvm supervisor clje
+[eve-media 17:05:09.948383718] progress {} coordinator jvm supervisor clje
+[eve-media 17:05:15.259855084] progress {} coordinator jvm supervisor clje
+[eve-media 17:05:20.380651105] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:05:25.545694123] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:05:30.702434282] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:05:35.880471904] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:05:40.955565959] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:05:46.013678609] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:05:51.067910716] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:05:56.119014355] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:01.185448599] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:06.212020701] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:11.250148355] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:16.358292951] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:21.396891084] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:26.439507924] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:31.488871486] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:36.573142763] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:41.637925837] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:46.695941173] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:51.728994562] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:06:56.785442756] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:07:01.835998670] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:07:06.506145214] kill -9 jolt pid 5129 mid-transcode of d2 f02
+[eve-media 17:07:06.993025688] progress {:planned 5, :new 5} coordinator jvm supervisor clje
+[eve-media 17:07:12.472929577] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:17.567139076] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:22.723217598] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:27.874682051] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:33.086134989] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:38.179407342] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:43.229572539] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:48.374148771] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:53.747936099] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:07:58.956400317] progress {:planned 8, :done 2} coordinator jvm supervisor clje
+[eve-media 17:08:04.148664451] progress {:planned 7, :done 3} coordinator jvm supervisor clje
+[eve-media 17:08:09.511495195] progress {:planned 6, :done 4} coordinator jvm supervisor clje
+[eve-media 17:08:14.835269059] progress {:planned 6, :done 4} coordinator jvm supervisor clje
+[eve-media 17:08:20.155652679] progress {:planned 6, :done 4} coordinator jvm supervisor clje
+[eve-media 17:08:25.287553883] progress {:planned 5, :done 5} coordinator jvm supervisor clje
+[eve-media 17:08:30.535614360] progress {:planned 3, :done 7} coordinator jvm supervisor clje
+[eve-media 17:08:35.936863905] progress {:planned 3, :done 7} coordinator jvm supervisor clje
+[eve-media 17:08:41.186535098] progress {:done 10} coordinator jvm supervisor clje
+[eve-media 17:08:44.591006638] complete in 217144 ms
+[eve-media 17:08:44.591732697] report /root/.eve-media/runs/2026-10-22T17-04-26-989/report.edn
+{:kill {:file "f02", :killed "jolt", :attempts 2, :starts 3, :sha256 "dc36e3c4f798038e0b4d733626a2709a71e13a11473fbf695c982cfbada6f602", :ok true}, :drop nil, :checks {:mp4s-h264-aac true, :supervised true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :kill-attempts-2-restarted true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :ran-on #{"jolt" "glj" "bb" "jvm" "node"}, :supervisor "clje", :coordinator "jvm", :ok true, :wall-ms 217144, :members #{"jolt" "glj" "bb" "jvm" "node"}}
+[eve-media 17:09:05.204675736] === verify run coordinator-kill [:bb :jvm :node :glj :jolt] kill coordinator 
+[eve-media 17:09:05.239082430] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 17:09:05.287595756] run /root/.eve-media/runs/2026-10-22T17-09-05-287 window /dev/shm/eve-media/2026-10-22T17-09-05-287
+[eve-media 17:09:05.589888133] started the supervisor: clje pid 7434
+[eve-media 17:09:40.873308744] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 17:09:40.879800516] progress {} coordinator jvm supervisor clje
+[eve-media 17:09:46.187503541] progress {} coordinator jvm supervisor clje
+[eve-media 17:09:51.301609455] progress {} coordinator jvm supervisor clje
+[eve-media 17:09:56.481311324] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:01.688985845] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:06.880270555] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:11.963038788] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:17.283102099] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:22.590536300] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:27.613248251] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:32.925098534] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:37.936836442] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:43.232484839] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:48.522992403] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:53.823519363] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:10:58.853597362] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:04.164031835] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:09.198704390] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:14.510196027] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:19.815492964] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:25.108671760] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:30.133149785] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:35.434346217] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:40.703234969] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:11:45.506045303] kill -9 the coordinator jvm pid 7756
+[eve-media 17:11:45.906684794] progress {:planned 9, :done 1} coordinator jvm supervisor clje
+[eve-media 17:11:50.979078932] progress {:planned 9, :done 1} coordinator jvm supervisor clje
+[eve-media 17:11:56.303534743] progress {:planned 9, :done 1} coordinator jvm supervisor clje
+[eve-media 17:12:01.661041629] progress {:done 2, :planned 8} coordinator jvm supervisor clje
+[eve-media 17:12:06.713092362] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 17:12:11.994761955] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 17:12:17.199319203] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 17:12:22.343908506] progress {:done 10} coordinator jvm supervisor clje
+[eve-media 17:12:26.620123640] complete in 163235 ms
+[eve-media 17:12:26.620734733] report /root/.eve-media/runs/2026-10-22T17-09-05-287/report.edn
+{:kill {:killed "jvm", :coordinator true, :starts 2, :ok true}, :drop nil, :checks {:mp4s-h264-aac true, :supervised true, :loudness-within-0.5-lu true, :coordinator-restarted true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :ran-on #{"jolt" "glj" "bb" "jvm" "node"}, :supervisor "clje", :coordinator "jvm", :ok true, :wall-ms 163235, :members #{"jolt" "glj" "bb" "jvm" "node"}}
+[eve-media 17:12:47.052535499] === verify run jvm-supervises [:bb :jvm :node :glj :jolt]  supervisor jvm
+[eve-media 17:12:47.088621442] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 17:12:47.129774819] run /root/.eve-media/runs/2026-10-22T17-12-47-129 window /dev/shm/eve-media/2026-10-22T17-12-47-129
+[eve-media 17:12:47.218579016] started the supervisor: jvm pid 9800
+[eve-media 17:12:52.752851131] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 17:12:52.779282162] progress {} coordinator jvm supervisor jvm
+[eve-media 17:12:57.948406904] progress {} coordinator jvm supervisor jvm
+[eve-media 17:13:03.130895889] progress {} coordinator jvm supervisor jvm
+[eve-media 17:13:08.342013691] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:13.540367604] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:18.735207307] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:23.918053894] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:29.102897758] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:34.263586155] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:39.447636322] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:44.612039849] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:49.787417969] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:13:54.972335801] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:00.158407869] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:05.316637143] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:10.502375404] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:15.660643782] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:20.828423416] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:26.004495443] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:31.171880890] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:36.350168516] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:41.510439761] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:46.673833025] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:51.832907820] progress {:new 10} coordinator jvm supervisor jvm
+[eve-media 17:14:57.285503194] progress {:planned 8, :done 2} coordinator jvm supervisor jvm
+[eve-media 17:15:02.395381957] progress {:done 4, :planned 6} coordinator jvm supervisor jvm
+[eve-media 17:15:07.792664406] progress {:done 5, :planned 5} coordinator jvm supervisor jvm
+[eve-media 17:15:13.228045199] progress {:done 5, :planned 5} coordinator jvm supervisor jvm
+[eve-media 17:15:18.577475366] progress {:done 5, :planned 5} coordinator jvm supervisor jvm
+[eve-media 17:15:23.616590778] progress {:done 6, :planned 4} coordinator jvm supervisor jvm
+[eve-media 17:15:28.964021515] progress {:done 8, :planned 2} coordinator jvm supervisor jvm
+[eve-media 17:15:34.329489582] progress {:done 8, :planned 2} coordinator jvm supervisor jvm
+[eve-media 17:15:39.502181570] progress {:done 10} coordinator jvm supervisor jvm
+[eve-media 17:15:42.619848069] complete in 167106 ms
+[eve-media 17:15:42.620501192] report /root/.eve-media/runs/2026-10-22T17-12-47-129/report.edn
+{:kill nil, :drop nil, :checks {:mp4s-h264-aac true, :supervised true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :ran-on #{"jolt" "glj" "bb" "jvm" "node"}, :supervisor "jvm", :coordinator "jvm", :ok true, :wall-ms 167106, :members #{"jolt" "glj" "bb" "jvm" "node"}}
+[eve-media 17:15:44.357773069] === verify run cli-transcode [:bb :jvm :node :glj]  
+[eve-media 17:15:44.371256589] build: glj-eve-media (glj/build.sh; cached by its source stamp)
+[eve-media 17:15:44.417930170] run /root/.eve-media/runs/2026-10-22T17-15-44-417 window /dev/shm/eve-media/2026-10-22T17-15-44-417
+[eve-media 17:15:44.711611884] started the supervisor: clje pid 11709
+[eve-media 17:16:20.866373150] the Go member's watcher scans /root/.eve-media/demo-media
+[eve-media 17:16:20.869240260] progress {} coordinator jvm supervisor clje
+[eve-media 17:16:26.007363856] progress {} coordinator jvm supervisor clje
+[eve-media 17:16:31.164853093] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:16:36.365631233] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:16:41.544740488] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:16:46.714988612] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:16:51.876839233] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:16:57.040536255] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:02.197893309] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:07.366359035] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:12.537326175] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:17.698723392] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:22.859115324] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:28.011170789] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:33.166865060] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:38.330901523] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:43.494149182] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:48.658334472] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:53.833085301] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:17:58.990271552] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:18:04.153462309] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:18:09.319711166] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:18:14.486555654] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:18:19.679393239] progress {:new 10} coordinator jvm supervisor clje
+[eve-media 17:18:24.715720619] progress {:planned 9, :done 1} coordinator jvm supervisor clje
+[eve-media 17:18:30.084581772] progress {:done 3, :planned 7} coordinator jvm supervisor clje
+[eve-media 17:18:35.281235222] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 17:18:40.540207187] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 17:18:45.717820093] progress {:done 5, :planned 5} coordinator jvm supervisor clje
+[eve-media 17:18:51.042549926] progress {:done 6, :planned 4} coordinator jvm supervisor clje
+[eve-media 17:18:56.326554957] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 17:19:01.568354667] progress {:done 8, :planned 2} coordinator jvm supervisor clje
+[eve-media 17:19:06.838598635] progress {:done 10} coordinator jvm supervisor clje
+[eve-media 17:19:09.733066654] complete in 166317 ms
+[eve-media 17:19:09.733777317] report /root/.eve-media/runs/2026-10-22T17-15-44-417/report.edn
+{:kill nil, :drop nil, :checks {:mp4s-h264-aac true, :supervised true, :loudness-within-0.5-lu true, :thumbnails true, :every-runtime-in-ran-on true, :index-complete true, :two-duplicate-groups true, :contact-sheets true, :every-file-done true, :every-runtime-in-meta true}, :ran-on #{"glj" "bb" "jvm" "node"}, :supervisor "clje", :coordinator "jvm", :ok true, :wall-ms 166317, :members #{"glj" "bb" "jvm" "node"}}
+[eve-media 17:19:30.158415773] verify PASSED /root/.eve-media/verify-2026-10-22T17-19-30-157165323.edn
+{:ok true, :rows {:full-checks true, :full-supervised-by-clojerl true, :full-kill-attempts-2-same-checksum true, :coordinator-kill-restarted true, :coordinator-kill-same-outputs true, :jvm-supervises true, :jvm-supervises-same-outputs true, :cli-transcode-checks true}, :run-checks {"full" true, "full-kill" true, "coordinator-kill" true, "jvm-supervises" true, "cli-transcode" true}}
+# end 2026-10-22 1:19:30 PM ET exit 0 wall 1273s peak-mem-in-use 4837 MB peak-process-tree-rss 5726 MB load 2.62 3.10 2.80

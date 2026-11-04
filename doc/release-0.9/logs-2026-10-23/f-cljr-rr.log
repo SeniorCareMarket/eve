@@ -1,0 +1,12 @@
+# run f-cljr-rr on 4b9a0117b eve tree f1d8221db5ac3d4444883293d3c4b3543a111b48
+# cmd (in eve/) bash -c bb test:cljr eve.read-region-test eve.tally-test
+# start 2026-10-23 4:18:43 PM ET load 1.47 1.23 1.49 mem-in-use 885 MB
+
+Testing eve.read-region-test
+
+Testing eve.tally-test
+
+Ran 12 tests containing 234 assertions.
+0 failures, 0 errors.
+:summary {:test 12, :pass 234, :fail 0, :error 0}
+# end 2026-10-23 4:19:41 PM ET exit 0 wall 58s peak-mem-in-use 1014 MB peak-process-tree-rss 296 MB load 1.17 1.19 1.45

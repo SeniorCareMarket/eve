@@ -9,6 +9,74 @@
    ;; undeclared-var: expected in test runner (namespace aliases used as anti-DCE values)
    :compiler-options {:warnings {:undeclared-var false}}}
 
+  ;; merkle-phase5 acceptance suite only (small compile graph; see
+  ;; test/eve/runner/merkle_phase5_main.cljs)
+  :merkle-phase5
+  {:target :node-script
+   :main eve.runner.merkle-phase5-main/main
+   :output-to "target/merkle-phase5/main.js"
+   :compiler-options {:warnings {:undeclared-var false}}}
+
+  ;; The thread feature's conformance in a browser (bb test:browser: built through deps.edn's :browser-test
+  ;; alias, which puts the browser's thread adapter in place of Node's). :simple with no output wrapper, so the
+  ;; kernel a worker importScripts keeps its names global (eve.thread-host resolves a thread's entry by name).
+  :eve-thread-browser
+  {:target :browser
+   :output-dir "target/thread-browser/public/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn eve.runner.thread-browser-main/init}}
+   :compiler-options {:optimizations :simple :output-wrapper false :load-tests true}}
+
+  ;; eve's performance suite in a browser (bb test:browser with EVE_BROWSER_PERF=1): the same route as the
+  ;; conformance page, a page of its own (the suite loads eve.alpha, which readies a module slab in every worker)
+  :eve-perf-browser
+  {:target :browser
+   :output-dir "target/perf-browser/public/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn eve.runner.perf-browser-main/init}}
+   :compiler-options {:optimizations :simple :output-wrapper false}}
+
+  ;; eve-media, the capstone (capstone/eve-media): the Node member, built through deps.edn's :node-test and
+  ;; :eve-media-node aliases (clojure -M:node-test:eve-media-node -m shadow.cljs.devtools.cli release eve-media-node)
+  :eve-media-node
+  {:target :node-script
+   :main eve-media.node-member/main
+   :output-to "capstone/eve-media/target/node-member.js"
+   :compiler-options {:optimizations :simple}}
+
+  ;; eve-media's page, built through :browser-test and :eve-media-page (the browser's http, crypto and thread
+  ;; adapters; reagami): at :simple with no output wrapper, so the workers it starts (eve.thread's browser adapter, the
+  ;; fat-kernel route) load it as their kernel with its names global
+  :eve-media-page
+  {:target :browser
+   :output-dir "capstone/eve-media/target/page/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn eve-media.page/init}}
+   :compiler-options {:optimizations :simple :output-wrapper false}}
+
+  ;; eve's local network, the page (bb net:local; net-local/page): built through deps.edn's :browser-test and
+  ;; :net-local-page aliases, at :simple with no output wrapper, so the workers it starts load it as their kernel
+  :net-local-page
+  {:target :browser
+   :output-dir "target/net-local/public/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn eve.net.local-page/init}}
+   :compiler-options {:optimizations :simple :output-wrapper false}}
+
+  ;; Durability spike bench (2026-10-27): node target/durability-bench/main.js <mode> ...
+  :durability-bench
+  {:target :node-script
+   :main eve.durability-bench/main
+   :output-to "target/durability-bench/main.js"
+   :compiler-options {:warnings {:undeclared-var false}}}
+
+  ;; Durability spike phase-3 workload writer (Node form)
+  :durability-workload
+  {:target :node-script
+   :main eve.durability-workload-node/main
+   :output-to "target/durability-workload/main.js"
+   :compiler-options {:warnings {:undeclared-var false}}}
+
   ;; Standalone mmap-atom worker for cross-process e2e tests
   :mmap-worker
   {:target    :node-script

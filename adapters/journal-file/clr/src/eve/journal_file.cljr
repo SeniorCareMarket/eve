@@ -1,0 +1,182 @@
+(ns eve.journal-file
+  "The commit journal's file handle (eve.atom's durability mode): an
+   append-only per-domain file beside the domain root, holding commit
+   records only. This host: ClojureCLR — a FileStream opened
+   read/write with sharing, positioned explicitly; the stream's byte
+   range lock is the journal's lock (measured: it excludes and is
+   excluded by the JVM's FileChannel.lock on the same path — the CLR
+   stream and the JDK both take POSIX OFD locks on Linux).
+
+   Record format (identical bytes on every host):
+     [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
+   magic = \"EVJ1\" (0x45564A31); all integers big-endian; len counts the
+   bytes after itself (epoch + table-len + table + crc); the CRC-32
+   covers the epoch..table-end bytes. The commit point is lock, write
+   blocks, force slab, append record, force journal — eve.atom runs
+   that sequence over this file.
+
+   ClojureCLR byte[] aget is UNSIGNED (0..255) and ClojureCLR bit ops
+   widen to long — the CRC-32 below keeps its accumulator a long
+   masked to 32 bits every step; the unmasked form reads a wrong
+   checksum (measured against the \"123456789\" check vector)."
+  (:require [eve.mem :as mem]
+            [eve.deftype-proto.data :as d])
+  (:import [System.IO FileStream FileMode FileAccess FileShare]))
+
+(def ^:private journal-magic (unchecked-int 0x45564A31))        ;; "EVJ1"
+(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+;; A lock span comfortably larger than any journal: [0, 2^62 - 1).
+;; FileStream.Lock accepts it on a 0-length file (measured).
+(def ^:private lock-length 4611686018427387903)
+
+;; CRC-32 (IEEE) over the platform byte[] (unsigned agen).
+(def ^:private crc-table
+  (let [t (object-array 256)]
+    (dotimes [n 256]
+      (loop [c (long n) i 0]
+        (if (< i 8)
+          (recur (if (zero? (bit-and c 1))
+                   (unsigned-bit-shift-right c 1)
+                   (bit-xor 0xEDB88320 (unsigned-bit-shift-right c 1)))
+                 (inc i))
+          (aset t n c))))
+    t))
+
+(defn- crc32-of
+  "CRC-32 of byte[] B from OFF for LEN bytes, as a signed i32."
+  [^bytes b off len]
+  (loop [c (long 0xFFFFFFFF) i 0]
+    (if (< i len)
+      (recur (bit-and 4294967295
+                      (bit-xor (unsigned-bit-shift-right c 8)
+                               (long (aget ^objects crc-table
+                                           (int (bit-and (bit-xor c (aget b (+ off i))) 0xFF))))))
+             (inc i))
+      (unchecked-int (bit-xor c 0xFFFFFFFF)))))
+
+(defn- put-i32!
+  "Write V big-endian at OFF in byte[] B."
+  [^bytes b off v]
+  (aset b off (unchecked-byte (bit-shift-right v 24)))
+  (aset b (+ off 1) (unchecked-byte (bit-shift-right v 16)))
+  (aset b (+ off 2) (unchecked-byte (bit-shift-right v 8)))
+  (aset b (+ off 3) (unchecked-byte v)))
+
+(defn- get-i32
+  "Read a big-endian i32 at OFF in byte[] B (aget is unsigned here, so
+   the shifts compose the signed value directly)."
+  [^bytes b off]
+  (unchecked-int (bit-or (bit-shift-left (aget b off) 24)
+                         (bit-shift-left (aget b (+ off 1)) 16)
+                         (bit-shift-left (aget b (+ off 2)) 8)
+                         (aget b (+ off 3)))))
+
+(defn open-journal
+  "Open (creating if needed) the journal file at PATH for read+write,
+   shareable (concurrent seats serialize on the file lock)."
+  [path]
+  (FileStream. (str path) FileMode/OpenOrCreate FileAccess/ReadWrite FileShare/ReadWrite))
+
+(defn with-journal-lock
+  "Run F holding the journal file's exclusive lock: the byte-range
+   lock over [0, 2^62)."
+  [^FileStream fs f]
+  (locking fs
+    (.Lock fs (long 0) lock-length)
+    (try (f) (finally (.Unlock fs (long 0) lock-length)))))
+
+(defn journal-record-of
+  "The commit record for an explicit EPOCH and TABLE (a byte array)."
+  [epoch ^bytes table]
+  (let [tlen (alength table)
+        len  (+ 4 4 tlen 4)
+        out  (byte-array (+ 8 len))]
+    (put-i32! out 0 journal-magic)
+    (put-i32! out 4 len)
+    (put-i32! out 8 (int epoch))
+    (put-i32! out 12 tlen)
+    (System.Buffer/BlockCopy table 0 out 16 tlen)
+    (put-i32! out (+ 16 tlen) (crc32-of out 8 (+ 4 4 tlen)))
+    out))
+
+(defn journal-record
+  "The commit record for ROOT-R's CURRENT epoch and atom table."
+  [root-r]
+  (journal-record-of (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                     (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)))
+
+(defn journal-scan
+  "Scan the journal's records in order. Returns {:newest {:epoch :table}
+   :oldest epoch :torn? bool} — a record is accepted iff its framing
+   survives (magic + length in range) and its CRC matches; a record whose
+   framing survives but whose CRC fails is SKIPPED (its length still
+   advances the scan); a framing failure ends the scan."
+  [^FileStream fs]
+  (let [size (int (.Length fs))
+        data (byte-array size)]
+    (set! (.Position fs) (long 0))
+    (loop [off 0]
+      (when (< off size)
+        (let [n (.Read fs data off (- size off))]
+          (if (zero? n)
+            nil
+            (recur (+ off n))))))
+    (loop [pos 0 newest nil oldest nil torn? false]
+      (let [remaining (- size pos)]
+        (cond
+          (< remaining 8)
+          {:newest newest :oldest oldest
+           :torn? (or torn? (pos? remaining))}
+
+          :else
+          (let [magic (get-i32 data pos)
+                len   (get-i32 data (+ pos 4))]
+            (if (or (not= magic journal-magic)
+                    (not (pos? len))
+                    (> len (- remaining 8)))
+              {:newest newest :oldest oldest :torn? true}
+              (let [epoch (get-i32 data (+ pos 8))
+                    tlen  (get-i32 data (+ pos 12))]
+                (if (> (+ 4 4 tlen 4) len)
+                  {:newest newest :oldest oldest :torn? true}
+                  (let [table (byte-array tlen)]
+                    (System.Buffer/BlockCopy data (+ pos 16) table 0 tlen)
+                    (if (= (get-i32 data (+ pos 16 tlen))
+                           (crc32-of data (+ pos 8) (+ 4 4 tlen)))
+                      (recur (+ pos 8 len)
+                             {:epoch epoch :table table}
+                             (or oldest epoch)
+                             torn?)
+                      (recur (+ pos 8 len) newest oldest true))))))))))))
+
+(defn journal-append!
+  "Write BYTES (a byte array) at the end of the journal file. Does not
+   force — the caller forces at the commit point."
+  [^FileStream fs ^bytes b]
+  (set! (.Position fs) (.Length fs))
+  (.Write fs b 0 (alength b)))
+
+(defn journal-write-at!
+  "Write BYTES (a byte array) at absolute offset POS."
+  [^FileStream fs ^bytes b pos]
+  (set! (.Position fs) (long pos))
+  (.Write fs b 0 (alength b)))
+
+(defn journal-truncate!
+  "Truncate the journal file to zero length (no force; the caller
+   forces as part of its checkpoint/recovery sequence)."
+  [^FileStream fs]
+  (.SetLength fs (long 0)))
+
+(defn journal-force!
+  "Force the journal file to storage. Flush(true) is the flush-to-disk
+   form (on Unix: fsync); a CLR FileStream's plain Flush cannot be
+   relied on to reach the device, so FULL? is ignored and the full
+   force is taken on both paths."
+  [^FileStream fs full?]
+  (.Flush fs true))
+
+(defn journal-close!
+  "Close the journal file; never throws."
+  [^FileStream fs]
+  (try (.Close fs) (catch System.Exception _ nil)))

@@ -17,8 +17,11 @@
    join-read prints the atom value as EDN to stdout.
    read-key-count prints the number of keys in the atom map to stdout."
   (:require [eve.atom :as atom]
+            [eve.region :as region]
             [eve.mem :as mem]
-            [cljs.reader :as reader]))
+            [cljs.reader :as reader]
+            [coop.scenario :as sc]
+            [coop.mix :as mix]))
 
 (defn- join-domain-atom!
   "Join an existing domain at base and look up the 'main' atom.
@@ -27,6 +30,15 @@
   (let [d (atom/persistent-atom-domain base)
         a (atom/persistent-atom {:id :eve/main :persistent base} nil)]
     [d a]))
+
+(defn- sc-plain
+  "A slab-backed value as plain CLJS data (EDN the JVM reads back exactly)."
+  [x]
+  (cond (map? x) (into {} (map (fn [[k v]] [(sc-plain k) (sc-plain v)])) x)
+        (set? x) (into #{} (map sc-plain) x)
+        (vector? x) (mapv sc-plain x)
+        (seq? x) (apply list (map sc-plain x))
+        :else x))
 
 (defn main [& _args]
   (let [argv   (.-argv js/process)
@@ -37,7 +49,7 @@
       (js/process.exit 2))
     ;; Load native addon
     (let [addon-path (.resolve (js/require "path") "build/Release/mmap_cas.node")]
-      (mem/load-native-addon! (js/require addon-path)))
+      (region/load-native-addon! (js/require addon-path)))
     (case action
       "join-verify"
       (let [expected (js/parseInt (aget argv 4) 10)
@@ -255,6 +267,71 @@
             n     (count val)]
         (atom/close-atom-domain! d)
         (println n)
+        (js/process.exit 0))
+
+      ;; The cooperative disk-atom scenarios (the coop orchestrator; coop.scenario is the
+      ;; shared source, test/coop/scenario.cljc): the value as plain EDN, the round-trip step,
+      ;; n contention ops, and round 2's semantics turn (COOP-ATOM-REPORT-ROUND2.md §4).
+      "coop-read"
+      (let [[d a] (join-domain-atom! base)
+            v     (sc-plain @a)]
+        (atom/close-atom-domain! d)
+        (println (pr-str v))
+        (js/process.exit 0))
+
+      "coop-rt-step"
+      (let [tag   (aget argv 4)
+            [d a] (join-domain-atom! base)]
+        (println (pr-str (sc-plain @a)))
+        (swap! a sc/rt-step tag)
+        (atom/close-atom-domain! d)
+        (js/process.exit 0))
+
+      "coop-contend"
+      (let [w     (aget argv 4)
+            n     (js/parseInt (aget argv 5) 10)
+            [d a] (join-domain-atom! base)
+            t0    (js/Date.now)]
+        (dotimes [i n] (swap! a sc/contend-op w i))
+        (atom/close-atom-domain! d)
+        (println (pr-str {:ops n :ms (- (js/Date.now) t0)}))
+        (js/process.exit 0))
+
+      "coop-sem-step"
+      (let [tag   (aget argv 4)
+            [d a] (join-domain-atom! base)]
+        (println (pr-str (sc/rt-view @a)))
+        (println (pr-str (sc/sem-read a)))
+        (swap! a sc/rt-step tag)
+        (sc/sem-write! a tag)
+        (atom/close-atom-domain! d)
+        (js/process.exit 0))
+
+      "coop-sem-read"
+      (let [[d a] (join-domain-atom! base)]
+        (println (pr-str (sc/rt-view @a)))
+        (println (pr-str (sc/sem-read a)))
+        (atom/close-atom-domain! d)
+        (js/process.exit 0))
+
+      ;; The capstone (coop.mix, test/coop/mix.cljc): eve's RRB vectors, sorted sets
+      ;; and maps mixed in one atom — n ops of writer w, and the snapshot this
+      ;; process reads.
+      "coop-mix-contend"
+      (let [w     (aget argv 4)
+            n     (js/parseInt (aget argv 5) 10)
+            [d a] (join-domain-atom! base)
+            t0    (js/Date.now)]
+        (dotimes [i n] (swap! a mix/mix-op w i))
+        (atom/close-atom-domain! d)
+        (println (pr-str {:ops n :ms (- (js/Date.now) t0)}))
+        (js/process.exit 0))
+
+      "coop-mix-snapshot"
+      (let [[d a] (join-domain-atom! base)
+            s     (mix/snapshot @a)]
+        (atom/close-atom-domain! d)
+        (println (pr-str s))
         (js/process.exit 0))
 
       ;; Unknown action

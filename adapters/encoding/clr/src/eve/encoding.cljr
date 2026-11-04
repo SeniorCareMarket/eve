@@ -1,0 +1,358 @@
+(ns eve.encoding
+  "eve's encoding primitives (HOST-CONTRACT §3-4): what eve's codec and types
+   take from the host where hosts' APIs differ — UTF-8, IEEE-754 bits, the
+   host's numbers, instants, uuids, exceptions, map entries, small caches —
+   over .NET's System (ClojureCLR)."
+  (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                            long class double bytes])
+  (:require [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                              long class double bytes]]))
+
+(defn throw-index-out-of-bounds
+  "Throw an index-out-of-bounds error."
+  [msg]
+  (throw (IndexOutOfRangeException. ^String msg)))
+
+(defn throw-unsupported
+  "Throw an unsupported-operation error."
+  []
+  (throw (NotSupportedException.)))
+
+(defn unsupported
+  "The host's unsupported-operation exception, with message msg."
+  [msg]
+  (NotSupportedException. ^String msg))
+
+(defn map-entry
+  "A map entry [k v] (what seq on a map answers), on every host."
+  [k v]
+  (clojure.lang.MapEntry/create k v))
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff."
+  [src soff dst doff len]
+  (System.Array/Copy ^System.Array src (int soff) ^System.Array dst (int doff) (int len)))
+
+(defn copy-of-range
+  "A new byte array of b's bytes [from, to)."
+  ^bytes [^bytes b from to]
+  (let [n (- to from) out (byte-array n)]
+    (arraycopy b from out 0 n)
+    out))
+
+(defn utf8-bytes
+  "The UTF-8 bytes of string s."
+  ^bytes [s]
+  (.GetBytes System.Text.Encoding/UTF8 ^String s))
+
+(defn utf8-string
+  "The string len UTF-8 bytes of b encode, from off."
+  [^bytes b off len]
+  (.GetString System.Text.Encoding/UTF8 b (int off) (int len)))
+
+(defn long-bits->double
+  "The double whose IEEE-754 bits are x."
+  ^double [^long x]
+  (BitConverter/Int64BitsToDouble x))
+
+(defn double->long-bits
+  "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
+  ^long [^double d]
+  (BitConverter/DoubleToInt64Bits d))
+
+(defn fixed-integer?
+  "An integer of a fixed-width host type — the ones eve's format carries as
+   INT32 or INT64. A BigInt is not one: the format has no tag for it."
+  [v]
+  (or (instance? Int64 v) (instance? Int32 v) (instance? Int16 v)
+      (instance? Byte v) (instance? SByte v) (instance? UInt16 v) (instance? UInt32 v)))
+
+(defn floating?
+  "A floating-point number (FLOAT64)."
+  [v]
+  (or (instance? Double v) (instance? Single v)))
+
+;; The numbers past a fixed width (FORMAT-DECISIONS.md §8): what they are on
+;; this host, and their parts as eve.codec writes them (it lays out the bytes)
+
+(defn big-integer?
+  "An integer past the fixed-width types: eve.codec writes it by its magnitude —
+   INT32 or INT64 when it fits, else BIGINT."
+  [v]
+  (and (integer? v) (not (fixed-integer? v))))
+
+(defn integer->twos
+  "Integer n's minimal two's-complement bytes, big-endian, as a vector of 0..255."
+  [n]
+  (let [n (bigint n)
+        k (loop [k 1 lim (+ (bigint 0) 128)]
+            (if (and (< n lim) (>= n (- lim))) k (recur (inc k) (* lim 256))))
+        m (loop [i 0 p (+ (bigint 0) 1)] (if (< i k) (recur (inc i) (* p 256)) p))]
+    (loop [i 0 u (if (neg? n) (+ n m) n) acc ()]
+      (if (< i k) (recur (inc i) (quot u 256) (conj acc (int (mod u 256)))) (vec acc)))))
+
+(defn twos->integer
+  "The integer whose minimal two's-complement big-endian bytes are bs (0..255 each)."
+  [bs]
+  (let [u (reduce (fn [acc b] (+ (* acc 256) b)) (bigint 0) bs)]
+    (if (and (seq bs) (>= (first bs) 128))
+      (- u (reduce (fn [p _] (* p 256)) (+ (bigint 0) 1) bs))
+      u)))
+
+(defn ratio? "A ratio (RATIO)." [v] (instance? clojure.lang.Ratio v))
+
+(defn ratio-parts
+  "[numerator denominator] of a ratio: lowest terms, the denominator positive."
+  [r]
+  [(numerator r) (denominator r)])
+
+(defn make-ratio "The ratio n/d (n, d integers in lowest terms, d > 1)." [n d] (/ (bigint n) (bigint d)))
+
+(defn bigdec? "An arbitrary-precision decimal (BIGDEC)." [v] (decimal? v))
+
+(defn- digits->exponent
+  "The exponent a decimal's text carries after its E ([+-]digits), 0 for none."
+  [exp]
+  (if (nil? exp)
+    0
+    (let [neg? (= \- (first exp))
+          ds (if (contains? #{\+ \-} (first exp)) (subs exp 1) exp)
+          e (reduce (fn [a c] (+ (* a 10) (- (int c) 48))) 0 ds)]
+      (if neg? (- e) e))))
+
+(defn bigdec-parts
+  "[unscaled scale] of decimal d in its canonical form: trailing zeros stripped
+   down to scale 0 (so (= 1.5M 1.50M) has one form), never a negative scale.
+   Read from d's text: [-]digits[.digits][E[+-]digits]."
+  [d]
+  (let [[_ sign int-part frac exp] (re-matches #"(-?)(\d*)\.?(\d*)(?:[eE]([+-]?\d+))?M?" (str d))
+        mag (reduce (fn [acc c] (+ (* acc 10) (- (int c) 48))) (bigint 0) (str int-part frac))
+        u (if (= "-" sign) (- mag) mag)]
+    (loop [u u s (- (count frac) (digits->exponent exp))]
+      (cond
+        (zero? u) [(bigint 0) 0]
+        (and (pos? s) (zero? (mod u 10))) (recur (quot u 10) (dec s))
+        (neg? s) [(reduce (fn [x _] (* x 10)) u (range (- s))) 0]
+        :else [u s]))))
+
+(defn make-bigdec
+  "The decimal unscaled × 10^-scale."
+  [unscaled scale]
+  (clojure.lang.BigDecimal/Parse (str unscaled "E" (- scale))))
+
+(defn date?
+  "The host's instant type, the one eve's DATE tag reads back as."
+  [v]
+  (instance? DateTime v))
+
+(defn date-ms
+  "Milliseconds since the Unix epoch of a date."
+  ^long [d]
+  (.ToUnixTimeMilliseconds (DateTimeOffset. ^DateTime d)))
+
+(defn ms->date
+  "The host's instant at ms milliseconds since the Unix epoch (UTC)."
+  [ms]
+  (.UtcDateTime (DateTimeOffset/FromUnixTimeMilliseconds (long ms))))
+
+(defn uuid->bytes!
+  "Write uuid u's 16 bytes, big-endian (network order), into b at off."
+  [u ^bytes b off]
+  ;; its canonical text, two hex digits a byte
+  (let [hex (apply str (remove #{\-} (str u)))
+        digit (fn [c] (let [x (int c)]
+                        (cond (<= 48 x 57) (- x 48) (<= 97 x 102) (- x 87) :else (- x 55))))]
+    (dotimes [i 16]
+      (aset b (+ off i)
+            (unchecked-byte (+ (* 16 (digit (nth hex (* 2 i)))) (digit (nth hex (inc (* 2 i))))))))))
+
+(defn bytes->uuid
+  "The uuid whose 16 big-endian bytes are at off in b."
+  [^bytes b off]
+  (let [hex "0123456789abcdef"
+        h (apply str (map (fn [i] (let [x (bit-and (long (aget b (+ off i))) 0xFF)]
+                                    (str (nth hex (quot x 16)) (nth hex (mod x 16)))))
+                          (range 16)))]
+    (parse-uuid
+     (str (subs h 0 8) "-" (subs h 8 12) "-" (subs h 12 16) "-"
+          (subs h 16 20) "-" (subs h 20 32)))))
+
+(defn utf16-units
+  "The UTF-16 code units of string s, as integers (what a JVM or
+   JavaScript string holds; a clojerl string is UTF-8, so a code point
+   above U+FFFF is two units there, a surrogate pair)."
+  [s]
+  (mapv int s))
+
+(defn host-char?
+  "A character of the host's own char type. basilisp and clojerl have none: a
+   one-character string answers char? there, and is a string, as in
+   ClojureScript."
+  [v]
+  (char? v))
+
+(defn host-array?
+  "A host array (a Java or CLR array; on clojerl one of eve.host's)."
+  [v]
+  (.IsArray (class v)))
+
+(defn new-cache
+  "A concurrent map for small caches (cache-get / cache-put!)."
+  []
+  (atom {}))
+
+(defn cache-get [c k]
+  (get @c k))
+
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (swap! c (fn [m] (assoc (if (> (count m) max) {} m) k v)))
+  v)
+
+(defn bytes=
+  "Two byte arrays equal, byte for byte."
+  [a b]
+  (and (== (eve.host/alength ^bytes a) (eve.host/alength ^bytes b))
+       (loop [i 0]
+         (if (>= i (eve.host/alength ^bytes a))
+           true
+           (if (not= (aget ^bytes a i) (aget ^bytes b i)) false (recur (inc i)))))))
+
+(defn illegal-argument
+  "The host's illegal-argument exception, with message msg."
+  [msg]
+  (ArgumentException. ^String msg))
+
+(defn index-out-of-bounds
+  "The host's index-out-of-bounds exception, with message msg."
+  [msg]
+  (IndexOutOfRangeException. ^String msg))
+
+(defn read-f32-le
+  "The float32 at byte off of b (little-endian), as a double."
+  [^bytes b off]
+  (double (BitConverter/ToSingle b (int off))))
+
+(defn read-f64-le
+  "The float64 at byte off of b (little-endian)."
+  [^bytes b off]
+  (BitConverter/ToDouble b (int off)))
+
+(defn f32-le-bytes
+  "The 4 little-endian bytes of v as a float32."
+  [v]
+  (BitConverter/GetBytes (float v)))
+
+(defn f64-le-bytes
+  "The 8 little-endian bytes of v as a float64."
+  [v]
+  (BitConverter/GetBytes (double v)))
+
+(defn make-bytes
+  "n zeroed bytes (the host's byte array, as eve's codec holds bytes)."
+  [n]
+  (clojure.core/byte-array (int n)))
+
+(defn bytes-of
+  "The bytes xs (each 0..255, or its signed byte), as a byte array."
+  [xs]
+  (clojure.core/byte-array (map (fn [x] (unchecked-byte x)) xs)))
+
+(defn bytes-copy
+  "A copy of byte array b, in b's own representation (what the host's region
+   and codec read: a read's bytes, changed, handed on as read)."
+  [b]
+  (clojure.core/aclone b))
+
+(defn map-hash-code
+  "The host's object hash of a map m (its hash of an unordered collection)."
+  [m]
+  (hash-unordered-coll m))
+
+(defn write!
+  "Write s (str of it) to the host's writer w (System.IO.TextWriter): what a printer writes to."
+  [w s]
+  (.Write ^System.IO.TextWriter w (str s)))
+
+(defn f64s-le
+  "The n float64s little-endian in b from byte off, as the host's double array."
+  [b off n]
+  (let [out (eve.host/double-array n)]
+    (dotimes [i n] (aset out i (read-f64-le b (+ off (* 8 i)))))
+    out))
+
+(defn i32s-le
+  "The n int32s little-endian in b from byte off, as the host's int array."
+  [b off n]
+  (let [out (eve.host/int-array n)
+        u (fn [j] (bit-and (aget b j) 0xFF))]
+    (dotimes [i n]
+      (let [j (+ off (* 4 i))
+            x (bit-or (bit-or (u j) (bit-shift-left (u (+ j 1)) 8))
+                      (bit-or (bit-shift-left (u (+ j 2)) 16) (bit-shift-left (u (+ j 3)) 24)))]
+        (aset out i (if (>= x 2147483648) (- x 4294967296) x))))
+    out))
+
+(defn f64s->bytes-le
+  "The little-endian bytes of the doubles in da (the host's double array), 8 each."
+  [da]
+  (let [n (count da)
+        b (eve.host/byte-array (* 8 n))]
+    (dotimes [i n]
+      (let [eb (f64-le-bytes (nth da i))]
+        (dotimes [k 8] (aset b (+ (* 8 i) k) (aget eb k)))))
+    b))
+
+(defn i32s->bytes-le
+  "The little-endian bytes of the ints in ia (the host's int array), 4 each."
+  [ia]
+  (let [n (count ia)
+        b (eve.host/byte-array (* 4 n))]
+    (dotimes [i n]
+      (let [x (nth ia i)]
+        (dotimes [k 4]
+          (aset b (+ (* 4 i) k) (unchecked-byte (bit-and (bit-shift-right x (* 8 k)) 0xFF))))))
+    b))
+
+(defn array-subtype+bytes
+  "[subtype little-endian-bytes] of a host typed array — eve.array's subtype
+   codes by the CLR array's element type (uint8 1, int8 2, int16 4, uint16 5,
+   int32 6, uint32 7, float32 8, float64 9) — nil for any other value."
+  [a]
+  (when (host-array? a)
+    (let [code (case (str (.GetElementType (class a)))
+                 "System.Byte" 1 "System.SByte" 2 "System.Int16" 4 "System.UInt16" 5
+                 "System.Int32" 6 "System.UInt32" 7 "System.Single" 8 "System.Double" 9
+                 nil)]
+      (when code
+        (let [n (* (count a) (case code (1 2) 1 (4 5) 2 (6 7 8) 4 9 8))
+              b (clojure.core/byte-array n)]
+          (Buffer/BlockCopy a 0 b 0 n)
+          [code b])))))
+
+(defn typed-array
+  "n elements of eve.array subtype code as the host's typed array: none here
+   (a fresh eve array is slab-backed; typed-aget and typed-aset! are never
+   reached)."
+  [_subtype _n]
+  nil)
+
+(defn typed-aget "Never reached here (typed-array)." [_a _subtype _i] nil)
+
+(defn typed-aset! "Never reached here (typed-array)." [_a _subtype _i v] v)
+
+(defn code-points->string
+  "The string of a sequence of Unicode code points (one past U+FFFF as its UTF-16 surrogate pair, as a .NET string
+   holds it) — the inverse of utf16-units."
+  [cps]
+  (apply str (map (fn [cp] (Char/ConvertFromUtf32 (int cp))) cps)))
+
+;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
+;; nil on this host for now: Convert.ToBase64String / FromHexString throw on characters outside the alphabet
+;; where eve.net.bytes' contract skips them, so a plug needs a filter in front of them; until one is measured,
+;; the portable implementations answer.
+(def bytes->b64 nil)
+(def b64->bytes nil)
+(def bytes->hex nil)
+(def hex->bytes nil)

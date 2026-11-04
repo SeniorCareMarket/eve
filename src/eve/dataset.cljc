@@ -3,9 +3,12 @@
 
    Built with eve-deftype — lives inside Eve atoms, backed by slab memory.
 
-   Construction (inside swap!):
+   Construction:
      (dataset {:price (arr/eve-array :float64 [10.5 20.3])
                :qty   (arr/eve-array :int32 [100 200])})
+   Inside swap!, pass the atom's domain sio so the dataset allocates in the
+   atom's slab (JVM):
+     (swap! ea (fn [_] (dataset (eve.atom/atom-sio ea) {...})))
 
    Column access (zero-copy — reads from slab):
      (column ds :price)          ;; → EveArray
@@ -19,15 +22,17 @@
      (drop-column ds :qty)
      (rename-columns ds {:price :cost})"
   (:require
+   [eve.core :as e]
    [eve.array :as arr]
    [eve.dataset.argops :as argops]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:cljs [[eve.deftype-proto.alloc :as alloc]
-              [eve.deftype.slab-runtime :as slab-rt]]
-       :clj  [[eve.deftype :refer [eve-deftype]]
-              [eve.deftype.slab-runtime :as slab-rt]]))
-  #?(:cljs (:require-macros [eve.deftype :refer [eve-deftype]])))
+   [eve.codec :as codec]
+   [eve.encoding :as enc]
+   [eve.platform :as p]
+   [eve.deftype :refer [eve-deftype]]
+   [eve.deftype-proto.alloc :as alloc]
+   [eve.deftype.slab-runtime :as slab-rt]))
 
 ;;-----------------------------------------------------------------------------
 ;; Protocol for accessing Dataset internals from standalone functions
@@ -51,90 +56,42 @@
   (-col-map [_] col-map)
   (-row-count [_] nrows)
 
-  #?@(:cljs
-      [eve.deftype-proto.data/ISabStorable
-       (-sab-tag [_] :eve-deftype/Dataset)
-       (-sab-encode [_ _env]
-         (ser/encode-sab-pointer Dataset-type-id offset__))
-       (-sab-dispose [_ _env]
-         ;; Dispose each EveArray in col-map
-         (let [slab-base__ (alloc/resolve-dv! offset__)
-               slab-dv__ alloc/resolved-dv
-               cm (slab-rt/slab-read-serialized offset__ 8)]
-           (doseq [[_ arr-val] cm]
-             (when (satisfies? d/ISabStorable arr-val)
-               (d/-sab-dispose arr-val _env))))
-         ;; Free serialized field data blocks
-         (slab-rt/slab-free-serialized! offset__ 4)
-         (slab-rt/slab-free-serialized! offset__ 8)
-         ;; Free the instance block itself
-         (alloc/free! offset__))
+  d/IPlain
+  (-plain [_]
+    (into {} (map (fn [k] [k (d/eve->clj (get col-map k))])) col-order))
 
-       ICounted
-       (-count [_] nrows)
+  clojure.lang.Counted
+  (count [_] nrows)
 
-       ILookup
-       (-lookup [_ k] (get col-map k))
-       (-lookup [_ k not-found] (get col-map k not-found))
+  clojure.lang.ILookup
+  (valAt [_ k] (get col-map k))
+  (valAt [_ k not-found] (get col-map k not-found))
 
-       IFn
-       (-invoke [_ k] (get col-map k))
-       (-invoke [_ k not-found] (get col-map k not-found))
+  clojure.lang.IFn
+  (invoke [_ k] (get col-map k))
+  (invoke [_ k not-found] (get col-map k not-found))
 
-       ISeqable
-       (-seq [_]
-         (map (fn [k] (MapEntry. k (get col-map k) nil)) col-order))
+  clojure.lang.Seqable
+  (seq [_]
+    (map (fn [k] (enc/map-entry k (get col-map k))) col-order))
 
-       IHash
-       (-hash [_]
-         (hash [col-order nrows (mapv #(hash (get col-map %)) col-order)]))
+  clojure.lang.IHashEq
+  (hasheq [_]
+    (hash [col-order nrows (mapv #(hash (get col-map %)) col-order)]))
 
-       IEquiv
-       (-equiv [_ other]
-         (and (instance? Dataset other)
-              (= nrows (-row-count other))
-              (= col-order (-column-names other))
-              (every? true? (map #(= (get col-map %) (get (-col-map other) %))
-                                 col-order))))
+  java.lang.Iterable
+  (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
-       IPrintWithWriter
-       (-pr-writer [_ writer _opts]
-         (-write writer (str "#eve/dataset {" (count col-order) " cols × " nrows " rows}")))]
-
-      :clj
-      [clojure.lang.Counted
-       (count [_] nrows)
-
-       clojure.lang.ILookup
-       (valAt [_ k] (get col-map k))
-       (valAt [_ k not-found] (get col-map k not-found))
-
-       clojure.lang.IFn
-       (invoke [_ k] (get col-map k))
-       (invoke [_ k not-found] (get col-map k not-found))
-
-       clojure.lang.Seqable
-       (seq [_]
-         (map (fn [k] (clojure.lang.MapEntry/create k (get col-map k)))
-              col-order))
-
-       clojure.lang.IHashEq
-       (hasheq [_]
-         (hash [col-order nrows (mapv #(hash (get col-map %)) col-order)]))
-
-       java.lang.Iterable
-       (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
-
-       java.lang.Object
-       (equals [_ other]
-         (and (instance? Dataset other)
-              (= nrows (-row-count other))
-              (= col-order (-column-names other))
-              (every? true? (map #(= (get col-map %) (get (-col-map other) %))
-                                 col-order))))
-       (hashCode [this] (.hasheq this))
-       (toString [_]
-         (str "#eve/dataset {" (count col-order) " cols × " nrows " rows}"))]))
+  java.lang.Object
+  (equals [_ other]
+    (and (instance? Dataset other)
+         (= nrows (-row-count other))
+         (= col-order (-column-names other))
+         (every? true? (map #(= (get col-map %) (get (-col-map other) %))
+                            col-order))))
+  (hashCode [this] (.hasheq this))
+  (toString [_]
+    (str "#eve/dataset {" (e/count col-order) " cols × " nrows " rows}")))
 
 ;;-----------------------------------------------------------------------------
 ;; Predicates
@@ -146,25 +103,55 @@
   (instance? Dataset x))
 
 ;;-----------------------------------------------------------------------------
+;; Domain helpers — explicit slab contexts (no ambient state)
+;;-----------------------------------------------------------------------------
+
+(defn- default-sio
+  "The slab I/O a constructor given none allocates in: the running swap!'s
+   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+  []
+  (alloc/current-sio))
+
+(defn- ->dataset-in
+  "->Dataset allocating in ds's own slab domain (JVM, bb) / the module slab
+   (CLJS, whose constructor takes the sio and allocates there). Structural ops
+   use this so derived datasets stay in the same domain."
+  [ds nrows col-order col-map]
+  (->Dataset (d/-eve-sio ds) nrows col-order col-map))
+
+;;-----------------------------------------------------------------------------
 ;; Construction
 ;;-----------------------------------------------------------------------------
 
 (defn dataset
   "Create a dataset from a map of {keyword → EveArray}.
-   All columns must have the same length. Must be called inside swap!."
-  [col-map]
-  (let [entries (seq col-map)
-        _ (when (empty? entries)
-            (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-                    "Dataset requires at least one column")))
-        col-order (vec (map first entries))
-        lengths (map #(count (second %)) entries)
-        n (first lengths)]
-    (when-not (every? #(= n %) lengths)
-      (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-              (str "All columns must have same length. Got: "
-                   (zipmap col-order lengths)))))
-    (->Dataset n col-order (into {} entries))))
+   All columns must have the same length.
+
+   ([col-map]) allocates in a fresh heap slab domain (JVM; no ambient state)
+   — the dataset is self-contained and fully usable for reads and structural
+   ops, but it can NOT be stored in an atom: atom roots must live in the
+   atom's own slab domain.
+   ([sio col-map]) allocates in sio's domain. When the dataset will be stored
+   in an atom, pass that atom's domain sio (eve.atom/atom-sio):
+     (swap! ea (fn [_] (dataset (eve.atom/atom-sio ea) {...})))"
+  ([col-map] (dataset (default-sio) col-map))
+  ([sio col-map]
+   (let [entries (e/seq col-map)
+         _ (when (empty? entries)
+             (throw (enc/illegal-argument
+                     "Dataset requires at least one column")))
+         col-order (vec (map first entries))
+         lengths (map #(e/count (second %)) entries)
+         n (first lengths)]
+     (when-not (every? #(= n %) lengths)
+       (throw (enc/illegal-argument
+               (str "All columns must have same length. Got: "
+                    (zipmap col-order lengths)))))
+     (->Dataset sio n col-order (into {} entries)))))
+
+;;-----------------------------------------------------------------------------
+;; Core accessors
+;;-----------------------------------------------------------------------------
 
 ;;-----------------------------------------------------------------------------
 ;; Core accessors
@@ -204,27 +191,27 @@
   [ds col-keys]
   (let [cm (-col-map ds)
         new-map (into {} (map (fn [k] [k (get cm k)])) col-keys)]
-    (->Dataset (-row-count ds) (vec col-keys) new-map)))
+    (->dataset-in ds (-row-count ds) (vec col-keys) new-map)))
 
 (defn add-column
   "Return new dataset with an additional column."
   [ds k col]
-  (when (not= (count col) (-row-count ds))
-    (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-            (str "Column length " (count col) " does not match dataset row count " (-row-count ds)))))
+  (when (not= (e/count col) (-row-count ds))
+    (throw (enc/illegal-argument
+            (str "Column length " (e/count col) " does not match dataset row count " (-row-count ds)))))
   (let [new-map (assoc (-col-map ds) k col)
         old-order (-column-names ds)
         new-order (if (some #{k} old-order)
                     old-order
                     (conj old-order k))]
-    (->Dataset (-row-count ds) new-order new-map)))
+    (->dataset-in ds (-row-count ds) new-order new-map)))
 
 (defn drop-column
   "Return new dataset without the specified column."
   [ds k]
   (let [new-map (dissoc (-col-map ds) k)
         new-order (vec (remove #{k} (-column-names ds)))]
-    (->Dataset (-row-count ds) new-order new-map)))
+    (->dataset-in ds (-row-count ds) new-order new-map)))
 
 (defn rename-columns
   "Return new dataset with columns renamed per rename-map {old-key → new-key}."
@@ -235,7 +222,7 @@
         new-map (into {} (map (fn [k]
                                 [(get rename-map k k) (get cm k)])
                               old-order))]
-    (->Dataset (-row-count ds) new-order new-map)))
+    (->dataset-in ds (-row-count ds) new-order new-map)))
 
 ;;-----------------------------------------------------------------------------
 ;; Row operations (new Dataset with new EveArray blocks)
@@ -248,7 +235,7 @@
         new-map (into {} (map (fn [k]
                                 [k (argops/take-indices (get cm k) idx-arr)])
                               (-column-names ds)))]
-    (->Dataset (count idx-arr) (-column-names ds) new-map)))
+    (->dataset-in ds (e/count idx-arr) (-column-names ds) new-map)))
 
 (defn filter-rows
   "Return new dataset with only rows where (pred (nth col i)) is truthy."

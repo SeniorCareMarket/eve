@@ -1,0 +1,12 @@
+# crash-suite variant=J10 size=counter manifest={0: 2068, 1: 2068, 2: 2068, 3: 2068, 4: 2068, 5: 2068, 6: 2068, 7: 2068, 8: 2068, 9: 2068, 10: 4136, 11: 4136}
+point p0-checkpoint: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point window-c1-nothing-forced: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point window-c5-nothing-forced: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point window-c9-nothing-forced: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point flush-after-sweep: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point flush-torn-100b: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point flush-torn-1030b: PASS (expect {'value': 0} got {'value': 0} rc=0)
+point flush-done: PASS (expect {'value': 10} got {'value': 10} rc=0)
+point post-flush-window-c11: PASS (expect {'value': 10} got {'value': 10} rc=0)
+point window-c5-root-ahead: PASS (expect {'value': 0} got {'value': 0} rc=0)
+# totals: 10 pass, 0 violations

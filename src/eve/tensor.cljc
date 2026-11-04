@@ -17,16 +17,21 @@
    Element access:
      (mget t 1 2)                        ;; get element at [1,2]
      (mset! t 1 2 42.0)                  ;; set element at [1,2]"
-  (:refer-clojure :exclude [to-array])
+  (:refer-clojure :exclude [to-array
+                            aget aset unchecked-add-int unchecked-multiply-int
+                            unchecked-inc-int long double volatile! vswap! transient
+                            persistent! conj! doubles])
   (:require
+   [eve.host :refer [aget aset unchecked-add-int unchecked-multiply-int unchecked-inc-int
+                     long double volatile! vswap! transient persistent! conj! doubles]]
+   [eve.core :as e]
    [eve.array :as arr]
    [eve.deftype-proto.data :as d]
+   [eve.encoding :as enc]
    [eve.deftype-proto.serialize :as ser]
-   #?@(:cljs [[eve.deftype-proto.alloc :as alloc]
-              [eve.deftype.slab-runtime :as slab-rt]]
-       :clj [[eve.deftype :refer [eve-deftype]]
-             [eve.deftype.slab-runtime :as slab-rt]]))
-  #?(:cljs (:require-macros [eve.deftype :refer [eve-deftype]])))
+   [eve.deftype :refer [eve-deftype]]
+   [eve.deftype-proto.alloc :as alloc]
+   [eve.deftype.slab-runtime :as slab-rt]))
 
 ;; Forward declarations
 (declare flat-get)
@@ -56,63 +61,49 @@
              (-strides [_] strides)
              (-elem-offset [_] elem-offset)
 
-             #?@(:cljs
-                 [Object
-                  (toString [_]
-                            (str "#eve/tensor " (pr-str shape)
-                                 " " (arr/subtype->type-kw (arr/array-subtype-code data))))
+             d/IPlain
+             (-plain [_]
+               (let [sh (vec shape)
+                     st (vec strides)
+                     eo (long elem-offset)
+                     backing (d/eve->clj data)]
+                 (letfn [(build [dim base]
+                           (if (= dim (e/count sh))
+                             (e/nth backing base)
+                             (let [stride (e/nth st dim)
+                                   n (e/nth sh dim)]
+                               (mapv (fn [i] (build (inc dim) (+ base (* i stride))))
+                                     (range n)))))]
+                   (if (empty? sh)
+                     (e/nth backing eo)
+                     (build 0 eo)))))
 
-                  ICounted
-                  (-count [_]
-                          (reduce * 1 shape))
+             clojure.lang.Counted
+             (count [_]
+               (reduce * 1 shape))
 
-                  IHash
-                  (-hash [this]
-                         (hash [shape (vec (take 100 (seq this)))]))
+             clojure.lang.IHashEq
+             (hasheq [this]
+               (hash [shape (vec (take 100 (e/seq this)))]))
 
-                  IEquiv
-                  (-equiv [this other]
-                          (and (instance? NDBuffer other)
-                               (= shape (-shape other))
-                               (every? true? (map = (seq this) (seq other)))))
+             clojure.lang.Seqable
+             (seq [this]
+               (let [n (reduce * 1 shape)]
+                 (when (pos? n)
+                   (map (fn [flat-idx] (flat-get this flat-idx)) (range n)))))
 
-                  ISeqable
-                  (-seq [this]
-                        (let [n (reduce * 1 shape)]
-                          (when (pos? n)
-                            (map (fn [flat-idx] (flat-get this flat-idx)) (range n)))))
+             java.lang.Iterable
+             (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
-                  IPrintWithWriter
-                  (-pr-writer [this writer _opts]
-                              (-write writer (str this)))]
-
-                 :clj
-                 [clojure.lang.Counted
-                  (count [_]
-                         (reduce * 1 shape))
-
-                  clojure.lang.IHashEq
-                  (hasheq [this]
-                          (hash [shape (vec (take 100 (seq this)))]))
-
-                  clojure.lang.Seqable
-                  (seq [this]
-                       (let [n (reduce * 1 shape)]
-                         (when (pos? n)
-                           (map (fn [flat-idx] (flat-get this flat-idx)) (range n)))))
-
-                  java.lang.Iterable
-                  (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
-
-                  java.lang.Object
-                  (equals [this other]
-                          (and (instance? NDBuffer other)
-                               (= shape (-shape other))
-                               (every? true? (map = (seq this) (seq other)))))
-                  (hashCode [this] (.hasheq this))
-                  (toString [_]
-                            (str "#eve/tensor " (pr-str shape)
-                                 " " (arr/subtype->type-kw (arr/array-subtype-code data))))]))
+             java.lang.Object
+             (equals [this other]
+               (and (instance? NDBuffer other)
+                    (= shape (-shape other))
+                    (every? true? (map = (e/seq this) (e/seq other)))))
+             (hashCode [this] (.hasheq this))
+             (toString [_]
+               (str "#eve/tensor " (pr-str shape)
+                    " " (arr/subtype->type-kw (arr/array-subtype-code data)))))
 
 ;;-----------------------------------------------------------------------------
 ;; Internal helpers
@@ -121,7 +112,7 @@
 (defn- compute-c-strides
   "Compute C-order (row-major) strides from shape."
   [shape]
-  (let [rank (count shape)]
+  (let [rank (e/count shape)]
     (if (zero? rank)
       []
       (loop [i (dec rank)
@@ -130,32 +121,32 @@
         (if (< i 0)
           (vec (reverse (persistent! result)))
           (recur (dec i)
-                 (* stride (nth shape i))
+                 (* stride (e/nth shape i))
                  (conj! result stride)))))))
 
 (defn- multi-idx->flat
   "Convert multi-dimensional index to flat index."
   [strides elem-offset indices]
   (loop [i 0 flat elem-offset]
-    (if (< i (count indices))
-      (recur (inc i) (+ flat (* (nth strides i) (nth indices i))))
+    (if (< i (e/count indices))
+      (recur (inc i) (+ flat (* (e/nth strides i) (e/nth indices i))))
       flat)))
 
 (defn- flat-idx->multi
   "Convert a linear iteration index to multi-dimensional index,
    then to flat data index via strides."
   [shape strides elem-offset flat-iter-idx]
-  (let [rank (count shape)]
+  (let [rank (e/count shape)]
     (loop [r (dec rank)
            remaining flat-iter-idx
            flat elem-offset]
       (if (< r 0)
         flat
-        (let [dim (nth shape r)
+        (let [dim (e/nth shape r)
               idx (rem remaining dim)]
           (recur (dec r)
                  (quot remaining dim)
-                 (+ flat (* (nth strides r) idx))))))))
+                 (+ flat (* (e/nth strides r) idx))))))))
 
 (defn- flat-get
   "Get element at a flat iteration index."
@@ -164,7 +155,7 @@
         st (-strides t)
         eo (-elem-offset t)
         data-idx (flat-idx->multi sh st eo flat-iter-idx)]
-    (nth (-data t) data-idx)))
+    (e/nth (-data t) data-idx)))
 
 ;;-----------------------------------------------------------------------------
 ;; Predicates
@@ -179,28 +170,60 @@
 ;; Construction
 ;;-----------------------------------------------------------------------------
 
+(defn- default-sio
+  "The slab I/O a constructor given none allocates in: the running swap!'s
+   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+  []
+  (alloc/current-sio))
+
+(defn- ->ndbuffer-in
+  "->NDBuffer allocating in t's own slab domain (JVM, bb) / the module slab
+   (CLJS, whose constructor takes the sio and allocates there). Shape ops use
+   this so derived tensors stay in the same domain."
+  [t elem-offset data shape strides]
+  (->NDBuffer (d/-eve-sio t) elem-offset data shape strides))
+
+(defn- array-domain-sio
+  "sio for an NDBuffer wrapping arr: the array's own domain when it is a
+   slab-backed Eve value that carries one, else the current one (a
+   ClojureScript instance carries none: its domain is the module slab)."
+  [arr]
+  (or (d/-eve-sio arr) (alloc/current-sio)))
+
 (defn from-array
   "Wrap an EveArray as an NDBuffer with given shape.
-   The product of shape dimensions must equal array length."
-  [arr shape]
-  (let [n (reduce * 1 shape)]
-    (when (not= n (count arr))
-      (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-              (str "Shape " shape " requires " n " elements but array has " (count arr)))))
-    (->NDBuffer 0 arr (vec shape) (compute-c-strides shape))))
+   The product of shape dimensions must equal array length.
+
+   ([arr shape]) uses the array's own slab domain when it is slab-backed
+   (JVM), else a fresh heap domain. ([sio arr shape]) allocates in sio's
+   domain — pass the atom's domain sio (eve.atom/atom-sio) when the tensor
+   will be stored in an atom."
+  ([arr shape] (from-array (array-domain-sio arr) arr shape))
+  ([sio arr shape]
+   (let [n (reduce * 1 shape)]
+     (when (not= n (e/count arr))
+       (throw (enc/illegal-argument
+               (str "Shape " shape " requires " n " elements but array has " (e/count arr)))))
+     (->NDBuffer sio 0 arr (vec shape) (compute-c-strides shape)))))
 
 (defn zeros
-  "Create a zero-filled tensor."
-  [type-kw shape]
-  (let [n (reduce * 1 shape)]
-    (from-array (arr/eve-array type-kw n) shape)))
+  "Create a zero-filled tensor.
+   ([type-kw shape]) uses a fresh heap domain (JVM). ([sio type-kw shape])
+   allocates in sio's domain — use the atom's domain sio for atom storage."
+  ([type-kw shape] (zeros (default-sio) type-kw shape))
+  ([sio type-kw shape]
+   (let [n (reduce * 1 shape)]
+     (from-array sio (arr/eve-array type-kw n) shape))))
 
 (defn ones
-  "Create a tensor filled with 1."
-  [type-kw shape]
-  (let [n (reduce * 1 shape)
-        a (arr/eve-array type-kw n 1)]
-    (from-array a shape)))
+  "Create a tensor filled with 1.
+   ([type-kw shape]) uses a fresh heap domain (JVM). ([sio type-kw shape])
+   allocates in sio's domain — use the atom's domain sio for atom storage."
+  ([type-kw shape] (ones (default-sio) type-kw shape))
+  ([sio type-kw shape]
+   (let [n (reduce * 1 shape)
+         a (arr/eve-array type-kw n 1)]
+     (from-array sio a shape))))
 
 ;;-----------------------------------------------------------------------------
 ;; Accessors
@@ -219,7 +242,7 @@
 (defn rank
   "Return the number of dimensions."
   [t]
-  (count (-shape t)))
+  (e/count (-shape t)))
 
 (defn contiguous?
   "True if the tensor has C-order (row-major) strides with no gaps."
@@ -234,7 +257,7 @@
   "Get element at multi-dimensional index."
   [t & indices]
   (let [flat (multi-idx->flat (-strides t) (-elem-offset t) indices)]
-    (nth (-data t) flat)))
+    (e/nth (-data t) flat)))
 
 (defn mset!
   "Set element at multi-dimensional index. Mutates the backing array."
@@ -254,15 +277,15 @@
    Requires contiguous layout. Product of new shape must equal product of old."
   [t new-shape]
   (when-not (contiguous? t)
-    (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+    (throw (enc/illegal-argument
             "Cannot reshape non-contiguous tensor")))
   (let [old-n (reduce * 1 (-shape t))
         new-n (reduce * 1 new-shape)]
     (when (not= old-n new-n)
-      (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+      (throw (enc/illegal-argument
               (str "Cannot reshape " (-shape t) " to " new-shape
                    ": element count mismatch"))))
-    (->NDBuffer (-elem-offset t) (-data t) (vec new-shape) (compute-c-strides new-shape))))
+    (->ndbuffer-in t (-elem-offset t) (-data t) (vec new-shape) (compute-c-strides new-shape))))
 
 (defn transpose
   "Transpose: reverse axis order (zero-copy).
@@ -270,13 +293,13 @@
   ([t]
    (let [sh (-shape t)
          st (-strides t)]
-     (->NDBuffer (-elem-offset t) (-data t) (vec (reverse sh)) (vec (reverse st)))))
+     (->ndbuffer-in t (-elem-offset t) (-data t) (vec (reverse sh)) (vec (reverse st)))))
   ([t perm]
    (let [sh (-shape t)
          st (-strides t)]
-     (->NDBuffer (-elem-offset t) (-data t)
-                 (vec (map #(nth sh %) perm))
-                 (vec (map #(nth st %) perm))))))
+     (->ndbuffer-in t (-elem-offset t) (-data t)
+                   (vec (map #(e/nth sh %) perm))
+                   (vec (map #(e/nth st %) perm))))))
 
 (defn slice-axis
   "Select a single index along an axis, reducing rank by 1.
@@ -284,65 +307,26 @@
   [t axis idx]
   (let [sh (-shape t)
         st (-strides t)
-        new-offset (+ (-elem-offset t) (* (nth st axis) idx))
+        new-offset (+ (-elem-offset t) (* (e/nth st axis) idx))
         new-shape (vec (concat (subvec sh 0 axis)
                                (subvec sh (inc axis))))
         new-strides (vec (concat (subvec st 0 axis)
                                  (subvec st (inc axis))))]
-    (->NDBuffer new-offset (-data t) new-shape new-strides)))
+    (->ndbuffer-in t new-offset (-data t) new-shape new-strides)))
 
-;;-----------------------------------------------------------------------------
-;; Direct typed-view access helpers (bypass protocol dispatch)
-;;-----------------------------------------------------------------------------
 
-#?(:cljs
-   (defn- direct-read
-     "Read element at index from a typed view. No bounds check."
-     [view base-idx i]
-     (clojure.core/aget view (+ base-idx i))))
 
-#?(:cljs
-   (defn- direct-write
-     "Write element at index to a typed view. No bounds check."
-     [view base-idx i val]
-     (clojure.core/aset view (+ base-idx i) val)))
 
-#?(:cljs
-   (defn- get-view-and-base
-     "Return [typed-view base-element-index] for an EveArray."
-     [^js arr]
-     (let [view (eve.array/get-typed-view arr)]
-       ;; get-typed-view returns a subarray already based at element 0
-       [view 0])))
+
+
 
 (defn- strided-read
   "Read element at flat iteration index using stride translation.
    Uses direct typed-view access (no nth protocol dispatch)."
   [data-arr shape strides elem-offset flat-iter-idx]
-  #?(:cljs
-     (let [[view base] (get-view-and-base data-arr)
-           data-idx (flat-idx->multi shape strides elem-offset flat-iter-idx)]
-       (clojure.core/aget view (+ base data-idx)))
-     :clj
-     (nth data-arr (flat-idx->multi shape strides elem-offset flat-iter-idx))))
+  (e/nth data-arr (flat-idx->multi shape strides elem-offset flat-iter-idx)))
 
-#?(:cljs
-   (defn- strided-iterate-2d
-     "Iterate over a 2D tensor using stride arithmetic. Calls (emit! out-idx data-idx)
-      for each element in row-major iteration order."
-     [shape strides elem-offset emit!]
-     (let [rows (nth shape 0)
-           cols (nth shape 1)
-           row-stride (nth strides 0)
-           col-stride (nth strides 1)]
-       (loop [r 0 out-i 0]
-         (when (< r rows)
-           (let [row-start (+ elem-offset (* r row-stride))]
-             (loop [c 0]
-               (when (< c cols)
-                 (emit! (+ out-i c) (+ row-start (* c col-stride)))
-                 (recur (inc c)))))
-           (recur (inc r) (+ out-i cols)))))))
+
 
 ;;-----------------------------------------------------------------------------
 ;; Bulk operations
@@ -354,177 +338,107 @@
   ([f t]
    (let [sh (-shape t)
          n (reduce * 1 sh)
-         type-kw (dtype t)
-         out-arr (arr/eve-array type-kw n)]
-     #?(:cljs
-        (let [data (-data t)
-              [src-view src-base] (get-view-and-base data)
-              [dst-view dst-base] (get-view-and-base out-arr)]
+         type-kw (dtype t)]
+     (from-array
+      (if-let [^doubles src (d/-as-double-array (-data t))]
+        (let [eo (int (-elem-offset t))
+              ^doubles dst (double-array n)]
           (if (contiguous? t)
-            (let [eo (-elem-offset t)]
-              (dotimes [i n]
-                (direct-write dst-view dst-base i
-                              (f (direct-read src-view src-base (+ eo i))))))
-            (let [st (-strides t)
-                  eo (-elem-offset t)]
-              (if (= 2 (count sh))
-                (strided-iterate-2d sh st eo
-                                    (fn [out-i data-idx]
-                                      (direct-write dst-view dst-base out-i
-                                                    (f (clojure.core/aget src-view (+ src-base data-idx))))))
+            (dotimes [i n] (aset dst i (double (f (aget src (+ eo i))))))
+            (let [st (-strides t)]
+              (if (== 2 (e/count sh))
+                (let [rows (int (e/nth sh 0)) cols (int (e/nth sh 1))
+                      rs   (int (e/nth st 0))  cs   (int (e/nth st 1))]
+                  (loop [r (int 0) out-i (int 0)]
+                    (when (< r rows)
+                      (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
+                        (loop [c (int 0)]
+                          (when (< c cols)
+                            (aset dst (unchecked-add-int out-i c)
+                                  (double (f (aget src (unchecked-add-int row-start (unchecked-multiply-int c cs))))))
+                            (recur (unchecked-inc-int c)))))
+                      (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
                 (dotimes [i n]
-                  (let [data-idx (flat-idx->multi sh st eo i)]
-                    (direct-write dst-view dst-base i
-                                  (f (clojure.core/aget src-view (+ src-base data-idx))))))))))
-        :clj
-        (if-let [^doubles src (d/-as-double-array (-data t))]
-          (let [eo (int (-elem-offset t))
-                ^doubles dst (d/-backing-array out-arr)]
-            (if (contiguous? t)
-              (dotimes [i n] (aset dst i (double (f (aget src (+ eo i))))))
-              (let [st (-strides t)]
-                (if (== 2 (count sh))
-                  (let [rows (int (nth sh 0)) cols (int (nth sh 1))
-                        rs   (int (nth st 0))  cs   (int (nth st 1))]
-                    (loop [r (int 0) out-i (int 0)]
-                      (when (< r rows)
-                        (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
-                          (loop [c (int 0)]
-                            (when (< c cols)
-                              (aset dst (unchecked-add-int out-i c)
-                                    (double (f (aget src (unchecked-add-int row-start (unchecked-multiply-int c cs))))))
-                              (recur (unchecked-inc-int c)))))
-                        (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
-                  (dotimes [i n]
-                    (aset dst i (double (f (aget src (int (flat-idx->multi sh st eo i)))))))))))
+                  (aset dst i (double (f (aget src (int (flat-idx->multi sh st eo i))))))))))
+          (arr/from-double-array dst))
+        (let [out-arr (arr/eve-array type-kw n)]
           (dotimes [i n]
-            (arr/aset! out-arr i (f (flat-get t i))))))
-     (from-array out-arr sh)))
+            (arr/aset! out-arr i (f (flat-get t i))))
+          out-arr))
+      sh)))
   ([f t1 t2]
    (let [sh (-shape t1)
          n (reduce * 1 sh)
-         type-kw (dtype t1)
-         out-arr (arr/eve-array type-kw n)]
-     #?(:cljs
-        (let [d1 (-data t1)
-              d2 (-data t2)
-              [sv1 sb1] (get-view-and-base d1)
-              [sv2 sb2] (get-view-and-base d2)
-              [dv db] (get-view-and-base out-arr)]
-          (if (and (contiguous? t1) (contiguous? t2))
-            (let [eo1 (-elem-offset t1)
-                  eo2 (-elem-offset t2)]
+         type-kw (dtype t1)]
+     (from-array
+      (let [^doubles s1 (d/-as-double-array (-data t1))
+            ^doubles s2 (d/-as-double-array (-data t2))]
+        (if (and s1 s2)
+          (let [^doubles dst (double-array n)
+                eo1 (int (-elem-offset t1)) eo2 (int (-elem-offset t2))]
+            (if (and (contiguous? t1) (contiguous? t2))
               (dotimes [i n]
-                (direct-write dv db i
-                              (f (direct-read sv1 sb1 (+ eo1 i))
-                                 (direct-read sv2 sb2 (+ eo2 i))))))
-            (let [st1 (-strides t1) eo1 (-elem-offset t1)
-                  st2 (-strides t2) eo2 (-elem-offset t2)
-                  sh2 (-shape t2)]
-              (dotimes [i n]
-                (direct-write dv db i
-                              (f (strided-read d1 sh st1 eo1 i)
-                                 (strided-read d2 sh2 st2 eo2 i)))))))
-        :clj
-        (let [^doubles s1 (d/-as-double-array (-data t1))
-              ^doubles s2 (d/-as-double-array (-data t2))]
-          (if (and s1 s2)
-            (let [^doubles dst (d/-backing-array out-arr)
-                  eo1 (int (-elem-offset t1)) eo2 (int (-elem-offset t2))]
-              (if (and (contiguous? t1) (contiguous? t2))
-                (dotimes [i n]
-                  (aset dst i (double (f (aget s1 (+ eo1 i)) (aget s2 (+ eo2 i))))))
-                (let [st1 (-strides t1) st2 (-strides t2) sh2 (-shape t2)]
-                  (if (and (== 2 (count sh)) (== 2 (count sh2)))
-                    ;; 2D fast path
-                    (let [rows (int (nth sh 0)) cols (int (nth sh 1))
-                          rs1  (int (nth st1 0)) cs1  (int (nth st1 1))
-                          rs2  (int (nth st2 0)) cs2  (int (nth st2 1))]
-                      (loop [r (int 0) out-i (int 0)]
-                        (when (< r rows)
-                          (let [base1 (unchecked-add-int eo1 (unchecked-multiply-int r rs1))
-                                base2 (unchecked-add-int eo2 (unchecked-multiply-int r rs2))]
-                            (loop [c (int 0)]
-                              (when (< c cols)
-                                (aset dst (unchecked-add-int out-i c)
-                                      (double (f (aget s1 (unchecked-add-int base1 (unchecked-multiply-int c cs1)))
-                                                 (aget s2 (unchecked-add-int base2 (unchecked-multiply-int c cs2))))))
-                                (recur (unchecked-inc-int c)))))
-                          (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
-                    (dotimes [i n]
-                      (aset dst i (double (f (aget s1 (int (flat-idx->multi sh st1 eo1 i)))
-                                             (aget s2 (int (flat-idx->multi sh2 st2 eo2 i)))))))))))
+                (aset dst i (double (f (aget s1 (+ eo1 i)) (aget s2 (+ eo2 i))))))
+              (let [st1 (-strides t1) st2 (-strides t2) sh2 (-shape t2)]
+                (if (and (== 2 (e/count sh)) (== 2 (e/count sh2)))
+                  ;; 2D fast path
+                  (let [rows (int (e/nth sh 0)) cols (int (e/nth sh 1))
+                        rs1  (int (e/nth st1 0)) cs1  (int (e/nth st1 1))
+                        rs2  (int (e/nth st2 0)) cs2  (int (e/nth st2 1))]
+                    (loop [r (int 0) out-i (int 0)]
+                      (when (< r rows)
+                        (let [base1 (unchecked-add-int eo1 (unchecked-multiply-int r rs1))
+                              base2 (unchecked-add-int eo2 (unchecked-multiply-int r rs2))]
+                          (loop [c (int 0)]
+                            (when (< c cols)
+                              (aset dst (unchecked-add-int out-i c)
+                                    (double (f (aget s1 (unchecked-add-int base1 (unchecked-multiply-int c cs1)))
+                                               (aget s2 (unchecked-add-int base2 (unchecked-multiply-int c cs2))))))
+                              (recur (unchecked-inc-int c)))))
+                        (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
+                  (dotimes [i n]
+                    (aset dst i (double (f (aget s1 (int (flat-idx->multi sh st1 eo1 i)))
+                                           (aget s2 (int (flat-idx->multi sh2 st2 eo2 i))))))))))
+            (arr/from-double-array dst))
+          (let [out-arr (arr/eve-array type-kw n)]
             (dotimes [i n]
-              (arr/aset! out-arr i (f (flat-get t1 i) (flat-get t2 i)))))))
-     (from-array out-arr sh))))
+              (arr/aset! out-arr i (f (flat-get t1 i) (flat-get t2 i))))
+            out-arr)))
+      sh))))
 
 (defn ereduce
   "Reduce all elements of the tensor."
   [f init t]
   (let [sh (-shape t)
         n (reduce * 1 sh)]
-    #?(:cljs
-       (let [data (-data t)
-             [view base] (get-view-and-base data)]
-         (if (contiguous? t)
-           ;; Fast path: direct sequential read
-           (let [eo (-elem-offset t)]
-             (loop [i 0 acc init]
-               (if (< i n)
-                 (recur (inc i) (f acc (direct-read view base (+ eo i))))
-                 acc)))
-           ;; Stride path: use 2D stride iteration when possible
-           (let [st (-strides t)
-                 eo (-elem-offset t)]
-             (if (= 2 (count sh))
-               (let [rows (nth sh 0)
-                     cols (nth sh 1)
-                     row-stride (nth st 0)
-                     col-stride (nth st 1)
-                     acc (volatile! init)]
-                 (loop [r 0]
-                   (when (< r rows)
-                     (let [row-start (+ eo (* r row-stride))]
-                       (loop [c 0]
-                         (when (< c cols)
-                           (vswap! acc f (clojure.core/aget view (+ base row-start (* c col-stride))))
-                           (recur (inc c)))))
-                     (recur (inc r))))
-                 @acc)
-               (loop [i 0 acc init]
-                 (if (< i n)
-                   (let [data-idx (flat-idx->multi sh st eo i)]
-                     (recur (inc i) (f acc (clojure.core/aget view (+ base data-idx)))))
-                   acc))))))
-       :clj
-       (if-let [^doubles da (d/-as-double-array (-data t))]
-         (let [eo (int (-elem-offset t))]
-           (if (contiguous? t)
-             (loop [i 0 acc init]
-               (if (< i n) (recur (inc i) (f acc (aget da (+ eo i)))) acc))
-             (let [st (-strides t)]
-               (if (== 2 (count sh))
-                 ;; 2D fast path
-                 (let [rows (int (nth sh 0)) cols (int (nth sh 1))
-                       rs   (int (nth st 0))  cs   (int (nth st 1))
-                       acc-v (volatile! init)]
-                   (loop [r (int 0)]
-                     (when (< r rows)
-                       (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
-                         (loop [c (int 0)]
-                           (when (< c cols)
-                             (vswap! acc-v f (aget da (unchecked-add-int row-start (unchecked-multiply-int c cs))))
-                             (recur (unchecked-inc-int c)))))
-                       (recur (unchecked-inc-int r))))
-                   @acc-v)
-                 (loop [i 0 acc init]
-                   (if (< i n)
-                     (recur (inc i) (f acc (aget da (int (flat-idx->multi sh st eo i)))))
-                     acc))))))
-         (loop [i 0 acc init]
-           (if (< i n)
-             (recur (inc i) (f acc (flat-get t i)))
-             acc))))))
+    (if-let [^doubles da (d/-as-double-array (-data t))]
+      (let [eo (int (-elem-offset t))]
+        (if (contiguous? t)
+          (loop [i 0 acc init]
+            (if (< i n) (recur (inc i) (f acc (aget da (+ eo i)))) acc))
+          (let [st (-strides t)]
+            (if (== 2 (e/count sh))
+              ;; 2D fast path
+              (let [rows (int (e/nth sh 0)) cols (int (e/nth sh 1))
+                    rs   (int (e/nth st 0))  cs   (int (e/nth st 1))
+                    acc-v (volatile! init)]
+                (loop [r (int 0)]
+                  (when (< r rows)
+                    (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
+                      (loop [c (int 0)]
+                        (when (< c cols)
+                          (vswap! acc-v f (aget da (unchecked-add-int row-start (unchecked-multiply-int c cs))))
+                          (recur (unchecked-inc-int c)))))
+                    (recur (unchecked-inc-int r))))
+                @acc-v)
+              (loop [i 0 acc init]
+                (if (< i n)
+                  (recur (inc i) (f acc (aget da (int (flat-idx->multi sh st eo i)))))
+                  acc))))))
+      (loop [i 0 acc init]
+        (if (< i n)
+          (recur (inc i) (f acc (flat-get t i)))
+          acc)))))
 
 ;;-----------------------------------------------------------------------------
 ;; Materialization
@@ -535,75 +449,54 @@
   [t]
   (let [sh (-shape t)
         n (reduce * 1 sh)
-        type-kw (dtype t)
-        out (arr/eve-array type-kw n)]
-    #?(:cljs
-       (let [data (-data t)
-             [sv sb] (get-view-and-base data)
-             [dv db] (get-view-and-base out)]
-         (if (contiguous? t)
-           ;; Fast path: bulk copy via typed array set
-           (let [eo (-elem-offset t)
-                 src-sub (.subarray sv (+ sb eo) (+ sb eo n))]
-             (.set dv src-sub db))
-           ;; Stride path: use 2D stride iteration when possible
-           (let [st (-strides t)
-                 eo (-elem-offset t)]
-             (if (= 2 (count sh))
-               (strided-iterate-2d sh st eo
-                                   (fn [out-i data-idx]
-                                     (direct-write dv db out-i
-                                                   (clojure.core/aget sv (+ sb data-idx)))))
-               (dotimes [i n]
-                 (let [data-idx (flat-idx->multi sh st eo i)]
-                   (direct-write dv db i
-                                 (clojure.core/aget sv (+ sb data-idx)))))))))
-       :clj
-       (if-let [^doubles src (d/-as-double-array (-data t))]
-         (let [eo (int (-elem-offset t))
-               ^doubles dst (d/-backing-array out)]
-           (if (contiguous? t)
-             (System/arraycopy src (int eo) dst 0 n)
-             (let [st (-strides t)]
-               (if (== 2 (count sh))
-                 ;; 2D fast path: nested primitive loops (no rem/quot)
-                 (let [rows (int (nth sh 0)) cols (int (nth sh 1))
-                       rs   (int (nth st 0))  cs   (int (nth st 1))]
-                   (loop [r (int 0) out-i (int 0)]
-                     (when (< r rows)
-                       (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
-                         (loop [c (int 0)]
-                           (when (< c cols)
-                             (aset dst (unchecked-add-int out-i c)
-                                   (aget src (unchecked-add-int row-start (unchecked-multiply-int c cs))))
-                             (recur (unchecked-inc-int c)))))
-                       (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
-                 ;; General ND path
-                 (dotimes [i n]
-                   (aset dst i (aget src (int (flat-idx->multi sh st eo i)))))))))
-         (dotimes [i n]
-           (arr/aset! out i (flat-get t i)))))
-    out))
+        type-kw (dtype t)]
+    (if-let [^doubles src (d/-as-double-array (-data t))]
+      (let [eo (int (-elem-offset t))
+            ^doubles dst (double-array n)]
+        (if (contiguous? t)
+          (dotimes [i n] (aset dst i (aget src (+ eo i))))
+          (let [st (-strides t)]
+            (if (== 2 (e/count sh))
+              ;; 2D fast path: nested primitive loops (no rem/quot)
+              (let [rows (int (e/nth sh 0)) cols (int (e/nth sh 1))
+                    rs   (int (e/nth st 0))  cs   (int (e/nth st 1))]
+                (loop [r (int 0) out-i (int 0)]
+                  (when (< r rows)
+                    (let [row-start (unchecked-add-int eo (unchecked-multiply-int r rs))]
+                      (loop [c (int 0)]
+                        (when (< c cols)
+                          (aset dst (unchecked-add-int out-i c)
+                                (aget src (unchecked-add-int row-start (unchecked-multiply-int c cs))))
+                          (recur (unchecked-inc-int c)))))
+                    (recur (unchecked-inc-int r) (unchecked-add-int out-i cols)))))
+              ;; General ND path
+              (dotimes [i n]
+                (aset dst i (aget src (int (flat-idx->multi sh st eo i))))))))
+        (arr/from-double-array dst))
+      (let [out (arr/eve-array type-kw n)]
+        (dotimes [i n]
+          (arr/aset! out i (flat-get t i)))
+        out))))
 
 (defn to-dataset
   "Convert a 2D tensor to a Dataset with given column names.
    Requires exactly rank-2."
   [t col-names]
   (let [sh (-shape t)]
-    (when (not= 2 (count sh))
-      (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
+    (when (not= 2 (e/count sh))
+      (throw (enc/illegal-argument
               "to-dataset requires a 2D tensor")))
     (let [nrows (first sh)
           ncols (second sh)
-          _ (when (not= ncols (count col-names))
-              (throw (#?(:cljs js/Error. :clj IllegalArgumentException.)
-                      (str "Expected " ncols " column names, got " (count col-names)))))
+          _ (when (not= ncols (e/count col-names))
+              (throw (enc/illegal-argument
+                      (str "Expected " ncols " column names, got " (e/count col-names)))))
           type-kw (dtype t)
           cols (into {} (map (fn [c]
                                (let [col-arr (arr/eve-array type-kw nrows)]
                                  (dotimes [r nrows]
                                    (arr/aset! col-arr r (apply mget t [r c])))
-                                 [(nth col-names c) col-arr]))
+                                 [(e/nth col-names c) col-arr]))
                              (range ncols)))]
       ;; Return the column map — caller can wrap with (eve.dataset/dataset ...)
       cols)))

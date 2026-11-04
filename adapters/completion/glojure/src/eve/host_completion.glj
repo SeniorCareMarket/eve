@@ -1,0 +1,553 @@
+(ns eve.host-completion
+  "glojure's completion of its core to Clojure's, loaded first by eve.host (HOST-CONTRACT §10; measured on glojure
+   v0.7.22). What glojure's core lacks, or answers otherwise, and eve needs:
+
+   - deftype and reify: glojure has neither (its only runtime type is a defrecord; its protocols are multimethods on
+     class, which a record answers with its own type). A deftype here is a record extended to its protocols: its
+     fields are the record's, read in a method body as locals, (.-f x) elsewhere (glj-eve's interpreter reads a
+     record's field so: adapters/completion/glojure/go/host-field.patch); a mutable field holds a cell (volatile!)
+     that ->T makes, its reads deref it and its set! vreset!s it — so such a type is built with ->T, as on clojerl.
+     (T. ...) builds a type without mutable fields. A reify is an instance of a record made once for its form, its
+     methods closures in the instance.
+   - satisfies? and extends?: extend records each type it extends a protocol to, and they read that list
+     (instance?: a record type, nil, a class or interface).
+   - unchecked-int: glojure's widens instead of wrapping ((unchecked-int 0x80000000) is 2147483648, and an int64 is
+     returned as Go's int); here it wraps to a signed 32-bit value, as the JVM's (the other fixed-width ops wrap
+     already: measured).
+   - deref, swap!, reset!, compare-and-set!, swap-vals!, reset-vals!: glojure's take its own atom and IDeref (Go
+     interfaces); for a type, they call its IDeref / IAtom below — what eve's types adapter
+     (adapters/types/glojure) translates clojure.lang.IDeref and clojure.lang.IAtom onto.
+   - realized?: a type's IPending likewise.
+   - sequence with a transducer, dedupe of a collection and partition-all's transducer: glojure's reach JVM classes
+     it lacks (clojure.lang.RT.chunkIteratorSeq, a sized java.util.ArrayList); Clojure's here.
+   - defprotocol and extend: glojure's protocol is a multimethod per method on class, its impls wrapped in variadic
+     fns that apply them (~3 µs a call); a protocol defined after this has fixed-arity method fns, each caching the
+     impl it found for a class, and extend writes the protocol's table (glojure's own protocols keep glojure's).
+
+   Calls compiled after this, in any namespace: each is re-rooted (an :inline one loses its inlining first).")
+
+;; ---------------------------------------------------------------------------
+;; The fixed-width op glojure widens
+;; ---------------------------------------------------------------------------
+
+(defn- wrap-int
+  "x (a number) as a signed 32-bit value."
+  [x]
+  (let [v (bit-and (long x) 0xFFFFFFFF)]
+    (if (>= v 0x80000000) (- v 0x100000000) v)))
+
+(alter-meta! #'clojure.core/unchecked-int dissoc :inline)
+(alter-var-root #'clojure.core/unchecked-int (fn [_] wrap-int))
+
+;; ---------------------------------------------------------------------------
+;; Protocols: a method fn of fixed arities, caching its impl by class
+;; ---------------------------------------------------------------------------
+
+(defn- answers? [atype x]
+  (if (nil? atype) (nil? x) (and (some? x) (instance? atype x))))
+
+(defn impl-for
+  "The fn protocol p's method k is for x: the impl extended to x's own type, else to nil (x nil), else to a type x is
+   an instance of (Object last) — cached in cache (a volatile map) under x's class."
+  [p k x cache]
+  (let [m @p
+        c (class x)
+        fns (:fns m)
+        f (or (get-in fns [c k])
+              (when (nil? x) (get-in fns [nil k]))
+              (some (fn [t] (when (and (some? t) (not (identical? t Object)) (answers? t x)) (get-in fns [t k])))
+                    (:impls m))
+              (when (some? x) (get-in fns [Object k])))]
+    (when-not f
+      (throw (IllegalArgumentException.
+              (str "No implementation of method: " (name k) " of protocol: " (:name m) " found for class: "
+                   (if (nil? x) "nil" (str c))))))
+    (vswap! cache assoc c f)
+    f))
+
+(defmacro defprotocol
+  "A protocol (glojure's own protocol record, marked :eve/fast): each method a fn of the arities its signature lists,
+   finding the impl for its first argument's class once (impl-for) and calling it directly after."
+  [pname & opts+sigs]
+  (let [sigs (filter seq? opts+sigs)]
+    `(do (def ~pname (atom {:on-interface true :eve/fast true :name '~(symbol (str *ns*) (name pname))
+                            :sigs '~sigs :impls [] :fns {} :caches []}))
+         ~@(for [[mname & specs] sigs
+                 :let [cache (gensym "cache")
+                       arglists (filter vector? specs)]]
+             `(let [~cache (volatile! {})]
+                (swap! ~pname update :caches conj ~cache)
+                (def ~mname
+                  (fn ~@(for [al arglists
+                              :let [as (vec (repeatedly (count al) #(gensym "a")))]]
+                          `(~as ((or (get (deref ~cache) (class ~(first as)))
+                                     (impl-for ~pname ~(keyword (name mname)) ~(first as) ~cache))
+                                 ~@as)))))))
+         (var ~pname))))
+
+(alter-var-root #'clojure.core/defprotocol (fn [_] @#'defprotocol))
+
+;; extend: a fast protocol's table, glojure's for its own; either way the type is recorded (satisfies?, extends?)
+(alter-var-root #'clojure.core/extend
+  (fn [core]
+    (fn [atype & proto+mmaps]
+      (doseq [[p mmap] (partition 2 proto+mmaps)]
+        (swap! p (fn [m] (-> m (update :impls (fn [is] (if (some #(= atype %) is) is (conj (vec is) atype))))
+                             (cond-> (:eve/fast m) (update-in [:fns atype] merge mmap))
+                             (dissoc :sat))))
+        (if (:eve/fast @p)
+          (doseq [c (:caches @p)] (vreset! c {}))
+          (core atype p mmap))))))
+
+;; ---------------------------------------------------------------------------
+;; The atom, deref and pending interfaces of a type
+;; ---------------------------------------------------------------------------
+
+(defprotocol IDeref (-deref [o]))
+(defprotocol IBlockingDeref (-deref-within [o ms timeout-val]))
+(defprotocol IAtom
+  (-swap [a f] [a f x] [a f x y] [a f x y more])
+  (-reset [a v])
+  (-compare-and-set [a old new]))
+(defprotocol IAtom2
+  (-swap-vals [a f] [a f x] [a f x y] [a f x y more])
+  (-reset-vals [a v]))
+(defprotocol IPending (-realized? [o]))
+
+(declare satisfies?)
+
+(defn- host-ref?
+  "x is one of glojure's own (its atom, delay, var, volatile, promise, future ...): a Go value that is no record."
+  [x]
+  (not (instance? clojure.lang.IRecord x)))
+
+(alter-var-root #'clojure.core/deref
+  (fn [core]
+    (fn ([x] (if (and (host-ref? x) (instance? clojure.lang.IDeref x)) (core x) (-deref x)))
+      ([x ms timeout-val]
+       (if (host-ref? x) (core x ms timeout-val) (-deref-within x ms timeout-val))))))
+
+(alter-var-root #'clojure.core/swap!
+  (fn [core]
+    (fn ([a f] (if (host-ref? a) (core a f) (-swap a f)))
+      ([a f x] (if (host-ref? a) (core a f x) (-swap a f x)))
+      ([a f x y] (if (host-ref? a) (core a f x y) (-swap a f x y)))
+      ([a f x y & more] (if (host-ref? a) (apply core a f x y more) (-swap a f x y more))))))
+
+(alter-var-root #'clojure.core/reset!
+  (fn [core] (fn [a v] (if (host-ref? a) (core a v) (-reset a v)))))
+
+(alter-var-root #'clojure.core/compare-and-set!
+  (fn [core] (fn [a o n] (if (host-ref? a) (core a o n) (-compare-and-set a o n)))))
+
+(defn- vals-by-swap
+  "[old new] of a swap through a type's IAtom: the old value is the one the successful swap's f was given."
+  [a f args]
+  (let [seen (volatile! nil)
+        nv (apply -swap a (fn [old & xs] (vreset! seen old) (apply f old xs)) args)]
+    [@seen nv]))
+
+(defn- host-swap-vals
+  "[old new] of a swap of glojure's own atom, by compare-and-set! (glojure's swap-vals! and reset-vals! fail with a
+   nil dereference, v0.7.22)."
+  [a f args]
+  (loop []
+    (let [old (clojure.core/deref a) nv (apply f old args)]
+      (if (compare-and-set! a old nv) [old nv] (recur)))))
+
+(alter-var-root #'clojure.core/swap-vals!
+  (fn [_]
+    (fn [a f & args]
+      (cond (host-ref? a) (host-swap-vals a f args)
+            (satisfies? IAtom2 a) (apply -swap-vals a f args)
+            :else (let [[x y & more] args]
+                    (vals-by-swap a f (cond (nil? args) [] (nil? (next args)) [x]
+                                            (nil? more) [x y] :else [x y more])))))))
+
+(alter-var-root #'clojure.core/reset-vals!
+  (fn [_]
+    (fn [a v]
+      (cond (host-ref? a) (host-swap-vals a (fn [_] v) nil)
+            (satisfies? IAtom2 a) (-reset-vals a v)
+            :else (vals-by-swap a (fn [_] v) [])))))
+
+(alter-var-root #'clojure.core/realized?
+  (fn [core] (fn [x] (if (host-ref? x) (core x) (-realized? x)))))
+
+;; ---------------------------------------------------------------------------
+;; satisfies? / extends?
+;; ---------------------------------------------------------------------------
+
+
+(defn satisfies?
+  "true when protocol p has been extended to x's type (or one x is an instance of)."
+  [p x]
+  (let [k (if (nil? x) ::nil (class x))
+        cached (get (:sat @p) k ::none)]
+    (if (identical? cached ::none)
+      (let [r (boolean (some #(answers? % x) (:impls @p)))]
+        (swap! p assoc-in [:sat k] r)
+        r)
+      cached)))
+
+(defn extends?
+  "true when protocol p has been extended to atype itself."
+  [p atype]
+  (boolean (some #(= atype %) (:impls @p))))
+
+(intern 'clojure.core 'satisfies? satisfies?)
+(intern 'clojure.core 'extends? extends?)
+
+;; ---------------------------------------------------------------------------
+;; deftype
+;; ---------------------------------------------------------------------------
+
+(def deftype-types
+  "The record types deftype and reify made: a type, not a map — the collection predicates answer for one as the JVM's
+   do for a deftype (below)."
+  (atom #{}))
+
+(defn deftype-instance?
+  "x is an instance of a type deftype or reify made."
+  [x]
+  (and (instance? clojure.lang.IRecord x) (contains? @deftype-types (class x))))
+
+;; A record is a map to glojure's core: a type is not. map?, coll?, associative?, counted?, seqable? and record? are
+;; false for one (eve's shared code tells a host collection from a type by them: d/eve->clj pours a map? into a map,
+;; the codec writes a map? as one).
+(doseq [v [#'clojure.core/map? #'clojure.core/coll? #'clojure.core/associative? #'clojure.core/counted?
+           #'clojure.core/seqable? #'clojure.core/record?]]
+  (alter-var-root v (fn [core] (fn [x] (if (deftype-instance? x) false (core x))))))
+
+;; = and hash: glojure's compare a record by its fields and hash them; a type's own equivalence and hash answer for
+;; it (as a JVM deftype's equals/hashCode do), once eve's types adapter names them (set-type-equality!: eve.core's
+;; -equiv and -hash, for a type extending eve.core's IEquiv / IHash itself). glojure's = is inlined: it loses its
+;; inlining first. (Go code in glojure's core compares by its own Equiv still: a type as a host map's key is a record.)
+
+(def ^:private type-equality (volatile! nil))
+(def ^:private own-cache (volatile! {}))
+
+(defn set-type-equality!
+  "m: {:equiv (fn [x y]) :hash (fn [x]) :equiv-proto p :hash-proto p} — what = and hash call for a type extending
+   the protocol itself."
+  [m]
+  (vreset! own-cache {})
+  (vreset! type-equality m))
+
+(defn- own? [k x]
+  (when-let [te @type-equality]
+    (let [c (class x) ck [k c] hit (get @own-cache ck ::none)]
+      (if (identical? hit ::none)
+        (let [r (extends? (get te k) c)] (vswap! own-cache assoc ck r) r)
+        hit))))
+
+(alter-meta! #'clojure.core/= dissoc :inline :inline-arities)
+(alter-var-root #'clojure.core/=
+  (fn [core]
+    (letfn [(eq [x y]
+              (cond (and (deftype-instance? x) (own? :equiv-proto x)) (boolean ((:equiv @type-equality) x y))
+                    (and (deftype-instance? y) (own? :equiv-proto y)) (boolean ((:equiv @type-equality) y x))
+                    :else (core x y)))]
+      (fn ([_] true)
+        ([x y] (eq x y))
+        ([x y & more] (if (eq x y)
+                        (if (next more) (recur y (first more) (next more)) (eq y (first more)))
+                        false))))))
+(alter-var-root #'clojure.core/not= (fn [_] (fn ([_] false) ([x y] (not (= x y))) ([x y & more] (not (apply = x y more))))))
+;; (a type's own hash is a signed 32-bit value, the JVM's; glojure's hash answers the same bits unsigned)
+(alter-var-root #'clojure.core/hash
+  (fn [core] (fn [x] (if (and (deftype-instance? x) (own? :hash-proto x))
+                       (bit-and (long ((:hash @type-equality) x)) 0xFFFFFFFF)
+                       (core x)))))
+
+;; glojure's hash-ordered-coll, hash-unordered-coll and mix-collection-hash refer to a Murmur3 class it lacks
+;; (v0.7.22): Clojure's algorithm, as glojure's own maps, sets and vectors hash, in eve's Go package (impls/glojure/host).
+(alter-var-root #'clojure.core/hash-ordered-coll (fn [_] (fn [coll] (eveglj:host.HashOrdered coll))))
+(alter-var-root #'clojure.core/hash-unordered-coll (fn [_] (fn [coll] (eveglj:host.HashUnordered coll))))
+(alter-var-root #'clojure.core/mix-collection-hash (fn [_] (fn [hash-basis count] (eveglj:host.MixCollHash hash-basis count))))
+
+;; glojure's range of integers with a negative step walks one element ((seq (range 5 0 -1)) is (5), and reducing it
+;; gives nothing, v0.7.22): a lazy seq here (a double range is glojure's, which counts down right)
+(defn- down-range [start end step]
+  (lazy-seq (when (> start end) (cons start (down-range (+ start step) end step)))))
+
+(alter-var-root #'clojure.core/range
+  (fn [core]
+    (fn ([] (core)) ([end] (core end)) ([start end] (core start end))
+      ([start end step]
+       (if (and (neg? step) (integer? start) (integer? step)) (down-range start end step) (core start end step))))))
+
+;; glojure's sequence with a transducer calls clojure.lang.RT.chunkIteratorSeq, which it lacks (so does dedupe of a
+;; collection, which is (sequence (dedupe) coll)), and partition-all's transducer builds its buffer as a sized
+;; java.util.ArrayList it cannot convert ("int64 to Object[]", v0.7.22, measured 2026-10-20 ET: eve.thread.fold's
+;; suites, 47 errors). sequence here is Clojure's lazy one: each input stepped through the transducer only when the
+;; items so far are consumed, the completion run once at the end (or when a step answers reduced); partition-all's
+;; transducer buffers in a vector.
+(defn- xf-sequence [xform inputs step-in]
+  (let [out (volatile! [])
+        rf (xform (fn ([acc] acc) ([acc x] (vswap! out conj x) acc)))
+        drain (fn [] (let [v @out] (vreset! out []) v))
+        step (fn step [s]
+               (lazy-seq
+                (loop [s s]
+                  (if (seq @out)
+                    (concat (drain) (step s))
+                    (if-let [s (seq s)]
+                      (if (reduced? (step-in rf (first s)))
+                        (do (rf nil) (seq (drain)))
+                        (recur (rest s)))
+                      (do (rf nil) (seq (drain))))))))]
+    (step inputs)))
+
+(alter-var-root #'clojure.core/sequence
+  (fn [core]
+    (fn ([coll] (core coll))
+      ([xform coll] (xf-sequence xform coll (fn [rf x] (rf nil x))))
+      ([xform coll & colls]
+       (xf-sequence xform (apply map vector coll colls) (fn [rf xs] (apply rf nil xs)))))))
+
+;; glojure's dedupe reaches its own sequence, not the var's
+(alter-var-root #'clojure.core/dedupe
+  (fn [core] (fn ([] (core)) ([coll] (sequence (core) coll)))))
+
+(alter-var-root #'clojure.core/partition-all
+  (fn [core]
+    (fn ([n]
+         (fn [rf]
+           (let [buf (volatile! [])]
+             (fn ([] (rf))
+               ([result]
+                (let [v @buf
+                      result (if (seq v) (do (vreset! buf []) (unreduced (rf result v))) result)]
+                  (rf result)))
+               ([result input]
+                (let [v (vswap! buf conj input)]
+                  (if (= n (count v)) (do (vreset! buf []) (rf result v)) result)))))))
+      ([n coll] (core n coll))
+      ([n step coll] (core n step coll)))))
+
+;; ---------------------------------------------------------------------------
+;; Sorted collections: into keeps their order, subseq and rsubseq answer
+;; ---------------------------------------------------------------------------
+
+;; glojure's into goes through a transient, which a sorted set's is not ((into (sorted-set) [3 1 2]) is an unordered
+;; hash set, v0.7.22): into a sorted collection conjes. Its subseq and rsubseq call seqFrom, which its sorted map and
+;; set lack (a nil dereference): they walk seq and rseq, with the collection's comparator (.comparator, nil for
+;; compare's; a boolean one as comparator makes it).
+(alter-var-root #'clojure.core/into
+  (fn [core]
+    (fn ([] []) ([to] to)
+      ([to from] (if (sorted? to) (reduce conj to from) (core to from)))
+      ([to xform from] (if (sorted? to) (transduce xform conj to from) (core to xform from))))))
+
+(defn- cmp-of [sc]
+  (let [f (.comparator sc)]
+    (if (nil? f)
+      compare
+      (fn [a b] (let [r (f a b)] (if (boolean? r) (cond r -1 (f b a) 1 :else 0) r))))))
+
+(defn- sorted-key [sc e] (if (map? sc) (key e) e))
+
+(defn- bound [sc test k]
+  (let [cmp (cmp-of sc)] (fn [e] (test (cmp (sorted-key sc e) k) 0))))
+
+(alter-var-root #'clojure.core/subseq
+  (fn [_]
+    (fn ([sc test k]
+         (let [in? (bound sc test k)]
+           (seq (if (#{> >=} test) (drop-while (complement in?) (seq sc)) (take-while in? (seq sc))))))
+      ([sc start-test start-key end-test end-key]
+       (seq (take-while (bound sc end-test end-key)
+                        (drop-while (complement (bound sc start-test start-key)) (seq sc))))))))
+
+(alter-var-root #'clojure.core/rsubseq
+  (fn [_]
+    (fn ([sc test k]
+         (let [in? (bound sc test k)]
+           (seq (if (#{< <=} test) (drop-while (complement in?) (rseq sc)) (take-while in? (rseq sc))))))
+      ([sc start-test start-key end-test end-key]
+       (seq (take-while (bound sc start-test start-key)
+                        (drop-while (complement (bound sc end-test end-key)) (rseq sc))))))))
+
+(defn- mutable-field? [f]
+  (let [m (meta f)] (or (:mutable m) (:unsynchronized-mutable m) (:volatile-mutable m))))
+
+(defn- binding-syms
+  "The symbols a binding form (a symbol, or a destructuring vector or map) binds."
+  [b]
+  (cond (symbol? b) (if (= '& b) [] [b])
+        (vector? b) (mapcat binding-syms b)
+        (map? b) (concat (mapcat binding-syms (remove keyword? (keys b)))
+                         (mapcat (fn [[k v]] (when (#{:keys :syms :strs} k) (map #(symbol (name %)) v))) b)
+                         (when-let [a (:as b)] [a]))
+        :else []))
+
+(def ^:private bound-forms
+  "The forms whose binding vector the cell walk reads (a name they bind shadows a field)."
+  '#{let let* loop loop* when-let if-let when-some if-some when-first binding
+     clojure.core/let clojure.core/loop clojure.core/when-let clojure.core/if-let
+     clojure.core/when-some clojure.core/if-some clojure.core/binding})
+
+(defn- cells
+  "A method body with each cell field (a symbol in cs) read through deref and set! through vreset!: a name a let,
+   loop, fn or binding form binds is left alone where it is bound."
+  [form cs]
+  (letfn [(walk [form shadow]
+            (cond
+              (and (symbol? form) (contains? cs form) (not (contains? shadow form)))
+              (list 'clojure.core/deref form)
+
+              (not (seq? form))
+              (cond (vector? form) (with-meta (mapv #(walk % shadow) form) (meta form))
+                    (map? form) (with-meta (into {} (map (fn [[k v]] [(walk k shadow) (walk v shadow)])) form)
+                                  (meta form))
+                    (set? form) (with-meta (set (map #(walk % shadow) form)) (meta form))
+                    :else form)
+
+              (empty? form) form
+              (contains? '#{quote var} (first form)) form
+
+              ;; a macro call is expanded first (a cell field it names, (caching-hash this f hash__), is the place it
+              ;; set!s after expansion, not a read)
+              (and (symbol? (first form)) (not (contains? shadow (first form))) (not (special-symbol? (first form)))
+                   (not (contains? bound-forms (first form)))
+                   (when-let [v (resolve (first form))] (and (var? v) (:macro (meta v)))))
+              (walk (macroexpand-1 form) shadow)
+
+              (and (= 'set! (first form)) (symbol? (second form)) (contains? cs (second form))
+                   (not (contains? shadow (second form))))
+              (list 'clojure.core/vreset! (second form) (walk (nth form 2) shadow))
+
+              (contains? bound-forms (first form))
+              (let [[op bvec & body] form
+                    [bs shadow'] (reduce (fn [[acc sh] [b init]]
+                                           [(conj acc b (walk init sh)) (into sh (binding-syms b))])
+                                         [[] shadow] (partition 2 bvec))]
+                (with-meta (list* op bs (map #(walk % shadow') body)) (meta form)))
+
+              (contains? '#{fn fn* clojure.core/fn} (first form))
+              (let [[op & more] form
+                    [nm more] (if (symbol? (first more)) [(first more) (rest more)] [nil more])
+                    sh (cond-> shadow nm (conj nm))]
+                (with-meta (concat (cond-> [op] nm (conj nm))
+                                   (if (vector? (first more))
+                                     (let [[args & body] more sh (into sh (binding-syms args))]
+                                       (cons args (map #(walk % sh) body)))
+                                     (map (fn [[args & body]]
+                                            (let [sh (into sh (binding-syms args))]
+                                              (list* args (map #(walk % sh) body))))
+                                          more)))
+                  (meta form)))
+
+              :else (with-meta (apply list (map #(walk % shadow) form)) (meta form))))]
+    (walk form #{})))
+
+(defn- occurs?
+  "Whether symbol s occurs anywhere in form (a field a body never names is not bound for it)."
+  [s form]
+  (cond (= s form) true
+        (or (seq? form) (vector? form) (set? form)) (boolean (some #(occurs? s %) form))
+        (map? form) (boolean (some #(or (occurs? s (key %)) (occurs? s (val %))) form))
+        :else false))
+
+(defn- untag [x] (if (and (symbol? x) (meta x)) (with-meta x nil) x))
+
+(defn- parse-impls
+  "deftype's body, protocol then its methods, as [[protocol [(name [args] body...) ...]] ...]."
+  [specs]
+  (loop [out [] s specs]
+    (if (seq s)
+      (let [p (first s) [ms more] (split-with seq? (rest s))]
+        (recur (conj out [p (vec ms)]) more))
+      out)))
+
+(defn- method-arities
+  "A protocol's methods as extend-type takes them: one entry per name, its arities from every entry with that name
+   (deftype lists an arity per entry), each body with the fields it names bound from this."
+  [methods fields cs]
+  (for [[nm entries] (group-by first methods)]
+    (cons nm
+          (for [[_ args & body] entries
+                :let [args (mapv untag args)
+                      this (first args)
+                      shadow (set (binding-syms args))
+                      used (filter #(and (not (contains? shadow %)) (occurs? % body)) fields)
+                      body (map #(cells % (apply disj cs shadow)) body)]]
+            (list args
+                  (if (seq used)
+                    (list* 'clojure.core/let (vec (mapcat (fn [f] [f (list (symbol (str ".-" f)) this)]) used))
+                           body)
+                    (cons 'do body)))))))
+
+(def ^:private dropped-protocols
+  "What a deftype here takes no impls for: Object's methods (a record's equality, hash and printing are glojure's;
+   eve's types adapter gives a type a printer of its own)."
+  '#{Object java.lang.Object})
+
+(defmacro deftype
+  "(deftype T [fields...] Protocol (method [this ...] body...) ...): a record extended to its protocols (above). ->T
+   and T__make build one, a cell made for each mutable field. With ^:eve/map on T it stands in for a map: a Go value
+   glojure's core takes as one (eve's Go types package, impls/glojure/types: its map methods call the glj functions
+   eve's types adapter names), its record type field-less (no key reads a field), (T. ...) made by its factory."
+  [type-name fields & specs]
+  (let [map-mode? (:eve/map (meta type-name))
+        type-name (vary-meta type-name dissoc :eve/map)
+        names (mapv untag fields)
+        cs (set (map untag (filter mutable-field? fields)))
+        impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+        args (mapv #(symbol (str "a" %)) (range (count names)))
+        factory `(fn ~args (new ~type-name ~@(map (fn [f a] (if (contains? cs f) `(clojure.core/volatile! ~a) a))
+                                                 names args)))]
+    `(do ~(if map-mode?
+            `(do (clojure.core/defrecord ~type-name [])
+                 (eveglj:types.Define ~type-name ~(mapv str names))
+                 ;; glojure's reduce protocols have no case for a record type: a map type's are its own
+                 (clojure.core/extend-type ~type-name
+                   clojure.core.protocols/CollReduce
+                   (~'coll-reduce ([c# f#] (.Reduce c# f#)) ([c# f# v#] (.ReduceInit c# f# v#)))
+                   clojure.core.protocols/IKVReduce
+                   (~'kv-reduce [c# f# init#] (reduce (fn [a# e#] (f# a# (key e#) (val e#))) init# c#))))
+            `(do (clojure.core/defrecord ~type-name ~names)
+                 (swap! deftype-types conj ~type-name)))
+         (def ~(symbol (str (name type-name) "__make")) ~factory)
+         ~@(when (or map-mode? (seq cs)) [`(def ~(symbol (str "->" (name type-name))) ~factory)])
+         ~@(for [[p methods] impls]
+             `(clojure.core/extend-type ~type-name ~p ~@(method-arities methods names cs)))
+         ~type-name)))
+
+(intern 'clojure.core (with-meta 'deftype {:macro true}) @#'deftype)
+(.SetMacro #'clojure.core/deftype)
+
+;; ---------------------------------------------------------------------------
+;; reify
+;; ---------------------------------------------------------------------------
+
+(def ^:private reify-types (atom {}))
+
+(defmacro reify
+  "(reify Protocol (method [this ...] body...) ...): an instance of a record made once for this form (at its
+   expansion), extended to the protocols with methods that call the instance's closures."
+  [& specs]
+  (let [impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+        k [(str *ns*) (pr-str specs)]
+        tname (or (get @reify-types k)
+                  (let [t (gensym "reify__")]
+                    (eval `(do (clojure.core/defrecord ~t [~'fns])
+                               (swap! deftype-types conj ~t)
+                               ~@(for [[p methods] impls]
+                                   `(clojure.core/extend-type ~t ~p
+                                      ~@(for [[nm entries] (group-by first methods)]
+                                          (cons nm (for [[_ args] entries
+                                                         :let [as (vec (repeatedly (count args) #(gensym "a")))]]
+                                                     (list as (list* (list 'clojure.core/get (list '.-fns (first as))
+                                                                           (list 'quote nm))
+                                                                     as)))))))))
+                    (swap! reify-types assoc k t)
+                    t))
+        fns (into {} (for [[_ methods] impls [nm entries] (group-by first methods)]
+                       [(list 'quote nm)
+                        (cons 'clojure.core/fn (for [[_ args & body] entries] (list* (mapv untag args) body)))]))]
+    `(new ~(symbol (str *ns*) (name tname)) ~fns)))
+
+(intern 'clojure.core (with-meta 'reify {:macro true}) @#'reify)
+(.SetMacro #'clojure.core/reify)

@@ -3,6 +3,7 @@
   (:require
    [cljs.test :refer-macros [deftest testing is]]
    [eve.atom :as atom]
+   [eve.sab :as sab]
    [eve.data :as d]))
 
 ;;-----------------------------------------------------------------------------
@@ -10,7 +11,7 @@
 ;;-----------------------------------------------------------------------------
 
 (defn get-test-env []
-  (atom/get-env atom/*global-atom-instance*))
+  (sab/get-env atom/*global-atom-instance*))
 
 ;;-----------------------------------------------------------------------------
 ;; Worker Registry Tests
@@ -170,7 +171,7 @@
   (testing "Retiring a block marks it with current epoch"
     (let [s-atom-env (get-test-env)
           ;; Allocate a block
-          alloc-result (atom/alloc s-atom-env 64)]
+          alloc-result (sab/alloc s-atom-env 64)]
       (is (not (:error alloc-result)) "Allocation should succeed")
       (let [desc-idx (:descriptor-idx alloc-result)
             epoch-before (atom/get-current-epoch s-atom-env)]
@@ -185,7 +186,7 @@
   (testing "Free retired block when no readers"
     (let [s-atom-env (get-test-env)
           ;; Allocate and retire a block
-          alloc-result (atom/alloc s-atom-env 64)]
+          alloc-result (sab/alloc s-atom-env 64)]
       (is (not (:error alloc-result)))
       (let [desc-idx (:descriptor-idx alloc-result)]
         (atom/retire-block! s-atom-env desc-idx)
@@ -201,7 +202,7 @@
           worker-id 333
           slot-idx (atom/register-worker! s-atom-env worker-id)]
       ;; Allocate a block
-      (let [alloc-result (atom/alloc s-atom-env 64)]
+      (let [alloc-result (sab/alloc s-atom-env 64)]
         (is (not (:error alloc-result)))
         (let [desc-idx (:descriptor-idx alloc-result)]
           ;; Start a read at current epoch
@@ -227,7 +228,7 @@
   (testing "Sweep finds and frees retired blocks"
     (let [s-atom-env (get-test-env)
           ;; Allocate several blocks
-          allocs (mapv (fn [_] (atom/alloc s-atom-env 32)) (range 5))]
+          allocs (mapv (fn [_] (sab/alloc s-atom-env 32)) (range 5))]
       (is (every? #(not (:error %)) allocs) "All allocations should succeed")
       ;; Retire some blocks
       (doseq [alloc (take 3 allocs)]
@@ -262,7 +263,7 @@
           worker-id 999
           slot-idx (atom/register-worker! s-atom-env worker-id)]
       ;; Allocate a block
-      (let [alloc1 (atom/alloc s-atom-env 128)]
+      (let [alloc1 (sab/alloc s-atom-env 128)]
         (is (not (:error alloc1)))
         (let [desc-idx (:descriptor-idx alloc1)]
           ;; Use it in a read context
@@ -271,7 +272,7 @@
               ;; Would read from the block here
               :used))
           ;; Now allocate a replacement (simulating update)
-          (let [alloc2 (atom/alloc s-atom-env 128)]
+          (let [alloc2 (sab/alloc s-atom-env 128)]
             (is (not (:error alloc2)))
             ;; Retire the old block
             (atom/retire-block! s-atom-env desc-idx)
@@ -293,7 +294,7 @@
       (is (every? #(some? (:slot %)) workers))
 
       ;; Allocate a block
-      (let [alloc (atom/alloc s-atom-env 64)]
+      (let [alloc (sab/alloc s-atom-env 64)]
         (is (not (:error alloc)))
         (let [desc-idx (:descriptor-idx alloc)]
           ;; All workers start reading

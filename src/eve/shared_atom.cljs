@@ -7,7 +7,8 @@
    [eve.util :as u]
    [eve.wasm-mem :as wasm]
    [eve.deftype-proto.alloc :as slab-alloc]
-   [eve.deftype-proto.serialize :as ser]
+   [eve.process-slab :as ps]
+   [eve.codec :as codec]
    [eve.deftype-proto.data :as sd]))
 
 ;; Forward declarations for functions defined later in this file
@@ -77,7 +78,7 @@
    Returns [status-mirror-byte-offset capacity-mirror-byte-offset]."
   [index-view]
   (let [max-blocks (aget index-view (/ d/OFFSET_MAX_BLOCK_DESCRIPTORS d/SIZE_OF_INT32))
-        desc-end (+ d/OFFSET_BLOCK_DESCRIPTORS_ARRAY_START (* max-blocks d/SIZE_OF_BLOCK_DESCRIPTOR))
+        desc-end (+ d/OFFSET_BLOCK_DESCRIPTORS_ARRAY_START (* max-blocks d/BD_NUM_COLUMNS d/SIZE_OF_INT32))
         cap-start (+ desc-end (* max-blocks d/SIZE_OF_INT32))]
     [desc-end cap-start]))
 
@@ -109,14 +110,14 @@
    after all writes are complete to prevent a race where another worker steals
    the descriptor while we're still writing to it."
   [index-view descriptor-idx]
-  (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_STATUS d/STATUS_ZEROED_UNUSED)
-  (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_DATA_OFFSET 0)
-  (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_DATA_LENGTH 0)
-  (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_BLOCK_CAPACITY 0)
-  (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+  (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_STATUS d/STATUS_ZEROED_UNUSED)
+  (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_DATA_OFFSET 0)
+  (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_DATA_LENGTH 0)
+  (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_BLOCK_CAPACITY 0)
+  (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
   ;; NOTE: Do NOT clear lock_owner here - that would release the lock prematurely!
   ;; The caller must release the lock after completing all field writes.
-  (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_RETIRED_EPOCH 0)
+  (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_RETIRED_EPOCH 0)
   (update-mirrors! index-view descriptor-idx d/STATUS_ZEROED_UNUSED 0)
   nil)
 
@@ -124,15 +125,14 @@
   "Try to CAS-lock a candidate descriptor and allocate it.
    Returns {:offset :descriptor-idx} on success, nil on failure."
   [index-view max-descriptors candidate requested-size-bytes]
-  (let [desc-base (u/get-block-descriptor-base-int32-offset candidate)
-        lock-field (+ desc-base (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+  (let [lock-field (u/get-block-descriptor-field-int32-offset index-view candidate d/BD_COL_LOCK_OWNER)]
     (when (== 0 (u/atomic-compare-exchange-int index-view lock-field 0 d/*worker-id*))
-      (let [status (u/read-block-descriptor-field index-view candidate d/OFFSET_BD_STATUS)
-            capacity (u/read-block-descriptor-field index-view candidate d/OFFSET_BD_BLOCK_CAPACITY)]
+      (let [status (u/read-block-descriptor-field index-view candidate d/BD_COL_STATUS)
+            capacity (u/read-block-descriptor-field index-view candidate d/BD_COL_BLOCK_CAPACITY)]
         (if (and (or (== status d/STATUS_FREE)
                      (== status d/STATUS_ZEROED_UNUSED))
                  (>= capacity requested-size-bytes))
-          (let [data-offset (u/read-block-descriptor-field index-view candidate d/OFFSET_BD_DATA_OFFSET)
+          (let [data-offset (u/read-block-descriptor-field index-view candidate d/BD_COL_DATA_OFFSET)
                 data-region-start (js/Atomics.load index-view (/ d/OFFSET_DATA_REGION_START d/SIZE_OF_INT32))
                 remainder-size (- capacity requested-size-bytes)]
             (if (< data-offset data-region-start)
@@ -142,17 +142,17 @@
                 (println "[BUG] alloc: data-offset" data-offset "< data-region-start" data-region-start
                          "for desc" candidate "status" status "cap" capacity ". Skipping.")
                 ;; Mark this broken descriptor as truly zeroed so we don't keep hitting it
-                (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_STATUS d/STATUS_ZEROED_UNUSED)
-                (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_DATA_OFFSET 0)
-                (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_BLOCK_CAPACITY 0)
+                (u/write-block-descriptor-field! index-view candidate d/BD_COL_STATUS d/STATUS_ZEROED_UNUSED)
+                (u/write-block-descriptor-field! index-view candidate d/BD_COL_DATA_OFFSET 0)
+                (u/write-block-descriptor-field! index-view candidate d/BD_COL_BLOCK_CAPACITY 0)
                 (update-mirrors! index-view candidate d/STATUS_ZEROED_UNUSED 0)
                 (u/atomic-store-int index-view lock-field 0)
                 nil) ;; Return nil → allocator tries next descriptor
               (do
-                (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_BLOCK_CAPACITY requested-size-bytes)
-                (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_DATA_LENGTH 0)
-                (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-                (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_STATUS d/STATUS_ALLOCATED)
+                (u/write-block-descriptor-field! index-view candidate d/BD_COL_BLOCK_CAPACITY requested-size-bytes)
+                (u/write-block-descriptor-field! index-view candidate d/BD_COL_DATA_LENGTH 0)
+                (u/write-block-descriptor-field! index-view candidate d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+                (u/write-block-descriptor-field! index-view candidate d/BD_COL_STATUS d/STATUS_ALLOCATED)
                 (update-mirrors! index-view candidate d/STATUS_ALLOCATED requested-size-bytes)
                 ;; Split remainder into a new free descriptor
                 (when (and (== status d/STATUS_FREE)
@@ -166,16 +166,15 @@
                           (let [next-wrapped? (or wrapped? (>= (inc rem-scan) max-descriptors))]
                             (if (== rem-scan candidate)
                               (recur (inc rem-scan) next-wrapped?)
-                              (let [rem-status (u/read-block-descriptor-field index-view rem-scan d/OFFSET_BD_STATUS)]
+                              (let [rem-status (u/read-block-descriptor-field index-view rem-scan d/BD_COL_STATUS)]
                                 (if (== rem-status d/STATUS_ZEROED_UNUSED)
-                                  (let [rem-desc-base (u/get-block-descriptor-base-int32-offset rem-scan)
-                                        rem-lock-field (+ rem-desc-base (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+                                  (let [rem-lock-field (u/get-block-descriptor-field-int32-offset index-view rem-scan d/BD_COL_LOCK_OWNER)]
                                     (if (== 0 (u/atomic-compare-exchange-int index-view rem-lock-field 0 d/*worker-id*))
                                       (do
                                         (clear-descriptor-fields! index-view rem-scan)
-                                        (u/write-block-descriptor-field! index-view rem-scan d/OFFSET_BD_DATA_OFFSET (+ data-offset requested-size-bytes))
-                                        (u/write-block-descriptor-field! index-view rem-scan d/OFFSET_BD_BLOCK_CAPACITY remainder-size)
-                                        (u/write-block-descriptor-field! index-view rem-scan d/OFFSET_BD_STATUS d/STATUS_FREE)
+                                        (u/write-block-descriptor-field! index-view rem-scan d/BD_COL_DATA_OFFSET (+ data-offset requested-size-bytes))
+                                        (u/write-block-descriptor-field! index-view rem-scan d/BD_COL_BLOCK_CAPACITY remainder-size)
+                                        (u/write-block-descriptor-field! index-view rem-scan d/BD_COL_STATUS d/STATUS_FREE)
                                         (update-mirrors! index-view rem-scan d/STATUS_FREE remainder-size)
                                         (u/atomic-store-int index-view rem-lock-field 0)
                                         (vreset! alloc-cursor (inc rem-scan))
@@ -186,7 +185,7 @@
                       ;; Restore original capacity so the remainder stays tracked.
                       ;; Over-allocating is better than leaking: the full block
                       ;; returns to the free pool when freed, preventing X-RAY gaps.
-                      (u/write-block-descriptor-field! index-view candidate d/OFFSET_BD_BLOCK_CAPACITY capacity)
+                      (u/write-block-descriptor-field! index-view candidate d/BD_COL_BLOCK_CAPACITY capacity)
                       (update-mirrors! index-view candidate d/STATUS_ALLOCATED capacity))))
                 (u/atomic-store-int index-view lock-field 0)
                 #js [data-offset candidate])))
@@ -211,9 +210,9 @@
           ;; to prevent infinite loop when a claim attempt sits at the
           ;; wrap boundary (index max-descriptors-1).
           (let [next-wrapped? (or wrapped? (>= (inc scan-idx) max-descriptors))
-                status (u/read-block-descriptor-field index-view scan-idx d/OFFSET_BD_STATUS)]
+                status (u/read-block-descriptor-field index-view scan-idx d/BD_COL_STATUS)]
             (if (and (or (== status d/STATUS_FREE) (== status d/STATUS_ZEROED_UNUSED))
-                     (>= (u/read-block-descriptor-field index-view scan-idx d/OFFSET_BD_BLOCK_CAPACITY) requested-size-bytes))
+                     (>= (u/read-block-descriptor-field index-view scan-idx d/BD_COL_BLOCK_CAPACITY) requested-size-bytes))
               (if-let [result (try-claim-descriptor! index-view max-descriptors scan-idx requested-size-bytes)]
                 (do (.push results result)
                     (recur (inc scan-idx) next-wrapped?))
@@ -376,10 +375,10 @@
                     (recur 0 false (inc sweep-polls)))))
             nil)
           (let [next-wrapped? (or wrapped? (>= (inc scan-idx) max-descriptors))
-                current-status-nolock (u/read-block-descriptor-field index-view scan-idx d/OFFSET_BD_STATUS)]
+                current-status-nolock (u/read-block-descriptor-field index-view scan-idx d/BD_COL_STATUS)]
             (if (and (or (== current-status-nolock d/STATUS_FREE)
                          (== current-status-nolock d/STATUS_ZEROED_UNUSED))
-                     (>= (u/read-block-descriptor-field index-view scan-idx d/OFFSET_BD_BLOCK_CAPACITY) requested-size-bytes))
+                     (>= (u/read-block-descriptor-field index-view scan-idx d/BD_COL_BLOCK_CAPACITY) requested-size-bytes))
               (if-let [result (try-claim-descriptor! index-view max-descriptors scan-idx requested-size-bytes)]
                 (do (vreset! alloc-cursor (inc scan-idx))
                     result)
@@ -416,9 +415,9 @@
         total-data-region (volatile! 0)]
     ;; Single scan: collect all block info
     (dotimes [i max-descriptors]
-      (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)
-            cap (u/read-block-descriptor-field index-view i d/OFFSET_BD_BLOCK_CAPACITY)
-            off (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
+      (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)
+            cap (u/read-block-descriptor-field index-view i d/BD_COL_BLOCK_CAPACITY)
+            off (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
             sidx (cond (== status d/STATUS_ZEROED_UNUSED) 7
                        (and (>= status 0) (< status 7)) status
                        :else 6)]
@@ -495,12 +494,12 @@
          ;; Collect all blocks with their physical offset
          blocks #js []]
      (dotimes [i max-descriptors]
-       (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)]
+       (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)]
          (when-not (== status d/STATUS_ZEROED_UNUSED)
-           (let [off (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
-                 cap (u/read-block-descriptor-field index-view i d/OFFSET_BD_BLOCK_CAPACITY)
-                 len (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_LENGTH)
-                 epoch (u/read-block-descriptor-field index-view i d/OFFSET_BD_RETIRED_EPOCH)]
+           (let [off (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
+                 cap (u/read-block-descriptor-field index-view i d/BD_COL_BLOCK_CAPACITY)
+                 len (u/read-block-descriptor-field index-view i d/BD_COL_DATA_LENGTH)
+                 epoch (u/read-block-descriptor-field index-view i d/BD_COL_RETIRED_EPOCH)]
              (when (and (pos? cap)
                         (or (nil? offset-range)
                             (and (>= off (first offset-range))
@@ -642,13 +641,13 @@
         descriptor-errors #js []  ;; per-descriptor invariant violations
         total-tracked (volatile! 0)]
     (dotimes [i max-descriptors]
-      (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)
-            off    (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
-            cap    (u/read-block-descriptor-field index-view i d/OFFSET_BD_BLOCK_CAPACITY)
-            data-len (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_LENGTH)
-            val-desc (u/read-block-descriptor-field index-view i d/OFFSET_BD_VALUE_DATA_DESC_IDX)
-            lock    (u/read-block-descriptor-field index-view i d/OFFSET_BD_LOCK_OWNER)
-            epoch   (u/read-block-descriptor-field index-view i d/OFFSET_BD_RETIRED_EPOCH)
+      (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)
+            off    (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
+            cap    (u/read-block-descriptor-field index-view i d/BD_COL_BLOCK_CAPACITY)
+            data-len (u/read-block-descriptor-field index-view i d/BD_COL_DATA_LENGTH)
+            val-desc (u/read-block-descriptor-field index-view i d/BD_COL_VALUE_DATA_DESC_IDX)
+            lock    (u/read-block-descriptor-field index-view i d/BD_COL_LOCK_OWNER)
+            epoch   (u/read-block-descriptor-field index-view i d/BD_COL_RETIRED_EPOCH)
             mirror-status (aget index-view (+ (/ sm-start 4) i))
             mirror-cap    (aget index-view (+ (/ cm-start 4) i))]
         ;; Invariant 4: Mirror consistency
@@ -1095,8 +1094,8 @@
         root-desc-idx (js/Atomics.load index-view (/ d/OFFSET_ATOM_ROOT_DATA_DESC_IDX d/SIZE_OF_INT32))]
     (if (== root-desc-idx d/ROOT_POINTER_NIL_SENTINEL)
       HAMT_NIL_OFFSET
-      (let [root-data-off (u/read-block-descriptor-field index-view root-desc-idx d/OFFSET_BD_DATA_OFFSET)
-            root-data-len (u/read-block-descriptor-field index-view root-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+      (let [root-data-off (u/read-block-descriptor-field index-view root-desc-idx d/BD_COL_DATA_OFFSET)
+            root-data-len (u/read-block-descriptor-field index-view root-desc-idx d/BD_COL_DATA_LENGTH)]
         (if (or (< root-data-len 7)
                 (not= (aget u8 root-data-off) d/DIRECT_MAGIC_0)
                 (not= (aget u8 (inc root-data-off)) d/DIRECT_MAGIC_1))
@@ -1173,11 +1172,11 @@
                 hwm (loop [i 0 hwm data-region-start]
                       (if (>= i max-descriptors)
                         hwm
-                        (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)]
+                        (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)]
                           (if (== status d/STATUS_ZEROED_UNUSED)
                             (recur (inc i) hwm)
-                            (let [off (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
-                                  cap (u/read-block-descriptor-field index-view i d/OFFSET_BD_BLOCK_CAPACITY)
+                            (let [off (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
+                                  cap (u/read-block-descriptor-field index-view i d/BD_COL_BLOCK_CAPACITY)
                                   end (+ off cap)]
                               (recur (inc i) (max hwm end)))))))
                 trailing (- sab-total hwm)]
@@ -1187,18 +1186,17 @@
                     tail-desc
                     (loop [i 0]
                       (when (< i max-descriptors)
-                        (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)]
+                        (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)]
                           (if (== status d/STATUS_ZEROED_UNUSED)
-                            (let [lf (+ (u/get-block-descriptor-base-int32-offset i)
-                                        (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+                            (let [lf (u/get-block-descriptor-field-int32-offset index-view i d/BD_COL_LOCK_OWNER)]
                               (if (== 0 (u/atomic-compare-exchange-int index-view lf 0 wid))
                                 (do
-                                  (u/write-block-descriptor-field! index-view i d/OFFSET_BD_DATA_OFFSET hwm)
-                                  (u/write-block-descriptor-field! index-view i d/OFFSET_BD_BLOCK_CAPACITY trailing)
-                                  (u/write-block-descriptor-field! index-view i d/OFFSET_BD_DATA_LENGTH 0)
-                                  (u/write-block-descriptor-field! index-view i d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-                                  (u/write-block-descriptor-field! index-view i d/OFFSET_BD_RETIRED_EPOCH 0)
-                                  (u/write-block-descriptor-field! index-view i d/OFFSET_BD_STATUS d/STATUS_FREE)
+                                  (u/write-block-descriptor-field! index-view i d/BD_COL_DATA_OFFSET hwm)
+                                  (u/write-block-descriptor-field! index-view i d/BD_COL_BLOCK_CAPACITY trailing)
+                                  (u/write-block-descriptor-field! index-view i d/BD_COL_DATA_LENGTH 0)
+                                  (u/write-block-descriptor-field! index-view i d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+                                  (u/write-block-descriptor-field! index-view i d/BD_COL_RETIRED_EPOCH 0)
+                                  (u/write-block-descriptor-field! index-view i d/BD_COL_STATUS d/STATUS_FREE)
                                   (update-mirrors! index-view i d/STATUS_FREE trailing)
                                   (u/atomic-store-int index-view lf 0)
                                   i)
@@ -1332,10 +1330,10 @@
 
    ;; Orphaned block cleanup logic
     (when (and index-view (.-buffer index-view)) ; Ensure index-view is valid
-      (let [current_block_status (u/read-block-descriptor-field index-view target-descriptor-idx d/OFFSET_BD_STATUS)]
+      (let [current_block_status (u/read-block-descriptor-field index-view target-descriptor-idx d/BD_COL_STATUS)]
         (when (= current_block_status d/STATUS_ORPHANED)
           (let [log-prefix-cleanup (str "[W:" worker-id-for-log " EndReadCleanup desc:" target-descriptor-idx "] ")
-                lock_owner_field_idx (+ (u/get-block-descriptor-base-int32-offset target-descriptor-idx) (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+                lock_owner_field_idx (u/get-block-descriptor-field-int32-offset index-view target-descriptor-idx d/BD_COL_LOCK_OWNER)]
            ;; (println log-prefix-cleanup "Block is ORPHANED. Attempting cleanup.")
            ;; Try to acquire lock with a few retries for orphan cleanup
             (loop [lock-cleanup-retries 5]
@@ -1343,14 +1341,14 @@
                 (try
                  ;; (println log-prefix-cleanup "Lock ACQUIRED.")
                  ;; CRITICAL: Re-verify status AND reader count while holding the lock
-                  (let [status_now (u/read-block-descriptor-field index-view target-descriptor-idx d/OFFSET_BD_STATUS)
+                  (let [status_now (u/read-block-descriptor-field index-view target-descriptor-idx d/BD_COL_STATUS)
                         reader-check-result-final (check-readers s-atom-env target-descriptor-idx)]
                     (if (and (= status_now d/STATUS_ORPHANED) (= :ok reader-check-result-final))
                       (do
                         (println log-prefix-cleanup "Confirmed ORPHANED and LAST READER. Performing final free.")
-                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/OFFSET_BD_DATA_LENGTH 0)
-                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/OFFSET_BD_STATUS d/STATUS_FREE)
+                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/BD_COL_DATA_LENGTH 0)
+                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+                        (u/write-block-descriptor-field! index-view target-descriptor-idx d/BD_COL_STATUS d/STATUS_FREE)
                         (update-mirrors! index-view target-descriptor-idx d/STATUS_FREE nil)
                         (let [max-descriptors (safe-max-descriptors s-atom-env)]
                           (coalesce-adjacent-free-blocks! index-view max-descriptors target-descriptor-idx)))
@@ -1376,10 +1374,10 @@
       -1
       (if (== i current-desc-idx)
         (recur (inc i))
-        (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)]
+        (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)]
           (if (== status d/STATUS_FREE)
-            (let [n-offset (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
-                  n-capacity (u/read-block-descriptor-field index-view i d/OFFSET_BD_BLOCK_CAPACITY)]
+            (let [n-offset (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
+                  n-capacity (u/read-block-descriptor-field index-view i d/BD_COL_BLOCK_CAPACITY)]
               (if (== (+ n-offset n-capacity) current-data-offset)
                 i
                 (recur (inc i))))
@@ -1396,9 +1394,9 @@
       -1
       (if (== i current-desc-idx)
         (recur (inc i))
-        (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)]
+        (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)]
           (if (== status d/STATUS_FREE)
-            (let [n-offset (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)]
+            (let [n-offset (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)]
               (if (== n-offset current-block-end-offset)
                 i
                 (recur (inc i))))
@@ -1418,8 +1416,8 @@
    Acquires locks on neighbor descriptors via CAS before modifying.
    If a neighbor lock fails (contention), skip that side — partial coalescing is safe."
   [index-view max-descriptors desc-idx]
-  (let [our-offset (u/read-block-descriptor-field index-view desc-idx d/OFFSET_BD_DATA_OFFSET)
-        our-capacity (u/read-block-descriptor-field index-view desc-idx d/OFFSET_BD_BLOCK_CAPACITY)
+  (let [our-offset (u/read-block-descriptor-field index-view desc-idx d/BD_COL_DATA_OFFSET)
+        our-capacity (u/read-block-descriptor-field index-view desc-idx d/BD_COL_BLOCK_CAPACITY)
         ;; --- Left coalesce ---
         ;; Find a FREE block whose end abuts our start.
         ;; Use volatile to track left lock field so it stays held through right merge.
@@ -1429,20 +1427,19 @@
         survivor-idx
         (if (== left-idx -1)
           desc-idx ;; No left neighbor — we are the survivor
-          (let [llf (+ (u/get-block-descriptor-base-int32-offset left-idx)
-                       (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+          (let [llf (u/get-block-descriptor-field-int32-offset index-view left-idx d/BD_COL_LOCK_OWNER)]
             (if (== 0 (u/atomic-compare-exchange-int index-view llf 0 d/*worker-id*))
-              (let [left-status (u/read-block-descriptor-field index-view left-idx d/OFFSET_BD_STATUS)]
+              (let [left-status (u/read-block-descriptor-field index-view left-idx d/BD_COL_STATUS)]
                 (if (== left-status d/STATUS_FREE)
-                  (let [left-capacity (u/read-block-descriptor-field index-view left-idx d/OFFSET_BD_BLOCK_CAPACITY)
+                  (let [left-capacity (u/read-block-descriptor-field index-view left-idx d/BD_COL_BLOCK_CAPACITY)
                         merged-capacity (+ left-capacity our-capacity)]
                     ;; Expand left to include us
-                    (u/write-block-descriptor-field! index-view left-idx d/OFFSET_BD_BLOCK_CAPACITY merged-capacity)
+                    (u/write-block-descriptor-field! index-view left-idx d/BD_COL_BLOCK_CAPACITY merged-capacity)
                     (update-mirrors! index-view left-idx d/STATUS_FREE merged-capacity)
                     ;; Mark ourselves as unused (reclaim descriptor slot)
-                    (u/write-block-descriptor-field! index-view desc-idx d/OFFSET_BD_STATUS d/STATUS_ZEROED_UNUSED)
-                    (u/write-block-descriptor-field! index-view desc-idx d/OFFSET_BD_DATA_OFFSET 0)
-                    (u/write-block-descriptor-field! index-view desc-idx d/OFFSET_BD_BLOCK_CAPACITY 0)
+                    (u/write-block-descriptor-field! index-view desc-idx d/BD_COL_STATUS d/STATUS_ZEROED_UNUSED)
+                    (u/write-block-descriptor-field! index-view desc-idx d/BD_COL_DATA_OFFSET 0)
+                    (u/write-block-descriptor-field! index-view desc-idx d/BD_COL_BLOCK_CAPACITY 0)
                     (update-mirrors! index-view desc-idx d/STATUS_ZEROED_UNUSED 0)
                     ;; Left is survivor — KEEP lock held for right merge
                     (vreset! left-lock-field-v llf)
@@ -1454,26 +1451,25 @@
     ;; survivor-idx is the FREE block owning our merged range.
     ;; If left merge succeeded, we still hold left's lock (left-lock-field-v is non-nil),
     ;; so no other worker can allocate the survivor — no TOCTOU race.
-    (let [survivor-end (+ (u/read-block-descriptor-field index-view survivor-idx d/OFFSET_BD_DATA_OFFSET)
-                          (u/read-block-descriptor-field index-view survivor-idx d/OFFSET_BD_BLOCK_CAPACITY))
+    (let [survivor-end (+ (u/read-block-descriptor-field index-view survivor-idx d/BD_COL_DATA_OFFSET)
+                          (u/read-block-descriptor-field index-view survivor-idx d/BD_COL_BLOCK_CAPACITY))
           right-idx (find-physically-adjacent-right-free-neighbor
                       index-view max-descriptors survivor-idx survivor-end)]
       (when (not= right-idx -1)
-        (let [right-lock-field (+ (u/get-block-descriptor-base-int32-offset right-idx)
-                                  (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+        (let [right-lock-field (u/get-block-descriptor-field-int32-offset index-view right-idx d/BD_COL_LOCK_OWNER)]
           (when (== 0 (u/atomic-compare-exchange-int index-view right-lock-field 0 d/*worker-id*))
-            (let [right-status (u/read-block-descriptor-field index-view right-idx d/OFFSET_BD_STATUS)]
+            (let [right-status (u/read-block-descriptor-field index-view right-idx d/BD_COL_STATUS)]
               (when (== right-status d/STATUS_FREE)
-                (let [surv-capacity (u/read-block-descriptor-field index-view survivor-idx d/OFFSET_BD_BLOCK_CAPACITY)
-                      right-capacity (u/read-block-descriptor-field index-view right-idx d/OFFSET_BD_BLOCK_CAPACITY)
+                (let [surv-capacity (u/read-block-descriptor-field index-view survivor-idx d/BD_COL_BLOCK_CAPACITY)
+                      right-capacity (u/read-block-descriptor-field index-view right-idx d/BD_COL_BLOCK_CAPACITY)
                       merged-capacity (+ surv-capacity right-capacity)]
                   ;; Expand survivor to include right
-                  (u/write-block-descriptor-field! index-view survivor-idx d/OFFSET_BD_BLOCK_CAPACITY merged-capacity)
+                  (u/write-block-descriptor-field! index-view survivor-idx d/BD_COL_BLOCK_CAPACITY merged-capacity)
                   (update-mirrors! index-view survivor-idx d/STATUS_FREE merged-capacity)
                   ;; Mark right as unused
-                  (u/write-block-descriptor-field! index-view right-idx d/OFFSET_BD_STATUS d/STATUS_ZEROED_UNUSED)
-                  (u/write-block-descriptor-field! index-view right-idx d/OFFSET_BD_DATA_OFFSET 0)
-                  (u/write-block-descriptor-field! index-view right-idx d/OFFSET_BD_BLOCK_CAPACITY 0)
+                  (u/write-block-descriptor-field! index-view right-idx d/BD_COL_STATUS d/STATUS_ZEROED_UNUSED)
+                  (u/write-block-descriptor-field! index-view right-idx d/BD_COL_DATA_OFFSET 0)
+                  (u/write-block-descriptor-field! index-view right-idx d/BD_COL_BLOCK_CAPACITY 0)
                   (update-mirrors! index-view right-idx d/STATUS_ZEROED_UNUSED 0))))
             (u/atomic-store-int index-view right-lock-field 0)))))
     ;; Release left lock if still held (left merge succeeded)
@@ -1494,14 +1490,14 @@
   [s-atom-env desc-idx-to-free]
   (let [index-view (:index-view s-atom-env)
         max-descriptors (safe-max-descriptors s-atom-env)
-        lock-owner-field-idx (+ (u/get-block-descriptor-base-int32-offset desc-idx-to-free) (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))
+        lock-owner-field-idx (u/get-block-descriptor-field-int32-offset index-view desc-idx-to-free d/BD_COL_LOCK_OWNER)
         log-prefix (str "[W:" d/*worker-id* " Free desc:" desc-idx-to-free "] ")]
     (loop [lock-retries 400]
       (if (zero? lock-retries)
         (do (println log-prefix "!!! FAILED to lock descriptor for freeing after retries.")
             {:error :free-lock-timeout})
         (if (== 0 (u/atomic-compare-exchange-int index-view lock-owner-field-idx 0 d/*worker-id*))
-          (let [status-initially (u/read-block-descriptor-field index-view desc-idx-to-free d/OFFSET_BD_STATUS)
+          (let [status-initially (u/read-block-descriptor-field index-view desc-idx-to-free d/BD_COL_STATUS)
                 lock-cleared-by-clear-descriptor? (volatile! false)
                 processing-outcome
                 (try
@@ -1510,9 +1506,9 @@
                     (let [reader-check-outcome (check-readers s-atom-env desc-idx-to-free)]
                       (if (= :ok reader-check-outcome)
                         (do
-                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_DATA_LENGTH 0)
-                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_STATUS d/STATUS_FREE)
+                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_DATA_LENGTH 0)
+                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_STATUS d/STATUS_FREE)
                           (update-mirrors! index-view desc-idx-to-free d/STATUS_FREE nil)
                           (coalesce-adjacent-free-blocks! index-view max-descriptors desc-idx-to-free)
                           {:success true :type :data-block-freed})
@@ -1523,16 +1519,16 @@
                     (do
                       (clear-descriptor-fields! index-view desc-idx-to-free)
                       ;; Lock is released by finally block, not by clear-descriptor-fields!
-                      (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_STATUS d/STATUS_ZEROED_UNUSED)
+                      (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_STATUS d/STATUS_ZEROED_UNUSED)
                       {:success true :type :atom-header-freed})
 
                     (== status-initially d/STATUS_ORPHANED)
                     (let [reader-check-outcome (check-readers s-atom-env desc-idx-to-free)]
                       (if (= :ok reader-check-outcome)
                         (do
-                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_DATA_LENGTH 0)
-                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_STATUS d/STATUS_FREE)
+                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_DATA_LENGTH 0)
+                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+                          (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_STATUS d/STATUS_FREE)
                           (update-mirrors! index-view desc-idx-to-free d/STATUS_FREE nil)
                           (coalesce-adjacent-free-blocks! index-view max-descriptors desc-idx-to-free)
                           {:success true :type :orphaned-block-cleaned-by-free})
@@ -1573,16 +1569,15 @@
         ;; Out of bounces — mark as ORPHANED and return
         :else
         (let [index-view (:index-view s-atom-env)
-              lock-owner-field-idx (+ (u/get-block-descriptor-base-int32-offset desc-idx-to-free)
-                                      (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+              lock-owner-field-idx (u/get-block-descriptor-field-int32-offset index-view desc-idx-to-free d/BD_COL_LOCK_OWNER)]
           ;; Try to acquire lock to mark ORPHANED
           (loop [retries 50]
             (when (pos? retries)
               (if (== 0 (u/atomic-compare-exchange-int index-view lock-owner-field-idx 0 d/*worker-id*))
                 (do
-                  (let [status (u/read-block-descriptor-field index-view desc-idx-to-free d/OFFSET_BD_STATUS)]
+                  (let [status (u/read-block-descriptor-field index-view desc-idx-to-free d/BD_COL_STATUS)]
                     (when (== status d/STATUS_ALLOCATED)
-                      (u/write-block-descriptor-field! index-view desc-idx-to-free d/OFFSET_BD_STATUS d/STATUS_ORPHANED)
+                      (u/write-block-descriptor-field! index-view desc-idx-to-free d/BD_COL_STATUS d/STATUS_ORPHANED)
                       (update-mirrors! index-view desc-idx-to-free d/STATUS_ORPHANED nil)))
                   (u/atomic-store-int index-view lock-owner-field-idx 0))
                 (recur (dec retries)))))
@@ -1795,8 +1790,7 @@
   [s-atom-env descriptor-idx]
   (let [index-view (:index-view s-atom-env)
         current-epoch (get-current-epoch s-atom-env)
-        desc-base (u/get-block-descriptor-base-int32-offset descriptor-idx)
-        status-idx (+ desc-base (/ d/OFFSET_BD_STATUS d/SIZE_OF_INT32))]
+        status-idx (u/get-block-descriptor-field-int32-offset index-view descriptor-idx d/BD_COL_STATUS)]
     ;; CAS status from ALLOCATED to RETIRED
     (when (== d/STATUS_ALLOCATED
               (js/Atomics.compareExchange index-view status-idx
@@ -1804,7 +1798,7 @@
                                           d/STATUS_RETIRED))
       ;; Record the epoch when retired
       (u/write-block-descriptor-field! index-view descriptor-idx
-                                       d/OFFSET_BD_RETIRED_EPOCH current-epoch)
+                                       d/BD_COL_RETIRED_EPOCH current-epoch)
       (update-mirrors! index-view descriptor-idx d/STATUS_RETIRED nil)
       true)))
 
@@ -1815,10 +1809,10 @@
    This is the cooperative cleanup - call opportunistically."
   [s-atom-env descriptor-idx]
   (let [index-view (:index-view s-atom-env)
-        status (u/read-block-descriptor-field index-view descriptor-idx d/OFFSET_BD_STATUS)]
+        status (u/read-block-descriptor-field index-view descriptor-idx d/BD_COL_STATUS)]
     (if (== status d/STATUS_RETIRED)
       (let [retired-epoch (u/read-block-descriptor-field index-view descriptor-idx
-                                                         d/OFFSET_BD_RETIRED_EPOCH)
+                                                         d/BD_COL_RETIRED_EPOCH)
             min-active (get-min-active-epoch s-atom-env)]
         (if (or (nil? min-active) (> min-active retired-epoch))
           ;; Epoch-safe — also check start-read!/end-read! reader count.
@@ -1832,19 +1826,18 @@
                               true)]
             (if-not readers-ok?
               :has-readers
-              (let [lock-owner-idx (+ (u/get-block-descriptor-base-int32-offset descriptor-idx)
-                                      (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+              (let [lock-owner-idx (u/get-block-descriptor-field-int32-offset index-view descriptor-idx d/BD_COL_LOCK_OWNER)]
                 ;; Try to acquire lock for cleanup
                 (if (== 0 (js/Atomics.compareExchange index-view lock-owner-idx 0 (or d/*worker-id* -1)))
                   (try
                     ;; Re-check status under lock
-                    (let [status-now (u/read-block-descriptor-field index-view descriptor-idx d/OFFSET_BD_STATUS)]
+                    (let [status-now (u/read-block-descriptor-field index-view descriptor-idx d/BD_COL_STATUS)]
                       (if (== status-now d/STATUS_RETIRED)
                         (do
-                          (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_DATA_LENGTH 0)
-                          (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-                          (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_RETIRED_EPOCH 0)
-                          (u/write-block-descriptor-field! index-view descriptor-idx d/OFFSET_BD_STATUS d/STATUS_FREE)
+                          (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_DATA_LENGTH 0)
+                          (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+                          (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_RETIRED_EPOCH 0)
+                          (u/write-block-descriptor-field! index-view descriptor-idx d/BD_COL_STATUS d/STATUS_FREE)
                           (update-mirrors! index-view descriptor-idx d/STATUS_FREE nil)
                           ;; Coalesce with adjacent free blocks to prevent fragmentation
                           (coalesce-adjacent-free-blocks! index-view (safe-max-descriptors s-atom-env) descriptor-idx)
@@ -1883,7 +1876,7 @@
    Returns :freed if successfully freed, :has-readers if still referenced."
   [s-atom-env descriptor-idx]
   (let [index-view (:index-view s-atom-env)
-        status (u/read-block-descriptor-field index-view descriptor-idx d/OFFSET_BD_STATUS)]
+        status (u/read-block-descriptor-field index-view descriptor-idx d/BD_COL_STATUS)]
     (if (== status d/STATUS_ORPHANED)
       (let [result (free-once s-atom-env descriptor-idx)]
         ;; free-once already coalesces on success
@@ -1899,10 +1892,10 @@
   (let [free-blocks #js []]
     ;; Collect all FREE blocks: [offset, capacity, desc-idx]
     (dotimes [i max-descriptors]
-      (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)]
+      (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)]
         (when (== status d/STATUS_FREE)
-          (.push free-blocks #js [(u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
-                                  (u/read-block-descriptor-field index-view i d/OFFSET_BD_BLOCK_CAPACITY)
+          (.push free-blocks #js [(u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
+                                  (u/read-block-descriptor-field index-view i d/BD_COL_BLOCK_CAPACITY)
                                   i]))))
     (.sort free-blocks (fn [a b] (- (aget a 0) (aget b 0))))
     (let [len (.-length free-blocks)]
@@ -1921,26 +1914,24 @@
                       ;; Lock BOTH survivor and consumed before merging.
                       ;; Without locking the survivor, the allocator can claim it
                       ;; between our scan and the capacity write → overlap corruption.
-                      s-lock (+ (u/get-block-descriptor-base-int32-offset s-idx)
-                                (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))
-                      c-lock (+ (u/get-block-descriptor-base-int32-offset c-idx)
-                                (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+                      s-lock (u/get-block-descriptor-field-int32-offset index-view s-idx d/BD_COL_LOCK_OWNER)
+                      c-lock (u/get-block-descriptor-field-int32-offset index-view c-idx d/BD_COL_LOCK_OWNER)]
                   (if (== 0 (u/atomic-compare-exchange-int index-view s-lock 0 wid))
                     ;; Got survivor lock — verify still FREE
-                    (let [s-status (u/read-block-descriptor-field index-view s-idx d/OFFSET_BD_STATUS)]
+                    (let [s-status (u/read-block-descriptor-field index-view s-idx d/BD_COL_STATUS)]
                       (if (== s-status d/STATUS_FREE)
                         (if (== 0 (u/atomic-compare-exchange-int index-view c-lock 0 wid))
                           ;; Got consumed lock — verify still FREE
-                          (let [c-status (u/read-block-descriptor-field index-view c-idx d/OFFSET_BD_STATUS)]
+                          (let [c-status (u/read-block-descriptor-field index-view c-idx d/BD_COL_STATUS)]
                             (if (== c-status d/STATUS_FREE)
                               (let [new-cap (+ (aget s 1) (aget c 1))]
                                 ;; Expand survivor
-                                (u/write-block-descriptor-field! index-view s-idx d/OFFSET_BD_BLOCK_CAPACITY new-cap)
+                                (u/write-block-descriptor-field! index-view s-idx d/BD_COL_BLOCK_CAPACITY new-cap)
                                 (update-mirrors! index-view s-idx d/STATUS_FREE new-cap)
                                 ;; Zero out consumed
-                                (u/write-block-descriptor-field! index-view c-idx d/OFFSET_BD_STATUS d/STATUS_ZEROED_UNUSED)
-                                (u/write-block-descriptor-field! index-view c-idx d/OFFSET_BD_DATA_OFFSET 0)
-                                (u/write-block-descriptor-field! index-view c-idx d/OFFSET_BD_BLOCK_CAPACITY 0)
+                                (u/write-block-descriptor-field! index-view c-idx d/BD_COL_STATUS d/STATUS_ZEROED_UNUSED)
+                                (u/write-block-descriptor-field! index-view c-idx d/BD_COL_DATA_OFFSET 0)
+                                (u/write-block-descriptor-field! index-view c-idx d/BD_COL_BLOCK_CAPACITY 0)
                                 (update-mirrors! index-view c-idx d/STATUS_ZEROED_UNUSED 0)
                                 ;; Release both locks
                                 (u/atomic-store-int index-view c-lock 0)
@@ -1991,7 +1982,7 @@
           (loop [desc-idx 0
                  freed-count 0]
             (if (< desc-idx max-descriptors)
-              (let [status (u/read-block-descriptor-field index-view desc-idx d/OFFSET_BD_STATUS)]
+              (let [status (u/read-block-descriptor-field index-view desc-idx d/BD_COL_STATUS)]
                 (if (== status d/STATUS_ORPHANED)
                   (let [result (try-free-orphaned! s-atom-env desc-idx)]
                     (recur (inc desc-idx)
@@ -2060,10 +2051,10 @@
      ;; Phase 1: Scan ALLOC blocks for HAMT bitmap parents with matching child offset
      (loop [i 0]
        (when (< i max-descriptors)
-         (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)]
+         (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)]
            (if (== status d/STATUS_ALLOCATED)
-             (let [data-off (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
-                   data-len (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_LENGTH)]
+             (let [data-off (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
+                   data-len (u/read-block-descriptor-field index-view i d/BD_COL_DATA_LENGTH)]
                ;; Bitmap node: type byte == 1 AND data_len > 12 (excludes EveHashMap headers)
                (if (and (>= data-len 16) (== (.getUint8 dv data-off) COMPACT_BITMAP_TYPE))
                  (let [node-bm (.getUint32 dv (+ data-off 8) true)
@@ -2095,8 +2086,8 @@
      ;; atom root desc → serialized pointer [0xEE, 0xDB, tag, i32_offset] → EveHashMap header → root-off
      (let [root-desc-idx (js/Atomics.load index-view (/ d/OFFSET_ATOM_ROOT_DATA_DESC_IDX d/SIZE_OF_INT32))]
        (when (not= root-desc-idx d/ROOT_POINTER_NIL_SENTINEL)
-         (let [root-data-off (u/read-block-descriptor-field index-view root-desc-idx d/OFFSET_BD_DATA_OFFSET)
-               root-data-len (u/read-block-descriptor-field index-view root-desc-idx d/OFFSET_BD_DATA_LENGTH)
+         (let [root-data-off (u/read-block-descriptor-field index-view root-desc-idx d/BD_COL_DATA_OFFSET)
+               root-data-len (u/read-block-descriptor-field index-view root-desc-idx d/BD_COL_DATA_LENGTH)
                u8 (wasm/u8-view)]
            ;; Check serialized SAB pointer format: [MAGIC_0, MAGIC_1, tag, offset:i32]
            (when (and (>= root-data-len 7)
@@ -2123,16 +2114,15 @@
   (loop [ri 0]
     (when (< ri max-descriptors)
       (if (and (not= ri exclude-a) (not= ri exclude-b)
-               (== (u/read-block-descriptor-field index-view ri d/OFFSET_BD_STATUS) d/STATUS_ZEROED_UNUSED))
-        (let [r-lk (+ (u/get-block-descriptor-base-int32-offset ri)
-                       (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+               (== (u/read-block-descriptor-field index-view ri d/BD_COL_STATUS) d/STATUS_ZEROED_UNUSED))
+        (let [r-lk (u/get-block-descriptor-field-int32-offset index-view ri d/BD_COL_LOCK_OWNER)]
           (if (== 0 (u/atomic-compare-exchange-int index-view r-lk 0 d/*worker-id*))
             (do
-              (u/write-block-descriptor-field! index-view ri d/OFFSET_BD_DATA_OFFSET rem-off)
-              (u/write-block-descriptor-field! index-view ri d/OFFSET_BD_BLOCK_CAPACITY rem-cap)
-              (u/write-block-descriptor-field! index-view ri d/OFFSET_BD_DATA_LENGTH 0)
-              (u/write-block-descriptor-field! index-view ri d/OFFSET_BD_STATUS d/STATUS_FREE)
-              (u/write-block-descriptor-field! index-view ri d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+              (u/write-block-descriptor-field! index-view ri d/BD_COL_DATA_OFFSET rem-off)
+              (u/write-block-descriptor-field! index-view ri d/BD_COL_BLOCK_CAPACITY rem-cap)
+              (u/write-block-descriptor-field! index-view ri d/BD_COL_DATA_LENGTH 0)
+              (u/write-block-descriptor-field! index-view ri d/BD_COL_STATUS d/STATUS_FREE)
+              (u/write-block-descriptor-field! index-view ri d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
               (update-mirrors! index-view ri d/STATUS_FREE rem-cap)
               (u/atomic-store-int index-view r-lk 0)
               true)
@@ -2157,9 +2147,9 @@
     (loop [i 0]
       (if (>= i max-descriptors)
         false
-        (let [status (u/read-block-descriptor-field index-view i d/OFFSET_BD_STATUS)
-              off (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_OFFSET)
-              cap (u/read-block-descriptor-field index-view i d/OFFSET_BD_BLOCK_CAPACITY)]
+        (let [status (u/read-block-descriptor-field index-view i d/BD_COL_STATUS)
+              off (u/read-block-descriptor-field index-view i d/BD_COL_DATA_OFFSET)
+              cap (u/read-block-descriptor-field index-view i d/BD_COL_BLOCK_CAPACITY)]
           (cond
             ;; FREE — remember for later matching
             (and (== status d/STATUS_FREE) (pos? cap))
@@ -2171,12 +2161,12 @@
             ;; are NOT safe to compact because their descriptor indices are referenced
             ;; by atom headers (VALUE_DATA_DESC_IDX) and root pointers that would go stale.
             (and (== status d/STATUS_ALLOCATED) (pos? cap)
-                 (let [data-len-c (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_LENGTH)]
+                 (let [data-len-c (u/read-block-descriptor-field index-view i d/BD_COL_DATA_LENGTH)]
                    (and (>= data-len-c 16) (== (.getUint8 dv off) COMPACT_BITMAP_TYPE))))
             (let [a-off off
                   a-cap cap
                   a-idx i
-                  a-len (u/read-block-descriptor-field index-view i d/OFFSET_BD_DATA_LENGTH)
+                  a-len (u/read-block-descriptor-field index-view i d/BD_COL_DATA_LENGTH)
                   ;; Find a free block at lower offset with capacity >= a-cap
                   fb (loop [fi 0]
                        (when (< fi (.-length free-blocks))
@@ -2192,13 +2182,13 @@
                       f-idx (aget fb 2)
                       ;; Lock both descriptors (ordered by index to prevent deadlock)
                       [lo hi] (if (< f-idx a-idx) [f-idx a-idx] [a-idx f-idx])
-                      lo-lk (+ (u/get-block-descriptor-base-int32-offset lo) (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))
-                      hi-lk (+ (u/get-block-descriptor-base-int32-offset hi) (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+                      lo-lk (u/get-block-descriptor-field-int32-offset index-view lo d/BD_COL_LOCK_OWNER)
+                      hi-lk (u/get-block-descriptor-field-int32-offset index-view hi d/BD_COL_LOCK_OWNER)]
                   (if (== 0 (u/atomic-compare-exchange-int index-view lo-lk 0 d/*worker-id*))
                     (if (== 0 (u/atomic-compare-exchange-int index-view hi-lk 0 d/*worker-id*))
                       ;; Both locked — re-verify statuses under lock
-                      (let [f-st (u/read-block-descriptor-field index-view f-idx d/OFFSET_BD_STATUS)
-                            a-st (u/read-block-descriptor-field index-view a-idx d/OFFSET_BD_STATUS)]
+                      (let [f-st (u/read-block-descriptor-field index-view f-idx d/BD_COL_STATUS)
+                            a-st (u/read-block-descriptor-field index-view a-idx d/BD_COL_STATUS)]
                         (if (and (== f-st d/STATUS_FREE) (== a-st d/STATUS_ALLOCATED))
                           (do
                             ;; ==================== COMPACT ====================
@@ -2206,10 +2196,10 @@
                             (when (pos? a-len) (wasm/memcpy! f-off a-off a-len))
 
                             ;; 2. F descriptor → ALLOCATED (new home for moved data)
-                            (u/write-block-descriptor-field! index-view f-idx d/OFFSET_BD_STATUS d/STATUS_ALLOCATED)
-                            (u/write-block-descriptor-field! index-view f-idx d/OFFSET_BD_BLOCK_CAPACITY a-cap)
-                            (u/write-block-descriptor-field! index-view f-idx d/OFFSET_BD_DATA_LENGTH a-len)
-                            (u/write-block-descriptor-field! index-view f-idx d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+                            (u/write-block-descriptor-field! index-view f-idx d/BD_COL_STATUS d/STATUS_ALLOCATED)
+                            (u/write-block-descriptor-field! index-view f-idx d/BD_COL_BLOCK_CAPACITY a-cap)
+                            (u/write-block-descriptor-field! index-view f-idx d/BD_COL_DATA_LENGTH a-len)
+                            (u/write-block-descriptor-field! index-view f-idx d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
                             (update-mirrors! index-view f-idx d/STATUS_ALLOCATED a-cap)
 
                             ;; 3. Split remainder if free block was larger
@@ -2220,8 +2210,8 @@
 
                             ;; 4. A descriptor → RETIRED (old location, epoch-based GC)
                             ;;    Data at old offset stays valid for concurrent readers
-                            (u/write-block-descriptor-field! index-view a-idx d/OFFSET_BD_STATUS d/STATUS_RETIRED)
-                            (u/write-block-descriptor-field! index-view a-idx d/OFFSET_BD_RETIRED_EPOCH
+                            (u/write-block-descriptor-field! index-view a-idx d/BD_COL_STATUS d/STATUS_RETIRED)
+                            (u/write-block-descriptor-field! index-view a-idx d/BD_COL_RETIRED_EPOCH
                               (get-current-epoch s-atom-env))
                             (update-mirrors! index-view a-idx d/STATUS_RETIRED a-cap)
 
@@ -2281,7 +2271,7 @@
   "Serialize a value for storage in SAB.
    Uses fast-path encoding for primitives and SAB pointer encoding for collections."
   [value]
-  (ser/serialize-element value))
+  (codec/serialize-element value))
 
 (defn atom-deserialize
   "Deserialize bytes from SAB back to a CLJS/SAB value.
@@ -2296,7 +2286,7 @@
                                 (not= (.-byteLength byte-array-view) (.-byteLength (.-buffer byte-array-view)))))
                      (js/Uint8Array. byte-array-view)
                      byte-array-view)]
-         (ser/deserialize-element s-atom-env bytes))
+         (codec/deserialize-element s-atom-env bytes))
        (catch :default e
          (println "!!! ERROR during atom/atom-deserialize:" e (.-stack e))
          (when byte-array-view (println "    Input bytes (hex, first 64):" (u/format-bytes-as-hex byte-array-view 64)))
@@ -2401,8 +2391,7 @@
    (RETIRED_EPOCH field) of a SharedAtom's header descriptor."
   [s-atom-env header-descriptor-idx]
   (let [index-view (:index-view s-atom-env)]
-    (+ (u/get-block-descriptor-base-int32-offset header-descriptor-idx)
-       (/ d/OFFSET_BD_RETIRED_EPOCH d/SIZE_OF_INT32))))
+    (u/get-block-descriptor-field-int32-offset index-view header-descriptor-idx d/BD_COL_RETIRED_EPOCH)))
 
 (defn- signal-remote-watches!
   "Atomically bump the watch version counter and notify waiting workers."
@@ -2521,7 +2510,7 @@
                              ;; Backs the overflow/class-6 coalescing allocator for blocks >1024B.
                              ;; WASM Memory maximum = min(MAX_PAGES, initial*4) = 1GB ceiling.
                              :or {sab-size (* 256 1024 1024) max-blocks 65536}}]
-  (let [block-descriptors-array-total-size (* max-blocks d/SIZE_OF_BLOCK_DESCRIPTOR)
+  (let [block-descriptors-array-total-size (* max-blocks d/BD_NUM_COLUMNS d/SIZE_OF_INT32)
         index-region-fixed-metadata-size d/OFFSET_BLOCK_DESCRIPTORS_ARRAY_START
         ;; SoA mirror arrays for SIMD descriptor scanning (Phase 1)
         ;; status_mirror[max_blocks]:  i32 per descriptor — contiguous for v128 scan
@@ -2571,17 +2560,17 @@
               (let [slot-byte-offset (+ d/OFFSET_WORKER_REGISTRY_START (* slot-idx d/WORKER_SLOT_SIZE))]
                 (js/Atomics.store index-view (/ slot-byte-offset d/SIZE_OF_INT32) d/WORKER_STATUS_INACTIVE)))
           ;; Initialize first block descriptor
-          _ (u/write-block-descriptor-field! index-view 0 d/OFFSET_BD_STATUS d/STATUS_FREE)
-          _ (u/write-block-descriptor-field! index-view 0 d/OFFSET_BD_DATA_OFFSET data-region-start-offset)
-          _ (u/write-block-descriptor-field! index-view 0 d/OFFSET_BD_DATA_LENGTH 0)
-          _ (u/write-block-descriptor-field! index-view 0 d/OFFSET_BD_BLOCK_CAPACITY actual-data-region-size)
-          _ (u/write-block-descriptor-field! index-view 0 d/OFFSET_BD_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
-          _ (u/write-block-descriptor-field! index-view 0 d/OFFSET_BD_LOCK_OWNER 0)
-          _ (u/write-block-descriptor-field! index-view 0 d/OFFSET_BD_RETIRED_EPOCH 0)
+          _ (u/write-block-descriptor-field! index-view 0 d/BD_COL_STATUS d/STATUS_FREE)
+          _ (u/write-block-descriptor-field! index-view 0 d/BD_COL_DATA_OFFSET data-region-start-offset)
+          _ (u/write-block-descriptor-field! index-view 0 d/BD_COL_DATA_LENGTH 0)
+          _ (u/write-block-descriptor-field! index-view 0 d/BD_COL_BLOCK_CAPACITY actual-data-region-size)
+          _ (u/write-block-descriptor-field! index-view 0 d/BD_COL_VALUE_DATA_DESC_IDX d/ROOT_POINTER_NIL_SENTINEL)
+          _ (u/write-block-descriptor-field! index-view 0 d/BD_COL_LOCK_OWNER 0)
+          _ (u/write-block-descriptor-field! index-view 0 d/BD_COL_RETIRED_EPOCH 0)
           _ (doseq [i (range 1 max-blocks)]
               (clear-descriptor-fields! index-view i)
               ;; Explicitly clear lock_owner during init (clear-descriptor-fields! doesn't)
-              (u/write-block-descriptor-field! index-view i d/OFFSET_BD_LOCK_OWNER 0))
+              (u/write-block-descriptor-field! index-view i d/BD_COL_LOCK_OWNER 0))
           ;; Initialize SoA mirror arrays for SIMD descriptor scanning
           ;; status_mirror[0] = STATUS_FREE, capacity_mirror[0] = data-region-size
           ;; status_mirror[1..N] = STATUS_ZEROED_UNUSED (-1), capacity_mirror[1..N] = 0
@@ -2608,7 +2597,7 @@
           ;; Set global atom instance so serialize-element can build SAB types
           _ (set! *global-atom-instance* the-atom-domain-instance)
           ;; Register overflow alloc/free callbacks for slab allocator
-          _ (slab-alloc/register-overflow-fns!
+          _ (ps/register-overflow-fns!
               (fn [size-bytes] (alloc s-atom-env size-bytes))
               (fn [desc-idx] (free s-atom-env desc-idx))
               :sab (:sab s-atom-env))
@@ -2633,7 +2622,7 @@
                     (throw (js/Error. (str "atom-domain init alloc for map: " (:error alloc-info))))
                     (do
                       (.set (:data-view s-atom-env) serialized-initial-map (:offset alloc-info))
-                      (u/write-block-descriptor-field! (:index-view s-atom-env) (:descriptor-idx alloc-info) d/OFFSET_BD_DATA_LENGTH (.-length serialized-initial-map))
+                      (u/write-block-descriptor-field! (:index-view s-atom-env) (:descriptor-idx alloc-info) d/BD_COL_DATA_LENGTH (.-length serialized-initial-map))
                       (:descriptor-idx alloc-info)))))))]
       (js/Atomics.store index-view (/ d/OFFSET_ATOM_ROOT_DATA_DESC_IDX d/SIZE_OF_INT32) initial-root-data-block-desc-idx)
       the-atom-domain-instance)))
@@ -2672,6 +2661,34 @@
 (def ^:private ^:mutable cached-deref-desc-idx -1)
 (def ^:private ^:mutable cached-deref-val nil)
 
+;; ---------------------------------------------------------------------------
+;; Change decision (merkle-phase5, plan §2g): identity → root digest →
+;; structural `=`. The decision gates only the write/alloc/retire churn
+;; (`:changed` / `:changed?` in the swap outcomes). Watch notification is
+;; NOT gated by it: the deftype -swap!/-reset! implementations below
+;; notify on every successful swap/reset (the decision on fork
+;; Q5 — Clojure semantics: watches fire on every successful swap,
+;; whether the value changed or not).
+(defn- root-digest-of
+  "Phase 3a seam: the root digest of a live eve value, or nil when the
+   value carries none. Today no live eve value exposes a root digest
+   (Phase 3a's eve storage is stopped at a layout fork), so this
+   answers nil and the decision falls through to structural `=`. When
+   the fork lands a digest accessor, this is the one place that
+   learns to read it."
+  [_v]
+  nil)
+
+(defn- same-root-value?
+  "True when new and old are the same root value: identical, or equal
+   root digests (when both sides carry one), or structurally `=`."
+  [new old]
+  (or (identical? new old)
+      (let [dn (root-digest-of new)
+            do (root-digest-of old)]
+        (and (some? dn) (some? do) (= dn do)))
+      (= new old)))
+
 (defn- -update-fn-for-atom-domain-swap!
   [s-env current-root-data-block-desc-idx validator-fn user-f user-args-arr]
   (let [index-view cached-atom-iv
@@ -2679,11 +2696,11 @@
         old-map-cljs-value
         (if (= current-root-data-block-desc-idx d/ROOT_POINTER_NIL_SENTINEL)
           {}
-          (let [status (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_STATUS)
-                data-offset (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_OFFSET)
-                data-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+          (let [status (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_STATUS)
+                data-offset (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_OFFSET)
+                data-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
             (if (and (== status d/STATUS_ALLOCATED) (>= data-len 0))
-              (ser/deserialize-from-dv s-env (wasm/data-view) data-offset data-len)
+              (codec/deserialize-from-dv s-env (wasm/data-view) data-offset data-len)
               (throw (js/Error. (str "StaleReadOrInvalidStateUpdateFn AtomDomainRoot: desc_idx " current-root-data-block-desc-idx))))))]
     (when-not (map? old-map-cljs-value) (throw (js/Error. (str "AtomDomain integrity error: expected map, got " (type old-map-cljs-value)))))
     (let [new-map-cljs-value (if user-args-arr
@@ -2694,7 +2711,10 @@
                                 (user-f old-map-cljs-value))]
       (when-not (map? new-map-cljs-value) (throw (js/Error. (str "AtomDomain swap fn must return map. Got: " (type new-map-cljs-value)))))
       (when (and validator-fn (not (validator-fn new-map-cljs-value))) (throw (js/Error. "Swap (AtomDomain) validator failed.")))
-      (if (identical? new-map-cljs-value old-map-cljs-value)
+      (if (same-root-value? new-map-cljs-value old-map-cljs-value)
+        ;; Same root value (identity → digest → `=`): skip serialize,
+        ;; alloc, CAS, and retirement entirely. Watches still fire —
+        ;; the caller notifies on every successful outcome (Q5).
         ;; Use JS object instead of CLJS map for CAS outcome — avoids HAMT allocation
         #js {:cas_idx current-root-data-block-desc-idx :free_idx nil
              :alloc_idx nil :final_val old-map-cljs-value
@@ -2717,8 +2737,8 @@
                   (throw (js/Error. "AllocFailedInUpdate AtomDomainRoot: out-of-memory")))
                   (let [new-data-offset (aget alloc-info 0) new-data-desc-idx (aget alloc-info 1)]
                     (.set data-view new_map_bytes new-data-offset)
-                    (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_LENGTH (.-length new_map_bytes))
-                    (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_OFFSET new-data-offset)
+                    (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_LENGTH (.-length new_map_bytes))
+                    (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_OFFSET new-data-offset)
                     #js {:cas_idx new-data-desc-idx :free_idx current-root-data-block-desc-idx
                          :alloc_idx new-data-desc-idx :final_val new-map-cljs-value
                          :old_val old-map-cljs-value :changed true})))))))))
@@ -2738,11 +2758,11 @@
       (let [old-map-cljs-value
             (if (= current-root-data-block-desc-idx d/ROOT_POINTER_NIL_SENTINEL)
               {}
-              (let [status (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_STATUS)
-                    data-offset (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_OFFSET)
-                    data-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+              (let [status (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_STATUS)
+                    data-offset (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_OFFSET)
+                    data-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                 (if (and (== status d/STATUS_ALLOCATED) (>= data-len 0))
-                  (ser/deserialize-from-dv s-env (wasm/data-view) data-offset data-len)
+                  (codec/deserialize-from-dv s-env (wasm/data-view) data-offset data-len)
                   {})))]
         #js {:cas_idx d/ROOT_POINTER_NIL_SENTINEL :free_idx current-root-data-block-desc-idx
              :alloc_idx nil :final_val new-map-cljs-value
@@ -2751,9 +2771,9 @@
       ;; When build-hamt-from-cljs returns a cached result, the encoded pointer bytes
       ;; are identical to what's already stored. Skip alloc/write/retirement entirely.
       (if (and (not= current-root-data-block-desc-idx d/ROOT_POINTER_NIL_SENTINEL)
-               (let [old-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+               (let [old-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                  (and (== old-len (.-length new_map_bytes))
-                      (let [old-off (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_OFFSET)
+                      (let [old-off (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_OFFSET)
                             new-len (.-length new_map_bytes)]
                         ;; Compare bytes directly (typically 7 bytes for SAB pointer)
                         (loop [i 0]
@@ -2770,11 +2790,11 @@
         (let [old-map-cljs-value
               (if (= current-root-data-block-desc-idx d/ROOT_POINTER_NIL_SENTINEL)
                 {}
-                (let [status (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_STATUS)
-                      data-offset (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_OFFSET)
-                      data-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+                (let [status (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_STATUS)
+                      data-offset (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_OFFSET)
+                      data-len (u/read-block-descriptor-field index-view current-root-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                   (if (and (== status d/STATUS_ALLOCATED) (>= data-len 0))
-                    (ser/deserialize-from-dv s-env (wasm/data-view) data-offset data-len)
+                    (codec/deserialize-from-dv s-env (wasm/data-view) data-offset data-len)
                     {})))
               alloc-info (alloc-root-block s-env (.-length new_map_bytes))]
           (if-not alloc-info
@@ -2785,8 +2805,8 @@
               (throw (js/Error. "AllocFailedInUpdate AtomDomainRoot (reset): out-of-memory")))
               (let [new-data-offset (aget alloc-info 0) new-data-desc-idx (aget alloc-info 1)]
                 (.set data-view new_map_bytes new-data-offset)
-                (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_LENGTH (.-length new_map_bytes))
-                (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_OFFSET new-data-offset)
+                (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_LENGTH (.-length new_map_bytes))
+                (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_OFFSET new-data-offset)
                 #js {:cas_idx new-data-desc-idx :free_idx current-root-data-block-desc-idx
                      :alloc_idx new-data-desc-idx :final_val new-map-cljs-value
                      :old_val old-map-cljs-value :changed true})))))))
@@ -2864,7 +2884,7 @@
                       ;; that no concurrent readers are deserializing from this offset.
                       (let [old-offset (u/read-block-descriptor-field
                                          (:index-view s-atom-env) old_desc_to_free
-                                         d/OFFSET_BD_DATA_OFFSET)]
+                                         d/BD_COL_DATA_OFFSET)]
                         (when-not (pool-root-block! s-atom-env old-offset old_desc_to_free)
                           ;; Pool full — fall back to epoch-based retirement
                           (retire-block! s-atom-env old_desc_to_free)))))
@@ -2931,13 +2951,13 @@
                           (== root-data-block-desc-idx cached-deref-desc-idx))
                    cached-deref-val
                    (if (= root-data-block-desc-idx d/ROOT_POINTER_NIL_SENTINEL) {}
-                       (let [status (u/read-block-descriptor-field index-view root-data-block-desc-idx d/OFFSET_BD_STATUS)
-                             data-offset (u/read-block-descriptor-field index-view root-data-block-desc-idx d/OFFSET_BD_DATA_OFFSET)
-                             data-len (u/read-block-descriptor-field index-view root-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+                       (let [status (u/read-block-descriptor-field index-view root-data-block-desc-idx d/BD_COL_STATUS)
+                             data-offset (u/read-block-descriptor-field index-view root-data-block-desc-idx d/BD_COL_DATA_OFFSET)
+                             data-len (u/read-block-descriptor-field index-view root-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                          (if (and (== status d/STATUS_ALLOCATED) (>= data-len 0))
                            ;; Materialize SAB types to CLJS on deref — SAB types
                            ;; never escape to user code outside a swap! transaction.
-                           (let [sab-val (ser/deserialize-from-dv s-atom-env (wasm/data-view) data-offset data-len)
+                           (let [sab-val (codec/deserialize-from-dv s-atom-env (wasm/data-view) data-offset data-len)
                                  val (eve->cljs sab-val)]
                              (set! cached-deref-env s-atom-env)
                              (set! cached-deref-desc-idx root-data-block-desc-idx)
@@ -2949,28 +2969,28 @@
            (when-not (map? new-map-cljs-value) (throw (js/Error. "AtomDomain can only be reset to a map.")))
            (let [^js outcome (do-atom-domain-swap! this -update-fn-for-atom-domain-reset! new-map-cljs-value nil)
                  final-cljs (eve->cljs (.-final-val outcome))]
-             (when (.-changed outcome) (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs))
+             (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs)
              final-cljs))
   ISwap
   (-swap! [this f] ; arity 1 (fn only)
     (let [^js outcome (do-atom-domain-swap! this -update-fn-for-atom-domain-swap! f nil)
           final-cljs (eve->cljs (.-final-val outcome))]
-      (when (.-changed outcome) (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs))
+      (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs)
       final-cljs))
   (-swap! [this f x] ; arity 2 (fn + 1 arg)
     (let [^js outcome (do-atom-domain-swap! this -update-fn-for-atom-domain-swap! f #js [x])
           final-cljs (eve->cljs (.-final-val outcome))]
-      (when (.-changed outcome) (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs))
+      (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs)
       final-cljs))
   (-swap! [this f x y] ; arity 3 (fn + 2 args)
     (let [^js outcome (do-atom-domain-swap! this -update-fn-for-atom-domain-swap! f #js [x y])
           final-cljs (eve->cljs (.-final-val outcome))]
-      (when (.-changed outcome) (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs))
+      (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs)
       final-cljs))
   (-swap! [this f x y r] ; arity 4+ (fn + 2 args + rest seq)
     (let [^js outcome (do-atom-domain-swap! this -update-fn-for-atom-domain-swap! f (to-array (cons x (cons y r))))
           final-cljs (eve->cljs (.-final-val outcome))]
-      (when (.-changed outcome) (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs))
+      (notify-watches watchers-atom (eve->cljs (.-old-val outcome)) final-cljs)
       final-cljs))
   IWatchable
   (-notify-watches [_this oldval newval] (notify-watches watchers-atom oldval newval))
@@ -3006,18 +3026,18 @@
                 (do (println log-prefix "ReadingOldForReset: Failed start-read!: " (pr-str start-read-outcome) ". THROWING StaleRead.")
                     (throw (js/Error. (str "StaleReadOrInvalidStateUpdateFn (Reset) FailedStartReadDetails: " (pr-str start-read-outcome)))))
                 (try
-                  (let [initial-data-block-status (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_STATUS)
-                        initial-data-block-offset (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_DATA_OFFSET)
-                        initial-data-block-length (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+                  (let [initial-data-block-status (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_STATUS)
+                        initial-data-block-offset (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_OFFSET)
+                        initial-data-block-length (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                     (if (and (== initial-data-block-status d/STATUS_ALLOCATED) (>= initial-data-block-length 0))
-                      (let [status-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_STATUS)
-                            length-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+                      (let [status-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_STATUS)
+                            length-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                         (if (or (not= status-after-read d/STATUS_ALLOCATED) (not= length-after-read initial-data-block-length))
                           (let [err-msg-detail (str "DataStateChangedDuringRead (Reset): AtomID " atom-id ", desc_idx: " current-value-data-block-desc-idx)]
                             (println log-prefix "THROWING StaleReadOrInvalidStateUpdateFn - " err-msg-detail)
                             (throw (js/Error. (str "StaleReadOrInvalidStateUpdateFn " err-msg-detail))))
                           ;; Zero-copy: read directly from SAB DataView
-                          (ser/deserialize-from-dv parent-s-env (wasm/data-view) initial-data-block-offset initial-data-block-length)))
+                          (codec/deserialize-from-dv parent-s-env (wasm/data-view) initial-data-block-offset initial-data-block-length)))
                       (let [err-msg-detail (str "InitialDescriptorCheckFailed_AfterStartRead (Reset): AtomID " atom-id ", desc_idx: " current-value-data-block-desc-idx " StatusWas_" initial-data-block-status)]
                         (println log-prefix "THROWING StaleReadOrInvalidStateUpdateFn - " err-msg-detail)
                         (throw (js/Error. (str "StaleReadOrInvalidStateUpdateFn " err-msg-detail))))))
@@ -3026,8 +3046,39 @@
           old-value-for-user-fn old-sabp-representative-value
           new_serialized_sab_state_bytes (binding [d/*parent-atom* shared-atom-instance
                                                    sd/*parent-atom* shared-atom-instance] (atom-serialize new-user-value))
-          alloc-info (if (and new_serialized_sab_state_bytes (> (.-length new_serialized_sab_state_bytes) 0)) (alloc parent-s-env (.-length new_serialized_sab_state_bytes)) nil)]
+          ;; Change decision (merkle-phase5, plan §2g): reset previously
+          ;; installed unconditionally. Skip the alloc/write when the new
+          ;; value is the same root value (identity → digest → `=`), or
+          ;; when its serialized bytes match the installed root block
+          ;; byte-for-byte (the fast-path shape AtomDomain reset uses).
+          ;; The installed block's bytes are immutable under this
+          ;; attempt's read epoch, so the compare is race-free.
+          skip-reset?
+          (or (same-root-value? new-user-value old-value-for-user-fn)
+              (and new_serialized_sab_state_bytes
+                   (> (.-length new_serialized_sab_state_bytes) 0)
+                   (not= current-value-data-block-desc-idx d/ROOT_POINTER_NIL_SENTINEL)
+                   (let [old-len (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
+                     (and (== old-len (.-length new_serialized_sab_state_bytes))
+                          (let [old-off (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_OFFSET)
+                                n (.-length new_serialized_sab_state_bytes)]
+                            (loop [i 0]
+                              (if (>= i n)
+                                true
+                                (if (== (aget data-view (+ old-off i)) (aget new_serialized_sab_state_bytes i))
+                                  (recur (inc i))
+                                  false))))))))
+          alloc-info (if skip-reset?
+                       :skip-unchanged
+                       (if (and new_serialized_sab_state_bytes (> (.-length new_serialized_sab_state_bytes) 0)) (alloc parent-s-env (.-length new_serialized_sab_state_bytes)) nil))]
       (cond
+          (= alloc-info :skip-unchanged)
+          ;; Same root value: CAS target is the installed desc itself,
+          ;; nothing to free on success, final value is the installed
+          ;; representative (mirrors the swap unchanged outcome, so the
+          ;; success-path retire-diff diffs the old tree against itself).
+          ;; Watches still fire — the caller notifies on success (Q5).
+          {:new-value-data-block-desc-idx-for-header current-value-data-block-desc-idx :old-data-desc-idx-to-free-on-success nil :old-sabp-representative-value old-sabp-representative-value :newly-allocated-data-desc-idx-to-free-on-cas-fail nil :newly-serialized-sab-state-bytes new_serialized_sab_state_bytes :final-cljs-value old-value-for-user-fn :value-read-for-this-attempt old-value-for-user-fn :changed? false}
           (nil? alloc-info) (do (when (and new_serialized_sab_state_bytes (> (.-length new_serialized_sab_state_bytes) 0))
                                   (let [err-msg (str "AllocFailedInUpdate (Reset): AtomID " atom-id ". Allocation returned nil for non-empty bytes.")]
                                     (println log-prefix "THROWING " err-msg)
@@ -3037,8 +3088,8 @@
                                 (println log-prefix "THROWING " err-msg) (throw (js/Error. err-msg)))
           :else (let [new-data-offset (:offset alloc-info) new-data-desc-idx (:descriptor-idx alloc-info)]
                   (.set data-view new_serialized_sab_state_bytes new-data-offset)
-                  (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_LENGTH (.-length new_serialized_sab_state_bytes))
-                  (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_OFFSET new-data-offset)
+                  (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_LENGTH (.-length new_serialized_sab_state_bytes))
+                  (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_OFFSET new-data-offset)
                   {:new-value-data-block-desc-idx-for-header new-data-desc-idx :old-data-desc-idx-to-free-on-success current-value-data-block-desc-idx :old-sabp-representative-value old-sabp-representative-value :newly-allocated-data-desc-idx-to-free-on-cas-fail new-data-desc-idx :newly-serialized-sab-state-bytes new_serialized_sab_state_bytes :final-cljs-value new-user-value :value-read-for-this-attempt old-value-for-user-fn :changed? true})))))
 
 (defn- -try-cas-header-field! [^js index-view ^number field-idx ^number expected-ptr ^number new-ptr num-inner-retries atom-id]
@@ -3057,8 +3108,7 @@
         index-view (:index-view parent-s-atom-env)
         header-desc-idx (.-header-descriptor-idx atom-instance)
         atom-id (.-shared-atom-id atom-instance)
-        target-value-desc-idx-in-header-field (+ (u/get-block-descriptor-base-int32-offset header-desc-idx)
-                                                 (/ d/OFFSET_BD_VALUE_DATA_DESC_IDX d/SIZE_OF_INT32))
+        target-value-desc-idx-in-header-field (u/get-block-descriptor-field-int32-offset index-view header-desc-idx d/BD_COL_VALUE_DATA_DESC_IDX)
         INNER_CAS_RETRIES 10
         ;; Epoch-based GC: register this worker so sweep sees our read epoch.
         ;; Without this, try-free-retired! sees nil min-active-epoch and frees
@@ -3157,12 +3207,12 @@
           (do (println log-prefix "Failed start-read!: " (pr-str start-read-status) ". Signaling retry.")
               {:retry true})
           (try
-            (let [data-block-status (u/read-block-descriptor-field parent-idx-view value-data-block-idx d/OFFSET_BD_STATUS)
-                  data-block-offset (u/read-block-descriptor-field parent-idx-view value-data-block-idx d/OFFSET_BD_DATA_OFFSET)
-                  data-block-length (u/read-block-descriptor-field parent-idx-view value-data-block-idx d/OFFSET_BD_DATA_LENGTH)]
+            (let [data-block-status (u/read-block-descriptor-field parent-idx-view value-data-block-idx d/BD_COL_STATUS)
+                  data-block-offset (u/read-block-descriptor-field parent-idx-view value-data-block-idx d/BD_COL_DATA_OFFSET)
+                  data-block-length (u/read-block-descriptor-field parent-idx-view value-data-block-idx d/BD_COL_DATA_LENGTH)]
               (if (and (== data-block-status d/STATUS_ALLOCATED) (>= data-block-length 0))
                 ;; Zero-copy: read directly from SAB DataView
-                {:value (ser/deserialize-from-dv parent-s-env (wasm/data-view) data-block-offset data-block-length)}
+                {:value (codec/deserialize-from-dv parent-s-env (wasm/data-view) data-block-offset data-block-length)}
                 (do (println log-prefix "Path: STALE_BLOCK_DESC (Status was " data-block-status ") after start-read. Signaling retry.")
                     {:retry true})))
             (finally
@@ -3185,26 +3235,26 @@
                 (do (println log-prefix "ReadingOld: Failed start-read!: " (pr-str start-read-status) ". THROWING StaleRead.")
                     (throw (js/Error. (str "StaleReadOrInvalidStateUpdateFn FailedStartRead: " (pr-str start-read-status)))))
                 (try
-                  (let [initial-data-block-status (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_STATUS)
-                        initial-data-block-offset (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_DATA_OFFSET)
-                        initial-data-block-length (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+                  (let [initial-data-block-status (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_STATUS)
+                        initial-data-block-offset (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_OFFSET)
+                        initial-data-block-length (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                     (if (and (== initial-data-block-status d/STATUS_ALLOCATED) (>= initial-data-block-length 0))
-                      (let [status-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_STATUS)
-                            length-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_DATA_LENGTH)]
+                      (let [status-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_STATUS)
+                            length-after-read (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_DATA_LENGTH)]
                         (if (or (not= status-after-read d/STATUS_ALLOCATED) (not= length-after-read initial-data-block-length))
                           (let [err-msg-detail (str "DataStateChangedDuringRead: AtomID " atom-id)]
                             (println log-prefix "THROWING StaleReadOrInvalidStateUpdateFn - " err-msg-detail)
                             (throw (js/Error. (str "StaleReadOrInvalidStateUpdateFn " err-msg-detail))))
                           ;; Zero-copy: read directly from SAB DataView
                           (try
-                            (ser/deserialize-from-dv parent-s-env (wasm/data-view) initial-data-block-offset initial-data-block-length)
+                            (codec/deserialize-from-dv parent-s-env (wasm/data-view) initial-data-block-offset initial-data-block-length)
                             (catch js/RangeError e
                               (println log-prefix "!!! DESERIALIZE CRASH at desc:" current-value-data-block-desc-idx
                                        "offset:" initial-data-block-offset "len:" initial-data-block-length
                                        "sab-size:" (.-byteLength (.-buffer index-view)))
-                              (println log-prefix "  desc-status:" (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_STATUS)
-                                       "desc-cap:" (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_BLOCK_CAPACITY)
-                                       "desc-epoch:" (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/OFFSET_BD_RETIRED_EPOCH))
+                              (println log-prefix "  desc-status:" (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_STATUS)
+                                       "desc-cap:" (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_BLOCK_CAPACITY)
+                                       "desc-epoch:" (u/read-block-descriptor-field index-view current-value-data-block-desc-idx d/BD_COL_RETIRED_EPOCH))
                               ;; Dump first 64 bytes of the data block for analysis
                               (println log-prefix "  first-32-bytes:"
                                        (let [dv (wasm/data-view)
@@ -3232,7 +3282,7 @@
             (throw e)))]
     (when (and validator-fn (not (validator-fn new-ab-native-value-from-user-fn)))
           (throw (js/Error. (str "ValidatorFailed: AtomID " atom-id))))
-        (if (= new-ab-native-value-from-user-fn old-value-for-user-fn)
+        (if (same-root-value? new-ab-native-value-from-user-fn old-value-for-user-fn)
           {:new-value-data-block-desc-idx-for-header current-value-data-block-desc-idx
            :old-data-desc-idx-to-free-on-success nil
            :old-sabp-representative-value old-sabp-representative-value
@@ -3271,8 +3321,8 @@
                         (validate-storage-model! parent-s-env {:label "WRITE-BOUNDS"})
                         (throw (js/RangeError. "Prevented OOB write to SAB")))
                       (.set data-view new_serialized_sab_state_bytes new-data-offset)
-                      (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_LENGTH (.-length new_serialized_sab_state_bytes))
-                      (u/write-block-descriptor-field! index-view new-data-desc-idx d/OFFSET_BD_DATA_OFFSET new-data-offset)
+                      (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_LENGTH (.-length new_serialized_sab_state_bytes))
+                      (u/write-block-descriptor-field! index-view new-data-desc-idx d/BD_COL_DATA_OFFSET new-data-offset)
                       {:new-value-data-block-desc-idx-for-header new-data-desc-idx :old-data-desc-idx-to-free-on-success current-value-data-block-desc-idx :old-sabp-representative-value old-sabp-representative-value :newly-allocated-data-desc-idx-to-free-on-cas-fail new-data-desc-idx :newly-serialized-sab-state-bytes new_serialized_sab_state_bytes :final-cljs-value new-ab-native-value-from-user-fn :value-read-for-this-attempt old-value-for-user-fn :changed? true}))))))
 
 (defprotocol ISharedAtom)
@@ -3291,8 +3341,7 @@
           parent-idx-view (:index-view parent-s-env)
           atom-id (.-shared-atom-id _this)
           hdr-idx (.-header-descriptor-idx _this)
-          atom-header-base-int32 (u/get-block-descriptor-base-int32-offset header-descriptor-idx)
-          value-data-desc-idx-field-in-header (+ atom-header-base-int32 (/ d/OFFSET_BD_VALUE_DATA_DESC_IDX d/SIZE_OF_INT32))
+          value-data-desc-idx-field-in-header (u/get-block-descriptor-field-int32-offset index-view header-descriptor-idx d/BD_COL_VALUE_DATA_DESC_IDX)
           read-context {:s-atom-env parent-s-env}
           log-prefix (str "[W:" d/*worker-id* " A:" atom-id " H:" hdr-idx " DerefLoop] ")
           ;; Epoch-protect deref: prevents retired blocks from being freed
@@ -3321,43 +3370,38 @@
               (throw (js/Error. (str "SharedAtom -reset! for ID " (.-shared-atom-id this) ": Validator function returned false."))))
           outcome (apply do-embedded-swap! this -update-fn-for-shared-atom-reset! new-user-value [])
           final-cljs (eve->cljs (:final-cljs-value outcome))]
-      (when (:changed? outcome)
-        (notify-watches watchers-atom old-user-value-for-watchers final-cljs)
-        (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx))
+      (notify-watches watchers-atom old-user-value-for-watchers final-cljs)
+      (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx)
       final-cljs))
   ISwap
   (-swap! [this f]
     (let [old @this
           outcome (apply do-embedded-swap! this -update-fn-for-shared-atom-swap! f [])
           final-cljs (eve->cljs (:final-cljs-value outcome))]
-      (when (:changed? outcome)
-        (notify-watches watchers-atom old final-cljs)
-        (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx))
+      (notify-watches watchers-atom old final-cljs)
+      (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx)
       final-cljs))
   (-swap! [this f x]
     (let [old @this
           outcome (apply do-embedded-swap! this -update-fn-for-shared-atom-swap! f [x])
           final-cljs (eve->cljs (:final-cljs-value outcome))]
-      (when (:changed? outcome)
-        (notify-watches watchers-atom old final-cljs)
-        (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx))
+      (notify-watches watchers-atom old final-cljs)
+      (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx)
       final-cljs))
   (-swap! [this f x y]
     (let [old @this
           outcome (apply do-embedded-swap! this -update-fn-for-shared-atom-swap! f [x y])
           final-cljs (eve->cljs (:final-cljs-value outcome))]
-      (when (:changed? outcome)
-        (notify-watches watchers-atom old final-cljs)
-        (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx))
+      (notify-watches watchers-atom old final-cljs)
+      (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx)
       final-cljs))
   (-swap! [this f x y r]
     (let [old @this
           user-args (into [x y] r)
           outcome (apply do-embedded-swap! this -update-fn-for-shared-atom-swap! f user-args)
           final-cljs (eve->cljs (:final-cljs-value outcome))]
-      (when (:changed? outcome)
-        (notify-watches watchers-atom old final-cljs)
-        (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx))
+      (notify-watches watchers-atom old final-cljs)
+      (notify-remote-watches! (.-s-atom-env parent-atom-domain) header-descriptor-idx)
       final-cljs))
   IWatchable
   (-notify-watches [_this oldval newval] (notify-watches watchers-atom oldval newval))
@@ -3421,22 +3465,22 @@
       (throw (js/Error. (str "atom constructor: Failed to alloc state block: " (:error alloc-result-value)))))
     (when (and alloc-result-value (not (:error alloc-result-value)) serialized-initial-bytes)
       (.set (:data-view parent-s-env) serialized-initial-bytes (:offset alloc-result-value))
-      (u/write-block-descriptor-field! parent-idx-view value_data_block_desc_idx d/OFFSET_BD_DATA_LENGTH (.-length serialized-initial-bytes)))
+      (u/write-block-descriptor-field! parent-idx-view value_data_block_desc_idx d/BD_COL_DATA_LENGTH (.-length serialized-initial-bytes)))
     (loop [candidate-header-idx 0 scan-retries 2]
       (if (>= candidate-header-idx (safe-max-descriptors parent-s-env))
         (if (> scan-retries 0) (recur 0 (dec scan-retries))
             (do (when (not= value_data_block_desc_idx d/ROOT_POINTER_NIL_SENTINEL)
                   (free parent-s-env value_data_block_desc_idx))
                 (throw (js/Error. "atom constructor: No suitable ZEROED_UNUSED descriptor slot for embedded atom header."))))
-        (let [header-status (u/read-block-descriptor-field parent-idx-view candidate-header-idx d/OFFSET_BD_STATUS)
-              header-lock-field-idx (+ (u/get-block-descriptor-base-int32-offset candidate-header-idx) (/ d/OFFSET_BD_LOCK_OWNER d/SIZE_OF_INT32))]
+        (let [header-status (u/read-block-descriptor-field parent-idx-view candidate-header-idx d/BD_COL_STATUS)
+              header-lock-field-idx (u/get-block-descriptor-field-int32-offset index-view candidate-header-idx d/BD_COL_LOCK_OWNER)]
           (if (and (== header-status d/STATUS_ZEROED_UNUSED)
                    (== 0 (u/atomic-compare-exchange-int parent-idx-view header-lock-field-idx 0 d/*worker-id*)))
             (let [final-atom-instance (->SharedAtom target-atom-domain atom-id candidate-header-idx validator metamap (cljs.core/atom {}))]
               (try
                 (clear-descriptor-fields! parent-idx-view candidate-header-idx)
-                (u/write-block-descriptor-field! parent-idx-view candidate-header-idx d/OFFSET_BD_VALUE_DATA_DESC_IDX value_data_block_desc_idx)
-                (u/write-block-descriptor-field! parent-idx-view candidate-header-idx d/OFFSET_BD_STATUS d/STATUS_EMBEDDED_ATOM_HEADER)
+                (u/write-block-descriptor-field! parent-idx-view candidate-header-idx d/BD_COL_VALUE_DATA_DESC_IDX value_data_block_desc_idx)
+                (u/write-block-descriptor-field! parent-idx-view candidate-header-idx d/BD_COL_STATUS d/STATUS_EMBEDDED_ATOM_HEADER)
                 (update-mirrors! parent-idx-view candidate-header-idx d/STATUS_EMBEDDED_ATOM_HEADER nil)
                 (swap! target-atom-domain assoc atom-id {:header-descriptor-idx candidate-header-idx})
                 final-atom-instance

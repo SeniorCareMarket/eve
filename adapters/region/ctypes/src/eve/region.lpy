@@ -1,0 +1,144 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2)
+   over Python's ctypes and mmap (basilisp): a file mapped MAP_SHARED, its
+   atomics the system libatomic's, wait/notify the futex syscall.
+
+   make-heap-region and open-mmap-region open them; lustre-region? says
+   whether a region's atomics are fcntl byte-range locks (a Lustre mount)."
+  (:refer-clojure :exclude [aget aset alength byte-array int-array long-array object-array
+                            into-array unchecked-byte unchecked-int unchecked-long
+                            unchecked-inc-int unsigned-bit-shift-right long double class
+                            locking transient persistent! conj! assoc! bytes objects
+                            const-bytes const-objects])
+  (:require
+   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
+                     into-array unchecked-byte unchecked-int unchecked-long
+                     unchecked-inc-int unsigned-bit-shift-right long double class locking
+                     transient persistent! conj! assoc! bytes objects const-bytes
+                     const-objects]]
+   [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
+                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
+  (:import array ctypes mmap os))
+
+;; Every region has atomic RMW unless it says otherwise.
+(extend-protocol mem/IHostAtomics
+  Object
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _byte-off f] (f)))
+
+   ;; basilisp (CPython): a region over a MAP_SHARED mmap or a bytearray, its
+   ;; atomics libatomic's (lock-free for 4 and 8 bytes on x86-64) and futex
+   ;; through libc's syscall, both by ctypes (HOST-CONTRACT §1-§2; measured
+   ;; cross-process, eve/doc/unification/PORT-TARGETS.md §3)
+
+(def ^:private SEQ-CST 5)
+
+(defn- cfn [lib nm argtypes restype]
+  (let [f (python/getattr lib nm)]
+    (set! (.-argtypes f) (python/list argtypes))
+    (set! (.-restype f) restype)
+    f))
+
+(def ^:private libatomic (ctypes/CDLL "libatomic.so.1"))
+(def ^:private libc (ctypes/CDLL nil ** :use-errno true))
+(def ^:private load4 (cfn libatomic "__atomic_load_4" [ctypes/c-void-p ctypes/c-int] ctypes/c-int32))
+(def ^:private store4 (cfn libatomic "__atomic_store_4" [ctypes/c-void-p ctypes/c-int32 ctypes/c-int] nil))
+(def ^:private add4 (cfn libatomic "__atomic_fetch_add_4" [ctypes/c-void-p ctypes/c-int32 ctypes/c-int] ctypes/c-int32))
+(def ^:private xchg4 (cfn libatomic "__atomic_exchange_4" [ctypes/c-void-p ctypes/c-int32 ctypes/c-int] ctypes/c-int32))
+;; libatomic's compare_exchange: (ptr, expected ptr, desired, success
+;; order, failure order) — no weak flag (that is the builtin's)
+(def ^:private cas4 (cfn libatomic "__atomic_compare_exchange_4"
+                         [ctypes/c-void-p ctypes/c-void-p ctypes/c-int32 ctypes/c-int ctypes/c-int]
+                         ctypes/c-bool))
+(def ^:private load8 (cfn libatomic "__atomic_load_8" [ctypes/c-void-p ctypes/c-int] ctypes/c-int64))
+(def ^:private store8 (cfn libatomic "__atomic_store_8" [ctypes/c-void-p ctypes/c-int64 ctypes/c-int] nil))
+(def ^:private add8 (cfn libatomic "__atomic_fetch_add_8" [ctypes/c-void-p ctypes/c-int64 ctypes/c-int] ctypes/c-int64))
+(def ^:private cas8 (cfn libatomic "__atomic_compare_exchange_8"
+                         [ctypes/c-void-p ctypes/c-void-p ctypes/c-int64 ctypes/c-int ctypes/c-int]
+                         ctypes/c-bool))
+(def ^:private syscall (cfn libc "syscall"
+                            [ctypes/c-long ctypes/c-void-p ctypes/c-int ctypes/c-int ctypes/c-void-p
+                             ctypes/c-void-p ctypes/c-int]
+                            ctypes/c-long))
+(def ^:private timespec (.__mul__ ctypes/c-long 2))
+
+(deftype LpyRegion [base size owner]
+  mem/IMemRegion
+  (-byte-length [_] size)
+  (-load-i32 [_ off] (load4 (+ base off) SEQ-CST))
+  (-store-i32! [_ off v] (store4 (+ base off) (unchecked-int v) SEQ-CST) nil)
+  (-cas-i32! [_ off expected desired]
+    ;; the witness: libatomic writes the value it saw into expected
+    (let [e (ctypes/c-int32 (unchecked-int expected))]
+      (cas4 (+ base off) (ctypes/addressof e) (unchecked-int desired) SEQ-CST SEQ-CST)
+      (.-value e)))
+  (-add-i32! [_ off delta] (add4 (+ base off) (unchecked-int delta) SEQ-CST))
+  (-sub-i32! [_ off delta] (add4 (+ base off) (unchecked-int (- delta)) SEQ-CST))
+  (-exchange-i32! [_ off v] (xchg4 (+ base off) (unchecked-int v) SEQ-CST))
+  (-load-i64 [_ off] (load8 (+ base off) SEQ-CST))
+  (-store-i64! [_ off v] (store8 (+ base off) (unchecked-long v) SEQ-CST) nil)
+  (-cas-i64! [_ off expected desired]
+    (let [e (ctypes/c-int64 (unchecked-long expected))]
+      (cas8 (+ base off) (ctypes/addressof e) (unchecked-long desired) SEQ-CST SEQ-CST)
+      (.-value e)))
+  (-add-i64! [_ off delta] (add8 (+ base off) (unchecked-long delta) SEQ-CST))
+  (-sub-i64! [_ off delta] (add8 (+ base off) (unchecked-long (- delta)) SEQ-CST))
+  (-wait-i32! [_ off expected timeout-ms]
+    ;; futex(2) FUTEX_WAIT (shared): 202 on x86-64
+    (let [ts (timespec (quot timeout-ms 1000) (* 1000000 (mod timeout-ms 1000)))
+          r (syscall 202 (+ base off) 0 (unchecked-int expected) (ctypes/addressof ts) nil 0)]
+      (if (zero? r)
+        :ok
+        (case (ctypes/get-errno) 11 :not-equal 110 :timed-out :ok))))
+  (-notify-i32! [_ off n] (syscall 202 (+ base off) 1 (int n) nil nil 0))
+  (-supports-watch? [_] true)
+  (-read-bytes [_ off len] (array/array "b" (ctypes/string-at (+ base off) len)))
+  (-write-bytes! [_ off src]
+    (ctypes/memmove (+ base off) (python/bytes src) (alength src))
+    nil)
+  mem/ISyncableRegion
+  ;; The mapping's own flush (msync under CPython's mmap). A heap
+  ;; region (owner's first is its bytearray) has nothing to force.
+  ;; Before this, mem/sync-region! answered nil for every basilisp
+  ;; region, so the journal flush's slab sweep and the recovery root
+  ;; force were silent no-ops on this host.
+  (-sync! [_]
+    (when (python/isinstance (first owner) mmap/mmap)
+      (.flush (first owner)))
+    nil)
+  (-sync-range! [_ off len]
+    (when (python/isinstance (first owner) mmap/mmap)
+      (let [page mmap/PAGESIZE
+            a    (- off (mod off page))]
+        (.flush (first owner) a (+ (- off a) len))))
+    nil))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed MAP_SHARED region of size-bytes at
+   path-str. The file grows to size-bytes when it is shorter and is never
+   truncated."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes opts]
+   (when (:lustre? opts)
+     (throw (python/NotImplementedError "eve on basilisp: no lustre regions")))
+   (let [fd (os/open path-str (bit-or os/O-RDWR os/O-CREAT) 420)
+         _ (when (< (.-st-size (os/fstat fd)) size-bytes) (os/ftruncate fd size-bytes))
+         mm (mmap/mmap fd size-bytes ** :flags mmap/MAP-SHARED :prot (bit-or mmap/PROT-READ mmap/PROT-WRITE))
+         keep (.from-buffer ctypes/c-char mm)]
+     (os/close fd)
+     (LpyRegion. (ctypes/addressof keep) size-bytes [mm keep]))))
+
+(defn make-heap-region
+  "An IMemRegion over a zero-initialized buffer of size-bytes, shared by
+   the process's threads."
+  [size-bytes]
+  (let [b (python/bytearray size-bytes)
+        keep (.from-buffer ctypes/c-char b)]
+    (LpyRegion. (ctypes/addressof keep) size-bytes [b keep])))
+
+(defn lustre-region?
+  "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
+  [_r]
+  false)

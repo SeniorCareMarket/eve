@@ -1,0 +1,15 @@
+# run f-node-mem on 0eecd8630 eve tree 8273dc9ad5fde4345ab21c8066edbef25ffc15c8
+# cmd (in eve/) node target/eve-test/all.js mem
+# start 2026-10-21 11:08:02 PM ET load 1.56 1.80 2.64 mem-in-use 1024 MB
+=== Eve Test Runner ===
+Suite: mem
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.mem-test
+
+Ran 9 tests containing 35 assertions.
+0 failures, 0 errors.
+# end 2026-10-21 11:08:04 PM ET exit 0 wall 2s peak-mem-in-use 1093 MB peak-process-tree-rss 28 MB load 1.56 1.80 2.64

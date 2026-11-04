@@ -1,0 +1,15 @@
+# run f-node-epoch-gc on ee9c65f32 eve tree 90774ad3019163e8675a0485ffe3fd15391903cc
+# cmd (in eve/) node target/eve-test/all.js epoch-gc
+# start 2026-10-21 11:07:26 PM ET load 1.72 1.86 2.69 mem-in-use 1101 MB
+=== Eve Test Runner ===
+Suite: epoch-gc
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.epoch-gc-test
+
+Ran 16 tests containing 44 assertions.
+0 failures, 0 errors.
+# end 2026-10-21 11:07:28 PM ET exit 0 wall 2s peak-mem-in-use 1101 MB peak-process-tree-rss 26 MB load 1.72 1.86 2.69

@@ -1,0 +1,345 @@
+(ns eve.encoding
+  "eve's encoding primitives (HOST-CONTRACT §3-4) over Go's (glojure): UTF-8, IEEE-754 bits, the host's numbers,
+   instants, uuids, exceptions, map entries, small caches, typed arrays — and the network atom's (a string's UTF-16
+   units, the string of code points; eve/doc/network-atoms/ADAPTERS.md §2). What would be a byte-at-a-time loop in
+   glj is eve's Go package compiled into glj-eve (eve/impls/glojure/host). glojure's byte array is []int8 (a byte reads
+   back signed, as on the JVM), its int array []int, its double array []float64."
+  (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                            long class double bytes])
+  (:require [clojure.string]
+            [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                              long class double bytes]]))
+
+(defn throw-index-out-of-bounds
+  "Throw an index-out-of-bounds error."
+  [msg]
+  (throw (github.com:glojurelang:glojure:pkg:lang.NewIndexOutOfBoundsError)))
+
+(defn throw-unsupported
+  "Throw an unsupported-operation error."
+  []
+  (throw (UnsupportedOperationException. "unsupported")))
+
+(defn unsupported
+  "The host's unsupported-operation exception, with message msg."
+  [msg]
+  (UnsupportedOperationException. msg))
+
+(defn map-entry
+  "A map entry [k v] (what seq on a map answers), on every host."
+  [k v]
+  (github.com:glojurelang:glojure:pkg:lang.NewMapEntry k v))
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff."
+  [src soff dst doff len]
+  (eveglj:host.ArrayCopy src soff dst doff len))
+
+(defn copy-of-range
+  "A new byte array of b's bytes [from, to)."
+  [b from to]
+  (let [n (- to from) out (clojure.core/byte-array n)]
+    (arraycopy b from out 0 n)
+    out))
+
+(defn utf8-bytes
+  "The UTF-8 bytes of string s."
+  [s]
+  (eveglj:host.Utf8Bytes s))
+
+(defn utf8-string
+  "The string len UTF-8 bytes of b encode, from off."
+  [b off len]
+  (eveglj:host.Utf8String b off len))
+
+(defn long-bits->double
+  "The double whose IEEE-754 bits are x."
+  [x]
+  (eveglj:host.LongBitsToDouble x))
+
+(defn double->long-bits
+  "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
+  [d]
+  (eveglj:host.DoubleToLongBits (clojure.core/double d)))
+
+(defn fixed-integer?
+  "An integer of a fixed-width host type — the ones eve's format carries as INT32 or INT64 (Go's int64, int, int32
+   ...). A big integer is not one: the format has no tag for it."
+  [v]
+  (and (int? v) (not (instance? clojure.lang.BigInt v)) (not (instance? java.math.BigInteger v))))
+
+(defn floating?
+  "A floating-point number (FLOAT64)."
+  [v]
+  (float? v))
+
+(defn big-integer?
+  "An integer of an arbitrary-precision type (glojure's BigInt, math/big's Int): eve.codec writes it by its
+   magnitude — INT32 or INT64 when it fits, else BIGINT."
+  [v]
+  (or (instance? clojure.lang.BigInt v) (instance? java.math.BigInteger v)))
+
+(defn integer->twos
+  "Integer n's minimal two's-complement bytes, big-endian, as a vector of 0..255 (by arithmetic: floor mod and exact
+   quotient)."
+  [n]
+  (loop [x n acc ()]
+    (let [b (clojure.core/long (mod x 256))
+          x (quot (-' x b) 256)]
+      (if (or (and (zero? x) (< b 128)) (and (= -1 x) (>= b 128)))
+        (vec (cons b acc))
+        (recur x (cons b acc))))))
+
+(defn twos->integer
+  "The integer whose minimal two's-complement big-endian bytes are bs (0..255 each): a BigInt where it needs one."
+  [bs]
+  (let [u (reduce (fn [acc b] (+' (*' acc 256) b)) 0N bs)]
+    (bigint (if (and (seq bs) (>= (first bs) 128))
+              (-' u (reduce *' 1N (repeat (count bs) 256)))
+              u))))
+
+(defn ratio? "A ratio (RATIO)." [v] (instance? clojure.lang.Ratio v))
+
+(defn ratio-parts
+  "[numerator denominator] of a ratio: lowest terms, the denominator positive."
+  [r]
+  [(numerator r) (denominator r)])
+
+(defn make-ratio "The ratio n/d (n, d integers in lowest terms, d > 1)." [n d] (/ (bigint n) (bigint d)))
+
+(defn bigdec? "An arbitrary-precision decimal (BIGDEC)." [v] (instance? java.math.BigDecimal v))
+
+(defn bigdec-parts
+  "[unscaled scale] of decimal d in its canonical form: trailing zeros stripped down to scale 0 (so (= 1.5M 1.50M)
+   has one form), never a negative scale — read from its text (glojure's decimal is a big.Float with the text it was
+   made from, 1E+2 or 1.50 as written)."
+  [d]
+  (let [[_ sign ip fp ex] (re-matches #"([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?" (str d))
+        fp (or fp "")
+        scale (- (count fp) (if ex (parse-long (clojure.string/replace ex "+" "")) 0))
+        u (bigint (str (if (= sign "-") "-" "") (if (= "" (str ip fp)) "0" (str ip fp))))]
+    (loop [u u scale scale]
+      (cond (neg? scale) [(*' u (reduce *' 1N (repeat (- scale) 10))) 0]
+            (and (pos? scale) (zero? (mod u 10))) (recur (quot u 10) (dec scale))
+            :else [u scale]))))
+
+(defn make-bigdec
+  "The decimal unscaled × 10^-scale."
+  [unscaled scale]
+  (let [u (bigint unscaled) neg (neg? u) digits (str (if neg (-' u) u))
+        k (clojure.core/long scale)
+        digits (if (<= (count digits) k) (str (apply str (repeat (- (inc k) (count digits)) "0")) digits) digits)
+        ip (subs digits 0 (- (count digits) k)) fp (subs digits (- (count digits) k))]
+    (bigdec (str (if neg "-" "") ip (when (pos? k) (str "." fp))))))
+
+(defn date?
+  "The host's instant type, the one eve's DATE tag reads back as (glojure's java.util.Date, which #inst reads; its
+   inst? answers nil for one, v0.7.22)."
+  [v]
+  (instance? java.util.Date v))
+
+(defn date-ms
+  "Milliseconds since the Unix epoch of a date."
+  [d]
+  (inst-ms d))
+
+(defn ms->date
+  "The host's instant at ms milliseconds since the Unix epoch (UTC)."
+  [ms]
+  (java.util.Date. (clojure.core/long ms)))
+
+(defn uuid->bytes!
+  "Write uuid u's 16 bytes, big-endian (network order), into b at off."
+  [u b off]
+  (let [hex (clojure.string/replace (str u) "-" "")]
+    (dotimes [i 16]
+      (aset b (+ off i) (unchecked-byte (Long/parseLong (subs hex (* 2 i) (+ 2 (* 2 i))) 16))))))
+
+(defn bytes->uuid
+  "The uuid whose 16 big-endian bytes are at off in b (java.util.UUID., the type #uuid reads as)."
+  [b off]
+  (let [word (fn [o] (loop [i 0 x 0]
+                       (if (< i 8)
+                         (recur (inc i) (bit-or (bit-shift-left x 8) (bit-and (clojure.core/long (aget b (+ o i))) 0xFF)))
+                         x)))]
+    (java.util.UUID. (word off) (word (+ off 8)))))
+
+(defn utf16-units
+  "The UTF-16 code units of string s, as integers (a Go string is UTF-8 and its seq is runes: one past U+FFFF is two
+   units, a surrogate pair)."
+  [s]
+  (vec (mapcat (fn [r]
+                 (let [cp (int r)]
+                   (if (< cp 0x10000)
+                     [cp]
+                     (let [v (- cp 0x10000)]
+                       [(+ 0xD800 (bit-shift-right v 10)) (+ 0xDC00 (bit-and v 0x3FF))]))))
+               (seq s))))
+
+(defn host-char?
+  "A character of the host's own char type (glojure's char is a rune)."
+  [v]
+  (char? v))
+
+(defn host-array?
+  "A host array (a Go slice: glojure's arrays are slices)."
+  [v]
+  (eveglj:host.IsArray v))
+
+(defn new-cache
+  "A concurrent map for small caches (cache-get / cache-put!): an atom of a map."
+  []
+  (clojure.core/atom {}))
+
+(defn cache-get [c k]
+  (get @c k))
+
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (swap! c (fn [m] (assoc (if (> (count m) max) {} m) k v)))
+  v)
+
+(defn bytes=
+  "Two byte arrays equal, byte for byte."
+  [a b]
+  (eveglj:host.BytesEqual a b))
+
+(defn illegal-argument
+  "The host's illegal-argument exception, with message msg."
+  [msg]
+  (IllegalArgumentException. msg))
+
+(defn index-out-of-bounds
+  "The host's index-out-of-bounds exception (glojure's carries no message)."
+  [_msg]
+  (github.com:glojurelang:glojure:pkg:lang.NewIndexOutOfBoundsError))
+
+(defn read-f32-le
+  "The float32 at byte off of b (little-endian), as a double."
+  [b off]
+  (eveglj:host.ReadF32LE b off))
+
+(defn read-f64-le
+  "The float64 at byte off of b (little-endian)."
+  [b off]
+  (eveglj:host.ReadF64LE b off))
+
+(defn f32-le-bytes
+  "The 4 little-endian bytes of v as a float32."
+  [v]
+  (eveglj:host.F32LEBytes (clojure.core/double v)))
+
+(defn f64-le-bytes
+  "The 8 little-endian bytes of v as a float64."
+  [v]
+  (eveglj:host.F64LEBytes (clojure.core/double v)))
+
+(defn make-bytes
+  "n zeroed bytes (the host's byte array, as eve's codec holds bytes)."
+  [n]
+  (clojure.core/byte-array n))
+
+(defn bytes-of
+  "The bytes xs (each 0..255, or its signed byte), as a byte array."
+  [xs]
+  (clojure.core/byte-array (map (fn [x] (unchecked-byte x)) xs)))
+
+(defn bytes-copy
+  "A copy of byte array b, in b's own representation."
+  [b]
+  (clojure.core/aclone b))
+
+(defn map-hash-code
+  "The host's object hash of a map m (java.util.Map's: the sum of each entry's key hash xor value hash, as an int)."
+  [m]
+  (reduce (fn [h [k v]] (unchecked-int (+ h (bit-xor (hash k) (hash v))))) 0 m))
+
+(defn write!
+  "Write s (str of it) to the host's writer w: what a printer writes to."
+  [w s]
+  (github.com:glojurelang:glojure:pkg:lang.WriteWriter w (str s)))
+
+(defn f64s-le
+  "The n float64s little-endian in b from byte off, as the host's double array."
+  [b off n]
+  (eveglj:host.F64sLE b off n))
+
+(defn i32s-le
+  "The n int32s little-endian in b from byte off, as the host's int array."
+  [b off n]
+  (eveglj:host.I32sLE b off n))
+
+(defn f64s->bytes-le
+  "The little-endian bytes of the doubles in da (the host's double array), 8 each."
+  [da]
+  (eveglj:host.F64sToBytesLE da))
+
+(defn i32s->bytes-le
+  "The little-endian bytes of the ints in ia (the host's int array), 4 each."
+  [ia]
+  (eveglj:host.I32sToBytesLE ia))
+
+(defn array-subtype+bytes
+  "[subtype little-endian-bytes] of a host typed array — eve.array's subtype codes: int8 2, int16 4, int32 6, float32
+   8, float64 9 — nil for any other value."
+  [a]
+  (cond
+    (instance? (class (clojure.core/int-array 0)) a) [6 (eveglj:host.I32sToBytesLE a)]
+    (instance? (class (clojure.core/double-array 0)) a) [9 (eveglj:host.F64sToBytesLE a)]
+    (instance? (class (clojure.core/float-array 0)) a) [8 (eveglj:host.F32sToBytesLE a)]
+    (instance? (class (clojure.core/short-array 0)) a) [4 (eveglj:host.I16sToBytesLE a)]
+    (instance? (class (clojure.core/byte-array 0)) a) [2 a]
+    :else nil))
+
+;; The host's own typed arrays, which a fresh eve array is on a host that has them (eve.array's heap arrays):
+;; glojure's arrays
+
+(defn typed-array
+  "n zeroed elements of eve.array subtype code as the host's typed array: a byte array for the 8-bit subtypes, a short
+   array for the 16-bit, an int array for the 32-bit integers, a float array, a double array."
+  [subtype n]
+  (case (clojure.core/long subtype)
+    (1 2 3) (clojure.core/byte-array n)
+    (4 5)   (clojure.core/short-array n)
+    (6 7)   (clojure.core/int-array n)
+    8       (clojure.core/float-array n)
+    9       (clojure.core/double-array n)))
+
+(defn typed-aget
+  "Element i of typed array a of subtype code, as eve.array reads it (an unsigned subtype's value from its
+   two's-complement bits)."
+  [a subtype i]
+  (case (clojure.core/long subtype)
+    (1 3) (bit-and (clojure.core/long (clojure.core/aget a i)) 0xFF)
+    2     (clojure.core/long (clojure.core/aget a i))
+    4     (clojure.core/long (clojure.core/aget a i))
+    5     (bit-and (clojure.core/long (clojure.core/aget a i)) 0xFFFF)
+    6     (clojure.core/long (clojure.core/aget a i))
+    7     (bit-and (clojure.core/long (clojure.core/aget a i)) 0xFFFFFFFF)
+    8     (clojure.core/double (clojure.core/aget a i))
+    9     (clojure.core/double (clojure.core/aget a i))))
+
+(defn typed-aset!
+  "Write v as element i of typed array a of subtype code (an unsigned value as its two's-complement bits: a :uint8 200
+   is the byte -56). Answers v."
+  [a subtype i v]
+  (case (clojure.core/long subtype)
+    (1 2 3) (clojure.core/aset a i (clojure.core/unchecked-byte (clojure.core/long v)))
+    (4 5)   (clojure.core/aset a i (clojure.core/unchecked-short (clojure.core/long v)))
+    (6 7)   (clojure.core/aset a i (clojure.core/unchecked-int (clojure.core/long v)))
+    8       (clojure.core/aset a i (float (clojure.core/double v)))
+    9       (clojure.core/aset a i (clojure.core/double v)))
+  v)
+
+(defn code-points->string
+  "The string of a sequence of Unicode code points (a glojure char is a rune: one per code point)."
+  [cps]
+  (apply str (map char cps)))
+
+;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
+;; nil on this host (the network atom's subset): the portable implementations answer.
+(def bytes->b64 nil)
+(def b64->bytes nil)
+(def bytes->hex nil)
+(def hex->bytes nil)

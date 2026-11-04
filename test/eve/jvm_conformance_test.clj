@@ -4,7 +4,7 @@
    Clojure counterparts. Mirrors eve.conformance-test (CLJS) for the JVM."
   (:require [clojure.test :refer [deftest is testing]]
             [eve.deftype-proto.alloc :as alloc]
-            [eve.mem :as mem]
+            [eve.codec :as codec]
             [eve.map  :as eve-map]
             [eve.vec  :as eve-vec]
             [eve.set  :as eve-set]
@@ -15,9 +15,8 @@
 ;; ============================================================================
 
 (defmacro with-heap-slab [& body]
-  `(let [ctx# (alloc/make-jvm-heap-slab-ctx {})]
-     (binding [alloc/*jvm-slab-ctx* ctx#]
-       ~@body)))
+  `(let [~'sio (alloc/make-jvm-heap-slab-ctx {})]
+     ~@body))
 
 (defn coll-factory [tag sio off]
   (case (int tag)
@@ -33,23 +32,21 @@
   (reduce conj (eve-set/empty-hash-set) elems))
 
 (defn write-list [sio coll]
-  (let [hdr (eve-list/jvm-write-list! sio (partial mem/value+sio->eve-bytes sio) coll)]
+  (let [hdr (eve-list/jvm-write-list! sio (partial codec/value+sio->eve-bytes sio) coll)]
     (eve-list/jvm-sab-list-from-offset sio hdr)))
 
 (defn write-map
   "Write a Clojure map into slab and read back as EveHashMap with coll-factory.
    Required for nested collection support (maps containing maps/vecs/sets)."
-  [m]
-  (let [sio alloc/*jvm-slab-ctx*
-        hdr (eve-map/jvm-write-map! sio (partial mem/value+sio->eve-bytes sio) m)]
+  [sio m]
+  (let [hdr (eve-map/jvm-write-map! sio (partial codec/value+sio->eve-bytes sio) m)]
     (eve-map/jvm-eve-hash-map-from-offset sio hdr coll-factory)))
 
 (defn write-vec
   "Write a collection into slab and read back as SabVecRoot with coll-factory.
    Required for nested collection support (vecs containing maps/sets)."
-  [coll]
-  (let [sio alloc/*jvm-slab-ctx*
-        hdr (eve-vec/jvm-write-vec! sio (partial mem/value+sio->eve-bytes sio) coll)]
+  [sio coll]
+  (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) coll)]
     (eve-vec/jvm-sabvec-from-offset sio hdr coll-factory)))
 
 ;; ============================================================================
@@ -315,7 +312,7 @@
 (deftest jvm-map-get-in-test
   (with-heap-slab
     (testing "get-in nested"
-      (let [m (write-map {:a {:b 42}})]
+      (let [m (write-map sio {:a {:b 42}})]
         (is (= 42 (get-in m [:a :b])))))
 
     (testing "get-in missing path"
@@ -327,13 +324,13 @@
 (deftest jvm-map-assoc-in-test
   (with-heap-slab
     (testing "assoc-in nested"
-      (let [m (assoc-in (write-map {:a {:b 1}}) [:a :b] 2)]
+      (let [m (assoc-in (write-map sio {:a {:b 1}}) [:a :b] 2)]
         (is (= 2 (get-in m [:a :b])))))))
 
 (deftest jvm-map-update-in-test
   (with-heap-slab
     (testing "update-in nested"
-      (let [m (update-in (write-map {:a {:b 1}}) [:a :b] inc)]
+      (let [m (update-in (write-map sio {:a {:b 1}}) [:a :b] inc)]
         (is (= 2 (get-in m [:a :b])))))))
 
 (deftest jvm-map-transient-test
@@ -739,7 +736,7 @@
 
 (deftest jvm-list-conj-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "conj adds to front"
         (let [l (conj (write-list sio '()) 42)]
           (is (= 1 (count l)))
@@ -753,7 +750,7 @@
 
 (deftest jvm-list-peek-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "peek returns first"
         (is (= 1 (peek (write-list sio '(1 2 3))))))
 
@@ -762,7 +759,7 @@
 
 (deftest jvm-list-pop-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "pop removes first"
         (let [l (pop (write-list sio '(1 2 3)))]
           (is (= 2 (count l)))
@@ -770,7 +767,7 @@
 
 (deftest jvm-list-count-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "count"
         (is (= 0 (count (write-list sio '()))))
         (is (= 1 (count (write-list sio '(42)))))
@@ -778,7 +775,7 @@
 
 (deftest jvm-list-seq-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "seq of empty list"
         (is (nil? (seq (write-list sio '())))))
 
@@ -789,7 +786,7 @@
 
 (deftest jvm-list-empty-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "empty returns empty list"
         (let [l (write-list sio '(1 2 3))
               e (empty l)]
@@ -797,7 +794,7 @@
 
 (deftest jvm-list-reduce-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "reduce"
         (let [l (write-list sio '(1 2 3 4 5))]
           (is (= 15 (reduce + l)))))
@@ -808,7 +805,7 @@
 
 (deftest jvm-list-equality-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "equal eve lists"
         (is (= (write-list sio '(1 2 3)) (write-list sio '(1 2 3)))))
 
@@ -821,7 +818,7 @@
 
 (deftest jvm-list-key-types-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "string values"
         (let [l (write-list sio '("hello" "world"))]
           (is (= "hello" (first l)))))
@@ -836,7 +833,7 @@
 
 (deftest jvm-list-large-test
   (with-heap-slab
-    (let [sio alloc/*jvm-slab-ctx*]
+    (let []
       (testing "1000-element list"
         (let [l (write-list sio (apply list (range 1000)))]
           (is (= 1000 (count l)))
@@ -849,22 +846,22 @@
 (deftest jvm-nested-map-collections-test
   (with-heap-slab
     (testing "map containing set"
-      (let [m (write-map {:tags #{:a :b}})]
+      (let [m (write-map sio {:tags #{:a :b}})]
         (is (contains? (get m :tags) :a))))
 
     (testing "map of maps"
-      (let [m (write-map {:inner {:deep 42}})]
+      (let [m (write-map sio {:inner {:deep 42}})]
         (is (= 42 (get-in m [:inner :deep])))))))
 
 (deftest jvm-nested-vec-collections-test
   (with-heap-slab
     (testing "map containing vector"
-      (let [m (write-map {:data [1 2 3]})]
+      (let [m (write-map sio {:data [1 2 3]})]
         (is (= 1 (nth (get m :data) 0)))
         (is (= 3 (count (get m :data))))))
 
     (testing "vector containing maps"
-      (let [v (write-vec [{:a 1} {:b 2}])]
+      (let [v (write-vec sio [{:a 1} {:b 2}])]
         (is (= 1 (get (nth v 0) :a)))
         (is (= 2 (get (nth v 1) :b)))))))
 
@@ -908,8 +905,7 @@
         (is (= 4 (count s2)))))
 
     (testing "list persistence"
-      (let [sio alloc/*jvm-slab-ctx*
-            l1 (write-list sio '(1 2 3))
+      (let [            l1 (write-list sio '(1 2 3))
             l2 (conj l1 0)]
         (is (= 3 (count l1)))
         (is (= 4 (count l2)))))))

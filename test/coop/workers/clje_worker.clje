@@ -1,0 +1,36 @@
+;; clje_worker.clje — the clojerl participant of the capstone (coop.mix): eve.atom under clojerl (Clojure on the BEAM;
+;; eve's clojerl regions: an mmap'd file, atomics, futex and fcntl locks through eve's NIF, native/eve_clje_nif.c)
+;; joins the mmap atom eve/main at a base path and takes its turn.
+;;
+;;   clojerl -pz <eve>/src -pz <each of eve's :clje roots in eve/hosts.edn> -pz <eve>/test <eve>/test/coop/workers/clje_worker.clje <mode> <base> [args...]
+;;   (-pz: one code path each; -pa would take the script for one too)
+;;     read     <base>                 the value as EDN
+;;     mix-contend <base> <writer> <n> n × swap! coop.mix/mix-op (the capstone); prints {:ops :ms}
+;;     mix-snapshot <base>             prints coop.mix/snapshot of the value
+;;
+;; swap! is eve.host's: clojerl's own reaches clojerl's atoms only. Not coop.scenario's modes: that file holds ratio
+;; literals, which clojerl's reader refuses (and it reads 1.5M as the float 1.5). Ends with erlang/halt: eve's
+;; heartbeat is a process of its own.
+(require '[eve.atom :as atom] '[eve.host :as h] '[coop.mix :as mix])
+
+(defn- plain [x]
+  (cond (map? x) (into {} (map (fn [[k v]] [(plain k) (plain v)])) x)
+        (set? x) (into #{} (map plain) x)
+        (vector? x) (mapv plain x)
+        (seq? x) (apply list (map plain x))
+        :else x))
+
+(defn- now-ms [] (erlang/system_time :millisecond))
+
+(let [[mode base & more] *command-line-args*
+      d (atom/persistent-atom-domain base)
+      a (atom/lookup-or-create-mmap-atom! d "eve/main" nil)]
+  (case mode
+    "read" (println (pr-str (plain @a)))
+    "mix-contend" (let [w (first more) n (erlang/binary_to_integer (second more)) t0 (now-ms)]
+                    (dotimes [i n] (h/swap! a mix/mix-op w i))
+                    (println (pr-str {:ops n :ms (- (now-ms) t0)})))
+    "mix-snapshot" (println (pr-str (mix/snapshot @a))))
+  (atom/close-atom-domain! d)
+  (flush)
+  (erlang/halt 0))

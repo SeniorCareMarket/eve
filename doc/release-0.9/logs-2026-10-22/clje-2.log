@@ -1,0 +1,391 @@
+# run clje-2 on 867da9ddd eve tree a172c68601decbe4742910e547fca52d255ea506
+# cmd (in eve/) bb test:clje
+# start 2026-10-21 10:27:30 PM ET load 1.00 1.21 1.19 mem-in-use 647 MB
+/home/user/atom.broker/eve/test/eve/eve_bytes_fixture_test.cljc:106:5: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/eve_bytes_fixture_test.cljc:108:5: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+NO_SOURCE_FILE:?:?: WARNING: sorted-set already refers to: #'clojure.core/sorted-set in namespace: eve.deftype.rb-tree-test
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:71:7: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:74:7: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:79:5: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:92:10: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:93:10: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:94:10: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:95:10: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/reference_tag_test.cljc:96:10: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/sorted_coll_test.cljc:129:19: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/keyring_test.cljc:63:3: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/keyring_test.cljc:204:7: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/value_buffer_test.cljc:10:19: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/thread_meta_test.cljc:267:7: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+/home/user/atom.broker/eve/test/eve/thread_meta_test.cljc:268:7: The symbol Exception could not be resolved as a type. If meant to be a binding symbol, start its name with lower case to remove this warning
+
+Testing eve.hamt-util-test
+done #'eve.hamt-util-test/get-index-rows 0ms
+done #'eve.hamt-util-test/mask-hash-reads-the-32-bit-pattern 0ms
+done #'eve.hamt-util-test/popcount32-rows 0ms
+done #'eve.hamt-util-test/node-bit-rows 1ms
+done #'eve.hamt-util-test/last-level-has-two-bits 0ms
+
+Testing eve.eve-bytes-fixture-test
+eve-bytes fixtures on clje: 52 rows, 19 skipped
+done #'eve.eve-bytes-fixture-test/eve-bytes-fixtures 53ms
+done #'eve.eve-bytes-fixture-test/long-symbol-has-no-encoding 1ms
+done #'eve.eve-bytes-fixture-test/key-hash-fixtures 6ms
+
+Testing eve.deftype.type-id-test
+done #'eve.deftype.type-id-test/types-that-share-a-type-id 9ms
+done #'eve.deftype.type-id-test/the-same-ids-on-every-host 0ms
+
+Testing eve.deftype.rb-tree-test
+done #'eve.deftype.rb-tree-test/member-test 3ms
+done #'eve.deftype.rb-tree-test/keyword-values-test 3ms
+done #'eve.deftype.rb-tree-test/empty-tree-test 0ms
+done #'eve.deftype.rb-tree-test/rb-delete-test 356ms
+done #'eve.deftype.rb-tree-test/invariants-reverse-test 43ms
+done #'eve.deftype.rb-tree-test/invariants-medium-test 112ms
+done #'eve.deftype.rb-tree-test/sorted-set-strings-test 2ms
+done #'eve.deftype.rb-tree-test/duplicate-insert-test 1ms
+done #'eve.deftype.rb-tree-test/single-insert-test 1ms
+done #'eve.deftype.rb-tree-test/sorted-set-print-test 1ms
+done #'eve.deftype.rb-tree-test/sorted-set-disj-test 13ms
+done #'eve.deftype.rb-tree-test/sorted-set-equality-test 2ms
+done #'eve.deftype.rb-tree-test/black-height-test 48ms
+done #'eve.deftype.rb-tree-test/two-insert-test 1ms
+done #'eve.deftype.rb-tree-test/sorted-set-lookup-test 1ms
+done #'eve.deftype.rb-tree-test/find-test 1ms
+done #'eve.deftype.rb-tree-test/height-bound-test 118ms
+done #'eve.deftype.rb-tree-test/sorted-set-keywords-test 3ms
+done #'eve.deftype.rb-tree-test/three-insert-test 1ms
+done #'eve.deftype.rb-tree-test/string-values-test 2ms
+done #'eve.deftype.rb-tree-test/sorted-set-empty-test 0ms
+done #'eve.deftype.rb-tree-test/sorted-set-meta-test 1ms
+done #'eve.deftype.rb-tree-test/sorted-set-in-an-atom-test 8ms
+done #'eve.deftype.rb-tree-test/invariants-small-test 8ms
+done #'eve.deftype.rb-tree-test/sorted-set-construction-test 3ms
+done #'eve.deftype.rb-tree-test/sorted-set-conj-test 1ms
+done #'eve.deftype.rb-tree-test/sorted-seq-test 5ms
+done #'eve.deftype.rb-tree-test/print-test 0ms
+
+Testing eve.numeric-tags-test
+
+Testing eve.collection-hash-test
+done #'eve.collection-hash-test/an-eve-collection-hashes-as-the-host-value 4ms
+done #'eve.collection-hash-test/a-map-built-by-its-constructors-holds-its-entries 0ms
+
+Testing eve.reference-tag-test
+done #'eve.reference-tag-test/a-foreign-or-unknown-reference-is-refused 4ms
+done #'eve.reference-tag-test/an-mmap-domain-refuses-a-reference 4ms
+done #'eve.reference-tag-test/a-closure-reads-back-by-identity 20ms
+done #'eve.reference-tag-test/the-wire-refuses-a-reference 0ms
+done #'eve.reference-tag-test/other-reference-values 32ms
+
+Testing eve.big-value-test
+done #'eve.big-value-test/a-node-past-64-kb-of-values 31ms
+done #'eve.big-value-test/a-value-out-of-line 6ms
+
+Testing eve.sorted-coll-test
+done #'eve.sorted-coll-test/rank-and-nth 34ms
+done #'eve.sorted-coll-test/default-sorted-map-dissoc-and-replace 28ms
+done #'eve.sorted-coll-test/subseq-and-rsubseq 17ms
+done #'eve.sorted-coll-test/default-sorted-set-conj-disj 12ms
+done #'eve.sorted-coll-test/comparator-sorted-map-and-set-order 10ms
+done #'eve.sorted-coll-test/metadata-and-empty-keep-the-comparator 6ms
+done #'eve.sorted-coll-test/equal-to-clojure-s-own 3ms
+done #'eve.sorted-coll-test/transients-round-trip-order-and-contents 51ms
+done #'eve.sorted-coll-test/one-canonical-tree 152ms
+done #'eve.sorted-coll-test/a-larger-map-stays-ordered-through-churn 788ms
+done #'eve.sorted-coll-test/default-sorted-map-orders-and-answers 14ms
+done #'eve.sorted-coll-test/mixed-keys 6ms
+
+Testing eve.keyring-test
+done #'eve.keyring-test/the-epoch-key-ring 1ms
+done #'eve.keyring-test/a-key-not-stored-is-not-in-the-ring 7ms
+done #'eve.keyring-test/the-record-is-enc-vs-s 0ms
+done #'eve.keyring-test/f9-1-and-2-an-encrypted-domain-writes-closes-and-reads-back 42ms
+done #'eve.keyring-test/the-fixtures 0ms
+done #'eve.keyring-test/f9-4-an-explicit-enable-with-the-program-s-key 8ms
+done #'eve.keyring-test/an-encrypted-domain-is-shared 4ms
+done #'eve.keyring-test/f9-3-the-off-posture-is-plaintext-and-reads-back 4ms
+
+Testing eve.value-buffer-test
+done #'eve.value-buffer-test/a-closure-s-captures 1ms
+done #'eve.value-buffer-test/an-accumulator-grows-in-place-then-by-doubling 3ms
+
+Testing eve.vec-retire-test
+done #'eve.vec-retire-test/swap-shrinks-a-nested-vector-across-levels 168ms
+done #'eve.vec-retire-test/an-int32-field-holds-an-offset-past-2-31 108ms
+done #'eve.vec-retire-test/rebuilt-vectors-of-every-depth 8904ms
+done #'eve.vec-retire-test/conj-pop-assoc-across-boundaries 4058ms
+done #'eve.vec-retire-test/a-fresh-map-or-set-written-keeps-only-its-tree 802ms
+
+Testing eve.reclaim-test
+done #'eve.reclaim-test/a-transient-build-keeps-its-tree 7682ms
+done #'eve.reclaim-test/a-constructor-keeps-only-its-tree 2408ms
+done #'eve.reclaim-test/a-vector-pop-across-a-trie-level-keeps-only-its-vector 1256ms
+done #'eve.reclaim-test/rb-tree-walk-and-writes 1200ms
+done #'eve.reclaim-test/a-transient-from-a-held-value-frees-only-its-own 456ms
+done #'eve.reclaim-test/sorted-walk-and-writes 723ms
+done #'eve.reclaim-test/int-map-walk-and-writes 827ms
+done #'eve.reclaim-test/a-list-walk-aligns-the-chains 19ms
+
+Testing eve.tally-test
+
+ERROR in (a-transient-storing-its-own-value-twice) (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: :function_clause
+
+ at clojerl.Atom/swap (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+    eve.tally-test/a-transient-storing-its-own-value-twice__test (/home/user/atom.broker/eve/test/eve/tally_test.cljc:111)
+    clojure.test/test-var (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:721)
+    clojure.test/-test-vars/1-loop_117/4-6- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:742)
+    clojure.test/-test-vars/1-loop_95/4-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:738)
+    clojure.test/test-ns (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:767)
+    clojure.core/-map/2-anon__333/0-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:2281)
+    clojerl.LazySeq/seq (/opt/eve-tools/clojerl/src/erl/lang/collections/clojerl.LazySeq.erl:145)
+    clojure.core/-seq-reduce/3-loop_1040/2-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:5393)
+    clojure.test/run-tests (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:782)
+    eve.runner.clje-main/-main (/home/user/atom.broker/eve/test/eve/runner/clje_main.clje:32)
+    clojure.main/main-opt (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:374)
+    clojure.main/main (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:463)
+    clojerl_cli/run_commands (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:106)
+    clojerl_cli/start (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:25)
+    init/start_em (NO_SOURCE_FILE:<<"?">>)
+    init/do_boot (NO_SOURCE_FILE:<<"?">>)
+done #'eve.tally-test/a-transient-storing-its-own-value-twice 36ms
+
+ERROR in (a-new-value-stored-twice-in-one-write) (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: :function_clause
+
+ at clojerl.Atom/swap (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+    eve.tally-test/a-new-value-stored-twice-in-one-write__test (/home/user/atom.broker/eve/test/eve/tally_test.cljc:74)
+    clojure.test/test-var (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:721)
+    clojure.test/-test-vars/1-loop_117/4-6- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:742)
+    clojure.test/-test-vars/1-loop_95/4-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:738)
+    clojure.test/test-ns (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:767)
+    clojure.core/-map/2-anon__333/0-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:2281)
+    clojerl.LazySeq/seq (/opt/eve-tools/clojerl/src/erl/lang/collections/clojerl.LazySeq.erl:145)
+    clojure.core/-seq-reduce/3-loop_1040/2-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:5393)
+    clojure.test/run-tests (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:782)
+    eve.runner.clje-main/-main (/home/user/atom.broker/eve/test/eve/runner/clje_main.clje:32)
+    clojure.main/main-opt (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:374)
+    clojure.main/main (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:463)
+    clojerl_cli/run_commands (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:106)
+    clojerl_cli/start (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:25)
+    init/start_em (NO_SOURCE_FILE:<<"?">>)
+    init/do_boot (NO_SOURCE_FILE:<<"?">>)
+done #'eve.tally-test/a-new-value-stored-twice-in-one-write 20ms
+done #'eve.tally-test/plain-data-holding-an-eve-value-reports-the-store 14ms
+
+ERROR in (a-piece-of-one-atom-stored-in-another) (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: :function_clause
+
+ at clojerl.Atom/swap (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+    eve.tally-test/a-piece-of-one-atom-stored-in-another__test (/home/user/atom.broker/eve/test/eve/tally_test.cljc:86)
+    clojure.test/test-var (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:721)
+    clojure.test/-test-vars/1-loop_117/4-6- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:742)
+    clojure.test/-test-vars/1-loop_95/4-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:738)
+    clojure.test/test-ns (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:767)
+    clojure.core/-map/2-anon__333/0-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:2281)
+    clojerl.LazySeq/seq (/opt/eve-tools/clojerl/src/erl/lang/collections/clojerl.LazySeq.erl:145)
+    clojure.core/-seq-reduce/3-loop_1040/2-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:5393)
+    clojure.test/run-tests (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:782)
+    eve.runner.clje-main/-main (/home/user/atom.broker/eve/test/eve/runner/clje_main.clje:32)
+    clojure.main/main-opt (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:374)
+    clojure.main/main (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:463)
+    clojerl_cli/run_commands (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:106)
+    clojerl_cli/start (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:25)
+    init/start_em (NO_SOURCE_FILE:<<"?">>)
+    init/do_boot (NO_SOURCE_FILE:<<"?">>)
+done #'eve.tally-test/a-piece-of-one-atom-stored-in-another 17ms
+
+ERROR in (a-value-at-two-keys) (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: :function_clause
+
+ at clojerl.Atom/swap (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+    eve.tally-test/a-value-at-two-keys__test (/home/user/atom.broker/eve/test/eve/tally_test.cljc:45)
+    clojure.test/test-var (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:721)
+    clojure.test/-test-vars/1-loop_117/4-6- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:742)
+    clojure.test/-test-vars/1-loop_95/4-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:738)
+    clojure.test/test-ns (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:767)
+    clojure.core/-map/2-anon__333/0-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:2281)
+    clojerl.LazySeq/seq (/opt/eve-tools/clojerl/src/erl/lang/collections/clojerl.LazySeq.erl:145)
+    clojure.core/-seq-reduce/3-loop_1040/2-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:5393)
+    clojure.test/run-tests (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:782)
+    eve.runner.clje-main/-main (/home/user/atom.broker/eve/test/eve/runner/clje_main.clje:32)
+    clojure.main/main-opt (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:374)
+    clojure.main/main (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:463)
+    clojerl_cli/run_commands (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:106)
+    clojerl_cli/start (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:25)
+    init/start_em (NO_SOURCE_FILE:<<"?">>)
+    init/do_boot (NO_SOURCE_FILE:<<"?">>)
+done #'eve.tally-test/a-value-at-two-keys 14ms
+
+ERROR in (a-value-made-from-another-and-stored-beside-it) (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: :function_clause
+
+ at clojerl.Atom/swap (/opt/eve-tools/clojerl/src/erl/lang/clojerl.Atom.erl:62)
+    eve.tally-test/a-value-made-from-another-and-stored-beside-it__test (/home/user/atom.broker/eve/test/eve/tally_test.cljc:56)
+    clojure.test/test-var (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:721)
+    clojure.test/-test-vars/1-loop_117/4-6- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:742)
+    clojure.test/-test-vars/1-loop_95/4-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:738)
+    clojure.test/test-ns (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:767)
+    clojure.core/-map/2-anon__333/0-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:2281)
+    clojerl.LazySeq/seq (/opt/eve-tools/clojerl/src/erl/lang/collections/clojerl.LazySeq.erl:145)
+    clojure.core/-seq-reduce/3-loop_1040/2-0- (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/core.clje:5393)
+    clojure.test/run-tests (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/test.clje:782)
+    eve.runner.clje-main/-main (/home/user/atom.broker/eve/test/eve/runner/clje_main.clje:32)
+    clojure.main/main-opt (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:374)
+    clojure.main/main (/opt/eve-tools/clojerl/_build/default/lib/clojerl/src/clj/clojure/main.clje:463)
+    clojerl_cli/run_commands (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:106)
+    clojerl_cli/start (/opt/eve-tools/clojerl/src/erl/clojerl_cli.erl:25)
+    init/start_em (NO_SOURCE_FILE:<<"?">>)
+    init/do_boot (NO_SOURCE_FILE:<<"?">>)
+done #'eve.tally-test/a-value-made-from-another-and-stored-beside-it 30ms
+
+Testing eve.domain-open-test
+done #'eve.domain-open-test/a-reopened-domain-joins-what-it-wrote 6ms
+done #'eve.domain-open-test/one-process-creates-the-file 1ms
+
+Testing eve.deftype.int-map-test
+done #'eve.deftype.int-map-test/overwrite-test 0ms
+done #'eve.deftype.int-map-test/into-test 1ms
+done #'eve.deftype.int-map-test/kv-reduce-test 1ms
+done #'eve.deftype.int-map-test/seq-test 1ms
+done #'eve.deftype.int-map-test/ifn-test 0ms
+done #'eve.deftype.int-map-test/update-test 0ms
+done #'eve.deftype.int-map-test/conj-test 2ms
+done #'eve.deftype.int-map-test/negative-keys-test 2ms
+done #'eve.deftype.int-map-test/multiple-assoc-test 1ms
+done #'eve.deftype.int-map-test/single-assoc-test 0ms
+done #'eve.deftype.int-map-test/bulk-insert-test 28ms
+done #'eve.deftype.int-map-test/dissoc-to-empty-test 1ms
+done #'eve.deftype.int-map-test/dissoc-test 0ms
+done #'eve.deftype.int-map-test/int-map-in-an-atom-test 30ms
+done #'eve.deftype.int-map-test/equality-test 1ms
+done #'eve.deftype.int-map-test/reduce-test 0ms
+done #'eve.deftype.int-map-test/range-test 2ms
+done #'eve.deftype.int-map-test/bulk-insert-200-test 68ms
+done #'eve.deftype.int-map-test/contains-test 0ms
+done #'eve.deftype.int-map-test/merge-test 1ms
+done #'eve.deftype.int-map-test/merge-with-test 1ms
+done #'eve.deftype.int-map-test/meta-test 1ms
+done #'eve.deftype.int-map-test/empty-map-test 0ms
+
+Testing eve.rrb-vector-test
+done #'eve.rrb-vector-test/test-hasheq 221ms
+done #'eve.rrb-vector-test/test-crrbv-20 66225ms
+done #'eve.rrb-vector-test/test-splicing 165283ms
+done #'eve.rrb-vector-test/test-relaxed 22ms
+done #'eve.rrb-vector-test/test-crrbv-21 20179ms
+done #'eve.rrb-vector-test/vector-in-an-atom-test 229ms
+done #'eve.rrb-vector-test/test-seq 3ms
+done #'eve.rrb-vector-test/test-reduce-2 50ms
+done #'eve.rrb-vector-test/test-reduce-3 0ms
+done #'eve.rrb-vector-test/vector-in-eve-memory-test 3ms
+done #'eve.rrb-vector-test/test-crrbv-14 29633ms
+done #'eve.rrb-vector-test/test-crrbv-30 1ms
+done #'eve.rrb-vector-test/test-assoc! 29759ms
+done #'eve.rrb-vector-test/test-crrbv-12 7540ms
+done #'eve.rrb-vector-test/test-reduce 8ms
+done #'eve.rrb-vector-test/test-reduce-subvec-catvec2 33554ms
+done #'eve.rrb-vector-test/test-crrbv-22 42ms
+done #'eve.rrb-vector-test/test-reduce-subvec-catvec 65511ms
+done #'eve.rrb-vector-test/test-assoc 36765ms
+done #'eve.rrb-vector-test/test-splice-high-subtree-branch-count 105ms
+done #'eve.rrb-vector-test/test-slicing 634ms
+done #'eve.rrb-vector-test/test-npe-for-1025-then-pop! 98ms
+
+Testing eve.thread-host-test
+done #'eve.thread-host-test/a-thread-starts-a-thread 4ms
+done #'eve.thread-host-test/a-dead-thread-is-never-silent 4ms
+done #'eve.thread-host-test/a-thread-sends-to-itself 0ms
+done #'eve.thread-host-test/receive-times-out 142ms
+done #'eve.thread-host-test/binding-frames 1ms
+done #'eve.thread-host-test/eval-a-form 1014ms
+done #'eve.thread-host-test/start-n-threads 1ms
+done #'eve.thread-host-test/stop-ends-each-thread 1ms
+done #'eve.thread-host-test/the-contract-answers 0ms
+done #'eve.thread-host-test/attempt-and-error-data 0ms
+done #'eve.thread-host-test/send-and-receive 1ms
+eve.thread-host round trips: :clje ms per 100 (5 batches, sorted): [3 3 3 3 4]
+done #'eve.thread-host-test/round-trips-take-under-a-millisecond 23ms
+done #'eve.thread-host-test/closures-in-messages 1ms
+
+Testing eve.thread-test
+done #'eve.thread-test/a-dead-threads-descriptors-are-adopted 13ms
+done #'eve.thread-test/per-task-pool-runs-tasks-at-once 505ms
+done #'eve.thread-test/descriptor-state-machine 0ms
+eve.thread S1 identity: :clje [[:binding 10] [:binding-task [10 20 30]] [:error [false eve.thread: task failed: boom {:x 7}]] [:future 3] [:future-local 21] [:laziness 7] [:nested 7] [:nested-pool-of-1 6] [:nested-task 112] [:pcalls [1 4]] [:pmap-2colls [11 22 33]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [3 6 9 12]] [:pvalues [3 12 ab]] [:with-pool [:p :q :p]]]
+done #'eve.thread-test/s1-identity-rows 2593ms
+eve.thread round trips: :clje :local ms per 100 futures (median of 5): 33 · the adapter alone, ms per 100: 0 · a host operation, µs: 1 · bar: 100
+done #'eve.thread-test/round-trips 252ms
+done #'eve.thread-test/conveyance-across-the-pool 5ms
+done #'eve.thread-test/the-future-is-an-eve-type 515ms
+done #'eve.thread-test/the-helping-deref-and-blocked-state 709ms
+done #'eve.thread-test/single-pool-fifo 8ms
+done #'eve.thread-test/scheduled-pool-timer 1662ms
+done #'eve.thread-test/default-pools 9ms
+done #'eve.thread-test/executor-protocol 646ms
+done #'eve.thread-test/cached-pool-grows-and-keeps-alive 431ms
+done #'eve.thread-test/fixed-pool-threads 19ms
+
+Testing eve.thread-meta-test
+done #'eve.thread-meta-test/a-slow-runtime-stretches-its-lease 0ms
+done #'eve.thread-meta-test/settled-stays-settled 1ms
+done #'eve.thread-meta-test/leases-at-the-grain-of-the-thread 0ms
+done #'eve.thread-meta-test/a-tasks-form-hash-is-the-same-on-every-host 1ms
+done #'eve.thread-meta-test/election-by-lease 0ms
+done #'eve.thread-meta-test/a-claim-takes-only-what-the-claimer-can-run 1ms
+done #'eve.thread-meta-test/bring-up-in-dependency-order 1ms
+done #'eve.thread-meta-test/claim-is-first-in-first-out-and-batched 3ms
+done #'eve.thread-meta-test/after-and-scopes 0ms
+done #'eve.thread-meta-test/blocked-work-moves-only-as-a-restart-after-its-lease 0ms
+done #'eve.thread-meta-test/descriptor-moves-are-the-tables-only 225ms
+done #'eve.thread-meta-test/pools-in-the-registry 0ms
+done #'eve.thread-meta-test/a-runtime-that-leaves-or-expires 0ms
+done #'eve.thread-meta-test/transports-and-the-upgrade 1ms
+
+Testing eve.thread-domain-test
+done #'eve.thread-domain-test/election-by-lease 2515ms
+done #'eve.thread-domain-test/two-runtimes-one-registry-one-pool 3003ms
+done #'eve.thread-domain-test/cancel-and-shutdown 171ms
+done #'eve.thread-domain-test/a-dead-runtimes-work-is-adopted-on-lease-expiry 2851ms
+done #'eve.thread-domain-test/the-upgrade-from-the-network-rung-to-the-disk 1574ms
+done #'eve.thread-domain-test/the-meta-atom-is-a-second-atom-of-the-domain 28ms
+done #'eve.thread-domain-test/bring-up-is-a-desired-set-claimed-in-dependency-order 1586ms
+
+Testing eve.thread-net-test
+done #'eve.thread-net-test/a-domain-is-placed-in-the-window-by-configuration-only 1100ms
+done #'eve.thread-net-test/a-gateway-serves-the-disk-atom-on-eve-net's-routes 63128ms
+done #'eve.thread-net-test/the-drivers-collect-the-same-results 1677ms
+done #'eve.thread-net-test/doorbells-ring-and-a-futex-wait-wakes 886ms
+done #'eve.thread-net-test/a-domain-pool-over-a-network-atom-at-a-broker 177653ms
+
+Testing eve.thread-fold-test
+done #'eve.thread-fold-test/the-parallel-set-is-corrected 30ms
+done #'eve.thread-fold-test/fold-over-a-pool-in-a-process 2321ms
+done #'eve.thread-fold-test/=>>-equals-->>-on-every-registered-transducer 1159ms
+done #'eve.thread-fold-test/fold-on-a-threadless-or-single-pool 46ms
+done #'eve.thread-fold-test/every-registered-transducer-means-what-clojure-means-here 34ms
+done #'eve.thread-fold-test/=>>-runs-on-the-pool-with-the-bindings-of-the-call 21ms
+done #'eve.thread-fold-test/chunks-are-sized-from-the-measured-swap-cost 1423ms
+
+Testing eve.thread-fold-group-test
+done #'eve.thread-fold-group-test/fold-on-a-group 2959ms
+done #'eve.thread-fold-group-test/=>>-on-a-group 1660ms
+done #'eve.thread-fold-group-test/the-chunks-of-a-group-are-sized-from-its-members-measured-swaps 3493ms
+
+Ran 198 tests containing 4390 assertions.
+0 failures, 5 errors.
+:summary {:error 5, :test 198, :pass 4385, :fail 0}
+Error while executing task: test:clje
+# end 2026-10-21 10:42:10 PM ET exit 1 wall 880s peak-mem-in-use 11788 MB load 1.43 1.24 1.19

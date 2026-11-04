@@ -62,7 +62,9 @@
    v128.load bitmap bytes → v128.not → find first non-zero byte
    via i8x16.bitmask + ctz. Scans 128 bits (128 blocks) per
    SIMD iteration. For a 1MB slab with 64B blocks (16384 blocks),
-   the full bitmap is 2KB = 128 v128 loads worst case.")
+   the full bitmap is 2KB = 128 v128 loads worst case."
+  (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes])
+  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes extend-default]]))
 
 ;;=============================================================================
 ;; Size Classes
@@ -80,9 +82,13 @@
 
 ;; Lookup table: class index → block size
 ;; Index 6 = overflow (legacy SAB): block_size=1 so block_idx * 1 = byte_offset
-(def SLAB_SIZES
-  #?(:clj  [32 64 128 256 512 1024 1]
-     :cljs #js [32 64 128 256 512 1024 1]))
+(def SLAB_SIZES [32 64 128 256 512 1024 1])
+
+(defn slab-size
+  "The block size of slab class class-idx (SLAB_SIZES' entry)."
+  [class-idx]
+  (case (int class-idx)
+    0 32 1 64 2 128 3 256 4 512 5 1024 6 1))
 
 ;; Max block size handled by slab allocator
 ;; Anything larger goes to the overflow (old-style) allocator
@@ -108,18 +114,12 @@
 ;; Class 4 (512B): 256MB =  512K blocks  (less common)
 ;; Class 5 (1024B):256MB =  256K blocks  (least common)
 (def ^:private SLAB_CLASS_CAPACITIES
-  #?(:clj  [(* 1024 1024 1024)        ;; Class 0: 1GB
-             (* 1024 1024 1024)        ;; Class 1: 1GB
-             (* 1024 1024 1024)        ;; Class 2: 1GB
-             (* 512 1024 1024)         ;; Class 3: 512MB
-             (* 256 1024 1024)         ;; Class 4: 256MB
-             (* 256 1024 1024)]        ;; Class 5: 256MB
-     :cljs #js [(* 1024 1024 1024)     ;; Class 0: 1GB
-                (* 1024 1024 1024)     ;; Class 1: 1GB
-                (* 1024 1024 1024)     ;; Class 2: 1GB
-                (* 512 1024 1024)      ;; Class 3: 512MB
-                (* 256 1024 1024)      ;; Class 4: 256MB
-                (* 256 1024 1024)]))   ;; Class 5: 256MB
+  [(* 1024 1024 1024)      ;; Class 0: 1GB
+   (* 1024 1024 1024)      ;; Class 1: 1GB
+   (* 1024 1024 1024)      ;; Class 2: 1GB
+   (* 512 1024 1024)       ;; Class 3: 512MB
+   (* 256 1024 1024)       ;; Class 4: 256MB
+   (* 256 1024 1024)])     ;; Class 5: 256MB
 
 ;; Initial (small) capacities for lazy slab growth.
 ;; Files start at these sizes and grow on demand up to max capacities.
@@ -127,27 +127,20 @@
 ;; Note: bitmap region is sized for max capacity but sparse-file semantics
 ;; mean untouched bitmap pages cost zero physical memory/disk.
 (def ^:private SLAB_CLASS_INITIAL_CAPACITIES
-  #?(:clj  [(* 64 1024)    ;; Class 0 (32B):  64KB = 2K blocks
-             (* 64 1024)    ;; Class 1 (64B):  64KB = 1K blocks
-             (* 32 1024)    ;; Class 2 (128B): 32KB = 256 blocks
-             (* 32 1024)    ;; Class 3 (256B): 32KB = 128 blocks
-             (* 16 1024)    ;; Class 4 (512B): 16KB = 32 blocks
-             (* 16 1024)]   ;; Class 5 (1024B):16KB = 16 blocks
-     :cljs #js [(* 64 1024)    ;; Class 0 (32B):  64KB = 2K blocks
-                (* 64 1024)    ;; Class 1 (64B):  64KB = 1K blocks
-                (* 32 1024)    ;; Class 2 (128B): 32KB = 256 blocks
-                (* 32 1024)    ;; Class 3 (256B): 32KB = 128 blocks
-                (* 16 1024)    ;; Class 4 (512B): 16KB = 32 blocks
-                (* 16 1024)])) ;; Class 5 (1024B):16KB = 16 blocks
+  [(* 64 1024)     ;; Class 0 (32B):  64KB = 2K blocks
+   (* 64 1024)     ;; Class 1 (64B):  64KB = 1K blocks
+   (* 32 1024)     ;; Class 2 (128B): 32KB = 256 blocks
+   (* 32 1024)     ;; Class 3 (256B): 32KB = 128 blocks
+   (* 16 1024)     ;; Class 4 (512B): 16KB = 32 blocks
+   (* 16 1024)])   ;; Class 5 (1024B):16KB = 16 blocks
 
 (defn default-capacity-for-class
   "Get the default (max) capacity for a slab class index."
   [class-idx]
   (let [caps SLAB_CLASS_CAPACITIES
-        len  #?(:clj (count caps) :cljs (.-length caps))]
+        len  (count caps)]
     (if (and (>= class-idx 0) (< class-idx len))
-      #?(:clj  (nth caps class-idx)
-         :cljs (aget caps class-idx))
+      (nth caps class-idx)
       DEFAULT_SLAB_CAPACITY)))
 
 (defn initial-capacity-for-class
@@ -155,10 +148,9 @@
    Files start at this size and grow on demand."
   [class-idx]
   (let [caps SLAB_CLASS_INITIAL_CAPACITIES
-        len  #?(:clj (count caps) :cljs (.-length caps))]
+        len  (count caps)]
     (if (and (>= class-idx 0) (< class-idx len))
-      #?(:clj  (nth caps class-idx)
-         :cljs (aget caps class-idx))
+      (nth caps class-idx)
       (* 64 1024))))
 
 
@@ -197,36 +189,104 @@
                      BITMAP_ALIGNMENT)]
     padded))
 
+;;=============================================================================
+;; Descriptor Table Layout
+;;=============================================================================
+
+;; Every block of a bitmap class has a descriptor: per-field COLUMNS, the same layout discipline as class 6's
+;; coalescing columns and ValueScript's kernel (VS's src/vs/kernel/wasm/alloc.vs; one layout
+;; and one implementation, 2026-10-22; columns since 2026-10-25). A column exists where a
+;; class reads it: eve's bitmap allocator reads and writes a block's COUNT and FLAGS, and eve.digest reads
+;; and stamps its POINTER (the digest-cache side-block pointer, coalesc/DESC_DIGEST_PTR — a collection root
+;; header is a bitmap-class block, so the claim the row form kept at @16 lives here as the third column),
+;; so an eve bitmap class carries those three columns (the kernel's bitmap classes carry STATUS, SIDE and
+;; EPOCH columns beside their own). The columns are block i's management record and never split or merge.
+;; A heap or SAB slab carries them between its bitmap and its data (the columns end where the blocks begin,
+;; as on a kernel page); an mmap slab carries each column in its own file beside the .bm
+;; ({base}.slabN.desc-count / .desc-flags / .desc-pointer), so a class's growth — re-mapping its files
+;; bigger — never moves an entry.
+
+(defn desc-table-byte-size
+  "The descriptor columns' bytes for n blocks in ONE buffer (a heap/SAB slab carries the COUNT, FLAGS
+   and POINTER columns between its bitmap and its data): 12 bytes a block, padded to 16 bytes (the
+   data region after it stays 16-aligned)."
+  [total-blocks]
+  (let [raw (* total-blocks 12)]
+    (* (quot (+ raw (dec BITMAP_ALIGNMENT)) BITMAP_ALIGNMENT) BITMAP_ALIGNMENT)))
+
+(defn desc-column-byte-size
+  "One descriptor column's bytes for n blocks: a flat i32 array, 4 bytes a block. An mmap slab carries
+   each column in its own file ({base}.slabN.desc-count / .desc-flags / .desc-pointer), so growth stays
+   append-only: re-mapping a bigger file never moves an entry."
+  [total-blocks]
+  (* total-blocks 4))
+
+(defn slab-desc-offset
+  "Where a heap or SAB slab's descriptor columns start: right after its bitmap."
+  [bitmap-offset total-blocks]
+  (+ bitmap-offset (bitmap-byte-size total-blocks)))
+
+(defn desc-col-addr
+  "The byte offset of a bitmap descriptor column entry in ONE buffer: the COUNT column starts at
+   desc-offset, the FLAGS column right after it (desc-offset + 4 * total-blocks), the POINTER column
+   after that (desc-offset + 8 * total-blocks); block idx's entry is 4 * idx into its column."
+  [desc-offset total-blocks col idx]
+  (+ desc-offset (* total-blocks 4 col) (* idx 4)))
+
+;; The three columns an eve bitmap class carries, as desc-col-addr's col argument.
+(def ^:const DESC_COL_COUNT 0)
+(def ^:const DESC_COL_FLAGS 1)
+(def ^:const DESC_COL_POINTER 2)
+
 (defn slab-layout
   "Calculate layout for a slab with given block-size and capacity.
-   Returns {:total-bytes :bitmap-offset :bitmap-size :data-offset :total-blocks}.
-   Used for SAB/heap slabs where bitmap and data share one buffer."
+   Returns {:total-bytes :bitmap-offset :bitmap-size :desc-offset :data-offset :total-blocks}.
+   Used for SAB/heap slabs where bitmap, descriptor columns and data share one buffer:
+   [header 64][bitmap][descriptor columns][data]."
   [block-size capacity-bytes]
   (let [total-blocks  (quot capacity-bytes block-size)
         bitmap-offset SLAB_HEADER_SIZE
         bm-size       (bitmap-byte-size total-blocks)
-        data-offset   (+ bitmap-offset bm-size)
+        desc-offset   (+ bitmap-offset bm-size)
+        data-offset   (+ desc-offset (desc-table-byte-size total-blocks))
         total-bytes   (+ data-offset (* total-blocks block-size))]
     {:total-bytes   total-bytes
      :bitmap-offset bitmap-offset
      :bitmap-size   bm-size
+     :desc-offset   desc-offset
      :data-offset   data-offset
      :total-blocks  total-blocks}))
 
 (defn mmap-slab-layout
   "Calculate split-file layout for an mmap slab.
-   Bitmap and data live in separate files so data_offset is always
-   SLAB_HEADER_SIZE. Returns {:data-bytes :bitmap-bytes :total-blocks}."
+   Bitmap, descriptor table and data live in separate files so data_offset is always
+   SLAB_HEADER_SIZE. Returns {:data-bytes :bitmap-bytes :desc-column-bytes :total-blocks}."
   [block-size capacity-bytes]
   (let [total-blocks (quot capacity-bytes block-size)]
     {:data-bytes   (+ SLAB_HEADER_SIZE (* total-blocks block-size))
      :bitmap-bytes (bitmap-byte-size total-blocks)
+     :desc-column-bytes (desc-column-byte-size total-blocks)
      :total-blocks total-blocks}))
 
 (defn slab-bitmap-path
   "Return the bitmap file path for a slab class, e.g. \"/tmp/eve.slab0.bm\"."
   [base-path class-idx]
   (str base-path ".slab" class-idx ".bm"))
+
+(defn slab-desc-count-path
+  "Return the COUNT column file path for a slab class, e.g. \"/tmp/eve.slab0.desc-count\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx ".desc-count"))
+
+(defn slab-desc-flags-path
+  "Return the FLAGS column file path for a slab class, e.g. \"/tmp/eve.slab0.desc-flags\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx ".desc-flags"))
+
+(defn slab-desc-pointer-path
+  "Return the POINTER column file path for a slab class, e.g. \"/tmp/eve.slab0.desc-pointer\"."
+  [base-path class-idx]
+  (str base-path ".slab" class-idx ".desc-pointer"))
 
 (defn slab-data-path
   "Return the data file path for a slab class, e.g. \"/tmp/eve.slab0\"."
@@ -351,6 +411,33 @@
 ;; Header field for atom table capacity (byte 20 in .root header)
 (def ^:const ROOT_ATOM_TABLE_CAPACITY 20)
 
+;; The exclusive-hold protocol (bytes 24 and 28 of the .root header; zero in
+;; every domain written before it, which is how a domain without a lock-only
+;; participant behaves exactly as before). A host with no atomic
+;; read-modify-write on shared memory (babashka: no MethodHandles, so no
+;; VarHandle CAS — measured 2026-10-15) still takes part in the CAS protocol:
+;;   * ROOT_HOLD     i32: 0, or 1 + the worker slot of the lock-only participant
+;;                   whose swap is in progress. That participant serialises
+;;                   against its own kind with a byte-range file lock on this
+;;                   word, then stores the hold, then waits for ROOT_INFLIGHT
+;;                   to reach 0, then runs its whole swap with plain loads and
+;;                   stores (nothing else is writing), then clears the hold.
+;;   * ROOT_INFLIGHT i32: the number of lock-free swaps in progress. A
+;;                   lock-free host adds 1 before its swap and subtracts 1
+;;                   after; if it sees ROOT_HOLD set after adding, it subtracts
+;;                   again and waits for the hold to clear before retrying.
+;; eve/doc/unification/FORMAT-DECISIONS.md names the proof and the one gap
+;; (a participant that does not implement the two words — the wasm host at
+;; the time of writing — races a lock-only participant, never a lock-free one).
+(def ^:const ROOT_HOLD_OFFSET 24)
+(def ^:const ROOT_INFLIGHT_OFFSET 28)
+
+;; Byte 32 of the .root header is reserved (zero). The count-pages tally of the 0.9 line kept its directory in
+;; this word (1 + the slab offset of the directory block, for the domain's life); the descriptor-row count
+;; (eve.tally) keeps every count on the block's own descriptor row and reads no directory, so the word is never
+;; written — a domain whose header carries a nonzero word here simply has it ignored.
+(def ^:const ROOT_SLOT_HINT_OFFSET 36)     ;; FORMAT-DECISIONS §12: the next-free atom slot hint; word 20 is the capacity
+
 (defn atom-slot-offset
   "Byte offset of a field within the atom slot table in the .root file."
   [slot-idx field-offset]
@@ -374,6 +461,15 @@
    type's header block. That one method is sufficient for atom swap! to work."
   (-root-header-off [this]))
 
+(defprotocol IEveSio
+  "The slab I/O a slab-backed value reads through (its domain). nil for a
+   value that is not slab-backed. eve.atom uses it to refuse a value from a
+   foreign domain at the root."
+  (-eve-sio [this]))
+
+(extend-default IEveSio
+  (-eve-sio [_] nil))
+
 (defprotocol IDirectSerialize
   (-direct-serialize [this]))
 
@@ -384,6 +480,17 @@
 
 (defprotocol ISabRetirable
   (-sab-retire-diff! [old-value new-value slab-env mode]))
+
+(defprotocol IRetireDiff
+  "An eve-deftype value that is a tree of eve blocks (an int-map, a sorted
+   collection), walked by its own structure: what it holds that new does not
+   (new nil, or another kind: everything it holds), as [blocks values] —
+   values the [old new] serialized-value blocks among blocks (new -1 where
+   new holds none at that place), for a caller that diffs a value that is a
+   collection. The tree's own walk serves its transients: a transient frees
+   what each of its writes superseded through it. Since 9.31 eve.atom retires
+   every kind through eve.retire, not through this walk."
+  (-retire-diff [old new]))
 
 (defprotocol ISabpType
   (-sabp-type-key [this]))
@@ -396,25 +503,60 @@
 (defprotocol IBackingArray
   "Protocol for Eve array types that expose a raw platform array for slab storage.
    Used by value+sio->eve-bytes to serialize JvmHeapEveArray without circular deps."
-  (-backing-array [this] "Return the underlying platform array (e.g. int[], double[])."))
+  (-backing-array [this] "Return the underlying platform array (e.g. int[], double[]).")
+  (-backing-subtype [this] "The element subtype code (1-9): a byte[] may hold :uint8 or :int8."))
 
-#?(:clj
-   (defprotocol IBulkAccess
-     "Protocol for bulk typed-array access to EveArray data.
-      Returns a primitive Java array for the entire column in one shot,
-      enabling aget/aset loops with zero per-element overhead."
-     (-as-double-array [this] "Return double[] of all elements, or nil if not float64.")
-     (-as-int-array    [this] "Return int[] of all elements, or nil if not int32.")))
+(defprotocol IPlain
+  "Materialize a slab-backed Eve value into plain Clojure data.
+   Implementations must recursively materialize children via eve->clj.
+   Called with the epoch pinned (atom deref pins it for the read)."
+  (-plain [this]))
+
+(defn eve->clj
+  "Recursively materialize an Eve value into plain Clojure data.
+   Portable: works on JVM and (once IPlain is implemented there) CLJS.
+   Scalars and already-plain values pass through unchanged; Eve collections
+   become persistent maps/sets/vectors/lists. Idempotent."
+  [v]
+  (cond
+    (nil? v) nil
+    (or (string? v) (number? v) (boolean? v)
+        (keyword? v) (symbol? v) (char? v)) v
+    (satisfies? IPlain v) (-plain v)
+    (map? v) (into {} (map (fn [[k x]] [(eve->clj k) (eve->clj x)])) v)
+    (set? v) (into #{} (map eve->clj) v)
+    (vector? v) (mapv eve->clj v)
+    (list? v) (apply list (map eve->clj v))
+    (sequential? v) (doall (map eve->clj v))
+    :else v))
+
+(defprotocol IBulkAccess
+  "Bulk typed-array access to EveArray data: the host's primitive array of
+   the whole column in one shot (a JVM double[] or int[]), for aget/aset
+   loops with no per-element overhead. A host whose arrays have none
+   implements nothing."
+  (-as-double-array [this] "The double array of all elements, or nil if not float64.")
+  (-as-int-array    [this] "The int array of all elements, or nil if not int32."))
 
 ;;=============================================================================
 ;; Dynamic Vars
 ;;=============================================================================
 
-(def ^:dynamic *persistent?* true)
+;; *parent-atom* marks the dynamic extent of a swap's f (bound by
+;; eve.atom/swap-attempt! on every host; read by the typed-array codec path,
+;; eve.array has-slab? and the deftype constructor guard). *worker-id* is the
+;; CLJS worker identity of the legacy SAB atom (eve.shared-atom). The former
+;; *persistent?*, *worker-slot-idx* and *read-epoch* had no reader anywhere
+;; and are gone (UNIFICATION-REPORT.md §5).
 (def ^:dynamic *parent-atom* nil)
 (def ^:dynamic *worker-id* nil)
-(def ^:dynamic *worker-slot-idx* nil)
-(def ^:dynamic *read-epoch* nil)
+
+;; *domain-sio* is the slab domain a constructor allocates in while a swap!'s
+;; f runs: the attempt's logging sio over the atom's domain (bound by
+;; eve.atom/swap-attempt!). Outside a swap it is nil and constructors use the
+;; process's own domain — see eve.deftype-proto.alloc/current-sio. Users of
+;; deftype, eve-array, dataset, tensor and the collections never pass an sio.
+(def ^:dynamic *domain-sio* nil)
 
 ;;=============================================================================
 ;; HAMT Node Constants (same as eve.data)
@@ -457,8 +599,6 @@
 (def ^:const DIRECT_MAGIC_0 0xEE)
 (def ^:const DIRECT_MAGIC_1 0xDB)
 (def ^:const DIRECT_MARKER_MAP 0xED)
-(def ^:const DIRECT_MARKER_SET 0xEC)
-
 ;; Linked list constants
 (def ^:const OFFSET_LL_NODE_VALUE 0)
 (def ^:const LL_NODE_NEXT_OFFSET_SIZE_BYTES SIZE_OF_INT32)
@@ -469,3 +609,20 @@
 ;; Max swap retries for CAS loops
 (def ^:const MAX_SWAP_RETRIES 1000)
 
+;; Canonical byte order (eve/doc/unification/FORMAT-DECISIONS.md §2): a flat
+;; set's elements and a flat map's entries are written in ascending order of
+;; their encoded bytes, so two writers encode equal values to equal bytes.
+(defn compare-bytes
+  "Compare two byte sequences (Uint8Array on CLJS, byte[] on the JVM and bb,
+   the host's byte array elsewhere) unsigned and lexicographically, a shorter
+   prefix first. Negative, zero or positive like `compare`."
+  [a b]
+  (let [la (alength ^bytes a)
+        lb (alength ^bytes b)
+        n  (if (< la lb) la lb)]
+    (loop [i 0]
+      (if (< i n)
+        (let [x (bit-and (aget ^bytes a i) 0xFF)
+              y (bit-and (aget ^bytes b i) 0xFF)]
+          (if (== x y) (recur (inc i)) (- x y)))
+        (- la lb)))))

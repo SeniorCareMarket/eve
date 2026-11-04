@@ -1,166 +1,125 @@
 (ns eve.atom
-  "Cross-process persistent atom backed by mmap slab files.
+  "Persistent atoms over slab memory — one implementation for every host.
 
-   B2 architecture: HAMT nodes live in slab files (.slab0–.slab5).
-   The root pointer in .root is a slab-qualified i32 [class:3|block:29].
-   A swap! does O(log n) slab allocations then CASes the root pointer.
+   A domain is a set of slab regions (.slab0–.slab6), a root region (.root:
+   header, 256 worker slots, 256 atom slots) and a reader map (.rmap), either
+   mmap files shared between processes or in-process memory. The root pointer
+   of an atom is a slab-qualified i32 [class:3|block:29]. A swap! allocates the
+   new value's blocks, CASes the root pointer, then retires the old value's
+   blocks behind the epoch its readers pinned.
 
-   No .main file. No block descriptor table. No flat serialization.
-
-   Phase 7: universal root types (any Eve collection, scalar, or nil).
-   Phase 6 extends: epoch GC, cross-process acceptance test."
-  (:refer-clojure :exclude [atom])
-  #?(:bb
-     (:require
-      [eve.deftype-proto.coalesc :as coalesc]
-      [eve.deftype-proto.data :as d]
-      [eve.deftype-proto.alloc :as alloc]
-      [eve.deftype-proto.serialize :as ser]
-      [eve.mem :as mem]
-      [eve.map :as eve-map]
-      [eve.set :as eve-set]
-      [eve.vec :as eve-vec]
-      [eve.list :as eve-list]
-      [eve.perf :as perf])
-     :cljs
-     (:require
-      [eve.deftype-proto.coalesc :as coalesc]
-      [eve.deftype-proto.data :as d]
-      [eve.deftype-proto.alloc :as alloc]
-      [eve.deftype-proto.serialize :as ser]
-      [eve.mem :as mem]
-      [eve.map :as eve-map]
-      [eve.wasm-mem :as wasm-mem]
-      [eve.vec :as eve-vec]
-      [eve.set :as eve-set]
-      [eve.list :as eve-list])
-     :clj
-     (:require
-      [eve.deftype-proto.coalesc :as coalesc]
-      [eve.deftype-proto.data :as d]
-      [eve.deftype-proto.alloc :as alloc]
-      [eve.deftype-proto.serialize :as ser]
-      [eve.mem :as mem]
-      [eve.map :as eve-map]
-      [eve.set :as eve-set]
-      [eve.vec :as eve-vec]
-      [eve.list :as eve-list]
-      [eve.array :as eve-array]
-      [eve.obj :as eve-obj]
-      [eve.perf :as perf])))
-
-#?(:bb nil :clj (import '[eve.map EveHashMap]
-                         '[eve.vec EveVector]
-                         '[eve.set EveHashSet]
-                         '[eve.list EveList]
-                         '[eve.array EveArray]))
+   The host enters only through the seams: IMemRegion (eve.mem) for the root
+   and reader map, ISlabIO (eve.deftype-proto.alloc) for the slabs, IEveRoot /
+   IEveSio (eve.deftype-proto.data) for the values, and the few one-line
+   primitives at the top of this file (the clock, the thread id, a sleep, a
+   timer, the exit hook, the atom interfaces of the host's core). A host whose
+   root region has no atomic read-modify-write (babashka) takes the exclusive
+   hold around each swap (ROOT_HOLD/ROOT_INFLIGHT, eve.deftype-proto.data)."
+  (:refer-clojure :exclude [atom
+                            aget alength long class
+                            volatile! vswap! locking transient persistent! conj! bytes])
+  (:require
+   [eve.host :refer [aget alength long class volatile!
+                     vswap! locking transient persistent! conj! bytes token]]
+   [eve.encoding :as enc]
+   [eve.int32 :as i32]
+   [eve.process :as proc]
+   [eve.journal-file :as jf]
+   [eve.read-region :as rr]
+   [eve.deftype-proto.data :as d]
+   [eve.slab-io :as slab]
+   [eve.deftype-proto.alloc :as alloc]
+   ;; the host's process slab (ClojureScript's module slabs register here)
+   [eve.process-slab]
+   [eve.deftype-proto.serialize :as ser]
+   [eve.region :as region]
+   [eve.mem :as mem]
+   [eve.hamt-util :as hu]
+   [eve.map :as eve-map]
+   [eve.set :as eve-set]
+   [eve.vec :as eve-vec]
+   [eve.list :as eve-list]
+   [eve.retire :as retire]
+   [eve.tally :as tally]
+   [eve.core :as ecore]
+   [eve.deftype :as edt]
+   ;; the array and object types, so their blocks read back in any value
+   [eve.array :as arr]
+   [eve.obj]
+   [eve.deftype-proto.macros]))
 
 ;; ---------------------------------------------------------------------------
-;; B2 constants
+;; Constants
 ;; Root pointer format: alloc/encode-slab-offset [class:3 | block:29]
-;; NOT data/pack-slab-ptr [class:8 | block:24] — that encoding is wrong here.
 ;; ---------------------------------------------------------------------------
 
 (def ^:const ROOT_BYTES d/ROOT_FILE_SIZE_V2) ;; 8320 (V2 multi-atom)
 (def ^:const READER_MAP_BYTES 262144)
 
-;; OBJ-1: Time-throttled retire flush — skip the expensive 256-slot scan
-;; when the last scan was recent enough. Correctness: we only delay freeing,
-;; never free too early. Retire queue grows bounded by threshold.
+;; Time-throttled retire flush — skip the 256-slot scan when the last scan
+;; was recent and the queue is small. Only ever delays a free.
 (def ^:const FLUSH_INTERVAL_MS 50)
 (def ^:const FLUSH_QUEUE_THRESHOLD 64)
 
-;; OBJ-4: CAS retry backoff — jittered exponential backoff on CAS failure.
-;; Reduces thundering herd under contention (8+ writers).
-;; Zero overhead when CAS succeeds on the first attempt.
+;; CAS retry backoff — jittered exponential backoff after the third failure.
 (def ^:const BACKOFF_CAP_MS 8)
 
 (def ^:const DEFAULT_ATOM_SLOT 1) ;; slot 0 = registry, slot 1 = default atom
 (def ^:const CLAIMED_SENTINEL -2) ;; "claimed but no value" slot marker
 
-;; ---------------------------------------------------------------------------
-;; BB materializer registration — nested collections in slab memory.
-;; SAB pointer tags 0x10-0x13 in eve-bytes->value need constructors that
-;; materialize to plain Clojure data (bb can't implement Java interfaces).
-;; ---------------------------------------------------------------------------
-
-#?(:bb
-   (do
-     (ser/register-jvm-type-constructor!
-      0x10 0xED ;; SAB_MAP pointer → HAMT map header
-      (fn [header-off]
-        (let [sio alloc/*jvm-slab-ctx*
-              [_cnt root-off] (eve-map/read-map-header sio header-off)]
-          (eve-map/hamt-kv-reduce sio root-off
-                                  (fn [m k v] (assoc m k v)) {}))))
-     (ser/register-jvm-type-constructor!
-      0x11 0xEE ;; SAB_SET pointer → HAMT set header
-      (fn [header-off]
-        (let [sio alloc/*jvm-slab-ctx*
-              [_cnt root-off] (eve-set/read-set-header sio header-off)]
-          (eve-set/hamt-val-reduce sio root-off
-                                   (fn [s v] (conj s v)) #{}))))
-     (ser/register-jvm-type-constructor!
-      0x12 0x12 ;; SAB_VEC pointer → vec trie header
-      (fn [header-off]
-        (let [sio alloc/*jvm-slab-ctx*
-              [cnt shift root tail _tail-len] (eve-vec/read-vec-header sio header-off)]
-          (loop [i 0 acc (transient [])]
-            (if (>= i cnt)
-              (persistent! acc)
-              (recur (inc i) (conj! acc (eve-vec/nth-impl sio cnt shift root tail i))))))))
-     (ser/register-jvm-type-constructor!
-      0x13 0x13 ;; SAB_LIST pointer → linked list header
-      (fn [header-off]
-        (let [sio alloc/*jvm-slab-ctx*
-              [cnt head-off] (eve-list/read-list-header sio header-off)]
-          (loop [off head-off i 0 acc (transient [])]
-            (if (or (>= i cnt) (== off alloc/NIL_OFFSET))
-              (apply list (persistent! acc))
-              (recur (eve-list/read-node-next sio off)
-                     (inc i)
-                     (conj! acc (eve-list/read-node-value sio off))))))))))
+;; The exclusive hold a joining lock-only participant takes before it has a
+;; slot (its value in ROOT_HOLD); cleared by a waiter after HEARTBEAT_TIMEOUT_MS.
+(def ^:const HOLD_JOINING (inc d/MAX_WORKERS))
 
 ;; ---------------------------------------------------------------------------
-;; Worker slot helpers — operate on mmap root-r, NOT the SAB @root-region
+;; The host's process primitives — the clock, a thread's identity, sleep, a
+;; periodic timer, a hook at exit, files — are eve.process's, an adapter
+;; (eve/adapters/process/, adapters/README.md).
+;; ---------------------------------------------------------------------------
+
+(defn- cas-backoff!
+  "Jittered exponential backoff after a lost CAS. The first three retries are
+   immediate; from the fourth, 1..min(2^(n-3), 8) ms."
+  [attempt]
+  (when (> attempt 3)
+    (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) BACKOFF_CAP_MS)]
+      (proc/sleep-ms! (inc (rand-int max-ms))))))
+
+;; ---------------------------------------------------------------------------
+;; Worker slots — on the root region
 ;; ---------------------------------------------------------------------------
 
 (defn- worker-slot-offset [slot-idx field-offset]
   (+ d/ROOT_WORKER_REGISTRY_START (* slot-idx d/WORKER_SLOT_SIZE) field-offset))
 
 (defn- write-heartbeat!
-  "Write the current time as a 64-bit timestamp split into two i32s."
+  "Write the clock as a 64-bit millisecond timestamp in two i32 words.
+   hi is the quotient by 2^32 (on CLJS `(unsigned-bit-shift-right now 32)` is
+   `now >>> 0`: hi was lo and a Node slot never went stale — round 2, N3)."
   [root-r slot-idx]
-  (let [now #?(:cljs (js/Date.now) :default (System/currentTimeMillis))]
-    (mem/-store-i32! root-r
-                     (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_LO)
-                     #?(:cljs (bit-and now 0xFFFFFFFF)
-                        :default (unchecked-int (bit-and now 0xFFFFFFFF))))
-    (mem/-store-i32! root-r
-                     (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_HI)
-                     #?(:cljs (unsigned-bit-shift-right now 32)
-                        :default (unchecked-int (unsigned-bit-shift-right now 32))))))
+  (let [now (proc/now-ms)
+        hi  (quot now 4294967296)
+        lo  (- now (* hi 4294967296))]
+    (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_LO)
+                     (i32/i32 lo))
+    (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_HI)
+                     (i32/i32 hi))))
 
 (defn- heartbeat-stale?
-  "True if the heartbeat timestamp for slot-idx is older than HEARTBEAT_TIMEOUT_MS."
+  "True if slot-idx's heartbeat is older than HEARTBEAT_TIMEOUT_MS."
   [root-r slot-idx]
   (let [lo (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_LO))
         hi (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_HI))
-        ts #?(:cljs (+ (* (unsigned-bit-shift-right hi 0) 0x100000000)
-                       (unsigned-bit-shift-right lo 0))
-              :default (bit-or (bit-shift-left (bit-and (long hi) 0xFFFFFFFF) 32)
-                               (bit-and (long lo) 0xFFFFFFFF)))
-        now #?(:cljs (js/Date.now) :default (System/currentTimeMillis))]
-    (> (- now ts) d/HEARTBEAT_TIMEOUT_MS)))
+        lo (if (neg? lo) (+ lo 4294967296) lo)
+        ts (+ (* hi 4294967296) lo)]
+    (> (- (proc/now-ms) ts) d/HEARTBEAT_TIMEOUT_MS)))
 
 (defn- mmap-claim-slot!
-  "CAS-scan the worker registry to claim the first INACTIVE slot.
-   If all slots are occupied, does a second pass reclaiming stale ACTIVE slots.
-   Stores ACTIVE and zeroes CURRENT_EPOCH. Returns slot-idx.
-   Throws if all 256 slots are occupied and none are stale."
+  "CAS-scan the worker registry for the first INACTIVE slot; failing that,
+   reclaim a stale ACTIVE one. Stores ACTIVE, zeroes CURRENT_EPOCH, returns
+   the slot index. Throws when all 256 slots are live."
   [root-r]
   (or
-   ;; First pass: look for INACTIVE slots
    (loop [i 0]
      (when (< i d/MAX_WORKERS)
        (let [status-off (worker-slot-offset i d/OFFSET_WS_STATUS)
@@ -168,11 +127,9 @@
                                     d/WORKER_STATUS_INACTIVE
                                     d/WORKER_STATUS_ACTIVE)]
          (if (== witness d/WORKER_STATUS_INACTIVE)
-           (do (mem/-store-i32! root-r
-                                (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
+           (do (mem/-store-i32! root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
                i)
            (recur (inc i))))))
-   ;; Second pass: reclaim stale ACTIVE slots
    (loop [i 0]
      (when (< i d/MAX_WORKERS)
        (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
@@ -181,8 +138,7 @@
            (let [witness (mem/-cas-i32! root-r (worker-slot-offset i d/OFFSET_WS_STATUS)
                                         d/WORKER_STATUS_ACTIVE d/WORKER_STATUS_ACTIVE)]
              (if (== witness d/WORKER_STATUS_ACTIVE)
-               (do (mem/-store-i32! root-r
-                                    (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
+               (do (mem/-store-i32! root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
                    i)
                (recur (inc i))))
            (recur (inc i))))))
@@ -196,19 +152,18 @@
                    d/WORKER_STATUS_INACTIVE))
 
 (defn- mmap-pin-epoch!
-  "Announce this process is reading at epoch. Call BEFORE reading root ptr."
+  "Announce this slot reads at epoch. Before the root pointer is read."
   [root-r slot-idx epoch]
   (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH) epoch))
 
 (defn- mmap-unpin-epoch!
-  "Clear the read-epoch announcement. Call AFTER deref completes (in finally)."
+  "Clear the announcement. After the read, in a finally."
   [root-r slot-idx]
   (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH) 0))
 
 (defn- mmap-min-safe-epoch
-  "Scan the worker registry. Return the minimum CURRENT_EPOCH among all
-   ACTIVE slots that are currently pinned (CURRENT_EPOCH != 0).
-   Returns nil if no slot is pinned — meaning all retired entries are safe."
+  "The minimum CURRENT_EPOCH among live, pinned slots; nil when none is
+   pinned (every retired entry is reclaimable)."
   [root-r]
   (loop [i 0 result nil]
     (if (>= i d/MAX_WORKERS)
@@ -222,1622 +177,1368 @@
           (recur (inc i) result))))))
 
 ;; ---------------------------------------------------------------------------
-;; CLJS domain open/join
+;; The exclusive hold — how a host without atomic RMW takes part
 ;; ---------------------------------------------------------------------------
+;; data.cljc names the two root words. A lock-free host counts each write
+;; (a swap, a slot claim) into ROOT_INFLIGHT and backs off while ROOT_HOLD is
+;; set; a lock-only host (its root region answers false to -atomic-rmw?)
+;; takes a byte-range file lock on the hold word, sets ROOT_HOLD, waits for
+;; ROOT_INFLIGHT to drain, runs its whole write with plain loads and stores,
+;; then clears ROOT_HOLD. Both orders of the Dekker pair are safe: the host
+;; that sees the other's word first yields; a host that saw neither cannot
+;; exist, because each write is fenced before the other's read.
 
-#?(:cljs
-   (do
-     ;; OBJ-4: Tiny SAB used by Atomics.wait for sub-ms CAS backoff sleep.
-     (def ^:private backoff-i32
-       (js/Int32Array. (js/SharedArrayBuffer. 4)))
+(defn- hold-holder-stale?
+  "A hold whose holder's heartbeat is HEARTBEAT_TIMEOUT_MS old, or a joining
+   hold (no slot yet) that a waiter has watched for that long."
+  [root-r hold waited-ms]
+  (if (== hold HOLD_JOINING)
+    (> waited-ms d/HEARTBEAT_TIMEOUT_MS)
+    (heartbeat-stale? root-r (dec hold))))
 
-     (defn- cas-backoff!
-       "Jittered exponential backoff after CAS failure.
-        First 3 failures retry immediately (handles low contention without penalty).
-        Failures 4+ use 1..min(2^(n-3),8) ms Atomics.wait to break thundering herd."
-       [attempt]
-       (when (> attempt 3)
-         (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) BACKOFF_CAP_MS)
-               ms (inc (rand-int max-ms))]
-           (js/Atomics.wait backoff-i32 0 0 ms))))
+(defn- wait-hold-clear!
+  "Spin, then sleep, until ROOT_HOLD is 0; a dead holder's hold is cleared."
+  [root-r]
+  (let [t0 (proc/now-ms)]
+    (loop [i 0]
+      (let [hold (mem/-load-i32 root-r d/ROOT_HOLD_OFFSET)]
+        (when-not (zero? hold)
+          (if (and (> i 1000) (hold-holder-stale? root-r hold (- (proc/now-ms) t0)))
+            (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET hold 0)
+            (do (when (> i 100) (proc/sleep-ms! 1))
+                (recur (inc i)))))))))
 
-     (defn- cljs-open-mmap-domain!
-       "Create and initialise mmap-backed atom domain files.
-        Opens/creates: {base}.slab0–.slab5, {base}.root, {base}.rmap.
-        Writes .root header. Returns domain-state map.
-        NOTE: Replaces the module-level slab instances.
-              A process using the mmap atom cannot simultaneously use
-              the intra-process SAB atom."
-       [base-path & {:keys [capacities] :or {capacities {}}}]
-       ;; Disable alloc-debug-set for mmap atoms (cross-process bitmap CAS is the guard)
-       (set! eve-map/mmap-mode? true)
-       ;; 1. Create/init 6 bitmap slab files (data + bitmap) + 1 coalescing slab
-       ;;    Uses initial (small) capacities by default for lazy growth.
-       (dotimes [i d/NUM_SLAB_CLASSES]
-         (let [cap (get capacities i (d/initial-capacity-for-class i))]
-           (alloc/init-mmap-slab! i (str base-path ".slab" i)
-                                  :capacity cap)))
-       (alloc/init-mmap-coalesc! (str base-path ".slab6"))
-       ;; 2. Open .root and .rmap
-       (let [root-r (mem/open-mmap-region (str base-path ".root") ROOT_BYTES)
-             rmap-r (mem/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES)]
-         ;; 3. Write .root header (V2)
-         (mem/store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
-         (mem/store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0) ;; now: atom slot count
-         (mem/store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
-         (mem/store-i32! root-r d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
-         (mem/store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
-         (mem/store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
-         ;; 4. Init worker slots
-         (dotimes [slot d/MAX_WORKERS]
-           (mem/store-i32! root-r
-                           (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
-                           d/WORKER_STATUS_INACTIVE))
-         ;; 4b. Write atom table header and init all slots
-         (mem/store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
-         (mem/store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
-         (dotimes [s d/MAX_ATOM_SLOTS]
-           (mem/store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET)
-                           alloc/NIL_OFFSET)
-           (mem/store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
-         ;; Init slot 0 (registry atom) — starts with NIL_OFFSET (empty registry)
-         (mem/store-i32! root-r (d/atom-slot-offset 0 d/ATOM_SLOT_PTR_OFFSET)
-                         alloc/NIL_OFFSET)
-         ;; 5. Claim a slot for this process
-         (let [slot-idx (mmap-claim-slot! root-r)]
-           (write-heartbeat! root-r slot-idx)
-           (let [timer-id (js/setInterval #(write-heartbeat! root-r slot-idx) 10000)]
-             (.on js/process "exit"
-                  (fn [_] (mmap-release-slot! root-r slot-idx)))
-             {:root-r root-r :rmap-r rmap-r :base-path base-path
-              :slot-idx slot-idx :timer-id timer-id
-              :retire-q (cljs.core/atom [])
-              :flush-ts (doto (make-array 1) (aset 0 0))}))))
+(defn- inflight-corrupt! [root-r op old]
+  (throw (ex-info "exclusive-hold protocol: ROOT_INFLIGHT count is corrupt"
+                  {:op op :inflight-before old
+                   :hold (mem/-load-i32 root-r d/ROOT_HOLD_OFFSET)})))
 
-     (defn- cljs-join-mmap-domain!
-       "Open existing mmap-backed atom domain files.
-        Opens: {base}.slab0–.slab5, {base}.root, {base}.rmap.
-        NOTE: Replaces the module-level slab instances."
-       [base-path]
-       ;; Disable alloc-debug-set for mmap atoms (cross-process bitmap CAS is the guard)
-       (set! eve-map/mmap-mode? true)
-       (dotimes [i d/NUM_SLAB_CLASSES]
-         (alloc/open-mmap-slab! i (str base-path ".slab" i)))
-       (alloc/open-mmap-coalesc! (str base-path ".slab6"))
-       (let [root-r (mem/open-mmap-region (str base-path ".root") ROOT_BYTES)
-             _ (let [magic (mem/-load-i32 root-r d/ROOT_MAGIC_OFFSET)]
-                 (when (not= magic d/ROOT_MAGIC_V2)
-                   (throw (ex-info "mmap-atom: root file has wrong magic (old format?)"
-                                   {:expected d/ROOT_MAGIC_V2 :actual magic}))))
-             rmap-r (mem/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES)
-             slot-idx (mmap-claim-slot! root-r)]
-         (write-heartbeat! root-r slot-idx)
-         (let [timer-id (js/setInterval #(write-heartbeat! root-r slot-idx) 10000)]
-           (.on js/process "exit"
-                (fn [_] (mmap-release-slot! root-r slot-idx)))
-           {:root-r root-r :rmap-r rmap-r :base-path base-path
-            :slot-idx slot-idx :timer-id timer-id
-            :retire-q (cljs.core/atom [])
-            :flush-ts (doto (make-array 1) (aset 0 0))})))
+(defn- enter-inflight!
+  "Lock-free host: count this write in, yielding to a held domain. The
+   count never goes negative; a negative old value is a corrupt domain and
+   is reported, never spun on."
+  [root-r]
+  (loop []
+    (let [old (mem/-add-i32! root-r d/ROOT_INFLIGHT_OFFSET 1)]
+      (when (neg? old) (inflight-corrupt! root-r :enter old)))
+    (when-not (zero? (mem/-load-i32 root-r d/ROOT_HOLD_OFFSET))
+      (mem/-sub-i32! root-r d/ROOT_INFLIGHT_OFFSET 1)
+      (wait-hold-clear! root-r)
+      (recur))))
 
-     (defn- cljs-open-sab-domain!
-       "Create an in-memory SAB-backed atom domain on CLJS.
-        Uses SharedArrayBuffers for slab backing (same as the existing WASM slab
-        allocator) plus a SAB-backed root region and rmap region.
-        Returns domain-state map compatible with cljs-mmap-deref/cljs-mmap-swap!.
-        NOTE: Replaces the module-level slab instances unless :skip-init true."
-       [& {:keys [capacities skip-init] :or {capacities {} skip-init false}}]
-       ;; 1. Initialize 6 slab classes backed by SABs (via existing init!)
-       ;;    init! calls init-slab! for each class which creates WASM-backed SABs.
-       ;;    If skip-init is true, assume slabs were already initialized by caller.
-       (let [slab-promises (when-not skip-init
-                             (alloc/init! :capacities capacities :force true))]
-         ;; 2. Create root region as SAB-backed JsSabRegion
-         (let [root-sab (js/SharedArrayBuffer. ROOT_BYTES)
-               root-r (mem/js-sab-region root-sab)
-               rmap-sab (js/SharedArrayBuffer. READER_MAP_BYTES)
-               rmap-r (mem/js-sab-region rmap-sab)]
-           ;; 3. Write .root header (V2 format — multi-atom with atom table)
-           (mem/store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
-           (mem/store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0)
-           (mem/store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
-           (mem/store-i32! root-r d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
-           (mem/store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
-           (mem/store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
-           ;; 4. Init worker slots
-           (dotimes [slot d/MAX_WORKERS]
-             (mem/store-i32! root-r
-                             (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
-                             d/WORKER_STATUS_INACTIVE))
-           ;; 4b. Write atom table header and init all slots
-           (mem/store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
-           (mem/store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
-           (dotimes [s d/MAX_ATOM_SLOTS]
-             (mem/store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET)
-                             alloc/NIL_OFFSET)
-             (mem/store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
-           ;; Init slot 0 (registry atom)
-           (mem/store-i32! root-r (d/atom-slot-offset 0 d/ATOM_SLOT_PTR_OFFSET)
-                           alloc/NIL_OFFSET)
-           ;; 5. Claim a worker slot (no heartbeat needed — single process in-memory)
-           (let [slot-idx (mmap-claim-slot! root-r)]
-             (write-heartbeat! root-r slot-idx)
-             {:root-r root-r :rmap-r rmap-r :base-path nil
-              :slot-idx slot-idx :timer-id nil
-              :retire-q (cljs.core/atom [])
-              :flush-ts (doto (make-array 1) (aset 0 0))
-              ;; Keep SABs for transfer to workers
-              :root-sab root-sab :rmap-sab rmap-sab
-              :slab-promises slab-promises}))))
+(defn- leave-inflight! [root-r]
+  (let [old (mem/-sub-i32! root-r d/ROOT_INFLIGHT_OFFSET 1)]
+    (when (< old 1) (inflight-corrupt! root-r :leave old))))
 
-     (defn- cljs-mmap-deref
-       "Read the current atom value from the .root file.
-        Pins epoch before reading root ptr to protect against epoch GC.
-        Returns an Eve type instance (or nil) based on the header type-id byte."
-       [{:keys [root-r slot-idx base-path]} atom-slot-idx]
-       ;; Refresh slab regions in case another process grew them (mmap only)
-       (when base-path (alloc/refresh-mmap-slabs!))
-       (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-         (mmap-pin-epoch! root-r slot-idx epoch)
-         (try
-           (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
-             (when (and (not= ptr alloc/NIL_OFFSET)
-                        (not= ptr CLAIMED_SENTINEL))
-               (let [type-id (alloc/read-header-type-byte ptr)]
-                 (if (== type-id ser/SCALAR_BLOCK_TYPE_ID)
-                   (alloc/read-scalar-block ptr)
-                   (let [ctor (ser/get-header-constructor type-id)]
-                     (if ctor
-                       (ctor nil ptr)
-                       (throw (ex-info "mmap-atom: unknown root value type-id"
-                                       {:type-id type-id :ptr ptr}))))))))
-           (finally
-             (mmap-unpin-epoch! root-r slot-idx)))))
+(defn- with-exclusive-hold*
+  "Lock-only host: run f with the domain held — no other participant writes."
+  [root-r hold-value f]
+  (mem/-with-file-lock root-r d/ROOT_HOLD_OFFSET
+                       (fn []
+      ;; the region's store is fenced: the hold is visible before the wait
+                         (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET hold-value)
+                         (try
+                           (loop [i 0]
+                             (let [n (mem/-load-i32 root-r d/ROOT_INFLIGHT_OFFSET)]
+                               (when (neg? n) (inflight-corrupt! root-r :hold n))
+                               (when-not (zero? n)
+                                 (when (> i 100) (proc/sleep-ms! 1))
+                                 (recur (inc i)))))
+                           (f)
+                           (finally
+                             (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0))))))
 
-     (defn- cljs-try-flush-retires!
-       "Flush retired slab offsets whose epoch is safe to reclaim.
-        OBJ-1: Skip the 256-slot scan when the last scan was recent (< FLUSH_INTERVAL_MS)
-        and the queue is small (< FLUSH_QUEUE_THRESHOLD). This eliminates up to 768
-        N-API crossings per swap in the common case."
-       [root-r retire-q flush-ts]
-       (let [now (js/Date.now)
-             last-t (aget flush-ts 0)
-             q @retire-q
-             q-len (count q)]
-         (when (or (> (- now last-t) FLUSH_INTERVAL_MS)
-                   (> q-len FLUSH_QUEUE_THRESHOLD))
-           (aset flush-ts 0 now)
-           (let [safe-epoch (mmap-min-safe-epoch root-r)
-                 grouped (group-by (fn [{:keys [epoch]}]
-                                     (or (nil? safe-epoch) (< epoch safe-epoch)))
-                                   q)
-                 to-free (get grouped true)
-                 still-live (get grouped false)]
-             (doseq [{:keys [offsets]} to-free]
-               (doseq [off offsets]
-                 (when (not= off alloc/NIL_OFFSET)
-                   (eve-map/untrack-debug-offset! off)
-                   (alloc/free! off))))
-             (reset! retire-q (or still-live []))))))
+(defn- with-root-write*
+  "Run f as a write to the root region: in flight for a lock-free host,
+   under the exclusive hold for a lock-only one."
+  [root-r lock-only? hold-value f]
+  (if lock-only?
+    (with-exclusive-hold* root-r hold-value f)
+    (do (enter-inflight! root-r)
+        (try (f)
+             (finally (leave-inflight! root-r))))))
 
-     (defn- collect-nested-collection-offsets
-       "Given a sio, SAB tag (0x10-0x13, 0x1C), and nested offset, collect ALL slab
-        offsets owned by that nested collection (full tree disposal)."
-       [sio tag nested-off]
-       (case tag
-         0x1C ;; EveArray — single slab block
-         [nested-off]
+(defn- with-held-write*
+  "A lock-free host's exclusive write, taken under the domain's hold: in flight, it takes
+   ROOT_HOLD by CAS, waits until it is the one write in flight — a lock-free write that starts sees the hold and
+   backs off; a lock-only participant stores its hold under its file lock and then waits for the in-flight count to
+   drain, so it waits for this one — runs f, and gives the hold back when it is still its own."
+  [root-r hold-value f]
+  (loop []
+    (enter-inflight! root-r)
+    (if (zero? (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET 0 hold-value))
+      (try
+        (loop [i 0]
+          (let [n (mem/-load-i32 root-r d/ROOT_INFLIGHT_OFFSET)]
+            (when (neg? n) (inflight-corrupt! root-r :hold n))
+            (when (> n 1)
+              (when (> i 100) (proc/sleep-ms! 1))
+              (recur (inc i)))))
+        (f)
+        (finally
+          (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET hold-value 0)
+          (leave-inflight! root-r)))
+      (do (leave-inflight! root-r)
+          (wait-hold-clear! root-r)
+          (recur)))))
 
-         0x10 ;; EveHashMap
-         (let [root-off (alloc/-sio-read-i32 sio nested-off eve-map/SABMAPROOT_ROOT_OFF_OFFSET)
-               tree-offs (eve-map/collect-tree-diff-offsets sio root-off alloc/NIL_OFFSET)
-               ;; Also recursively scan the nested map's nodes for SAB ptrs
-               deeper (mapcat
-                       (fn [node-off]
-                         (mapcat (fn [[t o]] (collect-nested-collection-offsets sio t o))
-                                 (eve-map/scan-node-value-sab-ptrs sio node-off)))
-                       tree-offs)]
-           (into (conj tree-offs nested-off) deeper))
-
-         0x11 ;; EveHashSet — full tree disposal
-         (let [root-off (alloc/-sio-read-i32 sio nested-off eve-set/SABSETROOT_ROOT_OFF_OFFSET)
-               result (volatile! (transient []))]
-           (eve-set/collect-hamt-offsets sio root-off result)
-           (conj (persistent! @result) nested-off))
-
-         0x12 ;; EveVector — full tree disposal
-         (let [root-off (alloc/-sio-read-i32 sio nested-off eve-vec/SABVECROOT_ROOT_OFFSET)
-               tail-off (alloc/-sio-read-i32 sio nested-off eve-vec/SABVECROOT_TAIL_OFFSET)
-               shift-val (alloc/-sio-read-i32 sio nested-off eve-vec/SABVECROOT_SHIFT_OFFSET)
-               result (volatile! (transient [nested-off]))]
-           (eve-vec/collect-trie-offsets sio root-off shift-val result)
-           (when (not= tail-off alloc/NIL_OFFSET)
-             (vswap! result conj! tail-off)
-             (dotimes [i 32]
-               (let [val-off (eve-vec/node-get sio tail-off i)]
-                 (when (not= val-off alloc/NIL_OFFSET)
-                   (vswap! result conj! val-off)))))
-           (persistent! @result))
-
-         0x13 ;; EveList — walk chain
-         (loop [off nested-off result [nested-off]]
-           (if (== off alloc/NIL_OFFSET)
-             result
-             (let [next-off (alloc/-sio-read-i32 sio off 8)]
-               (recur next-off (if (not= next-off alloc/NIL_OFFSET)
-                                 (conj result next-off)
-                                 result)))))
-
-         ;; Unknown tag — just the offset
-         [nested-off]))
-
-     (defn- collect-map-nested-sab-diffs
-       "For a map-to-map transition, find nested SAB pointers in retired nodes
-        that are no longer live in the new tree. Returns additional offsets to free."
-       [sio old-header new-header retired-node-offsets]
-       (let [;; Collect [tag offset] pairs from retired old nodes
-             old-pairs (into [] (mapcat #(eve-map/scan-node-value-sab-ptrs sio %))
-                             retired-node-offsets)
-             ;; Collect SAB pointer offsets still live in the new tree
-             new-root (alloc/-sio-read-i32 sio new-header eve-map/SABMAPROOT_ROOT_OFF_OFFSET)
-             live-nested (eve-map/collect-all-tree-sab-ptrs sio new-root)
-             ;; Orphaned = in old but not in new
-             orphaned (remove (fn [[_tag off]] (contains? live-nested off)) old-pairs)]
-         (into [] (mapcat (fn [[tag nested-off]]
-                            (collect-nested-collection-offsets sio tag nested-off)))
-               orphaned)))
-
-     (defn- collect-old-value-offsets
-       "Collect all slab offsets owned by old-val that should be retired after a
-        successful CAS. Dispatches to type-specific collectors. new-val is used
-        for same-type diff (only retire changed nodes). For type transitions or
-        unknown types, falls back to [old-ptr].
-        Also recursively collects offsets for nested Eve collections in map values."
-       [old-val new-val old-ptr]
-       (cond
-         (instance? eve-map/EveHashMap old-val)
-         (let [base-offsets (eve-map/collect-retire-diff-offsets old-val new-val)
-               sio (.-sio__ ^js old-val)
-               header-off (.-offset__ ^js old-val)
-               ;; Filter to just node offsets (not the header)
-               retired-nodes (filterv #(not= % header-off) base-offsets)]
-           (if (instance? eve-map/EveHashMap new-val)
-             ;; Map-to-map: diff nested SAB pointers
-             (let [new-header (.-offset__ ^js new-val)
-                   nested-offs (collect-map-nested-sab-diffs sio header-off new-header retired-nodes)]
-               (into base-offsets nested-offs))
-             ;; Map-to-other: all nested SAB pointers are orphaned
-             (let [nested-offs (into [] (mapcat (fn [node-off]
-                                                  (mapcat (fn [[tag off]]
-                                                            (collect-nested-collection-offsets sio tag off))
-                                                          (eve-map/scan-node-value-sab-ptrs sio node-off))))
-                                       retired-nodes)]
-               (into base-offsets nested-offs))))
-
-         (instance? eve-vec/EveVector old-val)
-         (eve-vec/collect-retire-diff-offsets old-val new-val)
-
-         (instance? eve-set/EveHashSet old-val)
-         (eve-set/collect-retire-diff-offsets old-val new-val)
-
-         (instance? eve-list/EveList old-val)
-         (eve-list/collect-retire-diff-offsets old-val new-val)
-
-         ;; EveArray and unknown types — just the header block
-         :else [old-ptr]))
-
-     (defn- cljs-resolve-new-ptr
-       "Resolve the slab-qualified offset for a new atom root value.
-        Returns alloc/NIL_OFFSET for nil, header-off for IEveRoot types,
-        converts CLJS native types via builders, or allocates a scalar block."
-       [new-val]
-       (cond
-         (nil? new-val)
-         alloc/NIL_OFFSET
-
-         ;; Already an Eve type in the slab — use its header-off directly
-         (satisfies? d/IEveRoot new-val)
-         (d/-root-header-off new-val)
-
-         ;; CLJS native type (PersistentHashMap, PersistentVector, etc.)
-         ;; — convert via the existing cljs-to-sab-builders registry
-         :else
-         (let [eve-val (ser/convert-to-sab new-val)]
-           (if eve-val
-             (d/-root-header-off eve-val)
-             ;; Not a collection — treat as scalar primitive
-             (alloc/alloc-scalar-block! new-val)))))
-
-     (defn- cljs-mmap-swap!
-       "B2 CAS-loop swap. Accepts any Eve type, CLJS native type, scalar, or nil.
-        On CAS failure, frees the newly-allocated value (safe: not yet published).
-        On CAS success, retires old ptr via epoch GC retire queue.
-        Binds *parent-atom* so nested collection allocation (vec/set/list alloc-node!)
-        passes the atomic-context guard.
-
-        IMPORTANT: epoch is pinned for the ENTIRE swap iteration (read + apply f +
-        CAS) to prevent the JVM from freeing slab blocks that the lazy Eve value
-        still references.  cljs-mmap-deref is NOT used here because it unpins in
-        its finally block, which is too early — applying f to the lazy old-val would
-        access slab data with the epoch unpinned."
-       [{:keys [root-r slot-idx retire-q flush-ts base-path] :as domain-state} atom-slot-idx f args]
-       (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
-         (loop [attempt 0]
-           (when (>= attempt d/MAX_SWAP_RETRIES)
-             (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
-         ;; Refresh slab regions in case another process grew them (mmap only)
-           (when base-path (alloc/refresh-mmap-slabs!))
-         ;; Pin epoch for the entire iteration — protects lazy old-val reads
-           (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-             (mmap-pin-epoch! root-r slot-idx epoch)
-             (let [old-ptr (mem/-load-i32 root-r ptr-off)
-                   old-val (when (and (not= old-ptr alloc/NIL_OFFSET)
-                                      (not= old-ptr CLAIMED_SENTINEL))
-                             (let [type-id (alloc/read-header-type-byte old-ptr)]
-                               (if (== type-id ser/SCALAR_BLOCK_TYPE_ID)
-                                 (alloc/read-scalar-block old-ptr)
-                                 (let [ctor (ser/get-header-constructor type-id)]
-                                   (if ctor
-                                     (ctor nil old-ptr)
-                                     (throw (ex-info "mmap-atom swap!: unknown root type-id"
-                                                     {:type-id type-id :ptr old-ptr})))))))
-                 ;; Bind *parent-atom* so nested collection builders (vec/set/list)
-                 ;; can allocate HAMT nodes in slabs during the user function.
-                   [new-val new-ptr]
-                   (binding [d/*parent-atom* domain-state]
-                     (let [nv (apply f old-val args)]
-                       [nv (cljs-resolve-new-ptr nv)]))
-                   w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
-             ;; Unpin epoch — CAS is done, old tree traversal is complete
-               (mmap-unpin-epoch! root-r slot-idx)
-               (if (== w old-ptr)
-                 (let [new-epoch (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)]
-                   (when (and (not= old-ptr alloc/NIL_OFFSET)
-                              (not= old-ptr CLAIMED_SENTINEL))
-                   ;; Collect offsets to free NOW (both trees are live),
-                   ;; but defer the actual freeing until the epoch is safe.
-                     (let [offsets (collect-old-value-offsets old-val new-val old-ptr)]
-                     ;; Untrack from debug-set immediately so subsequent allocs
-                     ;; don't false-positive when these offsets are re-used
-                       (doseq [off offsets]
-                         (eve-map/untrack-debug-offset! off))
-                       (swap! retire-q conj {:offsets offsets
-                                             :epoch (inc new-epoch)})))
-                   (cljs-try-flush-retires! root-r retire-q flush-ts)
-                   new-val)
-                 (do (when (and (not= new-ptr alloc/NIL_OFFSET)
-                                (not= new-ptr old-ptr))
-                     ;; CAS failed — free the abandoned new value immediately.
-                     ;; The new nodes were never published, so no reader can see them.
-                       (if (satisfies? d/ISabRetirable new-val)
-                         (d/-sab-retire-diff! new-val old-val nil :free)
-                         (alloc/free! new-ptr)))
-                     (cas-backoff! attempt)
-                     (recur (inc attempt)))))))))))
+(defn- with-domain-write
+  "(f exclusive?) as a write to the domain ds: exclusive? when no other participant writes while it runs — a
+   lock-only host's every write, a write that asked for the hold (hold?), and a write this thread makes while it
+   holds the domain (it runs inside that hold)."
+  [{:keys [root-r lock-only? slot-idx holder]} hold? f]
+  (let [tid (proc/thread-id)
+        held (fn [] (reset! holder tid) (try (f true) (finally (reset! holder nil))))]
+    (cond
+      (= @holder tid) (f true)
+      lock-only? (with-exclusive-hold* root-r (inc slot-idx) held)
+      hold? (with-held-write* root-r (inc slot-idx) held)
+      :else (with-root-write* root-r false (inc slot-idx) (fn [] (f false))))))
 
 ;; ---------------------------------------------------------------------------
-;; JVM domain open/join
+;; Domain root initialization
 ;; ---------------------------------------------------------------------------
 
-#?(:cljs nil
-   :default
-   (do
-     (defn- cas-backoff!
-       "Jittered exponential backoff after CAS failure (JVM).
-        First 3 failures retry immediately. Failures 4+ use LockSupport/parkNanos
-        with 100μs..min(2^(n-3),8)ms jitter to break thundering herd."
-       [attempt]
-       (when (> attempt 3)
-         (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) BACKOFF_CAP_MS)]
-           #?(:bb (Thread/sleep (inc (rand-int max-ms)))
-              :clj (let [nanos (* (inc (rand-int (* max-ms 1000))) 1000)]
-                     (java.util.concurrent.locks.LockSupport/parkNanos nanos))))))
-
-     (defn- jvm-open-mmap-domain!
-       "Create and initialise mmap-backed atom domain on JVM.
-        Opens/creates .slab0–.slab5 as JvmMmapRegion, wraps in JvmSlabCtx.
-        Opens .root and .rmap. Writes .root header. Returns domain-state map.
-        Uses initial (small) capacities by default for lazy growth."
-       [base-path & {:keys [capacities] :or {capacities {}}}]
-       (let [slab-paths (mapv #(str base-path ".slab" %) (range d/NUM_SLAB_CLASSES))
-             bm-paths (mapv #(str base-path ".slab" % ".bm") (range d/NUM_SLAB_CLASSES))
-             init-result
-             (mapv (fn [i]
-                     (let [block-size (nth d/SLAB_SIZES i)
-                           init-cap (get capacities i (d/initial-capacity-for-class i))
-                           layout (d/mmap-slab-layout block-size init-cap)
-                           init-blocks (:total-blocks layout)
-                           data-bytes (:data-bytes layout)
-                           bm-bytes (:bitmap-bytes layout)
-                           region (mem/open-mmap-region (nth slab-paths i) data-bytes)
-                           bm-region (mem/open-mmap-region (nth bm-paths i) bm-bytes)]
-                       (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
-                       (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
-                       (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS init-blocks)
-                       (mem/-store-i32! region d/SLAB_HDR_FREE_COUNT init-blocks)
-                       (mem/-store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)
-                       (mem/-store-i32! region d/SLAB_HDR_CLASS_IDX i)
-                       (mem/-store-i32! region d/SLAB_HDR_BITMAP_OFFSET 0)
-                       (mem/-store-i32! region d/SLAB_HDR_DATA_OFFSET d/SLAB_HEADER_SIZE)
-                       {:region region :bm-region bm-region}))
-                   (range d/NUM_SLAB_CLASSES))
-             regions (mapv :region init-result)
-             bm-regions (mapv :bm-region init-result)
-             ;; Class 6: coalescing overflow allocator — lazy growth
-             coalesc-init-sz coalesc/INITIAL_DATA_SIZE
-             coalesc-layout (coalesc/coalesc-layout coalesc-init-sz
-                                                    coalesc/MAX_DESCRIPTORS)
-             coalesc-r (mem/open-mmap-region
-                        (str base-path ".slab6") (:total-bytes coalesc-layout))
-             _ (coalesc/init-coalesc-region! coalesc-r
-                                             coalesc-init-sz
-                                             coalesc/MAX_DESCRIPTORS)
-             regions-7 (conj regions coalesc-r)
-             bm-regions-7 (conj bm-regions nil)
-             paths-7 (conj slab-paths (str base-path ".slab6"))
-             bm-paths-7 (conj bm-paths nil)
-             sio (alloc/make-jvm-slab-ctx regions-7 bm-regions-7
-                                          paths-7 bm-paths-7 nil)
-             root-r (mem/open-mmap-region (str base-path ".root") ROOT_BYTES)
-             rmap-r (mem/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES)]
-         (mem/-store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
-         (mem/-store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0) ;; now: atom slot count
-         (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
-         (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
-         (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
-         ;; Init all worker slots to INACTIVE
-         (dotimes [slot d/MAX_WORKERS]
-           (mem/-store-i32! root-r
-                            (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
-                            d/WORKER_STATUS_INACTIVE))
-         ;; Init atom table header and slots
-         (mem/-store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
-         (mem/-store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0)
-         (dotimes [s d/MAX_ATOM_SLOTS]
-           (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET)
-                            alloc/NIL_OFFSET)
-           (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
-         (mem/-store-i32! root-r (d/atom-slot-offset 0 d/ATOM_SLOT_PTR_OFFSET)
-                          alloc/NIL_OFFSET)
-         (let [slot-idx (mmap-claim-slot! root-r)]
-           (write-heartbeat! root-r slot-idx)
-           #?(:bb
-              {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
-               :slot-idx slot-idx :heartbeat-sched nil
-               :retire-q (java.util.LinkedList.)
-               :tree-logs (java.util.HashMap.)
-               :flush-ts (volatile! 0)
-               :thread-epochs (clojure.core/atom {})
-               :pin-lock (Object.)}
-              :clj
-              (let [sched (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
-                                 (reify java.util.concurrent.ThreadFactory
-                                   (newThread [_ r]
-                                     (doto (Thread. r)
-                                       (.setDaemon true)
-                                       (.setName "eve-heartbeat")))))
-                            (.scheduleAtFixedRate
-                             #(write-heartbeat! root-r slot-idx)
-                             10 10 java.util.concurrent.TimeUnit/SECONDS))]
-                {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
-                 :slot-idx slot-idx :heartbeat-sched sched
-                 :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
-                 :tree-logs (java.util.concurrent.ConcurrentHashMap.)
-                 :flush-ts (volatile! 0)
-                 :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
-                 :pin-lock (Object.)})))))
-
-     (defn- jvm-join-mmap-domain!
-       "Open existing mmap-backed atom domain on JVM."
-       [base-path]
-       (let [slab-paths (mapv #(str base-path ".slab" %) (range d/NUM_SLAB_CLASSES))
-             bm-paths (mapv #(str base-path ".slab" % ".bm") (range d/NUM_SLAB_CLASSES))
-             open-result
-             (mapv (fn [i]
-                     (let [peek-r (mem/open-mmap-region (nth slab-paths i) 64)
-                           total (mem/-load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS)
-                           bs (nth d/SLAB_SIZES i)
-                           data-bytes (+ d/SLAB_HEADER_SIZE (* total bs))
-                           bm-bytes (d/bitmap-byte-size total)]
-                       {:region (mem/open-mmap-region (nth slab-paths i) data-bytes)
-                        :bm-region (mem/open-mmap-region (nth bm-paths i) bm-bytes)}))
-                   (range d/NUM_SLAB_CLASSES))
-             regions (mapv :region open-result)
-             bm-regions (mapv :bm-region open-result)
-             ;; Class 6: coalescing overflow — peek header, open at current size
-             coalesc-peek (mem/open-mmap-region (str base-path ".slab6") 64)
-             coalesc-data-off (mem/-load-i32 coalesc-peek d/SLAB_HDR_DATA_OFFSET)
-             coalesc-cur-sz (mem/-load-i64 coalesc-peek coalesc/COALESC_HDR_DATA_SIZE)
-             coalesc-r (mem/open-mmap-region (str base-path ".slab6")
-                                             (+ coalesc-data-off coalesc-cur-sz))
-             regions-7 (conj regions coalesc-r)
-             bm-regions-7 (conj bm-regions nil)
-             paths-7 (conj slab-paths (str base-path ".slab6"))
-             bm-paths-7 (conj bm-paths nil)
-             sio (alloc/make-jvm-slab-ctx regions-7 bm-regions-7
-                                          paths-7 bm-paths-7 nil)
-             root-r (mem/open-mmap-region (str base-path ".root") ROOT_BYTES)
-             _ (let [magic (mem/-load-i32 root-r d/ROOT_MAGIC_OFFSET)]
-                 (when (not= magic d/ROOT_MAGIC_V2)
-                   (throw (ex-info "mmap-atom: root file has wrong magic (old format?)"
-                                   {:expected d/ROOT_MAGIC_V2 :actual magic}))))
-             rmap-r (mem/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES)
-             slot-idx (mmap-claim-slot! root-r)]
-         (write-heartbeat! root-r slot-idx)
-         #?(:bb
-            {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
-             :slot-idx slot-idx :heartbeat-sched nil
-             :retire-q (java.util.LinkedList.)
-             :tree-logs (java.util.HashMap.)
-             :flush-ts (volatile! 0)
-             :thread-epochs (clojure.core/atom {})
-             :pin-lock (Object.)}
-            :clj
-            (let [sched (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
-                               (reify java.util.concurrent.ThreadFactory
-                                 (newThread [_ r]
-                                   (doto (Thread. r)
-                                     (.setDaemon true)
-                                     (.setName "eve-heartbeat")))))
-                          (.scheduleAtFixedRate
-                           #(write-heartbeat! root-r slot-idx)
-                           10 10 java.util.concurrent.TimeUnit/SECONDS))]
-              {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
-               :slot-idx slot-idx :heartbeat-sched sched
-               :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
-               :tree-logs (java.util.concurrent.ConcurrentHashMap.)
-               :flush-ts (volatile! 0)
-               :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
-               :pin-lock (Object.)}))))
-
-     (defn- jvm-pin-thread-epoch!
-       "Pin epoch for the current JVM thread. Multiple threads share one worker
-        slot, so we track per-thread epochs and write the MIN to the shared slot.
-        This prevents a later thread's pin from masking an earlier thread's epoch."
-       [{:keys [root-r slot-idx thread-epochs
-                ^Object pin-lock]} epoch]
-       #?(:bb
-          (do (swap! thread-epochs assoc :main epoch)
-              (mmap-pin-epoch! root-r slot-idx (int epoch)))
-          :clj
-          (locking pin-lock
-            (.put ^java.util.concurrent.ConcurrentHashMap thread-epochs
-                  (.getId (Thread/currentThread)) (Long/valueOf (long epoch)))
-            (let [min-e (reduce min epoch (.values ^java.util.concurrent.ConcurrentHashMap thread-epochs))]
-              (mmap-pin-epoch! root-r slot-idx (int min-e))))))
-
-     (defn- jvm-unpin-thread-epoch!
-       "Unpin epoch for the current JVM thread. Updates the shared slot to the
-        MIN of remaining pinned threads, or clears it if no threads are pinned."
-       [{:keys [root-r slot-idx thread-epochs
-                ^Object pin-lock]}]
-       #?(:bb
-          (do (swap! thread-epochs dissoc :main)
-              (mmap-unpin-epoch! root-r slot-idx))
-          :clj
-          (locking pin-lock
-            (.remove ^java.util.concurrent.ConcurrentHashMap thread-epochs
-                     (.getId (Thread/currentThread)))
-            (if (.isEmpty ^java.util.concurrent.ConcurrentHashMap thread-epochs)
-              (mmap-unpin-epoch! root-r slot-idx)
-              (let [min-e (reduce min (.values ^java.util.concurrent.ConcurrentHashMap thread-epochs))]
-                (mmap-pin-epoch! root-r slot-idx (int min-e)))))))
-
-     (defn- jvm-read-root-value
-       "Read the atom value from a root pointer. Caller must ensure epoch is pinned.
-        CLJ: Returns slab-backed Eve types directly — no materialization.
-        BB: Returns slab-backed types (BbEveHashMap etc.) — no materialization.
-            Vec/List/Set fall back to plain Clojure (no bb deftype yet)."
-       [sio ptr]
-       (when (and (not= ptr alloc/NIL_OFFSET)
-                  (not= ptr CLAIMED_SENTINEL))
-         (let [type-id (alloc/jvm-read-header-type-byte sio ptr)]
-           #?(:bb
-              (case (int type-id)
-                0x01 (alloc/jvm-read-scalar-block sio ptr)
-                ;; Map — slab-backed BbEveHashMap (no materialization)
-                0xED (eve-map/hash-map-from-header sio ptr)
-                ;; Set — materialize to plain Clojure set (no bb deftype yet)
-                0xEE (let [[_cnt root-off] (eve-set/read-set-header sio ptr)]
-                       (eve-set/hamt-val-reduce sio root-off
-                                                (fn [s v] (conj s v)) #{}))
-                ;; Vec — materialize trie to plain Clojure vector
-                0x12 (let [[cnt shift root tail _tail-len] (eve-vec/read-vec-header sio ptr)]
-                       (loop [i 0 acc (transient [])]
-                         (if (>= i cnt)
-                           (persistent! acc)
-                           (recur (inc i) (conj! acc (eve-vec/nth-impl sio cnt shift root tail i))))))
-                ;; List — materialize linked list to plain Clojure list
-                0x13 (let [[cnt head-off] (eve-list/read-list-header sio ptr)]
-                       (loop [off head-off i 0 acc (transient [])]
-                         (if (or (>= i cnt) (== off alloc/NIL_OFFSET))
-                           (apply list (persistent! acc))
-                           (recur (eve-list/read-node-next sio off)
-                                  (inc i)
-                                  (conj! acc (eve-list/read-node-value sio off))))))
-                (throw (ex-info "jvm-mmap-deref: unknown root type-id"
-                                {:type-id type-id :ptr ptr})))
-              :clj
-              (case (int type-id)
-                0x01 (alloc/jvm-read-scalar-block sio ptr)
-                ;; Look up by header type-id byte directly
-                (if-let [ctor (ser/get-jvm-header-constructor type-id)]
-                  (ctor ptr)
-                  ;; Try array/obj constructors
-                  (case (int type-id)
-                    0x1D (eve-array/eve-array-from-offset sio ptr)
-                    0x1E (eve-obj/jvm-obj-from-offset sio ptr)
-                    (throw (ex-info "jvm-mmap-deref: unknown root type-id"
-                                    {:type-id type-id :ptr ptr})))))))))
-
-     (defn- jvm-mmap-deref
-       [{:keys [root-r sio] :as domain-state} atom-slot-idx]
-       ;; Refresh slab regions in case another process grew them
-       (alloc/refresh-jvm-slab-regions! sio)
-       (binding [alloc/*jvm-slab-ctx* sio]
-         (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-           (jvm-pin-thread-epoch! domain-state epoch)
-           (try
-             (jvm-read-root-value sio
-                                  (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)))
-             (finally
-               (jvm-unpin-thread-epoch! domain-state))))))
-
-     (defn- jvm-try-flush-retires!
-       "Free retired HAMT trees whose epoch is safe to reclaim.
-        OBJ-1: Skip the 256-slot scan when the last scan was recent enough."
-       [root-r retire-q sio flush-ts]
-       (let [now (System/currentTimeMillis)
-             last-t @flush-ts
-             q-len #?(:bb (count retire-q) :clj (.size ^java.util.Queue retire-q))]
-         (when (or (> (- now last-t) FLUSH_INTERVAL_MS)
-                   (> q-len FLUSH_QUEUE_THRESHOLD))
-           (vreset! flush-ts now)
-           (let [safe-epoch (mmap-min-safe-epoch root-r)
-                 entries (java.util.ArrayList.)]
-             (loop []
-               (when-let [e #?(:bb (when (seq retire-q) (.removeFirst ^java.util.LinkedList retire-q))
-                               :clj (.poll ^java.util.Queue retire-q))]
-                 (.add entries e)
-                 (recur)))
-             (doseq [entry entries]
-               (let [{:keys [offsets epoch]} entry]
-                 (if (or (nil? safe-epoch) (< epoch safe-epoch))
-                   (doseq [off offsets]
-                     (when (not= off alloc/NIL_OFFSET)
-                       (alloc/-sio-free! sio off)))
-                   #?(:bb (.add ^java.util.List retire-q entry)
-                      :clj (.add ^java.util.Queue retire-q entry)))))))))
-
-     (defn- jvm-collect-old-value-offsets
-       "Collect slab offsets owned by old-val for retirement (JVM).
-        Dispatches to type-specific collectors."
-       [old-val new-val old-ptr]
-       (cond
-         (instance? EveVector old-val)
-         (eve-vec/collect-retire-diff-offsets old-val new-val)
-
-         (instance? EveHashSet old-val)
-         (eve-set/collect-retire-diff-offsets old-val new-val)
-
-         (instance? EveList old-val)
-         (eve-list/collect-retire-diff-offsets old-val new-val)
-
-         ;; EveHashMap is handled separately via replaced-log
-         ;; EveArray and unknown types — just the header block
-         :else [old-ptr]))
-
-     (defn- jvm-resolve-new-ptr
-       "Resolve the slab-qualified offset for a new atom root value (JVM/bb).
-        If new-val is already a slab-backed Eve type, returns its header-off
-        directly (no re-serialization). Otherwise serializes to slab via the
-        collection writer registry."
-       [sio new-val]
-       (cond
-         (nil? new-val)
-         alloc/NIL_OFFSET
-
-         ;; Already an Eve type — use its header-off directly (via IEveRoot protocol)
-         (satisfies? d/IEveRoot new-val)
-         (d/-root-header-off new-val)
-
-         ;; Clojure native types — serialize via collection writer registry
-         (map? new-val)
-         #?(:bb (mem/jvm-write-collection! :map sio new-val)
-            :clj (if (and (contains? new-val :schema) (contains? new-val :values))
-                   (alloc/jvm-write-obj! sio (:schema new-val) (:values new-val))
-                   (mem/jvm-write-collection! :map sio new-val)))
-         (set? new-val) (mem/jvm-write-collection! :set sio new-val)
-         (vector? new-val) (mem/jvm-write-collection! :vec sio new-val)
-         (or (list? new-val) (seq? new-val))
-         (mem/jvm-write-collection! :list sio new-val)
-         #?@(:clj [(.isArray (class new-val))
-                   (alloc/jvm-write-eve-array! sio new-val)])
-         :else
-         (alloc/jvm-alloc-scalar-block! sio new-val)))
-
-     (defn- jvm-collect-replaced-nodes
-       "Walk old and new HAMT trees, collecting old node offsets that differ.
-        Skips shared subtrees (same offset). For structural sharing after a
-        single assoc, only O(log32 n) nodes differ."
-       [sio old-off new-off]
-       (let [nil-off (long alloc/NIL_OFFSET)
-             result (java.util.ArrayList.)]
-         (letfn [(walk [^long o ^long n]
-                   (when (and (not= o nil-off) (not= o n))
-                     (.add result o)
-                     (when (== (long (alloc/-sio-read-u8 sio o 0)) 1)
-                       (let [o-nbm (unchecked-int (alloc/-sio-read-i32 sio o 8))
-                             n-tp (when (not= n nil-off)
-                                    (long (alloc/-sio-read-u8 sio n 0)))
-                             n-nbm (when (and n-tp (== (long n-tp) 1))
-                                     (unchecked-int (alloc/-sio-read-i32 sio n 8)))]
-                         (loop [rem o-nbm oi 0]
-                           (when-not (zero? rem)
-                             (let [bit (bit-and rem (- rem))
-                                   oc (long (alloc/-sio-read-i32 sio o (+ 12 (* oi 4))))
-                                   nc (if (and n-nbm
-                                               (not (zero? (bit-and n-nbm bit))))
-                                        (let [ni (Integer/bitCount
-                                                  (unchecked-int
-                                                   (bit-and (unchecked-int n-nbm)
-                                                            (unchecked-int (dec bit)))))]
-                                          (long (alloc/-sio-read-i32 sio n (+ 12 (* ni 4)))))
-                                        nil-off)]
-                               (walk oc nc)
-                               (recur (bit-and rem (unchecked-int (dec rem)))
-                                      (inc oi)))))))))]
-           (walk old-off new-off))
-         (vec result)))
-
-     (defn- jvm-mmap-swap!
-       "B2 CAS-loop swap (JVM/bb). Epoch pinned for the ENTIRE iteration to
-        protect lazy EveHashMap reads during path-copy."
-       [{:keys [root-r sio retire-q tree-logs flush-ts] :as domain-state} atom-slot-idx f args]
-       (binding [alloc/*jvm-slab-ctx* sio]
-       (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
-       (loop [attempt 0]
-         (when (>= attempt d/MAX_SWAP_RETRIES)
-           (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
-         ;; Refresh slab regions in case another process grew them
-         (perf/timed :refresh-regions (alloc/refresh-jvm-slab-regions! sio))
-         (perf/timed :pin-epoch
-                     (jvm-pin-thread-epoch! domain-state (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)))
-         (let [[tag result]
-               (try
-                 (let [old-ptr (mem/-load-i32 root-r ptr-off)
-                       old-val (perf/timed :read-root (jvm-read-root-value sio old-ptr))
-                       _ (alloc/start-jvm-alloc-log!)
-                       _ (alloc/start-jvm-replaced-log!)
-                       new-val (perf/timed :apply-f (apply f old-val args))
-                       new-ptr (perf/timed :resolve-ptr (jvm-resolve-new-ptr sio new-val))
-                       cur-log (alloc/drain-jvm-alloc-log!)
-                       replaced-log (alloc/drain-jvm-replaced-log!)
-                       eve-passthru? (satisfies? d/IEveRoot new-val)
-                       w (perf/timed :cas (mem/-cas-i32! root-r ptr-off old-ptr new-ptr))]
-                   (if (== w old-ptr)
-                     (let [new-epoch (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)]
-                       (perf/timed :retire-enqueue
-                                   (when (and (not= old-ptr alloc/NIL_OFFSET)
-                                              (not= old-ptr CLAIMED_SENTINEL))
-                                     #?(:bb
-                              ;; bb: use replaced-log for Map→Map (structural sharing),
-                              ;; collect offsets for other Eve types
-                                        (if (and (instance? eve-map/BbEveHashMap old-val)
-                                                 (instance? eve-map/BbEveHashMap new-val))
-                                          (let [offs (conj (or replaced-log []) old-ptr)]
-                                            (.add ^java.util.List retire-q
-                                                  {:offsets offs :epoch (inc new-epoch)}))
-                                          (let [offsets (if (instance? eve-map/BbEveHashMap old-val)
-                                                          (eve-map/collect-retire-diff-offsets old-val new-val)
-                                                          (let [old-key (Integer/valueOf (int old-ptr))
-                                                                old-log (.remove ^java.util.HashMap tree-logs old-key)]
-                                                            (or old-log [old-ptr])))]
-                                            (.add ^java.util.List retire-q
-                                                  {:offsets offsets :epoch (inc new-epoch)})))
-                                        :clj
-                                        (if (and (instance? EveHashMap old-val) (instance? EveHashMap new-val))
-                                ;; Map->Map: replaced nodes were collected during path-copy
-                                          (let [offs (conj (or replaced-log []) old-ptr)]
-                                            (.add ^java.util.Queue retire-q {:offsets offs :epoch (inc new-epoch)}))
-                                ;; Other Eve types: collect offsets via type-specific walk
-                                          (let [offsets (cond
-                                                          (instance? EveHashMap old-val)
-                                                          (eve-map/collect-retire-diff-offsets old-val new-val)
-                                                          (satisfies? d/IEveRoot old-val)
-                                                          (jvm-collect-old-value-offsets old-val new-val old-ptr)
-                                                          :else
-                                                          (let [old-log (.remove ^java.util.concurrent.ConcurrentHashMap tree-logs
-                                                                                 (Integer/valueOf (int old-ptr)))]
-                                                            (or old-log [old-ptr])))]
-                                            (.add ^java.util.Queue retire-q {:offsets offsets
-                                                                             :epoch (inc new-epoch)}))))))
-                       ;; Store new tree's alloc-log for future retire (non-Eve types only)
-                       #?(:bb
-                          (when (and (not eve-passthru?) cur-log (not= new-ptr alloc/NIL_OFFSET))
-                            (.put ^java.util.HashMap tree-logs
-                                  (Integer/valueOf (int new-ptr)) cur-log))
-                          :clj
-                          (when (and (not eve-passthru?) cur-log (not= new-ptr alloc/NIL_OFFSET))
-                            (.put ^java.util.concurrent.ConcurrentHashMap tree-logs
-                                  (Integer/valueOf (int new-ptr)) cur-log)))
-                       [:ok new-val])
-                     ;; CAS failed — free ALL blocks allocated for the new tree
-                     (do (perf/count! :cas-retry)
-                         (when cur-log
-                           (doseq [off cur-log]
-                             (alloc/-sio-free! sio off)))
-                         [:retry nil])))
-                 (finally
-                   (perf/timed :unpin-epoch
-                               (jvm-unpin-thread-epoch! domain-state))))]
-           (case tag
-             :ok (do (perf/timed :flush-retires
-                                 (jvm-try-flush-retires! root-r retire-q sio flush-ts))
-                     result)
-             :retry (do (cas-backoff! attempt) (recur (inc attempt)))))))))))
+(defn init-domain-root!
+  "Write the V2 domain root header into root-r (any IMemRegion): epoch,
+   worker registry, atom table, the hold words, and the magic last — a
+   process joining a domain while its creator writes it reads the root once
+   the magic is there (await-domain-root!). Slab allocation is the caller's
+   job. Returns root-r."
+  [root-r]
+  (mem/-store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0) ;; now: atom slot count
+  (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
+  (mem/-store-i32! root-r d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
+  (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
+  (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
+  (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0)
+  (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
+  (dotimes [slot d/MAX_WORKERS]
+    (mem/-store-i32! root-r
+                     (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
+                     d/WORKER_STATUS_INACTIVE))
+  (mem/-store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
+  (mem/-store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
+  (dotimes [s d/MAX_ATOM_SLOTS]
+    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET) alloc/NIL_OFFSET)
+    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
+  ;; the region's store is fenced: everything above is visible before it
+  (mem/-store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
+  root-r)
 
 ;; ---------------------------------------------------------------------------
-;; MmapAtomDomain — CLJS
+;; Domain state — one shape on every host
+;; ---------------------------------------------------------------------------
+;;   :root-r :rmap-r  IMemRegion       :sio        ISlabIO (the domain's)
+;;   :base-path       str | nil        :slot-idx   this participant's worker slot
+;;   :lock-only?      no atomic RMW → exclusive hold per write
+;;   :heartbeat       the timer handle (nil for an in-process domain)
+;;   :retire-q        (atom [{:off o :kind k :epoch e} …]) — the zero queue: blocks whose count reached 0
+;;   :flush-ts        (atom ms)        :pins (atom {thread-id [epoch depth]})
+;;   :pin-lock        the host's lock  :closed? (atom bool)
+;;   :holder          (atom thread-id) the thread of this process holding the domain's exclusive hold, nil for none
+
+(declare park-fn)
+
+(defn- make-domain-state
+  [root-r rmap-r sio base-path slot-idx heartbeat]
+  (let [ds {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
+            :slot-idx slot-idx
+            :lock-only? (not (mem/-atomic-rmw? root-r))
+            :heartbeat heartbeat
+            :retire-q (clojure.core/atom [])
+            :flush-ts (clojure.core/atom 0)
+            :pins (clojure.core/atom {})
+            :pin-lock (token)
+            :holder (clojure.core/atom nil)
+            :closed? (clojure.core/atom false)}]
+    ;; a reference an eve-deftype writes in place into one of this domain's blocks parks what reaches 0 here
+    (tally/register-parker! sio (park-fn ds))
+    ds))
+
+(defn- park-fn
+  "The domain's park!: a block whose count reached 0 queued on the zero queue at the epoch now."
+  [{:keys [root-r retire-q]}]
+  (fn [off kind]
+    (swap! retire-q conj {:off off :kind kind :epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)})))
+
+(defn- flush-zero-queue!
+  "Free the zero queue's entries whose epoch no live reader pins
+  (eve.tally/flush!). The safe epoch is the retire path's existing
+  input — the minimum pinned reader epoch — with ONE added bound
+  (RETENTION FLOOR, fix (b), decision 2026-10-27): a journal
+  domain's floor epoch, the oldest epoch recovery may still install.
+  The journal pins that epoch the way a slow reader pins its read
+  epoch: blocks reachable from it are not recycled while its record
+  survives. The floor is per-process state set at recovery and
+  advanced at every flush (to the previous flush's epoch — the
+  FLUSH-ADVANCE rule below, journal-flush!) and at checkpoint, so
+  a stale local floor only ever makes this process's flush more
+  conservative."
+  [{:keys [root-r sio retire-q journal]}]
+  (tally/flush! sio retire-q
+                (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+                (fn [] (let [readers (mmap-min-safe-epoch root-r)
+                             floor   (some-> journal :floor deref)]
+                         (cond (and readers floor) (min readers floor)
+                               floor   floor
+                               :else   readers)))))
+
+(defn- claim-slot-as-participant!
+  "Claim a worker slot as a write to the root: a lock-only host holds the
+   domain with HOLD_JOINING while it claims (it has no slot yet)."
+  [root-r]
+  (let [lock-only? (not (mem/-atomic-rmw? root-r))]
+    (with-root-write* root-r lock-only? HOLD_JOINING
+      (fn [] (mmap-claim-slot! root-r)))))
+
+(defn- await-domain-root!
+  "A joiner's wait for the domain's creator: the root's magic, written last
+   (init-domain-root!). A creator that never finishes is reported once its
+   heartbeat timeout has passed, never waited on for ever."
+  [root-r base-path]
+  (let [t0 (proc/now-ms)]
+    (loop [i 0]
+      (let [magic (mem/-load-i32 root-r d/ROOT_MAGIC_OFFSET)]
+        (cond
+          (== magic d/ROOT_MAGIC_V2) nil
+          (not (zero? magic))
+          (throw (ex-info "mmap-atom: root file has wrong magic (old format?)"
+                          {:expected d/ROOT_MAGIC_V2 :actual magic}))
+          (> (- (proc/now-ms) t0) d/HEARTBEAT_TIMEOUT_MS)
+          (throw (ex-info "mmap-atom: the domain's creator never finished writing its root"
+                          {:base-path base-path}))
+          :else (do (when (> i 100) (proc/sleep-ms! 1)) (recur (inc i))))))))
+
+;; ---------------------------------------------------------------------------
+;; Commit journal (durability spike, variant J)
+;;
+;; A per-domain append-only file, <base>.journal, beside the .root.
+;; Records carry COMMIT METADATA ONLY — never values:
+;;   [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
+;; len counts the bytes after itself (epoch + table-len + table + crc);
+;; the crc32 covers the epoch and table bytes. The table is the root
+;; region's raw atom-table range (MAX_ATOM_SLOTS x ATOM_SLOT_SIZE — one
+;; pointer per atom per epoch), so the newest valid record IS the
+;; newest fully journaled epoch: recovery installs its table whole,
+;; no folding. A torn record (crash mid-append) fails framing or CRC
+;; and is skipped by its length. The journal decides nothing about
+;; liveness — the mmap root CAS + epoch bump coordinate running
+;; processes exactly as without it; it records which epochs are
+;; durable. Appends serialize on the journal file's own lock, held
+;; across a flush (append + force), never across the live CAS path.
+;; Every host writes the identical byte format (cross-host recovery
+;; verified: a Node opener recovers a JVM-written journal; the
+;; ClojureCLR and Basilisp seats write records the JVM reader
+;; recovers). The file itself — its lock, its record codec, its
+;; forces — is the host's adapter, eve.journal-file; everything below
+;; is the host-free sequence over it: lock, sweep, append, force.
 ;; ---------------------------------------------------------------------------
 
-#?(:cljs
-   (deftype MmapAtom [domain-state atom-slot-idx]
-     IDeref
-     (-deref [_] (cljs-mmap-deref domain-state atom-slot-idx))
-     IAtom
-     ISwap
-     (-swap! [_ f] (cljs-mmap-swap! domain-state atom-slot-idx f []))
-     (-swap! [_ f a] (cljs-mmap-swap! domain-state atom-slot-idx f [a]))
-     (-swap! [_ f a b] (cljs-mmap-swap! domain-state atom-slot-idx f [a b]))
-     (-swap! [_ f a b xs] (cljs-mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
-     IReset
-     (-reset! [this v] (-swap! this (constantly v)))
-     IPrintWithWriter
-     (-pr-writer [_ writer _opts]
-       (-write writer (str "#eve/shared-atom {:id " atom-slot-idx
-                           " :idx " atom-slot-idx "}")))))
+(def ^:dynamic *flush-timing*
+  "When bound to an atom, journal-flush! conjs each flush's wall time
+  in ms (whole call: lock + slab sweep + append + journal force).
+  Bench instrumentation only."
+  nil)
 
+(defn- now-ms []
+  ;; eve.process/now-ms is the portable wall clock (per-host adapter);
+  ;; System/currentTimeMillis exists only on the JVM — the CLR and
+  ;; Basilisp seats have no java.lang.System, and journal-note-commit!
+  ;; threw there once the batch/window path first ran on them
+  ;; (phase 3). The adapter's now-ms is the one clock on every host.
+  (proc/now-ms))
+
+(def ^:dynamic *flush-log*
+  "When bound to an atom, journal-flush! conjs {:at <wall-ms> :ms
+  <duration-ms>} per flush. Bench/workload instrumentation only."
+  nil)
+
+(defn- journal-flush!
+  "Append one flush record (the live epoch + atom table) and force the
+   journal — the commit point of a journal domain. sweep? forces the
+   slab set first (J10's deferred sweep; J1 swept before the CAS).
+   The sweep is whole-domain: a flush record's table names blocks
+   whichever live process wrote them, and the sweep makes them all
+   durable before the record can land."
+  [ds sweep?]
+  (let [journal (:journal ds)
+        ;; the epoch the appended record will carry (read again
+        ;; inside the lock by jf/journal-record; epochs are
+        ;; monotone, so this earlier read never exceeds it)
+        floor-epoch (when journal
+                      (mem/-load-i32 (:root-r ds) d/ROOT_EPOCH_OFFSET))
+        t0 (when (and journal *flush-timing*)
+             (now-ms))]
+    (when journal
+      (jf/with-journal-lock (:file journal)
+        (fn []
+          (when sweep? (alloc/sync-sio! (:sio ds)))
+          (jf/journal-append! (:file journal)
+                              (jf/journal-record (:root-r ds)))
+          ;; data force: the record bytes and the file size they need
+          ;; are durable; timestamps are not metadata recovery reads.
+          (jf/journal-force! (:file journal) false))))
+    (when journal
+      ;; RETENTION FLOOR — FLUSH-ADVANCE (decision 2026-10-27,
+      ;; after the sweep reconciliation measured the checkpoint-only
+      ;; floor's price): the floor advances at EVERY flush, not only
+      ;; at checkpoint. Recovery installs the newest valid record;
+      ;; appends are sequential and forced per flush, so a crash can
+      ;; tear only the tail append and recovery falls back at most
+      ;; one record — protection only needs to cover the two newest
+      ;; durable records. So: a first append into a floor-less
+      ;; journal pins the floor at that record's epoch (the journal's
+      ;; only record is the oldest installable); every later append
+      ;; advances the floor to the PREVIOUS append's epoch.
+      ;; :last-epoch tracks this process's own appends; records land
+      ;; in epoch order under the journal lock, so the record before
+      ;; this process's newest append has an epoch >= its own
+      ;; previous one — the own-previous epoch never exceeds the
+      ;; global second-newest durable record's epoch, and the floor
+      ;; stays conservative. (journal-anchor!'s reset of the floor
+      ;; to the anchor epoch at checkpoint is a separate mechanism —
+      ;; the anchor decides what the journal FILE holds — and is
+      ;; unchanged; the max keeps the floor monotone across it.)
+      (when (:floor journal)
+        (if (nil? @(:floor journal))
+          (reset! (:floor journal) floor-epoch)
+          (when (and (:last-epoch journal) @(:last-epoch journal))
+            (reset! (:floor journal)
+                    (max @(:floor journal) @(:last-epoch journal))))))
+      (when (:last-epoch journal)
+        (reset! (:last-epoch journal) floor-epoch))
+      (when (:last-flush journal) (reset! (:last-flush journal) (now-ms)))
+      (when *flush-log*
+        (swap! *flush-log* conj
+               {:at (now-ms)
+                :ms (when t0 (- (now-ms) t0))})))
+    (when t0
+      (swap! *flush-timing* conj (- (now-ms) t0)))))
+
+(defn- journal-note-commit!
+  "A journal domain's commit published: J1 (limit 1) flushes now — the
+   journal force is the commit point. J10 counts the epoch toward the
+   batch; the batch's flush is one sweep + one record + one force.
+   With :journal-window-ms set, a commit also flushes when the
+   window has elapsed since the last flush (checked on the commit
+   path — no timer thread; the count batch remains the backstop)."
+  [ds]
+  (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
+    (when journal
+      (if (<= limit 1)
+        (journal-flush! ds false)
+        (let [n (swap! pending inc)]
+          (when (or (>= n limit)
+                    (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
+            (reset! pending 0)
+            (journal-flush! ds true)))))))
+
+(defn- domain-live?
+  "Any worker slot ACTIVE with a fresh heartbeat: a process holds this
+   domain open right now."
+  [root-r]
+  (loop [i 0]
+    (cond (>= i d/MAX_WORKERS) false
+          (and (== (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))
+                   d/WORKER_STATUS_ACTIVE)
+               (not (heartbeat-stale? root-r i))) true
+          :else (recur (inc i)))))
+
+(defn- journal-recover!
+  "Open-time recovery for a journal domain, run before this process
+   claims its worker slot. Live domain: the journal is untouched (a
+   joining process reads the live root). Not live: install the newest
+   valid record's table + epoch when they differ from the mapped
+   root's, force the root file, and compact the journal to that
+   record — the torn tail is discarded. A creator truncates the
+   journal of a fresh domain."
+  [root-r journal create?]
+  (when journal
+    (jf/with-journal-lock (:file journal)
+      (fn []
+        (let [h (:file journal)]
+          (if create?
+            (do (jf/journal-truncate! h) (jf/journal-force! h true))
+            (let [{:keys [newest oldest torn?]} (jf/journal-scan h)
+                  e-map (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+              ;; RETENTION FLOOR (fix (b)): the oldest epoch
+              ;; recovery may still install — the journal's
+              ;; oldest surviving record, or the root's own
+              ;; epoch when no record survives. Set for live
+              ;; joiners too (read-only): their retire flush
+              ;; must honor it like anyone's.
+              (when (:floor journal)
+                (reset! (:floor journal) (or oldest e-map)))
+              (when-not (domain-live? root-r)
+                (let [install? (and newest (not= (:epoch newest) e-map))]
+                  (when install?
+                    (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
+                    (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
+                    (mem/sync-region! root-r))
+                  (when (or torn? install?)
+                    (jf/journal-truncate! h)
+                    (when newest
+                      (jf/journal-write-at! h (jf/journal-record root-r) 0))
+                    (jf/journal-force! h true)))))))))))
+
+(defn- journal-anchor!
+  "Checkpoint's tail — RECOVERY FLOOR FIX (a) (decision,
+  2026-10-27): checkpoint truncation never empties the journal. The
+  newest valid record — the checkpoint epoch's own — is rewritten as
+  the journal's sole record (the anchor); everything older goes.
+  Recovery's rule is then uniform: whenever a valid record exists,
+  install from the journal, never from the landed root — a root that
+  landed ahead of an emptied journal was exactly phase 2's
+  undefended floor. Also advances the retention floor (fix (b)) to
+  the anchor's epoch: monotone, at checkpoint, under the journal
+  lock, and nowhere else. A journal with no valid record (a fresh
+  domain) is left empty."
+  [journal]
+  (when journal
+    (jf/with-journal-lock (:file journal)
+      (fn [] (let [h (:file journal)
+                   {:keys [newest]} (jf/journal-scan h)]
+               (when newest
+                 (jf/journal-truncate! h)
+                 (jf/journal-write-at! h (jf/journal-record-of
+                                           (:epoch newest) (:table newest)) 0)
+                 (jf/journal-force! h true)
+                 (when (:floor journal)
+                   (reset! (:floor journal) (:epoch newest)))))))))
+
+(defn- journal-close! [journal]
+  (when journal
+    (jf/journal-close! (:file journal))))
+
+(defn- open-mmap-domain!
+  "Create (create? true) or join the mmap domain at base-path. Returns the
+   domain state. The process's slabs are this domain's from here on (CLJS
+   slabs are module state: one mmap domain per process). A creator writes the
+   slabs, then the root, its magic last; a joiner opens the slabs only once
+   the magic is there."
+  [base-path {:keys [capacities lustre? create?] :as opts}]
+  (when create? (proc/ensure-parent-dir! base-path))
+  (let [root-r (region/open-mmap-region (str base-path ".root") ROOT_BYTES
+                                        {:lustre? lustre? :lockable? true})
+        _      (when-not create? (await-domain-root! root-r base-path))
+        sio    (alloc/mmap-domain-sio! base-path opts)
+        rmap-r (region/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES
+                                        {:lustre? lustre?})]
+    (when create? (init-domain-root! root-r))
+    (let [journal  (when (:journal? opts)
+                     {:file    (jf/open-journal (str base-path ".journal"))
+                      :limit   (or (:journal-batch opts) 1)
+                      :pending (clojure.core/atom 0)
+                      ;; RETENTION FLOOR (fix (b)): the epoch the
+                      ;; journal pins against reclamation, set at
+                      ;; recovery (journal-recover!) and advanced
+                      ;; at every flush (journal-flush!, to the
+                      ;; previous flush's epoch) and at checkpoint
+                      ;; (journal-anchor!, to the anchor epoch).
+                      :floor   (clojure.core/atom nil)
+                      ;; FLUSH-ADVANCE: the epoch of the newest
+                      ;; record THIS process has durably appended —
+                      ;; the next flush advances :floor to it.
+                      :last-epoch (clojure.core/atom nil)})
+          _        (when journal (journal-recover! root-r journal create?))
+          journal  (cond-> journal
+                     (:journal-window-ms opts)
+                     (assoc :window-ms (:journal-window-ms opts)
+                            :last-flush (clojure.core/atom (now-ms))))
+          slot-idx (claim-slot-as-participant! root-r)
+          _        (write-heartbeat! root-r slot-idx)
+          hb       (proc/start-timer! 10000 #(write-heartbeat! root-r slot-idx))
+          ds       (cond-> (assoc (make-domain-state root-r rmap-r sio base-path slot-idx hb)
+                                  ;; commits force before they publish (see swap-attempt!),
+                                  ;; unless the opener asked for the group-commit shape;
+                                  ;; a journal domain is durable by construction
+                                  :durable-commits? (or (:journal? opts)
+                                                        (not (false? (:durable? opts)))))
+                     journal (assoc :journal journal))]
+      (proc/on-process-exit! (fn [] (when-not @(:closed? ds)
+                                      (mmap-release-slot! root-r slot-idx))))
+      ds)))
+
+(defn- open-heap-domain!
+  "An in-process domain: heap slabs (JVM, bb) or the module SABs (CLJS), a
+   heap root and reader map. One participant, no heartbeat."
+  [opts]
+  (let [sio    (alloc/heap-domain-sio! opts)
+        root-r (region/make-heap-region ROOT_BYTES)
+        rmap-r (region/make-heap-region READER_MAP_BYTES)]
+    (init-domain-root! root-r)
+    (let [slot-idx (mmap-claim-slot! root-r)]
+      (write-heartbeat! root-r slot-idx)
+      (make-domain-state root-r rmap-r sio nil slot-idx nil))))
 
 ;; ---------------------------------------------------------------------------
-;; MmapAtom — JVM / bb
+;; Epoch pins — per thread, nested, one slot per domain
 ;; ---------------------------------------------------------------------------
+;; Threads of one process share the worker slot: the slot carries the MIN of
+;; their pinned epochs. A thread's pins nest (a deref inside a swap keeps the
+;; swap's older epoch): depth counts them, the first wins.
 
-#?(:bb
-   (deftype MmapAtom [domain-state atom-slot-idx]
-     clojure.lang.IDeref
-     (deref [_] (jvm-mmap-deref domain-state atom-slot-idx))
-     clojure.lang.IAtom
-     (swap [_ f] (jvm-mmap-swap! domain-state atom-slot-idx f []))
-     (swap [_ f a] (jvm-mmap-swap! domain-state atom-slot-idx f [a]))
-     (swap [_ f a b] (jvm-mmap-swap! domain-state atom-slot-idx f [a b]))
-     (swap [_ f a b xs] (jvm-mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
-     (reset [_ v] (jvm-mmap-swap! domain-state atom-slot-idx (constantly v) []))
-     (compareAndSet [_ old-val new-val]
-       (let [current (jvm-mmap-deref domain-state atom-slot-idx)]
-         (if (= current old-val)
-           (do (jvm-mmap-swap! domain-state atom-slot-idx (constantly new-val) []) true)
-           false))))
-   :cljs nil
-   :clj
-   (deftype MmapAtom [domain-state atom-slot-idx]
-     clojure.lang.IDeref
-     (deref [_] (jvm-mmap-deref domain-state atom-slot-idx))
-     clojure.lang.IAtom
-     (swap [_ f] (jvm-mmap-swap! domain-state atom-slot-idx f []))
-     (swap [_ f a] (jvm-mmap-swap! domain-state atom-slot-idx f [a]))
-     (swap [_ f a b] (jvm-mmap-swap! domain-state atom-slot-idx f [a b]))
-     (swap [_ f a b xs] (jvm-mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
-     (reset [_ v] (jvm-mmap-swap! domain-state atom-slot-idx (constantly v) []))))
+(defn- slot-pin! [root-r slot-idx pins]
+  (if (empty? pins)
+    (mmap-unpin-epoch! root-r slot-idx)
+    (mmap-pin-epoch! root-r slot-idx (reduce min (map first (vals pins))))))
 
-;; SharedAtom compat alias (for tests referencing a/SharedAtom)
-#?(:cljs (def SharedAtom MmapAtom))
+(defn- pin-epoch! [{:keys [root-r slot-idx pins pin-lock]} epoch]
+  (locking pin-lock
+    (let [tid (proc/thread-id)
+          p   (swap! pins (fn [m]
+                            (if-let [[e depth] (get m tid)]
+                              (assoc m tid [(min e epoch) (inc depth)])
+                              (assoc m tid [epoch 1]))))]
+      (slot-pin! root-r slot-idx p))))
 
-;; ---------------------------------------------------------------------------
-;; MmapAtomDomain — CLJS
-;; ---------------------------------------------------------------------------
+(defn- unpin-epoch! [{:keys [root-r slot-idx pins pin-lock]}]
+  (locking pin-lock
+    (let [tid (proc/thread-id)
+          p   (swap! pins (fn [m]
+                            (if-let [[e depth] (get m tid)]
+                              (if (> depth 1)
+                                (assoc m tid [e (dec depth)])
+                                (dissoc m tid))
+                              m)))]
+      (slot-pin! root-r slot-idx p))))
 
-#?(:cljs
-   (deftype MmapAtomDomain [domain-state registry-cache]
-     IDeref
-     (-deref [_] (cljs-mmap-deref domain-state 0))
-     ISwap
-     (-swap! [_ f] (cljs-mmap-swap! domain-state 0 f []))
-     (-swap! [_ f a] (cljs-mmap-swap! domain-state 0 f [a]))
-     (-swap! [_ f a b] (cljs-mmap-swap! domain-state 0 f [a b]))
-     (-swap! [_ f a b xs] (cljs-mmap-swap! domain-state 0 f (concat [a b] xs)))
-     IReset
-     (-reset! [this v] (-swap! this (constantly v)))
-     ILookup
-     (-lookup [this k] (-lookup this k nil))
-     (-lookup [_ k not-found]
-       (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
-         (MmapAtom. domain-state slot-idx)
-         not-found))))
+(defn- refresh-slabs! [{:keys [base-path sio]}]
+  (when base-path (alloc/refresh! sio)))
 
 ;; ---------------------------------------------------------------------------
-;; MmapAtomDomain — JVM / bb
+;; Root values
 ;; ---------------------------------------------------------------------------
 
-#?(:bb
-   (deftype MmapAtomDomain [domain-state registry-cache]
-     clojure.lang.IDeref
-     (deref [_] (jvm-mmap-deref domain-state 0)))
-   :cljs nil
-   :clj
-   (deftype MmapAtomDomain [domain-state registry-cache]
-     clojure.lang.IDeref
-     (deref [_] (jvm-mmap-deref domain-state 0))
-     clojure.lang.ILookup
-     (valAt [this k] (.valAt this k nil))
-     (valAt [_ k not-found]
-       (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
-         (MmapAtom. domain-state slot-idx)
-         not-found))))
+(defn- live-ptr? [ptr]
+  (and (not= ptr alloc/NIL_OFFSET) (not= ptr CLAIMED_SENTINEL)))
+
+(defn- read-root-value
+  "The slab-backed value at ptr, read through sio. The caller pins."
+  [sio ptr]
+  (when (live-ptr? ptr)
+    (let [type-id (alloc/read-header-tag sio ptr)]
+      (if (== type-id ser/SCALAR_BLOCK_TYPE_ID)
+        (alloc/scalar-block->value sio ptr)
+        (if-let [ctor (ser/get-header-constructor type-id)]
+          (ctor sio ptr)
+          (throw (ex-info "mmap-atom: unknown root value type-id"
+                          {:type-id type-id :ptr ptr})))))))
+
+(defn- write-plain-collection!
+  "A plain collection as a slab value in sio: the host's direct writer when
+   one is registered (the JVM codec's HAMT/trie writers), else a builder.
+   Returns the header offset, or nil when v is no collection."
+  [sio v]
+  (let [direct (cond (map? v) (ser/get-coll-writer :map)
+                     (set? v) (ser/get-coll-writer :set)
+                     (vector? v) (ser/get-coll-writer :vec)
+                     (or (list? v) (seq? v)) (ser/get-coll-writer :list)
+                     :else nil)]
+    (if direct
+      (direct sio nil v)
+      (some-> (ser/convert-to-eve sio v) d/-root-header-off))))
+
+(defn- write-typed-root!
+  "A host typed array (or a heap-backed eve array, its backing array) a swap!
+   sets, written into sio as an eve array block; nil for any other value."
+  [sio v]
+  (cond
+    (enc/host-array? v) (arr/write-host-array! sio v)
+    (satisfies? d/IBackingArray v) (arr/write-host-array! sio (d/-backing-array v) (d/-backing-subtype v))
+    :else nil))
+
+(defn- resolve-new-ptr
+  "The slab offset a new root value lives at in sio: NIL for nil, the header
+   of a slab-backed value (which must be of this domain), the result of
+   writing a plain collection, or a fresh scalar block."
+  [sio new-val]
+  (cond
+    (nil? new-val)
+    alloc/NIL_OFFSET
+
+    (satisfies? d/IEveRoot new-val)
+    (let [vs (d/-eve-sio new-val)]
+      (when (and vs (not (identical? (alloc/sio-root vs) (alloc/sio-root sio))))
+        (throw (ex-info "swap!: Eve value was allocated in a different slab domain; construct it with the atom's domain sio (eve.atom/atom-sio)"
+                        {:value-type (str (type new-val))})))
+      (d/-root-header-off new-val))
+
+    :else
+    (or (write-typed-root! sio new-val)
+        (write-plain-collection! sio new-val)
+        (alloc/value->scalar-block! sio new-val))))
+
+;; ---------------------------------------------------------------------------
+;; Reclamation — how many use a block (eve.tally)
+;; ---------------------------------------------------------------------------
+;; A committed swap's slot holds the new value and lets the old one go: a
+;; fresh block's first holder counts its references once, a block another
+;; holder already has costs one increment, and a block whose count reaches 0
+;; is parked on the domain's zero queue — freed once no pinned reader can see
+;; it, its references dropped in turn. Counts decide what a write frees, so a
+;; value two atoms hold (or two keys of one atom) is freed only when the last
+;; of them lets it go. The reach readers below serve `seal`, which digests
+;; every block a value owns.
+
+(defn- try-flush-retires!
+  "The zero queue's flush, throttled: the 256-slot pin scan runs when the last one is FLUSH_INTERVAL_MS old or the
+   queue is past FLUSH_QUEUE_THRESHOLD. Only ever delays a free."
+  [{:keys [retire-q flush-ts] :as ds}]
+  (let [now (proc/now-ms)]
+    (when (or (> (- now @flush-ts) FLUSH_INTERVAL_MS)
+              (> (count @retire-q) FLUSH_QUEUE_THRESHOLD))
+      (reset! flush-ts now)
+      (flush-zero-queue! ds))))
+
+;; ---------------------------------------------------------------------------
+;; deref / swap!
+;; ---------------------------------------------------------------------------
+
+(defn- region-deref
+  "Inside a `$` (eve.read-region): the atom's value as the lazy, slab-backed value. Its domain is pinned the first
+   time the region reads it and stays pinned until the region exits, so every value read in the region is readable
+   until then; the region materializes its result before it lets go."
+  [{:keys [root-r sio] :as ds} atom-slot-idx]
+  (rr/hold! ds
+            (fn []
+              (refresh-slabs! ds)
+              (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)))
+            (fn [] (unpin-epoch! ds)))
+  (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+    (refresh-slabs! ds)
+    (read-root-value sio ptr)))
+
+(defn- plain-deref
+  "The atom's value as plain data (d/eve->clj), read under a pinned epoch.
+   Slab-backed wrappers must not escape: the epoch is unpinned on return."
+  [{:keys [root-r sio] :as ds} atom-slot-idx]
+  (refresh-slabs! ds)
+  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (try
+    (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+      ;; the root may name blocks another process allocated after growing a
+      ;; class past the refresh above: re-check behind the load
+      (refresh-slabs! ds)
+      (d/eve->clj (read-root-value sio ptr)))
+    (finally
+      (unpin-epoch! ds))))
+
+(defn- mmap-deref
+  "deref: the atom's value as plain data (plain-deref); inside a `$`, the lazy value (region-deref)."
+  [ds atom-slot-idx]
+  (if (rr/active?)
+    (region-deref ds atom-slot-idx)
+    (plain-deref ds atom-slot-idx)))
+
+(defn- swap-attempt!
+  "One CAS attempt: read the old root, apply f, write the new value, CAS the
+   root pointer. Returns [:ok new-val] or [:retry nil]. Runs under the
+   epoch pin for the whole attempt — the old value is lazy, and the commit's
+   hold reads the new tree (round 2, 0008). exclusive? is the call
+   convention with-domain-write hands the attempt (in the count-pages
+   design a plan that raised a count returned [:hold nil] and the write
+   ran again under the domain's hold); a descriptor count is a CAS word on
+   the descriptor row, safe to raise from any write, so no attempt ever
+   needs the hold and there is no [:hold nil] return."
+  [{:keys [root-r sio durable-commits? journal] :as ds} ptr-off f args exclusive?]
+  (refresh-slabs! ds)
+  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (try
+    (let [old-ptr (mem/-load-i32 root-r ptr-off)
+          _       (refresh-slabs! ds)                      ;; behind the load (0004/0007)
+          lsio    (alloc/logging-sio sio)                  ;; this attempt's allocations
+          old-val (read-root-value lsio old-ptr)
+          new-val (binding [d/*parent-atom* ds
+                            d/*domain-sio* lsio]
+                    (apply f old-val args))
+          ;; written in the attempt's domain too: a codec that allocates a nested collection in the running domain
+          ;; (ClojureScript's) logs it here, so a lost CAS frees what the attempt allocated unheld
+          new-ptr (binding [d/*domain-sio* lsio]
+                    (resolve-new-ptr lsio new-val))]
+      (if (== new-ptr old-ptr)
+        ;; the same value: nothing to publish, nothing to retire
+        (do (alloc/stop-logging! lsio)
+            [:ok new-val])
+        ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
+        (let [_ (tally/hold-root! sio new-ptr)
+              ;; durability (a disk domain with :durable-commits?): everything this
+              ;; commit wrote is forced BEFORE the root pointer can publish it, so a
+              ;; system crash cannot leave a root pointing at value pages that never
+              ;; reached disk. Spike form: the sio's whole slab, bitmap and descriptor
+              ;; regions — the upper bound; the written ranges are the production
+              ;; refinement. Inside the attempt, so a lost CAS wastes one force and the
+              ;; retry writes and forces its own blocks; nothing is held across the retry.
+              ;; a journal domain with a batch (J10) defers even this sweep
+              ;; to its flush; J1 and the force-ordering form sweep here.
+              _ (when (and durable-commits?
+                           (or (nil? journal) (<= (:limit journal) 1)))
+                  (alloc/sync-sio! sio))
+              w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
+          (if (== w old-ptr)
+            (do (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)
+                ;; and the epoch is made durable before swap! returns: a
+                ;; journal domain appends its flush record and forces the
+                ;; journal (that force is the commit point; the root file
+                ;; is a checkpoint and is not forced per commit) — otherwise
+                ;; the root's own range, the epoch word through the slot
+                ;; pointer, is forced after the CAS.
+                (when durable-commits?
+                  (if journal
+                    (journal-note-commit! ds)
+                    (mem/sync-region! root-r
+                                      (min ptr-off d/ROOT_EPOCH_OFFSET)
+                                      (+ 4 (- (max ptr-off d/ROOT_EPOCH_OFFSET)
+                                              (min ptr-off d/ROOT_EPOCH_OFFSET))))))
+                ;; the slot lets old go: a block at 0 is parked at the epoch now
+                (tally/drop-root! sio old-ptr (park-fn ds))
+                (alloc/stop-logging! lsio)
+                [:ok new-val])
+            (let [offs (alloc/logged-allocs lsio)]
+              ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
+              ;; share with other values keeps its count), and every other block this attempt allocated that no
+              ;; holder took is freed now (a value the attempt stored into another atom is that atom's)
+              ;; (read before the log stops: a stopped log reads empty)
+              (alloc/stop-logging! lsio)
+              (tally/drop-root! sio new-ptr (park-fn ds))
+              (tally/free-unheld! sio offs)
+              [:retry nil])))))
+    (finally
+      (unpin-epoch! ds))))
+
+(defn- mmap-swap!
+  "CAS-loop swap. Accepts any slab-backed value of this domain, a plain
+   collection, a scalar or nil."
+  [ds atom-slot-idx f args]
+  (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
+    (loop [attempt 0]
+      (when (>= attempt d/MAX_SWAP_RETRIES)
+        (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
+      (let [[tag result] (with-domain-write ds false
+                           (fn [exclusive?]
+                             (let [r (swap-attempt! ds ptr-off f args exclusive?)]
+                               (when (= :ok (first r))
+                                 (try-flush-retires! ds))
+                               r)))]
+        (case tag
+          :ok result
+          :retry (do (cas-backoff! attempt)
+                     (recur (inc attempt))))))))
+
+(defn- mmap-compare-and-set!
+  "Set the atom to new-val iff its value equals old-val. One CAS loop: f
+   returns the current value unchanged when it does not match."
+  [ds atom-slot-idx old-val new-val]
+  (let [set? (volatile! false)]
+    (mmap-swap! ds atom-slot-idx
+                (fn [cur]
+                  ;; f runs once per attempt; only the attempt whose CAS
+                  ;; commits counts, so every attempt overwrites the flag (a
+                  ;; matching attempt that lost its CAS used to leave it true)
+                  (let [hit? (= (d/eve->clj cur) old-val)]
+                    (vreset! set? hit?)
+                    (if hit? new-val cur)))
+                [])
+    @set?))
+
+(defprotocol IEveAtom
+  "An eve atom's (or atom domain's) parts: its domain's state and its slot."
+  (-domain-state [a])
+  (-atom-slot-idx [a]))
+
+(defprotocol IEveAtomDomain
+  "An eve atom domain's registry: a named atom's slot by its name."
+  (-registry-cache [d]))
+
+(defn- atom-domain-state [a]
+  (-domain-state a))
+
+(defn $*
+  "`$`'s region (eve.alpha/$ expands to it): (f) with every eve atom deref'd inside answering its lazy, slab-backed
+   value under a pin held until the outermost region exits; f's result materialized (d/eve->clj, lazy seqs
+   realized) before the pins go. A region inside another joins it."
+  [f]
+  (rr/run f d/eve->clj))
+
+(defn read-pinned
+  "Bounded slab-backed access to one atom: (f value & args) with the atom's
+   value as the lazy slab-backed Eve value, read under this thread's pinned
+   epoch, which is unpinned when f returns — f's result must not keep the
+   value. eve's own reads use it; a program reads with eve.alpha/$."
+  [a f & args]
+  (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
+        slot (-atom-slot-idx a)]
+    (refresh-slabs! ds)
+    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+    (try
+      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
+        (refresh-slabs! ds)
+        (apply f (read-root-value sio ptr) args))
+      (finally
+        (unpin-epoch! ds)))))
+
+;; ---------------------------------------------------------------------------
+;; MmapAtom / MmapAtomDomain — the host's atom interfaces are the one
+;; difference (cljs.core protocols vs clojure.lang interfaces); the bodies
+;; are the same calls.
+;; ---------------------------------------------------------------------------
+
+;; One definition for every host, written with the JVM's names: each host's
+;; types adapter realizes it (ClojureScript's ISwap/IReset, sci's own IAtom,
+;; basilisp's duck-typed swap/reset, clojerl's through eve.host).
+(edt/deftype MmapAtom [domain-state atom-slot-idx]
+  clojure.lang.IDeref
+  (deref [_] (mmap-deref domain-state atom-slot-idx))
+  clojure.lang.IAtom
+  (swap [_ f] (mmap-swap! domain-state atom-slot-idx f []))
+  (swap [_ f a] (mmap-swap! domain-state atom-slot-idx f [a]))
+  (swap [_ f a b] (mmap-swap! domain-state atom-slot-idx f [a b]))
+  (swap [_ f a b xs] (mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
+  (reset [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) []))
+  (compareAndSet [_ old-val new-val]
+    (mmap-compare-and-set! domain-state atom-slot-idx old-val new-val))
+  IEveAtom
+  (-domain-state [_] domain-state)
+  (-atom-slot-idx [_] atom-slot-idx)
+  ;; (a printer reaches the instance's fields through it: on a JVM host it
+  ;; is the type's print-method, outside the type)
+  IPrintWithWriter
+  (-pr-writer [this writer _opts]
+    (let [i (-atom-slot-idx this)]
+      (ecore/-write writer (str "#eve/shared-atom {:id " i " :idx " i "}")))))
+
+(defn compare-and-set!*
+  "compare-and-set! for an Eve atom on every host (CLJS's core
+   compare-and-set! is for its own Atom type)."
+  [a old-val new-val]
+  (mmap-compare-and-set! (atom-domain-state a)
+                         (-atom-slot-idx a)
+                         old-val new-val))
+
+;; SharedAtom compat alias (tests reference a/SharedAtom)
+(def SharedAtom MmapAtom)
+
+(edt/deftype MmapAtomDomain [domain-state registry-cache]
+  clojure.lang.IDeref
+  (deref [_] (mmap-deref domain-state 0))
+  ;; the domain's own value (slot 0) is an atom as well
+  clojure.lang.IAtom
+  (swap [_ f] (mmap-swap! domain-state 0 f []))
+  (swap [_ f a] (mmap-swap! domain-state 0 f [a]))
+  (swap [_ f a b] (mmap-swap! domain-state 0 f [a b]))
+  (swap [_ f a b xs] (mmap-swap! domain-state 0 f (concat [a b] xs)))
+  (reset [_ v] (mmap-swap! domain-state 0 (constantly v) []))
+  (compareAndSet [_ old-val new-val]
+    (mmap-compare-and-set! domain-state 0 old-val new-val))
+  ;; (:key domain): on babashka, whose deftype takes ILookup only on a map
+  ;; type, it is domain-lookup
+  clojure.lang.ILookup
+  (valAt [this k] (.valAt this k nil))
+  (valAt [_ k not-found]
+    (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
+      (MmapAtom. domain-state slot-idx)
+      not-found))
+  IEveAtom
+  (-domain-state [_] domain-state)
+  (-atom-slot-idx [_] 0)
+  IEveAtomDomain
+  (-registry-cache [_] registry-cache))
 
 (defn domain-lookup
-  "Look up an atom in a MmapAtomDomain by keyword (bb-compatible).
-   Use this instead of (:key domain) in Babashka."
+  "Look up an atom in a domain by keyword."
   ([domain k] (domain-lookup domain k nil))
   ([domain k not-found]
-   (let [registry-cache (.-registry-cache domain)]
+   (let [registry-cache (-registry-cache domain)]
      (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
-       (MmapAtom. (.-domain-state domain) slot-idx)
+       (MmapAtom. (atom-domain-state domain) slot-idx)
        not-found))))
 
 ;; ---------------------------------------------------------------------------
-;; Domain cache and file detection (must precede persistent-atom-domain)
+;; Domains
 ;; ---------------------------------------------------------------------------
 
 (def ^:private domain-cache
-  "Cache of opened domains by base-path string."
-  #?(:cljs (cljs.core/atom {})
-     :default (clojure.core/atom {})))
-
-(defn- domain-files-exist?
-  "Check if the domain root file exists at the given base-path."
-  [base-path]
-  (let [root-path (str base-path ".root")]
-    #?(:cljs (let [fs (js/require "fs")]
-               (.existsSync fs root-path))
-       :default (.exists (java.io.File. root-path)))))
-
-;; ---------------------------------------------------------------------------
-;; Public API
-;; ---------------------------------------------------------------------------
+  "Opened mmap domains by base path."
+  (clojure.core/atom {}))
 
 (defn persistent-atom-domain
-  "Open or create an mmap-backed atom domain at base-path.
-   If domain files already exist, joins them. Otherwise creates new ones.
-   Caches domains by path — subsequent calls with the same path return the
-   same domain. Returns an MmapAtomDomain. Use close-atom-domain! to release."
-  [base-path & {:keys [capacities lustre?] :or {capacities {} lustre? false}}]
+  "Open or create the mmap domain at base-path (joins when its files exist).
+   Cached by path: the same path returns the same domain until
+   close-atom-domain!. Returns an MmapAtomDomain. The process whose exclusive
+   create of the .root file succeeds creates the domain; every other joins —
+   never a check of the file's existence then a create, which two processes
+   opening a fresh domain together both pass (each initialised the domain
+   over the other's writes)."
+  [base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms] :or {capacities {} lustre? false durable? true}}]
   (or (get @domain-cache base-path)
-      (binding [mem/*lustre-mode* lustre?]
-        (let [exists? (domain-files-exist? base-path)
-              d #?(:cljs (MmapAtomDomain.
-                          (if exists?
-                            (cljs-join-mmap-domain! base-path)
-                            (cljs-open-mmap-domain! base-path :capacities capacities))
-                          (cljs.core/atom {}))
-                   :default (MmapAtomDomain.
-                             (if exists?
-                               (jvm-join-mmap-domain! base-path)
-                               (jvm-open-mmap-domain! base-path :capacities capacities))
-                             (clojure.core/atom {})))]
-          (swap! domain-cache assoc base-path d)
-          d))))
+      (let [_  (proc/ensure-parent-dir! base-path)
+            ds (open-mmap-domain! base-path {:capacities capacities
+                                             :lustre? lustre?
+                                             :durable? durable?
+                                             :journal? journal?
+                                             :journal-batch journal-batch
+                                             :journal-window-ms journal-window-ms
+                                             :create? (proc/create-exclusive! (str base-path ".root"))})
+            d  (MmapAtomDomain. ds (clojure.core/atom {}))]
+        (swap! domain-cache assoc base-path d)
+        d)))
 
 (defn join-atom-domain
-  "Join an existing mmap-backed atom domain at base-path.
-   Files must already exist. Returns an MmapAtomDomain.
-   Prefer persistent-atom-domain which auto-detects create vs join."
+  "Join an existing mmap domain at base-path (prefer persistent-atom-domain)."
   [base-path]
   (persistent-atom-domain base-path))
 
+(defn- sync-domain!
+  "Force a domain's whole mapped set — slabs, bitmaps, descriptor tables,
+   reader map, root — to durable storage (eve.mem/sync-region!: a region
+   that cannot force answers nil, so an in-process domain is a no-op)."
+  [{:keys [root-r rmap-r sio]}]
+  (alloc/sync-sio! sio)
+  (mem/sync-region! rmap-r)
+  (mem/sync-region! root-r))
+
+(defn- journal-checkpoint!
+  "Fold the journal into the root file: flush any pending batch,
+   force the whole domain (the root file is now the checkpoint),
+   then reduce the journal to its anchor record (never empty —
+   journal-anchor!). Without a journal this is sync-domain!."
+  [ds]
+  (let [journal (:journal ds)]
+    (when (and journal (pos? @(:pending journal)))
+      (reset! (:pending journal) 0)
+      (journal-flush! ds true))
+    (sync-domain! ds)
+    (when journal (journal-anchor! journal))))
+
+(defn- release-domain! [ds]
+  (let [{:keys [root-r slot-idx heartbeat closed? base-path]} ds]
+    (when (and root-r slot-idx (not @closed?))
+      (reset! closed? true)
+      ;; a disk domain is forced whole before it is let go: nothing a
+      ;; commit wrote is left riding the page cache at close; a journal
+      ;; domain folds its journal into the root file as it closes.
+      (when base-path (journal-checkpoint! ds))
+      (journal-close! (:journal ds))
+      (proc/stop-timer! heartbeat)
+      (mmap-release-slot! root-r slot-idx)
+      (tally/unregister-parker! (:sio ds))
+      ;; the slabs back to what this mmap domain replaced (ClojureScript's
+      ;; module slabs)
+      (alloc/release-domain-sio! (:sio ds) (some? base-path)))))
+
 (defn close-atom-domain!
-  "Release the worker slot and cancel heartbeat for a domain.
-   Atoms created from this domain become invalid after close.
-   Removes the domain from the internal cache."
+  "Release the worker slot, stop the heartbeat, forget the domain. Atoms of
+   the domain are invalid after this."
   [d]
-  (let [{:keys [root-r slot-idx base-path] :as ds} (.-domain-state #?(:cljs ^js d :default d))]
-    (when (and root-r slot-idx)
-      #?(:cljs (when-let [tid (:timer-id ds)] (js/clearInterval tid))
-         :default (when-let [sched (:heartbeat-sched ds)] (.shutdown sched)))
-      (mmap-release-slot! root-r slot-idx))
+  (let [{:keys [base-path] :as ds} (atom-domain-state d)]
+    (release-domain! ds)
     (when base-path
       (swap! domain-cache dissoc base-path))))
 
 (defn close!
-  "Release the worker slot acquired when this atom was opened or joined.
-   Cancels the heartbeat timer. Call when the process is done using the atom.
-   Safe to call multiple times (idempotent via slot INACTIVE check)."
+  "Release the worker slot of the domain this atom belongs to. Idempotent."
   [a]
-  (let [{:keys [root-r slot-idx] :as ds} (.-domain-state #?(:cljs ^js a :default a))]
-    (when (and root-r slot-idx)
-      #?(:cljs (when-let [tid (:timer-id ds)] (js/clearInterval tid))
-         :default (when-let [sched (:heartbeat-sched ds)] (.shutdown sched)))
-      (mmap-release-slot! root-r slot-idx))))
+  (release-domain! (atom-domain-state a)))
+
+(defn sync!
+  "Force everything this atom's (or domain's) domain has written to
+   durable storage: when sync! returns, every commit so far survives a
+   system crash or power loss, not only a process crash. Commits on a
+   disk domain are already forced one by one as they publish
+   (persistent-atom-domain's :durable?, default true); sync! is the
+   explicit barrier for a domain opened :durable? false — the
+   group-commit shape, one force for many commits. Returns x."
+  [x]
+  (journal-checkpoint! (atom-domain-state x))
+  x)
 
 ;; ---------------------------------------------------------------------------
-;; FNV-1a hash for atom name strings
+;; Atom names — FNV-1a over the name's UTF-16 units & 0xFF (the registry
+;; hash every host writes; FORMAT-DECISIONS.md §names)
 ;; ---------------------------------------------------------------------------
 
 (defn- fnv-1a-hash
-  "FNV-1a 32-bit hash of a string. Used for atom slot name_hash field."
-  [^String s]
-  (let [len #?(:cljs (.-length s) :default (.length s))]
-    (loop [i 0 h (unchecked-int 0x811c9dc5)]
-      (if (>= i len)
-        h
-        (let [b #?(:cljs (.charCodeAt s i) :default (int (.charAt s i)))]
-          (recur (inc i)
-                 (unchecked-int
-                  (unchecked-multiply
-                   (bit-xor h (bit-and b 0xFF))
-                   (unchecked-int 0x01000193)))))))))
+  [s]
+  (reduce (fn [h u] (i32/imul (bit-xor h (bit-and u 0xFF)) 0x01000193))
+          (i32/i32 0x811c9dc5)
+          (enc/utf16-units s)))
 
-(defn- keyword-str
-  "Convert a namespace-qualified keyword to its string form: \"ns/name\"."
-  [k]
+(defn- keyword-str [k]
   (str (namespace k) "/" (name k)))
 
-;; ---------------------------------------------------------------------------
-;; Atom slot allocation and registry
-;; ---------------------------------------------------------------------------
-
 (defn- claim-atom-slot!
-  "Scan the atom slot table for a free slot (atom_ptr == NIL_OFFSET).
-   CAS-claim it by writing a sentinel. Returns the slot index.
-   Starts scanning from slot 1 (slot 0 = registry)."
+  "CAS-claim the first free atom slot (from 1; 0 is the registry) with the
+   CLAIMED sentinel, write the name hash, return the index."
   [root-r name-hash]
-  (loop [i 1]
-    (when (>= i d/MAX_ATOM_SLOTS)
-      (throw (ex-info "mmap-atom: no free atom slot" {:max d/MAX_ATOM_SLOTS})))
-    (let [ptr-off (d/atom-slot-offset i d/ATOM_SLOT_PTR_OFFSET)
-          cur-ptr (mem/-load-i32 root-r ptr-off)]
-      (if (== cur-ptr alloc/NIL_OFFSET)
-        ;; Free slot — try to claim with CAS (NIL → CLAIMED sentinel)
-        (let [w (mem/-cas-i32! root-r ptr-off alloc/NIL_OFFSET CLAIMED_SENTINEL)]
-          (if (== w alloc/NIL_OFFSET)
-            (do (mem/-store-i32! root-r (d/atom-slot-offset i d/ATOM_SLOT_HASH_OFFSET)
-                                 name-hash)
-                i)
-            (recur (inc i))))
-        (recur (inc i))))))
+  ;; FORMAT-DECISIONS §12 (2026-10-24): the capacity is root word 20 (grown by CAS by a participant that can extend the
+  ;; file: eve-disk), the scan starts at the hint (word 36), and a slot whose ptr word is 0 (bytes a grown file gained)
+  ;; is free as NIL is. This participant maps the root at ROOT_BYTES: a capacity past that is a domain grown elsewhere
+  ;; — it claims what its region holds and says so past it (the remap is test/coop-atom's unit).
+  (let [cap (mem/-load-i32 root-r d/ROOT_ATOM_TABLE_CAPACITY)
+        cap (if (pos? cap) cap d/MAX_ATOM_SLOTS)
+        reach (min cap d/MAX_ATOM_SLOTS)
+        hint (mem/-load-i32 root-r d/ROOT_SLOT_HINT_OFFSET)]
+    (loop [i (max 1 hint)]
+      (when (>= i reach)
+        (throw (ex-info (if (> cap d/MAX_ATOM_SLOTS)
+                          "mmap-atom: the domain's atom slots pass this participant's root region (FORMAT-DECISIONS §12)"
+                          "mmap-atom: no free atom slot")
+                        {:capacity cap :region-slots d/MAX_ATOM_SLOTS})))
+      (let [ptr-off (d/atom-slot-offset i d/ATOM_SLOT_PTR_OFFSET)
+            cur-ptr (mem/-load-i32 root-r ptr-off)]
+        (if (or (== cur-ptr alloc/NIL_OFFSET) (== cur-ptr 0))
+          (let [w (mem/-cas-i32! root-r ptr-off cur-ptr CLAIMED_SENTINEL)]
+            (if (== w cur-ptr)
+              (do (mem/-store-i32! root-r (d/atom-slot-offset i d/ATOM_SLOT_HASH_OFFSET) name-hash)
+                  (mem/-store-i32! root-r d/ROOT_SLOT_HINT_OFFSET (inc i))
+                  i)
+              (recur (inc i))))
+          (recur (inc i)))))))
 
-(defn- update-registry!
-  "CAS-update the registry atom (slot 0) to associate kw-str → slot-idx.
-   The registry is an EveHashMap stored as a regular atom value."
-  [domain-state kw-str slot-idx]
-  #?(:cljs
-     (cljs-mmap-swap! domain-state 0
-                      (fn [reg] (assoc (or reg {}) kw-str slot-idx)) [])
-     :default
-     (jvm-mmap-swap! domain-state 0
-                     (fn [reg] (assoc (or reg {}) kw-str slot-idx)) [])))
+(defn- register-name!
+  "kw-str -> slot-idx in the registry unless the name is there already: one
+   swap of the registry, so of processes creating one name at once exactly one
+   registers it (each assoc'ing its own slot over the others' gave each its
+   own atom). The slot the name has, read under the swap's pin."
+  [ds kw-str slot-idx]
+  (let [got (volatile! nil)]
+    (mmap-swap! ds 0 (fn [reg]
+                       (let [reg  (or reg {})
+                             have (ecore/get reg kw-str)]
+                         ;; every attempt overwrites: the committed one's counts
+                         (vreset! got (if (some? have) have slot-idx))
+                         (if (some? have) reg (ecore/assoc reg kw-str slot-idx))))
+                [])
+    @got))
 
-(defn- read-registry
-  "Read the current registry map from slot 0."
-  [domain-state]
-  #?(:cljs (cljs-mmap-deref domain-state 0)
-     :default (jvm-mmap-deref domain-state 0)))
+(defn- read-registry [ds]
+  (plain-deref ds 0))
 
 (defn- create-mmap-atom!
-  "Create a new named atom in a domain. Allocates a slot, updates registry,
-   optionally sets initial value. Returns [MmapAtom slot-idx]."
-  [^MmapAtomDomain domain kw-str initial-val]
-  (let [ds (.-domain-state domain)
+  "Create the atom named kw-str in a domain, or open the one another process
+   created under that name first: claim a slot, write initial-val into it
+   while no other process can name it, then register the name
+   (register-name!). A process that lost frees its slot — the value retired as
+   any swap retires it — and opens the winner's, whose value it leaves alone.
+   Returns the MmapAtom."
+  [domain kw-str initial-val]
+  (let [ds (atom-domain-state domain)
         root-r (:root-r ds)
-        name-hash (fnv-1a-hash kw-str)
-        slot-idx (claim-atom-slot! root-r name-hash)]
-    ;; Update registry: assoc kw-str → slot-idx
-    (update-registry! ds kw-str slot-idx)
-    ;; Update in-memory cache
-    (swap! (.-registry-cache domain) assoc kw-str slot-idx)
-    ;; Create atom and set initial value if provided
-    (let [a (MmapAtom. ds slot-idx)]
-      (when (some? initial-val)
-        #?(:cljs (-swap! a (constantly initial-val))
-           :default (swap! a (constantly initial-val))))
-      a)))
+        mine (with-domain-write ds false
+               (fn [_] (claim-atom-slot! root-r (fnv-1a-hash kw-str))))]
+    (when (some? initial-val)
+      (mmap-swap! ds mine (constantly initial-val) []))
+    (let [slot (register-name! ds kw-str mine)]
+      (when-not (== slot mine)
+        ;; nil is the NIL root pointer: the slot is free again
+        (mmap-swap! ds mine (constantly nil) []))
+      (swap! (-registry-cache domain) assoc kw-str slot)
+      (MmapAtom. ds slot))))
 
 (defn lookup-or-create-mmap-atom!
-  "Look up an atom by keyword string, or create it if not found."
-  [^MmapAtomDomain domain kw-str initial-val]
-  ;; Check in-memory cache first
-  (if-let [cached-idx (get @(.-registry-cache domain) kw-str)]
-    (MmapAtom. (.-domain-state domain) cached-idx)
-    ;; Read registry from slab
-    (let [reg (read-registry (.-domain-state domain))]
-      (if-let [slot-idx (get reg kw-str)]
-        (do (swap! (.-registry-cache domain) assoc kw-str slot-idx)
-            (MmapAtom. (.-domain-state domain) slot-idx))
-        ;; Not found — create new atom
-        (create-mmap-atom! domain kw-str initial-val)))))
+  "The atom named kw-str in domain, created with initial-val when absent."
+  [domain kw-str initial-val]
+  (let [cache (-registry-cache domain)
+        ds (atom-domain-state domain)]
+    (if-let [cached-idx (get @cache kw-str)]
+      (MmapAtom. ds cached-idx)
+      (let [reg (read-registry ds)]
+        (if-let [slot-idx (get reg kw-str)]
+          (do (swap! cache assoc kw-str slot-idx)
+              (MmapAtom. ds slot-idx))
+          (create-mmap-atom! domain kw-str initial-val))))))
 
 ;; ---------------------------------------------------------------------------
-;; Argument parsing (mirrors shared_atom.cljs:parse-atom-args)
+;; Meta-atoms — an atom's coordination state kept beside it (operator
+;; direction, 2026-10-19): a second atom of the same domain, registered in
+;; the domain's registry under a reserved name made from the atom's own, read
+;; and swapped as any atom is. Its traffic never touches the atom's own slot:
+;; the atom's value, its root pointer (its version) and its registry entry are
+;; what they were. Neither the atom's format nor its equality changes — the
+;; pairing is a name.
+;; ---------------------------------------------------------------------------
+
+(def ^:const META_ATOM_PREFIX
+  "The reserved prefix of a meta-atom's registry name: the meta-atom of the
+   atom registered as n is registered as (str META_ATOM_PREFIX n)."
+  "eve.meta/")
+
+(defn registered-name
+  "The name eve atom a is registered under in its domain's registry, or nil
+   (the domain itself, slot 0, has none)."
+  [a]
+  (let [slot (-atom-slot-idx a)]
+    (when-not (zero? slot)
+      (some (fn [[k v]] (when (== v slot) k)) (read-registry (atom-domain-state a))))))
+
+(defn meta-atom
+  "The meta-atom of eve atom a: the atom of a's domain registered as
+   (str META_ATOM_PREFIX (registered-name a)), made holding initial-value (nil by
+   default) the first time any process asks for it — of processes asking at
+   once exactly one makes it (create-mmap-atom!)."
+  ([a] (meta-atom a nil))
+  ([a initial-value]
+   (let [nm (or (registered-name a)
+                (throw (ex-info "eve.atom/meta-atom: the atom has no registered name" {:slot (-atom-slot-idx a)})))]
+     (lookup-or-create-mmap-atom! (MmapAtomDomain. (atom-domain-state a) (clojure.core/atom {}))
+                                  (str META_ATOM_PREFIX nm) initial-value))))
+
+(defn version
+  "[domain-epoch root-pointer] of atom a, read epoch first: equal readings name one value of a — a commit to any atom
+   of the domain moves the epoch after its pointer moves, and a pointer comes back only after the commit that moved
+   it away has moved the epoch (its block is freed past that epoch). Unequal readings say nothing (a commit elsewhere
+   in the domain, or the same value written again)."
+  [a]
+  (let [{:keys [root-r]} (atom-domain-state a)
+        e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+    [e (mem/-load-i32 root-r (d/atom-slot-offset (-atom-slot-idx a) d/ATOM_SLOT_PTR_OFFSET))]))
+
+(defn- fnv-fold [h x] (i32/imul (bit-xor h (i32/i32 x)) 0x01000193))
+
+(defn seal
+  "Atom a's current version as it is stored, read under a pin: its slot's two
+   words — the root pointer (every committed swap writes a new one) and its
+   name's hash — and every block its value owns, offset and bytes, folded in
+   offset order into one FNV-1a digest (a fixed-size class's whole block, an
+   overflow block's first 32 bytes). Equal seals are one version, byte for
+   byte: what a meta-atom's traffic leaves of its atom."
+  [a]
+  (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
+        slot (-atom-slot-idx a)]
+    (refresh-slabs! ds)
+    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+    (try
+      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))
+            nh (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))
+            _ (refresh-slabs! ds)
+            offs (sort (distinct (when (live-ptr? ptr) (retire/reach sio ptr))))
+            digest (reduce (fn [h off]
+                             (let [cls (alloc/decode-class-idx off)
+                                   ^bytes bs (slab/read-bytes sio off 0 (if (< cls 6) (d/slab-size cls) 32))]
+                               (reduce (fn [h i] (fnv-fold h (bit-and (aget bs i) 0xFF)))
+                                       (fnv-fold h off)
+                                       (range (alength bs)))))
+                           (i32/i32 0x811c9dc5)
+                           offs)]
+        {:ptr ptr :name-hash nh :blocks (count offs) :digest digest})
+      (finally
+        (unpin-epoch! ds)))))
+
+;; ---------------------------------------------------------------------------
+;; Argument parsing
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-persistent-atom-args
-  "Parse persistent-atom arguments:
-   (persistent-atom value)                  - anonymous
-   (persistent-atom ::ns/kw value)          - named (qualified kw shorthand)
-   (persistent-atom {:id ::ns/kw} value)    - named (config map)
-   (persistent-atom nil value)              - anonymous (escape hatch)"
+  "(persistent-atom value) · (persistent-atom ::ns/kw value) ·
+   (persistent-atom {:id ::ns/kw} value) · (persistent-atom nil value)"
   [args]
   (if (== 1 (count args))
     {:value (first args) :opts {}}
     (let [fst (first args)
           snd (second args)]
       (cond
-        (and (keyword? fst) (namespace fst))
-        {:value snd :opts {:id fst}}
-
-        (map? fst)
-        {:value snd :opts fst}
-
-        (nil? fst)
-        {:value snd :opts {}}
-
-        :else
-        {:value fst :opts {}}))))
+        (and (keyword? fst) (namespace fst)) {:value snd :opts {:id fst}}
+        (map? fst) {:value snd :opts fst}
+        (nil? fst) {:value snd :opts {}}
+        :else {:value fst :opts {}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Default domain
 ;; ---------------------------------------------------------------------------
 
 (def ^:dynamic *global-persistent-atom-domain*
-  "Dynamic var for the default persistent atom domain.
-   Lazy-initialized on first persistent-atom call without :persistent key."
+  "The default persistent atom domain; ./eve/ is opened lazily when unset."
   nil)
 
 (defn- resolve-domain
-  "Resolve which domain to use for a persistent-atom call.
-   :persistent in opts → open/join that path.
-   :lustre? in opts → use fcntl byte-range locking for cross-node atomics.
-   Otherwise → *global-persistent-atom-domain* or lazy default at ./eve/."
+  ":persistent as a path opens that domain; :persistent true (or any
+   non-path) is the default global domain."
   [opts]
-  (let [lustre? (:lustre? opts false)]
-    (if-let [path (:persistent opts)]
+  (let [lustre? (:lustre? opts false)
+        path (:persistent opts)]
+    (if (string? path)
       (persistent-atom-domain path :lustre? lustre?)
       (or *global-persistent-atom-domain*
           (persistent-atom-domain "./eve/" :lustre? lustre?)))))
 
 (def ^:private anon-counter
-  "Auto-incrementing counter for anonymous persistent atoms."
-  #?(:cljs (cljs.core/atom 0)
-     :default (clojure.core/atom 0)))
+  (clojure.core/atom 0))
+
+(defn- atom-name [id]
+  (if id
+    (str (namespace id) "/" (name id))
+    (str "__anon__/" (swap! anon-counter inc))))
 
 (defn persistent-atom
-  "Create or look up a named persistent atom in an mmap-backed domain.
-
-   Forms:
+  "Create or look up a named persistent atom in an mmap domain.
      (persistent-atom ::counter 0)
-       Named atom in the default global domain (*global-persistent-atom-domain*
-       or lazy ./eve/). Name is the keyword string \"ns/counter\".
-
      (persistent-atom {:id ::counter :persistent \"./my-db\"} 0)
-       Named atom in an explicit domain at ./my-db.
-
      (persistent-atom 0)
-       Anonymous atom (auto-generated unique name) in the default domain.
-
-     (persistent-atom {:id ::counter} 0)
-       Named atom, default domain (same as keyword shorthand).
-
-   Returns an MmapAtom that implements IDeref, ISwap, IReset."
+   Returns an MmapAtom."
   [& args]
   (let [{:keys [value opts]} (parse-persistent-atom-args args)
-        domain (resolve-domain opts)
-        id (:id opts)
-        kw-str (if id
-                 (str (namespace id) "/" (name id))
-                 (str "__anon__/" (swap! anon-counter inc)))]
-    (lookup-or-create-mmap-atom! domain kw-str value)))
+        domain (resolve-domain opts)]
+    (lookup-or-create-mmap-atom! domain (atom-name (:id opts)) value)))
 
 ;; ---------------------------------------------------------------------------
-;; Heap-backed (non-persistent) atom — JVM only (not bb)
+;; In-process atoms — heap slabs (JVM, bb) or the module SABs (CLJS)
 ;; ---------------------------------------------------------------------------
 
-#?(:bb nil
-   :clj
-   (do
-     (defn- jvm-open-heap-domain!
-       "Create an in-memory (non-persistent) atom domain on JVM.
-        Uses JvmHeapRegion for slabs and root — no files on disk.
-        Returns domain-state map compatible with jvm-mmap-deref/jvm-mmap-swap!."
-       [& {:keys [capacities] :or {capacities {}}}]
-       (let [;; 6 bitmap slab classes (heap-backed)
-             slab-regions
-             (mapv (fn [i]
-                     (let [cap (get capacities i (* 1 1024 1024))]
-                       (alloc/init-jvm-heap-slab! i :capacity cap)))
-                   (range d/NUM_SLAB_CLASSES))
-             ;; Class 6: coalescing overflow (heap-backed)
-             coalesc-init-sz (* 64 1024) ;; 64 KB initial — grows on demand
-             coalesc-layout (coalesc/coalesc-layout coalesc-init-sz
-                                                    coalesc/MAX_DESCRIPTORS)
-             coalesc-r (mem/make-heap-region (:total-bytes coalesc-layout))
-             _ (coalesc/init-coalesc-region! coalesc-r
-                                             coalesc-init-sz
-                                             coalesc/MAX_DESCRIPTORS)
-             regions-7 (conj slab-regions coalesc-r)
-             ;; Heap slabs: bitmap is embedded in same region (no separate file)
-             bm-regions-7 (conj slab-regions nil) ;; classes 0-5 share region, 6 = nil
-             sio (alloc/make-jvm-slab-ctx regions-7 bm-regions-7)
-             ;; Root region (heap-backed)
-             root-r (mem/make-heap-region ROOT_BYTES)
-             rmap-r (mem/make-heap-region READER_MAP_BYTES)]
-         ;; Write root header (V2)
-         (mem/-store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
-         (mem/-store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0)
-         (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
-         (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
-         (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
-         ;; Init worker slots
-         (dotimes [slot d/MAX_WORKERS]
-           (mem/-store-i32! root-r
-                            (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
-                            d/WORKER_STATUS_INACTIVE))
-         ;; Init atom table
-         (mem/-store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
-         (mem/-store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0)
-         (dotimes [s d/MAX_ATOM_SLOTS]
-           (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET)
-                            alloc/NIL_OFFSET)
-           (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
-         (mem/-store-i32! root-r (d/atom-slot-offset 0 d/ATOM_SLOT_PTR_OFFSET)
-                          alloc/NIL_OFFSET)
-         ;; Claim a worker slot (no heartbeat needed — single process)
-         (let [slot-idx (mmap-claim-slot! root-r)]
-           (write-heartbeat! root-r slot-idx)
-           {:root-r root-r :rmap-r rmap-r :sio sio :base-path nil
-            :slot-idx slot-idx :heartbeat-sched nil
-            :retire-q (java.util.concurrent.ConcurrentLinkedQueue.)
-            :tree-logs (java.util.concurrent.ConcurrentHashMap.)
-            :flush-ts (volatile! 0)
-            :thread-epochs (java.util.concurrent.ConcurrentHashMap.)
-            :pin-lock (Object.)})))
+(def ^:private heap-domain-cache
+  "In-process domains by id (nil = the default)."
+  (clojure.core/atom {}))
 
-     (def ^:private heap-domain-cache
-       "Cache of heap domains by id (keyword or nil for default)."
-       (clojure.core/atom {}))
+(defn- resolve-heap-domain [id]
+  (or (get @heap-domain-cache id)
+      (let [d (MmapAtomDomain. (open-heap-domain! {}) (clojure.core/atom {}))]
+        (swap! heap-domain-cache assoc id d)
+        d)))
 
-     (defn- resolve-heap-domain
-       "Get or create a heap-backed MmapAtomDomain for the given id (nil = default)."
-       [id]
-       (or (get @heap-domain-cache id)
-           (let [ds (jvm-open-heap-domain!)
-                 d (MmapAtomDomain. ds (clojure.core/atom {}))]
-             (swap! heap-domain-cache assoc id d)
-             d)))
+(defn atom
+  "Create or look up an atom.
+     (atom ::counter 0)                            in-process
+     (atom {:id ::counter} 0)                      in-process
+     (atom {:id ::counter :persistent \"./db\"} 0)  mmap-backed (on disk)
+     (atom 0)                                      anonymous, in-process"
+  [& args]
+  (let [{:keys [value opts]} (parse-persistent-atom-args args)]
+    (if (:persistent opts)
+      (apply persistent-atom args)
+      (lookup-or-create-mmap-atom! (resolve-heap-domain (:id opts)) (atom-name (:id opts)) value))))
 
-     (defn atom
-       "Create or look up an atom (JVM).
+(defn atom-sio
+  "The ISlabIO of an Eve atom's domain: construct values that will be stored
+   in the atom with it, so they allocate in the atom's own domain:
+     (swap! ea (fn [_] (ds/dataset (atom-sio ea) {...})))
+   Accepts an MmapAtom or MmapAtomDomain."
+  [atm]
+  (:sio (atom-domain-state atm)))
 
-        Mirrors the cljs-thread t/atom API:
-
-          (atom ::counter 0)                     - heap-backed (in-memory)
-          (atom {:id ::counter} 0)               - heap-backed (in-memory)
-          (atom {:id ::counter :persistent \"./db\"} 0)  - mmap-backed (on disk)
-          (atom 0)                               - anonymous heap-backed
-
-        Without :persistent, creates an in-memory heap-backed atom (analogous
-        to CLJS SharedArrayBuffer atoms). With :persistent, delegates to
-        persistent-atom for mmap-backed cross-process atoms."
-       [& args]
-       (let [{:keys [value opts]} (parse-persistent-atom-args args)]
-         (if (:persistent opts)
-           (apply persistent-atom args)
-           (let [domain (resolve-heap-domain (:id opts))
-                 id (:id opts)
-                 kw-str (if id
-                          (str (namespace id) "/" (name id))
-                          (str "__anon__/" (swap! anon-counter inc)))]
-             (lookup-or-create-mmap-atom! domain kw-str value)))))))
-
-;; ---------------------------------------------------------------------------
-;; SAB-backed (non-persistent) atom — CLJS only
-;; ---------------------------------------------------------------------------
-
-#?(:cljs
-   (do
-     (def ^:private sab-domain-cache
-       "Cache of SAB domains by id (keyword or nil for default)."
-       (cljs.core/atom {}))
-
-     (defn- resolve-sab-domain
-       "Get or create an SAB-backed MmapAtomDomain for the given id (nil = default)."
-       [id]
-       (or (get @sab-domain-cache id)
-           (let [ds (cljs-open-sab-domain! :skip-init true)
-                 d (MmapAtomDomain. ds (cljs.core/atom {}))]
-             (swap! sab-domain-cache assoc id d)
-             d)))
-
-     (defn atom
-       "Create or look up an atom (CLJS).
-
-        Mirrors the JVM eve.atom/atom API:
-
-          (atom ::counter 0)                     - SAB-backed (in-memory)
-          (atom {:id ::counter} 0)               - SAB-backed (in-memory)
-          (atom {:id ::counter :persistent \"./db\"} 0)  - mmap-backed (on disk)
-          (atom 0)                               - anonymous SAB-backed
-
-        Without :persistent, creates an in-memory SAB-backed atom (replaces
-        the old eve.shared-atom). With :persistent, delegates to
-        persistent-atom for mmap-backed cross-process atoms."
-       [& args]
-       (let [{:keys [value opts]} (parse-persistent-atom-args args)]
-         (if (:persistent opts)
-           (apply persistent-atom args)
-           (let [domain (resolve-sab-domain (:id opts))
-                 id (:id opts)
-                 kw-str (if id
-                          (str (namespace id) "/" (name id))
-                          (str "__anon__/" (swap! anon-counter inc)))]
-             (lookup-or-create-mmap-atom! domain kw-str value)))))))
-
-;; ---------------------------------------------------------------------------
-;; Backward-compat API — bridges callers that used eve.shared-atom's API
-;; These shims let array.cljc and obj.cljc compile during the transition.
-;; ---------------------------------------------------------------------------
+(defn shared-atom?
+  "True for an Eve atom (MmapAtom or MmapAtomDomain)."
+  [obj]
+  (or (instance? MmapAtom obj) (instance? MmapAtomDomain obj)))
 
 (def ^:dynamic *global-atom-instance*
-  "Dynamic var for the global atom instance.
-   Bound during swap!/reset! and by atom-domain initialization.
-   Used by array.cljc and obj.cljc to locate the slab allocation context."
+  "The global atom instance where a caller binds it (or, on ClojureScript,
+   set!s it); global-domain answers it, else the domain atom-domain made
+   last."
   nil)
 
-(defn- create-atom-domain!
-  "Internal: create a domain, store initial value, set global."
-  [domain initial-value]
+;; atom-domain's last domain: a var's root is set only where a host allows
+;; it (ClojureScript's set!; the JVM refuses set! outside a binding), an
+;; atom's value everywhere
+(defonce ^:private last-atom-domain (clojure.core/atom nil))
+
+(defn global-domain
+  "The global atom domain: *global-atom-instance* where bound, else the
+   domain atom-domain made last (nil before one)."
+  []
+  (or *global-atom-instance* @last-atom-domain))
+
+(defn- create-atom-domain! [domain initial-value]
   (let [kw-str "__atom-domain__/root"
         _a (lookup-or-create-mmap-atom! domain kw-str initial-value)]
-    ;; Set the global so array.cljc / obj.cljc can find the slab context
-    (set! *global-atom-instance* domain)
+    (reset! last-atom-domain domain)
     domain))
 
-#?(:cljs
-   (do
-     (defn get-env
-       "Return the slab allocation environment map.
-        For backward compatibility with callers that used eve.shared-atom/get-env.
-        In the slab-backed system, the 'env' is the domain-state map
-        augmented with :sab pointing to the class 0 slab's SAB."
-       [obj]
-       (let [ds (cond
-                  (instance? MmapAtom obj) (.-domain-state ^js obj)
-                  (instance? MmapAtomDomain obj) (.-domain-state ^js obj)
-                  (map? obj) obj
-                  :else (.-domain-state ^js obj))
-             ;; Add :sab compat key from slab class 0
-             sabs (try (alloc/get-all-slab-sabs) (catch :default _ nil))
-             sab (when (and sabs (pos? (alength sabs))) (aget sabs 0))]
-         (if sab
-           (assoc ds :sab sab)
-           ds)))
+(defn atom-domain
+  "A fresh in-process atom domain holding initial-value. Returns an
+   MmapAtomDomain."
+  [initial-value & {:as _opts}]
+  (let [ds (open-heap-domain! {})
+        domain (MmapAtomDomain. ds (clojure.core/atom {}))]
+    (alloc/init-domain-views!)
+    (mmap-swap! ds 0 (constantly initial-value) [])
+    (create-atom-domain! domain initial-value)
+    domain))
 
-     (defn alloc
-       "Allocate a block of size-bytes via the slab allocator.
-        For backward compatibility with eve.shared-atom/alloc callers.
-        Returns {:offset slab-qualified-offset :descriptor-idx slab-offset}.
-        descriptor-idx is set to the slab offset for unique identification."
-       [_env size-bytes]
-       (let [result (alloc/alloc size-bytes)]
-         (if (:error result)
-           result
-           (let [off (:offset result)]
-             {:offset off
-              :descriptor-idx off}))))
+;; ---------------------------------------------------------------------------
+;; The epoch-GC surface the eve.shared-atom tests call (epoch_gc_test): worker
+;; slots, heartbeats, epochs and a retire registry over a domain-state map
+;; (eve.sab has ClojureScript's SAB and module-slab calls of that surface).
+;; ---------------------------------------------------------------------------
 
-     (defn free
-       "Free a slab-allocated block.
-        For backward compatibility with eve.shared-atom/free callers."
-       [_env slab-offset]
-       (alloc/free! slab-offset))
+(defn register-worker!
+  [env _worker-id]
+  (let [root-r (:root-r env)
+        slot (mmap-claim-slot! root-r)]
+    (write-heartbeat! root-r slot)
+    slot))
 
-     (defn shared-atom?
-       "Returns true if obj is an Eve atom (MmapAtom or MmapAtomDomain)."
-       [obj]
-       (or (instance? MmapAtom obj) (instance? MmapAtomDomain obj)))
+(defn unregister-worker! [env slot-idx]
+  (mmap-release-slot! (:root-r env) slot-idx))
 
-     (defn atom-serialize
-       "Serialize a value for atom storage (compat shim).
-        In the slab-backed system, this converts a CLJS value to an Eve type."
-       [v]
-       (ser/convert-to-sab v))
+(defn update-heartbeat! [env slot-idx]
+  (write-heartbeat! (:root-r env) slot-idx))
 
-     (defn atom-deserialize
-       "Deserialize a value from atom storage (compat shim).
-        In the slab-backed system, Eve types are already lazy — just return as-is."
-       [v]
-       v)
+(defn check-worker-liveness [env slot-idx]
+  (not (heartbeat-stale? (:root-r env) slot-idx)))
 
-     (defn eve->cljs
-       "Convert an Eve type to a plain CLJS value (compat shim).
-        Recursively materializes lazy slab-backed types into plain CLJS data."
-       [v]
-       (cond
-         (nil? v) v
-         (or (string? v) (number? v) (boolean? v) (keyword? v) (symbol? v)) v
-         (satisfies? IMap v) (into {} (map (fn [[k v]] [(eve->cljs k) (eve->cljs v)])) v)
-         (satisfies? IVector v) (into [] (map eve->cljs) v)
-         (satisfies? ISet v) (into #{} (map eve->cljs) v)
-         (satisfies? ISequential v) (into [] (map eve->cljs) v)
-         :else v))
+(defn get-current-epoch [env]
+  (mem/-load-i32 (:root-r env) d/ROOT_EPOCH_OFFSET))
 
-     (defn init-worker-cache!
-       "Initialize module-level cached views for a worker thread.
-        For backward compatibility with eve.shared-atom/init-worker-cache!.
-        In the slab system, initializes wasm-mem views from slab class 0 SAB."
-       [_env]
-       (let [sabs (alloc/get-all-slab-sabs)]
-         (when (and sabs (pos? (alength sabs)))
-           (wasm-mem/init-views-from-sab! (aget sabs 0)))))
+(defn increment-epoch! [env]
+  (inc (mem/-add-i32! (:root-r env) d/ROOT_EPOCH_OFFSET 1)))
 
-     (defn reset-alloc-cursor!
-       "Reset the allocation cursor (compat shim — no-op in slab system)."
-       ([] nil)
-       ([_pos] nil))
+(defn begin-read! [env slot-idx]
+  (let [root-r (:root-r env)
+        epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+    (mmap-pin-epoch! root-r slot-idx epoch)
+    epoch))
 
-     (defn sab-transfer-data
-       "Return the SABs for transferring to a worker.
-        Returns map with :sab (class 0 slab SAB), :reader-map-sab (rmap SAB),
-        :slab-sabs (all 6 slab SABs), :root-sab."
-       ([] (sab-transfer-data nil))
-       ([obj]
-        (let [sabs (alloc/get-all-slab-sabs)
-              sab (when (and sabs (pos? (alength sabs))) (aget sabs 0))
-              ds (when obj
-                   (cond
-                     (instance? MmapAtomDomain obj) (.-domain-state ^js obj)
-                     (instance? MmapAtom obj) (.-domain-state ^js obj)
-                     :else nil))
-              rmap-sab (when-let [rmap-r (when ds (:rmap-r ds))]
-                         (.-sab ^js rmap-r))]
-          {:sab sab
-           :reader-map-sab rmap-sab
-           :slab-sabs sabs
-           :root-sab (alloc/get-root-sab)})))
+(defn end-read-epoch! [env slot-idx]
+  (mmap-unpin-epoch! (:root-r env) slot-idx))
 
-     (defn atom-domain
-       "Create an SAB-backed atom domain (CLJS).
-        For backward compatibility with eve.shared-atom/atom-domain.
-        Creates a fresh SAB-backed domain with the given initial value.
-        Returns an MmapAtomDomain."
-       [initial-value & {:as _opts}]
-       (let [ds (cljs-open-sab-domain! :skip-init true)
-             domain (MmapAtomDomain. ds (cljs.core/atom {}))]
-         ;; Initialize wasm-mem cached views from slab class 0 SAB
-         (let [sabs (alloc/get-all-slab-sabs)]
-           (when (and sabs (pos? (alength sabs)))
-             (wasm-mem/init-views-from-sab! (aget sabs 0))))
-         (create-atom-domain! domain initial-value)
-         domain))
+(defn with-read-epoch [env slot-idx f]
+  (let [epoch (begin-read! env slot-idx)]
+    (try (f epoch)
+         (finally (end-read-epoch! env slot-idx)))))
 
-     ;; -----------------------------------------------------------------------
-     ;; Epoch-GC public API — shims for epoch_gc_test.cljs
-     ;; These delegate to the private worker-slot helpers on the root IMemRegion.
-     ;; The `env` parameter is a domain-state map (from get-env).
-     ;; -----------------------------------------------------------------------
+(defn get-min-active-epoch [env]
+  (mmap-min-safe-epoch (:root-r env)))
 
-     (defn register-worker!
-       "Register a worker in the root worker registry. Returns slot index."
-       [env _worker-id]
-       (let [root-r (:root-r env)
-             slot (mmap-claim-slot! root-r)]
-         (write-heartbeat! root-r slot)
-         slot))
+(def ^:private retired-blocks-registry
+  (clojure.core/atom {}))
 
-     (defn unregister-worker!
-       "Unregister a worker slot."
-       [env slot-idx]
-       (mmap-release-slot! (:root-r env) slot-idx))
+(defn retire-block!
+  [env descriptor-idx]
+  (let [epoch (get-current-epoch env)]
+    (swap! retired-blocks-registry assoc descriptor-idx
+           {:epoch epoch :slab-offset (:offset (get @retired-blocks-registry descriptor-idx))})
+    true))
 
-     (defn update-heartbeat!
-       "Update worker heartbeat timestamp."
-       [env slot-idx]
-       (write-heartbeat! (:root-r env) slot-idx))
+(defn try-free-retired!
+  [env descriptor-idx]
+  (if-let [entry (get @retired-blocks-registry descriptor-idx)]
+    (let [min-epoch (get-min-active-epoch env)
+          retired-epoch (:epoch entry)]
+      (if (or (nil? min-epoch) (> min-epoch retired-epoch))
+        (do (swap! retired-blocks-registry dissoc descriptor-idx)
+            :freed)
+        :has-readers))
+    :not-retired))
 
-     (defn check-worker-liveness
-       "Check if a worker's heartbeat is fresh (not stale)."
-       [env slot-idx]
-       (not (heartbeat-stale? (:root-r env) slot-idx)))
+(defn sweep-retired-blocks!
+  [env]
+  (let [min-epoch (get-min-active-epoch env)
+        entries @retired-blocks-registry
+        freeable (filter (fn [[_ {:keys [epoch]}]]
+                           (or (nil? min-epoch) (> min-epoch epoch)))
+                         entries)]
+    (doseq [[desc-idx _] freeable]
+      (swap! retired-blocks-registry dissoc desc-idx))
+    (count freeable)))
 
-     (defn get-current-epoch
-       "Read the current global epoch."
-       [env]
-       (mem/-load-i32 (:root-r env) d/ROOT_EPOCH_OFFSET))
-
-     (defn increment-epoch!
-       "Atomically increment the global epoch. Returns new epoch."
-       [env]
-       (inc (mem/-add-i32! (:root-r env) d/ROOT_EPOCH_OFFSET 1)))
-
-     (defn begin-read!
-       "Pin the current epoch for reading. Returns the epoch."
-       [env slot-idx]
-       (let [root-r (:root-r env)
-             epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-         (mmap-pin-epoch! root-r slot-idx epoch)
-         epoch))
-
-     (defn end-read-epoch!
-       "Unpin the read epoch for a worker slot."
-       [env slot-idx]
-       (mmap-unpin-epoch! (:root-r env) slot-idx))
-
-     (defn with-read-epoch
-       "Execute f within a pinned read epoch. Returns result of f."
-       [env slot-idx f]
-       (let [epoch (begin-read! env slot-idx)]
-         (try
-           (f epoch)
-           (finally
-             (end-read-epoch! env slot-idx)))))
-
-     (defn get-min-active-epoch
-       "Find the minimum epoch being read by any active worker."
-       [env]
-       (mmap-min-safe-epoch (:root-r env)))
-
-     (def ^:private retired-blocks-registry
-       "Track retired blocks for epoch-based GC compat.
-        Maps descriptor-idx to {:epoch N :slab-offset M}."
-       (cljs.core/atom {}))
-
-     (defn retire-block!
-       "Retire a block at the current epoch.
-        Returns true on success."
-       ([env descriptor-idx]
-        (let [epoch (get-current-epoch env)]
-          (swap! retired-blocks-registry assoc descriptor-idx
-                 {:epoch epoch :slab-offset (:offset (get @retired-blocks-registry descriptor-idx))})
-          true))
-       ([slab-offset]
-        (when (not= slab-offset alloc/NIL_OFFSET)
-          (alloc/free! slab-offset))))
-
-     (defn try-free-retired!
-       "Try to free a retired block. Checks if min-active-epoch > retired-epoch.
-        Returns :freed, :has-readers, or :not-retired."
-       [env descriptor-idx]
-       (if-let [entry (get @retired-blocks-registry descriptor-idx)]
-         (let [min-epoch (get-min-active-epoch env)
-               retired-epoch (:epoch entry)]
-           (if (or (nil? min-epoch) (> min-epoch retired-epoch))
-             (do
-               (swap! retired-blocks-registry dissoc descriptor-idx)
-               :freed)
-             :has-readers))
-         :not-retired))
-
-     (defn sweep-retired-blocks!
-       "Sweep retired blocks. Frees all blocks whose epoch is safe."
-       [env]
-       (let [min-epoch (get-min-active-epoch env)
-             entries @retired-blocks-registry
-             freeable (filter (fn [[_ {:keys [epoch]}]]
-                                (or (nil? min-epoch) (> min-epoch epoch)))
-                              entries)]
-         (doseq [[desc-idx _] freeable]
-           (swap! retired-blocks-registry dissoc desc-idx))
-         (count freeable)))
-
-     (defn mark-stale-workers!
-       "Mark stale workers. Returns count of stale workers found."
-       [env]
-       (let [root-r (:root-r env)]
-         (loop [i 0 count 0]
-           (if (>= i d/MAX_WORKERS)
-             count
-             (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
-               (if (and (== status d/WORKER_STATUS_ACTIVE)
-                        (heartbeat-stale? root-r i))
-                 (recur (inc i) (inc count))
-                 (recur (inc i) count)))))))))
-
+(defn mark-stale-workers!
+  [env]
+  (let [root-r (:root-r env)]
+    (loop [i 0 count 0]
+      (if (>= i d/MAX_WORKERS)
+        count
+        (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
+          (if (and (== status d/WORKER_STATUS_ACTIVE)
+                   (heartbeat-stale? root-r i))
+            (recur (inc i) (inc count))
+            (recur (inc i) count)))))))

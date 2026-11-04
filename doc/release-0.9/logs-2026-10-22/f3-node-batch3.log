@@ -1,0 +1,15 @@
+# run f3-node-batch3 on 5e7b4c01d eve tree bebfe373f5909f287b20792d17fbced01ab81494
+# cmd (in eve/) bash -c node target/eve-test/all.js batch3
+# start 2026-10-22 10:49:52 AM ET load 2.00 1.50 1.25 mem-in-use 839 MB
+=== Eve Test Runner ===
+Suite: batch3
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.batch3-validation-test
+
+Ran 7 tests containing 33 assertions.
+0 failures, 0 errors.
+# end 2026-10-22 10:49:54 AM ET exit 0 wall 2s peak-mem-in-use 916 MB peak-process-tree-rss 185 MB load 2.00 1.50 1.25

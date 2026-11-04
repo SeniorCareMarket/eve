@@ -4,6 +4,7 @@
   (:require
    [cljs.test :refer-macros [deftest testing is]]
    [eve.atom :as a]
+   [eve.sab :as sab]
    [eve.map :as sm]
    [eve.set :as ss]
    [eve.array :as arr]
@@ -33,7 +34,7 @@
   (ss/reset-pools!)
   (set! a/*global-atom-instance*
         (a/atom-domain {}))
-  (a/get-env a/*global-atom-instance*))
+  (sab/get-env a/*global-atom-instance*))
 
 ;;=============================================================================
 ;; sab-transfer-data — extract SAB refs for cross-thread transfer
@@ -41,13 +42,13 @@
 
 (deftest sab-transfer-data-exists-test
   (testing "sab-transfer-data is defined in atom namespace"
-    (is (fn? a/sab-transfer-data)
+    (is (fn? sab/sab-transfer-data)
         "sab-transfer-data should be a function")))
 
 (deftest sab-transfer-data-returns-sab-refs-test
   (testing "sab-transfer-data returns map with :sab and :reader-map-sab"
     (let [env (fresh-env)
-          transfer (a/sab-transfer-data a/*global-atom-instance*)]
+          transfer (sab/sab-transfer-data a/*global-atom-instance*)]
       (is (map? transfer)
           "should return a map")
       (is (contains? transfer :sab)
@@ -58,7 +59,7 @@
 (deftest sab-transfer-data-sab-is-shared-array-buffer-test
   (testing "sab-transfer-data :sab is a SharedArrayBuffer"
     (let [env (fresh-env)
-          transfer (a/sab-transfer-data a/*global-atom-instance*)
+          transfer (sab/sab-transfer-data a/*global-atom-instance*)
           sab (:sab transfer)]
       (is (some? sab) ":sab should be non-nil")
       (is (instance? js/SharedArrayBuffer sab)
@@ -69,7 +70,7 @@
 (deftest sab-transfer-data-round-trip-test
   (testing "SAB refs from sab-transfer-data can reconstruct atom env"
     (let [env (fresh-env)
-          transfer (a/sab-transfer-data a/*global-atom-instance*)
+          transfer (sab/sab-transfer-data a/*global-atom-instance*)
           sab (:sab transfer)
           index-view (js/Int32Array. sab)
           data-view (js/Uint8Array. sab)]
@@ -203,7 +204,7 @@
 ;;=============================================================================
 
 (deftest swap-retires-hamt-nodes-via-epoch-queue-test
-  (testing "swap! queues old HAMT structural nodes in retire-q (epoch-deferred)"
+  (testing "swap! parks the old root on the zero queue (eve.tally: freed behind the epoch, its nodes after it)"
     (fresh-env)
     ;; Swap 1: populate the atom
     (swap! a/*global-atom-instance* assoc :data (arr/eve-array :float64 [1 2 3]))
@@ -213,8 +214,8 @@
       (swap! a/*global-atom-instance* assoc :data (arr/eve-array :float64 [4 5 6]))
       (is (pos? (count @rq))
           "Retire queue should have entries after swap")
-      (is (every? #(contains? % :offsets) @rq)
-          "Each retire entry should have :offsets")
+      (is (every? #(and (contains? % :off) (contains? % :kind)) @rq)
+          "Each zero-queue entry names its block and the block's kind")
       (is (every? #(contains? % :epoch) @rq)
           "Each retire entry should have :epoch")
       (is (= 4.0 (first (get @a/*global-atom-instance* :data)))

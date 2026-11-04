@@ -1,212 +1,170 @@
-# Getting Started with Eve
+# Getting started
 
-Eve is a shared-memory persistent data structure library for ClojureScript and Clojure. It provides persistent maps, vectors, sets, and lists backed by `SharedArrayBuffer` (in-process) or memory-mapped files (cross-process). JVM Clojure and Node.js ClojureScript processes can share and atomically mutate Clojure data structures via mmap files on disk.
+eve runs on eleven hosts from one shared source. A host is `src/` plus that host's adapter roots, the row of
+[`hosts.edn`](../hosts.edn) that names it. This page starts you on the JVM, on babashka, and (in-tree) on ClojureScript.
+The other hosts are covered in [platform-support.md](platform-support.md).
 
----
+Every sample here was run as written on 2026-10-20 ET, on babashka 1.13.226 and on the JVM (OpenJDK 21.0.12, Clojure
+1.12.0), against this tree. Those are the only runtimes these instructions were checked on.
 
 ## Prerequisites
 
-| Requirement | Version | Notes |
-|---|---|---|
-| Node.js | 18+ | Required for ClojureScript runtime |
-| Java | 21+ | Required for JVM persistent atoms (Panama FFM) |
-| Clojure CLI | 1.11+ | `clojure` / `clj` commands |
-| npm | Any recent | Comes with Node.js |
-| C++ compiler | C++20 capable | GCC 5+, Clang 3.4+, Apple Clang 6+ |
+| For | What ran here |
+|---|---|
+| the JVM | JDK 21 (21.0.12 tested; `adapters/thread/jvm` starts virtual threads, a JDK 21 API) and the Clojure CLI with Clojure 1.12.0 |
+| babashka | babashka 1.13.226 |
+| ClojureScript on Node | Node 24.22.0 and npm. Disk domains also need eve's N-API addon (`native/mmap_cas.cc`), compiled on `npm install` by a C++20 toolchain (Python, `make`, a C++20 compiler) |
 
-The C++ compiler is only needed for the native addon (cross-process mmap atoms). In-process `SharedArrayBuffer` atoms work without it.
+## The JVM
 
----
-
-## Installation
-
-### As a dependency
-
-Add Eve to both `deps.edn` (for ClojureScript source) and `package.json` (for the native mmap addon):
+eve's `deps.edn` default `:paths` are `src` plus the JVM's adapter roots (the same list as `hosts.edn :jvm`). A
+project depends on the `eve/` directory:
 
 ```clojure
-;; deps.edn
-eve/eve {:git/url "https://github.com/SeniorCareMarket/eve"
-         :git/sha "0e084fff"}
+;; deps.edn of your project
+{:deps {eve/eve {:local/root "/path/to/eve"}}}
 ```
 
-```json
-// package.json — native addon (builds automatically on npm install)
-{
-  "dependencies": {
-    "eve-native": "github:SeniorCareMarket/eve"
-  }
-}
-```
+`clojure -M first_atom.cljc` in such a project ran the first sample below [ran]. A git dependency takes the
+repository's root (not run here). Only the JVM's roots come with the dependency.
+**A dependency's aliases never reach its consumer**, so a project on any other host lists that host's roots itself
+(next sections).
 
-The native addon is only needed for cross-process persistent atoms. In-process `SharedArrayBuffer` atoms work without it.
+## babashka
 
-### From source
+The classpath is `src` plus `hosts.edn :bb`'s roots. From `eve/`, `bb.edn`'s `:paths` are exactly that, so
+`bb file.cljc` works there. From anywhere else, `bb classpath bb` prints the same classpath with absolute paths:
 
 ```bash
-git clone https://github.com/SeniorCareMarket/eve.git
-cd eve
-
-# Install dependencies (also builds native addon via postinstall)
-npm install
-
-# Compile tests to verify the build
-npx shadow-cljs compile eve-test
-
-# Run all tests
-node target/eve-test/all.js all
+bb -cp "$(cd /path/to/eve && bb classpath bb)" file.cljc
 ```
 
-### shadow-cljs configuration
+## ClojureScript (in this tree)
 
-Eve uses shadow-cljs for ClojureScript compilation. Your `shadow-cljs.edn` should include the Eve source path and the `:node-test` alias from `deps.edn`:
+ClojureScript's roots are `hosts.edn :cljs`. This tree builds with them through `deps.edn`'s `:node-test` alias and
+`shadow-cljs.edn`'s builds. `npm install` builds the addon and `npm run test:compile` compiles the test bundles
+(`target/eve-test/all.js`). A ClojureScript **consumer** must put the `:cljs` roots on its own `:paths`, because the
+alias that carries them is eve's own and does not travel with the dependency. The build runs (`node
+target/eve-test/all.js all`: 482 tests, 0 failures, 2026-10-21); a consumer project was not run in the 0.9
+preparation.
 
-```clojure
-{:deps {:aliases [:node-test]}
- :builds
- {:my-app
-  {:target :node-script
-   :main my-app.core/main
-   :output-to "target/my-app.js"}}}
-```
-
----
-
-## Your First Eve Atom
-
-### In-Process (SharedArrayBuffer)
-
-The simplest way to use Eve is with in-process `SharedArrayBuffer`-backed atoms. These are fast, zero-copy, and work across web workers or Node.js worker threads.
-
-```clojure
-(ns my-app.core
-  (:require [eve.alpha :as e]))
-
-;; Create a SharedArrayBuffer-backed atom
-;; The slab allocator auto-initializes on first use
-(def my-atom (e/atom {:key "value"}))
-
-;; Standard Clojure atom operations — Eve handles storage transparently
-(swap! my-atom assoc :count 42)
-@my-atom ;; => {:key "value", :count 42}
-
-;; Named atoms — same :id returns the same atom
-(def state (e/atom ::app-state {:counter 0}))
-(swap! state update :counter inc)
-```
-
-All standard Clojure data structures — maps, vectors, sets, lists — are automatically serialized into Eve's `SharedArrayBuffer`-backed equivalents during `swap!` and `reset!`, and deserialized back on `deref`. You use normal Clojure code; the Eve layer is transparent.
-
-```clojure
-(def app (e/atom {:users {:alice {:role :admin}}
-                  :tags  #{:active :verified}
-                  :items [1 2 3]}))
-
-(swap! app assoc-in [:users :bob] {:role :user})
-(swap! app update :tags conj :premium)
-(swap! app update :items conj 4)
-
-@app
-;; => {:users {:alice {:role :admin}, :bob {:role :user}}
-;;     :tags #{:active :verified :premium}
-;;     :items [1 2 3 4]}
-```
-
-### Cross-Process (Persistent Atoms)
-
-Persistent atoms store data on disk via memory-mapped files. Multiple OS processes — JVM Clojure and Node.js ClojureScript — can share and atomically mutate the same data with full CAS semantics.
-
-**Process A** (Node.js or JVM):
+## Your first atom
 
 ```clojure
 (require '[eve.alpha :as e])
 
-;; Create a persistent atom backed by mmap files at ./my-db/
-(def counter (e/atom {:id ::counter :persistent "./my-db"} {:count 0}))
-
+(def counter (e/atom ::counter {:count 0}))   ; in-process, named
 (swap! counter update :count inc)
-@counter ;; => {:count 1}
+(println @counter)                              ; {:count 1}
+(reset! counter {:count 10})
+(println (compare-and-set! counter {:count 10} {:count 11}) @counter)   ; true {:count 11}
 ```
 
-**Process B** (Node.js or JVM — joins the same atom):
+`e/atom` is `eve.atom/atom` on every host. An in-process named atom gets a domain of its own. Deref returns the value
+as the host's own collections.
+
+## A disk domain
 
 ```clojure
 (require '[eve.alpha :as e])
 
-;; Same :id + path — detects the existing atom and loads its current value
-(def counter (e/atom {:id ::counter :persistent "./my-db"} {:count 0}))
+(def base (first *command-line-args*))          ; a directory; the domain's files are base/db.*
 
-@counter ;; => {:count 1}  (sees Process A's write)
-(swap! counter update :count inc)
-@counter ;; => {:count 2}
+(def p (e/atom {:id ::counter :persistent (str base "/db")} 0))
+(println (swap! p inc))                          ; 1 on the first run, 2 on the next ...
+(e/close-atom-domain! (eve.atom/persistent-atom-domain (str base "/db")))
 ```
 
-Both platforms use identical on-disk formats. No coordination server is needed — the mmap'd files on disk are the shared medium.
+Run twice with the same directory, it printed `1` and then `2`. The directory then held `db.root`, `db.rmap`,
+`db.slab0`–`db.slab5`, their bitmaps `db.slab0.bm`–`db.slab5.bm`, and `db.slab6` [ran]. A process may also open the
+domain itself, `(eve.atom/persistent-atom-domain path)`, and look its atoms up by name. See
+[atom-domains.md](atom-domains.md).
 
-### Cross-Worker Sharing (SharedArrayBuffer)
-
-To share an `AtomDomain` across web workers or Node.js worker threads:
+## Two processes, one atom
 
 ```clojure
-;; On the creating worker:
-(def my-domain (eve/atom-domain {:counter 0}))
-(def transfer (eve/sab-transfer-data my-domain))
-;; => {:sab <SharedArrayBuffer> :reader-map-sab <SharedArrayBuffer>}
+;; counter.cljc — run it in two processes at once, on the same path
+(require '[eve.alpha :as e])
 
-;; Send `transfer` to the worker via postMessage
-
-;; On the receiving worker:
-(eve/init-eve-on-worker! transfer)
+(def path (first *command-line-args*))
+(def c (e/atom {:id :demo/counter :persistent path} {:n 0}))
+(dotimes [_ 200] (swap! c update :n inc))
+(println @c)                                     ; the last process to finish prints {:n 400}
 ```
 
----
+```bash
+bb counter.cljc /tmp/demo/db & bb counter.cljc /tmp/demo/db; wait
+```
 
-## Supported Value Types
+Run with two babashka processes, and with a JVM process and a babashka process together, it ended at `{:n 400}`
+[ran]. The two need not run on the same host: every host in `hosts.edn` reads and writes the same files.
 
-Eve atoms accept any standard Clojure/ClojureScript value:
+## Eve collections
 
-| Type | Notes |
-|---|---|
-| Maps (`{}`) | Stored as HAMT with structural sharing |
-| Vectors (`[]`) | Stored as persistent trie |
-| Sets (`#{}`) | Stored as HAMT |
-| Lists (`'()`) | Stored as linked nodes |
-| Strings | Serialized as scalar blocks |
-| Numbers (int, float) | Serialized as scalar blocks |
-| Keywords | Serialized as scalar blocks |
-| Symbols | Serialized as scalar blocks |
-| UUIDs | Serialized as scalar blocks |
-| Dates | Serialized as scalar blocks |
-| `nil` | Represented as `NIL_OFFSET` (-1) |
-| Booleans | Serialized as scalar blocks |
-| Nested collections | Arbitrary nesting depth |
-
----
-
-## Specialized Collections
-
-For most use cases, standard Clojure data structures are sufficient — Eve converts them transparently. When you need specific capabilities beyond standard maps and sets, Eve provides:
-
-- **Integer Map** (`eve.deftype.int-map`): O(log32 n) lookups by integer key, efficient `merge-with`, range queries. A PATRICIA trie implementation.
-- **Sorted Set** (`eve.deftype.rb-tree`): O(log n) sorted traversal, membership testing, ordered iteration. A red-black tree implementation.
+`eve.alpha` turns plain Clojure maps, vectors, sets and lists into eve's own when they are stored in an atom. The
+specialized collections (int-maps, sorted maps and sets, RRB vectors, typed arrays) you build yourself, **inside
+`swap!`**, so they allocate in the atom's own domain:
 
 ```clojure
-(require '[eve.deftype.int-map :as im])
-(require '[eve.deftype.rb-tree :as rb])
+(require '[eve.alpha :as e]
+         '[eve.atom :as ea]
+         '[eve.core :as ec]
+         '[eve.deftype.int-map :as im]
+         '[eve.sorted :as sorted])
 
-(def state (e/atom {:index (im/int-map)
-                    :tags  (rb/sorted-set)}))
+(def s (e/atom ::colls {}))
 
-(swap! state update :index assoc 1 :a)
-(swap! state update :tags conj "clojure")
+;; build eve collections inside swap!: they allocate in the atom's own domain
+(swap! s (fn [_] {:ints (im/int-map 3 :c 1 :a) :by-name (sorted/sorted-map "b" 2 "a" 1)}))
+
+;; inside swap! the value is eve's own: eve.core's vocabulary works on every host
+(swap! s (fn [v] (ec/assoc v :ints (ec/assoc (ec/get v :ints) -10 :neg))))
+
+(println @s)                                       ; deref materializes host collections
+(println (e/$ (ec/get (ec/get @s :ints) 3)))       ; inside e/$, @ answers the slab-backed value in place: :c
 ```
 
----
+Output on both babashka and the JVM [ran]:
 
-## Next Steps
+```
+{:ints {-10 :neg, 1 :a, 3 :c}, :by-name #eve/SortedMap{a 1, b 2}}
+:c
+```
 
-- [API Guide](api-guide.md) — complete API reference
-- [Architecture](architecture.md) — system design and memory model
-- [Internals](internals.md) — slab allocator, serialization, HAMT details
-- [Testing](testing.md) — test suites and how to run them
-- [Platform Support](platform-support.md) — JVM, Node.js, browser compatibility
+Inside `swap!` and `$` the value is eve's own type. On hosts whose types carry the host's collection interfaces (the
+JVM, ClojureScript, nbb, ClojureCLR, jolt, basilisp, clojerl), `clojure.core`'s `get`, `assoc` and `update` work on it
+directly. That was run here on the JVM; for the others it follows from their coll adapter
+([adopter-tiers.md §2.3](adopter-tiers.md)). On babashka, glojure and ValueScript, whose eve types answer eve's own protocols (`adapters/coll/protocols`),
+use `eve.core`'s functions as above; they work everywhere. An eve collection built outside `swap!` cannot be stored
+into an atom yet ([the 0.9 limitations](api-guide.md#known-limitations-in-09)).
+
+## Threads
+
+```clojure
+(require '[eve.thread :as t]
+         '[eve.thread.fold :as tf]
+         '[eve.process])
+
+(println @(t/future (+ 1 2)))                           ; 3
+(println (doall (t/pmap inc [1 2 3])))                  ; (2 3 4)
+(println (tf/fold + (vec (range 1000))))                ; 499500
+(println (t/=>> (range 10) (map inc) (filter even?) (reduce +)))   ; 30
+
+(def p (t/fixed-pool 2))
+(println (t/with-pool p @(t/future :on-p)))             ; :on-p
+(println (t/deref (t/future (eve.process/sleep-ms! 50) :late) 10 :timeout))
+(t/shutdown! p)
+(t/shutdown-default-pools!)
+```
+
+It printed `3`, `(2 3 4)`, `499500`, `30`, `:on-p` and `:timeout` on babashka and the JVM [ran]. `eve.thread` is one
+executor service over each host's threads (`eve.thread-host`). See [api-guide.md](api-guide.md#evethread).
+
+## Next
+
+- [api-guide.md](api-guide.md): the user API, namespace by namespace
+- [atom-domains.md](atom-domains.md): domains, member atoms, meta-atoms, versions, seals, many processes
+- [network-atoms/README.md](network-atoms/README.md): atoms at a broker or a gateway
+- [platform-support.md](platform-support.md): the eleven hosts and what each lacks
+- [data-structures.md](data-structures.md), [collections.md](collections.md), [obj.md](obj.md): the collections
+- [../SECURITY.md](../SECURITY.md): what eve encrypts, and what it does not

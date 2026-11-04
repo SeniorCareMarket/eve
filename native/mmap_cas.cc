@@ -731,6 +731,33 @@ static Napi::Value NanoSleep(const Napi::CallbackInfo& info)
 // Module init
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// msync(buf, byteOffset, length) -> undefined
+//
+// Force the pages covering [byteOffset, byteOffset+length) of the mapping
+// to durable storage (MS_SYNC) — the same primitive the Lustre fcntl ops
+// above apply to the page of every write, as a standalone op: the default
+// region's durability (eve.mem/ISyncableRegion on NodeMmapRegion).
+// ---------------------------------------------------------------------------
+
+static Napi::Value Msync(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    auto buf = info[0].As<Napi::Buffer<uint8_t>>();
+    auto off = static_cast<uint64_t>(info[1].As<Napi::Number>().DoubleValue());
+    auto len = static_cast<uint64_t>(info[2].As<Napi::Number>().DoubleValue());
+    if (len == 0 || off >= buf.Length()) return env.Undefined();
+    if (off + len > buf.Length()) len = buf.Length() - off;  // clamp to the mapping
+    const uint64_t page  = 4096;  // the page size the fcntl ops sync by
+    uint64_t       start = off & ~(page - 1);
+    uint64_t       end   = (off + len + page - 1) & ~(page - 1);
+    if (::msync(buf.Data() + start, static_cast<size_t>(end - start), MS_SYNC) != 0) {
+        Napi::Error::New(env, std::string("msync failed: ") + std::strerror(errno))
+            .ThrowAsJavaScriptException();
+    }
+    return env.Undefined();
+}
+
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
     // Existing hardware-atomic ops
@@ -747,6 +774,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports["sub64"]    = Napi::Function::New(env, Sub64,    "sub64");
     exports["wait32"]   = Napi::Function::New(env, Wait32,   "wait32");
     exports["notify32"] = Napi::Function::New(env, Notify32, "notify32");
+    exports["msync"]    = Napi::Function::New(env, Msync,    "msync");
 
     // Lustre fcntl-based ops
     exports["openWithFd"]     = Napi::Function::New(env, OpenWithFd,     "openWithFd");

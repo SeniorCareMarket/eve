@@ -1,0 +1,18 @@
+# run m-node-thread on 92c2da290 eve tree d6e091078dfc7292e16c5b3f4b49fbcab0861560
+# cmd (in eve/) bash -c node target/eve-test/all.js thread
+# start 2026-10-23 2:44:14 PM ET load 1.73 1.60 1.44 mem-in-use 933 MB
+=== Eve Test Runner ===
+Suite: thread
+
+Initializing slab allocator...
+Slab allocator initialized.
+
+
+Testing eve.thread-test
+eve.thread S1 identity: :cljs [[:binding [:refused :eval]] [:binding-task [10 20 30]] [:error [false eve.thread: task failed: boom {:x 7}]] [:future [:refused :eval]] [:future-local [:refused :eval]] [:laziness 7] [:nested [:refused :eval]] [:nested-pool-of-1 [:refused :eval]] [:nested-task 112] [:pcalls [:refused :eval]] [:pmap-2colls [:refused :eval]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [:refused :eval]] [:pvalues [:refused :eval]] [:with-pool [:refused :eval]]]
+eve.thread round trips: :cljs :routed ms per 100 futures (median of 5): 58 · the adapter alone, ms per 100: 13 · a host operation, µs: 0 · bar: 130
+
+Ran 14 tests containing 144 assertions.
+0 failures, 0 errors.
+Worker start: 1217 ms (the last worker's, eve.thread-host/driving)
+# end 2026-10-23 2:44:54 PM ET exit 0 wall 40s peak-mem-in-use 2724 MB peak-process-tree-rss 1751 MB load 2.39 1.81 1.53

@@ -1,0 +1,11 @@
+;; glj_costs.glj — a protocol call through glojure's own protocols (no eve loaded: eve's completion turns protocols
+;; defined after it into cached fixed-arity functions), against a plain fn call; 100,000 calls each, after a warm-up.
+;; A record: glojure has no deftype of its own (eve's completion supplies one).
+(defprotocol P (pm [x]))
+(defrecord T [a])
+(extend-type T P (pm [_] 1))
+(defn f1 [x] 1)
+(def t (->T 1))
+(defn per-call-us [g] (g) (let [n 100000 t0 (.UnixNano (time.Now))] (g) (/ (- (.UnixNano (time.Now)) t0) n 1000.0)))
+(println "glojure's own protocol call:" (per-call-us #(dotimes [_ 100000] (pm t))) "us a call (loop included)")
+(println "a plain fn call:" (per-call-us #(dotimes [_ 100000] (f1 t))) "us a call (loop included)")

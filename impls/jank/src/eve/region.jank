@@ -1,0 +1,118 @@
+;; EVE's region layer on jank (HOST-CONTRACT sections 1-2): a MAP_SHARED
+;; file region and the atomic / futex / fcntl operations on it, written as
+;; cpp/raw and called as cpp/eve_region.<fn>. A region is its base address
+;; carried as a jank integer (i64). Loaded with
+;;   jank --module-path <impls/jank/src> ... (require 'eve.region)
+(ns eve.region)
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <cerrno>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <fcntl.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <linux/futex.h>
+namespace eve_region {
+  static uint8_t *P(long base, long off) { return reinterpret_cast<uint8_t *>(base) + off; }
+  long last_errno() { return errno; }
+  std::string strerr(long e) { return std::string(strerror((int)e)); }
+  /* open-mmap-region: grow (sparse ftruncate) but never truncate; MAP_SHARED */
+  long open_fd(std::string const &path) { return ::open(path.c_str(), O_RDWR | O_CREAT, 0644); }
+  long file_size(long fd) { struct stat st; if(fstat((int)fd, &st) != 0) return -1; return (long)st.st_size; }
+  long file_blocks(long fd) { struct stat st; if(fstat((int)fd, &st) != 0) return -1; return (long)st.st_blocks; }
+  long grow_never_truncate(long fd, long size) {
+    long cur = file_size(fd);
+    if(cur < size && ftruncate((int)fd, size) != 0) return -1;
+    return file_size(fd);
+  }
+  long map_shared(long fd, long size) {
+    void *p = mmap(nullptr, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED, (int)fd, 0);
+    return p == MAP_FAILED ? 0 : reinterpret_cast<long>(p);
+  }
+  long unmap(long base, long size) { return munmap(reinterpret_cast<void *>(base), (size_t)size); }
+  long msync_all(long base, long size) { return msync(reinterpret_cast<void *>(base), (size_t)size, MS_SYNC); }
+  long close_fd(long fd) { return ::close((int)fd); }
+  /* heap region: zero-initialised, process-local */
+  long heap_region(long size) { return reinterpret_cast<long>(::calloc((size_t)size, 1)); }
+  /* plain (non-atomic) and unaligned access */
+  long load_i32(long b, long off) { int32_t v; std::memcpy(&v, P(b, off), 4); return v; }
+  void store_i32(long b, long off, long x) { int32_t v = (int32_t)x; std::memcpy(P(b, off), &v, 4); }
+  long load_u8(long b, long off) { return *P(b, off); }
+  /* 32-bit atomics: __atomic builtins = lock-prefixed x86 ops, seq-cst */
+  long aload_i32(long b, long off) { return __atomic_load_n(reinterpret_cast<int32_t *>(P(b, off)), __ATOMIC_SEQ_CST); }
+  void astore_i32(long b, long off, long x) { __atomic_store_n(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)x, __ATOMIC_SEQ_CST); }
+  long cas_i32(long b, long off, long expected, long desired) {
+    int32_t e = (int32_t)expected;
+    __atomic_compare_exchange_n(reinterpret_cast<int32_t *>(P(b, off)), &e, (int32_t)desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return e; /* the witness: old value on success, current value on failure */
+  }
+  long add_i32(long b, long off, long d) { return __atomic_fetch_add(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)d, __ATOMIC_SEQ_CST); }
+  long sub_i32(long b, long off, long d) { return __atomic_fetch_sub(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)d, __ATOMIC_SEQ_CST); }
+  long xchg_i32(long b, long off, long x) { return __atomic_exchange_n(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)x, __ATOMIC_SEQ_CST); }
+  /* loops run in C++ so a race is a race of the hardware, not of the JIT */
+  long add_loop(long b, long off, long n) { for(long i = 0; i < n; ++i) __atomic_fetch_add(reinterpret_cast<int32_t *>(P(b, off)), 1, __ATOMIC_SEQ_CST); return n; }
+  long plain_loop(long b, long off, long n) {
+    volatile int32_t *w = reinterpret_cast<volatile int32_t *>(P(b, off));
+    for(long i = 0; i < n; ++i) { int32_t v = *w; *w = v + 1; }
+    return n;
+  }
+  /* 64-bit, 8-aligned */
+  long aload_i64(long b, long off) { return __atomic_load_n(reinterpret_cast<int64_t *>(P(b, off)), __ATOMIC_SEQ_CST); }
+  void astore_i64(long b, long off, long x) { __atomic_store_n(reinterpret_cast<int64_t *>(P(b, off)), (int64_t)x, __ATOMIC_SEQ_CST); }
+  long cas_i64(long b, long off, long expected, long desired) {
+    int64_t e = expected;
+    __atomic_compare_exchange_n(reinterpret_cast<int64_t *>(P(b, off)), &e, (int64_t)desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return e;
+  }
+  long add_i64(long b, long off, long d) { return __atomic_fetch_add(reinterpret_cast<int64_t *>(P(b, off)), (int64_t)d, __ATOMIC_SEQ_CST); }
+  /* futex on the mapping (shared, not FUTEX_PRIVATE): returns 0, or -errno */
+  long futex_wait(long b, long off, long expected, long timeout_ms) {
+    struct timespec ts{ timeout_ms / 1000, (timeout_ms % 1000) * 1000000L };
+    long r = syscall(SYS_futex, reinterpret_cast<int32_t *>(P(b, off)), FUTEX_WAIT, (int32_t)expected, &ts, nullptr, 0);
+    return r == 0 ? 0 : -errno;
+  }
+  long futex_wake(long b, long off, long n) { return syscall(SYS_futex, reinterpret_cast<int32_t *>(P(b, off)), FUTEX_WAKE, (int)n, nullptr, nullptr, 0); }
+  long now_ns() { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec * 1000000000L + ts.tv_nsec; }
+  void sleep_ms(long ms) { struct timespec ts{ ms / 1000, (ms % 1000) * 1000000L }; nanosleep(&ts, nullptr); }
+  /* spin (1 ms naps) until the i32 at off reaches want, at most timeout_ms; returns the last value */
+  long await_i32(long b, long off, long want, long timeout_ms) {
+    long t0 = now_ns();
+    for(;;) { long v = __atomic_load_n(reinterpret_cast<int32_t *>(P(b, off)), __ATOMIC_SEQ_CST);
+      if(v >= want || (now_ns() - t0) / 1000000L > timeout_ms) return v; sleep_ms(1); }
+  }
+  /* busy-spin (no nap) until the i32 at off reaches want: a start barrier that releases both processes together */
+  long spin_await_i32(long b, long off, long want, long timeout_ms) {
+    long t0 = now_ns();
+    for(long i = 0;; ++i) { long v = __atomic_load_n(reinterpret_cast<int32_t *>(P(b, off)), __ATOMIC_SEQ_CST);
+      if(v >= want) return v;
+      if((i & 1023) == 0 && (now_ns() - t0) / 1000000L > timeout_ms) return v;
+      __builtin_ia32_pause(); }
+  }
+  /* fcntl byte-range lock on [start, start+len): F_SETLK (non-blocking); 0 or -errno */
+  long lock_range(long fd, long start, long len, long exclusive) {
+    struct flock fl{}; fl.l_type = exclusive ? F_WRLCK : F_RDLCK; fl.l_whence = SEEK_SET; fl.l_start = start; fl.l_len = len;
+    return fcntl((int)fd, F_SETLK, &fl) == 0 ? 0 : -errno;
+  }
+  long unlock_range(long fd, long start, long len) {
+    struct flock fl{}; fl.l_type = F_UNLCK; fl.l_whence = SEEK_SET; fl.l_start = start; fl.l_len = len;
+    return fcntl((int)fd, F_SETLK, &fl) == 0 ? 0 : -errno;
+  }
+  /* F_GETLK: the pid holding a conflicting lock, 0 if none, -errno on error */
+  long lock_holder(long fd, long start, long len) {
+    struct flock fl{}; fl.l_type = F_WRLCK; fl.l_whence = SEEK_SET; fl.l_start = start; fl.l_len = len;
+    if(fcntl((int)fd, F_GETLK, &fl) != 0) return -errno;
+    return fl.l_type == F_UNLCK ? 0 : (long)fl.l_pid;
+  }
+  /* read a file whole by streaming (clojure.core/slurp sizes by std::filesystem::file_size, 0 for /proc files) */
+  std::string read_text(std::string const &path) { std::ifstream f(path); std::ostringstream o; o << f.rdbuf(); return o.str(); }
+  long pid() { return (long)getpid(); }
+  long tid() { return (long)syscall(SYS_gettid); }
+}
+")

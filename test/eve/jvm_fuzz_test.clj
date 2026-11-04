@@ -28,9 +28,8 @@
 ;; ============================================================================
 
 (defmacro with-heap-slab [& body]
-  `(let [ctx# (alloc/make-jvm-heap-slab-ctx {})]
-     (binding [alloc/*jvm-slab-ctx* ctx#]
-       ~@body)))
+  `(let [~'sio (alloc/make-jvm-heap-slab-ctx {})]
+     ~@body))
 
 (defn- check-property
   "Run a test.check property and report failures via clojure.test."

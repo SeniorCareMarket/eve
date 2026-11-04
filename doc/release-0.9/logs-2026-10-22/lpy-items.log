@@ -1,0 +1,53 @@
+# run lpy-items on c6860847 eve tree a49df34405bbb9c5030a3fb95b93c1e4821143f8
+# cmd (in eve/) bb test:lpy eve.thread-test eve.domain-open-test eve.thread-net-test eve.tally-test eve.reclaim-test eve.vec-retire-test
+# start 2026-10-21 9:27:20 PM ET load 0.05 0.01 0.00 mem-in-use 451 MB
+ok eve.thread-test/a-dead-threads-descriptors-are-adopted 0.0s
+ok eve.thread-test/cached-pool-grows-and-keeps-alive 0.5s
+ok eve.thread-test/conveyance-across-the-pool 0.0s
+ok eve.thread-test/default-pools 0.1s
+ok eve.thread-test/descriptor-state-machine 0.0s
+ok eve.thread-test/executor-protocol 0.7s
+ok eve.thread-test/fixed-pool-threads 0.1s
+ok eve.thread-test/per-task-pool-runs-tasks-at-once 0.6s
+eve.thread round trips: :lpy :local ms per 100 futures (median of 5): 383 · the adapter alone, ms per 100: 10 · a host operation, µs: 131 · bar: 3930
+ok eve.thread-test/round-trips 2.6s
+eve.thread S1 identity: :lpy [[:binding 10] [:binding-task [10 20 30]] [:error [false "eve.thread: task failed: boom" {:x 7}]] [:future 3] [:future-local 21] [:laziness 7] [:nested 7] [:nested-pool-of-1 6] [:nested-task 112] [:pcalls [1 4]] [:pmap-2colls [11 22 33]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [3 6 9 12]] [:pvalues [3 12 "ab"]] [:with-pool [:p :q :p]]]
+ok eve.thread-test/s1-identity-rows 10.6s
+ok eve.thread-test/scheduled-pool-timer 1.7s
+ok eve.thread-test/single-pool-fifo 0.1s
+ok eve.thread-test/the-future-is-an-eve-type 0.5s
+ok eve.thread-test/the-helping-deref-and-blocked-state 0.7s
+Ran eve.thread-test
+ok eve.domain-open-test/a-reopened-domain-joins-what-it-wrote 0.4s
+ok eve.domain-open-test/one-process-creates-the-file 0.0s
+Ran eve.domain-open-test
+ok eve.thread-net-test/a-domain-is-placed-in-the-window-by-configuration-only 7.4s
+ok eve.thread-net-test/a-domain-pool-over-a-network-atom-at-a-broker 1079.2s
+ok eve.thread-net-test/a-gateway-serves-the-disk-atom-on-eve-net's-routes 567.2s
+ok eve.thread-net-test/doorbells-ring-and-a-futex-wait-wakes 3.4s
+ok eve.thread-net-test/the-drivers-collect-the-same-results 46.3s
+Ran eve.thread-net-test
+ok eve.tally-test/a-new-value-stored-twice-in-one-write 9.8s
+ok eve.tally-test/a-piece-of-one-atom-stored-in-another 9.0s
+ok eve.tally-test/a-transient-storing-its-own-value-twice 8.4s
+ok eve.tally-test/a-value-at-two-keys 9.7s
+ok eve.tally-test/a-value-made-from-another-and-stored-beside-it 26.0s
+ok eve.tally-test/plain-data-holding-an-eve-value-reports-the-store 0.4s
+Ran eve.tally-test
+ok eve.reclaim-test/a-constructor-keeps-only-its-tree 57.1s
+ok eve.reclaim-test/a-list-walk-aligns-the-chains 0.5s
+ok eve.reclaim-test/a-transient-build-keeps-its-tree 107.7s
+ok eve.reclaim-test/a-transient-from-a-held-value-frees-only-its-own 16.3s
+ok eve.reclaim-test/a-vector-pop-across-a-trie-level-keeps-only-its-vector 15.3s
+ok eve.reclaim-test/int-map-walk-and-writes 15.8s
+ok eve.reclaim-test/rb-tree-walk-and-writes 86.9s
+ok eve.reclaim-test/sorted-walk-and-writes 52.6s
+Ran eve.reclaim-test
+ok eve.vec-retire-test/a-fresh-map-or-set-written-keeps-only-its-tree 32.6s
+ok eve.vec-retire-test/an-int32-field-holds-an-offset-past-2-31 3.3s
+ok eve.vec-retire-test/conj-pop-assoc-across-boundaries 84.6s
+ok eve.vec-retire-test/rebuilt-vectors-of-every-depth 166.1s
+ok eve.vec-retire-test/swap-shrinks-a-nested-vector-across-levels 3.5s
+Ran eve.vec-retire-test
+:summary {:pass 2593, :error 0, :test 40, :fail 0}
+# end 2026-10-21 10:09:34 PM ET exit 0 wall 2534s peak-mem-in-use 987 MB load 1.00 1.00 0.99

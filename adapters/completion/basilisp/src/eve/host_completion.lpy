@@ -1,0 +1,833 @@
+(ns eve.host-completion
+  "basilisp's completion of its core to Clojure's, read by basilisp in place
+   of host_completion.cljc: what eve's shared sources take from clojure.core
+   that basilisp.core lacks or does otherwise than Clojure (0.5.1, each
+   measured 2026-10-16), and clojure.core itself.
+
+   Loaded first, by eve.host (which every eve namespace at eve's root
+   requires): a name interned into basilisp.core here
+   (core!) resolves in every namespace compiled after it; a name basilisp.core
+   has and Clojure means otherwise (unchecked-int, which does not narrow;
+   swap!; ns) is replaced (patch!) in its var and in the basilisp.core module
+   attribute that compiled call sites read.
+
+   clojure.core is created as a namespace holding basilisp.core's vars, so
+   the qualified names eve's sources and macros write (clojure.core/seq,
+   clojure.core/deftype) resolve."
+  (:import array basilisp.lang.numbers basilisp.lang.obj basilisp.lang.runtime io operator sys))
+
+(defn- core!
+  "Interns f into basilisp.core as sym (a macro when macro?), unless
+   basilisp.core has it, and refers it into every namespace that exists now
+   (a namespace refers basilisp.core's vars when it is created, so the one
+   whose ns form is loading this one would not see it otherwise)."
+  ([sym f] (core! sym f false))
+  ([sym f macro?]
+   (when-not (ns-resolve 'basilisp.core sym)
+     (let [v (intern 'basilisp.core sym f)]
+       (when macro? (.alter-meta v assoc :macro true))
+       (doseq [n (all-ns)]
+         (when-not (.get-refer n sym) (.add-refer n sym v)))
+       v))))
+
+;; --- integers ----------------------------------------------------------------
+;; Clojure's fixed-width integer semantics. basilisp's unchecked-* return
+;; their argument (Python ints do not overflow) and its unchecked-byte throws
+;; past 127; eve's codec and hashes need the JVM's wrap. A compiled call site
+;; reaches a basilisp.core function through the module's attribute, so the
+;; replacement is set there (and on the var): it holds for every namespace
+;; compiled after this one, in this process.
+
+;; Python's operators, not basilisp's: these run on every slab read and write,
+;; and basilisp.core's bit-and, >= and - are variadic (a seq per call).
+(defn- wrap [bits]
+  (let [m (dec (bit-shift-left 1 bits)) half (bit-shift-left 1 (dec bits)) full (bit-shift-left 1 bits)]
+    (fn [x] (let [u (operator/and_ (python/int x) m)]
+              (if (operator/ge u half) (operator/sub u full) u)))))
+
+(def ^:private i8 (wrap 8))
+(def ^:private i16 (wrap 16))
+(def ^:private i32* (wrap 32))
+(def ^:private i64 (wrap 64))
+
+(def ^:private core-module (.get sys/modules "basilisp.core"))
+
+(defn- patch!
+  "Replaces basilisp.core's sym with f: its var's root (what a macro's
+   expansion and a var reference see) and the module attribute a compiled
+   call site reads (named by basilisp's munge: swap! is swap__BANG__)."
+  [sym f]
+  (python/setattr core-module (munge (name sym)) f)
+  (.bind-root (ns-resolve 'basilisp.core sym) f))
+
+(patch! 'unchecked-byte i8)
+(patch! 'unchecked-short i16)
+(patch! 'unchecked-int i32*)
+(patch! 'unchecked-long i64)
+(patch! 'unchecked-add-int (fn [a b] (i32* (+ a b))))
+(patch! 'unchecked-subtract-int (fn [a b] (i32* (- a b))))
+(patch! 'unchecked-multiply-int (fn [a b] (i32* (* a b))))
+(patch! 'unchecked-inc-int (fn [a] (i32* (inc a))))
+(patch! 'unchecked-dec-int (fn [a] (i32* (dec a))))
+(patch! 'unchecked-negate-int (fn [a] (i32* (- a))))
+
+(patch! 'unchecked-add (fn [a b] (i64 (+ a b))))
+(patch! 'unchecked-subtract (fn [a b] (i64 (- a b))))
+(patch! 'unchecked-multiply (fn [a b] (i64 (* a b))))
+(patch! 'unchecked-inc (fn [a] (i64 (inc a))))
+(patch! 'unchecked-dec (fn [a] (i64 (dec a))))
+
+;; --- aset into a bytearray ---------------------------------------------------
+;; Clojure's aset on a byte array stores the value's low 8 bits (a signed
+;; byte on the JVM). basilisp.core's aset is operator/setitem, and a Python
+;; bytearray — what eve.encoding's make-bytes/bytes-of answer on this host —
+;; accepts only 0..255, so (aset ba i (unchecked-byte v)) throws for every
+;; v past 127 (measured 2026-10-28: eve.hamt-util's xxh3 secret build, and
+;; eve.keyring's xor loop has the same shape). Mask on store for bytearray
+;; targets only; every other target (the codec's signed array('b'), Python
+;; lists, object arrays) goes to core's aset unchanged.
+(def ^:private core-aset @(ns-resolve 'basilisp.core 'aset))
+
+(patch! 'aset
+        (fn ([arr i v]
+             (if (instance? python/bytearray arr)
+               (do (operator/setitem arr i (operator/and_ (python/int v) 0xFF)) v)
+               (core-aset arr i v)))
+          ([arr i j & idxs]
+             (apply core-aset arr i j idxs))))
+
+;; --- inlined functions that name their argument twice -----------------------
+;; basilisp compiles a call to a ^:inline function by putting the argument's
+;; form into the function's body, so a body that names its parameter twice
+;; evaluates the argument twice: (true? (f)) called f twice — basilisp.core's
+;; true?, false?, seqable?, supers, peek and pop, all six (measured 2026-10-21;
+;; (is (true? (create-exclusive! f))) created the file, then found it there).
+;; Their vars lose :inline, so a call compiled after this one calls the
+;; function, which evaluates its argument once.
+(doseq [sym '[true? false? seqable? supers peek pop]]
+  (alter-meta! (ns-resolve 'basilisp.core sym) dissoc :inline))
+
+;; --- str ----------------------------------------------------------------------
+;; basilisp's str of two or more arguments makes a closure per call (its
+;; coerce), and making a basilisp fn runs its decorator (functools.wraps, a
+;; partial, an arity set): (str "a" "b") took 77 µs where a fixed-arity call
+;; takes ~1 µs (measured 2026-10-21; eve.net.bytes/hex called it per byte, a
+;; quarter of a network swap under py-spy). The same strings by fixed arities
+;; (a rest arity is a slower call), each argument through basilisp's own str.
+(let [str1 (python/getattr core-module (munge "str"))]
+  (patch! 'str (fn ([] "")
+                 ([x] (str1 x))
+                 ([a b] (operator/add (str1 a) (str1 b)))
+                 ([a b c] (.join "" #py [(str1 a) (str1 b) (str1 c)]))
+                 ([a b c d] (.join "" #py [(str1 a) (str1 b) (str1 c) (str1 d)]))
+                 ([a b c d & more] (.join "" (python/map str1 (cons a (cons b (cons c (cons d more))))))))))
+
+(core! 'unsigned-bit-shift-right
+       (fn [x n] (operator/rshift (operator/and_ x 0xFFFFFFFFFFFFFFFF) n)))
+
+;; --- comparison, arithmetic and bit ops at a fixed arity ------------------------
+;; basilisp.core's =, <, >, <=, >=, bit-and, bit-or and bit-xor take their second
+;; argument through a rest seq (a seq, first and rest per call), == and not=
+;; through apply as well, and +, - and * from the third argument on. eve's shared
+;; code calls them on every slab read and write and every bitmap step: under
+;; cProfile an == or not= cost ~370 µs and an = ~110 µs (2026-10-17). Each one is
+;; replaced by a function that computes the 2-argument case (and +, - and * the
+;; 3-argument case) exactly as basilisp's does, and hands every other arity to
+;; basilisp's own: the values are basilisp's.
+
+(defn- at-two
+  "f2 at two arguments, basilisp.core's orig at every other arity."
+  [orig f2]
+  (fn ([x] (orig x)) ([x y] (f2 x y)) ([x y & more] (apply orig x y more))))
+
+(defn- at-two-three
+  "f2 at two arguments and folded at three, basilisp.core's orig otherwise."
+  [orig f2]
+  (fn ([] (orig)) ([x] (orig x)) ([x y] (f2 x y)) ([x y z] (f2 (f2 x y) z))
+    ([x y z & more] (apply orig (f2 x y) z more))))
+
+(patch! '= (at-two basilisp.core/= basilisp.lang.runtime/equals))
+(patch! '== (at-two basilisp.core/== basilisp.lang.runtime/equals))
+(patch! 'not= (at-two basilisp.core/not= (fn [x y] (not (basilisp.lang.runtime/equals x y)))))
+(patch! '< (at-two basilisp.core/< operator/lt))
+(patch! '> (at-two basilisp.core/> operator/gt))
+(patch! '<= (at-two basilisp.core/<= operator/le))
+(patch! '>= (at-two basilisp.core/>= operator/ge))
+(patch! 'bit-and (at-two basilisp.core/bit-and operator/and_))
+(patch! 'bit-or (at-two basilisp.core/bit-or operator/or_))
+(patch! 'bit-xor (at-two basilisp.core/bit-xor operator/xor))
+(patch! '+ (at-two-three basilisp.core/+ basilisp.lang.numbers/add))
+(patch! '- (at-two-three basilisp.core/- basilisp.lang.numbers/subtract))
+(patch! '* (at-two-three basilisp.core/* basilisp.lang.numbers/multiply))
+
+;; conj! likewise: basilisp.core's takes every argument after the transient
+;; through a rest seq and apply, ~220 µs a call under cProfile (2026-10-24: a
+;; /deref's pages decoded from base64 a byte at a time, 30,000 conj!s in
+;; 6.6 s). The 2-argument case is the transient's own cons-transient, every
+;; other arity basilisp's.
+(patch! 'conj! (let [orig basilisp.core/conj!]
+                 (fn ([] (orig)) ([coll] coll) ([coll x] (.cons-transient coll x))
+                   ([coll x & xs] (apply orig coll x xs)))))
+
+;; --- arrays --------------------------------------------------------------------
+;; a byte array is signed, as the JVM's: Python's array('b') (a bytearray is
+;; unsigned and refuses a negative byte); it is a buffer, so struct and mmap
+;; take it as one. Python bytes become the array as they are (array('b')
+;; reads each byte as a signed one: i8's value); any other collection is
+;; walked by Python's map, not a lazy seq.
+
+(core! 'byte-array
+       (fn ([n-or-seq]
+            (cond
+              (number? n-or-seq) (array/array "b" (python/bytes n-or-seq))
+              (or (instance? python/bytes n-or-seq) (instance? python/bytearray n-or-seq))
+              (array/array "b" n-or-seq)
+              (nil? n-or-seq) (array/array "b")
+              :else (array/array "b" (python/list (python/map i8 n-or-seq)))))
+         ([n init] (let [b (array/array "b" (python/bytes n))]
+                     (doseq [[i x] (map-indexed vector (take n init))]
+                       (aset b i (i8 x)))
+                     b))))
+
+;; a numeric array starts at zero, as Clojure's: basilisp's int-array, long-array, short-array, float-array and
+;; double-array are its object-array, n nils (0.5.1, measured 2026-10-21: (long-array 3) is [nil nil nil]), and an
+;; element read before it is written is nil — a Montgomery multiply over a fresh array's elements added nil to a
+;; product, so every namespace whose load ran one failed at load. Still a Python
+;; list, as basilisp's arrays are.
+(defn- numeric-array
+  "Clojure's numeric array constructor, zero its element zero: (n) n zeros, (coll) coll's items, (n init) n of the
+   number init, or coll's first n items and zeros after them."
+  [zero]
+  (fn ([n-or-coll]
+       (if (number? n-or-coll)
+         (operator/mul (python/list [zero]) (python/int n-or-coll))
+         (python/list (or (seq n-or-coll) []))))
+    ([n init]
+     (if (number? init)
+       (operator/mul (python/list [init]) (python/int n))
+       (let [a (operator/mul (python/list [zero]) (python/int n))]
+         (doseq [[i x] (map-indexed vector (take n init))]
+           (aset a i x))
+         a)))))
+
+(patch! 'short-array (numeric-array 0))
+(patch! 'int-array (numeric-array 0))
+(patch! 'long-array (numeric-array 0))
+(patch! 'float-array (numeric-array 0.0))
+(patch! 'double-array (numeric-array 0.0))
+
+;; --- hashing (Clojure's: Murmur3 over the element hashes) ---------------------
+
+(defn- i32 [x] (let [u (bit-and x 0xFFFFFFFF)] (if (>= u 0x80000000) (- u 0x100000000) u)))
+(defn- imul [a b] (i32 (* (i32 a) (i32 b))))
+(defn- rotl [x r] (let [u (bit-and x 0xFFFFFFFF)]
+                    (i32 (bit-or (bit-shift-left u r) (bit-shift-right u (- 32 r))))))
+(defn- fmix [h n]
+  (let [h (bit-xor h n)
+        h (bit-xor h (bit-shift-right (bit-and h 0xFFFFFFFF) 16))
+        h (imul h (i32 0x85ebca6b))
+        h (bit-xor h (bit-shift-right (bit-and h 0xFFFFFFFF) 13))
+        h (imul h (i32 0xc2b2ae35))]
+    (i32 (bit-xor h (bit-shift-right (bit-and h 0xFFFFFFFF) 16)))))
+
+(core! 'mix-collection-hash
+       (fn [hash-basis n]
+         (let [k1 (-> (imul hash-basis (i32 0xcc9e2d51)) (rotl 15) (imul 0x1b873593))
+               h1 (i32 (+ (imul (rotl k1 13) 5) (i32 0xe6546b64)))]
+           (fmix h1 n))))
+
+;; a collection's hash is the hash basilisp gives its own collection with the
+;; same items: basilisp hashes a vector, list or seq as the tuple of its items,
+;; a map through immutables.Map and a set as Python's Set does. An eve
+;; collection equal to a basilisp one must hash the same, or a basilisp map or
+;; set holding the one does not find the other (eve's hash in eve memory is
+;; eve.hamt-util's, not this).
+(core! 'hash-ordered-coll
+       (fn [coll] (python/hash (python/tuple (or (seq coll) [])))))
+
+(core! 'hash-unordered-coll
+       (fn [coll] (hash (if (map? coll) (into {} coll) (into #{} coll)))))
+
+;; --- the JVM's type-hint names (basilisp resolves a hint) ------------------------
+
+(core! 'String python/str)
+(core! 'Object python/object)
+(core! 'objects python/list)
+(core! 'number python/float)
+
+;; --- the JVM's exceptions: Python exception classes of the same names ----------
+;; (a body that throws (IllegalArgumentException. msg) throws one of these;
+;; a catch of the Python base class catches it)
+
+(doseq [[nm base] [["Throwable" python/Exception]
+                   ["RuntimeException" python/RuntimeError]
+                   ["IllegalArgumentException" python/ValueError]
+                   ["IllegalStateException" python/RuntimeError]
+                   ["IndexOutOfBoundsException" python/IndexError]
+                   ["UnsupportedOperationException" python/NotImplementedError]
+                   ["ClassCastException" python/TypeError]
+                   ["ArithmeticException" python/ArithmeticError]
+                   ["InterruptedException" python/RuntimeError]]]
+  (core! (symbol nm) (python/type nm (python/tuple [base]) (python/dict))))
+
+;; --- seqs ----------------------------------------------------------------------
+
+(core! 'list*
+       (fn ([args] (seq args))
+         ([a args] (cons a args))
+         ([a b args] (cons a (cons b args)))
+         ([a b c & more] (cons a (cons b (cons c (apply (ns-resolve 'basilisp.core 'list*) more)))))))
+
+(defn- reductions*
+  "Clojure's reductions (basilisp 0.5.1 has none)."
+  ([f coll]
+   (lazy-seq
+    (if-let [s (seq coll)]
+      (reductions* f (first s) (rest s))
+      (list (f)))))
+  ([f init coll]
+   (if (reduced? init)
+     (list @init)
+     (cons init
+           (lazy-seq
+            (when-let [s (seq coll)]
+              (reductions* f (f init (first s)) (rest s))))))))
+
+(core! 'reductions reductions*)
+
+;; interleave: basilisp 0.5.1's nests a concat per step, and its lazy seqs do not
+;; unwrap a lazy body that returns another (the JVM's LazySeq.sval loops), so
+;; (count (interleave (range 3000) (range 3000))) exceeds Python's recursion
+;; limit. Clojure's builds the pairs with cons: the depth stays constant.
+(defn- interleave*
+  ([] ())
+  ([c1] (lazy-seq c1))
+  ([c1 c2]
+   (lazy-seq
+    (let [s1 (seq c1) s2 (seq c2)]
+      (when (and s1 s2)
+        (cons (first s1) (cons (first s2) (interleave* (rest s1) (rest s2))))))))
+  ([c1 c2 & colls]
+   (lazy-seq
+    (let [ss (map seq (cons c1 (cons c2 colls)))]
+      (when (every? identity ss)
+        (reduce (fn [acc x] (cons x acc))
+                (apply interleave* (map rest ss))
+                (reverse (map first ss))))))))
+
+(patch! 'interleave interleave*)
+
+;; iterate: basilisp 0.5.1's calls f one element ahead — (nth (iterate f x) 5)
+;; calls f six times, so iterating pop down to an empty vector pops it once
+;; more — and ends at a nil or false element. Clojure's calls f for the
+;; elements realized, and does not end.
+(defn- iterate* [f x] (cons x (lazy-seq (iterate* f (f x)))))
+
+(patch! 'iterate iterate*)
+
+;; chunked seqs: basilisp's own seqs are not chunked (a chunk is the first
+;; element); an eve type's chunked seq has the methods eve.deftype-proto.macros
+;; gives a JVM IChunkedSeq
+(core! 'chunk-first (fn [s] (if (python/hasattr s "chunked_first") (.chunked-first s) [(first s)])))
+(core! 'chunk-rest (fn [s] (if (python/hasattr s "chunked_rest") (.chunked-rest s) (rest s))))
+(core! 'chunk-next (fn [s] (if (python/hasattr s "chunked_next") (.chunked-next s) (next s))))
+(core! 'chunked-seq? (fn [s] (python/hasattr s "chunked_first")))
+
+;; --- a map equals another Mapping by its entries ------------------------------
+;; basilisp 0.5.1's map compares its own inner map with the other, which is
+;; never equal to a foreign Mapping (its vector and set compare by elements):
+;; (= {:a 1} eve-map) was false while (= eve-map {:a 1}) was true.
+
+(import basilisp.lang.map collections.abc)
+
+(let [pm basilisp.lang.map/PersistentMap
+      eq (python/getattr pm "__eq__")]
+  (python/setattr pm "__eq__"
+                  (fn [self other]
+                    (let [r (eq self other)]
+                      (if (and (false? r)
+                               (instance? collections.abc/Mapping other)
+                               (not (instance? pm other)))
+                        (and (= (count self) (count other))
+                             (every? (fn [e] (and (contains? other (key e)) (= (val e) (get other (key e)))))
+                                     (seq self)))
+                        r)))))
+
+;; --- sorted-set ------------------------------------------------------------------
+;; basilisp 0.5.1 has no sorted collections; eve reads its sorted set as plain
+;; data into one. A persistent set over a tuple kept in compare order.
+
+(import functools)
+
+(deftype SortedSet [items mta]
+  ^:abstract basilisp.lang.interfaces/IPersistentSet
+  (__contains__ [_ x] (boolean (some #(= x %) items)))
+  (__iter__ [_] (python/iter items))
+  (__len__ [_] (python/len items))
+  (cons [this & xs]
+    (SortedSet. (python/tuple (python/sorted (python/set (concat items xs))
+                                             ** :key (functools/cmp-to-key compare)))
+                mta))
+  (disj [_ & xs] (SortedSet. (python/tuple (remove (set xs) items)) mta))
+  (empty [_] (SortedSet. (python/tuple []) mta))
+  (seq [_] (seq items))
+  ^:abstract basilisp.lang.interfaces/IWithMeta
+  (^:property meta [_] mta)
+  (with-meta [_ m] (SortedSet. items m))
+  (__eq__ [this o] (and (set? o) (= (count this) (count o)) (every? #(contains? o %) items)))
+  (__hash__ [_] (hash (set items)))
+  (__repr__ [_] (str "#{" (apply str (interpose " " (map pr-str items))) "}"))
+  (__str__ [this] (.__repr__ this)))
+
+(core! 'sorted-set (fn [& xs] (apply conj (SortedSet. (python/tuple []) nil) xs)))
+
+;; --- sorted-map ------------------------------------------------------------------
+;; eve.net.atom keeps a network atom's snapshot entries in a sorted map (sorted by each entry's XXH3-128, so a swap
+;; touches only the entries it changes); basilisp 0.5.1 has none (thread-net-test's load stopped at it, 2026-10-21).
+;; A persistent map over a basilisp map (lookup) and a tuple of its keys kept in comparator order (the order): a key is
+;; found by bisection, and an added or removed key copies the tuple (Python's copy, not a seq walk).
+
+(import bisect)
+
+(defn- tuple-insert [t i x]
+  (operator/add (operator/add (aget t (python/slice nil i)) (python/tuple [x])) (aget t (python/slice i nil))))
+
+(defn- tuple-remove [t i]
+  (operator/add (aget t (python/slice nil i)) (aget t (python/slice (inc i) nil))))
+
+(deftype SortedMap [ks m kf mta]
+  ^:abstract basilisp.lang.interfaces/IPersistentMap
+  (__getitem__ [_ k] (.__getitem__ m k))
+  (__iter__ [_] (python/iter ks))
+  (__len__ [_] (python/len ks))
+  (val-at [_ k & default] (.val-at m k (first default)))
+  (contains [_ k] (.contains m k))
+  (entry [_ k] (.entry m k))
+  (assoc [_ & kvs]
+    (loop [ks ks m m kvs (seq kvs)]
+      (if kvs
+        (let [k (first kvs)]
+          (recur (if (.contains m k) ks (tuple-insert ks (bisect/bisect-left ks (kf k) ** :key kf) k))
+                 (.assoc m k (second kvs))
+                 (nnext kvs)))
+        (SortedMap. ks m kf mta))))
+  (dissoc [this & dks]
+    (loop [ks ks m m dks (seq dks)]
+      (if dks
+        (let [k (first dks)]
+          (if (.contains m k)
+            (recur (tuple-remove ks (bisect/bisect-left ks (kf k) ** :key kf)) (.dissoc m k) (next dks))
+            (recur ks m (next dks))))
+        (SortedMap. ks m kf mta))))
+  (cons [this & elems]
+    (reduce (fn [sm e]
+              (cond (nil? e) sm
+                    (map? e) (reduce (fn [sm x] (.assoc sm (key x) (val x))) sm (seq e))
+                    :else (.assoc sm (first e) (second e))))
+            this elems))
+  (empty [_] (SortedMap. (python/tuple []) {} kf mta))
+  (seq [_] (when (pos? (python/len ks)) (seq (map (fn [k] (map-entry k (.val-at m k nil))) ks))))
+  ^:abstract basilisp.lang.interfaces/IReversible
+  (rseq [_] (when (pos? (python/len ks)) (seq (map (fn [k] (map-entry k (.val-at m k nil))) (aget ks (python/slice nil nil -1))))))
+  ^:abstract basilisp.lang.interfaces/IWithMeta
+  (^:property meta [_] mta)
+  (with-meta [_ mm] (SortedMap. ks m kf mm))
+  (__call__ [_ k] (.val-at m k nil))
+  (__eq__ [this o] (and (map? o) (= (count this) (count o))
+                        (every? (fn [k] (and (contains? o k) (= (.val-at m k nil) (get o k)))) ks)))
+  (__hash__ [_] (hash m))
+  (__repr__ [_] (str "{" (apply str (interpose ", " (map (fn [k] (str (pr-str k) " " (pr-str (.val-at m k nil)))) ks)))
+                     "}"))
+  (__str__ [this] (.__repr__ this)))
+
+(defn- comparator-key
+  "Python's sort key for a Clojure comparator: one answering a number, or a predicate (> as Clojure takes it: true is
+   less, then the reverse asked)"
+  [c]
+  (functools/cmp-to-key (fn [a b] (let [r (c a b)]
+                                    (if (boolean? r) (cond r -1 (c b a) 1 :else 0) r)))))
+
+(core! 'sorted-map-by
+       (fn [comparator & kvs]
+         (let [e (SortedMap. (python/tuple []) {} (comparator-key comparator) nil)]
+           (if (seq kvs) (apply assoc e kvs) e))))
+
+(core! 'sorted-map (fn [& kvs] (apply sorted-map-by compare kvs)))
+
+;; --- locking -------------------------------------------------------------------
+;; a reentrant lock per object (by identity), as the JVM's monitor
+
+(import threading)
+(def ^:private locks (python/dict))
+(def ^:private locks-lock (threading/Lock))
+
+(defn lock-of
+  "The reentrant lock locking holds for x."
+  [x]
+  (with [_ locks-lock]
+        (let [k (python/id x)]
+          (or (.get locks k)
+              (let [l (threading/RLock)] (.__setitem__ locks k l) l)))))
+
+(defmacro locking*
+  [x & body]
+  `(with [_# (eve.host-completion/lock-of ~x)] ~@body))
+
+(core! 'locking @#'locking* true)
+
+;; --- case --------------------------------------------------------------------------
+;; basilisp's case makes each branch a function, so a recur in a branch of a
+;; case in a loop recurs to the branch ("recur arity does not match last recur
+;; point arity"); eve's loops do that. This case is Clojure's, as a cond:
+;; literal tests (a list groups alternatives), = comparison, an optional
+;; default, and an exception when nothing matches.
+
+(defmacro case*
+  [e & clauses]
+  (let [v (gensym "case")
+        dflt? (odd? (count clauses))
+        pairs (partition 2 (if dflt? (butlast clauses) clauses))
+        test (fn [k] (if (seq? k)
+                       `(contains? (quote ~(set k)) ~v)
+                       `(= (quote ~k) ~v)))]
+    `(let [~v ~e]
+       (cond
+         ~@(mapcat (fn [[k body]] [(test k) body]) pairs)
+         :else ~(if dflt?
+                  (last clauses)
+                  `(throw (python/ValueError (str "No case clause matching: " ~v))))))))
+
+(patch! 'case @#'case*)
+
+;; --- if-not ------------------------------------------------------------------------
+;; basilisp 0.5.1's if-not requires the else branch; Clojure's does not
+
+(defmacro if-not*
+  ([test then] `(if ~test nil ~then))
+  ([test then else] `(if ~test ~else ~then)))
+
+(patch! 'if-not @#'if-not*)
+
+;; if-let and if-some, likewise
+(def ^:private if-let-orig @#'basilisp.core/if-let)
+(def ^:private if-some-orig @#'basilisp.core/if-some)
+(defmacro if-let*
+  ([binding then] (if-let-orig &env &form binding then nil))
+  ([binding then else] (if-let-orig &env &form binding then else)))
+(defmacro if-some*
+  ([binding then] (if-some-orig &env &form binding then nil))
+  ([binding then else] (if-some-orig &env &form binding then else)))
+(patch! 'if-let @#'if-let*)
+(patch! 'if-some @#'if-some*)
+;; --- ns --------------------------------------------------------------------------
+;; basilisp 0.5.1's ns keeps only the last clause of each kind: (:require a)
+;; (:require b) requires b alone. Clojure's takes every clause; this ns merges
+;; repeated clauses before basilisp's own ns expands them.
+
+(def ^:private ns-orig @#'basilisp.core/ns)
+
+(defmacro ns*
+  [name & opts]
+  (let [[head clauses] (split-with (complement seq?) opts)
+        merged (reduce (fn [acc c]
+                         (if-let [i (first (keep-indexed
+                                            (fn [i x] (when (= (first x) (first c)) i))
+                                            acc))]
+                           (update acc i #(concat % (rest c)))
+                           (conj acc c)))
+                       [] clauses)]
+    (apply ns-orig &env &form name (concat head merged))))
+
+(patch! 'ns @#'ns*)
+
+;; --- swap! and reset! --------------------------------------------------------------
+;; basilisp 0.5.1's swap! and reset! are deref + compare-and-set!; Clojure's call
+;; the atom's own swap and reset (IAtom), which an eve atom's swap (eve.atom: the
+;; value built under a pinned epoch, the old one retired) needs. basilisp's
+;; Atom has both methods, so its atoms swap as before.
+
+(def ^:private swap-orig @#'basilisp.core/swap!)
+(def ^:private reset-orig @#'basilisp.core/reset!)
+
+(defn- swap!*
+  [a f & args]
+  (if (python/hasattr a "swap")
+    (apply (.-swap a) f args)
+    (apply swap-orig a f args)))
+
+(defn- reset!*
+  [a v]
+  (if (python/hasattr a "reset") (.reset a v) (reset-orig a v)))
+
+(patch! 'swap! swap!*)
+(patch! 'reset! reset!*)
+
+;; --- the reader: \u takes four hex digits -------------------------------------------
+;; basilisp 0.5.1 reads every hex digit that follows \u (and then wants 4 or 8), so
+;; "a\u0000b" (NUL, then b, in Clojure) is a syntax error. Clojure's \u is exactly
+;; four digits; basilisp's \U stays eight. The files read after this one are read so.
+
+(def ^:private reader-module (.get sys/modules "basilisp.lang.reader"))
+
+(defn- read-unicode-escape
+  [ctx]
+  (let [reader (.-reader ctx)
+        width (if (= "u" (.advance reader)) 4 8)
+        digits (loop [ds []]
+                 (let [c (.peek reader)]
+                   (if (and (< (count ds) width) (.match (.-hex-chars reader-module) c))
+                     (do (.next-char reader) (recur (conj ds c)))
+                     ds)))]
+    (.pushback reader)
+    (when-not (= width (count digits))
+      (throw (.syntax-error ctx (str "Unicode escape sequence must be exactly " width
+                                     " hex digits; got '" (apply str digits) "'"))))
+    (python/chr (python/int (apply str digits) 16))))
+
+(python/setattr reader-module "_read_unicode_escape_seq" read-unicode-escape)
+
+;; --- printing --------------------------------------------------------------------
+
+(core! 'print-simple (fn [o w] (.write w (str o))))
+(defmulti print-method* (fn [x _w] (type x)))
+(defmethod print-method* :default [x w] (.write w (pr-str x)))
+(core! 'print-method print-method*)
+
+;; basilisp's printer (basilisp.lang.obj/lrepr, a singledispatch on the
+;; Python type) never consults print-method: an object no basilisp printer
+;; claims prints through its print-method where it has one, as Clojure's do
+(defn- ^{:kwargs :collect} print-method-lrepr [o _kwargs]
+  (let [m (get-method print-method* (type o))]
+    (if (and m (not (identical? m (get-method print-method* :default))))
+      (let [w (io/StringIO)] (m o w) (.getvalue w))
+      (python/repr o))))
+(.register basilisp.lang.obj/lrepr python/object print-method-lrepr)
+
+;; --- clojure.core: basilisp.core under Clojure's name ---------------------------
+
+(create-ns 'clojure.core)
+(doseq [[s v] (ns-publics 'basilisp.core)]
+  (let [cv (intern 'clojure.core s @v)]
+    (when (:macro (meta v)) (.alter-meta cv assoc :macro true))))
+
+;; --- clojure.lang: the JVM's interface and helper names, as basilisp's ----------
+;; eve's sources name clojure.lang's interfaces in type hints and instance?
+;; checks and call a few of its static helpers. A Python module clojure.lang
+;; holds basilisp's own interface under each name and the helpers over
+;; basilisp.core; every namespace created from here on imports it (basilisp's
+;; Namespace/DEFAULT_IMPORTS), as does every one that exists now.
+
+(import types)
+(require '[basilisp.lang.interfaces :as-alias bi])
+
+(defn- static [m] (python/dict (into {} (map (fn [[k f]] [k (python/staticmethod f)])) m)))
+(defn- klass [nm m] (python/type nm (python/tuple []) (static m)))
+
+(def ^:private clojure-lang
+  (let [pkg (or (.get sys/modules "clojure") (types/ModuleType "clojure"))
+        m (types/ModuleType "clojure.lang")
+        ifaces {"Counted" basilisp.lang.interfaces/ICounted
+                "Indexed" basilisp.lang.interfaces/IIndexed
+                "ILookup" basilisp.lang.interfaces/ILookup
+                "Associative" basilisp.lang.interfaces/IAssociative
+                "IPersistentCollection" basilisp.lang.interfaces/IPersistentCollection
+                "IPersistentMap" basilisp.lang.interfaces/IPersistentMap
+                "IPersistentSet" basilisp.lang.interfaces/IPersistentSet
+                "IPersistentVector" basilisp.lang.interfaces/IPersistentVector
+                "IPersistentList" basilisp.lang.interfaces/IPersistentList
+                "IPersistentStack" basilisp.lang.interfaces/IPersistentStack
+                "ISeq" basilisp.lang.interfaces/ISeq
+                "Seqable" basilisp.lang.interfaces/ISeqable
+                "Sequential" basilisp.lang.interfaces/ISequential
+                "IMapEntry" basilisp.lang.interfaces/IMapEntry
+                "IMeta" basilisp.lang.interfaces/IMeta
+                "IObj" basilisp.lang.interfaces/IWithMeta
+                "IDeref" basilisp.lang.interfaces/IDeref
+                "IReduceInit" basilisp.lang.interfaces/IReduce
+                "IReduce" basilisp.lang.interfaces/IReduce
+                "IKVReduce" basilisp.lang.interfaces/IReduceKV
+                "IEditableCollection" basilisp.lang.interfaces/IEvolveableCollection
+                "ITransientCollection" basilisp.lang.interfaces/ITransientCollection
+                "ITransientAssociative" basilisp.lang.interfaces/ITransientAssociative
+                "ITransientMap" basilisp.lang.interfaces/ITransientMap
+                "ITransientSet" basilisp.lang.interfaces/ITransientSet
+                "ITransientVector" basilisp.lang.interfaces/ITransientVector
+                "Reversible" basilisp.lang.interfaces/IReversible
+                "Keyword" basilisp.lang.keyword/Keyword}
+        helpers {"MapEntry" {"create" (fn [k v] (map-entry k v))}
+                 "Util" {"equiv" (fn [a b] (= a b))
+                         "equals" (fn [a b] (= a b))
+                         "hash" (fn [x] (hash x))}
+                 "APersistentMap" {"mapEquals" (fn [m o]
+                                                 (boolean
+                                                  (and (map? o) (= (count m) (count o))
+                                                       (every? (fn [e] (and (contains? o (key e))
+                                                                            (= (val e) (get o (key e)))))
+                                                               (seq m)))))}
+                 "RT" {"count" (fn [x] (count x))
+                       "nth" (fn ([c i] (nth c i)) ([c i nf] (nth c i nf)))
+                       "get" (fn ([m k] (get m k)) ([m k nf] (get m k nf)))
+                       "seqToArray" (fn [s] (to-array s))}}]
+    (doseq [[n c] ifaces] (python/setattr m n c))
+    (doseq [[n fs] helpers] (python/setattr m n (klass n fs)))
+    (python/setattr m "PersistentList" (python/type "PersistentList" (python/tuple []) (python/dict {"EMPTY" '()})))
+    (python/setattr pkg "lang" m)
+    (.__setitem__ sys/modules "clojure" pkg)
+    (.__setitem__ sys/modules "clojure.lang" m)
+    m))
+
+(import basilisp.lang.compiler.generator)
+;; generated modules import a default import under a fixed alias, and refer
+;; to it by that alias
+(.__setitem__ (python/getattr (.get sys/modules "basilisp.lang.compiler.generator") "_MODULE_ALIASES")
+              "clojure.lang" "eve_clojure_lang")
+
+(import builtins)
+;; a module compiled before this one's preamble took the import refers to the
+;; alias unbound; Python looks a name up in builtins last
+(python/setattr builtins "eve_clojure_lang" clojure-lang)
+
+(let [s (symbol "clojure.lang")]
+  (set! (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace)
+        (conj (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace) s))
+  (doseq [n (all-ns)] (.add-import n s clojure-lang)))
+
+;; --- the JVM's class names: a.b.C read as basilisp's a.b/C ----------------------
+;; basilisp names a class in a module module/Name and refuses a bare symbol
+;; with a dot in it; eve's sources write the JVM's clojure.lang.IPersistentVector
+;; (in type hints, instance? checks, static calls' classes). The analyzer's
+;; bare-symbol resolution is given that reading: a dotted bare symbol that is
+;; not a local resolves as the namespaced symbol with the last segment as name.
+
+(import basilisp.lang.compiler.analyzer)
+
+(def ^:private analyzer-module (.get sys/modules "basilisp.lang.compiler.analyzer"))
+(def ^:private resolve-bare (python/getattr analyzer-module "__resolve_bare_symbol"))
+(def ^:private resolve-namespaced (python/getattr analyzer-module "__resolve_namespaced_symbol"))
+
+(python/setattr analyzer-module "__resolve_bare_symbol"
+                (fn [ctx form]
+                  (let [n (name form)
+                        i (.rfind n ".")]
+                    (if (and (pos? i) (< i (dec (count n))) (nil? (.find (.-current-ns ctx) form)))
+                      (resolve-namespaced ctx (symbol (subs n 0 i) (subs n (inc i))))
+                      (resolve-bare ctx form)))))
+
+;; --- protocols: a method named -foo -------------------------------------------
+;; basilisp 0.5.1's protocol dispatch calls a method whose name starts with -
+;; as (. obj -foo), which is field syntax: it reads the attribute foo, while a
+;; deftype implementing the protocol inline defines _foo (measured
+;; 2026-10-16: "'A' object has no attribute 'foo'"; extend-type works).
+;; eve's protocols are all -named and implemented inline, so the dispatch is
+;; generated here calling the method by its munged name (for protocols
+;; defined from now on).
+
+(defn- gen-protocol-dispatch*
+  [protocol-name interface-name [method-name & args+docstring :as method-def]]
+  (let [[arglists [docstring]] (split-with (complement string?) args+docstring)
+        py-name (munge (name method-name))]
+    [`(def ~(vary-meta method-name
+                       assoc
+                       :doc docstring
+                       :arglists (list 'quote arglists)
+                       :basilisp.core/source-protocol (list 'var protocol-name))
+        (functools/singledispatch
+         (fn ~method-name
+           ~@(map (fn [[obj-sym & args]]
+                    (list `[~obj-sym ~@(map #(vary-meta % assoc :no-warn-when-unused true) args)]
+                          `(let [obj-type# (python/type ~obj-sym)]
+                             (throw
+                              (ex-info (str
+                                        ~(str "No implementation of method " method-name " found for type ")
+                                        obj-type#)
+                                       {:protocol    (var ~protocol-name)
+                                        :method      ~method-name
+                                        :object-type obj-type#})))))
+                  arglists))))
+     `(.register ~(vary-meta method-name assoc :no-warn-on-var-indirection true)
+                 ~interface-name
+                 (fn ~method-name
+                   ~@(map (fn [[obj-sym & args]]
+                            (let [has-varargs (some #(= '& %) args)
+                                  clean-args  (filter #(not= '& %) args)]
+                              (list `[~obj-sym ~@args]
+                                    (if has-varargs
+                                      `(apply (python/getattr ~obj-sym ~py-name) ~@clean-args)
+                                      `((python/getattr ~obj-sym ~py-name) ~@clean-args)))))
+                          arglists)))]))
+
+(patch! 'gen-protocol-dispatch gen-protocol-dispatch*)
+
+;; --- transducing sequences -------------------------------------------------
+;; basilisp's (sequence xform coll) steps each input into a fresh queue and
+;; runs the transducer's completion after every step, so a buffering
+;; transducer flushes each time — (sequence (partition-all 2) [1 2 3]) answers
+;; ([1] [1 2] [3] [3]), (partition-by odd?) likewise — and an early end
+;; (halt-when) is concatenated as if it were a collection ("'int' object is not
+;; iterable"). Clojure's steps one reducing fn through the input and completes
+;; it once, at the end or at reduced. basilisp's (into to xform from) makes the
+;; result persistent outside the transduction, so halt-when's completion, which
+;; answers the halting input in place of the collection, hands persistent! a
+;; number ("does not implement ITransientCollection"); Clojure's (1.12) calls
+;; persistent! in the reducing fn's own completion. And basilisp's halt-when
+;; itself completes with the halting input as the result — its completion hands
+;; it to the inner reducing fn — and gives retf the uncompleted result:
+;; Clojure's halts with {::halt v} and unwraps it in its own completion, retf
+;; given the completed result. And basilisp's transduce answers init without
+;; calling the completion when coll is empty (its docstring says so):
+;; Clojure's is (f (reduce f init coll)) — an empty (into {} xf []) through it
+;; answered the transient itself, which eve.map's deftype expansion then met
+;; ("Unexpected form type ... TransientMap"). (Measured 2026-10-19:
+;; eve.thread-fold-test's row of every registered transducer.)
+
+(patch! 'transduce (fn
+                     ([xform f coll] (transduce xform f (f) coll))
+                     ([xform f init coll] (let [rf (xform f)] (rf (reduce rf init coll))))))
+
+(patch! 'halt-when (fn
+                     ([pred] (halt-when pred nil))
+                     ([pred retf]
+                      (fn [rf]
+                        (fn
+                          ([] (rf))
+                          ([result]
+                           (if (and (map? result) (contains? result ::halt)) (::halt result) (rf result)))
+                          ([result input]
+                           (if (pred input)
+                             (reduced {::halt (if retf (retf (rf result) input) input)})
+                             (rf result input))))))))
+
+(defn- transduced-seq [xform coll]
+  (let [buf (atom [])
+        rf (xform (fn ([acc] acc) ([acc x] (swap! buf conj x) acc)))
+        drain (fn [] (let [b @buf] (reset! buf []) b))
+        step (fn step [s]
+               (lazy-seq
+                (loop [s s]
+                  (when-not (= ::done s)
+                    (if-let [s' (seq s)]
+                      (let [r (rf nil (first s'))]
+                        (if (reduced? r)
+                          (do (rf nil) (concat (drain) (step ::done)))
+                          (let [out (drain)]
+                            (if (seq out) (concat out (step (rest s'))) (recur (rest s'))))))
+                      (do (rf nil) (seq (drain))))))))]
+    (step coll)))
+
+(let [core-sequence basilisp.core/sequence]
+  (patch! 'sequence (fn
+                      ([coll] (core-sequence coll))
+                      ([xform coll] (transduced-seq xform coll))
+                      ([xform coll & colls] (apply core-sequence xform coll colls)))))
+
+(let [core-into basilisp.core/into]
+  (patch! 'into (fn
+                  ([] [])
+                  ([to] to)
+                  ([to from] (core-into to from))
+                  ([to xform from]
+                   (if (instance? basilisp.lang.interfaces/IEvolveableCollection to)
+                     (let [tm (meta to)
+                           rf (xform (fn ([coll] (with-meta (persistent! coll) tm)) ([coll v] (conj! coll v))))]
+                       (rf (reduce rf (transient to) from)))
+                     (let [rf (xform conj)] (rf (reduce rf to from))))))))

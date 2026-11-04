@@ -98,3 +98,17 @@
       (is (= 100 (count s)))
       (doseq [i (range 100)]
         (is (contains? s i))))))
+
+(deftest transient-test
+  (testing "an eve set's transient: conj!, disj!, persistent!, and into
+            through it"
+    (let [s (ss/hash-set 1 2 3)
+          p (-> (transient s) (conj! 4) (disj! 1) (persistent!))]
+      (is (= #{2 3 4} p))
+      (is (= #{1 2 3 5} (into s [5])))
+      (is (= #{1 2 3} s)))))
+
+(deftest reduce-without-init-test
+  (testing "reduce without an init over an eve set"
+    (is (= 6 (reduce + (ss/hash-set 1 2 3))))
+    (is (= 0 (reduce + (ss/empty-hash-set))))))

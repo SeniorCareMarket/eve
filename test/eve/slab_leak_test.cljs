@@ -7,6 +7,7 @@
   (:require [cljs.test :refer [deftest testing is async]]
             [eve.atom :as atom]
             [eve.deftype-proto.alloc :as alloc]
+            [eve.process-slab :as ps]
             [eve.deftype-proto.data :as d]
             [eve.map :as eve-map]
             [eve.vec :as eve-vec]
@@ -20,11 +21,11 @@
   (loop [i 0 total 0]
     (if (>= i d/NUM_SLAB_CLASSES)
       total
-      (let [stats (alloc/slab-stats i)]
+      (let [stats (ps/slab-stats i)]
         (recur (inc i) (+ total (:used-count stats)))))))
 
 (defn- all-stats-str []
-  (let [stats (alloc/all-slab-stats)]
+  (let [stats (ps/all-slab-stats)]
     (str "{"
          (apply str
                 (interpose ", "

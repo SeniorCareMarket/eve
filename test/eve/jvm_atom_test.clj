@@ -1,6 +1,7 @@
 (ns eve.jvm-atom-test
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.atom :as atom]))
+            [eve.atom :as atom]
+            [eve.vec :as eve-vec]))
 
 (def ^:private base (str "/tmp/eve-p7-jvm-atom-" (System/currentTimeMillis)))
 
@@ -166,6 +167,19 @@
       (swap! a conj :d)
       (is (contains? @a :d)))))
 
+(deftest test-heap-set-of-collections
+  (testing "a set whose members are collections: a member's bytes are its key
+            bytes (flat), however the set was written — built at the root, or
+            written by the codec's set writer as a map's value"
+    (let [s #{[1 2] {:k 1} #{:x} '(3 4)}
+          a (atom/atom :test.heap/set-colls s)
+          b (atom/atom :test.heap/set-colls-nested {:s s})]
+      (doseq [m s]
+        (is (contains? @a m))
+        (is (contains? (:s @b) m)))
+      (is (= s @a))
+      (is (= s (:s @b))))))
+
 (deftest test-heap-list-value
   (testing "heap atom stores lists"
     (let [a (atom/atom :test.heap/list-val '(1 2 3))]
@@ -218,10 +232,10 @@
           latch   (java.util.concurrent.CountDownLatch. n)
           threads (mapv (fn [_]
                           (Thread.
-                            (fn []
-                              (dotimes [_ per]
-                                (swap! a update :count inc))
-                              (.countDown latch))))
+                           (fn []
+                             (dotimes [_ per]
+                               (swap! a update :count inc))
+                             (.countDown latch))))
                         (range n))]
       (doseq [t threads] (.start t))
       (.await latch 30 java.util.concurrent.TimeUnit/SECONDS)
@@ -257,3 +271,14 @@
       (swap! a update :w * 2)
       (is (= 20 (:w @a)))
       (atom/close-atom-domain! d))))
+
+(deftest test-nested-value-from-another-domain-refused
+  (testing "an eve value built in another domain, nested in the new value, is refused, as at the root (before
+            2026-10-16 its offset was written into this domain and read back as \"Unknown EVE type tag\")"
+    (let [a (atom/atom :test.heap/nested-foreign {:n 0})
+          foreign (into (eve-vec/empty-vec) [1 2 3])]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"different slab domain"
+                            (swap! a assoc :v foreign)))
+      (is (= {:n 0} @a) "the refused swap left the value as it was")
+      (swap! a (fn [m] (assoc m :v (into (eve-vec/empty-vec) [1 2 3]))))
+      (is (= [1 2 3] (:v @a)) "built inside swap!, the same vector goes in"))))
