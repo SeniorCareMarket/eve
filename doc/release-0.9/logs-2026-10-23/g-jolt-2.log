@@ -1,6 +1,0 @@
-# run g-jolt-2 on bb5617589 eve tree 0ce4ef880d412317fe10b8b4a8ddead3ad442d92
-# cmd (in eve/) bash -c bb test:jolt
-# start 2026-10-23 11:58:36 AM ET load 1.02 1.62 1.66 mem-in-use 736 MB
-No threaded Chez Scheme 10.x found; install one or set JOLT_CHEZ.
-Error while executing task: test:jolt
-# end 2026-10-23 11:58:37 AM ET exit 1 wall 1s peak-mem-in-use 736 MB peak-process-tree-rss 13 MB load 1.10 1.62 1.66

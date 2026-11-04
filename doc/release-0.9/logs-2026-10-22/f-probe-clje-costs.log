@@ -1,6 +1,0 @@
-# run f-probe-clje-costs on 1910e641e eve tree 5c5f9683aae646ac3d5b2e00854b6b08f45ea6de
-# cmd (in eve/) bash -c clojerl -pa $(bb classpath clje | tr ":" " ") doc/release-0.9/logs-2026-10-22/probes -m clje-costs
-# start 2026-10-22 2:18:42 AM ET load 0.68 1.01 0.57 mem-in-use 614 MB
-an eve long-array's aset: 0.03528222499999999 us; aget: 0.040148285 us
-the binding frame: 20 vars, 3105 bytes as a term; a round trip carrying it: 2.39652435 us
-# end 2026-10-22 2:18:46 AM ET exit 0 wall 4s peak-mem-in-use 725 MB peak-process-tree-rss 130 MB load 0.63 0.99 0.57

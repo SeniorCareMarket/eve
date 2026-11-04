@@ -1,5 +1,0 @@
-;; basilisp's own interleave (no eve loaded) over 3,000 elements (doc/hosts/basilisp.md: it exceeded the recursion limit)
-(println "basilisp's interleave, 3,000 elements:"
-         (try (count (interleave (range 3000) (range 3000))) (catch python/RecursionError _ "RecursionError")))
-(println "basilisp's interleave, 1,000 elements:"
-         (try (count (interleave (range 1000) (range 1000))) (catch python/RecursionError _ "RecursionError")))

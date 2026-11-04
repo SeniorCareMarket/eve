@@ -1,8 +1,0 @@
-:init-done
-CONTENTION variant=B tag=B2 procs=4 swaps-per-proc=400 sync-every=0
-  worker-1 elapsed-ms=171651.215473
-  worker-2 elapsed-ms=168728.340483
-  worker-3 elapsed-ms=173815.99759
-  worker-4 elapsed-ms=169539.340206
-  makespan-ms=173816 aggregate-ops-sec=9.2 aggregate-us-per-op=108635.0
-:value 1600

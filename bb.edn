@@ -4,7 +4,7 @@
          "adapters/crypto/java/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
          "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/region/jvm-nio-lock/src"
          "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src"
-         "adapters/process/java/src" "adapters/thread/jvm/src" "adapters/types/bb/src"]
+         "adapters/process/java/src" "adapters/thread/jvm/src" "adapters/types/bb/src" "adapters/journal-file/java/src"]
  :tasks
  {:requires ([babashka.fs :as fs] [clojure.edn :as edn] [clojure.string :as str])
   :init (defn roots

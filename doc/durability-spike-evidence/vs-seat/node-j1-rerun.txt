@@ -1,3 +1,0 @@
-{:mode :single, :variant "J1", :size :counter, :iters 3000, :ms 286876.7800600007, :us-per-op 95625.59335333358, :ops-sec 10.457451451360216}
-{:mode :single, :variant "J1", :size :kb, :iters 1000, :ms 193426.0585169997, :us-per-op 193426.05851699974, :ops-sec 5.169934225341786}
-{:mode :single, :variant "J1", :size :kb64, :iters 300, :ms 20957.67449299991, :us-per-op 69858.91497666638, :ops-sec 14.314565296841652}

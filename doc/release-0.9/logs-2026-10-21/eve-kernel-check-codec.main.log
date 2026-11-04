@@ -1,2 +1,0 @@
-EVE-KERNEL: FATAL codec: RUN-TRIP form 293 throw #error {  :cause "eve-kernel: clo-5786cd34d3df6faa (m832.wat): wat->vs: a statement between an instruction's operands and the instruction"  :data {}  :via
-exit=1 wall=94s

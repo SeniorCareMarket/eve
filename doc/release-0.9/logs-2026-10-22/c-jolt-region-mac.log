@@ -1,8 +1,0 @@
-# run c-jolt-region-mac on 21c6a510a eve tree 0abadb0855be5f71935ff851fa9abf027f7d25d9
-# cmd (in eve/) bash -c jolt -Scp /home/user/atom.broker/eve/src:/home/user/atom.broker/eve/adapters/slab-io/protocol/src:/home/user/atom.broker/eve/adapters/crypto/portable/src:/home/user/atom.broker/eve/adapters/core/clojure/src:/home/user/atom.broker/eve/adapters/completion/jolt/src:/home/user/atom.broker/eve/adapters/coll/jvm/src:/home/user/atom.broker/eve/adapters/slab/heap/src:/home/user/atom.broker/eve/adapters/region/jolt-ffi/src:/home/user/atom.broker/eve/adapters/encoding/java/src:/home/user/atom.broker/eve/adapters/int32/jvm/src:/home/user/atom.broker/eve/adapters/codec/byte-array/src:/home/user/atom.broker/eve/adapters/process/java/src:/home/user/atom.broker/eve/adapters/thread/jvm/src:/home/user/atom.broker/eve/adapters/types/jvm/src:/home/user/atom.broker/eve/adapters/types/js/src doc/release-0.9/logs-2026-10-22/probes/jolt_region_mac.clj
-# start 2026-10-22 11:59:32 AM ET load 0.40 1.35 1.73 mem-in-use 752 MB
-{:probe :cas-increments, :threads 8, :each 2000, :expected 16000, :got 16000, :ok true, :ms 31}
-{:probe :cas-witness, :got 41, :word 41, :ok true}
-{:probe :exchanges, :values 16001, :distinct 16001, :ok true}
-{:probe :poll-wait, :not-equal [:not-equal 0], :timed-out [:timed-out 201], :woken [:ok 51], :ok true}
-# end 2026-10-22 12:00:48 PM ET exit 0 wall 76s peak-mem-in-use 886 MB peak-process-tree-rss 123 MB load 0.20 1.09 1.61

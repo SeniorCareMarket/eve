@@ -1,8 +1,0 @@
-# run browser on d507212f eve tree 7e69d56535d55aa2cc934c79a90723067651ef10
-# cmd (in eve/) bb test:browser
-# start 2026-10-21 8:43:16 PM ET load 1.38 1.80 1.47 mem-in-use 553 MB
-test:browser: building the page (shadow-cljs release eve-thread-browser, :simple)
-test:browser: serving on 127.0.0.1:46323; opening headless Chromium
-test:browser: result {:op :suite, :summary {:test 48, :pass 633, :fail 0, :error 0}, :main {:block-never true, :wait-refused true, :poll-answers true}, :ms 11753, :driving {:block :never, :parallel true, :closures false, :eval false, :wake :futex, :spawn-ms 142, :max-threads 127, :runtime :browser}}
-:summary {:test 48, :pass 633, :fail 0, :error 0, :main {:block-never true, :wait-refused true, :poll-answers true}}
-# end 2026-10-21 8:43:58 PM ET exit 0 wall 42s peak-mem-in-use 1960 MB load 2.49 2.03 1.56

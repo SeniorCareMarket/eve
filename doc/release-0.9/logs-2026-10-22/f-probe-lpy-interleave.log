@@ -1,6 +1,0 @@
-# run f-probe-lpy-interleave on 00d722de5 eve tree d098985d44a2620aea317908e395d5b9ceb714e9
-# cmd (in eve/) basilisp run /tmp/claude-0/-home-user/a59b5296-f4eb-557a-a8c2-dec41a3a8f3a/scratchpad/probes/lpy_interleave.lpy
-# start 2026-10-22 1:16:58 AM ET load 0.91 1.25 1.50 mem-in-use 1003 MB
-basilisp's interleave, 3,000 elements: RecursionError
-basilisp's interleave, 1,000 elements: RecursionError
-# end 2026-10-22 1:17:14 AM ET exit 0 wall 16s peak-mem-in-use 1019 MB peak-process-tree-rss 54 MB load 0.93 1.24 1.49
