@@ -994,6 +994,20 @@
         (= verdict :unequal) false
         :else (map-equiv? sio__ root-off cnt other))))
 
+  clojure.lang.IReduce
+  (reduce [_ f]
+    (if (zero? cnt)
+      (f)
+      (let [acc (volatile! ::none)]
+        (hamt-kv-reduce sio__ root-off
+                        (fn [_ k v]
+                          (let [e (enc/map-entry k v)]
+                            (if (identical? ::none @acc)
+                              (vreset! acc e)
+                              (vreset! acc (f @acc e)))))
+                        nil)
+        (unreduced @acc))))
+
   clojure.lang.IReduceInit
   (reduce [_ f init]
     (let [sio sio__]
