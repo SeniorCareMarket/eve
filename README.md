@@ -84,15 +84,16 @@ served by a gateway (`network_atom.cljc`).
 
 A host is a list of adapter roots, one row of [`hosts.edn`](hosts.edn); eve's shared code (`src/`) names none of them
 but one ClojureScript-only file (`src/eve/shared_atom.cljs`, counted in `.host-leak`).
-Status is what this tree measured (the final pass, 2026-10-21/22 ET); each host's page in
+Status: the JVM and babashka rows are the 0.9.0 release battery (2026-11-03, one Linux box; `doc/release-0.9/REPORT.md`);
+the other rows are the final pass of 2026-10-21/22 ET, not re-run for 0.9.0. Each host's page in
 [doc/hosts/](doc/hosts/README.md) has its runs, its performance, how eve is built on it and its gotchas.
 
-| Host | Runs on | Runner | The final tree, 2026-10-21/22 ET |
+| Host | Runs on | Runner | Measured |
 |---|---|---|---|
-| JVM | Clojure 1.12, JDK 21 | `clojure -M:jvm-test` | **green**: 546 tests, 9,615 assertions |
+| JVM | Clojure 1.12, JDK 21 | `clojure -M:jvm-test` | **green** (0.9.0): 643 tests, 10,723 assertions |
 | ClojureScript (Node) | shadow-cljs, Node + eve's N-API addon | `node target/eve-test/all.js <suite>` | **green**: `all` 482 tests, 34,980 assertions; `net` 62 / 1,429, `slab-grow` 105 / 28,902, `thread-domain` 12 / 146, `deftype` 63 / 710 green |
 | ClojureScript (browser) | a cross-origin-isolated page | `bb test:browser` | **green**: 48 tests, 633 assertions (headless Chromium) |
-| babashka | bb 1.13 | `bb test:bb` | **green**: 247 tests, 4,748 assertions (babashka-minimal 242 / 4,623) |
+| babashka | bb 1.13 | `bb test:bb` | **green** (0.9.0): 294 tests, 5,632 assertions (babashka-minimal 242 / 4,623 on the final pass) |
 | nbb | Node | `bb test:nbb` | **green**: 242 tests, 4,617 assertions |
 | ClojureCLR | .NET 8, ClojureCLR 1.12.6 | `bb test:cljr` | **green**: 202 tests, 4,499 assertions |
 | basilisp | CPython 3.13, basilisp 0.5.1 | `bb test:lpy` | 180 tests, 4,350 assertions passing, **7 errors**: eve.thread.domain's 120 s waits run out late in the full run (checklist 9.26; fold on a group's three with a leak of its own, 9.35); each of those namespaces alone green |

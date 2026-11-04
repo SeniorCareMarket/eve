@@ -7,6 +7,35 @@ repository johnmn3/atom.broker; nothing of this session's work went to a public 
 On 2026-10-22 checklist 9.34 was landed and every battery re-run on it (9:24 AM – 2:10 PM ET, the same session and box): §0 is
 that declaration, basilisp's full run first.
 
+## 0.9.0 — released 2026-11-04 (the re-prep, a shortened battery by the operator's decision)
+
+Release commit: `34acd5bac1` on `claude/eve-0.9-reprep` = the re-prep's steps 0–6 (base `e000a1ff89`: the Oct 27–29 lane
+records excluded, the shipped sources scrubbed, the proof-era Poseidon path retired, the dangling aegis tests excluded, the
+stale strings, the two decisions and the CHANGELOG catch-up), the pre-alpha README warning, the license 0BSD with no
+copyright holder (operator ruling 2026-11-03), SECURITY.md's disclosure address, `EveHashMap` implementing
+`clojure.lang.IReduce` (`7c46768475`, the battery's one defect), and `:node-test` / `:browser-test` given
+`adapters/journal-file/java/src` (`34acd5bac1`: since `51fcc328c5` shadow's macro pass could not load `eve.journal-file`
+through those aliases; verified by `npm run test:compile` on the lane's box). Tag `eve-v0.9.0`; export branch
+`eve-0.9-export` (`git subtree split --prefix=eve`). `package.json` 0.9.0; CHANGELOG `[0.9.0] - 2026-11-04`.
+
+The battery for 0.9.0, run by the coordinator on one Linux box (4 CPUs, other work running) on `7c46768475` (the release
+commit differs from it only in the two test aliases above), one leg at a time, 2026-11-03 10:09–10:47 PM ET
+(`scratchpad/runs/eve-battery.log`, `eve-jvm2.log` of session `session_018hBD7mdcGTN6t4L7SWp2TQ`):
+
+| leg | result |
+|---|---|
+| `bb test:bb` | **294 tests, 5,632 assertions, 0 failures, 0 errors** (808 s) |
+| `clojure -M:jvm-test` | **643 tests, 10,723 assertions, 0 failures, 0 errors** (799 s), with `NO_PROXY=localhost,127.0.0.1,::1` so the loopback tests bypass the box's sandbox proxy, and python `wasmtime` installed for `eve.aegis.pages-v3-test`'s kernel loader (without it: 2 failures + 1 error in that namespace, nothing else) |
+
+The lane's own JVM run on `7c46768475` (another box, 10:29 PM ET): 643 / 10,755, 0 failures, 1 error — the loopback test
+through its sandbox proxy, the environmental case above.
+
+**Not run for 0.9.0** (deferred to 0.9.1): ClojureScript on Node (`node target/eve-test/all.js`), the browser, nbb, glojure
+(its run on the lane's box was SIGKILLed at 178 tests under memory pressure, no failing test), ClojureCLR, basilisp, jolt,
+clojerl, and ValueScript — `bb test:vs` under the installed vs 0.0.1 registered none of the runner's seven namespaces ("0
+passed, 0 failed", which the task's pass check accepts; a 0-test run is not a result). The README's host table keeps the
+final pass's counts (2026-10-21/22) for those hosts, marked as such.
+
 ## 0. Declaration — 9.34 landed, every battery re-run on it (2026-10-22)
 
 **basilisp's full battery on the fixed tree: 180 tests, 4,350 assertions, 0 failures, 7 errors — red.**

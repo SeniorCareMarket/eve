@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.0] — prepared 2026-10-20, unreleased
+## [0.9.0] - 2026-11-04
 
 0.9 is the API and host contract 1.0 will freeze, published for adopters to build against. Between 0.9 and 1.0 the
 public namespaces (`doc/api-guide.md`) change only with an entry here under *Changed* or *Removed*; the host contract
