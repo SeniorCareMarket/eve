@@ -26,6 +26,8 @@
    [eve.process :as proc]
    [eve.journal-file :as jf]
    [eve.read-region :as rr]
+   ;; PROTOTYPE (jvm-heap-grade step 2): the automatic read guard, JVM only
+   #?(:clj [eve.guard :as guard])
    [eve.deftype-proto.data :as d]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc]
@@ -351,7 +353,10 @@
             :pins (clojure.core/atom {})
             :pin-lock (token)
             :holder (clojure.core/atom nil)
-            :closed? (clojure.core/atom false)}]
+            :closed? (clojure.core/atom false)
+            ;; PROTOTYPE (step 2): what swap! does with a slab-backed value of ANOTHER domain — :throw (today's
+            ;; behaviour) or :copy (materialize it under the reader's pin and write it here). set-foreign-policy!
+            :foreign-policy (clojure.core/atom :throw)}]
     ;; a reference an eve-deftype writes in place into one of this domain's blocks parks what reaches 0 here
     (tally/register-parker! sio (park-fn ds))
     ds))
@@ -751,24 +756,29 @@
 
 (defn- resolve-new-ptr
   "The slab offset a new root value lives at in sio: NIL for nil, the header
-   of a slab-backed value (which must be of this domain), the result of
-   writing a plain collection, or a fresh scalar block."
-  [sio new-val]
-  (cond
-    (nil? new-val)
-    alloc/NIL_OFFSET
+   of a slab-backed value of this domain (its own pointer: shared, not copied), the result of
+   writing a plain collection, or a fresh scalar block. A slab-backed value of another domain
+   follows the receiving domain's foreign policy (step-2 prototype): :throw (the default, today's
+   error) or :copy (materialized under the reader's pin, then written here)."
+  ([sio new-val] (resolve-new-ptr sio new-val :throw))
+  ([sio new-val foreign-policy]
+   (cond
+     (nil? new-val)
+     alloc/NIL_OFFSET
 
-    (satisfies? d/IEveRoot new-val)
-    (let [vs (d/-eve-sio new-val)]
-      (when (and vs (not (identical? (alloc/sio-root vs) (alloc/sio-root sio))))
-        (throw (ex-info "swap!: Eve value was allocated in a different slab domain; construct it with the atom's domain sio (eve.atom/atom-sio)"
-                        {:value-type (str (type new-val))})))
-      (d/-root-header-off new-val))
+     (satisfies? d/IEveRoot new-val)
+     (let [vs (d/-eve-sio new-val)]
+       (if (and vs (not (identical? (alloc/sio-root vs) (alloc/sio-root sio))))
+         (case foreign-policy
+           :copy (resolve-new-ptr sio (d/eve->clj new-val) :throw)
+           (throw (ex-info "swap!: Eve value was allocated in a different slab domain; construct it with the atom's domain sio (eve.atom/atom-sio)"
+                           {:value-type (str (type new-val))})))
+         (d/-root-header-off new-val)))
 
-    :else
-    (or (write-typed-root! sio new-val)
-        (write-plain-collection! sio new-val)
-        (alloc/value->scalar-block! sio new-val))))
+     :else
+     (or (write-typed-root! sio new-val)
+         (write-plain-collection! sio new-val)
+         (alloc/value->scalar-block! sio new-val)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Reclamation — how many use a block (eve.tally)
@@ -825,12 +835,34 @@
     (finally
       (unpin-epoch! ds))))
 
+#?(:clj
+   (defn- guard-deref
+     "PROTOTYPE (step 2). Inside a guard extent (eve.guard): the atom's root as a lazy value — the slab-backed value
+      read-root-value builds, nothing materialized. The domain is pinned the first time the extent chain reads it and
+      unpinned when the extent that pinned it closes. The value comes back behind eve.guard's validity proxy; with
+      eve.guard/*proxy-same-domain?* false, a read of the extent's own receiving domain comes back raw (the slab
+      value itself, pointer-equal to the atom's, with no use-after-close check)."
+     [{:keys [root-r sio] :as ds} atom-slot-idx]
+     (guard/hold! ds
+                  (fn []
+                    (refresh-slabs! ds)
+                    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)))
+                  (fn [] (unpin-epoch! ds)))
+     (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))
+           _   (refresh-slabs! ds)
+           v   (read-root-value sio ptr)]
+       (if (and (not guard/*proxy-same-domain?*) (identical? ds (:domain guard/*extent*)))
+         v
+         (guard/wrap v (guard/current-cell))))))
+
 (defn- mmap-deref
-  "deref: the atom's value as plain data (plain-deref); inside a `$`, the lazy value (region-deref)."
+  "deref: the atom's value as plain data (plain-deref); inside a `$`, the lazy value (region-deref); inside a guard
+   extent (step-2 prototype, JVM), the lazy value behind the guard (guard-deref)."
   [ds atom-slot-idx]
-  (if (rr/active?)
-    (region-deref ds atom-slot-idx)
-    (plain-deref ds atom-slot-idx)))
+  (cond
+    (rr/active?) (region-deref ds atom-slot-idx)
+    #?@(:clj [(guard/active?) (guard-deref ds atom-slot-idx)])
+    :else (plain-deref ds atom-slot-idx)))
 
 (defn- swap-attempt!
   "One CAS attempt: read the old root, apply f, write the new value, CAS the
@@ -856,7 +888,7 @@
           ;; written in the attempt's domain too: a codec that allocates a nested collection in the running domain
           ;; (ClojureScript's) logs it here, so a lost CAS frees what the attempt allocated unheld
           new-ptr (binding [d/*domain-sio* lsio]
-                    (resolve-new-ptr lsio new-val))]
+                    (resolve-new-ptr lsio new-val (some-> (:foreign-policy ds) deref)))]
       (if (== new-ptr old-ptr)
         ;; the same value: nothing to publish, nothing to retire
         (do (alloc/stop-logging! lsio)
@@ -960,6 +992,13 @@
    realized) before the pins go. A region inside another joins it."
   [f]
   (rr/run f d/eve->clj))
+
+;; PROTOTYPE (step 2)
+(defn set-foreign-policy!
+  "What swap! on a's domain does with a slab-backed value of another domain: :throw (default) or :copy."
+  [a policy]
+  {:pre [(#{:throw :copy} policy)]}
+  (reset! (:foreign-policy (atom-domain-state a)) policy))
 
 (defn read-pinned
   "Bounded slab-backed access to one atom: (f value & args) with the atom's
