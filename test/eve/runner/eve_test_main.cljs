@@ -69,6 +69,7 @@
    [eve.fuzz-test :as fuzz-test]
    [eve.eve-bytes-fixture-test :as fixture-test]
    [eve.char-key-test :as char-key-test]
+   [eve.int-key-nested-value-test :as int-key-nested-value-test]
    [eve.hamt-util-test :as hamt-util-test]
    [eve.coalesc-align-test :as coalesc-align-test]
    [eve.lustre-test :as lustre-test]
@@ -129,6 +130,7 @@
 (goog/exportSymbol "eve.big_value_test" big-value-test)
 (goog/exportSymbol "eve.sorted_coll_test" sorted-coll-test)
 (goog/exportSymbol "eve.keyring_test" keyring-test)
+(goog/exportSymbol "eve.int_key_nested_value_test" int-key-nested-value-test)
 (goog/exportSymbol "eve.value_buffer_test" value-buffer-test)
 (goog/exportSymbol "eve.deftype.type_id_test" type-id-test)
 (goog/exportSymbol "eve.typed_array_test" typed-array-test)
@@ -335,7 +337,7 @@
   (t/run-tests 'eve.fuzz-test))
 
 (defn- run-em5! []
-  (t/run-tests 'eve.numeric-tags-test 'eve.collection-hash-test 'eve.reference-tag-test 'eve.big-value-test 'eve.sorted-coll-test 'eve.keyring-test 'eve.value-buffer-test))
+  (t/run-tests 'eve.numeric-tags-test 'eve.collection-hash-test 'eve.reference-tag-test 'eve.big-value-test 'eve.sorted-coll-test 'eve.keyring-test 'eve.int-key-nested-value-test 'eve.value-buffer-test))
 
 (defn- run-fixtures! []
   (t/run-tests 'eve.eve-bytes-fixture-test))
@@ -456,6 +458,7 @@
     'eve.big-value-test
     'eve.sorted-coll-test
     'eve.keyring-test
+    'eve.int-key-nested-value-test
     'eve.value-buffer-test
     'eve.thread-host-test
     'eve.thread-test
