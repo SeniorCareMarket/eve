@@ -11,7 +11,10 @@
             [eve.codec :as codec]
             [eve.core :as ecore]
             [eve.deftype-proto.alloc :as alloc]
-            [eve.map :as em]))
+            [eve.map :as em]
+            ;; the nested values' writers (:vec, :set), registered when their namespaces load
+            [eve.set]
+            [eve.vec]))
 
 (def ^:private cases
   "Number keys over values that write numbers of their own when encoded."
