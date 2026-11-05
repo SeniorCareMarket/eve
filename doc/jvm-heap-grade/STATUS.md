@@ -21,3 +21,8 @@ Branch: claude/eve-jvm-heap-grade · Base: origin/main @ d241de3fbc27e5dd80d5f1e
 
 ## STEP 2 — automatic guard vs whole-root materialization (US Eastern)
 - 13:32 — STEP 2 started (cohost agent, ordered via lane M 12:01, re-confirmed 13:25). Branch tip f97dde6. Reading step-1 harness + atom read path (atom.cljc deref / read-pinned / read-region / $). Next: toolchain + reproduce step-1 deref numbers.
+- 13:41 — Toolchain re-made (fresh container): Maven jars + deps.edn :paths, socket REPL. First REPL probes of the SAME-DOMAIN question (anonymous heap atoms share one domain sio — verified `identical?`):
+  - plain `@a` → `PersistentHashMap` (materialized). Inside `$`: `EveHashMap`, header off **806 == the atom slot's ptr 806**, sio `identical?` to the atom's; `(get v :k3)` → child `EveHashMap` @689 (in place).
+  - `(swap! b (fn [_] (get @a :k3)))` outside `$`: b's slot ptr **813 (a copy: deref materialized, swap re-wrote)**. Same inside `$`: b's slot ptr **689 == a's subtree ptr** (structure shared, no copy).
+  - Same inside `$` into a named atom (its own heap domain): throws `swap!: Eve value was allocated in a different slab domain` (resolve-new-ptr, atom.cljc:752).
+  - So today: same-domain pointer equality and no materialization already exist — but only under the manual `$` (region-deref). Next: implement the guard extent at the atom read path (eve.guard + mmap-deref hook + per-domain foreign policy).
