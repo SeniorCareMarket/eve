@@ -145,9 +145,10 @@
       ;; the top byte shifted signed (a host whose integers are unbounded — basilisp, clojerl — gets the negative
       ;; number, not its unsigned 64-bit pattern), the low seven or'd in beneath it
       (reduce (fn [acc i] (bit-or acc (bit-shift-left (nth bs i) (* 8 i)))) (bit-shift-left top 56) (range 7))
-      ;; a JS host: doubles, exact below 2^53, built by arithmetic (its bit operations hold 32 bits)
-      (+ (reduce + 0 (map (fn [i] (* (nth bs i) (reduce * 1 (repeat i 256)))) (range 7)))
-         (* top (reduce * 1 (repeat 7 256)))))))
+      ;; a JS host: doubles, exact below 2^53, built by arithmetic (its bit operations hold 32 bits) — from the signed top
+      ;; byte down, so every partial sum is the result's own high bytes and exact whenever the result is (the low seven
+      ;; summed first reach 2^56 - 1, which a double rounds: -1 read as 0)
+      (reduce (fn [acc i] (+ (* acc 256) (nth bs i))) top [6 5 4 3 2 1 0]))))
 
 ;; ── UTF-8 text ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
