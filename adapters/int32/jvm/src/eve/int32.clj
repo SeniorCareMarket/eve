@@ -6,26 +6,26 @@
 
 (defn i32
   "x's low 32 bits, as a signed integer."
-  [x]
+  ^long [^long x]
   (long (unchecked-int x)))
 
 (defn imul
   "a × b mod 2^32, signed."
-  [a b]
+  ^long [^long a ^long b]
   (long (unchecked-multiply-int (unchecked-int a) (unchecked-int b))))
 
 (defn rotl
   "x's 32-bit pattern rotated left by r bits (0 < r < 32), signed."
-  [x r]
+  ^long [^long x ^long r]
   (let [x (bit-and x 0xFFFFFFFF)]
     (long (unchecked-int (bit-or (bit-shift-left x r) (unsigned-bit-shift-right x (- 32 r)))))))
 
 (defn ushr
   "x's 32-bit pattern shifted right by n bits, zeros in: non-negative."
-  [x n]
+  ^long [^long x ^long n]
   (unsigned-bit-shift-right (bit-and x 0xFFFFFFFF) n))
 
 (defn popcount
   "The number of bits set in x's 32-bit pattern."
-  [x]
+  ^long [^long x]
   (Long/bitCount (bit-and x 0xFFFFFFFF)))

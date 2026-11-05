@@ -71,8 +71,10 @@
       (slab/write-i32! sio node-off (* i 4) NIL_OFFSET))
     node-off))
 
+;; A published node's (or this thread's own transient node's) words: the hot read path's plain node read
+;; (eve.deftype-proto.alloc/node-i32; jvm-heap-grade step 3).
 (defn node-get [sio node-off i]
-  (slab/read-i32 sio node-off (* i 4)))
+  (alloc/node-i32 sio node-off (* (long i) 4)))
 
 (defn- node-set! [sio node-off i val]
   (slab/write-i32! sio node-off (* i 4) val)
@@ -99,7 +101,7 @@
 
 (defn- read-value-block [sio val-off]
   (when (not= val-off NIL_OFFSET)
-    (let [val-len (slab/read-i32 sio val-off 0)
+    (let [val-len (alloc/node-i32 sio val-off 0)
           val-bs  (slab/read-bytes sio val-off 4 val-len)]
       (deserialize-element-bytes val-bs sio))))
 

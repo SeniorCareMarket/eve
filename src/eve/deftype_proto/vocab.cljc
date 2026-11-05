@@ -476,13 +476,18 @@
 
 (defn sio-read-expr
   "ISlabIO read expression for a field."
-  [{:keys [type-hint type-class]} offset-sym field-offset]
+  [{:keys [type-hint type-class mutability]} offset-sym field-offset]
   (let [read-fn (case type-class
                   :primitive
                   (case type-hint
                     (:int8 :uint8) 'eve.slab-io/read-u8
                     (:int16 :uint16) 'eve.slab-io/read-u16
-                    (:int32 :uint32 :float32 :float64)
+                    ;; an immutable int32 field is written once, before its instance is published: the hot read
+                    ;; path's plain node read (jvm-heap-grade step 3). A mutable one keeps the atomic read.
+                    :int32 (if (#{:mutable :volatile-mutable} mutability)
+                             'eve.slab-io/read-i32
+                             'eve.deftype-proto.alloc/node-i32)
+                    (:uint32 :float32 :float64)
                     'eve.slab-io/read-i32)
                   ;; :eve-type, :serialized — stored as int32
                   'eve.slab-io/read-i32)]

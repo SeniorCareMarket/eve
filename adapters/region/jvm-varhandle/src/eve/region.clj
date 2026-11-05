@@ -363,6 +363,14 @@
     (.put buf (int byte-off) ^bytes src 0 (alength ^bytes src))
     nil)
 
+  ;; --- the hot read path's plain loads (eve.mem/IHeapBytes): a heap buffer's own byte[] (make-heap-region
+  ;; wraps one at offset 0); a mapped buffer has none and answers nil ---
+  mem/IHeapBytes
+  (-heap-bytes [_]
+    (when (.hasArray buf)
+      (when (zero? (.arrayOffset buf))
+        (.array buf))))
+
   ;; --- durability (eve.mem/ISyncableRegion): a mapped buffer forces; a
   ;; heap buffer (make-heap-region) has nothing to force ---
   mem/ISyncableRegion

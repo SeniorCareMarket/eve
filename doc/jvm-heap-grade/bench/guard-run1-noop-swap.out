@@ -1,0 +1,76 @@
+=== checksums (each arm once, fixed keys) ===
+100        EQUAL [42]
+10k        EQUAL [4200]
+1k         EQUAL [420]
+deref-100  EQUAL [100]
+deref-10k  EQUAL [10000]
+deref-1k   EQUAL [1000]
+full-100   EQUAL [4950]
+full-10k   EQUAL [49995000]
+full-1k    EQUAL [499500]
+same-read  EQUAL [43]
+same-swap  EQUAL ["n42"]
+sparse8-100 EQUAL [384]
+sparse8-10k EQUAL [3827]
+sparse8-1k EQUAL [3827]
+all groups equal: true
+=== same-domain pointer identity ===
+aN slot ptr 517  aN[:u42] subtree ptr 108
+guard proxied @aN: type eve.guard.LazyMap  header 517  sio identical? true
+raw @aN: type eve.map.EveHashMap  header 517
+plain swap               bN slot ptr 530  != source (COPIED)
+$ swap                   bN slot ptr 108  == source subtree (shared)
+guard proxied swap       bN slot ptr 108  == source subtree (shared)
+domain-aware raw swap    bN slot ptr 108  == source subtree (shared)
+=== timing: per-round min ns/op, 3 interleaved rounds; bytes/op (round 3) === (11 s)
+100        plain   (get @a k), 100                          ["64.14 us" "58.08 us" "58.93 us"] 118.2 KB
+100        $       (get @a k), 100                          ["7.37 us" "2.48 us" "2.64 us"]    4.4 KB
+100        guard   (get @a k), 100, extent/op               ["7.12 us" "2.61 us" "2.66 us"]    4.5 KB
+100        guard   (get @a k), 100, in open extent          ["3.58 us" "1.42 us" "1.50 us"]    2.8 KB
+100        floor   read-pinned get, 100                     ["3.87 us" "1.97 us" "2.08 us"]    3.3 KB
+1k         plain   (get @a k), 1k                           ["560.32 us" "380.71 us" "379.69 us"] 955.5 KB
+1k         $       (get @a k), 1k                           ["4.33 us" "2.69 us" "2.75 us"]    5.4 KB
+1k         guard   (get @a k), 1k, extent/op                ["6.70 us" "2.82 us" "2.93 us"]    5.6 KB
+1k         guard   (get @a k), 1k, in open extent           ["3.37 us" "1.61 us" "1.63 us"]    3.9 KB
+1k         floor   read-pinned get, 1k                      ["4.29 us" "2.15 us" "2.17 us"]    4.3 KB
+10k        plain   (get @a k), 10k                          ["3.73 ms" "3.63 ms" "3.67 ms"]    8.5 MB
+10k        $       (get @a k), 10k                          ["29.21 us" "2.79 us" "2.89 us"]   5.8 KB
+10k        guard   (get @a k), 10k, extent/op               ["30.78 us" "2.92 us" "2.95 us"]   5.9 KB
+10k        guard   (get @a k), 10k, in open extent          ["19.96 us" "1.69 us" "1.76 us"]   4.3 KB
+10k        floor   read-pinned get, 10k                     ["26.22 us" "2.28 us" "2.32 us"]   4.7 KB
+deref-100  plain   @a, 100                                  ["560.79 us" "56.47 us" "59.70 us"] 118.2 KB
+deref-100  guard   @a, 100                                  ["15.81 us" "1.42 us" "1.40 us"]   2.1 KB
+deref-1k   plain   @a, 1k                                   ["1.12 ms" "367.03 us" "381.44 us"] 955.4 KB
+deref-1k   guard   @a, 1k                                   ["1.42 us" "1.46 us" "1.41 us"]    2.1 KB
+deref-10k  plain   @a, 10k                                  ["3.69 ms" "3.58 ms" "3.62 ms"]    8.5 MB
+deref-10k  guard   @a, 10k                                  ["1.44 us" "1.43 us" "1.41 us"]    2.1 KB
+sparse8-100 plain   8-key sum, 100                           ["60.11 us" "57.64 us" "59.50 us"] 118.3 KB
+sparse8-100 $       8-key sum, 100                           ["11.50 us" "9.49 us" "9.83 us"]   22.0 KB
+sparse8-100 guard   8-key sum, 100                           ["10.09 us" "9.69 us" "10.16 us"]  22.1 KB
+sparse8-1k plain   8-key sum, 1k                            ["367.76 us" "371.24 us" "391.60 us"] 955.6 KB
+sparse8-1k $       8-key sum, 1k                            ["10.62 us" "11.28 us" "11.24 us"] 31.2 KB
+sparse8-1k guard   8-key sum, 1k                            ["11.32 us" "11.40 us" "11.38 us"] 31.3 KB
+sparse8-10k plain   8-key sum, 10k                           ["3.56 ms" "3.73 ms" "3.68 ms"]    8.5 MB
+sparse8-10k $       8-key sum, 10k                           ["10.94 us" "11.06 us" "11.03 us"] 30.9 KB
+sparse8-10k guard   8-key sum, 10k                           ["11.57 us" "11.21 us" "11.33 us"] 31.0 KB
+full-100   plain   reduce-kv sum all, 100                   ["59.38 us" "58.34 us" "58.11 us"] 120.5 KB
+full-100   $       reduce-kv sum all, 100                   ["34.57 us" "32.90 us" "33.24 us"] 70.1 KB
+full-100   guard   reduce-kv sum all, 100                   ["33.40 us" "33.75 us" "32.81 us"] 70.2 KB
+full-1k    plain   reduce-kv sum all, 1k                    ["380.50 us" "402.10 us" "403.42 us"] 979.4 KB
+full-1k    $       reduce-kv sum all, 1k                    ["212.41 us" "214.08 us" "335.56 us"] 793.7 KB
+full-1k    guard   reduce-kv sum all, 1k                    ["217.91 us" "218.84 us" "237.86 us"] 793.9 KB
+full-10k   plain   reduce-kv sum all, 10k                   ["3.88 ms" "4.23 ms" "4.19 ms"]    8.7 MB
+full-10k   $       reduce-kv sum all, 10k                   ["2.05 ms" "2.11 ms" "2.05 ms"]    7.6 MB
+full-10k   guard   reduce-kv sum all, 10k                   ["2.13 ms" "2.05 ms" "2.11 ms"]    7.6 MB
+same-read  plain   (get-in @aN [k :tags 1])                 ["3.68 ms" "3.55 ms" "3.58 ms"]    9.0 MB
+same-read  $       (get-in @aN [k :tags 1])                 ["4.54 us" "4.12 us" "4.10 us"]    7.9 KB
+same-read  guard   proxied, same-domain extent (read)       ["4.67 us" "4.43 us" "4.30 us"]    8.1 KB
+same-read  domain-aware raw, same-domain extent (read)      ["5.31 us" "4.93 us" "4.43 us"]    8.8 KB
+same-swap  plain   (swap! bN (fn [_] (get @aN k)))          ["4.30 ms" "3.98 ms" "3.83 ms"]    9.4 MB
+same-swap  $       (swap! bN (fn [_] (get @aN k)))          ["41.98 us" "41.99 us" "40.79 us"] 97.6 KB
+same-swap  guard   proxied, same-domain extent (swap)       ["8.12 us" "6.85 us" "5.44 us"]    9.5 KB
+same-swap  domain-aware raw, same-domain extent (swap)      ["8.15 us" "6.80 us" "5.85 us"]    10.3 KB
+=== pin lifetime (100 swap! assoc on a100's domain while a guard extent is open vs closed) ===
+queue before: 0
+queue after 100 swaps + flush, extent OPEN: 99
+queue after the extent closed + flush: 0
