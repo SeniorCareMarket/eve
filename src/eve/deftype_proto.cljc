@@ -56,7 +56,7 @@
 (defn jvm-read-fn-for-type
   "Return the JVM read expression for a field type.
    sio__ and slab-off__ are bound from deftype fields."
-  [{:keys [type-hint type-class]} slab-off-expr field-offset]
+  [{:keys [type-hint type-class mutability]} slab-off-expr field-offset]
   (case type-class
     :primitive
     (case type-hint
@@ -68,7 +68,11 @@
                                          'sio__ slab-off-expr field-offset)]
                  (list 'if (list '> 'v__jvm 32767) (list '- 'v__jvm 65536) 'v__jvm))
       :uint16  (list 'eve.slab-io/read-u16 'sio__ slab-off-expr field-offset)
-      :int32   (list 'eve.slab-io/read-i32 'sio__ slab-off-expr field-offset)
+      ;; an immutable field is written once, before its instance is published: the hot read path's plain
+      ;; node read (eve.deftype-proto.alloc/node-i32; jvm-heap-grade step 3). A mutable one keeps the atomic read.
+      :int32   (if (#{:mutable :volatile-mutable} mutability)
+                 (list 'eve.slab-io/read-i32 'sio__ slab-off-expr field-offset)
+                 (list 'eve.deftype-proto.alloc/node-i32 'sio__ slab-off-expr field-offset))
       :uint32  (list 'bit-and
                      (list 'long (list 'eve.slab-io/read-i32
                                        'sio__ slab-off-expr field-offset))
