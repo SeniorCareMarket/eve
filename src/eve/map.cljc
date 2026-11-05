@@ -117,6 +117,23 @@
         val-len (alloc/node-i32 sio node-off val-off)]
     (+ val-off 4 val-len)))
 
+;; The read path's scan to the di-th KV pair: a primitive fn (a loop in a let binding compiles to a closure, allocated
+;; and boxed per lookup; jvm-heap-grade step 3).
+(defn- kv-pos
+  "The offset of the di-th KV pair in the node at node-off, its KV data starting at kvs."
+  ^long [sio ^long node-off ^long kvs ^long di]
+  (let [a (alloc/node-heap-array sio node-off)]
+    (if (nil? a)
+      (loop [i 0 p kvs]
+        (if (== i di) p
+            (recur (inc i) (skip-kv-at sio node-off p))))
+      ;; the node's heap bytes, resolved once: [key-len:i32][key][val-len:i32][val] per pair
+      (let [base (alloc/node-base sio node-off)]
+        (loop [i 0 p kvs]
+          (if (== i di) p
+              (let [vo (+ p 4 (alloc/bytes-i32 a (+ base p)))]
+                (recur (inc i) (+ vo 4 (alloc/bytes-i32 a (+ base vo)))))))))))
+
 (defn- calc-kv-size
   "Calculate total bytes for a KV pair."
   ^long [kb vb]
@@ -451,18 +468,16 @@
                   (let [di (get-index dbm bit)
                         hs (hashes-start-off nbm)
                         sh (alloc/node-i32 sio off (+ hs (* di 4)))]
-                    (if (not= sh kh)
+                    (if (not (== sh kh))
                       not-found
                       (let [kvs (kv-data-start-off dbm nbm)
-                            pos (loop [i 0 p kvs]
-                                  (if (== i di) p
-                                      (recur (inc i) (skip-kv-at sio off p))))
+                            pos (kv-pos sio off kvs di)
                             kl (alloc/node-i32 sio off pos)]
                         (if (and (== kl (bytes-length kb))
                                  (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                           (let [vo (+ pos 4 kl)
                                 vl (alloc/node-i32 sio off vo)
-                                vb (slab/read-bytes sio off (+ vo 4) vl)]
+                                vb (alloc/node-bytes sio off (+ vo 4) vl)]
                             (deserialize-value-bytes vb sio))
                           not-found))))
 
@@ -470,7 +485,7 @@
 
             ;; Collision node
             3 (let [ch (alloc/node-i32 sio off 4)]
-                (if (not= ch kh)
+                (if (not (== ch kh))
                   not-found
                   (let [cc (alloc/node-u8 sio off 1)]
                     (loop [i 0 pos COLLISION_HEADER_SIZE]
@@ -481,7 +496,7 @@
                                    (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                             (let [vo (+ pos 4 kl)
                                   vl (alloc/node-i32 sio off vo)
-                                  vb (slab/read-bytes sio off (+ vo 4) vl)]
+                                  vb (alloc/node-bytes sio off (+ vo 4) vl)]
                               (deserialize-value-bytes vb sio))
                             (let [vo (+ pos 4 kl)]
                               (recur (inc i) (+ vo 4 (alloc/node-i32 sio off vo)))))))))))
@@ -519,15 +534,13 @@
                       sh (alloc/node-i32 sio off (+ hs (* di 4)))]
                   (when (== sh kh)
                     (let [kvs (kv-data-start-off dbm nbm)
-                          pos (loop [i 0 p kvs]
-                                (if (== i di) p
-                                    (recur (inc i) (skip-kv-at sio off p))))
+                          pos (kv-pos sio off kvs di)
                           kl (alloc/node-i32 sio off pos)]
                       (when (and (== kl (bytes-length kb))
                                  (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                         (let [vo (+ pos 4 kl)
                               vl (alloc/node-i32 sio off vo)]
-                          (slab/read-bytes sio off (+ vo 4) vl))))))
+                          (alloc/node-bytes sio off (+ vo 4) vl))))))
 
                 :else nil))
 
@@ -541,7 +554,7 @@
                             vl (alloc/node-i32 sio off vo)]
                         (if (and (== kl (bytes-length kb))
                                  (alloc/node-bytes-equal? sio off (+ pos 4) kb))
-                          (slab/read-bytes sio off (+ vo 4) vl)
+                          (alloc/node-bytes sio off (+ vo 4) vl)
                           (recur (inc i) (+ vo 4 vl)))))))))
 
           nil)))))

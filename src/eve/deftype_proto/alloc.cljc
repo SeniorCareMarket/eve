@@ -863,7 +863,7 @@
 ;; Use these ONLY for bytes the reader cannot see change: nodes of a published (or this thread's own transient)
 ;; collection. A word other threads write (a tally, a descriptor, an atom slot) keeps slab/read-i32.
 
-(defn- node-ctx
+(defn- node-ctx*
   "sio's JvmSlabCtx under its logging wrappers, or nil."
   [sio]
   (loop [s sio]
@@ -887,10 +887,45 @@
        (* bi (aget ^ints (.-block-sizes ctx) ci))
        field-off)))
 
+(defn bytes-i32
+  "The little-endian i32 at byte i of byte array a (plain loads)."
+  ^long [a ^long i]
+  (let [^bytes a a
+        i (int i)]
+    (long (unchecked-int
+           (bit-or (bit-and (long (aget a i)) 0xFF)
+                   (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 1))) 0xFF) 8)
+                   (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 2))) 0xFF) 16)
+                   (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 3))) 0xFF) 24))))))
+
+;; A node scanned in place (a map node's KV pairs): its heap array and the byte offset of its block in it, resolved
+;; once per node; then bytes-i32 per word.
+(defn node-heap-array
+  "The heap byte array holding the published node at slab-off, or nil (read it with node-i32 then)."
+  [sio ^long slab-off]
+  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
+    (when ctx (node-heap-bytes ctx slab-off))))
+
+(defn node-base
+  "The byte offset in node-heap-array's array of the block at slab-off (call only where node-heap-array answered one)."
+  ^long [sio ^long slab-off]
+  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
+    (node-at ctx slab-off 0)))
+
+(defn node-bytes
+  "The len bytes at slab-off + field-off of a published node, as a new byte array: the region's own bulk read,
+   without the ISlabIO hop."
+  [sio ^long slab-off ^long field-off ^long len]
+  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
+    (if (nil? ctx)
+      (-sio-read-bytes sio slab-off field-off len)
+      (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) BLOCK_IDX_BITS)]
+        (mem/-read-bytes (aget ^objects (.-regions ^JvmSlabCtx ctx) (int ci)) (node-at ctx slab-off field-off) len)))))
+
 (defn node-u8
   "The unsigned byte at slab-off + field-off of a published node."
   ^long [sio ^long slab-off ^long field-off]
-  (let [ctx (node-ctx sio)
+  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
         arr (when ctx (node-heap-bytes ctx slab-off))]
     (if (nil? arr)
       (long (-sio-read-u8 sio slab-off field-off))
@@ -899,22 +934,16 @@
 (defn node-i32
   "The little-endian i32 at slab-off + field-off (any alignment) of a published node."
   ^long [sio ^long slab-off ^long field-off]
-  (let [ctx (node-ctx sio)
+  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
         arr (when ctx (node-heap-bytes ctx slab-off))]
     (if (nil? arr)
       (long (-sio-read-i32 sio slab-off field-off))
-      (let [^bytes a arr
-            i (int (node-at ctx slab-off field-off))]
-        (long (unchecked-int
-               (bit-or (bit-and (long (aget a i)) 0xFF)
-                       (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 1))) 0xFF) 8)
-                       (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 2))) 0xFF) 16)
-                       (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 3))) 0xFF) 24))))))))
+      (bytes-i32 arr (node-at ctx slab-off field-off)))))
 
 (defn node-bytes-equal?
   "Do the (alength b) bytes at slab-off + field-off of a published node equal byte array b."
   [sio ^long slab-off ^long field-off b]
-  (let [ctx (node-ctx sio)
+  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
         arr (when ctx (node-heap-bytes ctx slab-off))]
     (if (nil? arr)
       (slab/bytes-equal-at? sio slab-off field-off b)
