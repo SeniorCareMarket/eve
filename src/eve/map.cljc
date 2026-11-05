@@ -1060,6 +1060,13 @@
   d/IEveSio
   (-eve-sio [_] sio__)
 
+  ;; what a deref of an atom holding it answers: a plain Clojure map.
+  ;; eve->clj's (map? v) branch cannot see this type on every host — on
+  ;; jank the core predicates are false for Eve types — so the type
+  ;; carries its own conversion, as the int-map and the sorted types do.
+  d/IPlain
+  (-plain [this] (into {} (map (fn [kv] [(d/eve->clj (key kv)) (d/eve->clj (val kv))])) (ecore/seq this)))
+
   ;; --- the JVM's (dropped on ClojureScript, but IEditableCollection; on the
   ;; CLR java.util.Map is dropped and Iterable is IEnumerable) ---
   clojure.lang.MapEquivalence

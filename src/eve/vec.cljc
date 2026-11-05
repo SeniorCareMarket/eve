@@ -536,7 +536,10 @@
   d/IEveSio
   (d/-eve-sio [_] sio__)
 
-  
+  ;; what a deref of an atom holding it answers: a plain Clojure vector
+  ;; (see EveHashMap's IPlain note: eve->clj cannot rely on vector? here).
+  d/IPlain
+  (-plain [this] (mapv d/eve->clj (ecore/seq this)))
 
   java.lang.Iterable
   (iterator [this] (clojure.lang.SeqIterator. (.seq this)))

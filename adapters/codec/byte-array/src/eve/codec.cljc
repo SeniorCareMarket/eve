@@ -628,6 +628,16 @@
     (or (vector? v) (sequential? v) (seq? v))
     (flat-vec->eve-bytes v)
 
+    ;; an Eve collection on a host whose core predicates cannot see Eve
+    ;; types (jank: map?/set?/vector? are false for them): it carries its
+    ;; own plain conversion (d/IPlain) — encode that, whose flat bytes
+    ;; are the same canonical bytes the branches above write on a host
+    ;; where the predicates can see the type. Without this branch the
+    ;; value falls to the by-reference stub, and a digest over a shared
+    ;; root silently has no digest at all.
+    (satisfies? d/IPlain v)
+    (value->eve-bytes (d/-plain v))
+
     ;; no eve bytes: by reference, in this process only (§9)
     :else
     (ref->eve-bytes v)))

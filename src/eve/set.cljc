@@ -785,6 +785,11 @@
   d/IEveSio
   (-eve-sio [_] sio__)
 
+  ;; what a deref of an atom holding it answers: a plain Clojure set
+  ;; (see EveHashMap's IPlain note: eve->clj cannot rely on set? here).
+  d/IPlain
+  (-plain [this] (into #{} (map d/eve->clj) (ecore/seq this)))
+
   ;; java.lang.Object in main body so macro sees it and skips default IPrintWithWriter.
   ;; Proto map marks it :clj-only? so CLJS translation strips it automatically.
   java.lang.Object

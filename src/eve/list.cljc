@@ -250,7 +250,10 @@
   d/IEveSio
   (d/-eve-sio [_] sio__)
 
-  
+  ;; what a deref of an atom holding it answers: a plain Clojure list
+  ;; (see EveHashMap's IPlain note: eve->clj cannot rely on list? here).
+  d/IPlain
+  (-plain [this] (apply list (map d/eve->clj (ecore/seq this))))
 
   clojure.lang.IPersistentList
 
