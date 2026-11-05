@@ -128,3 +128,168 @@ swap! (~22 µs inc, ~140–185 µs assoc on a 100-map root, against ~30–90 ns 
   - `doc/jvm-heap-grade/REPORT.md` (this file)
   - `doc/jvm-heap-grade/bench/baseline.clj`
   - `doc/jvm-heap-grade/bench/baseline-run1.out`
+
+---
+
+# STEP 2: the automatic guard vs whole-root materialization (REPORT)
+
+**Declaration: STEP 2 COMPLETE. No wall hit.**
+
+- Branch `claude/eve-jvm-heap-grade` on SeniorCareMarket/eve, on top of step 1 (f97dde6).
+- Seat: JVM. OpenJDK 21, Clojure 1.12.0, 4 cores. Fresh container; same Maven-jar classpath as step 1.
+- Bench: `doc/jvm-heap-grade/bench/guard.clj`. One JVM, 47 arms × 3 interleaved rounds; each cell is the round's min over 3 batches of ~40 ms; bytes/op come from ThreadMXBean.
+- Banked output: `doc/jvm-heap-grade/bench/guard-run2.out`. Checksums are EQUAL across arms in all 14 groups.
+- `guard-run1-noop-swap.out` is the previous run. It is kept because its same-domain swap arms measured swap!'s "same pointer, nothing to publish" path by mistake. run2 alternates two subtrees.
+
+## 1. What was built (prototype grade)
+
+- **`src/eve/guard.clj`**: the guard extent, `guard*` / `with-guard`, with an optional receiving-domain state.
+  - A **chain of cells**: each extent's cell is a volatile that links to the enclosing extent's cell. A lazy value is valid only while every cell on its chain is open.
+  - Proxies: `LazyMap` (ILookup, Associative, IPersistentMap, Counted, Seqable, IKVReduce, IFn, IHashEq) and `LazyColl` (vec/set/list: Indexed, ILookup, Counted, Seqable, IReduceInit). Every access checks the chain.
+  - Scalar access delegates to the slab value's own in-place navigation (hamt-get / nth) and decodes only the leaf. Collection results come back as child proxies on the same cell.
+  - `materialize` is the one explicit materialization point.
+  - The proxies keep `IEveRoot` / `IEveSio`, so `swap!` sees the source pointer.
+  - Pins are taken once per domain per extent chain and released, last first, by the extent that took them.
+- **`src/eve/atom.cljc`** (hooks are `:clj` only; the cljs path is unchanged):
+  - `mmap-deref` checks, in order: `$` → region-deref; **guard extent → `guard-deref`**; otherwise plain-deref (unchanged).
+  - `guard-deref` is the **domain-aware read-root-value**. It pins through `guard/hold!` (the pin is owned by the extent that receives it) and returns `read-root-value` at the slot pointer, behind the proxy. When `eve.guard/*proxy-same-domain?*` is false and the atom is in the extent's receiving domain, it returns the raw slab value.
+  - **`resolve-new-ptr`'s foreign-domain throw (was atom.cljc:752) is now per-domain policy.** Domain state carries `:foreign-policy` (an atom: `:throw`, the default, or `:copy`, which materializes under the reader's pin and then writes), set by `eve.atom/set-foreign-policy!`.
+- **`test/eve/guard_test.clj`**: 3 tests, 18 assertions, pass. The existing atom and read-region suites (`eve.jvm-atom-*`, `eve.read-region-test`: 45 tests, 221 assertions) pass with the hooks in.
+- **Memory rules:** no journals, liveness scans, counters or arenas. A cell is a volatile; an extent's holds are a vector in one atom; pins reuse the domain's existing epoch pin.
+
+## 2. Step-1 numbers, reproduced in this session
+
+| | step 1 | step 2 (run2, rounds 2–3) |
+|---|---|---|
+| plain `(get @a k)`, 100 root | 53.6–64.8 µs | 57.5–58.6 µs |
+| plain `(get @a k)`, 1k root | 342–363 µs (probe) | 375–378 µs |
+| plain deref, 100 root | 48.6–63.2 µs | 58.3–65.3 µs |
+| `$ (get @a k)`, 100 root | 1.86–2.04 µs | 2.49–2.51 µs |
+
+All four reproduce.
+
+## 3. Measured (run2: ns/op as rounds 2–3, bytes/op from round 3)
+
+**`(get @a k)`**
+
+| root | plain | `$` (manual) | guard, extent per op | guard, in an open extent | read-pinned floor |
+|---|---|---|---|---|---|
+| 100 | 58 µs · 118 KB | 2.5 µs · 4.4 KB | **2.7 µs · 4.6 KB** | 1.5 µs · 2.8 KB | 2.0 µs |
+| 1k | 375 µs · 955 KB | 2.6 µs · 5.5 KB | **2.7 µs · 5.6 KB** | 1.6 µs · 3.9 KB | 2.1 µs |
+| 10k | 3.7 ms · 8.5 MB | 2.9 µs · 5.8 KB | **2.9 µs · 5.9 KB** | 1.8 µs · 4.3 KB | 2.3 µs |
+
+**Deref of the root alone**
+
+- plain: 58 µs / 376 µs / 3.7 ms
+- guard: **1.4 µs at all three sizes**, 2.1 KB
+
+**Sparse read: 8-key sum from one deref**
+
+| root | plain | `$` | guard |
+|---|---|---|---|
+| 100 | 59 µs | 9.6 µs | **9.8 µs** |
+| 1k | 380 µs | 11.2 µs | **11.4 µs** |
+| 10k | 3.7 ms | 11.0 µs | **11.2 µs** |
+
+**Full traversal: reduce-kv sum over all entries (the weak case)**
+
+| root | plain | `$` | guard |
+|---|---|---|---|
+| 100 | 59 µs | 33 µs | 32 µs |
+| 1k | 390 µs | 218 µs | 230 µs |
+| 10k | 4.1 ms | 2.05 ms | 2.2 ms |
+
+Allocation is about 0.8 KB per entry for both `$` and the guard.
+
+**Against the spike (the ratios are the claim)**
+
+| | spike | here |
+|---|---|---|
+| 10k root, plain ÷ guard | 15,111× | **1,290×** |
+| 10k root, manual ÷ guard | 1.95× | **1.0×** |
+| 100 root, plain ÷ guard | 110× | **22×** |
+| 100 root, manual ÷ guard | 0.89× | **0.94×** |
+| sparse access vs manual `$` | tracks it, flat in root size | **reproduces**: tracks within noise, flat 100 → 10k |
+| full traversal vs manual `$` | ~4× | **does NOT reproduce: guard ≈ `$`** |
+| full traversal vs plain | ~2.5× better | ~1.8× better |
+
+The spike's absolute plain costs were inflated (step 1 §1). The ratios to plain are therefore smaller here, but still 1–3 orders of magnitude.
+
+## 4. The same-domain arm (decisive)
+
+Setup: a nested 100-entry root `aN` and a receiving atom `bN`. Both are anonymous heap atoms, which share one domain (their sio is `identical?`).
+
+**Pointers**
+
+- The guarded `@aN` is a `LazyMap` with header **517 == aN's slot pointer 517**, and its sio is `identical?` to the atom's.
+- The raw domain-aware `@aN` is an `EveHashMap` with header **517**.
+- Today's plain deref returns a PersistentHashMap: a full copy.
+
+**Store: `(swap! bN (fn [_] (get @aN k)))`**
+
+| path | bN slot pointer | result | cost | allocated |
+|---|---|---|---|---|
+| plain | 530 | **copy** | 4.0 ms | 9.4 MB/op |
+| `$` | **108 == aN's subtree pointer** | shared | 49–54 µs | 110 KB |
+| guard, proxied | **108** | shared | **14–15 µs** | 21 KB |
+| guard, raw | **108** | shared | **14–15 µs** | 22 KB |
+
+`$` is slower here because it materializes swap!'s return value when the region exits.
+
+**Read: `(get-in @aN [k :tags 1])`**
+
+- plain: 3.7 ms
+- `$`: 4.1 µs
+- guard, proxied: 4.2–4.5 µs
+- guard, raw: 4.3–4.5 µs
+
+**Does today's code do this?** Yes, but only under the manual `$`. region-deref returns `read-root-value` at the slot pointer, and resolve-new-ptr stores a value from the same sio-root by its own pointer. Outside `$` (plain-deref), every read and every store materializes and copies.
+
+**Does the same-domain case need the guard?**
+
+- It does **not need the proxy** for pointer equality or for avoiding materialization. Those come from the domain-aware read path. Raw and proxied measure the same, the proxy cost is within noise, and both share the pointer.
+- It **does need the extent**: the pin, which keeps the read blocks alive.
+- Better production shape: a domain-aware `read-root-value` behind the deref inside an extent, as built here in `guard-deref`.
+- Keep the proxy anyway. It costs nothing measurable, and it is the only thing that turns a value escaping its extent into a loud error instead of a silent read of freed blocks.
+
+## 5. What remains unguarded or materializing
+
+- **Every deref outside an extent** still materializes the whole root (plain-deref, unchanged). The guard is "automatic" only where a crossing opens an extent.
+- **compare-and-set!** materializes the current root on every attempt (`(d/eve->clj cur)` in mmap-compare-and-set!).
+- **`$`** materializes its result on exit. The registry read uses plain-deref.
+- **`materialize` / `eve->clj` on nested data is dominated by `(satisfies? d/IPlain v)`.** In the REPL, that call costs ~19 µs on an `EveVector`, against a 3 µs seq of the same vector. A nested 100-entry root therefore derefs in ~3.7 ms, against ~58 µs for a flat one. This is a cheap, separate fix: an instance? check on the protocol interface. Out of scope here.
+- **Full traversal** stays O(N), because every leaf is decoded. That is inherent: the guard removes the copy, not the visit.
+- **Proxy interception gaps:**
+  - assoc/assocEx/dissoc/conj/empty throw (read-only). Write through swap!, or materialize first.
+  - Printing shows the deftype.
+  - `vector?`, `set?` and `sequential?` are false on LazyColl (`map?` is true on LazyMap).
+  - The seq of a proxy is a lazy seq whose steps are checked: realizing it after close throws.
+  - JVM only: no cljs, bb or basilisp branch.
+  - `=` and `hash` delegate to the slab value's in-place equiv/hash, not to identity as in the spike.
+- Decoded scalars, including strings, are heap objects and escape safely.
+
+## 6. Pin-lifetime hazards
+
+1. **An open extent holds its epoch, so nothing retired after it can free.** Measured: 100 `swap! assoc` with a guard extent open left **99 blocks on the zero queue after a flush**, and **0** once the extent closed. Under write load, a long-lived extent grows memory without bound. Extents must be scoped to a crossing (a request or message), never to a session.
+2. **Pins are keyed by thread id.** `pin-epoch!` / `unpin-epoch!` key the domain's `:pins` by `proc/thread-id`.
+   - `guard*` takes and releases its pin in try/finally on one thread, so the prototype is safe.
+   - In the production shape, "the pin is owned by the receiving domain's root lifecycle". If that lifecycle closes on another thread (an async crossing), it would unpin the wrong entry and leak the epoch, which is hazard 1 for good.
+   - Production needs a pin that the extent owns, not one keyed by thread.
+3. **Cross-thread reads inside the extent are fine.** The validity check is on the cell, not the thread, and the domain slot's pin covers every thread in the process. After close, they throw.
+4. **Raw mode** (`*proxy-same-domain?*` false) has no check. A raw value used after its extent closes is a silent use-after-free read. This is why the proxy is recommended even in the same domain.
+5. **A `:copy` foreign store materializes under the reader's pin**, inside the swap!, so it is safe. Its cost is the full materialization of the subtree that crosses.
+
+## 7. Verdict
+
+- **Sparse reads collapse.** The guard turns whole-root materialization into the navigation class: ~2.7–2.9 µs with an extent per op, ~1.5–1.8 µs inside an open one. That is flat from 100 to 10k entries and equal to manual `$`.
+- **Same-domain:** pointers are identical and nothing is materialized. That property belongs to the domain-aware read path, not the proxy. The guard's job there is the pin's lifetime and the escape check.
+- **Full traversal does not collapse.** It is ~1.8× better than plain and equal to `$`.
+- **Still materializing:** plain deref outside extents, compare-and-set!, `$`'s exit, and `eve->clj`, whose protocol-check cost dominates nested materialization.
+- **Hazards:** epoch retention while an extent is open, and the thread-keyed pin under an async lifecycle.
+- **Files:**
+  - `src/eve/guard.clj`
+  - `src/eve/atom.cljc` (hooks)
+  - `test/eve/guard_test.clj`
+  - `doc/jvm-heap-grade/bench/guard.clj`
+  - `guard-run2.out` (banked)
+  - `guard-run1-noop-swap.out` (superseded)
