@@ -14,8 +14,9 @@
             [eve.set :as eve-set]))
 
 (defn- pre-fix-mask-hash
-  "eve.hamt-util/mask-hash's :clj arm before §6."
-  [kh shift]
+  "eve.hamt-util/mask-hash's :clj arm before §6. Primitive-hinted like mask-hash (step 3), so a with-redefs of it
+   satisfies the IFn$LLL interface its callers were compiled against."
+  ^long [^long kh ^long shift]
   (bit-and (unsigned-bit-shift-right kh shift) 0x1f))
 
 (defn- legacy-map [sio m]
