@@ -1413,7 +1413,9 @@
     (set! encoding-sio sio)
     (let [bs (serialize-val v)]
       (set! encoding-sio outer)
-      bs)))
+      ;; the caller's own bytes, as encode-key's: a number's are a view of scratch buffer B, which the next
+      ;; pair's value overwrites while these are still held (a writer that encodes every pair before it writes)
+      (if (identical? (.-buffer bs) scratch-b-buf) (.slice bs) bs))))
 
 (defn encode-val-out-of-line
   "encode-val, a value whose bytes pass VALUE_INLINE_MAX written to a block of
@@ -1435,9 +1437,14 @@
 
 (defn encode-key
   "k's EVE bytes as a key: a pure function of k's value (a collection flat, in
-   canonical order — what the HAMT hashes and compares)."
+   canonical order — what the HAMT hashes and compares). The bytes are the
+   caller's own: a number's serialize-key bytes are a view of scratch buffer A,
+   which the encode of the value that follows reuses (serialize-element writes a
+   nested vector's or set's numbers there), so they are copied out — else
+   (assoc m 1 [1 2]) stored the key as 2, the last number the value wrote."
   [k]
-  (serialize-key k))
+  (let [bs (serialize-key k)]
+    (if (identical? (.-buffer bs) scratch-a-buf) (.slice bs) bs)))
 
 (defn decode
   "The value EVE bytes bs hold (a slab pointer read in sio's domain)."
