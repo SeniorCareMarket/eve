@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **jank host.** Eve runs on jank (Clojure on LLVM): a full seat at `hosts.edn`'s `:jank` row — the completion (deftype / defprotocol / defrecord / reify / extend-type, the core's missing ops, `clojure.edn`), eve's types as one C++ object each on `eve.core`'s protocols, and native adapters for slab-io, typed views, regions, encoding, int32, process and crypto, with HTTP and HTTP-server over C sockets. `bb test:jank` runs the shared suite on the seat; `doc/hosts/jank.md` carries the seat's map, its gates and the upstream defect list it answers.
+
+### Fixed
+
+- **Type ids agree on jank (they differed from every other host).** jank keeps
+  `+ - *` over two integers of the int32 range in 32 bits, and an integer loop
+  local typed by a literal narrows the same way through `recur`, so the
+  portable XXH3-128 eve hashes type names with came out wrong at every length
+  on this host: the same type definition received a different id on jank than
+  on the JVM, ClojureScript or any other host. The jank completion roots
+  `+ - *` (inline and var) at jank's own promoting ops as its first forms and
+  boxes an integer-literal loop init, so the digest is the portable one.
+  `eve.xxh3-kat-test` 4 / 83 and `eve.deftype.type-id-test` 2 / 7, no failures
+  or errors — the test's deftype-in-an-atom errors were the same family's:
+  a deftype value inside an atom now reads, compares and prints as itself on
+  jank (the types carry jank's object behaviors, and the operations the
+  evaluator cannot dispatch re-root at `eve.core`).
+- **HTTP on jank no longer faults on its error paths.** Both HTTP adapters kept
+  their last-error string in a `thread_local` inside `cpp/raw`; jank's JIT
+  segfaults when compiled code touches one, so every failure path ended the
+  process. The string is a mutex-guarded static now; the seat checks pass
+  14 / 14 and both modules AOT-compile clean (`doc/hosts/jank.md`, defect 28).
+
 ## [0.9.1] - 2026-11-04
 
 A re-cut of 0.9.0 on the release checker's export. 0.9.0's tree was the repository's whole `eve/` directory
