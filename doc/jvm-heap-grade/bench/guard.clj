@@ -29,7 +29,7 @@
                [(/ (double (- (System/nanoTime) t0)) n) (/ (double (- (alloc-bytes) b0)) n)]))]
     [(apply min (map first rs)) (second (last rs))]))
 
-(defn fmt [ns] (cond (> ns 1e6) (format "%.2f ms" (/ ns 1e6)) (> ns 1e3) (format "%.2f µs" (/ ns 1e3)) :else (format "%.0f ns" ns)))
+(defn fmt [ns] (cond (> ns 1e6) (format "%.2f ms" (/ ns 1e6)) (> ns 1e3) (format "%.2f us" (/ ns 1e3)) :else (format "%.0f ns" ns)))
 (defn fmtb [b] (cond (> b 1e6) (format "%.1f MB" (/ b 1e6)) (> b 1e3) (format "%.1f KB" (/ b 1e3)) :else (format "%.0f B" b)))
 
 ;; ---------------------------------------------------------------------------
@@ -53,6 +53,10 @@
 (def aN (e/atom srcN))
 (def bN (e/atom {}))
 (def ds-same (ea/-domain-state aN))
+;; the swap arms alternate two subtrees, so every swap publishes a new pointer (storing the pointer bN already holds
+;; is swap!'s "same value: nothing to publish" path — run 1 of this bench measured that by mistake)
+(def flip (volatile! false))
+(defn uk [] (if (vswap! flip not) :u42 :u43))
 (def slot-ptr #(mem/-load-i32 (:root-r (ea/-domain-state %)) (d/atom-slot-offset (ea/-atom-slot-idx %) d/ATOM_SLOT_PTR_OFFSET)))
 
 (def ks (int-array (shuffle (range 10000))))
@@ -88,12 +92,12 @@
     (get-arms "1k" a1k #(nk 1000) 420)
     (get-arms "10k" a10k #(nk 10000) 4200)
     ;; deref of the root alone
-    [["deref" "plain   @a, 100"   #(deref a100)                 #(count @a100)]
-     ["deref" "guard   @a, 100"   #(g/with-guard (deref a100))  #(g/with-guard (count @a100))]
-     ["deref" "plain   @a, 1k"    #(deref a1k)                  #(count @a1k)]
-     ["deref" "guard   @a, 1k"    #(g/with-guard (deref a1k))   #(g/with-guard (count @a1k))]
-     ["deref" "plain   @a, 10k"   #(deref a10k)                 #(count @a10k)]
-     ["deref" "guard   @a, 10k"   #(g/with-guard (deref a10k))  #(g/with-guard (count @a10k))]]
+    [["deref-100" "plain   @a, 100"   #(deref a100)                 #(count @a100)]
+     ["deref-100" "guard   @a, 100"   #(g/with-guard (deref a100))  #(g/with-guard (count @a100))]
+     ["deref-1k" "plain   @a, 1k"    #(deref a1k)                  #(count @a1k)]
+     ["deref-1k" "guard   @a, 1k"    #(g/with-guard (deref a1k))   #(g/with-guard (count @a1k))]
+     ["deref-10k" "plain   @a, 10k"   #(deref a10k)                 #(count @a10k)]
+     ["deref-10k" "guard   @a, 10k"   #(g/with-guard (deref a10k))  #(g/with-guard (count @a10k))]]
     ;; sparse multi-key: 8 keys from one deref
     (for [[tag a ks'] [["100" a100 sparse100] ["1k" a1k sparse-int] ["10k" a10k sparse-int]]
           [lbl f] [["plain " #(sum-get @a ks')]
@@ -109,17 +113,19 @@
     ;; SAME-DOMAIN arm — reads: a nested 100-root, consumer extent owned by the SAME domain
     [["same-read" "plain   (get-in @aN [k :tags 1])"        #(get-in @aN [:u42 :tags 1])                #(get-in @aN [:u42 :tags 1])]
      ["same-read" "$       (get-in @aN [k :tags 1])"        #(e/$ (get-in @aN [:u42 :tags 1]))          #(e/$ (get-in @aN [:u42 :tags 1]))]
-     ["same-read" "guard   proxied, same-domain extent"      #(g/guard* ds-same (fn [] (get-in @aN [:u42 :tags 1])))
+     ["same-read" "guard   proxied, same-domain extent (read)"      #(g/guard* ds-same (fn [] (get-in @aN [:u42 :tags 1])))
       #(g/guard* ds-same (fn [] (get-in @aN [:u42 :tags 1])))]
-     ["same-read" "domain-aware raw, same-domain extent"     #(binding [g/*proxy-same-domain?* false] (g/guard* ds-same (fn [] (get-in @aN [:u42 :tags 1]))))
+     ["same-read" "domain-aware raw, same-domain extent (read)"     #(binding [g/*proxy-same-domain?* false] (g/guard* ds-same (fn [] (get-in @aN [:u42 :tags 1]))))
       #(binding [g/*proxy-same-domain?* false] (g/guard* ds-same (fn [] (get-in @aN [:u42 :tags 1]))))]
      ;; SAME-DOMAIN arm — a subtree read from aN stored into bN (same domain): copy vs shared pointer
-     ["same-swap" "plain   (swap! bN (fn [_] (get @aN k)))"  #(swap! bN (fn [_] (get @aN :u42)))       #(do (swap! bN (fn [_] (get @aN :u42))) (e/$ (e/get @bN :name)))]
-     ["same-swap" "$       (swap! bN (fn [_] (get @aN k)))"  #(e/$ (swap! bN (fn [_] (get @aN :u42)))) #(do (e/$ (swap! bN (fn [_] (get @aN :u42)))) (e/$ (e/get @bN :name)))]
-     ["same-swap" "guard   proxied, same-domain extent"      #(g/guard* ds-same (fn [] (swap! bN (fn [_] (get @aN :u42)))))
+     ["same-swap" "plain   (swap! bN (fn [_] (get @aN k)))"  #(let [k (uk)] (swap! bN (fn [_] (get @aN k))))       #(do (swap! bN (fn [_] (get @aN :u42))) (e/$ (e/get @bN :name)))]
+     ["same-swap" "$       (swap! bN (fn [_] (get @aN k)))"  #(let [k (uk)] (e/$ (swap! bN (fn [_] (get @aN k))))) #(do (e/$ (swap! bN (fn [_] (get @aN :u42)))) (e/$ (e/get @bN :name)))]
+     ["same-swap" "guard   proxied, same-domain extent (swap)"      #(let [k (uk)] (g/guard* ds-same (fn [] (swap! bN (fn [_] (get @aN k))))))
       #(do (g/guard* ds-same (fn [] (swap! bN (fn [_] (get @aN :u42))))) (e/$ (e/get @bN :name)))]
-     ["same-swap" "domain-aware raw, same-domain extent"     #(binding [g/*proxy-same-domain?* false] (g/guard* ds-same (fn [] (swap! bN (fn [_] (get @aN :u42))))))
+     ["same-swap" "domain-aware raw, same-domain extent (swap)"     #(let [k (uk)] (binding [g/*proxy-same-domain?* false] (g/guard* ds-same (fn [] (swap! bN (fn [_] (get @aN k)))))))
       #(do (binding [g/*proxy-same-domain?* false] (g/guard* ds-same (fn [] (swap! bN (fn [_] (get @aN :u42)))))) (e/$ (e/get @bN :name)))]])))
+
+(assert (apply distinct? (map second arms)) "arm labels must be unique")
 
 ;; ---------------------------------------------------------------------------
 ;; Checksums — every arm of a group answers the same value
