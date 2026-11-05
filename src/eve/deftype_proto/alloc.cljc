@@ -850,6 +850,84 @@
 
 (ser/register-sio-root! sio-root)
 
+;; ---------------------------------------------------------------------------
+;; The hot read path: a published node's bytes (jvm-heap-grade step 3, 2026-11-05)
+;; ---------------------------------------------------------------------------
+;; A collection's lookup reads a node it reached through a pointer it acquired (the atom slot's atomic load, or
+;; a parent node read the same way), and a published node is never written again (step 2: immutability of
+;; published nodes), so these reads need no atomic op. Where the domain is a JvmSlabCtx — through any logging
+;; wrappers — and the block's region is this process's heap bytes (eve.mem/IHeapBytes), each read is a plain
+;; array load: one region call for the array, no ISlabIO dispatch, no allocation, no boxing. Anything else (a
+;; mapped region, a wrapping sio that transforms bytes, another host's slab) keeps the ISlabIO op.
+;;
+;; Use these ONLY for bytes the reader cannot see change: nodes of a published (or this thread's own transient)
+;; collection. A word other threads write (a tally, a descriptor, an atom slot) keeps slab/read-i32.
+
+(defn- node-ctx
+  "sio's JvmSlabCtx under its logging wrappers, or nil."
+  [sio]
+  (loop [s sio]
+    (cond (instance? JvmSlabCtx s) s
+          (instance? LoggingSlabIO s) (recur (.-inner ^LoggingSlabIO s))
+          :else nil)))
+
+(defn- node-heap-bytes
+  "The heap byte array holding the block at slab-off in ctx's domain, or nil."
+  [^JvmSlabCtx ctx ^long slab-off]
+  (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) BLOCK_IDX_BITS)]
+    (mem/-heap-bytes (aget ^objects (.-regions ctx) (int ci)))))
+
+(defn- node-at
+  "The byte offset in its region of field-off in the block at slab-off."
+  ^long [^JvmSlabCtx ctx ^long slab-off ^long field-off]
+  (let [u  (bit-and slab-off 0xFFFFFFFF)
+        ci (int (unsigned-bit-shift-right u BLOCK_IDX_BITS))
+        bi (bit-and u BLOCK_IDX_MASK)]
+    (+ (aget ^ints (.-data-offsets ctx) ci)
+       (* bi (aget ^ints (.-block-sizes ctx) ci))
+       field-off)))
+
+(defn node-u8
+  "The unsigned byte at slab-off + field-off of a published node."
+  ^long [sio ^long slab-off ^long field-off]
+  (let [ctx (node-ctx sio)
+        arr (when ctx (node-heap-bytes ctx slab-off))]
+    (if (nil? arr)
+      (long (-sio-read-u8 sio slab-off field-off))
+      (bit-and (long (aget ^bytes arr (int (node-at ctx slab-off field-off)))) 0xFF))))
+
+(defn node-i32
+  "The little-endian i32 at slab-off + field-off (any alignment) of a published node."
+  ^long [sio ^long slab-off ^long field-off]
+  (let [ctx (node-ctx sio)
+        arr (when ctx (node-heap-bytes ctx slab-off))]
+    (if (nil? arr)
+      (long (-sio-read-i32 sio slab-off field-off))
+      (let [^bytes a arr
+            i (int (node-at ctx slab-off field-off))]
+        (long (unchecked-int
+               (bit-or (bit-and (long (aget a i)) 0xFF)
+                       (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 1))) 0xFF) 8)
+                       (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 2))) 0xFF) 16)
+                       (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 3))) 0xFF) 24))))))))
+
+(defn node-bytes-equal?
+  "Do the (alength b) bytes at slab-off + field-off of a published node equal byte array b."
+  [sio ^long slab-off ^long field-off b]
+  (let [ctx (node-ctx sio)
+        arr (when ctx (node-heap-bytes ctx slab-off))]
+    (if (nil? arr)
+      (slab/bytes-equal-at? sio slab-off field-off b)
+      (let [^bytes a arr
+            ^bytes b b
+            n (alength b)
+            i0 (node-at ctx slab-off field-off)]
+        (loop [j 0]
+          (cond (== j n) true
+                (== (aget a (int (+ i0 j))) (aget b (int j))) (recur (inc j))
+                :else false))))))
+
+
 (declare host-op)
 
 (defprotocol IWrappedSio

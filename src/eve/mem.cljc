@@ -31,7 +31,7 @@
                      into-array unchecked-byte unchecked-int unchecked-long
                      unchecked-inc-int unsigned-bit-shift-right long double class locking
                      transient persistent! conj! assoc! bytes objects const-bytes
-                     const-objects]]
+                     const-objects extend-default]]
    [eve.deftype-proto.data :as d]
    [eve.encoding :as enc]
    [eve.platform :as p]))
@@ -154,6 +154,20 @@
     "Run f while this process holds an exclusive cross-process lock on the
      4 bytes at byte-off; returns f's result. A region with atomic RMW runs
      f directly — the lock exists for lock-only regions."))
+
+;; A region's bytes as this process's own array — the hot read path's plain loads (jvm-heap-grade step 3,
+;; 2026-11-05). A published node's bytes never change (they are written before its pointer is published and
+;; read after the reader acquired that pointer), so a lookup may read them with plain array loads instead of
+;; the region's atomic ops: no dispatch per read, no allocation per byte. Only a region whose bytes live in
+;; this process's heap, at array offset 0, answers one (the JVM's heap ByteBuffer); every other region —
+;; a mapped file another process writes, a SharedArrayBuffer, another host's — answers nil, and its
+;; readers keep the region's own ops.
+(defprotocol IHeapBytes
+  (-heap-bytes [r]
+    "r's backing byte array (byte i of the array is r's byte i), or nil."))
+
+(extend-default IHeapBytes
+  (-heap-bytes [_] nil))
 
 ;; ---------------------------------------------------------------------------
 ;; The regions themselves are the host's: eve.region, an adapter
