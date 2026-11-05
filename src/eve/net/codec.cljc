@@ -44,15 +44,36 @@
 (def ^:private T-VEC 0x12)
 (def ^:private T-LIST 0x13)
 (def ^:private EE (vec (repeat 32 0xEE)))
-(def ^:private POW2 (vec (take 57 (iterate (fn [p] (* 2 p)) 1))))   ;; 2^0..2^56: a 64-bit long holds them
+;; 2^0..2^30 — every one an int32, so every host's integer arithmetic makes and uses them alike: jank's integer
+;; arithmetic wraps across 2^31 (only its bit operations are i64-clean there — the defect-21 family), so no integer at or
+;; past 2^31 is ever built here by + - * quot mod. A 64-bit integer's bytes are cut by `i64-bytes` (the realm's way); a
+;; double's by arithmetic on doubles; a 32-bit bitmap is kept as its 4 bytes.
+(def ^:private POW2 (vec (take 31 (iterate (fn [p] (* 2 p)) 1))))
+;; 2^0..2^48 as doubles (exact): a double's 52 fraction bits are assembled and cut on doubles, never on an integer
+(def ^:private DPOW2 (vec (take 49 (iterate (fn [p] (* 2.0 p)) 1.0))))
+;; THE REALM: true where the host's bit operations are 64-bit clean (the JVM, jank, ClojureCLR, basilisp, clojerl, Dart)
+;; — 1 shifted up 40 and back is 1 there; false where they are 32-bit (a JS host: ClojureScript, nbb, cherry, squint),
+;; whose integers are doubles that arithmetic keeps exact below 2^53. A 64-bit integer is cut by bit operations in the
+;; first realm, by arithmetic in the second: neither formulation is right on every host (jank's arithmetic wraps past
+;; 2^31, a JS host's bit operations truncate to 32 bits)
+(def ^:private BITS64?
+  (= 1 (-> 1 (bit-shift-left 20) (bit-shift-left 20) (bit-shift-right 20) (bit-shift-right 20))))
 
 (defn- zeros [n] (vec (repeat n 0)))
 (defn- xor-bytes [x y] (mapv (fn [p q] (bit-xor p q)) x y))
 (defn- prefix? [bs p] (and (>= (count bs) (count p)) (= (vec p) (subvec (vec bs) 0 (count p)))))
 (defn- u16le [x] [(mod x 256) (mod (quot x 256) 256)])
 (defn- read-u16le [bs i] (+ (nth bs i) (* 256 (nth bs (inc i)))))
-(defn- popcount [x] (loop [x x c 0] (if (zero? x) c (recur (quot x 2) (+ c (mod x 2))))))
-(defn- bit? [x i] (= 1 (mod (quot x (nth POW2 i)) 2)))
+(defn- popcount [x] (loop [x x c 0] (if (zero? x) c (recur (quot x 2) (+ c (mod x 2))))))   ;; x below 2^31
+(defn- bit? [x i] (= 1 (mod (quot x (nth POW2 i)) 2)))                                      ;; x below 2^31
+
+;; a hamt bitmap (32 bits, little-endian u32 in the image) as its 4 bytes: bit f is bit (f mod 8) of byte (f quot 8).
+;; Its u32 reaches 2^31 when slice 31 is set, past what jank's arithmetic holds, so it is never formed as an integer
+(defn- bitmap-bytes "the 4 little-endian bytes of the bitmap whose set bits are fs (each 0..31)" [fs]
+  (reduce (fn [bm f] (update bm (quot f 8) + (nth POW2 (mod f 8)))) [0 0 0 0] fs))
+(defn- bitmap-at "the 4 bitmap bytes at off" [img off] (subvec (vec img) off (+ off 4)))
+(defn- bm-bit? [bm f] (bit? (nth bm (quot f 8)) (mod f 8)))
+(defn- bm-count [bm] (reduce + 0 (map popcount bm)))
 
 ;; ── IEEE 754 doubles and 64-bit integers, by arithmetic (no host's bit casts) ──────────────────────────────────
 
@@ -69,18 +90,27 @@
       :else
       (let [sign (if (neg? x) 1 0)
             a (if (neg? x) (- x) x)
-            [field mant] (if (> a 1.7976931348623157e308)
-                           [2047 0]                                               ;; ±Infinity
+            ;; frac: the 52 fraction bits as the double mant / 2^52 in [0, 1), exactly — never the integer mant, which
+            ;; passes 2^31
+            [field frac] (if (> a 1.7976931348623157e308)
+                           [2047 0.0]                                             ;; ±Infinity
                            (let [[e m] (loop [e 0 m a]                            ;; 1 <= a / 2^e < 2, exactly
                                          (cond (>= m 2.0) (recur (inc e) (/ m 2.0))
                                                (< m 1.0) (recur (dec e) (* m 2.0))
                                                :else [e m]))]
                              (if (< e -1022)
-                               [0 (long (loop [k 0 v a] (if (< k 1074) (recur (inc k) (* v 2.0)) v)))]
-                               [(+ e 1023) (long (loop [k 0 v (- m 1.0)] (if (< k 52) (recur (inc k) (* v 2.0)) v)))])))
-            low (mapv (fn [i] (mod (quot mant (nth POW2 (* 8 i))) 256)) (range 6))]
-        (conj low
-              (+ (mod (quot mant (nth POW2 48)) 16) (* 16 (mod field 16)))
+                               [0 (loop [k 0 v a] (if (< k 1022) (recur (inc k) (* v 2.0)) v))]   ;; subnormal: a·2^1022
+                               [(+ e 1023) (- m 1.0)])))
+            ;; the fraction's digits, most significant first — a nibble (bits 48..51), then bytes 5 down to 0 — each
+            ;; scaled up, its integer part taken (below 256: a cast, no wide arithmetic) and the rest kept, all exact
+            t (* frac 16.0)
+            nib (long t)
+            hi->lo (loop [k 0 f (- t (double nib)) out []]
+                     (if (= k 6)
+                       out
+                       (let [t (* f 256.0) d (long t)] (recur (inc k) (- t (double d)) (conj out d)))))]
+        (conj (vec (reverse hi->lo))
+              (+ nib (* 16 (mod field 16)))
               (+ (quot field 16) (* 128 sign)))))))
 
 (defn- bytes-f64
@@ -88,8 +118,9 @@
   [bs]
   (let [sign (quot (nth bs 7) 128)
         field (+ (* 16 (mod (nth bs 7) 128)) (quot (nth bs 6) 16))
-        mant (+ (reduce + (map (fn [i] (* (nth bs i) (nth POW2 (* 8 i)))) (range 6)))
-                (* (mod (nth bs 6) 16) (nth POW2 48)))
+        ;; the 52-bit mantissa assembled as a double (exact below 2^53), never as an integer past 2^31
+        mant (+ (reduce + 0.0 (map (fn [i] (* (double (nth bs i)) (nth DPOW2 (* 8 i)))) (range 6)))
+                (* (double (mod (nth bs 6) 16)) (nth DPOW2 48)))
         scale (fn [v e] (if (neg? e)
                           (loop [k 0 v v] (if (< k (- e)) (recur (inc k) (/ v 2.0)) v))
                           (loop [k 0 v v] (if (< k e) (recur (inc k) (* v 2.0)) v))))
@@ -102,15 +133,21 @@
     (if (= 1 sign) (- mag) mag)))
 
 (defn- i64-bytes "the 8 little-endian bytes of the integer x (two's complement)" [x]
-  (loop [i 0 v x out []]
-    (if (= i 8) out (let [r (mod v 256)] (recur (inc i) (quot (- v r) 256) (conj out r))))))
+  (if BITS64?
+    (mapv (fn [i] (bit-and (bit-shift-right x (* 8 i)) 255)) (range 8))      ;; an arithmetic shift: the sign fills in
+    (loop [i 0 v x out []]
+      (if (= i 8) out (let [r (mod v 256)] (recur (inc i) (quot (- v r) 256) (conj out r)))))))
 
 (defn- bytes-i64 "the integer of 8 little-endian two's-complement bytes" [bs]
-  (let [u (reduce + (map (fn [i] (* (nth bs i) (nth POW2 (* 8 i)))) (range 7)))
-        top (nth bs 7)]
-    (if (< top 128)
-      (+ u (* top (nth POW2 56)))
-      (- u (* (- 256 top) (nth POW2 56))))))
+  (let [top (nth bs 7)
+        top (if (< top 128) top (- top 256))]                                  ;; the signed top byte
+    (if BITS64?
+      ;; the top byte shifted signed (a host whose integers are unbounded — basilisp, clojerl — gets the negative
+      ;; number, not its unsigned 64-bit pattern), the low seven or'd in beneath it
+      (reduce (fn [acc i] (bit-or acc (bit-shift-left (nth bs i) (* 8 i)))) (bit-shift-left top 56) (range 7))
+      ;; a JS host: doubles, exact below 2^53, built by arithmetic (its bit operations hold 32 bits)
+      (+ (reduce + 0 (map (fn [i] (* (nth bs i) (reduce * 1 (repeat i 256)))) (range 7)))
+         (* top (reduce * 1 (repeat 7 256)))))))
 
 ;; ── UTF-8 text ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -158,7 +195,9 @@
           (= cid K-LONG-CID) (bytes-i64 (subvec bd 16 24))
           (= cid TRUE-CID) true
           (= cid FALSE-CID) false
-          (= cid INT32-CID) (let [u (b/read-u32le bd 16)] (if (>= u 2147483648) (- u 4294967296) u))
+          (= cid INT32-CID) (let [lo (+ (nth bd 16) (* 256 (nth bd 17)) (* 65536 (nth bd 18)))   ;; signed, read in int32
+                                     top (nth bd 19)]
+                                 (+ lo (* 16777216 (if (< top 128) top (- top 256)))))
           (= cid DOUBLE-CID) (bytes-f64 (subvec bd 16 24))
           (= cid LONG-CID) (bytes-i64 (subvec bd 24 32))
           :else ::none)))
@@ -256,8 +295,6 @@
 
 ;; ── hamt nodes ──
 
-(defn- bitmap [fs] (reduce + 0 (map (fn [f] (nth POW2 f)) fs)))
-
 (defn- node-image
   "the image of the bitmap node whose slices are sl ({frag {:e entry} | {:c node}}): a slice one entry has is a data
    entry, a slice two or more share a child node one level down"
@@ -269,7 +306,7 @@
         kvs (map (fn [e] (b/join [(b/u32le (count (:kb e))) (:kb e) (b/u32le CORE) (slot (:vb e))])) data)
         ;; the node's kv byte count is the BLOCK's (each value a 64-B slot there, its 32-B image here)
         kv-bytes (reduce + 0 (map (fn [e] (+ 8 (count (:kb e)) CORE)) data))]
-    (b/join (concat [[T-NODE] (u16le 0) (u16le kv-bytes) (b/u32le (bitmap singles)) (b/u32le (bitmap multis))]
+    (b/join (concat [[T-NODE] (u16le 0) (u16le kv-bytes) (bitmap-bytes singles) (bitmap-bytes multis)]
                     (map (fn [f] (slot (b/unhex (:k (:c (get sl f)))))) multis)
                     (map :h data)
                     kvs))))
@@ -645,10 +682,10 @@
   "every [key-bytes value-band] of the node image under key, depth first"
   [get-block key]
   (let [img (vec (get-block key))
-        dbm (b/read-u32le img 5)
-        nbm (b/read-u32le img 9)
-        cc (popcount nbm)
-        dc (popcount dbm)
+        dbm (bitmap-at img 5)
+        nbm (bitmap-at img 9)
+        cc (bm-count nbm)
+        dc (bm-count dbm)
         children (map (fn [i] (b/hex (band-at img (+ 13 (* SLOT i))))) (range cc))
         kv0 (+ 13 (* SLOT cc) (* 16 dc))
         data (loop [i 0 p kv0 out []]
@@ -778,7 +815,7 @@
 
 (defn- need! "refuses unless the image holds n bytes" [img n key what] (when (< (count img) n) (refuse 15 key what)))
 
-(defn- bits [x] (filter (fn [i] (bit? x i)) (range 32)))
+(defn- bits "the set bits of a bitmap's 4 bytes" [bm] (filter (fn [i] (bm-bit? bm i)) (range 32)))
 
 (defn- keyable? [k] (or (string? k) (keyword? k) (symbol? k) (number? k)))
 
@@ -820,11 +857,11 @@
     (need! img 13 key "a bitmap node's head")
     (when-not (= T-NODE (first img)) (refuse 15 key (str "tag " (first img) " where a bitmap node lies")))
     (when (> shift 125) (refuse 15 key "a node past the hash's depth"))
-    (let [dbm (b/read-u32le img 5)
-          nbm (b/read-u32le img 9)
+    (let [dbm (bitmap-at img 5)
+          nbm (bitmap-at img 9)
           dfs (vec (bits dbm))
           cfs (vec (bits nbm))
-          _ (when (some (fn [f] (bit? nbm f)) dfs) (refuse 15 key "a slice that is both a data entry and a child"))
+          _ (when (some (fn [f] (bm-bit? nbm f)) dfs) (refuse 15 key "a slice that is both a data entry and a child"))
           cc (count cfs)
           h0 (+ 13 (* SLOT cc))
           kv0 (+ h0 (* 16 (count dfs)))
@@ -1008,8 +1045,8 @@
         bands (cond
                 (not= ::none (value-of-image img)) []
                 (= tag T-MAP) [(band-at img 5)]
-                (= tag T-NODE) (let [dbm (b/read-u32le img 5) nbm (b/read-u32le img 9)
-                                     cc (popcount nbm) dc (popcount dbm)]
+                (= tag T-NODE) (let [dbm (bitmap-at img 5) nbm (bitmap-at img 9)
+                                     cc (bm-count nbm) dc (bm-count dbm)]
                                  (concat (map (fn [i] (band-at img (+ 13 (* SLOT i)))) (range cc))
                                          (loop [i 0 p (+ 13 (* SLOT cc) (* 16 dc)) out []]
                                            (if (= i dc)
