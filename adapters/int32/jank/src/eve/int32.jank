@@ -1,0 +1,52 @@
+(ns eve.int32
+  "32-bit integer arithmetic as eve's hashes take it (Murmur3, FNV-1a, a
+   HAMT's bitmaps): signed results, the same on every host. On jank the five
+   ops are C++ (cpp/raw, called as cpp/eve_i32.<fn>): the int32_t cast, a
+   uint32_t multiply, a uint32_t rotate, a uint32_t logical shift and
+   __builtin_popcount. jank's own integers are 64-bit wrapping, and its
+   clojure.core unchecked-int is a TODO stub — the completion re-roots it
+   arithmetically (a bit-and and a conditional subtract), which is the
+   portable adapter's cost again, not a cast; here each op is the one C++
+   operation itself.")
+
+(cpp/raw "
+#include <cstdint>
+namespace eve_i32 {
+  long i32(long x) { return (long)(int32_t)x; }
+  long imul(long a, long b) { return (long)(int32_t)((uint32_t)a * (uint32_t)b); }
+  long rotl(long x, long r) {
+    uint32_t const u((uint32_t)x);
+    unsigned const s((unsigned)r & 31u);
+    return s ? (long)(int32_t)((u << s) | (u >> (32u - s))) : (long)(int32_t)u;
+  }
+  long ushr(long x, long n) {
+    return n >= 32 ? 0L : (long)((uint32_t)x >> (unsigned)n);
+  }
+  long popcount(long x) { return (long)__builtin_popcount((uint32_t)x); }
+}
+")
+
+(defn i32
+  "x's low 32 bits, as a signed integer."
+  [x]
+  (cpp/eve_i32.i32 (long x)))
+
+(defn imul
+  "a × b mod 2^32, signed."
+  [a b]
+  (cpp/eve_i32.imul (long a) (long b)))
+
+(defn rotl
+  "x's 32-bit pattern rotated left by r bits (0 < r < 32), signed."
+  [x r]
+  (cpp/eve_i32.rotl (long x) (long r)))
+
+(defn ushr
+  "x's 32-bit pattern shifted right by n bits, zeros in: non-negative."
+  [x n]
+  (cpp/eve_i32.ushr (long x) (long n)))
+
+(defn popcount
+  "The number of bits set in x's 32-bit pattern."
+  [x]
+  (cpp/eve_i32.popcount (long x)))

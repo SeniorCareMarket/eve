@@ -1,0 +1,187 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) on jank, over C++ (cpp/raw, called as cpp/eve_proc.<fn>): the
+   clock, the calling thread's id, sleep, a periodic timer (a std::thread calling the jank function: measured to
+   call back into jank on jank 0.1-alpha, J1), hooks at exit (std::atexit, which runs on a normal end and on exit:
+   measured), files' existence, their exclusive creation (O_CREAT|O_EXCL) and directories, an object's identity
+   hash, and the operating system's entropy (/dev/urandom). random-bytes is the one crypto input no portable code
+   supplies (eve.crypto/random-bytes)."
+  (:refer-clojure :exclude [read-line])
+  (:require [clojure.string]))
+
+(cpp/raw "
+#define GC_THREADS 1
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <gc.h>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/nil.hpp>
+namespace eve_proc {
+  using namespace jank::runtime;
+  long now_ms() { return (long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+  long tid() { return (long)syscall(SYS_gettid); }
+  void sleep_ms(long ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+  /* the process is ending: no thread calls into jank after this (a detached timer thread alive at exit, or an
+     exit hook run by std::atexit, crashed the exit — jank tears its runtime down before the handlers run: measured,
+     J2). So the hooks run from exit! on the main thread, and the process ends by _exit after a flush. */
+  static std::atomic<bool> exiting{ false };
+  void exit_now(long code) { exiting.store(true); std::fflush(stdout); std::fflush(stderr); _exit((int)code); }
+  /* a timer: a thread (registered with the collector) sleeping period_ms between calls of f until its flag drops;
+     the fn is a GC root (statics and heap of JIT-compiled code are not scanned) */
+  struct timer { object_ref f; std::atomic<bool> running{ true }; };
+  long start_timer(object_ref f, long period_ms) {
+    auto *t = new timer{ f };
+    GC_add_roots(&t->f, &t->f + 1);
+    GC_allow_register_threads();
+    std::thread([t, period_ms]() {
+      struct GC_stack_base sb; GC_get_stack_base(&sb); GC_register_my_thread(&sb);
+      while(true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(period_ms));
+        if(exiting.load()) { GC_unregister_my_thread(); return; }
+        if(!t->running.load()) break;
+        /* a throw out of f is the timer's to report, never to end the thread: a jank value by its string, a C++
+           exception by what() (a lock jank takes around the call would otherwise leak silently) */
+        try { t->f.call(); }
+        catch(object_ref const &e) { std::fprintf(stderr, \"eve.process timer: %s\\n\", to_code_string(e).c_str()); }
+        catch(std::exception const &e) { std::fprintf(stderr, \"eve.process timer: %s\\n\", e.what()); }
+        catch(...) { std::fprintf(stderr, \"eve.process timer: unknown exception\\n\"); }
+      }
+      GC_remove_roots(&t->f, &t->f + 1);
+      GC_unregister_my_thread();
+      delete t;
+    }).detach();
+    return (long)reinterpret_cast<uintptr_t>(t);
+  }
+  void stop_timer(long h) { reinterpret_cast<timer *>(h)->running.store(false); }
+  bool file_exists(std::string const &path) { struct stat st; return ::stat(path.c_str(), &st) == 0; }
+  /* 1 created, 0 existed, -errno otherwise */
+  long create_exclusive(std::string const &path) {
+    int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if(fd >= 0) { ::close(fd); return 1; }
+    return errno == EEXIST ? 0 : -(long)errno;
+  }
+  long mkdir_p(std::string const &path) {
+    std::string p;
+    for(size_t i = 0; i <= path.size(); ++i) {
+      if(i == path.size() || path[i] == '/') {
+        if(!p.empty()) { if(::mkdir(p.c_str(), 0755) != 0 && errno != EEXIST) return -(long)errno; }
+      }
+      if(i < path.size()) p += path[i];
+    }
+    return 0;
+  }
+  long addr(object_ref o) { return (long)reinterpret_cast<uintptr_t>(o.ptr()); }
+  object_ref random_bytes(long n) {
+    object_ref v = make_box<obj::persistent_vector>();
+    FILE *f = std::fopen(\"/dev/urandom\", \"rb\");
+    if(!f) return jank_nil;
+    std::vector<unsigned char> buf((size_t)n);
+    size_t got = std::fread(buf.data(), 1, (size_t)n, f);
+    std::fclose(f);
+    if(got != (size_t)n) return jank_nil;
+    for(long i = 0; i < n; ++i) v = conj(v, make_box((jank::i64)buf[(size_t)i]));
+    return v;
+  }
+  std::string read_line() { std::string s; if(!std::getline(std::cin, s)) return std::string(\"\\x04\"); return s; }
+}
+")
+
+(defn now-ms [] (cpp/eve_proc.now_ms))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under: the calling OS thread's id."
+  []
+  (cpp/eve_proc.tid))
+
+(defn sleep-ms!
+  "Block this thread for about ms milliseconds."
+  [ms]
+  (cpp/eve_proc.sleep_ms (long ms)))
+
+(defn start-timer!
+  "Call f every period-ms until stop-timer!: a thread of its own. Returns the handle."
+  [period-ms f]
+  (cpp/eve_proc.start_timer f (long period-ms)))
+
+(defn stop-timer! [h]
+  (when h (cpp/eve_proc.stop_timer (long h))))
+
+(def ^:private exit-hooks (atom []))
+
+(defn run-exit-hooks!
+  "Run the hooks on-process-exit! registered, once each (exit! calls it)."
+  []
+  (let [hs (first (swap-vals! exit-hooks (fn [_] [])))]
+    (doseq [h hs] (try (h) (catch jank.runtime.object_ref _ nil) (catch std.exception _ nil)))))
+
+(defn on-process-exit!
+  "Run f when the process ends through exit! (a launcher's call: jank runs no hook on a normal end — its runtime is
+   torn down before std::atexit's handlers run, and a handler that called into it crashed; so a disk domain's slot
+   is released by heartbeat staleness after a program that ends otherwise, as on glojure)."
+  [f]
+  (swap! exit-hooks conj f)
+  nil)
+
+(defn exit!
+  "End the process with status code: the exit hooks run, the output is flushed, and _exit ends every thread (a timer
+   thread alive at a normal end crashes jank's teardown: measured)."
+  [code]
+  (run-exit-hooks!)
+  (cpp/eve_proc.exit_now (long code)))
+
+(defn file-exists? [path]
+  (cpp/eve_proc.file_exists (str path)))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step against every other process (O_CREAT|O_EXCL):
+   true for the process that created it, false when it already existed (an mmap domain's creator is the one that gets
+   true)."
+  [path]
+  (let [r (cpp/eve_proc.create_exclusive (str path))]
+    (cond (= 1 r) true
+          (= 0 r) false
+          :else (throw (ex-info (str "create-exclusive! " path ": errno " (- r)) {:path path :errno (- r)})))))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
+  [base-path]
+  (let [p (str base-path ".root")
+        i (clojure.string/last-index-of p "/")]
+    (when (and i (pos? i))
+      (cpp/eve_proc.mkdir_p (subs p 0 i)))
+    nil))
+
+(defn identity-hash
+  "An object's identity hash: equal for one object, whatever its own equality or hash — what eve's reference table
+   keys by (FORMAT-DECISIONS.md §9): its address; a value jank holds unboxed (a small integer, a boolean, nil) its own
+   hash (the table tells those apart by identical?)."
+  [x]
+  (if (or (nil? x) (boolean? x) (number? x) (keyword? x) (string? x))
+    (hash x)
+    (cpp/eve_proc.addr x)))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (/dev/urandom), as a vector of 0..255 — the one crypto input no portable
+   code can supply (eve.crypto/random-bytes)"
+  [n]
+  (let [v (cpp/eve_proc.random_bytes (long n))]
+    (when (nil? v) (throw (ex-info "random-bytes: /dev/urandom" {})))
+    v))
+
+(defn read-line
+  "the next line of the process's standard input, its line end dropped; nil at the end of the input. Blocking."
+  []
+  (let [s (cpp/eve_proc.read_line)]
+    (when-not (= s "\u0004") s)))

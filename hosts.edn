@@ -90,6 +90,16 @@
         "adapters/core/clojure/src" "adapters/completion/glojure/src" "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/region/glojure/src"
         "adapters/encoding/go/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/go/src" "adapters/thread/glojure/src"
         "adapters/types/glojure/src" "adapters/journal-file/unsupported/src"]
+ ;; jank (0.1-alpha; apt package jank 0.1-noble, 2026-10-28): its core completed by adapters/completion/jank (deftype,
+ ;; defprotocol, defrecord, reify, extend-type, the unchecked-* ops, = and hash reaching a type's own, clojure.edn),
+ ;; eve's types as one C++ object each on eve.core's protocols (babashka's coll adapter as jank reads it:
+ ;; adapters/coll/jank), regions, slab-io, typed-view, encoding, process, int32 and crypto over C++ (cpp/raw) in
+ ;; their adapters; the inbuilt codec and thread/none roots. Run under LC_ALL=en_US.UTF-8 (jank's lexer reads source through the locale)
+ :jank ["adapters/slab-io/jank/src" "adapters/core/clojure/src" "adapters/completion/jank/src" "adapters/coll/jank/src"
+        "adapters/slab/heap/src" "adapters/region/jank/src" "adapters/typed-view/jank/src" "adapters/encoding/jank/src" "adapters/int32/jank/src"
+        "adapters/codec/byte-array/src" "adapters/process/jank/src" "adapters/thread/none/src" "adapters/types/jank/src"
+        "adapters/crypto/jank/src" "adapters/http/jank/src" "adapters/http-server/jank/src"
+        "adapters/journal-file/unsupported/src"]
  ;; let-go, run as lg-eve (impls/let-go: let-go v1.13.0 with eve's Go package, evenative — `go build -o
  ;; target/lg-eve/lg-eve .` there): the network atom's set — http, crypto and encoding over lg-eve's Go natives
  ;; (evenative/host.go), the process feature's clock, entropy and stdin, no threads (thread/none). Not yet eve memory:

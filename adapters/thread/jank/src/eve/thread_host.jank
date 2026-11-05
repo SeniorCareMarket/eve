@@ -1,0 +1,187 @@
+(ns eve.thread-host
+  "eve's thread feature (HOST-CONTRACT §11) on jank: real threads — a std::thread a worker
+   (C++ through cpp/raw, called as cpp/eve_thread.<fn>), registered with the collector and
+   holding its entry closure as a GC root, on the pattern adapters/process/jank's timer
+   proved on this host.
+
+   An Eve thread is one long-lived worker running thread-main: it binds *self*, runs the
+   entry under the starter's conveyed binding frame, and — on any end, return or throw —
+   sends its starter the exit notice before its mailbox is dropped, so a dead thread is
+   never silent (the ValueScript adapter's shape, transposed: one process here, not a
+   mesh). The heap is shared: a message is the value itself, closures included
+   (ships-closures? true), and a binding frame is a value that travels (get-thread-bindings
+   / with-bindings*, the host's own conveyance). A mailbox is an atom holding a vector,
+   plus one futex word per address in a heap region of adapters/region/jank: send! conjs,
+   bumps the word and notifies it; receive! checks the queue, then waits on the word it
+   just read, so a send between the check and the wait changes the word and the wait
+   answers at once — no missed wakeup. The block is the host's real block (the futex
+   syscall, shared).
+
+   jank carries an evaluator (it is a JIT Lisp): :eval is true and eval-form evals."
+  (:require [eve.mem :as mem]
+            [eve.process :as proc]
+            [eve.region :as region]))
+
+(cpp/raw "
+#define GC_THREADS 1
+#include <thread>
+#include <gc.h>
+#include <jank/runtime/object.hpp>
+namespace eve_thread {
+  using namespace jank::runtime;
+  long parallelism() { unsigned n(std::thread::hardware_concurrency()); return n == 0 ? 1 : (long)n; }
+  /* a worker thread for f: f rooted while the thread lives (statics and the heap of
+     JIT-compiled code are not scanned — process/jank's timer note), the thread registered
+     with the collector, its end unregistering both. thread-main attempts the entry
+     already; the catch-all here is for what escapes it, so a worker never takes the
+     process down with it. */
+  struct job { object_ref f; };
+  void spawn(object_ref f) {
+    auto *j(new job{ f });
+    GC_add_roots(&j->f, &j->f + 1);
+    GC_allow_register_threads();
+    std::thread([j]() {
+      struct GC_stack_base sb; GC_get_stack_base(&sb); GC_register_my_thread(&sb);
+      try { j->f.call(); } catch(...) {}
+      GC_unregister_my_thread();
+      GC_remove_roots(&j->f, &j->f + 1);
+      delete j;
+    }).detach();
+  }
+}
+")
+
+;; ---------------------------------------------------------------------------
+;; The doorbells: one heap region, word per address at 8*addr (the vs adapter's
+;; window scheme, in-process). Addresses are never reused, so the words only grow:
+;; 1 MiB of words is ~131k threads over a process's life.
+
+(def ^:private doorbells (region/make-heap-region 1048576))
+
+(defn- futex-of [addr] (* 8 addr))
+
+;; ---------------------------------------------------------------------------
+;; The registry: address -> {:queue (atom []) :starter addr}.
+
+(def ^:private registry (atom {}))
+
+(def ^:private addr-counter (atom 0))
+
+(defn- alloc-addr! [] (swap! addr-counter inc))
+
+(defn- register! [addr starter]
+  (swap! registry assoc addr {:queue (atom []) :starter starter})
+  addr)
+
+(defn- mailbox-of [addr] (get @registry addr))
+
+;; ---------------------------------------------------------------------------
+;; self: a started thread reads the *self* its wrapper bound; the main thread
+;; registers its own mailbox the first time it asks.
+
+(def ^:dynamic *self* nil)
+
+(def ^:private main-addr
+  (delay (let [a (alloc-addr!)] (register! a a) a)))
+
+(defn self [] (or *self* @main-addr))
+
+(defn parallelism [] (cpp/eve_thread.parallelism))
+
+(defn ships-closures? [] true)
+
+;; ---------------------------------------------------------------------------
+;; send! / receive!: the mailbox atom and its futex word.
+
+(defn send! [addr msg]
+  (when-let [mb (mailbox-of addr)]
+    (swap! (:queue mb) conj msg)
+    (let [f (futex-of addr)]
+      (mem/-add-i32! doorbells f 1)
+      (mem/-notify-i32! doorbells f 1)))
+  nil)
+
+(defn- pop-queue!
+  "The head of queue-atom, or nil. The owner is the only consumer and senders only append, so the head a
+   swap! retry sees is the head the committed swap removes."
+  [q]
+  (let [taken (atom nil)]
+    (swap! q (fn [v] (if (seq v) (do (reset! taken (nth v 0)) (subvec v 1)) v)))
+    @taken))
+
+(defn receive!
+  "This thread's next message; :eve.thread/timeout after ms milliseconds (0 polls, a negative
+   ms waits for ever — a real wait here: another thread can always send)."
+  [ms]
+  (let [mb (mailbox-of (self))
+        q (:queue mb)
+        f (futex-of (self))]
+    (cond (zero? ms) (or (pop-queue! q) :eve.thread/timeout)
+          :else (let [deadline (when (pos? ms) (+ (proc/now-ms) ms))]
+                  (loop []
+                    (let [v (mem/-load-i32 doorbells f)]
+                      (or (pop-queue! q)
+                          (if (and deadline (>= (proc/now-ms) deadline))
+                            :eve.thread/timeout
+                            (do (mem/-wait-i32! doorbells f v (if deadline
+                                                                (max 0 (- deadline (proc/now-ms)))
+                                                                -1))
+                                (recur))))))))))
+
+;; ---------------------------------------------------------------------------
+;; start / stop. A thread is one worker running thread-main; the entry is
+;; resolved on the thread itself, under the starter's conveyed frame.
+
+(defn error-data [e] {:class (str (type e)) :message (ex-message e) :data (ex-data e)})
+
+(defn capture-frame [] (get-thread-bindings))
+
+(defn call-with-frame [frame f] (if frame (with-bindings* frame f) (f)))
+
+(defn- thread-main [entry boot starter addr frame]
+  (call-with-frame frame
+    (fn []
+      (let [reason (try (binding [*self* addr]
+                          ((resolve entry) (assoc boot :self addr))
+                          :normal)
+                        (catch jank.runtime.object_ref e (error-data e))
+                        (catch std.exception e {:class "std.exception" :message (cpp/.what e) :data nil}))]
+        (when (some? starter)
+          (send! starter {:eve.thread/exit addr :reason reason}))
+        (swap! registry dissoc addr)
+        nil))))
+
+(defn start-threads! [n entry boot _opts]
+  (let [starter (self)
+        frame (capture-frame)]
+    (mapv (fn [_]
+            (let [addr (alloc-addr!)]
+              (register! addr starter)
+              (cpp/eve_thread.spawn (fn [] (thread-main entry boot starter addr frame)))
+              addr))
+          (range n))))
+
+(defn stop-threads! [addrs]
+  (doseq [a addrs] (send! a :eve.thread/stop))
+  nil)
+
+;; ---------------------------------------------------------------------------
+;; The rest of the seam.
+
+(defn driving []
+  {:block :thread :parallel true :closures true :eval true :wake :futex
+   :spawn-ms 0 :max-threads (parallelism) :runtime :jank})
+
+(defn attempt [f]
+  (try [true (f)]
+       (catch jank.runtime.object_ref e [false e])
+       (catch std.exception e [false (ex-info (str "native: " (cpp/.what e)) {:eve.thread/native true})])))
+
+(defn var-symbol [v]
+  ;; (str v) is "#'ns/name" on this host (thread/none's :jank arm)
+  (symbol (subs (str v) 2)))
+
+(defn eval-form
+  "jank evals: the form, evaluated in the calling thread's context."
+  [form]
+  (eval form))

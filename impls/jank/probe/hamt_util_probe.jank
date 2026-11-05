@@ -1,0 +1,4 @@
+(require 'eve.hamt-util)
+(println :loaded (eve.hamt-util/mask-hash 642791526 5) (eve.hamt-util/popcount32 -1))
+(require 'clojure.test 'eve.hamt-util-test)
+(println (clojure.test/run-tests 'eve.hamt-util-test))

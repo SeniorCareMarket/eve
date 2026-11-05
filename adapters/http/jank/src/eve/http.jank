@@ -1,0 +1,238 @@
+(ns eve.http
+  "eve's http feature (adapters/README.md) on jank: HTTP/1.1 over the host's C sockets, in C++
+   (cpp/raw, called as cpp/eve_http.<fn>) — adapters/http/socket's division of labor (the JVM
+   seat's shape) with C++ where it held java.net.Socket: fetch writes the request's bytes and
+   reads the whole answer; the head's parsing, the chunked joining and the body conventions are
+   spelled here, as there. `platform` answers what this host lends eve.net (eve.net.run):
+   {:request f :request-all g}, f taking {:method :url :headers :body :as :body-as} and
+   answering {:status :headers :body} SYNCHRONOUSLY, as on every host. :body-as :b64 sends the
+   bytes its base64 :body names, :body-as :bytes the byte array :body is; :as :b64 answers the
+   response body as base64, :as :bytes as a byte array (eve.encoding's, which eve.codec reads);
+   otherwise bodies are UTF-8 text. The base64 is this adapter's own C++ (eve.encoding's b64
+   slot is nil on this host by design — eve.net.bytes answers it portably; eve.http does not
+   depend on eve.net). One connection a request (Connection: close); a chunked answer is
+   joined. http:// only — an https:// URL answers {:error …}. A transport failure answers
+   {:error message}. request-all runs a batch in turn. Nagle's algorithm is off on the
+   connection (TCP_NODELAY: a small answer must not wait on a delayed ACK — the http-server
+   seat's measured lesson), and a fetch gives up after 60 s."
+  (:require [clojure.string :as str]
+            [eve.encoding :as enc]))
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <vector>
+#include <mutex>
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <netinet/tcp.h>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/nil.hpp>
+#include <jank/runtime/obj/array.hpp>
+namespace eve_http {
+  using namespace jank::runtime;
+  /* the last transport error, kept for last_error(). A plain static under a mutex, NOT
+     thread_local: accessing a thread_local from jank's JIT-compiled cpp/raw code segfaults
+     (seam 8; measured — a probe fn reading the thread_local faults, the same fn over a
+     plain static does not). Writers are caller threads and the string is diagnostics
+     only, so the mutex serializes them; last_error reads under the same lock. */
+  static std::mutex err_mu;
+  static std::string err;
+  static void set_err(std::string const &s) { std::lock_guard<std::mutex> g(err_mu); err = s; }
+  object_ref last_error() { std::lock_guard<std::mutex> g(err_mu); return make_box(err); }
+  static obj::array<jank::i8> *A(object_ref o) { return static_cast<obj::array<jank::i8> *>(o.ptr()); }
+  object_ref fetch(std::string const &host, long port, object_ref req) {
+    set_err(std::string());
+    struct addrinfo hints{}; hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res(nullptr);
+    if(getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0) {
+      set_err(\"http: cannot resolve \" + host);
+      return jank_nil;
+    }
+    int fd(-1);
+    for(struct addrinfo *ai(res); ai != nullptr; ai = ai->ai_next) {
+      fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+      if(fd < 0) continue;
+      if(::connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
+      ::close(fd); fd = -1;
+    }
+    freeaddrinfo(res);
+    if(fd < 0) { set_err(\"http: cannot connect to \" + host + \":\" + std::to_string(port)); return jank_nil; }
+    struct timeval tv{ 60, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    int one(1); setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    auto *a(A(req));
+    size_t sent(0);
+    while(sent < a->size) {
+      ssize_t n(::send(fd, a->data.data + sent, a->size - sent, 0));
+      if(n <= 0) { set_err(\"http: send failed\"); ::close(fd); return jank_nil; }
+      sent += (size_t)n;
+    }
+    std::string buf;
+    char chunk[65536];
+    for(;;) {
+      ssize_t n(::recv(fd, chunk, sizeof chunk, 0));
+      if(n < 0) { set_err(\"http: receive failed\"); ::close(fd); return jank_nil; }
+      if(n == 0) break;
+      buf.append(chunk, (size_t)n);
+    }
+    ::close(fd);
+    auto out(make_box<obj::array<jank::i8>>((jank::i64)buf.size()));
+    std::memcpy(out->data.data, buf.data(), buf.size());
+    return out;
+  }
+  static char const B64[] = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/\";
+  object_ref b64_encode(object_ref bs) {
+    auto *a(A(bs));
+    std::string out;
+    out.reserve((a->size + 2) / 3 * 4);
+    for(size_t i = 0; i < a->size; i += 3) {
+      uint32_t v((uint32_t)(uint8_t)a->data.data[i] << 16);
+      int rem((int)(a->size - i));
+      if(rem > 1) v |= (uint32_t)(uint8_t)a->data.data[i + 1] << 8;
+      if(rem > 2) v |= (uint32_t)(uint8_t)a->data.data[i + 2];
+      out += B64[(v >> 18) & 63];
+      out += B64[(v >> 12) & 63];
+      out += rem > 1 ? B64[(v >> 6) & 63] : '=';
+      out += rem > 2 ? B64[v & 63] : '=';
+    }
+    return make_box(out);
+  }
+  object_ref b64_decode(std::string const &s) {
+    std::vector<uint8_t> out;
+    uint32_t acc(0); int nacc(0);
+    for(char c : s) {
+      if(c == '=') break;
+      char const *p(std::strchr(B64, c));
+      if(p == nullptr) continue;
+      acc = (acc << 6) | (uint32_t)(p - B64); nacc += 6;
+      if(nacc >= 8) { nacc -= 8; out.push_back((uint8_t)(acc >> nacc)); }
+    }
+    auto a(make_box<obj::array<jank::i8>>((jank::i64)out.size()));
+    std::memcpy(a->data.data, out.data(), out.size());
+    return a;
+  }
+}
+")
+
+;; --- the head's parsing and the body conventions (adapters/http/socket's, over eve.encoding) ---
+
+(defn- digits->long [s] (reduce (fn [a c] (+ (* a 10) (- (int c) 48))) 0 s))
+
+(defn- parse-url
+  "{:host :port :path} of an http:// URL, or nil"
+  [url]
+  ;; the scheme matched case-insensitively by character classes: jank's regex parser rejects the
+  ;; inline (?i) flag (seam 8, F-7). jank's re-matches answers an unmatched group as "" (measured,
+  ;; eve.encoding), not nil, so an absent port or path is tested by emptiness, not nil.
+  (when-let [[_ host port path] (re-matches #"[hH][tT][tT][pP]://([^/:?#]+)(?::(\d+))?([/?].*)?" (str url))]
+    {:host host :port (if (seq port) (digits->long port) 80)
+     :path (cond (empty? path) "/" (str/starts-with? path "?") (str "/" path) :else path)}))
+
+(defn- byte-at [a i] (bit-and (clojure.core/aget a i) 0xFF))
+
+(defn- head-end
+  "the index just past the CRLF CRLF that ends the head, or nil"
+  [a]
+  (let [n (clojure.core/alength a)]
+    (loop [i 0]
+      (cond (> (+ i 4) n) nil
+            (and (= 13 (byte-at a i)) (= 10 (byte-at a (+ i 1))) (= 13 (byte-at a (+ i 2))) (= 10 (byte-at a (+ i 3))))
+            (+ i 4)
+            :else (recur (inc i))))))
+
+(defn- line-end
+  "the index of the CRLF at or after i, or nil"
+  [a i]
+  (let [n (clojure.core/alength a)]
+    (loop [i i] (cond (>= (inc i) n) nil (and (= 13 (byte-at a i)) (= 10 (byte-at a (inc i)))) i :else (recur (inc i))))))
+
+(defn- hex-digit [c]
+  (cond (<= 48 (int c) 57) (- (int c) 48)
+        (<= 97 (int c) 102) (+ 10 (- (int c) 97))
+        (<= 65 (int c) 70) (+ 10 (- (int c) 65))
+        :else -1))
+
+(defn- hex->long [s]
+  (reduce (fn [acc c] (let [d (hex-digit c)] (if (neg? d) (reduced acc) (+ (* acc 16) d)))) 0 (str/trim s)))
+
+(defn- join-bytes
+  "the byte arrays concatenated"
+  [arrays]
+  (let [n (reduce + (map clojure.core/alength arrays))
+        out (clojure.core/byte-array n)]
+    (loop [off 0 as arrays]
+      (if (seq as)
+        (do (enc/arraycopy (first as) 0 out off (clojure.core/alength (first as)))
+            (recur (+ off (clojure.core/alength (first as))) (rest as)))
+        out))))
+
+(defn- dechunk
+  "the body of a chunked transfer: each chunk's bytes joined, its size line and trailers dropped"
+  [a start]
+  (let [parts (atom [])]
+    (loop [i start]
+      (if-let [le (line-end a i)]
+        (let [size (hex->long (enc/utf8-string a i (- le i)))]
+          (if (pos? size)
+            (do (swap! parts conj (enc/copy-of-range a (+ le 2) (+ le 2 size)))
+                (recur (+ le 2 size 2)))
+            (join-bytes @parts)))
+        (join-bytes @parts)))))
+
+(defn- answer [raw as]
+  (let [he (or (head-end raw) (throw (ex-info "http: no end to the response's head" {})))
+        lines (str/split (enc/utf8-string raw 0 (- he 4)) #"\r\n")
+        status (digits->long (second (str/split (first lines) #" ")))
+        headers (into {} (keep (fn [l] (let [i (str/index-of l ":")]
+                                         (when i [(str/lower-case (str/trim (subs l 0 i))) (str/trim (subs l (inc i)))])))
+                               (rest lines)))
+        body (if (= "chunked" (some-> (get headers "transfer-encoding") str/lower-case))
+               (dechunk raw he)
+               (let [cl (get headers "content-length")
+                     end (if cl (min (clojure.core/alength raw) (+ he (digits->long cl))) (clojure.core/alength raw))]
+                 (enc/copy-of-range raw he end)))]
+    {:status status
+     :headers headers
+     :body (case as
+             :b64 (cpp/eve_http.b64_encode body)
+             :bytes body
+             (enc/utf8-string body 0 (clojure.core/alength body)))}))
+
+(defn request
+  [{:keys [method url headers body as body-as]}]
+  (if-let [{:keys [host port path]} (parse-url url)]
+    (let [payload (cond (nil? body) nil
+                        (= :bytes body-as) body
+                        (= :b64 body-as) (cpp/eve_http.b64_decode body)
+                        :else (enc/utf8-bytes body))
+          head (str (or method "GET") " " path " HTTP/1.1\r\n"
+                    "Host: " host (when (not= 80 port) (str ":" port)) "\r\n"
+                    "Connection: close\r\n"
+                    (when (or payload (#{"POST" "PUT" "PATCH"} (or method "GET")))
+                      (str "Content-Length: " (if payload (clojure.core/alength payload) 0) "\r\n"))
+                    (apply str (keep (fn [[k v]]
+                                       (let [k (name k)]
+                                         (when-not (#{"host" "connection" "content-length"} (str/lower-case k))
+                                           (str k ": " v "\r\n"))))
+                                     headers))
+                    "\r\n")
+          req-bytes (join-bytes (if payload [(enc/utf8-bytes head) payload] [(enc/utf8-bytes head)]))
+          raw (cpp/eve_http.fetch host (long port) req-bytes)]
+      (if raw
+        (try (answer raw as)
+             (catch jank.runtime.object_ref e {:error (or (ex-message e) (str e))}))
+        {:error (cpp/eve_http.last_error)}))
+    {:error (str "eve.http over C sockets: http:// only, not " url)}))
+
+(defn request-all
+  "every request in turn"
+  [reqs]
+  (mapv request reqs))
+
+(defn platform [] {:request request :request-all request-all})

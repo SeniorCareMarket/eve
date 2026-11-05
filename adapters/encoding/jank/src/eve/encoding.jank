@@ -1,0 +1,508 @@
+(ns eve.encoding
+  "eve's encoding primitives (HOST-CONTRACT §3-4) on jank: UTF-8, IEEE-754 bits, the host's numbers, instants,
+   uuids, exceptions, map entries, small caches, typed arrays — and the network atom's (a string's UTF-16 units, the
+   string of code points). What is a byte loop is C++ here (cpp/raw, called as cpp/eve_enc.<fn>) over jank's own
+   arrays (obj::array<T>: a byte array is u8 — a byte reads back 0..255, as on let-go — a short array i16, an int
+   array i32, a float array f32, a double array f64; measured on jank 0.1-alpha). jank's string is UTF-8 (its count
+   is in bytes; its seq code points), its instant jank's own (read and printed as 2024-01-02T03:04:05.678-00:00: a
+   trailing Z is refused by its reader, 0.1), its uuid jank's own.
+
+   The exceptions are ex-infos carrying :eve/exception (jank's catch takes a C++ type: jank.runtime.object_ref is
+   every thrown value)."
+  (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                            long class double bytes])
+  (:require [clojure.string]
+            [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                              long class double bytes]]))
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <cstdio>
+#include <ctime>
+#include <limits>
+#include <string>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/rtti.hpp>
+#include <jank/runtime/obj/nil.hpp>
+#include <jank/runtime/obj/array.hpp>
+#include <jank/runtime/obj/inst.hpp>
+#include <jank/runtime/obj/ratio.hpp>
+#include <jank/runtime/obj/persistent_string.hpp>
+namespace eve_enc {
+  using namespace jank::runtime;
+  /* every array<T> lays element_type, size and data out the same: read through the u8 instantiation */
+  static obj::array<jank::u8> *A(object_ref o) { return static_cast<obj::array<jank::u8> *>(o.ptr()); }
+  static jank::u8 *B(object_ref o) { return A(o)->data.data; }
+  long elem_type(object_ref o) { return o.get_type() == object_type::array ? (long)A(o)->element_type : -1; }
+  long u8_code() { return (long)array_element_type::u8; }
+  long elem_size(object_ref o) {
+    switch(A(o)->element_type) {
+      case array_element_type::boolean: case array_element_type::character:
+      case array_element_type::u8: case array_element_type::i8: return 1;
+      case array_element_type::u16: case array_element_type::i16: return 2;
+      case array_element_type::u32: case array_element_type::i32: case array_element_type::f32: return 4;
+      case array_element_type::u64: case array_element_type::i64: case array_element_type::f64: return 8;
+      case array_element_type::object: return sizeof(object_ref);
+    }
+    return 1;
+  }
+  long alen(object_ref o) { return (long)A(o)->size; }
+  /* strings */
+  object_ref utf8_bytes(object_ref s) {
+    auto const &d(expect_object<obj::persistent_string>(s)->data);
+    auto out(make_box<obj::array<jank::i8>>((jank::i64)d.size()));
+    std::memcpy(out->data.data, d.data(), d.size());
+    return out;
+  }
+  object_ref utf8_string(object_ref b, long off, long len) {
+    return make_box<obj::persistent_string>(jtl::immutable_string(reinterpret_cast<char const *>(B(b) + off), (jtl::immutable_string::size_type)len));
+  }
+  /* IEEE-754 */
+  double long_bits_to_double(long x) { int64_t i = x; double d; std::memcpy(&d, &i, 8); return d; }
+  long double_to_long_bits(double d) { int64_t i; std::memcpy(&i, &d, 8); return (long)i; }
+  double read_f32_le(object_ref b, long off) { float f; std::memcpy(&f, B(b) + off, 4); return (double)f; }
+  double read_f64_le(object_ref b, long off) { double d; std::memcpy(&d, B(b) + off, 8); return d; }
+  object_ref f32_le_bytes(double v) { float f = (float)v; auto out(make_box<obj::array<jank::i8>>((jank::i64)4)); std::memcpy(out->data.data, &f, 4); return out; }
+  object_ref f64_le_bytes(double v) { auto out(make_box<obj::array<jank::i8>>((jank::i64)8)); std::memcpy(out->data.data, &v, 8); return out; }
+  /* bytes */
+  bool bytes_equal(object_ref a, object_ref b) {
+    if(A(a)->size != A(b)->size) return false;
+    return std::memcmp(B(a), B(b), A(a)->size) == 0;
+  }
+  void arraycopy(object_ref src, long soff, object_ref dst, long doff, long len) {
+    if(A(src)->element_type == array_element_type::object) {
+      auto *s = reinterpret_cast<object_ref *>(B(src)); auto *d = reinterpret_cast<object_ref *>(B(dst));
+      if(d + doff < s + soff) for(long i = 0; i < len; ++i) d[doff + i] = s[soff + i];
+      else for(long i = len - 1; i >= 0; --i) d[doff + i] = s[soff + i];
+      return;
+    }
+    long es = elem_size(src);
+    std::memmove(B(dst) + doff * es, B(src) + soff * es, (size_t)(len * es));
+  }
+  /* typed arrays as little-endian bytes and back (x86-64 is little-endian: a copy) */
+  object_ref array_bytes_le(object_ref a) {
+    long n = alen(a) * elem_size(a);
+    auto out(make_box<obj::array<jank::i8>>((jank::i64)n));
+    std::memcpy(out->data.data, B(a), (size_t)n);
+    return out;
+  }
+  object_ref f64s_le(object_ref b, long off, long n) {
+    auto out(make_box<obj::array<jank::f64>>((jank::i64)n)); std::memcpy(out->data.data, B(b) + off, (size_t)n * 8); return out;
+  }
+  object_ref i32s_le(object_ref b, long off, long n) {
+    auto out(make_box<obj::array<jank::i32>>((jank::i64)n)); std::memcpy(out->data.data, B(b) + off, (size_t)n * 4); return out;
+  }
+  /* instants: jank's inst from milliseconds, through the text its reader takes */
+  object_ref make_inst(long ms) {
+    time_t s = ms / 1000; long frac = ms % 1000; if(frac < 0) { frac += 1000; s -= 1; }
+    struct tm t; gmtime_r(&s, &t);
+    char buf[48];
+    std::snprintf(buf, sizeof buf, \"%04d-%02d-%02dT%02d:%02d:%02d.%03ld-00:00\", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, frac);
+    return make_box<obj::inst>(jtl::immutable_string(static_cast<char const *>(buf), std::strlen(buf)));
+  }
+  long addr(object_ref o) { return (long)reinterpret_cast<uintptr_t>(o.ptr()); }
+  /* jank's ratio from its two parts: a runtime (/ 1 2) divides as integers on jank 0.1 (0: measured) */
+  object_ref make_ratio(long n, long d) { return make_box(obj::ratio_data{ (jank::i64)n, (jank::i64)d }); }
+  /* a big integer's minimal two's-complement bytes (big-endian) and back, over jank's own cpp_int: jank's quot of a
+     big integer past 2^53 is off by one (it goes through a double: measured, J2), so the digit loop is C++ here */
+  object_ref big_to_twos(object_ref o) {
+    jank::native_big_integer v = expect_object<obj::big_integer>(o)->data;
+    bool neg = v < 0;
+    std::vector<unsigned char> out;
+    jank::native_big_integer x = v;
+    while(true) {
+      jank::native_big_integer r = x % 256;
+      if(r < 0) r += 256;
+      unsigned char b = (unsigned char)r.convert_to<int>();
+      x = (x - b) / 256;
+      out.push_back(b);
+      if((!neg && x == 0 && b < 128) || (neg && x == -1 && b >= 128)) break;
+    }
+    object_ref r = make_box<obj::persistent_vector>();
+    for(auto it = out.rbegin(); it != out.rend(); ++it) r = conj(r, make_box((jank::i64)*it));
+    return r;
+  }
+  object_ref twos_to_big(object_ref bs) {
+    jank::native_big_integer u = 0; long n = 0; unsigned char first = 0;
+    long len = (long)sequence_length(bs);
+    for(n = 0; n < len; ++n) {
+      unsigned char b = (unsigned char)to_int(nth(bs, make_box((jank::i64)n)));
+      if(n == 0) first = b;
+      u = u * 256 + b;
+    }
+    if(n > 0 && first >= 128) { jank::native_big_integer m = 1; for(long i = 0; i < n; ++i) m *= 256; u -= m; }
+    /* a value that fits is jank's own integer (a ratio is made of two by /: jank's / of big integers throws) */
+    if(u >= std::numeric_limits<jank::i64>::min() && u <= std::numeric_limits<jank::i64>::max()) return make_box((jank::i64)u.convert_to<jank::i64>());
+    return make_box<obj::big_integer>(u);
+  }
+}
+")
+
+(defn- host-exception [kind msg] (ex-info (str msg) {:eve/exception kind}))
+
+(defn throw-index-out-of-bounds
+  "Throw an index-out-of-bounds error."
+  [msg]
+  (throw (host-exception :index-out-of-bounds msg)))
+
+(defn throw-unsupported
+  "Throw an unsupported-operation error."
+  []
+  (throw (host-exception :unsupported "unsupported")))
+
+(defn unsupported
+  "The host's unsupported-operation exception, with message msg."
+  [msg]
+  (host-exception :unsupported msg))
+
+(defn map-entry
+  "A map entry [k v] (what seq on a map answers), on every host — a vector of two on jank, as its own entries are."
+  [k v]
+  [k v])
+
+(defn arraycopy
+  "Copy len elements of array src from soff to dst at doff."
+  [src soff dst doff len]
+  (cpp/eve_enc.arraycopy src (long soff) dst (long doff) (long len)))
+
+(defn copy-of-range
+  "A new byte array of b's bytes [from, to)."
+  [b from to]
+  (let [n (- to from) out (clojure.core/byte-array n)]
+    (arraycopy b from out 0 n)
+    out))
+
+(defn utf8-bytes
+  "The UTF-8 bytes of string s."
+  [s]
+  (cpp/eve_enc.utf8_bytes s))
+
+(defn utf8-string
+  "The string len UTF-8 bytes of b encode, from off."
+  [b off len]
+  (cpp/eve_enc.utf8_string b (long off) (long len)))
+
+(defn long-bits->double
+  "The double whose IEEE-754 bits are x."
+  [x]
+  (cpp/eve_enc.long_bits_to_double (long x)))
+
+(defn double->long-bits
+  "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
+  [d]
+  (cpp/eve_enc.double_to_long_bits (clojure.core/double d)))
+
+(defn fixed-integer?
+  "An integer of a fixed-width host type — jank's 64-bit integers (small_integer, integer), the ones eve's format
+   carries as INT32 or INT64. A big integer is not one: the format has no tag for it."
+  [v]
+  (int? v))
+
+(defn floating?
+  "A floating-point number (FLOAT64)."
+  [v]
+  (float? v))
+
+(defn big-integer?
+  "An integer of an arbitrary-precision type (jank's big_integer): eve.codec writes it by its magnitude — INT32 or
+   INT64 when it fits, else BIGINT."
+  [v]
+  (= "big_integer" (clojure.core/type v)))
+
+(defn integer->twos
+  "Integer n's minimal two's-complement bytes, big-endian, as a vector of 0..255 (a big integer's in C++ over its
+   cpp_int; a fixed integer's by arithmetic: floor mod and exact quotient)."
+  [n]
+  (if (big-integer? n)
+    (cpp/eve_enc.big_to_twos n)
+    (loop [x n acc ()]
+    (let [b (clojure.core/long (mod x 256))
+          x (quot (-' x b) 256)]
+      (if (or (and (zero? x) (< b 128)) (and (= -1 x) (>= b 128)))
+        (vec (cons b acc))
+        (recur x (cons b acc)))))))
+
+(defn twos->integer
+  "The integer whose minimal two's-complement big-endian bytes are bs (0..255 each): jank's integer when it fits,
+   else its big integer — built in C++ over its cpp_int."
+  [bs]
+  (cpp/eve_enc.twos_to_big (vec bs)))
+
+(defn ratio? "A ratio (RATIO)." [v] (= "ratio" (clojure.core/type v)))
+
+(defn ratio-parts
+  "[numerator denominator] of a ratio: lowest terms, the denominator positive."
+  [r]
+  [(numerator r) (denominator r)])
+
+(defn make-ratio
+  "The ratio n/d (n, d integers in lowest terms, d > 1): jank's ratio built from its two parts in C++ (a runtime
+   (/ 1 2) on jank 0.1 divides as integers, 0; its / of two big integers throws: measured). The parts fit in 64 bits
+   (jank's ratio holds two)."
+  [n d]
+  (cpp/eve_enc.make_ratio (clojure.core/long n) (clojure.core/long d)))
+
+(defn bigdec? "An arbitrary-precision decimal (BIGDEC)." [v] (= "big_decimal" (clojure.core/type v)))
+
+(defn bigdec-parts
+  "[unscaled scale] of decimal d in its canonical form: trailing zeros stripped down to scale 0 (so (= 1.5M 1.50M)
+   has one form), never a negative scale — read from its text (as glojure's)."
+  [d]
+  (let [[_ sign ip fp ex] (re-matches #"([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?" (str d))
+        ;; jank's re-matches answers an unmatched group as "" (measured), not nil
+        fp (or fp "")
+        scale (- (count fp) (if (seq ex) (parse-long (clojure.string/replace ex "+" "")) 0))
+        u (bigint (str (if (= sign "-") "-" "") (if (= "" (str ip fp)) "0" (str ip fp))))]
+    (loop [u u scale scale]
+      (cond (neg? scale) [(*' u (reduce *' 1N (repeat (- scale) 10))) 0]
+            (and (pos? scale) (zero? (mod u 10))) (recur (quot u 10) (dec scale))
+            :else [u scale]))))
+
+(defn make-bigdec
+  "The decimal unscaled × 10^-scale."
+  [unscaled scale]
+  (let [u (bigint unscaled) neg (neg? u) digits (str (if neg (-' u) u))
+        k (clojure.core/long scale)
+        digits (if (<= (count digits) k) (str (apply str (repeat (- (inc k) (count digits)) "0")) digits) digits)
+        ip (subs digits 0 (- (count digits) k)) fp (subs digits (- (count digits) k))]
+    (bigdec (str (if neg "-" "") ip (when (pos? k) (str "." fp))))))
+
+(defn date?
+  "The host's instant type, the one eve's DATE tag reads back as (jank's inst)."
+  [v]
+  (inst? v))
+
+(defn date-ms
+  "Milliseconds since the Unix epoch of a date."
+  [d]
+  (inst-ms d))
+
+(defn ms->date
+  "The host's instant at ms milliseconds since the Unix epoch (UTC)."
+  [ms]
+  (cpp/eve_enc.make_inst (long ms)))
+
+(def ^:private hex-chars "0123456789abcdef")
+
+(defn- hex-digit [c]
+  (let [i (clojure.core/int c)]
+    (cond (and (>= i 48) (<= i 57)) (- i 48)
+          (and (>= i 97) (<= i 102)) (- i 87)
+          (and (>= i 65) (<= i 70)) (- i 55)
+          :else -1)))
+
+(defn uuid->bytes!
+  "Write uuid u's 16 bytes, big-endian (network order), into b at off."
+  [u b off]
+  (let [hex (clojure.string/replace (str u) "-" "")]
+    (dotimes [i 16]
+      (aset b (+ off i) (+ (* 16 (hex-digit (nth hex (* 2 i)))) (hex-digit (nth hex (inc (* 2 i)))))))))
+
+(defn bytes->uuid
+  "The uuid whose 16 big-endian bytes are at off in b (jank's uuid, the type #uuid reads as)."
+  [b off]
+  (let [hex (apply str (for [i (range 16) :let [x (bit-and (clojure.core/long (aget b (+ off i))) 0xFF)]]
+                         (str (nth hex-chars (quot x 16)) (nth hex-chars (mod x 16)))))]
+    (parse-uuid (str (subs hex 0 8) "-" (subs hex 8 12) "-" (subs hex 12 16) "-" (subs hex 16 20) "-" (subs hex 20)))))
+
+(defn utf16-units
+  "The UTF-16 code units of string s, as integers (a jank string is UTF-8 and its seq is code points: one past
+   U+FFFF is two units, a surrogate pair)."
+  [s]
+  (vec (mapcat (fn [c]
+                 (let [cp (clojure.core/int c)]
+                   (if (< cp 0x10000)
+                     [cp]
+                     (let [v (- cp 0x10000)]
+                       [(+ 0xD800 (bit-shift-right v 10)) (+ 0xDC00 (bit-and v 0x3FF))]))))
+               (seq s))))
+
+(defn host-char?
+  "A character of the host's own char type (jank's character, a code point)."
+  [v]
+  (char? v))
+
+(defn host-array?
+  "A host array (one of jank's arrays)."
+  [v]
+  (= "array" (clojure.core/type v)))
+
+(defn new-cache
+  "A concurrent map for small caches (cache-get / cache-put!): an atom of a map."
+  []
+  (clojure.core/atom {}))
+
+(defn cache-get [c k]
+  (get @c k))
+
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (swap! c (fn [m] (assoc (if (> (count m) max) {} m) k v)))
+  v)
+
+(defn bytes=
+  "Two byte arrays equal, byte for byte."
+  [a b]
+  (cpp/eve_enc.bytes_equal a b))
+
+(defn illegal-argument
+  "The host's illegal-argument exception, with message msg."
+  [msg]
+  (host-exception :illegal-argument msg))
+
+(defn index-out-of-bounds
+  "The host's index-out-of-bounds exception, with message msg."
+  [msg]
+  (host-exception :index-out-of-bounds msg))
+
+(defn read-f32-le
+  "The float32 at byte off of b (little-endian), as a double."
+  [b off]
+  (cpp/eve_enc.read_f32_le b (long off)))
+
+(defn read-f64-le
+  "The float64 at byte off of b (little-endian)."
+  [b off]
+  (cpp/eve_enc.read_f64_le b (long off)))
+
+(defn f32-le-bytes
+  "The 4 little-endian bytes of v as a float32."
+  [v]
+  (cpp/eve_enc.f32_le_bytes (clojure.core/double v)))
+
+(defn f64-le-bytes
+  "The 8 little-endian bytes of v as a float64."
+  [v]
+  (cpp/eve_enc.f64_le_bytes (clojure.core/double v)))
+
+(defn make-bytes
+  "n zeroed bytes (the host's byte array, as eve's codec holds bytes)."
+  [n]
+  (clojure.core/byte-array (long n)))
+
+(defn bytes-of
+  "The bytes xs (each 0..255, or its signed byte), as a byte array."
+  [xs]
+  (clojure.core/byte-array (map (fn [x] (unchecked-byte (clojure.core/long x))) xs)))
+
+(defn bytes-copy
+  "A copy of byte array b, in b's own representation."
+  [b]
+  (clojure.core/aclone b))
+
+(defn map-hash-code
+  "The host's object hash of a map m (java.util.Map's: the sum of each entry's key hash xor value hash, as an int)."
+  [m]
+  (reduce (fn [h [k v]] (unchecked-int (+ h (bit-xor (hash k) (hash v))))) 0 m))
+
+(defn string-writer
+  "A writer a printer writes to (write!): an atom holding the text so far; (str w) is not it — deref it."
+  []
+  (clojure.core/atom ""))
+
+(defn write!
+  "Write s (str of it) to writer w: a string-writer (an atom), or the host's *out* (jank's stdout box)."
+  [w s]
+  (if (= "atom" (clojure.core/type w))
+    (swap! w str s)
+    (binding [*out* w] (print (str s))))
+  nil)
+
+(defn f64s-le
+  "The n float64s little-endian in b from byte off, as the host's double array."
+  [b off n]
+  (cpp/eve_enc.f64s_le b (long off) (long n)))
+
+(defn i32s-le
+  "The n int32s little-endian in b from byte off, as the host's int array."
+  [b off n]
+  (cpp/eve_enc.i32s_le b (long off) (long n)))
+
+(defn f64s->bytes-le
+  "The little-endian bytes of the doubles in da (the host's double array), 8 each."
+  [da]
+  (cpp/eve_enc.array_bytes_le da))
+
+(defn i32s->bytes-le
+  "The little-endian bytes of the ints in ia (the host's int array), 4 each."
+  [ia]
+  (cpp/eve_enc.array_bytes_le ia))
+
+;; jank's array_element_type codes (object.hpp): u8, then i8 u16 i16 u32 i32 u64 i64 f32 f64 object — u8's code read
+;; from the enum itself (the byte-array the completion re-roots makes i8 arrays: measured, int-array 78 = u8 + 5)
+(def ^:private u8-code (cpp/eve_enc.u8_code))
+
+(defn- elem-kind
+  "The element kind of a host array: :u8 :i16 :i32 :f32 :f64 :object, nil for another."
+  [a]
+  (let [t (cpp/eve_enc.elem_type a)]
+    (when (>= t 0)
+      (case (- t u8-code) 0 :u8 1 :i8 2 :u16 3 :i16 4 :u32 5 :i32 6 :u64 7 :i64 8 :f32 9 :f64 10 :object nil))))
+
+(defn array-subtype+bytes
+  "[subtype little-endian-bytes] of a host typed array — eve.array's subtype codes: int8 2, int16 4, int32 6,
+   float32 8, float64 9 — nil for any other value."
+  [a]
+  (when (host-array? a)
+    (case (elem-kind a)
+      :i32 [6 (cpp/eve_enc.array_bytes_le a)]
+      :f64 [9 (cpp/eve_enc.array_bytes_le a)]
+      :f32 [8 (cpp/eve_enc.array_bytes_le a)]
+      :i16 [4 (cpp/eve_enc.array_bytes_le a)]
+      (:u8 :i8) [2 a]
+      nil)))
+
+;; The host's own typed arrays, which a fresh eve array is on a host that has them (eve.array's heap arrays): jank's
+
+(defn typed-array
+  "n zeroed elements of eve.array subtype code as the host's typed array: a byte array for the 8-bit subtypes, a short
+   array for the 16-bit, an int array for the 32-bit integers, a float array, a double array."
+  [subtype n]
+  (case (clojure.core/long subtype)
+    (1 2 3) (clojure.core/byte-array (long n))
+    (4 5)   (clojure.core/short-array (long n))
+    (6 7)   (clojure.core/int-array (long n))
+    8       (clojure.core/float-array (long n))
+    9       (clojure.core/double-array (long n))))
+
+(defn typed-aget
+  "Element i of typed array a of subtype code, as eve.array reads it (an unsigned subtype's value from its
+   two's-complement bits; a jank byte reads back 0..255 already)."
+  [a subtype i]
+  (case (clojure.core/long subtype)
+    (1 3) (bit-and (clojure.core/long (clojure.core/aget a i)) 0xFF)
+    2     (clojure.core/long (clojure.core/aget a i))
+    4     (clojure.core/long (clojure.core/aget a i))
+    5     (bit-and (clojure.core/long (clojure.core/aget a i)) 0xFFFF)
+    6     (clojure.core/long (clojure.core/aget a i))
+    7     (bit-and (clojure.core/long (clojure.core/aget a i)) 0xFFFFFFFF)
+    8     (clojure.core/double (clojure.core/aget a i))
+    9     (clojure.core/double (clojure.core/aget a i))))
+
+(defn typed-aset!
+  "Write v as element i of typed array a of subtype code (an unsigned value as its two's-complement bits: jank's
+   arrays take the low bits). Answers v."
+  [a subtype i v]
+  (case (clojure.core/long subtype)
+    (1 2 3) (clojure.core/aset a i (unchecked-byte (clojure.core/long v)))
+    (4 5)   (clojure.core/aset a i (bit-and (clojure.core/long v) 0xFFFF))
+    (6 7)   (clojure.core/aset a i (unchecked-int (clojure.core/long v)))
+    8       (clojure.core/aset a i (clojure.core/double v))
+    9       (clojure.core/aset a i (clojure.core/double v)))
+  v)
+
+(defn code-points->string
+  "The string of a sequence of Unicode code points (a jank character is one code point)."
+  [cps]
+  (apply str (map char cps)))
+
+;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
+;; nil on this host (the network atom's subset): the portable implementations answer.
+(def bytes->b64 nil)
+(def b64->bytes nil)
+(def bytes->hex nil)
+(def hex->bytes nil)
