@@ -1,0 +1,61 @@
+=== env === 21.0.12.1 cores 4 load 1.2314453125
+=== checksums (each group's read under both arms, fixed keys) ===
+harness floor: (identity x)              EQUAL [1 1]
+direct get, 100-map (rand kw)            EQUAL [42 42]
+direct get, 1k-map (rand int)            EQUAL [420 420]
+vec nth, 1k-vec, direct (rand)           EQUAL [420 420]
+guard (get @a k), 100, extent/op         EQUAL [42 42]
+guard (get @a k), 100, in open extent    EQUAL [42 42]
+guard (get @a k), 1k, extent/op          EQUAL [420 420]
+guard (get @a k), 10k, extent/op         EQUAL [4200 4200]
+guard @a alone, 100                      EQUAL [100 100]
+anatomy: portable-hash-bytes, 6 B        EQUAL [-1536243316 -1536243316]
+anatomy: node-u8 (node type)             EQUAL [1 1]
+anatomy: node-i32, unaligned             EQUAL [505413632 505413632]
+anatomy: node-i32, aligned               EQUAL [-2143027198 -2143027198]
+anatomy: hamt-get-bytes walk, :k42       EQUAL [[-18 -37 3 42 0 0 0] [-18 -37 3 42 0 0 0]]
+all groups equal: true
+=== timing: per-round min ns/op, 5 interleaved rounds; bytes/op (last round) === (14 s)
+harness floor: (identity x)              step2  ["41.1 ns" "40.9 ns" "38.4 ns" "39.0 ns" "39.0 ns"]        0 B
+harness floor: (identity x)              step3  ["41.0 ns" "40.1 ns" "40.1 ns" "40.1 ns" "38.4 ns"]        0 B
+direct get, 100-map (rand kw)            step2  ["1.10 µs" "1.08 µs" "1.08 µs" "1.05 µs" "1.03 µs"]        2.8 KB
+direct get, 100-map (rand kw)            step3  ["425.2 ns" "450.3 ns" "421.1 ns" "399.5 ns" "398.7 ns"]   72 B
+direct get, 1k-map (rand int)            step2  ["1.27 µs" "1.26 µs" "1.24 µs" "1.20 µs" "1.26 µs"]        3.9 KB
+direct get, 1k-map (rand int)            step3  ["453.2 ns" "423.3 ns" "408.0 ns" "413.9 ns" "452.6 ns"]   134 B
+vec nth, 1k-vec, direct (rand)           step2  ["425.7 ns" "488.8 ns" "416.8 ns" "447.6 ns" "421.8 ns"]   1.5 KB
+vec nth, 1k-vec, direct (rand)           step3  ["222.3 ns" "230.2 ns" "226.8 ns" "226.2 ns" "220.4 ns"]   293 B
+guard (get @a k), 100, extent/op         step2  ["2.80 µs" "2.62 µs" "2.60 µs" "2.48 µs" "2.93 µs"]        4.9 KB
+guard (get @a k), 100, extent/op         step3  ["2.17 µs" "1.98 µs" "1.96 µs" "2.18 µs" "1.91 µs"]        2.1 KB
+guard (get @a k), 100, in open extent    step2  ["1.53 µs" "1.55 µs" "1.69 µs" "1.48 µs" "1.45 µs"]        3.2 KB
+guard (get @a k), 100, in open extent    step3  ["781.1 ns" "680.9 ns" "850.2 ns" "795.0 ns" "717.0 ns"]   456 B
+guard (get @a k), 1k, extent/op          step2  ["2.78 µs" "2.51 µs" "3.08 µs" "2.71 µs" "2.87 µs"]        5.9 KB
+guard (get @a k), 1k, extent/op          step3  ["1.95 µs" "1.94 µs" "2.38 µs" "2.00 µs" "1.94 µs"]        2.2 KB
+guard (get @a k), 10k, extent/op         step2  ["3.14 µs" "3.21 µs" "3.64 µs" "3.36 µs" "3.25 µs"]        6.4 KB
+guard (get @a k), 10k, extent/op         step3  ["2.00 µs" "2.11 µs" "2.08 µs" "1.93 µs" "2.16 µs"]        2.2 KB
+guard @a alone, 100                      step2  ["1.39 µs" "1.47 µs" "1.33 µs" "1.34 µs" "1.30 µs"]        2.0 KB
+guard @a alone, 100                      step3  ["1.34 µs" "1.28 µs" "1.31 µs" "1.31 µs" "1.29 µs"]        2.0 KB
+anatomy: portable-hash-bytes, 6 B        step2  ["260.2 ns" "241.4 ns" "251.7 ns" "244.3 ns" "249.7 ns"]   552 B
+anatomy: portable-hash-bytes, 6 B        step3  ["58.5 ns" "55.6 ns" "57.8 ns" "54.9 ns" "74.5 ns"]        24 B
+anatomy: node-u8 (node type)             step2  ["57.9 ns" "56.1 ns" "57.6 ns" "53.7 ns" "54.1 ns"]        72 B
+anatomy: node-u8 (node type)             step3  ["48.4 ns" "46.6 ns" "46.8 ns" "44.5 ns" "47.1 ns"]        0 B
+anatomy: node-i32, unaligned             step2  ["63.4 ns" "57.0 ns" "56.4 ns" "61.2 ns" "57.7 ns"]        128 B
+anatomy: node-i32, unaligned             step3  ["48.2 ns" "49.5 ns" "50.2 ns" "45.2 ns" "45.1 ns"]        24 B
+anatomy: node-i32, aligned               step2  ["65.5 ns" "67.4 ns" "63.9 ns" "63.8 ns" "61.7 ns"]        168 B
+anatomy: node-i32, aligned               step3  ["53.1 ns" "49.4 ns" "44.9 ns" "48.5 ns" "51.7 ns"]        24 B
+anatomy: hamt-get-bytes walk, :k42       step2  ["742.8 ns" "703.7 ns" "699.7 ns" "729.2 ns" "723.3 ns"]   2.2 KB
+anatomy: hamt-get-bytes walk, :k42       step3  ["239.2 ns" "242.6 ns" "220.1 ns" "240.8 ns" "236.0 ns"]   72 B
+=== ratio step2/step3 (median of rounds) ===
+harness floor: (identity x)              39.0 ns -> 40.1 ns  (0.97x)
+direct get, 100-map (rand kw)            1.08 µs -> 421.1 ns  (2.55x)
+direct get, 1k-map (rand int)            1.26 µs -> 423.3 ns  (2.98x)
+vec nth, 1k-vec, direct (rand)           425.7 ns -> 226.2 ns  (1.88x)
+guard (get @a k), 100, extent/op         2.62 µs -> 1.98 µs  (1.32x)
+guard (get @a k), 100, in open extent    1.53 µs -> 781.1 ns  (1.96x)
+guard (get @a k), 1k, extent/op          2.78 µs -> 1.95 µs  (1.43x)
+guard (get @a k), 10k, extent/op         3.25 µs -> 2.08 µs  (1.56x)
+guard @a alone, 100                      1.34 µs -> 1.31 µs  (1.03x)
+anatomy: portable-hash-bytes, 6 B        249.7 ns -> 57.8 ns  (4.32x)
+anatomy: node-u8 (node type)             56.1 ns -> 46.8 ns  (1.20x)
+anatomy: node-i32, unaligned             57.7 ns -> 48.2 ns  (1.20x)
+anatomy: node-i32, aligned               63.9 ns -> 49.4 ns  (1.30x)
+anatomy: hamt-get-bytes walk, :k42       723.3 ns -> 239.2 ns  (3.02x)
