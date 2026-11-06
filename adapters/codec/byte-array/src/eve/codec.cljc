@@ -78,8 +78,8 @@
 
 
 ;; --- OBJ-7: Keyword serialization cache ---
-;; keyword → bytes, mirroring CLJS kw-ser-cache (a ConcurrentHashMap on the
-;; JVM, enc/new-cache). Emptied when it passes KW_CACHE_MAX.
+;; keyword → bytes, mirroring CLJS kw-ser-cache (a thread-safe host map on
+;; the JVM, enc/new-cache). Emptied when it passes KW_CACHE_MAX.
 
 (def ^:private kw-encode-cache (enc/new-cache))
 

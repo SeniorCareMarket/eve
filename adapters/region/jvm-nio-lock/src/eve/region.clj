@@ -83,7 +83,7 @@
 (deftype BbMmapRegion [^MappedByteBuffer mbb ^long size
                        ^FileChannel chan
                        path
-                       ^java.util.concurrent.locks.ReentrantLock in-process]
+                       ^Object in-process]
   mem/IMemRegion
   (-byte-length [_] size)
 
@@ -179,16 +179,19 @@
     (when-not chan
       (throw (ex-info "BbMmapRegion: not opened :lockable? — no channel for the file lock"
                       {:byte-off byte-off})))
-    (.lock in-process)
-    (try
+    ;; An Object monitor (locking), as BbHeapRegion below locks: bb
+    ;; 1.3.190's analyzer cannot resolve java.util.concurrent.locks.
+    ;; ReentrantLock. -with-file-lock has exactly one call site (eve.atom's
+    ;; exclusive hold) and is never re-entered on the same region, so the
+    ;; monitor's non-reentrancy cannot bite.
+    (locking in-process
       (if @lock-close-ok?
         (let [fl (.lock chan (long byte-off) 4 false)]
           ;; .release is not reachable from bb; close releases (measured).
           (try (f) (finally (.close fl))))
         (let [^FileChannel c (FileChannel/open path (into-array OpenOption [StandardOpenOption/READ
                                                                              StandardOpenOption/WRITE]))]
-          (try (.lock c (long byte-off) 4 false) (f) (finally (.close c)))))
-      (finally (.unlock in-process)))))
+          (try (.lock c (long byte-off) 4 false) (f) (finally (.close c))))))))
 
 (defn open-mmap-region
   "Open (or create) a file-backed shared memory region at path-str,
@@ -210,7 +213,7 @@
          ^MappedByteBuffer mbb (.map fc FileChannel$MapMode/READ_WRITE 0 size)]
      (.order mbb ByteOrder/LITTLE_ENDIAN)
      (if (:lockable? opts)
-       (BbMmapRegion. mbb size fc path (java.util.concurrent.locks.ReentrantLock.))
+       (BbMmapRegion. mbb size fc path (Object.))
        (do (.close fc)
            (BbMmapRegion. mbb size nil nil nil))))))
 
