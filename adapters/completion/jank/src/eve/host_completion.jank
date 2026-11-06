@@ -1454,3 +1454,180 @@ namespace eve_host {
 (doseq [sym '[*print-length* *print-level*]]
   (when-not (ns-resolve 'clojure.core sym)
     (intern 'clojure.core (with-meta sym {:dynamic true}) nil)))
+
+;; ---------------------------------------------------------------------------
+;; load of a .cljc whose reader conditionals name :clj (F-JANK-LIBSPEC)
+;; ---------------------------------------------------------------------------
+;; jank's reader features are #{:jank} only (measured: (quote #?(:clj :a :jank :b)) → :b, and
+;; (quote [#?(:cljs cljs.reader :clj clojure.edn) :as edn]) → [:as edn] — an unmatched #? inside a
+;; collection is dropped), so a vanilla .cljc written for the JVM/CLJS pair loses every :clj branch
+;; at read time; in an ns libspec the lib name itself is destroyed and jank core's load-libs throws
+;; "not a libspec: [:as edn]" (DataScript 1.8.1's datascript.core / datascript.query, byte-identical
+;; upstream; contract-test six1-worker-jank3.log). The fix lives here, in the seat's completion:
+;; clojure.core/load is re-rooted so that a module whose loaded source is a .cljc file is read form
+;; by form through the runtime context's read_string with reader features #{:jank :clj} — jank's
+;; own extended-features reader path (first matching branch in form order, :default as fallback,
+;; :cljs never matches) — and evaluated form by form, which threads the ns switch exactly as a
+;; file load does (measured). Every other module delegates to the original load untouched.
+;; The ns form's :import clauses are stripped before eval: jank has no import ("`import` is not
+;; supported in jank", measured); on the JVM an :import only creates hint aliases and there are
+;; no classes here to alias. The port is never edited.
+;; Second wall, same kind (found by the first proof run): the :clj face also requires modules
+;; that exist only as .clj files (datascript.inline — clojure.lang.RT inlining shims;
+;; datascript.pprint — java.io printing) and jank's loader has no .clj module type at all, so
+;; those requires can never resolve here. process-ns-form below drops a :require clause whose
+;; module is .clj-only on this host and un-excludes any referred name clojure.core provides
+;; (datascript.inline/update → clojure.core/update, identical semantics); a module missing
+;; outright keeps its clause and fails honestly.
+
+(cpp/raw "
+#include <jank/runtime/module/loader.hpp>
+#include <jank/runtime/obj/persistent_string.hpp>
+#include <filesystem>
+namespace eve_load {
+  using namespace jank::runtime;
+  /* the source text of the .cljc file the loader would load for module, or nil when the module
+     is not a filesystem .cljc (a .jank/.cpp/baked source, a JAR entry, or not found) */
+  object_ref cljc_source(object_ref const module_name) {
+    auto const name(expect_object<obj::persistent_string>(module_name)->data);
+    auto res = __rt_ctx->module_loader.find(name, module::origin::latest);
+    if(res.is_err()) { return jank_nil; }
+    auto const &fr = res.expect_ok();
+    if(fr.to_load.is_none() || fr.to_load.unwrap() != module::module_type::cljc) { return jank_nil; }
+    if(fr.sources.cljc.is_none()) { return jank_nil; }
+    auto const &entry = fr.sources.cljc.unwrap();
+    if(entry.archive_path.is_some()) { return jank_nil; }
+    auto fv = module::loader::read_file(entry.path);
+    if(fv.is_err()) { return jank_nil; }
+    auto const &view = fv.expect_ok();
+    return make_box<obj::persistent_string>(jtl::immutable_string(view.data(), view.size()));
+  }
+  /* true when the loader has a source it can load for module */
+  object_ref loadable(object_ref const module_name) {
+    auto const name(expect_object<obj::persistent_string>(module_name)->data);
+    auto res = __rt_ctx->module_loader.find(name, module::origin::latest);
+    return make_box(res.is_ok() && res.expect_ok().to_load.is_some());
+  }
+  object_ref runtime_data() { return __rt_ctx->module_loader.to_runtime_data(); }
+  object_ref file_exists(object_ref const path) {
+    auto const p(expect_object<obj::persistent_string>(path)->data);
+    return make_box(std::filesystem::exists(std::filesystem::path{ std::string(p.data(), p.size()) }));
+  }
+}
+")
+
+(require '[clojure.string :as str])
+
+(def ^:private orig-load load)
+(def ^:private clj-feature-opts {:read-cond :allow :features #{:jank :clj}})
+(def ^:private eve-loaded-modules (atom #{}))
+(def ^:private eve-loading-modules (atom #{}))
+
+(defn- load-module-name
+  "The dotted module name for a load path, or nil when the path is relative (the original
+   load resolves those against the current namespace; they delegate unchanged)."
+  [path]
+  (let [s (str path)]
+    (cond (str/starts-with? s "/") (str/replace (subs s 1) "/" ".")
+          (str/includes? s "/") nil
+          :else s)))
+
+(def ^:private module-path-dirs
+  (delay (remove empty? (str/split (get (cpp/eve_load.runtime_data) "paths") #":"))))
+
+(defn- module-state
+  "\"loadable\" when the loader can load the module; \"clj-only\" when it exists on the
+   module path only as a .clj file (a JVM-host module — jank's loader has no .clj
+   module type and does not index them); \"missing\" otherwise."
+  [module]
+  (cond (cpp/eve_load.loadable module) "loadable"
+        (let [rel (str (str/replace (str/replace module "." "/") "-" "_") ".clj")]
+          (some (fn [dir] (cpp/eve_load.file_exists (str dir "/" rel))) @module-path-dirs)) "clj-only"
+        :else "missing"))
+
+(defn- simple-libspec?
+  "A libspec naming one lib directly: a symbol, or a vector whose head is the lib and whose
+   second element (when present) is an option keyword. Prefix lists are not simple."
+  [spec]
+  (or (symbol? spec)
+      (and (vector? spec) (symbol? (first spec))
+           (or (= 1 (count spec)) (keyword? (second spec))))))
+
+(defn- libspec-referred
+  "The var names a libspec refers ([] when it refers none, or :all)."
+  [spec]
+  (if (vector? spec)
+    (let [opts (apply hash-map (drop 1 spec))]
+      (if (contains? opts :refer)
+        (let [r (:refer opts)] (if (= :all r) :all (vec r)))
+        []))
+    []))
+
+(defn- process-ns-form
+  "An ns form made loadable on this host, without touching the library's source:
+   - :import clauses are dropped (jank cannot honor them; see the section head).
+   - A :require clause naming a module that exists only as a .clj file — a JVM-host
+     module jank's loader cannot load (datascript.inline, datascript.pprint) — is
+     dropped, and any var it referred that clojure.core also provides is removed
+     from the :refer-clojure :exclude list, so the core var serves instead. The
+     :clj face of a vanilla library uses such modules as JVM shims (inline is
+     clojure.lang.RT inlining; the semantics are core's); a module that is missing
+     outright keeps its clause, so the load fails with the honest error."
+  [form]
+  (if-not (and (seq? form) (= 'ns (first form)))
+    form
+    (let [clauses (drop 2 form)
+          dropped-refers
+          (into []
+                (comp (filter (fn [c] (and (seq? c) (= :require (first c)))))
+                      (mapcat (fn [c] (rest c)))
+                      (filter (fn [spec] (and (simple-libspec? spec)
+                                              (= "clj-only" (module-state (str (if (vector? spec) (first spec) spec)))))))
+                      (mapcat (fn [spec] (let [r (libspec-referred spec)] (if (= :all r) [] r))))
+                      (filter (fn [sym] (ns-resolve 'clojure.core sym))))
+                clauses)
+          dropped (set dropped-refers)]
+      (apply list (first form) (second form)
+             (mapcat (fn [clause]
+                       (cond (not (seq? clause)) [clause]
+                             (= :import (first clause)) []
+                             (= :require (first clause))
+                             [(apply list :require
+                                     (remove (fn [spec] (and (simple-libspec? spec)
+                                                              (= "clj-only" (module-state (str (if (vector? spec) (first spec) spec))))))
+                                             (rest clause)))]
+                             (and (= :refer-clojure (first clause)) (seq dropped))
+                             [(concat (list :refer-clojure)
+                                      (mapcat (fn [[k v]] (if (= :exclude k)
+                                                            [k (vec (remove dropped v))]
+                                                            [k v]))
+                                              (partition 2 (rest clause))))]
+                             :else [clause]))
+                     clauses)))))
+
+(defn- eval-cljc-source!
+  "Read src's forms with :clj among the reader features and eval each in order.
+   Forms live at read_string indices 1..N; a nil read is the end of the source."
+  [src]
+  (loop [n 1]
+    (let [form (cpp/.read_string cpp/jank.runtime.__rt_ctx src clj-feature-opts n)]
+      (when (some? form)
+        (eval (process-ns-form form))
+        (recur (inc n))))))
+
+(defn- eve-load [& paths]
+  (doseq [path paths]
+    (let [module (load-module-name path)]
+      (if (nil? module)
+        (orig-load path)
+        (let [src (when-not (contains? @eve-loaded-modules module)
+                    (cpp/eve_load.cljc_source module))]
+          (cond (nil? src) (orig-load path)
+                (contains? @eve-loading-modules module)
+                (throw (ex-info (str "Cyclic load dependency: " module) {:module module}))
+                :else (do (swap! eve-loading-modules conj module)
+                          (try (eval-cljc-source! src)
+                               (swap! eve-loaded-modules conj module)
+                               (finally (swap! eve-loading-modules disj module))))))))))
+
+(alter-var-root #'clojure.core/load (fn [_] eve-load))
