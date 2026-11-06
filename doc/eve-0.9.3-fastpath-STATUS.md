@@ -157,6 +157,51 @@ preseat tree never lost the fast paths; the only real regression was the
 seat layer, fixed above. (Local bisect corroborates: the full preseat
 content delta applied to the heap-grade tree left S2 in the fast band.)
 
+## FINAL ASSEMBLED JVM GATE (2026-11-05 ~11:16 PM ET) — PASS, reds = base verbatim
+
+Continuation lane (fastpath closeout) ran the full JVM suite on the fixed
+release tree @ 5041023 in this worktree: `CLJ_CONFIG=~/workspace/eve-env/cljconfig
+clojure -M:jvm-test` (log: `~/workspace/wt/eve-093-fastpath/logs/final-jvm-gate-5041023.log`).
+
+**Printed: Ran 630 tests containing 10422 assertions. 2 failures, 2 errors.**
+
+The four reds, each identified:
+- FAIL ×2 — `eve.aegis.pages_v3_test/the-kernel-gets-what-eve-wrote`
+  (pages_v3_test.cljc:286, :287). Trace shows the cause plainly:
+  `FileNotFoundError: ../vs/test/...` — the missing sibling `../vs` checkout.
+- ERROR — `eve.aegis.pages_v3_test/cross` (pages_v3_test.cljc:308, NPE from
+  the same missing-sibling path).
+- ERROR — `eve.net.wire-test/three-servers-run-one-pmap` (wire.cljc:23):
+  this box's sandbox refuses raw loopback TCP ("Other TCP connections is
+  turned off for this assistant").
+
+**All four are the untouched base tree's own reds, verbatim:** the collation
+lane's baseline run on pristine main (622 tests / 10555 assertions,
+`~/workspace/eve-093-baseline.log`) prints the identical four FAIL/ERROR
+lines. The assembled tree introduces NO new red. Count delta (622 → 630
+tests) is the collation pieces' + seat's added test files. Under the
+manifest's scoring contract (same reds as base, none others) the gate
+PASSES. `eve.jvm-legacy-index-test` ran in this suite with no FAIL/ERROR —
+the 67ff60b test-fix suite is GREEN on the assembled tree, as required.
+
+## PUSH STAGING + LANE CLOSEOUT (2026-11-05 ~11:16 PM ET)
+
+This box's credential is read-only on SeniorCareMarket/eve, so the tip is
+staged per the collation manifest's push sequencing: the release tip
+carrying this STATUS is pushed into the atom.broker repo under the staging
+ref `staging/release-eve-0.9.3`, and a push request is filed in the
+atom.broker channel (docs/cohost/debug-seam/REPORTS.md on
+`muse/cohost-reports`) addressed to cohost Agent 2 / Agent 3 — both hold
+Eve write access — to fetch the staging ref into SeniorCareMarket/eve as
+`release/eve-0.9.3` and verify on the fetched ref. Gate evidence named in
+the request: this section (630 / 10422 / 2F / 2E = base reds verbatim,
+legacy-index green) + the RE-BENCH VERDICT above (fast paths restored,
+jank arm unchanged). The exact staged sha is named in the REPORTS entry
+(this STATUS rides in that tip by construction).
+
+Nothing moved to main; no tag; README untouched — the operator's calls,
+on numbers already reported to him. **This lane is CLOSED.**
+
 ## Log
 
 - ~10:20 PM ET — pickup. Branch tip verified 12324bb in worktree
