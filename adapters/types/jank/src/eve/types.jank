@@ -19,10 +19,10 @@
             [eve.deftype-proto.sio :as sio]))
 
 (def ^:private eve-core-protocols
-  "The protocols eve.core defines on bb (ClojureScript's names)."
+  "The protocols eve.core defines on bb (ClojureScript's names), and IList, jank's eve.core marker of the JVM's list."
   '#{ICounted IIndexed ILookup ISeqable ICollection IEmptyableCollection IEquiv
      IHash IMeta IWithMeta IFn IReduce IKVReduce IAssociative IMap ISet IStack
-     IVector ISeq INext ISequential ASeq IReversible IComparable
+     IVector ISeq INext ISequential ASeq IReversible IComparable IList
      IEditableCollection ITransientCollection ITransientAssociative ITransientMap
      ITransientVector ITransientSet IChunkedSeq IChunkedNext IMapEntry IDeref
      IPrintWithWriter})
@@ -83,6 +83,15 @@
                                       [{:protocol p
                                         :methods (vec (keep (fn [m] (when-let [n (ms (:name m))] (assoc m :name n)))
                                                             (:methods impl)))}])
+
+                                    ;; the JVM's list marker, which the ClojureScript table drops: kept on jank as
+                                    ;; eve.core/IList for the identity table's list? (an EveList is list? on the JVM)
+                                    (= 'clojure.lang.IPersistentList (:protocol impl))
+                                    (cons {:protocol 'eve.core/IList :methods []}
+                                          (keep (fn [{:keys [protocol] :as t}]
+                                                  (when (contains? eve-core-protocols protocol)
+                                                    (assoc t :protocol (symbol "eve.core" (name protocol)))))
+                                                (cljs-translate-protocol impl)))
 
                                     (interface-sym? (:protocol impl))
                                     (keep (fn [{:keys [protocol] :as t}]
@@ -231,7 +240,17 @@
 ;; re-roots, reach a type's own collection protocols (the completion's hooks; F-3): eve.core's
 (eve.host-completion/set-type-collection!
  {:lookup [eve.core/ILookup eve.core/-lookup]
-  'contains? [eve.core/ILookup eve.core/contains?]
+  ;; contains?, find and nth as Eve's types answer them on the JVM (the identity table's lookups): contains? by the
+  ;; associative type's key, or the set's member; anything else (a list, a region) throws, as the JVM's; find of an
+  ;; associative type only; nth of an indexed type, or a sequential one's seq walked (a list)
+  'contains? [eve.core/ICollection
+              (fn [x k]
+                (let [t (eve.host-completion/object-tag x)]
+                  (cond (eve.host-completion/extends? eve.core/IAssociative t) (boolean (eve.core/-contains-key? x k))
+                        (eve.host-completion/extends? eve.core/ISet t) (not (identical? ::absent (eve.core/-lookup x k ::absent)))
+                        :else (throw (ex-info (str "eve: contains? not supported on " t) {:eve/unsupported "contains?"})))))]
+  'find [eve.core/IAssociative (fn [x k] (when (eve.core/-contains-key? x k) [k (eve.core/-lookup x k)]))]
+  'nth-seq [eve.core/ISequential eve.host-completion/nth-of-seq]
   'seq [eve.core/ISeqable eve.core/seq]
   ;; an eve type's Sequential marker answers clojure.core/sequential? for it (the completion re-roots it):
   ;; jank's own is a class test an opaque_box never passes, and EveVector's equiv gates on it
@@ -261,4 +280,7 @@
   'assoc! [eve.core/ITransientAssociative eve.core/assoc!]
   'dissoc! [eve.core/ITransientMap eve.core/-dissoc!]
   'disj! [eve.core/ITransientSet eve.core/-disjoin!]
-  'pop! [eve.core/ITransientVector eve.core/pop!]})
+  'pop! [eve.core/ITransientVector eve.core/pop!]
+  'compare [eve.core/IComparable eve.core/-compare]})
+;; (jank's core predicates on an eve value are the completion's identity table, by the type's protocols in eve.core:
+;; no entry here)

@@ -149,8 +149,9 @@ namespace eve_host {
        eve/probes/jank-xxh3/probe7.jank), so an eve value reaches its type's own ILookup, ISeqable, IIndexed and IFn
        through the lookup and dispatch hooks (F-3). A type without the protocol answers get's fallback as before,
        and throws for the others. */
-    static constexpr object_behavior obj_behaviors{ object_behavior::get | object_behavior::seqable
-                                                    | object_behavior::indexable | object_behavior::call };
+    static constexpr object_behavior obj_behaviors{ object_behavior::get | object_behavior::find
+                                                    | object_behavior::seqable | object_behavior::indexable
+                                                    | object_behavior::call | object_behavior::compare };
     static constexpr bool pointer_free{ false };
     object_ref tag;
     object_ref fields;
@@ -191,6 +192,11 @@ namespace eve_host {
     object_ref nth(object_ref index, object_ref fallback) const override { return dispatch.call(op(4), self(), index, fallback); }
     object_ref call(object_ref const a) const override { return dispatch.call(op(5), self(), a, jank_nil); }
     object_ref call(object_ref const a, object_ref const b) const override { return dispatch.call(op(6), self(), a, b); }
+    object_ref find(object_ref key) const override { return dispatch.call(op(7), self(), key, jank_nil); }
+    /* compare: the type's own IComparable (identity audit B-COMPARE: jank's compare had no Eve answer to reach) */
+    jank::i64 compare(object const &o) const override {
+      return to_int(dispatch.call(op(8), self(), object_ref{ jank::runtime::detail::untagged(&o) }, jank_nil));
+    }
   };
   object_ref make(object_ref tag, object_ref fields) { return make_box<eve_obj>(tag, fields); }
   bool is(object_ref o) { return o.get_type() == object_type::opaque_box && dynamic_cast<eve_obj *>(o.ptr()) != nullptr; }
@@ -248,6 +254,16 @@ namespace eve_host {
                           (if (contains? (get @type-mutable tag) f) @v v))))
         (map? x) (get x (keyword (name f)))
         :else nil))
+
+(defn set-field!
+  "Sets mutable field f (a symbol) of deftype instance x to v, as (set! (.-f x) v) does where a host's analyzer can see
+   x's type: the field's cell is reset. v; an ex-info for a field x does not hold mutable."
+  [x f v]
+  (let [tag (when (object? x) (object-tag x))
+        i (when tag (field-index tag f))]
+    (if (and i (contains? (get @type-mutable tag) f))
+      (do (vreset! (nth (object-fields x) i) v) v)
+      (throw (ex-info "set! of a field that is not a mutable field of this object" {:field f :type tag})))))
 
 (defn record?*
   "x is a defrecord instance (a map with :eve/record in its meta); jank's core has no record?."
@@ -410,15 +426,55 @@ namespace eve_host {
         (concat pre [(list ['& args]
                            (list* 'clojure.core/case (list 'clojure.core/count args) (concat clauses [default])))])))))
 
+;; A field read written (.-f x) — stock Clojure, and every external .cljc structure's — on a target whose type jank's
+;; analyzer cannot see compiles to a C++ member access on an object_ref, which cannot exist ("There is no `edit`
+;; member within jank::runtime::oref<jank::runtime::object>": Lane M's identity audit B-RRB, 148 sites on the release
+;; tree). Such a read can never have compiled on jank, so the bodies defn, defn-, fn, let and loop expand are walked
+;; first and each (.-f x) becomes the completion's field read (get-field: a deftype's field by name, a record's by
+;; key) — the field is the Eve object's, whatever the analyzer sees (the operator's analyzer-deferral route). It
+;; covers a read of another instance through an untyped parameter as well as this one's (`(.-keys next)` in a Node
+;; method: Lane M's external case, probes/jank-deferral), the other spelling (. x -f), and a write, (set! (.-f x) v)
+;; or (set! (. x -f) v), which becomes set-field! (the mutable field's cell reset). Quoted forms are left as they are.
+(defn- field-read-sym [s]
+  (when (and (symbol? s) (nil? (namespace s)))
+    (let [n (name s)] (when (and (> (count n) 2) (= ".-" (subs n 0 2))) (symbol (subs n 2))))))
+
+(defn- dot-field-sym
+  "f of (. x -f), the other spelling of a field read; nil for any other (. x ...)."
+  [form]
+  (when (and (= '. (first form)) (= 3 (count form)) (symbol? (nth form 2)) (nil? (namespace (nth form 2))))
+    (let [n (name (nth form 2))] (when (and (> (count n) 1) (= "-" (subs n 0 1))) (symbol (subs n 1))))))
+
+(defn- defer-field-reads [form]
+  (cond (seq? form)
+        (let [h (first form) f (field-read-sym h)
+              target (when (and (= 'set! h) (= 3 (count form)) (seq? (second form))) (second form))
+              tf (when target (or (and (= 2 (count target)) (field-read-sym (first target))) (dot-field-sym target)))]
+          (cond (= 'quote h) form
+                (and f (= 2 (count form))) (list 'eve.host-completion/get-field (defer-field-reads (second form))
+                                                 (list 'quote f))
+                (dot-field-sym form) (list 'eve.host-completion/get-field (defer-field-reads (second form))
+                                           (list 'quote (dot-field-sym form)))
+                ;; a write, (set! (.-f x) v) or (set! (. x -f) v): the object's cell
+                tf (list 'eve.host-completion/set-field! (defer-field-reads (second target)) (list 'quote tf)
+                         (defer-field-reads (nth form 2)))
+                :else (with-meta (apply list (map defer-field-reads form)) (meta form))))
+        (vector? form) (with-meta (mapv defer-field-reads form) (meta form))
+        (map? form) (with-meta (into {} (map (fn [[k v]] [(defer-field-reads k) (defer-field-reads v)])) form) (meta form))
+        :else form))
+
 (alter-var-root #'clojure.core/defn
-  (fn [core] (fn [form env name & tail] (apply core form env (untag-native name) (wide-arities (strip-fn-tail tail))))))
+  (fn [core] (fn [form env name & tail]
+               (apply core form env (untag-native name) (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
 (alter-var-root #'clojure.core/defn-
-  (fn [core] (fn [form env name & tail] (apply core form env (untag-native name) (wide-arities (strip-fn-tail tail))))))
+  (fn [core] (fn [form env name & tail]
+               (apply core form env (untag-native name) (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
 (alter-var-root #'clojure.core/fn
-  (fn [core] (fn [form env & tail] (apply core form env (wide-arities (strip-fn-tail tail))))))
+  (fn [core] (fn [form env & tail] (apply core form env (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
 (alter-var-root #'clojure.core/let
   (fn [core] (fn [form env bindings & body]
-               (apply core form env (if (vector? bindings) (strip-bindings bindings) bindings) body))))
+               (apply core form env (if (vector? bindings) (strip-bindings (defer-field-reads bindings)) bindings)
+                      (map defer-field-reads body)))))
 ;; A loop local whose init is an integer literal keeps the literal's C++ int width through recur (upstream defect
 ;; 21): (loop [p 1 i 0] (if (< i 32) (recur (* p 2) (inc i)) p)) answers 0, with + - * exact above. Such an init
 ;; is boxed here — (clojure.core/identity 1) — so the local is an object and holds what recur gives it (measured:
@@ -448,11 +504,12 @@ namespace eve_host {
 
 (alter-var-root #'clojure.core/loop
   (fn [core] (fn [form env bindings & body]
+               (let [bindings (defer-field-reads bindings) body (map defer-field-reads body)]
                (if (and (vector? bindings) (seq bindings))
                  (let [[outer lp inner] (fresh-loop (box-int-inits (strip-bindings bindings)))]
                    (list 'clojure.core/let outer
                          (apply core form env lp (list (list* 'clojure.core/let inner body)))))
-                 (apply core form env (if (vector? bindings) (strip-bindings bindings) bindings) body)))))
+                 (apply core form env (if (vector? bindings) (strip-bindings bindings) bindings) body))))))
 
 ;; jank's defmacro expands to `(reset-meta! (var name) (assoc (meta (var name)) :macro true))` with meta and assoc
 ;; unqualified, so a namespace that excludes meta from clojure.core (eve.alpha, which refers eve.core's) cannot define a
@@ -467,29 +524,33 @@ namespace eve_host {
               var-form)))))
 
 ;; ---------------------------------------------------------------------------
-;; case: a keyword, string or symbol case with a default clause expands to cond
+;; case: the default clause boxed
 ;; ---------------------------------------------------------------------------
-;; jank's case* codegen fails on a case whose test constants are keywords (core.jank:4531), strings or symbols
-;; (core.jank:4527) when a default clause is present ("no viable overloaded '=' … int to oref": measured,
-;; `(defn g [x] (case x :a 1 :b 2 3))`); the same case without a default, a grouped `(:a :b)` test, and an integer
-;; case with a default compile. eve's shared code writes keyword cases with a default throughout (eve.array's and
-;; eve.map's types), so such a case expands here to a let over cond, each test `(= g 'c)` (a grouped test an or);
-;; every other case is jank's own (upstream defect 19).
+;; jank's case* stores its result in an object_ref and assigns each branch's value to it boxed, but not the default
+;; clause's: a default C++-typed natively fails to compile ("no viable overloaded '=' … bool to oref", core.jank:4523
+;; for integer constants, 4531 for keywords, 4527 for strings and symbols) — a literal true/false, integer, double or
+;; string (const char*), a let ending in one, an if of literals, (boolean x) (measured, 25 shapes,
+;; probes/jank-case/out1..4.txt: `(defn f [x] (case x 1 true false))` fails; `(case x 1 false 2 true :d)` and
+;; `(case x 1 :a (clojure.core/identity false))` answer). eve.set's hamt-find ends `(case (int nt) 1 … 2 … false)`, so
+;; an Eve set's first walk (two sets holding a by-reference member, whose digests abstain) died at its deferred
+;; compile. So every case's default is passed through clojure.core/identity (an object) — keyword, string and symbol
+;; cases stay jank's own hashed dispatch (they compile once the default is boxed: measured; the cond route this
+;; replaced worked around the same defect). A default holding a recur is left as it is: identity would take the recur
+;; out of tail position, and an if over a recur and a literal compiles (measured). (Upstream defect 19, amended.)
 
-(defn- case-constants [clauses]
-  (mapcat (fn [t] (if (seq? t) t [t])) (map first (partition 2 clauses))))
+(defn- has-recur? [form]
+  (cond (= 'recur form) true
+        (or (seq? form) (vector? form)) (boolean (some has-recur? form))
+        (map? form) (boolean (some has-recur? (concat (keys form) (vals form))))
+        :else false))
 
 (alter-var-root #'clojure.core/case
   (fn [core]
     (fn [form env e & clauses]
-      (if (and (odd? (count clauses)) (not (every? integer? (case-constants clauses))))
-        (let [g (gensym "case-e")
-              test (fn [c] (list 'clojure.core/= g (list 'quote c)))]
-          (list 'clojure.core/let [g e]
-                (list* 'clojure.core/cond
-                       (concat (mapcat (fn [[t v]] [(if (seq? t) (cons 'clojure.core/or (map test t)) (test t)) v])
-                                       (partition 2 clauses))
-                               [:else (last clauses)]))))
+      (if (odd? (count clauses))
+        (let [d (last clauses)]
+          (apply core form env e (concat (butlast clauses)
+                                         [(if (has-recur? d) d (list 'clojure.core/identity d))])))
         (apply core form env e clauses)))))
 
 ;; ---------------------------------------------------------------------------
@@ -722,6 +783,18 @@ namespace eve_host {
 (defn- not-supported [x what]
   (throw (ex-info (str "eve type " (type-key x) " is not " what) {:type (type-key x)})))
 
+(defn nth-of-seq
+  "The n'th of a sequential type's seq — the JVM's nth over a list (the types adapter names it for ISequential): out of
+   range throws, or answers not-found."
+  ([x n] (loop [s (seq x) i 0]
+           (cond (nil? s) (throw (ex-info (str "eve: index " n " out of bounds") {:eve/index n}))
+                 (== i n) (first s)
+                 :else (recur (next s) (inc i)))))
+  ([x n nf] (loop [s (seq x) i 0]
+              (cond (nil? s) nf
+                    (== i n) (first s)
+                    :else (recur (next s) (inc i))))))
+
 (defn set-type-collection!
   "m: {op [protocol f]} — for an eve instance whose own type extends the protocol, what jank's get, keyword invoke,
    get-in, contains?, seq, nth, invoking it, and the re-rooted clojure.core names below call (eve's types adapter
@@ -732,13 +805,19 @@ namespace eve_host {
   (cpp/eve_host.set_dispatch
    (fn [op x a b]
      (let [op (long op)]
+       ;; where Eve's type on the JVM throws, a catchable ex-info here (the identity table's lookups, the reference's
+       ;; slots 10 and 11): contains? of a type neither associative nor a set, nth of one neither indexed nor sequential
+       ;; (with a not-found too), find of one not associative, a call of one not a fn
        (cond
-         (== op 1) (if-let [f (op-fn 'contains? x)] (boolean (f x a)) false)
+         (== op 1) (if-let [f (op-fn 'contains? x)] (boolean (f x a)) (not-supported x "associative or a set"))
          (== op 2) (if-let [f (op-fn 'seq x)] (f x) (not-supported x "seqable"))
-         (== op 3) (if-let [f (op-fn 'nth x)] (f x a) (not-supported x "indexed"))
-         (== op 4) (if-let [f (op-fn 'nth x)] (f x a b) (not-supported x "indexed"))
-         (== op 5) (if-let [f (op-fn 'invoke x)] (f x a) (if-let [f (op-fn :lookup x)] (f x a nil) (not-supported x "a fn")))
-         (== op 6) (if-let [f (op-fn 'invoke x)] (f x a b) (if-let [f (op-fn :lookup x)] (f x a b) (not-supported x "a fn")))
+         (== op 3) (if-let [f (or (op-fn 'nth x) (op-fn 'nth-seq x))] (f x a) (not-supported x "indexed"))
+         (== op 4) (if-let [f (or (op-fn 'nth x) (op-fn 'nth-seq x))] (f x a b) (not-supported x "indexed"))
+         (== op 5) (if-let [f (op-fn 'invoke x)] (f x a) (not-supported x "a fn"))
+         (== op 6) (if-let [f (op-fn 'invoke x)] (f x a b) (not-supported x "a fn"))
+         ;; find: [k v] when the associative type has k (select-keys builds through it), else nil
+         (== op 7) (if-let [f (op-fn 'find x)] (f x a) (not-supported x "associative"))
+         (== op 8) (if-let [f (op-fn 'compare x)] (f x a) (not-supported x "comparable"))
          :else (not-supported x (str "an op " op)))))))
 
 (defn- route!
@@ -777,16 +856,122 @@ namespace eve_host {
 ;; and an eve map asked the jank map, which cannot see an eve type — (= {:note [1 2 3]} eve-map) was false where the
 ;; JVM and babashka say true (eve.tally-test's two-atoms row: the holder's note read back an EveHashMap). An eve
 ;; value on the left reaches its type's IEquiv through the equiv hook (eve_obj's equal) already.
-(let [v #'clojure.core/= core @v]
-  (alter-meta! v dissoc :inline :inline-arities)
-  (alter-var-root v (fn [_] (fn ([x] true)
-                                ([a b] (if (and (cpp/eve_host.is b) (not (cpp/eve_host.is a))) (core b a) (core a b)))
-                                ([a b & more] (if (clojure.core/= a b)
-                                                (if (next more)
-                                                  (recur b (first more) (next more))
-                                                  (clojure.core/= b (first more)))
-                                                false))))))
-(let [v #'clojure.core/not=]
+;; A jank collection holding an eve value compares element by element, as the JVM's equiv does (eq's last arm below):
+;; jank's
+;; own equal of two vectors compares their elements with jank's equal, which never reaches the eve side — (= ["b1"
+;; {:note [1 2 3]}] ["b1" eve-map]) was false (eve.tally-test's two-atoms row, eve.read-region-test's lazy-result
+;; row). Only when jank's own answer is false and both are jank maps or sequentials: maps by key, sequentials in
+;; lockstep (an infinite seq stops at its first difference).
+(def ^:private jank= (deref #'clojure.core/=))
+;; jank's own collection predicates, for eve='s fallback: only jank's own maps and sequentials are walked (eve values
+;; are answered above it), and a number, keyword or string leaves at once
+(def ^:private jank-map? (deref #'clojure.core/map?))
+(def ^:private jank-sequential? (deref #'clojure.core/sequential?))
+(declare eve=)
+(defn- seq-eve= [a b]
+  (loop [xs (seq a) ys (seq b)]
+    (cond (nil? xs) (nil? ys)
+          (nil? ys) false
+          (eve= (first xs) (first ys)) (recur (next xs) (next ys))
+          :else false)))
+(defn- map-eve= [a b]
+  (and (== (count a) (count b))
+       (every? (fn [e] (let [bv (get b (key e) ::absent)]
+                         (and (not (identical? bv ::absent)) (eve= (val e) bv))))
+               a)))
+(defn- eve= [a b]
+  ;; jank's own = first: equal scalars answer at once (an element loop's common case — eve.rrb-vector-test's splicing
+  ;; rows compare half a million elements three ways: 136 s before this fallback, 534 s with the checks first)
+  (or (jank= a b)
+      (let [ea (cpp/eve_host.is a) eb (cpp/eve_host.is b)]
+        (cond ea false
+              eb (jank= b a)
+              (and (jank-map? a) (jank-map? b)) (map-eve= a b)
+              (and (jank-sequential? a) (jank-sequential? b)) (seq-eve= a b)
+              :else false))))
+
+;; ---------------------------------------------------------------------------
+;; THE IDENTITY TABLE: jank's core predicates on an eve value, answered by the instance's own type
+;; ---------------------------------------------------------------------------
+;; One mechanism with cohost Agent 3's reference (atom.broker agent3/eve-u6-opt3 @ b71aa3e41, IDENTITY-TABLE.md: Lane
+;; M's decision, operator-approved, 2026-11-06 11:53 AM ET). jank's own answer is its C++ check, which knows jank's
+;; types only: on an eve value coll?, counted?, vector?, map?, set?, seq?, associative?, list? answered false (Lane M's
+;; identity audit §C, measured). An eve instance — the one object with a symbol tag — answers each by its type's
+;; protocol in eve.core, named in this table; every other value keeps jank's answer, and pays one type compare
+;; (opaque_box) first. jank-side code that tells host values from eve values asks object? first, never these alone
+;; (eve.core's host-seq?, host-coll?, subvec; sequence below). sorted?, fn? and compare are not in the table: Eve's
+;; types answer the first two on the JVM as jank does (false), and compare reaches a type's own IComparable through the
+;; one object's compare (B-COMPARE; a type without it throws, as the JVM's).
+(def identity-table
+  "[jank's predicate, the eve.core protocol an eve instance answers it by, the C++ check of a jank :inline predicate
+   (its inline expansion keeps that check for every type but opaque_box), or nil] — one row each."
+  [['clojure.core/coll?         'eve.core/ICollection  'cpp/jank.runtime.is_collection]
+   ['clojure.core/seq?          'eve.core/ISeq         'cpp/jank.runtime.is_seq]
+   ['clojure.core/seqable?      'eve.core/ISeqable     'cpp/jank.runtime.is_seqable]
+   ['clojure.core/vector?       'eve.core/IVector      'cpp/jank.runtime.is_vector]
+   ['clojure.core/counted?      'eve.core/ICounted     nil]
+   ['clojure.core/sequential?   'eve.core/ISequential  nil]
+   ['clojure.core/map?          'eve.core/IMap         nil]
+   ['clojure.core/set?          'eve.core/ISet         nil]
+   ['clojure.core/list?         'eve.core/IList        nil]
+   ['clojure.core/associative?  'eve.core/IAssociative nil]
+   ['clojure.core/indexed?      'eve.core/IIndexed     nil]
+   ['clojure.core/reversible?   'eve.core/IReversible  nil]
+   ['clojure.core/ifn?          'eve.core/IFn          nil]])
+
+;; jank 0.1's reversible? and indexed? throw for every value ("TODO: port", core.jank:7012-7022): jank's own values
+;; answer as before the table, for every caller (the var's root takes them from here, not from jank's thrower).
+(def ^:private host-answers
+  {'clojure.core/reversible? (fn [x] (or (vector? x) (sorted? x)))
+   'clojure.core/indexed? (fn [x] (vector? x))})
+
+(def ^:private pred-cores
+  "jank's own predicate fns, taken before the re-roots below: the answer for every value not an eve instance."
+  (merge (into {} (map (fn [[k]] [k @(resolve k)]) identity-table)) host-answers))
+
+(def ^:private pred-protocols
+  "The protocol each predicate's row names, resolved at its first eve instance (eve.core loads after this)."
+  (volatile! {}))
+
+(defn eve-predicate
+  "Predicate k (its clojure.core symbol) of x: an eve instance's by its type's protocol (identity-table), any other
+   value's jank's own."
+  [k x]
+  (if (and (cpp/eve_host.is x) (symbol? (object-tag x)))
+    ;; eve.core not loaded (a program of plain deftypes: the completion's own pins): no type extends its protocols
+    (if-let [p (or (get @pred-protocols k)
+                   (when-let [pv (resolve (second (first (filter #(= k (first %)) identity-table))))]
+                     (let [p @pv] (vswap! pred-protocols assoc k p) p)))]
+      (boolean (extends? p (object-tag x)))
+      false)
+    (boolean ((get pred-cores k) x))))
+
+;; coll?, seq?, seqable? and vector? are :inline in jank (core.jank:305, 313, 321, 359): a direct call compiles to
+;; jank's C++ check and never reaches the var. Their inline expansion is replaced, not dropped: the C++ check stays the
+;; path for every type but opaque_box, which alone goes to eve-predicate (only jank's own headers are named, so a module
+;; compiled without this file's C++ expands it; the cast boxes a native argument — (+ a b), a count — as jank's own
+;; check does: measured by the reference, .get_type of a native int does not compile). Every row's root takes the same
+;; branch, so a call through the var (higher-order, apply) answers alike.
+(doseq [[k _ check] identity-table]
+  (let [v (resolve k) own (get pred-cores k)]
+    (when check
+      (alter-meta! v assoc :inline
+                   (fn [o]
+                     (let [g (gensym "o")]
+                       (list 'clojure.core/let [g (list 'cpp/cast 'cpp/jank.runtime.object_ref o)]
+                             (list 'if (list 'cpp/== 'cpp/jank.runtime.object_type.opaque_box (list 'cpp/.get_type g))
+                                   (list 'clojure.core/boolean (list 'eve.host-completion/eve-predicate (list 'quote k) g))
+                                   (list check g)))))))
+    (alter-var-root v (fn [_] (fn [x] (if (cpp/== cpp/jank.runtime.object_type.opaque_box (cpp/.get_type x))
+                                        (eve-predicate k x)
+                                        (own x)))))))
+
+;; into as Clojure 1.10's: with a transducer, a jank collection is built transiently and persistent! runs in the
+;; reducing fn's completion — so halt-when's halting input comes back as itself, where jank's into called persistent!
+;; on it ("Objects of type `small_integer` are not persistentable": eve.thread-fold-test's registered-transducer row);
+;; into an eve collection goes through the routed conj (jank's into conj'd in C++: "Objects of type `opaque_box` are
+;; not conjable", eve.thread-fold-group-test).
+(let [v #'clojure.core/into core @v]
   (alter-meta! v dissoc :inline :inline-arities)
   (alter-var-root v (fn [_] (fn ([x] false) ([a b] (not (clojure.core/= a b))) ([a b & more] (not (apply clojure.core/= a b more)))))))
 
@@ -802,13 +987,14 @@ namespace eve_host {
         (let [r (extends? (get te k) c)] (vswap! own-cache assoc ck r) r)
         hit))))
 
-(def ^:private core= =)
 (def ^:private core-hash hash)
 
 (defn- eq [x y]
   (cond (and (object? x) (own? :equiv-proto x)) (boolean ((:equiv @type-equality) x y))
         (and (object? y) (own? :equiv-proto y)) (boolean ((:equiv @type-equality) y x))
-        :else (core= x y)))
+        ;; neither is a type with its own equivalence: jank's own =, and where it says no for two jank maps or
+        ;; sequentials, element by element through this = (eve= above: a jank vector holding an eve map)
+        :else (eve= x y)))
 
 (alter-var-root #'clojure.core/=
   (fn [_]
@@ -1104,8 +1290,7 @@ namespace eve_host {
   `(do ~@body))
 
 (re-root! 'requiring-resolve (fn [sym] (or (resolve sym) (do (require (symbol (namespace sym))) (resolve sym)))))
-(re-root! 'reversible? (fn [x] (or (vector? x) (sorted? x))))
-(re-root! 'indexed? (fn [x] (vector? x)))
+;; reversible? and indexed?: the identity table (above) — an eve instance by its type, jank's own values as before
 (re-root! 'rseq (fn [x] (seq (reverse x))))
 (re-root! 'into-array (fn ([aseq] (object-array (vec aseq))) ([_type aseq] (object-array (vec aseq)))))
 ;; sort and sort-by of an empty collection answer a native_vector_sequence whose first segfaults ((first (sort []))
@@ -1156,7 +1341,7 @@ namespace eve_host {
     (step inputs)))
 
 (re-root! 'sequence
-  (fn ([coll] (if (seq? coll) coll (or (seq coll) ())))
+  (fn ([coll] (if (and (seq? coll) (not (object? coll))) coll (or (seq coll) ())))
     ([xform coll] (xf-sequence xform coll (fn [rf x] (rf nil x))))
     ([xform coll & colls]
      (xf-sequence xform (apply map vector coll colls) (fn [rf xs] (apply rf nil xs))))))

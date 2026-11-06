@@ -51,6 +51,9 @@
 (defprotocol ISeq (-first [coll]) (-rest [coll]))
 (defprotocol INext (-next [coll]))
 (defprotocol ISequential)
+;; jank only: the marker of the JVM's clojure.lang.IPersistentList (ClojureScript's table drops it as CLJ-only), so the
+;; completion's identity table answers list? of an eve instance by its type (an EveList is list? on the JVM)
+(defprotocol IList)
 (defprotocol ASeq)
 (defprotocol IReversible (-rseq [coll]))
 (defprotocol IComparable (-compare [x y]))
@@ -69,6 +72,10 @@
 ;; seq before any arm that calls it, and no (declare seq): on ValueScript a namespace's declare of a name clojure.core
 ;; also has breaks clojure.core's seq passed as a value in every other namespace of the program (EM4's seed,
 ;; vs/test-xfail/eve-migration/probes/declare_value_ref.vs). It needs only the protocols above.
+;; A jank seq, not an eve value: the completion answers seq? (and coll?, vector?, …) for eve values by their
+;; protocols (the identity audit's one equality domain), so host-ness is asked of object? here, never of seq? alone.
+(defn- host-seq? [s] (and (clojure.core/seq? s) (not (eve.host-completion/object? s))))
+
 (defn- host-seq
   "An EVE seq (a type with ISeq) as a lazy Clojure seq, element by
    element; anything else through clojure.core/seq."
@@ -78,7 +85,7 @@
          ;; satisfies? is true of every Object here (ISeq has an Object
          ;; fallback), so a host seq is told apart by clojure.core/seq?
          ;; and passed through, never wrapped again.
-         (clojure.core/seq? s) s
+         (host-seq? s) s
          (satisfies? ISeq s) (clojure.core/cons (-first s) (host-seq (-next s)))
          :else (clojure.core/seq s))))
 
@@ -87,7 +94,7 @@
    lazily), so clojure.core's sequence functions take it."
   [o]
   (let [s (-seq o)]
-    (if (or (nil? s) (clojure.core/seq? s)) s (host-seq s))))
+    (if (or (nil? s) (host-seq? s)) s (host-seq s))))
 ;; Clojure data and nil: clojure.core's answer. An EVE value without the
 ;; protocol reaches the Object arm too; where clojure.core cannot see it
 ;; (count, nth) the arm goes through the value's seq.
@@ -218,7 +225,7 @@
   "A host collection (or nil): coll? — jank's own collections; a type's instance is none (jank's coll? is false for
    an opaque object: measured)."
   [x]
-  (or (nil? x) (coll? x)))
+  (or (nil? x) (and (coll? x) (not (eve.host-completion/object? x)))))
 (defn- transient-of
   "An EVE type's transient, or nil when it has none (the Object fallback
    hands it to clojure.core/transient, which refuses it)."
@@ -288,7 +295,7 @@
 (defn subvec
   ([v start] (subvec v start (count v)))
   ([v start end]
-   (if (vector? v)
+   (if (and (vector? v) (not (eve.host-completion/object? v)))
      ;; jank 0.1 has no subvec: a fresh vector of the range
      (vec (map (fn [i] (clojure.core/nth v i)) (range start end)))
      (do (when (or (neg? start) (< end start) (> end (count v)))

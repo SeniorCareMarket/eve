@@ -31,6 +31,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   segfaults when compiled code touches one, so every failure path ended the
   process. The string is a mutex-guarded static now; the seat checks pass
   14 / 14 and both modules AOT-compile clean (`doc/hosts/jank.md`, defect 28).
+- jank: a field read written as stock Clojure — `(.-f x)` or `(. x -f)` on an untyped parameter, another instance's
+  field included (`(.-keys next)` in a type's method: an external library's idiom) — could not compile (a C++ member
+  access on an `object_ref`). The jank completion's `defn`/`defn-`/`fn`/`let`/`loop` walk their bodies first and read
+  the field through the completion's field machinery; `(set! (.-f x) v)` resets a mutable field's cell
+  (`eve.identity-test`'s stock-field-read row; `probes/jank-deferral`).
+- jank: a `case` whose default clause is C++-typed natively (`false`, an integer or string literal, `(boolean x)`)
+  failed to compile (jank's `case*` boxes its branches but not its default; upstream defect 19, amended): two eve sets
+  holding a by-reference member ended the process at their first comparison (eve.set's `hamt-find`). The completion
+  passes every case's default through `identity`; keyword, string and symbol cases keep jank's hashed dispatch.
+- jank: jank's own predicates and lookups answered for an eve value by jank's C++ checks — `coll?`, `vector?`,
+  `map?`, `set?`, `seq?`, `list?`, `counted?`, `associative?`, … false; `nth` of an eve list a throw. The completion's
+  identity table (one mechanism with eve-in-cohost's) answers each by the value's type's protocol, as Eve's types answer
+  on the JVM, and jank's own values keep jank's answers (`eve.identity-table-test`); `contains?`, `find`, `nth` and a
+  call throw a catchable `ex-info` where the JVM throws. Two Eve sets holding a by-reference member compare equal, a
+  hash set and a sorted set of the same members compare equal both ways, an Eve `[k v]` vector is a map entry to an
+  Eve map, and `compare` reaches a type's own `IComparable` (`eve.identity-test`, every host).
 
 ## [0.9.1] - 2026-11-04
 
