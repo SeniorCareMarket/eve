@@ -59,7 +59,7 @@
     (is (= 16 (count (kr/domain-salt r))))))
 
 (defn- caught-type [f]
-  (try (f) nil (catch #?(:cljs :default :default Exception) ex (:type (ex-data ex)))))
+  (try (f) nil (catch #?(:cljs :default :jank jank.runtime.object_ref :default Exception) ex (:type (ex-data ex)))))
 
 (deftest the-epoch-key-ring
   (let [r (region/make-heap-region kr/RECORD_BYTES)
@@ -88,8 +88,8 @@
           "the last reader of a draining key shreds it"))))
 
 (defn- fresh-base []
-  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :cljr (System.IO.Path/GetTempPath)
-            :default (System/getProperty "java.io.tmpdir"))
+  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :cljr (System.IO.Path/GetTempPath)
+          :default (System/getProperty "java.io.tmpdir"))
        "/eve-keyring-" (rand-int 1000000000) "/d"))
 
 (defn- file-text
@@ -103,6 +103,8 @@
        :cljr (.GetString System.Text.Encoding/Latin1 (System.IO.File/ReadAllBytes ^String p))
        ;; (a Go string holds the bytes as they are: an ASCII needle is found in them)
        :glj (let [[b _] (os.ReadFile p)] (.String (bytes.NewBuffer b)))
+       ;; (a jank string holds the bytes as they are too: slurp of 523 bytes counts 523, the needle found — measured)
+       :jank (slurp p)
        :default (String. ^bytes (java.nio.file.Files/readAllBytes (.toPath (java.io.File. ^String p))) "ISO-8859-1"))))
 
 (defn- in-domain-files? [base s]
@@ -200,5 +202,5 @@
     (try
       (is (alloc/shared-domain? sio) "the wrapper writes an mmap domain: no reference reaches it (§9)")
       (is (do (alloc/refresh! sio) true) "a refresh (another process grew a class) reaches the wrapped domain")
-      (is (thrown? #?(:cljs js/Error :default Exception) (codec/encode-value sio {:f (fn [x] x)})))
+      (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (codec/encode-value sio {:f (fn [x] x)})))
       (finally (release! sio)))))

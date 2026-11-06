@@ -129,8 +129,9 @@
                      :else                 :immutable)
         ;; Find the type hint: any metadata key that's not mutable/volatile-mutable,
         ;; :tag, or reader-added metadata (:file, :line, :column, :end-line, :end-column,
-        ;; :source; basilisp's reader puts its own on every symbol)
-        hint-keys (remove #(= "basilisp.lang.reader" (namespace %))
+        ;; :source, and a reader's own namespaced keys on every symbol — a hint is never
+        ;; namespaced)
+        hint-keys (remove namespace
                           (disj (set (keys m)) :mutable :volatile-mutable :tag :host :ref
                                 :unsynchronized-mutable :eve/field :eve/pointer
                                 :file :line :column :end-line :end-column :source))

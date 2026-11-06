@@ -78,8 +78,8 @@
 
 
 ;; --- OBJ-7: Keyword serialization cache ---
-;; keyword → bytes, mirroring CLJS kw-ser-cache (a ConcurrentHashMap on the
-;; JVM, enc/new-cache). Emptied when it passes KW_CACHE_MAX.
+;; keyword → bytes, mirroring CLJS kw-ser-cache (a thread-safe host map on
+;; the JVM, enc/new-cache). Emptied when it passes KW_CACHE_MAX.
 
 (def ^:private kw-encode-cache (enc/new-cache))
 
@@ -628,6 +628,16 @@
     (or (vector? v) (sequential? v) (seq? v))
     (flat-vec->eve-bytes v)
 
+    ;; an Eve collection on a host whose core predicates cannot see Eve
+    ;; types (jank: map?/set?/vector? are false for them): it carries its
+    ;; own plain conversion (d/IPlain) — encode that, whose flat bytes
+    ;; are the same canonical bytes the branches above write on a host
+    ;; where the predicates can see the type. Without this branch the
+    ;; value falls to the by-reference stub, and a digest over a shared
+    ;; root silently has no digest at all.
+    (satisfies? d/IPlain v)
+    (value->eve-bytes (d/-plain v))
+
     ;; no eve bytes: by reference, in this process only (§9)
     :else
     (ref->eve-bytes v)))
@@ -652,7 +662,7 @@
   [tag sio coll]
   (let [writer (ser/get-coll-writer tag)]
     (if writer
-      (writer sio (partial value+sio->eve-bytes sio) coll)
+      (writer sio (fn [x] (value+sio->eve-bytes sio x)) coll)
       (throw (ex-info (str "write-collection!: no writer for " tag) {:tag tag})))))
 
 (defn value+sio->eve-bytes
@@ -695,24 +705,27 @@
         (ser/stored-piece! sio)
         (encode-sab-pointer tag off))
 
+      ;; the element writer is a fn, not (partial value+sio->eve-bytes sio): jank 0.1 cannot compile a declared var
+      ;; taken as a value inside a closure of its own defn ("unordered_map::at", measured 2026-11-05 ET; the same
+      ;; form outside a closure, or an undeclared var, compiles) — the fn is the same on every host
       (map? v)
       (if-let [write-map! (get writers :map)]
-        (encode-sab-pointer 0x10 (shared-guarded sio #(write-map! sio (partial value+sio->eve-bytes sio) v)))
+        (encode-sab-pointer 0x10 (shared-guarded sio #(write-map! sio (fn [x] (value+sio->eve-bytes sio x)) v)))
         (throw (ex-info "value+sio->eve-bytes: :map writer not registered" {:value v})))
 
       (set? v)
       (if-let [write-set! (get writers :set)]
-        (encode-sab-pointer 0x11 (shared-guarded sio #(write-set! sio (partial value+sio->eve-bytes sio) v)))
+        (encode-sab-pointer 0x11 (shared-guarded sio #(write-set! sio (fn [x] (value+sio->eve-bytes sio x)) v)))
         (throw (ex-info "value+sio->eve-bytes: :set writer not registered" {:value v})))
 
       (list? v)
       (if-let [write-list! (get writers :list)]
-        (encode-sab-pointer 0x13 (shared-guarded sio #(write-list! sio (partial value+sio->eve-bytes sio) v)))
+        (encode-sab-pointer 0x13 (shared-guarded sio #(write-list! sio (fn [x] (value+sio->eve-bytes sio x)) v)))
         (throw (ex-info "value+sio->eve-bytes: :list writer not registered" {:value v})))
 
       (or (vector? v) (sequential? v))
       (if-let [write-vec! (get writers :vec)]
-        (encode-sab-pointer 0x12 (shared-guarded sio #(write-vec! sio (partial value+sio->eve-bytes sio) v)))
+        (encode-sab-pointer 0x12 (shared-guarded sio #(write-vec! sio (fn [x] (value+sio->eve-bytes sio x)) v)))
         (throw (ex-info "value+sio->eve-bytes: :vec writer not registered" {:value v})))
 
       (satisfies? d/IBackingArray v)

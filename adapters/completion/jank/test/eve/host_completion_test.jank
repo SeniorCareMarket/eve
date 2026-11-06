@@ -1,0 +1,74 @@
+(ns eve.host-completion-test
+  "The completion's pins (DJ-2): type, class and instance? tell two deftypes apart; a deftype instance is never = to a
+   map or a record with the same fields; = and hash reach a type's own; a deftype is a real object (not a map, vector
+   or seq to jank). Run by bb test:jank eve.host-completion-test (its root, adapters/completion/jank/test, is on the
+   runner's module path)."
+  (:require [clojure.test :refer [deftest is testing]]
+            [eve.host-completion :as hc]))
+
+(defprotocol Pair (-a [p]) (-b [p]))
+(defprotocol Eq (-eqv [x y]) (-hsh [x]))
+(deftype P1 [a b] Pair (-a [_] a) (-b [_] b) Eq (-eqv [_ o] (and (instance? P1 o) (= a (-a o)) (= b (-b o)))) (-hsh [_] (+ (* 31 (hash a)) (hash b))))
+(deftype P2 [a b] Pair (-a [_] a) (-b [_] b))
+(defrecord R1 [a b])
+
+(deftest two-deftypes-are-told-apart
+  (let [x (->P1 1 2) y (->P2 1 2)]
+    (is (= 'eve.host-completion-test/P1 (type x)))
+    (is (= 'eve.host-completion-test/P2 (type y)))
+    (is (not= (type x) (type y)))
+    (is (= (class x) (type x)))
+    (is (instance? P1 x))
+    (is (not (instance? P2 x)))
+    (is (not (instance? P1 y)))
+    (is (instance? P2 y))
+    (is (instance? Object x))
+    (is (not (instance? P1 nil)))
+    (is (satisfies? Pair x))
+    (is (satisfies? Pair y))
+    (is (not (satisfies? Eq y)))
+    (is (= [1 2] [(-a x) (-b x)] [(-a y) (-b y)]))))
+
+(deftest an-instance-is-never-a-map-or-a-record
+  (let [x (->P1 1 2) m {:a 1 :b 2} r (->R1 1 2)]
+    (is (not= x m))
+    (is (not= m x))
+    (is (not= x r))
+    (is (not= r x))
+    (is (not= x [1 2]))
+    (is (not= (->P1 1 2) (->P2 1 2)))
+    (is (not (map? x)))
+    (is (not (vector? x)))
+    (is (not (coll? x)))
+    (is (hc/object? x))
+    (is (not (hc/object? m)))
+    (is (map? r))
+    (is (record? r))
+    (is (not (record? m)))
+    (is (= 'eve.host-completion-test/R1 (type r)))
+    (is (instance? R1 r))
+    (is (not (instance? R1 m)))))
+
+(deftest equality-and-hash-reach-the-types-own
+  (hc/set-type-equality! {:equiv -eqv :hash -hsh :equiv-proto Eq :hash-proto Eq})
+  (testing "after: P1's own equivalence and hash, on jank's inlined = and hash and as a set member and map key"
+    (is (= (->P1 1 2) (->P1 1 2)))
+    (is (not= (->P1 1 2) (->P1 1 3)))
+    (is (= (->P1 1 2) (->P1 1 2) (->P1 1 2)))
+    (is (= (hash (->P1 1 2)) (hash (->P1 1 2))))
+    (is (not= (hash (->P1 1 2)) (hash (->P1 2 1))))
+    (is (contains? #{(->P1 1 2)} (->P1 1 2)))
+    (is (= :v (get {(->P1 3 4) :v} (->P1 3 4))))
+    (is (not= (->P2 1 2) (->P2 1 2)) "P2 has no Eq: identity")
+    (is (not= (->P1 1 2) {:a 1 :b 2}))
+    (is (not= (->P1 1 2) (->R1 1 2)))))
+
+(deftest a-mutable-field-and-a-printer
+  (deftype Cell [^:mutable v] Pair (-a [_] v) (-b [_] (set! v (inc v)) v))
+  (let [c (->Cell 1)]
+    (is (= 1 (-a c)))
+    (is (= 2 (-b c)))
+    (is (= 2 (-a c))))
+  (hc/set-printer! P2 (fn [x] (str "#P2[" (-a x) " " (-b x) "]")))
+  (is (= "#P2[1 2]" (str (->P2 1 2))))
+  (is (= "[#P2[1 2]]" (pr-str [(->P2 1 2)]))))

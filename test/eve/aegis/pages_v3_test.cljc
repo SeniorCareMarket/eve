@@ -8,8 +8,13 @@
 ;;
 ;; The kernel side is the loader of VS's test/core-census/kernel_attestation.py (v3_layout.py's Kern over kernel.wasm, the
 ;; published `wasmtime` package; V3_KERNEL picks another kernel) and kernel_merkle_canon.py's value builders, driven
-;; by the program below through python3 — on the hosts that run a process (bb, the JVM). Run from eve/:
+;; by the program below through python3 — on the hosts that run a process (bb, the JVM). Run from eve/, with the
+;; cross-repo opt-in on (below):
 ;;   bb test:bb eve.aegis.pages-v3-test        clojure -M:jvm-test -n eve.aegis.pages-v3-test
+;;
+;; CROSS-REPO OPT-IN: the kernel side lives in ValueScript's tree, which the shipped eve tree does NOT assume
+;; beside itself. VS_DIR names that checkout. With VS_DIR unset, the two kernel deftests below report SKIP and
+;; run no assertions — never a failure, never a silent pass. With VS_DIR set, they run as they always have.
 (ns eve.aegis.pages-v3-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
@@ -32,7 +37,7 @@
 
 (defn- page-map [w] (into {} (map (fn [pg] [(:cid pg) (:bytes pg)]) (:pages w))))
 
-(defn- thrown-type [f] (try (f) nil (catch #?(:cljs :default :lpy python/Exception :default Exception) e (:type (ex-data e)))))
+(defn- thrown-type [f] (try (f) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (:type (ex-data e)))))
 
 (deftest eve-writes-and-reads-its-pages
   (let [v (state)
@@ -260,9 +265,11 @@ mode_eve() if MODE == 'eve' else mode_kernel()
 print('%d/%d rows PASS' % (ROWS['n'] - ROWS['fail'], ROWS['n']))
 ")
 
+#?(:clj (def ^:private vs-dir (System/getenv "VS_DIR")))
+
 #?(:clj
    (defn- kernel [mode input]
-     (let [{:keys [exit out err]} (sh/sh "python3" "-c" kernel-py "../vs" mode :in input)]
+     (let [{:keys [exit out err]} (sh/sh "python3" "-c" kernel-py vs-dir mode :in input)]
        (when-not (zero? exit) (println "pages_v3_test: the kernel loader exited" exit (subs err (max 0 (- (count err) 2000)))))
        (str/split-lines out))))
 
@@ -275,7 +282,7 @@ print('%d/%d rows PASS' % (ROWS['n'] - ROWS['fail'], ROWS['n']))
    :aegis {:spent {"6f1d2a59e0c4b8a7d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0" true} :ballot-spends {}}})
 
 #?(:clj
-   (deftest the-kernel-gets-what-eve-wrote
+   (defn- run-the-kernel-gets-what-eve-wrote []
      (let [w (p/write-pages (members-state) {:salt (vec (repeat 32 9)) :stamp stamp :region 100})
            lines (kernel "eve" (str (str/join "\n" (map (fn [pg] (str "page " (:cid pg) " " (:base pg) " " (p/page-b64 (:bytes pg))))
                                                         (:pages w)))
@@ -288,7 +295,13 @@ print('%d/%d rows PASS' % (ROWS['n'] - ROWS['fail'], ROWS['n']))
            "the kernel adopts eve's pages and its own get finds the members map's entry eve wrote"))))
 
 #?(:clj
-   (deftest cross
+   (deftest the-kernel-gets-what-eve-wrote
+     (if vs-dir
+       (run-the-kernel-gets-what-eve-wrote)
+       (println "pages_v3_test: SKIP the-kernel-gets-what-eve-wrote — VS_DIR is not set; the kernel side is a cross-repo opt-in (set VS_DIR to a ValueScript checkout to run it)"))))
+
+#?(:clj
+   (defn- run-cross []
      (let [v (state)
            w (p/write-pages v {:salt (vec (repeat 32 7)) :stamp stamp :region 100})
            rec-band (b/hex (first (c/band-of (c/attest message at3))))
@@ -323,3 +336,9 @@ print('%d/%d rows PASS' % (ROWS['n'] - ROWS['fail'], ROWS['n']))
        (is sealers "an attested record's digest agrees across the two sealers (two epochs, two digests)")
        (println (str "  KERNEL->EVE: " (:checked r) " blocks verified by eve; records " (str/join " " (map (fn [x] (subs x 0 16)) records))))
        (println (if ok "CROSS PASS" "CROSS FAIL")))))
+
+#?(:clj
+   (deftest cross
+     (if vs-dir
+       (run-cross)
+       (println "pages_v3_test: SKIP cross — VS_DIR is not set; the kernel side is a cross-repo opt-in (set VS_DIR to a ValueScript checkout to run it)"))))

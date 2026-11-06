@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [alength unsigned-bit-shift-right volatile! vswap! transient
                             persistent! conj! bytes])
   (:require
-   [eve.host :refer [alength unsigned-bit-shift-right volatile! vswap! transient persistent!
+   [eve.host :refer [field alength unsigned-bit-shift-right volatile! vswap! transient persistent!
                      conj! bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
@@ -71,8 +71,10 @@
       (slab/write-i32! sio node-off (* i 4) NIL_OFFSET))
     node-off))
 
+;; A published node's (or this thread's own transient node's) words: the hot read path's plain node read
+;; (eve.deftype-proto.alloc/node-i32; jvm-heap-grade step 3).
 (defn node-get [sio node-off i]
-  (slab/read-i32 sio node-off (* i 4)))
+  (alloc/node-i32 sio node-off (* (long i) 4)))
 
 (defn- node-set! [sio node-off i val]
   (slab/write-i32! sio node-off (* i 4) val)
@@ -99,7 +101,7 @@
 
 (defn- read-value-block [sio val-off]
   (when (not= val-off NIL_OFFSET)
-    (let [val-len (slab/read-i32 sio val-off 0)
+    (let [val-len (alloc/node-i32 sio val-off 0)
           val-bs  (slab/read-bytes sio val-off 4 val-len)]
       (deserialize-element-bytes val-bs sio))))
 
@@ -534,7 +536,10 @@
   d/IEveSio
   (d/-eve-sio [_] sio__)
 
-  
+  ;; what a deref of an atom holding it answers: a plain Clojure vector
+  ;; (see EveHashMap's IPlain note: eve->clj cannot rely on vector? here).
+  d/IPlain
+  (-plain [this] (mapv d/eve->clj (ecore/seq this)))
 
   java.lang.Iterable
   (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
@@ -798,8 +803,8 @@
 (extend-type EveVector
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio       (.-sio__ this)
-          hdr       (.-offset__ this)
+    (let [sio       (field this sio__)
+          hdr       (field this offset__)
           old-root  (slab/read-i32 sio hdr SABVECROOT_ROOT_OFFSET)
           old-shift (slab/read-i32 sio hdr SABVECROOT_SHIFT_OFFSET)]
       (if (eve-vector? new-value)

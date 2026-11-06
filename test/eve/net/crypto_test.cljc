@@ -46,7 +46,7 @@
     (is (not= ca (c/encrypt-blob {:gak gak :nonce nonce-b :page-id 3 :slot-idx 2} plain)) "the same plaintext, another block")
     (is (= plain (c/decrypt-blob ctx ca addr)))
     (is (= :authentication (try (c/decrypt-blob ctx (update ca 7 (fn [x] (bit-xor x 1))) addr) nil
-                                (catch #?(:cljs :default :lpy python/Exception :default Exception) e (:type (ex-data e))))))))
+                                (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (:type (ex-data e))))))))
 
 (defn- portable-hmac [key msg]
   (let [k (vec key) k (if (> (count k) 64) (vec (sha/sha256 k)) k) k (into k (repeat (- 64 (count k)) 0))]

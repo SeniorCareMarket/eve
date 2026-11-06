@@ -8,8 +8,9 @@
 #
 #   test/coop/run.sh [test-var-or-ns…]       e.g. run.sh coop.orchestrator/round-trip-node-jvm-bb-wasm
 #
-# Environment: EVE_DIR (default: the eve tree this script is in) · VS_DIR (ValueScript's tree; default ../vs beside
-# eve) · COOP_ROOT (where the bases go: the host's --eve-root;
+# Environment: EVE_DIR (default: the eve tree this script is in) · VS_DIR (ValueScript's tree — a cross-repo
+# OPT-IN: the scenarios mix in ValueScript's wasm participant; with VS_DIR unset this script reports SKIP and
+# exits 0, because the shipped eve tree assumes no sibling checkout) · COOP_ROOT (where the bases go: the host's --eve-root;
 # default /tmp/coop-atom) · COOP_SCALE (contention ops per writer; default 40) · COOP_WASM_HOST (default: the host this
 # script builds) · COOP_LOG_DIR (default /tmp/coop-atom-logs) · COOP_WASM_BATCH (a wasm contention writer's ops per
 # process; unset: all in one — a VS program frees no temporaries, so one process's ops are bounded).
@@ -22,7 +23,11 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 EVE="${EVE_DIR:-$(cd "$HERE/../.." && pwd)}"
-VS="${VS_DIR:-$EVE/../vs}"
+if [ -z "${VS_DIR:-}" ]; then
+  echo "coop run: SKIP — VS_DIR is not set. These scenarios are a cross-repo opt-in: they mix ValueScript's wasm participant into eve's shared disk-atom scenarios, and the shipped eve tree assumes no sibling checkout. Set VS_DIR to a ValueScript checkout to run them."
+  exit 0
+fi
+VS="$VS_DIR"
 LOG="${COOP_LOG_DIR:-/tmp/coop-atom-logs}"
 ROOT="${COOP_ROOT:-/tmp/coop-atom}"
 WORK="$EVE/target/coop/wasm"

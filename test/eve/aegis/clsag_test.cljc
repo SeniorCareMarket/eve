@@ -40,7 +40,7 @@
     (testing "another member's key image" (is (not (clsag/verify {:msg MSG :ring ring :scope SCOPE :sig (assoc sig :I (clsag/key-image (seed 4) SCOPE))}))))
     (testing "the identity as key image" (is (not (clsag/verify {:msg MSG :ring ring :scope SCOPE :sig (assoc sig :I (into [1] (repeat 31 0)))}))))
     (testing "a seed outside the ring refuses to sign"
-      (is (thrown? #?(:cljs js/Error :default Exception) (clsag/sign {:msg MSG :ring ring :seed (seed 50) :index 2 :scope SCOPE :random (counter-random "z")}))))
+      (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (clsag/sign {:msg MSG :ring ring :seed (seed 50) :index 2 :scope SCOPE :random (counter-random "z")}))))
     (testing "every index signs" (doseq [i (range 8)] (is (clsag/verify {:msg MSG :ring ring :scope SCOPE :sig (sign-with ring i SCOPE MSG (str "i" i))}))))))
 
 (deftest linkability

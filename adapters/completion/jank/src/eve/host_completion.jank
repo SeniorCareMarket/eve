@@ -1,0 +1,1456 @@
+(ns eve.host-completion
+  "jank's completion of its core to Clojure's, loaded first by eve.host (HOST-CONTRACT §10; measured on jank
+   0.1-alpha, the jank 0.1-noble package of 2026-10-28, lane eve-jank J0/J1). What jank's core lacks, or answers
+   otherwise, and eve needs:
+
+   - defprotocol, deftype, defrecord, reify, extend-type, extend-protocol, extend, satisfies?, extends?: jank has
+     none of them (no such macro or special form in its core or any shipped namespace). A protocol here is a table
+     per method keyed by a value's type key (below), each method a fn of the arities its signature lists, caching
+     the impl it found; extend writes the table. A deftype is one C++ object type compiled once in this namespace
+     (eve_host::eve_obj: a tag naming the type, a vector of its fields), its methods extended to the tag; a mutable
+     field holds a cell (volatile!) its factory makes, read by deref and set! by vreset! (as on clojerl and glojure),
+     so such a type is built with ->T. T. and T__make are the factory too (jank keeps `T.` a plain symbol: a var of
+     that name resolves it). A reify is an instance whose fields hold its closures, its tag made once for its form. A
+     defrecord is a map carrying its type in metadata (:eve/record), so keyword lookup is jank's own.
+   - type and class: a deftype instance answers its tag (a symbol); a record its record tag; everything else jank's
+     own (a string naming the C++ type, e.g. \"persistent_vector\"). instance? reads the same.
+   - = and hash: a type's own equivalence and hash answer for it once eve's types adapter names them
+     (set-type-equality!, as glojure's) — jank's own = compares an opaque object by identity and never reaches a
+     virtual (measured). The C++ hash does reach the hook, so a type is a usable key in jank's maps and sets
+     by hash; equality there stays identity (jank's C++ path).
+   - meta: jank's meta on an opaque object never returns (measured: a 60 s timeout); nil here for a type.
+   - + - *: jank's add, sub and mul of two small integers (the int32 range) wrap at 32 bits; here they are jank's
+     promoting ops, exact (upstream defect 27; the first forms below). A loop local with an integer-literal init is
+     boxed, so it holds a value past 2^31 through recur (upstream defect 21; the loop re-root below).
+   - unchecked-*, byte, short: jank's core throws \"TODO: port\" from each (121 such names at 0.1); the fixed-width
+     ones wrap here as the JVM's (over the exact + - * above). instance?, locking,
+     hash-ordered-coll, hash-unordered-coll, mix-collection-hash, subseq, rsubseq, sequence, rseq, requiring-resolve,
+     reversible?, indexed?, into-array, cast likewise.
+   - A name interned into clojure.core here is seen by every namespace created after this one loads (measured), so
+     the launcher requires eve.host-completion first (test/eve/runner/jank_main.jank).
+
+   Re-rooted names hold for namespaces compiled after this one (alter-var-root on the core var: measured)."
+  (:refer-clojure :exclude [extend mix-collection-hash hash-ordered-coll hash-unordered-coll locking]))
+
+;; ---------------------------------------------------------------------------
+;; + - * exact past 2^31 — first, so every form compiled after these lines takes them (this namespace's own included)
+;; ---------------------------------------------------------------------------
+;; jank keeps an integer in the int32 range as a small_integer, and its add, sub and mul of two of them wrap at 32
+;; bits (upstream defect 27, measured on jank 0.1-noble cf627abb…: (+ 2147483647 1) → -2147483648, (* 239 16777216)
+;; → -285212672, (* 65535 65535) → -131071; through a fn's parameters and a long cast the same; an operand outside
+;; the int32 range, inc, dec, quot, mod and the shifts are exact). eve's shared code counts on exact integers below
+;; 2^53 — the portable XXH3-128's 32-bit limbs, and eve's type-ids through it (eve.deftype.type-id-steps-test: the
+;; digest was the first step to leave, so every type-id differed on this host). So + - * are pointed at jank's own
+;; promoting ops, the ones +' -' *' call, both as the 2-arity inline and as the var: exact as the JVM's long
+;; arithmetic below 2^63 (past it they promote where the JVM throws), doubles unchanged (measured:
+;; eve/probes/jank-xxh3/probe3.cljc).
+(alter-meta! #'clojure.core/+ assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_add l r)))
+(alter-meta! #'clojure.core/- assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_sub l r)))
+(alter-meta! #'clojure.core/* assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_mul l r)))
+(alter-var-root #'clojure.core/+ (fn [_] +'))
+(alter-var-root #'clojure.core/- (fn [_] -'))
+(alter-var-root #'clojure.core/* (fn [_] *'))
+
+;; / of two integers truncates on jank for every integer box ((/ 1 2) → 0, (/ 1N 2) → 0N; rationalize is a "TODO:
+;; port" stub; measured: eve/probes/jank-ratio), so eve.numeric-tags-test's ratios never were ratios (5 FAILs). jank
+;; has the ratio type: two integers divide here through obj::ratio::create — reduced, an integer when exact, a big
+;; integer operand through native_big_integer (measured: probe4.jank, 2^128 denominators); any other operand jank's
+;; own div. An integer zero divisor throws "Divide by zero" as the JVM does: jank's own integer div by zero is a C++
+;; division by zero, which ends the process (SIGFPE, exit 136: measured).
+(cpp/raw "
+#include <jank/runtime/obj/ratio.hpp>
+#include <jank/runtime/obj/big_integer.hpp>
+#include <jank/runtime/core/math.hpp>
+#include <jank/runtime/rtti.hpp>
+namespace eve_arith {
+  using namespace jank::runtime;
+  static bool integral(object_type const t) {
+    return t == object_type::integer || t == object_type::small_integer || t == object_type::big_integer;
+  }
+  static jank::native_big_integer as_big(object_ref const o) {
+    if(o.get_type() == object_type::big_integer) { return expect_object<obj::big_integer>(o)->data; }
+    return jank::native_big_integer(to_int(o));
+  }
+  /* an integer zero divisor, a big one compared as a big integer (jank's zero? of a 2^128 converts to i64 and throws
+     \"out of range for i64 conversion\": measured, eve.numeric-tags-test's ratios-round-trip) */
+  bool zero_divisor(object_ref const r) {
+    auto const t(r.get_type());
+    if(t == object_type::big_integer) { return expect_object<obj::big_integer>(r)->data == 0; }
+    return integral(t) && to_int(r) == 0;
+  }
+  object_ref divide(object_ref const l, object_ref const r) {
+    auto const lt(l.get_type()), rt(r.get_type());
+    if(!integral(lt) || !integral(rt)) { return jank::runtime::div(l, r); }
+    if(lt != object_type::big_integer && rt != object_type::big_integer) {
+      return obj::ratio::create(static_cast<jank::i64>(to_int(l)), static_cast<jank::i64>(to_int(r)));
+    }
+    return obj::ratio::create(as_big(l), as_big(r));
+  }
+}
+")
+
+(defn- divide [l r]
+  (if (cpp/eve_arith.zero_divisor r)
+    (throw (ex-info "Divide by zero" {:numerator l}))
+    (cpp/eve_arith.divide l r)))
+
+(let [v (ns-resolve 'clojure.core '/)]
+  (alter-meta! v dissoc :inline :inline-arities)
+  (alter-var-root v (fn [_] (fn ([x] (divide 1 x))
+                                ([l r] (divide l r))
+                                ([l r & more] (reduce divide (divide l r) more))))))
+
+;; ---------------------------------------------------------------------------
+;; The object a deftype instance is: one C++ type for every eve type
+;; ---------------------------------------------------------------------------
+
+(cpp/raw "
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/nil.hpp>
+#include <jank/runtime/obj/persistent_string.hpp>
+#include <gc.h>
+/* A type hint on a parameter or a let binding is a C++ type to jank's analyzer (^long i makes i a native long,
+   which works; an unknown name is \"Unable to find `bytes` within the global namespace\": measured). The names eve's
+   shared code and tests hint with — eve.host's array casts, the JVM's root types, the JVM interfaces core.rrb-vector's
+   EPL files name, and the eve types hinted by name — are aliases of object_ref here, so the hint is read and nothing
+   is narrowed. A hint naming an eve type not listed here is a load error naming it: add it. */
+using bytes = jank::runtime::object_ref; using shorts = jank::runtime::object_ref; using ints = jank::runtime::object_ref;
+using longs = jank::runtime::object_ref; using floats = jank::runtime::object_ref; using doubles = jank::runtime::object_ref;
+using objects = jank::runtime::object_ref; using booleans = jank::runtime::object_ref; using boolean = jank::runtime::object_ref;
+using String = jank::runtime::object_ref; using Object = jank::runtime::object_ref; using Throwable = jank::runtime::object_ref;
+using Exception = jank::runtime::object_ref; using Number = jank::runtime::object_ref; using Long = jank::runtime::object_ref;
+using Integer = jank::runtime::object_ref; using Double = jank::runtime::object_ref; using Boolean = jank::runtime::object_ref;
+using Character = jank::runtime::object_ref; using Comparable = jank::runtime::object_ref; using StringBuilder = jank::runtime::object_ref;
+using LoggingSlabIO = jank::runtime::object_ref; using JvmSlabCtx = jank::runtime::object_ref; using EveArray = jank::runtime::object_ref;
+using EveList = jank::runtime::object_ref; using EveVector = jank::runtime::object_ref; using EveHashMap = jank::runtime::object_ref;
+using EveHashSet = jank::runtime::object_ref; using MmapAtom = jank::runtime::object_ref; using MmapAtomDomain = jank::runtime::object_ref;
+using RSeq = jank::runtime::object_ref; using RRBChunkedSeq = jank::runtime::object_ref; using ObjArrayRow = jank::runtime::object_ref;
+namespace java { namespace util { using Collection = jank::runtime::object_ref; using List = jank::runtime::object_ref;
+  using ListIterator = jank::runtime::object_ref; using Iterator = jank::runtime::object_ref; using Map = jank::runtime::object_ref;
+  using Set = jank::runtime::object_ref; using Date = jank::runtime::object_ref; using UUID = jank::runtime::object_ref; }
+  namespace lang { using Object = jank::runtime::object_ref; using String = jank::runtime::object_ref; } }
+namespace clojure { namespace lang { using ISeq = jank::runtime::object_ref; using IPersistentVector = jank::runtime::object_ref;
+  using IPersistentMap = jank::runtime::object_ref; using IPersistentCollection = jank::runtime::object_ref; using Counted = jank::runtime::object_ref;
+  using IFn = jank::runtime::object_ref; using IAtom = jank::runtime::object_ref; using IDeref = jank::runtime::object_ref;
+  using Indexed = jank::runtime::object_ref; using Sequential = jank::runtime::object_ref; using IMapEntry = jank::runtime::object_ref;
+  using ITransientCollection = jank::runtime::object_ref; using IEditableCollection = jank::runtime::object_ref; using IObj = jank::runtime::object_ref;
+  using IHashEq = jank::runtime::object_ref; using IReduceInit = jank::runtime::object_ref; using IKVReduce = jank::runtime::object_ref; } }
+namespace eve_host {
+  using namespace jank::runtime;
+  /* the hooks are statics of JIT-compiled code, which the collector does not scan: registered as roots (without
+     this the printer was collected under the object and a print crashed, at random: measured, J1) */
+  static object_ref printer{ jank_nil };
+  static object_ref equiv{ jank_nil };
+  static object_ref hasher{ jank_nil };
+  static object_ref lookup{ jank_nil };
+  static object_ref dispatch{ jank_nil };
+  static bool rooted{ false };
+  static void root() { if(!rooted) { rooted = true; GC_add_roots(&printer, &printer + 1); GC_add_roots(&equiv, &equiv + 1); GC_add_roots(&hasher, &hasher + 1); GC_add_roots(&lookup, &lookup + 1); GC_add_roots(&dispatch, &dispatch + 1); } }
+  static object_ref op(long n) { return make_box(static_cast<jank::i64>(n)); }
+  struct eve_obj : object {
+    static constexpr object_type obj_type{ object_type::opaque_box };
+    /* jank 0.1 answers get, keyword invoke, get-in, contains?, seq, nth and a call through these virtuals when the
+       object declares the behavior (its own maps do: call|get|find|seqable; measured for get and call:
+       eve/probes/jank-xxh3/probe7.jank), so an eve value reaches its type's own ILookup, ISeqable, IIndexed and IFn
+       through the lookup and dispatch hooks (F-3). A type without the protocol answers get's fallback as before,
+       and throws for the others. */
+    static constexpr object_behavior obj_behaviors{ object_behavior::get | object_behavior::find
+                                                    | object_behavior::seqable | object_behavior::indexable
+                                                    | object_behavior::call | object_behavior::compare };
+    static constexpr bool pointer_free{ false };
+    object_ref tag;
+    object_ref fields;
+    eve_obj(object_ref t, object_ref f) : object{ obj_type, obj_behaviors }, tag{ t }, fields{ f } {}
+    /* a raw this is shifted into NaN space by the untagged_ptr constructor (oref.hpp: a ref built straight from
+       this read as a small_real, measured) */
+    object_ref self() const { return object_ref{ jank::runtime::detail::untagged(static_cast<object const *>(this)) }; }
+    jtl::immutable_string to_string() const override {
+      if(printer == jank_nil) return \"#eve/object\";
+      return jank::runtime::to_string(printer.call(self()));
+    }
+    void to_string(jtl::string_builder &sb) const override { sb(to_string()); }
+    jtl::immutable_string to_code_string() const override { return to_string(); }
+    bool equal(object const &o) const override {
+      if(&o == this) return true;
+      if(equiv == jank_nil) return false;
+      return truthy(equiv.call(self(), object_ref{ jank::runtime::detail::untagged(&o) }));
+    }
+    jank::uhash to_hash() const override {
+      if(hasher == jank_nil) return (jank::uhash)reinterpret_cast<uintptr_t>(this);
+      return (jank::uhash)to_int(hasher.call(self()));
+    }
+    object_ref get(object_ref key) const override {
+      if(lookup == jank_nil) return jank_nil;
+      return lookup.call(self(), key, jank_nil);
+    }
+    object_ref get(object_ref key, object_ref fallback) const override {
+      if(lookup == jank_nil) return fallback;
+      return lookup.call(self(), key, fallback);
+    }
+    bool contains(object_ref key) const override {
+      if(dispatch == jank_nil) return false;
+      return truthy(dispatch.call(op(1), self(), key, jank_nil));
+    }
+    object_ref seq() const override { return dispatch.call(op(2), self(), jank_nil, jank_nil); }
+    object_ref fresh_seq() const override { return seq(); }
+    /* a type that is its own seq (eve.core's seq returns it as itself): jank 0.1 walks an object through these
+       virtuals whatever its behavior bits (measured: eve/probes/jank-seqlike) — the base's first/next of an object
+       whose seq is itself never ended. A type's own ISeq through the hook; any other through its seq. */
+    object_ref first() const override { return dispatch.call(op(9), self(), jank_nil, jank_nil); }
+    object_ref next() const override { return dispatch.call(op(10), self(), jank_nil, jank_nil); }
+    object_ref next_in_place() override { return next(); }
+    object_ref nth(object_ref index) const override { return dispatch.call(op(3), self(), index, jank_nil); }
+    object_ref nth(object_ref index, object_ref fallback) const override { return dispatch.call(op(4), self(), index, fallback); }
+    object_ref call(object_ref const a) const override { return dispatch.call(op(5), self(), a, jank_nil); }
+    object_ref call(object_ref const a, object_ref const b) const override { return dispatch.call(op(6), self(), a, b); }
+    object_ref find(object_ref key) const override { return dispatch.call(op(7), self(), key, jank_nil); }
+    /* compare: the type's own IComparable (identity audit B-COMPARE: jank's compare had no Eve answer to reach) */
+    jank::i64 compare(object const &o) const override {
+      return to_int(dispatch.call(op(8), self(), object_ref{ jank::runtime::detail::untagged(&o) }, jank_nil));
+    }
+  };
+  object_ref make(object_ref tag, object_ref fields) { return make_box<eve_obj>(tag, fields); }
+  bool is(object_ref o) { return o.get_type() == object_type::opaque_box && dynamic_cast<eve_obj *>(o.ptr()) != nullptr; }
+  object_ref tag(object_ref o) { return static_cast<eve_obj *>(o.ptr())->tag; }
+  object_ref fields(object_ref o) { return static_cast<eve_obj *>(o.ptr())->fields; }
+  void set_printer(object_ref f) { root(); printer = f; }
+  void set_equiv(object_ref f) { root(); equiv = f; }
+  void set_hasher(object_ref f) { root(); hasher = f; }
+  void set_lookup(object_ref f) { root(); lookup = f; }
+  void set_dispatch(object_ref f) { root(); dispatch = f; }
+  long addr(object_ref o) { return (long)reinterpret_cast<uintptr_t>(o.ptr()); }
+  /* a byte array of eve's is signed (HOST-CONTRACT §3: a byte reads back signed, as the JVM's): jank's own
+     byte-array is u8, so eve's are obj::array<i8> made here */
+  object_ref i8_array(long n) { return make_box<obj::array<jank::i8>>((jank::i64)n); }
+}
+")
+
+(defn make-object
+  "An instance of the deftype whose tag is tag (a symbol), over fields (a vector: a mutable field's cell among them)."
+  [tag fields]
+  (cpp/eve_host.make tag fields))
+
+(defn object?
+  "x is a deftype or reify instance."
+  [x]
+  (cpp/eve_host.is x))
+
+(defn object-tag [x] (cpp/eve_host.tag x))
+(defn object-fields [x] (cpp/eve_host.fields x))
+(defn object-addr "The instance's address (identity-hash)." [x] (cpp/eve_host.addr x))
+
+(def type-fields
+  "Every deftype's field names by tag, in order (its factory's argument order): what a field read by name looks up."
+  (atom {}))
+
+(def type-mutable
+  "Every deftype's mutable field names by tag (a set): the fields whose slot holds a cell (volatile!) its factory
+   made. get-field derefs those only — an immutable field whose VALUE is a volatile (eve.host's (token), an
+   eve.rrb-vector transient's ^:host edit token) reads as itself, not as the cell's contents (F-3 family: tally's
+   rrb row threw \"conj! after persistent!\" when the edit token read nil)."
+  (atom {}))
+
+(defn field-index
+  "The index of field f (a symbol) in the type tagged tag; nil for none."
+  [tag f]
+  (first (keep-indexed (fn [i x] (when (= x f) i)) (get @type-fields tag))))
+
+(defn get-field
+  "The value of field f (a symbol) of a deftype instance x — a mutable field's cell's value — as (.-f x) reads it
+   where a host's analyzer can; a record's by its key; nil for a field x does not have."
+  [x f]
+  (cond (object? x) (let [tag (object-tag x)]
+                      (when-let [i (field-index tag f)]
+                        (let [v (nth (object-fields x) i)]
+                          (if (contains? (get @type-mutable tag) f) @v v))))
+        (map? x) (get x (keyword (name f)))
+        :else nil))
+
+(defn set-field!
+  "Sets mutable field f (a symbol) of deftype instance x to v, as (set! (.-f x) v) does where a host's analyzer can see
+   x's type: the field's cell is reset. v; an ex-info for a field x does not hold mutable."
+  [x f v]
+  (let [tag (when (object? x) (object-tag x))
+        i (when tag (field-index tag f))]
+    (if (and i (contains? (get @type-mutable tag) f))
+      (do (vreset! (nth (object-fields x) i) v) v)
+      (throw (ex-info "set! of a field that is not a mutable field of this object" {:field f :type tag})))))
+
+(defn record?*
+  "x is a defrecord instance (a map with :eve/record in its meta); jank's core has no record?."
+  [x]
+  (and (map? x) (some? (:eve/record (meta x)))))
+
+(def ^:private core-type type)
+
+(defn type-key
+  "What a protocol table is keyed by: a deftype's tag, a record's, ::nil for nil, else jank's own type name (a string)."
+  [x]
+  (cond (nil? x) ::nil
+        (object? x) (object-tag x)
+        (map? x) (or (:eve/record (meta x)) (core-type x))
+        :else (core-type x)))
+
+(alter-var-root #'clojure.core/type (fn [_] (fn [x] (when (some? x) (type-key x)))))
+(alter-var-root #'clojure.core/class (fn [_] (fn [x] (when (some? x) (type-key x)))))
+
+(defn- type-of-name
+  "The table key a type names in extend-type / instance?: a deftype's var holds its tag; Object, java.lang.Object
+   and default are every value; nil is nil; a string names one of jank's own types; another symbol names one by
+   its name."
+  [t]
+  (cond (nil? t) ::nil
+        (contains? '#{Object java.lang.Object default} t) ::default
+        (= :default t) ::default
+        (string? t) t
+        ;; a deftype's tag is qualified; an unqualified symbol names one of jank's own types, as type answers it
+        (symbol? t) (if (namespace t) t (name t))
+        (keyword? t) t
+        :else t))
+
+(alter-var-root #'clojure.core/instance?
+  (fn [_]
+    (fn [t x]
+      (let [k (type-of-name t)]
+        (cond (= ::default k) (some? x)
+              (= ::nil k) (nil? x)
+              :else (and (some? x) (= k (type-key x))))))))
+
+;; ---------------------------------------------------------------------------
+;; The fixed-width ops jank's core leaves as TODO
+;; ---------------------------------------------------------------------------
+
+(defn- wrap [bits]
+  (let [m (dec (bit-shift-left 1 bits)) half (bit-shift-left 1 (dec bits)) full (bit-shift-left 1 bits)]
+    (fn [x] (let [u (bit-and (long x) m)] (if (>= u half) (- u full) u)))))
+
+(def ^:private i8 (wrap 8))
+(def ^:private i16 (wrap 16))
+(def ^:private i32 (wrap 32))
+
+(defn- re-root! [sym f] (alter-var-root (ns-resolve 'clojure.core sym) (fn [_] f)))
+
+(re-root! 'unchecked-byte i8)
+(re-root! 'unchecked-short i16)
+(re-root! 'unchecked-int i32)
+(re-root! 'unchecked-long (fn [x] (long x)))
+(re-root! 'unchecked-add (fn [a b] (+ a b)))
+(re-root! 'unchecked-subtract (fn [a b] (- a b)))
+(re-root! 'unchecked-multiply (fn [a b] (* a b)))
+(re-root! 'unchecked-inc (fn [a] (+ a 1)))
+(re-root! 'unchecked-dec (fn [a] (- a 1)))
+(re-root! 'unchecked-negate (fn [a] (- a)))
+(re-root! 'unchecked-add-int (fn [a b] (i32 (+ a b))))
+(re-root! 'unchecked-subtract-int (fn [a b] (i32 (- a b))))
+(re-root! 'unchecked-multiply-int (fn [a b] (i32 (* (i32 a) (i32 b)))))
+(re-root! 'unchecked-inc-int (fn [a] (i32 (+ a 1))))
+(re-root! 'unchecked-dec-int (fn [a] (i32 (- a 1))))
+(re-root! 'unchecked-negate-int (fn [a] (i32 (- a))))
+(re-root! 'unchecked-divide-int (fn [a b] (i32 (quot a b))))
+(re-root! 'unchecked-remainder-int (fn [a b] (i32 (rem a b))))
+(re-root! 'byte i8)
+(re-root! 'short i16)
+(re-root! 'cast (fn [_ x] x))
+
+;; aset-byte, aset-short, aset-int, aset-long, aset-float, aset-double, aset-boolean: jank's core generates each as
+;; (throw "TODO: port …") — a throw of a string literal, which is a C++ throw of a char const* that no jank catch takes,
+;; so the process ends ("terminate called after throwing an instance of 'char const*'", exit 134: eve.reference-tag-test
+;; at a-foreign-or-unknown-reference-is-refused, its with-byte helper — the F-4 abort; eve/probes/jank-bytes). Each
+;; sets through jank's aset, the value coerced to the array's width, and answers it, as Clojure's do.
+(doseq [[sym coerce] [['aset-byte i8] ['aset-short i16] ['aset-int i32] ['aset-long (fn [x] (long x))]
+                      ['aset-float (fn [x] (double x))] ['aset-double (fn [x] (double x))]
+                      ['aset-boolean (fn [x] (boolean x))]]]
+  (re-root! sym (fn ([a i v] (let [v (coerce v)] (clojure.core/aset a i v) v))
+                    ([a i j & more] (apply (ns-resolve 'clojure.core sym) (clojure.core/aget a i) j more)))))
+
+;; eve's byte arrays are signed (a byte reads back -128..127, as the JVM's: HOST-CONTRACT §3, the slab-io conformance's
+;; rows): jank's byte-array makes u8 arrays, so it is re-rooted to i8 arrays (its inline dropped first)
+(defn- i8-array
+  ([n] (if (number? n)
+         (cpp/eve_host.i8_array (long n))
+         (let [xs (vec n) a (cpp/eve_host.i8_array (long (count xs)))]
+           (dotimes [i (count xs)] (clojure.core/aset a i (i8 (nth xs i))))
+           a)))
+  ([n init] (let [a (cpp/eve_host.i8_array (long n))] (dotimes [i n] (clojure.core/aset a i (i8 init))) a)))
+(alter-meta! #'clojure.core/byte-array dissoc :inline :inline-arities)
+(alter-var-root #'clojure.core/byte-array (fn [_] i8-array))
+
+;; the casts int, long, double, float, short, byte and char are inlined to native C++ values, which jank's codegen
+;; cannot box as a fn's result or a case's value ((count [_] (int cnt)) in a type: "no viable overloaded '=' … int to
+;; oref", measured on eve.array's type); called as functions they answer boxed, so their inline expansions are dropped
+(doseq [sym '[int long double float short byte char]]
+  (alter-meta! (ns-resolve 'clojure.core sym) dissoc :inline :inline-arities))
+
+;; object-array's inline expansion types its result, and jank's inline aset on a typed object array is an ambiguous
+;; C++ overload (array_ref<object_ref> with a T and an object_ref value both object_ref: measured, a compile error at
+;; the call site); called as a function, the array reaches aset untyped and the runtime overload answers.
+(alter-meta! #'clojure.core/object-array dissoc :inline :inline-arities)
+
+;; ---------------------------------------------------------------------------
+;; Type hints: dropped from every binding, so no value is a C++ native and no hint is a C++ type
+;; ---------------------------------------------------------------------------
+;; jank reads ^long on a parameter or a let/loop local as a native C++ long, and its case* codegen cannot box one
+;; that reaches a case form's dispatch or a branch ("no viable overloaded '=' … long to oref", core.jank:4523:
+;; measured, `(defn f [^long h] (case h 1 :one h))`); and a hint naming an eve type, as eve.deftype-proto.sio's
+;; `(defn T-offset [^T inst] ...)` does, is "Parameter type meta data is expected to be a symbol or list which
+;; resolves to a C++ type … a `var_unbound_root` instead" (measured, eve.dataset's Dataset). eve's shared code hints
+;; ^long in 78 places (the JVM's primitive hint) and its types by name, so defn, defn-, fn, let and loop are re-rooted
+;; here to drop the :tag from every binding symbol before the core macro expands: every value stays boxed on jank (the
+;; cpp/raw aliases above cover the hints the strip does not reach, a deftype method's parameters among them). jank's
+;; reader stores a hint as :tag (quote long), not the symbol (measured).
+
+(defn- tag-of [x]
+  (let [t (:tag (meta x))] (if (and (seq? t) (= 'quote (first t))) (second t) t)))
+
+(defn- untag-native
+  "x with its :tag dropped (every hint: a native's, an eve type's, a JVM class's — none is a C++ type eve means)."
+  [x]
+  (if (and (symbol? x) (some? (tag-of x))) (vary-meta x dissoc :tag) x))
+
+(defn- strip-bindings
+  "A binding form or arglist with the native tags dropped from its symbols (through vectors and destructuring maps)."
+  [form]
+  (cond (symbol? form) (untag-native form)
+        (vector? form) (with-meta (mapv strip-bindings form) (dissoc (meta form) :tag))
+        (map? form) (with-meta (into {} (map (fn [kv] [(strip-bindings (key kv)) (val kv)]) form)) (meta form))
+        :else form))
+
+(defn- strip-fn-tail
+  "A fn's tail — name? docstring? attr-map? then [params] body, or ([params] body)... — with its arglists stripped."
+  [tail]
+  (map (fn [x] (cond (vector? x) (strip-bindings x)
+                     (and (sequential? x) (not (vector? x)) (vector? (first x))) (cons (strip-bindings (first x)) (rest x))
+                     :else x))
+       tail))
+
+;; jank's fixed-arity limit is 10 parameters ("This function has too many parameters. The max is 10": upstream defect
+;; 13); eve.deftype-proto.sio's ->T constructor takes one per field and one more with a leading sio (IntMapBranch has
+;; 19). A fn with an arity past the limit becomes one variadic arity dispatching on its argument count to each arity's
+;; body under a let of its parameters (a variadic arity the default; none, an ex-info).
+(defn- arity? [x] (and (sequential? x) (not (vector? x)) (vector? (first x))))
+
+(defn- wide-arities
+  "A fn tail (after the name) whose arities all take at most 10 parameters is itself; past that, the tail with one
+   variadic arity dispatching on the count of its arguments."
+  [tail]
+  (let [[pre body] (split-with #(not (or (vector? %) (arity? %))) tail)
+        arities (if (vector? (first body)) [body] body)
+        n-fixed (fn [params] (count (take-while #(not= '& %) params)))
+        variadic? (fn [[params]] (some #(= '& %) params))]
+    (if-not (some (fn [[params]] (> (n-fixed params) 10)) arities)
+      tail
+      (let [args (gensym "args")
+            clauses (mapcat (fn [[params & b]] [(count params) (list* 'clojure.core/let [params args] b)])
+                            (remove variadic? arities))
+            default (if-let [[params & b] (first (filter variadic? arities))]
+                      (list* 'clojure.core/let [params args] b)
+                      (list 'throw (list 'ex-info "wrong number of arguments" {:count (list 'clojure.core/count args)})))]
+        (concat pre [(list ['& args]
+                           (list* 'clojure.core/case (list 'clojure.core/count args) (concat clauses [default])))])))))
+
+;; A field read written (.-f x) — stock Clojure, and every external .cljc structure's — on a target whose type jank's
+;; analyzer cannot see compiles to a C++ member access on an object_ref, which cannot exist ("There is no `edit`
+;; member within jank::runtime::oref<jank::runtime::object>": Lane M's identity audit B-RRB, 148 sites on the release
+;; tree). Such a read can never have compiled on jank, so the bodies defn, defn-, fn, let and loop expand are walked
+;; first and each (.-f x) becomes the completion's field read (get-field: a deftype's field by name, a record's by
+;; key) — the field is the Eve object's, whatever the analyzer sees (the operator's analyzer-deferral route). It
+;; covers a read of another instance through an untyped parameter as well as this one's (`(.-keys next)` in a Node
+;; method: Lane M's external case, probes/jank-deferral), the other spelling (. x -f), and a write, (set! (.-f x) v)
+;; or (set! (. x -f) v), which becomes set-field! (the mutable field's cell reset). Quoted forms are left as they are.
+(defn- field-read-sym [s]
+  (when (and (symbol? s) (nil? (namespace s)))
+    (let [n (name s)] (when (and (> (count n) 2) (= ".-" (subs n 0 2))) (symbol (subs n 2))))))
+
+(defn- dot-field-sym
+  "f of (. x -f), the other spelling of a field read; nil for any other (. x ...)."
+  [form]
+  (when (and (= '. (first form)) (= 3 (count form)) (symbol? (nth form 2)) (nil? (namespace (nth form 2))))
+    (let [n (name (nth form 2))] (when (and (> (count n) 1) (= "-" (subs n 0 1))) (symbol (subs n 1))))))
+
+(defn- defer-field-reads [form]
+  (cond (seq? form)
+        (let [h (first form) f (field-read-sym h)
+              target (when (and (= 'set! h) (= 3 (count form)) (seq? (second form))) (second form))
+              tf (when target (or (and (= 2 (count target)) (field-read-sym (first target))) (dot-field-sym target)))]
+          (cond (= 'quote h) form
+                (and f (= 2 (count form))) (list 'eve.host-completion/get-field (defer-field-reads (second form))
+                                                 (list 'quote f))
+                (dot-field-sym form) (list 'eve.host-completion/get-field (defer-field-reads (second form))
+                                           (list 'quote (dot-field-sym form)))
+                ;; a write, (set! (.-f x) v) or (set! (. x -f) v): the object's cell
+                tf (list 'eve.host-completion/set-field! (defer-field-reads (second target)) (list 'quote tf)
+                         (defer-field-reads (nth form 2)))
+                :else (with-meta (apply list (map defer-field-reads form)) (meta form))))
+        (vector? form) (with-meta (mapv defer-field-reads form) (meta form))
+        (map? form) (with-meta (into {} (map (fn [[k v]] [(defer-field-reads k) (defer-field-reads v)])) form) (meta form))
+        :else form))
+
+(alter-var-root #'clojure.core/defn
+  (fn [core] (fn [form env name & tail]
+               (apply core form env (untag-native name) (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
+(alter-var-root #'clojure.core/defn-
+  (fn [core] (fn [form env name & tail]
+               (apply core form env (untag-native name) (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
+(alter-var-root #'clojure.core/fn
+  (fn [core] (fn [form env & tail] (apply core form env (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
+(alter-var-root #'clojure.core/let
+  (fn [core] (fn [form env bindings & body]
+               (apply core form env (if (vector? bindings) (strip-bindings (defer-field-reads bindings)) bindings)
+                      (map defer-field-reads body)))))
+;; A loop local whose init is an integer literal keeps the literal's C++ int width through recur (upstream defect
+;; 21): (loop [p 1 i 0] (if (< i 32) (recur (* p 2) (inc i)) p)) answers 0, with + - * exact above. Such an init
+;; is boxed here — (clojure.core/identity 1) — so the local is an object and holds what recur gives it (measured:
+;; 4294967296; eve/probes/jank-xxh3/probe4.cljc). eve.hamt-util's pow2 table is such a loop (rows 31 and 32 read
+;; -2147483648 and 0 without it), and dotimes's counter.
+;; A boolean or char literal init likewise makes a native local, which a recur of a value that is nil at run time
+;; cannot take: "An object of type `boolean` was expected here, but a `nil` was provided instead" (Clojure's boolean
+;; and char loop locals are objects: legal there) — eve.thread.domain's loops (eve.thread-domain-test's 3 errors,
+;; eve.thread-fold-group-test's fold-on-a-group); measured: eve/probes/jank-loop/probe-bool.jank.
+(defn- box-int-inits
+  "A loop's binding vector with each integer, boolean or char literal init wrapped in identity."
+  [bindings]
+  (with-meta (vec (mapcat (fn [[b init]] [b (if (or (integer? init) (boolean? init) (char? init))
+                                               (list 'clojure.core/identity init)
+                                               init)])
+                          (partition 2 bindings)))
+             (meta bindings)))
+
+;; A loop nested in a loop that rebinds the outer one's locals fails jank's C++ codegen (upstream defect 24: "use of
+;; undeclared identifier 's47'"; measured with eve.rrb-vector.rrbt's Vector -nth shape: eve/probes/jank-loop), which
+;; ended tally's rrb row and eve.net.bignum's redc (the crypto fast path) once their deferred fns compiled. So every
+;; loop is written as Clojure's own loop writes a destructuring one: its bindings, in order, in a let (each init
+;; bound to a fresh name, the target to that name — sequential, as loop's are), loop* over the fresh names, the
+;; targets bound again inside. No two loops then share a local's name; recur still rebinds the loop's own locals.
+(defn- fresh-loop
+  "A loop's [bindings body] as [let-bindings loop-bindings inner-let-bindings] over fresh names."
+  [bindings]
+  (let [pairs (partition 2 bindings)
+        gs (mapv (fn [[b _]] (gensym (str (if (symbol? b) (name b) "b") "__loop"))) pairs)]
+    [(vec (mapcat (fn [g [b init]] [g init b g]) gs pairs))
+     (vec (mapcat (fn [g] [g g]) gs))
+     (vec (mapcat (fn [g [b _]] [b g]) gs pairs))]))
+
+(alter-var-root #'clojure.core/loop
+  (fn [core] (fn [form env bindings & body]
+               (let [bindings (defer-field-reads bindings) body (map defer-field-reads body)]
+               (if (and (vector? bindings) (seq bindings))
+                 (let [[outer lp inner] (fresh-loop (box-int-inits (strip-bindings bindings)))]
+                   (list 'clojure.core/let outer
+                         (apply core form env lp (list (list* 'clojure.core/let inner body)))))
+                 (apply core form env (if (vector? bindings) (strip-bindings bindings) bindings) body))))))
+
+;; jank's defmacro expands to `(reset-meta! (var name) (assoc (meta (var name)) :macro true))` with meta and assoc
+;; unqualified, so a namespace that excludes meta from clojure.core (eve.alpha, which refers eve.core's) cannot define a
+;; macro: "The symbol `meta` could not be resolved" (measured; upstream defect 20). Re-rooted to qualify them.
+(alter-var-root #'clojure.core/defmacro
+  (fn [core]
+    (fn [form env name & tail]
+      (let [[do-sym defn-form _ var-form] (apply core form env name tail)]
+        (list do-sym defn-form
+              (list 'clojure.core/reset-meta! var-form
+                    (list 'clojure.core/assoc (list 'clojure.core/meta var-form) :macro true))
+              var-form)))))
+
+;; ---------------------------------------------------------------------------
+;; case: the default clause boxed
+;; ---------------------------------------------------------------------------
+;; jank's case* stores its result in an object_ref and assigns each branch's value to it boxed, but not the default
+;; clause's: a default C++-typed natively fails to compile ("no viable overloaded '=' … bool to oref", core.jank:4523
+;; for integer constants, 4531 for keywords, 4527 for strings and symbols) — a literal true/false, integer, double or
+;; string (const char*), a let ending in one, an if of literals, (boolean x) (measured, 25 shapes,
+;; probes/jank-case/out1..4.txt: `(defn f [x] (case x 1 true false))` fails; `(case x 1 false 2 true :d)` and
+;; `(case x 1 :a (clojure.core/identity false))` answer). eve.set's hamt-find ends `(case (int nt) 1 … 2 … false)`, so
+;; an Eve set's first walk (two sets holding a by-reference member, whose digests abstain) died at its deferred
+;; compile. So every case's default is passed through clojure.core/identity (an object) — keyword, string and symbol
+;; cases stay jank's own hashed dispatch (they compile once the default is boxed: measured; the cond route this
+;; replaced worked around the same defect). A default holding a recur is left as it is: identity would take the recur
+;; out of tail position, and an if over a recur and a literal compiles (measured). (Upstream defect 19, amended.)
+
+(defn- has-recur? [form]
+  (cond (= 'recur form) true
+        (or (seq? form) (vector? form)) (boolean (some has-recur? form))
+        (map? form) (boolean (some has-recur? (concat (keys form) (vals form))))
+        :else false))
+
+(alter-var-root #'clojure.core/case
+  (fn [core]
+    (fn [form env e & clauses]
+      (if (odd? (count clauses))
+        (let [d (last clauses)]
+          (apply core form env e (concat (butlast clauses)
+                                         [(if (has-recur? d) d (list 'clojure.core/identity d))])))
+        (apply core form env e clauses)))))
+
+;; ---------------------------------------------------------------------------
+;; Protocols: a table per method keyed by type key; a method fn of fixed arities caching its impl
+;; ---------------------------------------------------------------------------
+
+(defn impl-for
+  "The fn protocol p's method k is for x: the impl extended to x's type key, else to nil (x nil), else the default
+   (Object) one — cached in cache (a volatile map) under the key."
+  [p k x cache]
+  (let [m @p
+        tk (type-key x)
+        fns (:fns m)
+        f (or (get-in fns [tk k])
+              (when (some? x) (get-in fns [::default k])))]
+    (when-not f
+      (throw (ex-info (str "No implementation of method: " (name k) " of protocol: " (:name m)
+                           " found for type: " (if (nil? x) "nil" (str tk)))
+                      {:protocol (:name m) :method k :type tk})))
+    (vswap! cache assoc tk f)
+    f))
+
+(defmacro defprotocol
+  "A protocol: an atom {:name :sigs :fns {type-key {method fn}} :impls [type-keys] :caches [..]} and one fn per
+   method, of the arities its signature lists, dispatching on its first argument's type key."
+  [pname & opts+sigs]
+  (let [sigs (filter seq? opts+sigs)]
+    `(do (def ~pname (atom {:name '~(symbol (str *ns*) (name pname))
+                            :sigs '~sigs :impls [] :fns {} :caches []}))
+         ~@(for [[mname & specs] sigs
+                 :let [cache (gensym "cache")
+                       arglists (filter vector? specs)]]
+             `(let [~cache (volatile! {})]
+                (swap! ~pname update :caches conj ~cache)
+                (def ~mname
+                  (fn ~@(for [al arglists
+                              :let [as (vec (repeatedly (count al) #(gensym "a")))]]
+                          `(~as ((or (get (deref ~cache) (eve.host-completion/type-key ~(first as)))
+                                     (eve.host-completion/impl-for ~pname ~(keyword (name mname)) ~(first as) ~cache))
+                                 ~@as)))))))
+         (var ~pname))))
+
+(defn extend
+  "(extend type-name proto mmap proto mmap ...): mmap's fns (keyword method names) become proto's for the type."
+  [atype & proto+mmaps]
+  (let [k (type-of-name atype)]
+    (doseq [[p mmap] (partition 2 proto+mmaps)]
+      (swap! p (fn [m] (-> m
+                           (update :impls (fn [is] (if (some #(= k %) is) is (conj (vec is) k))))
+                           (update-in [:fns k] merge mmap)
+                           (dissoc :sat))))
+      (doseq [c (:caches @p)] (vreset! c {})))
+    nil))
+
+(defn satisfies?
+  "true when protocol p has been extended to x's type key, or to every value (Object) and x is not nil."
+  [p x]
+  (let [k (type-key x)
+        m @p
+        cached (get (:sat m) k ::none)]
+    (if (identical? cached ::none)
+      (let [r (boolean (or (contains? (:fns m) k)
+                           (and (some? x) (contains? (:fns m) ::default))))]
+        (swap! p assoc-in [:sat k] r)
+        r)
+      cached)))
+
+(defn extends?
+  "true when protocol p has been extended to the type named atype itself."
+  [p atype]
+  (contains? (:fns @p) (type-of-name atype)))
+
+(defn- entry-arities
+  "A method entry's arities: (name [args] body...) is one; (name ([args] body...) ...) lists them."
+  [e]
+  (if (vector? (second e)) [(rest e)] (rest e)))
+
+(defn- method-map
+  "Method entries ((name [args] body...) or (name ([args] body...) ...), several entries per name allowed) as
+   {:name (fn ([args] body...) ...)}."
+  [entries]
+  (into {} (for [[nm es] (group-by first entries)]
+             [(keyword (name nm))
+              (cons 'clojure.core/fn (mapcat entry-arities es))])))
+
+(defn- parse-impls
+  "A body of protocol then its methods, as [[protocol [(name [args] body...) ...]] ...]."
+  [specs]
+  (loop [out [] s specs]
+    (if (seq s)
+      (let [p (first s) [ms more] (split-with seq? (rest s))]
+        (recur (conj out [p (vec ms)]) more))
+      out)))
+
+(defmacro extend-type
+  "(extend-type T Proto (m [this ...] body...) ...): each protocol's methods extended to T."
+  [t & specs]
+  `(eve.host-completion/extend ~(if (symbol? t) (list 'eve.host-completion/quote-or-value t) t)
+     ~@(mapcat (fn [[p ms]] [p (method-map ms)]) (parse-impls specs))))
+
+(defmacro quote-or-value
+  "A type name in extend-type: a var's value where the symbol resolves to one (a deftype's tag), else the symbol
+   itself (a host type named by its name)."
+  [s]
+  (if (or (nil? s) (contains? '#{Object java.lang.Object default} s))
+    (list 'quote s)
+    (if (resolve s) s (list 'quote s))))
+
+(defmacro extend-protocol
+  "(extend-protocol Proto T1 (m ...) T2 (m ...) ...)."
+  [p & specs]
+  (let [groups (loop [out [] s specs]
+                 (if (seq s)
+                   (let [t (first s) [ms more] (split-with seq? (rest s))]
+                     (recur (conj out [t (vec ms)]) more))
+                   out))]
+    `(do ~@(for [[t ms] groups] `(extend-type ~t ~p ~@ms)) nil)))
+
+;; ---------------------------------------------------------------------------
+;; The atom, deref and pending interfaces of a type (as glojure's completion): jank's deref, swap!, reset!,
+;; compare-and-set!, swap-vals!, reset-vals! and realized? are plain functions (not inlined: measured) and take
+;; jank's own atoms, delays and futures; for a type they call its IDeref / IAtom / IPending below — what eve's types
+;; adapter (adapters/types/jank) translates clojure.lang.IDeref, IAtom, IAtom2 and IPending onto.
+;; ---------------------------------------------------------------------------
+
+(defprotocol IDeref (-deref [o]))
+(defprotocol IBlockingDeref (-deref-within [o ms timeout-val]))
+(defprotocol IAtom
+  (-swap [a f] [a f x] [a f x y] [a f x y more])
+  (-reset [a v])
+  (-compare-and-set [a old new]))
+(defprotocol IAtom2
+  (-swap-vals [a f] [a f x] [a f x y] [a f x y more])
+  (-reset-vals [a v]))
+(defprotocol IPending (-realized? [o]))
+
+(defn- host-ref?
+  "x is one of jank's own (its atom, delay, volatile, var ...): not a type's instance."
+  [x]
+  (not (object? x)))
+
+(alter-var-root #'clojure.core/deref
+  (fn [core]
+    (fn ([x] (if (host-ref? x) (core x) (-deref x)))
+      ([x ms timeout-val]
+       (if (host-ref? x) (core x ms timeout-val) (-deref-within x ms timeout-val))))))
+
+(alter-var-root #'clojure.core/swap!
+  (fn [core]
+    (fn ([a f] (if (host-ref? a) (core a f) (-swap a f)))
+      ([a f x] (if (host-ref? a) (core a f x) (-swap a f x)))
+      ([a f x y] (if (host-ref? a) (core a f x y) (-swap a f x y)))
+      ([a f x y & more] (if (host-ref? a) (apply core a f x y more) (-swap a f x y more))))))
+
+(alter-var-root #'clojure.core/reset!
+  (fn [core] (fn [a v] (if (host-ref? a) (core a v) (-reset a v)))))
+
+(alter-var-root #'clojure.core/compare-and-set!
+  (fn [core] (fn [a o n] (if (host-ref? a) (core a o n) (-compare-and-set a o n)))))
+
+(defn- vals-by-swap
+  "[old new] of a swap through a type's IAtom: the old value is the one the successful swap's f was given."
+  [a f args]
+  (let [seen (volatile! nil)
+        nv (apply -swap a (fn [old & xs] (vreset! seen old) (apply f old xs)) args)]
+    [@seen nv]))
+
+(alter-var-root #'clojure.core/swap-vals!
+  (fn [core]
+    (fn [a f & args]
+      (cond (host-ref? a) (apply core a f args)
+            (satisfies? IAtom2 a) (apply -swap-vals a f args)
+            :else (let [[x y & more] args]
+                    (vals-by-swap a f (cond (nil? args) [] (nil? (next args)) [x]
+                                            (nil? more) [x y] :else [x y more])))))))
+
+(alter-var-root #'clojure.core/reset-vals!
+  (fn [core]
+    (fn [a v]
+      (cond (host-ref? a) (core a v)
+            (satisfies? IAtom2 a) (-reset-vals a v)
+            :else (vals-by-swap a (fn [_] v) [])))))
+
+(alter-var-root #'clojure.core/realized?
+  (fn [core] (fn [x] (if (host-ref? x) (core x) (-realized? x)))))
+
+;; ---------------------------------------------------------------------------
+;; = and hash reaching a type's own; meta on a type
+;; ---------------------------------------------------------------------------
+
+(def ^:private type-equality (volatile! nil))
+(def ^:private own-cache (volatile! {}))
+
+(defn set-type-equality!
+  "m: {:equiv (fn [x y]) :hash (fn [x]) :equiv-proto p :hash-proto p} — what = and hash call for a type extending
+   the protocol itself (eve's types adapter names eve.core's)."
+  [m]
+  (vreset! own-cache {})
+  (vreset! type-equality m)
+  (cpp/eve_host.set_equiv (fn [x y] (let [te @type-equality] (if (and te (extends? (:equiv-proto te) (type-key x)))
+                                                                ((:equiv te) x y)
+                                                                false))))
+  (cpp/eve_host.set_hasher (fn [x] (let [te @type-equality] (if (and te (extends? (:hash-proto te) (type-key x)))
+                                                               (bit-and (long ((:hash te) x)) 0xFFFFFFFF)
+                                                               (object-addr x))))))
+
+;; ---------------------------------------------------------------------------
+;; get and assoc reaching a type's own (F-3: an eve collection in an atom, updated with update/assoc, read with (:k m))
+;; ---------------------------------------------------------------------------
+;; A deftype instance is an opaque_box to jank, which jank's own assoc and get refused or answered nil: (swap! a
+;; update :m e/assoc 2 :b) threw "Objects of type `opaque_box` are not associatively writable" and (:m @a) read nil
+;; (int-map-in-an-atom, sorted-set-in-an-atom, sorted-set-disj, eve.deftype.type-id-test's atom rows, tally's).
+;; Reads: the eve_obj above declares jank's get, seqable, indexable and call behaviors, whose virtuals — what get,
+;; keyword invoke, get-in, contains?, seq (so first, vec, into's source, ...), nth and invoking call — reach the
+;; lookup and dispatch hooks. Writes and the rest: jank 0.1 has no behavior for them yet (associatively_writable,
+;; countable, conjable, ... are commented out in its object_behavior), so the clojure.core names below are re-rooted
+;; (inline dropped) by one table: an eve instance whose own type extends the protocol goes to eve.core's fn,
+;; everything else to jank's own — never an eve value back into its own route. jank's precompiled update and
+;; assoc-in call assoc through the var, so they follow (measured: eve/probes/jank-xxh3/probe6.cljc).
+
+(def ^:private type-collection (volatile! nil))
+
+(def ^:private op-cache
+  "[op tag] -> the table's fn for an instance of that type, or ::none: extends? and type-key on every routed call
+   made eve.rrb-vector-test's splicing rows 4.4x slower (136 s → 605 s, jank-v5/v8-targeted.log). Emptied when the
+   table is set, as own-cache is when the equality hooks are."
+  (volatile! {}))
+
+(defn- op-fn
+  "The eve.core fn the table names for op when x is an eve instance whose own type extends op's protocol; else nil."
+  [op x]
+  (when (cpp/eve_host.is x)
+    (let [ck [op (object-tag x)] hit (get @op-cache ck ::miss)]
+      (if (identical? hit ::miss)
+        (let [r (when-let [[p f] (get @type-collection op)]
+                  (when (extends? p (type-key x)) f))]
+          (vswap! op-cache assoc ck (if (some? r) r ::none))
+          r)
+        (when-not (identical? hit ::none) hit)))))
+
+(defn- not-supported [x what]
+  (throw (ex-info (str "eve type " (type-key x) " is not " what) {:type (type-key x)})))
+
+(defn nth-of-seq
+  "The n'th of a sequential type's seq — the JVM's nth over a list (the types adapter names it for ISequential): out of
+   range throws, or answers not-found."
+  ([x n] (loop [s (seq x) i 0]
+           (cond (nil? s) (throw (ex-info (str "eve: index " n " out of bounds") {:eve/index n}))
+                 (== i n) (first s)
+                 :else (recur (next s) (inc i)))))
+  ([x n nf] (loop [s (seq x) i 0]
+              (cond (nil? s) nf
+                    (== i n) (first s)
+                    :else (recur (next s) (inc i))))))
+
+(defn set-type-collection!
+  "m: {op [protocol f]} — for an eve instance whose own type extends the protocol, what jank's get, keyword invoke,
+   get-in, contains?, seq, nth, invoking it, and the re-rooted clojure.core names below call (eve's types adapter
+   names eve.core's: :lookup ILookup's -lookup, 'seq ISeqable's seq, 'assoc IAssociative's, ...)."
+  [m]
+  (vreset! op-cache {})
+  (vreset! type-collection m)
+  (cpp/eve_host.set_lookup (fn [x k nf] (if-let [f (op-fn :lookup x)] (f x k nf) nf)))
+  (cpp/eve_host.set_dispatch
+   (fn [op x a b]
+     (let [op (long op)]
+       ;; where Eve's type on the JVM throws, a catchable ex-info here (the identity table's lookups, the reference's
+       ;; slots 10 and 11): contains? of a type neither associative nor a set, nth of one neither indexed nor sequential
+       ;; (with a not-found too), find of one not associative, a call of one not a fn
+       (cond
+         (== op 1) (if-let [f (op-fn 'contains? x)] (boolean (f x a)) (not-supported x "associative or a set"))
+         (== op 2) (if-let [f (op-fn 'seq x)] (f x) (not-supported x "seqable"))
+         (== op 3) (if-let [f (or (op-fn 'nth x) (op-fn 'nth-seq x))] (f x a) (not-supported x "indexed"))
+         (== op 4) (if-let [f (or (op-fn 'nth x) (op-fn 'nth-seq x))] (f x a b) (not-supported x "indexed"))
+         (== op 5) (if-let [f (op-fn 'invoke x)] (f x a) (not-supported x "a fn"))
+         (== op 6) (if-let [f (op-fn 'invoke x)] (f x a b) (not-supported x "a fn"))
+         ;; find: [k v] when the associative type has k (select-keys builds through it), else nil
+         (== op 7) (if-let [f (op-fn 'find x)] (f x a) (not-supported x "associative"))
+         (== op 8) (if-let [f (op-fn 'compare x)] (f x a) (not-supported x "comparable"))
+         ;; first and next: a type that is its own seq by its ISeq / INext (-rest's seq without INext); any other
+         ;; through its seq (a host seq: never back here)
+         (== op 9) (if-let [f (op-fn 'first x)] (f x) (first (seq x)))
+         (== op 10) (if-let [f (op-fn 'next x)]
+                      (f x)
+                      (if-let [f (op-fn 'rest x)] (seq (f x)) (next (seq x))))
+         :else (not-supported x (str "an op " op)))))))
+
+(defn- route!
+  "clojure.core/sym re-rooted (its inline dropped): an eve instance in first position whose type extends the table's
+   protocol for sym goes to the table's fn, everything else to jank's own."
+  [sym]
+  (when-let [v (ns-resolve 'clojure.core sym)]
+    (let [core @v]
+      (alter-meta! v dissoc :inline :inline-arities)
+      (alter-var-root v (fn [_] (fn ([x] (if-let [f (op-fn sym x)] (f x) (core x)))
+                                    ([x a] (if-let [f (op-fn sym x)] (f x a) (core x a)))
+                                    ([x a b] (if-let [f (op-fn sym x)] (f x a b) (core x a b)))
+                                    ([x a b & more] (if-let [f (op-fn sym x)] (apply f x a b more) (apply core x a b more)))))))))
+
+(doseq [sym '[assoc dissoc conj disj count contains? empty peek pop key val rseq
+              transient persistent! conj! assoc! dissoc! disj! pop!
+              ;; sequential? too: it is a host class test, blind to an eve instance (an opaque_box is never
+              ;; jank's Sequential), and shared code gates on it — EveVector's equiv opens with
+              ;; (sequential? other), so an eve vector did not equal ITSELF while a host vector on the
+              ;; right passed the same gate ((= v v) false, (= v [1 2 3]) true; measured, Lane M 2026-11-06).
+              ;; The types adapter's table answers it for an eve type from its ISequential marker.
+              sequential?
+              ;; map? and set? are the same blindness one fallback deeper: EveHashMap's and EveHashSet's
+              ;; equiv delegate to map-equiv?/set-equiv? when the digest verdict abstains (by-reference
+              ;; content), and those open with (map? other)/(set? other) — false for every eve instance,
+              ;; so two distinct eve maps/sets holding a by-reference value compared FALSE (measured on
+              ;; the release tree on two boxes, eve.digest-cache-test's by-reference row, Lane M 2026-11-06).
+              map?]]
+  (route! sym))
+;; set? is deliberately NOT routed: re-rooting it breaks jank's own core codegen (clojure/core.jank:4523,
+;; a bool flows into an oref assignment in a core form compiled against set?'s native answer; measured
+;; twice, Lane M 2026-11-06). EveHashSet's equiv fallback therefore still gates on a blind (set? other)
+;; for by-reference content — the named sibling in this lane's STATUS, with its repro.
+
+;; = with an eve value on either side compares from the eve side, as the JVM's does: jank's own equal of a jank map
+;; and an eve map asked the jank map, which cannot see an eve type — (= {:note [1 2 3]} eve-map) was false where the
+;; JVM and babashka say true (eve.tally-test's two-atoms row: the holder's note read back an EveHashMap). An eve
+;; value on the left reaches its type's IEquiv through the equiv hook (eve_obj's equal) already.
+;; A jank collection holding an eve value compares element by element, as the JVM's equiv does (eq's last arm below):
+;; jank's
+;; own equal of two vectors compares their elements with jank's equal, which never reaches the eve side — (= ["b1"
+;; {:note [1 2 3]}] ["b1" eve-map]) was false (eve.tally-test's two-atoms row, eve.read-region-test's lazy-result
+;; row). Only when jank's own answer is false and both are jank maps or sequentials: maps by key, sequentials in
+;; lockstep (an infinite seq stops at its first difference).
+(def ^:private jank= (deref #'clojure.core/=))
+;; jank's own collection predicates, for eve='s fallback: only jank's own maps and sequentials are walked (eve values
+;; are answered above it), and a number, keyword or string leaves at once
+(def ^:private jank-map? (deref #'clojure.core/map?))
+(def ^:private jank-sequential? (deref #'clojure.core/sequential?))
+(declare eve=)
+(defn- seq-eve= [a b]
+  (loop [xs (seq a) ys (seq b)]
+    (cond (nil? xs) (nil? ys)
+          (nil? ys) false
+          (eve= (first xs) (first ys)) (recur (next xs) (next ys))
+          :else false)))
+(defn- map-eve= [a b]
+  (and (== (count a) (count b))
+       (every? (fn [e] (let [bv (get b (key e) ::absent)]
+                         (and (not (identical? bv ::absent)) (eve= (val e) bv))))
+               a)))
+(defn- eve= [a b]
+  ;; jank's own = first: equal scalars answer at once (an element loop's common case — eve.rrb-vector-test's splicing
+  ;; rows compare half a million elements three ways: 136 s before this fallback, 534 s with the checks first)
+  (or (jank= a b)
+      (let [ea (cpp/eve_host.is a) eb (cpp/eve_host.is b)]
+        (cond ea false
+              eb (jank= b a)
+              (and (jank-map? a) (jank-map? b)) (map-eve= a b)
+              (and (jank-sequential? a) (jank-sequential? b)) (seq-eve= a b)
+              :else false))))
+
+;; ---------------------------------------------------------------------------
+;; THE IDENTITY TABLE: jank's core predicates on an eve value, answered by the instance's own type
+;; ---------------------------------------------------------------------------
+;; One mechanism with cohost Agent 3's reference (atom.broker agent3/eve-u6-opt3 @ b71aa3e41, IDENTITY-TABLE.md: Lane
+;; M's decision, operator-approved, 2026-11-06 11:53 AM ET). jank's own answer is its C++ check, which knows jank's
+;; types only: on an eve value coll?, counted?, vector?, map?, set?, seq?, associative?, list? answered false (Lane M's
+;; identity audit §C, measured). An eve instance — the one object with a symbol tag — answers each by its type's
+;; protocol in eve.core, named in this table; every other value keeps jank's answer, and pays one type compare
+;; (opaque_box) first. jank-side code that tells host values from eve values asks object? first, never these alone
+;; (eve.core's host-seq?, host-coll?, subvec; sequence below). sorted?, fn? and compare are not in the table: Eve's
+;; types answer the first two on the JVM as jank does (false), and compare reaches a type's own IComparable through the
+;; one object's compare (B-COMPARE; a type without it throws, as the JVM's).
+(def identity-table
+  "[jank's predicate, the eve.core protocol an eve instance answers it by, the C++ check of a jank :inline predicate
+   (its inline expansion keeps that check for every type but opaque_box), or nil] — one row each."
+  [['clojure.core/coll?         'eve.core/ICollection  'cpp/jank.runtime.is_collection]
+   ['clojure.core/seq?          'eve.core/ISeq         'cpp/jank.runtime.is_seq]
+   ['clojure.core/seqable?      'eve.core/ISeqable     'cpp/jank.runtime.is_seqable]
+   ['clojure.core/vector?       'eve.core/IVector      'cpp/jank.runtime.is_vector]
+   ['clojure.core/counted?      'eve.core/ICounted     nil]
+   ['clojure.core/sequential?   'eve.core/ISequential  nil]
+   ['clojure.core/map?          'eve.core/IMap         nil]
+   ['clojure.core/set?          'eve.core/ISet         nil]
+   ['clojure.core/list?         'eve.core/IList        nil]
+   ['clojure.core/associative?  'eve.core/IAssociative nil]
+   ['clojure.core/indexed?      'eve.core/IIndexed     nil]
+   ['clojure.core/reversible?   'eve.core/IReversible  nil]
+   ['clojure.core/ifn?          'eve.core/IFn          nil]])
+
+;; jank 0.1's reversible? and indexed? throw for every value ("TODO: port", core.jank:7012-7022): jank's own values
+;; answer as before the table, for every caller (the var's root takes them from here, not from jank's thrower).
+(def ^:private host-answers
+  {'clojure.core/reversible? (fn [x] (or (vector? x) (sorted? x)))
+   'clojure.core/indexed? (fn [x] (vector? x))})
+
+(def ^:private pred-cores
+  "jank's own predicate fns, taken before the re-roots below: the answer for every value not an eve instance."
+  (merge (into {} (map (fn [[k]] [k @(resolve k)]) identity-table)) host-answers))
+
+(def ^:private pred-protocols
+  "The protocol each predicate's row names, resolved at its first eve instance (eve.core loads after this)."
+  (volatile! {}))
+
+(defn eve-predicate
+  "Predicate k (its clojure.core symbol) of x: an eve instance's by its type's protocol (identity-table), any other
+   value's jank's own."
+  [k x]
+  (if (and (cpp/eve_host.is x) (symbol? (object-tag x)))
+    ;; eve.core not loaded (a program of plain deftypes: the completion's own pins): no type extends its protocols
+    (if-let [p (or (get @pred-protocols k)
+                   (when-let [pv (resolve (second (first (filter #(= k (first %)) identity-table))))]
+                     (let [p @pv] (vswap! pred-protocols assoc k p) p)))]
+      (boolean (extends? p (object-tag x)))
+      false)
+    (boolean ((get pred-cores k) x))))
+
+;; coll?, seq?, seqable? and vector? are :inline in jank (core.jank:305, 313, 321, 359): a direct call compiles to
+;; jank's C++ check and never reaches the var. Their inline expansion is replaced, not dropped: the C++ check stays the
+;; path for every type but opaque_box, which alone goes to eve-predicate (only jank's own headers are named, so a module
+;; compiled without this file's C++ expands it; the cast boxes a native argument — (+ a b), a count — as jank's own
+;; check does: measured by the reference, .get_type of a native int does not compile). Every row's root takes the same
+;; branch, so a call through the var (higher-order, apply) answers alike.
+(doseq [[k _ check] identity-table]
+  (let [v (resolve k) own (get pred-cores k)]
+    (when check
+      (alter-meta! v assoc :inline
+                   (fn [o]
+                     (let [g (gensym "o")]
+                       (list 'clojure.core/let [g (list 'cpp/cast 'cpp/jank.runtime.object_ref o)]
+                             (list 'if (list 'cpp/== 'cpp/jank.runtime.object_type.opaque_box (list 'cpp/.get_type g))
+                                   (list 'clojure.core/boolean (list 'eve.host-completion/eve-predicate (list 'quote k) g))
+                                   (list check g)))))))
+    (alter-var-root v (fn [_] (fn [x] (if (cpp/== cpp/jank.runtime.object_type.opaque_box (cpp/.get_type x))
+                                        (eve-predicate k x)
+                                        (own x)))))))
+
+;; into as Clojure 1.10's: with a transducer, a jank collection is built transiently and persistent! runs in the
+;; reducing fn's completion — so halt-when's halting input comes back as itself, where jank's into called persistent!
+;; on it ("Objects of type `small_integer` are not persistentable": eve.thread-fold-test's registered-transducer row);
+;; into an eve collection goes through the routed conj (jank's into conj'd in C++: "Objects of type `opaque_box` are
+;; not conjable", eve.thread-fold-group-test).
+(let [v #'clojure.core/into core @v]
+  (alter-meta! v dissoc :inline :inline-arities)
+  (alter-var-root v (fn [_] (fn ([] [])
+                                ([to] to)
+                                ([to from] (if (cpp/eve_host.is to) (reduce clojure.core/conj to from) (core to from)))
+                                ([to xform from]
+                                 (if (and (not (cpp/eve_host.is to)) (or (vector? to) (map? to) (set? to)))
+                                   (let [tm (meta to)
+                                         rf (fn ([coll] (let [r (persistent! coll)] (if tm (with-meta r tm) r)))
+                                                ([coll x] (conj! coll x)))]
+                                     (transduce xform rf (transient to) from))
+                                   (transduce xform clojure.core/conj to from)))))))
+
+;; merge and merge-with as Clojure's, over the routed conj, assoc, get and contains?: jank's own conj in C++, so
+;; (merge eve-map m) threw "Objects of type `opaque_box` are not conjable" (eve.thread.domain's measured costs, merged
+;; into a runtime's descriptor in the meta-atom: eve.thread-fold-group-test).
+(re-root! 'merge (fn ([] nil)
+                     ([m] m)
+                     ([m & ms] (when (some identity (cons m ms))
+                                 (reduce (fn [a b] (clojure.core/conj (or a {}) b)) m ms)))))
+(re-root! 'merge-with
+          (fn [f & maps]
+            (when (some identity maps)
+              (let [merge-entry (fn [m e] (let [k (key e) v (val e)]
+                                            (if (contains? m k) (assoc m k (f (get m k) v)) (assoc m k v))))
+                    merge2 (fn [m1 m2] (reduce merge-entry (or m1 {}) (seq m2)))]
+                (reduce merge2 maps)))))
+
+;; reduce-kv takes its collection last
+(let [v #'clojure.core/reduce-kv core @v]
+  (alter-meta! v dissoc :inline :inline-arities)
+  (alter-var-root v (fn [_] (fn [f init coll] (if-let [g (op-fn 'reduce-kv coll)] (g f init coll) (core f init coll))))))
+
+(defn- own? [k x]
+  (when-let [te @type-equality]
+    (let [c (type-key x) ck [k c] hit (get @own-cache ck ::none)]
+      (if (identical? hit ::none)
+        (let [r (extends? (get te k) c)] (vswap! own-cache assoc ck r) r)
+        hit))))
+
+(def ^:private core-hash hash)
+
+(defn- eq [x y]
+  (cond (and (object? x) (own? :equiv-proto x)) (boolean ((:equiv @type-equality) x y))
+        (and (object? y) (own? :equiv-proto y)) (boolean ((:equiv @type-equality) y x))
+        ;; neither is a type with its own equivalence: jank's own =, and where it says no for two jank maps or
+        ;; sequentials, element by element through this = (eve= above: a jank vector holding an eve map)
+        :else (eve= x y)))
+
+(alter-var-root #'clojure.core/=
+  (fn [_]
+    (fn ([_] true)
+      ([x y] (eq x y))
+      ([x y & more] (if (eq x y)
+                      (if (next more) (recur y (first more) (next more)) (eq y (first more)))
+                      false)))))
+(alter-var-root #'clojure.core/not= (fn [_] (fn ([_] false) ([x y] (not (= x y))) ([x y & more] (not (apply = x y more))))))
+(alter-var-root #'clojure.core/hash
+  (fn [_] (fn [x] (if (and (object? x) (own? :hash-proto x))
+                    (bit-and (long ((:hash @type-equality) x)) 0xFFFFFFFF)
+                    (core-hash x)))))
+
+(def ^:private core-meta meta)
+(alter-var-root #'clojure.core/meta (fn [_] (fn [x] (if (object? x) nil (core-meta x)))))
+
+;; a printer for every instance: jank's str / pr-str / println reach it through the C++ object
+(def ^:private printers (atom {}))
+
+(defn set-printer!
+  "f prints an instance of the type tagged tag: (f x) → a string."
+  [tag f]
+  (swap! printers assoc tag f))
+
+(cpp/eve_host.set_printer
+ (fn [x]
+   (let [tag (object-tag x)]
+     (if-let [f (get @printers tag)]
+       (f x)
+       (str "#object[" tag " 0x" (object-addr x) "]")))))
+
+;; ---------------------------------------------------------------------------
+;; deftype
+;; ---------------------------------------------------------------------------
+
+(defn- mutable-field? [f]
+  (let [m (meta f)] (or (:mutable m) (:unsynchronized-mutable m) (:volatile-mutable m))))
+
+(defn- binding-syms
+  "The symbols a binding form (a symbol, or a destructuring vector or map) binds."
+  [b]
+  (cond (symbol? b) (if (= '& b) [] [b])
+        (vector? b) (mapcat binding-syms b)
+        (map? b) (concat (mapcat binding-syms (remove keyword? (keys b)))
+                         (mapcat (fn [[k v]] (when (#{:keys :syms :strs} k) (map #(symbol (name %)) v))) b)
+                         (when-let [a (:as b)] [a]))
+        :else []))
+
+(def ^:private bound-forms
+  "The forms whose binding vector the cell walk reads (a name they bind shadows a field)."
+  '#{let let* loop loop* when-let if-let when-some if-some when-first binding
+     clojure.core/let clojure.core/loop clojure.core/when-let clojure.core/if-let
+     clojure.core/when-some clojure.core/if-some clojure.core/binding})
+
+(def ^:private special-forms
+  "jank's special forms (special-symbol? is a TODO stub in its core)."
+  '#{def if do let* loop* fn* recur quote var throw try catch finally set! letfn* case* new .})
+
+(defn- cells
+  "A method body with each cell field (a symbol in cs) read through deref and set! through vreset!: a name a let,
+   loop, fn or binding form binds is left alone where it is bound."
+  [form cs]
+  (letfn [(walk [form shadow]
+            (cond
+              (and (symbol? form) (contains? cs form) (not (contains? shadow form)))
+              (list 'clojure.core/deref form)
+
+              (not (seq? form))
+              (cond (vector? form) (with-meta (mapv #(walk % shadow) form) (meta form))
+                    (map? form) (with-meta (into {} (map (fn [[k v]] [(walk k shadow) (walk v shadow)])) form)
+                                  (meta form))
+                    (set? form) (with-meta (set (map #(walk % shadow) form)) (meta form))
+                    :else form)
+
+              (empty? form) form
+              (contains? '#{quote var} (first form)) form
+
+              ;; a macro call is expanded first (a cell field it names, (caching-hash this f hash__), is the place it
+              ;; set!s after expansion, not a read)
+              (and (symbol? (first form)) (not (contains? shadow (first form)))
+                   (not (contains? special-forms (first form)))
+                   (not (contains? bound-forms (first form)))
+                   (when-let [v (resolve (first form))] (and (var? v) (:macro (meta v)))))
+              (walk (macroexpand-1 form) shadow)
+
+              (and (= 'set! (first form)) (symbol? (second form)) (contains? cs (second form))
+                   (not (contains? shadow (second form))))
+              (list 'clojure.core/vreset! (second form) (walk (nth form 2) shadow))
+
+              (contains? bound-forms (first form))
+              (let [[op bvec & body] form
+                    [bs shadow'] (reduce (fn [[acc sh] [b init]]
+                                           [(conj acc b (walk init sh)) (into sh (binding-syms b))])
+                                         [[] shadow] (partition 2 bvec))]
+                (with-meta (list* op bs (map #(walk % shadow') body)) (meta form)))
+
+              (contains? '#{fn fn* clojure.core/fn} (first form))
+              (let [[op & more] form
+                    [nm more] (if (symbol? (first more)) [(first more) (rest more)] [nil more])
+                    sh (cond-> shadow nm (conj nm))]
+                (with-meta (concat (cond-> [op] nm (conj nm))
+                                   (if (vector? (first more))
+                                     (let [[args & body] more sh (into sh (binding-syms args))]
+                                       (cons args (map #(walk % sh) body)))
+                                     (map (fn [[args & body]]
+                                            (let [sh (into sh (binding-syms args))]
+                                              (list* args (map #(walk % sh) body))))
+                                          more)))
+                  (meta form)))
+
+              :else (with-meta (apply list (map #(walk % shadow) form)) (meta form))))]
+    (walk form #{})))
+
+(defn- occurs?
+  "Whether symbol s occurs anywhere in form (a field a body never names is not bound for it)."
+  [s form]
+  (cond (= s form) true
+        (or (seq? form) (vector? form) (set? form)) (boolean (some #(occurs? s %) form))
+        (map? form) (boolean (some #(or (occurs? s (key %)) (occurs? s (val %))) form))
+        :else false))
+
+(defn- untag [x] (if (and (symbol? x) (meta x)) (with-meta x nil) x))
+
+(defn- method-arities
+  "A protocol's methods as extend-type takes them: one entry per name, its arities from every entry with that name
+   (deftype lists an arity per entry), each body with the fields it names bound from this (field i is
+   (nth (object-fields this) i))."
+  [methods fields cs]
+  (for [[nm entries] (group-by first methods)]
+    (cons nm
+          (for [[_ args & body] entries
+                :let [args (mapv untag args)
+                      ;; a this named _ is renamed: a later _ parameter would shadow it ((m [_ _] field) read nil);
+                      ;; when _ is the this alone, the body's _ is the this, as in Clojure ((valAt [_ k] (cmp-of _))
+                      ;; in an external library's type: "The symbol `_` could not be resolved" without it)
+                      self_ (and (= '_ (first args)) (not (some #{'_} (rest args))) (occurs? '_ body))
+                      args (if (= '_ (first args)) (assoc args 0 (gensym "this__")) args)
+                      this (first args)
+                      shadow (set (binding-syms args))
+                      used (filter #(and (not (contains? shadow %)) (occurs? % body)) fields)
+                      body (map #(cells % (apply disj cs shadow)) body)
+                      binds (vec (concat (when self_ ['_ this])
+                                         (mapcat (fn [f] [f (list 'clojure.core/nth (list 'eve.host-completion/object-fields this)
+                                                                 (first (keep-indexed (fn [i x] (when (= x f) i)) fields)))])
+                                                 used)))]]
+            (list args
+                  (if (seq binds)
+                    (list* 'clojure.core/let binds body)
+                    (cons 'do body)))))))
+
+(def ^:private dropped-protocols
+  "What a deftype here takes no impls for: Object's methods (printing is the types adapter's: set-printer!)."
+  '#{Object java.lang.Object})
+
+(defmacro deftype
+  "(deftype T [fields...] Protocol (method [this ...] body...) ...): T names its tag (a symbol, this namespace's
+   T); ->T, T. and T__make build an instance, a cell made for each mutable field."
+  [type-name fields & specs]
+  (let [tag (symbol (str *ns*) (name type-name))
+        names (mapv untag fields)
+        cs (set (map untag (filter mutable-field? fields)))
+        impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+        args (mapv #(symbol (str "a" %)) (range (count names)))
+        cell (fn [f a] (if (contains? cs f) `(clojure.core/volatile! ~a) a))
+        ;; jank caps a fixed-arity fn at 10 parameters (measured: "This function has too many parameters. The max is
+        ;; 10"): a type of more fields (an eve-deftype's slab-off__ and sio__ among them) builds from a rest argument
+        rest-args (gensym "args")
+        factory (if (<= (count names) 10)
+                  `(fn ~args (eve.host-completion/make-object '~tag ~(mapv cell names args)))
+                  `(fn [& ~rest-args] (eve.host-completion/make-object '~tag
+                                        ~(mapv (fn [f i] (cell f `(clojure.core/nth ~rest-args ~i))) names (range (count names))))))]
+    `(do (def ~type-name '~tag)
+         (swap! eve.host-completion/type-fields assoc '~tag '~names)
+         (swap! eve.host-completion/type-mutable assoc '~tag '~cs)
+         (def ~(symbol (str (name type-name) "__make")) ~factory)
+         ;; ->T and T. by intern, not def: an eve-deftype's expansion defines ->T again (its constructor) in the same
+         ;; top-level form, and jank binds a var defined twice in one form to the FIRST definition when the second's
+         ;; deferred fn is compiled at its first call (measured: upstream defect 26). intern leaves one def in the form; the
+         ;; declare (a def without a value, which does not take part) lets a form that names ->T right after resolve it.
+         (declare ~(symbol (str "->" (name type-name))) ~(symbol (str (name type-name) ".")))
+         (intern '~(symbol (namespace tag)) '~(symbol (str "->" (name type-name))) ~factory)
+         (intern '~(symbol (namespace tag)) '~(symbol (str (name type-name) ".")) ~factory)
+         ~@(for [[p methods] impls]
+             `(eve.host-completion/extend '~tag ~p ~(method-map (method-arities methods names cs))))
+         ~type-name)))
+
+;; ---------------------------------------------------------------------------
+;; defrecord: a map carrying its type in metadata
+;; ---------------------------------------------------------------------------
+
+(defmacro defrecord
+  "(defrecord R [fields...] Protocol (method ...) ...): an instance is a map of its fields with {:eve/record 'ns/R}
+   in its metadata; ->R and map->R build one; R names its tag."
+  [type-name fields & specs]
+  (let [tag (symbol (str *ns*) (name type-name))
+        names (mapv untag fields)
+        impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))]
+    `(do (def ~type-name '~tag)
+         (defn ~(symbol (str "->" (name type-name))) ~names
+           (with-meta ~(zipmap (map keyword names) names) {:eve/record '~tag}))
+         (defn ~(symbol (str "map->" (name type-name))) [m#]
+           (with-meta (merge ~(zipmap (map keyword names) (repeat nil)) m#) {:eve/record '~tag}))
+         (def ~(symbol (str (name type-name) ".")) ~(symbol (str "->" (name type-name))))
+         ~@(for [[p methods] impls]
+             `(eve.host-completion/extend '~tag ~p ~(method-map (for [[nm args & body] methods
+                                                   :let [args (mapv untag args)
+                                                         ;; _ the this alone: the body's _ is the this (deftype's rule)
+                                                         self_ (and (= '_ (first args)) (not (some #{'_} (rest args)))
+                                                                    (occurs? '_ body))
+                                                         args (if (= '_ (first args)) (assoc args 0 (gensym "this__")) args)]]
+                                              (list* nm args
+                                                     (let [this (first args)
+                                                           used (filter #(occurs? % body) names)
+                                                           binds (vec (concat (when self_ ['_ this])
+                                                                              (mapcat (fn [f] [f (list (keyword f) this)]) used)))]
+                                                       (if (seq binds)
+                                                         [(list* 'clojure.core/let binds body)]
+                                                         body)))))))
+         ~type-name)))
+
+;; ---------------------------------------------------------------------------
+;; reify
+;; ---------------------------------------------------------------------------
+
+(def ^:private reify-tags (atom {}))
+
+(defmacro reify
+  "(reify Protocol (method [this ...] body...) ...): an instance whose one field is a map of its closures; its tag
+   made once for this form (at its expansion), its methods extended to the tag, each calling the closure."
+  [& specs]
+  (let [impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+        k [(str *ns*) (pr-str specs)]
+        tag (or (get @reify-tags k)
+                (let [t (symbol (str *ns*) (str (gensym "reify__")))]
+                  (swap! reify-tags assoc k t)
+                  t))
+        fns (into {} (for [[_ methods] impls [nm entries] (group-by first methods)]
+                       [(list 'quote nm)
+                        (cons 'clojure.core/fn (for [[_ args & body] entries] (list* (mapv untag args) body)))]))]
+    `(do ~@(for [[p methods] impls]
+             `(eve.host-completion/extend '~tag ~p
+                ~(into {} (for [[nm entries] (group-by first methods)]
+                            [(keyword (name nm))
+                             (cons 'clojure.core/fn
+                                   (for [[_ args] entries
+                                         :let [as (vec (repeatedly (count args) #(gensym "a")))]]
+                                     (list as (list* (list 'clojure.core/get
+                                                           (list 'clojure.core/nth (list 'eve.host-completion/object-fields (first as)) 0)
+                                                           (list 'quote nm))
+                                                     as))))]))))
+         (eve.host-completion/make-object '~tag [~fns]))))
+
+;; ---------------------------------------------------------------------------
+;; Collection hashes (Clojure's Murmur3 mixing: jank's core leaves them as TODO), locking, sorted walks
+;; ---------------------------------------------------------------------------
+
+(defn- imul32 [a b] (i32 (* (i32 a) (i32 b))))
+(defn- rotl32 [x r] (let [u (bit-and (long x) 0xFFFFFFFF)]
+                      (i32 (bit-or (bit-shift-left u r) (unsigned-bit-shift-right u (- 32 r))))))
+(defn- ushr32 [x n] (unsigned-bit-shift-right (bit-and (long x) 0xFFFFFFFF) n))
+
+(defn- fmix32 [h len]
+  (let [h (bit-xor h len)
+        h (bit-xor h (ushr32 h 16))
+        h (imul32 h 0x85ebca6b)
+        h (bit-xor h (ushr32 h 13))
+        h (imul32 h 0xc2b2ae35)
+        h (bit-xor h (ushr32 h 16))]
+    (i32 h)))
+
+(defn mix-collection-hash
+  "Clojure's Murmur3 mixCollHash: a collection's hash from its basis and count (a signed 32-bit value)."
+  [hash-basis count]
+  (let [k1 (-> hash-basis (imul32 0xcc9e2d51) (rotl32 15) (imul32 0x1b873593))
+        h1 (bit-xor 0 k1)
+        h1 (-> h1 (rotl32 13) (imul32 5) (i32) (+ 0xe6546b64) (i32))]
+    (fmix32 h1 count)))
+
+(defn hash-ordered-coll [coll]
+  (loop [n 0 h 1 s (seq coll)]
+    (if s
+      (recur (inc n) (i32 (+ (imul32 31 h) (i32 (hash (first s))))) (next s))
+      (mix-collection-hash h n))))
+
+(defn hash-unordered-coll [coll]
+  (loop [n 0 h 0 s (seq coll)]
+    (if s
+      (recur (inc n) (i32 (+ h (i32 (hash (first s))))) (next s))
+      (mix-collection-hash h n))))
+
+(re-root! 'mix-collection-hash mix-collection-hash)
+(re-root! 'hash-ordered-coll hash-ordered-coll)
+(re-root! 'hash-unordered-coll hash-unordered-coll)
+
+(defmacro locking
+  "One thread for now (thread/none): the body. The thread adapter's lock replaces it (J3)."
+  [_x & body]
+  `(do ~@body))
+
+(re-root! 'requiring-resolve (fn [sym] (or (resolve sym) (do (require (symbol (namespace sym))) (resolve sym)))))
+;; reversible? and indexed?: the identity table (above) — an eve instance by its type, jank's own values as before
+(re-root! 'rseq (fn [x] (seq (reverse x))))
+(re-root! 'into-array (fn ([aseq] (object-array (vec aseq))) ([_type aseq] (object-array (vec aseq)))))
+;; sort and sort-by of an empty collection answer a native_vector_sequence whose first segfaults ((first (sort []))
+;; and (str/join " " (sort [])) end the process, exit 139: measured; seq and count of it are fine — upstream 25). An
+;; empty collection sorts to (); the rest is jank's own.
+(alter-var-root #'clojure.core/sort
+  (fn [core] (fn ([coll] (if (seq coll) (core coll) ())) ([cmp coll] (if (seq coll) (core cmp coll) ())))))
+(alter-var-root #'clojure.core/sort-by
+  (fn [core] (fn ([k coll] (if (seq coll) (core k coll) ())) ([k cmp coll] (if (seq coll) (core k cmp coll) ())))))
+
+;; subseq and rsubseq: a walk of seq and rseq with the collection's comparator (as glojure's completion)
+(defn- sorted-key [sc e] (if (map? sc) (key e) e))
+(defn- bound [sc test k]
+  (fn [e] (test (compare (sorted-key sc e) k) 0)))
+
+(re-root! 'subseq
+  (fn ([sc test k]
+       (let [in? (bound sc test k)]
+         (seq (if (#{> >=} test) (drop-while (complement in?) (seq sc)) (take-while in? (seq sc))))))
+    ([sc start-test start-key end-test end-key]
+     (seq (take-while (bound sc end-test end-key)
+                      (drop-while (complement (bound sc start-test start-key)) (seq sc)))))))
+
+(re-root! 'rsubseq
+  (fn ([sc test k]
+       (let [in? (bound sc test k) rs (reverse (seq sc))]
+         (seq (if (#{< <=} test) (drop-while (complement in?) rs) (take-while in? rs)))))
+    ([sc start-test start-key end-test end-key]
+     (let [rs (reverse (seq sc))]
+       (seq (take-while (bound sc start-test start-key)
+                        (drop-while (complement (bound sc end-test end-key)) rs)))))))
+
+;; sequence with a transducer: Clojure's lazy one (jank's is a TODO stub)
+(defn- xf-sequence [xform inputs step-in]
+  (let [out (volatile! [])
+        rf (xform (fn ([acc] acc) ([acc x] (vswap! out conj x) acc)))
+        drain (fn [] (let [v @out] (vreset! out []) v))
+        step (fn step [s]
+               (lazy-seq
+                (loop [s s]
+                  (if (seq @out)
+                    (concat (drain) (step s))
+                    (if-let [s (seq s)]
+                      (if (reduced? (step-in rf (first s)))
+                        (do (rf nil) (seq (drain)))
+                        (recur (rest s)))
+                      (do (rf nil) (seq (drain))))))))]
+    (step inputs)))
+
+(re-root! 'sequence
+  (fn ([coll] (if (and (seq? coll) (not (object? coll))) coll (or (seq coll) ())))
+    ([xform coll] (xf-sequence xform coll (fn [rf x] (rf nil x))))
+    ([xform coll & colls]
+     (xf-sequence xform (apply map vector coll colls) (fn [rf xs] (apply rf nil xs))))))
+
+(re-root! 'pmap (fn [f & colls] (apply map f colls)))
+
+;; ---------------------------------------------------------------------------
+;; The names into clojure.core: seen by every namespace created after this one
+;; ---------------------------------------------------------------------------
+
+(doseq [[sym v] {'defprotocol #'defprotocol 'deftype #'deftype 'defrecord #'defrecord 'reify #'reify
+                 'extend-type #'extend-type 'extend-protocol #'extend-protocol 'quote-or-value #'quote-or-value
+                 'locking #'locking}]
+  (intern 'clojure.core (with-meta sym {:macro true}) @v))
+;; halt-when (clojure.core's transducer, which jank 0.1 lacks: measured — eve.thread.fold's rows name it)
+(defn halt-when
+  ([pred] (halt-when pred nil))
+  ([pred retf]
+   (fn [rf]
+     (fn ([] (rf))
+         ([result] (if (and (map? result) (contains? result ::halt)) (::halt result) (rf result)))
+         ([result input] (if (pred input)
+                           (reduced {::halt (if retf (retf (rf result) input) input)})
+                           (rf result input)))))))
+
+(doseq [[sym v] {'extend extend 'satisfies? satisfies? 'extends? extends? 'record? record?* 'halt-when halt-when
+                 ;; Object as a value (instance?, extend, extends?): the name of every value's type
+                 'Object 'Object}]
+  (intern 'clojure.core sym v))
+
+;; the printer's dynamic vars jank's core lacks (eve.vec's printer reads *print-length*): nil, Clojure's defaults
+(doseq [sym '[*print-length* *print-level*]]
+  (when-not (ns-resolve 'clojure.core sym)
+    (intern 'clojure.core (with-meta sym {:dynamic true}) nil)))

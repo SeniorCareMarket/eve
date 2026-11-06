@@ -7,7 +7,7 @@
    reads and writes an eve/deftype type's bodies get. A host realizes a type
    from these in its adapter (eve.types, eve/adapters/types/)."
   (:refer-clojure :exclude [into-array unchecked-inc-int long objects])
-  (:require [eve.host :refer [into-array unchecked-inc-int long objects]]
+  (:require [eve.host :refer [field into-array unchecked-inc-int long objects]]
             [clojure.string :as str]
             [eve.deftype-proto.proto-map :as pm]))
 
@@ -450,7 +450,7 @@
 
 (defn cached?
   "An immutable field in eve memory, read when the instance is reached and
-   kept on it (so (.-f x) reads it on every host). A ^:Type reference is read
+   kept on it (so (field x f) reads it on every host). A ^:Type reference is read
    when a method reads it instead: a node linked to nodes of its own type
    would read the whole structure."
   [f]
@@ -476,13 +476,18 @@
 
 (defn sio-read-expr
   "ISlabIO read expression for a field."
-  [{:keys [type-hint type-class]} offset-sym field-offset]
+  [{:keys [type-hint type-class mutability]} offset-sym field-offset]
   (let [read-fn (case type-class
                   :primitive
                   (case type-hint
                     (:int8 :uint8) 'eve.slab-io/read-u8
                     (:int16 :uint16) 'eve.slab-io/read-u16
-                    (:int32 :uint32 :float32 :float64)
+                    ;; an immutable int32 field is written once, before its instance is published: the hot read
+                    ;; path's plain node read (jvm-heap-grade step 3). A mutable one keeps the atomic read.
+                    :int32 (if (#{:mutable :volatile-mutable} mutability)
+                             'eve.slab-io/read-i32
+                             'eve.deftype-proto.alloc/node-i32)
+                    (:uint32 :float32 :float64)
                     'eve.slab-io/read-i32)
                   ;; :eve-type, :serialized — stored as int32
                   'eve.slab-io/read-i32)]

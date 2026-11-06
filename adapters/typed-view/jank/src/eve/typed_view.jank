@@ -1,0 +1,207 @@
+(ns eve.typed-view
+  "jank's own views of an EveArray: the bulk operations straight over the slab mapping in C++
+   (cpp/raw, called as cpp/eve_tview.<fn>) — fill, copy, sum, min, max, equality on :int32 arrays,
+   the wasm-SIMD rows of ClojureScript's adapter answered by plain C++ loops over the region's
+   bytes — and the host typed arrays as the view's currency: get-typed-view answers a jank typed
+   array holding the array's elements (a snapshot: jank's arrays own their bytes, no jank array
+   type views foreign memory; the bulk operations are the live path), from-typed-array builds an
+   EveArray from one. eve.array is the array on every host; these are jank's.
+   (The :int32 operations do NOT use atomics and should only be used when the array is not yet
+   shared with other threads, is read-only in the current context, or other synchronization is
+   in place — the same terms as ClojureScript's.)"
+  (:require [eve.core :as e]
+            [eve.array :as arr]
+            [eve.host :as host]
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]
+            [eve.deftype-proto.serialize :as ser]
+            [eve.encoding :as enc]
+            [eve.region :as region]))
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <algorithm>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/array.hpp>
+namespace eve_tview {
+  using namespace jank::runtime;
+  static int32_t *I32(long base, long off) { return reinterpret_cast<int32_t *>(reinterpret_cast<uint8_t *>(base) + off); }
+  void fill_i32(long base, long off, long n, long v) { std::fill_n(I32(base, off), (size_t)n, (int32_t)v); }
+  void copy_i32(long db, long doff, long sb, long soff, long n) {
+    std::memmove(I32(db, doff), I32(sb, soff), (size_t)n * 4);
+  }
+  long sum_i32(long base, long off, long n) {
+    int32_t const *p(I32(base, off));
+    int64_t s(0);
+    for(long i = 0; i < n; ++i) s += p[i];
+    return (long)s;
+  }
+  long min_i32(long base, long off, long n) {
+    int32_t const *p(I32(base, off));
+    int32_t m(p[0]);
+    for(long i = 1; i < n; ++i) m = p[i] < m ? p[i] : m;
+    return (long)m;
+  }
+  long max_i32(long base, long off, long n) {
+    int32_t const *p(I32(base, off));
+    int32_t m(p[0]);
+    for(long i = 1; i < n; ++i) m = p[i] > m ? p[i] : m;
+    return (long)m;
+  }
+  long eq_i32(long b1, long o1, long b2, long o2, long n) {
+    return std::memcmp(I32(b1, o1), I32(b2, o2), (size_t)n * 4) == 0 ? 1 : 0;
+  }
+  /* a host typed array of subtype's kind holding the n elements at base+off */
+  object_ref read_elems(long base, long off, long subtype, long n) {
+    uint8_t const *p(reinterpret_cast<uint8_t *>(base) + off);
+    switch(subtype) {
+      case 1: case 2: case 3: { auto a(make_box<obj::array<jank::i8>>((jank::i64)n)); std::memcpy(a->data.data, p, (size_t)n); return a; }
+      case 4: case 5: { auto a(make_box<obj::array<jank::i16>>((jank::i64)n)); std::memcpy(a->data.data, p, (size_t)n * 2); return a; }
+      case 6: case 7: { auto a(make_box<obj::array<jank::i32>>((jank::i64)n)); std::memcpy(a->data.data, p, (size_t)n * 4); return a; }
+      case 8: { auto a(make_box<obj::array<jank::f32>>((jank::i64)n)); std::memcpy(a->data.data, p, (size_t)n * 4); return a; }
+      default: { auto a(make_box<obj::array<jank::f64>>((jank::i64)n)); std::memcpy(a->data.data, p, (size_t)n * 8); return a; }
+    }
+  }
+}
+")
+
+(defn- require-int32! [a op]
+  (when (not= (arr/array-subtype-code a) ser/TYPED_ARRAY_INT32)
+    (throw (ex-info (str op " only supported on :int32 arrays") {:subtype (arr/array-subtype-code a)}))))
+
+(defn- data-loc
+  "a's data region as [base byte-off]: the base of the region holding it and the offset of its
+   first element in that region (through the slab I/O's own resolution, so a grown domain's
+   current mapping is what answers)."
+  [a]
+  (let [sio (d/-eve-sio a)
+        [r off] (alloc/-sio-mem-region sio (d/-root-header-off a) arr/HEADER_SIZE)]
+    [(region/region-base r) off]))
+
+(defn- data-loc-at
+  "data-loc, at element start of an :int32 array."
+  [a start]
+  (let [[base off] (data-loc a)]
+    [base (+ off (* start 4))]))
+
+;;-----------------------------------------------------------------------------
+;; Low-level access
+;;-----------------------------------------------------------------------------
+
+(defn get-sab
+  "The backing of this array on jank: the eve.region region holding it (the mapping itself is
+   the buffer on this host — there is no separate buffer object)."
+  [arr]
+  (let [sio (d/-eve-sio arr)]
+    (first (alloc/-sio-mem-region sio (d/-root-header-off arr) arr/HEADER_SIZE))))
+
+(defn get-offset
+  "The byte offset of the data region in its backing region."
+  [arr]
+  (second (data-loc arr)))
+
+(defn get-typed-view
+  "A host typed array of the array's subtype holding its elements — a snapshot copy (jank's
+   arrays own their bytes); the bulk operations below work on the mapping itself."
+  [arr]
+  (let [[base off] (data-loc arr)]
+    (cpp/eve_tview.read_elems base off (arr/array-subtype-code arr) (e/count arr))))
+
+(defn get-int32-view
+  "get-typed-view for an :int32 array: a host int array of its elements."
+  [arr]
+  (require-int32! arr "get-int32-view")
+  (get-typed-view arr))
+
+(defn get-descriptor-idx
+  "Deprecated: returns -1 (descriptors are no longer tracked per-array)."
+  [_arr]
+  -1)
+
+;;-----------------------------------------------------------------------------
+;; Bulk operations (:int32 only), in C++ over the mapping
+;;-----------------------------------------------------------------------------
+
+(defn afill-simd!
+  "Fill an :int32 array with value, in C++ over the mapping.
+   WARNING: Does not use atomics. Only use before sharing with other threads."
+  ([arr val] (afill-simd! arr val 0 (e/count arr)))
+  ([arr val start end]
+   (require-int32! arr "afill-simd!")
+   (let [[base off] (data-loc-at arr start)]
+     (when (pos? (- end start))
+       (cpp/eve_tview.fill_i32 base off (- end start) (long val)))
+     arr)))
+
+(defn acopy-simd!
+  "Copy elements between :int32 arrays, in C++ over the mappings.
+   WARNING: Does not use atomics. Only use before sharing with other threads."
+  ([dest src] (acopy-simd! dest 0 src 0 (min (e/count dest) (e/count src))))
+  ([dest dest-start src src-start len]
+   (require-int32! dest "acopy-simd!")
+   (require-int32! src "acopy-simd!")
+   (when (pos? len)
+     (let [[db doff] (data-loc-at dest dest-start)
+           [sb soff] (data-loc-at src src-start)]
+       (cpp/eve_tview.copy_i32 db doff sb soff (long len))))
+   dest))
+
+(defn asum-simd
+  "Sum all elements in an :int32 array, in C++. Safe on shared arrays (read-only)."
+  ([arr] (asum-simd arr 0 (e/count arr)))
+  ([arr start end]
+   (require-int32! arr "asum-simd")
+   (let [[base off] (data-loc-at arr start)
+         n (- end start)]
+     (if (pos? n) (cpp/eve_tview.sum_i32 base off n) 0))))
+
+(defn amin-simd
+  "Minimum of an :int32 array, in C++. Returns INT32_MAX for an empty range."
+  ([arr] (amin-simd arr 0 (e/count arr)))
+  ([arr start end]
+   (require-int32! arr "amin-simd")
+   (let [[base off] (data-loc-at arr start)
+         n (- end start)]
+     (if (pos? n) (cpp/eve_tview.min_i32 base off n) 2147483647))))
+
+(defn amax-simd
+  "Maximum of an :int32 array, in C++. Returns INT32_MIN for an empty range."
+  ([arr] (amax-simd arr 0 (e/count arr)))
+  ([arr start end]
+   (require-int32! arr "amax-simd")
+   (let [[base off] (data-loc-at arr start)
+         n (- end start)]
+     (if (pos? n) (cpp/eve_tview.max_i32 base off n) -2147483648))))
+
+(defn aequal-simd?
+  "Compare two :int32 arrays for equality, in C++. Safe on shared arrays (read-only)."
+  [arr1 arr2]
+  (require-int32! arr1 "aequal-simd?")
+  (require-int32! arr2 "aequal-simd?")
+  (let [len1 (e/count arr1)
+        len2 (e/count arr2)]
+    (if (not= len1 len2)
+      false
+      (if (pos? len1)
+        (let [[b1 o1] (data-loc arr1)
+              [b2 o2] (data-loc arr2)]
+          (== 1 (cpp/eve_tview.eq_i32 b1 o1 b2 o2 len1)))
+        true))))
+
+;;-----------------------------------------------------------------------------
+;; Host typed array → EveArray conversion
+;;-----------------------------------------------------------------------------
+
+(defn from-typed-array
+  "Create an EveArray from a host typed array (eve.encoding's array-subtype+bytes answers its
+   subtype and its little-endian bytes). Copies the data into slab memory through ISlabIO."
+  [elem]
+  (let [[subtype bs] (enc/array-subtype+bytes elem)]
+    (when-not subtype
+      (throw (ex-info "from-typed-array: not a host typed array eve.encoding knows" {:value elem})))
+    (let [es (case (long subtype) 2 1 4 2 6 4 8 4 9 8)
+          a (arr/eve-array-uninit (arr/subtype->type-kw subtype) (quot (host/alength bs) es))]
+      (alloc/-sio-write-bytes! (d/-eve-sio a) (d/-root-header-off a) arr/HEADER_SIZE bs)
+      a)))

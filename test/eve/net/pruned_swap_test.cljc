@@ -233,7 +233,7 @@
 
 (defn- reason-of [{:keys [root images]}]
   (try (codec/decode-rec (b/unhex root) images) :accepted
-       (catch #?(:cljs :default :lpy python/Exception :default Exception) e (or (:reason (ex-data e)) (ex-message e)))))
+       (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (or (:reason (ex-data e)) (ex-message e)))))
 
 (defn- crafted-cases
   "[name, its expected reason, the crafted tree] — each one rule broken, every block under the key its bytes hash to"
@@ -272,7 +272,7 @@
             k (sha-hex blob)]
         (swap! (:store s) merge (:images tree))
         (swap! (:state s) assoc-in [:atoms "a1"] {:root_key k :epoch 1 :root_blob (b/to-b64 blob) :root_count 1})
-        (let [got (try (a/deref ra) (catch #?(:cljs :default :lpy python/Exception :default Exception) e
+        (let [got (try (a/deref ra) (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e
                                       (assoc (ex-data e) :thrown true)))]
           (if (= :accepted want)
             (is (= {:t {(first (two-sharing-frag0)) 1}} got) what)

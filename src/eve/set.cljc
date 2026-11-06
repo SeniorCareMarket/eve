@@ -10,7 +10,7 @@
                             aget alength unchecked-int unsigned-bit-shift-right volatile!
                             vswap! transient persistent! conj! long bytes])
   (:require
-   [eve.host :refer [aget alength unchecked-int unsigned-bit-shift-right volatile! vswap!
+   [eve.host :refer [field aget alength unchecked-int unsigned-bit-shift-right volatile! vswap!
                      transient persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
@@ -651,16 +651,34 @@
 (declare ->transient-set)
 (declare eve-hash-set?)
 
+(defonce ^:private set-kinds
+  (atom []))
+
+(defn register-set-kind!
+  "pred answers true for an Eve set type its namespace defines (eve.sorted's EveSortedSet): a set to eve-set?,
+   so to every set gate that asks it."
+  [pred]
+  (swap! set-kinds conj pred)
+  nil)
+
+(defn eve-set?
+  "x is a set in Eve's vocabulary: the host's set?, an EveHashSet, or a registered Eve set kind. The set gates ask
+   this, never the host's set? alone — on a host whose Eve values are not host objects (jank's opaque_box) set? is
+   blind to every Eve set (Lane M's identity audit, 2026-11-06: B-SET, B-SET-X)."
+  [x]
+  (or (set? x) (eve-hash-set? x) (boolean (some (fn [pred] (pred x)) @set-kinds))))
+
 (defn- set-equiv?
   "The set at root-off (cnt values) equals other: a set of as many values,
    each of them in this one."
   [sio root-off cnt other]
-  (and (set? other)
-       (== cnt (count other))
+  ;; in Eve's vocabulary end to end: other may be an Eve set the host cannot count or walk (bb's sci types)
+  (and (eve-set? other)
+       (== cnt (ecore/count other))
        (every? (fn [v]
                  (let [vb (serialize-val-bytes sio v)]
                    (hamt-find sio root-off v (portable-hash-bytes vb) vb)))
-               other)))
+               (ecore/seq other))))
 
 (defn- root-digest-verdict
   "Merkle Phase 4 (§2b) digest seam for equiv — ported from canonical eve
@@ -785,6 +803,11 @@
   d/IEveSio
   (-eve-sio [_] sio__)
 
+  ;; what a deref of an atom holding it answers: a plain Clojure set
+  ;; (see EveHashMap's IPlain note: eve->clj cannot rely on set? here).
+  d/IPlain
+  (-plain [this] (into #{} (map d/eve->clj) (ecore/seq this)))
+
   ;; java.lang.Object in main body so macro sees it and skips default IPrintWithWriter.
   ;; Proto map marks it :clj-only? so CLJS translation strips it automatically.
   java.lang.Object
@@ -894,16 +917,16 @@
 (extend-type EveHashSet
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio (.-sio__ this)
-          old-root (slab/read-i32 sio (.-offset__ this) SABSETROOT_ROOT_OFF_OFFSET)]
+    (let [sio (field this sio__)
+          old-root (slab/read-i32 sio (field this offset__) SABSETROOT_ROOT_OFF_OFFSET)]
       (if (eve-hash-set? new-value)
         (let [new-root-off (slab/read-i32 sio (d/-root-header-off new-value) SABSETROOT_ROOT_OFF_OFFSET)]
           (retire-tree-diff! sio old-root new-root-off))
         (when (not= old-root NIL_OFFSET)
           (free-hamt-node! sio old-root)))
       ;; Free the header block
-      (when (not= (.-offset__ this) NIL_OFFSET)
-        (slab/free! sio (.-offset__ this))))))
+      (when (not= (field this offset__) NIL_OFFSET)
+        (slab/free! sio (field this offset__))))))
 
 ;;=============================================================================
 ;; Constructors

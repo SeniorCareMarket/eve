@@ -1,0 +1,33 @@
+(ns clojure.edn
+  "clojure.edn on jank (part of its core completion, adapters/completion/jank: jank 0.1 ships no clojure.edn):
+   read-string over jank's reader with *read-eval* off, opts' :readers and :default as Clojure's. #inst and #uuid are
+   jank's own tags. jank's inst reader (0.1-alpha) refuses the Z suffix (\"Unrecognized date/time syntax:
+   2024-01-02T03:04:05.678Z\": measured) and takes -00:00, so an EDN text's Z-suffixed instants are rewritten to
+   -00:00 before the read — an upstream jank defect to file."
+  (:refer-clojure :exclude [read-string read])
+  (:require [clojure.string]))
+
+(defn- z->offset
+  "#inst \"...Z\" as #inst \"...-00:00\", which jank's reader takes."
+  [s]
+  (clojure.string/replace s #"(#inst\s+\"[^\"]*)Z\"" "$1-00:00\""))
+
+(defn read-string
+  "One object from string s, as EDN; nil for a blank string."
+  ([s] (read-string {} s))
+  ([opts s]
+   (when-not (clojure.string/blank? s)
+     (binding [*read-eval* false
+               *data-readers* (merge *data-readers* (:readers opts))
+               *default-data-reader-fn* (or (:default opts) *default-data-reader-fn*)]
+       (clojure.core/read-string (z->offset s))))))
+
+(defn read
+  "One object from reader rdr, as EDN."
+  ([] (read *in*))
+  ([rdr] (read {} rdr))
+  ([opts rdr]
+   (binding [*read-eval* false
+             *data-readers* (merge *data-readers* (:readers opts))
+             *default-data-reader-fn* (or (:default opts) *default-data-reader-fn*)]
+     (clojure.core/read rdr))))

@@ -38,13 +38,14 @@
 
 (defn- ubyte
   "Read unsigned byte from buf at index i."
-  [buf i]
+  ^long [buf ^long i]
   (bit-and (aget ^bytes buf i) 0xFF))
 
 (defn portable-hash-bytes
   "Murmur3_x86_32 hash (seed=0) of byte array.
-   Returns int32, identical on every host."
-  [buf]
+   Returns int32, identical on every host. Primitive-hinted (2026-11-05, jvm-heap-grade
+   step 3): boxed, this was ~175-215 ns over 6 key bytes on the JVM."
+  ^long [buf]
   (let [len     (alength ^bytes buf)
         nblocks (i32/ushr len 2)]
     (loop [i 0, h 0]
@@ -62,13 +63,27 @@
         ;; Tail
         (let [t (* nblocks 4)
               r (bit-and len 3)
-              k (cond (== r 3) (bit-or (bit-or (ubyte buf t)
-                                               (bit-shift-left (ubyte buf (+ t 1)) 8))
-                                       (bit-shift-left (ubyte buf (+ t 2)) 16))
-                      (== r 2) (bit-or (ubyte buf t)
-                                       (bit-shift-left (ubyte buf (+ t 1)) 8))
-                      (== r 1) (ubyte buf t)
-                      :else    0)
+              ;; case, not cond: cond's implicit nil tail boxed every hash.
+              ;; On jank the cond form stays: jank's case* codegen assigns the
+              ;; scrutinee's primitive into an object slot and the compile
+              ;; fails ("no viable overloaded '='" in clojure.core's case
+              ;; machinery, measured 2026-11-05 ET) — the cond computes the
+              ;; same k.
+              k #?(:jank (cond (== r 3) (bit-or (bit-or (ubyte buf t)
+                                                        (bit-shift-left (ubyte buf (+ t 1)) 8))
+                                                (bit-shift-left (ubyte buf (+ t 2)) 16))
+                               (== r 2) (bit-or (ubyte buf t)
+                                                (bit-shift-left (ubyte buf (+ t 1)) 8))
+                               (== r 1) (ubyte buf t)
+                               :else    0)
+                   :default (case (int r)
+                              3 (bit-or (bit-or (ubyte buf t)
+                                                (bit-shift-left (ubyte buf (+ t 1)) 8))
+                                        (bit-shift-left (ubyte buf (+ t 2)) 16))
+                              2 (bit-or (ubyte buf t)
+                                        (bit-shift-left (ubyte buf (+ t 1)) 8))
+                              1 (ubyte buf t)
+                              0))
               h (if (pos? r)
                   (bit-xor h (-> k (i32/imul 0xcc9e2d51)
                                  (i32/rotl 15)
@@ -668,24 +683,24 @@
 
 (defn popcount32
   "Population count (number of set bits) in a 32-bit integer."
-  [n]
+  ^long [^long n]
   (i32/popcount n))
 
 (defn mask-hash
   "Extract the 5-bit slot index from hash at the given shift level: bits
    [shift, shift+5) of the hash's 32-bit pattern, so the last level (shift
    30) has two bits on every host (FORMAT-DECISIONS.md §6)."
-  [kh shift]
+  ^long [^long kh ^long shift]
   (bit-and (i32/ushr kh shift) 0x1f))
 
 (defn bitpos
   "Compute the bitmap position for hash at the given shift level."
-  [kh shift]
+  ^long [^long kh ^long shift]
   (bit-shift-left 1 (mask-hash kh shift)))
 
 (defn has-bit?
   "Test whether a specific bit is set in a bitmap."
-  [bitmap bit]
+  [^long bitmap ^long bit]
   (not (zero? (bit-and bitmap bit))))
 
 (defn node-bit
@@ -696,7 +711,7 @@
    32-bit pattern's (30/31 for 2/3); when the pattern's slot is empty there and
    that one is set, the key is read, replaced and removed where it was
    written. A new key takes (bitpos kh shift)."
-  [dbm nbm kh shift]
+  ^long [^long dbm ^long nbm ^long kh ^long shift]
   (let [bit (bitpos kh shift)]
     (if (and (== shift 30) (neg? kh)
              (not (has-bit? dbm bit)) (not (has-bit? nbm bit)))
@@ -706,5 +721,5 @@
 
 (defn get-index
   "Count set bits below `bit` in `bitmap` to get the array index."
-  [bitmap bit]
+  ^long [^long bitmap ^long bit]
   (popcount32 (bit-and bitmap (dec bit))))

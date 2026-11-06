@@ -1,0 +1,236 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2) on jank, over C++ (cpp/raw, called as
+   cpp/eve_region.<fn>): a calloc'd block, or a file mapped MAP_SHARED (grown, never truncated); the atomics the
+   __atomic builtins (lock-prefixed, seq-cst); wait/notify the futex syscall (shared, not FUTEX_PRIVATE: a mapping's
+   waiters in other processes wake too); bulk bytes eve's byte arrays (i8: a byte reads back signed). A region is its base address, a jank
+   integer, in a type of the completion's deftype (adapters/completion/jank). Moved here from impls/jank/src/eve/region.jank
+   (J2), where it was written while measuring jank.
+
+   make-heap-region and open-mmap-region open them; lustre-region? says whether a region's atomics are fcntl byte-range
+   locks (a Lustre mount: open-mmap-region with {:lustre? true}, whose read-modify-writes each take the 4 bytes'
+   lock)."
+  (:require [eve.host :as host]
+            [eve.mem :as mem]))
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <cerrno>
+#include <cstdlib>
+#include <string>
+#include <fcntl.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <linux/futex.h>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/array.hpp>
+namespace eve_region {
+  using namespace jank::runtime;
+  static uint8_t *P(long base, long off) { return reinterpret_cast<uint8_t *>(base) + off; }
+  static obj::array<jank::u8> *A(object_ref o) { return static_cast<obj::array<jank::u8> *>(o.ptr()); }
+  long last_errno() { return errno; }
+  std::string strerr(long e) { return std::string(strerror((int)e)); }
+  /* open-mmap-region: grow (sparse ftruncate) but never truncate; MAP_SHARED */
+  long open_fd(std::string const &path) { return ::open(path.c_str(), O_RDWR | O_CREAT, 0644); }
+  long file_size(long fd) { struct stat st; if(fstat((int)fd, &st) != 0) return -1; return (long)st.st_size; }
+  long grow_never_truncate(long fd, long size) {
+    long cur = file_size(fd);
+    if(cur < size && ftruncate((int)fd, size) != 0) return -1;
+    return file_size(fd);
+  }
+  long map_shared(long fd, long size) {
+    void *p = mmap(nullptr, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED, (int)fd, 0);
+    return p == MAP_FAILED ? 0 : reinterpret_cast<long>(p);
+  }
+  long unmap(long base, long size) { return munmap(reinterpret_cast<void *>(base), (size_t)size); }
+  long msync_range(long base, long off, long len) {
+    long page = sysconf(_SC_PAGESIZE);
+    long start = (off / page) * page;
+    return msync(P(base, start), (size_t)(len + (off - start)), MS_SYNC);
+  }
+  long close_fd(long fd) { return ::close((int)fd); }
+  /* heap region: zero-initialised, process-local */
+  long heap_region(long size) { return reinterpret_cast<long>(::calloc((size_t)size, 1)); }
+  /* plain (non-atomic) and unaligned access: an i32 at any alignment, signed */
+  long load_i32(long b, long off) { int32_t v; std::memcpy(&v, P(b, off), 4); return v; }
+  void store_i32(long b, long off, long x) { int32_t v = (int32_t)x; std::memcpy(P(b, off), &v, 4); __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+  /* 32-bit atomics (aligned): __atomic builtins = lock-prefixed x86 ops, seq-cst */
+  long aload_i32(long b, long off) { return __atomic_load_n(reinterpret_cast<int32_t *>(P(b, off)), __ATOMIC_SEQ_CST); }
+  void astore_i32(long b, long off, long x) { __atomic_store_n(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)x, __ATOMIC_SEQ_CST); }
+  long cas_i32(long b, long off, long expected, long desired) {
+    int32_t e = (int32_t)expected;
+    __atomic_compare_exchange_n(reinterpret_cast<int32_t *>(P(b, off)), &e, (int32_t)desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return e; /* the witness: old value on success, current value on failure */
+  }
+  long add_i32(long b, long off, long d) { return __atomic_fetch_add(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)d, __ATOMIC_SEQ_CST); }
+  long sub_i32(long b, long off, long d) { return __atomic_fetch_sub(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)d, __ATOMIC_SEQ_CST); }
+  long xchg_i32(long b, long off, long x) { return __atomic_exchange_n(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)x, __ATOMIC_SEQ_CST); }
+  /* 64-bit, 8-aligned */
+  long aload_i64(long b, long off) { return __atomic_load_n(reinterpret_cast<int64_t *>(P(b, off)), __ATOMIC_SEQ_CST); }
+  void astore_i64(long b, long off, long x) { __atomic_store_n(reinterpret_cast<int64_t *>(P(b, off)), (int64_t)x, __ATOMIC_SEQ_CST); }
+  long cas_i64(long b, long off, long expected, long desired) {
+    int64_t e = expected;
+    __atomic_compare_exchange_n(reinterpret_cast<int64_t *>(P(b, off)), &e, (int64_t)desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return e;
+  }
+  long add_i64(long b, long off, long d) { return __atomic_fetch_add(reinterpret_cast<int64_t *>(P(b, off)), (int64_t)d, __ATOMIC_SEQ_CST); }
+  long sub_i64(long b, long off, long d) { return __atomic_fetch_sub(reinterpret_cast<int64_t *>(P(b, off)), (int64_t)d, __ATOMIC_SEQ_CST); }
+  /* futex on the mapping (shared): 0 woken or value changed, 1 not equal (EAGAIN), 2 timed out; timeout_ms < 0 waits */
+  long futex_wait(long b, long off, long expected, long timeout_ms) {
+    struct timespec ts{ timeout_ms / 1000, (timeout_ms % 1000) * 1000000L };
+    long r = syscall(SYS_futex, reinterpret_cast<int32_t *>(P(b, off)), FUTEX_WAIT, (int32_t)expected, timeout_ms < 0 ? nullptr : &ts, nullptr, 0);
+    if(r == 0) return 0;
+    if(errno == EAGAIN) return 1;
+    if(errno == ETIMEDOUT) return 2;
+    return 0; /* EINTR: woken */
+  }
+  long futex_wake(long b, long off, long n) { return syscall(SYS_futex, reinterpret_cast<int32_t *>(P(b, off)), FUTEX_WAKE, (int)n, nullptr, nullptr, 0); }
+  /* bulk bytes: a fresh u8 array of the region's bytes; an array's bytes into the region */
+  object_ref read_bytes(long b, long off, long len) {
+    auto out(make_box<obj::array<jank::i8>>((jank::i64)len));
+    std::memcpy(out->data.data, P(b, off), (size_t)len);
+    return out;
+  }
+  void write_bytes(long b, long off, object_ref src) {
+    auto *a = A(src);
+    std::memcpy(P(b, off), a->data.data, a->size);
+  }
+  /* fcntl byte-range lock on [start, start+len): F_SETLKW (blocking); 0 or -errno */
+  long lock_range(long fd, long start, long len, long exclusive) {
+    struct flock fl{}; fl.l_type = exclusive ? F_WRLCK : F_RDLCK; fl.l_whence = SEEK_SET; fl.l_start = start; fl.l_len = len;
+    return fcntl((int)fd, F_SETLKW, &fl) == 0 ? 0 : -errno;
+  }
+  long unlock_range(long fd, long start, long len) {
+    struct flock fl{}; fl.l_type = F_UNLCK; fl.l_whence = SEEK_SET; fl.l_start = start; fl.l_len = len;
+    return fcntl((int)fd, F_SETLK, &fl) == 0 ? 0 : -errno;
+  }
+  long pid() { return (long)getpid(); }
+  void sleep_ms(long ms) { struct timespec ts{ ms / 1000, (ms % 1000) * 1000000L }; nanosleep(&ts, nullptr); }
+}
+")
+
+;; ---------------------------------------------------------------------------
+;; The plain region: hardware atomics on a calloc'd block or a MAP_SHARED mapping
+;; ---------------------------------------------------------------------------
+
+(deftype JankRegion [base size fd]
+  mem/IMemRegion
+  (-byte-length [_] size)
+  (-load-i32 [_ off] (cpp/eve_region.load_i32 base off))
+  (-store-i32! [_ off v] (cpp/eve_region.store_i32 base off v) nil)
+  (-cas-i32! [_ off expected desired] (cpp/eve_region.cas_i32 base off expected desired))
+  (-add-i32! [_ off delta] (cpp/eve_region.add_i32 base off delta))
+  (-sub-i32! [_ off delta] (cpp/eve_region.sub_i32 base off delta))
+  (-exchange-i32! [_ off v] (cpp/eve_region.xchg_i32 base off v))
+  (-load-i64 [_ off] (cpp/eve_region.aload_i64 base off))
+  (-store-i64! [_ off v] (cpp/eve_region.astore_i64 base off v) nil)
+  (-cas-i64! [_ off expected desired] (cpp/eve_region.cas_i64 base off expected desired))
+  (-add-i64! [_ off delta] (cpp/eve_region.add_i64 base off delta))
+  (-sub-i64! [_ off delta] (cpp/eve_region.sub_i64 base off delta))
+  (-wait-i32! [_ off expected timeout-ms]
+    (case (cpp/eve_region.futex_wait base off expected timeout-ms) 1 :not-equal 2 :timed-out :ok))
+  (-notify-i32! [_ off n] (cpp/eve_region.futex_wake base off n))
+  (-supports-watch? [_] true)
+  (-read-bytes [_ off len] (cpp/eve_region.read_bytes base off len))
+  (-write-bytes! [_ off src] (cpp/eve_region.write_bytes base off src) nil)
+  mem/IHostAtomics
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _off f] (f))
+  mem/ISyncableRegion
+  (-sync! [_] (when fd (cpp/eve_region.msync_range base 0 size)) nil)
+  (-sync-range! [_ off len] (when fd (cpp/eve_region.msync_range base off len)) nil))
+
+;; ---------------------------------------------------------------------------
+;; A Lustre mount's region: its read-modify-writes under the fcntl lock on the bytes they change
+;; ---------------------------------------------------------------------------
+
+(defn- under-lock [fd off n f]
+  (let [r (cpp/eve_region.lock_range fd off n 1)]
+    (when (neg? r) (throw (ex-info (str "eve.region: fcntl lock: " (cpp/eve_region.strerr (- r))) {:offset off})))
+    (try (f) (finally (cpp/eve_region.unlock_range fd off n)))))
+
+(deftype JankLockedRegion [base size fd]
+  mem/IMemRegion
+  (-byte-length [_] size)
+  (-load-i32 [_ off] (cpp/eve_region.load_i32 base off))
+  (-store-i32! [_ off v] (cpp/eve_region.store_i32 base off v) nil)
+  (-cas-i32! [_ off expected desired]
+    (under-lock fd off 4 (fn [] (let [cur (cpp/eve_region.load_i32 base off)]
+                                 (when (== cur expected) (cpp/eve_region.store_i32 base off desired))
+                                 cur))))
+  (-add-i32! [_ off delta]
+    (under-lock fd off 4 (fn [] (let [cur (cpp/eve_region.load_i32 base off)]
+                                 (cpp/eve_region.store_i32 base off (+ cur delta))
+                                 cur))))
+  (-sub-i32! [this off delta] (mem/-add-i32! this off (- delta)))
+  (-exchange-i32! [_ off v]
+    (under-lock fd off 4 (fn [] (let [cur (cpp/eve_region.load_i32 base off)] (cpp/eve_region.store_i32 base off v) cur))))
+  (-load-i64 [_ off] (cpp/eve_region.aload_i64 base off))
+  (-store-i64! [_ off v] (cpp/eve_region.astore_i64 base off v) nil)
+  (-cas-i64! [_ off expected desired]
+    (under-lock fd off 8 (fn [] (let [cur (cpp/eve_region.aload_i64 base off)]
+                                 (when (== cur expected) (cpp/eve_region.astore_i64 base off desired))
+                                 cur))))
+  (-add-i64! [_ off delta]
+    (under-lock fd off 8 (fn [] (let [cur (cpp/eve_region.aload_i64 base off)]
+                                 (cpp/eve_region.astore_i64 base off (+ cur delta))
+                                 cur))))
+  (-sub-i64! [this off delta] (mem/-add-i64! this off (- delta)))
+  ;; no futex across a lock-only mount: a bounded poll, and a notify that wakes nobody (0 is a legal answer, §2.3)
+  (-wait-i32! [_ off expected timeout-ms]
+    (let [limit (if (neg? timeout-ms) 1000000000000 timeout-ms)]
+      (loop [waited 0]
+        (cond (not (== expected (cpp/eve_region.load_i32 base off))) :not-equal
+              (>= waited limit) :timed-out
+              :else (do (cpp/eve_region.sleep_ms 1) (recur (+ waited 1)))))))
+  (-notify-i32! [_ _off _n] 0)
+  (-supports-watch? [_] false)
+  (-read-bytes [_ off len] (cpp/eve_region.read_bytes base off len))
+  (-write-bytes! [_ off src] (cpp/eve_region.write_bytes base off src) nil)
+  mem/IHostAtomics
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ off f] (under-lock fd off 4 f)))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed MAP_SHARED region of size-bytes at path-str. The file grows to size-bytes when it is
+   shorter and is never truncated. The descriptor stays open (the fcntl locks of a Lustre mount need it; msync does
+   not)."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes opts]
+   (let [size (long size-bytes)
+         fd (cpp/eve_region.open_fd (str path-str))]
+     (when (neg? fd)
+       (throw (ex-info (str "eve.region: open " path-str ": " (cpp/eve_region.strerr (cpp/eve_region.last_errno)))
+                       {:path path-str})))
+     (when (neg? (cpp/eve_region.grow_never_truncate fd size))
+       (throw (ex-info (str "eve.region: grow " path-str ": " (cpp/eve_region.strerr (cpp/eve_region.last_errno)))
+                       {:path path-str :size size})))
+     (let [base (cpp/eve_region.map_shared fd size)]
+       (when (zero? base)
+         (throw (ex-info (str "eve.region: mmap " path-str ": " (cpp/eve_region.strerr (cpp/eve_region.last_errno)))
+                         {:path path-str :size size})))
+       (if (:lustre? opts) (->JankLockedRegion base size fd) (->JankRegion base size fd))))))
+
+(defn make-heap-region
+  "An IMemRegion over size-bytes of zeroed memory (calloc), shared by the process's threads (never freed: a region
+   lives as long as its domain)."
+  [size-bytes]
+  (let [size (long size-bytes) base (cpp/eve_region.heap_region size)]
+    (when (zero? base) (throw (ex-info "eve.region: calloc failed" {:size size})))
+    (->JankRegion base size nil)))
+
+(defn lustre-region?
+  "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
+  [r]
+  (instance? JankLockedRegion r))
+
+(defn region-base
+  "r's base address — the number the C++ accessors take (either region type).
+   eve.slab-io's fused primitives read it to work on the mapping directly."
+  [r]
+  (host/field r base))

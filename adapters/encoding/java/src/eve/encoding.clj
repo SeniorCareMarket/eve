@@ -182,17 +182,24 @@
   (.isArray (class v)))
 
 (defn new-cache
-  "A concurrent map for small caches (cache-get / cache-put!)."
+  "A thread-safe map for small caches (cache-get / cache-put!).
+  A synchronized HashMap, not a ConcurrentHashMap: this leaf is analyzed
+  by babashka (named in the ns docstring), and bb 1.3.190's analyzer cannot
+  resolve java.util.concurrent.ConcurrentHashMap (nor java.util.Hashtable).
+  Every operation the cache's callers use (get / put / size / clear, never
+  iteration) is individually synchronized on the wrapper, so the cache
+  stays safe under concurrent encoding; the size→clear→put sequence was
+  never atomic and remains a benign memo race (a lost entry re-encodes)."
   []
-  (java.util.concurrent.ConcurrentHashMap. 256))
+  (java.util.Collections/synchronizedMap (java.util.HashMap. 256)))
 
 (defn cache-get [c k]
-  (.get ^java.util.concurrent.ConcurrentHashMap c k))
+  (.get ^java.util.Map c k))
 
 (defn cache-put!
   "Put k → v in cache c, emptying it first when it holds more than max."
   [c k v max]
-  (let [^java.util.concurrent.ConcurrentHashMap c c]
+  (let [^java.util.Map c c]
     (when (> (.size c) (long max)) (.clear c))
     (.put c k v))
   v)

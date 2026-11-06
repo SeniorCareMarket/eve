@@ -8,7 +8,7 @@
    Uses eve/deftype macro: CLJ protocol names, sio threaded everywhere."
   (:refer-clojure :exclude [alength volatile! vswap! transient persistent! conj! bytes])
   (:require
-   [eve.host :refer [alength volatile! vswap! transient persistent! conj! bytes]]
+   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
     :refer [NIL_OFFSET]]
@@ -250,7 +250,10 @@
   d/IEveSio
   (d/-eve-sio [_] sio__)
 
-  
+  ;; what a deref of an atom holding it answers: a plain Clojure list
+  ;; (see EveHashMap's IPlain note: eve->clj cannot rely on list? here).
+  d/IPlain
+  (-plain [this] (apply list (map d/eve->clj (ecore/seq this))))
 
   clojure.lang.IPersistentList
 
@@ -288,8 +291,8 @@
    WARNING: After disposal, the list must not be used."
   [eve-list]
   (when (instance? EveList eve-list)
-    (let [sio (.-sio__ ^EveList eve-list)
-          hdr (.-offset__ ^EveList eve-list)
+    (let [sio (field ^EveList eve-list sio__)
+          hdr (field ^EveList eve-list offset__)
           hd  (when hdr (slab/read-i32 sio hdr LIST_HEAD_OFFSET))]
       (when (and hd (not= hd NIL_OFFSET))
         (free-list-chain! sio hd))
@@ -313,8 +316,8 @@
 (extend-type EveList
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio      (.-sio__ this)
-          hdr      (.-offset__ this)
+    (let [sio      (field this sio__)
+          hdr      (field this offset__)
           old-head (slab/read-i32 sio hdr LIST_HEAD_OFFSET)
           new-head (when (instance? EveList new-value)
                      (slab/read-i32 sio (d/-root-header-off new-value) LIST_HEAD_OFFSET))]

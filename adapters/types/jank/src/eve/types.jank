@@ -1,0 +1,286 @@
+(ns eve.types
+  "eve's types on jank: a type is the completion's deftype (adapters/completion/jank: jank 0.1 has no deftype or
+   protocols of its own; an instance is one C++ object, its methods on the completion's protocol tables). It
+   implements no interface of jank's core, so every interface a type lists is translated, as on babashka, onto
+   eve.core's protocols (ClojureScript's names: ICounted/-count, IIndexed/-nth, ...), through which eve.core/count and
+   friends answer — a map type too (no host map interface to keep). IDeref, IAtom, IAtom2 and IPending go onto the
+   completion's, through which clojure.core's deref, swap!, reset!, compare-and-set! and realized? reach a type; =
+   and hash reach a type's own IEquiv and IHash (set-type-equality!); a type with a printer prints through it
+   (set-printer!: jank's str and pr-str reach the object's C++ printer). A registered collection reads as the host's
+   own (jank's collections, which clojure.core takes).
+   The entry points eve's macros call (every eve.types has them):
+     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     existing-def, rename-fields, reader-of, print-form, vector-types."
+  (:require [clojure.string :as str]
+            [eve.core]
+            [eve.encoding]
+            [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
+                                                 cljs-protocol? cljs-translate-protocol]]
+            [eve.deftype-proto.sio :as sio]))
+
+(def ^:private eve-core-protocols
+  "The protocols eve.core defines on bb (ClojureScript's names), and IList, jank's eve.core marker of the JVM's list."
+  '#{ICounted IIndexed ILookup ISeqable ICollection IEmptyableCollection IEquiv
+     IHash IMeta IWithMeta IFn IReduce IKVReduce IAssociative IMap ISet IStack
+     IVector ISeq INext ISequential ASeq IReversible IComparable IList
+     IEditableCollection ITransientCollection ITransientAssociative ITransientMap
+     ITransientVector ITransientSet IChunkedSeq IChunkedNext IMapEntry IDeref
+     IPrintWithWriter})
+
+(def ^:private self-call->eve-core
+  "A method a body calls on its own instance, (.m this ...), and the eve.core
+   protocol fn that answers it on bb (where the type has no such method)."
+  '{seq eve.core/-seq count eve.core/-count nth eve.core/-nth
+    valAt eve.core/-lookup equiv eve.core/-equiv hasheq eve.core/-hash
+    cons eve.core/-conj empty eve.core/-empty invoke eve.core/-invoke
+    meta eve.core/-meta withMeta eve.core/-with-meta disjoin eve.core/-disjoin
+    reduce eve.core/-reduce kvreduce eve.core/-kv-reduce
+    containsKey eve.core/-contains-key? assoc eve.core/-assoc without eve.core/-dissoc
+    peek eve.core/-peek pop eve.core/-pop assocN eve.core/-assoc-n})
+
+(defn- rewrite-self-calls
+  "(.m this args...) → (eve.core/-m' this args...) for the methods above."
+  [form this-sym]
+  (let [m (when (and (seq? form) (symbol? (first form)) (= this-sym (second form)))
+            (let [n (name (first form))]
+              (when (and (str/starts-with? n ".") (not (str/starts-with? n ".-")))
+                (self-call->eve-core (symbol (subs n 1))))))]
+    (cond
+      m (apply list m this-sym (map #(rewrite-self-calls % this-sym) (nnext form)))
+      (seq? form) (with-meta (apply list (map #(rewrite-self-calls % this-sym) form)) (meta form))
+      (vector? form) (with-meta (mapv #(rewrite-self-calls % this-sym) form) (meta form))
+      (map? form) (with-meta (into {} (map (fn [[k v]] [(rewrite-self-calls k this-sym)
+                                                        (rewrite-self-calls v this-sym)])
+                                           form))
+                    (meta form))
+      :else form)))
+
+(def ^:private completion-interfaces
+  "The JVM interfaces whose impls go onto the completion's protocols (clojure.core's deref, swap!, reset!,
+   compare-and-set!, realized? call them for a type), each method's name there."
+  '{clojure.lang.IDeref {:protocol eve.host-completion/IDeref :methods {deref -deref}}
+    clojure.lang.IBlockingDeref {:protocol eve.host-completion/IBlockingDeref :methods {deref -deref-within}}
+    clojure.lang.IAtom {:protocol eve.host-completion/IAtom
+                        :methods {swap -swap reset -reset compareAndSet -compare-and-set}}
+    clojure.lang.IAtom2 {:protocol eve.host-completion/IAtom2 :methods {swapVals -swap-vals resetVals -reset-vals}}
+    clojure.lang.IPending {:protocol eve.host-completion/IPending :methods {isRealized -realized?}}})
+
+(defn jank-translate-protos
+  "A type's impls ([{:protocol :methods}], JVM names) as the completion's deftype takes them: interfaces translated
+   onto eve.core's protocols (through the ClojureScript table; ones without an eve.core protocol dropped) or the
+   completion's (the atom interfaces), the type's own protocols as written; Object's toString as a printer when the
+   type has none (its equals and hashCode are its IEquiv and IHash: set-type-equality!). Self-calls in bodies go
+   through eve.core."
+  [parsed-protos type-name]
+  (let [object? #(contains? '#{Object java.lang.Object} (:protocol %))
+        rewrite (fn [m] (update m :body (fn [body] (map #(rewrite-self-calls % (first (:args m))) body))))
+        objects (mapcat :methods (filter object? parsed-protos))
+        translated (->> (remove object? parsed-protos)
+                        (mapcat (fn [impl]
+                                  (cond
+                                    (contains? completion-interfaces (:protocol impl))
+                                    (let [{p :protocol ms :methods} (completion-interfaces (:protocol impl))]
+                                      [{:protocol p
+                                        :methods (vec (keep (fn [m] (when-let [n (ms (:name m))] (assoc m :name n)))
+                                                            (:methods impl)))}])
+
+                                    ;; the JVM's list marker, which the ClojureScript table drops: kept on jank as
+                                    ;; eve.core/IList for the identity table's list? (an EveList is list? on the JVM)
+                                    (= 'clojure.lang.IPersistentList (:protocol impl))
+                                    (cons {:protocol 'eve.core/IList :methods []}
+                                          (keep (fn [{:keys [protocol] :as t}]
+                                                  (when (contains? eve-core-protocols protocol)
+                                                    (assoc t :protocol (symbol "eve.core" (name protocol)))))
+                                                (cljs-translate-protocol impl)))
+
+                                    (interface-sym? (:protocol impl))
+                                    (keep (fn [{:keys [protocol] :as t}]
+                                            (when (contains? eve-core-protocols protocol)
+                                              (assoc t :protocol (symbol "eve.core" (name protocol)))))
+                                          (cljs-translate-protocol impl))
+                                    ;; a ClojureScript protocol: eve.core's of that name
+                                    (cljs-protocol? (:protocol impl))
+                                    (let [p (strip-cljs-core (:protocol impl))]
+                                      (when (contains? eve-core-protocols p)
+                                        [(assoc impl :protocol (symbol "eve.core" (name p)))]))
+                                    :else [impl])))
+                        (group-by :protocol)
+                        (mapv (fn [[p impls]] {:protocol p :methods (vec (mapcat :methods impls))})))
+        printed? (some #(= 'eve.core/IPrintWithWriter (:protocol %)) translated)
+        to-string (when-not printed? (first (filter #(= 'toString (:name %)) objects)))
+        protos (set (map :protocol translated))
+        ;; a collection prints by its shape over its seq, as the JVM prints one: its toString is (pr-str this) on
+        ;; eve's collections, which on jank is this printer again — a print recursed until the stack ran out
+        ;; (SIGSEGV printing any EveHashMap: eve/probes/jank-tally/probe3, both arms)
+        shape (when (contains? protos 'eve.core/ISeqable)
+                (cond (contains? protos 'eve.core/IMap) :map
+                      (contains? protos 'eve.core/ISet) :set
+                      (contains? protos 'eve.core/IVector) :vector
+                      :else :seq))]
+    (cond-> (mapv (fn [impl] (update impl :methods #(mapv rewrite %))) translated)
+      (and to-string shape)
+      ;; the printer's self name is FRESH, never the toString method's first arg: that symbol is
+      ;; used here as a VALUE (the coll-str argument), and when it is _ the completion's
+      ;; method-arities renames the -pr-writer parameter to a gensym, stranding this reference
+      ;; (analyze/unresolved-symbol - eve.dataset and every collection-shaped user eve-deftype
+      ;; without its own printer failed to load on this seat). Printed output is unchanged:
+      ;; coll-str of the instance, same shape.
+      (conj (let [self (gensym "self")]
+              {:protocol 'eve.core/IPrintWithWriter
+               :methods [{:name '-pr-writer :args [self '__w '__opts]
+                          :body [(list 'eve.core/-write '__w (list 'eve.types/coll-str self shape))]}]}))
+      (and to-string (not shape))
+      (conj {:protocol 'eve.core/IPrintWithWriter
+             :methods [{:name '-pr-writer :args [(first (:args to-string)) '__w '__opts]
+                        :body [(list 'eve.core/-write '__w
+                                     (cons 'do (map #(rewrite-self-calls % (first (:args to-string))) (:body to-string))))]}]}))))
+
+(defn coll-str
+  "An eve collection as the JVM prints one of its shape: {k v, ...}, #{...}, [...] or (...), each element by pr-str
+   (an eve value through its own printer)."
+  [x shape]
+  (let [one (fn [e] (if (= shape :map)
+                      (if (satisfies? eve.core/IMapEntry e)
+                        (str (pr-str (eve.core/-key e)) " " (pr-str (eve.core/-val e)))
+                        (str (pr-str (eve.core/nth e 0)) " " (pr-str (eve.core/nth e 1))))
+                      (pr-str e)))
+        body (apply str (interpose (if (= shape :map) ", " " ") (map one (eve.core/seq x))))]
+    (cond (= shape :map) (str "{" body "}")
+          (= shape :set) (str "#{" body "}")
+          (= shape :vector) (str "[" body "]")
+          :else (str "(" body ")"))))
+
+(defn- printed? [impls] (some #(= 'eve.core/IPrintWithWriter (:protocol %)) impls))
+
+(defn- printer-form
+  "The completion's printer for a type that prints through eve.core's IPrintWithWriter (its print-method)."
+  [type-name]
+  (list 'eve.host-completion/set-printer! type-name
+        '(fn [x] (let [w (eve.encoding/string-writer)] (eve.core/-pr-writer x w nil) (deref w)))))
+
+;; the deftype forms are built with list*, not a syntax quote with ~@: jank's syntax-quote splices through
+;; clojure.core/concat*, a private var it refuses from another namespace ("The var `clojure.core/concat*` is private":
+;; measured at this namespace's load)
+(defn- define [type-name fields forms]
+  (concat [(list* 'deftype type-name fields forms)]
+          (when (some #{'eve.core/IPrintWithWriter} forms) [(printer-form type-name)])))
+
+(defn- hooks
+  "This host's steps for eve.deftype-proto.sio."
+  []
+  {:normalize (fn [parsed] {:impls parsed})
+   ;; the interfaces go onto eve.core's protocols; an IPrintWithWriter body is the printer
+   :define (fn [type-name fields impls _forms _print]
+             (let [impls (jank-translate-protos impls type-name)]
+               (concat [(list* 'deftype type-name fields (impls->forms impls))]
+                       (when (printed? impls) [(printer-form type-name)]))))
+   ;; the completion's deftype makes T. a var holding the factory (jank keeps T. a plain symbol): the deftype's own
+   ;; factory is kept as T__new before ->T becomes the constructor, and builds instances, as on babashka
+   :build (fn [_type-name _fields new-name args] (list* new-name args))
+   :factory-via-var? true
+   ;; every interface goes onto eve.core's protocols, a map type's too
+   :slab-prepare (fn [parsed type-name] (jank-translate-protos parsed type-name))
+   ;; no IHashEq or Object equals/hashCode: = and hash reach IEquiv and IHash through set-type-equality!
+   :object-boilerplate? false
+   :slab-define define})
+
+(defn host-type
+  "A plain type written with the JVM's names (host-deftype)."
+  [_env type-name fields parsed]
+  (let [impls (jank-translate-protos parsed type-name)]
+    (list* 'do (list* 'deftype type-name fields (impls->forms impls))
+           (concat (when (printed? impls) [(printer-form type-name)]) [type-name]))))
+
+(defn plain-type
+  "A plain type (eve.deftype/deftype) on eve.core's protocols."
+  [_env type-name fields parsed]
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)
+        impls (jank-translate-protos parsed type-name)]
+    (list* 'do (list* 'clojure.core/deftype type-name fields (impls->forms impls))
+           (concat (when (printed? impls) [(printer-form type-name)]) [type-name]))))
+
+(defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
+(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
+
+(defn existing-def
+  "{:value v} when the namespace being compiled already defines sym, else nil."
+  [_env sym]
+  (when-let [v (resolve sym)] {:value @v}))
+
+(defn rename-fields
+  "An eve-deftype's fields and body with the field names the JVM reserves
+   renamed (__hash): [fields body]."
+  [_env fields body]
+  (sio/eve-renames fields body))
+
+(defn reader-of
+  "What a registered eve collection reads as on jank: the host's own collection (host-value) where one is given — a
+   type answers eve.core's protocols, not clojure.core's, so what is read is the jank collection clojure.core takes;
+   else its eve type (from-header)."
+  [from-header host-value]
+  (or host-value from-header))
+
+(defn print-form
+  "The printer of a registered eve collection: none — a value read from eve memory is a jank collection, printed by
+   jank."
+  [_env _type-name _spec]
+  nil)
+
+(defn vector-types
+  "jank's own vector type, by the name its type answers (the completion's extend-type takes a string)."
+  [_env]
+  '["persistent_vector"])
+
+;; = and hash reach a type's own equivalence and hash (the completion's hook): eve.core's
+(eve.host-completion/set-type-equality!
+ {:equiv eve.core/-equiv :hash eve.core/-hash :equiv-proto eve.core/IEquiv :hash-proto eve.core/IHash})
+
+;; jank's get, keyword invoke, get-in, contains?, seq, nth and invoke, and the clojure.core names the completion
+;; re-roots, reach a type's own collection protocols (the completion's hooks; F-3): eve.core's
+(eve.host-completion/set-type-collection!
+ {:lookup [eve.core/ILookup eve.core/-lookup]
+  ;; contains?, find and nth as Eve's types answer them on the JVM (the identity table's lookups): contains? by the
+  ;; associative type's key, or the set's member; anything else (a list, a region) throws, as the JVM's; find of an
+  ;; associative type only; nth of an indexed type, or a sequential one's seq walked (a list)
+  'contains? [eve.core/ICollection
+              (fn [x k]
+                (let [t (eve.host-completion/object-tag x)]
+                  (cond (eve.host-completion/extends? eve.core/IAssociative t) (boolean (eve.core/-contains-key? x k))
+                        (eve.host-completion/extends? eve.core/ISet t) (not (identical? ::absent (eve.core/-lookup x k ::absent)))
+                        :else (throw (ex-info (str "eve: contains? not supported on " t) {:eve/unsupported "contains?"})))))]
+  'find [eve.core/IAssociative (fn [x k] (when (eve.core/-contains-key? x k) [k (eve.core/-lookup x k)]))]
+  'nth-seq [eve.core/ISequential eve.host-completion/nth-of-seq]
+  'seq [eve.core/ISeqable eve.core/seq]
+  ;; an eve type's Sequential marker answers clojure.core/sequential? for it (the completion re-roots it):
+  ;; jank's own is a class test an opaque_box never passes, and EveVector's equiv gates on it
+  'sequential? [eve.core/ISequential (fn [_] true)]
+  ;; the same host class tests, answered from the type's own protocols (the completion re-roots them):
+  ;; EveHashMap's and EveHashSet's equiv fallbacks gate on them when the digest verdict abstains
+  'map? [eve.core/IMap (fn [_] true)]
+  'nth [eve.core/IIndexed eve.core/nth]
+  'invoke [eve.core/IFn eve.core/invoke]
+  'assoc [eve.core/IAssociative (fn ([m k v] (eve.core/assoc m k v))
+                                  ([m k v & kvs] (loop [r (eve.core/assoc m k v) kvs kvs]
+                                                   (if kvs (recur (eve.core/assoc r (first kvs) (second kvs)) (nnext kvs)) r))))]
+  'dissoc [eve.core/IMap (fn ([m] m) ([m k] (eve.core/dissoc m k)) ([m k & ks] (reduce eve.core/dissoc (eve.core/dissoc m k) ks)))]
+  'conj [eve.core/ICollection eve.core/conj]
+  'disj [eve.core/ISet (fn ([s] s) ([s v] (eve.core/disj s v)) ([s v & vs] (reduce eve.core/disj (eve.core/disj s v) vs)))]
+  'count [eve.core/ICounted eve.core/count]
+  'empty [eve.core/IEmptyableCollection eve.core/empty]
+  'peek [eve.core/IStack eve.core/peek]
+  'pop [eve.core/IStack eve.core/pop]
+  'key [eve.core/IMapEntry eve.core/-key]
+  'val [eve.core/IMapEntry eve.core/-val]
+  'rseq [eve.core/IReversible eve.core/rseq]
+  'reduce-kv [eve.core/IKVReduce eve.core/reduce-kv]
+  'transient [eve.core/IEditableCollection eve.core/transient]
+  'persistent! [eve.core/ITransientCollection eve.core/persistent!]
+  'conj! [eve.core/ITransientCollection (fn ([t] t) ([t x] (eve.core/conj! t x)))]
+  'assoc! [eve.core/ITransientAssociative eve.core/assoc!]
+  'dissoc! [eve.core/ITransientMap eve.core/-dissoc!]
+  'disj! [eve.core/ITransientSet eve.core/-disjoin!]
+  'pop! [eve.core/ITransientVector eve.core/pop!]
+  'compare [eve.core/IComparable eve.core/-compare]})
+;; (jank's core predicates on an eve value are the completion's identity table, by the type's protocols in eve.core:
+;; no entry here)

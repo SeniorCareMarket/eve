@@ -196,8 +196,13 @@
 
 (defn- fresh-ref-table []
   ;; the realm: 32 random bits, so another process's handles are refused, not
-  ;; misread as this one's
-  {:realm (reduce (fn [acc x] (+ (* acc 256) x)) 0 (proc/random-bytes 4))
+  ;; misread as this one's. Assembled with bit ops, not multiply-accumulate:
+  ;; on jank an arithmetic accumulator that crosses 2^31 wraps to a negative
+  ;; i32 (its JIT types the intermediates as int), while the codec's wire
+  ;; read of the same bits is unsigned (read-u32-le) — a wrapped realm makes
+  ;; handle->ref refuse this process's own references. Bit assembly yields
+  ;; the unsigned value 0..2^32-1 on every host.
+  {:realm (reduce (fn [acc x] (bit-or (bit-shift-left acc 8) x)) 0 (proc/random-bytes 4))
    :next 1 :by-handle {} :by-ref {}})
 
 (defn- ref-table [] (or @refs (swap! refs #(or % (fresh-ref-table)))))

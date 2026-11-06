@@ -1,0 +1,509 @@
+(ns eve.crypto
+  "eve's crypto feature (adapters/README.md) on jank: the primitives as C++ (cpp/raw, called as
+   cpp/eve_crypto.<fn>) — SHA-256, SHA-512 and SHA-384 (the FIPS 180-4 compression functions over
+   uint32_t / uint64_t words), AES-256-CTR (FIPS-197 key schedule and block cipher, the whole 16-byte
+   counter incremented big-endian, as eve.net.aes), XXH3-128 (the reference algorithm over uint64_t and
+   unsigned __int128, transcribed path for path from eve.net.xxh3: len 0, 1–3, 4–8, 9–16, 17–128,
+   129–240, long), and the big-integer rows over jank's own cpp_int (jank::native_big_integer: from-be /
+   to-be, add / sub / mul / quot / mod, a square-and-multiply modpow, an extended-Euclid modinv).
+   Bytes are vectors of 0..255 in and out, as eve.net holds them.
+
+   Composed over those, in this file: HMAC-SHA256 (RFC 2104 over the native sha256, portable-crypto's
+   composition), AES-256-GCM (eve.net.gcm over the native CTR, portable-crypto's composition), and the
+   edwards25519 rows — eve.net.edwards over an OPS map of the cpp_int rows, with eve.net.edwards'
+   ed25519-rows for the public key and the signature (the .NET adapter's shape, there being no Ed25519
+   in the platform). Verify is portable verify's equation answered by the group rows — [S]B + [k](−A)
+   against R, −A the key with its sign bit turned — behind eve.net.ed25519/well-formed?, so what eve
+   refuses (a non-canonical y, S ≥ L, x = 0 signed, a small-order key) is refused here before any curve
+   arithmetic, as the java adapter guards its platform verify. Random bytes are the process feature's."
+  (:require [eve.net.bigops :as bo]
+            [eve.net.edwards :as edw]
+            [eve.net.ed25519 :as ed]
+            [eve.net.ell2 :as ell2]
+            [eve.net.gcm :as gcm]
+            [eve.process :as process]))
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <vector>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/rtti.hpp>
+#include <jank/runtime/obj/nil.hpp>
+#include <jank/runtime/obj/persistent_vector.hpp>
+namespace eve_crypto {
+  using namespace jank::runtime;
+
+  /* bytes cross as vectors of 0..255 (eve.net's convention): read by nth, built by conj */
+  static std::vector<uint8_t> to_bytes(object_ref bs) {
+    long const n((long)sequence_length(bs));
+    std::vector<uint8_t> out((size_t)n);
+    for(long i = 0; i < n; ++i) out[(size_t)i] = (uint8_t)to_int(nth(bs, make_box((jank::i64)i)));
+    return out;
+  }
+  static object_ref of_bytes(uint8_t const *p, size_t n) {
+    object_ref r(make_box<obj::persistent_vector>());
+    for(size_t i = 0; i < n; ++i) r = conj(r, make_box((jank::i64)p[i]));
+    return r;
+  }
+  static object_ref of_bytes(std::vector<uint8_t> const &v) { return of_bytes(v.data(), v.size()); }
+
+  /* ── SHA-256 (FIPS 180-4) ── */
+  static uint32_t const K256[64] = {
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2 };
+  static inline uint32_t rr32(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+  static void sha256_block(uint32_t h[8], uint8_t const *p) {
+    uint32_t w[64];
+    for(int i = 0; i < 16; ++i) w[i] = ((uint32_t)p[4*i] << 24) | ((uint32_t)p[4*i+1] << 16) | ((uint32_t)p[4*i+2] << 8) | (uint32_t)p[4*i+3];
+    for(int i = 16; i < 64; ++i) {
+      uint32_t const s0(rr32(w[i-15], 7) ^ rr32(w[i-15], 18) ^ (w[i-15] >> 3));
+      uint32_t const s1(rr32(w[i-2], 17) ^ rr32(w[i-2], 19) ^ (w[i-2] >> 10));
+      w[i] = w[i-16] + s0 + w[i-7] + s1;
+    }
+    uint32_t a(h[0]), b(h[1]), c(h[2]), d(h[3]), e(h[4]), f(h[5]), g(h[6]), hh(h[7]);
+    for(int i = 0; i < 64; ++i) {
+      uint32_t const S1(rr32(e, 6) ^ rr32(e, 11) ^ rr32(e, 25));
+      uint32_t const ch((e & f) ^ (~e & g));
+      uint32_t const t1(hh + S1 + ch + K256[i] + w[i]);
+      uint32_t const S0(rr32(a, 2) ^ rr32(a, 13) ^ rr32(a, 22));
+      uint32_t const mj((a & b) ^ (a & c) ^ (b & c));
+      uint32_t const t2(S0 + mj);
+      hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+  }
+  object_ref sha256(object_ref bs) {
+    std::vector<uint8_t> const in(to_bytes(bs));
+    uint32_t h[8] = { 0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19 };
+    size_t const n(in.size());
+    size_t i(0);
+    for(; i + 64 <= n; i += 64) sha256_block(h, in.data() + i);
+    uint8_t tail[128];
+    size_t const rem(n - i);
+    std::memcpy(tail, in.data() + i, rem);
+    tail[rem] = 0x80;
+    size_t const total(rem < 56 ? 64 : 128);
+    std::memset(tail + rem + 1, 0, total - rem - 1);
+    uint64_t const bits((uint64_t)n * 8);
+    for(int k = 0; k < 8; ++k) tail[total - 1 - k] = (uint8_t)(bits >> (8 * k));
+    sha256_block(h, tail);
+    if(total == 128) sha256_block(h, tail + 64);
+    std::vector<uint8_t> out(32);
+    for(int k = 0; k < 8; ++k) { out[4*k] = (uint8_t)(h[k] >> 24); out[4*k+1] = (uint8_t)(h[k] >> 16); out[4*k+2] = (uint8_t)(h[k] >> 8); out[4*k+3] = (uint8_t)h[k]; }
+    return of_bytes(out);
+  }
+
+  /* ── SHA-512 and SHA-384 (FIPS 180-4) ── */
+  static uint64_t const K512[80] = {
+    0x428a2f98d728ae22ULL,0x7137449123ef65cdULL,0xb5c0fbcfec4d3b2fULL,0xe9b5dba58189dbbcULL,
+    0x3956c25bf348b538ULL,0x59f111f1b605d019ULL,0x923f82a4af194f9bULL,0xab1c5ed5da6d8118ULL,
+    0xd807aa98a3030242ULL,0x12835b0145706fbeULL,0x243185be4ee4b28cULL,0x550c7dc3d5ffb4e2ULL,
+    0x72be5d74f27b896fULL,0x80deb1fe3b1696b1ULL,0x9bdc06a725c71235ULL,0xc19bf174cf692694ULL,
+    0xe49b69c19ef14ad2ULL,0xefbe4786384f25e3ULL,0x0fc19dc68b8cd5b5ULL,0x240ca1cc77ac9c65ULL,
+    0x2de92c6f592b0275ULL,0x4a7484aa6ea6e483ULL,0x5cb0a9dcbd41fbd4ULL,0x76f988da831153b5ULL,
+    0x983e5152ee66dfabULL,0xa831c66d2db43210ULL,0xb00327c898fb213fULL,0xbf597fc7beef0ee4ULL,
+    0xc6e00bf33da88fc2ULL,0xd5a79147930aa725ULL,0x06ca6351e003826fULL,0x142929670a0e6e70ULL,
+    0x27b70a8546d22ffcULL,0x2e1b21385c26c926ULL,0x4d2c6dfc5ac42aedULL,0x53380d139d95b3dfULL,
+    0x650a73548baf63deULL,0x766a0abb3c77b2a8ULL,0x81c2c92e47edaee6ULL,0x92722c851482353bULL,
+    0xa2bfe8a14cf10364ULL,0xa81a664bbc423001ULL,0xc24b8b70d0f89791ULL,0xc76c51a30654be30ULL,
+    0xd192e819d6ef5218ULL,0xd69906245565a910ULL,0xf40e35855771202aULL,0x106aa07032bbd1b8ULL,
+    0x19a4c116b8d2d0c8ULL,0x1e376c085141ab53ULL,0x2748774cdf8eeb99ULL,0x34b0bcb5e19b48a8ULL,
+    0x391c0cb3c5c95a63ULL,0x4ed8aa4ae3418acbULL,0x5b9cca4f7763e373ULL,0x682e6ff3d6b2b8a3ULL,
+    0x748f82ee5defb2fcULL,0x78a5636f43172f60ULL,0x84c87814a1f0ab72ULL,0x8cc702081a6439ecULL,
+    0x90befffa23631e28ULL,0xa4506cebde82bde9ULL,0xbef9a3f7b2c67915ULL,0xc67178f2e372532bULL,
+    0xca273eceea26619cULL,0xd186b8c721c0c207ULL,0xeada7dd6cde0eb1eULL,0xf57d4f7fee6ed178ULL,
+    0x06f067aa72176fbaULL,0x0a637dc5a2c898a6ULL,0x113f9804bef90daeULL,0x1b710b35131c471bULL,
+    0x28db77f523047d84ULL,0x32caab7b40c72493ULL,0x3c9ebe0a15c9bebcULL,0x431d67c49c100d4cULL,
+    0x4cc5d4becb3e42b6ULL,0x597f299cfc657e2aULL,0x5fcb6fab3ad6faecULL,0x6c44198c4a475817ULL };
+  static inline uint64_t rr64(uint64_t x, int n) { return (x >> n) | (x << (64 - n)); }
+  static void sha512_block(uint64_t h[8], uint8_t const *p) {
+    uint64_t w[80];
+    for(int i = 0; i < 16; ++i) { uint64_t v(0); for(int k = 0; k < 8; ++k) v = (v << 8) | p[8*i + k]; w[i] = v; }
+    for(int i = 16; i < 80; ++i) {
+      uint64_t const s0(rr64(w[i-15], 1) ^ rr64(w[i-15], 8) ^ (w[i-15] >> 7));
+      uint64_t const s1(rr64(w[i-2], 19) ^ rr64(w[i-2], 61) ^ (w[i-2] >> 6));
+      w[i] = w[i-16] + s0 + w[i-7] + s1;
+    }
+    uint64_t a(h[0]), b(h[1]), c(h[2]), d(h[3]), e(h[4]), f(h[5]), g(h[6]), hh(h[7]);
+    for(int i = 0; i < 80; ++i) {
+      uint64_t const S1(rr64(e, 14) ^ rr64(e, 18) ^ rr64(e, 41));
+      uint64_t const ch((e & f) ^ (~e & g));
+      uint64_t const t1(hh + S1 + ch + K512[i] + w[i]);
+      uint64_t const S0(rr64(a, 28) ^ rr64(a, 34) ^ rr64(a, 39));
+      uint64_t const mj((a & b) ^ (a & c) ^ (b & c));
+      uint64_t const t2(S0 + mj);
+      hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+  }
+  static std::vector<uint8_t> sha512_digest(std::vector<uint8_t> const &in, uint64_t const iv[8], size_t outn) {
+    uint64_t h[8]; std::memcpy(h, iv, sizeof h);
+    size_t const n(in.size());
+    size_t i(0);
+    for(; i + 128 <= n; i += 128) sha512_block(h, in.data() + i);
+    uint8_t tail[256];
+    size_t const rem(n - i);
+    std::memcpy(tail, in.data() + i, rem);
+    tail[rem] = 0x80;
+    size_t const total(rem < 112 ? 128 : 256);
+    std::memset(tail + rem + 1, 0, total - rem - 1);
+    uint64_t const bits((uint64_t)n * 8);
+    for(int k = 0; k < 8; ++k) tail[total - 1 - k] = (uint8_t)(bits >> (8 * k));
+    sha512_block(h, tail);
+    if(total == 256) sha512_block(h, tail + 128);
+    std::vector<uint8_t> out(outn);
+    for(size_t k = 0; k < outn; ++k) out[k] = (uint8_t)(h[k / 8] >> (56 - 8 * (k % 8)));
+    return out;
+  }
+  object_ref sha512(object_ref bs) {
+    static uint64_t const IV[8] = { 0x6a09e667f3bcc908ULL,0xbb67ae8584caa73bULL,0x3c6ef372fe94f82bULL,0xa54ff53a5f1d36f1ULL,
+                                    0x510e527fade682d1ULL,0x9b05688c2b3e6c1fULL,0x1f83d9abfb41bd6bULL,0x5be0cd19137e2179ULL };
+    return of_bytes(sha512_digest(to_bytes(bs), IV, 64));
+  }
+  object_ref sha384(object_ref bs) {
+    static uint64_t const IV[8] = { 0xcbbb9d5dc1059ed8ULL,0x629a292a367cd507ULL,0x9159015a3070dd17ULL,0x152fecd8f70e5939ULL,
+                                    0x67332667ffc00b31ULL,0x8eb44a8768581511ULL,0xdb0c2e0d64f98fa7ULL,0x47b5481dbefa4fa4ULL };
+    return of_bytes(sha512_digest(to_bytes(bs), IV, 48));
+  }
+
+  /* ── AES-256 (FIPS-197) and CTR (SP 800-38A: the whole 16-byte counter, big-endian) ── */
+  static uint8_t const SBOX[256] = {
+    0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
+    0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
+    0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
+    0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,
+    0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,
+    0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,
+    0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,
+    0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,
+    0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,
+    0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,
+    0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,
+    0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,
+    0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,
+    0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,
+    0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,
+    0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16 };
+  static inline uint8_t xtime(uint8_t x) { return (uint8_t)((x << 1) ^ ((x & 0x80) ? 0x1b : 0x00)); }
+  struct aes256 {
+    uint8_t rk[240];
+    explicit aes256(uint8_t const *key) {
+      std::memcpy(rk, key, 32);
+      static uint8_t const RCON[7] = { 0x01,0x02,0x04,0x08,0x10,0x20,0x40 };
+      for(int i = 8; i < 60; ++i) {
+        uint8_t t[4] = { rk[4*(i-1)], rk[4*(i-1)+1], rk[4*(i-1)+2], rk[4*(i-1)+3] };
+        if(i % 8 == 0) { uint8_t const u = t[0]; t[0] = (uint8_t)(SBOX[t[1]] ^ RCON[i/8 - 1]); t[1] = SBOX[t[2]]; t[2] = SBOX[t[3]]; t[3] = SBOX[u]; }
+        else if(i % 8 == 4) { for(int k = 0; k < 4; ++k) t[k] = SBOX[t[k]]; }
+        for(int k = 0; k < 4; ++k) rk[4*i + k] = (uint8_t)(rk[4*(i-8) + k] ^ t[k]);
+      }
+    }
+    void encrypt(uint8_t const *in, uint8_t *out) const {
+      uint8_t s[16];
+      for(int i = 0; i < 16; ++i) s[i] = (uint8_t)(in[i] ^ rk[i]);
+      for(int round = 1; round <= 13; ++round) {
+        uint8_t t[16];
+        for(int i = 0; i < 16; ++i) { int const r(i % 4), c(i / 4); t[i] = SBOX[s[r + 4 * ((c + r) % 4)]]; }
+        for(int c = 0; c < 4; ++c) {
+          uint8_t const a0(t[4*c]), a1(t[4*c+1]), a2(t[4*c+2]), a3(t[4*c+3]);
+          uint8_t const x0(xtime(a0)), x1(xtime(a1)), x2(xtime(a2)), x3(xtime(a3));
+          s[4*c]   = (uint8_t)(x0 ^ x1 ^ a1 ^ a2 ^ a3);
+          s[4*c+1] = (uint8_t)(a0 ^ x1 ^ x2 ^ a2 ^ a3);
+          s[4*c+2] = (uint8_t)(a0 ^ a1 ^ x2 ^ x3 ^ a3);
+          s[4*c+3] = (uint8_t)(x0 ^ a0 ^ a1 ^ a2 ^ x3);
+        }
+        for(int i = 0; i < 16; ++i) s[i] = (uint8_t)(s[i] ^ rk[16*round + i]);
+      }
+      for(int i = 0; i < 16; ++i) { int const r(i % 4), c(i / 4); out[i] = (uint8_t)(SBOX[s[r + 4 * ((c + r) % 4)]] ^ rk[224 + i]); }
+    }
+  };
+  object_ref aes256_ctr(object_ref key, object_ref iv, object_ref data) {
+    std::vector<uint8_t> const k(to_bytes(key)), v(to_bytes(iv)), d(to_bytes(data));
+    aes256 const aes(k.data());
+    std::vector<uint8_t> out(d.size());
+    uint8_t ctr[16]; std::memcpy(ctr, v.data(), 16);
+    uint8_t ks[16];
+    for(size_t i = 0; i < d.size(); i += 16) {
+      aes.encrypt(ctr, ks);
+      size_t const m(d.size() - i < 16 ? d.size() - i : 16);
+      for(size_t j = 0; j < m; ++j) out[i + j] = (uint8_t)(d[i + j] ^ ks[j]);
+      for(int j = 15; j >= 0; --j) { ctr[j] = (uint8_t)(ctr[j] + 1); if(ctr[j] != 0) break; }
+    }
+    return of_bytes(out);
+  }
+
+  /* ── XXH3-128 (the reference algorithm, default secret, seed 0; eve.net.xxh3 path for path) ── */
+  static uint64_t const XP64_1(0x9E3779B185EBCA87ULL), XP64_2(0xC2B2AE3D27D4EB4FULL), XP64_3(0x165667B19E3779F9ULL),
+                        XP64_4(0x85EBCA77C2B2AE63ULL), XP64_5(0x27D4EB2F165667C5ULL),
+                        XPMX1(0x165667919E3779F9ULL), XPMX2(0x9FB21C651E98DF25ULL);
+  static uint64_t const XP32_1(0x9E3779B1ULL), XP32_2(0x85EBCA77ULL), XP32_3(0xC2B2AE3DULL);
+  /* the canonical 192-byte secret, as its 48 little-endian i32 words (eve.net.xxh3's SECRET-WORDS) */
+  static int32_t const SECRET_WORDS[48] = {
+    963444408,-1102339037,746652028,481108471,-378678050,-610824061,-1532739470,526889911,1323727307,2028323020,
+    2110806658,561184716,1950746808,-1910225929,-426756640,1277573761,-1152243652,-889142383,-1956261752,-1557245157,
+    -1756863375,1324944802,1190074680,-659759447,1064762024,1060412643,-943989511,491719623,1272992138,827962573,
+    -914448440,1685289177,-2085829142,-1007955148,-6258235,-345828358,1373441303,1239085239,643110611,-1637297111,
+    1488852523,-56539267,-776406897,-835596166,-1891972283,671356565,-889464913,2118142907 };
+  static uint8_t const *secret_bytes() {
+    static uint8_t s[192];
+    static bool const init((std::memcpy(s, SECRET_WORDS, 192), true));
+    (void)init;
+    return s;
+  }
+  static inline uint64_t rd64(uint8_t const *p) { uint64_t v; std::memcpy(&v, p, 8); return v; }
+  static inline uint32_t rd32(uint8_t const *p) { uint32_t v; std::memcpy(&v, p, 4); return v; }
+  static inline uint64_t s64(int o) { return rd64(secret_bytes() + o); }
+  static inline uint32_t s32(int o) { return rd32(secret_bytes() + o); }
+  static inline uint64_t avalanche64(uint64_t h) { h ^= h >> 33; h *= XP64_2; h ^= h >> 29; h *= XP64_3; h ^= h >> 32; return h; }
+  static inline uint64_t avalanche(uint64_t h) { h ^= h >> 37; h *= XPMX1; h ^= h >> 32; return h; }
+  struct u128 { uint64_t lo, hi; };
+  static inline u128 mul128(uint64_t a, uint64_t b) { unsigned __int128 const p((unsigned __int128)a * b); u128 r{ (uint64_t)p, (uint64_t)(p >> 64) }; return r; }
+  static inline uint64_t fold64(uint64_t a, uint64_t b) { u128 const p(mul128(a, b)); return p.lo ^ p.hi; }
+  static inline uint64_t mix16(uint8_t const *bs, size_t i, int so) {
+    return fold64(rd64(bs + i) ^ s64(so), rd64(bs + i + 8) ^ s64(so + 8));
+  }
+  static void mix32(uint64_t &lo, uint64_t &hi, uint8_t const *bs, size_t i1, size_t i2, int so) {
+    lo += mix16(bs, i1, so);
+    lo ^= rd64(bs + i2) + rd64(bs + i2 + 8);
+    hi += mix16(bs, i2, so + 16);
+    hi ^= rd64(bs + i1) + rd64(bs + i1 + 8);
+  }
+  static u128 finish_mid(uint64_t lo, uint64_t hi, uint64_t n) {
+    u128 r{ lo + hi, lo * XP64_1 + hi * XP64_4 + n * XP64_2 };
+    return r;
+  }
+  static u128 xxh3_128_bytes(uint8_t const *bs, size_t n) {
+    if(n == 0) { u128 r{ avalanche64(s64(64) ^ s64(72)), avalanche64(s64(80) ^ s64(88)) }; return r; }
+    if(n <= 3) {
+      uint32_t const c1(bs[0]), c2(bs[n / 2]), c3(bs[n - 1]);
+      uint32_t const cl((c1 << 16) | (c2 << 24) | c3 | ((uint32_t)n << 8));
+      uint32_t const ch(((uint32_t)__builtin_bswap32(cl) << 13) | ((uint32_t)__builtin_bswap32(cl) >> 19));
+      u128 r{ avalanche64((uint64_t)(cl ^ (s32(0) ^ s32(4)))), avalanche64((uint64_t)(ch ^ (s32(8) ^ s32(12)))) };
+      return r;
+    }
+    if(n <= 8) {
+      uint64_t const in_lo(rd32(bs)), in_hi(rd32(bs + n - 4));
+      uint64_t const keyed(((in_hi << 32) | in_lo) ^ (s64(16) ^ s64(24)));
+      u128 m(mul128(keyed, XP64_1 + (uint64_t)n * 4));
+      m.hi += m.lo << 1;
+      m.lo ^= m.hi >> 3;
+      m.lo ^= m.lo >> 35;
+      m.lo *= XPMX2;
+      m.lo ^= m.lo >> 28;
+      u128 r{ m.lo, avalanche(m.hi) };
+      return r;
+    }
+    if(n <= 16) {
+      uint64_t const bfl(s64(32) ^ s64(40)), bfh(s64(48) ^ s64(56));
+      uint64_t in_lo(rd64(bs)), in_hi(rd64(bs + n - 8));
+      u128 m(mul128(in_lo ^ in_hi ^ bfl, XP64_1));
+      m.lo += (uint64_t)(n - 1) << 54;
+      in_hi ^= bfh;
+      m.hi += in_hi + (uint64_t)(uint32_t)in_hi * (XP32_2 - 1);
+      m.lo ^= __builtin_bswap64(m.hi);
+      u128 h(mul128(m.lo, XP64_2));
+      h.hi += m.hi * XP64_2;
+      u128 r{ avalanche(h.lo), avalanche(h.hi) };
+      return r;
+    }
+    if(n <= 128) {
+      uint64_t lo((uint64_t)n * XP64_1), hi(0);
+      if(n > 32) {
+        if(n > 64) {
+          if(n > 96) mix32(lo, hi, bs, 48, n - 64, 96);
+          mix32(lo, hi, bs, 32, n - 48, 64);
+        }
+        mix32(lo, hi, bs, 16, n - 32, 32);
+      }
+      mix32(lo, hi, bs, 0, n - 16, 0);
+      u128 const f(finish_mid(lo, hi, (uint64_t)n));
+      u128 r{ avalanche(f.lo), 0 - avalanche(f.hi) };
+      return r;
+    }
+    if(n <= 240) {
+      uint64_t lo((uint64_t)n * XP64_1), hi(0);
+      for(size_t i = 32; i < 160; i += 32) mix32(lo, hi, bs, i - 32, i - 16, (int)i - 32);
+      lo = avalanche(lo); hi = avalanche(hi);
+      for(size_t i = 160; i < n + 1; i += 32) mix32(lo, hi, bs, i - 32, i - 16, (int)i - 157);
+      mix32(lo, hi, bs, n - 16, n - 32, 103);
+      u128 const f(finish_mid(lo, hi, (uint64_t)n));
+      u128 r{ avalanche(f.lo), 0 - avalanche(f.hi) };
+      return r;
+    }
+    size_t const blocks((n - 1) / 1024);
+    uint64_t acc[8] = { XP32_3, XP64_1, XP64_2, XP64_3, XP64_4, XP32_2, XP64_5, XP32_1 };
+    auto accumulate = [&](size_t off, int so) {
+      for(int k = 0; k < 8; ++k) {
+        uint64_t const dv(rd64(bs + off + 8 * (size_t)k));
+        uint64_t const dk(dv ^ s64(so + 8 * k));
+        acc[k ^ 1] += dv;
+        acc[k] += (uint64_t)(uint32_t)dk * (uint64_t)(uint32_t)(dk >> 32);
+      }
+    };
+    for(size_t b = 0; b < blocks; ++b) {
+      for(int s = 0; s < 16; ++s) accumulate(b * 1024 + (size_t)s * 64, s * 8);
+      for(int k = 0; k < 8; ++k) { acc[k] ^= acc[k] >> 47; acc[k] ^= s64(128 + 8 * k); acc[k] *= XP32_1; }
+    }
+    size_t const stripes(((n - 1) - blocks * 1024) / 64);
+    for(size_t s = 0; s < stripes; ++s) accumulate(blocks * 1024 + s * 64, (int)s * 8);
+    accumulate(n - 64, 121);
+    auto merge = [&](int so, uint64_t start) {
+      uint64_t r(start);
+      for(int k = 0; k < 4; ++k) r += fold64(acc[2 * k] ^ s64(so + 16 * k), acc[2 * k + 1] ^ s64(so + 16 * k + 8));
+      return avalanche(r);
+    };
+    u128 r{ merge(11, (uint64_t)n * XP64_1), merge(117, ~((uint64_t)n * XP64_2)) };
+    return r;
+  }
+  object_ref xxh3_128(object_ref bs) {
+    std::vector<uint8_t> const in(to_bytes(bs));
+    u128 const h(xxh3_128_bytes(in.data(), in.size()));
+    std::vector<uint8_t> out(16);
+    for(int k = 0; k < 8; ++k) { out[(size_t)k] = (uint8_t)(h.hi >> (56 - 8 * k)); out[8 + (size_t)k] = (uint8_t)(h.lo >> (56 - 8 * k)); }
+    return of_bytes(out);
+  }
+
+  /* ── big integers over jank's cpp_int (eve.net.bigops' OPS values: always big_integer objects here) ── */
+  static jank::native_big_integer to_big(object_ref o) {
+    if(o.get_type() == object_type::big_integer) return expect_object<obj::big_integer>(o)->data;
+    return jank::native_big_integer(to_int(o));
+  }
+  static object_ref of_big(jank::native_big_integer const &v) { return make_box<obj::big_integer>(v); }
+  object_ref big_int(long n) { return of_big(jank::native_big_integer(n)); }
+  object_ref big_from_be(object_ref bs) {
+    std::vector<uint8_t> const in(to_bytes(bs));
+    jank::native_big_integer v(0);
+    for(uint8_t b : in) { v <<= 8; v += b; }
+    return of_big(v);
+  }
+  object_ref big_to_be(object_ref o, long len) {
+    jank::native_big_integer v(to_big(o));
+    std::vector<uint8_t> out((size_t)len);
+    for(long i = len - 1; i >= 0; --i) { out[(size_t)i] = (uint8_t)(v & 0xff).convert_to<unsigned>(); v >>= 8; }
+    return of_bytes(out);
+  }
+  object_ref big_add(object_ref a, object_ref b) { return of_big(to_big(a) + to_big(b)); }
+  object_ref big_sub(object_ref a, object_ref b) { return of_big(to_big(a) - to_big(b)); }
+  object_ref big_mul(object_ref a, object_ref b) { return of_big(to_big(a) * to_big(b)); }
+  object_ref big_quot(object_ref a, object_ref b) { return of_big(to_big(a) / to_big(b)); }
+  object_ref big_mod(object_ref a, object_ref m) {
+    jank::native_big_integer const mm(to_big(m));
+    jank::native_big_integer r(to_big(a) % mm);
+    if(r < 0) r += mm;
+    return of_big(r);
+  }
+  object_ref big_modpow(object_ref b, object_ref e, object_ref m) {
+    jank::native_big_integer const mm(to_big(m));
+    if(mm == 1) return of_big(jank::native_big_integer(0));
+    jank::native_big_integer acc(1), base(to_big(b) % mm), ex(to_big(e));
+    while(ex > 0) {
+      if((ex & 1) != 0) acc = (acc * base) % mm;
+      ex >>= 1;
+      base = (base * base) % mm;
+    }
+    return of_big(acc);
+  }
+  object_ref big_modinv(object_ref a, object_ref m) {
+    jank::native_big_integer const mm(to_big(m));
+    jank::native_big_integer r0(mm), r1(((to_big(a) % mm) + mm) % mm), t0(0), t1(1);
+    while(r1 != 0) {
+      jank::native_big_integer const q(r0 / r1);
+      jank::native_big_integer const r2(r0 - q * r1); r0 = r1; r1 = r2;
+      jank::native_big_integer const t2(t0 - q * t1); t0 = t1; t1 = t2;
+    }
+    if(r0 != 1) return jank_nil;
+    jank::native_big_integer out(t0 % mm);
+    if(out < 0) out += mm;
+    return of_big(out);
+  }
+  bool big_even(object_ref a) { return (to_big(a) & 1) == 0; }
+  bool big_zero(object_ref a) { return to_big(a) == 0; }
+  bool big_eq(object_ref a, object_ref b) { return to_big(a) == to_big(b); }
+}
+")
+
+(defn sha256 "the 32-byte digest" [bs] (cpp/eve_crypto.sha256 bs))
+(defn sha512 "the 64-byte digest" [bs] (cpp/eve_crypto.sha512 bs))
+(defn sha384 "the 48-byte digest" [bs] (cpp/eve_crypto.sha384 bs))
+
+(defn hmac-sha256
+  "RFC 2104 over the native SHA-256 (portable-crypto's composition)"
+  [key msg]
+  (let [k (vec key)
+        k (if (> (count k) 64) (sha256 k) k)
+        k (into k (repeat (- 64 (count k)) 0))]
+    (sha256 (into (mapv (fn [x] (bit-xor x 0x5c)) k)
+                  (sha256 (into (mapv (fn [x] (bit-xor x 0x36)) k) msg))))))
+
+(defn aes256-ctr "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key" [key iv data]
+  (cpp/eve_crypto.aes256_ctr key iv data))
+
+(defn xxh3-128 "the 16-byte XXH3-128 digest, big-endian hi then lo" [bs] (cpp/eve_crypto.xxh3_128 bs))
+(defn random-bytes "n bytes of the operating system's entropy" [n] (process/random-bytes n))
+
+(defn aes256-gcm-seal "AES-256-GCM (eve.net.gcm over the native CTR, portable-crypto's composition)" [key iv aad pt]
+  (gcm/seal aes256-ctr key iv aad pt))
+(defn aes256-gcm-open "the plaintext of AES-256-GCM ciphertext ‖ tag, or nil (the same composition)" [key iv aad sealed]
+  (gcm/open aes256-ctr key iv aad sealed))
+
+;; ── the big-integer rows: eve.net.bigops over the cpp_int OPS map; the edwards rows over the same map
+(def ^:private OPS
+  (bo/complete
+   {:int (fn [n] (cpp/eve_crypto.big_int (long n)))
+    :from-be (fn [bs] (cpp/eve_crypto.big_from_be bs))
+    :to-be (fn [x len] (cpp/eve_crypto.big_to_be x (long len)))
+    :add (fn [a b] (cpp/eve_crypto.big_add a b))
+    :sub (fn [a b] (cpp/eve_crypto.big_sub a b))
+    :mul (fn [a b] (cpp/eve_crypto.big_mul a b))
+    :quot (fn [a b] (cpp/eve_crypto.big_quot a b))
+    :mod (fn [a m] (cpp/eve_crypto.big_mod a m))
+    :modpow (fn [b e m] (cpp/eve_crypto.big_modpow b e m))
+    :modinv (fn [a m] (cpp/eve_crypto.big_modinv a m))
+    :even? (fn [a] (cpp/eve_crypto.big_even a))
+    :zero? (fn [a] (cpp/eve_crypto.big_zero a))
+    :eq (fn [a b] (cpp/eve_crypto.big_eq a b))}))
+
+(defn modpow "base^exp mod n over big-endian bytes" [base exp n] (bo/modpow-bytes OPS base exp n))
+(defn modmul "a·b mod n over big-endian bytes" [a b n] (bo/modmul-bytes OPS a b n))
+(defn modinv "a^-1 mod n over big-endian bytes, or nil" [a n] (bo/modinv-bytes OPS a n))
+
+(def ^:private ED (edw/make OPS))
+(def ^:private ED25519 (edw/ed25519-rows OPS ED sha512))
+
+(defn ed25519-public-key "the 32-byte public key of a 32-byte secret seed" [seed] ((:public-key ED25519) seed))
+(defn ed25519-sign "the 64-byte signature of the message under a 32-byte secret seed" [seed msg] ((:sign ED25519) seed msg))
+
+(defn ed25519-scalarmult "the encoding of [s]P" [s p] ((:scalarmult ED) s p))
+(defn ed25519-mul-add "the encoding of [a]P + [b]Q" [a p b q] ((:mul-add ED) a p b q))
+(defn x25519 "X25519 (RFC 7748)" [k u] ((:x25519 ED) k u))
+
+;; verify: portable's equation, [S]B + [k](−A) = R, by the group rows — −A is A with its sign bit
+;; turned (x negated, y the same); k = SHA-512(R ‖ A ‖ M) mod L, as 32 little-endian bytes.
+(def ^:private L ((:from-be OPS) [0x10 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0x14 0xde 0xf9 0xde 0xa2 0xf7 0x9c 0xd6 0x58 0x12 0x63 0x1a 0x5c 0xf5 0xd3 0xed]))
+(defn- le->int [bs] ((:from-be OPS) (vec (rseq (vec bs)))))
+(defn- int->le32 [x] (vec (rseq ((:to-be OPS) x 32))))
+
+(defn ed25519-verify "is sig a valid signature of the message under the 32-byte public key" [pub msg sig]
+  (boolean
+   (and (ed/well-formed? pub sig)
+        (let [pub (vec pub) sig (vec sig)
+              r-enc (subvec sig 0 32)
+              s-enc (subvec sig 32 64)
+              k (int->le32 ((:mod OPS) (le->int (sha512 (into r-enc (into pub (vec msg))))) L))
+              neg-a (update pub 31 (fn [b] (bit-xor b 128)))]
+          (= r-enc ((:mul-add ED) s-enc (:base ED) k neg-a))))))
+
+(defn ed25519-map-to-point
+  "the 32-byte encoding of clear_cofactor(map_to_curve(u0) + map_to_curve(u1)) on edwards25519 (RFC 9380
+   G.2.1–G.2.2), u0 and u1 32 little-endian bytes (bit 255 dropped) — eve.net.ell2's map over this
+   adapter's modpow"
+  [u0 u1]
+  (ell2/map-to-point u0 u1 modpow))

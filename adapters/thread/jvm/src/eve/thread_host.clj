@@ -5,14 +5,19 @@
    (get-thread-bindings). A started thread's end, normal or not, is a message to the thread that started it.")
 
 (def ^:private boxes
-  "address → that thread's mailbox, while the thread runs."
-  (java.util.concurrent.ConcurrentHashMap.))
+  "address → that thread's mailbox, while the thread runs.
+  A synchronized HashMap, not a ConcurrentHashMap: bb 1.3.190's analyzer
+  cannot resolve that class, and this leaf is analyzed by babashka (see
+  the ns docstring). Only put / get / remove are used — each individually
+  synchronized on the wrapper — and addresses are unique (AtomicLong),
+  so no compound atomicity is needed."
+  (java.util.Collections/synchronizedMap (java.util.HashMap.)))
 (def ^:private next-id (java.util.concurrent.atomic.AtomicLong. 0))
 (def ^:private local-id (ThreadLocal.))
 
 (defn- box! []
   (let [id (.incrementAndGet ^java.util.concurrent.atomic.AtomicLong next-id)]
-    (.put ^java.util.concurrent.ConcurrentHashMap boxes id (java.util.concurrent.LinkedBlockingQueue.))
+    (.put ^java.util.Map boxes id (java.util.concurrent.LinkedBlockingQueue.))
     id))
 
 (defn- runtime []
@@ -48,7 +53,7 @@
 (defn send!
   "Enqueue msg for the thread at addr; never blocks. A thread that has ended has no mailbox: the message is dropped."
   [addr msg]
-  (when-let [q (.get ^java.util.concurrent.ConcurrentHashMap boxes addr)]
+  (when-let [q (.get ^java.util.Map boxes addr)]
     (.put ^java.util.concurrent.LinkedBlockingQueue q msg))
   nil)
 
@@ -67,7 +72,7 @@
                      (.set ^ThreadLocal local-id id)
                      (let [reason (try (f (assoc boot :self id)) :normal
                                        (catch Throwable e (error-data e)))]
-                       (.remove ^java.util.concurrent.ConcurrentHashMap boxes id)
+                       (.remove ^java.util.Map boxes id)
                        (send! starter {:eve.thread/exit id :reason reason})))]
              (if virtual?
                (.start (.name (Thread/ofVirtual) (str tname "-" i)) ^Runnable r)
@@ -77,7 +82,7 @@
 (defn receive!
   "The calling thread's next message; :eve.thread/timeout after ms milliseconds (ms < 0: wait for ever; 0: poll)."
   [ms]
-  (let [^java.util.concurrent.LinkedBlockingQueue q (.get ^java.util.concurrent.ConcurrentHashMap boxes (self))]
+  (let [^java.util.concurrent.LinkedBlockingQueue q (.get ^java.util.Map boxes (self))]
     (cond (neg? ms) (.take q)
           (zero? ms) (or (.poll q) :eve.thread/timeout)
           :else (or (.poll q (long ms) java.util.concurrent.TimeUnit/MILLISECONDS) :eve.thread/timeout))))

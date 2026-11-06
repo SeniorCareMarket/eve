@@ -1,0 +1,67 @@
+(ns eve.identity-table-test
+  "The completion's identity table (one mechanism with cohost Agent 3's reference, agent3/eve-u6-opt3 @ b71aa3e41: its
+   pin rows, ported): jank's own core predicates, lookups and calls on an eve value answer as Eve's types do on the
+   JVM — by the instance's type's protocol — and jank's own values keep jank's answers. Its own namespace: the
+   completion's pins reset the type-equality hook to theirs (eve.host-completion-test). Run by
+   bb test:jank eve.identity-table-test."
+  (:require [clojure.test :refer [deftest is testing]]
+            [eve.vec :as v]
+            [eve.list :as l]
+            [eve.map :as m]
+            [eve.set :as s]
+            [eve.sorted :as so]
+            [eve.region :as rg]
+            [eve.core]
+            [eve.host-completion :as hc]
+            [eve.deftype-proto.data :as dp]))
+
+;; Lane M's audit A20 (B-PLAIN): a user type that is collection-shaped (a set here) without IPlain, reaching the ladder
+(deftype ShapeSet [xs]
+  eve.core/ISet (-disjoin [_ v] (->ShapeSet (vec (remove #(= v %) xs))))
+  eve.core/ISeqable (-seq [_] (seq xs))
+  eve.core/ICounted (-count [_] (count xs)))
+
+;; each check a boolean, so a failure never prints an eve value; a throw the JVM makes is a throw here (caught)
+(defn- threw? [f] (try (f) false (catch jank.runtime.object_ref _ true) (catch std.exception _ true)))
+
+(deftest eve-values-answer-jank-core-as-on-the-jvm
+  (let [v (v/eve-vec [1 2 3])]
+    (is (true? (and (coll? v) (counted? v) (vector? v) (sequential? v) (associative? v) (indexed? v) (reversible? v)
+                    (seqable? v) (ifn? v))) "vector predicates")
+    (is (true? ((deref #'coll?) v)) "coll? through the var")
+    (is (true? (every? true? (map (fn [p] (p v)) [coll? vector? seqable? sequential?]))) "predicates as values")
+    (is (false? (or (map? v) (set? v) (seq? v) (list? v))) "vector: not a map, set, seq or list")
+    (is (true? (and (= 1 (get v 0)) (= :nf (get v 9 :nf)) (= 1 (nth v 0)) (= :nf (nth v 99 :nf)) (contains? v 0)
+                    (= [0 1] (find v 0)) (= 1 (v 0)))) "vector lookups and call"))
+  (let [mp (m/hash-map :a 1 :b 2)]
+    (is (true? (and (map? mp) (coll? mp) (counted? mp) (associative? mp) (ifn? mp))) "map predicates")
+    (is (true? (and (= 1 (get mp :a)) (= 1 (mp :a)) (= [:a 1] (find mp :a)) (contains? mp :a) (not (contains? mp :z))))
+        "map lookups and call")
+    (is (true? (and (threw? #(nth mp 0)) (threw? #(nth mp 99 :nf)))) "nth on a map throws, as on the JVM"))
+  (let [st (s/hash-set 1 2 3)]
+    (is (true? (and (set? st) (coll? st) (counted? st))) "set predicates")
+    (is (true? (and (= 1 (get st 1)) (= 1 (st 1)) (contains? st 1) (not (contains? st 9)))) "set lookups and call")
+    (is (true? (and (= st #{1 2 3}) (= #{1 2 3} st) (= 3 (count (into [] st))))) "= with jank's set; into")
+    (is (true? (threw? #(find st 1))) "find on a set throws, as on the JVM"))
+  (let [ls (l/eve-list [1 2 3])]
+    (is (true? (and (seq? ls) (list? ls) (coll? ls) (counted? ls))) "list predicates")
+    (is (true? (and (= 1 (nth ls 0)) (= 3 (nth ls 2)) (= :nf (nth ls 99 :nf)))) "nth on a list walks its seq")
+    (is (true? (and (threw? #(contains? ls 0)) (threw? #(find ls 0)))) "contains? and find on a list throw"))
+  (let [r (rg/make-heap-region 64)]
+    (is (false? (or (seqable? r) (ifn? r) (coll? r))) "a region: not seqable, not a fn, not a collection")
+    (is (true? (and (threw? #(contains? r 0)) (threw? #(find r 0)) (threw? #(nth r 99 :nf)))) "lookups on a region throw"))
+  (testing "Lane M's identity audit groups"
+    (is (true? (= (s/hash-set inc) (s/hash-set inc))) "B-SET: a set holding a fn = an equal one")
+    (is (true? (and (= (so/sorted-set 1 2 3) (s/hash-set 1 2 3)) (= (s/hash-set 1 2 3) (so/sorted-set 1 2 3))))
+        "B-SET-X: a sorted set = a hash set, both ways")
+    ;; this tree routes clojure.core/conj for an eve map (the release line's class)
+    (let [r (conj (m/hash-map :a 1) (v/eve-vec [:k 2]))]
+      (is (true? (and (= 2 (count r)) (= 2 (get r :k)))) "B-VEC-ENTRY: an Eve [k v] conj'd onto an Eve map")))
+  (testing "B-PLAIN: a collection-shaped type without IPlain keeps its kind through the eve->clj ladder"
+    (let [p (dp/eve->clj (->ShapeSet [1 2 3]))]
+      (is (true? (and (set? p) (not (hc/object? p)) (= #{1 2 3} p))) "set-shaped: a set, not a seq")))
+  (testing "jank's own values keep jank's answers"
+    (is (true? (and (coll? [1]) (vector? [1]) (seq? '(1)) (seqable? [1]) (map? {}) (set? #{}) (list? '(1)))))
+    (is (false? (or (coll? 1) (vector? '(1)) (seq? [1]) (seqable? 1))))
+    (is (true? (and (reversible? [1]) (indexed? [1]) (not (reversible? '(1))) (not (indexed? {})))) "reversible?, indexed?: jank's are TODO throws")
+    (is (false? (or (coll? (+ 1 2)) (vector? (count [1])))) "a native argument compiles through the inline's cast")))

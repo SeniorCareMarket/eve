@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-06
+
+### Added
+
+- **jank host.** Eve runs on jank (Clojure on LLVM): a full seat at `hosts.edn`'s `:jank` row — the completion (deftype / defprotocol / defrecord / reify / extend-type, the core's missing ops, `clojure.edn`), eve's types as one C++ object each on `eve.core`'s protocols, and native adapters for slab-io, typed views, regions, encoding, int32, process and crypto, with HTTP and HTTP-server over C sockets. `bb test:jank` runs the shared suite on the seat; `doc/hosts/jank.md` carries the seat's map, its gates and the upstream defect list it answers.
+
+### Fixed
+
+- **Type ids agree on jank (they differed from every other host).** jank keeps
+  `+ - *` over two integers of the int32 range in 32 bits, and an integer loop
+  local typed by a literal narrows the same way through `recur`, so the
+  portable XXH3-128 eve hashes type names with came out wrong at every length
+  on this host: the same type definition received a different id on jank than
+  on the JVM, ClojureScript or any other host. The jank completion roots
+  `+ - *` (inline and var) at jank's own promoting ops as its first forms and
+  boxes an integer-literal loop init, so the digest is the portable one.
+  `eve.xxh3-kat-test` 4 / 83 and `eve.deftype.type-id-test` 2 / 7, no failures
+  or errors — the test's deftype-in-an-atom errors were the same family's:
+  a deftype value inside an atom now reads, compares and prints as itself on
+  jank (the types carry jank's object behaviors, and the operations the
+  evaluator cannot dispatch re-root at `eve.core`).
+- **HTTP on jank no longer faults on its error paths.** Both HTTP adapters kept
+  their last-error string in a `thread_local` inside `cpp/raw`; jank's JIT
+  segfaults when compiled code touches one, so every failure path ended the
+  process. The string is a mutex-guarded static now; the seat checks pass
+  14 / 14 and both modules AOT-compile clean (`doc/hosts/jank.md`, defect 28).
+- jank: a field read written as stock Clojure — `(.-f x)` or `(. x -f)` on an untyped parameter, another instance's
+  field included (`(.-keys next)` in a type's method: an external library's idiom) — could not compile (a C++ member
+  access on an `object_ref`). The jank completion's `defn`/`defn-`/`fn`/`let`/`loop` walk their bodies first and read
+  the field through the completion's field machinery; `(set! (.-f x) v)` resets a mutable field's cell
+  (`eve.identity-test`'s stock-field-read row; `probes/jank-deferral`).
+- jank: a `case` whose default clause is C++-typed natively (`false`, an integer or string literal, `(boolean x)`)
+  failed to compile (jank's `case*` boxes its branches but not its default; upstream defect 19, amended): two eve sets
+  holding a by-reference member ended the process at their first comparison (eve.set's `hamt-find`). The completion
+  passes every case's default through `identity`; keyword, string and symbol cases keep jank's hashed dispatch.
+- jank: jank's own predicates and lookups answered for an eve value by jank's C++ checks — `coll?`, `vector?`,
+  `map?`, `set?`, `seq?`, `list?`, `counted?`, `associative?`, … false; `nth` of an eve list a throw. The completion's
+  identity table (one mechanism with eve-in-cohost's) answers each by the value's type's protocol, as Eve's types answer
+  on the JVM, and jank's own values keep jank's answers (`eve.identity-table-test`); `contains?`, `find`, `nth` and a
+  call throw a catchable `ex-info` where the JVM throws. Two Eve sets holding a by-reference member compare equal, a
+  hash set and a sorted set of the same members compare equal both ways, an Eve `[k v]` vector is a map entry to an
+  Eve map, and `compare` reaches a type's own `IComparable` (`eve.identity-test`, every host).
+
 ## [0.9.1] - 2026-11-04
 
 A re-cut of 0.9.0 on the release checker's export. 0.9.0's tree was the repository's whole `eve/` directory

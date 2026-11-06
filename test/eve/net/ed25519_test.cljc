@@ -117,5 +117,5 @@
     (testing "a seed that is not 32 bytes refuses by name"
       ;; the message's start: glojure's ex-message appends its stack to the message
       (is (= "ed25519: a seed is 32 bytes, not 1"
-             (let [m (try (ed/public-key [0]) nil (catch #?(:cljs :default :lpy python/Exception :default Exception) e (ex-message e)))]
+             (let [m (try (ed/public-key [0]) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (ex-message e)))]
                (subs m 0 (min (count m) 34))))))))

@@ -36,7 +36,7 @@
 
 (deftest decode-refuses
   (let [v (g/encode {:old-root (sha "o") :new-root (sha "n") :branch [(sha "a") (sha "b")]})
-        throws? (fn [x] (try (g/decode x) false (catch #?(:cljs :default :lpy python/Exception :default Exception) _ true)))]
+        throws? (fn [x] (try (g/decode x) false (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) _ true)))]
     (is (throws? (assoc v 0 0)) "bad magic")
     (is (throws? (assoc v 4 99)) "wrong version")
     (is (throws? (subvec v 0 (dec (count v)))) "short SHA lists")

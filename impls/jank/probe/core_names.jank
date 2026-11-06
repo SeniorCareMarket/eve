@@ -1,0 +1,33 @@
+(def names '[aget aset alength aclone byte-array short-array int-array long-array float-array
+    double-array object-array into-array to-array unchecked-byte unchecked-short
+    unchecked-int unchecked-long unchecked-add-int unchecked-multiply-int
+    unchecked-inc-int unchecked-dec-int unchecked-add unchecked-multiply unchecked-inc
+    unsigned-bit-shift-right long double class volatile! volatile? vswap! vreset! locking
+    transient persistent! conj! assoc! dissoc! disj! pop! bytes shorts ints longs floats
+    doubles objects booleans swap! reset! compare-and-set! defonce delay deref
+    quot mod rem bit-and bit-or bit-xor bit-shift-left bit-shift-right bit-not bit-test
+    int long short byte char double float num integer? int? pos? neg? zero? even? odd?
+    deftype defrecord defprotocol extend-protocol extend-type reify satisfies? extends? instance? type
+    defmulti defmethod sorted-map sorted-set sorted-map-by sorted-set-by subseq rsubseq
+    hash hash-ordered-coll hash-unordered-coll mix-collection-hash hash-combine
+    ex-info ex-data ex-message throw try catch finally with-meta meta vary-meta alter-meta!
+    atom add-watch remove-watch future promise deliver realized? pmap
+    str subs format pr-str prn-str print-str println pr prn printf char-array
+    keyword symbol namespace name gensym requiring-resolve resolve ns-resolve find-ns create-ns in-ns intern
+    loop recur letfn case cond condp when-let if-let when-some if-some some-> some->> cond-> cond->> as-> doto
+    doseq dotimes while for range repeat repeatedly iterate take drop take-while drop-while partition partition-all partition-by
+    reduce reduce-kv reductions transduce into mapv filterv keep keep-indexed map-indexed mapcat interleave interpose
+    group-by frequencies sort sort-by compare comparator max-key min-key
+    assoc-in update update-in get-in select-keys merge merge-with zipmap
+    every? some not-any? not-every? empty? seq? vector? map? set? list? coll? sequential? associative? counted? sorted? reversible? chunked-seq?
+    chunk-buffer chunk-append chunk chunk-first chunk-rest chunk-next chunk-cons
+    lazy-seq cons concat lazy-cat rseq nthnext nthrest last butlast peek pop
+    identical? boolean nil? some? true? false? fn? ifn? var? var-get var-set binding bound-fn* with-bindings* get-thread-bindings push-thread-bindings pop-thread-bindings
+    declare def defn defn- defmacro fn macroexpand macroexpand-1 eval read-string load-string load-file require use import refer alias
+    int-array aset-int aget long-array amap areduce array-map hash-map hash-set
+    uuid random-uuid parse-long parse-double abs Math/abs
+    clojure.string/join clojure.string/split clojure.string/starts-with? clojure.edn/read-string
+    *ns* *out* *err* *in* *print-length* *warn-on-reflection* *unchecked-math* *file*])
+(def specials (quote #{throw try catch finally loop recur case def fn if do let quote var new set! deftype* reify* letfn* monitor-enter monitor-exit}))
+(def missing (remove #(or (resolve %) (contains? specials %)) names))
+(println :missing (count missing) (vec missing))

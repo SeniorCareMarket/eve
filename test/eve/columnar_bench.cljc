@@ -12,7 +12,8 @@
      JVM:   clojure -M:columnar-bench"
   (:refer-clojure :exclude [atom])
   (:require
-   [eve.array :as arr]
+   [eve.host :refer [field]]
+            [eve.array :as arr]
    [eve.core :as ec]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
@@ -408,11 +409,11 @@
   [bench-fn n mode]
   (try
     (bench-fn n mode)
-    (catch #?(:cljs :default :lpy python/Exception :default Exception) e
+    (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e
       (swap! failures conj {:bench (some (fn [[k f]] (when (= f bench-fn) k)) @benches-by-name) :n n :mode mode
                             :error (ex-message e)})
       (println (str "  [FAIL] " (ex-message e)))
-      (doseq [l (take 16 #?(:cljs (some-> (.-stack e) (.split "\n"))
+      (doseq [l (take 16 #?(:cljs (some-> (field e stack) (.split "\n"))
                             :clj (map str (.getStackTrace ^Throwable e))
                             :default nil))]
         (println (str "    " l)))
@@ -430,7 +431,7 @@
   [n mode]
   (try
     (run-tier! n mode)
-    (catch #?(:cljs :default :lpy python/Exception :default Exception) e
+    (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e
       (swap! failures conj {:tier n :mode mode :error (ex-message e)})
       (println (str "  [ERROR] Tier n=" n " mode=" (name mode) " failed: "
                     (ex-message e)))

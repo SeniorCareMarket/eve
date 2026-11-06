@@ -12,14 +12,14 @@
   ;; the host's arrays and integer casts are eve.host's (HOST-CONTRACT §10)
   (:refer-clojure :exclude [aclone alength byte-array unchecked-byte bytes])
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.host :refer [aclone alength byte-array unchecked-byte bytes]]
+            [eve.host :refer [field aclone alength byte-array unchecked-byte bytes]]
             #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn])
             [clojure.string :as str]
             [eve.hamt-util :as hu]
             [eve.codec :as codec]
             [eve.deftype-proto.alloc :as alloc]))
 
-(def host #?(:cljs :cljs :bb :bb :clj :clj :cljr :cljr :lpy :lpy :clje :clje))
+(def host #?(:cljs :cljs :bb :bb :clj :clj :cljr :cljr :lpy :lpy :clje :clje :jank :jank))
 
 (def fixture-path "test/eve/fixtures/eve-bytes.edn")
 
@@ -65,7 +65,7 @@
 
 (defn- bytes->hex [b]
   #?(:cljs (str/join (map (fn [i] (let [h (.toString (aget b i) 16)] (if (< (aget b i) 16) (str "0" h) h)))
-                          (range (.-length b))))
+                          (range (field b length))))
      :default (str/join (map #(let [x (bit-and % 0xFF)]
                                 (str (nth "0123456789abcdef" (quot x 16)) (nth "0123456789abcdef" (mod x 16))))
                              b))))
@@ -110,13 +110,13 @@
       (is (= hash (hu/portable-hash-bytes (hex->bytes bytes)))
           (str "hash of " (pr-str value))))))
 
-(defn- bytes-length [b] #?(:cljs (.-length b) :default (alength ^bytes b)))
+(defn- bytes-length [b] #?(:cljs (field b length) :default (alength ^bytes b)))
 
 (deftest long-symbol-has-no-encoding
   (testing "a symbol name or namespace past 255 UTF-8 bytes is refused on every host, never truncated (seam map L-40)"
-    (is (thrown? #?(:cljs js/Error :default Exception)
+    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
                  (encode-key (symbol (apply str (repeat 300 "s"))))))
-    (is (thrown? #?(:cljs js/Error :default Exception)
+    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
                  (encode-key (symbol (apply str (repeat 300 "n")) "k"))))
     (is (= 255 (bytes-length (encode-key (symbol (apply str (repeat 251 "s"))))))
         "251 bytes of name + the 4-byte header is the longest symbol")))

@@ -343,12 +343,14 @@
     (str "#eve/SortedSet#{" (apply str (interpose " " (map (fn [n] (pr-str (-sk n))) (nodes (-root sc) true)))) "}")))
 
 (defn- map-equiv [sc other]
-  (and (or (map? other) (satisfies? ISortedColl other))
+  (and (or (map? other) (eve.map/eve-hash-map? other) (satisfies? ISortedColl other))
        (== (-size (-root sc)) (e/count other))
        (every? (fn [n] (= (-sv n) (e/get other (-sk n) ::absent))) (nodes (-root sc) true))))
 
 (defn- set-equiv [sc other]
-  (and (or (set? other) (satisfies? ISortedColl other))
+  ;; eve-set?: the host's set?, an EveHashSet, or this namespace's EveSortedSet (registered below) — never set? alone,
+  ;; blind on jank to every Eve set (identity audit B-SET-X: a sorted set and a hash set of the same members unequal)
+  (and (or (eve.set/eve-set? other) (satisfies? ISortedColl other))
        (== (-size (-root sc)) (e/count other))
        (every? (fn [x] (some? (find-node (-root sc) (cmp-of (-cmp sc)) x))) (e/seq other))))
 
@@ -420,7 +422,7 @@
              (cons [this o]
                    (cond
                      (map? o) (reduce (fn [m en] (e/assoc m (key en) (val en))) this (e/seq o))
-                     (vector? o) (e/assoc this (nth o 0) (nth o 1))
+                     (or (vector? o) (eve.vec/eve-vector? o)) (e/assoc this (e/nth o 0) (e/nth o 1))
                      :else (e/assoc this (key o) (val o))))
              (empty [_] (->EveSortedMap nil cmp mta))
              (equiv [this other] (map-equiv this other))
@@ -633,7 +635,7 @@
     (live! live?)
     (let [c (cmp-of cmp)
           kvs (cond (map? o) (map (fn [en] [(key en) (val en)]) (e/seq o))
-                    (vector? o) [[(nth o 0) (nth o 1)]]
+                    (or (vector? o) (eve.vec/eve-vector? o)) [[(e/nth o 0) (e/nth o 1)]]
                     :else [[(key o) (val o)]])]
       (set! root (reduce (fn [r [k v]] (edit sio cmp r #(tree-assoc % c k v))) root kvs)))
     this)
@@ -674,6 +676,9 @@
    integer, or a boolean predicate such as >)."
   [cmp & kvs]
   (build-map cmp (partition 2 kvs)))
+
+;; an EveSortedSet is a set to eve.set's set gates (eve.set/eve-set?), on every host
+(eve.set/register-set-kind! (fn [x] (instance? EveSortedSet x)))
 
 (defn sorted-set
   "An eve sorted set of the keys, ordered by compare."

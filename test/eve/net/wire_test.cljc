@@ -57,7 +57,7 @@
            (run s (wire/cas-root cfg {:old-key nil :new-key "secret"}))))
     (is (nil? (get-in @(:state s) [:atoms "a1" :root_key])) "nothing written")
     (let [e (try (run s (wire/deref-atom (assoc cfg :api-key "wrong"))) nil
-                 (catch #?(:cljs :default :lpy python/Exception :default Exception) e (ex-data e)))]
+                 (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (ex-data e)))]
       (is (= 401 (:status e)) "a 401 where an answer is required throws, naming the status"))))
 
 (deftest presign-batches
@@ -89,7 +89,7 @@
             t (stand-in {:tamper {k bad}})]
         (reset! (:store t) blocks)
         (is (str/includes? (try (run t (blobs/fetch-blocks cfg [k])) "no throw"
-                                (catch #?(:cljs :default :lpy python/Exception :default Exception) e (ex-message e)))
+                                (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (ex-message e)))
                            (str "asked for " k)))))))
 
 (deftest requests-go-out-together

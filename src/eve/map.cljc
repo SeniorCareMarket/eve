@@ -15,7 +15,7 @@
                             aget alength unsigned-bit-shift-right volatile! vswap! transient
                             persistent! conj! long bytes])
   (:require
-   [eve.host :refer [aget alength unsigned-bit-shift-right volatile! vswap! transient
+   [eve.host :refer [field aget alength unsigned-bit-shift-right volatile! vswap! transient
                      persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc]
@@ -27,6 +27,7 @@
    [eve.core :as ecore]
    [eve.platform :as p]
    [eve.deftype-proto.macros :as eve]
+   [eve.vec :as evec]
    [eve.codec :as codec]
    [eve.digest :as dg]))
 
@@ -112,10 +113,27 @@
 (defn- skip-kv-at
   "Skip a KV pair at pos within node, returning offset after it."
   ^long [sio ^long node-off ^long pos]
-  (let [key-len (slab/read-i32 sio node-off pos)
+  (let [key-len (alloc/node-i32 sio node-off pos)
         val-off (+ pos 4 key-len)
-        val-len (slab/read-i32 sio node-off val-off)]
+        val-len (alloc/node-i32 sio node-off val-off)]
     (+ val-off 4 val-len)))
+
+;; The read path's scan to the di-th KV pair: a primitive fn (a loop in a let binding compiles to a closure, allocated
+;; and boxed per lookup; jvm-heap-grade step 3).
+(defn- kv-pos
+  "The offset of the di-th KV pair in the node at node-off, its KV data starting at kvs."
+  ^long [sio ^long node-off ^long kvs ^long di]
+  (let [a (alloc/node-heap-array sio node-off)]
+    (if (nil? a)
+      (loop [i 0 p kvs]
+        (if (== i di) p
+            (recur (inc i) (skip-kv-at sio node-off p))))
+      ;; the node's heap bytes, resolved once: [key-len:i32][key][val-len:i32][val] per pair
+      (let [base (alloc/node-base sio node-off)]
+        (loop [i 0 p kvs]
+          (if (== i di) p
+              (let [vo (+ p 4 (alloc/bytes-i32 a (+ base p)))]
+                (recur (inc i) (+ vo 4 (alloc/bytes-i32 a (+ base vo)))))))))))
 
 (defn- calc-kv-size
   "Calculate total bytes for a KV pair."
@@ -125,9 +143,9 @@
 (defn- key-bytes-match?
   "Check if key bytes at pos match kb."
   [sio ^long node-off ^long pos kb]
-  (let [stored-len (slab/read-i32 sio node-off pos)]
+  (let [stored-len (alloc/node-i32 sio node-off pos)]
     (when (== stored-len (bytes-length kb))
-      (slab/bytes-equal-at? sio node-off (+ pos 4) kb))))
+      (alloc/node-bytes-equal? sio node-off (+ pos 4) kb))))
 
 (defn- write-kv!
   "Write a KV pair at pos within node. Returns offset after written data."
@@ -146,10 +164,10 @@
 (defn- read-kv-bytes-at
   "Read key and value byte arrays at pos. Returns [kb vb next-pos]."
   [sio ^long node-off ^long pos]
-  (let [klen (slab/read-i32 sio node-off pos)
+  (let [klen (alloc/node-i32 sio node-off pos)
         kb (slab/read-bytes sio node-off (+ pos 4) klen)
         voff (+ pos 4 klen)
-        vlen (slab/read-i32 sio node-off voff)
+        vlen (alloc/node-i32 sio node-off voff)
         vb (slab/read-bytes sio node-off (+ voff 4) vlen)]
     [kb vb (+ voff 4 vlen)]))
 
@@ -435,56 +453,54 @@
     (loop [off root-off shift 0]
       (if (== off NIL_OFFSET)
         not-found
-        (let [nt (slab/read-u8 sio off 0)]
+        (let [nt (alloc/node-u8 sio off 0)]
           (case (int nt)
             ;; Bitmap node
-            1 (let [dbm (slab/read-i32 sio off 4)
-                    nbm (slab/read-i32 sio off 8)
+            1 (let [dbm (alloc/node-i32 sio off 4)
+                    nbm (alloc/node-i32 sio off 8)
                     bit (node-bit dbm nbm kh shift)]
                 (cond
                   (has-bit? nbm bit)
-                  (recur (slab/read-i32 sio off
+                  (recur (alloc/node-i32 sio off
                                         (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
                          (+ shift SHIFT_STEP))
 
                   (has-bit? dbm bit)
                   (let [di (get-index dbm bit)
                         hs (hashes-start-off nbm)
-                        sh (slab/read-i32 sio off (+ hs (* di 4)))]
-                    (if (not= sh kh)
+                        sh (alloc/node-i32 sio off (+ hs (* di 4)))]
+                    (if (not (== sh kh))
                       not-found
                       (let [kvs (kv-data-start-off dbm nbm)
-                            pos (loop [i 0 p kvs]
-                                  (if (== i di) p
-                                      (recur (inc i) (skip-kv-at sio off p))))
-                            kl (slab/read-i32 sio off pos)]
+                            pos (kv-pos sio off kvs di)
+                            kl (alloc/node-i32 sio off pos)]
                         (if (and (== kl (bytes-length kb))
-                                 (slab/bytes-equal-at? sio off (+ pos 4) kb))
+                                 (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                           (let [vo (+ pos 4 kl)
-                                vl (slab/read-i32 sio off vo)
-                                vb (slab/read-bytes sio off (+ vo 4) vl)]
+                                vl (alloc/node-i32 sio off vo)
+                                vb (alloc/node-bytes sio off (+ vo 4) vl)]
                             (deserialize-value-bytes vb sio))
                           not-found))))
 
                   :else not-found))
 
             ;; Collision node
-            3 (let [ch (slab/read-i32 sio off 4)]
-                (if (not= ch kh)
+            3 (let [ch (alloc/node-i32 sio off 4)]
+                (if (not (== ch kh))
                   not-found
-                  (let [cc (slab/read-u8 sio off 1)]
+                  (let [cc (alloc/node-u8 sio off 1)]
                     (loop [i 0 pos COLLISION_HEADER_SIZE]
                       (if (>= i cc)
                         not-found
-                        (let [kl (slab/read-i32 sio off pos)]
+                        (let [kl (alloc/node-i32 sio off pos)]
                           (if (and (== kl (bytes-length kb))
-                                   (slab/bytes-equal-at? sio off (+ pos 4) kb))
+                                   (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                             (let [vo (+ pos 4 kl)
-                                  vl (slab/read-i32 sio off vo)
-                                  vb (slab/read-bytes sio off (+ vo 4) vl)]
+                                  vl (alloc/node-i32 sio off vo)
+                                  vb (alloc/node-bytes sio off (+ vo 4) vl)]
                               (deserialize-value-bytes vb sio))
                             (let [vo (+ pos 4 kl)]
-                              (recur (inc i) (+ vo 4 (slab/read-i32 sio off vo)))))))))))
+                              (recur (inc i) (+ vo 4 (alloc/node-i32 sio off vo)))))))))))
 
             ;; Unknown
             not-found))))))
@@ -502,46 +518,44 @@
   (loop [off root-off shift 0]
     (if (== off NIL_OFFSET)
       nil
-      (let [nt (slab/read-u8 sio off 0)]
+      (let [nt (alloc/node-u8 sio off 0)]
         (case (int nt)
-          1 (let [dbm (slab/read-i32 sio off 4)
-                  nbm (slab/read-i32 sio off 8)
+          1 (let [dbm (alloc/node-i32 sio off 4)
+                  nbm (alloc/node-i32 sio off 8)
                   bit (node-bit dbm nbm kh shift)]
               (cond
                 (has-bit? nbm bit)
-                (recur (slab/read-i32 sio off
+                (recur (alloc/node-i32 sio off
                                       (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
                        (+ shift SHIFT_STEP))
 
                 (has-bit? dbm bit)
                 (let [di (get-index dbm bit)
                       hs (hashes-start-off nbm)
-                      sh (slab/read-i32 sio off (+ hs (* di 4)))]
+                      sh (alloc/node-i32 sio off (+ hs (* di 4)))]
                   (when (== sh kh)
                     (let [kvs (kv-data-start-off dbm nbm)
-                          pos (loop [i 0 p kvs]
-                                (if (== i di) p
-                                    (recur (inc i) (skip-kv-at sio off p))))
-                          kl (slab/read-i32 sio off pos)]
+                          pos (kv-pos sio off kvs di)
+                          kl (alloc/node-i32 sio off pos)]
                       (when (and (== kl (bytes-length kb))
-                                 (slab/bytes-equal-at? sio off (+ pos 4) kb))
+                                 (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                         (let [vo (+ pos 4 kl)
-                              vl (slab/read-i32 sio off vo)]
-                          (slab/read-bytes sio off (+ vo 4) vl))))))
+                              vl (alloc/node-i32 sio off vo)]
+                          (alloc/node-bytes sio off (+ vo 4) vl))))))
 
                 :else nil))
 
-          3 (let [ch (slab/read-i32 sio off 4)]
+          3 (let [ch (alloc/node-i32 sio off 4)]
               (when (== ch kh)
-                (let [cc (slab/read-u8 sio off 1)]
+                (let [cc (alloc/node-u8 sio off 1)]
                   (loop [i 0 pos COLLISION_HEADER_SIZE]
                     (when (< i cc)
-                      (let [kl (slab/read-i32 sio off pos)
+                      (let [kl (alloc/node-i32 sio off pos)
                             vo (+ pos 4 kl)
-                            vl (slab/read-i32 sio off vo)]
+                            vl (alloc/node-i32 sio off vo)]
                         (if (and (== kl (bytes-length kb))
-                                 (slab/bytes-equal-at? sio off (+ pos 4) kb))
-                          (slab/read-bytes sio off (+ vo 4) vl)
+                                 (alloc/node-bytes-equal? sio off (+ pos 4) kb))
+                          (alloc/node-bytes sio off (+ vo 4) vl)
                           (recur (inc i) (+ vo 4 vl)))))))))
 
           nil)))))
@@ -982,7 +996,9 @@
   (cons [this entry]
     (cond
       (map? entry) (reduce-kv (fn [m k v] (assoc m k v)) this entry)
-      (vector? entry) (.assoc this (nth entry 0) (nth entry 1))
+      ;; an Eve vector is a [k v] pair as a host vector is (on jank vector? is blind to it: identity audit
+      ;; B-VEC-ENTRY — it fell to the sequential arm, its key and value conj'd as two entries)
+      (or (vector? entry) (evec/eve-vector? entry)) (.assoc this (ecore/nth entry 0) (ecore/nth entry 1))
       (sequential? entry) (reduce conj this entry)
       :else (.assoc this (key entry) (val entry))))
   (empty [_]
@@ -1046,6 +1062,13 @@
 
   d/IEveSio
   (-eve-sio [_] sio__)
+
+  ;; what a deref of an atom holding it answers: a plain Clojure map.
+  ;; eve->clj's (map? v) branch cannot see this type on every host — on
+  ;; jank the core predicates are false for Eve types — so the type
+  ;; carries its own conversion, as the int-map and the sorted types do.
+  d/IPlain
+  (-plain [this] (into {} (map (fn [kv] [(d/eve->clj (key kv)) (d/eve->clj (val kv))])) (ecore/seq this)))
 
   ;; --- the JVM's (dropped on ClojureScript, but IEditableCollection; on the
   ;; CLR java.util.Map is dropped and Iterable is IEnumerable) ---
@@ -1584,8 +1607,8 @@
 (extend-type EveHashMap
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio (.-sio__ this)
-          old-hdr (.-offset__ this)
+    (let [sio (field this sio__)
+          old-hdr (field this offset__)
           old-root (slab/read-i32 sio old-hdr SABMAPROOT_ROOT_OFF_OFFSET)]
       (if (eve-hash-map? new-value)
         (let [new-root (slab/read-i32 sio (d/-root-header-off new-value) SABMAPROOT_ROOT_OFF_OFFSET)]

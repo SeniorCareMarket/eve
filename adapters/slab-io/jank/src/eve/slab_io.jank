@@ -1,0 +1,251 @@
+(ns eve.slab-io
+  "eve's memory-level seam (adapters/README.md, slab-io; HOST-CONTRACT §12) on jank.
+
+   The domain's slab I/O, the domain's representation and the region header words are the protocol
+   adapter's macros, unchanged (ISlabIO on the slab context, IMemRegion on a region) — on jank those
+   land on adapters/region/jank's C++ a call later. What is native here is §12's fused primitives,
+   the ones the contract wants in one call: bitmap-find-free (the allocator's scan), bitmap-alloc-cas!
+   and bitmap-free! (its CAS loop), and bytes-equal-at? (the compare in place, no read-back copy) —
+   direct C++ over the region's mapping (cpp/raw, called as cpp/eve_slab.<fn>), the __atomic builtins
+   on the base address adapters/region/jank maps. A Lustre region (its atomics are fcntl locks, not
+   hardware ones) keeps eve.mem's portable forms, which take the locks.
+
+   A slab offset is slab-qualified ([class:3 | block:29]); a field offset is a byte offset within
+   its block. A region is an eve.region region; an offset in it is a byte offset. Being macros, the
+   names are called, never passed as values; the expansions name their namespaces in full:
+   eve.deftype-proto.alloc requires this one, so this one cannot require it. The helper functions
+   the fused macros expand to are this namespace's own, and public for that reason; the namespaces
+   their bodies name are required here — jank resolves a qualified symbol only in a namespace
+   already loaded, and this one is loaded early (the protocol adapter names nothing in a body:
+   it has no bodies)."
+  (:require [eve.encoding]
+            [eve.host]
+            [eve.mem]
+            [eve.region]))
+
+;; --- the fused primitives in C++: the bitmap scan and its CAS loop, the in-place compare ---
+;; (eve.mem's scan-free / imr-bitmap-alloc-cas! / imr-bitmap-free! semantics, word for word: an
+;; i32 word a bit, seq-cst __atomic ops on the mapping, as adapters/region/jank's accessors use)
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/obj/array.hpp>
+namespace eve_slab {
+  using namespace jank::runtime;
+  static int32_t *W(long base, long off) { return reinterpret_cast<int32_t *>(reinterpret_cast<uint8_t *>(base) + off); }
+  static int32_t load(long base, long off) { return __atomic_load_n(W(base, off), __ATOMIC_SEQ_CST); }
+  static int32_t cas(long base, long off, int32_t expected, int32_t desired) {
+    int32_t e = expected;
+    __atomic_compare_exchange_n(W(base, off), &e, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return e;
+  }
+  /* the first clear bit at or after start-bit among total-bits, or -1 (eve.mem/scan-free) */
+  long bitmap_find_free(long base, long bm_off, long total_bits, long start_bit) {
+    long const words((total_bits + 31) >> 5);
+    long wi(start_bit >> 5);
+    int bi((int)(start_bit & 31));
+    for(; wi < words; ++wi) {
+      uint32_t inv(~(uint32_t)load(base, bm_off + wi * 4));
+      if(bi > 0) inv &= (0xFFFFFFFFu << bi);
+      if(inv != 0) {
+        long const abs_bit(wi * 32 + __builtin_ctz(inv));
+        return abs_bit < total_bits ? abs_bit : -1;
+      }
+      bi = 0;
+    }
+    return -1;
+  }
+  /* bit 0 -> 1: 1, or 0 when it was set already (eve.mem/imr-bitmap-alloc-cas!) */
+  long bitmap_alloc_cas(long base, long bm_off, long bit) {
+    long const off(bm_off + (bit >> 5) * 4);
+    int32_t const mask((int32_t)(1u << (bit & 31)));
+    for(;;) {
+      int32_t const old(load(base, off));
+      if((old & mask) != 0) return 0;
+      if(cas(base, off, old, old | mask) == old) return 1;
+    }
+  }
+  /* bit 1 -> 0: 1 when it was set, 0 when it was clear already (eve.mem/imr-bitmap-free!) */
+  long bitmap_free(long base, long bm_off, long bit) {
+    long const off(bm_off + (bit >> 5) * 4);
+    int const pos((int)(bit & 31));
+    int32_t const mask((int32_t)(1u << pos));
+    for(;;) {
+      int32_t const cur(load(base, off));
+      if(cas(base, off, cur, cur & ~mask) == cur) return (cur >> pos) & 1;
+    }
+  }
+  /* the array's bytes against the mapping's, in place: 1 equal, 0 not */
+  long bytes_equal(long base, long off, object_ref b) {
+    auto *a(static_cast<obj::array<jank::u8> *>(b.ptr()));
+    return std::memcmp(reinterpret_cast<uint8_t *>(base) + off, a->data.data, a->size) == 0 ? 1 : 0;
+  }
+}
+")
+
+;; ---------------------------------------------------------------------------
+;; A domain's slab I/O
+;; ---------------------------------------------------------------------------
+
+(defmacro read-u8
+  "The unsigned byte at slab-off + field-off."
+  [sio slab-off field-off]
+  (list 'eve.deftype-proto.alloc/-sio-read-u8 sio slab-off field-off))
+
+(defmacro read-u16
+  "The little-endian u16 at slab-off + field-off."
+  [sio slab-off field-off]
+  (list 'eve.deftype-proto.alloc/-sio-read-u16 sio slab-off field-off))
+
+(defmacro read-i32
+  "The little-endian i32 at slab-off + field-off (any alignment)."
+  [sio slab-off field-off]
+  (list 'eve.deftype-proto.alloc/-sio-read-i32 sio slab-off field-off))
+
+(defmacro read-bytes
+  "The len bytes at slab-off + field-off, as a host byte array (HOST-CONTRACT
+   §2.4: valid until the next write to them)."
+  [sio slab-off field-off len]
+  (list 'eve.deftype-proto.alloc/-sio-read-bytes sio slab-off field-off len))
+
+(defmacro write-u8!
+  [sio slab-off field-off v]
+  (list 'eve.deftype-proto.alloc/-sio-write-u8! sio slab-off field-off v))
+
+(defmacro write-u16!
+  [sio slab-off field-off v]
+  (list 'eve.deftype-proto.alloc/-sio-write-u16! sio slab-off field-off v))
+
+(defmacro write-i32!
+  [sio slab-off field-off v]
+  (list 'eve.deftype-proto.alloc/-sio-write-i32! sio slab-off field-off v))
+
+(defmacro write-bytes!
+  "All of byte array src at slab-off + field-off."
+  [sio slab-off field-off src]
+  (list 'eve.deftype-proto.alloc/-sio-write-bytes! sio slab-off field-off src))
+
+(defmacro cas-i32!
+  "Compare-and-exchange on the aligned i32 at slab-off + field-off: the value
+   found (success iff it equals expected)."
+  [sio slab-off field-off expected desired]
+  (list 'eve.deftype-proto.alloc/-sio-cas-i32! sio slab-off field-off expected desired))
+
+(defmacro copy-block!
+  "len bytes from src-off + src-field to dst-off + dst-field."
+  [sio dst-off dst-field src-off src-field len]
+  (list 'eve.deftype-proto.alloc/-sio-copy-block! sio dst-off dst-field src-off src-field len))
+
+(defmacro alloc!
+  "A block of at least size-bytes: its slab offset (throws when out of memory)."
+  [sio size-bytes]
+  (list 'eve.deftype-proto.alloc/-sio-alloc! sio size-bytes))
+
+(defmacro free!
+  "The block at slab-off freed: true, or false when it was free already."
+  [sio slab-off]
+  (list 'eve.deftype-proto.alloc/-sio-free! sio slab-off))
+
+(defmacro mem-region
+  "[region byte-off]: the region holding slab-off + field-off and the field's
+   offset in it (for the region's own operations, wait and notify)."
+  [sio slab-off field-off]
+  (list 'eve.deftype-proto.alloc/-sio-mem-region sio slab-off field-off))
+
+;; The fused primitive: the compare in place, in C++ over the region the slab offset names —
+;; no read-back copy (the protocol adapter's default reads the bytes out and compares arrays).
+(defn bytes-equal-in-region?
+  [r off b]
+  (if (eve.region/lustre-region? r)
+    (eve.encoding/bytes= (eve.mem/-read-bytes r off (eve.host/alength b)) b)
+    (== 1 (cpp/eve_slab.bytes_equal (eve.region/region-base r) (long off) b))))
+
+(defmacro bytes-equal-at?
+  "Do the (alength b) bytes at slab-off + field-off equal byte array b.
+   The in-place compare needs the block's region — but a wrapped slab I/O
+   (the keyring's encrypting wrapper above all) transforms bytes on the
+   ISlabIO path, so its blocks must be read through that path, never as a
+   region: a wrapped sio takes the protocol adapter's read-and-compare."
+  [sio slab-off field-off b]
+  (let [ss (gensym "s") so (gensym "so") fo (gensym "fo") bs (gensym "b") rs (gensym "r") os (gensym "off")]
+    (list 'let [ss sio so slab-off fo field-off bs b]
+          (list 'if (list 'satisfies? 'eve.deftype-proto.alloc/IWrappedSio ss)
+                (list 'eve.encoding/bytes=
+                      (list 'eve.deftype-proto.alloc/-sio-read-bytes ss so fo
+                            (list 'eve.host/alength bs))
+                      bs)
+                (list 'let [[rs os] (list 'eve.deftype-proto.alloc/-sio-mem-region ss so fo)]
+                      (list 'eve.slab-io/bytes-equal-in-region? rs os bs))))))
+
+;; ---------------------------------------------------------------------------
+;; A domain: the slab I/O eve's values carry, over the slab context
+;; (eve.deftype-proto.alloc's JvmSlabCtx) that holds its regions
+;; ---------------------------------------------------------------------------
+
+(defmacro domain
+  "The slab I/O of slab context ctx: ctx itself."
+  [ctx]
+  ctx)
+
+(defmacro domain-ctx
+  "The slab context behind a domain's slab I/O: the slab I/O itself."
+  [sio]
+  sio)
+
+(defmacro regions-changed!
+  "ctx's regions were re-mapped (a class grew): nothing to follow."
+  [ctx]
+  nil)
+
+;; ---------------------------------------------------------------------------
+;; A region: the slab allocators' header words and bitmaps
+;; ---------------------------------------------------------------------------
+
+(defmacro region-load-i32 [r off] (list 'eve.mem/-load-i32 r off))
+(defmacro region-store-i32! [r off v] (list 'eve.mem/-store-i32! r off v))
+(defmacro region-cas-i32! [r off expected desired] (list 'eve.mem/-cas-i32! r off expected desired))
+(defmacro region-add-i32! [r off delta] (list 'eve.mem/-add-i32! r off delta))
+(defmacro region-sub-i32! [r off delta] (list 'eve.mem/-sub-i32! r off delta))
+(defmacro region-load-i64 [r off] (list 'eve.mem/-load-i64 r off))
+(defmacro region-store-i64! [r off v] (list 'eve.mem/-store-i64! r off v))
+(defmacro region-cas-i64! [r off expected desired] (list 'eve.mem/-cas-i64! r off expected desired))
+
+;; The fused primitives: one call a scan, one call a CAS loop, in C++ over the region's mapping
+;; (the protocol adapter's defaults are eve.mem's forms, a load or a CAS per word through the
+;; region protocol). A Lustre region keeps eve.mem's forms: its atomics are fcntl locks.
+
+(defn bitmap-find-free*
+  [r bm-off total-bits start-bit]
+  (if (eve.region/lustre-region? r)
+    (eve.mem/imr-bitmap-find-free r bm-off total-bits start-bit)
+    (cpp/eve_slab.bitmap_find_free (eve.region/region-base r) (long bm-off) (long total-bits) (long start-bit))))
+
+(defn bitmap-alloc-cas!*
+  [r bm-off bit]
+  (if (eve.region/lustre-region? r)
+    (eve.mem/imr-bitmap-alloc-cas! r bm-off bit)
+    (== 1 (cpp/eve_slab.bitmap_alloc_cas (eve.region/region-base r) (long bm-off) (long bit)))))
+
+(defn bitmap-free!*
+  [r bm-off bit]
+  (if (eve.region/lustre-region? r)
+    (eve.mem/imr-bitmap-free! r bm-off bit)
+    (== 1 (cpp/eve_slab.bitmap_free (eve.region/region-base r) (long bm-off) (long bit)))))
+
+(defmacro bitmap-find-free
+  "The first clear bit at or after start-bit of the total-bits bitmap at
+   bm-off in r, or -1."
+  [r bm-off total-bits start-bit]
+  (list 'eve.slab-io/bitmap-find-free* r bm-off total-bits start-bit))
+
+(defmacro bitmap-alloc-cas!
+  "bit set 0 -> 1: true, or false when it was set already."
+  [r bm-off bit]
+  (list 'eve.slab-io/bitmap-alloc-cas!* r bm-off bit))
+
+(defmacro bitmap-free!
+  "bit cleared 1 -> 0: true, or false when it was clear already."
+  [r bm-off bit]
+  (list 'eve.slab-io/bitmap-free!* r bm-off bit))
