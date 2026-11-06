@@ -50,7 +50,7 @@
           (is (every? (fn [[k img]] (= img (get blocks k))) want) "every image"))))))
 
 (deftest refusals
-  (let [thrown (fn [v] (try (c/encode v) nil (catch #?(:cljs :default :lpy python/Exception :default Exception) e (:type (ex-data e)))))]
+  (let [thrown (fn [v] (try (c/encode v) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (:type (ex-data e)))))]
     (is (= :unencodable (thrown {:k ":looks-like-a-keyword"})) "a string the kernel would read as a keyword")
     (is (= :unencodable (thrown {[1] 2})) "a vector as a key")))
 

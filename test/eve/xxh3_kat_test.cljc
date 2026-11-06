@@ -12,7 +12,7 @@
    only when this suite passes with it in place, on that host."
   (:refer-clojure :exclude [aget alength byte-array unchecked-byte bytes])
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.host :refer [aget alength byte-array unchecked-byte bytes]]
+            [eve.host :refer [field aget alength byte-array unchecked-byte bytes]]
             [clojure.string :as str]
             [eve.encoding :as enc]
             [eve.hamt-util :as hu]))
@@ -26,7 +26,7 @@
 (defn- hex [b]
   #?(:cljs (str/join (map (fn [i] (let [h (.toString (aget b i) 16)]
                                     (if (< (aget b i) 16) (str "0" h) h)))
-                          (range (.-length b))))
+                          (range (field b length))))
      :default (str/join (map #(let [x (bit-and % 0xFF)]
                                 (str (nth "0123456789abcdef" (quot x 16))
                                      (nth "0123456789abcdef" (mod x 16))))

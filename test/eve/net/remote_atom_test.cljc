@@ -76,7 +76,7 @@
 (deftest denied-throws-once
   (let [[ra s slept] (setup {:deny (fn [req] (some (fn [[kb _]] (str/includes? (apply str (map char kb)) ":secret"))
                                                       (snap/unframe (b/from-b64 (get req "root_blob")))))})
-        e (try (a/swap! ra assoc :secret 1) nil (catch #?(:cljs :default :lpy python/Exception :default Exception) e e))]
+        e (try (a/swap! ra assoc :secret 1) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e e))]
     (is (= :policy-denied (:type (ex-data e))) "T-4.7")
     (is (= "spec-write-denied" (:reason (ex-data e))))
     (is (= [] @slept))
@@ -85,7 +85,7 @@
 
 (deftest retries-are-bounded
   (let [[ra s slept] (setup {:before-cas (fn [st] (swap! st update-in [:atoms "a1" :root_key] str "x"))})
-        e (try (a/swap! ra assoc :n 1) nil (catch #?(:cljs :default :lpy python/Exception :default Exception) e e))]
+        e (try (a/swap! ra assoc :n 1) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e e))]
     (is (= :retries-exhausted (:type (ex-data e))))
     (is (= 50 (count @slept)))
     (is (every? (fn [ms] (<= ms 3000)) @slept) "capped at 2000 ms × 1.5")))
@@ -136,7 +136,7 @@
         (is (every? (fn [[k img]] (let [stored (get @(:store s) k)] (and stored (not= img stored)))) blocks)
             "the store holds ciphertext under each block's plaintext key")
         (is (= v (a/deref (a/remote-atom ecfg p))) "a fresh reader with the gak reads it")
-        (is (thrown? #?(:cljs :default :lpy python/Exception :default Exception) (a/deref (a/remote-atom cfg p)))
+        (is (thrown? #?(:cljs :default :lpy python/Exception :jank nil :default Exception) (a/deref (a/remote-atom cfg p)))
             "a reader without the gak fails the address check")))))
 
 (deftest a-long-past-int32-round-trips

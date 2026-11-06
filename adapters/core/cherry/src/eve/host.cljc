@@ -19,3 +19,9 @@
   [proto & impls]
   `(do (extend-type nil ~proto ~@impls)
        (extend-type ~'default ~proto ~@impls)))
+
+(defmacro field
+  "(field x f): the value of field f of x, a type's instance: (.-f x) (eve.host's name for a field read; on jank the
+   completion's read by name)."
+  [x f]
+  (list (symbol (str ".-" (name f))) x))

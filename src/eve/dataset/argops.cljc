@@ -37,6 +37,8 @@
 
 ;;-----------------------------------------------------------------------------
 ;; Quicksort of an index array by a value array (primitive comparisons where the host has them)
+;; (the scans' loop locals are a and b, not the partition loop's i and j they start from: a host whose codegen
+;; cannot shadow an outer loop's local in an inner loop — doc/hosts/jank.md, upstream 24)
 ;;-----------------------------------------------------------------------------
 
 (defn- qsort-doubles-asc!
@@ -45,8 +47,8 @@
   (when (< lo hi)
     (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
       (loop [i (int lo) j (int hi)]
-        (let [i (int (loop [i i] (if (and (<= i j) (< (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
-              j (int (loop [j j] (if (and (<= i j) (> (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+        (let [i (int (loop [a i] (if (and (<= a j) (< (aget vals (aget idx a)) pivot)) (recur (unchecked-inc-int a)) a)))
+              j (int (loop [b j] (if (and (<= i b) (> (aget vals (aget idx b)) pivot)) (recur (unchecked-dec-int b)) b)))]
           (if (<= i j)
             (let [tmp (aget idx i)]
               (aset idx i (aget idx j))
@@ -61,8 +63,8 @@
   (when (< lo hi)
     (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
       (loop [i (int lo) j (int hi)]
-        (let [i (int (loop [i i] (if (and (<= i j) (> (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
-              j (int (loop [j j] (if (and (<= i j) (< (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+        (let [i (int (loop [a i] (if (and (<= a j) (> (aget vals (aget idx a)) pivot)) (recur (unchecked-inc-int a)) a)))
+              j (int (loop [b j] (if (and (<= i b) (< (aget vals (aget idx b)) pivot)) (recur (unchecked-dec-int b)) b)))]
           (if (<= i j)
             (let [tmp (aget idx i)]
               (aset idx i (aget idx j))
@@ -77,8 +79,8 @@
   (when (< lo hi)
     (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
       (loop [i (int lo) j (int hi)]
-        (let [i (int (loop [i i] (if (and (<= i j) (< (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
-              j (int (loop [j j] (if (and (<= i j) (> (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+        (let [i (int (loop [a i] (if (and (<= a j) (< (aget vals (aget idx a)) pivot)) (recur (unchecked-inc-int a)) a)))
+              j (int (loop [b j] (if (and (<= i b) (> (aget vals (aget idx b)) pivot)) (recur (unchecked-dec-int b)) b)))]
           (if (<= i j)
             (let [tmp (aget idx i)]
               (aset idx i (aget idx j))
@@ -93,8 +95,8 @@
   (when (< lo hi)
     (let [pivot (aget vals (aget idx (int (+ lo (unsigned-bit-shift-right (- hi lo) 1)))))]
       (loop [i (int lo) j (int hi)]
-        (let [i (int (loop [i i] (if (and (<= i j) (> (aget vals (aget idx i)) pivot)) (recur (unchecked-inc-int i)) i)))
-              j (int (loop [j j] (if (and (<= i j) (< (aget vals (aget idx j)) pivot)) (recur (unchecked-dec-int j)) j)))]
+        (let [i (int (loop [a i] (if (and (<= a j) (> (aget vals (aget idx a)) pivot)) (recur (unchecked-inc-int a)) a)))
+              j (int (loop [b j] (if (and (<= i b) (< (aget vals (aget idx b)) pivot)) (recur (unchecked-dec-int b)) b)))]
           (if (<= i j)
             (let [tmp (aget idx i)]
               (aset idx i (aget idx j))

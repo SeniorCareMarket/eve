@@ -61,3 +61,11 @@
   [proto & impls]
   (let [root (if (:ns &env) 'default #?(:cljs 'default :default 'Object))]
     `(extend-protocol ~proto nil ~@impls ~root ~@impls)))
+
+(defmacro field
+  "(field x f): the value of field f of x, a type's instance — (.-f x) on every host whose analyzer reads a field
+   so (the JVM's, ClojureScript's, babashka's, ...); on jank the completion's read by name (jank's (.-f x) is C++
+   member access on a static type: a dynamic value has none). The one name eve's shared code reads a field through."
+  [x f]
+  #?(:jank `(eve.host-completion/get-field ~x '~f)
+     :default (list (symbol (str ".-" (name f))) x)))

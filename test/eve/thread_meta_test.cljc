@@ -264,8 +264,8 @@
                                (get-in c [:at :running])))
                     (vals (:components m))))))
     (testing "a cycle or an unknown dependency is refused: nothing swapped in"
-      (is (thrown? #?(:cljs js/Error :default Exception) (mt/desire {} {:a {:after #{:b}} :b {:after #{:a}}})))
-      (is (thrown? #?(:cljs js/Error :default Exception) (mt/desire {} {:a {:after #{:nope}}}))))
+      (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (mt/desire {} {:a {:after #{:b}} :b {:after #{:a}}})))
+      (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (mt/desire {} {:a {:after #{:nope}}}))))
     (testing "a claimer that dies: its component is desired again"
       (let [[m cid] (mt/claim-component m "r2" "rt" (fn [_] true) t0)
             [m adopted] (mt/adopt-components m (+ t0 200))]

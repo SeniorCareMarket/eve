@@ -78,7 +78,7 @@
         lb (assoc-in lb ["boxes" (hexpk "bob")] (r/seal-box ATOM REGION 1 k-evil (pk "bob") (rnd 32)))]
     (is (= k1 (r/open-key lb ATOM REGION (seed "alice"))))
     (is (= :region/commit-mismatch (try (r/open-key lb ATOM REGION (seed "bob")) nil
-                                        (catch #?(:cljs :default :default Exception) e (:reason (ex-data e))))))
+                                        (catch #?(:cljs :default :jank jank.runtime.object_ref :default Exception) e (:reason (ex-data e))))))
     (is (nil? (r/lockbox-refusal nil lb #{(hexpk "alice") (hexpk "bob")} :grant))
         "the broker cannot see it (it holds no key): members detect it")))
 

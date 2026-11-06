@@ -32,7 +32,7 @@
 
 (defn- page-map [w] (into {} (map (fn [pg] [(:cid pg) (:bytes pg)]) (:pages w))))
 
-(defn- thrown-type [f] (try (f) nil (catch #?(:cljs :default :lpy python/Exception :default Exception) e (:type (ex-data e)))))
+(defn- thrown-type [f] (try (f) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (:type (ex-data e)))))
 
 (deftest eve-writes-and-reads-its-pages
   (let [v (state)

@@ -50,14 +50,14 @@
 
 (defn attempt [f]
   (try [true (f)]
-       (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :default Throwable) e
+       (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) e
          [false e])))
 
 (defn capture-frame [] #?(:cljs nil :cljd nil :default (get-thread-bindings)))
 (defn call-with-frame [frame f] #?(:cljs (f) :cljd (f) :default (if frame (with-bindings* frame f) (f))))
 
 (defn var-symbol [v]
-  #?(:cljs (symbol v) :glj (symbol v) :cljd (symbol (str v))
+  #?(:cljs (symbol v) :glj (symbol v) :cljd (symbol (str v)) :jank (symbol (subs (str v) 2))
      :default (let [m (meta v)] (symbol (str (ns-name (:ns m))) (str (:name m))))))
 
 (defn eval-form

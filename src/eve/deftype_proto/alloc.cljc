@@ -37,7 +37,7 @@
    [eve.host :refer [aget aset alength byte-array short-array int-array float-array
                      double-array object-array into-array unchecked-byte unchecked-int
                      unsigned-bit-shift-right long double locking bytes shorts ints floats
-                     doubles objects defdelay]]
+                     doubles objects defdelay field]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.coalesc :as coalesc]
    [eve.deftype-proto.data :as d]
@@ -316,17 +316,17 @@
         them, then spill to the next class; larger blocks, and a spill past
         class 5, go to the coalescing class 6."
        [^JvmSlabCtx ctx size-bytes]
-       (let [^objects regions        (.-regions ctx)
-             ^objects bitmap-regions (.-bitmap-regions ctx)
-             ^ints    data-offsets   (.-data-offsets ctx)
-             ^ints    bitmap-offsets (.-bitmap-offsets ctx)
-             ^ints    total-blocks   (.-total-blocks ctx)
-             ^ints    block-sizes    (.-block-sizes ctx)
-             ^objects file-paths     (.-file-paths ctx)
-             ^objects bitmap-paths   (.-bitmap-paths ctx)
-             ^objects desc-regions   (.-desc-regions ctx)
-             ^objects desc-flags-regions (.-desc-flags-regions ctx)
-             ^objects desc-pointer-regions (.-desc-pointer-regions ctx)
+       (let [^objects regions        (field ctx regions)
+             ^objects bitmap-regions (field ctx bitmap-regions)
+             ^ints    data-offsets   (field ctx data-offsets)
+             ^ints    bitmap-offsets (field ctx bitmap-offsets)
+             ^ints    total-blocks   (field ctx total-blocks)
+             ^ints    block-sizes    (field ctx block-sizes)
+             ^objects file-paths     (field ctx file-paths)
+             ^objects bitmap-paths   (field ctx bitmap-paths)
+             ^objects desc-regions   (field ctx desc-regions)
+             ^objects desc-flags-regions (field ctx desc-flags-regions)
+             ^objects desc-pointer-regions (field ctx desc-pointer-regions)
              class-idx (d/size->class-idx size-bytes)]
          (if (== class-idx -1)
            ;; Coalescing allocator (class 6) with lazy growth
@@ -473,19 +473,19 @@
         [flags-region flags-off] [pointer-region pointer-off]] — the addresses of the block's COUNT,
         FLAGS and POINTER column entries — or nil when the class carries no columns."
        [^JvmSlabCtx ctx ci block-idx]
-       (let [dr (aget ^objects (.-desc-regions ctx) ci)]
+       (let [dr (aget ^objects (field ctx desc-regions) ci)]
          (when dr
-           (let [fr   (aget ^objects (.-desc-flags-regions ctx) ci)
-                 pr   (aget ^objects (.-desc-pointer-regions ctx) ci)
-                 off  (aget ^ints (.-desc-offsets ctx) ci)
+           (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
+                 pr   (aget ^objects (field ctx desc-pointer-regions) ci)
+                 off  (aget ^ints (field ctx desc-offsets) ci)
                  ;; a heap / SAB slab carries all three columns in its own region (FLAGS right after
                  ;; COUNT, POINTER right after FLAGS); an mmap class's flags and pointer regions are
                  ;; their own files, their columns at offset 0 there
                  foff (if (identical? fr dr)
-                        (+ off (* 4 (aget ^ints (.-total-blocks ctx) ci)))
+                        (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
                         off)
                  poff (if (identical? pr dr)
-                        (+ off (* 8 (aget ^ints (.-total-blocks ctx) ci)))
+                        (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
                         off)]
              [[dr (+ off (* 4 block-idx))]
               [fr (+ foff (* 4 block-idx))]
@@ -495,7 +495,7 @@
        "The block at slab-offset in ctx's slabs freed: true, or false when it
         was free already (a double free)."
        [^JvmSlabCtx ctx slab-offset]
-       (let [^objects regions (.-regions ctx)
+       (let [^objects regions (field ctx regions)
              class-idx        (decode-class-idx slab-offset)]
          (if (== class-idx OVERFLOW_CLASS_IDX)
            ;; Coalescing free (class 6)
@@ -506,8 +506,8 @@
                false))
            ;; Bitmap free (class 0-5)
            (let [block-idx (decode-block-idx slab-offset)
-                 bm-rgn    (aget ^objects (.-bitmap-regions ctx) class-idx)
-                 bm-off    (aget ^ints (.-bitmap-offsets ctx) class-idx)
+                 bm-rgn    (aget ^objects (field ctx bitmap-regions) class-idx)
+                 bm-off    (aget ^ints (field ctx bitmap-offsets) class-idx)
                  ;; the block's descriptor is reset BEFORE its bit clears (after it another thread may claim the
                  ;; block): its count 0, its flags clear and its digest pointer 0 — the block's own
                  ;; columns, nothing else
@@ -533,7 +533,7 @@
            (desc-handle ctx ci (decode-block-idx slab-offset))
 
            (== ci OVERFLOW_CLASS_IDX)
-           (when-let [r (aget ^objects (.-regions ctx) OVERFLOW_CLASS_IDX)]
+           (when-let [r (aget ^objects (field ctx regions) OVERFLOW_CLASS_IDX)]
              (when-let [[co fo po] (coalesc/row-of r (decode-block-idx slab-offset))]
                [[r co] [r fo] [r po]]))
 
@@ -547,9 +547,9 @@
          (cond
            (< ci OVERFLOW_CLASS_IDX)
            (let [bi (decode-block-idx slab-offset)]
-             (and (< bi (aget ^ints (.-total-blocks ctx) ci))
-                  (let [w (slab/region-load-i32 (aget ^objects (.-bitmap-regions ctx) ci)
-                                                (+ (aget ^ints (.-bitmap-offsets ctx) ci)
+             (and (< bi (aget ^ints (field ctx total-blocks) ci))
+                  (let [w (slab/region-load-i32 (aget ^objects (field ctx bitmap-regions) ci)
+                                                (+ (aget ^ints (field ctx bitmap-offsets) ci)
                                                    (* 4 (unsigned-bit-shift-right bi 5))))]
                     (not (zero? (bit-and w (bit-shift-left 1 (bit-and bi 31))))))))
 
@@ -623,10 +623,10 @@
         Takes an explicit sio."
        ([sio]
        (let [^JvmSlabCtx ctx (slab/domain-ctx sio)
-             ^objects regions      (.-regions ctx)
-             ^ints total-blocks    (.-total-blocks ctx)
-             ^objects file-paths   (.-file-paths ctx)
-             ^ints data-offsets    (.-data-offsets ctx)
+             ^objects regions      (field ctx regions)
+             ^ints total-blocks    (field ctx total-blocks)
+             ^objects file-paths   (field ctx file-paths)
+             ^ints data-offsets    (field ctx data-offsets)
              ;; Fast path: lockless scan for growth in classes 0-5
              any-grew?
              (loop [ci 0]
@@ -653,12 +653,12 @@
          (when (or any-grew? coalesc-grew?)
            ;; re-map every class the way it was opened (Lustre or not)
            (let [opts (region-opts (first (filter some? regions)))
-                 ^objects bitmap-regions (.-bitmap-regions ctx)
-                 ^ints block-sizes       (.-block-sizes ctx)
-                 ^objects bitmap-paths   (.-bitmap-paths ctx)
-                 ^objects desc-regions   (.-desc-regions ctx)
-                 ^objects desc-flags-regions (.-desc-flags-regions ctx)
-                 ^objects desc-pointer-regions (.-desc-pointer-regions ctx)]
+                 ^objects bitmap-regions (field ctx bitmap-regions)
+                 ^ints block-sizes       (field ctx block-sizes)
+                 ^objects bitmap-paths   (field ctx bitmap-paths)
+                 ^objects desc-regions   (field ctx desc-regions)
+                 ^objects desc-flags-regions (field ctx desc-flags-regions)
+                 ^objects desc-pointer-regions (field ctx desc-pointer-regions)]
              (do
                (locking regions
                  (when any-grew?
@@ -713,7 +713,7 @@
         calls it for the whole domain."
        [sio]
        (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
-         (doseq [^objects arr [(.-regions ctx) (.-bitmap-regions ctx) (.-desc-regions ctx)]
+         (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)]
                  :when arr
                  r arr
                  :when r]
@@ -845,7 +845,7 @@
   "The domain's own slab I/O under any logging wrappers (a transient's log over a swap attempt's)."
   [sio]
   (if (instance? LoggingSlabIO sio)
-    (recur (.-inner ^LoggingSlabIO sio))
+    (recur (field ^LoggingSlabIO sio inner))
     sio))
 
 (ser/register-sio-root! sio-root)
@@ -868,14 +868,14 @@
   [sio]
   (loop [s sio]
     (cond (instance? JvmSlabCtx s) s
-          (instance? LoggingSlabIO s) (recur (.-inner ^LoggingSlabIO s))
+          (instance? LoggingSlabIO s) (recur (field ^LoggingSlabIO s inner))
           :else nil)))
 
 (defn- node-heap-bytes
   "The heap byte array holding the block at slab-off in ctx's domain, or nil."
   [^JvmSlabCtx ctx ^long slab-off]
   (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) BLOCK_IDX_BITS)]
-    (mem/-heap-bytes (aget ^objects (.-regions ctx) (int ci)))))
+    (mem/-heap-bytes (aget ^objects (field ctx regions) (int ci)))))
 
 (defn- node-at
   "The byte offset in its region of field-off in the block at slab-off."
@@ -883,8 +883,8 @@
   (let [u  (bit-and slab-off 0xFFFFFFFF)
         ci (int (unsigned-bit-shift-right u BLOCK_IDX_BITS))
         bi (bit-and u BLOCK_IDX_MASK)]
-    (+ (aget ^ints (.-data-offsets ctx) ci)
-       (* bi (aget ^ints (.-block-sizes ctx) ci))
+    (+ (aget ^ints (field ctx data-offsets) ci)
+       (* bi (aget ^ints (field ctx block-sizes) ci))
        field-off)))
 
 (defn bytes-i32
@@ -920,7 +920,7 @@
     (if (nil? ctx)
       (-sio-read-bytes sio slab-off field-off len)
       (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) BLOCK_IDX_BITS)]
-        (mem/-read-bytes (aget ^objects (.-regions ^JvmSlabCtx ctx) (int ci)) (node-at ctx slab-off field-off) len)))))
+        (mem/-read-bytes (aget ^objects (field ^JvmSlabCtx ctx regions) (int ci)) (node-at ctx slab-off field-off) len)))))
 
 (defn node-u8
   "The unsigned byte at slab-off + field-off of a published node."
@@ -940,6 +940,15 @@
       (long (-sio-read-i32 sio slab-off field-off))
       (bytes-i32 arr (node-at ctx slab-off field-off)))))
 
+;; IWrappedSio is defined before node-bytes-equal? (not after it, as the JVM's
+;; load order allowed): the jank slab-io adapter's bytes-equal-at? is a macro
+;; whose expansion names this protocol, and jank's analyzer resolves the name
+;; at expansion time.
+(defprotocol IWrappedSio
+  "A slab I/O that transforms another's bytes (eve.keyring's encrypting one):
+   the domain it writes is the wrapped one's."
+  (-wrapped-sio [w]))
+
 (defn node-bytes-equal?
   "Do the (alength b) bytes at slab-off + field-off of a published node equal byte array b."
   [sio ^long slab-off ^long field-off b]
@@ -958,11 +967,6 @@
 
 
 (declare host-op)
-
-(defprotocol IWrappedSio
-  "A slab I/O that transforms another's bytes (eve.keyring's encrypting one):
-   the domain it writes is the wrapped one's."
-  (-wrapped-sio [w]))
 
 (defn domain-root
   "The domain's own slab I/O (through logging and through a wrapper)."
@@ -1000,7 +1004,7 @@
       (if-let [f (host-op :shared-domain?)]
         (f r)
         (and (instance? JvmSlabCtx r)
-             (some? (aget ^objects (.-file-paths ^JvmSlabCtx r) 0)))))))
+             (some? (aget ^objects (field ^JvmSlabCtx r file-paths) 0)))))))
 
 (ser/register-shared-domain-fn! shared-domain?)
 
@@ -1020,7 +1024,7 @@
    other version holds."
   [sio off]
   (and (instance? LoggingSlabIO sio)
-       (contains? @(.-log ^LoggingSlabIO sio) (bit-and (long off) 0xFFFFFFFF))))
+       (contains? @(field ^LoggingSlabIO sio log) (bit-and (long off) 0xFFFFFFFF))))
 
 (defn keep-owned!
   "A write through a scope stored an existing eve value by pointer: the piece, or blocks a value derived from it
@@ -1030,8 +1034,8 @@
   ;; every log in the chain: a transient's scope, the swap attempt's under it
   (loop [s sio]
     (when (instance? LoggingSlabIO s)
-      (reset! (.-keep ^LoggingSlabIO s) true)
-      (recur (.-inner ^LoggingSlabIO s))))
+      (reset! (field ^LoggingSlabIO s keep) true)
+      (recur (field ^LoggingSlabIO s inner))))
   nil)
 
 (ser/register-stored-piece! keep-owned!)
@@ -1039,15 +1043,15 @@
 (defn stored-pieces?
   "True when a write through the logging sio (or a scope under it) stored an existing eve value by pointer."
   [sio]
-  (and (instance? LoggingSlabIO sio) (boolean @(.-keep ^LoggingSlabIO sio))))
+  (and (instance? LoggingSlabIO sio) (boolean @(field ^LoggingSlabIO sio keep))))
 
 (defn free-owned!
   "Free each of offs a logging sio allocated and has not freed, through it: a block it did not allocate (one of the
    value the scope began from) is not its to free. Each checked as it goes, so an offset named twice is freed once.
    A scope that stored an existing eve value by pointer (keep-owned!) frees nothing."
   [sio offs]
-  (when (and (instance? LoggingSlabIO sio) (not @(.-keep ^LoggingSlabIO sio)))
-    (let [log (.-log ^LoggingSlabIO sio)]
+  (when (and (instance? LoggingSlabIO sio) (not @(field ^LoggingSlabIO sio keep)))
+    (let [log (field ^LoggingSlabIO sio log)]
       (doseq [off offs]
         (when (contains? @log (bit-and (long off) 0xFFFFFFFF))
           (slab/free! sio off))))))
@@ -1057,7 +1061,7 @@
    32 bits)."
   [sio]
   (if (instance? LoggingSlabIO sio)
-    (or @(.-log ^LoggingSlabIO sio) [])
+    (or @(field ^LoggingSlabIO sio log) [])
     []))
 
 (defn stop-logging!
@@ -1065,7 +1069,7 @@
    carry the wrapper keep working, their allocations no longer logged)."
   [sio]
   (when (instance? LoggingSlabIO sio)
-    (reset! (.-log ^LoggingSlabIO sio) nil))
+    (reset! (field ^LoggingSlabIO sio log) nil))
   nil)
 
 ;; ---------------------------------------------------------------------------

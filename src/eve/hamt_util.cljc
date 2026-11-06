@@ -63,15 +63,27 @@
         ;; Tail
         (let [t (* nblocks 4)
               r (bit-and len 3)
-              ;; case, not cond: cond's implicit nil tail boxed every hash
-              k (case (int r)
-                  3 (bit-or (bit-or (ubyte buf t)
-                                    (bit-shift-left (ubyte buf (+ t 1)) 8))
-                            (bit-shift-left (ubyte buf (+ t 2)) 16))
-                  2 (bit-or (ubyte buf t)
-                            (bit-shift-left (ubyte buf (+ t 1)) 8))
-                  1 (ubyte buf t)
-                  0)
+              ;; case, not cond: cond's implicit nil tail boxed every hash.
+              ;; On jank the cond form stays: jank's case* codegen assigns the
+              ;; scrutinee's primitive into an object slot and the compile
+              ;; fails ("no viable overloaded '='" in clojure.core's case
+              ;; machinery, measured 2026-11-05 ET) — the cond computes the
+              ;; same k.
+              k #?(:jank (cond (== r 3) (bit-or (bit-or (ubyte buf t)
+                                                        (bit-shift-left (ubyte buf (+ t 1)) 8))
+                                                (bit-shift-left (ubyte buf (+ t 2)) 16))
+                               (== r 2) (bit-or (ubyte buf t)
+                                                (bit-shift-left (ubyte buf (+ t 1)) 8))
+                               (== r 1) (ubyte buf t)
+                               :else    0)
+                   :default (case (int r)
+                              3 (bit-or (bit-or (ubyte buf t)
+                                                (bit-shift-left (ubyte buf (+ t 1)) 8))
+                                        (bit-shift-left (ubyte buf (+ t 2)) 16))
+                              2 (bit-or (ubyte buf t)
+                                        (bit-shift-left (ubyte buf (+ t 1)) 8))
+                              1 (ubyte buf t)
+                              0))
               h (if (pos? r)
                   (bit-xor h (-> k (i32/imul 0xcc9e2d51)
                                  (i32/rotl 15)
