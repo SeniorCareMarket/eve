@@ -3,13 +3,13 @@
    measurements of the retire zero-queue's flush discipline. Run:
      clojure -M:t -Sdeps '{:aliases {:t {:extra-paths [\"bench\"]}}}' \\
        -e \"(require 'eve.jcost-probe) (eve.jcost-probe/probe1)\"
-   Scratch domains live under ~/workspace/jcost-runs/."
+   Scratch domains live under target/jcost-runs/ (JCOST_RUNS_DIR overrides)."
   (:require [eve.atom :as atom]
             [eve.mem :as mem]
             [eve.deftype-proto.data :as d]
             [clojure.java.io :as io]))
 
-(def ^:private runs-dir "/home/hatch/workspace/jcost-runs")
+(def ^:private runs-dir (or (System/getenv "JCOST_RUNS_DIR") "target/jcost-runs"))
 
 (defn- delete-recursively! [^java.io.File f]
   (when (.exists f)

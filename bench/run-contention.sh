@@ -11,7 +11,7 @@ TREE="$1"; VARIANT="$2"; PROCS="$3"; N="$4"; SYNCE="$5"; TAG="$6"
 export CLJ_CONFIG=~/workspace/eve-env/cljconfig
 export JAVA_HOME=~/opt/jdk-21.0.7+6-jre
 export PATH=~/opt/jdk-21.0.7+6-jre/bin:~/opt/clojure-tools/bin:$PATH
-export BENCH_DIR=${BENCH_DIR:-/home/hatch/workspace/durability-bench-runs}
+export BENCH_DIR=${BENCH_DIR:-$TREE/target/durability-bench-runs}
 DIR="$BENCH_DIR/cont-$TAG"
 CLJ="clojure -J--add-opens -Jjava.base/java.lang=ALL-UNNAMED -J--enable-native-access=ALL-UNNAMED -Sdeps {:aliases{:bench{:extra-paths[\"bench\"]}}} -M:bench -m eve.durability-bench"
 rm -f "$DIR.go" "$DIR".ready-* "$DIR".elapsed-*
