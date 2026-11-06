@@ -1,0 +1,7 @@
+:lru-loaded
+
+Testing datascript.test.lru
+
+Ran 2 tests containing 20 assertions.
+0 failures, 0 errors.
+{:test 2, :pass 20, :fail 0, :error 0, :type :summary}
