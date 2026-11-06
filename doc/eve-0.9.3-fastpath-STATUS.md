@@ -121,6 +121,42 @@ this box.** Either the bench lane's single-process pre-seat control on J
 full speed. The J re-bench settles it: heap-grade control, pre-seat tip, and
 fixed release tree, staged and run identically, 3 processes per arm.
 
+## RE-BENCH VERDICT (2026-11-05 ~11:46 PM ET, j.slaa.us) — FAST PATHS RESTORED
+
+Fixed tree = release @ 6f44aef staged on J as `~/jvj-bench/eve-fix`
+(archive md5-verified files; bench file byte-identical to the bench lane's
+as-run variant). Method identical to the bench lane's: probes first
+(JVM 7/7, jank 6/6, all checksums green), 3 processes per arm, min-of-3
+batches per process, headline = median of 3; loads 0.42–1.93 recorded per
+run in `fix-passes-driver.log`. Raw logs: `~/workspace/wt/eve-093-fastpath/logs/fix-*`
+and on J under `~/jvj-bench/logs/`.
+
+| Shape | JVM pre-fix (rel median) | JVM FIXED (median of 3) | Heap-grade line (banked) | Jank pre-fix | Jank FIXED (median of 3) |
+|---|---|---|---|---|---|
+| S1a sparse get @a | 126.49 µs | **71.08 µs** | 62.89 µs | 2,917.99 µs | 2,981.83 µs |
+| S1b guarded get | 184.79 µs | **1.82 µs** | 1.89 µs | — | — |
+| S2 direct get 100-map | 188.06 µs | **0.40 µs** | 0.39 µs | 243.87 µs | 250.94 µs |
+| S3a swap! inc | 178.54 µs | **107.53 µs** | 39.63 µs † | 633.65 µs | 660.16 µs |
+| S3b reset! alt | 222.19 µs | **65.25 µs** | 26.42 µs † | 614.57 µs | 623.64 µs |
+| S4a deref @a | 109.04 µs | **47.16 µs** | 57.79 µs | 3,100.96 µs | 3,012.61 µs |
+| S4b raw root handle | 1.58 µs | **1.59 µs** | 1.63 µs | 19.83 µs | 19.77 µs |
+
+† S3a/S3b: the round-1 "line" figures did not reproduce on the heap-grade
+checkout itself today — same-day control (eve-jvm, its own staging/harness):
+S3a 108.05 µs, S3b 108.84 µs. Against the same-day control the fixed tree is
+at parity on S3a (107.53) and faster on S3b (65.25). Every other shape
+matches the banked line within noise. **The jank arm is unchanged on every
+shape** — the fix is compile-time metadata only, as designed.
+
+**Pre-seat "layer 1" — CLOSED as a harness artifact.** Attribution controls
+in the bench lane's r2 series ran a different harness copy (its S2 calls
+`(get m100 …)` on a top-level def). Same preseat tree, both files, today:
+r2 variant S2 2.24 µs vs as-run variant **S2 0.383 µs**, S1b 1.82 µs, S4b
+1.59 µs (log `fix-preseat-asrun.log`). Under the canonical harness the
+preseat tree never lost the fast paths; the only real regression was the
+seat layer, fixed above. (Local bisect corroborates: the full preseat
+content delta applied to the heap-grade tree left S2 in the fast band.)
+
 ## Log
 
 - ~10:20 PM ET — pickup. Branch tip verified 12324bb in worktree
