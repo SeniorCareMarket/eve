@@ -1,0 +1,74 @@
+(ns eve.runner.jank-main
+  "EVE on jank: the shared (.cljc) tests, run from the source tree on jank (hosts.edn :jank). jank's module path is
+   --module-path; the runner is run-main (bb test:jank does both, under LC_ALL=en_US.UTF-8: jank's lexer reads source
+   through the process locale, and refuses a non-ASCII character under POSIX).
+
+     LC_ALL=en_US.UTF-8 jank --module-path src:<hosts.edn :jank roots>:test run-main eve.runner.jank-main -- test [ns ...]
+
+   eve.host-completion loads first: a namespace sees the names the completion interns into clojure.core (deftype,
+   defprotocol, ...) only when it is made after them. Exits through eve.process/exit! (the exit hooks, a flush, _exit:
+   jank's own end runs no hook and crashes under a live timer thread), non-zero on a failure."
+  (:require [eve.host-completion]
+            [clojure.test :as t]
+            [eve.process :as proc]))
+
+;; one line per test as it starts and as it ends, with its time: a suite that stalls or dies names the test it was in
+(def ^:private test-start (atom 0))
+(defmethod t/report :begin-test-var [m] (println "test" (:var m)) (reset! test-start (proc/now-ms)))
+(defmethod t/report :end-test-var [m]
+  (println "done" (:var m) (str (- (proc/now-ms) @test-start) "ms")))
+
+;; jank's test-var catches only a thrown jank value: a C++ exception of jank's runtime (an invalid call's arity error,
+;; a native failure) escapes it and ends the run. Here it is an error of the test, counted and named, and the run goes on.
+(alter-var-root #'t/test-var
+  (fn [_]
+    (fn [v]
+      (when-let [f (:test (meta v))]
+        (binding [t/*testing-vars* (conj t/*testing-vars* v)]
+          (t/do-report {:type :begin-test-var :var v})
+          (t/inc-report-counter :test)
+          (try (f)
+               (catch jank.runtime.object_ref e
+                 (t/do-report {:type :error :message "Uncaught exception, not in assertion." :expected nil :actual e}))
+               (catch std.exception e
+                 (t/do-report {:type :error :message (str "Uncaught C++ exception of jank's runtime, not in assertion: " (cpp/.what e))
+                               :expected nil :actual nil})))
+          (t/do-report {:type :end-test-var :var v}))))))
+
+(def shared-tests
+  "The test namespaces jank runs as written, by default (adopting-eve-minimal §5's order first: the byte format and
+   the hashes, the thread contract, then every shared suite but eve.net's, which need the http feature, and
+   aegis's, whose RSA rows run past 30 min on the portable crypto). eve.rrb-vector-test runs when named."
+  '[eve.hamt-util-test eve.eve-bytes-fixture-test eve.thread-host-test
+    eve.coalesc-align-test eve.array-hosts-test eve.dataset-test eve.tensor-test
+    eve.deftype.rb-tree-test eve.numeric-tags-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test
+    eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test
+    eve.descriptor-table-test eve.tally-test eve.read-region-test eve.domain-open-test eve.deftype.int-map-test
+    eve.deftype.type-id-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-fold-test
+    eve.thread-fold-group-test])
+
+(defn -main [& [cmd & args]]
+  (case cmd
+    "test" (let [syms (if (seq args) (map symbol args) shared-tests)
+                 ;; ns/name: that one test (with its namespace's fixtures)
+                 tests (filter namespace syms)
+                 nses (remove namespace syms)
+                 _ (apply require (distinct (concat nses (map (comp symbol namespace) tests))))
+                 r (merge-with + (when (seq nses) (apply t/run-tests nses))
+                               (when (seq tests)
+                                 (binding [t/*report-counters* (atom t/*initial-report-counters*)]
+                                   (t/test-vars (map resolve tests))
+                                   @t/*report-counters*)))]
+             (println :summary (select-keys r [:test :pass :fail :error]))
+             (proc/exit! (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))
+    "perf" (do (require 'eve.perf-suite)
+               ((resolve 'eve.perf-suite/run!) {:budget-ms (some-> (first args) read-string)})
+               (proc/exit! 0))
+    ;; a program by its module name on the module path, the completion loaded first (jank has no load-file: load
+    ;; takes a module name), then a form if one is given: examples/in_memory.cljc is `-- run in-memory` with
+    ;; examples on the module path; `-- run disk-domain "(disk-domain/run! \"db\" 200)"` runs that example's fn
+    "run" (do (load (first args))
+              (when-let [form (second args)] (eval (read-string form)))
+              (proc/exit! 0))
+    (do (println "usage: run-main eve.runner.jank-main -- test [ns ...] | run <module> | perf [budget-ms]")
+        (proc/exit! 2))))

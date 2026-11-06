@@ -22,7 +22,7 @@
 (deftest read-str-throws-on-malformed
   ;; the message's start: glojure's ex-message appends its stack to the message
   (is (= "json: malformed text"
-         (let [m (try (j/read-str "{") nil (catch #?(:cljs :default :lpy python/Exception :default Exception) e (ex-message e)))]
+         (let [m (try (j/read-str "{") nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e (ex-message e)))]
            (subs m 0 (min (count m) 20))))))
 
 (deftest round-trips

@@ -226,8 +226,8 @@
                   (list 'and
                         (list 'instance? type-name 'other)
                         (list '== 'slab-off__
-                              (list '.-slab-off__
-                                    (with-meta 'other {:tag type-name})))))
+                              (list 'eve.host/field
+                                    (with-meta 'other {:tag type-name}) 'slab-off__))))
             (list 'hashCode ['this] (list '.hasheq 'this))
             (list 'toString ['_]
                   (list 'str (str "#eve/" (name type-name) " {:offset ")
@@ -288,7 +288,7 @@
 
        ;; Offset accessor
        (~'defn ~(symbol (str (name type-name) "-offset")) [~(with-meta 'inst {:tag type-name})]
-               (~'.-slab-off__ ~'inst))
+               (eve.host/field ~'inst ~'slab-off__))
 
        ;; Type-id constant
        (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)

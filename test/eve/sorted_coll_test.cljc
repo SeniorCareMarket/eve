@@ -126,7 +126,7 @@
     (is (nil? (e/seq (e/empty st))))
     (is (= [2 1 0] (els (e/conj (e/conj (e/conj (e/empty (s/sorted-set-by > 1)) 0) 1) 2))))))
 
-(defn- caught [f] (try (f) nil (catch #?(:cljs :default :default Exception) _ :thrown)))
+(defn- caught [f] (try (f) nil (catch #?(:cljs :default :jank jank.runtime.object_ref :default Exception) _ :thrown)))
 
 (deftest transients-round-trip-order-and-contents
   (let [t (reduce (fn [t k] (e/assoc! t k (str k))) (e/transient (s/sorted-map)) shuffled)

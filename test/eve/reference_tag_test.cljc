@@ -9,7 +9,7 @@
   ;; is called (clojerl resolves it there)
   (:refer-clojure :exclude [bytes volatile!])
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.host :refer [bytes volatile!]]
+            [eve.host :refer [field bytes volatile!]]
             [eve.codec :as codec]
             [eve.core :as e]
             [eve.deftype-proto.alloc :as alloc]
@@ -22,7 +22,7 @@
 
 (defn- u8 [b i] (bit-and (int #?(:cljs (aget b i) :default (nth b i))) 0xFF))
 
-(defn- blen [b] #?(:cljs (.-length b) :default (count b)))
+(defn- blen [b] #?(:cljs (field b length) :default (count b)))
 
 (defn- round-trip [v] (let [s (sio)] (codec/decode s (codec/encode-value s v))))
 
@@ -68,15 +68,15 @@
         s (sio)
         b (codec/encode-key f)]
     (testing "another process's realm: the handle names nothing here"
-      (is (thrown? #?(:cljs js/Error :default Exception)
+      (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
                    (codec/decode s (with-byte b 3 (bit-xor (u8 b 3) 0xFF))))))
     (testing "a handle this process never issued"
-      (is (thrown? #?(:cljs js/Error :default Exception)
+      (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
                    (codec/decode s (with-byte (with-byte b 9 0xFF) 10 0x7F)))))))
 
 (deftest the-wire-refuses-a-reference
   (testing "eve.net.codec has no image for one: :unencodable"
-    (is (thrown? #?(:cljs js/Error :default Exception) (wire/encode {:f (closure 1)})))))
+    (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (wire/encode {:f (closure 1)})))))
 
 #?(:cljs nil
    :default
@@ -89,11 +89,11 @@
            s (alloc/mmap-domain-sio! (str dir "/d") {:create? true})
            f (closure 3)]
        (testing "C3: a value holding a reference, written into a shared domain, throws — in every position"
-         (is (thrown? Exception (codec/encode-value s f)) "inline")
-         (is (thrown? Exception (codec/encode-value s {:f f})) "a map's value")
-         (is (thrown? Exception (codec/encode-value s {f 1})) "a map's key")
-         (is (thrown? Exception (codec/encode-value s #{[1 f]})) "deep in a set's element")
-         (is (thrown? Exception (codec/encode-value s [{:a [f]}])) "deep in a vector"))
+         (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (codec/encode-value s f)) "inline")
+         (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (codec/encode-value s {:f f})) "a map's value")
+         (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (codec/encode-value s {f 1})) "a map's key")
+         (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (codec/encode-value s #{[1 f]})) "deep in a set's element")
+         (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (codec/encode-value s [{:a [f]}])) "deep in a vector"))
        (testing "and the same domain takes the values eve has bytes for"
          (is (= "plain" (codec/decode s (codec/encode-value s "plain"))))
          (is (= 2 (e/count (codec/decode s (codec/encode-value s {:a 1 :b [1 2]})))))))))

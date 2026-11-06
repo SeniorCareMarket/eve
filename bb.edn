@@ -141,6 +141,10 @@
              :task (shell {:extra-env {"GLJ_CLASSPATH" (str/join ":" (roots :glj "test"))}}
                           "target/glj-eve/glj-eve" "-e" (str "(require 'eve.runner.glj-main) (apply eve.runner.glj-main/-main '"
                                                              (pr-str (cons "test" *command-line-args*)) ")"))}
+  test:jank {:doc "The shared (.cljc) tests on jank (hosts.edn :jank; jank on PATH, LC_ALL=en_US.UTF-8 set here: jank's lexer reads source through the locale; namespaces named after the task run alone)"
+             :task (apply shell {:extra-env {"LC_ALL" "en_US.UTF-8"}}
+                          "jank" "--module-path" (str/join ":" (roots :jank "adapters/completion/jank/test" "adapters/slab-io/test" "test"))
+                          "run-main" "eve.runner.jank-main" "--" "test" *command-line-args*)}
   net:local {:doc "eve's local network in one command: a broker, a store, three thread servers (one the app host) and the page (scripts/net-local.clj; flags --port --threads --hosts --dir --no-open --no-build)"
              :task (apply shell "bb" "-cp" (str/join ":" (roots :bb "net-local/src")) "scripts/net-local.clj" *command-line-args*)}
   net:probe {:doc "One network atom at a running bb net:local, for scripts/net-local-check.py's persist row: `bb net:probe write|read BROKER DOMAIN API-KEY ATOM-ID`. write creates the atom and resets it to a fixed value of many blocks; read derefs it with a fresh handle; each prints {:op :ok}, :ok when the value is that fixed value"

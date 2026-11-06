@@ -13,7 +13,7 @@
             #?(:cljs ["os" :as os])))
 
 (defn- fresh-base []
-  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :cljr (System.IO.Path/GetTempPath)
+  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :cljr (System.IO.Path/GetTempPath)
           :default (System/getProperty "java.io.tmpdir"))
        "/eve-domain-open-" (rand-int 1000000000) "/d"))
 

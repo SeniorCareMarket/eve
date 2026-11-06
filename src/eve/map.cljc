@@ -15,7 +15,7 @@
                             aget alength unsigned-bit-shift-right volatile! vswap! transient
                             persistent! conj! long bytes])
   (:require
-   [eve.host :refer [aget alength unsigned-bit-shift-right volatile! vswap! transient
+   [eve.host :refer [field aget alength unsigned-bit-shift-right volatile! vswap! transient
                      persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc]
@@ -1604,8 +1604,8 @@
 (extend-type EveHashMap
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio (.-sio__ this)
-          old-hdr (.-offset__ this)
+    (let [sio (field this sio__)
+          old-hdr (field this offset__)
           old-root (slab/read-i32 sio old-hdr SABMAPROOT_ROOT_OFF_OFFSET)]
       (if (eve-hash-map? new-value)
         (let [new-root (slab/read-i32 sio (d/-root-header-off new-value) SABMAPROOT_ROOT_OFF_OFFSET)]

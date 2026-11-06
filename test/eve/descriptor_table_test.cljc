@@ -55,7 +55,7 @@
       (is (zero? (mem/-load-i32 r flags0)) "the hand-out clears the flags and releases the lock"))))
 
 (defn- fresh-base []
-  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :default (System/getProperty "java.io.tmpdir"))
+  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :default (System/getProperty "java.io.tmpdir"))
        "/eve-descriptor-table-" (rand-int 1000000000) "/d"))
 
 (deftest an-mmap-domain-carries-desc-files

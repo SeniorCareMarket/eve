@@ -7,7 +7,7 @@
    reads and writes an eve/deftype type's bodies get. A host realizes a type
    from these in its adapter (eve.types, eve/adapters/types/)."
   (:refer-clojure :exclude [into-array unchecked-inc-int long objects])
-  (:require [eve.host :refer [into-array unchecked-inc-int long objects]]
+  (:require [eve.host :refer [field into-array unchecked-inc-int long objects]]
             [clojure.string :as str]
             [eve.deftype-proto.proto-map :as pm]))
 
@@ -450,7 +450,7 @@
 
 (defn cached?
   "An immutable field in eve memory, read when the instance is reached and
-   kept on it (so (.-f x) reads it on every host). A ^:Type reference is read
+   kept on it (so (field x f) reads it on every host). A ^:Type reference is read
    when a method reads it instead: a node linked to nodes of its own type
    would read the whole structure."
   [f]

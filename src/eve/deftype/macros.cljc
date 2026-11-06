@@ -22,7 +22,8 @@
      (default) — immutable, set at construction
      ^:mutable — mutable via set! (single-worker)
      ^:volatile-mutable — atomic via set!/cas! (cross-worker)"
-  (:require [eve.deftype.registry :as reg]
+  (:require [eve.host :refer [field]]
+            [eve.deftype.registry :as reg]
             [eve.deftype-proto :as proto]
             [eve.deftype-proto.vocab :as v]
             [eve.types :as t]))
@@ -68,7 +69,7 @@
                    process's own memory (a cache, a transient's edit token);
                    nil when an instance is read back from eve memory
    An immutable field (not a ^:MyEveType reference) is read when the instance
-   is reached and kept on it, so (.-field x) reads it on every host, as a
+   is reached and kept on it, so (field x field) reads it on every host, as a
    deftype's field.
 
    Mutability:

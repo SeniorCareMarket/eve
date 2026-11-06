@@ -1,0 +1,296 @@
+(ns eve.http-server
+  "eve's http-server feature (adapters/README.md) on jank: an HTTP/1.1 server in C++ (cpp/raw,
+   called as cpp/eve_httpd.<fn>) — what a member needs to serve its disk domain's atoms on
+   eve.net's routes (eve.net.gateway). (serve! opts handler) answers {:port :stop}; handler
+   takes {:method :url :headers :body :body-b64} — :url the request's path and query as sent,
+   :headers lower-case names, :body UTF-8 text and :body-b64 the same bytes as base64 — and
+   answers {:status :headers :body :body-as}: :body text, or with :body-as :b64 the base64 of
+   the bytes to send (eve.net.run's conventions; the base64 is this adapter's own C++, as in
+   adapters/http/jank). The C++ side owns the sockets: a listener thread and :threads worker
+   threads (default 8) registered with the collector, the handler rooted while the server
+   lives; a worker reads one request (head to 64 KB, body to 64 MB — the gateway's traffic is
+   small JSON; blobs go direct to a presigned store), hands its bytes to the wrapped handler,
+   writes the answer's bytes and closes (Connection: close). The parsing and the answer's
+   formatting are spelled here, as in adapters/http-server/jdk. Nagle's algorithm is off
+   (TCP_NODELAY on the listener and every accepted socket: a small response must not wait on
+   the client's delayed ACK — the JDK seat's measured lesson, 264 ms with it on, 73 ms off).
+   A handler that throws answers 500."
+  (:require [clojure.string :as str]
+            [eve.encoding :as enc]))
+
+(cpp/raw "
+#define GC_THREADS 1
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <vector>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <thread>
+#include <gc.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/nil.hpp>
+#include <jank/runtime/obj/array.hpp>
+namespace eve_httpd {
+  using namespace jank::runtime;
+  /* the last transport error, kept for last_error(). A plain static under a mutex, NOT
+     thread_local: accessing a thread_local from jank's JIT-compiled cpp/raw code segfaults
+     (seam 8; measured — a probe fn reading the thread_local faults, the same fn over a
+     plain static does not). Writers are caller threads and the string is diagnostics
+     only, so the mutex serializes them; last_error reads under the same lock. */
+  static std::mutex err_mu;
+  static std::string err;
+  static void set_err(std::string const &s) { std::lock_guard<std::mutex> g(err_mu); err = s; }
+  object_ref last_error() { std::lock_guard<std::mutex> g(err_mu); return make_box(err); }
+  static obj::array<jank::i8> *A(object_ref o) { return static_cast<obj::array<jank::i8> *>(o.ptr()); }
+  struct server {
+    object_ref handler;
+    int lfd{ -1 };
+    long port{ 0 };
+    std::atomic<bool> running{ true };
+    std::thread listener;
+    std::vector<std::thread> workers;
+    std::mutex m;
+    std::condition_variable cv;
+    std::deque<int> q;
+  };
+  static std::vector<server *> servers;
+  static bool write_all(int fd, uint8_t const *p, size_t n) {
+    size_t sent(0);
+    while(sent < n) {
+      ssize_t k(::send(fd, p + sent, n - sent, MSG_NOSIGNAL));
+      if(k <= 0) return false;
+      sent += (size_t)k;
+    }
+    return true;
+  }
+  /* one request: the head (to 64 KB), then its content-length of body (to 64 MB) */
+  static bool read_request(int fd, std::string &out) {
+    std::string buf;
+    char tmp[16384];
+    size_t head_end(std::string::npos);
+    while(buf.size() < 65536 && head_end == std::string::npos) {
+      ssize_t n(::recv(fd, tmp, sizeof tmp, 0));
+      if(n <= 0) return false;
+      buf.append(tmp, (size_t)n);
+      head_end = buf.find(\"\\r\\n\\r\\n\");
+    }
+    if(head_end == std::string::npos) return false;
+    head_end += 4;
+    long cl(0);
+    {
+      std::string head(buf.substr(0, head_end));
+      for(size_t i = 0; i < head.size(); ++i) head[i] = (char)std::tolower((unsigned char)head[i]);
+      size_t p(head.find(\"content-length:\"));
+      if(p != std::string::npos) cl = std::atol(head.c_str() + p + 15);
+      if(cl < 0 || cl > 67108864) return false;
+    }
+    while(buf.size() < head_end + (size_t)cl) {
+      ssize_t n(::recv(fd, tmp, sizeof tmp, 0));
+      if(n <= 0) return false;
+      buf.append(tmp, (size_t)n);
+    }
+    out.assign(buf.data(), head_end + (size_t)cl);
+    return true;
+  }
+  static void serve_conn(server *s, int fd) {
+    int one(1); setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    std::string raw;
+    if(read_request(fd, raw)) {
+      auto req(make_box<obj::array<jank::i8>>((jank::i64)raw.size()));
+      std::memcpy(req->data.data, raw.data(), raw.size());
+      object_ref resp(jank_nil);
+      /* object_ref's own call member (jank's C++ API has no free call(); process.jank's timer does the same) */
+      try { object_ref rq(req); resp = s->handler.call(rq); } catch(...) {}
+      if(!resp.is_nil()) { auto *a(A(resp)); write_all(fd, (uint8_t const *)a->data.data, a->size); }
+    }
+    ::close(fd);
+  }
+  static void gc_register() { struct GC_stack_base sb; GC_get_stack_base(&sb); GC_register_my_thread(&sb); }
+  static void worker_loop(server *s) {
+    gc_register();
+    for(;;) {
+      int fd(-1);
+      {
+        std::unique_lock<std::mutex> lk(s->m);
+        s->cv.wait(lk, [&] { return !s->q.empty() || !s->running.load(); });
+        if(s->q.empty()) break;
+        fd = s->q.front(); s->q.pop_front();
+      }
+      serve_conn(s, fd);
+    }
+    GC_unregister_my_thread();
+  }
+  static void accept_loop(server *s) {
+    gc_register();
+    while(s->running.load()) {
+      int fd(::accept(s->lfd, nullptr, nullptr));
+      if(fd < 0) { if(!s->running.load()) break; continue; }
+      { std::lock_guard<std::mutex> lk(s->m); s->q.push_back(fd); }
+      s->cv.notify_one();
+    }
+    GC_unregister_my_thread();
+  }
+  long serve(object_ref handler, std::string const &host, long port, long threads) {
+    set_err(std::string());
+    auto *s(new server());
+    s->handler = handler;
+    GC_add_roots(&s->handler, &s->handler + 1);
+    struct addrinfo hints{}; hints.ai_socktype = SOCK_STREAM; hints.ai_flags = AI_PASSIVE;
+    struct addrinfo *res(nullptr);
+    if(getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0 || res == nullptr) {
+      set_err(\"http-server: cannot resolve \" + host);
+      GC_remove_roots(&s->handler, &s->handler + 1); delete s;
+      return -1;
+    }
+    int fd(::socket(res->ai_family, res->ai_socktype, res->ai_protocol));
+    int one(1);
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    if(fd < 0 || ::bind(fd, res->ai_addr, res->ai_addrlen) != 0 || ::listen(fd, 128) != 0) {
+      set_err(\"http-server: cannot bind \" + host + \":\" + std::to_string(port));
+      if(fd >= 0) ::close(fd);
+      freeaddrinfo(res);
+      GC_remove_roots(&s->handler, &s->handler + 1); delete s;
+      return -1;
+    }
+    freeaddrinfo(res);
+    struct sockaddr_storage ss; socklen_t sl(sizeof ss);
+    getsockname(fd, (struct sockaddr *)&ss, &sl);
+    s->port = ss.ss_family == AF_INET ? ntohs(((struct sockaddr_in *)&ss)->sin_port) : ntohs(((struct sockaddr_in6 *)&ss)->sin6_port);
+    s->lfd = fd;
+    servers.push_back(s);
+    GC_allow_register_threads();
+    for(long i = 0; i < threads; ++i) s->workers.emplace_back(worker_loop, s);
+    s->listener = std::thread(accept_loop, s);
+    return (long)(servers.size() - 1);
+  }
+  long server_port(long id) { return servers[(size_t)id]->port; }
+  void stop_server(long id) {
+    auto *s(servers[(size_t)id]);
+    if(s == nullptr || !s->running.exchange(false)) return;
+    ::shutdown(s->lfd, SHUT_RDWR);
+    ::close(s->lfd);
+    if(s->listener.joinable()) s->listener.join();
+    s->cv.notify_all();
+    for(auto &w : s->workers) if(w.joinable()) w.join();
+    { std::lock_guard<std::mutex> lk(s->m); while(!s->q.empty()) { ::close(s->q.front()); s->q.pop_front(); } }
+    GC_remove_roots(&s->handler, &s->handler + 1);
+  }
+  static char const B64[] = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/\";
+  object_ref b64_encode(object_ref bs) {
+    auto *a(A(bs));
+    std::string out;
+    out.reserve((a->size + 2) / 3 * 4);
+    for(size_t i = 0; i < a->size; i += 3) {
+      uint32_t v((uint32_t)(uint8_t)a->data.data[i] << 16);
+      int rem((int)(a->size - i));
+      if(rem > 1) v |= (uint32_t)(uint8_t)a->data.data[i + 1] << 8;
+      if(rem > 2) v |= (uint32_t)(uint8_t)a->data.data[i + 2];
+      out += B64[(v >> 18) & 63];
+      out += B64[(v >> 12) & 63];
+      out += rem > 1 ? B64[(v >> 6) & 63] : '=';
+      out += rem > 2 ? B64[v & 63] : '=';
+    }
+    return make_box(out);
+  }
+  object_ref b64_decode(std::string const &s) {
+    std::vector<uint8_t> out;
+    uint32_t acc(0); int nacc(0);
+    for(char c : s) {
+      if(c == '=') break;
+      char const *p(std::strchr(B64, c));
+      if(p == nullptr) continue;
+      acc = (acc << 6) | (uint32_t)(p - B64); nacc += 6;
+      if(nacc >= 8) { nacc -= 8; out.push_back((uint8_t)(acc >> nacc)); }
+    }
+    auto a(make_box<obj::array<jank::i8>>((jank::i64)out.size()));
+    std::memcpy(a->data.data, out.data(), out.size());
+    return a;
+  }
+}
+")
+
+;; --- the request's parsing and the answer's formatting (adapters/http-server/jdk's shapes) ---
+
+(defn- byte-at [a i] (bit-and (clojure.core/aget a i) 0xFF))
+
+(defn- head-end
+  "the index just past the CRLF CRLF that ends the head, or nil"
+  [a]
+  (let [n (clojure.core/alength a)]
+    (loop [i 0]
+      (cond (> (+ i 4) n) nil
+            (and (= 13 (byte-at a i)) (= 10 (byte-at a (+ i 1))) (= 13 (byte-at a (+ i 2))) (= 10 (byte-at a (+ i 3))))
+            (+ i 4)
+            :else (recur (inc i))))))
+
+(defn- join-bytes
+  "the byte arrays concatenated"
+  [arrays]
+  (let [n (reduce + (map clojure.core/alength arrays))
+        out (clojure.core/byte-array n)]
+    (loop [off 0 as arrays]
+      (if (seq as)
+        (do (enc/arraycopy (first as) 0 out off (clojure.core/alength (first as)))
+            (recur (+ off (clojure.core/alength (first as))) (rest as)))
+        out))))
+
+(defn- parse-request [raw]
+  (let [he (or (head-end raw) (throw (ex-info "http-server: no end to the request's head" {})))
+        lines (str/split (enc/utf8-string raw 0 (- he 4)) #"\r\n")
+        [method url] (str/split (first lines) #" " 3)
+        headers (into {} (keep (fn [l] (let [i (str/index-of l ":")]
+                                         (when i [(str/lower-case (str/trim (subs l 0 i))) (str/trim (subs l (inc i)))])))
+                               (rest lines)))
+        body (enc/copy-of-range raw he (clojure.core/alength raw))]
+    {:method method
+     :url url
+     :headers headers
+     :body (enc/utf8-string body 0 (clojure.core/alength body))
+     :body-b64 (cpp/eve_httpd.b64_encode body)}))
+
+(def ^:private reasons
+  {200 "OK" 201 "Created" 204 "No Content" 301 "Moved Permanently" 302 "Found"
+   400 "Bad Request" 401 "Unauthorized" 403 "Forbidden" 404 "Not Found"
+   405 "Method Not Allowed" 409 "Conflict" 500 "Internal Server Error"})
+
+(defn- format-response [{:keys [status headers body body-as]}]
+  (let [status (or status 200)
+        bs (if (= :b64 body-as)
+             (cpp/eve_httpd.b64_decode (str (or body "")))
+             (enc/utf8-bytes (str (or body ""))))
+        head (str "HTTP/1.1 " status " " (get reasons status "") "\r\n"
+                  (apply str (map (fn [[k v]] (str (name k) ": " v "\r\n")) headers))
+                  "Content-Length: " (clojure.core/alength bs) "\r\n"
+                  "Connection: close\r\n\r\n")]
+    (join-bytes [(enc/utf8-bytes head) bs])))
+
+(defn- wrap
+  "the handler the C++ side calls: a request's bytes to the answer's bytes; a throw answers 500"
+  [handler]
+  (fn [raw]
+    (try (format-response (handler (parse-request raw)))
+         (catch jank.runtime.object_ref e (format-response {:status 500 :headers {} :body (str e)}))
+         (catch std.exception e (format-response {:status 500 :headers {} :body "native error"})))))
+
+(defn serve!
+  "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1) :threads (default 8)}:
+   {:port :stop}. :stop ends the server and its threads."
+  [opts handler]
+  (let [id (cpp/eve_httpd.serve (wrap handler)
+                                (str (or (:host opts) "127.0.0.1"))
+                                (long (or (:port opts) 0))
+                                (long (or (:threads opts) 8)))]
+    (when (neg? id)
+      (throw (ex-info (cpp/eve_httpd.last_error) {:opts opts})))
+    {:port (cpp/eve_httpd.server_port id)
+     :stop (fn [] (cpp/eve_httpd.stop_server id))}))

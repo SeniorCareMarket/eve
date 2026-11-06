@@ -81,6 +81,6 @@
 (deftest the-pins-go-when-the-body-throws
   (let [a (fresh {:k 1})
         thrown (try (e/$ (ec/get @a :k) (throw (ex-info "in the region" {:at :body})))
-                    (catch #?(:cljs :default :lpy python/Exception :default Exception) ex (:at (ex-data ex))))]
+                    (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) ex (:at (ex-data ex))))]
     (is (= :body thrown))
     (is (not (pinned? a)))))

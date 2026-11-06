@@ -197,10 +197,11 @@
   (let [slab-off-sym 'slab-off__
         field-read-bindings (jvm-field-bindings fields slab-off-sym)
         rewritten (map #(jvm-rewrite-set!-forms % field-map slab-off-sym) body)
-        resolve-bindings ['slab-off__ (list '.-slab-off__
-                                            (with-meta this-sym {:tag type-name}))
-                          'sio__      (list '.-sio__
-                                            (with-meta this-sym {:tag type-name}))]
+        ;; the instance's own fields, read by eve.host/field (a host's member read; the completion's on jank)
+        resolve-bindings ['slab-off__ (list 'eve.host/field
+                                            (with-meta this-sym {:tag type-name}) 'slab-off__)
+                          'sio__      (list 'eve.host/field
+                                            (with-meta this-sym {:tag type-name}) 'sio__)]
         all-bindings (vec (concat resolve-bindings field-read-bindings))]
     (list (apply list 'let all-bindings (vec rewritten)))))
 

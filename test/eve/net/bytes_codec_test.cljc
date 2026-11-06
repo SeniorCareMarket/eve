@@ -26,7 +26,7 @@
   ["" "00" "ff" "FF" "0123456789abcdef" "deadBEEF" (b/hex-portable field-8k)])
 
 (defn- throws? [f]
-  (try (f) false (catch #?(:cljs :default :lpy python/Exception :default Exception) _ true)))
+  (try (f) false (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) _ true)))
 
 (deftest known-answers
   ;; RFC 4648's vectors, as byte vectors

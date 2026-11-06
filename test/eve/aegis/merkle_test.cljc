@@ -34,10 +34,10 @@
     (is (not= (m/field-of ["a" "b"]) (m/field-of ["b" "a"])))
     (is (= zero32 (m/field-of []))))
   (testing "no encoding"
-    (is (thrown? #?(:cljs js/Error :default Exception) (m/field-of -1)))
-    (is (thrown? #?(:cljs js/Error :default Exception) (m/field-of 1.5)))
-    (is (thrown? #?(:cljs js/Error :default Exception) (m/field-of {:a 1})))
-    (is (thrown? #?(:cljs js/Error :default Exception) (m/field-of [[1]])))))
+    (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (m/field-of -1)))
+    (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (m/field-of 1.5)))
+    (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (m/field-of {:a 1})))
+    (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (m/field-of [[1]])))))
 
 (deftest record-leaf-test
   (let [ks [:id :author :ts :attachment-cid]
@@ -95,7 +95,7 @@
       (is (not= root (m/sidecar-root (dissoc seven "fig"))))
       (is (= root (m/sidecar-root (assoc seven "apple" "red")))))
     (testing "two keys with the same bytes are refused"
-      (is (thrown? #?(:cljs js/Error :default Exception)
+      (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
                    (m/sidecar-root {"a" 1 :a 2}))))))
 
 (deftest sidecar-empty-and-tiny

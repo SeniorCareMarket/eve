@@ -1,0 +1,2 @@
+(ns eve.encoding)
+(defn make-bytes [n] (byte-array n))
