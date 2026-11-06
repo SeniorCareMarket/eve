@@ -1,0 +1,82 @@
+# Eve 0.9.3 — JVM fast-path restoration lane — STATUS
+
+Lane opened 2026-11-05 ~10:14 PM ET on the operator's direct order ("get that up now").
+Branch: `release/eve-0.9.3` @ 12324bb. Worktree: `~/workspace/wt/eve-093`.
+Work product: `~/workspace/wt/eve-093-fastpath/` (logs, probes).
+
+## The defect (banked evidence, bench lane `muse/eve-093-release-bench` on atom.broker)
+
+On the assembled release tree the JVM seat lost the heap-grade fast paths; the
+slab layer itself is intact. Release-tree JVM medians vs the heap-grade line
+(claude/eve-jvm-heap-grade @ 8cbf392, control-verified same box/hour):
+
+- S2 direct `get`, 100-entry Eve map: **188 µs** (r2 cross-check band 350–560 µs) vs **0.39 µs**
+- S1b guarded sparse `(get @a k)`: **185 µs** vs **1.89 µs**
+- S1a plain sparse deref get: 126 µs vs 62.9 µs; S3a swap! 179 vs 39.6 µs; S3b reset! 222 vs 26.4 µs
+- S4b raw root handle (guarded deref): 1.58 µs vs 1.63 µs — **unchanged**
+
+Layer attribution (bench lane r2 controls, single-process, same box/hour):
+heap-grade checkout S2 0.37 µs → pre-seat release tip 8213d78 S2 **5.02 µs**
+→ post-seat 12324bb S2 **~350–560 µs**. Two layers: ~13× in the collation
+before the seat merge, ~70× more from the seat merge's shared-tree deltas.
+`mask-hash` exonerated by diff (byte-identical pre/post seat); `eve/map.cljc`'s
+get path untouched except one `field` routing in a retire fn.
+
+## Suspect list (to verify or refute firsthand, REPL-first)
+
+Coordinator's assessment — assembly unwiring, not a step-3 regression — is
+UNVERIFIED. Ordered suspects:
+
+1. **Seat layer (~70×):** `src/eve/deftype_proto.cljc` — the seat delta rewired
+   every eve-deftype method body's field bindings from `(.-slab-off__ this)` /
+   `(.-sio__ this)` to `(eve.host/field this '…)`. On the JVM `eve.host/field`
+   is a macro expanding to `(.-f x)`, but only where the macro resolves as a
+   macro in the emitting namespace; check what the emitted bodies actually
+   compile to on the JVM (macro vs reflective fallback).
+2. **Seat layer:** `src/eve/deftype/registry.cljc` hint-keys change
+   (`(remove namespace …)`) — could strip primitive type hints from eve-deftype
+   field descriptors, un-primitivizing the int32 node fields step 3 relies on.
+3. **Seat layer:** `src/eve/deftype_proto/alloc.cljc` (116-line delta) — the
+   in-place KV scan / node-read path step 3 built.
+4. **Pre-seat layer (~13×):** fault-1 fix b62b738 added `d/IPlain` to
+   EveHashMap/EveVector/EveHashSet/EveList deftypes (preseat delta
+   map/list/set/vec + atom.cljc bb-guard splice + net/codec F-1). Check whether
+   a deftype change displaced step 3's direct-get dispatch.
+5. **Wiring:** deps.edn / hosts.edn / completion classpath differences between
+   the heap-grade branch checkout and the release tree (which `eve.host` /
+   completion the JVM seat actually loads).
+
+## Method
+
+Same bench file both lanes banked (`heap_bench_as-run.cljc`), same runner
+shape (deps.edn :paths + bench dir + Clojure 1.12.0), run per-tree in short
+probe mode first (seconds–minutes, never an hour-scale leg). Diagnosis must
+name file, form, and the collation commit that introduced each layer before
+any fix. Fix must keep both arms correct — a fix that re-breaks the jank seat
+is not a fix. Re-bench on j.slaa.us in a quiet window (one heavy leg at a
+time); numbers go to the coordinator FIRST; README untouched. Final assembled
+JVM gate on the fixed tree; then stage the tip for push via the atom.broker
+channel (this box's Eve credential is read-only). No move to main, no tag —
+the operator's call.
+
+## Stop conditions
+
+- A leg failing twice the same way stops; diagnosis banked here; no third
+  blind attempt.
+- If the evidence proves a genuine step-3 regression (not assembly), STOP and
+  report — step 3 is not redesigned in this lane.
+- If a fix candidate would change jank-seat behavior, it is not applied until
+  its jank arm is probe-verified.
+
+## Log
+
+- ~10:20 PM ET — pickup. Branch tip verified 12324bb in worktree
+  `~/workspace/wt/eve-093` (clean). Bench report + r2 cross-check read from
+  atom.broker `muse/eve-093-release-bench` (commits 36a1256, 0b51d64).
+  Read-path diffs taken: preseat delta (8cbf392→8213d78) = atom.cljc bb-guard
+  splice, IPlain on map/list/set/vec, net/codec F-1. Seat delta
+  (8213d78→729e909) = deftype_proto.cljc field-binding rewire,
+  registry.cljc hint-keys, alloc.cljc 116 lines, hamt_util `cond`-on-jank
+  (JVM `:default` keeps the `case`), map/list/set/vec `field` routings.
+  `eve.host/field` confirmed a macro on the JVM clojure adapter expanding to
+  `(.-f x)`. Next: per-tree probe runs (heap-grade / preseat / release).
