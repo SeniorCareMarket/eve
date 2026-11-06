@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **nbb: a ClojureScript library naming a goog namespace could not load.** nbb carries no Google Closure library, so a library written for ClojureScript whose source requires one — DataScript's `datascript.db` requires `goog.array` — failed on eve's nbb seat with "Could not find namespace: goog.array". The seat now carries a goog adapter (`adapters/goog/nbb`): the Closure namespaces such libraries name, each var with Closure's own definition; the surface is census-driven, starting with `goog.array`'s `defaultCompare` and the base `goog` namespace's `exportSymbol` and `getUid`, which the DataScript port names (the base namespace without even requiring it — ClojureScript treats it as ambient).
+- **nbb: a deftype whose bare `Object` block carries `hashCode` could not load.** Eve's CLJS deftype translation gave a qualified `java.lang.Object` block its cljs disposition (toString stays, equals becomes IEquiv's, hashCode drops — the type's IHashEq is IHash there) but passed a bare `Object` block — the unqualified name a vanilla ClojureScript library's deftype face uses, as DataScript's Datom does — through verbatim, emitting its `hashCode` into the ClojureScript deftype, which sci cannot register ("Unable to resolve symbol: sci.impl.deftype/hashCode"). A bare `Object` block now gets the qualified name's disposition, in the proto map and in `cljs-object-impls`.
+- **nbb: a ClojureScript library using primitive type tags on def names could not load.** ClojureScript's `^number` / `^string` tags on a `def`/`defn` name are compiler hints — no vars by those names exist — but sci resolves a name-position tag as a symbol, so such a library (DataScript carries 37, e.g. `(defn ^number hash-datom [d])`) failed analysis with "Unable to resolve symbol: number". Eve's nbb types adapter now interns the primitive tag names that sci's core lacks a var for (`boolean`, `array`, `symbol` already resolve — they name cljs.core functions), each guarded so a name a future nbb supplies itself is never shadowed.
+
 ## [0.9.3] - 2026-11-06
 
 ### Added

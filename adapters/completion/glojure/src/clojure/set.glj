@@ -1,0 +1,107 @@
+(ns clojure.set
+  "clojure.set on glojure (part of its core completion, adapters/completion/glojure: glojure v0.7.22 ships no
+   clojure.set): the relational/set operations of stock Clojure's, over glojure's collections."
+  (:refer-clojure :exclude [select]))
+
+(defn union
+  "Returns a set that is the union of the input sets."
+  ([] #{})
+  ([s1] s1)
+  ([s1 s2]
+   (if (< (count s1) (count s2))
+     (reduce conj s2 s1)
+     (reduce conj s1 s2)))
+  ([s1 s2 & sets]
+   (reduce union (union s1 s2) sets)))
+
+(defn intersection
+  "Returns a set that is the intersection of the input sets."
+  ([s1] s1)
+  ([s1 s2]
+   (if (< (count s2) (count s1))
+     (recur s2 s1)
+     (reduce (fn [result item]
+               (if (contains? s2 item) result (disj result item)))
+             s1 s1)))
+  ([s1 s2 & sets]
+   (reduce intersection s1 (conj sets s2))))
+
+(defn difference
+  "Returns a set that is the first set without elements of the remaining sets."
+  ([s1] s1)
+  ([s1 s2]
+   (if (< (count s1) (count s2))
+     (reduce (fn [result item]
+               (if (contains? s2 item) (disj result item) result))
+             s1 s1)
+     (reduce disj s1 s2)))
+  ([s1 s2 & sets]
+   (reduce difference s1 (conj sets s2))))
+
+(defn select
+  "Returns a set of the elements of x for which pred is true."
+  [pred x]
+  (reduce (fn [result item]
+            (if (pred item) result (disj result item)))
+          x x))
+
+(defn subset?
+  "Is set1 a subset of set2?"
+  [set1 set2]
+  (and (<= (count set1) (count set2))
+       (every? #(contains? set2 %) set1)))
+
+(defn superset?
+  "Is set1 a superset of set2?"
+  [set1 set2]
+  (and (>= (count set1) (count set2))
+       (every? #(contains? set1 %) set2)))
+
+(defn map-invert
+  "Returns the map with the keys and vals swapped."
+  [m]
+  (reduce (fn [m [k v]] (assoc m v k)) {} m))
+
+(defn rename-keys
+  "Returns the map with the keys in kmap renamed to the values in kmap."
+  [map kmap]
+  (reduce (fn [m [old new]]
+            (if (contains? map old)
+              (-> m (assoc new (get map old)) (dissoc old))
+              m))
+          map kmap))
+
+(defn index
+  "Returns a map of the distinct values of ks in the xs to a set of the xs sharing them."
+  [xs ks]
+  (reduce (fn [m x]
+            (update m (select-keys x ks) (fnil conj #{}) x))
+          {} xs))
+
+(defn project
+  "Returns a set of maps keeping only the keys in ks."
+  [xset ks]
+  (set (map #(select-keys % ks) xset)))
+
+(defn rename
+  "Returns a set of maps with the keys in kmap renamed, as rename-keys does per map."
+  [xset kmap]
+  (set (map #(rename-keys % kmap) xset)))
+
+(defn join
+  "When passed two sets of maps, returns a set of maps that is the natural join of them;
+   with a keymap, the keys in xset whose names differ from those in yset are renamed first."
+  ([xset yset]
+   (if (and (seq xset) (seq yset))
+     (let [ks (intersection (set (keys (first xset))) (set (keys (first yset))))
+           idx (index yset ks)]
+       (reduce (fn [result item]
+                 (if-let [others (get idx (select-keys item ks))]
+                   (reduce (fn [r other] (conj r (merge item other))) result others)
+                   result))
+               #{} xset))
+     #{}))
+  ([xset yset km]
+   ;; km maps the names of keys in xset to the names they carry in yset:
+   ;; rename xset's keys by it, then the natural join.
+   (join (rename xset km) yset)))

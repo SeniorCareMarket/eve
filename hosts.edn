@@ -34,7 +34,7 @@
         "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
         "adapters/types/bb/src" "adapters/journal-file/java/src"]
  :nbb  ["adapters/slab-io/protocol/src" "adapters/http/node/src" "adapters/crypto/node/src" "adapters/crypto/js-bigint/src"
-        "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/nbb/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
+        "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/nbb/src" "adapters/goog/nbb/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
         "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/thread/node/src"
         "adapters/types/js/src" "adapters/types/nbb/src" "adapters/journal-file/node/src"]
  ;; Scittle (SCI in a browser, interpreted from source like nbb; a page's loader reads these roots
