@@ -105,6 +105,22 @@ expansion — one macro, every call site, compile-time only, jank expansion
 unchanged in shape. Pre-seat layer (~13×) still to bisect after this fix is
 measured on the full release tree.
 
+## Fix measured + pre-seat layer local verdict (~11:00 PM ET)
+
+Fix committed 6f44aef on the release branch. Full release tree, local bench:
+S2 1.46 ms → **5.50 µs** — the seat layer is gone; the tree now reads in the
+pre-seat band locally.
+
+Pre-seat layer: the ENTIRE content delta heap-grade tip → pre-seat tip is
+16 files (src IPlain/atom/codec + codec adapters + tests + slab binaries).
+Applied to the heap-grade worktree in two steps (src, then + codec
+adapters), S2 stayed at the heap-grade local band (1.96 / 3.19 µs vs 2.05 µs
+control, loads 1.3–4.7): **the pre-seat delta does not reproduce the 13× on
+this box.** Either the bench lane's single-process pre-seat control on J
+(5.02 µs) is a staging/measurement artifact, or the effect only manifests at
+full speed. The J re-bench settles it: heap-grade control, pre-seat tip, and
+fixed release tree, staged and run identically, 3 processes per arm.
+
 ## Log
 
 - ~10:20 PM ET — pickup. Branch tip verified 12324bb in worktree
