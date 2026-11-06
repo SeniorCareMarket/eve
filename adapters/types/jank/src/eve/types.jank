@@ -110,9 +110,16 @@
                       :else :seq))]
     (cond-> (mapv (fn [impl] (update impl :methods #(mapv rewrite %))) translated)
       (and to-string shape)
-      (conj {:protocol 'eve.core/IPrintWithWriter
-             :methods [{:name '-pr-writer :args [(first (:args to-string)) '__w '__opts]
-                        :body [(list 'eve.core/-write '__w (list 'eve.types/coll-str (first (:args to-string)) shape))]}]})
+      ;; the printer's self name is FRESH, never the toString method's first arg: that symbol is
+      ;; used here as a VALUE (the coll-str argument), and when it is _ the completion's
+      ;; method-arities renames the -pr-writer parameter to a gensym, stranding this reference
+      ;; (analyze/unresolved-symbol - eve.dataset and every collection-shaped user eve-deftype
+      ;; without its own printer failed to load on this seat). Printed output is unchanged:
+      ;; coll-str of the instance, same shape.
+      (conj (let [self (gensym "self")]
+              {:protocol 'eve.core/IPrintWithWriter
+               :methods [{:name '-pr-writer :args [self '__w '__opts]
+                          :body [(list 'eve.core/-write '__w (list 'eve.types/coll-str self shape))]}]}))
       (and to-string (not shape))
       (conj {:protocol 'eve.core/IPrintWithWriter
              :methods [{:name '-pr-writer :args [(first (:args to-string)) '__w '__opts]
