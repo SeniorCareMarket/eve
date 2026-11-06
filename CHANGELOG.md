@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-06
+
 ### Added
 
 - **jank host.** Eve runs on jank (Clojure on LLVM): a full seat at `hosts.edn`'s `:jank` row — the completion (deftype / defprotocol / defrecord / reify / extend-type, the core's missing ops, `clojure.edn`), eve's types as one C++ object each on `eve.core`'s protocols, and native adapters for slab-io, typed views, regions, encoding, int32, process and crypto, with HTTP and HTTP-server over C sockets. `bb test:jank` runs the shared suite on the seat; `doc/hosts/jank.md` carries the seat's map, its gates and the upstream defect list it answers.
