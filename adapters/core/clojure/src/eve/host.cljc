@@ -65,7 +65,13 @@
 (defmacro field
   "(field x f): the value of field f of x, a type's instance — (.-f x) on every host whose analyzer reads a field
    so (the JVM's, ClojureScript's, babashka's, ...); on jank the completion's read by name (jank's (.-f x) is C++
-   member access on a static type: a dynamic value has none). The one name eve's shared code reads a field through."
+   member access on a static type: a dynamic value has none). The one name eve's shared code reads a field through.
+   The expansion carries the call form's metadata: a type tag written on the call — (aget ^ints (field ctx xs) i) —
+   is how the host's compiler picks the primitive overload of the call the field read sits inside, and an
+   expansion built fresh drops it (measured 2026-11-05: the slab node readers' aget fell to its generic path,
+   ~70x on direct map get in the assembled 0.9.3 tree)."
   [x f]
-  #?(:jank `(eve.host-completion/get-field ~x '~f)
-     :default (list (symbol (str ".-" (name f))) x)))
+  (with-meta
+    #?(:jank `(eve.host-completion/get-field ~x '~f)
+       :default (list (symbol (str ".-" (name f))) x))
+    (meta &form)))
