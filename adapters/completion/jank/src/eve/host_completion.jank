@@ -754,8 +754,24 @@ namespace eve_host {
                                     ([x a b & more] (if-let [f (op-fn sym x)] (apply f x a b more) (apply core x a b more)))))))))
 
 (doseq [sym '[assoc dissoc conj disj count contains? empty peek pop key val rseq
-              transient persistent! conj! assoc! dissoc! disj! pop!]]
+              transient persistent! conj! assoc! dissoc! disj! pop!
+              ;; sequential? too: it is a host class test, blind to an eve instance (an opaque_box is never
+              ;; jank's Sequential), and shared code gates on it — EveVector's equiv opens with
+              ;; (sequential? other), so an eve vector did not equal ITSELF while a host vector on the
+              ;; right passed the same gate ((= v v) false, (= v [1 2 3]) true; measured, Lane M 2026-11-06).
+              ;; The types adapter's table answers it for an eve type from its ISequential marker.
+              sequential?
+              ;; map? and set? are the same blindness one fallback deeper: EveHashMap's and EveHashSet's
+              ;; equiv delegate to map-equiv?/set-equiv? when the digest verdict abstains (by-reference
+              ;; content), and those open with (map? other)/(set? other) — false for every eve instance,
+              ;; so two distinct eve maps/sets holding a by-reference value compared FALSE (measured on
+              ;; the release tree on two boxes, eve.digest-cache-test's by-reference row, Lane M 2026-11-06).
+              map?]]
   (route! sym))
+;; set? is deliberately NOT routed: re-rooting it breaks jank's own core codegen (clojure/core.jank:4523,
+;; a bool flows into an oref assignment in a core form compiled against set?'s native answer; measured
+;; twice, Lane M 2026-11-06). EveHashSet's equiv fallback therefore still gates on a blind (set? other)
+;; for by-reference content — the named sibling in this lane's STATUS, with its repro.
 
 ;; = with an eve value on either side compares from the eve side, as the JVM's does: jank's own equal of a jank map
 ;; and an eve map asked the jank map, which cannot see an eve type — (= {:note [1 2 3]} eve-map) was false where the

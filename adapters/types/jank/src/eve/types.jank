@@ -226,6 +226,12 @@
  {:lookup [eve.core/ILookup eve.core/-lookup]
   'contains? [eve.core/ILookup eve.core/contains?]
   'seq [eve.core/ISeqable eve.core/seq]
+  ;; an eve type's Sequential marker answers clojure.core/sequential? for it (the completion re-roots it):
+  ;; jank's own is a class test an opaque_box never passes, and EveVector's equiv gates on it
+  'sequential? [eve.core/ISequential (fn [_] true)]
+  ;; the same host class tests, answered from the type's own protocols (the completion re-roots them):
+  ;; EveHashMap's and EveHashSet's equiv fallbacks gate on them when the digest verdict abstains
+  'map? [eve.core/IMap (fn [_] true)]
   'nth [eve.core/IIndexed eve.core/nth]
   'invoke [eve.core/IFn eve.core/invoke]
   'assoc [eve.core/IAssociative (fn ([m k v] (eve.core/assoc m k v))
