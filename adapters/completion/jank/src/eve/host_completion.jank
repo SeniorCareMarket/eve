@@ -71,6 +71,13 @@ namespace eve_arith {
     if(o.get_type() == object_type::big_integer) { return expect_object<obj::big_integer>(o)->data; }
     return jank::native_big_integer(to_int(o));
   }
+  /* an integer zero divisor, a big one compared as a big integer (jank's zero? of a 2^128 converts to i64 and throws
+     \"out of range for i64 conversion\": measured, eve.numeric-tags-test's ratios-round-trip) */
+  bool zero_divisor(object_ref const r) {
+    auto const t(r.get_type());
+    if(t == object_type::big_integer) { return expect_object<obj::big_integer>(r)->data == 0; }
+    return integral(t) && to_int(r) == 0;
+  }
   object_ref divide(object_ref const l, object_ref const r) {
     auto const lt(l.get_type()), rt(r.get_type());
     if(!integral(lt) || !integral(rt)) { return jank::runtime::div(l, r); }
@@ -83,7 +90,7 @@ namespace eve_arith {
 ")
 
 (defn- divide [l r]
-  (if (and (integer? r) (zero? r))
+  (if (cpp/eve_arith.zero_divisor r)
     (throw (ex-info "Divide by zero" {:numerator l}))
     (cpp/eve_arith.divide l r)))
 
@@ -188,6 +195,12 @@ namespace eve_host {
     }
     object_ref seq() const override { return dispatch.call(op(2), self(), jank_nil, jank_nil); }
     object_ref fresh_seq() const override { return seq(); }
+    /* a type that is its own seq (eve.core's seq returns it as itself): jank 0.1 walks an object through these
+       virtuals whatever its behavior bits (measured: eve/probes/jank-seqlike) — the base's first/next of an object
+       whose seq is itself never ended. A type's own ISeq through the hook; any other through its seq. */
+    object_ref first() const override { return dispatch.call(op(9), self(), jank_nil, jank_nil); }
+    object_ref next() const override { return dispatch.call(op(10), self(), jank_nil, jank_nil); }
+    object_ref next_in_place() override { return next(); }
     object_ref nth(object_ref index) const override { return dispatch.call(op(3), self(), index, jank_nil); }
     object_ref nth(object_ref index, object_ref fallback) const override { return dispatch.call(op(4), self(), index, fallback); }
     object_ref call(object_ref const a) const override { return dispatch.call(op(5), self(), a, jank_nil); }
@@ -341,6 +354,17 @@ namespace eve_host {
 (re-root! 'short i16)
 (re-root! 'cast (fn [_ x] x))
 
+;; aset-byte, aset-short, aset-int, aset-long, aset-float, aset-double, aset-boolean: jank's core generates each as
+;; (throw "TODO: port …") — a throw of a string literal, which is a C++ throw of a char const* that no jank catch takes,
+;; so the process ends ("terminate called after throwing an instance of 'char const*'", exit 134: eve.reference-tag-test
+;; at a-foreign-or-unknown-reference-is-refused, its with-byte helper — the F-4 abort; eve/probes/jank-bytes). Each
+;; sets through jank's aset, the value coerced to the array's width, and answers it, as Clojure's do.
+(doseq [[sym coerce] [['aset-byte i8] ['aset-short i16] ['aset-int i32] ['aset-long (fn [x] (long x))]
+                      ['aset-float (fn [x] (double x))] ['aset-double (fn [x] (double x))]
+                      ['aset-boolean (fn [x] (boolean x))]]]
+  (re-root! sym (fn ([a i v] (let [v (coerce v)] (clojure.core/aset a i v) v))
+                    ([a i j & more] (apply (ns-resolve 'clojure.core sym) (clojure.core/aget a i) j more)))))
+
 ;; eve's byte arrays are signed (a byte reads back -128..127, as the JVM's: HOST-CONTRACT §3, the slab-io conformance's
 ;; rows): jank's byte-array makes u8 arrays, so it is re-rooted to i8 arrays (its inline dropped first)
 (defn- i8-array
@@ -480,10 +504,16 @@ namespace eve_host {
 ;; is boxed here — (clojure.core/identity 1) — so the local is an object and holds what recur gives it (measured:
 ;; 4294967296; eve/probes/jank-xxh3/probe4.cljc). eve.hamt-util's pow2 table is such a loop (rows 31 and 32 read
 ;; -2147483648 and 0 without it), and dotimes's counter.
+;; A boolean or char literal init likewise makes a native local, which a recur of a value that is nil at run time
+;; cannot take: "An object of type `boolean` was expected here, but a `nil` was provided instead" (Clojure's boolean
+;; and char loop locals are objects: legal there) — eve.thread.domain's loops (eve.thread-domain-test's 3 errors,
+;; eve.thread-fold-group-test's fold-on-a-group); measured: eve/probes/jank-loop/probe-bool.jank.
 (defn- box-int-inits
-  "A loop's binding vector with each integer-literal init wrapped in identity."
+  "A loop's binding vector with each integer, boolean or char literal init wrapped in identity."
   [bindings]
-  (with-meta (vec (mapcat (fn [[b init]] [b (if (integer? init) (list 'clojure.core/identity init) init)])
+  (with-meta (vec (mapcat (fn [[b init]] [b (if (or (integer? init) (boolean? init) (char? init))
+                                               (list 'clojure.core/identity init)
+                                               init)])
                           (partition 2 bindings)))
              (meta bindings)))
 
@@ -773,12 +803,23 @@ namespace eve_host {
 
 (def ^:private type-collection (volatile! nil))
 
+(def ^:private op-cache
+  "[op tag] -> the table's fn for an instance of that type, or ::none: extends? and type-key on every routed call
+   made eve.rrb-vector-test's splicing rows 4.4x slower (136 s → 605 s, jank-v5/v8-targeted.log). Emptied when the
+   table is set, as own-cache is when the equality hooks are."
+  (volatile! {}))
+
 (defn- op-fn
   "The eve.core fn the table names for op when x is an eve instance whose own type extends op's protocol; else nil."
   [op x]
   (when (cpp/eve_host.is x)
-    (when-let [[p f] (get @type-collection op)]
-      (when (extends? p (type-key x)) f))))
+    (let [ck [op (object-tag x)] hit (get @op-cache ck ::miss)]
+      (if (identical? hit ::miss)
+        (let [r (when-let [[p f] (get @type-collection op)]
+                  (when (extends? p (type-key x)) f))]
+          (vswap! op-cache assoc ck (if (some? r) r ::none))
+          r)
+        (when-not (identical? hit ::none) hit)))))
 
 (defn- not-supported [x what]
   (throw (ex-info (str "eve type " (type-key x) " is not " what) {:type (type-key x)})))
@@ -800,6 +841,7 @@ namespace eve_host {
    get-in, contains?, seq, nth, invoking it, and the re-rooted clojure.core names below call (eve's types adapter
    names eve.core's: :lookup ILookup's -lookup, 'seq ISeqable's seq, 'assoc IAssociative's, ...)."
   [m]
+  (vreset! op-cache {})
   (vreset! type-collection m)
   (cpp/eve_host.set_lookup (fn [x k nf] (if-let [f (op-fn :lookup x)] (f x k nf) nf)))
   (cpp/eve_host.set_dispatch
@@ -818,6 +860,12 @@ namespace eve_host {
          ;; find: [k v] when the associative type has k (select-keys builds through it), else nil
          (== op 7) (if-let [f (op-fn 'find x)] (f x a) (not-supported x "associative"))
          (== op 8) (if-let [f (op-fn 'compare x)] (f x a) (not-supported x "comparable"))
+         ;; first and next: a type that is its own seq by its ISeq / INext (-rest's seq without INext); any other
+         ;; through its seq (a host seq: never back here)
+         (== op 9) (if-let [f (op-fn 'first x)] (f x) (first (seq x)))
+         (== op 10) (if-let [f (op-fn 'next x)]
+                      (f x)
+                      (if-let [f (op-fn 'rest x)] (seq (f x)) (next (seq x))))
          :else (not-supported x (str "an op " op)))))))
 
 (defn- route!
@@ -973,7 +1021,31 @@ namespace eve_host {
 ;; not conjable", eve.thread-fold-group-test).
 (let [v #'clojure.core/into core @v]
   (alter-meta! v dissoc :inline :inline-arities)
-  (alter-var-root v (fn [_] (fn ([x] false) ([a b] (not (clojure.core/= a b))) ([a b & more] (not (apply clojure.core/= a b more)))))))
+  (alter-var-root v (fn [_] (fn ([] [])
+                                ([to] to)
+                                ([to from] (if (cpp/eve_host.is to) (reduce clojure.core/conj to from) (core to from)))
+                                ([to xform from]
+                                 (if (and (not (cpp/eve_host.is to)) (or (vector? to) (map? to) (set? to)))
+                                   (let [tm (meta to)
+                                         rf (fn ([coll] (let [r (persistent! coll)] (if tm (with-meta r tm) r)))
+                                                ([coll x] (conj! coll x)))]
+                                     (transduce xform rf (transient to) from))
+                                   (transduce xform clojure.core/conj to from)))))))
+
+;; merge and merge-with as Clojure's, over the routed conj, assoc, get and contains?: jank's own conj in C++, so
+;; (merge eve-map m) threw "Objects of type `opaque_box` are not conjable" (eve.thread.domain's measured costs, merged
+;; into a runtime's descriptor in the meta-atom: eve.thread-fold-group-test).
+(re-root! 'merge (fn ([] nil)
+                     ([m] m)
+                     ([m & ms] (when (some identity (cons m ms))
+                                 (reduce (fn [a b] (clojure.core/conj (or a {}) b)) m ms)))))
+(re-root! 'merge-with
+          (fn [f & maps]
+            (when (some identity maps)
+              (let [merge-entry (fn [m e] (let [k (key e) v (val e)]
+                                            (if (contains? m k) (assoc m k (f (get m k) v)) (assoc m k v))))
+                    merge2 (fn [m1 m2] (reduce merge-entry (or m1 {}) (seq m2)))]
+                (reduce merge2 maps)))))
 
 ;; reduce-kv takes its collection last
 (let [v #'clojure.core/reduce-kv core @v]
@@ -1128,19 +1200,22 @@ namespace eve_host {
     (cons nm
           (for [[_ args & body] entries
                 :let [args (mapv untag args)
-                      ;; a this named _ is renamed: a later _ parameter would shadow it ((m [_ _] field) read nil)
+                      ;; a this named _ is renamed: a later _ parameter would shadow it ((m [_ _] field) read nil);
+                      ;; when _ is the this alone, the body's _ is the this, as in Clojure ((valAt [_ k] (cmp-of _))
+                      ;; in an external library's type: "The symbol `_` could not be resolved" without it)
+                      self_ (and (= '_ (first args)) (not (some #{'_} (rest args))) (occurs? '_ body))
                       args (if (= '_ (first args)) (assoc args 0 (gensym "this__")) args)
                       this (first args)
                       shadow (set (binding-syms args))
                       used (filter #(and (not (contains? shadow %)) (occurs? % body)) fields)
-                      body (map #(cells % (apply disj cs shadow)) body)]]
+                      body (map #(cells % (apply disj cs shadow)) body)
+                      binds (vec (concat (when self_ ['_ this])
+                                         (mapcat (fn [f] [f (list 'clojure.core/nth (list 'eve.host-completion/object-fields this)
+                                                                 (first (keep-indexed (fn [i x] (when (= x f) i)) fields)))])
+                                                 used)))]]
             (list args
-                  (if (seq used)
-                    (list* 'clojure.core/let
-                           (vec (mapcat (fn [f] [f (list 'clojure.core/nth (list 'eve.host-completion/object-fields this)
-                                                        (first (keep-indexed (fn [i x] (when (= x f) i)) fields)))])
-                                        used))
-                           body)
+                  (if (seq binds)
+                    (list* 'clojure.core/let binds body)
                     (cons 'do body)))))))
 
 (def ^:private dropped-protocols
@@ -1199,14 +1274,17 @@ namespace eve_host {
          ~@(for [[p methods] impls]
              `(eve.host-completion/extend '~tag ~p ~(method-map (for [[nm args & body] methods
                                                    :let [args (mapv untag args)
+                                                         ;; _ the this alone: the body's _ is the this (deftype's rule)
+                                                         self_ (and (= '_ (first args)) (not (some #{'_} (rest args)))
+                                                                    (occurs? '_ body))
                                                          args (if (= '_ (first args)) (assoc args 0 (gensym "this__")) args)]]
                                               (list* nm args
                                                      (let [this (first args)
-                                                           used (filter #(occurs? % body) names)]
-                                                       (if (seq used)
-                                                         [(list* 'clojure.core/let
-                                                                 (vec (mapcat (fn [f] [f (list (keyword f) this)]) used))
-                                                                 body)]
+                                                           used (filter #(occurs? % body) names)
+                                                           binds (vec (concat (when self_ ['_ this])
+                                                                              (mapcat (fn [f] [f (list (keyword f) this)]) used)))]
+                                                       (if (seq binds)
+                                                         [(list* 'clojure.core/let binds body)]
                                                          body)))))))
          ~type-name)))
 
