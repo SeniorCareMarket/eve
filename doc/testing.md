@@ -106,7 +106,8 @@ once — lives in `test/coop/`: its transitions in `mix.cljc` and `scenario.cljc
 orchestrator `orchestrator.clj` (`coop.orchestrator`, a JVM test namespace run by name, not by `:jvm-test`), and one
 worker per host in `workers/` — bb, nbb, ClojureCLR, basilisp, jolt and clojerl over this tree, and a ValueScript
 program (`coop_worker.vs`, built by ValueScript's compiler and run by its `hosts/eve-mmap` host; `VS_DIR` names
-ValueScript's tree, default `../vs`). Every participant joins one mmap atom at once.
+ValueScript's tree — an explicit cross-repo opt-in: with `VS_DIR` unset, `run.sh` reports SKIP and runs nothing,
+because the shipped tree assumes no sibling checkout). Every participant joins one mmap atom at once.
 
 ```
 test/coop/run.sh                                      # every scenario but the soak (needs nbb, cljr, basilisp, jolt, clojerl)
