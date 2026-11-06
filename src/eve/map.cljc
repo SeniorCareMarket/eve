@@ -27,6 +27,7 @@
    [eve.core :as ecore]
    [eve.platform :as p]
    [eve.deftype-proto.macros :as eve]
+   [eve.vec :as evec]
    [eve.codec :as codec]
    [eve.digest :as dg]))
 
@@ -995,7 +996,9 @@
   (cons [this entry]
     (cond
       (map? entry) (reduce-kv (fn [m k v] (assoc m k v)) this entry)
-      (vector? entry) (.assoc this (nth entry 0) (nth entry 1))
+      ;; an Eve vector is a [k v] pair as a host vector is (on jank vector? is blind to it: identity audit
+      ;; B-VEC-ENTRY — it fell to the sequential arm, its key and value conj'd as two entries)
+      (or (vector? entry) (evec/eve-vector? entry)) (.assoc this (ecore/nth entry 0) (ecore/nth entry 1))
       (sequential? entry) (reduce conj this entry)
       :else (.assoc this (key entry) (val entry))))
   (empty [_]
