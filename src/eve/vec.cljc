@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [alength unsigned-bit-shift-right volatile! vswap! transient
                             persistent! conj! bytes])
   (:require
-   [eve.host :refer [alength unsigned-bit-shift-right volatile! vswap! transient persistent!
+   [eve.host :refer [field alength unsigned-bit-shift-right volatile! vswap! transient persistent!
                      conj! bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
@@ -803,8 +803,8 @@
 (extend-type EveVector
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio       (.-sio__ this)
-          hdr       (.-offset__ this)
+    (let [sio       (field this sio__)
+          hdr       (field this offset__)
           old-root  (slab/read-i32 sio hdr SABVECROOT_ROOT_OFFSET)
           old-shift (slab/read-i32 sio hdr SABVECROOT_SHIFT_OFFSET)]
       (if (eve-vector? new-value)

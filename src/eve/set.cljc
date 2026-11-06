@@ -10,7 +10,7 @@
                             aget alength unchecked-int unsigned-bit-shift-right volatile!
                             vswap! transient persistent! conj! long bytes])
   (:require
-   [eve.host :refer [aget alength unchecked-int unsigned-bit-shift-right volatile! vswap!
+   [eve.host :refer [field aget alength unchecked-int unsigned-bit-shift-right volatile! vswap!
                      transient persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
@@ -899,16 +899,16 @@
 (extend-type EveHashSet
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio (.-sio__ this)
-          old-root (slab/read-i32 sio (.-offset__ this) SABSETROOT_ROOT_OFF_OFFSET)]
+    (let [sio (field this sio__)
+          old-root (slab/read-i32 sio (field this offset__) SABSETROOT_ROOT_OFF_OFFSET)]
       (if (eve-hash-set? new-value)
         (let [new-root-off (slab/read-i32 sio (d/-root-header-off new-value) SABSETROOT_ROOT_OFF_OFFSET)]
           (retire-tree-diff! sio old-root new-root-off))
         (when (not= old-root NIL_OFFSET)
           (free-hamt-node! sio old-root)))
       ;; Free the header block
-      (when (not= (.-offset__ this) NIL_OFFSET)
-        (slab/free! sio (.-offset__ this))))))
+      (when (not= (field this offset__) NIL_OFFSET)
+        (slab/free! sio (field this offset__))))))
 
 ;;=============================================================================
 ;; Constructors
