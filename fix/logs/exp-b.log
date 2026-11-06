@@ -1,0 +1,24 @@
+----- Error --------------------------------------
+Message:  Protocol not found: clojure.lang.Sorted
+Location: /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib/me/tonsky/persistent_sorted_set.cljc:403:1
+
+----- Context ------------------------------------
+399:     (cond (nil? c)     compare
+400:           (keyword? c) (get @comparator-registry c)
+401:           :else        c)))
+402: 
+403: (eve-deftype BTSet [root ^:int32 shift cnt comparator meta]
+     ^--- Protocol not found: clojure.lang.Sorted
+404:   clojure.lang.IMeta
+405:   (meta [_] meta)
+406: 
+407:   clojure.lang.IObj
+408:   (withMeta [_ m] (->BTSet root shift cnt comparator m))
+file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13
+$APP.SC),$APP.gY);return g.A?g.A():g.call(null)}):null).then(function(g){$APP.k($APP.k(d)?g!=null:d)&&$APP.Sy.o($APP.x([g],0));return g}).catch(function(g){$APP.ula(g,b);$APP.k($APP.Ty.h(b))&&console.error(g);throw Error($APP.Kk(g));})})):console.error("Usage: "+$APP.G.h("nbb")+" \x3cscript\x3e or nbb -e \x3cexpr\x3e.")})();
+                                                                                                                                                                                                                       ^
+
+Error: Protocol not found: clojure.lang.Sorted
+    at file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13:216
+
+Node.js v24.22.1

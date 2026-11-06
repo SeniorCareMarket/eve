@@ -1,0 +1,38 @@
+:dc-numbers [-1 1 0]
+:dc-strings [-1 1 0]
+:dc-bools [1 -1 0]
+:dc-arrays [-1 1 0]
+----- Error --------------------------------------
+Message:  Unable to resolve symbol: eve.process-slab/cljs-sio
+Location: /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib/me/tonsky/persistent_sorted_set.cljc:337:40
+Phase:    analysis
+
+----- Context ------------------------------------
+333:     (let [idx (lookup-exact cmp keys key)]
+334:       (when-not (== -1 idx)
+335:         (arrays/aget keys idx))))
+336: 
+337:   (node-conj [_ cmp key]
+                                            ^--- Unable to resolve symbol: eve.process-slab/cljs-sio
+338:     (let [idx    (binary-search-l cmp keys (dec (arrays/alength keys)) key)
+339:           keys-l (arrays/alength keys)]
+340:       (cond
+341:         ;; element already here
+342:         (and (< idx keys-l)
+
+----- Stack trace --------------------------------
+me.tonsky.persistent-sorted-set                - /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib/me/tonsky/persistent_sorted_set.cljc:337:40 
+eve.deftype.slab-runtime/slab-free-serialized! - /home/hatch/workspace/wt/eve-0931-nbb/src/eve/deftype/slab_runtime.cljc:57:1 
+clojure.core/let                               - cljs/core.cljc:772:1 
+clojure.core/fn                                - clojure/core.clj:4513:4 
+clojure.core/multi-fn-add-method-impl          - sci/impl/multimethods.cljc:192:7 
+clojure.core/defmethod                         - cljs/core.cljc:2852:1 
+
+file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13
+$APP.SC),$APP.gY);return g.A?g.A():g.call(null)}):null).then(function(g){$APP.k($APP.k(d)?g!=null:d)&&$APP.Sy.o($APP.x([g],0));return g}).catch(function(g){$APP.ula(g,b);$APP.k($APP.Ty.h(b))&&console.error(g);throw Error($APP.Kk(g));})})):console.error("Usage: "+$APP.G.h("nbb")+" \x3cscript\x3e or nbb -e \x3cexpr\x3e.")})();
+                                                                                                                                                                                                                       ^
+
+Error: Unable to resolve symbol: eve.process-slab/cljs-sio
+    at file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13:216
+
+Node.js v24.22.1

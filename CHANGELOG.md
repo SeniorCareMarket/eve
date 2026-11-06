@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **nbb: a ClojureScript library naming a goog namespace could not load.** nbb carries no Google Closure library, so a library written for ClojureScript whose source requires one — DataScript's `datascript.db` requires `goog.array` — failed on eve's nbb seat with "Could not find namespace: goog.array". The seat now carries a goog adapter (`adapters/goog/nbb`): the Closure namespaces such libraries name, each var with Closure's own definition; the surface is census-driven, starting with `goog.array`'s `defaultCompare`, the one var the DataScript port names.
+
 ## [0.9.3] - 2026-11-06
 
 ### Added

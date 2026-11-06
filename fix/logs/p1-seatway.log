@@ -1,0 +1,32 @@
+----- Error --------------------------------------
+Message:  Unable to resolve symbol: number
+Location: /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib-ds/datascript/db.cljc:162:1
+Phase:    analysis
+
+----- Context ------------------------------------
+158:         ~(apply make-record-updatable-clj  name fields impls))))
+159: 
+160: ;; ----------------------------------------------------------------------------
+161: 
+162: #?(:clj  (declare hash-datom)
+     ^--- Unable to resolve symbol: number
+163:    :cljs (defn ^number hash-datom [d]))
+164: 
+165: #?(:clj  (declare equiv-datom)
+166:    :cljs (defn ^boolean equiv-datom [d o]))
+167: 
+
+----- Stack trace --------------------------------
+datascript.db     - /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib-ds/datascript/db.cljc:162:1 
+clojure.core/defn - cljs/core.cljc:3364:1 
+datascript.db     - /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib-ds/datascript/db.cljc:162:1 
+datascript.db     - /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib-ds/datascript/db.cljc:162:1 
+
+file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13
+$APP.SC),$APP.gY);return g.A?g.A():g.call(null)}):null).then(function(g){$APP.k($APP.k(d)?g!=null:d)&&$APP.Sy.o($APP.x([g],0));return g}).catch(function(g){$APP.ula(g,b);$APP.k($APP.Ty.h(b))&&console.error(g);throw Error($APP.Kk(g));})})):console.error("Usage: "+$APP.G.h("nbb")+" \x3cscript\x3e or nbb -e \x3cexpr\x3e.")})();
+                                                                                                                                                                                                                       ^
+
+Error: Unable to resolve symbol: number
+    at file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13:216
+
+Node.js v24.22.1

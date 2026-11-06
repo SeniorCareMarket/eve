@@ -151,6 +151,17 @@
                get      {:cljs-name nil      :arities [[_ v]]}
                contains {:cljs-name nil      :arities [[_ v]]}}}
 
+    ;; ClojureScript's ISorted carries seqFrom alone: a sorted collection's
+    ;; comparator is a plain field there (a cljs consumer reads
+    ;; (.-comparator set), as datascript.db does), and entryKey is the
+    ;; identity the JVM interface asks for — neither has a protocol home on
+    ;; CLJS, so both drop, following the ITransientSet get/contains pattern.
+    clojure.lang.Sorted
+    {:cljs-proto ISorted
+     :methods {comparator {:cljs-name nil              :arities [[_]]}
+               entryKey   {:cljs-name nil              :arities [[_ k]]}
+               seqFrom    {:cljs-name -sorted-seq-from :arities [[_ k ascending]]}}}
+
     clojure.lang.ISeq
     {:cljs-proto ISeq
      :methods {first {:cljs-name -first :arities [[_]]}
