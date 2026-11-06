@@ -1,6 +1,12 @@
 > **Historical record** — the unification's leak register (Unit 1, 2026-10-15, BASE `b24c8c034`: 371 reader-conditional
 > sites, the `L-nn` ids HOST-CONTRACT §8 still cites). It describes eve as it stood then, not eve 0.9 (`src/` has 0 today).
 > Current authority: `scripts/check-host-leak` and `.host-leak` (the gate), `doc/unification/HOST-CONTRACT.md` (the contract).
+>
+> **Since BASE — bb atomics (L-23, L-55, §5 item 14; 2026-11-06):** closed. `bb-lock` is gone; bb's region is
+> `adapters/region/jvm-nio-lock` (`BbMmapRegion`, a lock-only region: `-atomic-rmw?` false, `-with-file-lock` a FileChannel
+> byte-range lock), and `eve.atom` runs every bb write under the exclusive hold (ROOT_HOLD under that file lock, lock-free
+> hosts draining through ROOT_INFLIGHT). Measured on release/eve-0.9.3: `test/coop/bb_contention.clj` (bb-only and JVM+bb
+> writers on one atom, no lost update) and `test/coop/bb_lock_price.clj`.
 
 # EVE Seam Map — Unit 1 of the unification
 
@@ -128,7 +134,7 @@ portability item).
 | L-20 | `eve-map/mmap-mode?` (map.cljc:1240), set by the CLJS openers (atom.cljc:284, :314); every consumer is a no-op stub (`untrack-debug-offset!` :1243). | — | Delete. | open (dead) |
 | L-21 | CLJS serializer scratch aliasing: `serialize-key` returns scratch A, `serialize-val` scratch B, `encode-sab-pointer` returns `sab-ptr-buf` (serialize.cljc:372–391) — "valid until the next call". The HAMT write path relies on this ordering silently (`write-kv!` consumes before the next serialize). | single-threaded, non-reentrant codec | The codec contract must say so ("returned bytes may alias a reusable scratch buffer; consume before the next encode") or return fresh bytes. A port that copies is correct; a port that caches the returned view is not. | open (contract gap) |
 | L-22 | Keyword caches: CLJS `keyword-cache`/`kw-deser-cache` (identity/offset keyed), JVM `kw-encode-cache` (mem.cljc:1443). | — | One cache policy in the unified codec, keyed by value. | open (duplication) |
-| L-23 | bb `bb-lock` (mem.cljc:488): a process-wide `Object` used to *simulate* atomics. | — | See L-55. | open |
+| L-23 | bb `bb-lock` (mem.cljc:488): a process-wide `Object` used to *simulate* atomics. | — | See L-55. | open at BASE; closed since (banner) |
 
 ### C. Duplicated registries and parallel paths
 
@@ -180,7 +186,7 @@ portability item).
 
 | # | What | Absorbing seam | BASE |
 |---|---|---|---|
-| L-55 | bb "atomics" are a process-local `locking` (mem.cljc:491–700). Against a concurrent JVM or Node process, a bb `-cas-i32!` is read-compare-write with no cross-process atomicity: the root CAS and the bitmap-alloc CAS can both lose updates. The README's "2 JVM + 2 Node + 2 bb … CORRECT" is a low-rate measurement, not a guarantee. bb has `java.nio.channels.FileChannel`/`FileLock` (probed 2026-10-15: available) but not `java.lang.invoke.MethodHandles` (missing) — so the correct bb region is the fcntl byte-range-lock pattern already used by the Lustre regions, not VarHandles. | Host contract: atomic RMW across processes is a *required* primitive of a file-mapped region; the bb region must implement it with `FileLock` or declare bb a single-process host. | open (correctness) |
+| L-55 | bb "atomics" are a process-local `locking` (mem.cljc:491–700). Against a concurrent JVM or Node process, a bb `-cas-i32!` is read-compare-write with no cross-process atomicity: the root CAS and the bitmap-alloc CAS can both lose updates. The README's "2 JVM + 2 Node + 2 bb … CORRECT" is a low-rate measurement, not a guarantee. bb has `java.nio.channels.FileChannel`/`FileLock` (probed 2026-10-15: available) but not `java.lang.invoke.MethodHandles` (missing) — so the correct bb region is the fcntl byte-range-lock pattern already used by the Lustre regions, not VarHandles. | Host contract: atomic RMW across processes is a *required* primitive of a file-mapped region; the bb region must implement it with `FileLock` or declare bb a single-process host. | open (correctness) at BASE; closed since (banner) |
 | L-56 | `value+sio->eve-bytes` bb arm hard-codes tag `0x1D` for any `IEveRoot` value that is not a map/set/vector/list (mem.cljc:1967) — a bb Dataset/Tensor nested in a map is written as an EveArray pointer. | `read-header-tag` through the one registry on every host (L-24). | open |
 | L-57 | bb per-thread epoch pinning keys `thread-epochs` by the constant `:main` (atom.cljc:770–800); `bench/bb_stress_atom.clj` Phase 4 runs four bb threads → the slot's pinned epoch is whichever thread wrote last, so a reader can be unpinned while still reading. | Thread identity is a host primitive (`current-thread-id`); the aggregation logic is portable and should not be forked. | open (correctness) |
 | L-58 | **bb cannot load `eve.atom` at BASE**: `eve.deftype-proto.alloc` fails at line 607 (`ser/register-header-tag-reader!` unresolved — defined only in serialize.cljc's `:clj` arm, :163). Verified 2026-10-15 with `bb -cp src -e "(require 'eve.atom)"`. The coop-atom patch `0001-bb-loads-eve-atom.patch` targets a *different* failure (`bb-hash-map?`, `into-hash-set` bb arm, a bb guard on `jvm-collect-old-value-offsets`) and its map.cljc hunk no longer applies (it references `alloc/*jvm-slab-ctx*`). | — | **cand-new** regression |
