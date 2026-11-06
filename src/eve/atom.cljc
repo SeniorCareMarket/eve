@@ -27,7 +27,7 @@
    [eve.journal-file :as jf]
    [eve.read-region :as rr]
    ;; PROTOTYPE (jvm-heap-grade step 2): the automatic read guard, JVM only
-   #?(:clj [eve.guard :as guard])
+   #?@(:bb [] :clj [[eve.guard :as guard]])
    [eve.deftype-proto.data :as d]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc]
@@ -835,7 +835,8 @@
     (finally
       (unpin-epoch! ds))))
 
-#?(:clj
+#?(:bb nil
+   :clj
    (defn- guard-deref
      "PROTOTYPE (step 2). Inside a guard extent (eve.guard): the atom's root as a lazy value — the slab-backed value
       read-root-value builds, nothing materialized. The domain is pinned the first time the extent chain reads it and
@@ -861,7 +862,7 @@
   [ds atom-slot-idx]
   (cond
     (rr/active?) (region-deref ds atom-slot-idx)
-    #?@(:clj [(guard/active?) (guard-deref ds atom-slot-idx)])
+    #?@(:bb [] :clj [(guard/active?) (guard-deref ds atom-slot-idx)])
     :else (plain-deref ds atom-slot-idx)))
 
 (defn- swap-attempt!
