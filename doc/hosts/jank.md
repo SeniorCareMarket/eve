@@ -162,11 +162,18 @@ where named. Filing them against jank-lang/jank is the operator's (no GitHub acc
     as `:tag (quote long)`. The completion drops the native tags (`long double int boolean float short byte char`)
     from every `defn`/`fn`/`let`/`loop` binding before the core macro expands, so no eve value is a C++ native on
     jank.
-19. A `case` on keyword, string or symbol constants with a default clause: `(defn g [x] (case x :a 1 :b 2 3))` →
-    C++ "no viable overloaded '=' … int to oref" (core.jank:4531 for keywords, 4527 for strings and symbols); the
-    same case without a default, a grouped `(:a :b)` test, and an integer case with a default compile (measured, nine
-    shapes). The completion re-roots `case`: such a case expands to a `let` over `cond` with `(= g 'c)` tests (a
-    grouped test an `or`); every other case is jank's own.
+19. A `case` whose default clause is C++-typed natively: `case*` assigns each branch's value to its `object_ref`
+    result boxed, but not the default's — `(defn g [x] (case x :a 1 :b 2 3))` → C++ "no viable overloaded '=' … int
+    to oref" (core.jank:4531 for keywords, 4527 for strings and symbols, 4523 for integers). Amended 2026-11-06 (VS
+    Agent 3, 25 shapes, `probes/jank-case/out1..4.txt`): it is the default, whatever the constants — a literal
+    true/false, integer, double or string (`const char*`), a `let` ending in one, an `if` of literals, `(boolean x)`;
+    `(case x 1 true false)` fails, `(case x 1 false 2 true :d)` and `(case x 1 :a (identity false))` compile, and so
+    do keyword, string and symbol cases once their default is boxed. eve.set's `hamt-find` ends `(case (int nt) 1 …
+    2 … false)`: two Eve sets holding a by-reference member (their digests abstain, so the first walk compiles)
+    stopped the run. The completion re-roots `case` to pass the default through `identity` (left as it is when it
+    holds a `recur`; an `if` over a `recur` and a literal compiles); every case is jank's own dispatch. (Before the
+    amendment the completion expanded a keyword, string or symbol case with a default to a `cond`, which worked
+    around the same defect.)
 20. `defmacro` expands to `(reset-meta! (var name) (assoc (meta (var name)) :macro true))` with `meta` and `assoc`
     unqualified: a namespace that excludes `meta` from clojure.core (`eve.alpha`, which refers `eve.core`'s) cannot
     define a macro — "The symbol `meta` could not be resolved" at its `defmacro`. The completion re-roots `defmacro`
