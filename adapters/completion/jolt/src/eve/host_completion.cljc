@@ -64,3 +64,118 @@
   (fn [core]
     (fn ([smap] (clojure.core/map (fn [x] (if-let [e (clojure.core/find smap x)] (clojure.core/val e) x))))
       ([smap coll] (core smap coll)))))
+
+;; A library written for the JVM names a primitive in a type tag by the
+;; class of clojure.core's cast fn — (assoc meta :tag clojure.core$long)
+;; is the idiom, its value on the JVM being that class (datascript's
+;; db.cljc patch-tag). jolt's analyzer resolves a dotted symbol to a
+;; clojure.core var named by the symbol — java.lang.Boolean is one — and
+;; a $-bearing class name sits outside its class grammar, so the symbol
+;; is unresolved and the library's analysis dies on it (F-JOLT-TAG,
+;; measured, jolt v0.8.23). The classes exist: (class clojure.core/long)
+;; is clojure.core$long. Intern them under their names, as jolt itself
+;; interns the java.lang ones, and the symbol resolves to the very class
+;; the JVM reads.
+(doseq [f '[long double boolean int short byte char float]]
+  (let [cname (clojure.core/symbol (clojure.core/str "clojure.core$" (clojure.core/name f)))]
+    (when-not (clojure.core/find-var (clojure.core/symbol "clojure.core" (clojure.core/str cname)))
+      (clojure.core/intern 'clojure.core cname
+        (clojure.core/class @(clojure.core/find-var (clojure.core/symbol "clojure.core" (clojure.core/name f))))))))
+
+;; A JVM library's portability macro can emit the JVM's raw deftype*
+;; special form — a qualified name, a class name, fields, :implements
+;; [clojure.lang.* ...], then flat method defs in JVM method names
+;; (extend-clj's deftype-atom, under datascript's Conn). jolt reads :clj
+;; but has no deftype*: its analyzer stops at the symbol. The form is
+;; translatable here — jolt's deftype takes the same interfaces as spec
+;; heads and registers methods under the names written — by grouping
+;; the flat defs under their interfaces again. The atom surface then
+;; already works: the swap!/reset!/compare-and-set! roots above call a
+;; non-jolt atom's own .swap/.reset/.compareAndSet, which are the very
+;; methods such a type defines.
+;;
+;; One JVM shape needs more than grouping: deftype there grows extra
+;; constructors, and the extend family builds through the short one —
+;; (new Conn atom nil {}), the user fields plus __meta and __extmap.
+;; jolt's new takes every field, so a type whose field tail is
+;; extend's [__validator __watches __meta __extmap __hash __hasheq] is
+;; built here with just the short constructor's slots: __meta and
+;; __extmap stay fields, __validator and __watches move into __extmap
+;; under their own keys (method bodies are rewritten to match), and
+;; __hash/__hasheq — named in no method body of that family — go.
+(defmacro jvm-deftype*
+  [qname classname fields & body]
+  (let [opts    (loop [b (seq body) m {}]
+                  (if (keyword? (first b))
+                    (recur (nnext b) (assoc m (first b) (second b)))
+                    m))
+        methods (drop (* 2 (count opts)) body)
+        fname   (fn [f] (symbol (name f)))
+        extend-tail? (and (<= 6 (count fields))
+                          (= '[__validator __watches __meta __extmap __hash __hasheq]
+                             (mapv fname (take-last 6 fields))))
+        fields  (if extend-tail?
+                  (let [user  (drop-last 6 fields)
+                        meta-f (nth fields (- (count fields) 4))
+                        ext-f  (nth fields (- (count fields) 3))
+                        bare   (fn [f] (with-meta (symbol (name f)) (meta f)))]
+                    (vec (concat (map bare user)
+                                 [(bare meta-f) (vary-meta (bare ext-f) assoc :volatile-mutable true)])))
+                  fields)
+        packed  (when extend-tail? '#{__validator __watches})
+        pack    (fn pack [form]
+                  (cond
+                    (and (seq? form) (= 'set! (first form)) (contains? packed (second form)))
+                    (list 'set! '__extmap
+                          (list 'clojure.core/assoc '__extmap (keyword (second form)) (pack (nth form 2))))
+                    (and (symbol? form) (contains? packed form))
+                    (if (= '__watches form)
+                      (list 'clojure.core/get '__extmap :__watches {})
+                      (list 'clojure.core/get '__extmap (keyword form)))
+                    (seq? form)    (apply list (map pack form))
+                    (vector? form) (mapv pack form)
+                    (map? form)    (into {} (map (fn [[k v]] [(pack k) (pack v)])) form)
+                    (set? form)    (into #{} (map pack) form)
+                    :else form))
+        methods (if extend-tail?
+                  (map (fn [mdef] (cons (first mdef) (cons (second mdef) (map pack (drop 2 mdef))))) methods)
+                  methods)
+        ifaces  (:implements opts)
+        static  {'clojure.lang.IMeta          #{'meta}
+                 'clojure.lang.IReference     #{'alterMeta 'resetMeta}
+                 'clojure.lang.IDeref         #{'deref}
+                 'clojure.lang.IRef           #{'setValidator 'getValidator 'addWatch 'removeWatch 'getWatches}
+                 'clojure.lang.IAtom          #{'swap 'compareAndSet 'reset}
+                 'clojure.lang.IAtom2         #{'swapVals 'resetVals}
+                 'clojure.lang.ILookup        #{'valAt}
+                 'clojure.lang.IKeywordLookup #{'getLookupThunk}}
+        names-of (fn [iface]
+                   (or (get static iface)
+                       (try
+                         (let [s      (str iface)
+                               dotted (fn [t] (let [i (.lastIndexOf t ".")]
+                                                  (when (pos? i)
+                                                    (symbol (subs t 0 i) (subs t (inc i))))))
+                               v      (or (resolve iface)
+                                          (when-let [d (dotted s)] (resolve d))
+                                          (when-let [d (dotted (.replace s "_" "-"))] (resolve d)))]
+                           (when (and v (map? @v))
+                             (set (map :name (vals (:sigs @v))))))
+                         (catch Throwable _ nil))))
+        groups  (reduce (fn [gs mdef]
+                          (let [mname (symbol (name (first mdef)))
+                                owner (first (filter (fn [i] (contains? (names-of i) mname)) ifaces))]
+                            (when-not owner
+                              (throw (ex-info (str "deftype*: no interface in :implements declares method " mname)
+                                              {:method mname})))
+                            (update gs owner (fnil conj []) (cons mname (rest mdef)))))
+                        {}
+                        methods)
+        specs   (mapcat (fn [i] (cons i (get groups i)))
+                        (filter (fn [i] (contains? groups i)) ifaces))]
+    (list 'do
+          (apply list 'deftype (symbol (name qname)) fields specs)
+          (symbol (name qname)))))
+
+(alter-meta! (clojure.core/intern 'clojure.core 'deftype* @#'jvm-deftype*)
+             clojure.core/assoc :macro true)
