@@ -1,0 +1,29 @@
+----- Error --------------------------------------
+Message:  Unable to resolve symbol: defn+
+Location: /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib-ds/datascript/db.cljc:242:1
+Phase:    analysis
+
+----- Context ------------------------------------
+238:   ([e a v tx added] (->Datom e a v (if added tx (- tx)) 0)))
+239: 
+240: (defn datom? [x] (instance? Datom x))
+241: 
+242: (defn+ ^:private hash-datom [^Datom d]
+     ^--- Unable to resolve symbol: defn+
+243:   (-> (hash (.-e d))
+244:     (combine-hashes (hash (.-a d)))
+245:     (combine-hashes (hash (.-v d)))))
+246: 
+247: (defn+ ^:private equiv-datom [^Datom d ^Datom o]
+
+----- Stack trace --------------------------------
+datascript.db - /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib-ds/datascript/db.cljc:242:1 
+
+file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13
+$APP.SC),$APP.gY);return g.A?g.A():g.call(null)}):null).then(function(g){$APP.k($APP.k(d)?g!=null:d)&&$APP.Sy.o($APP.x([g],0));return g}).catch(function(g){$APP.ula(g,b);$APP.k($APP.Ty.h(b))&&console.error(g);throw Error($APP.Kk(g));})})):console.error("Usage: "+$APP.G.h("nbb")+" \x3cscript\x3e or nbb -e \x3cexpr\x3e.")})();
+                                                                                                                                                                                                                       ^
+
+Error: Unable to resolve symbol: defn+
+    at file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13:216
+
+Node.js v24.22.1

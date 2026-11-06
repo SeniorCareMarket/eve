@@ -75,3 +75,70 @@ adapter layer; the library stays untouched.
   untouched. Census of the port's primitive tags comes first.
 - Next: push this branch (prior session never pushed), tag census,
   F-NBB-TAG fix design, then proofs 1–4.
+- Branch PUSHED (continuation): this box's git credential 403s on
+  SCM/eve writes (the standing route fact) — the branch was created +
+  pushed through the GitHub connector (push-files) and verified on the
+  fetched ref: tree diff vs local HEAD = 0 lines. Later banks push the
+  same way.
+- F-NBB-TAG SOLVED at probe scale (fix/probes/): position census —
+  arg-position tags resolve, name-position (def/defn) tags throw;
+  boolean/array/symbol resolve unaided (real cljs.core vars), number/
+  string/object/function/bigint/undefined do not (stock probe). Dead
+  ends, banked so they are not retried: sci eval-string (forks its
+  context), in-ns+def in a loaded file (def lands in the file's own
+  ns — verified via ns-interns). Working mechanism: plain
+  (intern 'clojure.core tag tag) from any loaded namespace — sci keeps
+  its core as clojure.core — after which a later-loaded namespace's
+  (defn ^number ...) and (def ^number ...) analyse and run
+  (probe tagmain11: :tagmain11-ok 3 42).
+- F-NBB-TAG FIX implemented: adapters/types/nbb/src/eve/types.cljs
+  interns the six missing primitive tags at load, each resolve-guarded;
+  CHANGELOG entry added. types.cljs rides every Eve load on nbb
+  (eve.deftype-proto.macros requires eve.types), so a consumer loading
+  Eve first — the seat's pattern — gets the tags before its library.
+- Next: proof 1 (seat's way) rerun, then proofs 2–4.
+- Proof 1 rerun with the tag fix (fix/logs/p1-seatway2.log): PAST
+  db.cljc:162 — the ^number wall is down — and stopped at a fourth
+  wall, F-NBB-OBJHASH: (eve-deftype Datom ...) at db.cljc:192 throws
+  "Unable to resolve symbol: sci.impl.deftype/hashCode". Datom's bare
+  `Object` group declares hashCode explicitly. Eve's translation
+  gives java.lang.Object its cljs disposition (proto map :clj-only?,
+  cljs-object-impls re-homes toString/equals, hashCode drops), but a
+  BARE Object group had no proto-map entry and passed through
+  verbatim — hashCode and all — into the emitted cljs deftype, whose
+  sci deftype cannot register it. (bb's seat strips Object methods in
+  its types adapter; compiled cljs never sees Eve's own types written
+  this way — the port is the first bare-Object carrier.)
+- F-NBB-OBJHASH FIX: proto_map gains a bare `Object` entry mirroring
+  java.lang.Object's; vocab/cljs-object-impls' object? matches both
+  names. CHANGELOG entry added.
+- Next: proof 1 rerun; then proofs 2–4.
+- Proof 1 continues (fix/logs/p1-seatway3.log): Datom's eve-deftype
+  analyses clean — F-NBB-OBJHASH is down. seatway4: stopped at
+  (goog/exportSymbol ...) (db.cljc:233) — the ambient Closure BASE
+  namespace, named without a require (full goog census, all
+  positions: goog.array, goog/exportSymbol x2, goog/getUid x1).
+  FIX: adapters/goog/nbb/src/goog.cljs (ns goog) with Closure's own
+  exportSymbol and getUid; sci resolves a bare goog/* reference only
+  once the namespace is loaded, so eve.types (nbb) now requires goog
+  as eve loads. seatway5: PAST exportSymbol — stopped at
+  (defn+ ...) db.cljc:242.
+- F-NBB-MACROS — the nbb leg's remaining blocker (platform gap, NOT
+  Eve-fixable): datascript.db's macros (defn+, case-tree, combine-cmp,
+  defcomp, int-compare, validate-attr/val; also parser's and
+  serialize's sets) are defined under #?(:clj ...) and referred via
+  self (:require-macros [datascript.db ...]). Probes (fix/probes/,
+  stock nbb 1.6.214 = the latest nbb on npm): self require-macros
+  with :clj-branch defmacros FAILS ("Unable to resolve symbol:
+  defn-plus"); the same macros bare or under :cljs branches WORK;
+  a separate macro ns with :clj defmacros FAILS ("does not exist").
+  By elimination, sci's macro-namespace harvest reads .cljc sources
+  with the :cljs feature set only, so a dual-face library's :clj
+  macros are invisible to it. An adapter cannot supply another
+  library's macro code without forking it (the goog/tag fixes supply
+  missing NAMES from the platform library; macros are the port's own
+  algorithms). Disposition: named blocker for proofs 1–3 with this
+  evidence; upstream observation for sci/nbb, recorded here (no
+  upstream patch per standing rule).
+- Next: flagship nbb leg run (evidence on the flagship's own path),
+  proof 4 (Eve nbb seat probes), report.

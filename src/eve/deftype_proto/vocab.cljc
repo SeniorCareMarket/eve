@@ -142,9 +142,11 @@
    another way (IPersistentCollection's equiv, its own IEquiv), and hashCode
    goes (IHashEq is IHash there)."
   [parsed-protos]
-  ;; java.lang.Object is a JVM-named body's; a bare Object block is written
-  ;; ClojureScript's way and passes through as it is
-  (let [object? #(= 'java.lang.Object (:protocol %))
+  ;; java.lang.Object is a JVM-named body's; a bare Object block is the
+  ;; same body with the unqualified name and gets the same disposition
+  ;; (its group is dropped by the proto map's Object entry, here its
+  ;; toString and equals are re-homed as below)
+  (let [object? #(contains? '#{java.lang.Object Object} (:protocol %))
         ms (mapcat :methods (filter object? parsed-protos))
         equiv? (some (fn [{:keys [protocol methods]}]
                        (or (= 'IEquiv protocol)

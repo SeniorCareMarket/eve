@@ -8,6 +8,29 @@
             [eve.deftype-proto.vocab :as v]
             [eve.types-js :as js]))
 
+;; F-NBB-TAG: ClojureScript's primitive type tags (^number, ^string, ...)
+;; on a def or defn name are compiler hints in ClojureScript — no var by
+;; those names exists. sci resolves a name-position tag as a symbol, so a
+;; vanilla ClojureScript library carrying them (DataScript's
+;; (defn ^number hash-datom [d]), 37 sites across the port) fails to
+;; analyse on this seat: "Unable to resolve symbol: number". The tags
+;; that happen to name a cljs.core function (boolean, array, symbol)
+;; resolve on their own; the rest are interned here, into the core
+;; namespace sci keeps (clojure.core), each holding its own symbol — a
+;; tag is metadata, nothing derefs it. Guarded by resolve, so a name a
+;; future nbb supplies itself is never shadowed.
+(doseq [tag '[number string object function bigint undefined]]
+  (when-not (resolve tag)
+    (intern 'clojure.core tag tag)))
+
+;; F-NBB-GOOG (the base namespace): ClojureScript code also names the
+;; ambient Closure base — (goog/exportSymbol ...), (goog/getUid ...) —
+;; without requiring it, and sci resolves such a reference only once the
+;; namespace is loaded. The seat's goog adapter (adapters/goog/nbb)
+;; provides it; loading it here, as eve loads, registers it before a
+;; consumer's library is analysed.
+(require 'goog)
+
 (def ^:private nbb-missing-protocols
   "ClojureScript protocols nbb's cljs.core lacks; eve.core defines them there."
   '#{IChunkedSeq IChunkedNext ASeq})

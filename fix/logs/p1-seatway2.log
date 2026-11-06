@@ -1,0 +1,25 @@
+----- Error --------------------------------------
+Message:  Unable to resolve symbol: sci.impl.deftype/hashCode
+Location: /home/hatch/workspace/wt/datascript-multihost2/contract-test/lib-ds/datascript/db.cljc:192:1
+Phase:    analysis
+
+----- Context ------------------------------------
+188: ;; Vanilla's ^:unsynchronized-mutable _hash cache is dropped (hash-datom
+189: ;; computes on demand, the PSS E2 pattern) and idx is fixed at
+190: ;; construction: datom-set-idx throws (serialize's freeze path, its only
+191: ;; caller, uses a side table in this port).
+192: (eve-deftype Datom [e a v tx idx]
+     ^--- Unable to resolve symbol: sci.impl.deftype/hashCode
+193:   IDatom
+194:   (datom-tx [d] (if (pos? tx) tx (- tx)))
+195:   (datom-added [d] (pos? tx))
+196:   (datom-get-idx [_] idx)
+197:   (datom-set-idx [_ _value]
+file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13
+$APP.SC),$APP.gY);return g.A?g.A():g.call(null)}):null).then(function(g){$APP.k($APP.k(d)?g!=null:d)&&$APP.Sy.o($APP.x([g],0));return g}).catch(function(g){$APP.ula(g,b);$APP.k($APP.Ty.h(b))&&console.error(g);throw Error($APP.Kk(g));})})):console.error("Usage: "+$APP.G.h("nbb")+" \x3cscript\x3e or nbb -e \x3cexpr\x3e.")})();
+                                                                                                                                                                                                                       ^
+
+Error: Unable to resolve symbol: sci.impl.deftype/hashCode
+    at file:///usr/lib/node_modules/nbb/lib/nbb_main.js:13:216
+
+Node.js v24.22.1

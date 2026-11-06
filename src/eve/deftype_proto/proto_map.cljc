@@ -200,6 +200,21 @@
                equals   {:cljs-name nil :arities [[_ other]]}
                hashCode {:cljs-name nil :arities [[_]]}}}
 
+    ;; A bare Object group is the same body written with the unqualified
+    ;; name (a vanilla ClojureScript library's deftype face does this —
+    ;; DataScript's Datom). It gets java.lang.Object's disposition:
+    ;; dropped here, with toString and equals re-homed by
+    ;; eve.deftype-proto.vocab/cljs-object-impls. Passing it through
+    ;; verbatim emitted its hashCode into the CLJS deftype, which sci
+    ;; cannot register (sci.impl.deftype/hashCode does not resolve on
+    ;; nbb) — F-NBB-OBJHASH.
+    Object
+    {:cljs-proto nil
+     :clj-only? true
+     :methods {toString {:cljs-name nil :arities [[_]]}
+               equals   {:cljs-name nil :arities [[_ other]]}
+               hashCode {:cljs-name nil :arities [[_]]}}}
+
     java.util.Set
     {:cljs-proto nil
      :clj-only? true
