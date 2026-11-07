@@ -142,7 +142,10 @@
                           "target/glj-eve/glj-eve" "-e" (str "(require 'eve.runner.glj-main) (apply eve.runner.glj-main/-main '"
                                                              (pr-str (cons "test" *command-line-args*)) ")"))}
   test:jank {:doc "The shared (.cljc) tests on jank (hosts.edn :jank; jank on PATH, LC_ALL=en_US.UTF-8 set here: jank's lexer reads source through the locale; namespaces named after the task run alone)"
-             :task (apply shell {:extra-env {"LC_ALL" "en_US.UTF-8"}}
+             ;; the completion's C++ header (eve/eve_obj.hpp) on jank's include path: jank's clang reads CPLUS_INCLUDE_PATH
+             :task (apply shell {:extra-env {"LC_ALL" "en_US.UTF-8"
+                                             "CPLUS_INCLUDE_PATH" (str (System/getProperty "user.dir") "/adapters/completion/jank/include"
+                                                                       (when-let [c (System/getenv "CPLUS_INCLUDE_PATH")] (str ":" c)))}}
                           "jank" "--module-path" (str/join ":" (roots :jank "adapters/completion/jank/test" "adapters/slab-io/test" "test"))
                           "run-main" "eve.runner.jank-main" "--" "test" *command-line-args*)}
   net:local {:doc "eve's local network in one command: a broker, a store, three thread servers (one the app host) and the page (scripts/net-local.clj; flags --port --threads --hosts --dir --no-open --no-build)"

@@ -3,7 +3,8 @@
    --module-path; the runner is run-main (bb test:jank does both, under LC_ALL=en_US.UTF-8: jank's lexer reads source
    through the process locale, and refuses a non-ASCII character under POSIX).
 
-     LC_ALL=en_US.UTF-8 jank --module-path src:<hosts.edn :jank roots>:test run-main eve.runner.jank-main -- test [ns ...]
+     LC_ALL=en_US.UTF-8 CPLUS_INCLUDE_PATH=adapters/completion/jank/include \\
+       jank --module-path src:<hosts.edn :jank roots>:test run-main eve.runner.jank-main -- test [ns ...]
 
    eve.host-completion loads first: a namespace sees the names the completion interns into clojure.core (deftype,
    defprotocol, ...) only when it is made after them. Exits through eve.process/exit! (the exit hooks, a flush, _exit:

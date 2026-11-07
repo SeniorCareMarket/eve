@@ -4,7 +4,13 @@
    or seq to jank). Run by bb test:jank eve.host-completion-test (its root, adapters/completion/jank/test, is on the
    runner's module path)."
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.host-completion :as hc]))
+            [eve.host-completion :as hc]
+            [eve.vec :as v]
+            [eve.list :as l]
+            [eve.map :as m]
+            [eve.set :as s]
+            [eve.sorted :as so]
+            [eve.region :as rg]))
 
 (defprotocol Pair (-a [p]) (-b [p]))
 (defprotocol Eq (-eqv [x y]) (-hsh [x]))
@@ -50,18 +56,112 @@
     (is (not (instance? R1 m)))))
 
 (deftest equality-and-hash-reach-the-types-own
-  (hc/set-type-equality! {:equiv -eqv :hash -hsh :equiv-proto Eq :hash-proto Eq})
-  (testing "after: P1's own equivalence and hash, on jank's inlined = and hash and as a set member and map key"
-    (is (= (->P1 1 2) (->P1 1 2)))
-    (is (not= (->P1 1 2) (->P1 1 3)))
-    (is (= (->P1 1 2) (->P1 1 2) (->P1 1 2)))
-    (is (= (hash (->P1 1 2)) (hash (->P1 1 2))))
-    (is (not= (hash (->P1 1 2)) (hash (->P1 2 1))))
-    (is (contains? #{(->P1 1 2)} (->P1 1 2)))
-    (is (= :v (get {(->P1 3 4) :v} (->P1 3 4))))
-    (is (not= (->P2 1 2) (->P2 1 2)) "P2 has no Eq: identity")
-    (is (not= (->P1 1 2) {:a 1 :b 2}))
-    (is (not= (->P1 1 2) (->R1 1 2)))))
+  ;; the type equality is global: this test restores the one it found (eve's own, once eve's types load in this run --
+  ;; an-eve-vector-is-equal-to-itself compares eve values after it)
+  (let [prev (hc/current-type-equality)]
+    (try
+      (hc/set-type-equality! {:equiv -eqv :hash -hsh :equiv-proto Eq :hash-proto Eq})
+      (testing "after: P1's own equivalence and hash, on jank's inlined = and hash and as a set member and map key"
+        (is (= (->P1 1 2) (->P1 1 2)))
+        (is (not= (->P1 1 2) (->P1 1 3)))
+        (is (= (->P1 1 2) (->P1 1 2) (->P1 1 2)))
+        (is (= (hash (->P1 1 2)) (hash (->P1 1 2))))
+        (is (not= (hash (->P1 1 2)) (hash (->P1 2 1))))
+        (is (contains? #{(->P1 1 2)} (->P1 1 2)))
+        (is (= :v (get {(->P1 3 4) :v} (->P1 3 4))))
+        (is (not= (->P2 1 2) (->P2 1 2)) "P2 has no Eq: identity")
+        (is (not= (->P1 1 2) {:a 1 :b 2}))
+        (is (not= (->P1 1 2) (->R1 1 2))))
+      (finally (hc/set-type-equality! prev)))))
+
+(deftest an-eve-vector-is-equal-to-itself
+  ;; Eve-in-cohost unit 6 (option 3): EveVector's (and EveList's) equiv asks (sequential? other); jank's own
+  ;; sequential? knows only jank's types, so (= v v) of an Eve vector answered false on jank (measured at 4e1126d55 and
+  ;; 984c5773a). The completion's sequential? answers the one object through eve.core's ISequential. Built as eve's own
+  ;; tests build them (eve.collection-hash-test); each check is (true? ...), so a failure prints a boolean, never an
+  ;; eve value.
+  (let [v (v/eve-vec [1 2 3])]
+    (is (true? (hc/object? v)))
+    (is (true? (sequential? v)))
+    (is (true? (= v v)) "(= v v)")
+    (is (true? (= v (v/eve-vec [1 2 3]))) "(= v w), w equal and distinct")
+    (is (false? (= v (v/eve-vec [1 2 4]))) "(= v u), u unequal")
+    (is (true? (= v [1 2 3])) "(= v host)")
+    (is (true? (= [1 2 3] v)) "(= host v)")
+    (is (true? (= v (into [] v))) "(= v (into [] v))"))
+  (let [el (l/eve-list [1 2 3])]
+    (is (true? (= el el)) "(= l l), an eve list"))
+  (let [m (m/hash-map :a 1 :b 2)]
+    (is (false? (sequential? m)))
+    (is (true? (= m m)) "(= m m)"))
+  (let [st (s/hash-set 1 2 3)]
+    (is (true? (= st st)) "(= s s)")))
+
+;; Eve-in-cohost unit 6 (option 3), the divergence table: jank's own core predicates, lookups and calls on an eve value
+;; answer as Eve's types do on the JVM -- by the instance's tag's protocol (the completion's predicate re-roots and the
+;; one object's slots 4, 6, 9, 10, 11). Each check a boolean, so a failure never prints an eve value; a throw the JVM
+;; makes is a throw here (caught).
+(defn- threw? [f] (try (f) false (catch jank.runtime.object_ref _ true) (catch std.exception _ true)))
+
+(deftest eve-values-answer-jank-core-as-on-the-jvm
+  (let [v (v/eve-vec [1 2 3])]
+    (is (true? (and (coll? v) (counted? v) (vector? v) (sequential? v) (associative? v) (indexed? v) (reversible? v)
+                    (seqable? v) (ifn? v))) "vector predicates")
+    (is (true? ((deref #'coll?) v)) "coll? through the var")
+    (is (false? (or (map? v) (set? v) (seq? v) (list? v))) "vector: not a map, set, seq or list")
+    (is (true? (and (= 1 (get v 0)) (= :nf (get v 9 :nf)) (= 1 (nth v 0)) (= :nf (nth v 99 :nf)) (contains? v 0)
+                    (= [0 1] (find v 0)) (= 1 (v 0)))) "vector lookups and call"))
+  (let [m (m/hash-map :a 1 :b 2)]
+    (is (true? (and (map? m) (coll? m) (counted? m) (associative? m) (ifn? m))) "map predicates")
+    (is (true? (and (= 1 (get m :a)) (= 1 (m :a)) (= [:a 1] (find m :a)) (contains? m :a) (not (contains? m :z))))
+        "map lookups and call")
+    (is (true? (and (threw? #(nth m 0)) (threw? #(nth m 99 :nf)))) "nth on a map throws, as on the JVM"))
+  (let [st (s/hash-set 1 2 3)]
+    (is (true? (and (set? st) (coll? st) (counted? st))) "set predicates")
+    (is (true? (and (= 1 (get st 1)) (= 1 (st 1)) (contains? st 1) (not (contains? st 9)))) "set lookups and call")
+    (is (true? (and (= st #{1 2 3}) (= #{1 2 3} st) (= 3 (count (into [] st))))) "= with jank's set; into")
+    (is (true? (threw? #(find st 1))) "find on a set throws, as on the JVM"))
+  (let [l (l/eve-list [1 2 3])]
+    (is (true? (and (seq? l) (list? l) (coll? l) (counted? l))) "list predicates")
+    (is (true? (and (= 1 (nth l 0)) (= :nf (nth l 99 :nf)))) "nth on a list")
+    (is (true? (and (threw? #(contains? l 0)) (threw? #(find l 0)))) "contains? and find on a list throw"))
+  (let [r (rg/make-heap-region 64)]
+    (is (false? (or (seqable? r) (ifn? r) (coll? r))) "a region: not seqable, not a fn, not a collection")
+    (is (true? (and (threw? #(contains? r 0)) (threw? #(find r 0)) (threw? #(nth r 99 :nf)))) "lookups on a region throw"))
+  (testing "Lane M's identity audit groups"
+    (is (true? (= (s/hash-set inc) (s/hash-set inc))) "B-SET: a set holding a fn = an equal one")
+    (is (true? (and (= (so/sorted-set 1 2 3) (s/hash-set 1 2 3)) (= (s/hash-set 1 2 3) (so/sorted-set 1 2 3))))
+        "B-SET-X: a sorted set = a hash set, both ways"))
+  ;; (B-VEC-ENTRY needs clojure.core/conj routed for an eve map, which this tree does not do: the release line's class)
+  (testing "jank's own values keep jank's answers"
+    (is (true? (and (coll? [1]) (vector? [1]) (seq? '(1)) (seqable? [1]) (map? {}) (set? #{}) (list? '(1)))))
+    (is (false? (or (coll? 1) (vector? '(1)) (seq? [1]) (seqable? 1))))))
+
+;; Eve-in-cohost unit 6, the identity table's refinements (lane M, 2026-11-06): (a) the per-(predicate, tag) answer cache
+;; never answers from a stale row -- a protocol extended to a type at runtime changes the answer at once; (b) count of an
+;; eve instance whose type extends ICounted is its own -count. Plain6 is extended in the test, after its answers were
+;; asked (and cached).
+(deftype Plain6 [a])
+
+(deftest an-extension-at-runtime-is-never-answered-stale
+  (let [x (->Plain6 1)]
+    (is (true? (and (false? (coll? x)) (false? (counted? x)))) "before: no ICollection, no ICounted (answers cached)")
+    (is (true? (threw? #(count x))) "before: count walks its seq, and it has none")
+    (extend-type Plain6
+      eve.core/ICollection (-conj [c o] c)
+      eve.core/ICounted (-count [_] 42))
+    (is (true? (and (coll? x) (counted? x))) "after extend-type: the new answers, not the cached ones")
+    (is (= 42 (count x)) "after: count is its own -count")
+    (is (true? (and ((deref #'coll?) x) (= 42 ((deref #'count) x)))) "and through the vars"))
+  (let [v (v/eve-vec [1 2 3 4 5 6 7 8])]
+    (is (= 8 (count v)) "an eve vector's count: its own -count")))
+
+;; Eve-in-cohost unit 6: the two printer vars the completion adds to jank's clojure.core are dynamic as Clojure defines
+;; them (binding them threw "Can't dynamically bind non-dynamic var" in cohost's booted core: intern sets only the meta,
+;; on jank as on the JVM); a binding is seen inside it and gone after it.
+(deftest the-printer-vars-are-dynamic
+  (is (= [2 1] (binding [*print-length* 2 *print-level* 1] [*print-length* *print-level*])))
+  (is (= [nil nil] [*print-length* *print-level*])))
 
 (deftest a-mutable-field-and-a-printer
   (deftype Cell [^:mutable v] Pair (-a [_] v) (-b [_] (set! v (inc v)) v))
