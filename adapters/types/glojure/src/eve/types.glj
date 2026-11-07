@@ -189,6 +189,14 @@
 (eve.host-completion/set-type-equality!
  {:equiv eve.core/-equiv :hash eve.core/-hash :equiv-proto eve.core/IEquiv :hash-proto eve.core/IHash})
 
+;; collection access on a type (the completion's hook): clojure.core's get, assoc, contains?, count
+;; and seq through eve.core's protocols
+(eve.host-completion/set-coll-dispatch!
+ {:lookup eve.core/-lookup :assoc eve.core/-assoc :contains-key? eve.core/-contains-key?
+  :count eve.core/-count :seq eve.core/seq
+  :protocols {:lookup eve.core/ILookup :assoc eve.core/IAssociative :contains-key? eve.core/IAssociative
+              :count eve.core/ICounted :seq eve.core/ISeqable}})
+
 ;; a map type's map methods (eve's Go types package, impls/glojure/types): eve.core's, which reach the type's own
 (defn- print-map [m] (pr-str (into {} (eve.core/seq m))))
 

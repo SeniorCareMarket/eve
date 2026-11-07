@@ -23,6 +23,11 @@
    - defprotocol and extend: glojure's protocol is a multimethod per method on class, its impls wrapped in variadic
      fns that apply them (~3 µs a call); a protocol defined after this has fixed-arity method fns, each caching the
      impl it found for a class, and extend writes the protocol's table (glojure's own protocols keep glojure's).
+   - a deftype/reify naming a JVM interface (clojure.lang.ILookup and kin, as plain Clojure code writes them):
+     the interface goes onto eve.core's protocols, through eve.deftype-proto.proto-map's table — the one eve's
+     types adapter translates eve-deftypes by — or onto this completion's own for the atom interfaces.
+   - get, assoc, contains?, count and seq on a type: through eve.core's protocols, once eve's types adapter
+     names the dispatch (set-coll-dispatch!); a record's own answers are its fields'.
 
    Calls compiled after this, in any namespace: each is re-rooted (an :inline one loses its inlining first).")
 
@@ -198,6 +203,14 @@
 (intern 'clojure.core 'satisfies? satisfies?)
 (intern 'clojure.core 'extends? extends?)
 
+;; The clojure.core$<fn> names: on the JVM they resolve as the AOT classes of clojure.core's fns and
+;; portable code uses them as :tag hints (datascript's patch-tag tags 'number as clojure.core$long).
+;; glojure has no such classes; the names are interned here as the fns themselves — a tag is a hint,
+;; and this completion strips tags before they can act.
+(intern 'clojure.core 'clojure.core$long clojure.core/long)
+(intern 'clojure.core 'clojure.core$double clojure.core/double)
+(intern 'clojure.core 'clojure.core$boolean clojure.core/boolean)
+
 ;; ---------------------------------------------------------------------------
 ;; deftype
 ;; ---------------------------------------------------------------------------
@@ -211,6 +224,58 @@
   "x is an instance of a type deftype or reify made."
   [x]
   (and (instance? clojure.lang.IRecord x) (contains? @deftype-types (class x))))
+
+;; ---------------------------------------------------------------------------
+;; Collection access on a type: clojure.core's get, assoc, contains?, count
+;; and seq answer through eve.core's protocols for a type extended to them
+;; (a record's own answers are its fields'). The dispatch is named by eve's
+;; types adapter once eve.core exists (set-coll-dispatch!); before that, and
+;; for anything not a type, glojure's own answers stand.
+;; ---------------------------------------------------------------------------
+
+(def ^:private coll-dispatch (volatile! nil))
+
+(defn set-coll-dispatch!
+  "m: {:lookup f :assoc f :contains-key? f :count f :seq f
+       :protocols {:lookup p :assoc p :contains-key? p :count p :seq p}}."
+  [m]
+  (vreset! coll-dispatch m))
+
+(defn- type-dispatch
+  "The dispatch fn of kind for x, when x is a type the kind's protocol has been extended to."
+  [kind x]
+  (let [d @coll-dispatch]
+    (when (and d (deftype-instance? x) (satisfies? (get (:protocols d) kind) x))
+      (get d kind))))
+
+(alter-meta! #'clojure.core/get dissoc :inline)
+(alter-var-root #'clojure.core/get
+  (fn [core]
+    (fn ([m k] (if-let [f (type-dispatch :lookup m)] (f m k) (core m k)))
+        ([m k nf] (if-let [f (type-dispatch :lookup m)] (f m k nf) (core m k nf))))))
+
+(alter-meta! #'clojure.core/assoc dissoc :inline)
+(alter-var-root #'clojure.core/assoc
+  (fn [core]
+    (fn ([m] m)
+        ([m k v] (if-let [f (type-dispatch :assoc m)] (f m k v) (core m k v)))
+        ([m k v & kvs] (let [ret (if-let [f (type-dispatch :assoc m)] (f m k v) (core m k v))]
+                         (if kvs (apply clojure.core/assoc ret kvs) ret))))))
+
+(alter-meta! #'clojure.core/contains? dissoc :inline)
+(alter-var-root #'clojure.core/contains?
+  (fn [core]
+    (fn [m k] (if-let [f (type-dispatch :contains-key? m)] (f m k) (core m k)))))
+
+(alter-meta! #'clojure.core/count dissoc :inline)
+(alter-var-root #'clojure.core/count
+  (fn [core]
+    (fn [x] (if-let [f (type-dispatch :count x)] (f x) (core x)))))
+
+(alter-meta! #'clojure.core/seq dissoc :inline)
+(alter-var-root #'clojure.core/seq
+  (fn [core]
+    (fn [x] (if-let [f (type-dispatch :seq x)] (f x) (core x)))))
 
 ;; A record is a map to glojure's core: a type is not. map?, coll?, associative?, counted?, seqable? and record? are
 ;; false for one (eve's shared code tells a host collection from a type by them: d/eve->clj pours a map? into a map,
@@ -484,6 +549,64 @@
    eve's types adapter gives a type a printer of its own)."
   '#{Object java.lang.Object})
 
+(def ^:private completion-interface-map
+  "The JVM interfaces whose impls go onto this completion's own protocols, each method's name there — the
+   same table eve's types adapter keeps for eve-deftypes (adapters/types/glojure: completion-interfaces)."
+  '{clojure.lang.IDeref {:protocol eve.host-completion/IDeref :methods {deref -deref}}
+    clojure.lang.IBlockingDeref {:protocol eve.host-completion/IBlockingDeref :methods {deref -deref-within}}
+    clojure.lang.IAtom {:protocol eve.host-completion/IAtom
+                        :methods {swap -swap reset -reset compareAndSet -compare-and-set}}
+    clojure.lang.IAtom2 {:protocol eve.host-completion/IAtom2 :methods {swapVals -swap-vals resetVals -reset-vals}}
+    clojure.lang.IPending {:protocol eve.host-completion/IPending :methods {isRealized -realized?}}})
+
+(defn- proto-map-lookup
+  "eve.deftype-proto.proto-map's lookup, loaded on first use: the canonical CLJ -> CLJS protocol table
+   eve's types adapter translates eve-deftypes by. nil when it cannot be loaded."
+  [sym]
+  (try (require 'eve.deftype-proto.proto-map)
+       ((resolve 'eve.deftype-proto.proto-map/lookup) sym)
+       (catch Throwable _ nil)))
+
+(defn- rename-methods
+  "methods ((name args & body) ...) with each name renamed through renames {old new}; a name with no
+   entry is dropped (it has no counterpart on this seat)."
+  [methods renames]
+  (keep (fn [[nm & more]] (when-let [n (get renames nm)] (cons n more))) methods))
+
+(defn- translate-impl
+  "One [protocol methods] impl as this seat takes it: [[protocol methods] ...] and whether an entry names
+   an eve.core protocol. A JVM interface goes onto eve.core's protocols, through proto-map's table
+   (methods renamed, a split protocol split, a CLJ-only one dropped), or onto this completion's own for
+   the atom interfaces; any other protocol passes as written."
+  [[p ms]]
+  (cond
+    (contains? completion-interface-map p)
+    (let [entry (get completion-interface-map p)]
+      [[[(:protocol entry) (rename-methods ms (:methods entry))]] false])
+
+    :else
+    (if-let [mapping (proto-map-lookup p)]
+      (cond (:clj-only? mapping) [[] false]
+            (:marker? mapping) [[[(symbol "eve.core" (name (:cljs-proto mapping))) []]] true]
+            :else
+            [(for [[proto ms2] (group-by (fn [[nm]] (when-let [info (get (:methods mapping) nm)]
+                                                      (or (:cljs-proto-override info) (:cljs-proto mapping))))
+                                         ms)
+                   :when proto]
+               [(symbol "eve.core" (name proto))
+                (keep (fn [[nm & more]] (when-let [cn (:cljs-name (get (:methods mapping) nm))]
+                                          (cons cn more))) ms2)])
+             true])
+      [[[p ms]] false])))
+
+(defn- translate-impls
+  "A deftype/reify's impls as this seat takes them (translate-impl on each): [impls eve-core?]."
+  [impls]
+  (reduce (fn [[out core?] impl]
+            (let [[entries c?] (translate-impl impl)]
+              [(into out entries) (or core? c?)]))
+          [[] false] impls))
+
 (defmacro deftype
   "(deftype T [fields...] Protocol (method [this ...] body...) ...): a record extended to its protocols (above). ->T
    and T__make build one, a cell made for each mutable field. With ^:eve/map on T it stands in for a map: a Go value
@@ -494,7 +617,7 @@
         type-name (vary-meta type-name dissoc :eve/map)
         names (mapv untag fields)
         cs (set (map untag (filter mutable-field? fields)))
-        impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+        [impls needs-eve-core?] (translate-impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs)))
         args (mapv #(symbol (str "a" %)) (range (count names)))
         factory `(fn ~args (new ~type-name ~@(map (fn [f a] (if (contains? cs f) `(clojure.core/volatile! ~a) a))
                                                  names args)))]
@@ -509,6 +632,7 @@
                    (~'kv-reduce [c# f# init#] (reduce (fn [a# e#] (f# a# (key e#) (val e#))) init# c#))))
             `(do (clojure.core/defrecord ~type-name ~names)
                  (swap! deftype-types conj ~type-name)))
+         ~@(when needs-eve-core? [`(clojure.core/require 'eve.core)])
          (def ~(symbol (str (name type-name) "__make")) ~factory)
          ~@(when (or map-mode? (seq cs)) [`(def ~(symbol (str "->" (name type-name))) ~factory)])
          ~@(for [[p methods] impls]
@@ -524,16 +648,31 @@
 
 (def ^:private reify-types (atom {}))
 
+(def ^:private fn-interfaces
+  "The interfaces a reify of nothing else is a function: a comparator and the fn interfaces. Such a reify
+   is the fn itself on this seat (its compare/invoke bodies the fn's arities)."
+  '#{java.util.Comparator clojure.lang.IFn IFn$OOL clojure.lang.IFn$OOL})
+
 (defmacro reify
   "(reify Protocol (method [this ...] body...) ...): an instance of a record made once for this form (at its
-   expansion), extended to the protocols with methods that call the instance's closures."
+   expansion), extended to the protocols with methods that call the instance's closures. A reify of only
+   the fn interfaces (fn-interfaces) is a plain fn of its compare (else invoke) arities."
   [& specs]
-  (let [impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+  (let [raw-impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))]
+    (if (and (seq raw-impls)
+             (every? (fn [[p]] (or (contains? fn-interfaces p) (= "IFn$OOL" (name p)))) raw-impls))
+      (let [methods (mapcat second raw-impls)
+            compares (filter #(= 'compare (first %)) methods)
+            chosen (if (seq compares) compares (filter #(= 'invoke (first %)) methods))]
+        `(clojure.core/fn ~@(for [[_ args & body] chosen]
+                              (list* (mapv untag (rest args)) body))))
+      (let [[impls needs-eve-core?] (translate-impls raw-impls)
         k [(str *ns*) (pr-str specs)]
         tname (or (get @reify-types k)
                   (let [t (gensym "reify__")]
                     (eval `(do (clojure.core/defrecord ~t [~'fns])
                                (swap! deftype-types conj ~t)
+                               ~@(when needs-eve-core? [`(clojure.core/require 'eve.core)])
                                ~@(for [[p methods] impls]
                                    `(clojure.core/extend-type ~t ~p
                                       ~@(for [[nm entries] (group-by first methods)]
@@ -547,7 +686,7 @@
         fns (into {} (for [[_ methods] impls [nm entries] (group-by first methods)]
                        [(list 'quote nm)
                         (cons 'clojure.core/fn (for [[_ args & body] entries] (list* (mapv untag args) body)))]))]
-    `(new ~(symbol (str *ns*) (name tname)) ~fns)))
+    `(new ~(symbol (str *ns*) (name tname)) ~fns)))))
 
 (intern 'clojure.core (with-meta 'reify {:macro true}) @#'reify)
 (.SetMacro #'clojure.core/reify)
