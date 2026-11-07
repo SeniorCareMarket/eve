@@ -42,14 +42,59 @@
 ;; 2^53 — the portable XXH3-128's 32-bit limbs, and eve's type-ids through it (eve.deftype.type-id-steps-test: the
 ;; digest was the first step to leave, so every type-id differed on this host). So + - * are pointed at jank's own
 ;; promoting ops, the ones +' -' *' call, both as the 2-arity inline and as the var: exact as the JVM's long
-;; arithmetic below 2^63 (past it they promote where the JVM throws), doubles unchanged (measured:
-;; eve/probes/jank-xxh3/probe3.cljc).
-(alter-meta! #'clojure.core/+ assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_add l r)))
-(alter-meta! #'clojure.core/- assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_sub l r)))
-(alter-meta! #'clojure.core/* assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_mul l r)))
-(alter-var-root #'clojure.core/+ (fn [_] +'))
-(alter-var-root #'clojure.core/- (fn [_] -'))
-(alter-var-root #'clojure.core/* (fn [_] *'))
+;; arithmetic below 2^63, doubles unchanged (measured: eve/probes/jank-xxh3/probe3.cljc). Past 2^63 they throw, as the
+;; JVM's + - * do, when both operands are fixed-width integers (a big integer operand promotes, as the JVM's BigInt
+;; contagion; +' -' *' keep promoting): the promoting op's result is checked -- a big integer from two fixed-width
+;; operands is the JVM's ArithmeticException (Eve-in-cohost unit 6, coordinator/lane M 2026-11-06 ET: cohost's checked-i64
+;; battery rows, measured: (+ Long/MAX 1) promoted to 9223372036854775808N here). What is thrown is jank's own kind for
+;; an integer overflow: the string "integer overflow" as a jank object -- jank's inc of Long/MAX throws the string
+;; "Overflow on increment." (measured: caught by cpp/jank.runtime.object_ref, string? true), the series build's + - *
+;; throw "integer overflow" (cohost's adapter note: runtime/core/math.cpp throw_integer_overflow), and a host keyed on
+;; that message (cohost's :exception-class) reads it as the JVM's ArithmeticException, where an ex-info reads as a
+;; RuntimeException. Thrown from a var, not a literal: jank compiles (throw "...") to a C++ throw of a char const* that no
+;; jank catch takes (measured: the process aborts, "terminate called after throwing an instance of 'char const*'", 134;
+;; aset-* below). The common path stays inline: the promoting op and one type compare; only a
+;; big-integer result reaches a call.
+(def ^:private integer-overflow "integer overflow")
+(defn- fixed-width? [x]
+  (let [t (cpp/.get_type (cpp/cast cpp/jank.runtime.object_ref x))]
+    (if (cpp/== cpp/jank.runtime.object_type.integer t)
+      true
+      (if (cpp/== cpp/jank.runtime.object_type.small_integer t) true false))))
+(defn overflow-checked
+  "s, a promoting op's big-integer result over operands a and b: the string \"integer overflow\" thrown when both were
+   fixed-width integers (the JVM's long arithmetic past 2^63), else s (a big integer operand: the JVM's BigInt contagion)."
+  [s a b]
+  (if (fixed-width? a)
+    (if (fixed-width? b) (throw integer-overflow) s)
+    s))
+;; The inline's let* sits under (if true ... nil): jank 0.1 fails C++ codegen for a let* that is an argument of a fn's
+;; direct self-call ("use of undeclared identifier"; raw jank, no Eve: (defn f [n x] (if (< n 1) x (f (dec n) (let [y
+;; (+ x 1)] y)))) -- unit 6's IDENTITY-TABLE.md section 6), so a bare let* inline breaks every (f ... (+ x 1)) recursion
+;; (eve.map's hamt-assoc, measured). Under the if, the same let* compiles there (measured), and at -O3 the if costs
+;; nothing: 1e7 adds in a loop 4.1-5.2 ns per add wrapped vs 4.2-4.5 unwrapped, 3.5-4.6 for the bare promoting op;
+;; as a self-call argument 20.8-21.3 ns vs 19.4-20.1 (raw jank, JIT, step3/arith/addbench3.jank, scratch).
+(defn- checked-inline [op]
+  (fn* [l r]
+       (let [a (gensym "a") b (gensym "b") s (gensym "s")]
+         (list 'if true
+               (list 'let* [a l b r s (list op a b)]
+                     (list 'if (list 'cpp/== 'cpp/jank.runtime.object_type.big_integer (list 'cpp/.get_type s))
+                           (list 'eve.host-completion/overflow-checked s a b)
+                           s))
+               nil))))
+(defn- add2 [a b] (let* [s (cpp/jank.runtime.promoting_add a b)]
+                    (if (cpp/== cpp/jank.runtime.object_type.big_integer (cpp/.get_type s)) (overflow-checked s a b) s)))
+(defn- sub2 [a b] (let* [s (cpp/jank.runtime.promoting_sub a b)]
+                    (if (cpp/== cpp/jank.runtime.object_type.big_integer (cpp/.get_type s)) (overflow-checked s a b) s)))
+(defn- mul2 [a b] (let* [s (cpp/jank.runtime.promoting_mul a b)]
+                    (if (cpp/== cpp/jank.runtime.object_type.big_integer (cpp/.get_type s)) (overflow-checked s a b) s)))
+(alter-meta! #'clojure.core/+ assoc :inline (checked-inline 'cpp/jank.runtime.promoting_add))
+(alter-meta! #'clojure.core/- assoc :inline (checked-inline 'cpp/jank.runtime.promoting_sub))
+(alter-meta! #'clojure.core/* assoc :inline (checked-inline 'cpp/jank.runtime.promoting_mul))
+(alter-var-root #'clojure.core/+ (fn [_] (fn ([] 0) ([x] (+' x)) ([x y] (add2 x y)) ([x y & more] (reduce add2 (add2 x y) more)))))
+(alter-var-root #'clojure.core/- (fn [_] (fn ([x] (sub2 0 x)) ([x y] (sub2 x y)) ([x y & more] (reduce sub2 (sub2 x y) more)))))
+(alter-var-root #'clojure.core/* (fn [_] (fn ([] 1) ([x] (*' x)) ([x y] (mul2 x y)) ([x y & more] (reduce mul2 (mul2 x y) more)))))
 
 ;; / of two integers truncates on jank for every integer box ((/ 1 2) → 0, (/ 1N 2) → 0N; rationalize is a "TODO:
 ;; port" stub; measured: eve/probes/jank-ratio), so eve.numeric-tags-test's ratios never were ratios (5 FAILs). jank

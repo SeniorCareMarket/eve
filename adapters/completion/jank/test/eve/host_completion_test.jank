@@ -172,3 +172,38 @@
   (hc/set-printer! P2 (fn [x] (str "#P2[" (-a x) " " (-b x) "]")))
   (is (= "#P2[1 2]" (str (->P2 1 2))))
   (is (= "[#P2[1 2]]" (pr-str [(->P2 1 2)]))))
+
+;; + - * are Clojure's on fixed-width integers: exact within i64 (jank's small integers wrap at 32 bits, upstream defect
+;; 27), and past 2^63 the throw jank gives an integer overflow -- the string "integer overflow", which a host keyed on it
+;; (cohost's :exception-class) reads as the JVM's ArithmeticException -- through the 2-arity inline, a fn's parameters and
+;; the var alike. +' -' *' and a big-integer operand promote; doubles are unchanged.
+(defn- overflow [f] (try (f) (catch cpp/jank.runtime.object_ref e (if (= "integer overflow" e) :overflow [:thrown (pr-str e)]))))
+(defn- add2 [a b] (+ a b))
+(defn- mul2 [a b] (* a b))
+(defn- sub2 [a b] (- a b))
+;; + as an argument of the fn's own self-call: the inline compiles there (a bare let* inline does not on jank 0.1)
+(defn- count-up [n acc] (if (< n 1) acc (count-up (dec n) (+ acc 1))))
+(deftest plus-minus-times-are-checked-past-2-63
+  (testing "two fixed-width integers past 2^63 throw \"integer overflow\""
+    (is (= :overflow (overflow #(add2 9223372036854775807 1))))
+    (is (= :overflow (overflow #(mul2 3037000500 3037000500))))
+    (is (= :overflow (overflow #(sub2 (sub2 -9223372036854775807 1) 1))))
+    (is (= :overflow (overflow #(* (count "abcabc") 4611686018427387904))))
+    (is (= :overflow (overflow #(+ (identity 9223372036854775807) 1))))
+    (is (= :overflow (overflow #(apply + [9223372036854775807 1]))))
+    (is (= :overflow (overflow #(apply - [-9223372036854775807 1 1]))))
+    (is (= :overflow (overflow #(reduce * [4294967296 4294967296])))))
+  (testing "exact within i64"
+    (is (= 2147483648 (+ 2147483647 1)))
+    (is (= 2147483648 (add2 2147483647 1)))
+    (is (= 4294967296 (mul2 65536 65536)))
+    (is (= -9223372036854775807 (inc (sub2 -9223372036854775807 1))))
+    (is (= 6 (+ 1 2 3)))
+    (is (= 1000 (count-up 1000 0)))
+    (is (= -5 (- 5))))
+  (testing "+' -' *' and a big-integer operand promote; doubles unchanged"
+    (is (< 9223372036854775807 (+' 9223372036854775807 1)))
+    (is (< 9223372036854775807 (*' 3037000500 3037000500)))
+    (is (< 9223372036854775807 (+ (bigint 9223372036854775807) 1)))
+    (is (= 1.5 (+ 1 0.5)))
+    (is (= 0.25 (* 0.5 0.5)))))
