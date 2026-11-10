@@ -1,4 +1,5 @@
-{:deps {org.clojure/clojure {:mvn/version "1.12.0"}
+{:deps {datascript-on-eve/datascript-on-eve {:local/root "../lib-ds"}
+        org.clojure/clojure {:mvn/version "1.12.0"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}
         org.clojure/test.check {:mvn/version "1.1.1"}
         cheshire {:mvn/version "5.12.0"}

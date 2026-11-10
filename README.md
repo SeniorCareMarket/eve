@@ -121,6 +121,30 @@ Five host runtimes — JVM, babashka, jolt, nbb and glojure — have transacted 
 such shared database in the flagship test. The guide covers the day-to-day API, what eve provides
 underneath (the journal, the sorted-set indexes, the seal), the porting deltas, and what is proven where.
 
+The port is a **library**, consumed as a dependency — the pattern this
+release demonstrates for libraries made for Eve. Its own
+[contract-test/lib-ds/deps.edn](contract-test/lib-ds/deps.edn) declares
+it and everything it needs (Eve, the sorted-set library, extend-clj).
+From your own project:
+
+```clojure
+;; deps.edn
+{:deps {datascript-on-eve/datascript-on-eve
+        {:git/url "https://github.com/SeniorCareMarket/eve"
+         :git/tag "v0.9.3.1"
+         :deps/root "contract-test/lib-ds"}}}
+```
+
+(In this repo the same lib is named `{:local/root "contract-test/lib-ds"}` —
+the contract drivers under `contract-test/drivers/` consume it exactly
+that way.)
+
+Beside it sits the release's other worked example: **the ants demo** —
+Rich Hickey's ants re-hosted on Eve's STM ([doc/stm.md](doc/stm.md)),
+every cell of the world a ref, one transaction per step, several hosts
+transacting against one shared world:
+[docs/stm-ants/](docs/stm-ants/).
+
 ## Hosts
 
 A host is a list of adapter roots, one row of [`hosts.edn`](hosts.edn); eve's shared code (`src/`) names none of them

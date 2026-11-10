@@ -99,6 +99,31 @@ Seated this way, two processes transact against the same refs: the
 shared clock hands out commit points both honour, and each ref's lock
 and history live in the shared domain, not in either process.
 
+## The worked example: the ants demo
+
+The example project for this STM — the peer of the
+[DataScript example](../docs/datascript-eve/GUIDE.md) — is the **ants
+demo**: Rich Hickey's `ants.clj` re-hosted on `eve.stm` as closely to
+the original as possible. Every cell of the world is a ref — its own
+Eve atom, its own contention domain — and one simulation step is one
+STM transaction spanning two cell refs: the cell an ant leaves and the
+cell it enters. It is the acceptance vehicle for the contention side of
+this design: several hosts, and several processes, transacting against
+the same world of refs at once.
+
+- The project: [`docs/stm-ants/`](../docs/stm-ants/) — the program at
+  [`ants.cljc`](../docs/stm-ants/ants.cljc), Hickey's original kept
+  beside it at `ants-original.clj` for comparison, the runner at
+  `demo/run.cljc`, and a host entry point per seat under `hosts/`.
+- The demo's own doc:
+  [`docs/stm-ants/demo/README.md`](../docs/stm-ants/demo/README.md).
+
+What it has proven so far: two-ref transfers under contention on
+Babashka; a jank member joining a running world; and a mixed-host run
+— JVM, Babashka, jolt and jank as members of one world — completing
+with its final audit clean (every ant and every food accounted for,
+no invariant violations).
+
 ## The API
 
 | Var | What |

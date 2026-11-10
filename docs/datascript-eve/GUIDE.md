@@ -196,3 +196,24 @@ set), `contract-test/lib-ds-deps/` (extend-clj), with drivers under
 `contract-test/drivers/`. Development happens in the
 private atom.broker repository; public repositories receive releases
 only, as collated snapshots, on the operator's word.
+
+It is consumed **as a dependency**, the way any library made for Eve
+is: each of the three directories carries its own `deps.edn`, and
+`contract-test/lib-ds/deps.edn` declares the port's deps (Eve, the
+sorted-set library, extend-clj) as `:local/root` deps. A consumer
+names the library, nothing else:
+
+```clojure
+;; in this repo
+{:deps {datascript-on-eve/datascript-on-eve {:local/root "contract-test/lib-ds"}}}
+
+;; from your own project (git dep; the nested :local/root deps
+;; resolve inside the checkout)
+{:deps {datascript-on-eve/datascript-on-eve
+        {:git/url "https://github.com/SeniorCareMarket/eve"
+         :git/tag "v0.9.3.1"
+         :deps/root "contract-test/lib-ds"}}}
+```
+
+The contract drivers under `contract-test/drivers/` consume it in the
+first form, from their own `deps.edn`.
