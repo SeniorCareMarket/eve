@@ -6,9 +6,10 @@
    Header layout: [type-id:u8 | pad:3 | cnt:i32 | head-off:i32] = 12 bytes
 
    Uses eve/deftype macro: CLJ protocol names, sio threaded everywhere."
-  (:refer-clojure :exclude [alength volatile! vswap! transient persistent! conj! bytes])
+  ;; :clje — callees' ^long return tags resolve in the CALLER's ns on clojerl; take eve.host's `long`.
+  (:refer-clojure :exclude [alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])])
   (:require
-   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes]]
+   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
     :refer [NIL_OFFSET]]

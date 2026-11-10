@@ -7,7 +7,10 @@
    array's, an eve value array's, a scalar root, an eve-deftype instance by its registered field layout), :map-node /
    :set-node (HAMT nodes and their inline values), [:vec shift base toff] (a vector's trie node), [:leaf n] (a
    vector's tail), :vblock (a serialized value block), :cell (a list cell), :varr (an eve value array's slots)."
+  ;; :clje — hu/popcount32's ^long return tag resolves in the CALLER's ns on clojerl; take eve.host's `long`.
+  #?@(:clje [(:refer-clojure :exclude [long])])
   (:require
+   #?@(:clje [[eve.host :refer [long]]])
    [eve.deftype-proto.serialize :as ser]
    [eve.hamt-util :as hu]
    [eve.slab-io :as slab]))
