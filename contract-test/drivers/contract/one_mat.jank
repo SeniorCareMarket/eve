@@ -1,0 +1,139 @@
+(ns contract.one-mat
+  "The contract job of contract.one -- open the domain, look the DB atom up,
+   install an empty DB when fresh, transact one entity, read the datoms back
+   -- with a residency mark after each step: the pages of the domain's own
+   files resident in this process (/proc/self/smaps, Rss summed over the
+   mappings whose path begins with the domain's base path -- the
+   ds-materialization lane's instrument, MATERIALIZATION.md §1), with the
+   process's VmRSS and its minor/major fault counts. The DataScript calls are
+   contract.one's, in its order; only the marks are added. jank only (C++
+   over /proc); the AOT entry dispatches here on `--mat`.
+
+     target/one --mat <fresh-db-dir>"
+  (:require [eve.atom :as atom] [datascript.core :as d] [eve.core :as e]
+            [eve.process :as proc]))
+
+(cpp/raw "
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/persistent_string.hpp>
+namespace eve_mat {
+  using namespace jank::runtime;
+  static std::string S(object_ref const o) {
+    auto const p(expect_object<obj::persistent_string>(o)->data);
+    return std::string(p.data(), p.size());
+  }
+  /* a mapping's header line starts with its hex address range; every field line
+     (Rss:, Pss:, Size:, VmFlags: ...) starts with an upper-case letter */
+  static bool header_line(std::string const &l) { return !l.empty() && std::isxdigit((unsigned char)l[0]) && !std::isupper((unsigned char)l[0]); }
+  static bool under(std::string const &l, std::string const &pre, std::string *path) {
+    auto const slash(l.find('/'));
+    if(slash == std::string::npos || l.compare(slash, pre.size(), pre) != 0) { return false; }
+    if(path) { *path = l.substr(slash); }
+    return true;
+  }
+  /* kB of Rss over the smaps mappings whose path begins with prefix */
+  long resident_kb_under(object_ref const prefix) {
+    std::string const pre(S(prefix));
+    std::ifstream in(\"/proc/self/smaps\");
+    std::string line; bool in_match = false; long kb = 0;
+    while(std::getline(in, line)) {
+      if(header_line(line)) { in_match = under(line, pre, nullptr); }
+      else if(in_match && line.compare(0, 4, \"Rss:\") == 0) { kb += std::atol(line.c_str() + 4); }
+    }
+    return kb;
+  }
+  /* one line per matching mapping: path rss_kb (the final mark's breakdown) */
+  object_ref resident_report_under(object_ref const prefix) {
+    std::string const pre(S(prefix));
+    std::ifstream in(\"/proc/self/smaps\");
+    std::string line, path; bool in_match = false; std::ostringstream out;
+    while(std::getline(in, line)) {
+      if(header_line(line)) { in_match = under(line, pre, &path); }
+      else if(in_match && line.compare(0, 4, \"Rss:\") == 0) { out << path << ' ' << std::atol(line.c_str() + 4) << '\\n'; }
+    }
+    std::string const s(out.str());
+    return make_box<obj::persistent_string>(jtl::immutable_string(s.data(), s.size()));
+  }
+  long vm_rss_kb() {
+    std::ifstream in(\"/proc/self/status\"); std::string line;
+    while(std::getline(in, line)) { if(line.compare(0, 6, \"VmRSS:\") == 0) { return std::atol(line.c_str() + 6); } }
+    return -1;
+  }
+  /* /proc/self/stat: field 10 (minflt) / 12 (majflt), counted from the token after the parenthesised comm (field 3) */
+  long fault_field(long which) {
+    std::ifstream in(\"/proc/self/stat\"); std::string s; std::getline(in, s);
+    auto const close(s.rfind(')'));
+    if(close == std::string::npos) { return -1; }
+    std::istringstream rest(s.substr(close + 2));
+    std::string tok;
+    for(long i = 3; i <= which; ++i) { if(!(rest >> tok)) { return -1; } }
+    return std::atol(tok.c_str());
+  }
+  long minflt() { return fault_field(10); }
+  long majflt() { return fault_field(12); }
+}
+")
+
+(defn- mark [label dir]
+  (println (pr-str {:mat label
+                    :domain-pages (quot (cpp/eve_mat.resident_kb_under (str dir)) 4)
+                    :vm-rss-kb (cpp/eve_mat.vm_rss_kb)
+                    :minflt (cpp/eve_mat.minflt)
+                    :majflt (cpp/eve_mat.majflt)})))
+
+(defn open-only
+  "Open (create) the domain and install the empty DB, then return: the
+   journal proof's first step — the fresh domain's .root is snapshotted after
+   this, so a later reopen over that stale root can only show the transacted
+   datum by installing the journal's newest record."
+  [dir]
+  (let [dom (atom/persistent-atom-domain dir)
+        a (atom/lookup-or-create-mmap-atom! dom "contract/ds-cli-update-db" nil)]
+    (when (nil? @a) (swap! a (fn [_] (d/empty-db))))
+    (println (pr-str {:mark :OPEN-ONLY :datoms (e/count (d/datoms @a :eavt))}))))
+
+(defn readback
+  "Reopen the domain and count the DB's datoms; no transact."
+  [dir]
+  (let [dom (atom/persistent-atom-domain dir)
+        a (atom/lookup-or-create-mmap-atom! dom "contract/ds-cli-update-db" nil)]
+    (println (pr-str {:mark :READBACK :datoms (if (nil? @a) :no-db (e/count (d/datoms @a :eavt)))
+                      :name (when (some? @a) (:name (d/entity @a 1)))}))))
+
+(defn one-16k
+  "contract.one's exact sequence with the domain created at 16,384
+   descriptors — the module-slab seat's default (process_slab.cljs
+   MAX_DESCRIPTORS), the count the compiled-ClojureScript row's domain is
+   created with (its .slab6: 524,352 B); the jank/JVM path defaults to
+   alloc.cljc's DEFAULT_MMAP_DESCRIPTORS = 1,048,576 (29,425,728 B) — 64×
+   the init-loop stores. Equal creation work for the apples-to-apples pair.
+   contract.one itself (J's source of record) is untouched."
+  [dir]
+  (let [dom (atom/persistent-atom-domain dir :coalesc-descriptors 16384)
+        a (atom/lookup-or-create-mmap-atom! dom "contract/ds-cli-update-db" nil)]
+    (when (nil? @a) (swap! a (fn [_] (d/empty-db))))
+    (swap! a (fn [db] (d/db-with db [{:db/id 1 :name "one" :age 1}])))
+    (println (pr-str {:mark :ONE-DONE :datoms (e/count (d/datoms @a :eavt)) :descriptors 16384}))))
+
+(defn -main [& [dir]]
+  (mark :start dir)
+  (let [dom (atom/persistent-atom-domain dir)
+        _ (mark :domain-open dir)
+        a (atom/lookup-or-create-mmap-atom! dom "contract/ds-cli-update-db" nil)
+        _ (mark :atom-lookup dir)]
+    (when (nil? @a) (swap! a (fn [_] (d/empty-db))))
+    (mark :empty-db-installed dir)
+    (swap! a (fn [db] (d/db-with db [{:db/id 1 :name "one" :age 1}])))
+    (mark :transacted dir)
+    (let [n (e/count (d/datoms @a :eavt))]
+      (mark :readback dir)
+      (println (pr-str {:mark :ONE-DONE :datoms n}))
+      (print (cpp/eve_mat.resident_report_under (str dir))))))

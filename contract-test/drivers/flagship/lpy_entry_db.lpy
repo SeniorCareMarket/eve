@@ -1,0 +1,17 @@
+(ns flagship.lpy-entry-db
+  ;; Partial basilisp entry proof: datascript.db only (load +
+  ;; transact + datoms + entity). datascript.core is blocked on
+  ;; basilisp at its ns form (see STATUS) — conn/query wait on
+  ;; that finding's owners.
+  (:require [datascript.db :as db]))
+
+(def base-tx (mapv (fn [i] {:db/id i :name (str "base-" i) :age (+ 20 i)})
+                   (range 1 11)))
+
+(defn -main [& args]
+  (let [d1 (db/db-with (db/empty-db) base-tx)
+        n (count (db/datoms d1 :eavt))
+        e5 (db/entity d1 5)]
+    (println :lpy-entry-db {:datoms n :e5-name (:name e5) :e5-age (:age e5)})
+    (println :lpy-entry-db-ok
+             (and (= 20 n) (= "base-5" (:name e5)) (= 25 (:age e5))))))
