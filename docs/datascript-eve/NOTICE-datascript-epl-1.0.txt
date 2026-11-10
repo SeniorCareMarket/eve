@@ -1,0 +1,47 @@
+NOTICE — DataScript for Eve
+===========================
+
+This library contains a port of DataScript, the immutable in-memory
+database and Datalog query engine for Clojure, ClojureScript and JS.
+
+  DataScript — Copyright (c) Nikita Prokopov (Tonsky) and contributors
+  Upstream:  https://github.com/tonsky/datascript
+  Version:   1.8.1 (upstream tag; master tip at fetch time, 2026-11-06)
+  License:   Eclipse Public License — v 1.0
+
+DataScript is distributed under the Eclipse Public License 1.0. When
+this library is distributed in source code form, a copy of the Eclipse
+Public License 1.0 must be included with each copy (EPL-1.0 §3), and
+copyright notices contained within the Program may not be removed or
+altered. Upstream carries the license text at the root of its
+repository (file `LICENSE`); in the Eve development trees it is
+preserved verbatim at `contract-test/vanilla-ds/LICENSE` and
+`contract-test/upstream-ds/LICENSE`. Any standalone distribution of
+the ported sources (`datascript.*` namespaces) MUST ship that EPL-1.0
+license text alongside them, together with this NOTICE.
+
+The Eve port (the `datascript.*` namespaces adapted to Eve values,
+Eve atoms and the Eve BTSet substrate, plus the porting deltas recorded
+in `contract-test/PORTING-DS.md`) is a Contribution by the Eve project.
+Every porting delta identifies itself with a `PORT DELTA` comment at
+the site of change, so the originator of each change is identifiable
+as EPL-1.0 §3 requires.
+
+Thank you to Nikita Prokopov for DataScript — a decade of careful
+design that made this port possible — and to the DataScript
+contributors whose work the upstream test suite carries.
+
+This library also contains:
+
+  persistent-sorted-set — Copyright (c) 2019 Nikita Prokopov
+  Upstream: https://github.com/tonsky/persistent-sorted-set
+  License:  MIT (see LICENSE-persistent-sorted-set-MIT.txt)
+  DataScript's indexes are persistent-sorted-sets; the Eve port of
+  the set (0.2.3, upgraded to the 0.3.1 DataScript 1.8.1 pins) is the
+  index substrate of this library.
+
+  extend-clj 0.1.0 — Copyright (c) 2023 Nikita Prokopov
+  Upstream: https://github.com/tonsky/extend-clj
+  License:  MIT (see LICENSE-extend-clj-MIT.txt)
+  Vendored verbatim, unmodified, as DataScript's second pinned
+  dependency.

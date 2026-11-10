@@ -80,6 +80,47 @@ The runnable examples carry on from here: [examples/](examples/) — an in-proce
 (`in_memory.cljc`), processes of different hosts on one disk domain (`disk_domain_processes.clj`), a network atom
 served by a gateway (`network_atom.cljc`).
 
+## DataScript on eve
+
+This release includes **DataScript** — Tonsky's immutable database and Datalog query engine
+(upstream DataScript 1.8.1) — ported near-verbatim onto eve's value substrate: the same namespaces,
+the same `datascript.core` API, the upstream test suite as its conformance bar. The port lives at
+[contract-test/lib-ds/](contract-test/lib-ds/); the full guide is
+[docs/datascript-eve/GUIDE.md](docs/datascript-eve/GUIDE.md), with provenance and licensing alongside it.
+
+Plain DataScript works exactly as upstream:
+
+```clojure
+(require '[datascript.core :as d])
+
+(def conn (d/create-conn))
+(d/transact! conn [{:db/id 1 :name "Ivan" :age 34}
+                   {:db/id 2 :name "Petr" :age 22}
+                   {:db/id 3 :name "Oleg" :age 34}])
+(d/q '[:find [?n ...] :where [?e :age 34] [?e :name ?n]] @conn)
+;; => ["Ivan" "Oleg"]
+```
+
+What eve changes is where the database can live. A DataScript DB on eve is an eve value, so storing
+it is placing it in an atom — including a persistent atom in a domain on disk, where any process, on
+any proven host, that opens the same domain derefs the same database, transacts against it in
+parallel with the others, and reads back byte-identical state (seals match):
+
+```clojure
+(require '[eve.atom :as atom] '[eve.host :refer [swap!]] '[datascript.core :as d])
+
+(def domain (atom/persistent-atom-domain "/path/to/domain-dir"))
+(def db-atom (atom/lookup-or-create-mmap-atom! domain "my/db" nil))
+(when (nil? @db-atom)
+  (swap! db-atom (fn [_] (d/empty-db schema))))
+(swap! db-atom (fn [db] (:db-after (d/with db [{:db/id 1 :name "Ivan" :age 34}]))))
+(d/q '[:find [?n ...] :where [?e :name ?n]] @db-atom)
+```
+
+Five host runtimes — JVM, babashka, jolt, nbb and glojure — have transacted in parallel into one
+such shared database in the flagship test. The guide covers the day-to-day API, what eve provides
+underneath (the journal, the sorted-set indexes, the seal), the porting deltas, and what is proven where.
+
 ## Hosts
 
 A host is a list of adapter roots, one row of [`hosts.edn`](hosts.edn); eve's shared code (`src/`) names none of them
