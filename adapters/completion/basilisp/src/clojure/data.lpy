@@ -1,0 +1,70 @@
+(ns clojure.data
+  "clojure.data on basilisp (part of Eve's basilisp completion,
+   adapters/completion/basilisp: basilisp ships no clojure.data): the
+   EqualityPartition and Diff protocols and diff, with stock Clojure's
+   semantics over Clojure values. Mirrors the glojure completion's
+   clojure.data (adapters/completion/glojure/src/clojure/data.glj),
+   written with core fns only. A JVM library type names these protocols
+   in its deftype spec (datascript's DB does: equality-partition is
+   :datascript/db, diff-similar diffs its indexes); without the
+   namespace the seat cannot resolve them and the library cannot load.")
+
+(defprotocol EqualityPartition
+  (equality-partition [x] "The equality partition of x: values in different partitions differ wholly."))
+
+(defprotocol Diff
+  (diff-similar [a b] "[only-in-a only-in-b in-both] of two values of one partition that a type diffs itself."))
+
+(extend-protocol EqualityPartition
+  nil (equality-partition [_] :nil)
+  python/object (equality-partition [_] :default))
+
+(declare diff)
+
+(defn- diff-sequential
+  [a b]
+  (loop [a (seq a) b (seq b) only-a [] only-b [] both []]
+    (cond
+      (and (nil? a) (nil? b)) [only-a only-b both]
+      (nil? a) [(when (seq only-a) only-a) (into only-b b) (when (seq both) both)]
+      (nil? b) [(into only-a a) (when (seq only-b) only-b) (when (seq both) both)]
+      :else (let [[da db dab] (diff (first a) (first b))]
+              (recur (next a) (next b)
+                     (if (some? da) (conj only-a da) only-a)
+                     (if (some? db) (conj only-b db) only-b)
+                     (if (some? dab) (conj both dab) both))))))
+
+(defn- diff-map
+  [a b]
+  (let [ks (into (set (keys a)) (keys b))]
+    (reduce (fn [[only-a only-b both] k]
+              (cond
+                (not (contains? b k)) [(assoc only-a k (get a k)) only-b both]
+                (not (contains? a k)) [only-a (assoc only-b k (get b k)) both]
+                :else (let [[da db dab] (diff (get a k) (get b k))]
+                        [(if (some? da) (assoc only-a k da) only-a)
+                         (if (some? db) (assoc only-b k db) only-b)
+                         (if (some? dab) (assoc both k dab) both)])))
+            [{} {} {}]
+            ks)))
+
+(defn diff
+  "Returns [only-in-a only-in-b in-both] for a and b, recursively over maps, sets and sequentials;
+   a member whose two sides are equal appears only in in-both, a member wholly different only in
+   the only-in side(s). Values whose equality partitions differ are wholly different."
+  [a b]
+  (if (= a b)
+    [nil nil a]
+    (let [epa (equality-partition a)
+          epb (equality-partition b)]
+      (if (not= epa epb)
+        [a b nil]
+        (cond
+          (satisfies? Diff a) (diff-similar a b)
+          (and (map? a) (map? b)) (let [[oa ob both] (diff-map a b)]
+                                    [(when (seq oa) oa) (when (seq ob) ob) (when (seq both) both)])
+          (and (set? a) (set? b)) [(let [d (into #{} (filter (fn [x] (not (contains? b x))) a))] (when (seq d) d))
+                                   (let [d (into #{} (filter (fn [x] (not (contains? a x))) b))] (when (seq d) d))
+                                   (let [i (into #{} (filter (fn [x] (contains? b x)) a))] (when (seq i) i))]
+          (and (sequential? a) (sequential? b)) (diff-sequential a b)
+          :else [a b nil])))))

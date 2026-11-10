@@ -298,6 +298,19 @@
 ;; hold / drop
 ;; ---------------------------------------------------------------------------
 
+(def ^:dynamic *touches*
+  "When bound to an atom of offsets, hold!/drop!/store! conj every block
+   offset whose descriptor row they mutate (and store!'s containing
+   block) into it. eve.atom's swap attempt binds it to collect the
+   commit's touched set for the ranged durability force
+   (eve.deftype-proto.alloc/sync-touched!); unbound — the default —
+   it costs one nil check per mutation."
+  nil)
+
+(defn- note-touch! [off]
+  (when *touches* (swap! *touches* conj off))
+  nil)
+
 (defn- hold-one!
   "One holder gains block off: :new when this hold made it counted (its references are the caller's to hold),
    :held, :norow (the block has no row: its references are held on every hold, and it is never freed here — a
@@ -317,13 +330,14 @@
                       (when (and (zero? c) (not (zero? (bit-and t F_QUEUED))))
                         (set-flag! row F_TAKEN))
                       (if (== c (ccas row c (if (== c CMAX) CPERM (i32/i32 (inc c)))))
-                        :held
+                        (do (note-touch! off) :held)
                         (recur)))))
           (when (alloc/allocated? sio off)
             ;; publish: whoever's CAS takes PUB holds the references; the count follows
             (let [nt (if leaf? (bit-or t F_PUB F_LEAF) (bit-or t F_PUB))]
               (if (== t (fcas row t nt))
-                (do (slab/region-add-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) 1)
+                (do (note-touch! off)
+                    (slab/region-add-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) 1)
                     :new)
                 (recur)))))))
     :norow))
@@ -369,8 +383,9 @@
             (== c CPERM) :dropped
             (or (zero? c) (== c CDEAD)) nil
             (not (== c (ccas row c (i32/i32 (dec c))))) (recur)
-            (not (== c 1)) :dropped
-            :else (do (when-not (set-flag! row F_QUEUED)
+            (not (== c 1)) (do (note-touch! off) :dropped)
+            :else (do (note-touch! off)
+                      (when-not (set-flag! row F_QUEUED)
                         (park! off kind))
                       :parked)))))))
 
@@ -415,6 +430,7 @@
    counts what it holds then), nor does a c held as a leaf (its references were never counted)."
   [sio c old new kind]
   (when-not (== old new)
+    (note-touch! c)
     (when-let [row (alloc/desc-of sio c)]
       (let [t (flags row)]
         (when (and (not (zero? (bit-and t F_PUB))) (zero? (bit-and t F_LEAF)))

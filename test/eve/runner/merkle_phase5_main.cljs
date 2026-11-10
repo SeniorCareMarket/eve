@@ -7,10 +7,10 @@
    (allocator init, native addon, summary reporter with exit code).
    Usage: node target/merkle-phase5/main.js"
   (:require [cljs.test :as t]
-            [eve.deftype-proto.alloc :as eve-alloc]
+            [eve.process-slab :as ps]
+            [eve.region :as region]
             [eve.atom :as a]
             [eve.data :as d]
-            [eve.mem :as mem]
             [eve.merkle-phase5-test]))
 
 (defmethod t/report [::t/default :summary] [{:keys [test pass fail error]}]
@@ -22,8 +22,8 @@
 
 (defn main []
   (let [path (.resolve (js/require "path") "build/Release/mmap_cas.node")]
-    (mem/load-native-addon! (js/require path)))
-  (-> (eve-alloc/init! :force true)
+    (region/load-native-addon! (js/require path)))
+  (-> (ps/init! :force true)
       (.then (fn [_]
                (set! d/*worker-id* 1)
                (set! a/*global-atom-instance* (a/atom-domain {}))

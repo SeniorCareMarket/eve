@@ -1,0 +1,198 @@
+(ns eve.journal-file
+  "The commit journal's file handle (eve.atom's durability mode) on the
+   BEAM: a raw Erlang file (pread/pwrite at absolute offsets, datasync
+   for force) beside the domain root, holding commit records only.
+
+   The journal's lock is the eve NIF's fcntl byte-range lock (classic
+   POSIX F_SETLK, non-blocking) over a dedicated <journal>.lock region
+   file, spun on :busy — the same POSIX lock family the other hosts'
+   journal locks use (lockf / FileChannel), so seats serialize on a
+   domain the same way; the lock region is a separate file because the
+   NIF's open extends a smaller file to the region size, which a journal
+   must never suffer. The lock is released by process death like every
+   fcntl lock.
+
+   Record format (identical bytes on every host):
+     [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
+   magic = \"EVJ1\" (0x45564A31); all integers big-endian; len counts the
+   bytes after itself (epoch + table-len + table + crc); the CRC-32
+   (erlang:crc32, unsigned) covers the epoch..table-end bytes and is
+   stored as the signed i32. The commit point is lock, write blocks,
+   force slab, append record, force journal — eve.atom runs that
+   sequence over this file."
+  (:require [eve.clje-nif :as nif]
+            [eve.host :as host]
+            [eve.mem :as mem]
+            [eve.deftype-proto.data :as d]))
+
+(def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
+(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+
+(defn- to-signed
+  "An unsigned 32-bit value as the signed i32 the record stores/reads."
+  [u]
+  (if (>= u 2147483648) (- u 4294967296) u))
+
+(defn- be32-bytes
+  "The 4 big-endian bytes of V (mod 2^32) as a list of ints."
+  [v]
+  (let [u (bit-and v 0xFFFFFFFF)]
+    [(bit-and (bit-shift-right u 24) 0xFF)
+     (bit-and (bit-shift-right u 16) 0xFF)
+     (bit-and (bit-shift-right u 8) 0xFF)
+     (bit-and u 0xFF)]))
+
+(defn- be32-at
+  "The signed big-endian i32 at byte offset I of byte-vector BS."
+  [bs i]
+  (to-signed (+ (* (nth bs i) 16777216)
+                (* (nth bs (+ i 1)) 65536)
+                (* (nth bs (+ i 2)) 256)
+                (nth bs (+ i 3)))))
+
+(defn- chars [s] (erlang/binary_to_list (str s)))
+
+(defn open-journal
+  "Open (creating if needed) the journal file at PATH for raw
+   positioned read+write. Returns {:fd :path :lock-r} — the raw file
+   descriptor, and the NIF region over PATH.lock that carries the
+   journal lock."
+  [path]
+  (let [p (str path)
+        cl (chars p)
+        r (file/open cl #erl(:read :write :binary :raw))
+        fd (if (= :ok (erlang/element 1 r))
+             (erlang/element 2 r)
+             (do ;; create the file, then reopen it raw
+               (file/close (erlang/element 2 (file/open cl #erl(:write))))
+               (erlang/element 2 (file/open cl #erl(:read :write :binary :raw)))))]
+    {:fd fd :path p :lock-r (nif/open (str p ".lock") 4096)}))
+
+(defn with-journal-lock
+  "Run F holding the journal's exclusive lock: the NIF's fcntl POSIX
+   write lock on the lock region's first byte, spun while it is :busy."
+  [{:keys [lock-r]} f]
+  (loop []
+    (let [r (nif/lock! lock-r 0 1)]
+      (cond
+        (= r :ok)   (try (f) (finally (nif/unlock! lock-r 0 1)))
+        (= r :busy) (do (timer/sleep 1) (recur))
+        :else       (throw (ex-info "eve.journal-file: journal lock failed"
+                                    {:error r}))))))
+
+(defn journal-record-of
+  "The commit record for an explicit EPOCH and TABLE (eve's host byte
+   array, as eve.mem/-read-bytes returns it). The record itself is an
+   Erlang binary."
+  [epoch table]
+  (let [tbin (nif/read-bytes (host/byte-region table) 0 (host/alength table))
+        tlen (erlang/byte_size tbin)
+        len  (+ 4 4 tlen 4)
+        body (erlang/list_to_binary
+              (clj_rt/to_list
+               (vec (concat (be32-bytes epoch)
+                            (be32-bytes tlen)
+                            (erlang/binary_to_list tbin)))))
+        crc  (to-signed (erlang/crc32 body))]
+    (erlang/list_to_binary
+     (clj_rt/to_list
+      (vec (concat (be32-bytes journal-magic)
+                   (be32-bytes len)
+                   (erlang/binary_to_list body)
+                   (be32-bytes crc)))))))
+
+(defn journal-record
+  "The commit record for ROOT-R's CURRENT epoch and atom table."
+  [root-r]
+  (journal-record-of (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                     (mem/-read-bytes root-r d/ATOM_TABLE_START
+                                      journal-table-bytes)))
+
+(defn- read-all
+  "The journal file's whole content as a vector of byte ints."
+  [{:keys [fd]}]
+  (let [size (erlang/element 2 (file/position fd :eof))]
+    (if (zero? size)
+      []
+      (let [r (file/pread fd 0 size)]
+        (if (= :ok (erlang/element 1 r))
+          (vec (erlang/binary_to_list (erlang/element 2 r)))
+          [])))))
+
+(defn journal-scan
+  "Scan the journal's records in order. Returns {:newest {:epoch :table}
+   :oldest epoch :torn? bool} — a record is accepted iff its framing
+   survives (magic + length in range) and its CRC matches; a record whose
+   framing survives but whose CRC fails is SKIPPED (its length still
+   advances the scan); a framing failure ends the scan. The table is
+   eve's host byte array, ready for eve.mem/-write-bytes!."
+  [h]
+  (let [data  (read-all h)
+        total (count data)]
+    (loop [pos 0 newest nil oldest nil torn? false]
+      (let [remaining (- total pos)]
+        (cond
+          (< remaining 8)
+          {:newest newest :oldest oldest
+           :torn? (or torn? (pos? remaining))}
+
+          :else
+          (let [magic (be32-at data pos)
+                len   (be32-at data (+ pos 4))]
+            (if (or (not= magic journal-magic)
+                    (not (pos? len))
+                    (> len (- remaining 8)))
+              {:newest newest :oldest oldest :torn? true}
+              (let [epoch (be32-at data (+ pos 8))
+                    tlen  (be32-at data (+ pos 12))]
+                (if (> (+ 4 4 tlen 4) len)
+                  {:newest newest :oldest oldest :torn? true}
+                  (let [stored (be32-at data (+ pos 16 tlen))
+                        calc   (to-signed
+                                (erlang/crc32
+                                 (erlang/list_to_binary
+                                  (clj_rt/to_list
+                                   (subvec data (+ pos 8)
+                                           (+ pos 16 tlen))))))]
+                    (if (= stored calc)
+                      (recur (+ pos 8 len)
+                             {:epoch epoch
+                              :table (host/region->bytes
+                                      (nif/from-binary
+                                       (erlang/list_to_binary
+                                        (clj_rt/to_list
+                                         (subvec data (+ pos 16)
+                                                 (+ pos 16 tlen))))))}
+                             (or oldest epoch)
+                             torn?)
+                      (recur (+ pos 8 len) newest oldest true))))))))))))
+
+(defn journal-append!
+  "Write BYTES (an Erlang binary) at the end of the journal file. Does
+   not force — the caller forces at the commit point."
+  [{:keys [fd]} b]
+  (file/pwrite fd (erlang/element 2 (file/position fd :eof)) b))
+
+(defn journal-write-at!
+  "Write BYTES (an Erlang binary) at absolute offset POS."
+  [{:keys [fd]} b pos]
+  (file/pwrite fd (int pos) b))
+
+(defn journal-truncate!
+  "Truncate the journal file to zero length (no force; the caller
+   forces as part of its checkpoint/recovery sequence)."
+  [{:keys [fd]}]
+  (file/truncate fd))
+
+(defn journal-force!
+  "Force the journal file to storage: file:datasync (data + the
+   metadata durability needs). FULL? is ignored — the datasync is
+   taken on both paths."
+  [{:keys [fd]} full?]
+  (file/datasync fd))
+
+(defn journal-close!
+  "Close the journal file; never throws. The lock region is a NIF
+   resource: it is released with its last reference."
+  [{:keys [fd]}]
+  (try (file/close fd) (catch _ _ nil)))

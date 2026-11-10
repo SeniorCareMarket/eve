@@ -1,0 +1,38 @@
+(ns Math
+  "The JVM class-statics vanilla code names (datascript.built-ins'
+   aggregate-stddev calls Math/sqrt as a function value), as a real namespace
+   of real vars — the host's own scalar math (cpp/*) and core's min/max/abs.
+
+   This file exists because eve.host-completion's runtime synthesis
+   (create-ns + intern) is invisible to jank's AOT compiler in two ways: the
+   analyzer resolves only compiled module interfaces, and the AOT collector
+   demands a compiled module for every namespace a compiled module creates.
+   eve.host-completion requires this namespace, so it is a compiled module in
+   every graph that loads the completion; its when-not intern block remains
+   as the fallback for any environment where this module was not loaded.
+   The c-* helpers come first: a defn whose name is also the C function its
+   body calls (sqrt, pow, ...) collides with that call in jank's codegen,
+   so each public var delegates to a privately named impl.")
+
+(defn- c-sqrt [x] (cpp/sqrt (double x)))
+(defn- c-pow [x y] (cpp/pow (double x) (double y)))
+(defn- c-floor [x] (cpp/floor (double x)))
+(defn- c-ceil [x] (cpp/ceil (double x)))
+(defn- c-exp [x] (cpp/exp (double x)))
+(defn- c-log [x] (cpp/log (double x)))
+(defn- c-sin [x] (cpp/sin (double x)))
+(defn- c-cos [x] (cpp/cos (double x)))
+(defn- c-tan [x] (cpp/tan (double x)))
+
+(defn sqrt [x] (c-sqrt x))
+(defn pow [x y] (c-pow x y))
+(defn floor [x] (c-floor x))
+(defn ceil [x] (c-ceil x))
+(defn exp [x] (c-exp x))
+(defn log [x] (c-log x))
+(defn sin [x] (c-sin x))
+(defn cos [x] (c-cos x))
+(defn tan [x] (c-tan x))
+(defn abs [x] (if (neg? x) (- x) x))
+(defn min [x y] (clojure.core/min x y))
+(defn max [x y] (clojure.core/max x y))

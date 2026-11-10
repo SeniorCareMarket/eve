@@ -78,7 +78,7 @@
 (defn- add! [r off d] (mem/-with-file-lock r off (fn [] (mem/-add-i32! r off d))))
 
 (defn- read-vec [r off n]
-  (let [^bytes b (mem/-read-bytes r off n)]
+  (let [b (mem/-read-bytes r off n)]
     (mapv #(bit-and (aget b %) 0xFF) (range n))))
 
 (defn- write-vec! [r off v] (mem/-write-bytes! r off (enc/bytes-of v)))
@@ -307,7 +307,7 @@
    region answers (signed or unsigned, a typed array — as the host's codec
    holds bytes)."
   [^bytes b ks]
-  (let [^bytes out (enc/bytes-copy b)]
+  (let [out (enc/bytes-copy b)]
     (dotimes [i (alength b)] (aset out i (unchecked-byte (bit-xor (bit-and (aget b i) 0xFF) (nth ks i)))))
     out))
 

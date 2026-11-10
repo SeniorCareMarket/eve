@@ -151,6 +151,17 @@
                get      {:cljs-name nil      :arities [[_ v]]}
                contains {:cljs-name nil      :arities [[_ v]]}}}
 
+    ;; ClojureScript's ISorted carries seqFrom alone: a sorted collection's
+    ;; comparator is a plain field there (a cljs consumer reads
+    ;; (.-comparator set), as datascript.db does), and entryKey is the
+    ;; identity the JVM interface asks for — neither has a protocol home on
+    ;; CLJS, so both drop, following the ITransientSet get/contains pattern.
+    clojure.lang.Sorted
+    {:cljs-proto ISorted
+     :methods {comparator {:cljs-name nil              :arities [[_]]}
+               entryKey   {:cljs-name nil              :arities [[_ k]]}
+               seqFrom    {:cljs-name -sorted-seq-from :arities [[_ k ascending]]}}}
+
     clojure.lang.ISeq
     {:cljs-proto ISeq
      :methods {first {:cljs-name -first :arities [[_]]}
@@ -183,6 +194,21 @@
      :methods {iterator {:cljs-name nil :arities [[_]]}}}
 
     java.lang.Object
+    {:cljs-proto nil
+     :clj-only? true
+     :methods {toString {:cljs-name nil :arities [[_]]}
+               equals   {:cljs-name nil :arities [[_ other]]}
+               hashCode {:cljs-name nil :arities [[_]]}}}
+
+    ;; A bare Object group is the same body written with the unqualified
+    ;; name (a vanilla ClojureScript library's deftype face does this —
+    ;; DataScript's Datom). It gets java.lang.Object's disposition:
+    ;; dropped here, with toString and equals re-homed by
+    ;; eve.deftype-proto.vocab/cljs-object-impls. Passing it through
+    ;; verbatim emitted its hashCode into the CLJS deftype, which sci
+    ;; cannot register (sci.impl.deftype/hashCode does not resolve on
+    ;; nbb) — F-NBB-OBJHASH.
+    Object
     {:cljs-proto nil
      :clj-only? true
      :methods {toString {:cljs-name nil :arities [[_]]}

@@ -59,6 +59,14 @@ namespace eve_region {
   /* plain (non-atomic) and unaligned access: an i32 at any alignment, signed */
   long load_i32(long b, long off) { int32_t v; std::memcpy(&v, P(b, off), 4); return v; }
   void store_i32(long b, long off, long x) { int32_t v = (int32_t)x; std::memcpy(P(b, off), &v, 4); __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+  /* COUNT consecutive i32 slots from OFF set to X (any alignment: memcpy per slot,
+     which the compiler turns into a vector fill); one seq-cst fence after the fill,
+     as store_i32 has after its one store */
+  void fill_i32(long b, long off, long count, long x) {
+    int32_t v = (int32_t)x; char *p = reinterpret_cast<char *>(P(b, off));
+    for (long i = 0; i < count; i++) std::memcpy(p + 4 * i, &v, 4);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  }
   /* 32-bit atomics (aligned): __atomic builtins = lock-prefixed x86 ops, seq-cst */
   long aload_i32(long b, long off) { return __atomic_load_n(reinterpret_cast<int32_t *>(P(b, off)), __ATOMIC_SEQ_CST); }
   void astore_i32(long b, long off, long x) { __atomic_store_n(reinterpret_cast<int32_t *>(P(b, off)), (int32_t)x, __ATOMIC_SEQ_CST); }
@@ -138,6 +146,8 @@ namespace eve_region {
   (-supports-watch? [_] true)
   (-read-bytes [_ off len] (cpp/eve_region.read_bytes base off len))
   (-write-bytes! [_ off src] (cpp/eve_region.write_bytes base off src) nil)
+  mem/IFillRegion
+  (-fill-i32! [_ off n v] (cpp/eve_region.fill_i32 base off n v) nil)
   mem/IHostAtomics
   (-atomic-rmw? [_] true)
   (-with-file-lock [_ _off f] (f))
@@ -192,14 +202,21 @@ namespace eve_region {
   (-supports-watch? [_] false)
   (-read-bytes [_ off len] (cpp/eve_region.read_bytes base off len))
   (-write-bytes! [_ off src] (cpp/eve_region.write_bytes base off src) nil)
+  mem/IFillRegion
+  ;; plain stores, as this type's -store-i32! is (no lock: a fill initializes an unpublished range)
+  (-fill-i32! [_ off n v] (cpp/eve_region.fill_i32 base off n v) nil)
   mem/IHostAtomics
   (-atomic-rmw? [_] true)
   (-with-file-lock [_ off f] (under-lock fd off 4 f)))
 
 (defn open-mmap-region
   "Open (or create) a file-backed MAP_SHARED region of size-bytes at path-str. The file grows to size-bytes when it is
-   shorter and is never truncated. The descriptor stays open (the fcntl locks of a Lustre mount need it; msync does
-   not)."
+   shorter and is never truncated. The descriptor stays open only for a Lustre mount (its fcntl locks need it);
+   a plain region's descriptor is closed once the mapping exists -- msync works on the mapping, not the
+   descriptor, and a domain maps dozens of region files, so held descriptors exhaust the process fd limit
+   (the ants seat hit EMFILE at the 30th cell domain under the default 1024). A plain region's fd field
+   holds true instead: -sync!'s (when fd ...) guard reads it as syncable, and no code path closes or
+   locks through a plain region's fd (its -with-file-lock is a plain call)."
   ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
   ([path-str size-bytes opts]
    (let [size (long size-bytes)
@@ -214,7 +231,10 @@ namespace eve_region {
        (when (zero? base)
          (throw (ex-info (str "eve.region: mmap " path-str ": " (cpp/eve_region.strerr (cpp/eve_region.last_errno)))
                          {:path path-str :size size})))
-       (if (:lustre? opts) (->JankLockedRegion base size fd) (->JankRegion base size fd))))))
+       (if (:lustre? opts)
+         (->JankLockedRegion base size fd)
+         (do (cpp/eve_region.close_fd fd)
+             (->JankRegion base size true)))))))
 
 (defn make-heap-region
   "An IMemRegion over size-bytes of zeroed memory (calloc), shared by the process's threads (never freed: a region

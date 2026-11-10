@@ -48,16 +48,16 @@
     (if (and (or da (number? a)) (or db (number? b)))
       ;; Fast path: double[] aget loops
       (let [n  (int (min (arr-count a) (arr-count b)))
-            ^doubles out (double-array n)]
+            out (double-array n)]
         (cond
           (and da db)
-          (let [^doubles x da ^doubles y db]
+          (let [x da y db]
             (dotimes [i n] (aset out i (+ (aget x i) (aget y i)))))
           da
-          (let [^doubles x da bv (double b)]
+          (let [x da bv (double b)]
             (dotimes [i n] (aset out i (+ (aget x i) bv))))
           :else
-          (let [av (double a) ^doubles y db]
+          (let [av (double a) y db]
             (dotimes [i n] (aset out i (+ av (aget y i))))))
         (arr/from-double-array out))
       ;; Fallback
@@ -73,16 +73,16 @@
         db (when-not (number? b) (d/-as-double-array b))]
     (if (and (or da (number? a)) (or db (number? b)))
       (let [n  (int (min (arr-count a) (arr-count b)))
-            ^doubles out (double-array n)]
+            out (double-array n)]
         (cond
           (and da db)
-          (let [^doubles x da ^doubles y db]
+          (let [x da y db]
             (dotimes [i n] (aset out i (- (aget x i) (aget y i)))))
           da
-          (let [^doubles x da bv (double b)]
+          (let [x da bv (double b)]
             (dotimes [i n] (aset out i (- (aget x i) bv))))
           :else
-          (let [av (double a) ^doubles y db]
+          (let [av (double a) y db]
             (dotimes [i n] (aset out i (- av (aget y i))))))
         (arr/from-double-array out))
       (let [n (int (min (arr-count a) (arr-count b)))
@@ -97,16 +97,16 @@
         db (when-not (number? b) (d/-as-double-array b))]
     (if (and (or da (number? a)) (or db (number? b)))
       (let [n  (int (min (arr-count a) (arr-count b)))
-            ^doubles out (double-array n)]
+            out (double-array n)]
         (cond
           (and da db)
-          (let [^doubles x da ^doubles y db]
+          (let [x da y db]
             (dotimes [i n] (aset out i (* (aget x i) (aget y i)))))
           da
-          (let [^doubles x da bv (double b)]
+          (let [x da bv (double b)]
             (dotimes [i n] (aset out i (* (aget x i) bv))))
           :else
-          (let [av (double a) ^doubles y db]
+          (let [av (double a) y db]
             (dotimes [i n] (aset out i (* av (aget y i))))))
         (arr/from-double-array out))
       (let [n (int (min (arr-count a) (arr-count b)))
@@ -121,16 +121,16 @@
         db (when-not (number? b) (d/-as-double-array b))]
     (if (and (or da (number? a)) (or db (number? b)))
       (let [n  (int (min (arr-count a) (arr-count b)))
-            ^doubles out (double-array n)]
+            out (double-array n)]
         (cond
           (and da db)
-          (let [^doubles x da ^doubles y db]
+          (let [x da y db]
             (dotimes [i n] (aset out i (/ (aget x i) (aget y i)))))
           da
-          (let [^doubles x da bv (double b)]
+          (let [x da bv (double b)]
             (dotimes [i n] (aset out i (/ (aget x i) bv))))
           :else
-          (let [av (double a) ^doubles y db]
+          (let [av (double a) y db]
             (dotimes [i n] (aset out i (/ av (aget y i))))))
         (arr/from-double-array out))
       (let [n (int (min (arr-count a) (arr-count b)))
@@ -145,11 +145,11 @@
 (defn sum
   "Sum all elements."
   [col]
-  (if-let [^doubles da (d/-as-double-array col)]
+  (if-let [da (d/-as-double-array col)]
     (let [n (alength da)]
       (loop [i 0 acc 0.0]
         (if (< i n) (recur (inc i) (+ acc (aget da i))) acc)))
-    (if-let [^ints ia (d/-as-int-array col)]
+    (if-let [ia (d/-as-int-array col)]
       (let [n (alength ia)]
         (loop [i 0 acc (long 0)]
           (if (< i n) (recur (inc i) (+ acc (long (aget ia i)))) (double acc))))
@@ -166,7 +166,7 @@
 (defn min-val
   "Minimum value."
   [col]
-  (if-let [^doubles da (d/-as-double-array col)]
+  (if-let [da (d/-as-double-array col)]
     (when (pos? (alength da))
       (loop [i 1 m (aget da 0)]
         (if (< i (alength da))
@@ -182,7 +182,7 @@
 (defn max-val
   "Maximum value."
   [col]
-  (if-let [^doubles da (d/-as-double-array col)]
+  (if-let [da (d/-as-double-array col)]
     (when (pos? (alength da))
       (loop [i 1 m (aget da 0)]
         (if (< i (alength da))
@@ -204,10 +204,10 @@
   [a b]
   (let [da (when-not (number? a) (d/-as-double-array a))]
     (if (and da (number? b))
-      (let [^doubles x da
+      (let [x da
             n   (alength x)
             bv  (double b)
-            ^bytes out (enc/make-bytes n)]
+            out (enc/make-bytes n)]
         (dotimes [i n]
           (aset out i (byte (if (> (aget x i) bv) 1 0))))
         (arr/from-byte-array out))
@@ -243,9 +243,9 @@
   "Map f over elements, returning new array of same type.
    f receives (elem)."
   [f col]
-  (if-let [^doubles da (d/-as-double-array col)]
+  (if-let [da (d/-as-double-array col)]
     (let [n (alength da)
-          ^doubles out (double-array n)]
+          out (double-array n)]
       (dotimes [i n] (aset out i (double (f (aget da i)))))
       (arr/from-double-array out))
     (let [n (e/count col)

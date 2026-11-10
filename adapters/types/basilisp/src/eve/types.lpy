@@ -50,6 +50,8 @@
     clojure.lang.Sequential basilisp.lang.interfaces/ISequential
     clojure.lang.IMeta basilisp.lang.interfaces/IMeta
     clojure.lang.IObj basilisp.lang.interfaces/IWithMeta
+    clojure.lang.IRef basilisp.lang.interfaces/IRef
+    clojure.lang.IReference basilisp.lang.interfaces/IReference
     clojure.lang.IDeref basilisp.lang.interfaces/IDeref
     clojure.lang.IReduceInit basilisp.lang.interfaces/IReduce
     clojure.lang.IReduce basilisp.lang.interfaces/IReduce
@@ -71,9 +73,44 @@
     (and (or (str/starts-with? n "->") (str/starts-with? n "--"))
          (not (contains? #{"->" "->>" "--"} n)))))
 
+(def ^:private lpy-member-renames
+  "JVM method names the translation chain renames as MEMBERS (not core
+   fns — those are v/jvm-method->core's): a (.m this ...) call inside a
+   method body must use the basilisp member name, because basilisp's
+   interop munge leaves camelCase untouched (compareAndSet stays
+   compareAndSet) while the member itself is compare-and-set
+   (compare_and_set). Measured 2026-11-08, probe3 run9: datascript
+   Conn's swap* body calls (.compareAndSet this ...) and died with
+   'Conn object has no attribute compareAndSet'."
+  '{compareAndSet compare-and-set
+    kvreduce reduce-kv
+    chunkedFirst chunked-first
+    chunkedMore chunked-rest
+    chunkedNext chunked-next
+    alterMeta alter-meta
+    resetMeta reset-meta
+    setValidator set-validator
+    getValidator get-validator
+    addWatch add-watch
+    removeWatch remove-watch
+    getWatches get-watches})
+
 (defn- lpy-rewrite-calls [form]
   (cond
     (and (seq? form) (contains? '#{var quote} (first form))) form
+
+    ;; (.jvmName this ...) of a member the chain renamed: use its name.
+    ;; (Restored with the F-LPY-IREF-COVERAGE collation take: the release
+    ;; tree's types.lpy restructure had dropped this call-site mechanism;
+    ;; the lpy line's probe3 run9 measured the death it prevents --
+    ;; 'Conn object has no attribute compareAndSet'.)
+    (and (seq? form) (symbol? (first form))
+         (let [n (name (first form))]
+           (and (str/starts-with? n ".") (not (str/starts-with? n ".-")) (> (count n) 1)
+                (contains? lpy-member-renames (symbol (subs n 1))))))
+    (let [m (symbol (subs (name (first form)) 1))
+          args (map lpy-rewrite-calls (rest form))]
+      (apply list (symbol (str "." (get lpy-member-renames m))) args))
 
     ;; ->Type inside a deftype method reaches the factory through its var
     ;; (a module attribute named __GT_Type would be mangled there)
@@ -175,10 +212,23 @@
 
 (defn- lpy-prop [name m] (lpy-method (vary-meta name assoc :property true) m))
 
+(defn- lpy-apply-method
+  "A JVM method (name [self f args]) whose basilisp caller SPREADS the
+   trailing seq argument: emit (name [self f & args]) with the JVM body,
+   which already treats args as a seq. IReference.alterMeta is the
+   instance: basilisp alter-meta! is (apply-method o alter-meta f
+   args), calling alter_meta(o, f, *args) -- the verbatim JVM arity
+   dies with 'takes 3 positional arguments but 4 were given' (measured
+   2026-11-09, lpyfix.irefprobe post-fix run 1)."
+  [name {a :args body :body}]
+  (list* name [(first a) (second a) (quote &) (nth a 2)] body))
+
 (defn lpy-translate-protos
   "Parsed protocol impls ([{:protocol :methods}], JVM names) as a basilisp
-   deftype takes them (see above): [{:protocol :methods}], methods as forms."
-  [impls]
+   deftype takes them (see above): [{:protocol :methods}], methods as forms.
+   type-name names the generated carrier interface of the
+   F-LPY-NO-IFACE-EXTRAS tail case below."
+  [type-name impls]
   (let [jvm-ifaces (set (keep (fn [{:keys [protocol]}] (when (interface-sym? protocol) protocol)) impls))
         transient? (some #(str/starts-with? (str %) "clojure.lang.ITransient") jvm-ifaces)
         ;; basilisp's ITransientAssociative (contains_transient, entry_transient)
@@ -194,6 +244,33 @@
         by-name (group-by :name (mapcat :methods (filter #(interface-sym? (:protocol %)) impls)))
         one (fn [n] (first (get by-name n)))
         arity (fn [n k] (some #(when (= k (count (:args %))) %) (get by-name n)))
+        ;; an identity transient (IEditableCollection + ITransientCollection,
+        ;; no ITransient* sibling): the persistent type is its own transient,
+        ;; so it needs BOTH surfaces below — the transient branch alone drops
+        ;; the persistent cons/disj/__contains__ its declared IPersistentSet
+        ;; requires, and Python refuses to instantiate the class
+        ;; (measured 2026-11-08 on me.tonsky's BTSet, probe1 run7).
+        identity-transient-shape? (and (contains? jvm-ifaces 'clojure.lang.IEditableCollection)
+                                       (contains? jvm-ifaces 'clojure.lang.ITransientCollection)
+                                       (not (some (fn [x] (contains? jvm-ifaces x))
+                                                  '[clojure.lang.ITransientSet clojure.lang.ITransientMap
+                                                    clojure.lang.ITransientVector clojure.lang.ITransientAssociative])))
+        ;; the Object group's own methods that are not JVM members
+        ;; (toString/hashCode/equals and the IAtom surface swap/
+        ;; reset/compareAndSet are translated in the chain below —
+        ;; deftype-atom authors those as Object methods too, and
+        ;; emitting them twice breaks deftype analysis): a type's
+        ;; custom helpers — extend-clj's deftype-atom
+        ;; builds its whole atom machinery as Object methods
+        ;; (deref-impl, compare-and-set-impl, validate, notify-watches,
+        ;; swap*), called from the translated members via (.m this).
+        ;; Dropping them left datascript's Conn without deref_impl
+        ;; (measured 2026-11-08, probe3 run6). They ride verbatim at
+        ;; the end of the chain, admitted as the type's own members
+        ;; via the extras below.
+        object-customs (remove (fn [m] (contains? '#{toString hashCode equals
+                                                     swap reset compareAndSet} (:name m)))
+                                (mapcat :methods (filter #(= 'Object (:protocol %)) impls)))
         methods
         (concat
          (when-let [m (one 'count)] [(lpy-method '__len__ m)])
@@ -232,6 +309,19 @@
          (when (get by-name 'swap) [(lpy-swap (get by-name 'swap))])
          (when-let [m (one 'reset)] [(lpy-method 'reset m)])
          (when-let [m (one 'compareAndSet)] [(lpy-method 'compare-and-set m)])
+         ;; IRef / IReference: basilisp's interfaces carry every member
+         ;; but getWatches, which has no basilisp counterpart -- it rides
+         ;; as the type's own member via the ^:abstract extras below.
+         ;; On this seat the family arrives pooled from a deftype-atom
+         ;; type's IMeta group (extend-clj's :lpy face folds it in), so
+         ;; the entries key on the pooled names like every other entry.
+         (when-let [m (one 'alterMeta)] [(lpy-apply-method 'alter-meta m)])
+         (when-let [m (one 'resetMeta)] [(lpy-method 'reset-meta m)])
+         (when-let [m (one 'setValidator)] [(lpy-method 'set-validator m)])
+         (when-let [m (one 'getValidator)] [(lpy-method 'get-validator m)])
+         (when-let [m (one 'addWatch)] [(lpy-method 'add-watch m)])
+         (when-let [m (one 'removeWatch)] [(lpy-method 'remove-watch m)])
+         (when-let [m (one 'getWatches)] [(lpy-method 'get-watches m)])
          (when (get by-name 'reduce)
            [(let [r2 (arity 'reduce 2) r3 (arity 'reduce 3)
                   self (gensym "self") f (gensym "f") init (gensym "init")]
@@ -250,7 +340,7 @@
          (when-let [m (one 'val)] [(lpy-prop 'value m)])
          (when-let [m (one 'rseq)] [(lpy-method 'rseq m)])
          (when-let [m (one 'peek)] [(lpy-method 'peek m)])
-         (if transient?
+         (when transient?
            (concat
             (when-let [m (if (contains? jvm-ifaces 'clojure.lang.ITransientVector)
                            (or (arity 'assocN 3) (arity 'assoc 3))
@@ -262,7 +352,8 @@
             (when-let [m (one 'pop)] [(lpy-method 'pop-transient m)])
             (when-let [m (one 'persistent)] [(lpy-method 'to-persistent m)])
             (when-let [m (one 'containsKey)] [(lpy-method 'contains-transient m)])
-            (when-let [m (one 'entryAt)] [(lpy-method 'entry-transient m)]))
+            (when-let [m (one 'entryAt)] [(lpy-method 'entry-transient m)])))
+         (when (or (not transient?) identity-transient-shape?)
            (concat
             ;; a vector's assoc delegates to assocN, the one that writes
             (when-let [m (if vector?
@@ -281,7 +372,43 @@
             (when-let [m (arity 'contains 2)] [(lpy-method '__contains__ m)])
             (when-let [m (one 'asTransient)] [(lpy-method 'to-transient m)])))
          (when-let [m (one 'first)] [(lpy-prop 'first m)])
-         (when-let [m (one 'more)] [(lpy-prop 'rest m)]))
+         (when-let [m (one 'more)]
+           ;; the canonical more, (or (next this) ()), is circular on
+           ;; basilisp: its core next is defined through rest (runtime
+           ;; next_ -> rest -> ISeq.rest), where the JVM's next is the
+           ;; primitive and more the derived one. Emit the type's own
+           ;; next method (otherwise dropped: basilisp's ISeq has no
+           ;; next member) as next-step and derive rest from it, which
+           ;; is exactly more's contract. (The helper is not named next:
+           ;; at the time this was written the extras declaration below
+           ;; munged dashes only, so a member named next — which
+           ;; basilisp munges to next_, a Python builtin — was
+           ;; unadmittable; the extras now use basilisp's own munge,
+           ;; and the next-step name is retained.) A non-canonical
+           ;; more body
+           ;; keeps the verbatim translation (measured 2026-11-08,
+           ;; probe1 run18: me.tonsky's Iter rest recursed without
+           ;; bound; tw90 for the next_ admission failure).
+           (let [next-m (one 'next)
+                 self (first (:args m))
+                 body (:body m)
+                 canonical (and next-m
+                                (= 1 (count body))
+                                (let [f (first body)]
+                                  (and (seq? f)
+                                       (= "or" (name (first f)))
+                                       (= 3 (count f))
+                                       (let [n (second f)]
+                                         (and (seq? n)
+                                              (= "next" (name (first n)))
+                                              (= 2 (count n))
+                                              (= self (second n))))
+                                       (and (seq? (nth f 2)) (empty? (nth f 2))))))]
+             (if canonical
+               [(lpy-method 'next-step next-m)
+                (lpy-prop 'rest (assoc m :body [(list 'clojure.core/or (list '.next-step self) '())]))]
+               [(lpy-prop 'rest m)])))
+         (map (fn [m] (lpy-method (:name m) m)) object-customs))
         defined (set (map (fn [m] (str (first m))) methods))
         has? #(contains? defined %)
         derived
@@ -298,7 +425,25 @@
                   '(clojure.core/let [v (.val-at this k ::absent)]
                      (if (clojure.core/= v ::absent) (throw (python/KeyError k)) v)))])
          (when (and vector? (not (has? "__getitem__")))
-           [(list '__getitem__ '[this i] '(.nth this i))])
+           ;; basilisp's subvec is (operator/getitem v (slice start
+           ;; end)): a vector's __getitem__ on this seat must answer
+           ;; slice objects, materializing the range as a vector of
+           ;; the same type (measured 2026-11-08, probe5: PSS's
+           ;; cut-n-splice -> subvec -> __getitem__ handed nth a
+           ;; slice, which died in neg?). Ints keep the nth path.
+           [(list '__getitem__ '[this i]
+                  '(if (python/isinstance i python/slice)
+                     (clojure.core/let [c (clojure.core/count this)
+                                        norm (clojure.core/fn [x d]
+                                               (clojure.core/cond (clojure.core/nil? x) d
+                                                                  (clojure.core/neg? x) (clojure.core/+ c x)
+                                                                  :else x))
+                                        start (norm (python/.-start i) 0)
+                                        stop (norm (python/.-stop i) c)]
+                       (clojure.core/into (clojure.core/empty this)
+                                          (clojure.core/map (clojure.core/fn [j] (.nth this j))
+                                                            (clojure.core/range start stop (clojure.core/or (python/.-step i) 1)))))
+                     (.nth this i)))])
          (when (and (contains? jvm-ifaces 'clojure.lang.ISeq) (not (has? "is-empty")))
            [(list (vary-meta 'is-empty assoc :property true) '[this] '(clojure.core/nil? (.seq this)))])
          (when (and transient-assoc? (has? "val-at") (not (has? "contains-transient")))
@@ -319,16 +464,69 @@
         ;; this type's own basilisp methods
         methods (concat (map lpy-rewrite-calls methods) derived)
         ;; the basilisp interfaces, less any another one extends
-        types (distinct (keep #(get lpy-ifaces %) jvm-ifaces))
+        types (distinct (concat (keep #(get lpy-ifaces %) jvm-ifaces)
+                                ;; a deftype-atom type's IRef/IReference
+                                ;; groups never appear as group symbols on
+                                ;; this seat (the :lpy face folds them into
+                                ;; its IMeta group), so the interfaces are
+                                ;; derived from FULL method evidence: the
+                                ;; whole abstract set present, never a part
+                                ;; (a part would leave the type abstract).
+                                (when (and (get by-name 'addWatch) (get by-name 'removeWatch)
+                                           (get by-name 'setValidator) (get by-name 'getValidator))
+                                  '[basilisp.lang.interfaces/IRef])
+                                (when (and (get by-name 'alterMeta) (get by-name 'resetMeta))
+                                  '[basilisp.lang.interfaces/IReference])))
         ;; basilisp's ITransientSet and ILookup share no class (their MROs put
         ;; ABC and Generic in opposite orders: Python refuses the pair, measured
         ;; 2026-10-18): a transient set keeps its val-at as its own member
-        lookup-dropped? (and (some #{'basilisp.lang.interfaces/ITransientSet} types)
-                             (some #{'basilisp.lang.interfaces/ILookup} types))
-        types (if lookup-dropped? (remove #{'basilisp.lang.interfaces/ILookup} types) types)
+        ;; NOTE (2026-11-08): membership tests in this function must
+        ;; compare symbol NAMES, never set-as-fn / set literals over
+        ;; the symbols in `types`: those symbols are FRESH objects
+        ;; (built by keep over jvm-ifaces) and basilisk sets hash
+        ;; symbols by identity here, so (some #{'...} types) silently
+        ;; answers nil and (remove #{'...} types) removes nothing.
+        ;; The same defect emptied `types` entirely for small shapes
+        ;; (see the subsumption binding below).
+        lookup-dropped? (and (some (fn [t] (= "ITransientSet" (name t))) types)
+                             (some (fn [t] (= "ILookup" (name t))) types))
+        types (if lookup-dropped?
+                (remove (fn [t] (= "ILookup" (name t))) types)
+                types)
+        ;; an identity transient (a persistent type that is its own
+        ;; transient: IEditableCollection + ITransientCollection, no
+        ;; ITransient* sibling) must not declare ITransientCollection NOR
+        ;; IEvolveableCollection: basilisp's deftype check admits only
+        ;; the members the DECLARED interfaces' own classes declare, and
+        ;; ITransientCollection declares none of its own — its
+        ;; cons_transient/to_persistent are inherited from
+        ;; IEvolveableCollection — while IEvolveableCollection's own
+        ;; declaration (to_transient) appears nowhere in this type's
+        ;; impls when the port answers to_transient from IEditableCollection's
+        ;; asTransient (PSS's BTSet also translates its ITransientCollection
+        ;; persistent into a to_persistent member no declared interface
+        ;; owns). Both removals measured 2026-11-07 on BTSet. The methods
+        ;; stay as the type's own members, named in the ^:abstract extras
+        ;; below (cons-transient, to-persistent, and disj-transient, which
+        ;; the port derives from ITransientCollection's disjoin although
+        ;; no group declares it).
+        identity-transient? (and (contains? jvm-ifaces 'clojure.lang.IEditableCollection)
+                                 (contains? jvm-ifaces 'clojure.lang.ITransientCollection)
+                                 (not (some (fn [x] (contains? jvm-ifaces x))
+                                            '[clojure.lang.ITransientSet
+                                              clojure.lang.ITransientMap
+                                              clojure.lang.ITransientVector
+                                              clojure.lang.ITransientAssociative])))
+        types (if identity-transient?
+                (remove (fn [t] (contains? #{"ITransientCollection" "IEvolveableCollection"} (name t))) types)
+                types)
         ifaces-module (.get (.-modules (python/__import__ "sys")) "basilisp.lang.interfaces")
         cls (fn [s] (python/getattr ifaces-module (name s)))
-        types (remove (fn [t] (some #(and (not= % t) (python/issubclass (cls %) (cls t))) types)) types)
+        types (into []
+                    (remove (fn [t] (some (fn [o] (and (not (= (str o) (str t)))
+                                                       (python/issubclass (cls o) (cls t))))
+                                           types)))
+                    types)
         protocols (keep (fn [{:keys [protocol] :as impl}]
                           (when-not (interface-sym? protocol)
                             (update impl :methods
@@ -342,30 +540,247 @@
           ;; ^:abstract admits the members the interfaces inherit; the
           ;; chunked seq's are no interface's, so they are named
           (when (seq types)
-            (let [extra (->> methods
+            (let [admitted (into #{}
+                                 (mapcat (fn [t]
+                                           ;; basilisk's extras check
+                                           ;; (analyzer.py): for a REAL ABC base,
+                                           ;; admitted methods are exactly its
+                                           ;; __abstractmethods__; routines on the
+                                           ;; class are NOT admitted (probe-31/32)
+                                           (try (vec (.-__abstractmethods__ (cls t)))
+                                                (catch python/Exception _ [])))
+                                         types))
+                  extra (->> methods
                              (map first)
-                             (filter (cond-> '#{chunked-first chunked-rest chunked-next
-                                                swap reset compare-and-set}
-                                       lookup-dropped? (conj 'val-at)))
-                             (map #(str/replace (name %) "-" "_"))
-                             set)]
-              [{:protocol (vary-meta (first types)
-                                     (fn [m] (cond-> (assoc m :abstract true)
-                                               (seq extra) (assoc :abstract-members extra))))
-                :forms methods}]))
-          (map (fn [t] {:protocol (vary-meta t assoc :abstract true) :forms []}) (rest types))
-          ;; basilisp's deftype takes methods anywhere in its body (and
-          ;; adds python/object itself)
+                             (filter (fn [m] (or (not (contains? admitted (munge (name m))))
+                                                 ;; IEvolveableCollection's transient
+                                                 ;; members live on its class but under
+                                                 ;; its abstractmethods only via the ABC
+                                                 ;; machinery; basilisk's extras admit
+                                                 ;; explicitly -- and DB implements the
+                                                 ;; transient group without declaring
+                                                 ;; that interface (measured probe-31)
+                                                 (contains? '#{contains-transient entry-transient
+                                                              assoc-transient cons-transient
+                                                              to-persistent} m))))
+                             ;; every survivor is named: the checker's
+                             ;; artificially-abstract pool (getmembers of the
+                             ;; marked bases) varies with which interfaces it
+                             ;; processes artificially, which rotates with
+                             ;; interface order — an earlier throttle that
+                             ;; named only a fixed set (chunked-*, swap,
+                             ;; reset, compare-and-set, the transient five)
+                             ;; left members like cons / val_at / with_meta
+                             ;; unadmitted on some rotations (measured
+                             ;; 2026-11-08, tw83 + BTSet). Naming every
+                             ;; unadmitted method makes admission depend only
+                             ;; on the type's own member set.
+                             ;; The declared names use basilisp's own
+                             ;; munge, not a dash-only one: the checker
+                             ;; compares them against the member names
+                             ;; as IT munges them from the deftype body,
+                             ;; so a custom named swap* is admitted only
+                             ;; as swap__STAR__ (measured 2026-11-08,
+                             ;; probe3 run8 on datascript's Conn).
+                             (map #(munge (name %)))
+                             set)
+                  mark (fn [t] (vary-meta t (fn [m] (cond-> (assoc m :abstract true)
+                                                      (seq extra) (assoc :abstract-members extra)))))]
+              ;; the extras ride EVERY declared interface, not just the
+              ;; first: basilisk's checker collects artificially-abstract
+              ;; members per interface, and DB keeps whichever interface
+              ;; order the subsumption removal leaves (measured probes
+              ;; 30-33: the same member set passed and failed as the
+              ;; marked interface rotated). For a real ABC the checker
+              ;; ignores the key; for an artificial one it is the only
+              ;; admission path.
+              ;; ONE body form (lane-m/lpy-standing c4be726e78): with the
+              ;; vector and the map as two forms the let answered only the
+              ;; map, and every deftype lost its translated method groups
+              ;; (measured 2026-11-09: MmapAtomDomain could not be
+              ;; instantiated — abstract method 'val_at' — opening a world).
+              (into [{:protocol (mark (first types))
+                      :forms methods}]
+                    (map (fn [t] {:protocol (mark t) :forms []}) (rest types)))))
+          ;; F-LPY-NO-IFACE-EXTRAS: when no declared group maps to a
+          ;; basilisp interface (types empty — e.g. a type whose only
+          ;; interface group is the unmapped clojure.lang.IAtom, or
+          ;; Object customs alone), the pool methods still need a
+          ;; header: basilisp's deftype* analyzer rejects any method
+          ;; that is not a member of a declared interface (measured
+          ;; 2026-11-09, bv1trace: "deftype* definition for interface
+          ;; includes members not part of defined interfaces"), an
+          ;; object header is skipped by that check so it cannot
+          ;; carry them, and basilisp 0.5.1 has no IAtom interface to
+          ;; map onto. The tail entry therefore names a generated
+          ;; carrier interface — a definterface emitted by
+          ;; lpy-carrier-forms ahead of the deftype at every assembly
+          ;; site — whose abstract members are exactly the pool's
+          ;; non-dunder signatures (dunders ride undeclared: the
+          ;; analyzer subtracts OBJECT_DUNDER_METHODS itself).
+          ;; Carrier shape measured green in pure basilisp
+          ;; (carrierprobe C1, 2026-11-09). Signature arg lists are
+          ;; normalized to a leading `this` (the pool's self bindings
+          ;; are gensyms; gen-interface keys its arity bookkeeping
+          ;; off a literal self/this first arg).
           (when (and (empty? types) (seq methods))
-            [{:protocol nil :forms methods}])))))
+            (let [carrier (symbol (str (name type-name) "__iface"))
+                  sigs (into []
+                             (comp (remove (fn [f] (str/starts-with? (name (first f)) "_")))
+                                   (mapcat (fn [f]
+                                             (if (clojure.core/vector? (second f))
+                                               ;; ^ qualified: this defn binds a bool local named vector?
+                                               ;; (the IPersistentVector flag above) — the unqualified
+                                               ;; call resolved to it and threw 'bool not callable'
+                                               ;; (t3trace, 2026-11-09)
+                                               [[(first f) (assoc (second f) 0 'this)]]
+                                               ;; a multi-arity method is declared ONCE,
+                                             ;; variadically: the deftype side collapses it to a
+                                             ;; single [self & rest] dispatch form (lpy-collapse-
+                                             ;; multi-arity; carrierprobe3 C8, 2026-11-09)
+                                             [[(first f) ['this '& 'rest]]])))
+                                   (distinct))
+                             methods)]
+              [{:protocol carrier
+                :forms methods
+                :carrier sigs}]))))))
+
+(defn- lpy-collapse-multi-arity
+  "Pool method forms as basilisp's deftype* takes them. A single-arity
+   form passes through. A Clojure-style multi-arity form
+   (name ([self args...] body...) ([self args...] body...)) cannot be
+   emitted as-is under an interface header (the analyzer demands one
+   arglist vector per form: \"deftype* member arguments must be
+   vector\", bv6trace 2026-11-09), nor split into same-name forms
+   (the definition check rejects them, carrierprobe2 C3-C5), nor
+   left undeclared (carrierprobe3 C6/C7). It is collapsed into ONE
+   variadic form dispatching on the argument count to the original
+   arity bodies, each body seeing its own argument names bound from
+   the rest list (measured green in pure basilisp, carrierprobe3
+   C8). The generated carrier declares such a method once, as
+   (name [this & rest]) (see the tail in lpy-translate-protos)."
+  [forms]
+  (mapcat (fn [f]
+            (if (and (seq? f) (seq? (second f)) (vector? (first (second f))))
+              (let [mname (first f)
+                    self (first (ffirst (rest f)))
+                    rsym '__arity-rest__
+                    clauses
+                    (mapcat (fn [arity-form]
+                              (let [arglist (first arity-form)
+                                    body (rest arity-form)
+                                    s (first arglist)
+                                    args (vec (rest arglist))
+                                    variadic? (boolean (some #{'&} args))
+                                    fixed-args (if variadic?
+                                                 (vec (take-while #(not= '& %) args))
+                                                 args)
+                                    rest-name (when variadic? (last args))
+                                    n (count fixed-args)
+                                    bindings (vec (mapcat (fn [i a] [a (list 'nth rsym i)])
+                                                          (range n) fixed-args))
+                                    bindings (cond-> bindings
+                                               (not= s self) (into [s self])
+                                               rest-name (into [rest-name (list 'drop n rsym)]))
+                                    value (if (seq bindings)
+                                            (list 'let bindings (cons 'do body))
+                                            (cons 'do body))]
+                                [(if variadic?
+                                   (list '>= (list 'count rsym) n)
+                                   (list '= (list 'count rsym) n))
+                                 value]))
+                            ;; fixed arities first (an exact count
+                            ;; wins), a variadic arity last
+                            (sort-by (fn [arity-form]
+                                       (if (some #{'&} (first arity-form)) 1 0))
+                                     (rest f)))]
+                [(list* mname [self '& rsym]
+                        [(list* 'cond
+                                (concat clauses
+                                        [:else (list 'throw
+                                                     (list 'python/TypeError
+                                                           (str "Wrong number of args passed to "
+                                                                (name mname))))]))])])
+              [f]))
+          forms))
 
 (defn lpy-impls->forms
   "lpy-translate-protos' result as the flat body of a deftype."
   [impls]
   (mapcat (fn [{:keys [protocol methods forms]}]
-            (cond->> (or forms (map (fn [{:keys [name args body]}] (list* name args body)) methods))
+            (cond->> (or (some-> forms lpy-collapse-multi-arity)
+                         (map (fn [{:keys [name args body]}]
+                                      ;; keep the method name's meta on the
+                                      ;; emitted form: basilisk's analyzer
+                                      ;; reads :property / :kwargs from the
+                                      ;; FORM's head symbol meta, and the
+                                      ;; name in the method map carries it
+                                      ;; (lpy-prop / lpy-nth vary it there).
+                                      ;; Without this, IMeta's meta and
+                                      ;; ISeq's first/rest land as plain
+                                      ;; methods and their ABC properties
+                                      ;; stay unsatisfied (measured
+                                      ;; 2026-11-08, tw32/tw33).
+                                      (with-meta (list* name args body) (meta name)))
+                                    methods))
               protocol (cons protocol)))
           impls))
+
+
+(defn lpy-carrier-forms
+  "The definterface forms for any generated carrier entries in
+   translated (see the F-LPY-NO-IFACE-EXTRAS tail in
+   lpy-translate-protos): one per carrier, declaring exactly the
+   entry's signatures, emitted ahead of the deftype at every
+   assembly site."
+  [translated]
+  (vec (for [{:keys [protocol carrier]} translated
+             :when carrier]
+         (list* 'definterface protocol
+                (map (fn [[n args]] (list n args)) carrier)))))
+
+
+(defn lpy-protocol-arity-fixups
+  "Post-deftype forms repairing basilisp 0.5.1's multi-arity protocol
+   methods (measured 2026-11-08, tw84/tw85/drv87 on me.tonsky's ISeek):
+   gen-interface (basilisp core) names a multi-arity method's per-arity
+   abstract methods \"_\" + munge(name) + \"_arity\" + k, k the argument
+   count past this (\"_rest\" for a variadic arity), but deftype*'s
+   generator stores the handlers it emits from the sibling method forms
+   under Python's name-mangled keys (_Iter__seek_arity1), so the
+   unmangled abstract names stay unsatisfied and the class can never be
+   instantiated. Copy each handler to its unmangled name and prune the
+   names from the class's __abstractmethods__ (ABCMeta froze that set at
+   class creation; the copies alone do not lift it — tw88/tw89). Only
+   dash-led method names mangle (their abstract names start with __); a
+   plain name's handler already sits at its abstract key."
+  [type-name impls]
+  (let [munge (fn [s] (-> (name s)
+                          (str/replace "-" "_")
+                          (str/replace "?" "__Q__")))
+        abstracts (vec
+                    (mapcat (fn [{:keys [methods]}]
+                              (mapcat (fn [[mname ms]]
+                                        (when (and (< 1 (count ms))
+                                                   (str/starts-with? (name mname) "-"))
+                                          (map (fn [{:keys [args]}]
+                                                 (str "_" (munge mname) "_arity"
+                                                      (if (some #{'&} args)
+                                                        "rest"
+                                                        (dec (count args)))))
+                                               ms)))
+                                      (group-by :name methods)))
+                            (filter :methods impls)))]
+    (if (empty? abstracts)
+      []
+      (into (mapv (fn [abstract]
+                    `(python/setattr ~type-name ~abstract
+                                     (python/getattr ~type-name
+                                                     ~(str "_" (munge type-name) abstract))))
+                  abstracts)
+            [`(python/setattr ~type-name "__abstractmethods__"
+                              (.difference (python/getattr ~type-name "__abstractmethods__")
+                                           (python/frozenset ~abstracts)))]))))
 
 (defn lpy-field
   "A field symbol as basilisp's deftype takes it: a mutable field is
@@ -389,11 +804,20 @@
 
 (defn lpy-rename-methods
   "Method forms (name [args] & body), and the protocol names between them,
-   with the fields renamed per renames in each method's arguments and body."
+   with the fields renamed per renames in each method's arguments and body.
+   A field read in the JVM's interop spelling (.-meta x) is renamed too:
+   it is a different symbol from the bare field name, and left alone it
+   reads the basilisp member the field was renamed to escape — (.-meta x)
+   is IMeta's meta property, so a slab type's own meta method recursed
+   (measured 2026-11-08, datascript DB in probe1 run12)."
   [body renames]
   (if (empty? renames)
     body
-    (map (fn [f] (if (seq? f) (cons (first f) (rename-syms (rest f) renames)) f)) body)))
+    (let [renames (into renames
+                        (map (fn [[k v]] [(symbol (str ".-" (name k)))
+                                          (symbol (str ".-" (name v)))]))
+                        renames)]
+      (map (fn [f] (if (seq? f) (cons (first f) (rename-syms (rest f) renames)) f)) body))))
 
 (defn- hooks
   "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
@@ -403,31 +827,54 @@
    ;; the host's own deftype, the body translated already (a namespace may
    ;; refer eve.deftype's as deftype)
    :define (fn [type-name fields impls _forms print]
-             (concat [`(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
-                         ~@(lpy-impls->forms (lpy-translate-protos impls)))]
-                     (when print [(sio/print-method-form type-name print)])))
+             (let [translated (lpy-translate-protos type-name impls)]
+               (concat (lpy-carrier-forms translated)
+                       [`(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+                           ~@(lpy-impls->forms translated))]
+                       (lpy-protocol-arity-fixups type-name translated)
+                       (when print [(sio/print-method-form type-name print)]))))
    :build (fn [type-name _fields _new-name args] (list* 'new type-name args))
    :factory-via-var? false
    :slab-prepare (fn [parsed _type-name] parsed)
    :object-boilerplate? true
    :slab-define (fn [type-name fields forms]
-                  [`(~'deftype ~type-name ~(mapv lpy-field fields)
-                     ~@(lpy-impls->forms (lpy-translate-protos (parse-protocol-impls forms))))])})
+                  (let [translated (lpy-translate-protos type-name (parse-protocol-impls forms))]
+                    (into (vec (concat (lpy-carrier-forms translated)
+                                       [`(~'deftype ~type-name ~(mapv lpy-field fields)
+                                           ~@(lpy-impls->forms translated))]))
+                          (lpy-protocol-arity-fixups type-name translated))))})
 
 (defn host-type
   "A plain type written with the JVM's names (host-deftype)."
   [_env type-name fields parsed]
-  `(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
-     ~@(lpy-impls->forms (lpy-translate-protos parsed))))
+  (let [translated (lpy-translate-protos type-name parsed)
+        fixups (lpy-protocol-arity-fixups type-name translated)
+        carriers (lpy-carrier-forms translated)]
+    (if (seq carriers)
+      `(do ~@carriers
+           (clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+             ~@(lpy-impls->forms translated))
+           ~@fixups
+           ~type-name)
+      (if (seq fixups)
+        `(do (clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+               ~@(lpy-impls->forms translated))
+             ~@fixups
+             ~type-name)
+        `(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+           ~@(lpy-impls->forms translated))))))
 
 (defn plain-type
   "A plain type (eve.deftype/deftype): also the fields a member's name takes
    renamed (lpy-field-renames)."
   [_env type-name fields parsed]
   (let [[fields parsed] (sio/plain-renames fields parsed lpy-field-renames)
-        {:keys [impls print]} (v/jvm-translate-protos parsed)]
-    `(do (clojure.core/deftype ~type-name ~(mapv lpy-field fields)
-           ~@(lpy-impls->forms (lpy-translate-protos impls)))
+        {:keys [impls print]} (v/jvm-translate-protos parsed)
+        translated (lpy-translate-protos type-name impls)]
+    `(do ~@(lpy-carrier-forms translated)
+         (clojure.core/deftype ~type-name ~(mapv lpy-field fields)
+           ~@(lpy-impls->forms translated))
+         ~@(lpy-protocol-arity-fixups type-name translated)
          ~@(when print [(sio/print-method-form type-name print)])
          ~type-name)))
 

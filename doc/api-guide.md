@@ -11,6 +11,7 @@ Arglists are the source's. Every sample was run as written on 2026-10-20 ET on b
 |---|---|---|
 | [`eve.alpha`](#evealpha) | the entry point: atoms, the core constructors, typed-array access, eve.core's vocabulary, the type macros | every host but ValueScript |
 | [`eve.atom`](#eveatom) | atoms and atom domains | every host but ValueScript |
+| [`eve.stm`](#evestm) | software transactional memory: refs and `dosync` on eve atoms | every host but ValueScript |
 | [`eve.thread`, `eve.thread.fold`](#evethread) | the executor service: futures, pools, `pmap`, `fold`, `=>>` | every host with a thread adapter (all but ValueScript) |
 | [`eve.net.atom`, `.gateway`, `.auth`, `.platform`](#evenet) | network atoms | hosts with an http adapter |
 | [`eve.keyring`](#evekeyring) | encryption at rest, at the slab level | every host but ValueScript |
@@ -71,7 +72,7 @@ The domain API is described in [atom-domains.md](atom-domains.md), with a run sa
 | Var | Arglist | What |
 |---|---|---|
 | `atom`, `persistent-atom` | `[& args]` | as `eve.alpha/atom`; `persistent-atom` always on disk |
-| `persistent-atom-domain` | `[base-path & {:keys [capacities lustre?]}]` | open or create a disk domain, cached by path; the creator is the one exclusive create of `<base>.root` |
+| `persistent-atom-domain` | `[base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes]}]` | open or create a disk domain, cached by path; the creator is the one exclusive create of `<base>.root`. `:journal?` (default: on unless `:durable? false`) — the disk tier is journaled by design; `false` keeps durable commits without the journal file. `:mem-budget` (bytes) caps the domain's total region growth; refused growth names the budget (defaults: `MEM-BUDGET-DESKTOP` 2 GB, `MEM-BUDGET-BROWSER` 1 GB, `MEM-BUDGET-WORKERD` 48 MB — developer-settable defaults, not ceilings). `:segment-bytes` (a power of two, default 256 MiB) sets the region mapping window: segmentation takes a domain past the 2 GiB single-mapping ceiling, and the value is stored nowhere in the domain's files, so processes may join one domain with different windows |
 | `join-atom-domain` | `[base-path]` | the same |
 | `lookup-or-create-mmap-atom!` | `[domain "ns/name" init]` | a member atom by string name |
 | `domain-lookup` | `[domain k]` `[domain k not-found]` | a member atom by keyword |
@@ -87,6 +88,31 @@ The domain API is described in [atom-domains.md](atom-domains.md), with a run sa
 
 Deref (`@a`) materializes the value into the host's own collections. Its other public vars (`register-worker!`,
 `begin-read!`, `retire-block!`, and the like) are the epoch surface the tests drive, not application API.
+
+## eve.stm
+
+Software transactional memory in Eve, on Eve atoms, with no host STM beneath: stock Clojure's semantics over a per-ref construction — each ref's cell is the sole atom of its own Eve atom domain, so the ref's domain is its contention domain. The full page is [stm.md](stm.md); in brief:
+
+| Var | Arglist | What |
+|---|---|---|
+| `make-ref` | `[x]`, `[x opts]` | a new ref holding `x`; opts `:meta`, `:validator`, `:min-history`, `:max-history`, `:seat` (disk-tier seating: `{:domain-path :name :durable?}`) |
+| `dosync` (macro) | `[& body]` | run the body in a transaction; a nested call joins the running attempt |
+| `sync` (macro) | `[flags & body]` | the same runner (the `:release-pending-sends` flag is not modelled) |
+| `run-in-transaction` | `[f]` | the runner itself: run `f` in an attempt, retrying per the STM page's rules |
+| `deref-ref` | `[r]` | in a transaction, the value as of the attempt's read point, folded with its own writes; outside, the latest committed value |
+| `ref-set*` | `[r v]` | the attempt's value of `r` becomes `v` |
+| `alter*` | `[r f args]` | apply `f` to the attempt's view of `r`, recorded as a set; an altered ref is validated at commit |
+| `commute*` | `[r f args]` | record `f` to fold over the ref's current committed value at commit time, in call order; not validated |
+| `ensure*` | `[r]` | enrol `r` in the attempt's validated set (the write-skew guard) |
+| `ref-history-count`, `ref-min-history`, `ref-max-history`, `set-min-history!`, `set-max-history!` | `[r]`, `[r n]` | the ref's retained versioned history (max defaults to 10, min to 0) |
+| `add-watch*`, `remove-watch*`, `get-watches` | `[r k f]`, `[r k]`, `[r]` | ref watches — refs carry watches and a validator in their own state (eve atoms have neither) |
+| `set-validator*`, `get-validator` | `[r f]`, `[r]` | the ref's validator, run at commit |
+| `seat-clock!` | `[a]` | seat the commit-point clock in a shared Eve atom: the disk-tier seating, with `make-ref`'s `:seat`, that lets two processes transact against the same refs |
+| `dispatch!`, `set-send-dispatcher!` | `[msg]`, `[f]` | the agent seam: a send inside a transaction is held and released exactly once, after the winning commit |
+| `stats`, `reset-stats!` | `[]` | attempt / retry / commit counters |
+| `in-transaction?`, `ref-value?` | `[]`, `[x]` | predicates |
+
+A transaction fixes one read point and reads every ref as of it from its versioned history — the multi-ref snapshot defect (a **jagged transaction**, a combination that never existed at one commit point) is what this prevents. Commit locks each written or ensured ref in creation order, validates, claims the next commit point, and installs each written ref with one CAS on its own cell atom; there is no single atomic swap anywhere in the construction. Ordinary retries are unbounded and never counted; basis faults (a cell beyond the commit-point clock — only an out-of-band write can produce one) are counted per invocation and bounded at 10,000. **History encoding:** this release ships the OLD encoding; the accepted flat encoding is not in this release, the two do not read each other, and seated worlds must be re-created at an encoding change ([stm.md](stm.md#history-encoding--read-this-before-seating-worlds)).
 
 ## eve.thread
 

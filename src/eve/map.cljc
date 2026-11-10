@@ -67,6 +67,30 @@
   [k]
   (codec/encode-key k))
 
+;; --- A5: the lookup's [kb kh] memo for interned keys ---
+;; A HAMT lookup pays key serialize + Murmur hash before its first
+;; node read. kb and kh are pure functions of the key, and a keyword
+;; is one object per name on every host, so an identity-keyed memo
+;; is exact: a hit returns the very bytes and hash the uncached path
+;; computes; a miss falls through to it. Bounded and emptied whole
+;; past the cap, the codec kw-encode-cache pattern (enc/cache-put!).
+;; Keyword-only: an equal-but-not-identical key type would only ever
+;; miss, so the memo never fills with entries that cannot hit.
+(def ^:private key-memo (enc/new-cache))
+(def ^:private ^:const KEY-MEMO-MAX 4096)
+
+(defn- key-bytes+hash
+  "The [kb kh] a HAMT lookup needs for k."
+  [k]
+  (if (keyword? k)
+    (or (enc/cache-get key-memo k)
+        (let [kb (serialize-key-bytes k)
+              pair [kb (portable-hash-bytes kb)]]
+          (enc/cache-put! key-memo k pair KEY-MEMO-MAX)
+          pair))
+    (let [kb (serialize-key-bytes k)]
+      [kb (portable-hash-bytes kb)])))
+
 (defn- serialize-val-bytes
   "Serialize a value to bytes (platform-specific).
    sio is explicit on CLJ (ignored on CLJS)."
@@ -89,8 +113,8 @@
 
 (defn- bytes-length
   "Get byte array length."
-  ^long [ba]
-  (alength ^bytes ba))
+   [^bytes ba]
+  (alength ba))
 
 ;;=============================================================================
 ;; Computed node layout helpers
@@ -98,12 +122,12 @@
 
 (defn- hashes-start-off
   "Byte offset within node where hash array starts (after children)."
-  ^long [^long node-bm]
+   ^long [^long node-bm]
   (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm))))
 
 (defn- kv-data-start-off
   "Byte offset within node where KV data starts."
-  ^long [^long data-bm ^long node-bm]
+   ^long [^long data-bm ^long node-bm]
   (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm)) (* 4 (popcount32 data-bm))))
 
 ;;=============================================================================
@@ -112,7 +136,7 @@
 
 (defn- skip-kv-at
   "Skip a KV pair at pos within node, returning offset after it."
-  ^long [sio ^long node-off ^long pos]
+   [sio ^long node-off ^long pos]
   (let [key-len (alloc/node-i32 sio node-off pos)
         val-off (+ pos 4 key-len)
         val-len (alloc/node-i32 sio node-off val-off)]
@@ -122,7 +146,7 @@
 ;; and boxed per lookup; jvm-heap-grade step 3).
 (defn- kv-pos
   "The offset of the di-th KV pair in the node at node-off, its KV data starting at kvs."
-  ^long [sio ^long node-off ^long kvs ^long di]
+   [sio ^long node-off ^long kvs ^long di]
   (let [a (alloc/node-heap-array sio node-off)]
     (if (nil? a)
       (loop [i 0 p kvs]
@@ -137,7 +161,7 @@
 
 (defn- calc-kv-size
   "Calculate total bytes for a KV pair."
-  ^long [kb vb]
+   [kb vb]
   (+ 4 (bytes-length kb) 4 (bytes-length vb)))
 
 (defn- key-bytes-match?
@@ -183,7 +207,7 @@
 
 (defn- node-kv-total-size
   "Read the cached kv-total-size from header. If 0, compute by scanning."
-  ^long [sio ^long node-off ^long data-bm ^long node-bm]
+   [sio ^long node-off ^long data-bm ^long node-bm]
   (let [cached (slab/read-u16 sio node-off 2)]
     (if (pos? cached)
       cached
@@ -196,7 +220,7 @@
 
 (defn- node-byte-size
   "Compute total byte size of a bitmap node."
-  ^long [sio ^long node-off ^long data-bm ^long node-bm]
+   [sio ^long node-off ^long data-bm ^long node-bm]
   (+ NODE_HEADER_SIZE
      (* 4 (popcount32 node-bm))
      (* 4 (popcount32 data-bm))
@@ -445,12 +469,19 @@
 ;; HAMT Find (unified)
 ;;=============================================================================
 
-(defn- hamt-get
-  "Find key k in HAMT rooted at root-off. Returns value or not-found."
-  [sio ^long root-off k not-found]
-  (let [kb (serialize-key-bytes k)
-        kh (portable-hash-bytes kb)]
-    (loop [off root-off shift 0]
+(defn- hamt-get-words
+  "Find the key in the HAMT at root-off, walking with the per-word
+   node readers: every node field a separate node read (plain loads
+   on published nodes since item 9b). This is the path for a sio
+   with no JvmSlabCtx under its wrappers, and the fallback for any
+   single node a view cannot resolve. kbkh is [kb kh shift0] — the
+   precomputed key bytes, their hash, and the starting shift,
+   packed because a fn taking primitives supports at most 4 args; a
+   missing shift0 is 0 (hamt-get passes key-bytes+hash's [kb kh])."
+  [sio ^long root-off kbkh not-found]
+    (let [kb (nth kbkh 0)
+          kh (long (nth kbkh 1))]
+    (loop [off root-off shift (long (nth kbkh 2 0))]
       (if (== off NIL_OFFSET)
         not-found
         (let [nt (alloc/node-u8 sio off 0)]
@@ -504,6 +535,120 @@
 
             ;; Unknown
             not-found))))))
+
+;; The kv walk of hamt-get-view, a named fn: a loop bound in a let is compiled
+;; as a closure returning a boxed position (a fresh fn object and a Long per
+;; node, measured — fix-for-release E3). Absolute offsets keep it at four
+;; args (a fn taking primitives supports at most 4): start is base + the
+;; node's kv-data offset, the result is the absolute offset of entry di.
+(defn- kv-pos-parts
+  ^long [arr rgn ^long start ^long di]
+  (loop [i 0 p start]
+    (if (== i di)
+      p
+      (let [vo (+ p 4 (alloc/parts-i32 arr rgn 0 p))]
+        (recur (inc i) (+ vo 4 (alloc/parts-i32 arr rgn 0 vo)))))))
+
+(defn- hamt-get-view
+  "Find the key in the HAMT at root-off, resolving each node once
+   (alloc/node-view) and reading its words through the view. A node
+   the view cannot resolve hands off to hamt-get-words at the same
+   position and shift. kbkh is [kb kh shift0] (see hamt-get-words)."
+  [sio ^long root-off kbkh not-found]
+  (let [kb (nth kbkh 0)
+        kh (long (nth kbkh 1))]
+  (loop [off root-off shift (long (nth kbkh 2 0))]
+    (if (== off NIL_OFFSET)
+      not-found
+      (let [view (alloc/node-view sio off)]
+        (if (nil? view)
+          (hamt-get-words sio off [kb kh shift] not-found)
+          (let [arr (nth view 0)
+                rgn (nth view 1)
+                base (long (nth view 2))
+                nt (alloc/parts-u8 arr rgn base 0)]
+            (case (int nt)
+              ;; Bitmap node
+              1 (let [dbm (alloc/parts-i32 arr rgn base 4)
+                      nbm (alloc/parts-i32 arr rgn base 8)
+                      bit (node-bit dbm nbm kh shift)]
+                  (cond
+                    (has-bit? nbm bit)
+                    (recur (alloc/parts-i32 arr rgn base
+                                          (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                           (+ shift SHIFT_STEP))
+
+                    (has-bit? dbm bit)
+                    (let [di (get-index dbm bit)
+                          hs (hashes-start-off nbm)
+                          sh (alloc/parts-i32 arr rgn base (+ hs (* di 4)))]
+                      (if (not (== sh kh))
+                        not-found
+                        (let [kvs (kv-data-start-off dbm nbm)
+                              pos (- (kv-pos-parts arr rgn (+ base kvs) di) base)
+                              kl (alloc/parts-i32 arr rgn base pos)]
+                          (if (and (== kl (bytes-length kb))
+                                   (alloc/parts-bytes-equal? arr rgn (+ base pos 4) kb))
+                            (let [vo (+ pos 4 kl)
+                                  vl (alloc/parts-i32 arr rgn base vo)
+                                  vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
+                              (deserialize-value-bytes vb sio))
+                            not-found))))
+
+                    :else not-found))
+
+              ;; Collision node
+              3 (let [ch (alloc/parts-i32 arr rgn base 4)]
+                  (if (not (== ch kh))
+                    not-found
+                    (let [cc (alloc/parts-u8 arr rgn base 1)]
+                      (loop [i 0 pos COLLISION_HEADER_SIZE]
+                        (if (>= i cc)
+                          not-found
+                          (let [kl (alloc/parts-i32 arr rgn base pos)]
+                            (if (and (== kl (bytes-length kb))
+                                     (alloc/parts-bytes-equal? arr rgn (+ base pos 4) kb))
+                              (let [vo (+ pos 4 kl)
+                                    vl (alloc/parts-i32 arr rgn base vo)
+                                    vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
+                                (deserialize-value-bytes vb sio))
+                              (let [vo (+ pos 4 kl)]
+                                (recur (inc i) (+ vo 4 (alloc/parts-i32 arr rgn base vo)))))))))))
+
+              ;; Unknown
+              not-found))))))))
+
+(defn- hamt-get
+  "Find key k in HAMT rooted at root-off. Returns value or not-found.
+   The descent resolves each node once and reads its words through
+   the resolved view (alloc/node-view) when the sio is a JvmSlabCtx
+   under its wrappers — the per-word readers re-pay the wrapper
+   walk, the region lookup, and the offset arithmetic on every
+   word (tier-repair round 2, adder A4). Any other sio, and any
+   node a view cannot resolve, walks per-word (hamt-get-words).
+
+   History: a fused per-node-view variant (one bulk read per node
+   into a fresh byte array, walked locally) was built and measured
+   in round 1 and REVERTED the same night: engagement was total
+   (599/599 nodes viewed) but it priced ~2x the per-word path -- a
+   bulk region read costs ~0.61us, about two plain word loads, and
+   the view pays it twice per node (header, then whole node) plus
+   the array copies. That shape wanted a zero-copy region view;
+   the resolved view above is it (no copies — the node's words are
+   read in place through the one resolution). The round-1 finding
+   is banked in the sweep STATUS (adder A4)."
+  [sio ^long root-off k not-found]
+  (let [kbkh (key-bytes+hash k)]
+    ;; the incumbent descent's first test: an empty map's root is
+    ;; NIL_OFFSET, which is not a node — never hand it to node-view
+    ;; (its class bits decode to 7, off the regions array)
+    (if (== root-off NIL_OFFSET)
+      not-found
+      ;; kbkh is [kb kh]: both descents start at shift 0 when it has no third
+      ;; element, so it is passed as it is (no per-lookup vector)
+      (if (alloc/node-viewable? sio)
+        (hamt-get-view sio root-off kbkh not-found)
+        (hamt-get-words sio root-off kbkh not-found)))))
 
 ;;=============================================================================
 ;; HAMT Assoc (unified)
@@ -881,7 +1026,7 @@
 
 (defn write-map-header!
   "Allocate and write a 12-byte EveHashMap header. Returns slab offset."
-  ^long [sio ^long cnt ^long root-off]
+   [sio ^long cnt ^long root-off]
   (let [off (slab/alloc! sio 12)]
     (slab/write-u8! sio off 0 EveHashMap-type-id)
     (slab/write-u8! sio off 1 1) ;; flags

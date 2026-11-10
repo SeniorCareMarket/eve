@@ -112,7 +112,7 @@
           (cond r -1 (f b a) 1 :else 0)
           r)))))
 
-(defn- key-bytes [k] (aclone (codec/encode-key k)))
+(defn- key-bytes [k] (aclone ^bytes (codec/encode-key k)))
 
 (defn- prio-of
   "A key's priority: the Murmur3 of its key bytes, the same on every host."

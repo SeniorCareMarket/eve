@@ -18,20 +18,20 @@
 (defn- bulk-doubles
   "Extract all elements as a double[] — fast path via IBulkAccess,
    fallback via nth."
-  ^doubles [col]
+   [col]
   (or (d/-as-double-array col)
       (let [n (e/count col)
-            ^doubles out (double-array n)]
+            out (double-array n)]
         (dotimes [i n] (aset out i (double (e/nth col i))))
         out)))
 
 (defn- bulk-ints
   "Extract all elements as an int[] — fast path via IBulkAccess,
    fallback via nth."
-  ^ints [col]
+   [col]
   (or (d/-as-int-array col)
       (let [n (e/count col)
-            ^ints out (int-array n)]
+            out (int-array n)]
         (dotimes [i n] (aset out i (int (e/nth col i))))
         out)))
 
@@ -113,11 +113,11 @@
    (let [n (e/count col)]
      (if (< n 2)
        (arr/from-int-array (int-array (range n)))
-       (let [^ints ia (d/-as-int-array col)
-             ^doubles da (when-not ia (d/-as-double-array col))]
+       (let [ia (d/-as-int-array col)
+             da (when-not ia (d/-as-double-array col))]
          (if (or ia da)
            ;; Fast path: quicksort on primitive int[] indices
-           (let [^ints idx (int-array n)
+           (let [idx (int-array n)
                  _ (dotimes [i n] (aset idx i (int i)))]
              (cond
                ia (if (= direction :desc)
@@ -133,7 +133,7 @@
                         (fn [a b] (compare (e/nth col b) (e/nth col a)))
                         (fn [a b] (compare (e/nth col a) (e/nth col b))))
                  sorted (sort cfn idxs)
-                 ^ints out (int-array n)]
+                 out (int-array n)]
              (dotimes [i n]
                (aset out i (int (clojure.core/nth sorted i))))
              (arr/from-int-array out))))))))
@@ -142,8 +142,8 @@
   "Return :int32 array of indices where (pred elem) is truthy."
   [col pred]
   (let [n (e/count col)
-        ^doubles da (d/-as-double-array col)
-        ^ints ia (when-not da (d/-as-int-array col))
+        da (d/-as-double-array col)
+        ia (when-not da (d/-as-int-array col))
         elem (cond da (fn [i] (aget da i))
                    ia (fn [i] (aget ia i))
                    :else (fn [i] (e/nth col i)))
@@ -152,14 +152,14 @@
                  (recur (inc i) (if (pred (elem i)) (conj! acc i) acc))
                  (persistent! acc)))
         m (count hits)
-        ^ints out (int-array m)]
+        out (int-array m)]
     (dotimes [i m] (aset out i (int (nth hits i))))
     (arr/from-int-array out)))
 
 (defn argmin
   "Return index of minimum value (scalar)."
   [col]
-  (if-let [^doubles da (d/-as-double-array col)]
+  (if-let [da (d/-as-double-array col)]
     (when (pos? (alength da))
       (loop [i 1 best 0 best-val (aget da 0)]
         (if (< i (alength da))
@@ -177,7 +177,7 @@
 (defn argmax
   "Return index of maximum value (scalar)."
   [col]
-  (if-let [^doubles da (d/-as-double-array col)]
+  (if-let [da (d/-as-double-array col)]
     (when (pos? (alength da))
       (loop [i 1 best 0 best-val (aget da 0)]
         (if (< i (alength da))
@@ -204,7 +204,7 @@
     (into {}
           (map (fn [[k idxs]]
                  (let [m (count idxs)
-                       ^ints out (int-array m)]
+                       out (int-array m)]
                    (dotimes [i m] (aset out i (int (nth idxs i))))
                    [k (arr/from-int-array out)])))
           groups)))
@@ -213,16 +213,16 @@
   "Gather: return new array with elements at given indices.
    idx-arr is an :int32 EveArray of indices."
   [col idx-arr]
-  (let [^ints idx (or (d/-as-int-array idx-arr)
+  (let [idx (or (d/-as-int-array idx-arr)
                       (bulk-ints idx-arr))
         n   (alength idx)]
-    (if-let [^doubles da (d/-as-double-array col)]
-      (let [^doubles out (double-array n)]
+    (if-let [da (d/-as-double-array col)]
+      (let [out (double-array n)]
         (dotimes [i n]
           (aset out i (aget da (aget idx i))))
         (arr/from-double-array out))
-      (if-let [^ints ia (d/-as-int-array col)]
-        (let [^ints out (int-array n)]
+      (if-let [ia (d/-as-int-array col)]
+        (let [out (int-array n)]
           (dotimes [i n]
             (aset out i (aget ia (aget idx i))))
           (arr/from-int-array out))

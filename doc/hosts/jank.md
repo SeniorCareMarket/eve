@@ -9,6 +9,13 @@ reads it, `adapters/coll/jank`), and regions, encoding and process primitives in
 adapters. Memory is a `calloc`'d block or a `MAP_SHARED` mapping with the `__atomic` builtins and the futex syscall;
 one thread (`thread/none`) until the thread seam (J3).
 
+**0.9.3.1 (2026-11-09).** At this release's pin the compiled form is clean: the AOT build compiles
+165 files with 0 failures, the one-datum DataScript contract passes 5/5 cold runs (0.317 s median,
+journal engaged, fresh-process readback exact), and `eve.test.ffi-ns` passes 15/15. The take-2-era
+notes further down this page (the AOT abort, the missing-descriptor set) describe the tree they
+measured and do not hold at this pin; the remaining known gap is the warm-up tax on `-main` dispatch.
+The journal-file adapter is in tree; its Mac proof is outstanding (venue-blocked).
+
 ```bash
 apt-get install -y jank                                   # jank's own apt repository (book.jank-lang.org, Installation)
 locale-gen en_US.UTF-8                                    # once: jank's lexer reads source through the locale
@@ -76,6 +83,7 @@ DJ-2 (2026-11-04) keeps the one shared, tagged object.
 | typed-view | `typed-view/jank` | the bulk ops on :int32 (fill/copy/sum/min/max/eq) as hand-written C++ loops over the array's region bytes; ~2,400–4,900× eve's element loops at n=8000. Highway through cpp/raw measured 10–27× slower (it lands on its portable target without a per-target recompile) and does not ship — DECISIONS seam 6 |
 | http | `http/jank` | HTTP/1.1 over C sockets in C++ (cpp/raw, called as `cpp/eve_http.<fn>`): fetch writes the request's bytes and reads the whole answer; the head's parsing, the chunked joining and the body conventions in Clojure; its last-error string a mutex-guarded static, never a `thread_local` (defect 28) |
 | http-server | `http-server/jank` | the same C-socket shape on the server side (cpp/raw, `cpp/eve_httpd.<fn>`): a listener thread plus a fixed worker pool, the handler rooted and the threads GC-registered on process/jank's pattern; the last-error string mutex-guarded (defect 28) |
+| journal-file | `journal-file/jank` | the commit journal over a POSIX fd in C++ (cpp/raw, `cpp/eve_journal.<fn>`): `O_RDWR\|O_CREAT` (no `O_APPEND`, under which Linux `pwrite` ignores its offset), an append `lseek` to the end then `write`, write-at `pwrite`; the lock an fcntl POSIX write lock over the whole file (`F_SETLKW`, excluding and excluded by the JVM FileChannel lock and the python adapter's `lockf`); force `fsync` (full) or `fdatasync`; the EVJ1 record, its big-endian i32s and its CRC-32 built and read in C++ over eve's `i8` arrays, the scan's loop in Clojure |
 | core, slab, codec, thread | the inbuilt roots | `core/clojure`, `slab/heap`, `codec/byte-array`, `thread/none` (its catch arm `:jank jank.runtime.object_ref`) |
 
 ## Gotchas

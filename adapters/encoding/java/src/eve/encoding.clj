@@ -182,16 +182,18 @@
   (.isArray (class v)))
 
 (defn new-cache
-  "A thread-safe map for small caches (cache-get / cache-put!).
-  A synchronized HashMap, not a ConcurrentHashMap: this leaf is analyzed
-  by babashka (named in the ns docstring), and bb 1.3.190's analyzer cannot
-  resolve java.util.concurrent.ConcurrentHashMap (nor java.util.Hashtable).
-  Every operation the cache's callers use (get / put / size / clear, never
-  iteration) is individually synchronized on the wrapper, so the cache
-  stays safe under concurrent encoding; the size→clear→put sequence was
-  never atomic and remains a benign memo race (a lost entry re-encodes)."
+  "A thread-safe map for small caches (cache-get / cache-put!): a
+  ConcurrentHashMap — a get is a lock-free read, which the hot lookup path
+  takes once per key (eve.map's key memo; fix-for-release-2 E3: the
+  synchronized HashMap this replaced held a monitor per lookup, ~11% of a
+  warm map get's CPU). This leaf is also babashka's (named in the ns
+  docstring); the babashka this tree supports (1.13.x) resolves
+  java.util.concurrent.ConcurrentHashMap — the synchronized-map workaround
+  was for bb 1.3.190, which can no longer load the tree. The size→clear→put
+  sequence is not atomic: a benign memo race (a lost entry re-encodes). No
+  null keys or values: callers memo non-nil results only."
   []
-  (java.util.Collections/synchronizedMap (java.util.HashMap. 256)))
+  (java.util.concurrent.ConcurrentHashMap. 256))
 
 (defn cache-get [c k]
   (.get ^java.util.Map c k))
@@ -427,8 +429,8 @@
           (let [j (* 2 i)
                 hc (nth s j)
                 lc (nth s (inc j))
-                hi (if (< (int hc) 128) (Character/digit hc 16) -1)
-                lo (if (< (int lc) 128) (Character/digit lc 16) -1)]
+                hi (if (< (int hc) 128) (Character/digit (char (int hc)) 16) -1)
+                lo (if (< (int lc) 128) (Character/digit (char (int lc)) 16) -1)]
             (when (or (neg? hi) (neg? lo))
               (let [bad (if (neg? hi) hc lc)]
                 (throw (ex-info (str "not a hex digit: " bad) {:char bad}))))

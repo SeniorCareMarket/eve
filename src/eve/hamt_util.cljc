@@ -24,8 +24,8 @@
    (register-xxh3-128-impl!) only after it has passed the KAT suite in
    test/eve/xxh3_kat_test.cljc on that host — identity is proven by
    measurement, never assumed."
-  (:refer-clojure :exclude [aget alength bytes])
-  (:require [eve.host :refer [aget alength bytes]]
+  (:refer-clojure :exclude [aget aset alength bytes long reset!])
+  (:require [eve.host :refer [aget aset alength bytes long reset! const-bytes]]
             [eve.encoding :as enc]
             [eve.int32 :as i32]))
 
@@ -38,15 +38,15 @@
 
 (defn- ubyte
   "Read unsigned byte from buf at index i."
-  ^long [buf ^long i]
-  (bit-and (aget ^bytes buf i) 0xFF))
+   [^bytes buf ^long i]
+  (bit-and (aget buf i) 0xFF))
 
 (defn portable-hash-bytes
   "Murmur3_x86_32 hash (seed=0) of byte array.
    Returns int32, identical on every host. Primitive-hinted (2026-11-05, jvm-heap-grade
    step 3): boxed, this was ~175-215 ns over 6 key bytes on the JVM."
-  ^long [buf]
-  (let [len     (alength ^bytes buf)
+   [^bytes buf]
+  (let [len     (alength buf)
         nblocks (i32/ushr len 2)]
     (loop [i 0, h 0]
       (if (< i nblocks)
@@ -108,14 +108,14 @@
 ;; plain numbers in [0, 2^32); every intermediate product uses 16-bit
 ;; sub-limbs, so each value stays below 2^53 and is exact on every host.
 
-(defn- byte-len [buf]
-  (alength ^bytes buf))
+(defn- byte-len [^bytes buf]
+  (alength buf))
 
 (defn- new-bytes [n]
   (enc/make-bytes n))
 
-(defn- put-byte! [arr i v]
-  (aset ^bytes arr (int i) (unchecked-byte v)))
+(defn- put-byte! [^bytes arr i v]
+  (aset arr (int i) (eve.host/unchecked-byte v)))
 
 (def ^:private u32-range 4294967296)
 
@@ -405,11 +405,12 @@
    64
    126])
 
+;; The secret as a CONSTANT byte array (eve.host/const-bytes): some seats
+;; (clojerl) compile a def's value into the module as a literal, and a
+;; heap/NIF byte array is not one — const-bytes is the seat's arrangement
+;; for exactly that. The secret is only ever read, never written.
 (def ^:private xxh3-secret
-  (let [arr (new-bytes 192)]
-    (dotimes [i 192]
-      (put-byte! arr i (nth xxh3-secret-bytes i)))
-    arr))
+  (const-bytes xxh3-secret-bytes))
 
 (defn- s64 [off]
   (read-u64le xxh3-secret off))

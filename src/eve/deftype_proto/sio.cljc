@@ -247,7 +247,7 @@
        ;; methods may build new instances: the constructor, declared first
        (~'declare ~ctor-name ~load-name ~@(when factory-via-var? [new-name]))
        ;; the host's deftype: its cached and host-local fields,
-       ;; [^long slab-off__ sio__], and its print-method
+       ;; [slab-off__ sio__], and its print-method
        ~@(define type-name all-syms (proto/parse-protocol-impls body) body print)
        ~@(when factory-via-var? [`(~'def ~new-name ~ctor-name)])
 

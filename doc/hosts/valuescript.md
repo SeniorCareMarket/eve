@@ -1,10 +1,11 @@
 # eve on ValueScript
 
 ValueScript (`hosts.edn :vs`) is a Clojure-family language compiled to WebAssembly and run under
-wasmtime. **VS is not in eve 0.9**, and its row is partial — eve's slab I/O,
+wasmtime. **VS shipped in eve 0.9 as a partial seat** (the changelog's 0.9.0 section carries it as part of the release — the earlier "not in eve 0.9" framing contradicted the changelog and is corrected here), and its row is partial — eve's slab I/O,
 regions, allocator, codec and HAMT functions run on it, but eve's types (`eve/deftype`, and so the collections and
 `eve.atom` built on it) wait on VS's analyzer and macro evaluator (EM4's landing B), and it has no thread or http root
-yet. Its adapters require VS's `vs.thread`, `vs.mmap` and `vs.interop` (the unwired `crypto/vs` also needs
+yet. In 0.9.3.1 it remains **the only host with no working journal adapter**: its `hosts.edn` row carries
+`journal-file/unsupported`, so a VS domain cannot be journaled, and `eve.stm` does not run on it. Its adapters require VS's `vs.thread`, `vs.mmap` and `vs.interop` (the unwired `crypto/vs` also needs
 `vs.net.bytes`).
 
 ```bash

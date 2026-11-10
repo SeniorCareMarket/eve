@@ -119,13 +119,13 @@
   "The schema bytes of field-map, padded so 4 + their length is a multiple of 8."
   [field-map]
   (let [entries (mapv (fn [[k t]] [(enc/utf8-bytes (name k)) (obj-type-kw->code t)]) field-map)
-        len (+ 1 (reduce + 0 (map (fn [[nb _]] (+ 2 (alength ^bytes nb))) entries)))
+        len (+ 1 (reduce + 0 (map (fn [[^bytes nb _]] (+ 2 (alength nb))) entries)))
         ^bytes buf (enc/make-bytes (- (align-offset (+ 4 len) 8) 4))]
     (aset buf 0 (unchecked-byte (count entries)))
     (loop [pos 1 es (seq entries)]
       (when es
-        (let [[nb code] (first es)
-              nlen (alength ^bytes nb)]
+        (let [[^bytes nb code] (first es)
+              nlen (alength nb)]
           (aset buf pos (unchecked-byte nlen))
           (enc/arraycopy nb 0 buf (inc pos) nlen)
           (aset buf (+ pos 1 nlen) (unchecked-byte code))
@@ -268,8 +268,8 @@
    values (fields not given are 0); answers its slab offset."
   [sio schema-or-field-map values]
   (let [schema (->schema schema-or-field-map)
-        ^bytes sbytes (encode-obj-schema (:field-map schema))
-        slen (alength sbytes)
+        sbytes (encode-obj-schema (:field-map schema))
+        slen (alength ^bytes sbytes)
         slab-off (slab/alloc! sio (+ 4 slen (:size schema)))
         data-off (+ 4 slen)]
     (slab/write-u8! sio slab-off 0 ser/EVE_OBJ_SLAB_TYPE_ID)

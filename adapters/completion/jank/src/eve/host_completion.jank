@@ -19,37 +19,181 @@
      virtual (measured). The C++ hash does reach the hook, so a type is a usable key in jank's maps and sets
      by hash; equality there stays identity (jank's C++ path).
    - meta: jank's meta on an opaque object never returns (measured: a 60 s timeout); nil here for a type.
-   - + - *: jank's add, sub and mul of two small integers (the int32 range) wrap at 32 bits; here they are jank's
-     promoting ops, exact (upstream defect 27; the first forms below). A loop local with an integer-literal init is
+   - + - *: jank's add, sub and mul of two small integers (the int32 range) wrap at 32 bits (upstream defect 27;
+     the first forms below); here they are checked — eve_arith's __builtin_*_overflow ops, throwing on i64
+     overflow as the JVM's do (doc/arithmetic-overflow.md, the operator's 2026-11-07 decision), with jank's
+     promoting ops left to +' -' *'. A loop local with an integer-literal init is
      boxed, so it holds a value past 2^31 through recur (upstream defect 21; the loop re-root below).
    - unchecked-*, byte, short: jank's core throws \"TODO: port\" from each (121 such names at 0.1); the fixed-width
-     ones wrap here as the JVM's (over the exact + - * above). instance?, locking,
+     ones wrap here as the JVM's (over the promoting +' -' *' above). instance?, locking,
      hash-ordered-coll, hash-unordered-coll, mix-collection-hash, subseq, rsubseq, sequence, rseq, requiring-resolve,
      reversible?, indexed?, into-array, cast likewise.
    - A name interned into clojure.core here is seen by every namespace created after this one loads (measured), so
      the launcher requires eve.host-completion first (test/eve/runner/jank_main.jank).
 
    Re-rooted names hold for namespaces compiled after this one (alter-var-root on the core var: measured)."
-  (:refer-clojure :exclude [extend mix-collection-hash hash-ordered-coll hash-unordered-coll locking]))
+  (:refer-clojure :exclude [extend mix-collection-hash hash-ordered-coll hash-unordered-coll locking])
+  ;; Math, System, UUID are real source modules in this adapter (Math.jank,
+  ;; System.jank, UUID.jank beside this file's tree): requiring them makes
+  ;; them compiled modules in every graph that loads the completion, which
+  ;; jank's AOT collector demands; the when-not synthesis blocks at the end
+  ;; of this file remain as the fallback and skip when these have loaded.
+  (:require [Math] [System] [UUID]))
+
+;; The collector primed first: its heap grown to 64 MiB at once, so the load and a program's first allocations do not
+;; collect at every few MiB of growth (Boehm's default start). GC_expand_hp in a static initializer runs as this
+;; form's code is loaded (JIT) or at the binary's start (AOT); it initializes the collector if it is not yet.
+(cpp/raw "
+#include <gc.h>
+namespace eve_gc { static bool const primed = [] { GC_expand_hp(static_cast<size_t>(64) << 20); return true; }(); }
+")
 
 ;; ---------------------------------------------------------------------------
-;; + - * exact past 2^31 — first, so every form compiled after these lines takes them (this namespace's own included)
+;; + - * checked — first, so every form compiled after these lines takes them (this namespace's own included)
 ;; ---------------------------------------------------------------------------
 ;; jank keeps an integer in the int32 range as a small_integer, and its add, sub and mul of two of them wrap at 32
 ;; bits (upstream defect 27, measured on jank 0.1-noble cf627abb…: (+ 2147483647 1) → -2147483648, (* 239 16777216)
 ;; → -285212672, (* 65535 65535) → -131071; through a fn's parameters and a long cast the same; an operand outside
 ;; the int32 range, inc, dec, quot, mod and the shifts are exact). eve's shared code counts on exact integers below
 ;; 2^53 — the portable XXH3-128's 32-bit limbs, and eve's type-ids through it (eve.deftype.type-id-steps-test: the
-;; digest was the first step to leave, so every type-id differed on this host). So + - * are pointed at jank's own
-;; promoting ops, the ones +' -' *' call, both as the 2-arity inline and as the var: exact as the JVM's long
-;; arithmetic below 2^63 (past it they promote where the JVM throws), doubles unchanged (measured:
-;; eve/probes/jank-xxh3/probe3.cljc).
-(alter-meta! #'clojure.core/+ assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_add l r)))
-(alter-meta! #'clojure.core/- assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_sub l r)))
-(alter-meta! #'clojure.core/* assoc :inline (fn* [l r] (list 'cpp/jank.runtime.promoting_mul l r)))
-(alter-var-root #'clojure.core/+ (fn [_] +'))
-(alter-var-root #'clojure.core/- (fn [_] -'))
-(alter-var-root #'clojure.core/* (fn [_] *'))
+;; digest was the first step to leave, so every type-id differed on this host). So + - * were first pointed at
+;; jank's own promoting ops, the ones +' -' *' call: exact below 2^63, promoting past it where the JVM throws.
+;;
+;; The operator's decision (2026-11-07; doc/arithmetic-overflow.md) closes that divergence: checked + - * throw
+;; on i64 overflow on every host, as the JVM's do; +' -' *' promote; unchecked-* wrap. The binding here is
+;; eve_arith's checked ops: for two i64 integers the C++ __builtin_*_overflow computes the value and its
+;; overflow flag in one op (the flag-native seat's price, ≈0 — the proof lane's rows), and on overflow the op
+;; answers the nil object, which no numeric op can legitimately answer, and the Clojure side throws — the
+;; seat's throwable for an arithmetic fault is ex-info, as this completion's Divide by zero is. Any other
+;; operands (a big integer, a double, a ratio) go through jank's promoting op, as +' does: the checked
+;; semantics bind the i64 path only, exactly as the JVM's Numbers binds the long path only. inc and dec take
+;; the same binding (the JVM's inc and dec throw too). jank exposes no Clojure-level checked op, so the
+;; intrinsic lives in this cpp/raw, not upstream: nothing here patches jank.
+(cpp/raw "
+#include <jank/runtime/obj/nil.hpp>
+#include <jank/runtime/core/math.hpp>
+#include <jank/runtime/core/make_box.hpp>
+namespace eve_arith {
+  using namespace jank::runtime;
+  /* the i64-valued integers: jank's small_integer (the int32 range) and integer boxes */
+  static bool i64_integer(object_type const t) {
+    return t == object_type::integer || t == object_type::small_integer;
+  }
+  bool is_big(object_ref const o) { return o.get_type() == object_type::big_integer; }
+  object_ref checked_add(object_ref const l, object_ref const r) {
+    if(i64_integer(l.get_type()) && i64_integer(r.get_type())) {
+      jank::i64 res;
+      if(__builtin_add_overflow(to_int(l), to_int(r), &res)) { return object_ref{}; }
+      return make_box(res);
+    }
+    return promoting_add(l, r);
+  }
+  object_ref checked_sub(object_ref const l, object_ref const r) {
+    if(i64_integer(l.get_type()) && i64_integer(r.get_type())) {
+      jank::i64 res;
+      if(__builtin_sub_overflow(to_int(l), to_int(r), &res)) { return object_ref{}; }
+      return make_box(res);
+    }
+    return promoting_sub(l, r);
+  }
+  object_ref checked_mul(object_ref const l, object_ref const r) {
+    if(i64_integer(l.get_type()) && i64_integer(r.get_type())) {
+      jank::i64 res;
+      if(__builtin_mul_overflow(to_int(l), to_int(r), &res)) { return object_ref{}; }
+      return make_box(res);
+    }
+    return promoting_mul(l, r);
+  }
+  object_ref checked_negate(object_ref const x) {
+    if(i64_integer(x.get_type())) {
+      jank::i64 res;
+      if(__builtin_sub_overflow(static_cast<jank::i64>(0), to_int(x), &res)) { return object_ref{}; }
+      return make_box(res);
+    }
+    return promoting_sub(make_box(static_cast<jank::i64>(0)), x);
+  }
+  object_ref checked_inc(object_ref const x) {
+    if(i64_integer(x.get_type())) {
+      jank::i64 res;
+      if(__builtin_add_overflow(to_int(x), static_cast<jank::i64>(1), &res)) { return object_ref{}; }
+      return make_box(res);
+    }
+    return promoting_inc(x);
+  }
+  object_ref checked_dec(object_ref const x) {
+    if(i64_integer(x.get_type())) {
+      jank::i64 res;
+      if(__builtin_sub_overflow(to_int(x), static_cast<jank::i64>(1), &res)) { return object_ref{}; }
+      return make_box(res);
+    }
+    return promoting_dec(x);
+  }
+}
+")
+
+(defn checked-add
+  "Two values added as clojure.core/+ means it (doc/arithmetic-overflow.md): jank's promoting answer, throwing
+   ex-info \"integer overflow\" when two i64 integers overflow — this seat's ArithmeticException, as its Divide
+   by zero is an ex-info."
+  [l r]
+  (let [res (cpp/eve_arith.checked_add l r)]
+    (if (nil? res) (throw (ex-info "integer overflow" {})) res)))
+
+(defn checked-sub [l r]
+  (let [res (cpp/eve_arith.checked_sub l r)]
+    (if (nil? res) (throw (ex-info "integer overflow" {})) res)))
+
+(defn checked-mul [l r]
+  (let [res (cpp/eve_arith.checked_mul l r)]
+    (if (nil? res) (throw (ex-info "integer overflow" {})) res)))
+
+(defn checked-negate [x]
+  (let [res (cpp/eve_arith.checked_negate x)]
+    (if (nil? res) (throw (ex-info "integer overflow" {})) res)))
+
+(defn checked-inc [x]
+  (let [res (cpp/eve_arith.checked_inc x)]
+    (if (nil? res) (throw (ex-info "integer overflow" {})) res)))
+
+(defn checked-dec [x]
+  (let [res (cpp/eve_arith.checked_dec x)]
+    (if (nil? res) (throw (ex-info "integer overflow" {})) res)))
+
+;; The 2-, 3- and 4-ary calls inline to nested binary checked ops, left to right as the reduce below folds them
+;; (a 3- or 4-ary call through the var's [x y & more] arity built a rest seq and reduced it: 591 ns against 359 for the
+;; same arithmetic nested, measured /home/user/stage/probes/probe2.jank P2/P3); jank's analyzer reads :inline-arities
+;; (core.jank's own + carries #{2}), so a 1-ary or 5+-ary call still reaches the var.
+(defn- inline-fold [op]
+  (fn* ([a b] (list op a b))
+       ([a b c] (list op (list op a b) c))
+       ([a b c d] (list op (list op (list op a b) c) d))))
+(alter-meta! #'clojure.core/+ assoc :inline (inline-fold 'eve.host-completion/checked-add) :inline-arities #{2 3 4})
+(alter-meta! #'clojure.core/- assoc :inline (inline-fold 'eve.host-completion/checked-sub) :inline-arities #{2 3 4})
+(alter-meta! #'clojure.core/* assoc :inline (inline-fold 'eve.host-completion/checked-mul) :inline-arities #{2 3 4})
+(alter-var-root #'clojure.core/+
+  (fn [_] (fn ([] 0)
+              ([x] x)
+              ([x y] (checked-add x y))
+              ([x y z] (checked-add (checked-add x y) z))
+              ([x y z w] (checked-add (checked-add (checked-add x y) z) w))
+              ([x y z w & more] (reduce checked-add (checked-add (checked-add (checked-add x y) z) w) more)))))
+(alter-var-root #'clojure.core/-
+  (fn [_] (fn ([x] (checked-negate x))
+              ([x y] (checked-sub x y))
+              ([x y z] (checked-sub (checked-sub x y) z))
+              ([x y z w] (checked-sub (checked-sub (checked-sub x y) z) w))
+              ([x y z w & more] (reduce checked-sub (checked-sub (checked-sub (checked-sub x y) z) w) more)))))
+(alter-var-root #'clojure.core/*
+  (fn [_] (fn ([] 1)
+              ([x] x)
+              ([x y] (checked-mul x y))
+              ([x y z] (checked-mul (checked-mul x y) z))
+              ([x y z w] (checked-mul (checked-mul (checked-mul x y) z) w))
+              ([x y z w & more] (reduce checked-mul (checked-mul (checked-mul (checked-mul x y) z) w) more)))))
+(alter-meta! #'clojure.core/inc assoc :inline (fn* [x] (list 'eve.host-completion/checked-inc x)))
+(alter-var-root #'clojure.core/inc (fn [_] checked-inc))
+(alter-meta! #'clojure.core/dec assoc :inline (fn* [x] (list 'eve.host-completion/checked-dec x)))
+(alter-var-root #'clojure.core/dec (fn [_] checked-dec))
 
 ;; / of two integers truncates on jank for every integer box ((/ 1 2) → 0, (/ 1N 2) → 0N; rationalize is a "TODO:
 ;; port" stub; measured: eve/probes/jank-ratio), so eve.numeric-tags-test's ratios never were ratios (5 FAILs). jank
@@ -111,6 +255,8 @@ namespace eve_arith {
 #include <jank/runtime/obj/nil.hpp>
 #include <jank/runtime/obj/persistent_string.hpp>
 #include <gc.h>
+#include <jank/runtime/obj/detail/base_persistent_map.hpp>
+#include <chrono>
 /* A type hint on a parameter or a let binding is a C++ type to jank's analyzer (^long i makes i a native long,
    which works; an unknown name is \"Unable to find `bytes` within the global namespace\": measured). The names eve's
    shared code and tests hint with — eve.host's array casts, the JVM's root types, the JVM interfaces core.rrb-vector's
@@ -120,7 +266,7 @@ using bytes = jank::runtime::object_ref; using shorts = jank::runtime::object_re
 using longs = jank::runtime::object_ref; using floats = jank::runtime::object_ref; using doubles = jank::runtime::object_ref;
 using objects = jank::runtime::object_ref; using booleans = jank::runtime::object_ref; using boolean = jank::runtime::object_ref;
 using String = jank::runtime::object_ref; using Object = jank::runtime::object_ref; using Throwable = jank::runtime::object_ref;
-using Exception = jank::runtime::object_ref; using Number = jank::runtime::object_ref; using Long = jank::runtime::object_ref;
+using Exception = jank::runtime::object_ref; using ClassCastException = jank::runtime::object_ref; using Number = jank::runtime::object_ref; using Long = jank::runtime::object_ref;
 using Integer = jank::runtime::object_ref; using Double = jank::runtime::object_ref; using Boolean = jank::runtime::object_ref;
 using Character = jank::runtime::object_ref; using Comparable = jank::runtime::object_ref; using StringBuilder = jank::runtime::object_ref;
 using LoggingSlabIO = jank::runtime::object_ref; using JvmSlabCtx = jank::runtime::object_ref; using EveArray = jank::runtime::object_ref;
@@ -136,7 +282,12 @@ namespace clojure { namespace lang { using ISeq = jank::runtime::object_ref; usi
   using IFn = jank::runtime::object_ref; using IAtom = jank::runtime::object_ref; using IDeref = jank::runtime::object_ref;
   using Indexed = jank::runtime::object_ref; using Sequential = jank::runtime::object_ref; using IMapEntry = jank::runtime::object_ref;
   using ITransientCollection = jank::runtime::object_ref; using IEditableCollection = jank::runtime::object_ref; using IObj = jank::runtime::object_ref;
-  using IHashEq = jank::runtime::object_ref; using IReduceInit = jank::runtime::object_ref; using IKVReduce = jank::runtime::object_ref; } }
+  using IHashEq = jank::runtime::object_ref; using IReduceInit = jank::runtime::object_ref; using IKVReduce = jank::runtime::object_ref;
+  /* the rest of the :clj face's interface names (a vanilla deftype's specs and instance? tests name them):
+     jank's analyzer reads clojure.lang.<Name> as a class, never as a var, so each needs its alias here */
+  using Seqable = jank::runtime::object_ref; using ILookup = jank::runtime::object_ref; using Associative = jank::runtime::object_ref;
+  using IPersistentSet = jank::runtime::object_ref; using IPersistentList = jank::runtime::object_ref; using IPersistentStack = jank::runtime::object_ref;
+  using IMeta = jank::runtime::object_ref; using IReduce = jank::runtime::object_ref; using Reversible = jank::runtime::object_ref; } }
 namespace eve_host {
   using namespace jank::runtime;
   /* the hooks are statics of JIT-compiled code, which the collector does not scan: registered as roots (without
@@ -220,7 +371,54 @@ namespace eve_host {
   void set_hasher(object_ref f) { root(); hasher = f; }
   void set_lookup(object_ref f) { root(); lookup = f; }
   void set_dispatch(object_ref f) { root(); dispatch = f; }
+  /* = of x and y is jank's own equal when neither is an opaque object (an eve instance's type, whose own equivalence
+     answers first) and either is a scalar (nil, boolean, number, string, keyword, symbol, character: object_type's
+     enumerators through character, but the string sequence): eve='s element walk runs only for two jank maps or two
+     sequentials, and its other arms answer false where jank's equal did */
+  static bool scalar_type(object_type const t) { return t <= object_type::character && t != object_type::persistent_string_sequence; }
+  bool eq_plain(object_ref x, object_ref y) {
+    object_type const tx{ x.get_type() }, ty{ y.get_type() };
+    return tx != object_type::opaque_box && ty != object_type::opaque_box && (scalar_type(tx) || scalar_type(ty));
+  }
+  /* A protocol table's key for x in one call: an eve instance's tag; nil's key (::nil); jank's own type name for every
+     other value but a map — the name boxed once per object_type at load (jank's type boxed a fresh string per call:
+     532 ns a vector's key, measured probe2 P7) — and nil for a map, whose record tag (its meta's :eve/record) the
+     Clojure side reads. The table is written once, by init_type_keys at load, and read only after. */
+  static object_ref nil_key{ jank_nil };
+  static object_ref type_names[static_cast<int>(object_type::max) + 1];
+  static bool keys_rooted{ false };
+  void init_type_keys(object_ref nk) {
+    if(!keys_rooted) {
+      keys_rooted = true;
+      GC_add_roots(&nil_key, &nil_key + 1);
+      GC_add_roots(&type_names[0], &type_names[0] + (static_cast<int>(object_type::max) + 1));
+    }
+    nil_key = nk;
+    for(int i = 0; i <= static_cast<int>(object_type::max); ++i) {
+      type_names[i] = make_box(object_type_str(static_cast<object_type>(i)));
+    }
+  }
+  object_ref type_key(object_ref x) {
+    object_type const t{ x.get_type() };
+    if(t == object_type::nil) return nil_key;
+    if(t == object_type::opaque_box) {
+      if(auto const *e = dynamic_cast<eve_obj *>(x.ptr())) return e->tag;
+      return type_names[static_cast<int>(t)];
+    }
+    if(is_map(x)) return jank_nil;
+    return type_names[static_cast<int>(t)];
+  }
+  /* every entry of publics (a map of symbol to var) referred into namespace cur: the per-var refer jank's refer makes,
+     in one C++ loop (ns.hpp has no bulk refer) */
+  object_ref refer_all(object_ref cur, object_ref publics) {
+    for(object_ref it{ jank::runtime::seq(publics) }; !it.is_nil(); it = jank::runtime::next(it)) {
+      object_ref const e{ jank::runtime::first(it) };
+      jank::runtime::refer(cur, jank::runtime::first(e), jank::runtime::second(e));
+    }
+    return jank_nil;
+  }
   long addr(object_ref o) { return (long)reinterpret_cast<uintptr_t>(o.ptr()); }
+  long now_millis() { return (long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
   /* a byte array of eve's is signed (HOST-CONTRACT §3: a byte reads back signed, as the JVM's): jank's own
      byte-array is u8, so eve's are obj::array<i8> made here */
   object_ref i8_array(long n) { return make_box<obj::array<jank::i8>>((jank::i64)n); }
@@ -252,19 +450,30 @@ namespace eve_host {
    rrb row threw \"conj! after persistent!\" when the edit token read nil)."
   (atom {}))
 
+(def type-field-index
+  "Every deftype's fields by tag, each name to [its index, whether it is mutable] — type-fields and type-mutable
+   folded into one map, written beside them at deftype time: a field read by name is one get here (it was a
+   keep-indexed walk of type-fields with = per name and a second atom's set: 3,791 ns a read, measured
+   /home/user/stage/probes/probe2.jank P4)."
+  (atom {}))
+
+(defn field-entries
+  "names (a type's fields in order) and cs (its mutable ones, a set) as type-field-index holds them."
+  [names cs]
+  (into {} (map-indexed (fn [i f] [f [i (contains? cs f)]]) names)))
+
 (defn field-index
   "The index of field f (a symbol) in the type tagged tag; nil for none."
   [tag f]
-  (first (keep-indexed (fn [i x] (when (= x f) i)) (get @type-fields tag))))
+  (when-let [e (get (get (cpp/jank.runtime.deref type-field-index) tag) f)] (nth e 0)))
 
 (defn get-field
   "The value of field f (a symbol) of a deftype instance x — a mutable field's cell's value — as (.-f x) reads it
    where a host's analyzer can; a record's by its key; nil for a field x does not have."
   [x f]
-  (cond (object? x) (let [tag (object-tag x)]
-                      (when-let [i (field-index tag f)]
-                        (let [v (nth (object-fields x) i)]
-                          (if (contains? (get @type-mutable tag) f) @v v))))
+  (cond (cpp/eve_host.is x) (when-let [e (get (get (cpp/jank.runtime.deref type-field-index) (cpp/eve_host.tag x)) f)]
+                              (let [v (nth (cpp/eve_host.fields x) (nth e 0))]
+                                (if (nth e 1) (cpp/jank.runtime.deref v) v)))
         (map? x) (get x (keyword (name f)))
         :else nil))
 
@@ -273,9 +482,9 @@ namespace eve_host {
    x's type: the field's cell is reset. v; an ex-info for a field x does not hold mutable."
   [x f v]
   (let [tag (when (object? x) (object-tag x))
-        i (when tag (field-index tag f))]
-    (if (and i (contains? (get @type-mutable tag) f))
-      (do (vreset! (nth (object-fields x) i) v) v)
+        e (when tag (get (get (cpp/jank.runtime.deref type-field-index) tag) f))]
+    (if (and e (nth e 1))
+      (do (vreset! (nth (object-fields x) (nth e 0)) v) v)
       (throw (ex-info "set! of a field that is not a mutable field of this object" {:field f :type tag})))))
 
 (defn record?*
@@ -285,13 +494,13 @@ namespace eve_host {
 
 (def ^:private core-type type)
 
+(cpp/eve_host.init_type_keys ::nil)
+
 (defn type-key
   "What a protocol table is keyed by: a deftype's tag, a record's, ::nil for nil, else jank's own type name (a string)."
   [x]
-  (cond (nil? x) ::nil
-        (object? x) (object-tag x)
-        (map? x) (or (:eve/record (meta x)) (core-type x))
-        :else (core-type x)))
+  (let [k (cpp/eve_host.type_key x)]
+    (if (nil? k) (or (:eve/record (meta x)) (core-type x)) k)))
 
 (alter-var-root #'clojure.core/type (fn [_] (fn [x] (when (some? x) (type-key x)))))
 (alter-var-root #'clojure.core/class (fn [_] (fn [x] (when (some? x) (type-key x)))))
@@ -310,13 +519,210 @@ namespace eve_host {
         (keyword? t) t
         :else t))
 
+(declare extends?)
+
+(require 'clojure.string)
+
+(defn- class-simple-name
+  "The simple name of a class name as written: clojure.lang.Seqable → \"Seqable\", Iterable →
+   \"Iterable\". On this seat a dotted symbol is ONE name — (namespace 'clojure.lang.Seqable) is
+   nil and (name ...) is the whole dotted string (measured: probe D2, ds-collate lane) — while
+   clj-class-protos is keyed by simple names, so a (name t) lookup of a dotted class symbol
+   never hits. The segment after the last dot is the simple name on every seat."
+  [t]
+  (last (clojure.string/split (name t) #"\.")))
+
+(def ^:private clj-class-protos
+  "A JVM interface name (its simple name) → the eve.core protocol that answers instance? for it:
+   vanilla :clj code tests (instance? clojure.lang.Seqable x) and its kin, where the class is a
+   protocol question about the value's own type."
+  {"Seqable" 'ISeqable "Associative" 'IAssociative "ILookup" 'ILookup "Indexed" 'IIndexed
+   "IPersistentMap" 'IMap "IPersistentVector" 'IVector "IPersistentSet" 'ISet
+   "IPersistentCollection" 'ICollection "IFn" 'IFn "Counted" 'ICounted "ISeq" 'ISeq
+   "IPersistentList" 'IList "Map" 'IMap "List" 'IVector "Collection" 'ICollection
+   "Iterable" 'ISeqable "Sequential" 'ISequential})
+
+(def ^:private clj-host-protos
+  "A JVM interface name (its simple name) -> the completion's own protocol that answers
+   instance? for it: the atom-family interfaces have no eve.core protocol - the types
+   adapter puts them on the completion's protocols (its completion-interfaces table),
+   so instance? answers from the completion's own registry, by the value's tag
+   (F-JANK-INSTANCE-HOST-PROTOS: datascript.conn/conn? tests clojure.lang.IDeref,
+   which fell to the type-key comparison and answered false for a Conn)."
+  {"IDeref" 'IDeref "IBlockingDeref" 'IBlockingDeref "IAtom" 'IAtom
+   "IAtom2" 'IAtom2 "IPending" 'IPending})
+
+(defn clj-comparable?
+  "instance? Comparable on this seat: the scalar kinds the seat's compare orders natively.
+   Any other value answers false, as a JVM class without Comparable does in the port's
+   value-compare dispatch (the caller falls through to class-compare)."
+  [x]
+  (or (number? x) (string? x) (keyword? x) (symbol? x) (char? x) (true? x) (false? x)))
+
+(defn clj-bigint? [x] (= "big_integer" (type-key x)))
+(defn clj-nan? [x] (not= x x))
+(defn clj-ratio? [x] (= "ratio" (type-key x)))
+(defn clj-bigdecimal? [_] false)
+
+(def ^:private clj-class-preds
+  "A JVM class name (its simple name) that is a predicate question on this seat rather than a
+   protocol: (instance? Number x) is number?; (instance? Comparable x) is clj-comparable?.
+   Consulted alongside clj-class-protos by clj-instance? and the instance? re-root."
+  {"Number" clojure.core/number? "Comparable" clj-comparable?
+   "BigInteger" clj-bigint? "BigInt" clj-bigint?
+   "Ratio" clj-ratio? "BigDecimal" clj-bigdecimal?
+   ;; the scalar-leaf screen of eve.atom's swap! dispatch (ds11-jvm-reads FIX, atom.cljc scalar-leaf?): its :clj
+   ;; arm — the one jank's reader takes — tests (instance? String v) and its kin; a JVM class name is no value on
+   ;; this seat (measured 2026-11-09, compiled-jank lane: "The symbol `String` could not be resolved" loading
+   ;; eve.atom), so clj-face rewrites each to the seat's predicate through this table
+   "String" clojure.core/string? "Boolean" clojure.core/boolean? "Character" clojure.core/char?
+   "Keyword" clojure.core/keyword? "Symbol" clojure.core/symbol?
+   "Date" clojure.core/inst? "UUID" clojure.core/uuid?})
+
+
 (alter-var-root #'clojure.core/instance?
   (fn [_]
     (fn [t x]
       (let [k (type-of-name t)]
         (cond (= ::default k) (some? x)
               (= ::nil k) (nil? x)
+              ;; a JVM interface name: the value's own type extending the protocol, as
+              ;; eve-predicate resolves one (eve.core may not be loaded: then nothing extends it)
+              (and (symbol? t) (contains? clj-class-preds (class-simple-name t)))
+              ((get clj-class-preds (class-simple-name t)) x)
+              (and (symbol? t) (contains? clj-host-protos (class-simple-name t)))
+              (and (some? x)
+                   (extends? @(ns-resolve 'eve.host-completion (get clj-host-protos (class-simple-name t))) (object-tag x)))
+              (and (symbol? t) (contains? clj-class-protos (class-simple-name t)))
+              (and (some? x) (some? (find-ns 'eve.core))
+                   (extends? @(ns-resolve 'eve.core (get clj-class-protos (class-simple-name t))) (type-key x)))
               :else (and (some? x) (= k (type-key x))))))))
+
+;; with-meta on a defrecord instance: a record here is a map whose TYPE lives in
+;; its meta (:eve/record - defrecord's constructors), so replacing the meta
+;; wholesale strips the type and every protocol the record answers (measured:
+;; datascript.parser's with-source on a parsed Pattern - the record kept its
+;; fields but satisfied nothing, collect-vars read none of its vars, and query
+;; validation raised "unknown vars"). On the JVM with-meta never changes an
+;; object's type; keep the marker (F-JANK-WITH-META-RECORD).
+(alter-var-root #'clojure.core/with-meta
+  (fn [orig]
+    (fn [x m]
+      (if-let [r (when (map? x) (:eve/record (meta x)))]
+        (orig x (assoc m :eve/record r))
+        (orig x m)))))
+
+(defn util-hash-combine
+  "clojure.lang.Util/hashCombine — the JVM's int hash mixer, named as a static call by vanilla
+   :clj code (datascript.db's combine-hashes): x ^ (y + 0x9e3779b9 + (x << 6) + (x >>> 2)),
+   computed in int arithmetic (each step wrapped to 32 bits, as the JVM's int ops wrap)."
+  [x y]
+  (let [x (int x) y (int y)]
+    (int (bit-xor x
+                  (int (+ y 2654435769
+                          (int (bit-shift-left x 6))
+                          (int (bit-shift-right (bit-and x 0xffffffff) 2))))))))
+
+(defn clj-instance?
+  "instance? against a JVM interface name (the symbol as written: clojure.lang.Seqable, java.util.Map,
+   Iterable): the value's own type extending the eve.core protocol clj-class-protos names. A class
+   symbol never resolves as a value here (jank's analyzer reads clojure.lang.<Name> as a class, and
+   there is no class), so clj-face rewrites the (instance? <name> x) form to this call."
+  [t x]
+  (if (contains? clj-class-preds (class-simple-name t))
+    ((get clj-class-preds (class-simple-name t)) x)
+    (if (contains? clj-host-protos (class-simple-name t))
+      (and (some? x)
+           (extends? @(ns-resolve 'eve.host-completion (get clj-host-protos (class-simple-name t))) (object-tag x)))
+      (and (some? x) (some? (find-ns 'eve.core))
+           (extends? @(ns-resolve 'eve.core (get clj-class-protos (class-simple-name t))) (type-key x))))))
+
+;; ---------------------------------------------------------------------------
+;; +' -' *' exact — jank's promoting_sub wraps at the i64 boundary
+;; ---------------------------------------------------------------------------
+;; The primed ops are the contract's promoting half, and jank's own promoting_sub breaks it for genuine i64
+;; integer operands: measured on this seat (eve.overflow-test, primed-promotes) (-' MIN 1) answered
+;; 9223372036854775807N — the i64-wrapped value in a big box — and (-' MIN) answered MIN in a big box, where
+;; +' of the same operands answered exactly. promoting_add and promoting_mul share the code shape, so all
+;; three are bound here, not just the measured one: for two i64 integers the builtin computes the value; on
+;; overflow the exact value is built as a big integer from the operands (eve_arith.as_big, the divide block
+;; above). Any other operands keep jank's promoting op. An upstream observation with this repro belongs to
+;; jank's tracker; nothing here patches jank.
+(cpp/raw "
+namespace eve_arith {
+  using namespace jank::runtime;
+  object_ref exact_add(object_ref const l, object_ref const r) {
+    if(i64_integer(l.get_type()) && i64_integer(r.get_type())) {
+      jank::i64 res;
+      if(__builtin_add_overflow(to_int(l), to_int(r), &res)) {
+        return make_box<obj::big_integer>(as_big(l) + as_big(r));
+      }
+      return make_box(res);
+    }
+    return promoting_add(l, r);
+  }
+  object_ref exact_sub(object_ref const l, object_ref const r) {
+    if(i64_integer(l.get_type()) && i64_integer(r.get_type())) {
+      jank::i64 res;
+      if(__builtin_sub_overflow(to_int(l), to_int(r), &res)) {
+        return make_box<obj::big_integer>(as_big(l) - as_big(r));
+      }
+      return make_box(res);
+    }
+    return promoting_sub(l, r);
+  }
+  object_ref exact_mul(object_ref const l, object_ref const r) {
+    if(i64_integer(l.get_type()) && i64_integer(r.get_type())) {
+      jank::i64 res;
+      if(__builtin_mul_overflow(to_int(l), to_int(r), &res)) {
+        return make_box<obj::big_integer>(as_big(l) * as_big(r));
+      }
+      return make_box(res);
+    }
+    return promoting_mul(l, r);
+  }
+  object_ref exact_negate(object_ref const x) {
+    if(i64_integer(x.get_type())) {
+      jank::i64 res;
+      if(__builtin_sub_overflow(static_cast<jank::i64>(0), to_int(x), &res)) {
+        return make_box<obj::big_integer>(-as_big(x));
+      }
+      return make_box(res);
+    }
+    return promoting_sub(make_box(static_cast<jank::i64>(0)), x);
+  }
+}
+")
+
+(defn exact-add [l r] (cpp/eve_arith.exact_add l r))
+(defn exact-sub [l r] (cpp/eve_arith.exact_sub l r))
+(defn exact-mul [l r] (cpp/eve_arith.exact_mul l r))
+(defn exact-negate [x] (cpp/eve_arith.exact_negate x))
+
+;; The primed vars are re-rooted only, no :inline: a 2-arity :inline on -' is applied by jank's analyzer to
+;; its 1-arity call too (this file's own unchecked-negate calls (-' a)), and the module refuses to load
+;; ("Invalid call to fn with 1 args provided": measured). The var root carries the binding — a compiled
+;; call answers through it, as the landing lane's probe shows (+' and -' exact at both boundaries).
+(alter-var-root #'clojure.core/+'
+  (fn [_] (fn ([] 0)
+              ([x] x)
+              ([x y] (exact-add x y))
+              ([x y z] (exact-add (exact-add x y) z))
+              ([x y z w] (exact-add (exact-add (exact-add x y) z) w))
+              ([x y z w & more] (reduce exact-add (exact-add (exact-add (exact-add x y) z) w) more)))))
+(alter-var-root #'clojure.core/-'
+  (fn [_] (fn ([x] (exact-negate x))
+              ([x y] (exact-sub x y))
+              ([x y z] (exact-sub (exact-sub x y) z))
+              ([x y z w] (exact-sub (exact-sub (exact-sub x y) z) w))
+              ([x y z w & more] (reduce exact-sub (exact-sub (exact-sub (exact-sub x y) z) w) more)))))
+(alter-var-root #'clojure.core/*'
+  (fn [_] (fn ([] 1)
+              ([x] x)
+              ([x y] (exact-mul x y))
+              ([x y z] (exact-mul (exact-mul x y) z))
+              ([x y z w] (exact-mul (exact-mul (exact-mul x y) z) w))
+              ([x y z w & more] (reduce exact-mul (exact-mul (exact-mul (exact-mul x y) z) w) more)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The fixed-width ops jank's core leaves as TODO
@@ -332,22 +738,41 @@ namespace eve_host {
 
 (defn- re-root! [sym f] (alter-var-root (ns-resolve 'clojure.core sym) (fn [_] f)))
 
+;; + - * are checked now (the section at the top of this file), so the unchecked ops are built on the promoting
+;; ops +' -' *' and wrap64: a promoting answer past i64 (a big integer) wraps to its low 64 bits, signed, as the
+;; JVM's unchecked ops answer. wrap64 goes through mod, never (long <big>): what jank's long cast of a big
+;; integer does is not the JVM's BigInteger.longValue contract this needs.
+(defn- wrap64 [r]
+  (if (cpp/eve_arith.is_big r)
+    (let [u (mod r 18446744073709551616)]
+      (if (>= u 9223372036854775808) (- u 18446744073709551616) u))
+    r))
+
 (re-root! 'unchecked-byte i8)
 (re-root! 'unchecked-short i16)
 (re-root! 'unchecked-int i32)
-(re-root! 'unchecked-long (fn [x] (long x)))
-(re-root! 'unchecked-add (fn [a b] (+ a b)))
-(re-root! 'unchecked-subtract (fn [a b] (- a b)))
-(re-root! 'unchecked-multiply (fn [a b] (* a b)))
-(re-root! 'unchecked-inc (fn [a] (+ a 1)))
-(re-root! 'unchecked-dec (fn [a] (- a 1)))
-(re-root! 'unchecked-negate (fn [a] (- a)))
-(re-root! 'unchecked-add-int (fn [a b] (i32 (+ a b))))
-(re-root! 'unchecked-subtract-int (fn [a b] (i32 (- a b))))
-(re-root! 'unchecked-multiply-int (fn [a b] (i32 (* (i32 a) (i32 b)))))
-(re-root! 'unchecked-inc-int (fn [a] (i32 (+ a 1))))
-(re-root! 'unchecked-dec-int (fn [a] (i32 (- a 1))))
-(re-root! 'unchecked-negate-int (fn [a] (i32 (- a))))
+(re-root! 'unchecked-long (fn [x] (if (cpp/eve_arith.is_big x) (wrap64 x) (long x))))
+(re-root! 'unchecked-add (fn [a b] (wrap64 (+' a b))))
+
+;; Eduction: jank's clojure.core has no Eduction type, factory or fn (probed: ->Eduction,
+;; Eduction and eduction all unresolvable). Libraries call ->Eduction in deftype method bodies
+;; (datascript's -search wraps index slices in it). The seat's eduction is the reducible seq
+;; view (sequence xform coll): reducible and seqable, which is how the results are consumed.
+(intern 'clojure.core '->Eduction (fn [xform coll] (sequence xform coll)))
+(intern 'clojure.core 'eduction
+        (fn ([xform coll] (sequence xform coll))
+            ([xform coll & xforms] (sequence (apply comp xform xforms) coll))))
+(re-root! 'unchecked-subtract (fn [a b] (wrap64 (-' a b))))
+(re-root! 'unchecked-multiply (fn [a b] (wrap64 (*' a b))))
+(re-root! 'unchecked-inc (fn [a] (wrap64 (+' a 1))))
+(re-root! 'unchecked-dec (fn [a] (wrap64 (-' a 1))))
+(re-root! 'unchecked-negate (fn [a] (wrap64 (-' a))))
+(re-root! 'unchecked-add-int (fn [a b] (i32 (wrap64 (+' a b)))))
+(re-root! 'unchecked-subtract-int (fn [a b] (i32 (wrap64 (-' a b)))))
+(re-root! 'unchecked-multiply-int (fn [a b] (i32 (*' (i32 a) (i32 b)))))
+(re-root! 'unchecked-inc-int (fn [a] (i32 (wrap64 (+' a 1)))))
+(re-root! 'unchecked-dec-int (fn [a] (i32 (wrap64 (-' a 1)))))
+(re-root! 'unchecked-negate-int (fn [a] (i32 (wrap64 (-' a)))))
 (re-root! 'unchecked-divide-int (fn [a b] (i32 (quot a b))))
 (re-root! 'unchecked-remainder-int (fn [a b] (i32 (rem a b))))
 (re-root! 'byte i8)
@@ -618,7 +1043,7 @@ namespace eve_host {
                 (def ~mname
                   (fn ~@(for [al arglists
                               :let [as (vec (repeatedly (count al) #(gensym "a")))]]
-                          `(~as ((or (get (deref ~cache) (eve.host-completion/type-key ~(first as)))
+                          `(~as ((or (get (cpp/jank.runtime.deref ~cache) (eve.host-completion/type-key ~(first as)))
                                      (eve.host-completion/impl-for ~pname ~(keyword (name mname)) ~(first as) ~cache))
                                  ~@as)))))))
          (var ~pname))))
@@ -671,7 +1096,14 @@ namespace eve_host {
   [specs]
   (loop [out [] s specs]
     (if (seq s)
-      (let [p (first s) [ms more] (split-with seq? (rest s))]
+      (let [p0 (first s)
+            ;; a dotted class name in spec position (java.util.Comparator in a reify spec) arrives
+            ;; qualified by the defining macro's syntax quote (datascript.db/java.util.Comparator):
+            ;; the seat's spec tables are keyed by the bare dotted symbol, so strip the qualification
+            p (if (and (symbol? p0) (namespace p0) (not= (name p0) (class-simple-name p0)))
+                (symbol (name p0))
+                p0)
+            [ms more] (split-with seq? (rest s))]
         (recur (conj out [p (vec ms)]) more))
       out)))
 
@@ -1061,7 +1493,10 @@ namespace eve_host {
 
 (def ^:private core-hash hash)
 
-(defn- eq [x y]
+(defn- eq
+  "x = y, the slow path: a type's own equivalence first (either side), else eve= (jank's equal, then the element walk
+   of two jank maps or sequentials)."
+  [x y]
   (cond (and (object? x) (own? :equiv-proto x)) (boolean ((:equiv @type-equality) x y))
         (and (object? y) (own? :equiv-proto y)) (boolean ((:equiv @type-equality) y x))
         ;; neither is a type with its own equivalence: jank's own =, and where it says no for two jank maps or
@@ -1071,10 +1506,13 @@ namespace eve_host {
 (alter-var-root #'clojure.core/=
   (fn [_]
     (fn ([_] true)
-      ([x y] (eq x y))
+      ([x y] (if (cpp/eve_host.eq_plain x y) (cpp/jank.runtime.equal x y) (eq x y)))
       ([x y & more] (if (eq x y)
                       (if (next more) (recur y (first more) (next more)) (eq y (first more)))
                       false)))))
+;; No :inline for the 2-ary call: measured, an inline expansion of this fast path (jank's own C++ only) answered
+;; (= i 5) in 104 ns against 118 through the var, and (= :a :b) in 152 against 152 (probe3 P5/P6 vs P18/P19) — not
+;; worth an expansion every module compiles.
 (alter-var-root #'clojure.core/not= (fn [_] (fn ([_] false) ([x y] (not (= x y))) ([x y & more] (not (apply = x y more))))))
 (alter-var-root #'clojure.core/hash
   (fn [_] (fn [x] (if (and (object? x) (own? :hash-proto x))
@@ -1219,8 +1657,288 @@ namespace eve_host {
                     (cons 'do body)))))))
 
 (def ^:private dropped-protocols
-  "What a deftype here takes no impls for: Object's methods (printing is the types adapter's: set-printer!)."
-  '#{Object java.lang.Object})
+  "What a deftype here takes no impls for: Object's methods (printing is the types adapter's: set-printer!),
+   and clojure.lang.IKeywordLookup — an optimization interface with no eve.core counterpart (keyword
+   lookup dispatches through ILookup here); its getLookupThunk method is discarded by the same
+   equals/hashCode-only salvage that handles a dropped Object group's methods."
+  '#{Object java.lang.Object clojure.lang.IKeywordLookup})
+
+;; ---------------------------------------------------------------------------
+;; deftype specs naming clojure.lang interfaces (F-JANK-CLJFACE-DEFTYPE)
+;; ---------------------------------------------------------------------------
+;; A vanilla :clj-face deftype names JVM interfaces and Java method names (datascript.lru:
+;; clojure.lang.ILookup (valAt ...), clojure.lang.Associative (assoc ...); datascript.impl.entity:
+;; Seqable / Associative / ILookup / IFn). On the JVM those are the host's own machinery; here the
+;; seat's answer to each is the eve.core protocol of the same meaning — the one registry jank's get,
+;; the routed clojure.core names and the eve_obj dispatch hooks consult (the types adapter's table).
+;; The deftype macro presents such a declaration in the full form the seat accepts: each clojure.lang
+;; spec is completed to the eve.core protocol(s) its methods belong to (a piecemeal list — ILookup
+;; alone, Associative alone — is completed by its methods: Associative's valAt belongs to ILookup),
+;; Java method names become the protocols' (valAt → -lookup, containsKey → -contains-key?; the
+;; eve.deftype-proto jvm->cljs table), and method bodies are rewritten where they call the JVM surface
+;; directly: (.valAt x k) → (get x k), (.containsKey x k) → (contains? x k), (.entryAt x k) → (find x k)
+;; (find is synthesized from -contains-key? + -lookup by the types adapter, so an entryAt method itself
+;; is dropped), (clojure.lang.MapEntry. k v) → [k v], (UnsupportedOperationException. msg) → (ex-info
+;; msg {}). Object's equals and hashCode — dropped with the rest of Object until now — are kept as
+;; IEquiv/-equiv and IHash/-hash, which is what = and hash reach through the equality hooks; toString
+;; stays the printer layer's. A spec naming anything else passes through unchanged.
+
+(defn clj-proto
+  "eve.core's protocol atom for a protocol name (ILookup, IAssociative, ...): what a clojure.lang
+   interface in a deftype spec translates to. eve.core is required on first use. eve.types is
+   required unconditionally: its set-type-collection! call at load is what routes core fns
+   (assoc/get/...) to the protocols for eve objects — Eve's own deftype macros pull eve.types
+   in at their expansion time, but a completion deftype's expansions must not depend on that
+   having happened first (eve.core can be loaded with the table still empty)."
+  [pname]
+  (require 'eve.types)
+  (if-let [v (when (find-ns 'eve.core) (ns-resolve 'eve.core pname))]
+    @v
+    (do (require 'eve.core)
+        @(ns-resolve 'eve.core pname))))
+
+(def ^:private clj-method-dest
+  "A JVM method name → [eve.core protocol, its method name]; entryAt → nil (find synthesizes it).
+   compare → [IFn -invoke]: java.util.Comparator has no eve.core protocol — a Comparator's seat
+   is a plain 2-arg fn (datascript.db's defcomp builds exactly that on the non-JVM faces), so
+   its compare method is the fn's invoke, and the reified object is callable as one."
+  '{valAt [ILookup -lookup] assoc [IAssociative -assoc] containsKey [IAssociative -contains-key?]
+    entryAt nil
+    seq [ISeqable -seq] count [ICounted -count] invoke [IFn -invoke] cons [ICollection -conj]
+    empty [IEmptyableCollection -empty] equiv [IEquiv -equiv] hasheq [IHash -hash]
+    nth [IIndexed -nth] without [IMap -dissoc] peek [IStack -peek] pop [IStack -pop]
+    meta [IMeta -meta] withMeta [IWithMeta -with-meta] deref [IDeref -deref]
+    reduce [IReduce -reduce] kvreduce [IKVReduce -kv-reduce] rseq [IReversible -rseq]
+    equals [IEquiv -equiv] hashCode [IHash -hash] compare [IFn -invoke]})
+
+(def ^:private clj-iface-proto
+  "A clojure.lang interface → its primary eve.core protocol (the home of a method the table lacks)."
+  '{clojure.lang.ILookup ILookup clojure.lang.Associative IAssociative clojure.lang.Seqable ISeqable
+    clojure.lang.Counted ICounted clojure.lang.IFn IFn clojure.lang.IHashEq IHash
+    clojure.lang.IPersistentCollection ICollection clojure.lang.IPersistentMap IMap
+    clojure.lang.Indexed IIndexed clojure.lang.IMeta IMeta clojure.lang.IObj IWithMeta
+    clojure.lang.IDeref IDeref clojure.lang.IReduce IReduce clojure.lang.IKVReduce IKVReduce
+    clojure.lang.Reversible IReversible clojure.lang.IPersistentStack IStack
+    clojure.lang.IPersistentVector IVector clojure.lang.IPersistentSet ISet
+    java.util.Comparator IFn})
+
+(def ^:private clj-data-proto-names
+  "clojure.data's protocols by their spec name: jank ships clojure.data natively with the protocol
+   FUNCTIONS (equality-partition, diff-similar) but no protocol vars, so a deftype spec naming
+   clojure.data/EqualityPartition has no var to resolve and nothing to extend."
+  '{clojure.data/EqualityPartition EqualityPartition clojure.data/Diff Diff})
+
+(def ^:private clj-data-protos (atom {}))
+
+(defn clj-data-proto
+  "The seat's protocol atom for a clojure.data protocol, built on first use: registrations (a
+   deftype's equality-partition / diff-similar methods) land here. Calls still dispatch through
+   jank's native clojure.data fns, which do not consult these registrations."
+  [pname]
+  (or (get @clj-data-protos pname)
+      (let [p (atom {:name (symbol "clojure.data" (name pname)) :fns {} :impls [] :sat {}})]
+        (swap! clj-data-protos assoc pname p)
+        p)))
+
+(def ^:private clj-method-xlate
+  "A JVM method name → the seat's dispatching name for it, in a (.name target args...) form whose
+   target is an ordinary value: the :clj face's methods on collections and shimmed classes, stated
+   once. valAt/containsKey/entryAt are clojure.lang's own; first/next/cons are ISeq/IPersistentCollection's;
+   equals/compareTo/toString/size are Object's and the collections'; get is List.get/Map.get (one
+   helper decides by the key); add is List.add on the ArrayList shim; write is Writer.write;
+   getMostSignificantBits/getLeastSignificantBits are UUID's, over its [msb lsb] form."
+  '{valAt clojure.core/get containsKey clojure.core/contains? entryAt clojure.core/find
+    first clojure.core/first next clojure.core/next cons clojure.core/conj
+    equals clojure.core/= compareTo clojure.core/compare toString clojure.core/str
+    size clojure.core/count
+    get eve.host-completion/jvm-get add eve.host-completion/jvm-add write eve.host-completion/jvm-write
+    getMostSignificantBits eve.host-completion/uuid-msb getLeastSignificantBits eve.host-completion/uuid-lsb
+    getClass clojure.core/type getName clojure.core/name
+    ;; startsWith is String's, answered by clojure.string (eve.atom's eve-class?
+    ;; screen, landed on the release line after the collate fork: the merged
+    ;; tree's first jank analysis wall)
+    startsWith clojure.string/starts-with?})
+
+(def ^:private clj-ctor-xlate
+  "A JVM class name (the head of a (Class. args...) form, dot stripped) → how the seat builds it:
+   the exception classes are ex-info; MapEntry is its [k v] entry vector; ArrayList and UUID are
+   the completion's shims. A constructor naming anything else — a deftype of the file's own, above
+   all — passes through unchanged."
+  '{clojure.lang.MapEntry clojure.core/vector
+    UnsupportedOperationException eve.host-completion/ex-info-ctor
+    IllegalArgumentException eve.host-completion/ex-info-ctor
+    IndexOutOfBoundsException eve.host-completion/ex-info-ctor
+    java.lang.IndexOutOfBoundsException eve.host-completion/ex-info-ctor
+    Exception eve.host-completion/ex-info-ctor
+    java.util.ArrayList eve.host-completion/array-list
+    UUID eve.host-completion/uuid-new})
+
+(def ^:private clj-class-value-syms
+  "Dotted class names a vanilla :clj body may name in VALUE position (a :tag value in a meta
+   map — datascript.db's patch-tag assocs java.lang.Boolean — a map/vector member, a defn
+   hint's target): on the JVM the symbol resolves to the class; here there is no class for the
+   analyzer to resolve, and the seat's own uses of such a name are as data (a tag, a type key),
+   so clj-face quotes it. Static-call heads (clojure.lang.Util/hashCombine — the symbol carries
+   a slash) and constructor heads (…MapEntry. — handled by the ctor clause) are not in this set."
+  '#{clojure.lang.Seqable clojure.lang.ILookup clojure.lang.Associative clojure.lang.IPersistentSet
+     clojure.lang.IPersistentList clojure.lang.IPersistentStack clojure.lang.IMeta clojure.lang.IReduce
+     clojure.lang.ISeq clojure.lang.IPersistentVector clojure.lang.IPersistentMap
+     clojure.lang.IPersistentCollection clojure.lang.Counted clojure.lang.IFn clojure.lang.IAtom
+     clojure.lang.IDeref clojure.lang.Indexed clojure.lang.Sequential clojure.lang.IMapEntry
+     clojure.lang.ITransientCollection clojure.lang.IEditableCollection clojure.lang.IObj
+     clojure.lang.IHashEq clojure.lang.IReduceInit clojure.lang.IKVReduce clojure.lang.MapEntry
+     java.lang.Object java.lang.String java.lang.Boolean java.lang.Long java.lang.Integer
+     java.lang.Double java.lang.Character java.lang.Number java.lang.Comparable
+     java.lang.StringBuilder java.lang.Exception java.util.Collection java.util.List
+     java.util.ListIterator java.util.Iterator java.util.Map java.util.Set java.util.Date
+     java.util.UUID java.util.Comparator})
+
+(defn clj-face
+  "A form of :clj-face (vanilla JVM) code with its direct JVM-surface calls rewritten to the seat's
+   dispatching names: (.name target args...) and (. target (name args...)) method forms by
+   clj-method-xlate, (Class. args...) constructors by clj-ctor-xlate. Quoted forms are data and
+   pass untouched; anything unrecognized passes through unchanged, to fail honestly if reached."
+  [form]
+  (cond (seq? form)
+        (let [h (first form)]
+          (cond (= h 'quote) form
+                ;; (set! *warn-on-reflection* v): a compiler-flag statement of the :clj face; this
+                ;; host has no reflection warnings to toggle, so the statement is read and dropped
+                (and (= h 'set!) (symbol? (second form))
+                     (= \* (first (name (second form))))) nil
+                ;; (instance? <JVM interface name> x): the name is no value here; the question is
+                ;; the value's type against the interface's eve.core protocol (clj-instance?)
+                (and (contains? '#{instance? clojure.core/instance?} h)
+                     (symbol? (second form))
+                     (or (contains? clj-class-protos (class-simple-name (second form))) (contains? clj-class-preds (class-simple-name (second form)))))
+                (list 'eve.host-completion/clj-instance? (list 'quote (second form)) (clj-face (nth form 2)))
+                ;; (clojure.lang.Util/hashCombine x y): a static call of the :clj face — the
+                ;; seat's own mixer (util-hash-combine), as the :cljs face's hash-combine
+                ;; answers the same defn there
+                ;; (Double/isNaN x): a wrapper-class static of the :clj face — the host's
+                ;; own NaN test answers it (datascript.serialize's number dispatch)
+                (and (= h 'Double/isNaN) (= 2 (count form)))
+                (list 'eve.host-completion/clj-nan? (clj-face (nth form 1)))
+                                (and (= h 'clojure.lang.Util/hashCombine) (= 3 (count form)))
+                (list 'eve.host-completion/util-hash-combine
+                      (clj-face (nth form 1)) (clj-face (nth form 2)))
+                ;; (. clojure.lang.Util (hasheq x)): the seat's hash, as the :cljs face's
+                ;; (hash x) answers datascript.db's ihash there
+                (and (= h '.) (= (second form) 'clojure.lang.Util)
+                     (seq? (nth form 2)) (= 'hasheq (first (nth form 2))))
+                (list 'clojure.core/hash (clj-face (second (nth form 2))))
+                ;; (.compare cmp a b): a Comparator call — the seat's Comparator is a plain
+                ;; 2-arg fn (the reify translation above), so the call is the call itself
+                (and (= h '.) (seq? (nth form 2)) (= 'compare (first (nth form 2)))
+                     (= 2 (count (nth form 2))))
+                (apply list (clj-face (second form)) (map clj-face (rest (nth form 2))))
+                ;; (defmethod print-method T [x w] body...): this seat has no print-method
+                ;; var to extend (jank's core is fixed; printing an instance is the types
+                ;; adapter's registry: set-printer! under the type's tag — the keyword its
+                ;; deftype var holds), so the method becomes the type's printer: the body
+                ;; runs against a string writer (print-via-string-writer). The writer arg
+                ;; name is the form's own; the vector is passed untranslated (its symbols
+                ;; are binding names, and a ^Tag on the value is read and dropped as data —
+                ;; its class symbols must never be walked as values).
+                (and (= h 'defmethod) (= (second form) 'print-method) (symbol? (nth form 2))
+                     (vector? (nth form 3)))
+                (list 'eve.host-completion/set-printer! (list 'quote (nth form 2))
+                      (list 'fn [(first (nth form 3))]
+                            (list 'eve.host-completion/print-via-string-writer
+                                  (first (nth form 3))
+                                  (list 'quote (nth form 3))
+                                  (list 'quote (apply list (map clj-face (nthnext form 4)))))))
+                ;; (. target (name args...)) / (. target name args...): normalize to (.name target args...)
+                (= h '.)
+                (let [target (second form) r (nthnext form 2)
+                      m (first r)]
+                  (if (or (seq? m) (and (symbol? m) (contains? clj-method-xlate m)))
+                    (clj-face (apply list (symbol (str "." (if (seq? m) (first m) m))) target
+                                     (if (seq? m) (rest m) (rest r))))
+                    (apply list (map clj-face form))))
+                ;; (.name target args...)
+                (and (symbol? h) (> (count (name h)) 1) (= "." (subs (name h) 0 1)))
+                (if-let [f (get clj-method-xlate (symbol (subs (name h) 1)))]
+                  (apply list f (map clj-face (rest form)))
+                  (apply list (map clj-face form)))
+                ;; (Class. args...)
+                (and (symbol? h) (> (count (name h)) 1) (= "." (subs (name h) (dec (count (name h))))))
+                (if-let [f (get clj-ctor-xlate (symbol (subs (name h) 0 (dec (count (name h))))))]
+                  (apply list f (map clj-face (rest form)))
+                  (apply list (map clj-face form)))
+                ;; a type-spec form (deftype & kin): its direct symbol elements are spec /
+                ;; protocol NAMES — data of the type DSL, never values — so they pass
+                ;; unquoted (the value-quote below would hand the spec parser a (quote …)
+                ;; seq where it expects a symbol: measured, ds-collate DB3); subforms
+                ;; (method entries, bodies) are walked as their own forms as usual
+                :else (if (contains? '#{deftype eve-deftype defrecord reify extend-type
+                                        extend-protocol defprotocol eve-extend-type
+                                        defrecord-updatable}
+                                     ;; the head matched by NAME: a spec head is spelled
+                                     ;; qualified at its call sites (edt/deftype,
+                                     ;; eve.deftype-proto.macros/deftype, clojure.core/deftype),
+                                     ;; and the qualified symbol is not in the set - the generic
+                                     ;; walk then quotes the spec's class-name protocol heads
+                                     ;; (clojure.lang.Counted becomes (quote clojure.lang.Counted)),
+                                     ;; the spec parser drops the leading group and files each
+                                     ;; (quote ...) as a bogus method entry (name quote, args the
+                                     ;; bare class symbol) in the preceding group: every
+                                     ;; JVM-named group of every eve deftype corrupted on this
+                                     ;; seat, crashing where such an entry reaches the deftype
+                                     ;; machinery (eve.rseq's RSeq: F-JANK-FACE-SPEC-HEADS)
+                                     (if (symbol? h) (symbol (name h)) h))
+                        (apply list (map (fn [el] (if (symbol? el) el (clj-face el))) form))
+                        (apply list (map clj-face form)))))
+        (vector? form) (mapv clj-face form)
+        (map? form) (into {} (map (fn [[k v]] [(clj-face k) (clj-face v)]) form))
+        (set? form) (into #{} (map clj-face form))
+        ;; a dotted class name in value position: data here, not a class (see
+        ;; clj-class-value-syms) — quoted, so the analyzer never tries to resolve it
+        (symbol? form) (if (contains? clj-class-value-syms form) (list 'quote form) form)
+        :else form))
+
+(defn- clj-body
+  "A deftype method body with its direct JVM-surface calls rewritten: clj-face, at method scale."
+  [form]
+  (clj-face form))
+
+(defn- clj-rewrite-entry
+  "A method entry ((name [args] body...) or (name ([args] body...) ...)) with bodies rewritten."
+  [[mname & arities]]
+  (cons mname
+        (if (vector? (first arities))
+          (cons (first arities) (map clj-body (rest arities)))
+          (map (fn [arity] (cons (first arity) (map clj-body (rest arity)))) arities))))
+
+(defn- translate-impls
+  "parse-impls' groups, plus a dropped Object group's methods, in the seat's form: [[proto methods]...]
+   where proto is the original spec symbol, or a (clj-proto 'Name) form for a translated group."
+  [impls object-methods]
+  (let [by-dest (fn [entries]
+                  (reduce (fn [acc e]
+                            (let [dest (get clj-method-dest (first e) ::unknown)]
+                              (cond (nil? dest) acc
+                                    (= ::unknown dest) (update acc ::unknown (fnil conj []) e)
+                                    :else (update acc dest (fnil conj []) e))))
+                          {} entries))
+        emit (fn [by-dest fallback]
+               (for [[dest entries] by-dest]
+                 (if (= ::unknown dest)
+                   [fallback (map clj-rewrite-entry entries)]
+                   [(list 'eve.host-completion/clj-proto (list 'quote (first dest)))
+                    (map (fn [e] (clj-rewrite-entry (cons (second dest) (rest e)))) entries)])))]
+    (concat
+      (mapcat (fn [[p methods]]
+                (cond (contains? clj-iface-proto p)
+                      (emit (by-dest methods)
+                            (list 'eve.host-completion/clj-proto (list 'quote (get clj-iface-proto p))))
+                      (contains? clj-data-proto-names p)
+                      [[(list 'eve.host-completion/clj-data-proto (list 'quote (get clj-data-proto-names p)))
+                        (map clj-rewrite-entry methods)]]
+                      :else
+                      [[p (map clj-rewrite-entry methods)]]))
+              impls)
+      (emit (by-dest (filter (fn [e] (contains? '#{equals hashCode} (first e))) object-methods)) nil))))
 
 (defmacro deftype
   "(deftype T [fields...] Protocol (method [this ...] body...) ...): T names its tag (a symbol, this namespace's
@@ -1229,7 +1947,10 @@ namespace eve_host {
   (let [tag (symbol (str *ns*) (name type-name))
         names (mapv untag fields)
         cs (set (map untag (filter mutable-field? fields)))
-        impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+        raw-impls (parse-impls specs)
+        object-methods (mapcat (fn [[p ms]] (if (contains? dropped-protocols p) ms [])) raw-impls)
+        impls (translate-impls (remove #(contains? dropped-protocols (first %)) raw-impls)
+                               object-methods)
         args (mapv #(symbol (str "a" %)) (range (count names)))
         cell (fn [f a] (if (contains? cs f) `(clojure.core/volatile! ~a) a))
         ;; jank caps a fixed-arity fn at 10 parameters (measured: "This function has too many parameters. The max is
@@ -1242,6 +1963,7 @@ namespace eve_host {
     `(do (def ~type-name '~tag)
          (swap! eve.host-completion/type-fields assoc '~tag '~names)
          (swap! eve.host-completion/type-mutable assoc '~tag '~cs)
+         (swap! eve.host-completion/type-field-index assoc '~tag (eve.host-completion/field-entries '~names '~cs))
          (def ~(symbol (str (name type-name) "__make")) ~factory)
          ;; ->T and T. by intern, not def: an eve-deftype's expansion defines ->T again (its constructor) in the same
          ;; top-level form, and jank binds a var defined twice in one form to the FIRST definition when the second's
@@ -1264,7 +1986,10 @@ namespace eve_host {
   [type-name fields & specs]
   (let [tag (symbol (str *ns*) (name type-name))
         names (mapv untag fields)
-        impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))]
+        raw-impls (parse-impls specs)
+        object-methods (mapcat (fn [[p ms]] (if (contains? dropped-protocols p) ms [])) raw-impls)
+        impls (translate-impls (remove #(contains? dropped-protocols (first %)) raw-impls)
+                               object-methods)]
     `(do (def ~type-name '~tag)
          (defn ~(symbol (str "->" (name type-name))) ~names
            (with-meta ~(zipmap (map keyword names) names) {:eve/record '~tag}))
@@ -1454,3 +2179,434 @@ namespace eve_host {
 (doseq [sym '[*print-length* *print-level*]]
   (when-not (ns-resolve 'clojure.core sym)
     (intern 'clojure.core (with-meta sym {:dynamic true}) nil)))
+
+;; ---------------------------------------------------------------------------
+;; The same names at ANALYSIS time (the AOT half). jank's AOT analyzer
+;; resolves each module against the analyzer process's live clojure.core.
+;; Load-time top-level forms never execute there, so the interns above are
+;; invisible to dependent modules' analysis (measured: the whole-graph
+;; compile dies at the first core call site, eve/atom.cljc's satisfies?).
+;; But definitions made during one module's analysis ARE visible to modules
+;; analyzed after it, and a macro's expansion is such a definition point
+;; (measured in miniature: probe7/probe8, compiled-jank lane). This macro's
+;; expansion performs exactly the interns the doseq forms above perform at
+;; load; the doseqs remain the runtime half, binding the same roots when
+;; this module's init runs -- on the JIT seat and in AOT binaries alike.
+;; ---------------------------------------------------------------------------
+
+(defmacro aot-inject-core-names! []
+  (doseq [[sym v] {'defprotocol #'defprotocol 'deftype #'deftype 'defrecord #'defrecord 'reify #'reify
+                   'extend-type #'extend-type 'extend-protocol #'extend-protocol 'quote-or-value #'quote-or-value
+                   'locking #'locking}]
+    (intern 'clojure.core (with-meta sym {:macro true}) @v))
+  (doseq [[sym v] {'extend extend 'satisfies? satisfies? 'extends? extends? 'record? record?* 'halt-when halt-when
+                   'Object 'Object}]
+    (intern 'clojure.core sym v))
+  (doseq [sym '[*print-length* *print-level*]]
+    (when-not (ns-resolve 'clojure.core sym)
+      (intern 'clojure.core (with-meta sym {:dynamic true}) nil)))
+  (intern 'clojure.core '->Eduction (fn [xform coll] (sequence xform coll)))
+  (intern 'clojure.core 'eduction
+          (fn ([xform coll] (sequence xform coll))
+              ([xform coll & xforms] (sequence (apply comp xform xforms) coll))))
+  (alter-meta! #'clojure.core/concat* dissoc :private)
+  nil)
+
+(aot-inject-core-names!)
+
+;; ---------------------------------------------------------------------------
+;; load of a .cljc whose reader conditionals name :clj (F-JANK-LIBSPEC)
+;; ---------------------------------------------------------------------------
+;; jank's reader features are #{:jank} only (measured: (quote #?(:clj :a :jank :b)) → :b, and
+;; (quote [#?(:cljs cljs.reader :clj clojure.edn) :as edn]) → [:as edn] — an unmatched #? inside a
+;; collection is dropped), so a vanilla .cljc written for the JVM/CLJS pair loses every :clj branch
+;; at read time; in an ns libspec the lib name itself is destroyed and jank core's load-libs throws
+;; "not a libspec: [:as edn]" (DataScript 1.8.1's datascript.core / datascript.query, byte-identical
+;; upstream; contract-test six1-worker-jank3.log). The fix lives here, in the seat's completion:
+;; clojure.core/load is re-rooted so that a module whose loaded source is a .cljc file is read form
+;; by form through the runtime context's read_string with reader features #{:jank :clj} — jank's
+;; own extended-features reader path (first matching branch in form order, :default as fallback,
+;; :cljs never matches) — and evaluated form by form, which threads the ns switch exactly as a
+;; file load does (measured). Every other module delegates to the original load untouched.
+;; The ns form's :import clauses are stripped before eval: jank has no import ("`import` is not
+;; supported in jank", measured); on the JVM an :import only creates hint aliases and there are
+;; no classes here to alias. The port is never edited.
+;; Second wall, same kind (found by the first proof run): the :clj face also requires modules
+;; that exist only as .clj files (datascript.inline — clojure.lang.RT inlining shims;
+;; datascript.pprint — java.io printing) and jank's loader has no .clj module type at all, so
+;; those requires can never resolve here. process-ns-form below drops a :require clause whose
+;; module is .clj-only on this host and un-excludes any referred name clojure.core provides
+;; (datascript.inline/update → clojure.core/update, identical semantics); a module missing
+;; outright keeps its clause and fails honestly.
+
+(cpp/raw "
+#include <jank/runtime/module/loader.hpp>
+#include <jank/runtime/obj/persistent_string.hpp>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+namespace eve_load {
+  using namespace jank::runtime;
+  /* cljc_source and loadable used to live here, calling module_loader.find.
+     The AOT (static) runtime does not link that symbol -- a whole-graph
+     `jank compile` reached the linker and failed on exactly those two
+     references (measured, compiled-jank lane 2026-11-08). They are now
+     answered in Clojure below, as a filesystem search over the same module
+     path dirs (module-path-dirs), which is the search find performed.
+     read_text_file is the one piece that stays native. */
+  object_ref read_text_file(object_ref const path) {
+    auto const p(expect_object<obj::persistent_string>(path)->data);
+    std::ifstream in{ std::string(p.data(), p.size()), std::ios::binary };
+    if(!in) { return jank_nil; }
+    std::string const text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+    return make_box<obj::persistent_string>(jtl::immutable_string(text.data(), text.size()));
+  }
+  object_ref runtime_data() { return __rt_ctx->module_loader.to_runtime_data(); }
+  /* flush: jank's core flush is a TODO stub (it throws after a println has
+     already reached the fd); the completion re-roots it to a real flush of
+     the C stdio stream every println writes through. */
+  object_ref flush_stdout() { std::fflush(stdout); return jank_nil; }
+  object_ref file_exists(object_ref const path) {
+    auto const p(expect_object<obj::persistent_string>(path)->data);
+    return make_box(std::filesystem::exists(std::filesystem::path{ std::string(p.data(), p.size()) }));
+  }
+}
+")
+
+(require '[clojure.string :as str])
+
+;; (flush) is a TODO stub in jank's core (upstream defect 7): it throws ex-info "TODO: port flush" AFTER the
+;; preceding println already reached stdout, which killed the translator's runs (compiled-jank lane) and ends
+;; contract programs in a throw. Re-rooted to an fflush of stdout, the stream println writes through.
+(re-root! 'flush (fn [] (cpp/eve_load.flush_stdout) nil))
+
+(def ^:private orig-load load)
+(def ^:private clj-feature-opts {:read-cond :allow :features #{:jank :clj}})
+(def ^:private eve-loaded-modules (atom #{}))
+(def ^:private eve-loading-modules (atom #{}))
+
+(defn- load-module-name
+  "The dotted module name for a load path, or nil when the path is relative (the original
+   load resolves those against the current namespace; they delegate unchanged)."
+  [path]
+  (let [s (str path)]
+    (cond (str/starts-with? s "/") (str/replace (subs s 1) "/" ".")
+          (str/includes? s "/") nil
+          :else s)))
+
+(def ^:private module-path-dirs
+  (delay (remove empty? (str/split (get (cpp/eve_load.runtime_data) "paths") #":"))))
+
+(defn- module-rel-path
+  "The module-path-relative source path stem for a dotted module name."
+  [module]
+  (str/replace (str/replace module "." "/") "-" "_"))
+
+(defn- find-on-module-path
+  "The first module-path file for module with one of exts, or nil. Path
+   entries that are JAR/ZIP archives are not searched -- the seat's module
+   paths are plain directories."
+  [module exts]
+  (let [rel (module-rel-path module)]
+    (some (fn [dir]
+            (some (fn [ext]
+                    (let [p (str dir "/" rel ext)]
+                      (when (cpp/eve_load.file_exists p) p)))
+                  exts))
+          @module-path-dirs)))
+
+(defn- loadable
+  "True when the module path holds a source the loader could load for module
+   (a .cljc, .jank or .cpp file, in path order). The C++ original asked
+   module_loader.find, which the AOT runtime does not link; this is the same
+   filesystem search over the same dirs. A module present only as a compiled
+   object reads as not-loadable here -- module-state's callers only
+   distinguish source modules, which is what the distinction is for."
+  [module]
+  (some? (find-on-module-path module [".cljc" ".jank" ".cpp"])))
+
+(defn- cljc-source
+  "The source text of module's .cljc file on the module path, or nil when the
+   module has no filesystem .cljc source (a .jank/.cpp/baked module, or not
+   found) -- the C++ original's contract, answered without
+   module_loader.find."
+  [module]
+  (when-let [p (find-on-module-path module [".cljc"])]
+    (cpp/eve_load.read_text_file p)))
+
+(defn- module-state
+  "\"loadable\" when the loader can load the module; \"clj-only\" when it exists on the
+   module path only as a .clj file (a JVM-host module — jank's loader has no .clj
+   module type and does not index them); \"missing\" otherwise."
+  [module]
+  (cond (loadable module) "loadable"
+        (let [rel (str (str/replace (str/replace module "." "/") "-" "_") ".clj")]
+          (some (fn [dir] (cpp/eve_load.file_exists (str dir "/" rel))) @module-path-dirs)) "clj-only"
+        :else "missing"))
+
+(defn- simple-libspec?
+  "A libspec naming one lib directly: a symbol, or a vector whose head is the lib and whose
+   second element (when present) is an option keyword. Prefix lists are not simple."
+  [spec]
+  (or (symbol? spec)
+      (and (vector? spec) (symbol? (first spec))
+           (or (= 1 (count spec)) (keyword? (second spec))))))
+
+(defn- libspec-referred
+  "The var names a libspec refers ([] when it refers none, or :all)."
+  [spec]
+  (if (vector? spec)
+    (let [opts (apply hash-map (drop 1 spec))]
+      (if (contains? opts :refer)
+        (let [r (:refer opts)] (if (= :all r) :all (vec r)))
+        []))
+    []))
+
+(defn- process-ns-form
+  "An ns form made loadable on this host, without touching the library's source:
+   - :refer-clojure clauses move ahead of the other reference clauses (jank's ns macro
+     processes references in source order; JVM Clojure refers clojure.core first).
+   - :import clauses are dropped (jank cannot honor them; see the section head).
+   - A :require clause naming a module that exists only as a .clj file — a JVM-host
+     module jank's loader cannot load (datascript.inline, datascript.pprint) — is
+     dropped, and any var it referred that clojure.core also provides is removed
+     from the :refer-clojure :exclude list, so the core var serves instead. The
+     :clj face of a vanilla library uses such modules as JVM shims (inline is
+     clojure.lang.RT inlining; the semantics are core's); a module that is missing
+     outright keeps its clause, so the load fails with the honest error."
+  [form]
+  (if-not (and (seq? form) (= 'ns (first form)))
+    form
+    (let [clauses (drop 2 form)
+          ;; jank's ns macro processes reference clauses in source order; JVM Clojure applies
+          ;; :refer-clojure before the other references. A vanilla ns form that puts
+          ;; (:refer-clojure ...) after (:require ...) (DataScript's shape) would otherwise run
+          ;; its requires in a namespace clojure.core has not been referred into yet, and a
+          ;; not-yet-loaded .jank module's own (ns ...) head then fails to resolve. Move the
+          ;; :refer-clojure clauses ahead of the other reference clauses; any docstring /
+          ;; attr-map (non-seq heads) keep their place at the front.
+          [head-clauses ref-clauses] (split-with (complement seq?) clauses)
+          ordered-clauses (concat head-clauses
+                                  (filter (fn [c] (= :refer-clojure (first c))) ref-clauses)
+                                  (remove (fn [c] (= :refer-clojure (first c))) ref-clauses))
+          dropped-refers
+          (into []
+                (comp (filter (fn [c] (and (seq? c) (= :require (first c)))))
+                      (mapcat (fn [c] (rest c)))
+                      (filter (fn [spec] (and (simple-libspec? spec)
+                                              (= "clj-only" (module-state (str (if (vector? spec) (first spec) spec)))))))
+                      (mapcat (fn [spec] (let [r (libspec-referred spec)] (if (= :all r) [] r))))
+                      (filter (fn [sym] (ns-resolve 'clojure.core sym))))
+                clauses)
+          dropped (set dropped-refers)]
+      (apply list (first form) (second form)
+             (mapcat (fn [clause]
+                       (cond (not (seq? clause)) [clause]
+                             (= :import (first clause)) []
+                             (= :require (first clause))
+                             [(apply list :require
+                                     (remove (fn [spec] (and (simple-libspec? spec)
+                                                              (= "clj-only" (module-state (str (if (vector? spec) (first spec) spec))))))
+                                             (rest clause)))]
+                             (and (= :refer-clojure (first clause)) (seq dropped))
+                             [(concat (list :refer-clojure)
+                                      (mapcat (fn [[k v]] (if (= :exclude k)
+                                                            [k (vec (remove dropped v))]
+                                                            [k v]))
+                                              (partition 2 (rest clause))))]
+                             :else [clause]))
+                     ordered-clauses)))))
+
+(defn- eval-cljc-source!
+  "Read src's forms with :clj among the reader features and eval each in order.
+   Forms live at read_string indices 1..N; a nil read is the end of the source."
+  [src]
+  (loop [n 1]
+    (let [form (cpp/.read_string cpp/jank.runtime.__rt_ctx src clj-feature-opts n)]
+      (when (some? form)
+        (eval (clj-face (process-ns-form form)))
+        (recur (inc n))))))
+
+(def ^:private translated-tree?
+  "True when a module-path dir carries the `.eve-translated` marker that
+   scripts/compiled-jank/stage-translate.sh writes into the mirror tree it
+   builds: every .cljc there IS this loader's translation already (reader
+   conditionals resolved, clj-face applied, ns forms made loadable), so
+   jank's own load reads it -- and under `jank compile`, compiles it. With
+   this override active over such a tree, every .cljc require was
+   JIT-evaluated by eval-cljc-source! instead (measured 2026-11-09,
+   compiled-jank lane: the build's cache held 17 .o files, all .jank
+   modules, none of the graph's .cljc, and the entry's graph died in the
+   JIT path), so the translated tree names itself and eve-load steps aside."
+  (delay (boolean (some (fn [dir] (cpp/eve_load.file_exists (str dir "/.eve-translated")))
+                        @module-path-dirs))))
+
+(declare eve-load-cljc)
+
+(defn- eve-load [& paths]
+  (if @translated-tree?
+    (apply orig-load paths)
+    (apply eve-load-cljc paths)))
+
+(defn- eve-load-cljc [& paths]
+  (doseq [path paths]
+    (let [module (load-module-name path)]
+      (if (nil? module)
+        (orig-load path)
+        (let [src (when-not (contains? @eve-loaded-modules module)
+                    (cljc-source module))]
+          (cond (nil? src) (orig-load path)
+                (contains? @eve-loading-modules module)
+                (throw (ex-info (str "Cyclic load dependency: " module) {:module module}))
+                :else (do (swap! eve-loading-modules conj module)
+                          (try ;; load_module restores *ns* when a module is loaded; the eval
+                               ;; loop must give load's caller the same contract, or an outer
+                               ;; ns form's remaining refer/alias steps — and its body forms —
+                               ;; resolve in the loaded library's namespace instead of its own
+                               ;; (measured: eve.mem's extend-default, referred from eve.host,
+                               ;; unresolved after eve.deftype-proto.data loaded through here).
+                               (binding [*ns* *ns*]
+                                 (eval-cljc-source! src))
+                               (swap! eve-loaded-modules conj module)
+                               (finally (swap! eve-loading-modules disj module))))))))))
+
+(alter-var-root #'clojure.core/load (fn [_] eve-load))
+
+;; jank's reader expands a splicing syntax-quote (`x ~@ys`) into a call to clojure.core/concat*,
+;; clojure.core's bootstrap concat — private as a bootstrap detail, but named by reader-emitted
+;; code in any namespace, whose analysis jank then refuses ("The var `clojure.core/concat*` is
+;; private": measured, Lane M 2026-11-06, on datascript.util's log/raise macros). Eve's own code
+;; avoids ~@ for this (the types adapter builds forms with list*); vanilla code cannot be asked
+;; to. The completion answers it the way JVM Clojure's reader behaves — there the emitted name is
+;; the public concat: the privacy flag on the reader-named var is dropped.
+(alter-meta! #'clojure.core/concat* dissoc :private)
+
+;; ---------------------------------------------------------------------------
+;; The :clj-face shims clj-face's translations call: the exception classes are
+;; ex-info; an ArrayList is a transient vector being built (its .add is conj!,
+;; answering true as List.add does); List.get/Map.get are one read (a numeric
+;; key indexes, any other looks up); Writer.write prints to the writer bound
+;; as *out*; a UUID is its two longs, [msb lsb] — compared and hashed by
+;; content, as a UUID is.
+;; ---------------------------------------------------------------------------
+
+(defn ex-info-ctor
+  "An exception class of the :clj face (IllegalArgumentException, UnsupportedOperationException,
+   Exception) built as the seat's throwable: ex-info with the message, or no message."
+  ([] (ex-info "" {}))
+  ([msg] (ex-info (str msg) {}))
+  ([msg _cause] (ex-info (str msg) {})))
+
+(defn array-list
+  "java.util.ArrayList, as a transient vector under construction (the capacity hint is read and dropped)."
+  [& _]
+  (transient []))
+
+(defn jvm-add
+  "List.add on the ArrayList shim: conj!, answering true as List.add does."
+  [t x]
+  (conj! t x)
+  true)
+
+(defn jvm-get
+  "List.get / Map.get: a numeric key indexes the target, any other key looks it up."
+  [t k]
+  (if (number? k) (nth t k) (get t k)))
+
+(defn jvm-write
+  "Writer.write: print s to the writer, as *out*."
+  [w s]
+  (binding [*out* w] (print (str s)))
+  nil)
+
+(defn print-via-string-writer
+  "print-method's defn on this seat, for (defmethod print-method T [x w] body...): the method
+   runs against a string writer (the encoding adapter's string-writer, loaded here on first
+   use — this namespace loads before it exists) and what it wrote is the instance's printed
+   form. body keeps its own names: [x w] is the method's argument vector as written."
+  [x args body]
+  (let [w ((ns-resolve (do (require (quote eve.encoding)) (find-ns (quote eve.encoding)))
+                       (quote string-writer)))
+        f (eval (list 'fn args body))]
+    (f x w)
+    (str (deref w))))
+
+(defn uuid-new
+  "java.util.UUID as its two longs: [msb lsb]."
+  [msb lsb]
+  [msb lsb])
+
+(defn uuid-msb [u] (nth u 0))
+(defn uuid-lsb [u] (nth u 1))
+
+(defn- rand-long []
+  (bit-or (bit-shift-left (rand-int 2147483647) 32)
+          (bit-and (rand-int 2147483647) 0xffffffff)))
+
+(when-not (find-ns 'UUID)
+  (create-ns 'UUID)
+  (intern 'UUID 'randomUUID (fn [] (uuid-new (rand-long) (rand-long)))))
+
+;; ---------------------------------------------------------------------------
+;; System/*: the JVM class-statics vanilla code calls by name — identityHashCode
+;; (datascript.impl.entity's hash-entity), getProperty (datascript.util's log
+;; macro, at expansion time), currentTimeMillis (datascript.util's squuid).
+;; There is no System class here; a namespace of that name carrying the vars
+;; answers the same symbols. Each answer is the honest one for this host: the
+;; instance's own address is its identity hash; no system properties are set
+;; (getProperty answers nil, or the caller's default); the wall clock is real.
+;; ---------------------------------------------------------------------------
+
+(when-not (find-ns 'System)
+  (create-ns 'System)
+  (intern 'System 'identityHashCode (fn [x] (bit-and (object-addr x) 0x7fffffff)))
+  (intern 'System 'getProperty (fn ([_] nil) ([_ d] d)))
+  (intern 'System 'currentTimeMillis (fn [] (cpp/eve_host.now_millis))))
+
+;; ---------------------------------------------------------------------------
+;; Math/*: the JVM class-statics vanilla code names (datascript.built-ins'
+;; aggregate-stddev calls Math/sqrt as a function value). There is no Math
+;; class here; a namespace of that name carrying the vars answers the same
+;; symbols, in call position and in value position alike. The answers are
+;; the host's own scalar math (cpp/*) and core's min/max/abs.
+;; ---------------------------------------------------------------------------
+
+(when-not (find-ns 'Math)
+  (create-ns 'Math)
+  (intern 'Math 'sqrt (fn [x] (cpp/sqrt (double x))))
+  (intern 'Math 'pow (fn [x y] (cpp/pow (double x) (double y))))
+  (intern 'Math 'floor (fn [x] (cpp/floor (double x))))
+  (intern 'Math 'ceil (fn [x] (cpp/ceil (double x))))
+  (intern 'Math 'exp (fn [x] (cpp/exp (double x))))
+  (intern 'Math 'log (fn [x] (cpp/log (double x))))
+  (intern 'Math 'sin (fn [x] (cpp/sin (double x))))
+  (intern 'Math 'cos (fn [x] (cpp/cos (double x))))
+  (intern 'Math 'tan (fn [x] (cpp/tan (double x))))
+  (intern 'Math 'abs (fn [x] (if (neg? x) (- x) x)))
+  (intern 'Math 'min (fn [x y] (min x y)))
+  (intern 'Math 'max (fn [x y] (max x y))))
+
+;; ---------------------------------------------------------------------------
+;; (refer 'clojure.core), the one every ns form expands to
+;; ---------------------------------------------------------------------------
+;; jank's refer rebuilds ns-publics of clojure.core (a reduce over its whole mapping, core.jank:4640) and refers each
+;; var through a Clojure reduce, per namespace created. Unfiltered, of clojure.core: the publics are kept while
+;; clojure.core's mapping is the same map (identical?: a name interned into clojure.core makes a new one), and the
+;; refers run in eve_host::refer_all. Every other call is jank's own.
+(def ^:private core-refer (deref #'clojure.core/refer))
+(def ^:private core-publics
+  "[clojure.core's mapping, its publics] of the last unfiltered (refer 'clojure.core)."
+  (atom nil))
+(defn- clojure-core-publics []
+  (let [ns (the-ns 'clojure.core)
+        m (cpp/jank.runtime.ns_map ns)
+        c (cpp/jank.runtime.deref core-publics)]
+    (if (and c (identical? m (nth c 0)))
+      (nth c 1)
+      (let [p (ns-publics ns)] (reset! core-publics [m p]) p))))
+(alter-var-root #'clojure.core/refer
+  (fn [_] (fn [ns-sym & filters]
+            (if (and (nil? filters) (= 'clojure.core ns-sym))
+              (cpp/eve_host.refer_all *ns* (clojure-core-publics))
+              (apply core-refer ns-sym filters)))))

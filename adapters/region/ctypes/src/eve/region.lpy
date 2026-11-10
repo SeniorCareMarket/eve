@@ -64,6 +64,67 @@
                             ctypes/c-long))
 (def ^:private timespec (.__mul__ ctypes/c-long 2))
 
+;; darwin wait/notify: macOS has no futex -- syscall 202 there is
+;; SYS_sysctl, and the Linux errno map (11/110) is wrong there too
+;; (EAGAIN is 35, ETIMEDOUT 60). libSystem's __ulock_wait/__ulock_wake
+;; (ULOCK_COMPARE_AND_WAIT) are the futex-shaped primitives; they are
+;; resolved from the process image (the use-errno handle above) when
+;; present. If a macOS ever drops them, -wait-i32! falls back to
+;; polling the word -- the same contract (:ok/:not-equal/:timed-out)
+;; with coarser wakeups, never a silent change of meaning.
+(def ^:private darwin? (= "darwin" (.-platform sys)))
+(def ^:private ulock-wait
+  (when darwin?
+    (try (cfn libc "__ulock_wait"
+              [ctypes/c-uint32 ctypes/c-void-p ctypes/c-uint64 ctypes/c-uint32]
+              ctypes/c-int)
+         (catch python/AttributeError _ nil))))
+(def ^:private ulock-wake
+  (when darwin?
+    (try (cfn libc "__ulock_wake"
+              [ctypes/c-uint32 ctypes/c-void-p ctypes/c-uint64]
+              ctypes/c-int)
+         (catch python/AttributeError _ nil))))
+(def ^:private time-mod (python/__import__ "time"))
+(defn- time-ms-now [] (long (* 1000 (.monotonic time-mod))))
+
+(defn- darwin-wait-i32
+  "Wait on the i32 at addr via __ulock_wait, chunked at 5 s so the
+   deadline and EINTR handling live in one loop; the value pre-check
+   each round keeps the differs-at-entry case exact."
+  [addr expected timeout-ms]
+  (let [deadline (when (and (some? timeout-ms) (not= timeout-ms ##Inf))
+                   (+ (time-ms-now) timeout-ms))
+        exp32 (unchecked-int expected)]
+    (loop []
+      (cond
+        (not= (load4 addr SEQ-CST) exp32) :not-equal
+        (and deadline (>= (time-ms-now) deadline)) :timed-out
+        :else (let [chunk-us (long (if deadline
+                                     (min 5000000 (* 1000 (max 0 (- deadline (time-ms-now)))))
+                                     5000000))
+                    r (ulock-wait 1 addr (bit-and exp32 0xFFFFFFFF) chunk-us)]
+                (cond
+                  (zero? r) :ok
+                  :else (case (ctypes/get-errno)
+                          35 :not-equal
+                          60 (if (and deadline (< (time-ms-now) deadline)) (recur) :timed-out)
+                          4 (recur)
+                          :ok)))))))
+
+(defn- poll-wait-i32
+  "The no-ulock darwin fallback: poll the word at 2 ms until it
+   differs or the deadline passes."
+  [addr expected timeout-ms]
+  (let [deadline (when (and (some? timeout-ms) (not= timeout-ms ##Inf))
+                   (+ (time-ms-now) timeout-ms))
+        exp32 (unchecked-int expected)]
+    (loop []
+      (cond
+        (not= (load4 addr SEQ-CST) exp32) :not-equal
+        (and deadline (>= (time-ms-now) deadline)) :timed-out
+        :else (do (.sleep time-mod 0.002) (recur))))))
+
 (deftype LpyRegion [base size owner]
   mem/IMemRegion
   (-byte-length [_] size)
@@ -86,13 +147,28 @@
   (-add-i64! [_ off delta] (add8 (+ base off) (unchecked-long delta) SEQ-CST))
   (-sub-i64! [_ off delta] (add8 (+ base off) (unchecked-long (- delta)) SEQ-CST))
   (-wait-i32! [_ off expected timeout-ms]
-    ;; futex(2) FUTEX_WAIT (shared): 202 on x86-64
-    (let [ts (timespec (quot timeout-ms 1000) (* 1000000 (mod timeout-ms 1000)))
-          r (syscall 202 (+ base off) 0 (unchecked-int expected) (ctypes/addressof ts) nil 0)]
-      (if (zero? r)
-        :ok
-        (case (ctypes/get-errno) 11 :not-equal 110 :timed-out :ok))))
-  (-notify-i32! [_ off n] (syscall 202 (+ base off) 1 (int n) nil nil 0))
+    (cond
+      ulock-wait (darwin-wait-i32 (+ base off) expected timeout-ms)
+      darwin? (poll-wait-i32 (+ base off) expected timeout-ms)
+      :else
+      ;; futex(2) FUTEX_WAIT (shared): 202 on x86-64
+      (let [ts (timespec (quot timeout-ms 1000) (* 1000000 (mod timeout-ms 1000)))
+            r (syscall 202 (+ base off) 0 (unchecked-int expected) (ctypes/addressof ts) nil 0)]
+        (if (zero? r)
+          :ok
+          (case (ctypes/get-errno) 11 :not-equal 110 :timed-out :ok)))))
+  (-notify-i32! [_ off n]
+    (cond
+      ulock-wake (let [;; ULOCK_WAKE_ALL (0x100) when waking more than one
+                       op (if (and (number? n) (<= n 1)) 1 0x101)
+                       r (ulock-wake op (+ base off) 0)]
+                   ;; __ulock_wake does not report a woken count: 1
+                   ;; means the wake was delivered, 0 that it was not.
+                   (if (zero? r) 1 0))
+      ;; poll waiters observe the word themselves; nobody is blocked
+      ;; in a primitive to wake
+      darwin? 0
+      :else (syscall 202 (+ base off) 1 (int n) nil nil 0)))
   (-supports-watch? [_] true)
   (-read-bytes [_ off len] (array/array "b" (ctypes/string-at (+ base off) len)))
   (-write-bytes! [_ off src]

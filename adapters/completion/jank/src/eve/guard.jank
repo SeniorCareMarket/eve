@@ -1,0 +1,100 @@
+(ns eve.guard
+  "The automatic read guard — the no-guard seat supply (jank).
+
+   eve.guard proper (eve/src/eve/guard.clj) is a JVM-only prototype: inside
+   a guard extent (with-guard / guard*), an mmap atom's deref pins its
+   domain once for the extent and answers its root as a LAZY slab-backed
+   value behind a validity proxy (LazyMap / LazyColl), instead of
+   materializing the whole root. bb, glojure and cljs have no guard at
+   all — eve.atom's reader arms exclude them — because their deref always
+   materializes (eve.atom/plain-deref), inside the epoch pin plain-deref
+   itself takes: there is no lazy value for a hold to keep valid.
+
+   Jank cannot take the reader exclusion. The seat's completion reads
+   Eve's .cljc sources with :clj among the reader features
+   (eve.host-completion's eve-load), so eve.atom takes its :clj arm and
+   requires this namespace; but eve.guard exists upstream only as a .clj
+   file and jank's loader has no .clj module type, so the completion's
+   ns-form processing classified eve.guard clj-only and dropped the
+   require clause, leaving every guard reference (guard/hold! first)
+   unresolved at compile. This file is the seat's eve.guard: the guard's
+   public surface with its extent-free semantics, which are the only
+   semantics reachable here — no extent can open on this seat, because
+   deref never produces a guarded lazy value (active? is false, so
+   eve.atom's mmap-deref takes plain-deref, exactly as on bb/glj/cljs).
+
+   Per var:
+   - *extent*, current-cell: no extent exists; nil, the real guard's
+     value outside an extent.
+   - *proxy-same-domain?*: the real default, true; consulted only inside
+     guard-deref, which active? gates off.
+   - active?: false.
+   - hold!: answers nil, the real hold!'s documented answer outside an
+     extent. (Inside an extent it registers a pin; there are no extents
+     here, and the pin a deref needs is plain-deref's own epoch pin.)
+   - guard*, with-guard: run the body with no extent. Sound because the
+     body's derefs materialize eagerly — which is precisely what the JVM
+     contract demands of any value escaping an extent. This seat gains
+     no laziness and loses no safety.
+   - wrap, unwrap: identity. No validity proxy exists on this seat;
+     wrap's only caller (eve.atom/guard-deref) is gated off by active?,
+     and nothing here is an IGuarded.
+   - valid?, check!: no cells exist; valid? is true (the real chain
+     walk's base case at a nil cell) and check! does not throw.
+   - materialize: the real semantics, seat-universal — d/eve->clj.
+   Deliberately absent: the LazyMap / LazyColl validity proxies and the
+   IGuarded protocol — JVM host machinery (clojure.lang deftypes) for
+   values this seat never produces."
+  (:require [eve.deftype-proto.data :as d]))
+
+(def ^:dynamic *extent*
+  "This thread's innermost guard extent. Always nil on this seat."
+  nil)
+
+(def ^:dynamic *proxy-same-domain?*
+  "The real guard's default. Read only inside guard-deref, which
+   active? gates off on this seat."
+  true)
+
+(defn active? [] false)
+
+(defn current-cell [] nil)
+
+(defn hold!
+  "Outside an extent: nil (the real hold!'s documented answer). This
+   seat is always outside an extent."
+  [k acquire release]
+  nil)
+
+(defn guard*
+  "Runs f with no guard extent (see the ns docstring for why that is
+   sound on this seat). The receiving-domain arity ignores its first
+   argument: there is no extent for a domain to own."
+  ([f] (f))
+  ([receiving-domain f] (f)))
+
+(defmacro with-guard
+  "A guard extent around body — on this seat, the body with no extent."
+  [& body]
+  (cons 'do body))
+
+(defn valid? [c] true)
+
+(defn check! [c] nil)
+
+(defn wrap
+  "x as the extent's lazy value — on this seat x itself: nothing is
+   proxied here."
+  [x cell]
+  x)
+
+(defn unwrap
+  "The slab-backed value under a proxy — on this seat x itself:
+   nothing is proxied here."
+  [x]
+  x)
+
+(defn materialize
+  "The one explicit materialization point: x as plain data."
+  [x]
+  (d/eve->clj x))

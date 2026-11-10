@@ -30,17 +30,39 @@
     doubles objects booleans const-bytes const-objects defdelay swap! reset!
     compare-and-set! token])
 
+(defn expand-const-bytes
+  "Runtime builder behind the const-bytes macro. The plain expansion
+   (clojure.core/byte-array values) is unavailable on seats whose core
+   is SCI's (nbb/scittle: SCI's clojure.core has no byte-array — the
+   F3 load death at eve/hamt_util.cljc's xxh3-secret def), so const
+   byte blocks are built here instead: the core's byte-array where
+   the seat's core has one, a js/Uint8Array over the same values
+   where it does not. Readers go through host aget + masking
+   (hamt_util's ubyte), so the two representations are
+   indistinguishable to every caller."
+  [values]
+  ;; :default, not :clj — ClojureCLR's reader takes :cljr and basilisp's
+  ;; :lpy, so a :clj/:cljs-only body read as EMPTY there and returned nil:
+  ;; every const-bytes constant (the codec's BYTES-NIL/TRUE/FALSE and
+  ;; small-int cache) was nil on both, and a persistent atom whose root
+  ;; became a small integer died writing it (CLR: NullReferenceException at
+  ;; alength in value->scalar-block!; basilisp: TypeError len(None)) —
+  ;; fix-for-release F4, ants d8-m6 cljr and lpy members, 2026-11-09.
+  #?(:cljs    (js/Uint8Array. (clojure.core/into-array values))
+     :default (clojure.core/byte-array values)))
+
 (defn expand
   "clojure.core's call of name n on args. (token) is a fresh cell, identical?
-   only to itself; const-bytes and const-objects the core's arrays;
-   (defdelay name & body) (defonce name (delay body)); vswap! one expansion,
+   only to itself; const-bytes is built by expand-const-bytes (some
+   seats' cores have no byte-array) and const-objects is the core's
+   array; (defdelay name & body) (defonce name (delay body)); vswap! one expansion,
    over vreset! and deref, so (vswap! v conj! x) holds where a core's vswap!
    is a function."
   [n args]
   (let [c (fn [s] (symbol "clojure.core" (name s)))]
     (case n
       token (list (c 'volatile!) nil)
-      const-bytes (cons (c 'byte-array) args)
+      const-bytes (list 'eve.host/expand-const-bytes (first args))
       const-objects (cons (c 'object-array) args)
       defdelay (let [[nm & body] args] (list (c 'defonce) nm (list* (c 'delay) body)))
       vswap! (let [[v f & more] args sym (gensym "vol")]
@@ -60,7 +82,7 @@
    file's :cljs)."
   [proto & impls]
   (let [root (if (:ns &env) 'default #?(:cljs 'default :default 'Object))]
-    `(extend-protocol ~proto nil ~@impls ~root ~@impls)))
+    `(clojure.core/extend-protocol ~proto nil ~@impls ~root ~@impls)))
 
 (defmacro field
   "(field x f): the value of field f of x, a type's instance — (.-f x) on every host whose analyzer reads a field

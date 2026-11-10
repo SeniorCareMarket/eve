@@ -74,15 +74,15 @@
   (codec/decode sio bs))
 
 (defn- byte-len [bs]
-  (eve.host/alength ^bytes bs))
+  (eve.host/alength bs))
 
 (defn- magic? [bs]
   (and (>= (byte-len bs) 3)
-       (== d/DIRECT_MAGIC_0 (bit-and (eve.host/aget ^bytes bs 0) 0xFF))
-       (== d/DIRECT_MAGIC_1 (bit-and (eve.host/aget ^bytes bs 1) 0xFF))))
+       (== d/DIRECT_MAGIC_0 (bit-and (eve.host/aget bs 0) 0xFF))
+       (== d/DIRECT_MAGIC_1 (bit-and (eve.host/aget bs 1) 0xFF))))
 
 (defn- byte-at [bs i]
-  (bit-and (eve.host/aget ^bytes bs i) 0xFF))
+  (bit-and (eve.host/aget bs i) 0xFF))
 
 (defn- i32-at [bs i]
   (let [v (bit-or (byte-at bs i)
@@ -267,7 +267,7 @@
   [a i]
   (if (value-array? a)
     (read-slot (-va-sio a) (-va-off a) (-va-count a) i)
-    (eve.host/aget ^objects a (int i))))
+    (eve.host/aget a (int i))))
 
 (defn aset
   "Store v at index i. An eve array is written while it is new: by the code
@@ -275,14 +275,14 @@
   [a i v]
   (if (value-array? a)
     (do (write-slot! (-va-sio a) (-va-off a) (-va-count a) i v) v)
-    (eve.host/aset ^objects a (int i) v)))
+    (eve.host/aset a (int i) v)))
 
 (defn alength
   "The number of slots."
   [a]
   (if (value-array? a)
     (-va-count a)
-    (eve.host/alength ^objects a)))
+    (eve.host/alength a)))
 
 (defn aclone
   "A new array with a's values (an eve array: a new one in the current domain,
@@ -293,7 +293,7 @@
           ret (make-array n)]
       (copy-slots! (-va-sio a) (-va-off a) n 0 (-va-sio ret) (-va-off ret) n 0 n)
       ret)
-    (eve.host/aclone ^objects a)))
+    (eve.host/aclone a)))
 
 (defn array-copy
   "Copy len values from (from, i) to (to, j) — ClojureScript's array-copy."
@@ -322,5 +322,5 @@
    (let [n   (- end off)
          arr (object-array n)]
      (dotimes [k n]
-       (eve.host/aset ^objects arr k (aget a (+ off k))))
+       (eve.host/aset arr k (aget a (+ off k))))
      (e/array-chunk arr n))))

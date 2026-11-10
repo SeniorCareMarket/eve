@@ -5,6 +5,7 @@ eve's shared code (`src/`) has no reader conditional keyed by a host and no host
 `host-files 1`). A **host** is `src/` plus a list of adapter roots, its row in [`hosts.edn`](../hosts.edn).
 Hosts with the same capability share an adapter. This page is the matrix of the eleven hosts `hosts.edn` ships: what
 runs each one, its adapters, its test runner, what it lacks, and what was run for 0.9.
+What 0.9.3.1 ran, and the per-host journal matrix it adds, are in [0.9.3.1](#0931) below.
 
 For how to add a host, see [adopting-eve-minimal.md](adopting-eve-minimal.md); for the three adapter tiers,
 [doc/adopter-tiers.md](adopter-tiers.md).
@@ -40,7 +41,45 @@ release's report. Otherwise it is **experimental**: present, with no green run r
 . By that rule, the 0.9 preparation's final sweep has
 every shipped host green but basilisp, whose full run errs at the network rung's domain pool late in the run (9.26) and
 four times after it (9.34: the failed tests' tickers run on) — each of those namespaces alone green;
-ValueScript is not part of 0.9.
+ValueScript shipped in 0.9 as a partial seat (the changelog's 0.9.0 section carries it as part of the release): its three namespaces pass (260 / 0), but eve's types, `eve.atom` and `eve.stm` wait on VS machinery, and it remains the only host with no journal adapter (see [0.9.3.1](#0931)).
+
+## 0.9.3.1
+
+The 0.9 table above is the 0.9 preparation's final pass and stands as its record. What this
+release ran on its integrated tree (the ship-packet gate, 2026-11-09 ET; verdict file in the
+development record):
+
+| Host | 0.9.3.1 gate |
+|---|---|
+| JVM | **green: 659 tests, 10,730 assertions, 0 failures, 0 errors** (630 s) |
+| babashka | **green: 251 tests / 4,678 assertions** (30 namespaces) **+ 42 / 890** (the remaining 9), 0 / 0; `eve.thread-net-test` and `eve.aegis.rsabssa-test` excluded by name (the http feature; an RSA-2048 row past 30 min) |
+| jolt | journal leg **green**: journal created, 5 fsync, fresh-process read exact (the JVM's journal leg likewise: 8,272 B, 5 syncs, read exact) |
+
+Per-host work this release is on each host's page and in the changelog: jank's compiled form
+proven at the pin (AOT contract 5/5, 0.317 s cold median), glojure's `*compile-files*` panic
+fixed, compiled-ClojureScript persistent writes proven, clojerl's first `swap!` fixed,
+basilisp's crypto and serialization fixes. `eve.stm` is shared code and ships on every host
+but ValueScript.
+
+### Journal support per host
+
+The disk tier is journaled by design in 0.9.3.1; a host's journal is its `eve.journal-file`
+adapter (`adapters/journal-file/<impl>`). A host with no adapter cannot carry a journaled disk
+domain.
+
+| Host | journal-file adapter | State in 0.9.3.1 |
+|---|---|---|
+| JVM (`:jvm`) | `java` | yes — gate journal leg green |
+| babashka (`:bb`) | `java` (the JVM seat's) | yes |
+| jolt (`:jolt`) | `jolt` | yes — gate journal leg green |
+| glojure (`:glj`) | `glojure` | yes — new in this release; the A3 probe is unchanged-exact on glj |
+| nbb (`:nbb`) / ClojureScript on Node (`:cljs`) | `node` | yes |
+| ClojureCLR (`:cljr`) | `clr` | yes |
+| basilisp (`:lpy`) | `python` | yes |
+| clojerl (`:clje`) | `beam` | yes |
+| jank (`:jank`) | `jank` | adapter in tree; its Mac proof is outstanding (venue-blocked, job file prepared) |
+| browser (`:browser`) | — | no disk domains on this seat |
+| **ValueScript (`:vs`)** | `unsupported` | **no working adapter — the only host with none; its row carries the `unsupported` journal-file root** |
 
 ## Adapter roots per host
 

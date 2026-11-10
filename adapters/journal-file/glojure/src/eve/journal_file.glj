@@ -1,0 +1,224 @@
+(ns eve.journal-file
+  "The commit journal's file handle (eve.atom's durability mode): an
+   append-only per-domain file beside the domain root, holding commit
+   records only. This host: glojure — a Go os.File, positioned reads
+   and writes (ReadAt / WriteAt); the journal's lock is an fcntl POSIX
+   write lock on the journal fd (eve's Go host package: F_SETLKW),
+   the lock family the JVM seat's FileLock and the basilisp seat's
+   lockf share on the same path, so seats of different hosts
+   serialize on one domain's journal.
+
+   Record format (identical bytes on every host):
+     [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
+   magic = \"EVJ1\" (0x45564A31); all integers big-endian; len counts the
+   bytes after itself (epoch + table-len + table + crc); the CRC-32
+   (IEEE, in-language below) covers the epoch..table-end bytes and is
+   stored as the signed i32 of its bit pattern. The commit point is
+   lock, write blocks, force slab, append record, force journal —
+   eve.atom runs that sequence over this file."
+  (:require [eve.host :refer [locking]]
+            [eve.mem :as mem]
+            [eve.deftype-proto.data :as d]))
+
+(def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
+(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+
+;; ---------------------------------------------------------------------------
+;; bytes: glojure's byte arrays are Go []int8; a byte's value is its
+;; unsigned 0..255 reading everywhere below.
+;; ---------------------------------------------------------------------------
+
+(defn- b8
+  "v's low byte as the signed int8 a byte array holds."
+  [v]
+  (let [x (bit-and v 0xFF)]
+    (byte (if (>= x 128) (- x 256) x))))
+
+(defn- put-i32!
+  "Write v as a big-endian i32 at off in b (v taken mod 2^32)."
+  [b off v]
+  (let [v (bit-and v 0xFFFFFFFF)]
+    (aset b off       (b8 (bit-shift-right v 24)))
+    (aset b (+ off 1) (b8 (bit-shift-right v 16)))
+    (aset b (+ off 2) (b8 (bit-shift-right v 8)))
+    (aset b (+ off 3) (b8 v))))
+
+(defn- get-i32
+  "The big-endian i32 at off in b, signed (as struct's >i reads it)."
+  [b off]
+  (let [u (bit-or (bit-shift-left (bit-and (aget b off) 0xFF) 24)
+                  (bit-or (bit-shift-left (bit-and (aget b (+ off 1)) 0xFF) 16)
+                          (bit-or (bit-shift-left (bit-and (aget b (+ off 2)) 0xFF) 8)
+                                  (bit-and (aget b (+ off 3)) 0xFF))))]
+    (if (>= u 2147483648) (- u 4294967296) u)))
+
+;; CRC-32 (IEEE 802.3, reflected, polynomial 0xEDB88320 — the zlib /
+;; java.util.zip.CRC32 checksum), table-driven, in-language.
+
+(def ^:private crc-table
+  (vec (for [n (range 256)]
+         (loop [c n k 0]
+           (if (= k 8)
+             c
+             (recur (if (odd? c)
+                      (bit-xor 0xEDB88320 (unsigned-bit-shift-right c 1))
+                      (unsigned-bit-shift-right c 1))
+                    (inc k)))))))
+
+(defn- crc32
+  "The CRC-32 of the len bytes of b from off, as a signed i32 (the
+   record stores the signed reading of the checksum's bit pattern)."
+  [b off len]
+  (let [u (loop [i 0 crc 0xFFFFFFFF]
+            (if (= i len)
+              (bit-xor crc 0xFFFFFFFF)
+              (recur (inc i)
+                     (bit-xor (nth crc-table
+                                   (bit-and (bit-xor crc (bit-and (aget b (+ off i)) 0xFF)) 0xFF))
+                              (unsigned-bit-shift-right crc 8)))))]
+    (if (>= u 2147483648) (- u 4294967296) u)))
+
+;; ---------------------------------------------------------------------------
+;; the handle: {:file os.File :path string}
+;; ---------------------------------------------------------------------------
+
+(defn open-journal
+  "Open (creating if needed) the journal file at PATH for read+write.
+   Returns the file handle {:file :path}."
+  [path]
+  (let [[f err] (os.OpenFile (str path) (bit-or os.O_RDWR os.O_CREATE) (os.FileMode 0644))]
+    (when err
+      (throw (ex-info (str "eve.journal-file: cannot open journal at " path)
+                      {:path (str path) :error (str err)})))
+    {:file f :path (str path)}))
+
+(defn with-journal-lock
+  "Run F holding the journal file's exclusive lock: an fcntl POSIX
+   write lock on the journal file (and this process's monitor on the
+   file, so the OS lock never overlaps within one process — the JVM
+   adapter's arrangement)."
+  [{:keys [file]} f]
+  (locking file
+    (let [err (eveglj:host.JournalLock file)]
+      (when err
+        (throw (ex-info "eve.journal-file: cannot lock journal" {:error (str err)}))))
+    (try (f)
+         (finally (eveglj:host.JournalUnlock file)))))
+
+(defn journal-record-of
+  "The commit record for an explicit EPOCH and TABLE (byte array)."
+  [epoch table]
+  (let [tlen (alength table)
+        len  (+ 4 4 tlen 4)
+        out  (byte-array (+ 8 len))]
+    (put-i32! out 0 journal-magic)
+    (put-i32! out 4 len)
+    (put-i32! out 8 epoch)
+    (put-i32! out 12 tlen)
+    (eveglj:host.ArrayCopy table 0 out 16 tlen)
+    (put-i32! out (+ 16 tlen) (crc32 out 8 (+ 4 4 tlen)))
+    out))
+
+(defn journal-record
+  "The commit record for ROOT-R's CURRENT epoch and atom table."
+  [root-r]
+  (journal-record-of (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                     (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)))
+
+(defn- read-all
+  "The journal file's whole content as a byte array (positioned
+   reads; the file's write position is untouched)."
+  [{:keys [file]}]
+  (let [[info err] (.Stat file)]
+    (when err
+      (throw (ex-info "eve.journal-file: cannot stat journal" {:error (str err)})))
+    (let [size (.Size info)
+          buf  (byte-array size)]
+      (loop [off 0]
+        (if (< off size)
+          (let [[n rerr] (.ReadAt file (eveglj:host.ByteSlice buf) off)]
+            (when (and rerr (zero? n))
+              (throw (ex-info "eve.journal-file: cannot read journal" {:error (str rerr)})))
+            (recur (+ off n)))
+          buf)))))
+
+(defn journal-scan
+  "Scan the journal's records in order. Returns {:newest {:epoch :table}
+   :oldest epoch :torn? bool} — a record is accepted iff its framing
+   survives (magic + length in range) and its CRC matches; a record whose
+   framing survives but whose CRC fails is SKIPPED (its length still
+   advances the scan); a framing failure ends the scan. The table is a
+   byte array, ready for eve.mem/-write-bytes!."
+  [h]
+  (let [data  (read-all h)
+        total (alength data)]
+    (loop [pos 0 newest nil oldest nil torn? false]
+      (let [remaining (- total pos)]
+        (cond
+          (< remaining 8)
+          {:newest newest :oldest oldest
+           :torn? (or torn? (pos? remaining))}
+
+          :else
+          (let [magic (get-i32 data pos)
+                len   (get-i32 data (+ pos 4))]
+            (if (or (not= magic journal-magic)
+                    (not (pos? len))
+                    (> len (- remaining 8)))
+              {:newest newest :oldest oldest :torn? true}
+              (let [epoch (get-i32 data (+ pos 8))
+                    tlen  (get-i32 data (+ pos 12))]
+                (if (> (+ 4 4 tlen 4) len)
+                  {:newest newest :oldest oldest :torn? true}
+                  (let [stored (get-i32 data (+ pos 16 tlen))
+                        calc   (crc32 data (+ pos 8) (+ 4 4 tlen))]
+                    (if (= stored calc)
+                      (let [table (byte-array tlen)]
+                        (eveglj:host.ArrayCopy data (+ pos 16) table 0 tlen)
+                        (recur (+ pos 8 len)
+                               {:epoch epoch :table table}
+                               (or oldest epoch)
+                               torn?))
+                      (recur (+ pos 8 len) newest oldest true))))))))))))
+
+(defn journal-append!
+  "Write BYTES (byte array) at the end of the journal file. Does not
+   force — the caller forces at the commit point."
+  [{:keys [file]} b]
+  (let [[info err] (.Stat file)]
+    (when err
+      (throw (ex-info "eve.journal-file: cannot stat journal" {:error (str err)})))
+    (let [[n werr] (.WriteAt file (eveglj:host.ByteSlice b) (.Size info))]
+      (when (or werr (not= n (alength b)))
+        (throw (ex-info "eve.journal-file: cannot append to journal"
+                        {:error (str werr)}))))))
+
+(defn journal-write-at!
+  "Write BYTES (byte array) at absolute offset POS."
+  [{:keys [file]} b pos]
+  (let [[n werr] (.WriteAt file (eveglj:host.ByteSlice b) (long pos))]
+    (when (or werr (not= n (alength b)))
+      (throw (ex-info "eve.journal-file: cannot write journal"
+                      {:error (str werr)})))))
+
+(defn journal-truncate!
+  "Truncate the journal file to zero length (no force; the caller
+   forces as part of its checkpoint/recovery sequence)."
+  [{:keys [file]}]
+  (let [err (.Truncate file 0)]
+    (when err
+      (throw (ex-info "eve.journal-file: cannot truncate journal" {:error (str err)})))))
+
+(defn journal-force!
+  "Force the journal file to storage. File.Sync forces data and
+   metadata alike — FULL? is ignored (the stronger force is taken on
+   both paths, as on the basilisp seat)."
+  [{:keys [file]} full?]
+  (let [err (.Sync file)]
+    (when err
+      (throw (ex-info "eve.journal-file: cannot force journal" {:error (str err)})))))
+
+(defn journal-close!
+  "Close the journal file; never throws."
+  [{:keys [file]}]
+  (try (.Close file) (catch go/any _ nil)))

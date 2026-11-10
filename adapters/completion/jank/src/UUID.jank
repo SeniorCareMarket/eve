@@ -1,0 +1,16 @@
+(ns UUID
+  "java.util.UUID's one static vanilla code names — randomUUID
+   (datascript.util's squuid) — as a real namespace with a real var.
+   A UUID here is its two longs, [msb lsb], as in eve.host-completion's
+   uuid-new.
+
+   A real module, not eve.host-completion's runtime synthesis, so jank's
+   AOT compiler can analyze and collect it; see Math.jank's docstring.
+   eve.host-completion requires this namespace; its when-not intern block
+   remains as the fallback.")
+
+(defn- rand-long []
+  (bit-or (bit-shift-left (rand-int 2147483647) 32)
+          (bit-and (rand-int 2147483647) 0xffffffff)))
+
+(defn randomUUID [] [(rand-long) (rand-long)])

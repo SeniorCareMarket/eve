@@ -1,0 +1,158 @@
+(ns eve.host-completion-translate
+  "Build-time half of the completion's load-time work, for the AOT seat.
+   On the JIT seat, eve.host-completion's eve-load reads every .cljc form
+   with the seat's reader features and evaluates (clj-face (process-ns-form
+   form)) -- the :clj face's JVM-surface calls rewritten to seat calls, ns
+   forms made loadable. jank's AOT analyzer has no such pass: it reads the
+   raw forms, and the rewrite surface (instance? class names, static-call
+   heads in macro templates, :import clauses) is unresolvable there.
+   This tool performs the identical per-form translation ahead of time and
+   writes a translated source tree; `jank compile` then runs over that
+   tree. It changes no library source -- it is the seat's own load
+   translation, hoisted from load time to build time, and the translated
+   tree is a regenerable build artifact (see the compiled-jank BUILD.md).
+   Usage: jank run-main eve.host-completion-translate <manifest>, where the
+   manifest lists one <input>\t<output> pair per line."
+  (:require [eve.host-completion]
+            [clojure.string :as str]))
+
+(cpp/raw "
+#include <jank/runtime/obj/persistent_string.hpp>
+#include <fstream>
+#include <string>
+namespace eve_aot {
+  using namespace jank::runtime;
+  object_ref write_text_file(object_ref const path, object_ref const text) {
+    auto const p(expect_object<obj::persistent_string>(path)->data);
+    auto const t(expect_object<obj::persistent_string>(text)->data);
+    std::ofstream out{ std::string(p.data(), p.size()), std::ios::binary | std::ios::trunc };
+    if(!out) { return jank_nil; }
+    out << std::string(t.data(), t.size());
+    return make_box(true);
+  }
+}
+")
+
+(def ^:private clj-face-fn @(ns-resolve 'eve.host-completion 'clj-face))
+(def ^:private process-ns-form-fn @(ns-resolve 'eve.host-completion 'process-ns-form))
+(def ^:private feature-opts @(ns-resolve 'eve.host-completion 'clj-feature-opts))
+
+(defn- read-form
+  "The nth form (1-based) of a .cljc source text, read exactly as
+   eval-cljc-source! reads them (the seat's cpp reader with the seat's
+   feature opts), or nil at the end of the source."
+  [src n]
+  (cpp/.read_string cpp/jank.runtime.__rt_ctx src feature-opts n))
+
+(defn- translate-form [f] (clj-face-fn (process-ns-form-fn f)))
+
+
+
+(declare print-form)
+
+(defn- meta-text
+  "The metadata of v as source text (the :jank/source entry stripped), or nil.
+   A single {keyword true} entry prints in the ^:kw shorthand, as written in
+   the sources; anything else prints as a ^{...} map."
+  [v]
+  (let [m (meta v)
+        m (when m (dissoc m :jank/source))]
+    (when (seq m)
+      (let [e (first m)]
+        (if (and (= 1 (count m)) (keyword? (key e)) (true? (val e)))
+          (str "^" (key e))
+          (str "^" (print-form m)))))))
+
+(defn- print-form
+  "A form as source text, metadata included. jank's pr-str never prints
+   metadata (measured: (meta field) carries :mutable after read_string, yet
+   pr-str drops it with or without *print-meta*), and the graph's semantics
+   ride on metadata (^:mutable deftype fields above all) -- so the
+   translator prints forms itself: collections recursively, leaves via
+   pr-str, metadata prefixed per meta-text."
+  [v]
+  ;; A space always separates the metadata from its form: `^:private HEX`
+  ;; read back as `^:privateHEX ...` when they touched (v9's first output —
+  ;; the keyword token swallowed the symbol, and the def lost its name).
+  (let [m (meta-text v)
+        m (if m (str m " ") "")]
+    (cond
+      (or (seq? v) (list? v)) (str m "(" (str/join " " (map print-form v)) ")")
+      (vector? v) (str m "[" (str/join " " (map print-form v)) "]")
+      (map? v) (str m "{" (str/join ", " (map (fn [[k x]] (str (print-form k) " " (print-form x))) v)) "}")
+      (set? v) (str m "#{" (str/join " " (map print-form v)) "}")
+      :else (str m (pr-str v)))))
+
+(defn- wire-aliases!
+  "Declare the ns form's :require aliases on the fresh file namespace, so
+   read_string resolves ::alias/kw and #:alias{} forms exactly as eve-load's
+   threaded read resolves them. Alias targets are bare namespace objects
+   (create-ns) carrying the library's name; nothing is loaded."
+  [ns-form]
+  (let [wire-one (fn wire-one [prefix spec]
+                   (cond
+                     (vector? spec)
+                     (let [lib (symbol (if prefix (str prefix "." (first spec)) (str (first spec))))]
+                       (loop [xs (rest spec)]
+                         (when (seq xs)
+                           (cond
+                             (= :as (first xs))
+                             (do (alias (second xs) (create-ns lib))
+                                 (recur (nnext xs)))
+
+                             (or (vector? (first xs)) (seq? (first xs)))
+                             (do (wire-one lib (first xs))
+                                 (recur (rest xs)))
+
+                             :else (recur (rest xs))))))
+                     (seq? spec) (wire-one prefix (vec spec))
+                     :else nil))]
+    (doseq [clause (rest ns-form)]
+      (when (and (seq? clause) (#{:require :require-macros} (first clause)))
+        (doseq [spec (rest clause)]
+          (wire-one nil spec))))))
+
+(defn- translate-file
+  "The forms are read with *ns* bound to a fresh namespace object carrying
+   the file's name (create-ns): bare auto-resolved keywords (::counter) then
+   resolve to the file's namespace, exactly as under eve-load. A census of
+   the graph shows no ::alias/kw or #:alias{} forms in code (the one ::ns/
+   occurrence is inside a docstring), so no alias environment is needed.
+   Nothing is loaded or evaluated here."
+  [in out]
+  (let [src (cpp/eve_load.read_text_file in)]
+    (when (nil? src)
+      (throw (ex-info (str "unreadable input: " in) {:in in})))
+    (let [first-form (read-form src 1)]
+      (when-not (and (seq? first-form) (= 'ns (first first-form)))
+        (throw (ex-info (str "no ns form in: " in) {:in in})))
+      (binding [*ns* (create-ns (second first-form))]
+        (wire-aliases! first-form)
+        (loop [n 1 acc []]
+          (let [f (read-form src n)]
+            (if (some? f)
+              (recur (inc n) (conj acc (translate-form f)))
+              (do (cpp/eve_aot.write_text_file out (str (str/join "\n" (map print-form acc)) "\n"))
+                  (count acc)))))))))
+
+(def failures (atom []))
+
+(defn -main [& [manifest]]
+  (let [lines (str/split-lines (cpp/eve_load.read_text_file manifest))
+        pairs (keep (fn [line]
+                      (let [[in out] (str/split line #"\t")]
+                        (when (and (seq in) (seq out)) [in out])))
+                    lines)
+        total (reduce (fn [acc [in out]]
+                        (println :translating in)
+                        (try (+ acc (translate-file in out))
+                             (catch Exception e
+                               (println :FAILED in (ex-message e))
+                               (swap! failures conj in)
+                               acc)))
+                      0 pairs)]
+    (println :translated-files (count pairs) :forms total :failed (count @failures))
+    (when (seq @failures)
+      (println :failures @failures))))
+
+(defn run [manifest] (-main manifest))

@@ -39,11 +39,19 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 ### `persistent-atom-domain`
 
 ```text
-(persistent-atom-domain base-path & {:keys [capacities lustre?]})
+(persistent-atom-domain base-path & {:keys [capacities lustre? durable? journal? journal-batch
+                                             journal-window-ms coalesc-descriptors mem-budget
+                                             segment-bytes]})
 ```
 
 - `:capacities` — a map from class index to bytes: each class's initial size.
 - `:lustre? true` uses the fcntl byte-range-lock region, for file systems without cross-node atomics.
+- `:durable?` (default true) — durable commits. `false` is the non-durable comms form: no journal, no
+  forces, `sync!` is the caller's explicit barrier.
+- `:journal?` — the disk tier is journaled by default (see *Journal durability*, below); `false` keeps
+  durable commits without the journal file, carried by the pre-CAS sweep + root-range force alone.
+- `:mem-budget` — bytes: caps the domain's total region growth (see *Tiers and the memory budget*).
+- `:segment-bytes` — a power of two (default 256 MiB): the region mapping window (see *Segmentation*).
 - Which process **creates** a domain is decided by one atomic exclusive create of `<base>.root`
   (`eve.process/create-exclusive!`). It is never an existence check followed by a create, which two processes opening a
   fresh domain together would both pass (`atom.cljc:797-813`). Every other process joins.
@@ -63,9 +71,27 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 A run of the getting-started disk sample left exactly `db.root db.rmap db.slab0 … db.slab5 db.slab0.bm … db.slab5.bm
 db.slab6` [ran].
 
+### Segmentation: domains past 2 GiB
+
+On the JVM seat a region is a `FileChannel.map` mapping, and one mapping cannot pass 2^31 bytes:
+a domain that grew past ~2.1 GB was stranded — it could no longer be mapped whole. Segmentation is
+below the protocol: pointer formats never encode within-slab offsets, so the region keeps a **segment
+table** and maps the domain file as a table of segment windows instead of one mapping. Every
+operation decomposes its absolute offset (segment = offset >>> shift, the offset within the segment
+the remainder); no operation can straddle a segment boundary (the segment size is a multiple of
+4096). Growth maps only the delta — the new segments — never the whole file again, and a domain
+stranded by the old ceiling **re-opens in place**: open it on a segmented seat and it continues; no
+copy, no conversion.
+
+The window is `:segment-bytes`, an open-time parameter (a power of two, 4096..2^30; default
+256 MiB). It is presentation, not format — stored nowhere in the domain's files — so processes may
+join the same domain with different windows.
+
 ### Journal durability and the retention floor
 
-A disk domain opened with `:journal?` also carries `<base>.journal`, written through the host's
+A disk domain carries `<base>.journal` by default (the disk tier is journaled by design; the named
+opt-outs are `:journal? false` — durable commits carried by the sweep + root force alone — and
+`:durable? false`, the non-durable comms form), written through the host's
 `eve.journal-file` adapter (`adapters/journal-file/`): the shared code in `src/eve/atom.cljc` owns the sequence —
 lock, sweep, append, force — and the adapter owns only the file, its lock and its forces. Each record is one epoch
 and the atom table that epoch published, so recovery installs the newest valid record whole. The domain keeps a
@@ -74,6 +100,19 @@ and the atom table that epoch published, so recovery installs the newest valid r
 anchor's epoch — and advanced by **flush-advance**: every flush records the newest durably appended epoch, and the
 next flush moves the floor to it. Blocks a still-recoverable epoch needs are therefore never reclaimed out from
 under the journal.
+
+### Tiers and the memory budget
+
+Every atom is tiered. A disk domain's atom has an in-memory tier over its on-disk tier: the in-mem
+tier is a cache over the lower tier — resident data reads at heap speed, and with more tiers the
+in-mem tier is an LRU over the tiers beneath it. The journal belongs to the disk tier only (above);
+an in-memory atom is unjournaled.
+
+`:mem-budget` (bytes) caps a domain's total region growth. Growth past the budget is refused with a
+named error that names the budget — never the host's hard out-of-memory. The defaults are
+per-target and developer-settable, not limits compiled into the allocator: `MEM-BUDGET-DESKTOP`
+2 GB, `MEM-BUDGET-BROWSER` 1 GB, `MEM-BUDGET-WORKERD` 48 MB (the platform's ~64 MB envelope leaves
+the runtime its share). Pass your own byte count to `persistent-atom-domain` to set a domain's.
 
 ## The domain API
 

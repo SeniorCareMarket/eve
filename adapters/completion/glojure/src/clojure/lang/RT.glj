@@ -1,0 +1,12 @@
+(ns clojure.lang.RT
+  "clojure.lang.RT on glojure (part of its core completion, adapters/completion/glojure): portable code
+   calls RT's statics in static syntax — (clojure.lang.RT/assoc m k v) is how datascript.inline's
+   assoc expands — and this seat's analyzer resolves such a call to a var of this namespace, which
+   glojure itself does not provide. The vars here answer with clojure.core's own operations.")
+
+(defn assoc
+  "RT/assoc: clojure.core/assoc."
+  ([m k v]
+   (clojure.core/assoc m k v))
+  ([m k v & kvs]
+   (apply clojure.core/assoc m k v kvs)))

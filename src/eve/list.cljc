@@ -52,8 +52,8 @@
   []
   (alloc/current-sio))
 
-(defn- bytes-length [ba]
-  (alength ^bytes ba))
+(defn- bytes-length [^bytes ba]
+  (alength ba))
 
 ;;=============================================================================
 ;; Node operations (via ISlabIO)

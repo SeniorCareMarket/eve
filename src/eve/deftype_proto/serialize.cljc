@@ -201,8 +201,13 @@
   ;; i32 (its JIT types the intermediates as int), while the codec's wire
   ;; read of the same bits is unsigned (read-u32-le) — a wrapped realm makes
   ;; handle->ref refuse this process's own references. Bit assembly yields
-  ;; the unsigned value 0..2^32-1 on every host.
-  {:realm (reduce (fn [acc x] (bit-or (bit-shift-left acc 8) x)) 0 (proc/random-bytes 4))
+  ;; the unsigned value 0..2^32-1 on every 64-bit-integer host; JavaScript's
+  ;; bit ops answer a signed int32, so a top byte >= 0x80 made the realm
+  ;; negative there and every reference this process wrote was refused on
+  ;; read (nbb: reference-tag / value-buffer tests failed on half the runs) —
+  ;; `>>> 0` gives the unsigned value.
+  {:realm (let [r (reduce (fn [acc x] (bit-or (bit-shift-left acc 8) x)) 0 (proc/random-bytes 4))]
+            #?(:cljs (unsigned-bit-shift-right r 0) :default r))
    :next 1 :by-handle {} :by-ref {}})
 
 (defn- ref-table [] (or @refs (swap! refs #(or % (fresh-ref-table)))))

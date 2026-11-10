@@ -1,8 +1,9 @@
 (ns eve.region
   "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2)
-   over java.nio without VarHandle (babashka): a MappedByteBuffer whose
-   read-modify-write ops are plain, made exclusive across processes by a
-   FileChannel byte-range lock (IHostAtomics: a lock-only region).
+   over java.nio without VarHandle (babashka): a table of MappedByteBuffer
+   segment windows whose read-modify-write ops are plain, made exclusive
+   across processes by a FileChannel byte-range lock (IHostAtomics: a
+   lock-only region).
 
    make-heap-region and open-mmap-region open them; lustre-region? says
    whether a region's atomics are fcntl byte-range locks (a Lustre mount)."
@@ -80,7 +81,142 @@
                (try (.close fl) true (catch Exception _ false)))
              (finally (.close fc) (.delete f)))))))
 
-(deftype BbMmapRegion [^MappedByteBuffer mbb ^long size
+;; ------------------------------------------------------------------
+;; Segmentation — as in the varhandle adapter (design of record:
+;; docs/eve-region-segmentation/REPORT.md): a file-backed region is a
+;; table of MappedByteBuffer windows of a power-of-two size
+;; (:segment-bytes open-time parameter, default 256 MiB, stored
+;; nowhere in the files), so no slab file is walled at 2^31 bytes by
+;; FileChannel.map's single-mapping limit.  Every op decomposes its
+;; absolute offset inside the region.  ByteBuffer's absolute
+;; getInt/getLong tolerate unaligned offsets within one window; an
+;; access that straddles a window boundary composes byte by byte.
+;; ------------------------------------------------------------------
+
+(def DEFAULT-SEGMENT-BYTES
+  "The default segment window of a file-backed region: 256 MiB."
+  (bit-shift-left 1 28))
+
+(defn- segment-shift
+  "Validate a :segment-bytes value — a power of two, 4096..2^30 (a
+   window is one FileChannel.map, so a window may not exceed what one
+   mapping can hold) — and return its log2."
+  [seg-bytes]
+  (let [sb (long seg-bytes)]
+    (when-not (and (<= 4096 sb)
+                   (<= sb (bit-shift-left 1 30))
+                   (zero? (bit-and sb (dec sb))))
+      (throw (ex-info (str "eve.region: :segment-bytes must be a power of two "
+                           "between 4096 and 2^30, got " sb)
+                      {:segment-bytes sb})))
+    (loop [shift 0 v sb]
+      (if (== v 1)
+        shift
+        (recur (inc shift) (bit-shift-right v 1))))))
+
+(defn- seg-buf
+  "The segment buffer covering absolute offset off."
+  ^MappedByteBuffer [^objects segments ^long shift ^long off]
+  (aget segments (int (unsigned-bit-shift-right off shift))))
+
+(defn- seg-intra
+  "The offset of absolute offset off within its segment."
+  ^long [^long shift ^long off]
+  (bit-and off (dec (bit-shift-left 1 shift))))
+
+(defn- seg-load-i32
+  [^objects segments ^long shift ^long off]
+  (let [intra (seg-intra shift off)]
+    (if (<= (+ intra 4) (bit-shift-left 1 shift))
+      (.getInt (seg-buf segments shift off) (int intra))
+      (unchecked-int
+       (bit-or (bit-and (.get (seg-buf segments shift off) (int (seg-intra shift off))) 0xFF)
+               (bit-shift-left (bit-and (.get (seg-buf segments shift (+ off 1)) (int (seg-intra shift (+ off 1)))) 0xFF) 8)
+               (bit-shift-left (bit-and (.get (seg-buf segments shift (+ off 2)) (int (seg-intra shift (+ off 2)))) 0xFF) 16)
+               (bit-shift-left (bit-and (.get (seg-buf segments shift (+ off 3)) (int (seg-intra shift (+ off 3)))) 0xFF) 24))))))
+
+(defn- seg-store-i32!
+  [^objects segments ^long shift ^long off ^long v]
+  (let [intra (seg-intra shift off)]
+    (if (<= (+ intra 4) (bit-shift-left 1 shift))
+      (.putInt (seg-buf segments shift off) (int intra) (unchecked-int v))
+      (do (.put (seg-buf segments shift off) (int (seg-intra shift off)) (unchecked-byte v))
+          (.put (seg-buf segments shift (+ off 1)) (int (seg-intra shift (+ off 1))) (unchecked-byte (unsigned-bit-shift-right v 8)))
+          (.put (seg-buf segments shift (+ off 2)) (int (seg-intra shift (+ off 2))) (unchecked-byte (unsigned-bit-shift-right v 16)))
+          (.put (seg-buf segments shift (+ off 3)) (int (seg-intra shift (+ off 3))) (unchecked-byte (unsigned-bit-shift-right v 24)))))))
+
+(defn- seg-load-i64
+  [^objects segments ^long shift ^long off]
+  (let [intra (seg-intra shift off)]
+    (if (<= (+ intra 8) (bit-shift-left 1 shift))
+      (.getLong (seg-buf segments shift off) (int intra))
+      (let [lo (seg-load-i32 segments shift off)
+            hi (seg-load-i32 segments shift (+ off 4))]
+        (bit-or (bit-shift-left (long hi) 32)
+                (bit-and (long lo) 0xFFFFFFFF))))))
+
+(defn- seg-store-i64!
+  [^objects segments ^long shift ^long off ^long v]
+  (let [intra (seg-intra shift off)]
+    (if (<= (+ intra 8) (bit-shift-left 1 shift))
+      (.putLong (seg-buf segments shift off) (int intra) (long v))
+      (do (seg-store-i32! segments shift off (unchecked-int v))
+          (seg-store-i32! segments shift (+ off 4)
+                          (unchecked-int (unsigned-bit-shift-right v 32)))))))
+
+(defn- seg-read-bytes
+  [^objects segments ^long shift ^long off ^long len]
+  (let [dst      (byte-array (int len))
+        seg-size (bit-shift-left 1 shift)]
+    (loop [done 0]
+      (when (< done len)
+        (let [abs   (+ off done)
+              intra (seg-intra shift abs)
+              n     (int (min (- seg-size intra) (- len done)))]
+          (.get (seg-buf segments shift abs) (int intra) dst (int done) n)
+          (recur (+ done n)))))
+    dst))
+
+(defn- seg-write-bytes!
+  [^objects segments ^long shift ^long off ^bytes src]
+  (let [len      (alength src)
+        seg-size (bit-shift-left 1 shift)]
+    (loop [done 0]
+      (when (< done len)
+        (let [abs   (+ off done)
+              intra (seg-intra shift abs)
+              n     (int (min (- seg-size intra) (- len done)))]
+          (.put (seg-buf segments shift abs) (int intra) src (int done) n)
+          (recur (+ done n))))))
+  nil)
+
+(defn- map-segments
+  "Map fc's file over [0, size) in windows of 2^shift bytes, each
+   LITTLE_ENDIAN.  When old-segments (a previous region's table for
+   the same file, opened at the same shift) has a window whose length
+   is unchanged, that window's buffer is reused — a growth or refresh
+   re-map maps only the delta."
+  ^objects [^FileChannel fc size shift ^objects old-segments old-shift]
+  (let [size     (long size)
+        shift    (long shift)
+        seg-size (bit-shift-left 1 shift)
+        n        (int (max 1 (quot (+ size (dec seg-size)) seg-size)))
+        arr      (object-array n)]
+    (dotimes [k n]
+      (let [start (long (* (long k) seg-size))
+            len   (min seg-size (- size start))
+            old   (when (and old-segments
+                             (== shift old-shift)
+                             (< k (alength old-segments)))
+                    (aget old-segments k))]
+        (aset arr k
+              (if (and old (== (long (.capacity ^MappedByteBuffer old)) len))
+                old
+                (doto (.map fc FileChannel$MapMode/READ_WRITE start len)
+                  (.order ByteOrder/LITTLE_ENDIAN))))))
+    arr))
+
+(deftype BbMmapRegion [^objects segments ^long size ^int shift
                        ^FileChannel chan
                        path
                        ^Object in-process]
@@ -88,62 +224,88 @@
   (-byte-length [_] size)
 
   (-load-i32 [_ byte-off]
-    (.getInt mbb (int byte-off)))
+    ;; Inlined common path (see the varhandle adapter's -load-i32):
+    ;; method -> .getInt directly, helper only for a straddle.
+    (let [off   (long byte-off)
+          intra (bit-and off (dec (bit-shift-left 1 shift)))]
+      (if (<= (+ intra 4) (bit-shift-left 1 shift))
+        (let [^MappedByteBuffer buf (aget segments
+                                          (int (unsigned-bit-shift-right off shift)))]
+          (.getInt buf (int intra)))
+        (seg-load-i32 segments shift off))))
 
   (-store-i32! [_ byte-off val]
-    (.putInt mbb (int byte-off) (unchecked-int val))
+    (let [off   (long byte-off)
+          intra (bit-and off (dec (bit-shift-left 1 shift)))]
+      (if (<= (+ intra 4) (bit-shift-left 1 shift))
+        (let [^MappedByteBuffer buf (aget segments
+                                          (int (unsigned-bit-shift-right off shift)))]
+          (.putInt buf (int intra) (unchecked-int val)))
+        (seg-store-i32! segments shift off (long val))))
     (fence!)
     nil)
 
   (-cas-i32! [_ byte-off expected desired]
-    (let [cur (.getInt mbb (int byte-off))]
+    (let [cur (seg-load-i32 segments shift (long byte-off))]
       (when (== cur (int expected))
-        (.putInt mbb (int byte-off) (unchecked-int desired))
+        (seg-store-i32! segments shift (long byte-off) (unchecked-int desired))
         (fence!))
       cur))
 
   (-add-i32! [_ byte-off delta]
-    (let [old (.getInt mbb (int byte-off))]
-      (.putInt mbb (int byte-off) (unchecked-int (+ old (int delta))))
+    (let [old (seg-load-i32 segments shift (long byte-off))]
+      (seg-store-i32! segments shift (long byte-off) (unchecked-int (+ old (int delta))))
       (fence!)
       old))
 
   (-sub-i32! [_ byte-off delta]
-    (let [old (.getInt mbb (int byte-off))]
-      (.putInt mbb (int byte-off) (unchecked-int (- old (int delta))))
+    (let [old (seg-load-i32 segments shift (long byte-off))]
+      (seg-store-i32! segments shift (long byte-off) (unchecked-int (- old (int delta))))
       (fence!)
       old))
 
   (-exchange-i32! [_ byte-off val]
-    (let [old (.getInt mbb (int byte-off))]
-      (.putInt mbb (int byte-off) (unchecked-int val))
+    (let [old (seg-load-i32 segments shift (long byte-off))]
+      (seg-store-i32! segments shift (long byte-off) (unchecked-int val))
       (fence!)
       old))
 
   (-load-i64 [_ byte-off]
-    (.getLong mbb (int byte-off)))
+    (let [off   (long byte-off)
+          intra (bit-and off (dec (bit-shift-left 1 shift)))]
+      (if (<= (+ intra 8) (bit-shift-left 1 shift))
+        (let [^MappedByteBuffer buf (aget segments
+                                          (int (unsigned-bit-shift-right off shift)))]
+          (.getLong buf (int intra)))
+        (seg-load-i64 segments shift off))))
 
   (-store-i64! [_ byte-off val]
-    (.putLong mbb (int byte-off) (long val))
+    (let [off   (long byte-off)
+          intra (bit-and off (dec (bit-shift-left 1 shift)))]
+      (if (<= (+ intra 8) (bit-shift-left 1 shift))
+        (let [^MappedByteBuffer buf (aget segments
+                                          (int (unsigned-bit-shift-right off shift)))]
+          (.putLong buf (int intra) (long val)))
+        (seg-store-i64! segments shift off (long val))))
     (fence!)
     nil)
 
   (-cas-i64! [_ byte-off expected desired]
-    (let [cur (.getLong mbb (int byte-off))]
+    (let [cur (seg-load-i64 segments shift (long byte-off))]
       (when (== cur (long expected))
-        (.putLong mbb (int byte-off) (long desired))
+        (seg-store-i64! segments shift (long byte-off) (long desired))
         (fence!))
       cur))
 
   (-add-i64! [_ byte-off delta]
-    (let [old (.getLong mbb (int byte-off))]
-      (.putLong mbb (int byte-off) (+ old (long delta)))
+    (let [old (seg-load-i64 segments shift (long byte-off))]
+      (seg-store-i64! segments shift (long byte-off) (+ old (long delta)))
       (fence!)
       old))
 
   (-sub-i64! [_ byte-off delta]
-    (let [old (.getLong mbb (int byte-off))]
-      (.putLong mbb (int byte-off) (- old (long delta)))
+    (let [old (seg-load-i64 segments shift (long byte-off))]
+      (seg-store-i64! segments shift (long byte-off) (- old (long delta)))
       (fence!)
       old))
 
@@ -151,7 +313,7 @@
   (-wait-i32! [_ byte-off expected timeout-ms]
     (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
       (loop []
-        (let [cur (.getInt mbb (int byte-off))]
+        (let [cur (seg-load-i32 segments shift (long byte-off))]
           (cond
             (not= cur (int expected))                  :not-equal
             (>= (System/currentTimeMillis) deadline)   :timed-out
@@ -162,14 +324,29 @@
 
   (-supports-watch? [_] false)
 
-  ;; Absolute bulk get/put: no position state, so no lock.
+  ;; Absolute bulk get/put across segments: no position state, so no lock.
   (-read-bytes [_ byte-off len]
-    (let [dst (byte-array len)]
-      (.get mbb (int byte-off) dst)
-      dst))
+    ;; Inlined common path (see the varhandle adapter's -read-bytes).
+    (let [off   (long byte-off)
+          len   (long len)
+          intra (bit-and off (dec (bit-shift-left 1 shift)))]
+      (if (<= (+ intra len) (bit-shift-left 1 shift))
+        (let [^MappedByteBuffer buf (aget segments
+                                          (int (unsigned-bit-shift-right off shift)))
+              dst (byte-array (int len))]
+          (.get buf (int intra) dst 0 (int len))
+          dst)
+        (seg-read-bytes segments shift off len))))
 
   (-write-bytes! [_ byte-off src]
-    (.put mbb (int byte-off) ^bytes src)
+    (let [off   (long byte-off)
+          len   (alength ^bytes src)
+          intra (bit-and off (dec (bit-shift-left 1 shift)))]
+      (if (<= (+ intra len) (bit-shift-left 1 shift))
+        (let [^MappedByteBuffer buf (aget segments
+                                          (int (unsigned-bit-shift-right off shift)))]
+          (.put buf (int intra) ^bytes src 0 (int len)))
+        (seg-write-bytes! segments shift off src)))
     (fence!)
     nil)
 
@@ -195,12 +372,20 @@
 
 (defn open-mmap-region
   "Open (or create) a file-backed shared memory region at path-str,
-   grown to size-bytes when smaller, never truncated. opts:
-     :lockable? — keep the file's channel open for -with-file-lock
-                  (the .root region of a domain; see BbMmapRegion)."
+   grown to size-bytes when smaller, never truncated. The file is
+   mapped in segment windows (see the segmentation note above). opts:
+     :lockable?     — keep the file's channel open for -with-file-lock
+                      (the .root region of a domain; see BbMmapRegion).
+     :segment-bytes — the mapping window: a power of two, 4096..2^30,
+                      default 256 MiB.  Presentation, not format: it
+                      is stored nowhere in the file.
+     :reuse-from    — a BbMmapRegion previously opened on this file at
+                      the same segment size: its unchanged windows are
+                      reused (growth/refresh map only the delta)."
   ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
   ([path-str size-bytes opts]
    (let [size  (long size-bytes)
+         shift (segment-shift (or (:segment-bytes opts) DEFAULT-SEGMENT-BYTES))
          _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
                  (try (when (< (.length raf) size) (.setLength raf size))
                       (finally (.close raf))))
@@ -210,12 +395,17 @@
                            (into-array OpenOption
                                        [StandardOpenOption/READ
                                         StandardOpenOption/WRITE]))
-         ^MappedByteBuffer mbb (.map fc FileChannel$MapMode/READ_WRITE 0 size)]
-     (.order mbb ByteOrder/LITTLE_ENDIAN)
+         reuse (:reuse-from opts)
+         old-segments (when (instance? BbMmapRegion reuse)
+                        (.segments ^BbMmapRegion reuse))
+         old-shift    (if (instance? BbMmapRegion reuse)
+                        (long (.shift ^BbMmapRegion reuse))
+                        -1)
+         segments (map-segments fc size shift old-segments old-shift)]
      (if (:lockable? opts)
-       (BbMmapRegion. mbb size fc path (Object.))
+       (BbMmapRegion. segments size (int shift) fc path (Object.))
        (do (.close fc)
-           (BbMmapRegion. mbb size nil nil nil))))))
+           (BbMmapRegion. segments size (int shift) nil nil nil))))))
 
 ;; BbHeapRegion — byte[] under ByteBuffer.wrap, one process, its RMW ops
 ;; serialised by the region's own lock (bb threads are futures).

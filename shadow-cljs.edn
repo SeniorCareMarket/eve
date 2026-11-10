@@ -5,17 +5,14 @@
   :eve-test
   {:target :node-script
    :main eve.runner.eve-test-main/main
-   :output-to "target/eve-test/all.js"
-   ;; undeclared-var: expected in test runner (namespace aliases used as anti-DCE values)
-   :compiler-options {:warnings {:undeclared-var false}}}
+   :output-to "target/eve-test/all.js"}
 
   ;; merkle-phase5 acceptance suite only (small compile graph; see
   ;; test/eve/runner/merkle_phase5_main.cljs)
   :merkle-phase5
   {:target :node-script
    :main eve.runner.merkle-phase5-main/main
-   :output-to "target/merkle-phase5/main.js"
-   :compiler-options {:warnings {:undeclared-var false}}}
+   :output-to "target/merkle-phase5/main.js"}
 
   ;; The thread feature's conformance in a browser (bb test:browser: built through deps.edn's :browser-test
   ;; alias, which puts the browser's thread adapter in place of Node's). :simple with no output wrapper, so the
@@ -67,15 +64,13 @@
   :durability-bench
   {:target :node-script
    :main eve.durability-bench/main
-   :output-to "target/durability-bench/main.js"
-   :compiler-options {:warnings {:undeclared-var false}}}
+   :output-to "target/durability-bench/main.js"}
 
   ;; Durability spike phase-3 workload writer (Node form)
   :durability-workload
   {:target :node-script
    :main eve.durability-workload-node/main
-   :output-to "target/durability-workload/main.js"
-   :compiler-options {:warnings {:undeclared-var false}}}
+   :output-to "target/durability-workload/main.js"}
 
   ;; Standalone mmap-atom worker for cross-process e2e tests
   :mmap-worker

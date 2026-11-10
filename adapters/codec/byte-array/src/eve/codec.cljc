@@ -22,7 +22,7 @@
 (defn encode-sab-pointer
   "Encode a slab pointer: [0xEE 0xDB tag off0 off1 off2 off3], a fresh byte
    array."
-  ^bytes [tag offset]
+   [tag offset]
   (let [b (byte-array 7)
         off (long offset)]
     (aset b 0 (unchecked-byte 0xEE))
@@ -87,22 +87,22 @@
 
 ;; --- EVE binary format — manual LE byte helpers (no ByteBuffer alloc) ---
 
-(defn- read-u8 ^long [^bytes b ^long i]
+(defn- read-u8  [^bytes b ^long i]
   (bit-and (aget b i) 0xFF))
 
-(defn- read-u32-le ^long [^bytes b ^long i]
+(defn- read-u32-le  ^long [^bytes b ^long i]
   (bit-or (bit-and (long (aget b i)) 0xFF)
           (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
           (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
           (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)))
 
-(defn- read-i32-le ^long [^bytes b ^long i]
+(defn- read-i32-le  ^long [^bytes b ^long i]
   (let [u (read-u32-le b i)]
     (if (>= u 0x80000000)
       (- u 0x100000000)
       u)))
 
-(defn- read-i64-le ^long [^bytes b ^long i]
+(defn- read-i64-le  [^bytes b ^long i]
   (bit-or (bit-and (long (aget b i)) 0xFF)
           (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
           (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
@@ -112,7 +112,7 @@
           (bit-shift-left (bit-and (long (aget b (+ i 6))) 0xFF) 48)
           (bit-shift-left (long (aget b (+ i 7))) 56)))
 
-(defn- read-f64-le ^double [^bytes b ^long i]
+(defn- read-f64-le  [^bytes b ^long i]
   (enc/long-bits->double (read-i64-le b i)))
 
 ;; --- LE write helpers (eliminates ByteBuffer alloc for fixed-size types) ---
@@ -332,7 +332,7 @@
 (defn- bytes-header-tag
   "Create a 3-byte prefix [0xEE 0xDB tag]. Only used for variable-size types
    that need a fresh array. Fixed-size types use cached constants or put-* helpers."
-  ^bytes [tag]
+   [tag]
   (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 (unchecked-byte tag))))
 
 (declare value->eve-bytes)
@@ -347,12 +347,12 @@
 
 (defn- tagged
   "A fresh byte array of n bytes led by [0xEE 0xDB tag]."
-  ^bytes [tag n]
+   [tag n]
   (doto (byte-array n) (aset 0 (unchecked-byte MAGIC-0)) (aset 1 (unchecked-byte MAGIC-1)) (aset 2 (unchecked-byte tag))))
 
 (defn- bigint->eve-bytes
   "BIGINT: [0xEE][0xDB][0x16][len:u32LE][two's complement, big-endian, minimal]"
-  ^bytes [n]
+   [n]
   (let [bs (enc/integer->twos n)
         b (tagged TAG-BIGINT (+ 7 (count bs)))]
     (put-twos! b 3 bs)
@@ -360,7 +360,7 @@
 
 (defn- ratio->eve-bytes
   "RATIO: [0xEE][0xDB][0x17][len:u32LE][numerator][len:u32LE][denominator]"
-  ^bytes [r]
+   [r]
   (let [[n d] (enc/ratio-parts r)
         nb (enc/integer->twos n)
         db (enc/integer->twos d)
@@ -371,7 +371,7 @@
 (defn- bigdec->eve-bytes
   "BIGDEC: [0xEE][0xDB][0x18][scale:i32LE][len:u32LE][unscaled], canonical
    (enc/bigdec-parts: trailing zeros stripped down to scale 0)"
-  ^bytes [x]
+   [x]
   (let [[u sc] (enc/bigdec-parts x)
         ub (enc/integer->twos u)
         b (tagged TAG-BIGDEC (+ 11 (count ub)))]
@@ -382,7 +382,7 @@
 (defn- ref->eve-bytes
   "REF: [0xEE][0xDB][0x15][realm:u32LE][handle:u32LE] — refused while the
    running swap!'s domain or the write in progress is a shared one"
-  ^bytes [v]
+   [v]
   (when (ser/shared-domain? d/*domain-sio*) (ser/refuse-reference! v))
   (let [h (ser/ref->handle! v)
         b (tagged TAG-REF 11)]
@@ -402,7 +402,7 @@
   "The symbol tags 0x0C/0x0D carry a one-byte length: a name or namespace
    past 255 UTF-8 bytes has no encoding (FORMAT-DECISIONS.md §4). Refuse it
    rather than write len mod 256 (seam map L-40)."
-  ^long [v n]
+   [v n]
   (when (> (long n) 255)
     (throw (ex-info "eve: symbol segment longer than 255 bytes has no encoding"
                     {:symbol v :bytes n})))
@@ -412,8 +412,8 @@
   "Write each encoded element of es into b from pos, led by its length
    ([len:i32LE][bytes]); the position after the last."
   [^bytes b pos es]
-  (reduce (fn [pos ^bytes eb]
-            (let [n (alength eb)]
+  (reduce (fn [pos eb]
+            (let [n (alength ^bytes eb)]
               (put-i32-le! b pos n)
               (enc/arraycopy eb 0 b (+ pos 4) n)
               (+ pos 4 n)))
@@ -424,11 +424,11 @@
    Format: [0xEE][0xDB][0xEE][count:i32LE]([e-len:i32LE][e-bytes])*
    Elements in ascending order of their bytes (d/compare-bytes) — the
    canonical order every host writes (FORMAT-DECISIONS.md §2)."
-  ^bytes [s]
+   [s]
   (let [items   (seq s)
         cnt     (count s)
         encoded (sort d/compare-bytes (mapv value->eve-bytes items))
-        body    (reduce + (map #(+ 4 (alength ^bytes %)) encoded))
+        body    (reduce + (map (fn [^bytes eb] (+ 4 (alength eb))) encoded))
         b       (byte-array (+ 7 body))]
     (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-SET)
     (put-i32-le! b 3 cnt)
@@ -438,11 +438,11 @@
 (defn- flat-vec->eve-bytes
   "Encode a Clojure sequential as a FLAT_VEC byte[].
    Format: [0xEE][0xDB][0xEF][count:i32LE]([e-len:i32LE][e-bytes])*"
-  ^bytes [coll]
+   [coll]
   (let [items   (seq coll)
         count   (count coll)
         encoded (mapv value->eve-bytes items)
-        body    (reduce + (map #(+ 4 (alength ^bytes %)) encoded))
+        body    (reduce + (map (fn [^bytes eb] (+ 4 (alength eb))) encoded))
         b       (byte-array (+ 7 body))]
     (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-VEC)
     (put-i32-le! b 3 count)
@@ -454,11 +454,11 @@
    Format: [0xEE][0xDB][0xED][count:i32LE]([k-len:i32LE][k-bytes][v-len:i32LE][v-bytes])*
    Entries in ascending order of their key bytes (d/compare-bytes) — the
    canonical order every host writes (FORMAT-DECISIONS.md §2)."
-  ^bytes [m]
+   [m]
   (let [count   (count m)
         encoded (sort-by first d/compare-bytes
                          (mapv (fn [[k v]] [(value->eve-bytes k) (value->eve-bytes v)]) m))
-        body    (reduce (fn [acc [kb vb]] (+ acc 4 (alength ^bytes kb) 4 (alength ^bytes vb)))
+        body    (reduce (fn [acc [^bytes kb ^bytes vb]] (+ acc 4 (alength kb) 4 (alength vb)))
                         0 encoded)
         b       (byte-array (+ 7 body))]
     (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-MAP)
@@ -479,7 +479,7 @@
 
    Fixed-size types use manual LE byte writes (no ByteBuffer allocation).
    nil, booleans, and small integers [-128,127] return cached arrays (zero alloc)."
-  ^bytes [v]
+   [v]
   (cond
     (nil? v)
     BYTES-NIL
@@ -533,7 +533,7 @@
       b)
 
     (string? v)
-    (let [^bytes utf8 (enc/utf8-bytes v)
+    (let [utf8 (enc/utf8-bytes v)
           slen (alength utf8)]
       (if (<= slen 255)
         ;; STRING_SHORT: [0xEE][0xDB][0x05][len:u8][utf8]
@@ -553,7 +553,7 @@
               nm-str  (name v)
               result
               (if (nil? ns-str)
-                (let [^bytes utf8 (enc/utf8-bytes nm-str)
+                (let [utf8 (enc/utf8-bytes nm-str)
                       slen (alength utf8)]
                   (if (<= slen 255)
                     (let [b (byte-array (+ 4 slen))]
@@ -564,8 +564,8 @@
                       (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-KEYWORD-LONG)
                       (put-i32-le! b 3 (long slen))
                       (enc/arraycopy utf8 0 b 7 slen) b)))
-                (let [^bytes ns-utf8 (enc/utf8-bytes ns-str)
-                      ^bytes nm-utf8 (enc/utf8-bytes nm-str)
+                (let [ns-utf8 (enc/utf8-bytes ns-str)
+                      nm-utf8 (enc/utf8-bytes nm-str)
                       ns-len (alength ns-utf8)
                       nm-len (alength nm-utf8)]
                   (if (and (<= ns-len 255) (<= nm-len 255))
@@ -588,15 +588,15 @@
           nm-str (name v)]
       (if (nil? ns-str)
         ;; Simple symbol
-        (let [^bytes utf8 (enc/utf8-bytes nm-str)
+        (let [utf8 (enc/utf8-bytes nm-str)
               slen (check-symbol-len! v (alength utf8))
               b    (byte-array (+ 4 slen))]
           (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-SYMBOL-SHORT)
           (aset b 3 (unchecked-byte slen))
           (enc/arraycopy utf8 0 b 4 slen) b)
         ;; Namespaced symbol
-        (let [^bytes ns-utf8 (enc/utf8-bytes ns-str)
-              ^bytes nm-utf8 (enc/utf8-bytes nm-str)
+        (let [ns-utf8 (enc/utf8-bytes ns-str)
+              nm-utf8 (enc/utf8-bytes nm-str)
               ns-len (check-symbol-len! v (alength ns-utf8))
               nm-len (check-symbol-len! v (alength nm-utf8))
               b (byte-array (+ 5 ns-len nm-len))]
@@ -673,7 +673,7 @@
    Collection writers must be registered via register-collection-writer!
    before calling this function with collection values.
    Takes an explicit sio — no ambient context."
-  (^bytes [sio v]
+  ([sio v]
   (let [writers @ser/coll-writers]
     (cond
       (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
@@ -751,13 +751,13 @@
 (defn encode-value
   "v's EVE bytes as a value: a scalar inline, a collection a slab pointer (a
    host collection written into sio)."
-  ^bytes [sio v]
+   [sio v]
   (value+sio->eve-bytes sio v))
 
 (defn encode-val
   "encode-value, for the value of a key/value pair (each call's bytes are its
    own here)."
-  ^bytes [sio v]
+   [sio v]
   (value+sio->eve-bytes sio v))
 
 (defn encode-val-out-of-line
@@ -765,9 +765,9 @@
    its own: [0xEE 0xDB 0x19][block:i32LE][len:u32LE] (FORMAT-DECISIONS.md §10).
    Not yet what encode-val writes: that switch lands with the retire walk's
    data-value arm, which frees a superseded block (EM2)."
-  ^bytes [sio v]
-  (let [^bytes bs (value+sio->eve-bytes sio v)
-        n (alength bs)]
+   [sio v]
+  (let [bs (value+sio->eve-bytes sio v)
+        n (alength ^bytes bs)]
     (if (<= n ser/VALUE_INLINE_MAX)
       bs
       (let [b (tagged (unchecked-byte ser/FAST_TAG_VALUE_BLOCK) 11)]
@@ -778,7 +778,7 @@
 (defn encode-key
   "k's EVE bytes as a key: a pure function of k's value (a collection flat, in
    canonical order — what the HAMT hashes and compares)."
-  ^bytes [k]
+   [k]
   (value->eve-bytes k))
 
 (defn decode

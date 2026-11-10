@@ -1,0 +1,189 @@
+--- a/pkg/runtime/codegen.go
++++ b/pkg/runtime/codegen.go
+@@ -10,6 +10,7 @@
+ 	"go/token"
+ 	"io"
+ 	"math"
++	"math/big"
+ 	"net/http"
+ 	"os"
+ 	"path/filepath"
+@@ -876,6 +877,12 @@
+ 		return g.generateBigDecimalValue(v)
+ 	case *lang.BigInt:
+ 		return generateBigIntValue(v)
++	case *big.Int:
++		// a Go big integer held as a value (eve's crypto constants on this
++		// seat: eve.digest's curve arithmetic keeps *big.Int, not lang.BigInt)
++		bigAlias := g.addImportWithAlias("math/big")
++		return fmt.Sprintf(`func() *%s.Int { z, ok := new(%s.Int).SetString(%q, 10); if !ok { panic("bad big.Int literal") }; return z }()`,
++			bigAlias, bigAlias, v.String())
+ 	case *lang.Ratio:
+ 		return generateRatioValue(v)
+ 	case bool:
+@@ -908,6 +915,33 @@
+ 			return scalar
+ 		}
+ 
++		// a persistent queue (eve's retirement queues start as
++		// clojure.lang.PersistentQueue/EMPTY): the empty queue with each
++		// element conj'd. (Without a case the value fell to the panic below,
++		// whose %v printing of a queue recursed until the stack overflowed.)
++		if q, ok := v.(*lang.PersistentQueue); ok {
++			expr := "lang.EmptyPersistentQueue"
++			for seq := lang.Seq(q); seq != nil; seq = seq.Next() {
++				expr = fmt.Sprintf("%s.Cons(%s).(*lang.PersistentQueue)", expr, g.generateValue(seq.First()))
++			}
++			return expr
++		}
++		if expr, ok := primitiveSliceValue(rv); ok {
++			return expr
++		}
++		// a []any (glojure's object-array: eve's small-value caches hold
++		// byte arrays in one) as a literal of its elements' own values
++		if rv.IsValid() && rv.Kind() == reflect.Slice && rv.Type() == reflect.TypeOf([]any(nil)) {
++			if rv.IsNil() {
++				return "[]any(nil)"
++			}
++			elems := make([]string, rv.Len())
++			for i := range elems {
++				elems[i] = g.generateValue(rv.Index(i).Interface())
++			}
++			return fmt.Sprintf("[]any{%s}", strings.Join(elems, ", "))
++		}
++
+ 		if rv.IsValid() && rv.Kind() == reflect.Func {
+ 			if fn := goruntime.FuncForPC(rv.Pointer()); fn != nil {
+ 				const langPrefix = "github.com/glojurelang/glojure/pkg/lang."
+@@ -934,6 +968,9 @@
+ 						return g.addImportWithAlias(pkgPath) + "." + name
+ 					}
+ 				}
++				if expr, ok := g.coreVarValue(rv); ok {
++					return expr
++				}
+ 				panic(fmt.Sprintf("unsupported function value %T (%s)", v, fn.Name()))
+ 			}
+ 		}
+@@ -941,6 +978,83 @@
+ 	}
+ }
+ 
++// primitiveSliceValue emits a slice of a predeclared numeric or bool element
++// type ([]int8 — glojure's byte-array —, []byte, []int32, []float64, ...) as
++// a Go composite literal of its current elements: a namespace's constant
++// bytes (eve's codec headers, const-bytes) are such values. (eve's glj-eve
++// build: without it eve.deftype-proto.alloc's chain panicked "unsupported
++// value type []int8" under *compile-files*.)
++func primitiveSliceValue(rv reflect.Value) (string, bool) {
++	if !rv.IsValid() || rv.Kind() != reflect.Slice || rv.Type().Name() != "" {
++		return "", false
++	}
++	elem := rv.Type().Elem()
++	if elem.PkgPath() != "" || elem.Name() == "" {
++		return "", false
++	}
++	switch elem.Kind() {
++	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
++		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
++		reflect.Float32, reflect.Float64:
++	default:
++		return "", false
++	}
++	if rv.IsNil() {
++		return fmt.Sprintf("[]%s(nil)", elem.Name()), true
++	}
++	parts := make([]string, rv.Len())
++	for i := range parts {
++		x := rv.Index(i)
++		switch elem.Kind() {
++		case reflect.Float32, reflect.Float64:
++			f := x.Float()
++			if math.IsNaN(f) || math.IsInf(f, 0) {
++				return "", false
++			}
++			parts[i] = fmt.Sprint(f)
++		default:
++			parts[i] = fmt.Sprint(x.Interface())
++		}
++	}
++	return fmt.Sprintf("[]%s{%s}", elem.Name(), strings.Join(parts, ", ")), true
++}
++
++// coreVarValue names an opaque Go function value that is the root of a
++// clojure.core var (identity, str, ...) as that var's value at load time. A
++// namespace's state can hold such a value (an atom defaulting to identity, a
++// registry of core fns); the generator snapshots values, and a native Go
++// closure has no source to emit — but the var it came from does. (eve's
++// glj-eve build: without it every eve namespace whose state holds a core fn
++// panicked "unsupported function value" under *compile-files*.)
++func (g *Generator) coreVarValue(rv reflect.Value) (string, bool) {
++	core := lang.FindNamespace(lang.NewSymbol("clojure.core"))
++	if core == nil {
++		return "", false
++	}
++	var names []string
++	for seq := lang.Seq(core.Mappings()); seq != nil; seq = seq.Next() {
++		entry := seq.First()
++		sym, ok := lang.First(entry).(*lang.Symbol)
++		if !ok {
++			continue
++		}
++		second, _ := lang.Nth(entry, 1)
++		vr, ok := second.(*lang.Var)
++		if !ok || vr.Namespace() != core || !vr.IsBound() {
++			continue
++		}
++		root := reflect.ValueOf(vr.Get())
++		if root.IsValid() && root.Kind() == reflect.Func && root.Type() == rv.Type() && root.Pointer() == rv.Pointer() {
++			names = append(names, sym.Name())
++		}
++	}
++	if len(names) == 0 {
++		return "", false
++	}
++	sort.Strings(names)
++	return fmt.Sprintf("%s.Get()", g.allocVarVar("clojure.core", names[0])), true
++}
++
+ // generateNamedScalarValue emits constants whose Go type has a name, such as
+ // fs.FileMode or uuid.UUID. Host symbols resolve to their exact Go values
+ // during analysis, so AOT generation must preserve both the value and its
+@@ -2688,22 +2802,24 @@
+ 		g.writef("} // end letfn\n")
+ 	}()
+ 
+-	// Emit bindings directly to g.w
+-	for _, binding := range letFnNode.Bindings {
+-		bindingNode := binding.Sub.(*ast.BindingNode)
+-		name := bindingNode.Name
+-		fn := bindingNode.Init
+-
+-		// Allocate a Go variable for the Clojure name.
++	// Declare every binding before generating any fn: a letfn's fns may
++	// call each other in any order (eve.deftype-proto.alloc's grow-jvm! calls
++	// remap-jvm!, bound after it), so a name must be in scope before the
++	// first body is generated, not only before its own. (eve's glj-eve build:
++	// one name per pass panicked "variable remap-jvm! not found in any scope".)
++	varNames := make([]string, len(letFnNode.Bindings))
++	for i, binding := range letFnNode.Bindings {
++		name := binding.Sub.(*ast.BindingNode).Name
+ 		// Use any so that FnFuncN assignments (from fixed-arity functions)
+ 		// are accepted without type mismatch; ApplyN's type switch handles dispatch.
+ 		g.writef("// letfn binding \"%s\"\n", name)
+-		varName := g.allocateLocal(name.Name())
+-		// declare the variable now to allow for recursion
+-		g.writef("var %s any\n", varName)
+-		fnVar := g.generateASTNode(fn)
+-		g.writeAssign(varName, fnVar)
+-		g.writeAssign("_", varName) // Prevent unused variable warning
++		varNames[i] = g.allocateLocal(name.Name())
++		g.writef("var %s any\n", varNames[i])
++	}
++	for i, binding := range letFnNode.Bindings {
++		fnVar := g.generateASTNode(binding.Sub.(*ast.BindingNode).Init)
++		g.writeAssign(varNames[i], fnVar)
++		g.writeAssign("_", varNames[i]) // Prevent unused variable warning
+ 	}
+ 
+ 	// Return the body expression (r-value)
