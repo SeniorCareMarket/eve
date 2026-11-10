@@ -31,7 +31,9 @@
       :else                                 ta)))
 
 (defn- arr-count [x]
-  (if (number? x) ##Inf (e/count x)))
+  ;; a scalar broadcasts: "unbounded". Every caller takes (int (min ...)), and (int ##Inf) is Integer/MAX_VALUE, so
+  ;; :clje (whose reader has no ##Inf) spells that saturated value directly.
+  (if (number? x) #?(:clje 2147483647 :default ##Inf) (e/count x)))
 
 (defn- arr-get [x i]
   (if (number? x) x (e/nth x i)))
