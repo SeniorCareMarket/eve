@@ -1,0 +1,4 @@
+;; extend-clj — the small protocol-extension overlay the DataScript
+;; port builds on. A standalone library: Clojure only, no Eve dep.
+{:paths ["."]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}}

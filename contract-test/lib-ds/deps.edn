@@ -1,0 +1,13 @@
+;; DataScript on Eve — the DataScript port as a library for Eve.
+;;
+;; This directory IS the library: datascript/* and data_readers.cljc at
+;; its root. Consume it the way any tools.deps library is consumed —
+;; in this repo its sibling libraries and Eve itself are :local/root
+;; deps; from outside, the same deps.edn serves a git dep on the Eve
+;; repository with :deps/root "contract-test/lib-ds" (the nested
+;; :local/root deps then resolve inside that checkout).
+{:paths ["."]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        eve/eve {:local/root "../.."}
+        me.tonsky/persistent-sorted-set {:local/root "../lib"}
+        extend-clj/extend-clj {:local/root "../lib-ds-deps"}}}

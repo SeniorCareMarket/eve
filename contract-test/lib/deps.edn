@@ -1,0 +1,5 @@
+;; me.tonsky.persistent-sorted-set, the Eve port — a library for Eve.
+;; Its B-tree runs on Eve's own types, so it depends on Eve itself.
+{:paths ["."]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        eve/eve {:local/root "../.."}}}
