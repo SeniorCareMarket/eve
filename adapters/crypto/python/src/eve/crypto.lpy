@@ -6,7 +6,8 @@
    eve.net.portable-crypto's; so is XXH3 (CPython has none); random bytes are the process feature's. Bytes are vectors
    of 0..255 in and out; eve/test/eve/net/crypto_test.cljc holds this adapter to the portable code."
   (:import ctypes ctypes.util hashlib hmac)
-  (:require [eve.net.bigops :as bo]
+  (:require [eve.host-completion] ; interns +' -' *' on this seat (basilisp.core has none)
+            [eve.net.bigops :as bo]
             [eve.net.edwards :as edw]
             [eve.net.gcm :as gcm]
             [eve.net.portable-crypto :as p]
@@ -135,12 +136,21 @@
 
 ;; ── the aegis clear-evaluation rows: SHA-384 (hashlib), the big-integer and edwards25519 rows
 ;; over Python's int (pow for the exponentiation and the inverse) through eve.net.bigops / eve.net.edwards
+;; The big-integer rows are promoting arithmetic by contract (+' -' *': the operator's 2026-11-07
+;; arithmetic decision, doc/arithmetic-overflow.md — checked + - * throw past i64 on every host, the
+;; primed ops promote). A 32-byte value is ~2^256, so this ops map and the :from-be fold name the
+;; primed ops; with the checked + and * the fold threw ArithmeticException at load (edwards' make reads
+;; (from-be P-BE)) — F-LPY-CRYPTO-FROM-BE-OVERFLOW; the same change as lane-m/lpy-standing d847c0760e.
+;; The names are written basilisp.core-qualified: the completion interns them into basilisp.core when it
+;; loads, and a namespace refers basilisp.core's vars when its ns form starts — before its :require
+;; runs — so a bare +' resolves only when something loaded the completion earlier (measured: required
+;; first, bare +' is 'unable to resolve symbol'). The :require of eve.host-completion makes the vars exist.
 (def ^:private OPS
   (bo/complete
    {:int (fn [n] n)
-    :from-be (fn [bs] (reduce (fn [acc b] (+ (* acc 256) b)) 0 bs))
+    :from-be (fn [bs] (reduce (fn [acc b] (basilisp.core/+' (basilisp.core/*' acc 256) b)) 0 bs))
     :to-be (fn [x len] (bo/to-be-by {:int identity :mod mod :quot quot} identity x len))
-    :add + :sub - :mul * :quot quot :mod mod
+    :add basilisp.core/+' :sub basilisp.core/-' :mul basilisp.core/*' :quot quot :mod mod
     :modpow (fn [b e m] (python/pow b e m))
     :modinv (fn [a m] (try (python/pow a -1 m) (catch python/ValueError _ nil)))
     :even? even? :zero? zero? :eq =}))

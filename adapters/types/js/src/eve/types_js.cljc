@@ -321,6 +321,21 @@
          ['eve.deftype-proto.data/IDirectSerialize
           (list 'eve.deftype-proto.data/-direct-serialize ['_] off-sym)]
 
+         ;; IEveRoot — the header offset, as the JVM/bb emission
+         ;; (eve.deftype-proto.sio) gives it, unless the type provides its own
+         (when-not (provides? parsed-protos 'eve.deftype-proto.data/IEveRoot 'd/IEveRoot)
+           ['eve.deftype-proto.data/IEveRoot
+            (list 'eve.deftype-proto.data/-root-header-off ['_] off-sym)])
+
+         ;; IEveSio — the domain the instance reads through: on CLJS every
+         ;; eve-deftype lives in the module slab (the open mmap domain once
+         ;; one is open), whose slab I/O is eve.process-slab/cljs-sio — the
+         ;; same token the domain's atoms hold, so eve.atom's foreign-domain
+         ;; check sees this domain (the JVM/bb emission answers its sio__)
+         (when-not (provides? parsed-protos 'eve.deftype-proto.data/IEveSio 'd/IEveSio)
+           ['eve.deftype-proto.data/IEveSio
+            (list 'eve.deftype-proto.data/-eve-sio ['_] '(eve.process-slab/cljs-sio))])
+
          ;; ISabStorable — for atom serialization/disposal (skipped if user provides)
          (when-not (provides? parsed-protos 'eve.deftype-proto.data/ISabStorable)
            ['eve.deftype-proto.data/ISabStorable
@@ -433,8 +448,8 @@
        ;; when its CAS loses), else this process's (alloc/current-sio), as
        ;; on the JVM; on CLJS every sio is the module slab, which is the
        ;; open mmap domain once one is open, so the fields are written there.
-       ;; A nil sio is the current one (a CLJS instance carries none:
-       ;; d/-eve-sio of one is nil).
+       ;; A nil sio is the current one (a CLJS instance carries none; its
+       ;; d/-eve-sio answers the module slab's cljs-sio).
        (~'defn ~ctor-name
                ([~@ctor-args]
                 (~ctor-name (eve.deftype-proto.alloc/current-sio) ~@ctor-args))
@@ -482,11 +497,42 @@
 
        ~type-name)))
 
+(defn- factory-ctor-calls
+  "impls with each method body's own-type construction (T. field ...)
+   rewritten to the factory call (->T field ...). On SCI (nbb), a
+   (T. ...) inside a method body can resolve the type's name to a
+   non-constructor \u2014 \"[object Object] is not a constructor\" when a
+   seq method builds the next node (F-NBB-SEQWALK; the sorted-set
+   Iter's -next) \u2014 where ->T, a plain fn the deftype defines,
+   constructs on every host."
+  [impls type-name]
+  (let [ctor    (symbol (str (name type-name) "."))
+        factory (symbol (str "->" (name type-name)))
+        rw      (fn rw [form]
+                  (cond
+                    (and (seq? form) (= 'quote (first form))) form
+                    (and (seq? form) (= ctor (first form)))
+                    (apply list factory (map rw (rest form)))
+                    (seq? form) (with-meta (apply list (map rw form)) (meta form))
+                    (vector? form) (with-meta (mapv rw form) (meta form))
+                    (map? form) (with-meta (into {} (map (fn [[k v]] [(rw k) (rw v)])) form) (meta form))
+                    (set? form) (into #{} (map rw form))
+                    :else form))]
+    (mapv (fn [impl]
+            (update impl :methods
+                    (fn [ms] (mapv (fn [m] (update m :body #(map rw %))) ms))))
+          impls)))
+
 (defn plain-type
   "A plain type (eve.deftype/deftype) as cljs.core's deftype: JVM names
-   translated (twist's :translate after)."
-  [type-name fields parsed {:keys [translate]}]
+   translated (twist's :translate after). A twist's :factory-ctor-calls
+   rewrites own-type constructions in method bodies to ->T factory
+   calls (see factory-ctor-calls)."
+  [type-name fields parsed {:keys [translate] :as twist}]
   (let [impls (translate (v/translate-protos (v/cljs-own-calls parsed) :cljs))
+        impls (if (:factory-ctor-calls twist)
+                (factory-ctor-calls impls type-name)
+                impls)
         ;; the JVM's mutable field marks are ClojureScript's ^:mutable
         fields (mapv (fn [f]
                        (let [m (meta f)]
@@ -576,6 +622,17 @@
       (list '-pr-writer ['this 'writer '_opts]
             (list '-write 'writer (str "#eve/" (name type-name) " "))
             (list '-write 'writer (str "{:offset " (list '.-offset__ 'this) "}")))])
+   ;; IEveRoot — the header offset, as the JVM/bb emission
+   ;; (eve.deftype-proto.sio) gives it, unless the type provides its own
+   (when-not (or (v/user-provides-protocol? parsed-protos 'eve.deftype-proto.data/IEveRoot)
+                 (v/user-provides-protocol? parsed-protos 'd/IEveRoot))
+     ['eve.deftype-proto.data/IEveRoot
+      (list '-root-header-off ['_] (list '.-offset__ '_))])
+   ;; IEveSio — the instance's own sio__, as the JVM/bb emission answers it
+   (when-not (or (v/user-provides-protocol? parsed-protos 'eve.deftype-proto.data/IEveSio)
+                 (v/user-provides-protocol? parsed-protos 'd/IEveSio))
+     ['eve.deftype-proto.data/IEveSio
+      (list '-eve-sio ['_] (list '.-sio__ '_))])
    ;; ISabpType — every Eve type carries its qualified name
    ['eve.deftype-proto.data/ISabpType
     (list '-sabp-type-key ['_] type-key)]))

@@ -22,22 +22,76 @@
 (def ^:private journal-magic (unchecked-int 0x45564A31))        ;; "EVJ1"
 (def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
 
+(def ^:private journal-paths
+  "The journal file's path by channel, for with-journal-lock's
+   channel route (open-journal records it; journal-close! drops it)."
+  (atom {}))
+
+(def ^:private lock-close-ok?
+  "Can this process call a method on a FileLock? Not on every seat
+   that loads this adapter: a babashka refuses every method of the
+   lock itself (sun.nio.ch.FileLockImpl — (.release fl) throws
+   NoSuchFieldException: release there, and a journaled domain's open
+   runs recovery under with-journal-lock, so every journaled open died
+   in the release; measured on fleet bb 1.13.226, 2026-11-08).
+   (.close fl) IS reachable there and is release()'s JDK-specified
+   equivalent. Checked once per process, by locking a scratch file and
+   closing the lock — the jvm-nio-lock region adapter's probe,
+   carried here. EVE_BB_JOURNAL_LOCK=channel forces the channel route
+   (its test)."
+  (delay (and (not= "channel" (System/getenv "EVE_BB_JOURNAL_LOCK"))
+              (let [f (java.io.File/createTempFile "eve-journal-lock" ".probe")
+                    ^FileChannel fc (FileChannel/open (.toPath f)
+                                                      (into-array OpenOption
+                                                                  [StandardOpenOption/READ
+                                                                   StandardOpenOption/WRITE]))]
+                (try
+                  (let [fl (.lock fc)]
+                    (try
+                      (.close fl)
+                      true
+                      (catch Exception _ false)))
+                  (finally (.close fc) (.delete f)))))))
+
 (defn open-journal
-  "Open (creating if needed) the journal file at PATH for read+write."
+  "Open (creating if needed) the journal file at PATH for read+write.
+   The path is remembered by channel: with-journal-lock's channel
+   route needs it to open the lock channel (see lock-close-ok?)."
   [path]
-  (FileChannel/open (Paths/get path (into-array String []))
-                    (into-array OpenOption [StandardOpenOption/CREATE
-                                            StandardOpenOption/READ
-                                            StandardOpenOption/WRITE])))
+  (let [fc (FileChannel/open (Paths/get path (into-array String []))
+                             (into-array OpenOption
+                                         [StandardOpenOption/CREATE
+                                          StandardOpenOption/READ
+                                          StandardOpenOption/WRITE]))]
+    (swap! journal-paths assoc fc path)
+    fc))
 
 (defn with-journal-lock
   "Run F holding the journal file's exclusive lock (and this process's
    monitor on the channel, so the OS lock never overlaps within one
-   process)."
+   process). The lock is released by closing it — FileLock.close(),
+   the JDK-specified equivalent of release() — wherever that is
+   reachable (lock-close-ok?); where even close is refused, the lock
+   is taken on a channel of its own, opened for it and closed to
+   release it."
   [^FileChannel fc f]
   (locking fc
-    (let [fl (.lock fc)]
-      (try (f) (finally (.release fl))))))
+           (if (and (not @lock-close-ok?) (get @journal-paths fc))
+             (let [^FileChannel c (FileChannel/open (Paths/get (get @journal-paths
+                                                                    fc)
+                                                               (into-array String
+                                                                           []))
+                                                    (into-array OpenOption
+                                                                [StandardOpenOption/READ
+                                                                 StandardOpenOption/WRITE]))]
+               (try
+                 (.lock c)
+                 (f)
+                 (finally (.close c))))
+             (let [fl (.lock fc)]
+               (try
+                 (f)
+                 (finally (if @lock-close-ok? (.close fl) (.release fl))))))))
 
 (defn journal-record-of
   "The commit record for an explicit EPOCH and TABLE (byte array), as
@@ -142,4 +196,7 @@
 (defn journal-close!
   "Close the journal file; never throws."
   [^FileChannel fc]
-  (try (.close fc) (catch Throwable _ nil)))
+  (swap! journal-paths dissoc fc)
+  (try
+    (.close fc)
+    (catch Throwable _ nil)))

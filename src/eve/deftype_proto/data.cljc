@@ -523,6 +523,18 @@
     (or (string? v) (number? v) (boolean? v)
         (keyword? v) (symbol? v) (char? v)) v
     (satisfies? IPlain v) (-plain v)
+    ;; An Eve type with no IPlain of its own is already the value every
+    ;; seat answers for it: other seats' predicates never mistake it for
+    ;; a plain collection, so it reaches :else untouched. A seat whose
+    ;; core predicates DO mistake it (bb presents a map-signature
+    ;; deftype as a host map, so map? answers true there) must not
+    ;; descend into it either — descending rebuilds it as plain data
+    ;; and materializes its fields out from under the type (measured:
+    ;; a DataScript DB in an atom, whose index sets' IPlain rebuilds
+    ;; lose their registered comparators — F-BB-DATOM-CMP). The bb
+    ;; types adapter marks the types it defines with IsEve so this
+    ;; arm can tell them from plain maps.
+    (satisfies? IsEve v) v
     (map? v) (into {} (map (fn [[k x]] [(eve->clj k) (eve->clj x)])) v)
     (set? v) (into #{} (map eve->clj) v)
     (vector? v) (mapv eve->clj v)
@@ -616,13 +628,13 @@
   "Compare two byte sequences (Uint8Array on CLJS, byte[] on the JVM and bb,
    the host's byte array elsewhere) unsigned and lexicographically, a shorter
    prefix first. Negative, zero or positive like `compare`."
-  [a b]
-  (let [la (alength ^bytes a)
-        lb (alength ^bytes b)
+  [^bytes a ^bytes b]
+  (let [la (alength a)
+        lb (alength b)
         n  (if (< la lb) la lb)]
     (loop [i 0]
       (if (< i n)
-        (let [x (bit-and (aget ^bytes a i) 0xFF)
-              y (bit-and (aget ^bytes b i) 0xFF)]
+        (let [x (bit-and (aget a i) 0xFF)
+              y (bit-and (aget b i) 0xFF)]
           (if (== x y) (recur (inc i)) (- x y)))
         (- la lb)))))

@@ -70,14 +70,14 @@
 (defn- bytes-equal? [a b]
   (enc/bytes= a b))
 
-(defn- bytes-length [ba]
-  (alength ^bytes ba))
+(defn- bytes-length [^bytes ba]
+  (alength ba))
 
 ;;=============================================================================
 ;; Node I/O helpers
 ;;=============================================================================
 
-(defn- children-start ^long [] NODE_HEADER_SIZE)
+(defn- children-start  [] NODE_HEADER_SIZE)
 
 (defn- values-start-off
   "Byte offset where inline values begin."
@@ -1046,7 +1046,7 @@
    sio is explicit (first parameter)."
   [sio _serialize-elem coll]
   (let [entries (mapv (fn [v]
-                        (let [^bytes vb (codec/encode-key v)
+                        (let [vb (codec/encode-key v)
                               vh (portable-hash-bytes vb)]
                           [vh vb]))
                       coll)]

@@ -85,7 +85,7 @@
           (recur l mid)
           (recur (inc mid) h))))))
 
-(defn index-of-nil ^long [arr]
+(defn index-of-nil  [arr]
   (loop [l 0 h 31]
     (if (>= l (dec h))
       (if (nil? (aget arr l))

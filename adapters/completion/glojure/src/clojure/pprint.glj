@@ -1,0 +1,90 @@
+(ns clojure.pprint
+  "clojure.pprint on glojure (part of its core completion, adapters/completion/glojure: glojure v0.7.22
+   ships no clojure.pprint): the dispatch surface portable code extends and calls — simple-dispatch,
+   write-out, pprint-newline, pprint-logical-block, print-length-loop — and the pprint entry point,
+   without the columnar layout engine. A logical block writes its prefix, its body and its suffix; a
+   newline writes a newline; a value prints as pr-str prints it, a collection element by element
+   through write-out, so a type's own simple-dispatch (datascript's Datom and DB) is honored.")
+
+(def ^:dynamic *print-right-margin*
+  "The margin a full pretty printer would lay out against; kept for API compatibility."
+  72)
+
+(def ^:dynamic *print-miser-width*
+  "The miser width a full pretty printer would use; kept for API compatibility."
+  40)
+
+(defn- out-write [s] (.write *out* (str s)))
+
+(defmulti simple-dispatch
+  "The pretty printer's dispatch on a value's class, extended per type with defmethod, as in
+   clojure.pprint. The default method prints a leaf as pr-str does and a collection element by
+   element through write-out."
+  (fn [x] (class x)))
+
+(defn write-out
+  "Write x through simple-dispatch."
+  [x]
+  (simple-dispatch x))
+
+(defn- write-coll [open close xs]
+  (out-write open)
+  (loop [xs (seq xs) first? true]
+    (when xs
+      (when-not first? (out-write " "))
+      (write-out (first xs))
+      (recur (next xs) false)))
+  (out-write close))
+
+(defmethod simple-dispatch :default [x]
+  (cond
+    (nil? x)        (out-write "nil")
+    (map? x)        (do (out-write "{")
+                        (loop [es (seq x) first? true]
+                          (when es
+                            (when-not first? (out-write ", "))
+                            (write-out (key (first es)))
+                            (out-write " ")
+                            (write-out (val (first es)))
+                            (recur (next es) false)))
+                        (out-write "}"))
+    (vector? x)     (write-coll "[" "]" x)
+    (set? x)        (write-coll "#{" "}" x)
+    (sequential? x) (write-coll "(" ")" x)
+    :else           (out-write (pr-str x))))
+
+(defn pprint-newline
+  "A conditional newline in a logical block; on this seat, a newline."
+  [kind]
+  (out-write "\n"))
+
+(defmacro pprint-logical-block
+  "A logical block: leading keyword options (:prefix, :suffix, :per-line-prefix) then the body.
+   Writes the prefix, the body, the suffix."
+  [& args]
+  (let [[opts body] (loop [opts {} args (seq args)]
+                      (if (keyword? (first args))
+                        (recur (assoc opts (first args) (second args)) (nnext args))
+                        [opts args]))]
+    `(do ~(when-let [p (:prefix opts)] `(out-write ~p))
+         ~@body
+         ~(when-let [s (:suffix opts)] `(out-write ~s)))))
+
+(defmacro print-length-loop
+  "A loop over the bindings for printing a sequence a member at a time; the body recurs with the
+   next member, as in clojure.pprint."
+  [bindings & body]
+  `(loop ~bindings ~@body))
+
+(defn pprint
+  "Print x through simple-dispatch, with a trailing newline."
+  ([x] (pprint x *out*))
+  ([x writer]
+   (binding [*out* writer]
+     (write-out x)
+     (out-write "\n"))))
+
+(defn pp
+  "Print the last REPL result; the entry point clojure.pprint provides."
+  []
+  (pprint *1))

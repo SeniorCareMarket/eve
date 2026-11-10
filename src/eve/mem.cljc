@@ -169,6 +169,76 @@
 (extend-default IHeapBytes
   (-heap-bytes [_] nil))
 
+;; Plain (non-atomic) loads of a published node's bytes — the mmap tier's
+;; counterpart to IHeapBytes (cleanup-sweep item 9b, 2026-11-07). A published
+;; node is never written again (written before its pointer is published, read
+;; after the reader acquired that pointer, under the domain's epoch pin), so
+;; its words may be read with plain loads on ANY backing — a mapped file
+;; included: the bytes another process could write are a NEW node's, never
+;; this one's. The measured alternative — every word through the region's
+;; atomic load — cost ~100–160× the heap tier per step on the JVM seat (the
+;; atomic load there is a spread MethodHandle volatile invoke plus an
+;; argument-array allocation per word). Use ONLY for published-node bytes;
+;; a word other threads write (a tally, a descriptor, an atom slot) keeps
+;; the atomic ops above. A region with no plain vehicle answers through
+;; the extend-default below: bytes via -read-bytes. (An earlier
+;; default answered through the region atomic load; that is NOT
+;; always correct -- the atomic load requires 4-byte alignment
+;; and a published node's packed words sit at any alignment, so
+;; on alignment-enforcing hosts the fallback faulted on exactly
+;; these reads: F-REGION-ATOMIC-ALIGN, read arm.)
+(defprotocol IPlainLoad
+  (-plain-load-i32 [r byte-off]
+    "The little-endian i32 at byte-off (any alignment), read with plain
+     (non-atomic) loads. Published-node bytes only.")
+  (-plain-load-u8 [r byte-off]
+    "The unsigned byte at byte-off, read with a plain load.
+     Published-node bytes only."))
+
+(extend-default IPlainLoad
+  (-plain-load-i32 [r byte-off]
+    ;; Through -read-bytes, never the region's atomic -load-i32: this
+    ;; default serves every region with no plain vehicle of its own,
+    ;; and the atomic load requires 4-byte alignment (IMemRegion's
+    ;; contract) while a published node's packed words sit at any
+    ;; alignment (HAMT write-kv! [klen][k][vlen][v]) -- on arm64 the
+    ;; atomic fallback FAULTS on exactly the reads this protocol
+    ;; exists for (F-REGION-ATOMIC-ALIGN, read arm: map.cljc's
+    ;; skip-kv-at -> alloc/node-i32 -> here). The composition mirrors
+    ;; -plain-load-u8 below and alloc's -sio-read-i32. A region whose
+    ;; plain load is faster than byte composition implements
+    ;; IPlainLoad itself (the JVM varhandle region does).
+    (let [b (-read-bytes r byte-off 4)
+          u (bit-or (bit-and (aget ^bytes b 0) 0xFF)
+                    (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8)
+                    (bit-shift-left (bit-and (aget ^bytes b 2) 0xFF) 16)
+                    (bit-shift-left (bit-and (aget ^bytes b 3) 0xFF) 24))]
+      (if (>= u 2147483648) (- u 4294967296) u)))
+  (-plain-load-u8 [r byte-off]
+    (bit-and (aget ^bytes (-read-bytes r byte-off 1) 0) 0xFF)))
+
+;; Bulk i32 fill — initialization of a fresh region before it is published
+;; (coalesc's descriptor table: two columns of max-desc - 1 entries each).
+;; Measured on the jank seat: 2,097,150 single -store-i32! calls through the
+;; protocol at ~1.07 us each = ~2.2 s for a default domain, where one fill
+;; per column costs ~1-2 ms. A region with a native fill implements
+;; IFillRegion itself; every other region answers through the
+;; extend-default below, one -store-i32! per slot (the same stores the
+;; caller's loop made, so its bytes and ordering contract are unchanged).
+;; Not for zeroing reused memory (the memory rules forbid that): a writer
+;; that must set every slot of a fresh, unpublished range to one value.
+(defprotocol IFillRegion
+  (-fill-i32! [r byte-off count val]
+    "Store the i32 VAL at COUNT consecutive 4-byte slots from BYTE-OFF."))
+
+(extend-default IFillRegion
+  (-fill-i32! [r byte-off count val]
+    (loop [i 0]
+      (when (< i count)
+        (-store-i32! r (+ byte-off (* 4 i)) val)
+        (recur (inc i))))
+    nil))
+
 ;; ---------------------------------------------------------------------------
 ;; The regions themselves are the host's: eve.region, an adapter
 ;; (eve/adapters/region/<implementation>, adapters/README.md), opens them —
@@ -181,6 +251,7 @@
 
 (defn load-i32       [r byte-off]           (-load-i32       r byte-off))
 (defn store-i32!     [r byte-off val]       (-store-i32!     r byte-off val))
+(defn fill-i32!      [r byte-off cnt val]   (-fill-i32!      r byte-off cnt val))
 (defn cas-i32!       [r byte-off exp des]   (-cas-i32!       r byte-off exp des))
 (defn add-i32!       [r byte-off delta]     (-add-i32!       r byte-off delta))
 (defn sub-i32!       [r byte-off delta]     (-sub-i32!       r byte-off delta))
@@ -242,26 +313,47 @@
                 -1))
             (recur (inc word-idx) 0)))))))
 
+(defn- bitmap-bits-in-region
+  "How many bitmap bits region actually holds past bm-byte-offset, in
+   whole words. A remap publishes a grown class new region before its
+   new total, so a reader can hold the new total with the old, shorter
+   region; scans clamp to this so the unmapped remainder reads as full
+   (the caller takes its grow/spill path) instead of throwing."
+  [region bm-byte-offset]
+  (let [avail (- (-byte-length region) bm-byte-offset)]
+    (if (pos? avail) (* 32 (quot avail 4)) 0)))
+
 (defn imr-bitmap-find-free
   "Scan bitmap for the first free bit (0-bit) starting from start-bit.
    bm-byte-offset is the byte offset of the bitmap within the IMemRegion.
-   Returns the block index (absolute bit position), or -1 if bitmap is full."
+   Returns the block index (absolute bit position), or -1 if bitmap is full.
+   total-bits is clamped to what region actually holds past bm-byte-offset:
+   a caller holding a torn snapshot from a concurrent remap (the new total
+   with the old, shorter region) scans only the mapped words — the unmapped
+   remainder reads as full — instead of loading past the buffer."
   [region bm-byte-offset total-bits start-bit]
-  (scan-free (fn [i] (-load-i32 region (+ bm-byte-offset (* i 4)))) total-bits start-bit))
+  (scan-free (fn [i] (-load-i32 region (+ bm-byte-offset (* i 4))))
+             (min total-bits (bitmap-bits-in-region region bm-byte-offset))
+             start-bit))
 
 (defn imr-bitmap-find-free-bulk
   "Like imr-bitmap-find-free but reads the bitmap in one bulk -read-bytes call,
    then scans the local byte array. This avoids per-word fcntl lock overhead in
    lustre mode where -load-i32 acquires a byte-range lock per call.
-   The snapshot may be slightly stale, but that's safe: the caller retries via
-   imr-bitmap-alloc-cas! which uses a proper CAS."
+   The snapshot may be slightly stale, but that is safe: the caller retries via
+   imr-bitmap-alloc-cas! which uses a proper CAS. total-bits is clamped to
+   what region actually holds past bm-byte-offset, as in imr-bitmap-find-free."
   [region bm-byte-offset total-bits start-bit]
-  (let [^bytes raw (-read-bytes region bm-byte-offset (* 4 (unsigned-bit-shift-right (+ total-bits 31) 5)))
+  (let [total-bits (min total-bits (bitmap-bits-in-region region bm-byte-offset))
+        ^bytes raw (-read-bytes region bm-byte-offset
+                                (* 4
+                                   (unsigned-bit-shift-right (+ total-bits 31) 5)))
         u8 (fn [o] (bit-and (aget raw o) 0xFF))]
-    (scan-free (fn [i] (let [o (* i 4)]
-                         (unchecked-int (bit-or (u8 o) (bit-shift-left (u8 (+ o 1)) 8)
-                                                (bit-shift-left (u8 (+ o 2)) 16)
-                                                (bit-shift-left (u8 (+ o 3)) 24)))))
+    (scan-free (fn [i]
+                 (let [o (* i 4)]
+                   (unchecked-int (bit-or (u8 o) (bit-shift-left (u8 (+ o 1)) 8)
+                                          (bit-shift-left (u8 (+ o 2)) 16)
+                                          (bit-shift-left (u8 (+ o 3)) 24)))))
                total-bits start-bit)))
 
 (defn imr-bitmap-alloc-cas!

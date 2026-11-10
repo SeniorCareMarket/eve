@@ -40,3 +40,52 @@
  func (env *environment) EvalASTGo(n *ast.Node) (interface{}, error) {
  	goNode := n.Sub.(*ast.GoNode)
  
+--- a/pkg/runtime/codegen.go
++++ b/pkg/runtime/codegen.go
+@@ -1980,6 +1980,8 @@
+ 		return g.generateHostCall(node)
+ 	case ast.OpHostInterop:
+ 		return g.generateHostInterop(node)
++	case ast.OpHostField:
++		return g.generateHostField(node)
+ 	case ast.OpMaybeHostForm:
+ 		return g.generateMaybeHostForm(node)
+ 	case ast.OpTheVar:
+@@ -3486,6 +3488,37 @@
+ 	return resultId
+ }
+ 
++// generateHostField reads a field, (.-f x) / (. x -f), as the interpreter's
++// EvalASTHostField does: a record's field by name, else the host value's own
++// field (lang.FieldOrMethod). Never a call: a field holding a function is
++// returned, not applied. (eve's glj-eve build: the analyzer emits OpHostField;
++// the interpreter's case is host-field.patch, and without this case every
++// namespace holding a field read panicked under *compile-files*.)
++func (g *Generator) generateHostField(node *ast.Node) string {
++	hostFieldNode := node.Sub.(*ast.HostFieldNode)
++	tgtId := g.generateASTNode(hostFieldNode.Target)
++	name := hostFieldNode.Field.Name()
++	resultId := g.allocateTempVar()
++	g.writef("var %s any\n", resultId)
++	g.writef("{\n")
++	g.writef("  found := false\n")
++	g.writef("  if rec, ok := %s.(lang.RecordValue); ok {\n", tgtId)
++	g.writef("    if idx, ok := rec.RecordType().FieldIndex(lang.NewKeyword(%q)); ok {\n", name)
++	g.writef("      %s = rec.RecordField(idx)\n", resultId)
++	g.writef("      found = true\n")
++	g.writef("    }\n")
++	g.writef("  }\n")
++	g.writef("  if !found {\n")
++	g.writef("    v, ok := lang.FieldOrMethod(%s, %q)\n", tgtId, name)
++	g.writef("    if !ok {\n")
++	g.writef("      panic(lang.NewIllegalArgumentError(fmt.Sprintf(\"no such field on %%T: %%s\", %s, %q)))\n", tgtId, name)
++	g.writef("    }\n")
++	g.writef("    %s = v\n", resultId)
++	g.writef("  }\n")
++	g.writef("}\n")
++	return resultId
++}
++
+ // generateMaybeHostForm preserves the evaluator's late-bound host lookup.
+ // Some portable Clojure forms use JVM-style class names that compatibility
+ // bridges register only at runtime (for example clojure.lang.MapEntry/create).

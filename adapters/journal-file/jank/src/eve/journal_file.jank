@@ -1,0 +1,250 @@
+(ns eve.journal-file
+  "The commit journal's file handle (eve.atom's durability mode): an
+   append-only per-domain file beside the domain root, holding commit
+   records only. This host: jank, over C++ (cpp/raw, called as
+   cpp/eve_journal.<fn>) on a POSIX fd opened O_RDWR|O_CREAT (not
+   O_APPEND: Linux pwrite ignores its offset under O_APPEND, so an
+   append is lseek SEEK_END + write and write-at! is pwrite). The
+   journal's lock is an fcntl POSIX write lock over the whole file
+   (F_SETLKW, released F_UNLCK): it excludes and is excluded by the
+   JVM FileChannel's lock and the python adapter's lockf on the same
+   path. One thread per process on this host (thread/none), so no
+   in-process monitor is taken. Bytes are eve's byte arrays on jank
+   (obj::array<jank::i8>, what eve.mem's -read-bytes answers and
+   -write-bytes! takes); every byte-level step (big-endian i32s, the
+   CRC) is C++.
+
+   Record format (identical bytes on every host):
+     [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
+   magic = \"EVJ1\" (0x45564A31); all integers big-endian; len counts the
+   bytes after itself (epoch + table-len + table + crc); the CRC-32
+   covers the epoch..table-end bytes. The commit point is lock, write
+   blocks, force slab, append record, force journal — eve.atom runs
+   that sequence over this file."
+  (:require [eve.mem :as mem]
+            [eve.deftype-proto.data :as d]))
+
+(cpp/raw "
+#include <cstdint>
+#include <cstring>
+#include <cerrno>
+#include <string>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/array.hpp>
+namespace eve_journal {
+  using namespace jank::runtime;
+  static obj::array<jank::i8> *A(object_ref o) { return static_cast<obj::array<jank::i8> *>(o.ptr()); }
+  static uint8_t *B(object_ref o) { return reinterpret_cast<uint8_t *>(A(o)->data.data); }
+  static object_ref fresh(long len) { return make_box<obj::array<jank::i8>>((jank::i64)len); }
+  long last_errno() { return errno; }
+  std::string strerr(long e) { return std::string(strerror((int)e)); }
+  long open_rw(std::string const &path) { return ::open(path.c_str(), O_RDWR | O_CREAT, 0644); }
+  long lock_all(long fd) {
+    struct flock fl{}; fl.l_type = F_WRLCK; fl.l_whence = SEEK_SET; fl.l_start = 0; fl.l_len = 0;
+    return fcntl((int)fd, F_SETLKW, &fl) == 0 ? 0 : -errno;
+  }
+  long unlock_all(long fd) {
+    struct flock fl{}; fl.l_type = F_UNLCK; fl.l_whence = SEEK_SET; fl.l_start = 0; fl.l_len = 0;
+    return fcntl((int)fd, F_SETLK, &fl) == 0 ? 0 : -errno;
+  }
+  long file_size(long fd) { struct stat st; if(fstat((int)fd, &st) != 0) return -1; return (long)st.st_size; }
+  long arr_size(object_ref a) { return (long)A(a)->size; }
+  /* the whole file as a fresh i8 array (empty on error) */
+  object_ref read_all(long fd) {
+    long n = file_size(fd);
+    if(n < 0) n = 0;
+    auto out(make_box<obj::array<jank::i8>>((jank::i64)n));
+    uint8_t *p = reinterpret_cast<uint8_t *>(out->data.data);
+    long got = 0;
+    while(got < n) {
+      ssize_t r = ::pread((int)fd, p + got, (size_t)(n - got), (off_t)got);
+      if(r < 0) { if(errno == EINTR) continue; break; }
+      if(r == 0) break;
+      got += r;
+    }
+    if(got < n) { auto cut(make_box<obj::array<jank::i8>>((jank::i64)got)); std::memcpy(cut->data.data, p, (size_t)got); return cut; }
+    return out;
+  }
+  static long write_loop(long fd, uint8_t const *p, long n, long pos, bool positional) {
+    long done = 0;
+    while(done < n) {
+      ssize_t r = positional ? ::pwrite((int)fd, p + done, (size_t)(n - done), (off_t)(pos + done))
+                             : ::write((int)fd, p + done, (size_t)(n - done));
+      if(r < 0) { if(errno == EINTR) continue; return -errno; }
+      done += r;
+    }
+    return done;
+  }
+  long write_end(long fd, object_ref bytes) {
+    if(::lseek((int)fd, 0, SEEK_END) < 0) return -errno;
+    return write_loop(fd, B(bytes), (long)A(bytes)->size, 0, false);
+  }
+  long write_at(long fd, object_ref bytes, long pos) { return write_loop(fd, B(bytes), (long)A(bytes)->size, pos, true); }
+  long truncate0(long fd) { return ::ftruncate((int)fd, 0) == 0 ? 0 : -errno; }
+  /* full: data + metadata (a truncate/checkpoint boundary); else data + size
+     (the append path). Linux: fsync / fdatasync. macOS has no fdatasync, and
+     its fsync stops at the drive's cache: full is fcntl F_FULLFSYNC (fsync
+     where the file system refuses it), the append path is fsync. */
+  long force(long fd, long full) {
+#if defined(__APPLE__)
+    int r = full ? ::fcntl((int)fd, F_FULLFSYNC) : ::fsync((int)fd);
+    if(r != 0 && full) r = ::fsync((int)fd);
+#else
+    int r = full ? ::fsync((int)fd) : ::fdatasync((int)fd);
+#endif
+    return r == 0 ? 0 : -errno;
+  }
+  long close_fd(long fd) { return ::close((int)fd); }
+  /* CRC-32 (IEEE), the unsigned 32-bit value */
+  static uint32_t crc_raw(uint8_t const *p, long len) {
+    static uint32_t table[256];
+    static bool ready = false;
+    if(!ready) {
+      for(uint32_t n = 0; n < 256; n++) {
+        uint32_t c = n;
+        for(int k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        table[n] = c;
+      }
+      ready = true;
+    }
+    uint32_t c = 0xFFFFFFFFu;
+    for(long i = 0; i < len; i++) c = table[(c ^ p[i]) & 0xFF] ^ (c >> 8);
+    return c ^ 0xFFFFFFFFu;
+  }
+  long crc32(object_ref a, long off, long len) { return (long)crc_raw(B(a) + off, len); }
+  static void put_be(uint8_t *p, uint32_t v) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
+  static uint32_t get_be(uint8_t const *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3]; }
+  long get_i32be(object_ref a, long pos) { return (long)(int32_t)get_be(B(a) + pos); }
+  long get_u32be(object_ref a, long pos) { return (long)get_be(B(a) + pos); }
+  object_ref slice(object_ref a, long from, long len) {
+    auto out(make_box<obj::array<jank::i8>>((jank::i64)len));
+    std::memcpy(out->data.data, B(a) + from, (size_t)len);
+    return out;
+  }
+  /* the full EVJ1 record for EPOCH and TABLE */
+  object_ref make_record(long epoch, object_ref table) {
+    long tlen = (long)A(table)->size;
+    long len = 4 + 4 + tlen + 4;
+    auto out(make_box<obj::array<jank::i8>>((jank::i64)(8 + len)));
+    uint8_t *p = reinterpret_cast<uint8_t *>(out->data.data);
+    put_be(p, 0x45564A31u);
+    put_be(p + 4, (uint32_t)len);
+    put_be(p + 8, (uint32_t)(int32_t)epoch);
+    put_be(p + 12, (uint32_t)tlen);
+    std::memcpy(p + 16, B(table), (size_t)tlen);
+    put_be(p + 16 + tlen, crc_raw(p + 8, 4 + 4 + tlen));
+    return out;
+  }
+}
+")
+
+(def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
+(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+
+(defn- fail [what r path]
+  (throw (ex-info (str "eve.journal-file: " what ": " (cpp/eve_journal.strerr (- r)))
+                  {:path path :errno (- r)})))
+
+(defn open-journal
+  "Open (creating if needed) the journal file at PATH for read+write.
+   Returns the file handle {:fd :path}."
+  [path]
+  (let [fd (cpp/eve_journal.open_rw (str path))]
+    (when (neg? fd) (fail "open" (- (cpp/eve_journal.last_errno)) path))
+    {:fd fd :path path}))
+
+(defn with-journal-lock
+  "Run F holding the journal file's exclusive lock: an fcntl POSIX
+   write lock over the whole file (F_SETLKW), released in finally."
+  [{:keys [fd path]} f]
+  (let [r (cpp/eve_journal.lock_all fd)]
+    (when (neg? r) (fail "fcntl lock" r path))
+    (try (f) (finally (cpp/eve_journal.unlock_all fd)))))
+
+(defn journal-record-of
+  "The commit record for an explicit EPOCH and TABLE (an i8 array)."
+  [epoch tbl]
+  (cpp/eve_journal.make_record epoch tbl))
+
+(defn journal-record
+  "The commit record for ROOT-R's CURRENT epoch and atom table, as an
+   i8 array."
+  [root-r]
+  (journal-record-of (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                     (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)))
+
+(defn journal-scan
+  "Scan the journal's records in order. Returns {:newest {:epoch :table}
+   :oldest epoch :torn? bool} — a record is accepted iff its framing
+   survives (magic + length in range) and its CRC matches; a record whose
+   framing survives but whose CRC fails is SKIPPED (its length still
+   advances the scan); a framing failure ends the scan."
+  [{:keys [fd]}]
+  (let [data (cpp/eve_journal.read_all fd)
+        total (cpp/eve_journal.arr_size data)]
+    (loop [pos 0 newest nil oldest nil torn? false]
+      (let [remaining (- total pos)]
+        (if (< remaining 8)
+          {:newest newest :oldest oldest :torn? (or torn? (pos? remaining))}
+          (let [magic (cpp/eve_journal.get_i32be data pos)
+                len (cpp/eve_journal.get_i32be data (+ pos 4))]
+            (if (or (not= magic journal-magic)
+                    (not (pos? len))
+                    (> len (- remaining 8)))
+              {:newest newest :oldest oldest :torn? true}
+              (let [epoch (cpp/eve_journal.get_i32be data (+ pos 8))
+                    tlen (cpp/eve_journal.get_i32be data (+ pos 12))]
+                (if (or (neg? tlen) (> (+ 4 4 tlen 4) len))
+                  {:newest newest :oldest oldest :torn? true}
+                  (if (= (cpp/eve_journal.get_u32be data (+ pos 16 tlen))
+                         (cpp/eve_journal.crc32 data (+ pos 8) (+ 4 4 tlen)))
+                    (recur (+ pos 8 len)
+                           {:epoch epoch :table (cpp/eve_journal.slice data (+ pos 16) tlen)}
+                           (or oldest epoch) torn?)
+                    (recur (+ pos 8 len) newest oldest true)))))))))))
+
+(defn journal-append!
+  "Write BYTES (an i8 array) at the end of the journal file. Does not
+   force — the caller forces at the commit point."
+  [{:keys [fd path]} bytes]
+  (let [r (cpp/eve_journal.write_end fd bytes)]
+    (when (neg? r) (fail "append" r path))
+    r))
+
+(defn journal-write-at!
+  "Write BYTES (an i8 array) at absolute offset POS."
+  [{:keys [fd path]} bytes pos]
+  (let [r (cpp/eve_journal.write_at fd bytes pos)]
+    (when (neg? r) (fail "write-at" r path))
+    r))
+
+(defn journal-truncate!
+  "Truncate the journal file to zero length (no force; the caller
+   forces as part of its checkpoint/recovery sequence)."
+  [{:keys [fd path]}]
+  (let [r (cpp/eve_journal.truncate0 fd)]
+    (when (neg? r) (fail "truncate" r path))
+    nil))
+
+(defn journal-force!
+  "Force the journal file to storage. FULL? true is fsync (data and
+   metadata: a truncate/checkpoint boundary); false is fdatasync (the
+   append path's data+size force). On macOS (no fdatasync): FULL? true is
+   fcntl F_FULLFSYNC (fsync where refused), false is fsync."
+  [{:keys [fd path]} full?]
+  (let [r (cpp/eve_journal.force fd (if full? 1 0))]
+    (when (neg? r) (fail "force" r path))
+    nil))
+
+(defn journal-close!
+  "Close the journal file; never throws."
+  [{:keys [fd]}]
+  (try (cpp/eve_journal.close_fd fd)
+       (catch jank.runtime.object_ref _ nil)
+       (catch std.exception _ nil))
+  nil)

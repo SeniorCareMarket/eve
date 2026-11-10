@@ -64,18 +64,23 @@
 (patch! 'unchecked-short i16)
 (patch! 'unchecked-int i32*)
 (patch! 'unchecked-long i64)
-(patch! 'unchecked-add-int (fn [a b] (i32* (+ a b))))
-(patch! 'unchecked-subtract-int (fn [a b] (i32* (- a b))))
-(patch! 'unchecked-multiply-int (fn [a b] (i32* (* a b))))
-(patch! 'unchecked-inc-int (fn [a] (i32* (inc a))))
-(patch! 'unchecked-dec-int (fn [a] (i32* (dec a))))
-(patch! 'unchecked-negate-int (fn [a] (i32* (- a))))
+;; the wrap family's inner ops are basilisp.lang.numbers' own (promoting):
+;; since the arithmetic contract landed below, basilisp.core's + - * inc
+;; dec THROW on i64 overflow, and a wrap computed through them would throw
+;; instead of wrapping (measured: (unchecked-add MAX 1) threw).
+(patch! 'unchecked-add-int (fn [a b] (i32* (basilisp.lang.numbers/add a b))))
+(patch! 'unchecked-subtract-int (fn [a b] (i32* (basilisp.lang.numbers/subtract a b))))
+(patch! 'unchecked-multiply-int (fn [a b] (i32* (basilisp.lang.numbers/multiply a b))))
+(patch! 'unchecked-inc-int (fn [a] (i32* (basilisp.lang.numbers/add a 1))))
+(patch! 'unchecked-dec-int (fn [a] (i32* (basilisp.lang.numbers/subtract a 1))))
+(patch! 'unchecked-negate-int (fn [a] (i32* (basilisp.lang.numbers/subtract 0 a))))
 
-(patch! 'unchecked-add (fn [a b] (i64 (+ a b))))
-(patch! 'unchecked-subtract (fn [a b] (i64 (- a b))))
-(patch! 'unchecked-multiply (fn [a b] (i64 (* a b))))
-(patch! 'unchecked-inc (fn [a] (i64 (inc a))))
-(patch! 'unchecked-dec (fn [a] (i64 (dec a))))
+(patch! 'unchecked-add (fn [a b] (i64 (basilisp.lang.numbers/add a b))))
+(patch! 'unchecked-subtract (fn [a b] (i64 (basilisp.lang.numbers/subtract a b))))
+(patch! 'unchecked-multiply (fn [a b] (i64 (basilisp.lang.numbers/multiply a b))))
+(patch! 'unchecked-inc (fn [a] (i64 (basilisp.lang.numbers/add a 1))))
+(patch! 'unchecked-dec (fn [a] (i64 (basilisp.lang.numbers/subtract a 1))))
+(patch! 'unchecked-negate (fn [a] (i64 (basilisp.lang.numbers/subtract 0 a))))
 
 ;; --- aset into a bytearray ---------------------------------------------------
 ;; Clojure's aset on a byte array stores the value's low 8 bits (a signed
@@ -156,9 +161,94 @@
 (patch! 'bit-and (at-two basilisp.core/bit-and operator/and_))
 (patch! 'bit-or (at-two basilisp.core/bit-or operator/or_))
 (patch! 'bit-xor (at-two basilisp.core/bit-xor operator/xor))
-(patch! '+ (at-two-three basilisp.core/+ basilisp.lang.numbers/add))
-(patch! '- (at-two-three basilisp.core/- basilisp.lang.numbers/subtract))
-(patch! '* (at-two-three basilisp.core/* basilisp.lang.numbers/multiply))
+;; --- checked + - *: the arithmetic contract (doc/arithmetic-overflow.md) ------
+;; Python's integers do not overflow: basilisp.lang.numbers' add of two longs
+;; promotes where the JVM's + throws ArithmeticException (the operator's
+;; 2026-11-07 decision: checked + - * throw on every host; +' -' *' promote;
+;; unchecked-* wrap). The binding: when both operands are Python ints in the
+;; i64 range (basilisp's longs) and the exact result leaves it, throw this
+;; completion's ArithmeticException (the Python ArithmeticError subclass
+;; core!'d into basilisp.core below as a var; resolved through the var at
+;; call time, as this section runs before that intern). Any other operands — floats,
+;; decimals, ratios, or an operand already past i64 (a bigint, which this
+;; seat cannot tell from a promoted long: its honest approximation) — keep
+;; basilisp's own answer. This is the census's REAL-cost seat: two range
+;; compares on the integer path of an op the seat prices in tens of ns.
+;; The variadic shape is at-two-three's (a direct 2-argument case, folds
+;; without rest seqs), with the checked fn at every fold and at unary minus.
+
+(def ^:private i64-min -9223372036854775808)
+(def ^:private i64-max 9223372036854775807)
+
+;; basilisp.core has no +' -' *' at all (its + always promoted, so upstream
+;; never needed the names): that contract surface is supplied below, from
+;; the original core ops captured here, before the checked patch! replaces
+;; +. (Its unchecked-* already wrap — the i64 patch! family above.)
+(def ^:private core-promote+ basilisp.core/+)
+(def ^:private core-promote- basilisp.core/-)
+(def ^:private core-promote* basilisp.core/*)
+
+(defn- arith-overflow []
+  ;; the class is core!'d into basilisp.core as a var (the exceptions section
+  ;; below); a var is not a module attribute on this seat, so it is resolved
+  ;; through the var, at call time (measured: a module getattr answers
+  ;; AttributeError, which thrown? Exception would have passed spuriously).
+  (throw ((deref (ns-resolve 'basilisp.core 'ArithmeticException)) "integer overflow")))
+
+(defn- checked2 [f]
+  (fn [x y]
+    (let [r (f x y)]
+      (if (and (python/isinstance x python/int) (python/isinstance y python/int)
+               (operator/le i64-min x) (operator/le x i64-max)
+               (operator/le i64-min y) (operator/le y i64-max)
+               (or (operator/lt r i64-min) (operator/gt r i64-max)))
+        (arith-overflow)
+        r))))
+
+(defn- checked-neg [x]
+  ((checked2 basilisp.lang.numbers/subtract) 0 x))
+
+(defn- arith
+  "orig at zero arguments, f1 at one, f2 at two and at every fold past two."
+  [orig f1 f2]
+  (fn ([] (orig)) ([x] (f1 x)) ([x y] (f2 x y))
+    ([x y & more] (reduce f2 (f2 x y) more))))
+
+(patch! '+ (arith basilisp.core/+ (fn [x] x) (checked2 basilisp.lang.numbers/add)))
+(patch! '- (arith basilisp.core/- checked-neg (checked2 basilisp.lang.numbers/subtract)))
+(patch! '* (arith basilisp.core/* (fn [x] x) (checked2 basilisp.lang.numbers/multiply)))
+(patch! 'inc (fn [x] ((checked2 basilisp.lang.numbers/add) x 1)))
+(patch! 'dec (fn [x] ((checked2 basilisp.lang.numbers/subtract) x 1)))
+
+;; the promoting names, supplied per the note above: +' -' *' are interned
+;; into basilisp.core as the seat's own promoting ops under the contract's
+;; names (patch! cannot create a var — it resolves an existing one — so
+;; these go through intern, as this file's ArithmeticException does).
+(intern 'basilisp.core '+' core-promote+)
+(intern 'basilisp.core '-' core-promote-)
+(intern 'basilisp.core '*' core-promote*)
+
+;; unchecked-* already wrap on this seat: the i64 patch! family near the top of this file
+;; wraps the promoted result at 64 bits, which is the contract's wrapping answer.
+
+;; mod/rem: basilisp's own implementations multiply the quotient by the
+;; divisor back through the (now checked) *, so for a dividend past i64
+;; whose quotient is still in range the product leaves i64 and the checked
+;; * throws — mod/rem break on a band of bigints (measured 2026-11-08,
+;; tw81/tw82: (mod 9223372036854775808 256) throws "integer overflow";
+;; measured again 2026-11-09 at eve.crypto's load: edwards' make -> to-be-by
+;; -> (mod x 256) of a 255-bit value). Python's % is floored, which is
+;; Clojure's mod; rem is the truncating remainder, quotient times divisor by
+;; the promoting ops. Both exact at any size; non-integer operands keep
+;; basilisp's own answer. (The same change as lane-m/lpy-standing d847c0760e.)
+(def ^:private core-mod basilisp.core/mod)
+(def ^:private core-rem basilisp.core/rem)
+(patch! 'mod (fn [x y] (if (and (python/isinstance x python/int) (python/isinstance y python/int))
+                         (operator/mod x y)
+                         (core-mod x y))))
+(patch! 'rem (fn [x y] (if (and (python/isinstance x python/int) (python/isinstance y python/int))
+                         (core-promote- x (core-promote* (quot x y) y))
+                         (core-rem x y))))
 
 ;; conj! likewise: basilisp.core's takes every argument after the transient
 ;; through a rest seq and apply, ~220 µs a call under cProfile (2026-10-24: a
@@ -255,6 +345,12 @@
 (core! 'objects python/list)
 (core! 'number python/float)
 
+;; clojure.core/num: coerce to a number — the identity on this seat's
+;; numbers (ints/floats are already numbers; Clojure's num casts among
+;; the numeric tower, which Python's single int/float pair subsumes for
+;; the port's uses, e.g. combine-cmp's (num 0) accumulator seed)
+(core! 'num (fn [x] x))
+
 ;; --- the JVM's exceptions: Python exception classes of the same names ----------
 ;; (a body that throws (IllegalArgumentException. msg) throws one of these;
 ;; a catch of the Python base class catches it)
@@ -316,6 +412,41 @@
                 (reverse (map first ss))))))))
 
 (patch! 'interleave interleave*)
+
+;; concat: basilisp 0.5.1's is basilisp.lang.runtime/concat-from-seq — an
+;; iterator_sequence over itertools.chain. A consumer that rebuilds its
+;; pending seq as (concat new-items rest) on every step — DataScript's
+;; transact-tx-data-impl loop does exactly this, once per entity — grows a
+;; tower of chain iterators, and forcing the tower's head descends one
+;; Python iterator layer per element already processed (~6 frames per
+;; element: LazySeq.first -> is_empty -> seq -> _compute_seq -> gen ->
+;; SeqIterator.__next__ -> first ...), so a 1,000-entity db-with exceeds
+;; the recursion limit inside the first hundred entities
+;; (F-LPY-DS-DATASET-RECURSION). Clojure's concat is cons/lazy-seq built:
+;; a layer whose input is exhausted returns the next lazy seq unforced
+;; and LazySeq.seq unwraps it in its loop, so the depth stays constant.
+;; (No chunk arms: first/rest on a chunked seq are still correct, just
+;; element-wise — the same trade interleave* above makes.)
+(defn- concat*
+  ([] ())
+  ([x] (lazy-seq x))
+  ([x y]
+   (lazy-seq
+    (let [s (seq x)]
+      (if s
+        (cons (first s) (concat* (rest s) y))
+        (concat* y)))))
+  ([x y & zs]
+   (let [cat (fn cat [xys zs]
+               (lazy-seq
+                (let [xys (seq xys)]
+                  (if xys
+                    (cons (first xys) (cat (rest xys) zs))
+                    (when zs
+                      (cat (first zs) (next zs)))))))]
+     (cat (concat* x y) zs))))
+
+(patch! 'concat concat*)
 
 ;; iterate: basilisp 0.5.1's calls f one element ahead — (nth (iterate f x) 5)
 ;; calls f six times, so iterating pop down to an empty vector pops it once
@@ -562,6 +693,51 @@
 (patch! 'swap! swap!*)
 (patch! 'reset! reset!*)
 
+;; --- the reader: top-level splicing conditionals ----------------------------------
+;; basilisp 0.5.1 splices #?@ only inside a collection; at the top level of a
+;; file its read() loop raises "Unexpected reader conditional" (F-LPY-TOPLEVEL-
+;; SPLICE, lpy-fix lane). Clojure splices at any position, and portable .cljc
+;; sources (the DataScript port's db.cljc among them) write top-level #?@ pairs
+;; for whole definitions. read() is a generator whose source cannot be reused
+;; with replaced globals, so the module's `read` is rebound to a copy of the
+;; same loop that yields the selected branch's forms at the top level instead
+;; of raising. Behavior is otherwise basilisp's own: non-splicing top-level
+;; conditionals never reach this loop (they are processed inside the reader),
+;; and an unmatched splicing branch contributes no forms.
+
+(def ^:private reader-read-source
+  (let [inspect-mod (.get sys/modules "inspect")
+        read-fn (.-read (.get sys/modules "basilisp.lang.reader"))]
+    (apply str (python/list (.getsource inspect-mod read-fn)))))
+
+(def ^:private reader-read-patched
+  (let [guard "        if isinstance(expr, ReaderConditional) and ctx.should_process_reader_cond:\n            raise ctx.syntax_error("
+        i (.find reader-read-source guard)]
+    (when (neg? i)
+      (throw (python/RuntimeError "eve.host-completion: basilisp reader.read guard not found; top-level #?@ patch not applied")))
+    (let [body (subs reader-read-source (+ i (count guard)))
+          j (.find body "\n            )\n")
+          tail (subs body (+ j (count "\n            )\n")))
+          splice (str "        if isinstance(expr, ReaderConditional) and ctx.should_process_reader_cond:\n"
+                      "            if not expr.is_splicing:\n"
+                      "                raise ctx.syntax_error(\n"
+                      "                    f\"Unexpected reader conditional '{repr(expr)})'; \"\n"
+                      "                    \"reader is configured to process reader conditionals\"\n"
+                      "                )\n"
+                      "            selected = _select_reader_conditional_branch(ctx, expr)\n"
+                      "            if selected is ReaderConditional.FEATURE_NOT_PRESENT:\n"
+                      "                continue\n"
+                      "            if not isinstance(selected, vec.PersistentVector):\n"
+                      "                raise ctx.syntax_error(\"Expecting Vector for splicing reader conditional form\")\n"
+                      "            yield from selected\n"
+                      "            continue\n")]
+      (str (subs reader-read-source 0 i) splice tail))))
+
+(let [code (python/compile reader-read-patched "<eve-host-completion:reader.read>" "exec")
+      ns (python/dict (.-__dict__ (.get sys/modules "basilisp.lang.reader")))]
+  (python/exec code ns)
+  (python/setattr (.get sys/modules "basilisp.lang.reader") "read" (.get ns "read")))
+
 ;; --- the reader: \u takes four hex digits -------------------------------------------
 ;; basilisp 0.5.1 reads every hex digit that follows \u (and then wants 4 or 8), so
 ;; "a\u0000b" (NUL, then b, in Clojure) is a syntax error. Clojure's \u is exactly
@@ -603,6 +779,13 @@
       (python/repr o))))
 (.register basilisp.lang.obj/lrepr python/object print-method-lrepr)
 
+;; clojure.core$long: the symbol patch-tag writes as the :tag for a
+;; 'number — on the JVM it names the compiled clojure.core$long class
+;; (Clojure's long cast as a class symbol); a tag on this seat is only
+;; ever read by patch-tag-shaped consumers, so the name is interned as
+;; a var holding Python's int, the seat's long.
+(intern 'basilisp.core 'clojure.core$long python/int)
+
 ;; --- clojure.core: basilisp.core under Clojure's name ---------------------------
 
 (create-ns 'clojure.core)
@@ -642,6 +825,8 @@
                 "IMapEntry" basilisp.lang.interfaces/IMapEntry
                 "IMeta" basilisp.lang.interfaces/IMeta
                 "IObj" basilisp.lang.interfaces/IWithMeta
+                "IRef" basilisp.lang.interfaces/IRef
+                "IReference" basilisp.lang.interfaces/IReference
                 "IDeref" basilisp.lang.interfaces/IDeref
                 "IReduceInit" basilisp.lang.interfaces/IReduce
                 "IReduce" basilisp.lang.interfaces/IReduce
@@ -653,9 +838,30 @@
                 "ITransientSet" basilisp.lang.interfaces/ITransientSet
                 "ITransientVector" basilisp.lang.interfaces/ITransientVector
                 "Reversible" basilisp.lang.interfaces/IReversible
-                "Keyword" basilisp.lang.keyword/Keyword}
+                "Keyword" basilisp.lang.keyword/Keyword
+                ;; value classes named as :tag values and in hints by
+                ;; portable sources (the DataScript port's patch-tag
+                ;; writes java.lang.Boolean as a tag): Python's own
+                ;; types under the JVM names. bool is final in Python,
+                ;; so (instance? java.lang.Boolean x) is (boolean? x).
+                "Boolean" python/bool
+                "Long" python/int
+                "Integer" python/int
+                "Double" python/float
+                "Number" python/float
+                "String" python/str
+                "Character" python/str
+                "Object" python/object}
         helpers {"MapEntry" {"create" (fn [k v] (map-entry k v))}
-                 "Util" {"equiv" (fn [a b] (= a b))
+                 ;; Util.hashCombine combines host hashes
+                 ;; (Python ints up to i64); the checked +/*
+                 ;; threw past i64 (F-LPY-SERIALIZE-OVERFLOW,
+                 ;; via combine-hashes -> hash-datom). The
+                 ;; contract's unchecked ops wrap at i64 —
+                 ;; hash combining is wrap math by nature.
+                 "Util" {"hasheq" (fn [x] (hash x))
+                         "hashCombine" (fn [a b] (unchecked-add (hash a) (unchecked-multiply 31 (hash b))))
+                         "equiv" (fn [a b] (= a b))
                          "equals" (fn [a b] (= a b))
                          "hash" (fn [x] (hash x))}
                  "APersistentMap" {"mapEquals" (fn [m o]
@@ -687,10 +893,78 @@
 ;; alias unbound; Python looks a name up in builtins last
 (python/setattr builtins "eve_clojure_lang" clojure-lang)
 
+
+
+
+;; --- java.lang: the JVM's value classes under their JVM names -------------------
+;; Portable sources also name java.lang's value classes (patch-tag in the
+;; DataScript port writes (assoc meta :tag java.lang.Boolean); defn tags say
+;; ^Boolean). The dotted-name reading above turns java.lang.Boolean into
+;; java.lang/Boolean, which resolves only if java.lang is a module every
+;; namespace imports — the same registration clojure.lang gets below, with
+;; Python's own types under the JVM names (bool is final: instance? is
+;; boolean?; Python ints are arbitrary precision, so Long/Integer are int).
+(def ^:private java-lang
+  (let [pkg (or (.get sys/modules "java") (types/ModuleType "java"))
+        m (types/ModuleType "java.lang")
+        cmp3 (fn [a b] (if (< a b) -1 (if (> a b) 1 0)))
+        numclass (fn [base] (python/type "NumClass" (python/tuple [base])
+                                         (python/dict {"compare" (python/staticmethod cmp3)})))
+        classes {"Boolean" python/bool "Long" (numclass python/int) "Integer" (numclass python/int)
+                 "Double" (numclass python/float) "Float" (numclass python/float) "Number" python/float
+                 "String" python/str "Character" python/str "Object" python/object
+                 "Class" python/type "Comparable" python/object}]
+    (doseq [[n c] classes] (python/setattr m n c))
+    (python/setattr pkg "lang" m)
+    (.__setitem__ sys/modules "java" pkg)
+    (.__setitem__ sys/modules "java.lang" m)
+    m))
+
+(let [s (symbol "java.lang")]
+  (set! (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace)
+        (conj (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace) s))
+  (doseq [n (all-ns)] (.add-import n s java-lang)))
+
 (let [s (symbol "clojure.lang")]
   (set! (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace)
         (conj (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace) s))
   (doseq [n (all-ns)] (.add-import n s clojure-lang)))
+
+;; --- java.lang: the JVM's value classes under their JVM names -------------------
+;; Portable sources also name java.lang's value classes (patch-tag in the
+;; DataScript port writes (assoc meta :tag java.lang.Boolean); defn tags say
+;; ^Boolean). The dotted-name reading above turns java.lang.Boolean into
+;; java.lang/Boolean, which resolves only if java.lang is a module every
+;; namespace imports — the same registration clojure.lang gets below, with
+;; Python's own types under the JVM names (bool is final: instance? is
+;; boolean?; Python ints are arbitrary precision, so Long/Integer are int).
+(def ^:private java-lang
+  (let [pkg (or (.get sys/modules "java") (types/ModuleType "java"))
+        m (types/ModuleType "java.lang")
+        cmp3 (fn [a b] (if (< a b) -1 (if (> a b) 1 0)))
+        numclass (fn [base] (python/type "NumClass" (python/tuple [base])
+                                         (python/dict {"compare" (python/staticmethod cmp3)})))
+        classes {"Boolean" python/bool "Long" (numclass python/int) "Integer" (numclass python/int)
+                 "Double" (numclass python/float) "Float" (numclass python/float) "Number" python/float
+                 "String" python/str "Character" python/str "Object" python/object
+                 "Class" python/type "Comparable" python/object}]
+    (doseq [[n c] classes] (python/setattr m n c))
+    (python/setattr pkg "lang" m)
+    (.__setitem__ sys/modules "java" pkg)
+    (.__setitem__ sys/modules "java.lang" m)
+    m))
+
+(let [s (symbol "java.lang")]
+  (set! (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace)
+        (conj (.-DEFAULT-IMPORTS basilisp.lang.runtime/Namespace) s))
+  (doseq [n (all-ns)] (.add-import n s java-lang)))
+
+;; generated modules name a module import by a fixed alias from the
+;; generator's _MODULE_ALIASES (as clojure.lang's eve_clojure_lang above)
+(.__setitem__ (python/getattr (.get sys/modules "basilisp.lang.compiler.generator") "_MODULE_ALIASES")
+              "java.lang" "eve_java_lang")
+(python/setattr builtins "eve_java_lang" java-lang)
+
 
 ;; --- the JVM's class names: a.b.C read as basilisp's a.b/C ----------------------
 ;; basilisp names a class in a module module/Name and refuses a bare symbol
@@ -831,3 +1105,31 @@
                            rf (xform (fn ([coll] (with-meta (persistent! coll) tm)) ([coll v] (conj! coll v))))]
                        (rf (reduce rf (transient to) from)))
                      (let [rf (xform conj)] (rf (reduce rf to from))))))))
+
+;; --- clojure.data: this seat ships none; Eve's completion carries it ----------
+;; (adapters/completion/basilisp/src/clojure/data.lpy, mirroring the glojure
+;; completion's clojure.data). Library deftype specs name its protocols
+;; (datascript's DB names clojure.data/Diff and EqualityPartition), so the
+;; namespace must be loaded before such a library is read. Two measured
+;; constraints shape this loader: (1) it runs at the END of this file --
+;; importing a namespace mid-file disturbs the sections below it (the
+;; java.lang section's types/ModuleType stopped resolving); (2) neither
+;; require nor a plain dotted import can reach it -- sys.modules.clojure
+;; is this completion's own pseudo-package, a bare module with no
+;; __path__, so a dotted import dies with "'clojure' is not a package".
+;; The loader asks basilisp's importer (on sys.meta_path) for the spec
+;; directly -- find_spec with no path walks sys.path itself -- then
+;; drives importlib's module_from_spec + the spec loader's exec_module.
+;; The host-call spellings are this file's own: (.method obj args) for
+;; method calls and (.-attr obj) for attribute reads.
+(let [importlib-mod (.get sys/modules "importlib")]
+  (when importlib-mod
+    (try
+      (let [util-mod (.import_module importlib-mod "importlib.util")
+            finder (first (filter (fn [f] (= "BasilispImporter" (.-__name__ (type f)))) sys/meta_path))
+            spec (when finder (.find_spec finder "clojure.data" nil nil))]
+        (when spec
+          (let [mod (.module_from_spec util-mod spec)]
+            (.__setitem__ sys/modules "clojure.data" mod)
+            (.exec_module (.-loader spec) mod))))
+      (catch python/Exception _ nil))))

@@ -6,6 +6,14 @@ and its processes share no heap, so eve's memory on the BEAM is a NIF's: `adapte
 shared futex (a 100 µs poll outside Linux), and arrays as NIF resources. eve's threads are BEAM processes, which ship closures and block cheaply.
 clojerl is the capstone's usual coordinator.
 
+**0.9.3.1 (2026-11-09).** This release fixes the seat's first `swap!` wall:
+`eve.core/-with-meta`'s `:clje` branch discarded the value being meta'd, so the first swap's install
+carried an empty atom box (journals pre-fix carry the empty values; re-create worlds seated under
+them). The people-1k dataset run is diagnosed slow-not-stuck — its transact cost grows
+superlinearly; at the previous tree its checks died on `clojerl.IHash` for the sorted set's Iter,
+and the rebuild carrying this tree's Iter-hash fix has not been run. The journal-file adapter
+(`beam`) is in tree.
+
 ```bash
 export PATH=/opt/eve-tools/clojerl/bin:$PATH
 bb test:clje                   # the battery; eve's NIF is built on first load (gcc and the BEAM's erl_nif.h)

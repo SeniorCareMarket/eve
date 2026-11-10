@@ -47,6 +47,7 @@
    [eve.deftype.int-map-test :as int-map-test]
    [eve.deftype.rb-tree-test :as rb-tree-test]
    [eve.numeric-tags-test :as numeric-tags-test]
+   [eve.overflow-test :as overflow-test]
    [eve.collection-hash-test :as collection-hash-test]
    [eve.reference-tag-test :as reference-tag-test]
    [eve.big-value-test :as big-value-test]
@@ -97,79 +98,6 @@
    [eve.net.pruned-swap-test :as net-pruned-swap-test]
    [eve.net.bytes-codec-test :as net-bytes-codec-test]))
 
-;; Anti-DCE exports — namespace aliases as values force the test namespaces to load.
-;; The undeclared-var warnings here are expected and harmless.
-(goog/exportSymbol "eve.deftype_test" deftype-test)
-(goog/exportSymbol "eve.array_test" array-test)
-(goog/exportSymbol "eve.map_test" map-test)
-(goog/exportSymbol "eve.vec_test" vec-test)
-(goog/exportSymbol "eve.vec_retire_test" vec-retire-test)
-(goog/exportSymbol "eve.reclaim_test" reclaim-test)
-(goog/exportSymbol "eve.tally_test" tally-test)
-(goog/exportSymbol "eve.read_region_test" read-region-test)
-(goog/exportSymbol "eve.thread_host_test" thread-host-test)
-(goog/exportSymbol "eve.thread_test" thread-test)
-(goog/exportSymbol "eve.thread_meta_test" thread-meta-test)
-(goog/exportSymbol "eve.thread_domain_test" thread-domain-test)
-(goog/exportSymbol "eve.thread_fold_test" thread-fold-test)
-(goog/exportSymbol "eve.thread_fold_group_test" thread-fold-group-test)
-(goog/exportSymbol "eve.thread_net_test" thread-net-test)
-(goog/exportSymbol "eve.list_test" list-test)
-(goog/exportSymbol "eve.set_test" set-test)
-(goog/exportSymbol "eve.large_scale_test" large-scale-test)
-(goog/exportSymbol "eve.epoch_gc_test" epoch-gc-test)
-(goog/exportSymbol "eve.obj_test" obj-test)
-(goog/exportSymbol "eve.batch2_validation_test" batch2-test)
-(goog/exportSymbol "eve.batch3_validation_test" batch3-test)
-(goog/exportSymbol "eve.batch4_validation_test" batch4-test)
-(goog/exportSymbol "eve.deftype.int_map_test" int-map-test)
-(goog/exportSymbol "eve.deftype.rb_tree_test" rb-tree-test)
-(goog/exportSymbol "eve.numeric_tags_test" numeric-tags-test)
-(goog/exportSymbol "eve.collection_hash_test" collection-hash-test)
-(goog/exportSymbol "eve.reference_tag_test" reference-tag-test)
-(goog/exportSymbol "eve.big_value_test" big-value-test)
-(goog/exportSymbol "eve.sorted_coll_test" sorted-coll-test)
-(goog/exportSymbol "eve.keyring_test" keyring-test)
-(goog/exportSymbol "eve.int_key_nested_value_test" int-key-nested-value-test)
-(goog/exportSymbol "eve.value_buffer_test" value-buffer-test)
-(goog/exportSymbol "eve.deftype.type_id_test" type-id-test)
-(goog/exportSymbol "eve.typed_array_test" typed-array-test)
-(goog/exportSymbol "eve.mem_test" mem-test)
-(goog/exportSymbol "eve.mmap_test" mmap-test)
-(goog/exportSymbol "eve.mmap_worker_test" mmap-worker-test)
-(goog/exportSymbol "eve.mmap_slab_test" mmap-slab-test)
-(goog/exportSymbol "eve.mmap_atom_test" mmap-atom-test)
-(goog/exportSymbol "eve.merkle_phase5_test" merkle-phase5-test)
-(goog/exportSymbol "eve.mmap_atom_e2e_test" mmap-atom-e2e-test)
-(goog/exportSymbol "eve.mmap_domain_test" mmap-domain-test)
-(goog/exportSymbol "eve.conformance_test" conformance-test)
-(goog/exportSymbol "eve.fuzz_test" fuzz-test)
-(goog/exportSymbol "eve.eve_bytes_fixture_test" fixture-test)
-(goog/exportSymbol "eve.char_key_test" char-key-test)
-(goog/exportSymbol "eve.hamt_util_test" hamt-util-test)
-(goog/exportSymbol "eve.coalesc_align_test" coalesc-align-test)
-(goog/exportSymbol "eve.lustre_test" lustre-test)
-(goog/exportSymbol "eve.lustre_bench" lustre-bench)
-(goog/exportSymbol "eve.dataset_test" dataset-test)
-(goog/exportSymbol "eve.array_hosts_test" array-hosts-test)
-(goog/exportSymbol "eve.tensor_test" tensor-test)
-(goog/exportSymbol "eve.rrb_vector_test" rrb-vector-test)
-(goog/exportSymbol "eve.columnar_bench" columnar-bench)
-(goog/exportSymbol "eve.perf_audit" perf-audit)
-(goog/exportSymbol "eve.repro_test" repro-test)
-(goog/exportSymbol "eve.slab_leak_test" slab-leak-test)
-(goog/exportSymbol "eve.net.json_test" net-json-test)
-(goog/exportSymbol "eve.net.graft_test" net-graft-test)
-(goog/exportSymbol "eve.net.xxh3_test" net-xxh3-test)
-(goog/exportSymbol "eve.net.codec_fixture_test" net-codec-fixture-test)
-(goog/exportSymbol "eve.net.wire_test" net-wire-test)
-(goog/exportSymbol "eve.net.broker_test" net-broker-test)
-(goog/exportSymbol "eve.net.broker_disk_test" net-broker-disk-test)
-(goog/exportSymbol "eve.net.remote_atom_test" net-remote-atom-test)
-(goog/exportSymbol "eve.net.crypto_test" net-crypto-test)
-(goog/exportSymbol "eve.net.ed25519_test" net-ed25519-test)
-(goog/exportSymbol "eve.net.pruned_swap_test" net-pruned-swap-test)
-(goog/exportSymbol "eve.net.bytes_codec_test" net-bytes-codec-test)
 
 ;; Isolated namespace support
 (def ^:private isolated-nss
@@ -453,6 +381,7 @@
     'eve.hamt-util-test
     'eve.coalesc-align-test
     'eve.numeric-tags-test
+    'eve.overflow-test
     'eve.collection-hash-test
     'eve.reference-tag-test
     'eve.big-value-test

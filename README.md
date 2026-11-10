@@ -84,16 +84,16 @@ served by a gateway (`network_atom.cljc`).
 
 A host is a list of adapter roots, one row of [`hosts.edn`](hosts.edn); eve's shared code (`src/`) names none of them
 but one ClojureScript-only file (`src/eve/shared_atom.cljs`, counted in `.host-leak`).
-Status: the JVM and babashka rows are the 0.9.0 release battery (2026-11-03, one Linux box; [CHANGELOG.md](CHANGELOG.md));
-the other rows are the final pass of 2026-10-21/22 ET, not re-run for 0.9.0. Each host's page in
+Status: the JVM and babashka rows are the 0.9.3.1 release battery (2026-11-09, one Linux box; [CHANGELOG.md](CHANGELOG.md));
+the other rows are the final pass of 2026-10-21/22 ET, not re-run for 0.9.0 or 0.9.3.1. Each host's page in
 [doc/hosts/](doc/hosts/README.md) has its runs, its performance, how eve is built on it and its gotchas.
 
 | Host | Runs on | Runner | Measured |
 |---|---|---|---|
-| JVM | Clojure 1.12, JDK 21 | `clojure -M:jvm-test` | **green** (0.9.0): 643 tests, 10,723 assertions |
+| JVM | Clojure 1.12, JDK 21 | `clojure -M:jvm-test` | **green** (0.9.3.1): 659 tests, 10,730 assertions, 0 failures, 0 errors, 630 s |
 | ClojureScript (Node) | shadow-cljs, Node + eve's N-API addon | `node target/eve-test/all.js <suite>` | **green**: `all` 482 tests, 34,980 assertions; `net` 62 / 1,429, `slab-grow` 105 / 28,902, `thread-domain` 12 / 146, `deftype` 63 / 710 green |
 | ClojureScript (browser) | a cross-origin-isolated page | `bb test:browser` | **green**: 48 tests, 633 assertions (headless Chromium) |
-| babashka | bb 1.13 | `bb test:bb` | **green** (0.9.0): 294 tests, 5,632 assertions (babashka-minimal 242 / 4,623 on the final pass) |
+| babashka | bb 1.13 | `bb test:bb` | **green** (0.9.3.1): 251 tests / 4,678 assertions (30 namespaces) + 42 / 890 (the remaining 9), 0 failures, 0 errors both counts; `eve.thread-net-test` and `eve.aegis.rsabssa-test` excluded by name |
 | nbb | Node | `bb test:nbb` | **green**: 242 tests, 4,617 assertions |
 | ClojureCLR | .NET 8, ClojureCLR 1.12.6 | `bb test:cljr` | **green**: 202 tests, 4,499 assertions |
 | basilisp | CPython 3.13, basilisp 0.5.1 | `bb test:lpy` | 180 tests, 4,350 assertions passing, **7 errors**: eve.thread.domain's 120 s waits run out late in the full run (checklist 9.26; fold on a group's three with a leak of its own, 9.35); each of those namespaces alone green |
@@ -144,6 +144,10 @@ jank, phel) and a babashka atomics pod nothing uses.
 
 ## Performance
 
+The 0.9.3.1 measurements — Eve-DataScript vs stock DataScript, the startup shootout, the write and
+read repair rows, gaps named — are in [doc/performance.md](doc/performance.md). The suite below is
+the per-host record.
+
 One performance suite (`test/eve/perf_suite.cljc`, ten workloads over the public API: swaps and derefs of in-process
 atoms, a zero-copy read, a 1,000-element reset, sorted-set and int-map builds, a disk-domain swap, 64 tasks through
 the compute pool) runs on every host: `bb scripts/perf-all.clj` runs them one at a time and writes
@@ -162,6 +166,8 @@ numbers are in [doc/hosts/](doc/hosts/README.md). The cost of each seam, portabl
 | [doc/network-atoms/README.md](doc/network-atoms/README.md) | network atoms, gateways, sign-in |
 | [doc/collections.md](doc/collections.md), [doc/data-structures.md](doc/data-structures.md), [doc/obj.md](doc/obj.md) | the collections, typed arrays, objects, datasets |
 | [doc/platform-support.md](doc/platform-support.md) | the host matrix |
+| [doc/stm.md](doc/stm.md) | the STM: refs on Eve atoms, `dosync`, the history-encoding disclosure |
+| [doc/performance.md](doc/performance.md) | the 0.9.3.1 performance record: Eve-DataScript vs stock, the startup shootout, gaps named |
 | [doc/hosts/](doc/hosts/README.md) | one page per host: its battery, its performance, how eve is built on it, gotchas, next steps |
 | [doc/architecture.md](doc/architecture.md), [doc/internals.md](doc/internals.md) | the design, the byte format, the slab allocator |
 | [doc/memory-model.md](doc/memory-model.md) | how memory is reclaimed, and where eve's code differs from the model |

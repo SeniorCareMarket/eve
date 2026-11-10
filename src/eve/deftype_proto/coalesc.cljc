@@ -51,7 +51,13 @@
 ;;=============================================================================
 
 (def ^:const DESC_COL_BYTES 28)     ;; total column bytes per descriptor (the columns below)
-(def ^:const MAX_DESCRIPTORS 16384) ;; default; can be overridden
+(def ^:const MAX_DESCRIPTORS 16384) ;; heap-form default descriptor count; overridable per domain
+;; The descriptor count is a CREATION parameter of the domain (stored in
+;; the .slab6 header, read back at open) — never an intrinsic ceiling:
+;; a domain opener sizes the table with :coalesc-descriptors. The mmap
+;; form defaults far larger: its table lives in the sparse .slab6 file,
+;; so untouched descriptor pages cost no resident memory.
+(def ^:const DEFAULT_MMAP_DESCRIPTORS 1048576)
 
 ;; Descriptor field ids — a field names a COLUMN, not a byte offset in a row (2026-10-25). A field's entry
 ;; sits at dt-off + max-desc * (column prefix) + idx * (column width) + sub-offset (desc-byte-off):
@@ -103,22 +109,22 @@
 
 (defn- desc-table-offset
   "Read the descriptor table byte offset from the .slab6 header."
-  ^long [region]
+   [region]
   (slab/region-load-i32 region d/SLAB_HDR_BITMAP_OFFSET))
 
 (defn- max-descs
   "Read the max descriptor count from the .slab6 header."
-  ^long [region]
+   [region]
   (slab/region-load-i32 region d/SLAB_HDR_TOTAL_BLOCKS))
 
 (defn- data-region-offset
   "Read the data region byte offset from the .slab6 header."
-  ^long [region]
+   [region]
   (slab/region-load-i32 region d/SLAB_HDR_DATA_OFFSET))
 
 (defn current-data-size
   "Read the current data-region size from the .slab6 header."
-  ^long [region]
+   [region]
   (slab/region-load-i64 region COALESC_HDR_DATA_SIZE))
 
 ;;=============================================================================
@@ -127,7 +133,7 @@
 
 (defn- desc-col-prefix
   "The per-entry bytes of the columns before field's column."
-  ^long [field]
+   [field]
   (cond (== field DESC_STATUS) 0
         (== field DESC_DATA_LENGTH) 12
         (== field DESC_LOCK_OWNER) 16
@@ -137,17 +143,17 @@
 
 (defn- desc-col-width
   "The column's entry width: GEOM entries are 8 bytes, the rest 4."
-  ^long [field]
+   [field]
   (if (or (== field DESC_DATA_OFFSET) (== field DESC_BLOCK_CAPACITY)) 8 4))
 
 (defn- desc-col-sub
   "The field's offset within its column entry: BLOCK_CAPACITY sits at +4."
-  ^long [field]
+   [field]
   (if (== field DESC_BLOCK_CAPACITY) 4 0))
 
 (defn- desc-byte-off
   "Absolute byte offset of field within descriptor idx: the field's column entry."
-  ^long [dt-off max-desc idx field]
+   [dt-off max-desc idx field]
   (+ dt-off (* max-desc (desc-col-prefix field)) (* idx (desc-col-width field)) (desc-col-sub field)))
 
 (defn- desc-load
@@ -264,11 +270,19 @@
     (desc-store! region desc-table-offset max-desc 0 DESC_LOCK_OWNER LOCK_UNLOCKED)
     (desc-store! region desc-table-offset max-desc 0 DESC_RESERVED2 0)
 
-    ;; Remaining descriptors: ZEROED_UNUSED
-    (dotimes [i (dec max-desc)]
-      (let [idx (inc i)]
-        (desc-store! region desc-table-offset max-desc idx DESC_STATUS STATUS_ZEROED_UNUSED)
-        (desc-store! region desc-table-offset max-desc idx DESC_LOCK_OWNER LOCK_UNLOCKED)))
+    ;; Remaining descriptors 1..max-desc-1: STATUS <- ZEROED_UNUSED and
+    ;; LOCK_OWNER <- UNLOCKED, one fill per column (each field's column is
+    ;; contiguous, 4-byte entries — desc-byte-off), the same bytes the
+    ;; per-descriptor loop wrote at ~1 us of protocol dispatch per store
+    ;; (2.2 s at 1,048,576 descriptors on jank). LOCK_OWNER's zeros stay
+    ;; explicit: a reused file is not guaranteed zero. This initializes a
+    ;; fresh region before publication — it is not zeroing reused memory.
+    (let [n (dec max-desc)]
+      (when (pos? n)
+        (eve.mem/fill-i32! region (desc-byte-off desc-table-offset max-desc 1 DESC_STATUS)
+                           n STATUS_ZEROED_UNUSED)
+        (eve.mem/fill-i32! region (desc-byte-off desc-table-offset max-desc 1 DESC_LOCK_OWNER)
+                           n LOCK_UNLOCKED)))
 
     region))
 
@@ -419,11 +433,33 @@
             ;; Not a suitable candidate — continue
             (recur (inc i) wrapped?)))))))
 
+(defn descriptors-exhausted?
+  "True when no ZEROED_UNUSED descriptor remains in the region's
+   table — allocation failure is then the table's size (the domain's
+   :coalesc-descriptors creation parameter), not space: growing the
+   data region cannot mint descriptors and must not be attempted
+   (the growing allocator once doubled the data region twenty times
+   chasing a descriptor failure — the wall the DataScript port hit)."
+  [region]
+  (== -1 (find-zeroed-slot region (desc-table-offset region) (max-descs region) 0)))
+
 (defn coalesc-alloc!
-  "try-coalesc-alloc!, throwing on OOM."
+  "try-coalesc-alloc!, throwing on OOM. The two failures are named
+   apart: descriptor-table exhaustion (every descriptor in use — the
+   table's size is the domain's :coalesc-descriptors creation
+   parameter, not a space limit) vs a genuinely unplaceable block."
   [region size-bytes]
   (or (try-coalesc-alloc! region size-bytes)
-      (throw (ex-info "coalesc-alloc!: out of memory" {:size size-bytes}))))
+      (let [dt-off   (desc-table-offset region)
+            max-desc (max-descs region)]
+        (if (== -1 (find-zeroed-slot region dt-off max-desc 0))
+          (throw (ex-info (str "coalesc-alloc!: descriptor table exhausted — all "
+                               max-desc " descriptors are in use. The count is a "
+                               "creation parameter: reopen the domain with a larger "
+                               ":coalesc-descriptors.")
+                          {:size size-bytes :max-descriptors max-desc
+                           :descriptor-exhausted true}))
+          (throw (ex-info "coalesc-alloc!: out of memory" {:size size-bytes}))))))
 
 ;;=============================================================================
 ;; Free

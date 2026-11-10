@@ -58,8 +58,8 @@
   []
   (alloc/current-sio))
 
-(defn- bytes-length [ba]
-  (alength ^bytes ba))
+(defn- bytes-length [^bytes ba]
+  (alength ba))
 
 ;;=============================================================================
 ;; Node operations (via ISlabIO)
@@ -74,7 +74,7 @@
 ;; A published node's (or this thread's own transient node's) words: the hot read path's plain node read
 ;; (eve.deftype-proto.alloc/node-i32; jvm-heap-grade step 3).
 (defn node-get [sio node-off i]
-  (alloc/node-i32 sio node-off (* (long i) 4)))
+  (alloc/node-i32 sio node-off (* (eve.host/long i) 4)))
 
 (defn- node-set! [sio node-off i val]
   (slab/write-i32! sio node-off (* i 4) val)
@@ -835,20 +835,16 @@
 
 ;; Collection writer: a host collection written straight into the slab, for a
 ;; codec that writes one directly (eve.codec)
-(defn- -write-vec-coll!
-  "Serialize a Clojure vector/seq to slab as an Eve persistent vector trie.
-   Returns header offset."
-  [sio _serialize-val coll]
-  (let [elems (vec coll)
-        cnt   (count elems)]
+(defn- assemble-vec!
+  "The trie + tail + header of a vector whose elements are the
+   EXISTING value blocks val-offs (i32 offsets in sio's domain), in
+   order. Returns the header offset."
+  [sio val-offs]
+  (let [cnt (count val-offs)]
     (if (zero? cnt)
       (let [empty-tail (alloc-node! sio)]
         (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET empty-tail 0))
-      (let [val-offs (mapv (fn [elem]
-                             (make-value-block! sio (codec/encode-value sio elem)))
-                           elems)
-            toff     (tail-offset-calc cnt)
-            tail-len (- cnt toff)
+      (let [toff     (tail-offset-calc cnt)
             tail-off (let [t-off (alloc-node! sio)]
                        (dorun (map-indexed
                                 (fn [i v-off]
@@ -886,7 +882,92 @@
                                     node-off))
                                 (partition-all NODE_SIZE nodes))]
                       (recur parent-nodes (+ sh SHIFT_STEP)))))))]
-        (write-vec-header! sio cnt sft root tail-off tail-len)))))
+        (write-vec-header! sio cnt sft root tail-off (- cnt toff))))))
+
+(defn- -write-vec-coll!
+  "Serialize a Clojure vector/seq to slab as an Eve persistent vector trie.
+   Returns header offset."
+  [sio _serialize-val coll]
+  (assemble-vec! sio (mapv (fn [elem]
+                             (make-value-block! sio (codec/encode-value sio elem)))
+                           (vec coll))))
+
+;; ---------------------------------------------------------------------------
+;; Block-level construction — vectors assembled from existing element
+;; blocks. A builder that carries elements over from a vector it is
+;; derived from (a splice, a sub-range, a concatenation) shares their
+;; value blocks instead of decoding and re-wrapping every element:
+;; the new vector's block population is its trie + tail + header, not
+;; its length. The layout is byte-identical to an element-by-element
+;; write; the tally counts each shared block once more at publish.
+;; ---------------------------------------------------------------------------
+
+(defn elem-block-offsets
+  "The element value-block offsets of EveVector v, in order (a heap
+   vector of i32s): the block-level view of v."
+  [v]
+  (let [sio (d/-eve-sio v)
+        [cnt shift root tail _tail-len] (read-vec-header sio (d/-root-header-off v))
+        toff (tail-offset-calc cnt)]
+    (mapv (fn [n]
+            (if (>= n toff)
+              (node-get sio tail (- n toff))
+              (loop [node-off root sh shift]
+                (let [idx (bit-and (unsigned-bit-shift-right n sh) MASK)]
+                  (if (zero? sh)
+                    (node-get sio node-off idx)
+                    (recur (node-get sio node-off idx) (- sh SHIFT_STEP)))))))
+          (range cnt))))
+
+(defn build-vec
+  "An EveVector whose elements are the EXISTING value blocks
+   elem-offs (i32 offsets in sio's domain), shared, not copied: only
+   the trie, tail and header blocks are written."
+  [sio elem-offs]
+  (vec-from-header sio (assemble-vec! sio (vec elem-offs))))
+
+(defn wrap-elem-block!
+  "The offset of a fresh value block holding x's element encoding in
+   sio's domain — the cost of one genuinely new vector element."
+  [sio x]
+  (make-value-block! sio (codec/encode-value sio x)))
+
+(defn splice-vec
+  "A new EveVector: v[from, splice-from) ++ xs ++ v[splice-to, to),
+   built at the block level. Carried-over elements keep their value
+   blocks — no decode, no re-encode, no re-wrap; each x in xs (host
+   values) is wrapped once. The block population of the result is its
+   trie + tail + header plus one value block per x, independent of
+   how many elements carry over."
+  [v from splice-from splice-to to xs]
+  (let [sio  (d/-eve-sio v)
+        offs (elem-block-offsets v)
+        mid  (mapv (fn [x] (wrap-elem-block! sio x)) (vec xs))]
+    (build-vec sio (into (into (subvec offs from splice-from) mid)
+                         (subvec offs splice-to to)))))
+
+(defn subvec-sharing
+  "A new EveVector holding v[from, to)'s elements, sharing their
+   value blocks (the block-level subvec)."
+  [v from to]
+  (build-vec (d/-eve-sio v) (subvec (elem-block-offsets v) from to)))
+
+(defn concat-vec
+  "A new EveVector: v's elements followed by w's, sharing both
+   vectors' element blocks. v and w must live in the same domain."
+  [v w]
+  (build-vec (d/-eve-sio v) (into (elem-block-offsets v) (elem-block-offsets w))))
+
+(defn replace-range-vec
+  "A new EveVector: `to` with the (from-end - from-start) elements at
+   to-start replaced by from[from-start, from-end)'s elements, all
+   carried over at the block level."
+  [to to-start from from-start from-end]
+  (let [offs (elem-block-offsets to)
+        seg  (subvec (elem-block-offsets from) from-start from-end)]
+    (build-vec (d/-eve-sio to)
+               (into (into (subvec offs 0 to-start) seg)
+                     (subvec offs (+ to-start (count seg)))))))
 
 ;; Type constructor + disposer + builder + collection writer registrations
 (defn- vec->host-value

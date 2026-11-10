@@ -20,7 +20,8 @@
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
                      -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
                      -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]))
+                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
+                     -fill-i32!]]))
 
 ;; Every region has atomic RMW unless it says otherwise.
 (extend-protocol mem/IHostAtomics
@@ -31,8 +32,19 @@
 ;; --- Helpers ---
 
 (defn- byte-off->i32-idx
-  "Convert a 4-byte-aligned byte offset to the Int32Array element index."
+  "Convert a 4-byte-aligned byte offset to the Int32Array element index.
+   IMemRegion's atomic i32/i64 ops require 4-byte alignment; an Int32Array
+   index cannot express any other offset, and flooring one (byte-off >>> 2)
+   would land the access on the wrong word — a silent mis-write. So a
+   misaligned offset throws (F-REGION-ATOMIC-ALIGN's JS hazard). Packed slab
+   payload words never come here: the slab I/O reads and writes them as
+   plain bytes (alloc's -sio-read-i32 / -sio-write-i32!, the module slab's
+   DataView)."
   [byte-off]
+  (when-not (zero? (bit-and byte-off 3))
+    (throw (ex-info (str "eve.region: misaligned i32 atomic access at byte offset " byte-off
+                         " (IMemRegion atomics require 4-byte alignment)")
+                    {:byte-off byte-off})))
   (unsigned-bit-shift-right byte-off 2))
 
 (defn- wait-result->kw
@@ -115,6 +127,17 @@
 
   (-write-bytes! [_ byte-off src]
     (.set -u8 src byte-off)
+    nil)
+
+  ;; bulk fill of a fresh, unpublished range: TypedArray fill over the
+  ;; Int32Array view, then the last slot through Atomics.store, so the fill
+  ;; is ordered before what follows as the single store is
+  mem/IFillRegion
+  (-fill-i32! [_ byte-off n val]
+    (when (pos? n)
+      (let [i0 (byte-off->i32-idx byte-off)]
+        (.fill -i32 val i0 (+ i0 n))
+        (js/Atomics.store -i32 (+ i0 (dec n)) val)))
     nil))
 
 (defn js-sab-region
@@ -266,6 +289,18 @@
     ;; Buffer.copy for zero-extra-copy semantics
     (let [src-buf (js/Buffer.from (.-buffer src) (.-byteOffset src) (.-byteLength src))]
       (.copy src-buf buf byte-off))
+    nil)
+
+  ;; bulk fill: the addon's store32 per slot, one direct native call each
+  ;; (no protocol dispatch per slot) — the MAP_SHARED mapping keeps the
+  ;; addon's store semantics on every word
+  mem/IFillRegion
+  (-fill-i32! [_ byte-off n val]
+    (let [^js nat (native)]
+      (loop [i 0]
+        (when (< i n)
+          (.store32 nat buf (+ byte-off (* 4 i)) val)
+          (recur (inc i)))))
     nil)
 
   ;; --- durability (eve.mem/ISyncableRegion): the addon's msync — the

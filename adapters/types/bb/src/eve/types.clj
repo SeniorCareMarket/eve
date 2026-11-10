@@ -161,10 +161,70 @@
                         [{:name 'hashCode :args '[this] :body '[(eve.core/-hash this)]}])
                       (get by-name 'hashCode))
         hash-code (map (fn [m] (update m :body (fn [b] [(list 'unchecked-int (cons 'do b))])))
-                       hash-code)]
+                       hash-code)
+        ;; A type carrying the full map signature (ILookup +
+        ;; Associative + Counted) is a map on the JVM whether or not
+        ;; it names IPersistentMap: deftype there answers
+        ;; clojure.core's get/assoc/count through those interfaces.
+        ;; On this seat only sci's map mode gives a type that
+        ;; visibility, so such a type's map groups are ALSO kept as
+        ;; written (with the IPersistentMap marker), beside their
+        ;; eve.core translations — datascript's DB is the measured
+        ;; case (its spec names no IPersistentMap, and library code
+        ;; reaches it through clojure.core's fns, which are blind to
+        ;; eve.core protocols).
+        ;; The exclusion that keeps this honest: a type that names
+        ;; a host collection-KIND head (IPersistentVector,
+        ;; IPersistentMap, IPersistentSet, IPersistentList, IList,
+        ;; IPersistentStack, IPersistentQueue, Sequential) is one of
+        ;; the seat's own collection types — EveVector carries the
+        ;; signature too, and as a SciMap its host hash/iteration
+        ;; walk fields instead of contents (measured: (hash
+        ;; (eve-vec [1 2 3])) threw "Method not implemented:
+        ;; iterator" in map mode, and is the eve hash as a SciType).
+        ;; Kind-headed types keep the plain translation only.
+        map-signature? (let [ps (set (map :protocol parsed-protos))]
+                         (and (contains? ps 'clojure.lang.ILookup)
+                              (contains? ps 'clojure.lang.Associative)
+                              (contains? ps 'clojure.lang.Counted)
+                              (not-any? ps '#{clojure.lang.IPersistentVector
+                                              clojure.lang.IPersistentMap
+                                              clojure.lang.IPersistentSet
+                                              clojure.lang.IPersistentList
+                                              clojure.lang.IList
+                                              clojure.lang.IPersistentStack
+                                              clojure.lang.IPersistentQueue
+                                              clojure.lang.Sequential})))
+        map-kept (when map-signature?
+                   (into [{:protocol 'clojure.lang.IPersistentMap :methods []}]
+                         (filter (fn [impl]
+                                   (contains? '#{clojure.lang.ILookup
+                                                 clojure.lang.Associative
+                                                 clojure.lang.IPersistentCollection
+                                                 clojure.lang.Counted
+                                                 clojure.lang.Seqable}
+                                              (:protocol impl)))
+                                 parsed-protos)))]
     (mapv (fn [impl] (update impl :methods #(mapv rewrite %)))
-          (conj translated
-                {:protocol 'Object :methods (vec (concat to-string equals hash-code))}))))
+          (into (conj translated
+                      {:protocol 'Object :methods (vec (concat to-string equals hash-code))})
+                (concat map-kept
+                        ;; Every type this adapter defines is an Eve type:
+                        ;; mark it with eve.deftype-proto.data/IsEve, as
+                        ;; Eve's own collection types mark themselves in
+                        ;; their sources. The mark is what lets Eve's own
+                        ;; traversal (eve->clj) tell a presented deftype
+                        ;; from a plain collection on this seat — sci's
+                        ;; predicates cannot: a map-signature type IS a
+                        ;; host map here, and an unmarked one is descended
+                        ;; into and rebuilt as plain data by a deref
+                        ;; (F-BB-DATOM-CMP: a DataScript DB in an atom,
+                        ;; its index sets materialized with their
+                        ;; registered comparators lost). A type that
+                        ;; already carries the mark keeps its own impl.
+                        (when-not (some #(= "IsEve" (name (:protocol %))) translated)
+                          [{:protocol 'eve.deftype-proto.data/IsEve
+                            :methods [{:name '-eve? :args '[_] :body '[true]}]}]))))))
 
 (defn- define [type-name fields forms]
   [`(~'deftype ~type-name ~fields ~@forms)])

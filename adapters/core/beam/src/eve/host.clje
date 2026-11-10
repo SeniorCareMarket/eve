@@ -163,6 +163,29 @@
 
 (defn region->bytes "A byte array over region r." [r] (ByteArray. r))
 
+(defn- array-str
+  "The JVM Arrays.toString shape for a host array: elements space-separated
+   in brackets. Clojerl's `str` reaches a type only through IStringable;
+   without it, stringifying any host array throws — including inside error
+   formatting, where it masks the real error."
+  [a]
+  (let [n (-alength a)]
+    (loop [i 0 parts []]
+      (if (< i n)
+        (recur (inc i) (conj parts (str (-aget a i))))
+        (str "[" (clojure.string/join " " parts) "]")))))
+
+(extend-protocol clojerl.IStringable
+  ByteArray        (toString [a] (array-str a))
+  ShortArray       (toString [a] (array-str a))
+  IntArray         (toString [a] (array-str a))
+  LongArray        (toString [a] (array-str a))
+  FloatArray       (toString [a] (array-str a))
+  DoubleArray      (toString [a] (array-str a))
+  ObjectArray      (toString [a] (array-str a))
+  ConstByteArray   (toString [a] (array-str a))
+  ConstObjectArray (toString [a] (array-str a)))
+
 (defn- filled
   "An array of ctor's kind: n zeroed elements, or the elements of a seq."
   [width ctor size-or-seq]

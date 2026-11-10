@@ -14,17 +14,39 @@
    - unchecked-int: glojure's widens instead of wrapping ((unchecked-int 0x80000000) is 2147483648, and an int64 is
      returned as Go's int); here it wraps to a signed 32-bit value, as the JVM's (the other fixed-width ops wrap
      already: measured).
+   - + - * (and inc, dec): checked, throwing on i64 overflow as the JVM's do
+     (a RuntimeException here: this runtime has no ArithmeticException type)
+     (doc/arithmetic-overflow.md; the operator's 2026-11-07 decision), through an exact promoting
+     computation — the Go carry binding (math/bits) is the seat's priced follow-on, named in that doc.
    - deref, swap!, reset!, compare-and-set!, swap-vals!, reset-vals!: glojure's take its own atom and IDeref (Go
      interfaces); for a type, they call its IDeref / IAtom below — what eve's types adapter
      (adapters/types/glojure) translates clojure.lang.IDeref and clojure.lang.IAtom onto.
-   - realized?: a type's IPending likewise.
+   - realized?: a type's IPending likewise. add-watch, remove-watch, set-validator!, get-validator, alter-meta!
+     and reset-meta!: a type's IRef / IReference below (extend-clj's deftype-atom face, extend_clj/core.glj in
+     this completion, builds its watches/validator/meta on them).
+   - instance? of one of the JVM interfaces deftype translates (clojure.lang.IDeref and kin): glojure answers
+     by Go type identity, which a record never has; for a deftype instance it also answers by the translation —
+     true when the type was extended to the interface's protocol.
    - sequence with a transducer, dedupe of a collection and partition-all's transducer: glojure's reach JVM classes
      it lacks (clojure.lang.RT.chunkIteratorSeq, a sized java.util.ArrayList); Clojure's here.
    - defprotocol and extend: glojure's protocol is a multimethod per method on class, its impls wrapped in variadic
      fns that apply them (~3 µs a call); a protocol defined after this has fixed-arity method fns, each caching the
      impl it found for a class, and extend writes the protocol's table (glojure's own protocols keep glojure's).
+   - a deftype/reify naming a JVM interface (clojure.lang.ILookup and kin, as plain Clojure code writes them):
+     the interface goes onto eve.core's protocols, through eve.deftype-proto.proto-map's table — the one eve's
+     types adapter translates eve-deftypes by — or onto this completion's own for the atom interfaces.
+   - get, assoc, contains?, count and seq on a type: through eve.core's protocols, once eve's types adapter
+     names the dispatch (set-coll-dispatch!); a record's own answers are its fields'.
 
    Calls compiled after this, in any namespace: each is re-rooted (an :inline one loses its inlining first).")
+
+;; The reduce protocols' namespace, loaded here: deftype's map-mode expansion
+;; (below) extends clojure.core.protocols/CollReduce and IKVReduce, and glojure
+;; loads that namespace only when something requires it — under the test
+;; runner clojure.test does; a program that requires eve.atom without it died
+;; at eve.map's first map type with an opaque *runtime.RTEvalError
+;; ("EvalASTMaybeHostForm: clojure.core.protocols/CollReduce").
+(require 'clojure.core.protocols)
 
 ;; ---------------------------------------------------------------------------
 ;; The fixed-width op glojure widens
@@ -38,6 +60,87 @@
 
 (alter-meta! #'clojure.core/unchecked-int dissoc :inline)
 (alter-var-root #'clojure.core/unchecked-int (fn [_] wrap-int))
+
+;; ---------------------------------------------------------------------------
+;; + - * checked (doc/arithmetic-overflow.md)
+;; ---------------------------------------------------------------------------
+;; The arithmetic contract (the operator's 2026-11-07 decision): checked
+;; + - * throw ArithmeticException on i64 overflow on every host, +' -' *'
+;; promote, unchecked-* wrap. This binding does not depend on what the
+;; seat's own + does at the i64 edge: when both operands are integers in
+;; the i64 range, the exact result is computed through the promoting op
+;; and a result outside the range throws; any other operands (a value
+;; already past i64, a double, a ratio) keep the seat's own answer. The
+;; price is REAL (an exact widening computation per integer op, at this
+;; seat's interpreted-op prices): the flag binding — math/bits' carry out
+;; of Add64/Sub64, a hi-word compare for Mul64 — is Go-level and belongs
+;; with eve's Go package for this seat (impls/glojure), named in the doc
+;; as this seat's priced follow-on; this binding holds the contract
+;; until then.
+
+(def ^:private i64-min -9223372036854775808)
+(def ^:private i64-max 9223372036854775807)
+
+(defn- in-i64 [x] (and (integer? x) (<= i64-min x) (<= x i64-max)))
+
+(defn- overflow! []
+  ;; glojure's runtime carries no ArithmeticException type (measured: the
+  ;; name, bare or java.lang-qualified, does not resolve; IllegalArgument-
+  ;; Exception and RuntimeException do, as Go error constructors). The
+  ;; throw is ArithmeticException's JVM parent, named here so the seat's
+  ;; divergence is a class name, never the semantics.
+  (throw (RuntimeException. "integer overflow")))
+
+(defn- checked2
+  "core-fn's answer, throwing when two i64-range integers' exact result
+   (promote-fn's) leaves the range."
+  [core-fn promote-fn]
+  (fn [x y]
+    (if (and (in-i64 x) (in-i64 y))
+      (let [exact (promote-fn x y)]
+        (if (or (< exact i64-min) (> exact i64-max)) (overflow!) (core-fn x y)))
+      (core-fn x y))))
+
+;; The helpers below capture the seat's fns as VALUES before the
+;; re-root and call only the captures. A helper that calls a re-rooted
+;; var by name recurses through its own wrapper: neg did exactly that
+;; (its body called clojure.core/-, whose new root's 1-arity is neg
+;; itself) and unary minus stack-overflowed the runtime — latent on
+;; every tree carrying this section, first bitten by a datascript
+;; load that calls unary - (glj-interaction lane, 2026-11-07).
+(let [add (checked2 clojure.core/+ clojure.core/+')
+      sub (checked2 clojure.core/- clojure.core/-')
+      mul (checked2 clojure.core/* clojure.core/*')
+      orig- clojure.core/-
+      orig-' clojure.core/-'
+      orig+' clojure.core/+'
+      orig-inc clojure.core/inc
+      orig-dec clojure.core/dec
+      neg (fn [x] (if (in-i64 x)
+                    (let [exact (orig-' x)]
+                      (if (or (< exact i64-min) (> exact i64-max)) (overflow!) (orig- x)))
+                    (orig- x)))
+      inc* (fn [x] (if (in-i64 x)
+                     (let [exact (orig+' x 1)]
+                       (if (> exact i64-max) (overflow!) (orig-inc x)))
+                     (orig-inc x)))
+      dec* (fn [x] (if (in-i64 x)
+                     (let [exact (orig-' x 1)]
+                       (if (< exact i64-min) (overflow!) (orig-dec x)))
+                     (orig-dec x)))]
+  (alter-meta! #'clojure.core/+ dissoc :inline)
+  (alter-var-root #'clojure.core/+
+    (fn [_] (fn ([] 0) ([x] x) ([x y] (add x y)) ([x y & more] (reduce add (add x y) more)))))
+  (alter-meta! #'clojure.core/- dissoc :inline)
+  (alter-var-root #'clojure.core/-
+    (fn [_] (fn ([x] (neg x)) ([x y] (sub x y)) ([x y & more] (reduce sub (sub x y) more)))))
+  (alter-meta! #'clojure.core/* dissoc :inline)
+  (alter-var-root #'clojure.core/*
+    (fn [_] (fn ([] 1) ([x] x) ([x y] (mul x y)) ([x y & more] (reduce mul (mul x y) more)))))
+  (alter-meta! #'clojure.core/inc dissoc :inline)
+  (alter-var-root #'clojure.core/inc (fn [_] inc*))
+  (alter-meta! #'clojure.core/dec dissoc :inline)
+  (alter-var-root #'clojure.core/dec (fn [_] dec*)))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocols: a method fn of fixed arities, caching its impl by class
@@ -113,6 +216,15 @@
   (-swap-vals [a f] [a f x] [a f x y] [a f x y more])
   (-reset-vals [a v]))
 (defprotocol IPending (-realized? [o]))
+(defprotocol IRef
+  (-get-validator [o])
+  (-set-validator [o vf])
+  (-get-watches [o])
+  (-add-watch [o k f])
+  (-remove-watch [o k]))
+(defprotocol IReference
+  (-alter-meta [o f args])
+  (-reset-meta [o m]))
 
 (declare satisfies?)
 
@@ -174,6 +286,24 @@
 (alter-var-root #'clojure.core/realized?
   (fn [core] (fn [x] (if (host-ref? x) (core x) (-realized? x)))))
 
+(alter-var-root #'clojure.core/add-watch
+  (fn [core] (fn [x k f] (if (host-ref? x) (core x k f) (-add-watch x k f)))))
+
+(alter-var-root #'clojure.core/remove-watch
+  (fn [core] (fn [x k] (if (host-ref? x) (core x k) (-remove-watch x k)))))
+
+(alter-var-root #'clojure.core/set-validator!
+  (fn [core] (fn [x vf] (if (host-ref? x) (core x vf) (-set-validator x vf)))))
+
+(alter-var-root #'clojure.core/get-validator
+  (fn [core] (fn [x] (if (host-ref? x) (core x) (-get-validator x)))))
+
+(alter-var-root #'clojure.core/alter-meta!
+  (fn [core] (fn [x f & args] (if (host-ref? x) (apply core x f args) (-alter-meta x f args)))))
+
+(alter-var-root #'clojure.core/reset-meta!
+  (fn [core] (fn [x m] (if (host-ref? x) (core x m) (-reset-meta x m)))))
+
 ;; ---------------------------------------------------------------------------
 ;; satisfies? / extends?
 ;; ---------------------------------------------------------------------------
@@ -198,6 +328,14 @@
 (intern 'clojure.core 'satisfies? satisfies?)
 (intern 'clojure.core 'extends? extends?)
 
+;; The clojure.core$<fn> names: on the JVM they resolve as the AOT classes of clojure.core's fns and
+;; portable code uses them as :tag hints (datascript's patch-tag tags 'number as clojure.core$long).
+;; glojure has no such classes; the names are interned here as the fns themselves — a tag is a hint,
+;; and this completion strips tags before they can act.
+(intern 'clojure.core 'clojure.core$long clojure.core/long)
+(intern 'clojure.core 'clojure.core$double clojure.core/double)
+(intern 'clojure.core 'clojure.core$boolean clojure.core/boolean)
+
 ;; ---------------------------------------------------------------------------
 ;; deftype
 ;; ---------------------------------------------------------------------------
@@ -207,10 +345,105 @@
    do for a deftype (below)."
   (atom #{}))
 
+(def ^:private raw-instance?
+  "glojure's own instance?, captured before the bridge below re-roots the var: deftype-instance?
+   is called BY that bridge, so it must not go through it (the cycle overflowed the stack at
+   load, measured)."
+  @#'clojure.core/instance?)
+
 (defn deftype-instance?
   "x is an instance of a type deftype or reify made."
   [x]
-  (and (instance? clojure.lang.IRecord x) (contains? @deftype-types (class x))))
+  (and (raw-instance? clojure.lang.IRecord x) (contains? @deftype-types (class x))))
+
+;; ---------------------------------------------------------------------------
+;; Collection access on a type: clojure.core's get, assoc, contains?, count
+;; and seq answer through eve.core's protocols for a type extended to them
+;; (a record's own answers are its fields'). The dispatch is named by eve's
+;; types adapter once eve.core exists (set-coll-dispatch!); before that, and
+;; for anything not a type, glojure's own answers stand.
+;; ---------------------------------------------------------------------------
+
+(def ^:private coll-dispatch (volatile! nil))
+
+(defn set-coll-dispatch!
+  "m: {:lookup f :assoc f :contains-key? f :count f :seq f
+       :protocols {:lookup p :assoc p :contains-key? p :count p :seq p}}."
+  [m]
+  (vreset! coll-dispatch m))
+
+(defn- real-impl?
+  "True when protocol p serves x through an impl extended to x's own type
+   or to a supertype of it — not through the protocol's Object arm.
+   eve.core's protocols extend Object arms that delegate back to
+   clojure.core's own fns (ICounted's arm calls clojure.core/count,
+   IAssociative's clojure.core/assoc, ISeqable's clojure.core/seq), so a
+   satisfies? that counts the arm makes EVERY type satisfy the protocol,
+   and routing through the arm re-enters the very fn that asked, without
+   bound (measured: eve.core/count of a persistent-sorted-set Iter —
+   which has no -count of its own — recursed count -> -count -> count
+   until the runtime stack overflowed; the same shape waited in assoc,
+   get and seq for any type lacking that kind's impl). impl-for's own
+   resolution, minus its Object fallback, is the test."
+  [p x]
+  (when p
+    (let [m @p
+          c (class x)]
+      (boolean
+        (or (get-in (:fns m) [c])
+            (some (fn [t] (and (some? t) (not (identical? t Object)) (answers? t x)))
+                  (:impls m)))))))
+
+(defn- type-dispatch
+  "The dispatch fn of kind for x, when x is a type the kind's protocol has been extended to."
+  [kind x]
+  (let [d @coll-dispatch]
+    (when (and d (deftype-instance? x) (real-impl? (get (:protocols d) kind) x))
+      (get d kind))))
+
+(alter-meta! #'clojure.core/get dissoc :inline)
+(alter-var-root #'clojure.core/get
+  (fn [core]
+    (fn ([m k] (if-let [f (type-dispatch :lookup m)] (f m k) (core m k)))
+        ([m k nf] (if-let [f (type-dispatch :lookup m)] (f m k nf) (core m k nf))))))
+
+(alter-meta! #'clojure.core/assoc dissoc :inline)
+;; The var must also carry :redef: glojure's optimizer lowers a direct
+;; (clojure.core/assoc ...) call to a native assoc node (its lower-assoc
+;; pass), never consulting the var, unless the var's meta has :redef —
+;; the compiler's own exemption for redefined core vars. Without the
+;; mark, a compiled assoc on a type record-clones it: the clone's cached
+;; fields carry the new value but the instance keeps the receiver's slab
+;; block, so a value built by assoc publishes the pre-assoc original
+;; wherever the slab is read (measured: a DataScript DB built by
+;; db-with's assoc/update chain inside a persistent-domain swap
+;; materialized as the empty DB it started from). Calls through the var
+;; were always routed correctly; the mark makes compiled calls take the
+;; same path. The mark must be set before the calling code is analyzed,
+;; which the completion's load position (Eve boot, before any port code)
+;; guarantees.
+(alter-meta! #'clojure.core/assoc assoc :redef true)
+(alter-var-root #'clojure.core/assoc
+  (fn [core]
+    (fn ([m] m)
+        ([m k v] (if-let [f (type-dispatch :assoc m)] (f m k v) (core m k v)))
+        ([m k v & kvs] (let [ret (if-let [f (type-dispatch :assoc m)] (f m k v) (core m k v))]
+                         (if kvs (apply clojure.core/assoc ret kvs) ret))))))
+
+(alter-meta! #'clojure.core/contains? dissoc :inline)
+(alter-var-root #'clojure.core/contains?
+  (fn [core]
+    (fn [m k] (if-let [f (type-dispatch :contains-key? m)] (f m k) (core m k)))))
+
+(alter-meta! #'clojure.core/count dissoc :inline)
+(alter-var-root #'clojure.core/count
+  (fn [core]
+    (fn [x] (if-let [f (type-dispatch :count x)] (f x) (core x)))))
+
+(alter-meta! #'clojure.core/seq dissoc :inline)
+(alter-var-root #'clojure.core/seq
+  (fn [core]
+    (fn [x] (if-let [f (type-dispatch :seq x)] (f x) (core x)))))
 
 ;; A record is a map to glojure's core: a type is not. map?, coll?, associative?, counted?, seqable? and record? are
 ;; false for one (eve's shared code tells a host collection from a type by them: d/eve->clj pours a map? into a map,
@@ -337,8 +570,13 @@
 (alter-var-root #'clojure.core/into
   (fn [core]
     (fn ([] []) ([to] to)
-      ([to from] (if (sorted? to) (reduce conj to from) (core to from)))
-      ([to xform from] (if (sorted? to) (transduce xform conj to from) (core to xform from))))))
+      ;; a deftype source is handed over as its seq: glojure's native into
+      ;; coerces a deftype instance as a map of its fields (see the
+      ;; seq-coercion routing below)
+      ([to from] (if (sorted? to) (reduce conj to from)
+                     (core to (if (deftype-instance? from) (seq from) from))))
+      ([to xform from] (if (sorted? to) (transduce xform conj to from)
+                           (core to xform (if (deftype-instance? from) (seq from) from)))))))
 
 (defn- cmp-of [sc]
   (let [f (.comparator sc)]
@@ -368,6 +606,129 @@
       ([sc start-test start-key end-test end-key]
        (seq (take-while (bound sc start-test start-key)
                         (drop-while (complement (bound sc end-test end-key)) (rseq sc))))))))
+
+;; ---------------------------------------------------------------------------
+;; The transient family, for a deftype: glojure's transient and its kin
+;; Go-assert the value to glojure's own transient interfaces, which a record
+;; never implements ("*lang.Record is not ITransientCollection: missing
+;; method AsTransient", measured on datascript's (update report :db-after
+;; transient)) — an Eve type's transience is eve.core's IEditableCollection
+;; / ITransient* protocols, which its impls were translated onto. For a
+;; deftype instance satisfying the eve.core protocol, the core fn routes
+;; there; every other value keeps glojure's answer. eve.core is resolved
+;; lazily: it loads with the first eve-typed deftype, before portable code
+;; transients one.
+;; ---------------------------------------------------------------------------
+
+(defn- eve-proto
+  "eve.core's protocol of this name, or nil when eve.core is not loadable here."
+  [sym]
+  (try (require 'eve.core)
+       (when-let [v (resolve (symbol "eve.core" (name sym)))] @v)
+       (catch Throwable _ nil)))
+
+(defn- eve-method
+  "eve.core's protocol fn of this name, or nil."
+  [sym]
+  (try (require 'eve.core)
+       (resolve (symbol "eve.core" (name sym)))
+       (catch Throwable _ nil)))
+
+(defn- route-transient
+  "core wrapped so a deftype instance satisfying eve.core's protocol proto is answered by its
+   method m; any other value by core."
+  [core proto m]
+  (fn [& xs]
+    (let [x (first xs)]
+      (if (and (deftype-instance? x)
+               (when-let [p (eve-proto proto)] (satisfies? p x))
+               (eve-method m))
+        (apply @(eve-method m) xs)
+        (apply core xs)))))
+
+(alter-var-root #'clojure.core/transient   (fn [core] (route-transient core 'IEditableCollection '-as-transient)))
+(alter-var-root #'clojure.core/persistent! (fn [core] (route-transient core 'ITransientCollection '-persistent!)))
+(alter-var-root #'clojure.core/conj!       (fn [core] (route-transient core 'ITransientCollection '-conj!)))
+(alter-var-root #'clojure.core/assoc!      (fn [core] (route-transient core 'ITransientAssociative '-assoc!)))
+(alter-var-root #'clojure.core/dissoc!     (fn [core] (route-transient core 'ITransientMap '-dissoc!)))
+(alter-var-root #'clojure.core/disj!       (fn [core] (route-transient core 'ITransientSet '-disjoin!)))
+(alter-var-root #'clojure.core/pop!        (fn [core] (route-transient core 'ITransientVector '-pop!)))
+
+;; Seq coercion routing: glojure's native first/rest/next/take coerce their
+;; argument through the host's seq machinery, which treats a completion
+;; deftype instance as a map of its fields (a persistent-sorted-set Iter
+;; yields [:set ..] [:left ..] [:right ..]) instead of calling its
+;; ISeqable -seq. clojure.core/seq itself routes correctly on this seat,
+;; so for deftype instances these four answer through (seq x) via the
+;; captured core fns; every other value keeps the host answer.
+(let [core-first @#'clojure.core/first
+      core-rest  @#'clojure.core/rest
+      core-next  @#'clojure.core/next
+      core-take  @#'clojure.core/take]
+  (alter-var-root #'clojure.core/first
+    (fn [_] (fn [x] (if (deftype-instance? x) (core-first (seq x)) (core-first x)))))
+  (alter-var-root #'clojure.core/rest
+    (fn [_] (fn [x] (if (deftype-instance? x) (core-rest (seq x)) (core-rest x)))))
+  (alter-var-root #'clojure.core/next
+    (fn [_] (fn [x] (if (deftype-instance? x) (core-next (seq x)) (core-next x)))))
+  (alter-var-root #'clojure.core/take
+    (fn [_] (fn [n x] (if (deftype-instance? x) (core-take n (seq x)) (core-take n x))))))
+
+;; partition-by has the same defect inside its own body: it walks its
+;; source with the host's first/rest, so a deftype source (a
+;; persistent-sorted-set Iter, as datascript's -search returns) is
+;; traversed as a map of its fields — every element's key fn reads nil
+;; (measured: datascript's entity cache came out {nil nil} and every
+;; entity lookup missed, which wedged the flagship worker at its
+;; rendezvous). Hand a deftype source over as its seq, as above.
+(let [core-partition-by @#'clojure.core/partition-by]
+  (alter-var-root #'clojure.core/partition-by
+    (fn [_] (fn [f coll] (if (deftype-instance? coll)
+                           (core-partition-by f (seq coll))
+                           (core-partition-by f coll))))))
+
+;; mapv likewise (measured in the same probe): its body reaches the
+;; source through into/reduce as the host built them, coercing a
+;; deftype source as a field map. Build it over the seq instead.
+(let [core-mapv @#'clojure.core/mapv]
+  (alter-var-root #'clojure.core/mapv
+    (fn [_] (fn ([f coll] (if (deftype-instance? coll)
+                            (core-mapv f (seq coll))
+                            (core-mapv f coll)))
+                ([f c1 c2] (core-mapv f c1 c2))
+                ([f c1 c2 & colls] (apply core-mapv f c1 c2 colls))))))
+
+;; reduce has the same native-coercion defect as first/take: over a
+;; completion deftype instance it walks the instance's fields as a map
+;; instead of its seq (a persistent-sorted-set yields [:root ..]
+;; [:shift ..] [:cnt ..] field entries). A deftype instance is therefore
+;; reduced over (seq x) via the captured core reduce — same elements,
+;; same order as its IReduceInit would give; other values keep the
+;; host answer.
+(let [core-reduce @#'clojure.core/reduce]
+  (alter-var-root #'clojure.core/reduce
+    (fn [_] (fn ([f coll] (if (deftype-instance? coll)
+                            (core-reduce f (seq coll))
+                            (core-reduce f coll)))
+                ([f init coll] (if (deftype-instance? coll)
+                                 (core-reduce f init (seq coll))
+                                 (core-reduce f init coll)))))))
+
+;; count likewise: over a deftype instance that is not eve.core/ICounted
+;; the native count coerces it as a field map (and can recurse without
+;; bound on an iterator over a set); a counted deftype keeps the host
+;; answer, any other deftype instance counts its seq. "Counted" must be
+;; real-impl?'s test, not satisfies?: eve.core extends ICounted to
+;; Object with an arm that itself calls clojure.core/count, so every
+;; deftype satisfies ICounted, and a satisfies? guard routes an
+;; uncounted type (a sorted-set Iter) count -> -count -> the arm ->
+;; count without bound.
+(let [core-count @#'clojure.core/count]
+  (alter-var-root #'clojure.core/count
+    (fn [_] (fn [x] (if (and (deftype-instance? x)
+                             (not (when-let [p (eve-proto 'ICounted)] (real-impl? p x))))
+                      (core-count (seq x))
+                      (core-count x))))))
 
 (defn- mutable-field? [f]
   (let [m (meta f)] (or (:mutable m) (:unsynchronized-mutable m) (:volatile-mutable m))))
@@ -484,6 +845,78 @@
    eve's types adapter gives a type a printer of its own)."
   '#{Object java.lang.Object})
 
+(def ^:private completion-interface-map
+  "The JVM interfaces whose impls go onto this completion's own protocols, each method's name there — the
+   same table eve's types adapter keeps for eve-deftypes (adapters/types/glojure: completion-interfaces)."
+  '{clojure.lang.IDeref {:protocol eve.host-completion/IDeref :methods {deref -deref}}
+    clojure.lang.IBlockingDeref {:protocol eve.host-completion/IBlockingDeref :methods {deref -deref-within}}
+    clojure.lang.IAtom {:protocol eve.host-completion/IAtom
+                        :methods {swap -swap reset -reset compareAndSet -compare-and-set}}
+    clojure.lang.IAtom2 {:protocol eve.host-completion/IAtom2 :methods {swapVals -swap-vals resetVals -reset-vals}}
+    clojure.lang.IPending {:protocol eve.host-completion/IPending :methods {isRealized -realized?}}
+    clojure.lang.IRef {:protocol eve.host-completion/IRef
+                       :methods {getValidator -get-validator setValidator -set-validator
+                                 getWatches -get-watches addWatch -add-watch removeWatch -remove-watch}}
+    clojure.lang.IReference {:protocol eve.host-completion/IReference
+                             :methods {alterMeta -alter-meta resetMeta -reset-meta}}})
+
+(defn- proto-map-lookup
+  "eve.deftype-proto.proto-map's lookup, loaded on first use: the canonical CLJ -> CLJS protocol table
+   eve's types adapter translates eve-deftypes by. nil when it cannot be loaded."
+  [sym]
+  (try (require 'eve.deftype-proto.proto-map)
+       ((resolve 'eve.deftype-proto.proto-map/lookup) sym)
+       (catch Throwable _ nil)))
+
+(defn- rename-methods
+  "methods ((name args & body) ...) with each name renamed through renames {old new}; a name with no
+   entry is dropped (it has no counterpart on this seat)."
+  [methods renames]
+  (keep (fn [[nm & more]] (when-let [n (get renames nm)] (cons n more))) methods))
+
+(defn- translate-impl
+  "One [protocol methods] impl as this seat takes it: [[protocol methods] ...] and whether an entry names
+   an eve.core protocol. A JVM interface goes onto eve.core's protocols, through proto-map's table
+   (methods renamed, a split protocol split, a CLJ-only one dropped), or onto this completion's own for
+   the atom interfaces; any other protocol passes as written."
+  [[p ms]]
+  (cond
+    (contains? completion-interface-map p)
+    (let [entry (get completion-interface-map p)]
+      [[[(:protocol entry) (rename-methods ms (:methods entry))]] false])
+
+    :else
+    (if-let [mapping (proto-map-lookup p)]
+      (cond (:clj-only? mapping) [[] false]
+            (:marker? mapping) [[[(symbol "eve.core" (name (:cljs-proto mapping))) []]] true]
+            :else
+            [(for [[proto ms2] (group-by (fn [[nm]] (when-let [info (get (:methods mapping) nm)]
+                                                      (or (:cljs-proto-override info) (:cljs-proto mapping))))
+                                         ms)
+                   :when proto]
+               [(symbol "eve.core" (name proto))
+                (keep (fn [[nm & more]] (when-let [cn (:cljs-name (get (:methods mapping) nm))]
+                                          (cons cn more))) ms2)])
+             true])
+      (if (and (symbol? p)
+               (nil? (namespace p))
+               (.contains (name p) "."))
+        ;; a JVM class with no table entry and no completion entry (clojure.lang.IKeywordLookup,
+        ;; a lookup-thunk optimization with no CLJS counterpart): a class name is one symbol
+        ;; with dots and no namespace, it names no var on this seat and can never resolve —
+        ;; dropped, the :clj-only disposition. A protocol a user defined is a plain or
+        ;; ns-qualified name without dots and passes as written, below.
+        [[] false]
+        [[[p ms]] false]))))
+
+(defn- translate-impls
+  "A deftype/reify's impls as this seat takes them (translate-impl on each): [impls eve-core?]."
+  [impls]
+  (reduce (fn [[out core?] impl]
+            (let [[entries c?] (translate-impl impl)]
+              [(into out entries) (or core? c?)]))
+          [[] false] impls))
+
 (defmacro deftype
   "(deftype T [fields...] Protocol (method [this ...] body...) ...): a record extended to its protocols (above). ->T
    and T__make build one, a cell made for each mutable field. With ^:eve/map on T it stands in for a map: a Go value
@@ -494,7 +927,7 @@
         type-name (vary-meta type-name dissoc :eve/map)
         names (mapv untag fields)
         cs (set (map untag (filter mutable-field? fields)))
-        impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+        [impls needs-eve-core?] (translate-impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs)))
         args (mapv #(symbol (str "a" %)) (range (count names)))
         factory `(fn ~args (new ~type-name ~@(map (fn [f a] (if (contains? cs f) `(clojure.core/volatile! ~a) a))
                                                  names args)))]
@@ -509,6 +942,7 @@
                    (~'kv-reduce [c# f# init#] (reduce (fn [a# e#] (f# a# (key e#) (val e#))) init# c#))))
             `(do (clojure.core/defrecord ~type-name ~names)
                  (swap! deftype-types conj ~type-name)))
+         ~@(when needs-eve-core? [`(clojure.core/require 'eve.core)])
          (def ~(symbol (str (name type-name) "__make")) ~factory)
          ~@(when (or map-mode? (seq cs)) [`(def ~(symbol (str "->" (name type-name))) ~factory)])
          ~@(for [[p methods] impls]
@@ -519,21 +953,73 @@
 (.SetMacro #'clojure.core/deftype)
 
 ;; ---------------------------------------------------------------------------
+;; instance? of a JVM interface, for a type: the identity half of the
+;; interface translation above. glojure's instance? answers by Go type
+;; identity, which a record never has for clojure.lang.IDeref and kin —
+;; so (instance? clojure.lang.IDeref x) is false for every deftype here,
+;; however it was extended (measured: a completion deftype implementing
+;; IDeref, and datascript.lru's type, both false; glojure's own atom
+;; true). Portable code gates on it (datascript.conn's conn?). For the
+;; interfaces this completion itself translates, and only for a deftype
+;; instance, instance? also answers by the translation: true when the
+;; type was extended to the interface's protocol. Everything else keeps
+;; glojure's answer. (instance? is var-routed on this seat, measured.)
+;; ---------------------------------------------------------------------------
+
+(def ^:private iface-classes
+  "The JVM interface symbols completion-interface-map translates, as [symbol class] pairs. (resolve
+   alone, not deref: two of the map's keys name this file's own protocols — their vars' roots are
+   the protocol atoms, and derefing the class the symbol also names would dispatch -deref on it.)"
+  (into {} (keep (fn [s] (when-let [v (resolve s)] [s (if (var? v) @v v)])) (keys completion-interface-map))))
+
+(alter-var-root #'clojure.core/instance?
+  (fn [core]
+    (fn [c x]
+      (or (core c x)
+          (boolean
+           (and (deftype-instance? x)
+                (some (fn [[s cls]]
+                        (and (identical? c cls)
+                             (let [p (resolve (:protocol (get completion-interface-map s)))]
+                               (and p (extends? @p (class x))))))
+                      iface-classes)))))))
+
+;; ---------------------------------------------------------------------------
 ;; reify
 ;; ---------------------------------------------------------------------------
 
 (def ^:private reify-types (atom {}))
 
+(def ^:private fn-interfaces
+  "The interfaces a reify of nothing else is a function: a comparator and the fn interfaces. Such a reify
+   is the fn itself on this seat (its compare/invoke bodies the fn's arities)."
+  '#{java.util.Comparator clojure.lang.IFn IFn$OOL clojure.lang.IFn$OOL})
+
 (defmacro reify
   "(reify Protocol (method [this ...] body...) ...): an instance of a record made once for this form (at its
-   expansion), extended to the protocols with methods that call the instance's closures."
+   expansion), extended to the protocols with methods that call the instance's closures. A reify of only
+   the fn interfaces (fn-interfaces) is a plain fn of its compare (else invoke) arities."
   [& specs]
-  (let [impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+  (let [raw-impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))]
+    (if (and (seq raw-impls)
+             (every? (fn [[p]] (or (contains? fn-interfaces p) (= "IFn$OOL" (name p)))) raw-impls))
+      (let [methods (mapcat second raw-impls)
+            ;; method names arrive as written for a hand-written reify, but a macro-generated one
+            ;; (datascript's defcomp, a syntax-quote template) carries them qualified —
+            ;; clojure.core/compare, datascript.db/invoke. Match by name, as for IFn$OOL above:
+            ;; matching the full symbol selects no arity and emits (fn) with no parameter
+            ;; declaration at all (the analyzer's "Parameter declaration missing" on datascript.db).
+            compares (filter #(= "compare" (name (first %))) methods)
+            chosen (if (seq compares) compares (filter #(= "invoke" (name (first %))) methods))]
+        `(clojure.core/fn ~@(for [[_ args & body] chosen]
+                              (list* (mapv untag (rest args)) body))))
+      (let [[impls needs-eve-core?] (translate-impls raw-impls)
         k [(str *ns*) (pr-str specs)]
         tname (or (get @reify-types k)
                   (let [t (gensym "reify__")]
                     (eval `(do (clojure.core/defrecord ~t [~'fns])
                                (swap! deftype-types conj ~t)
+                               ~@(when needs-eve-core? [`(clojure.core/require 'eve.core)])
                                ~@(for [[p methods] impls]
                                    `(clojure.core/extend-type ~t ~p
                                       ~@(for [[nm entries] (group-by first methods)]
@@ -547,7 +1033,118 @@
         fns (into {} (for [[_ methods] impls [nm entries] (group-by first methods)]
                        [(list 'quote nm)
                         (cons 'clojure.core/fn (for [[_ args & body] entries] (list* (mapv untag args) body)))]))]
-    `(new ~(symbol (str *ns*) (name tname)) ~fns)))
+    `(new ~(symbol (str *ns*) (name tname)) ~fns)))))
 
 (intern 'clojure.core (with-meta 'reify {:macro true}) @#'reify)
 (.SetMacro #'clojure.core/reify)
+
+;; ---------------------------------------------------------------------------
+;; defrecord with protocol implementations: glojure's defrecord is its one
+;; runtime type, but it refuses impls at expansion ("defrecord protocol
+;; implementations are not yet supported") — the wall datascript.db's
+;; defrecord-updatable (FilteredDB) hits, since that macro macroexpands
+;; (defrecord name fields impls) and postwalks the expansion for a deftype*
+;; form to dedupe against the impls it was given. Here defrecord keeps
+;; glojure's record — the base expansion is the original macro's own,
+;; applied at expansion time as macroexpand would — and the impls are
+;; translated exactly as deftype's are (JVM interfaces onto this
+;; completion's / eve.core's protocols) and extended after the record:
+;; the port's own cljs shape, (defrecord name fields) + (extend-type
+;; name impls...). The expansion is a do of those forms: no deftype*
+;; for the dedupe postwalk to find, and the impls are the record's own.
+;; ---------------------------------------------------------------------------
+
+(def ^:private glojure-defrecord
+  "clojure.core/defrecord's macro fn, captured before the intern below: the base expansion of a
+   record with no impls is this fn's own work (it makes the record class at expansion time)."
+  @#'clojure.core/defrecord)
+
+(defmacro defrecord
+  "(defrecord T [fields...] Protocol (method [this ...] body...) ...): glojure's record, with any
+   protocol implementations translated as deftype's are and extended onto the record."
+  [type-name fields & specs]
+  (let [names (mapv untag fields)
+        [impls needs-eve-core?] (translate-impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs)))
+        base (apply glojure-defrecord &form &env [type-name fields])]
+    `(do ~base
+         ~@(when needs-eve-core? [`(clojure.core/require 'eve.core)])
+         ~@(for [[p methods] impls]
+             `(clojure.core/extend-type ~type-name ~p ~@(method-arities methods names #{})))
+         ~type-name)))
+
+(intern 'clojure.core (with-meta 'defrecord {:macro true}) @#'defrecord)
+(.SetMacro #'clojure.core/defrecord)
+
+;; ---------------------------------------------------------------------------
+;; This completion's own root, last on the load path: glojure's loader
+;; scans every load-path root for a namespace's file and the LAST root
+;; holding it supplies it (its load loop overwrites as it goes; measured
+;; on this seat, and read in the runtime's load: roots in order, .glj /
+;; .clj / .cljc within each). A consumer's classpath puts its own
+;; libraries after eve's roots, so a library file of the same namespace
+;; shadows this completion's — extend_clj/core.cljc (DataScript's
+;; dependency, whose deftype-atom emits deftype*) over this completion's
+;; extend_clj/core.glj (the W5 adapter), clojure.set / data / edn
+;; likewise wherever a library carries them. The seat contract is that
+;; this completion loads first; from here it re-appends its own root —
+;; found among the harness's GLJ_CLASSPATH entries by this tree's
+;; layout — so the completion's answers are the ones later loads get.
+;; A harness that does not set GLJ_CLASSPATH keeps the old behavior.
+;; ---------------------------------------------------------------------------
+
+(try
+  (when-let [cp (os/Getenv "GLJ_CLASSPATH")]
+    (require 'clojure.string)
+    (doseq [root (clojure.string/split cp #":")]
+      (when (or (.endsWith root "/adapters/completion/glojure/src")
+                (.endsWith root "/adapters/completion/glojure/src/"))
+        (add-load-path root))))
+  (catch Throwable _ nil))
+
+;; clojure.lang.RT's statics, answered by vars of that namespace (clojure/lang/RT.glj in this
+;; completion): portable code calls (clojure.lang.RT/assoc m k v) in static syntax — datascript's
+;; inline assoc expands to exactly that — and the analyzer resolves the call to the var.
+(require 'clojure.lang.RT)
+
+;; clojure.lang.Util's statics the same way (clojure/lang/Util.glj in this completion):
+;; hasheq and hashCombine, which datascript's ihash and datom hash call.
+(require 'clojure.lang.Util)
+
+;; ---------------------------------------------------------------------------
+;; ClassCastException, for catch: glojure's class registry has no
+;; ClassCastException (measured: IllegalArgumentException, Exception,
+;; RuntimeException, Throwable resolve; ClassCastException does not, in
+;; either short or java.lang form), and portable code catches it around
+;; compare — datascript's value-compare falls back to a class ordering
+;; when compare cannot compare its values. A catch class resolves
+;; through the namespace mapping when one exists (measured), so
+;; clojure.core gains the name, bound to Throwable's class: on this seat
+;; a failed compare throws a runtime error, and the fallback the catch
+;; guards is the same. Only the name is supplied; no code catches
+;; anything it did not already catch around a compare.
+;; ---------------------------------------------------------------------------
+
+(intern 'clojure.core 'ClassCastException (resolve 'Throwable))
+
+;; Iterable, for instance?: the registry has no java.lang.Iterable either (measured; java.util.Map,
+;; List, Set and Collection all resolve), and portable code tests it as a fallback disjunct —
+;; datascript's seqable? already answers every value this seat has through Seqable, arrays and
+;; java.util.Map before Iterable is reached. The name is bound to java.util.Iterator's class, a
+;; host type no seat collection is an instance of, so the test answers false exactly where the
+;; JVM's would answer false for a Clojure value.
+(intern 'clojure.core 'Iterable (resolve 'java.util.Iterator))
+
+;; Eduction: glojure's clojure.core has no eduction at all (measured: eduction, ->Eduction and
+;; clojure.lang.Eduction all unresolvable), where clojure.core itself defines the Eduction
+;; deftype and portable code constructs it directly — datascript's -datoms and query tuple
+;; collection both do. The completion supplies the two names over sequence: for the pure,
+;; finite transformations portable code educes, a sequence of the transducer over the
+;; collection answers with the same elements, in the same order, to seq, reduce and into;
+;; what differs from the JVM's Eduction is only the realization strategy (a sequence caches
+;; what it realizes; an eduction re-runs), never the results.
+(intern 'clojure.core '->Eduction
+        (fn [xform coll] (sequence xform coll)))
+
+(intern 'clojure.core 'eduction
+        (fn ([xform coll] (sequence xform coll))
+          ([xform coll & xforms] (sequence (apply comp xform xforms) coll))))

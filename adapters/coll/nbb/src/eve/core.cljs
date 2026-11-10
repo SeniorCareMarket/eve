@@ -50,6 +50,12 @@
 (defprotocol IChunkedSeq (-chunked-first [coll]) (-chunked-rest [coll]))
 (defprotocol IChunkedNext (-chunked-next [coll]))
 (defprotocol ASeq)
+;; F-NBB-DEREFTIMEOUT: cljs.core's IDerefWithTimeout, which nbb's core
+;; lacks; a vanilla library's :cljs reify names it (DataScript's
+;; transact future). Defined here as eve.core's, like the chunked
+;; protocols above; eve.types interns it into the core namespace and
+;; remaps deftype bodies to it.
+(defprotocol IDerefWithTimeout (-deref-with-timeout [ref timeout-ms timeout-val]))
 (defn pr-writer [x w _opts] (-write w (pr-str x)))
 (defn pr-str* [x] (pr-str x))
 (defmacro caching-hash [coll hash-fn hash-key]

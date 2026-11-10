@@ -6,6 +6,14 @@ to Clojure's semantics before eve loads — the largest completion of any host. 
 `bytearray`, with libatomic's atomics and futex(2) called through `ctypes`. Threads are Python threads: real, but
 serialized by the GIL.
 
+**0.9.3.1 (2026-11-09).** This release carries this seat's fixes: `eve.crypto` loads through four
+walls (a completion `re-matches` atom patch, a Completion host-divergence header, the F-LPY
+completion `Class`-binding arity, and a crypto from-be fold), measured rounds of ten loads in a row
+at exit 0 — the packaged run's earlier load death, blamed on a checked-arithmetic overflow in that
+fold, does not reproduce on this tree. Serialize freeze/thaw and `pr-str` move to the
+`eve.core`/`eve.coll` vocabulary, and the Iter-hash fix in the shared set code is this seat's own
+port work. The dataset acceptance re-run on the fixed tree is still owed.
+
 ```bash
 python3 -m venv /opt/pyhosts && /opt/pyhosts/bin/pip install basilisp==0.5.1   # basilisp on PATH
 bb test:lpy                    # the battery, compiled afresh into target/lpycache-test each run

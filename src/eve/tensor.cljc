@@ -65,7 +65,7 @@
              (-plain [_]
                (let [sh (vec shape)
                      st (vec strides)
-                     eo (long elem-offset)
+                     eo (eve.host/long elem-offset)
                      backing (d/eve->clj data)]
                  (letfn [(build [dim base]
                            (if (= dim (e/count sh))
@@ -340,9 +340,9 @@
          n (reduce * 1 sh)
          type-kw (dtype t)]
      (from-array
-      (if-let [^doubles src (d/-as-double-array (-data t))]
+      (if-let [src (d/-as-double-array (-data t))]
         (let [eo (int (-elem-offset t))
-              ^doubles dst (double-array n)]
+              dst (eve.host/double-array n)]
           (if (contiguous? t)
             (dotimes [i n] (aset dst i (double (f (aget src (+ eo i))))))
             (let [st (-strides t)]
@@ -371,10 +371,10 @@
          n (reduce * 1 sh)
          type-kw (dtype t1)]
      (from-array
-      (let [^doubles s1 (d/-as-double-array (-data t1))
-            ^doubles s2 (d/-as-double-array (-data t2))]
+      (let [s1 (d/-as-double-array (-data t1))
+            s2 (d/-as-double-array (-data t2))]
         (if (and s1 s2)
-          (let [^doubles dst (double-array n)
+          (let [dst (eve.host/double-array n)
                 eo1 (int (-elem-offset t1)) eo2 (int (-elem-offset t2))]
             (if (and (contiguous? t1) (contiguous? t2))
               (dotimes [i n]
@@ -411,7 +411,7 @@
   [f init t]
   (let [sh (-shape t)
         n (reduce * 1 sh)]
-    (if-let [^doubles da (d/-as-double-array (-data t))]
+    (if-let [da (d/-as-double-array (-data t))]
       (let [eo (int (-elem-offset t))]
         (if (contiguous? t)
           (loop [i 0 acc init]
@@ -450,9 +450,9 @@
   (let [sh (-shape t)
         n (reduce * 1 sh)
         type-kw (dtype t)]
-    (if-let [^doubles src (d/-as-double-array (-data t))]
+    (if-let [src (d/-as-double-array (-data t))]
       (let [eo (int (-elem-offset t))
-            ^doubles dst (double-array n)]
+            dst (eve.host/double-array n)]
         (if (contiguous? t)
           (dotimes [i n] (aset dst i (aget src (+ eo i))))
           (let [st (-strides t)]

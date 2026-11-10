@@ -44,8 +44,8 @@
     (do (slab/write-i32! sio slab-off field-offset -1)
         -1)
     ;; Serialize, allocate block, write bytes, store offset
-    (let [^bytes encoded (codec/encode-value sio val)
-          byte-len      (alength encoded)
+    (let [encoded (codec/encode-value sio val)
+          byte-len      (alength ^bytes encoded)
           ser-off       (slab/alloc! sio (+ 4 byte-len))]
       ;; Write length + bytes into the serialized data block
       (slab/write-i32! sio ser-off 0 byte-len)

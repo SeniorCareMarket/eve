@@ -6,6 +6,15 @@ eve's Go packages (regions, host helpers, types) and three patches to glojure, b
 completion builds them from records; eve's types answer eve's own protocols (babashka's `coll/protocols`). Memory is a
 Go byte slice or a `MAP_SHARED` mapping with `sync/atomic` and futex (a 100 µs poll outside Linux); threads are goroutines.
 
+**0.9.3.1 (2026-11-09).** This release fixes the `*compile-files*` panic (the file now realizes its
+entry's value last; seven codegen patches in eve's completion Go patches) and the window-shape
+`RTEvalError: Casting: Unsupported type *go/types.Basic` (the completion routes glj values through its
+own `goValue` writer). glj tests: 24 tests / 310 assertions / 0 failures / 0 errors. The journal-file
+adapter is new in this release and its A3 probe is unchanged-exact. Diagnosis-only leftovers:
+`(:go entity)` derefs to nil (one measured nil; a workaround is named), the `d`/`q` lru death in the
+window shape reproduces only inside the glj-eve harness, and the completion is not itself
+AOT-compilable.
+
 ```bash
 bb test:glj                    # builds glj-eve if its stamp is stale, then the battery
 GLJ_CLASSPATH=src:<hosts.edn :glj roots>:test target/glj-eve/glj-eve -e "(require 'eve.runner.glj-main) (eve.runner.glj-main/-main \"perf\")"

@@ -147,6 +147,23 @@
   [_v]
   false)
 
+(defn new-cache
+  "A map for small caches (cache-get / cache-put!): one JS context,
+   one thread — the dart adapter's volatile! form. This adapter was
+   missing the cache family entirely; eve.map's key-memo calls
+   enc/new-cache at load, so every graph reaching eve.map died at
+   analysis on this seat (shootout F3b, bank 27)."
+  []
+  (volatile! {}))
+
+(defn cache-get [c k] (get @c k))
+
+(defn cache-put!
+  "Put k → v in cache c, emptying it first when it holds more than max."
+  [c k v max]
+  (vreset! c (assoc (if (> (count @c) max) {} @c) k v))
+  v)
+
 (defn array-subtype+bytes
   "[subtype little-endian-bytes] of a host array: none here (host-array?)."
   [_a]

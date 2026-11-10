@@ -27,7 +27,8 @@
    [eve.journal-file :as jf]
    [eve.read-region :as rr]
    ;; PROTOTYPE (jvm-heap-grade step 2): the automatic read guard, JVM only
-   #?@(:bb [] :clj [[eve.guard :as guard]])
+   ;; (bb and glj read :clj but cannot load the JVM-only eve.guard: no guard there, as on cljs)
+   #?@(:bb [] :glj [] :clj [[eve.guard :as guard]])
    [eve.deftype-proto.data :as d]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc]
@@ -349,6 +350,9 @@
             :lock-only? (not (mem/-atomic-rmw? root-r))
             :heartbeat heartbeat
             :retire-q (clojure.core/atom [])
+            ;; the slab classes the zero-queue flush wrote (frees, the cascade's drops) that no force has covered
+            ;; yet, {class one-offset-of-it}: the next commit's force sweeps them with its own (take-unforced!)
+            :unforced (clojure.core/atom {})
             :flush-ts (clojure.core/atom 0)
             :pins (clojure.core/atom {})
             :pin-lock (token)
@@ -367,6 +371,16 @@
   (fn [off kind]
     (swap! retire-q conj {:off off :kind kind :epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)})))
 
+(defn- take-unforced!
+  "One offset in each slab class the zero-queue flush wrote that no force has covered yet, taken (the note emptied):
+   the caller's force sweeps those classes with its own (alloc/sync-touched! forces by class)."
+  [{:keys [unforced]}]
+  (if unforced
+    (loop []
+      (let [u @unforced]
+        (if (compare-and-set! unforced u {}) (vals u) (recur))))
+    nil))
+
 (defn- flush-zero-queue!
   "Free the zero queue's entries whose epoch no live reader pins
   (eve.tally/flush!). The safe epoch is the retire path's existing
@@ -379,15 +393,35 @@
   advanced at every flush (to the previous flush's epoch — the
   FLUSH-ADVANCE rule below, journal-flush!) and at checkpoint, so
   a stale local floor only ever makes this process's flush more
-  conservative."
-  [{:keys [root-r sio retire-q journal]}]
-  (tally/flush! sio retire-q
-                (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-                (fn [] (let [readers (mmap-min-safe-epoch root-r)
-                             floor   (some-> journal :floor deref)]
-                         (cond (and readers floor) (min readers floor)
-                               floor   floor
-                               :else   readers)))))
+  conservative.
+
+  The flush's own writes (bitmap + descriptor writes of the frees) are
+  NOT forced here: the classes of the blocks it may free (the queue at
+  entry — the set this flush used to force) are noted on the domain
+  (:unforced) and the next commit's force sweeps them with its
+  own (journal-flush!'s sweep, the force-ordering form's pre-CAS sweep;
+  a checkpoint, sync! and close force the whole domain). Every block
+  this flush frees is unreachable from every version recovery can
+  install (its epoch is below the floor), so a crash before that force
+  can only find a freed block still allocated, or a count above its
+  holders (a cascade drop never forced) — the leak direction, never a
+  use-after-free. (Measured, fix-for-release-2 E2: the flush runs on
+  every single-swap commit — its queue never falls under
+  FLUSH_QUEUE_THRESHOLD — so a force here was a second whole-class
+  force per commit, ~3.9 ms of an add-5 commit's 17.9 on the bench
+  box.)"
+  [{:keys [root-r sio retire-q journal durable-commits? base-path unforced]}]
+  (let [note? (and durable-commits? base-path unforced)
+        queued (when note? (mapv :off @retire-q))]
+    (tally/flush! sio retire-q
+                  (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+                  (fn [] (let [readers (mmap-min-safe-epoch root-r)
+                               floor   (some-> journal :floor deref)]
+                           (cond (and readers floor) (min readers floor)
+                                 floor   floor
+                                 :else   readers))))
+    (when note?
+      (swap! unforced into (map (fn [o] [(alloc/decode-class-idx o) o])) queued))))
 
 (defn- claim-slot-as-participant!
   "Claim a worker slot as a write to the root: a lock-only host holds the
@@ -461,29 +495,36 @@
 
 (defn- journal-flush!
   "Append one flush record (the live epoch + atom table) and force the
-   journal — the commit point of a journal domain. sweep? forces the
-   slab set first (J10's deferred sweep; J1 swept before the CAS).
-   The sweep is whole-domain: a flush record's table names blocks
-   whichever live process wrote them, and the sweep makes them all
-   durable before the record can land."
-  [ds sweep?]
+   journal — the commit point of a journal domain. sweep selects what
+   is forced before the record lands, all inside the journal lock: a
+   collection of slab offsets sweeps exactly those (alloc/sync-touched!
+   — the J1 per-commit form: the publishing attempt's logged
+   allocations and descriptor touches, its drop's writes included);
+   true sweeps the whole domain (the J10 batch flush and checkpoints:
+   a flush record's table names blocks whichever live process wrote
+   them, and the sweep makes them all durable before the record can
+   land); falsy sweeps nothing."
+  [ds sweep]
   (let [journal (:journal ds)
         ;; the epoch the appended record will carry (read again
         ;; inside the lock by jf/journal-record; epochs are
         ;; monotone, so this earlier read never exceeds it)
         floor-epoch (when journal
                       (mem/-load-i32 (:root-r ds) d/ROOT_EPOCH_OFFSET))
-        t0 (when (and journal *flush-timing*)
-             (now-ms))]
+        t0 (when (and journal *flush-timing*) (now-ms))]
     (when journal
       (jf/with-journal-lock (:file journal)
-        (fn []
-          (when sweep? (alloc/sync-sio! (:sio ds)))
-          (jf/journal-append! (:file journal)
-                              (jf/journal-record (:root-r ds)))
-          ;; data force: the record bytes and the file size they need
-          ;; are durable; timestamps are not metadata recovery reads.
-          (jf/journal-force! (:file journal) false))))
+                            (fn []
+                              (cond
+                                (coll? sweep)
+                                (alloc/sync-touched! (:sio ds) (into sweep (take-unforced! ds)))
+                                sweep
+                                (do (take-unforced! ds) (alloc/sync-sio! (:sio ds))))
+                              (jf/journal-append! (:file journal)
+                                                  (jf/journal-record (:root-r ds)))
+                              ;; data force: the record bytes and the file size they need
+                              ;; are durable; timestamps are not metadata recovery reads.
+                              (jf/journal-force! (:file journal) false))))
     (when journal
       ;; RETENTION FLOOR — FLUSH-ADVANCE (decision 2026-10-27,
       ;; after the sweep reconciliation measured the checkpoint-only
@@ -511,33 +552,36 @@
           (when (and (:last-epoch journal) @(:last-epoch journal))
             (reset! (:floor journal)
                     (max @(:floor journal) @(:last-epoch journal))))))
-      (when (:last-epoch journal)
-        (reset! (:last-epoch journal) floor-epoch))
+      (when (:last-epoch journal) (reset! (:last-epoch journal) floor-epoch))
       (when (:last-flush journal) (reset! (:last-flush journal) (now-ms)))
       (when *flush-log*
-        (swap! *flush-log* conj
-               {:at (now-ms)
-                :ms (when t0 (- (now-ms) t0))})))
-    (when t0
-      (swap! *flush-timing* conj (- (now-ms) t0)))))
+        (swap! *flush-log* conj {:at (now-ms) :ms (when t0 (- (now-ms) t0))})))
+    (when t0 (swap! *flush-timing* conj (- (now-ms) t0)))))
 
 (defn- journal-note-commit!
   "A journal domain's commit published: J1 (limit 1) flushes now — the
-   journal force is the commit point. J10 counts the epoch toward the
-   batch; the batch's flush is one sweep + one record + one force.
+   journal force is the commit point. offsets, when the caller hands
+   them, is the publishing attempt's full touched set (its logged
+   allocations and descriptor touches, its drop's writes included):
+   the flush sweeps exactly those inside the journal lock before it
+   appends, so a record recovery can accept was written only after
+   every page it references was forced. J10 counts the epoch toward
+   the batch; the batch's flush is one whole-domain sweep + one record
+   + one force (its record names blocks other processes wrote too).
    With :journal-window-ms set, a commit also flushes when the
    window has elapsed since the last flush (checked on the commit
    path — no timer thread; the count batch remains the backstop)."
-  [ds]
-  (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
-    (when journal
-      (if (<= limit 1)
-        (journal-flush! ds false)
-        (let [n (swap! pending inc)]
-          (when (or (>= n limit)
-                    (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
-            (reset! pending 0)
-            (journal-flush! ds true)))))))
+  ([ds] (journal-note-commit! ds nil))
+  ([ds offsets]
+    (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
+      (when journal
+        (if (<= limit 1)
+          (journal-flush! ds offsets)
+          (let [n (swap! pending inc)]
+            (when (or (>= n limit)
+                      (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
+              (reset! pending 0)
+              (journal-flush! ds true))))))))
 
 (defn- domain-live?
   "Any worker slot ACTIVE with a fresh heartbeat: a process holds this
@@ -555,9 +599,14 @@
    claims its worker slot. Live domain: the journal is untouched (a
    joining process reads the live root). Not live: install the newest
    valid record's table + epoch when they differ from the mapped
-   root's, force the root file, and compact the journal to that
-   record — the torn tail is discarded. A creator truncates the
-   journal of a fresh domain."
+   root's — a different epoch, or, at the SAME epoch, a table that
+   differs byte for byte (the record is CRC-verified and the root's
+   table carries no integrity check, so a same-epoch divergence is
+   root-table corruption; without the repair the corrupted table
+   misses every lookup and lookup-or-create silently mints fresh
+   atoms over the lost ones — the F2 battery's W2). Then force the
+   root file, and compact the journal to that record — the torn tail
+   is discarded. A creator truncates the journal of a fresh domain."
   [root-r journal create?]
   (when journal
     (jf/with-journal-lock (:file journal)
@@ -576,7 +625,17 @@
               (when (:floor journal)
                 (reset! (:floor journal) (or oldest e-map)))
               (when-not (domain-live? root-r)
-                (let [install? (and newest (not= (:epoch newest) e-map))]
+                (let [install? (and newest
+                                    (or (not= (:epoch newest) e-map)
+                                        ;; W2: equal epochs, diverged
+                                        ;; tables — install the
+                                        ;; CRC-verified record's table
+                                        ;; over the root's corrupted
+                                        ;; one (see the docstring).
+                                        (not (enc/bytes=
+                                               (mem/-read-bytes root-r d/ATOM_TABLE_START
+                                                                (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+                                               (:table newest)))))]
                   (when install?
                     (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
                     (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
@@ -731,6 +790,38 @@
           (throw (ex-info "mmap-atom: unknown root value type-id"
                           {:type-id type-id :ptr ptr})))))))
 
+(defn- scalar-leaf?
+  "True when v is a host scalar leaf — a number, string, keyword, symbol,
+   boolean, char, date or UUID: a value no IEveRoot / IBackingArray
+   implementor and no serialize builder can claim (convert-to-eve answers
+   nil for scalars by construction). The swap! dispatch screens its
+   protocol checks with this: for a scalar, each NEGATIVE satisfies?
+   re-walks the type hierarchy (find-protocol-impl: supers set + lazy
+   impl scan), which priced most of a scalar swap. The screen is by what
+   a value cannot be claimed AS, never by class-name prefix: screening
+   by namespace was the DS11 JVM defect — an eve-deftype in a user
+   namespace (datascript.db/DB) is an IEveRoot in its own class, and a
+   name screen silently published its atom roots through a scalar block,
+   so the tally never counted (never held, never freed) the tree beneath
+   and seal/reach could not see it. Non-scalars keep the full dispatch;
+   non-JVM seats keep it unconditionally (their satisfies? does not
+   walk). The :jank arm below is written first on purpose: jank's
+   feature set includes :clj, but its analyzer cannot resolve the
+   bare java.lang names the :clj arm names (Number, String, Boolean,
+   Character), so that arm must never be read on the jank seat —
+   jank takes the :default behavior explicitly."
+  [v]
+  #?(:jank false
+     :clj (boolean (or (instance? Number v)
+                       (instance? String v)
+                       (instance? Boolean v)
+                       (instance? Character v)
+                       (instance? clojure.lang.Keyword v)
+                       (instance? clojure.lang.Symbol v)
+                       (instance? java.util.Date v)
+                       (instance? java.util.UUID v)))
+     :default false))
+
 (defn- write-plain-collection!
   "A plain collection as a slab value in sio: the host's direct writer when
    one is registered (the JVM codec's HAMT/trie writers), else a builder.
@@ -743,7 +834,11 @@
                      :else nil)]
     (if direct
       (direct sio nil v)
-      (some-> (ser/convert-to-eve sio v) d/-root-header-off))))
+      ;; convert-to-eve's builders match Eve values and plain
+      ;; collections only; anything else is a scalar — skip the builder
+      ;; loop (and its satisfies? preds) for it.
+      (when (not (scalar-leaf? v))
+        (some-> (ser/convert-to-eve sio v) d/-root-header-off)))))
 
 (defn- write-typed-root!
   "A host typed array (or a heap-backed eve array, its backing array) a swap!
@@ -751,7 +846,7 @@
   [sio v]
   (cond
     (enc/host-array? v) (arr/write-host-array! sio v)
-    (satisfies? d/IBackingArray v) (arr/write-host-array! sio (d/-backing-array v) (d/-backing-subtype v))
+    (and (not (scalar-leaf? v)) (satisfies? d/IBackingArray v)) (arr/write-host-array! sio (d/-backing-array v) (d/-backing-subtype v))
     :else nil))
 
 (defn- resolve-new-ptr
@@ -766,7 +861,7 @@
      (nil? new-val)
      alloc/NIL_OFFSET
 
-     (satisfies? d/IEveRoot new-val)
+     (and (not (scalar-leaf? new-val)) (satisfies? d/IEveRoot new-val))
      (let [vs (d/-eve-sio new-val)]
        (if (and vs (not (identical? (alloc/sio-root vs) (alloc/sio-root sio))))
          (case foreign-policy
@@ -836,6 +931,7 @@
       (unpin-epoch! ds))))
 
 #?(:bb nil
+   :glj nil
    :clj
    (defn- guard-deref
      "PROTOTYPE (step 2). Inside a guard extent (eve.guard): the atom's root as a lazy value — the slab-backed value
@@ -862,7 +958,7 @@
   [ds atom-slot-idx]
   (cond
     (rr/active?) (region-deref ds atom-slot-idx)
-    #?@(:bb [] :clj [(guard/active?) (guard-deref ds atom-slot-idx)])
+    #?@(:bb [] :glj [] :clj [(guard/active?) (guard-deref ds atom-slot-idx)])
     :else (plain-deref ds atom-slot-idx)))
 
 (defn- swap-attempt!
@@ -875,70 +971,118 @@
    ran again under the domain's hold); a descriptor count is a CAS word on
    the descriptor row, safe to raise from any write, so no attempt ever
    needs the hold and there is no [:hold nil] return."
-  [{:keys [root-r sio durable-commits? journal] :as ds} ptr-off f args exclusive?]
+  [{:keys [root-r sio durable-commits? journal] :as ds}
+   ptr-off
+   f
+   args
+   exclusive?]
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-  (try
-    (let [old-ptr (mem/-load-i32 root-r ptr-off)
-          _       (refresh-slabs! ds)                      ;; behind the load (0004/0007)
-          lsio    (alloc/logging-sio sio)                  ;; this attempt's allocations
-          old-val (read-root-value lsio old-ptr)
-          new-val (binding [d/*parent-atom* ds
-                            d/*domain-sio* lsio]
-                    (apply f old-val args))
-          ;; written in the attempt's domain too: a codec that allocates a nested collection in the running domain
-          ;; (ClojureScript's) logs it here, so a lost CAS frees what the attempt allocated unheld
-          new-ptr (binding [d/*domain-sio* lsio]
-                    (resolve-new-ptr lsio new-val (some-> (:foreign-policy ds) deref)))]
-      (if (== new-ptr old-ptr)
-        ;; the same value: nothing to publish, nothing to retire
-        (do (alloc/stop-logging! lsio)
+  (binding [tally/*touches* (clojure.core/atom #{})]
+    (try
+      (let [old-ptr (mem/-load-i32 root-r ptr-off)
+            _ (refresh-slabs! ds)  ;; behind the load (0004/0007)
+            lsio (alloc/logging-sio sio)  ;; this attempt's allocations
+            old-val (read-root-value lsio old-ptr)
+            new-val (binding [d/*parent-atom* ds
+                              d/*domain-sio* lsio]
+                      (apply f old-val args))
+            ;; written in the attempt's domain too: a codec that allocates a nested collection in the running domain
+            ;; (ClojureScript's) logs it here, so a lost CAS frees what the attempt allocated unheld
+            new-ptr (binding [d/*domain-sio* lsio]
+                      (resolve-new-ptr lsio new-val
+                                       (some-> (:foreign-policy ds) deref)))]
+        (if (== new-ptr old-ptr)
+          ;; the same value: nothing to publish, nothing to retire
+          (do
+            (alloc/stop-logging! lsio)
             [:ok new-val])
-        ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
-        (let [_ (tally/hold-root! sio new-ptr)
-              ;; durability (a disk domain with :durable-commits?): everything this
-              ;; commit wrote is forced BEFORE the root pointer can publish it, so a
-              ;; system crash cannot leave a root pointing at value pages that never
-              ;; reached disk. Spike form: the sio's whole slab, bitmap and descriptor
-              ;; regions — the upper bound; the written ranges are the production
-              ;; refinement. Inside the attempt, so a lost CAS wastes one force and the
-              ;; retry writes and forces its own blocks; nothing is held across the retry.
-              ;; a journal domain with a batch (J10) defers even this sweep
-              ;; to its flush; J1 and the force-ordering form sweep here.
-              _ (when (and durable-commits?
-                           (or (nil? journal) (<= (:limit journal) 1)))
-                  (alloc/sync-sio! sio))
-              w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
-          (if (== w old-ptr)
-            (do (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)
-                ;; and the epoch is made durable before swap! returns: a
-                ;; journal domain appends its flush record and forces the
-                ;; journal (that force is the commit point; the root file
-                ;; is a checkpoint and is not forced per commit) — otherwise
-                ;; the root's own range, the epoch word through the slot
-                ;; pointer, is forced after the CAS.
-                (when durable-commits?
-                  (if journal
-                    (journal-note-commit! ds)
-                    (mem/sync-region! root-r
-                                      (min ptr-off d/ROOT_EPOCH_OFFSET)
-                                      (+ 4 (- (max ptr-off d/ROOT_EPOCH_OFFSET)
-                                              (min ptr-off d/ROOT_EPOCH_OFFSET))))))
-                ;; the slot lets old go: a block at 0 is parked at the epoch now
-                (tally/drop-root! sio old-ptr (park-fn ds))
+          ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
+          (let [_ (tally/hold-root! sio new-ptr)
+                ;; durability (a disk domain with :durable-commits?): everything this
+                ;; commit wrote is forced BEFORE the root pointer can publish it, so a
+                ;; system crash cannot leave a root pointing at value pages that never
+                ;; reached disk. The force covers the slab classes this attempt
+                ;; touched — its logged allocations and the descriptor rows its
+                ;; tally holds mutated (alloc/sync-touched!) — not the whole slab.
+                ;; Inside the attempt, so a lost CAS wastes one force and the
+                ;; retry writes and forces its own blocks; nothing is held across the retry.
+                ;; Journal domains defer this sweep to their flush: J1's flush
+                ;; sweeps this attempt's touched set inside the journal lock
+                ;; before it appends (see the success path below); J10's flush
+                ;; sweeps the whole domain. Only the force-ordering form
+                ;; (durable, no journal) sweeps here — its root force below
+                ;; is its commit record.
+                _ (when (and durable-commits? (nil? journal))
+                    (alloc/sync-touched! sio
+                                         (into (into @tally/*touches* (take-unforced! ds))
+                                               (alloc/logged-allocs lsio))))
+                w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
+            (if (== w old-ptr)
+              (do
+                (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)
+                (if (and durable-commits? journal (<= (:limit journal) 1))
+                  ;; J1 (journal, per-commit durability): the slot lets
+                  ;; old go FIRST, so the drop's descriptor writes join
+                  ;; the set the flush is about to sweep; then the
+                  ;; flush — one touched sweep inside the journal lock,
+                  ;; the record append, the journal force — is the
+                  ;; commit point. (The attempt used to sweep twice
+                  ;; around the CAS and the flush swept nothing; the
+                  ;; invariant is unchanged — recovery accepts a record
+                  ;; only after the sweep that precedes its append
+                  ;; inside the same lock — at half the forces.)
+                  (do
+                    (tally/drop-root! sio old-ptr (park-fn ds))
+                    (journal-note-commit! ds
+                                          (into @tally/*touches*
+                                                (alloc/logged-allocs lsio))))
+                  (do  ;; and the epoch is made durable before swap! returns: a
+                    ;; batch journal domain appends its flush record at
+                    ;; its batch boundary (that flush's force is the
+                    ;; batch's commit point; the root file is a
+                    ;; checkpoint and is not forced per commit) —
+                    ;; otherwise (the force-ordering form) the root's
+                    ;; own range, the epoch word through the slot
+                    ;; pointer, is forced after the CAS.
+                    (when durable-commits?
+                      (if journal
+                        (journal-note-commit! ds)
+                        (mem/sync-region! root-r
+                                          (min ptr-off d/ROOT_EPOCH_OFFSET)
+                                          (+ 4
+                                             (- (max ptr-off d/ROOT_EPOCH_OFFSET)
+                                                (min ptr-off d/ROOT_EPOCH_OFFSET))))))
+                    ;; the slot lets old go: a block at 0 is parked at the epoch now
+                    (tally/drop-root! sio old-ptr (park-fn ds))
+                    ;; the drop's descriptor writes are forced too (the root
+                    ;; force above covered the root's own range only)
+                    (when (and durable-commits? (nil? journal))
+                      (alloc/sync-touched! sio @tally/*touches*))))
                 (alloc/stop-logging! lsio)
                 [:ok new-val])
-            (let [offs (alloc/logged-allocs lsio)]
-              ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
-              ;; share with other values keeps its count), and every other block this attempt allocated that no
-              ;; holder took is freed now (a value the attempt stored into another atom is that atom's)
-              ;; (read before the log stops: a stopped log reads empty)
-              (alloc/stop-logging! lsio)
-              (tally/drop-root! sio new-ptr (park-fn ds))
-              (tally/free-unheld! sio offs)
-              [:retry nil])))))
-    (finally
-      (unpin-epoch! ds))))
+              (let [offs (alloc/logged-allocs lsio)]
+                ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
+                ;; share with other values keeps its count), and every other block this attempt allocated that no
+                ;; holder took is freed now (a value the attempt stored into another atom is that atom's)
+                ;; (read before the log stops: a stopped log reads empty)
+                (alloc/stop-logging! lsio)
+                (tally/drop-root! sio new-ptr (park-fn ds))
+                (tally/free-unheld! sio offs)
+                ;; the frees' and drop's writes are forced even on a lost
+                ;; attempt (the pre-CAS force covered the allocations, not
+                ;; their taking-back). Journal domains skip this force:
+                ;; nothing was published, and the lagging allocator writes
+                ;; are forced by the flush sweep of whichever commit's
+                ;; record first references a reused block (J1: that
+                ;; commit's touched sweep; J10/checkpoint: the whole-domain
+                ;; sweep) and by the retire flush that recycles the blocks
+                ;; — a crash before then reads the blocks as still
+                ;; allocated, the leak direction only.
+                (when (and durable-commits? (nil? journal))
+                  (alloc/sync-touched! sio (into @tally/*touches* offs)))
+                [:retry nil])))))
+      (finally (unpin-epoch! ds)))))
 
 (defn- mmap-swap!
   "CAS-loop swap. Accepts any slab-backed value of this domain, a plain
@@ -1098,6 +1242,24 @@
 ;; Domains
 ;; ---------------------------------------------------------------------------
 
+(def MEM-BUDGET-DESKTOP
+  "The desktop per-domain in-mem budget default: 2 GB. A developer-settable
+   DEFAULT for a domain's :mem-budget — pass it (or your own byte count) to
+   persistent-atom-domain / atom-domain; nothing applies it for you, and it
+   is a parameter, not a ceiling compiled into the allocator: growth past
+   it is refused with a named error, never the host's hard OOM."
+  (* 2 1024 1024 1024))
+
+(def MEM-BUDGET-BROWSER
+  "The browser per-domain in-mem budget default: 1 GB. See MEM-BUDGET-DESKTOP."
+  (* 1024 1024 1024))
+
+(def MEM-BUDGET-WORKERD
+  "The Cloudflare workerd per-domain in-mem budget default: 48 MB (the
+   platform's ~64 MB envelope leaves the runtime its share). See
+   MEM-BUDGET-DESKTOP."
+  (* 48 1024 1024))
+
 (def ^:private domain-cache
   "Opened mmap domains by base path."
   (clojure.core/atom {}))
@@ -1109,17 +1271,41 @@
    create of the .root file succeeds creates the domain; every other joins —
    never a check of the file's existence then a create, which two processes
    opening a fresh domain together both pass (each initialised the domain
-   over the other's writes)."
-  [base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms] :or {capacities {} lustre? false durable? true}}]
+   over the other's writes).
+
+   Durability is the default shape of a disk domain: unless the opener
+   says otherwise, the domain is JOURNALED — commits append a record to
+   <base>.journal and the journal force is the commit point; the .root
+   file is a checkpoint (cleanup-sweep journal verdict, 2026-11-07: the
+   disk tier is journaled by design). The named opt-outs: :journal? false
+   keeps durable commits without the journal file (the pre-CAS sweep +
+   root-range force per commit carry durability alone); :durable? false
+   is the non-durable comms form — no journal, no forces, sync! is the
+   caller's explicit barrier. :mem-budget (bytes) caps the domain's total
+   region growth — refused growth names the budget, never the host's
+   out-of-memory; the MEM-BUDGET-* constants are the per-target defaults.
+   :segment-bytes (a power of two) sets the region mapping window —
+   presentation, not format: it is stored nowhere in the domain's
+   files, and processes may join the same domain with different
+   windows."
+  [base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes] :or {capacities {} lustre? false durable? true}}]
   (or (get @domain-cache base-path)
       (let [_  (proc/ensure-parent-dir! base-path)
-            ds (open-mmap-domain! base-path {:capacities capacities
-                                             :lustre? lustre?
+            ds (open-mmap-domain! base-path (cond-> {:capacities capacities
+                                                     :lustre? lustre?
                                              :durable? durable?
-                                             :journal? journal?
+                                             :journal? (if (nil? journal?)
+                                                         (not (false? durable?))
+                                                         journal?)
                                              :journal-batch journal-batch
                                              :journal-window-ms journal-window-ms
-                                             :create? (proc/create-exclusive! (str base-path ".root"))})
+                                             :create? (proc/create-exclusive! (str base-path ".root"))}
+                                      coalesc-descriptors
+                                      (assoc :coalesc-descriptors coalesc-descriptors)
+                                      mem-budget
+                                      (assoc :mem-budget mem-budget)
+                                      segment-bytes
+                                      (assoc :segment-bytes segment-bytes)))
             d  (MmapAtomDomain. ds (clojure.core/atom {}))]
         (swap! domain-cache assoc base-path d)
         d)))
@@ -1133,7 +1319,8 @@
   "Force a domain's whole mapped set — slabs, bitmaps, descriptor tables,
    reader map, root — to durable storage (eve.mem/sync-region!: a region
    that cannot force answers nil, so an in-process domain is a no-op)."
-  [{:keys [root-r rmap-r sio]}]
+  [{:keys [root-r rmap-r sio] :as ds}]
+  (take-unforced! ds)
   (alloc/sync-sio! sio)
   (mem/sync-region! rmap-r)
   (mem/sync-region! root-r))
@@ -1355,10 +1542,10 @@
             offs (sort (distinct (when (live-ptr? ptr) (retire/reach sio ptr))))
             digest (reduce (fn [h off]
                              (let [cls (alloc/decode-class-idx off)
-                                   ^bytes bs (slab/read-bytes sio off 0 (if (< cls 6) (d/slab-size cls) 32))]
-                               (reduce (fn [h i] (fnv-fold h (bit-and (aget bs i) 0xFF)))
+                                   bs (slab/read-bytes sio off 0 (if (< cls 6) (d/slab-size cls) 32))]
+                               (reduce (fn [h i] (fnv-fold h (bit-and (aget ^bytes bs i) 0xFF)))
                                        (fnv-fold h off)
-                                       (range (alength bs)))))
+                                       (range (alength ^bytes bs)))))
                            (i32/i32 0x811c9dc5)
                            offs)]
         {:ptr ptr :name-hash nh :blocks (count offs) :digest digest})
@@ -1485,9 +1672,10 @@
 
 (defn atom-domain
   "A fresh in-process atom domain holding initial-value. Returns an
-   MmapAtomDomain."
-  [initial-value & {:as _opts}]
-  (let [ds (open-heap-domain! {})
+   MmapAtomDomain. Domain options (:capacities, :coalesc-descriptors,
+   :mem-budget) pass through to the domain's slab I/O."
+  [initial-value & {:as opts}]
+  (let [ds (open-heap-domain! opts)
         domain (MmapAtomDomain. ds (clojure.core/atom {}))]
     (alloc/init-domain-views!)
     (mmap-swap! ds 0 (constantly initial-value) [])

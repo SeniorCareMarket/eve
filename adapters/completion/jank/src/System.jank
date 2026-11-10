@@ -1,0 +1,29 @@
+(ns System
+  "The JVM class-statics vanilla code calls by name — identityHashCode
+   (datascript.impl.entity's hash-entity), getProperty (datascript.util's log
+   macro, at expansion time), currentTimeMillis (datascript.util's squuid) —
+   as a real namespace of real vars. Each answer is the honest one for this
+   host: the instance's own address is its identity hash; no system
+   properties are set (getProperty answers nil, or the caller's default);
+   the wall clock is real.
+
+   A real module, not eve.host-completion's runtime synthesis, so jank's
+   AOT compiler can analyze and collect it; see Math.jank's docstring.
+   eve.host-completion requires this namespace; its when-not intern block
+   remains as the fallback. The two native answers live in this module's
+   own cpp/raw (namespace eve_sys): cpp/eve_host.* is eve.host-completion's
+   native block and is not visible from this module.")
+
+(cpp/raw "
+#include <chrono>
+#include <cstdint>
+namespace eve_sys {
+  using namespace jank::runtime;
+  long addr(object_ref o) { return (long)reinterpret_cast<uintptr_t>(o.ptr()); }
+  long now_millis() { return (long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+}
+")
+
+(defn identityHashCode [x] (bit-and (cpp/eve_sys.addr x) 0x7fffffff))
+(defn getProperty ([_] nil) ([_ d] d))
+(defn currentTimeMillis [] (cpp/eve_sys.now_millis))

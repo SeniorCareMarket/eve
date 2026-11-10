@@ -1,0 +1,15 @@
+(ns clojure.lang.Util
+  "clojure.lang.Util on glojure (part of its core completion, adapters/completion/glojure): the two
+   statics portable code calls — hasheq (datascript's ihash) and hashCombine (its datom hash) —
+   answered by vars of this namespace, which the seat's analyzer resolves the static-looking call
+   to. hasheq is the seat's own hash; hashCombine is boost's combine, the JVM's formula.")
+
+(defn hasheq
+  "Util/hasheq: the seat's hash of x."
+  [x]
+  (hash x))
+
+(defn hashCombine
+  "Util/hashCombine: seed combined with hash, boost::hash_combine as the JVM has it."
+  [seed hash]
+  (int (bit-xor seed (+ hash 0x9e3779b9 (bit-shift-left seed 6) (bit-shift-right seed 2)))))

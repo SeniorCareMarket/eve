@@ -38,14 +38,14 @@
 
 (defn copy-of-range
   "A new byte array of b's bytes [from, to)."
-  ^bytes [^bytes b from to]
+   [^bytes b from to]
   (let [n (- to from) out (byte-array n)]
     (arraycopy b from out 0 n)
     out))
 
 (defn utf8-bytes
   "The UTF-8 bytes of string s."
-  ^bytes [s]
+   [s]
   ;; a clojerl string is its UTF-8 binary
   (h/region->bytes (nif/from-binary s)))
 
@@ -56,12 +56,12 @@
 
 (defn long-bits->double
   "The double whose IEEE-754 bits are x."
-  ^double [^long x]
+   [^long x]
   (nif/bits-double x))
 
 (defn double->long-bits
   "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
-  ^long [^double d]
+   [^double d]
   (nif/double-bits d))
 
 (defn fixed-integer?
@@ -117,7 +117,7 @@
 
 (defn date-ms
   "Milliseconds since the Unix epoch of a date."
-  ^long [d]
+   [d]
   (inst-ms d))
 
 (defn ms->date
@@ -186,11 +186,11 @@
 (defn bytes=
   "Two byte arrays equal, byte for byte."
   [a b]
-  (and (== (eve.host/alength ^bytes a) (eve.host/alength ^bytes b))
+  (and (== (eve.host/alength a) (eve.host/alength b))
        (loop [i 0]
-         (if (>= i (eve.host/alength ^bytes a))
+         (if (>= i (eve.host/alength a))
            true
-           (if (not= (aget ^bytes a i) (aget ^bytes b i)) false (recur (inc i)))))))
+           (if (not= (aget a i) (aget b i)) false (recur (inc i)))))))
 
 (defn illegal-argument
   "The host's illegal-argument exception, with message msg."

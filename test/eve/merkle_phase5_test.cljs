@@ -19,7 +19,8 @@
   (:require [cljs.test :refer [deftest testing is]]
             [eve.atom :as atom]
             [eve.data :as d]
-            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as dd]
+            [eve.process-slab :as ps]
             [eve.util :as u]))
 
 (def ^:private test-base (str "target/merkle-phase5-probe-" (js/Date.now)))
@@ -42,9 +43,9 @@
 
 (defn- total-used-blocks []
   (loop [i 0 total 0]
-    (if (>= i d/NUM_SLAB_CLASSES)
+    (if (>= i dd/NUM_SLAB_CLASSES)
       total
-      (recur (inc i) (+ total (:used-count (alloc/slab-stats i)))))))
+      (recur (inc i) (+ total (:used-count (ps/slab-stats i)))))))
 
 (deftest shared-atom-equal-rebuilt-swap-notifies-without-new-root
   (testing "SharedAtom: equal-but-rebuilt swap answered by the decision; watch still fires"
