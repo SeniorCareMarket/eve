@@ -52,8 +52,10 @@
    resets the freed block's row (its management record), never its bytes. The zero queue is the domain state's own
    queue, as eve's retire queue was: each process's holds what it parked, freed behind the pins every process
    publishes; the rows are in the domain's files, so every process sees one count."
-  (:refer-clojure :exclude [unsigned-bit-shift-right volatile! vswap!])
-  (:require [eve.host :refer [unsigned-bit-shift-right volatile! vswap!]]
+  ;; :clje — eve.hamt-util/popcount32 carries a ^long return tag that clojerl resolves as a symbol in
+  ;; the CALLER's ns (clojerl has no JVM `long` coercion); take eve.host's `long`, as hamt_util itself does.
+  (:refer-clojure :exclude [unsigned-bit-shift-right volatile! vswap! #?@(:clje [long])])
+  (:require [eve.host :refer [unsigned-bit-shift-right volatile! vswap! #?@(:clje [long])]]
             [eve.slab-io :as slab]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.serialize :as ser]
