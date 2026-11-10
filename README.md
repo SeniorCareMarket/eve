@@ -131,7 +131,7 @@ From your own project:
 ;; deps.edn
 {:deps {datascript-on-eve/datascript-on-eve
         {:git/url "https://github.com/SeniorCareMarket/eve"
-         :git/tag "v0.9.3.1"
+         :git/tag "v0.9.3.2"
          :deps/root "contract-test/lib-ds"}}}
 ```
 

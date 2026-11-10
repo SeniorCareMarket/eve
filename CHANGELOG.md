@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3.2] - 2026-11-10
+
+### Fixed
+
+- **`eve.tally` loads on clojerl.** `eve.hamt-util/popcount32`'s `^long` return tag is resolved by clojerl in the caller's namespace, so `(require 'eve.tally)` failed with "Unable to resolve symbol: long" at tally.cljc:190. `eve.tally` now takes `eve.host`'s `long` under `:clje`. Source: `clje-tally-long` dab410673579c8abf9d4eab90baafa3d28f7f2bc. (Verified on the JVM suite only; the clojerl load check is a separate run.)
+- **`eve.mem` bulk extend-default fill.** The fill is chunked through `-write-bytes!`. Source: `eve-bulk-fill-fix` f3a1e76d32e1ae8cd0896a52d879c5656831178b (record: BULK-FILL-FIX-REPORT.md).
+
+### Added
+
+- **`eve.aegis.chat-spec`** (`test/eve/aegis/chat_spec.cljc`): the self-contained data namespace the aegis chat's JVM suite requires, absent from 0.9.3.1. Source: `aegis-chat-spec` 032a6f1d23700ab69b624eab0cc00bbde612cf78 (sha256 3cb414f8d8362a61c25da0185033553adbeb0e427eadddeb0a13141d453bb823).
+
 ## [0.9.3.1] - 2026-11-09
 
 ### Added
