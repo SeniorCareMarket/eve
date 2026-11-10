@@ -1,0 +1,33 @@
+(ns flagship.lpy-entry
+  ;; Roster entry ticket — BASILISP seat: DataScript load +
+  ;; transact + query on basilisp against the release tree.
+  ;; Heap conn first, then a persistent (mmap) domain round.
+  (:require [datascript.core :as d]
+            [datascript.conn :as conn]
+            [eve.atom :as atom]))
+
+(def base-tx (mapv (fn [i] {:db/id i :name (str "base-" i) :age (+ 20 i)})
+                   (range 1 11)))
+
+(defn -main [& args]
+  (let [dir (first args)
+        c (conn/create-conn)
+        _ (conn/transact! c base-tx)
+        heap-count (count (d/datoms @c :eavt))
+        heap-q (d/q '[:find ?n :where [?e :name ?n] [?e :age 25]] @c)]
+    (println :lpy-entry {:heap-count heap-count :heap-q25 heap-q})
+    (try
+      (let [dom (atom/persistent-atom-domain dir)
+            a (atom/lookup-or-create-mmap-atom! dom "contract/ds-flagship" nil)
+            _ (when (nil? @a) (swap! a (fn [_] (d/empty-db))))
+            _ (swap! a (fn [db] (d/db-with db base-tx)))
+            mmap-count (count (seq (d/datoms @a :eavt)))
+            mmap-q (d/q '[:find ?n :where [?e :name ?n] [?e :age 25]] @a)]
+        (println :lpy-entry {:mmap-count mmap-count :mmap-q25 mmap-q})
+        (println :lpy-entry-ok
+                 (and (= 20 heap-count) (= #{["base-5"]} heap-q)
+                      (= 20 mmap-count) (= #{["base-5"]} mmap-q))))
+      (catch Exception e
+        (println :lpy-entry-mmap-failed (str e))
+        (println :lpy-entry-ok
+                 (and (= 20 heap-count) (= #{["base-5"]} heap-q)))))))
