@@ -2,8 +2,10 @@
 
 Branch: `eve-bulk-fill-fix` on SeniorCareMarket/eve, off main
 4a9212981680 (the shipped 0.9.3.1 tree). One source file changed:
-`src/eve/mem.cljc`. PR: opened against main with this report's
-numbers in the body — NOT merged (the operator merges Eve PRs).
+`src/eve/mem.cljc`. PR: **#35** —
+https://github.com/SeniorCareMarket/eve/pull/35 — opened against
+main with this report's numbers in the body; state verified open
+and unmerged after creation (the operator merges Eve PRs).
 This file is the banked half of the lane's double declaration; the
 other half is the lane's final chat message, same substance.
 
