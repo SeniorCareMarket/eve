@@ -5,11 +5,12 @@
    Uses ISlabIO protocol for all memory access, sio threaded everywhere.
 
    Uses eve/deftype macro: CLJ protocol names, auto-translated on CLJS."
+  ;; :clje — callees' ^long return tags (alloc/node-i32) resolve in the CALLER's ns on clojerl; take eve.host's `long`.
   (:refer-clojure :exclude [alength unsigned-bit-shift-right volatile! vswap! transient
-                            persistent! conj! bytes])
+                            persistent! conj! bytes #?@(:clje [long])])
   (:require
    [eve.host :refer [field alength unsigned-bit-shift-right volatile! vswap! transient persistent!
-                     conj! bytes]]
+                     conj! bytes #?@(:clje [long])]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
     :refer [NIL_OFFSET]]
