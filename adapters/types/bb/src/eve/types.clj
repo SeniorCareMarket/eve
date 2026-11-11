@@ -8,6 +8,8 @@
      host-type, plain-type, slab-type, eve-type, extend-eve-type,
      existing-def, rename-fields, reader-of, print-form, vector-types."
   (:require [clojure.string :as str]
+            [eve.logical-protocol :as logical]
+            [eve.record-context :as record-context]
             [eve.core]
             [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
                                                  cljs-protocol? rename-syms parse-protocol-impls
@@ -240,7 +242,24 @@
                                                        clojure.lang.Seqable
                                                        java.lang.Iterable}
                                                     (:protocol impl)))
-                                       parsed-protos)]
+                                       parsed-protos)
+                         ;; SCI's map hash and host collection consumers call
+                         ;; iterator directly. A JVM map-shaped declaration can
+                         ;; omit Iterable, but SciMap cannot: derive it from seq.
+                         kept (if (some #(= 'java.lang.Iterable (:protocol %)) kept)
+                                kept
+                                (conj kept
+                                      {:protocol 'java.lang.Iterable
+                                       :methods [{:name 'iterator :args '[this]
+                                                  :body '[(let [state (atom (seq this))]
+                                                            (reify java.util.Iterator
+                                                              (hasNext [_] (boolean @state))
+                                                              (next [_]
+                                                                (if-let [s @state]
+                                                                  (let [v (first s)]
+                                                                    (swap! state next)
+                                                                    v)
+                                                                  (throw (java.util.NoSuchElementException.))))))]}]}))]
                      (if (some #(= 'clojure.lang.IPersistentMap (:protocol %)) kept)
                        kept
                        (into [{:protocol 'clojure.lang.IPersistentMap :methods []}] kept))))]
@@ -341,7 +360,7 @@
     x))
 
 (defn- define [type-name fields forms]
-  [`(~'deftype ~type-name ~fields ~@forms)])
+  [`(clojure.core/deftype ~type-name ~fields ~@forms)])
 
 (defn- hooks
   "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
@@ -354,7 +373,7 @@
              (when (some #(= 'clojure.lang.IMapEntry (:protocol %)) impls)
                (swap! map-entry-types conj (qualified-type type-name)))
              (let [bb-impls (bb-translate-protos impls type-name {:slab? true})]
-               (concat [`(~'deftype ~type-name ~fields ~@(impls->forms bb-impls))]
+               (concat [`(clojure.core/deftype ~type-name ~fields ~@(impls->forms bb-impls))]
                        (when (some #(= 'eve.core/IPrintWithWriter (:protocol %)) bb-impls)
                          [(sio/print-method-form type-name 'eve.core/-pr-writer)]))))
    ;; sci builds (T. x) through the ->T var: the deftype's own factory, kept
@@ -377,20 +396,27 @@
 (defn host-type
   "A plain type written with the JVM's names (host-deftype)."
   [_env type-name fields parsed]
-  `(~'deftype ~type-name ~fields ~@(impls->forms (bb-translate-protos parsed type-name))))
+  `(clojure.core/deftype ~type-name ~fields ~@(impls->forms (bb-translate-protos parsed type-name))))
 
 (defn plain-type
   "A plain type (eve.deftype/deftype) on eve.core's protocols."
   [_env type-name fields parsed]
+  (logical/install!)
   (let [[fields parsed] (sio/plain-renames fields parsed nil)
         impls (bb-translate-protos parsed type-name)
-        printed? (some #(= 'eve.core/IPrintWithWriter (:protocol %)) impls)]
+        printed? (some #(= 'eve.core/IPrintWithWriter (:protocol %)) impls)
+        map-mode? (some #(= 'clojure.lang.IPersistentMap (:protocol %)) impls)
+        factory (symbol (str "->" (name type-name)))]
     `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))
          ~@(when printed? [(sio/print-method-form type-name 'eve.core/-pr-writer)])
+         ~@(when map-mode?
+             [`(eve.host-completion/present-map-mode-type! (var ~factory) ~type-name)])
          ~type-name)))
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
-(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx]
+  (logical/install!)
+  (sio/eve-type ctx (hooks)))
 (defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
 
 (defn existing-def
@@ -410,7 +436,12 @@
    protocols, not clojure.core's, so what bb reads is the Clojure collection
    clojure.core takes; else its eve type (from-header)."
   [from-header host-value]
-  (or host-value from-header))
+  (if host-value
+    `(fn [sio# header-off#]
+       (if eve.record-context/*slab-values*
+         (~from-header sio# header-off#)
+         (~host-value sio# header-off#)))
+    from-header))
 
 (defn print-form
   "The printer of a registered eve collection: none — babashka (a value read from eve memory is a Clojure

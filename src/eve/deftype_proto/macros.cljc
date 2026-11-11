@@ -17,6 +17,7 @@
   (:refer-clojure :exclude [deftype])
   (:require [eve.deftype-proto.vocab :as v]
             [eve.deftype-proto.macros.registry :as reg]
+            [eve.deftype.registry :as dt-reg]
             [eve.types :as t]))
 
 (defmacro host-deftype
@@ -24,7 +25,9 @@
    eve.types realizes it (clojure.core/deftype on the JVM; each other host's
    own types, translated)."
   [type-name fields & body]
-  (t/host-type &env type-name fields (v/parse-protocol-impls body)))
+  (list 'do
+        (t/host-type &env type-name fields (v/parse-protocol-impls body))
+        (dt-reg/registration-form &env type-name {:storage :process-local})))
 
 ;;=============================================================================
 ;; Main Macro
@@ -53,7 +56,7 @@
         ;; an existing (def TypeName-type-id ...) in the namespace being
         ;; compiled (the host's eve.types reads it its way)
         existing (t/existing-def &env type-id-sym)
-        type-key (str (ns-name *ns*) "/" (name type-name))
+        type-key (dt-reg/qualified-type-key &env type-name)
         type-id (or (:value existing) (reg/derived-type-id! type-key))
         ;; Only emit (def TypeName-type-id ...) if not already defined
         emit-type-id-def? (nil? existing)
@@ -63,9 +66,12 @@
                                :fields fields
                                :type-key type-key})
         parsed-protos (v/parse-protocol-impls body)]
-    (t/slab-type {:env &env :type-name type-name :fields fields :parsed-protos parsed-protos
+    (list 'do
+      (t/slab-type {:env &env :type-name type-name :fields fields :parsed-protos parsed-protos
                   :type-id type-id :total-size total-size
-                  :emit-type-id-def? emit-type-id-def? :type-key type-key})))
+                  :emit-type-id-def? emit-type-id-def? :type-key type-key})
+      (dt-reg/registration-form &env type-name
+        {:type-id type-id :total-size total-size :type-key type-key :storage :slab :fields fields}))))
 
 ;;=============================================================================
 ;; Registration Macro

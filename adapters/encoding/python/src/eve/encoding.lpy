@@ -135,7 +135,9 @@
 (defn date-ms
   "Milliseconds since the Unix epoch of a date."
   ^long [d]
-  (let [td (.__sub__ d (datetime/datetime 1970 1 1 ** :tzinfo datetime.timezone/utc))]
+  (let [d (if (nil? (.-tzinfo d))
+            (.replace d ** :tzinfo datetime.timezone/utc) d)
+        td (.__sub__ d (datetime/datetime 1970 1 1 ** :tzinfo datetime.timezone/utc))]
     (+ (* 86400000 (.-days td)) (* 1000 (.-seconds td)) (quot (.-microseconds td) 1000))))
 
 (defn ms->date

@@ -184,7 +184,7 @@
                  enumerators dictionary reduce1))))
 
 (defn- define [type-name fields forms]
-  [`(~'deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos (parse-protocol-impls forms))))])
+  [`(clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos (parse-protocol-impls forms))))])
 
 (defn- hooks
   "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's

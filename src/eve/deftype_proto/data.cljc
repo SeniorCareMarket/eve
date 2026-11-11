@@ -63,8 +63,8 @@
    via i8x16.bitmask + ctz. Scans 128 bits (128 blocks) per
    SIMD iteration. For a 1MB slab with 64B blocks (16384 blocks),
    the full bitmap is 2KB = 128 v128 loads worst case."
-  (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes])
-  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes extend-default]]))
+  (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes long])
+  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes long extend-default]]))
 
 ;;=============================================================================
 ;; Size Classes

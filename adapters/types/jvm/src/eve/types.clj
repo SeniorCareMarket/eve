@@ -21,7 +21,7 @@
   (some? (:ns env)))
 
 (defn- define [type-name fields forms]
-  [`(~'deftype ~type-name ~fields ~@forms)])
+  [`(clojure.core/deftype ~type-name ~fields ~@forms)])
 
 (defn- hooks
   "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's

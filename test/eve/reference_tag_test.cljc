@@ -97,3 +97,16 @@
        (testing "and the same domain takes the values eve has bytes for"
          (is (= "plain" (codec/decode s (codec/encode-value s "plain"))))
          (is (= 2 (e/count (codec/decode s (codec/encode-value s {:a 1 :b [1 2]})))))))))
+
+;; Java object arrays are not Eve typed arrays. Query tuples and transaction
+;; inputs may contain them; do not route them to the primitive-array writer.
+#?(:bb
+   (deftest object-arrays-remain-references
+     (doseq [v [(to-array [1 "two" nil]) (into-array String ["one" "two"])]]
+       (is (identical? v (round-trip v)))
+       (is (identical? v (e/get (in-map :v v) :v)))))
+   :clj
+   (deftest object-arrays-remain-references
+     (doseq [v [(to-array [1 "two" nil]) (into-array String ["one" "two"])]]
+       (is (identical? v (round-trip v)))
+       (is (identical? v (e/get (in-map :v v) :v))))))

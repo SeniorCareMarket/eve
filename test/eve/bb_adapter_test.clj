@@ -69,3 +69,48 @@
             "eve.db.ds.* children are carved out")
         (is (true? (binding [*ns* (create-ns 'user)] (lookup)))
             "plain user/library namespaces still present")))))
+
+(edt/deftype LocalSeq [xs]
+  clojure.lang.Seqable
+  (seq [_] (seq xs)))
+
+(deftest vec-consumes-eve-seqables
+  (is (= [1 2 3] (vec (LocalSeq. [1 2 3]))))
+  (is (= [] (vec (LocalSeq. []))))
+  (let [v (with-meta [1 2 3] {:native true})]
+    (if-let [original (ns-resolve 'eve.host-completion 'sci-vec)]
+      (do (is (= (identical? v (@original v)) (identical? v (vec v))))
+          (is (= (meta (@original v)) (meta (vec v)))))
+      (is (= [1 2 3] (vec v))))))
+
+;; Map-shaped JVM declarations do not have to spell out Iterable. In SCI
+;; map mode the adapter must supply it for native hash/set consumers.
+(edt/deftype MapWithoutIterator [m]
+  clojure.lang.ILookup
+  (valAt [_ k] (get m k))
+  (valAt [_ k nf] (get m k nf))
+  clojure.lang.Associative
+  (containsKey [_ k] (contains? m k))
+  (entryAt [_ k] (find m k))
+  (assoc [_ k v] (MapWithoutIterator. (assoc m k v)))
+  clojure.lang.Counted
+  (count [_] (count m))
+  clojure.lang.Seqable
+  (seq [_] (seq m)))
+
+(deftest map-without-explicit-iterator-can-be-hashed
+  (when (System/getProperty "babashka.version")
+    (let [x (MapWithoutIterator. {:a 1 :b 2})]
+      (is (= (hash {:a 1 :b 2}) (hash x)))
+      (is (= #{x} (hash-set x)))
+      (is (= #{[:a 1] [:b 2]} (set x))))))
+
+(edt/deftype LookupOnly [m]
+  clojure.lang.ILookup
+  (valAt [_ k] (get m k))
+  (valAt [_ k nf] (get m k nf)))
+
+(deftest juxt-normalizes-keyword-constituents
+  (let [x (LookupOnly. {:a 1 :b false})]
+    (is (= [1 false nil] ((juxt :a :b :missing) x)))
+    (is (= [[1 false]] (mapv (juxt :a :b) [x])))))

@@ -11,8 +11,8 @@
 
 (def shared-tests
   "The test namespaces ClojureCLR runs as written."
-  '[eve.hamt-util-test eve.eve-bytes-fixture-test eve.deftype.type-id-test
-    eve.deftype.rb-tree-test eve.numeric-tags-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.tally-test eve.domain-open-test eve.deftype.int-map-test eve.rrb-vector-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-net-test eve.thread-fold-test eve.thread-fold-group-test
+  '[eve.type-io-test eve.clock-uuid-test eve.associative-transient-test eve.hamt-util-test eve.eve-bytes-fixture-test eve.record-test eve.deftype.type-id-test
+    eve.deftype.rb-tree-test eve.numeric-tags-test eve.numeric-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.tally-test eve.domain-open-test eve.deftype.int-map-test eve.rrb-vector-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-net-test eve.thread-fold-test eve.thread-fold-group-test
     ;; the crypto feature's fast-path rows (AesGcm, Ed25519 over BigInteger)
     eve.net.crypto-fast-path-test])
 

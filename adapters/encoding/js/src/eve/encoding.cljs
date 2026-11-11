@@ -29,6 +29,11 @@
   [k v]
   (MapEntry. k v nil))
 
+(defn date-ms
+  "Milliseconds since the Unix epoch of a host instant."
+  [d]
+  (.getTime d))
+
 (defn arraycopy
   "Copy len elements of array src from soff to dst at doff."
   [src soff dst doff len]

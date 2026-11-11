@@ -21,6 +21,7 @@
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
+   [eve.hamt-batch :as batch]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                  bitpos node-bit has-bit? get-index]]
    [eve.encoding :as enc]
@@ -1307,9 +1308,9 @@
            coll))))
 
 ;;=============================================================================
-;; Transients: a persistent collection behind a transient's interface — each
-;; op makes the next persistent one (eve.core's ops: on bb the type answers
-;; eve.core's protocols), and frees what it superseded in the one before
+;; Transients: empty-source builds batch canonical encoded entries and write
+;; each final node once. Observation/removal flushes the batch. Nonempty
+;; sources and post-flush edits use the persistent path with owned-node reclaim.
 ;;=============================================================================
 
 (declare collect-retire-diff-offsets)
@@ -1361,33 +1362,86 @@
   (let [kb (serialize-key-bytes k)]
     (fn [m m'] (collect-key-path-diff-offsets m m' kb))))
 
+
+(defn- build-batch-map [sio entries]
+  (let [entries (batch/unique-entries entries)
+        root (if (empty? entries) NIL_OFFSET
+                 (batch/build
+                  entries 0
+                  (fn [db nb data children]
+                    (let [kv-size (reduce (fn [n [_ kb vb]] (+ n (calc-kv-size kb vb))) 0 data)
+                          off (slab/alloc! sio (+ NODE_HEADER_SIZE (* 4 (count children))
+                                                 (* 4 (count data)) kv-size))]
+                      (slab/write-u8! sio off 0 NODE_TYPE_BITMAP)
+                      (slab/write-u8! sio off 1 0)
+                      (slab/write-u16! sio off 2 (kv-total-cache kv-size))
+                      (slab/write-i32! sio off 4 db)
+                      (slab/write-i32! sio off 8 nb)
+                      (doseq [[i child] (map-indexed vector children)]
+                        (slab/write-i32! sio off (+ NODE_HEADER_SIZE (* i 4)) child))
+                      (doseq [[i [kh]] (map-indexed vector data)]
+                        (slab/write-i32! sio off (+ (hashes-start-off nb) (* i 4)) kh))
+                      (reduce (fn [p [_ kb vb]] (write-kv! sio off p kb vb))
+                              (kv-data-start-off db nb) data)
+                      off))
+                  (fn [entries] (make-collision-node! sio (ffirst entries) entries))))]
+    (hash-map-from-header sio (write-map-header! sio (count entries) root))))
+
+(defn- batch-map-entry [sio k v]
+  (let [[kb kh] (key-bytes+hash k)]
+    [kh kb (serialize-val-bytes sio v)]))
+
 (do
-     (eve/host-deftype TransientEveHashMap [^:volatile-mutable m sio]
+     (eve/host-deftype TransientEveHashMap [^:volatile-mutable m sio ^:volatile-mutable pending]
        clojure.lang.ITransientMap
        (assoc [this k v]
-         (set! m (edit sio m #(assoc % k v) (key-walk k)))
+         (if pending
+           (set! pending (conj! pending (batch-map-entry sio k v)))
+           (set! m (edit sio m #(assoc % k v) (key-walk k))))
          this)
        (without [this k]
+         (when pending
+           (set! m (build-batch-map sio (persistent! pending)))
+           (set! pending nil))
          (set! m (edit sio m #(dissoc % k) (key-walk k)))
          this)
-       (persistent [_] (alloc/stop-logging! sio) m)
+       (persistent [_]
+         (when pending
+           (set! m (build-batch-map sio (persistent! pending)))
+           (set! pending nil))
+         (alloc/stop-logging! sio) m)
        (conj [this x]
-         (if (map-entry? x)
-           (set! m (edit sio m #(assoc % (key x) (val x)) (key-walk (key x))))
-           (set! m (edit sio m #(conj % x))))
+         (if (or (map-entry? x) (and (vector? x) (= 2 (count x))))
+           (if pending
+             (set! pending (conj! pending (batch-map-entry sio (nth x 0) (nth x 1))))
+             (set! m (edit sio m #(assoc % (nth x 0) (nth x 1)) (key-walk (nth x 0)))))
+           (do
+             (when pending
+               (set! m (build-batch-map sio (persistent! pending)))
+               (set! pending nil))
+             (set! m (edit sio m #(conj % x)))))
          this)
-
        clojure.lang.Counted
-       (count [_] (count m))
-
+       (count [_]
+         (when pending
+           (set! m (build-batch-map sio (persistent! pending)))
+           (set! pending nil))
+         (count m))
        clojure.lang.ILookup
-       (valAt [_ k] (get m k))
-       (valAt [_ k nf] (get m k nf)))
-
+       (valAt [_ k]
+         (when pending
+           (set! m (build-batch-map sio (persistent! pending)))
+           (set! pending nil))
+         (get m k))
+       (valAt [_ k nf]
+         (when pending
+           (set! m (build-batch-map sio (persistent! pending)))
+           (set! pending nil))
+         (get m k nf)))
      (defn ->transient-map [m]
-       ;; the map read through a scope of its own over its domain: what its ops allocate is logged there
        (let [sio (alloc/scope-sio (d/-eve-sio m))]
-         (->TransientEveHashMap (hash-map-from-header sio (d/-root-header-off m)) sio))))
+         (->TransientEveHashMap (hash-map-from-header sio (d/-root-header-off m)) sio
+                                (when (zero? (count m)) (transient []))))))
 
 ;;=============================================================================
 ;; Debug no-ops (API compat) and the direct map encoder

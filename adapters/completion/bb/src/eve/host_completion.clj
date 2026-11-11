@@ -1064,6 +1064,15 @@
 
 (alter-var-root #'clojure.core/seq (fn [_] presented-seq))
 
+;; vec calls RT/toArray directly, bypassing the presented seq function.
+;; Only Eve instances need a host seq view; retain vec's identity/metadata
+;; behavior for native vectors and its normal array conversion path.
+(def ^:private sci-vec @#'clojure.core/vec)
+(alter-var-root #'clojure.core/vec
+                (fn [_] (fn [x]
+                          (sci-vec (if (eve-typed? x) (presented-seq x) x)))))
+
+
 ;; first/rest/next on the seat's own types go through eve.core's
 ;; -first/-next directly, NOT through presented-seq's host view:
 ;; a sorted set Iter's own more is (or (next this) ()), so a
@@ -1184,6 +1193,22 @@
                   (own x w)
                   ((.getMethod pm clojure.lang.IPersistentMap) x w)))))
 
+;; SCI stores deftype print-methods on type metadata, whereas the native
+;; print-dup dispatches on the implementation class shared by all SCI types.
+;; Route those classes through the declared printer just as normal printing
+;; does; leave ordinary SciMap values on their original map duplicate printer.
+(clojure.core/deftype PrintDupProbe [])
+(let [^clojure.lang.MultiFn dup print-dup]
+  ;; Native-image Class/forName does not expose SciType by its class name.
+  ;; Obtain the actual implementation class from an ordinary SCI type.
+  (.addMethod dup (class (->PrintDupProbe))
+              (fn [x w] (print-method x w)))
+  (.addMethod dup (Class/forName "babashka.impl.SciMap")
+              (fn [x w]
+                (if (map-mode-type x)
+                  (print-method x w)
+                  ((.getMethod dup clojure.lang.IPersistentMap) x w)))))
+
 (defn- user-meta
   "Meta as the program sees it: the stamp removed."
   [m]
@@ -1279,6 +1304,13 @@
         ([x] (g x f))
         ([x nf] (g x f nf))))
     f))
+
+(def ^:private sci-juxt @#'clojure.core/juxt)
+;; A composite fn hides its keyword invocations from map/mapv's presenter.
+;; Normalize the constituent fns at construction, not the returned values.
+(alter-var-root #'clojure.core/juxt
+                (fn [_] (fn [& fs]
+                          (apply sci-juxt (sci-map presented-fn fs)))))
 
 (defn- xf-last
   "Like seq-last, but a single argument is the transducer arity

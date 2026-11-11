@@ -14,12 +14,15 @@
    ClojureScript compiler takes the macros from here through its adapter's
    eve/deftype.cljs (adapters/core/cljs-compiler)."
   (:refer-clojure :exclude [deftype])
-  (:require [eve.deftype-proto.alloc]
+  (:require [eve.deftype.registry]
+            [eve.deftype-proto.alloc]
+            #?(:cljs [eve.process-slab])
             [eve.deftype-proto.data]
             [eve.deftype-proto.serialize]
             [eve.codec]
             [eve.deftype.slab-runtime]
-            [eve.deftype.macros :as m]))
+            [eve.deftype.macros :as m]
+            [eve.type-readers]))
 
 (defmacro eve-deftype
   "Define a slab-backed type. See eve.deftype.macros/eve-deftype*."

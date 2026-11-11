@@ -1,0 +1,26 @@
+diff --git a/eve/adapters/completion/bb/src/eve/host_completion.clj b/eve/adapters/completion/bb/src/eve/host_completion.clj
+index 6e1fc3917ec..cc0561fc9ac 100644
+--- a/eve/adapters/completion/bb/src/eve/host_completion.clj
++++ b/eve/adapters/completion/bb/src/eve/host_completion.clj
+@@ -99,8 +99,8 @@
+    unchanged."
+   [form env type-name fields & opts]
+   (let [ifaces (interface-symbols opts)]
+-    (if (and (some piecemeal-map-interfaces ifaces)
+-             (not (some #(= full-map-interface %) ifaces)))
++    (if (or (some piecemeal-map-interfaces ifaces)
++            (some #(= full-map-interface %) ifaces))
+       ;; The map-mode instance is a babashka.impl.SciMap, which
+       ;; carries no reference to its type: (type x) answers SciMap
+       ;; and (instance? T x) answers false (measured on datascript's
+@@ -111,7 +111,9 @@
+       ;; type / instance? / meta read it back.
+       (list 'do
+             (apply sci-deftype form env type-name fields
+-                   (concat opts [full-map-interface]))
++                   (if (some #(= full-map-interface %) ifaces)
++                     opts
++                     (concat opts [full-map-interface])))
+             (list 'eve.host-completion/present-map-mode-type!
+                   (list 'var (symbol (str "->" (name type-name))))
+                   type-name))

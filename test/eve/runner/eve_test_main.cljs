@@ -21,6 +21,7 @@
 
    ;; All test namespaces (must be required so they compile)
    [eve.deftype-test :as deftype-test]
+   [eve.type-io-test]
    [eve.array-test :as array-test]
    [eve.map-test :as map-test]
    [eve.vec-test :as vec-test]
@@ -29,6 +30,7 @@
    [eve.tally-test :as tally-test]
    [eve.read-region-test :as read-region-test]
    [eve.thread-host :as thread-host]
+   [eve.portable-surface-test]
    [eve.thread-host-test :as thread-host-test]
    [eve.thread-test :as thread-test]
    [eve.thread-meta-test :as thread-meta-test]
@@ -47,6 +49,7 @@
    [eve.deftype.int-map-test :as int-map-test]
    [eve.deftype.rb-tree-test :as rb-tree-test]
    [eve.numeric-tags-test :as numeric-tags-test]
+   [eve.numeric-test :as numeric-test]
    [eve.overflow-test :as overflow-test]
    [eve.collection-hash-test :as collection-hash-test]
    [eve.reference-tag-test :as reference-tag-test]
@@ -54,6 +57,7 @@
    [eve.sorted-coll-test :as sorted-coll-test]
    [eve.keyring-test :as keyring-test]
    [eve.value-buffer-test :as value-buffer-test]
+   [eve.record-test]
    [eve.deftype.type-id-test :as type-id-test]
    [eve.typed-array-test :as typed-array-test]
    [eve.mem-test :as mem-test]
@@ -205,8 +209,10 @@
 (defn- run-deftype! []
   (t/run-tests
     'eve.deftype-test
+    'eve.type-io-test
     'eve.deftype.int-map-test
     'eve.deftype.rb-tree-test
+    'eve.record-test
     'eve.deftype.type-id-test))
 
 (defn- run-validation! []
@@ -265,7 +271,7 @@
   (t/run-tests 'eve.fuzz-test))
 
 (defn- run-em5! []
-  (t/run-tests 'eve.numeric-tags-test 'eve.collection-hash-test 'eve.reference-tag-test 'eve.big-value-test 'eve.sorted-coll-test 'eve.keyring-test 'eve.int-key-nested-value-test 'eve.value-buffer-test))
+  (t/run-tests 'eve.numeric-tags-test 'eve.numeric-test 'eve.collection-hash-test 'eve.reference-tag-test 'eve.big-value-test 'eve.sorted-coll-test 'eve.keyring-test 'eve.int-key-nested-value-test 'eve.value-buffer-test))
 
 (defn- run-fixtures! []
   (t/run-tests 'eve.eve-bytes-fixture-test))
@@ -354,6 +360,7 @@
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
+    'eve.type-io-test
     'eve.array-test
     'eve.map-test
     'eve.vec-test
@@ -371,6 +378,8 @@
     'eve.batch4-validation-test
     'eve.deftype.int-map-test
     'eve.deftype.rb-tree-test
+    'eve.record-test
+    'eve.portable-surface-test
     'eve.deftype.type-id-test
     'eve.typed-array-test
     'eve.dataset-test
@@ -381,6 +390,7 @@
     'eve.hamt-util-test
     'eve.coalesc-align-test
     'eve.numeric-tags-test
+    'eve.numeric-test
     'eve.overflow-test
     'eve.collection-hash-test
     'eve.reference-tag-test

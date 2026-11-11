@@ -422,7 +422,7 @@
        ~@(when declare-type? [`(~'declare ~type-name)])
        (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
        ;; The instance: its cached and host-local fields, and its block's offset
-       (~'deftype ~type-name [~@inst-syms ~off-sym]
+       (cljs.core/deftype ~type-name [~@inst-syms ~off-sym]
                   ~@boilerplate
                   ~@transformed-protos)
 
@@ -651,7 +651,7 @@
                                   sym)))
                             (filter :cached? fields))]
     `(do
-       (~'deftype ~type-name [~'sio__ ~'offset__ ~@cached-fields]
+       (cljs.core/deftype ~type-name [~'sio__ ~'offset__ ~@cached-fields]
                   ~@boilerplate
                   ~@translated)
 

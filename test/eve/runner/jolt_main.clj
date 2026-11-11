@@ -18,8 +18,8 @@
 
 (def shared-tests
   "The test namespaces jolt runs as written."
-  '[eve.hamt-util-test eve.eve-bytes-fixture-test eve.deftype.type-id-test
-    eve.deftype.rb-tree-test eve.numeric-tags-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.tally-test eve.domain-open-test eve.deftype.int-map-test eve.rrb-vector-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-fold-test eve.thread-fold-group-test
+  '[eve.type-io-test eve.hamt-util-test eve.eve-bytes-fixture-test eve.record-test eve.deftype.type-id-test
+    eve.deftype.rb-tree-test eve.numeric-tags-test eve.numeric-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.tally-test eve.domain-open-test eve.deftype.int-map-test eve.rrb-vector-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-fold-test eve.thread-fold-group-test
     ;; the network rung and the chat client's core: the http feature, http/socket
     eve.thread-net-test
     ;; the crypto feature's fast-path rows

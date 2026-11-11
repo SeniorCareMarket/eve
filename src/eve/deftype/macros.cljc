@@ -32,6 +32,53 @@
 ;; deftype: a host type, written once
 ;;-----------------------------------------------------------------------------
 
+(defn- type-io-spec
+  "Optional EDN declaration immediately after the field vector. Existing
+   IPrintWithWriter implementations remain the portable override surface."
+  [type-name fields body]
+  (let [opts (if (map? (first body)) (first body) {})
+        body (if (map? (first body)) (next body) body)
+        tag (or (:tag opts) (symbol (str (ns-name *ns*)) (name type-name)))
+        _ (when-not (symbol? tag)
+            (throw (ex-info "Eve type :tag must be a symbol" {:tag tag})))
+        parsed (proto/parse-protocol-impls body)
+        fields? (some #(or (= 'eve.type-readers/ITypeFields (:protocol %))
+                           ;; A consumer can use an alias for this protocol.
+                           (= "ITypeFields" (name (:protocol %)))) parsed)
+        printer? (some #(= 'IPrintWithWriter (v/strip-cljs-core (:protocol %))) parsed)
+        _ (when (and printer? (:print opts))
+            (throw (ex-info "Use either :print or IPrintWithWriter, not both" {:type type-name})))
+        x (gensym "value") w (gensym "writer") o (gensym "opts")
+        pairs (mapcat (fn [f] [(keyword (name f))
+                               (symbol (name f))]) fields)
+        print-form (or (:print opts)
+                       (list 'fn [x w o]
+                             (list 'eve.type-readers/write-tagged! w (list 'quote tag)
+                                   (list 'eve.type-readers/-type-fields x)
+                                   (mapv (fn [f] (keyword (name f))) fields))))
+        body (if printer? body
+               (concat body (when-not (or (:print opts) fields?)
+                              ['eve.type-readers/ITypeFields
+                               (list '-type-fields [x] (cons 'array-map pairs))])
+                       ['IPrintWithWriter
+                             (list '-pr-writer [x w o] (list print-form x w o))]))]
+    {:body body :tag tag :read (:read opts)
+     :print-info {:mode (cond (:print opts) :custom printer? :protocol :else :field-map)
+                  :protocol 'IPrintWithWriter :method '-pr-writer}}))
+
+(defn- reader-form [type-name fields {:keys [tag read print-info]}]
+  ;; Capture the positional factory NOW: a record wrapper may subsequently
+  ;; rebind ->T to a public constructor hiding metadata/extmap fields.
+  (let [ctor (gensym "constructor") data (gensym "data")
+        factory (symbol (str "->" (name type-name)))
+        reader (or read (list 'fn [data]
+                              (list 'eve.type-readers/require-fields! (list 'quote tag) data)
+                              (cons ctor (map (fn [f] (list 'get data (keyword (name f)))) fields))))]
+    (list 'let [ctor factory]
+          (list 'eve.type-readers/register!
+                (str (ns-name *ns*) "/" (name type-name))
+                (list 'quote tag) reader (list 'quote print-info)))))
+
 (defn deftype*
   "The expansion of eve.deftype/deftype (env: the macro's &env): a plain type
    on the host — in the process's own memory, not in eve memory — written
@@ -45,7 +92,14 @@
    (__hash), and an IPrintWithWriter body the type's print-method; on each
    other host its own types."
   [env type-name fields body]
-  (t/plain-type env type-name fields (proto/parse-protocol-impls body)))
+  (let [io (type-io-spec type-name fields body)
+        type-key (reg/qualified-type-key env type-name)]
+    (list 'do
+          (t/plain-type env type-name fields (proto/parse-protocol-impls (:body io)))
+          (reader-form type-name fields io)
+          (reg/registration-form env type-name
+            {:type-key type-key :storage :process-local})
+          type-name)))
 
 ;;-----------------------------------------------------------------------------
 ;; eve-deftype macro
@@ -82,7 +136,10 @@
        ICounted
        (-count [this] count))"
   [env type-name fields body]
-  (let [;; the field names the host reserves, renamed (the JVM's __hash)
+  (let [io (type-io-spec type-name fields body)
+        body (:body io)
+        reader (reader-form type-name fields io)
+        ;; the field names the host reserves, renamed (the JVM's __hash)
         [fields body] (t/rename-fields env fields body)
         ;; Parse fields using registry (supports :serialized and :host)
         parsed-fields (mapv reg/parse-field fields)
@@ -92,7 +149,7 @@
         live-fields (filterv v/live? fields)
         inst-fields (filterv #(or (v/cached? %) (v/host-local? %)) fields)
         type-tag (str "eve/" (name type-name))
-        type-key (str (name (ns-name *ns*)) "/" (name type-name))
+        type-key (reg/qualified-type-key env type-name)
         ;; type-id byte and name hash, both from the name: the same in every
         ;; process (eve.deftype.registry)
         [type-id name-hash] (reg/claim-type-id! type-key)
@@ -135,6 +192,9 @@
                        :new-name new-name :load-name load-name :inst-vals inst-vals
                        :total-size total-size :type-id type-id :name-hash name-hash
                        :name-hash-bytes name-hash-bytes :sab-tag-kw sab-tag-kw})
+          (reg/registration-form env type-name
+            {:type-id type-id :name-hash name-hash :type-key type-key
+             :storage :slab :total-size total-size :fields slab-fields})
           ;; the fields that point at other blocks, so eve.retire walks a stored value of this type as it walks
           ;; its own collections (a cons cell's tail is the value it replaced, and stays) — a tree's nodes too
           (list 'eve.deftype-proto.serialize/register-deftype-layout! type-id name-hash
@@ -150,7 +210,8 @@
           (list 'eve.deftype-proto.serialize/register-type-refs! type-id name-hash
                 (vec (keep (fn [f]
                              (when-let [k (v/ref-kind f)] [(:offset f) k]))
-                           slab-fields))))))
+                           slab-fields)))
+          reader)))
 
 ;;-----------------------------------------------------------------------------
 ;; eve-extend-type macro

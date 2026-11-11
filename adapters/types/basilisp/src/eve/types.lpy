@@ -10,7 +10,8 @@
             [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
                                                  cljs-protocol? rename-syms parse-protocol-impls
                                                  cljs-translate-protocol]]
-            [eve.deftype-proto.sio :as sio]))
+            [eve.deftype-proto.sio :as sio]
+            [eve.type-readers]))
 
 ;; basilisp: the JVM's interface names on basilisp's interfaces
 ;; basilisp's collection interfaces (basilisp.lang.interfaces) are Python
@@ -223,6 +224,26 @@
    2026-11-09, lpyfix.irefprobe post-fix run 1)."
   [name {a :args body :body}]
   (list* name [(first a) (second a) (quote &) (nth a 2)] body))
+
+(defn- complete-protocol-methods
+  "Clojure permits a deftype to implement only some protocol methods.
+   Basilisp's ABC analyzer requires every method. Supply throwing methods
+   here, not semantic pretend implementations in application code."
+  [{:keys [protocol methods] :as impl}]
+  (let [v (resolve protocol)
+        p (when v @v)
+        present (set (map (fn [m] [(symbol (name (:name m))) (count (:args m))]) methods))
+        pns (when-let [pv (:var p)] (str (ns-name (:ns (meta pv)))))
+        absent (when (and pns (:methods p))
+                 (for [k (keys (:methods p))
+                       :let [m (symbol (name k))
+                             mv (resolve (symbol pns (name k)))]
+                       args (:arglists (meta mv))
+                       :when (not (contains? present [m (count args)]))]
+                   {:name m :args (mapv (fn [_] (gensym "arg")) args)
+                    :body [`(throw (ex-info "Unimplemented Eve protocol method"
+                                           {:protocol '~protocol :method '~m}))]}))]
+    (update impl :methods into absent)))
 
 (defn lpy-translate-protos
   "Parsed protocol impls ([{:protocol :methods}], JVM names) as a basilisp
@@ -533,7 +554,7 @@
                     types)
         protocols (keep (fn [{:keys [protocol] :as impl}]
                           (when-not (interface-sym? protocol)
-                            (update impl :methods
+                            (update (complete-protocol-methods impl) :methods
                                     (fn [ms] (mapv #(update % :body (fn [b] (map lpy-rewrite-calls b))) ms)))))
                         impls)]
     ;; protocols first: basilisp dispatches a protocol fn by the type's
@@ -823,6 +844,11 @@
                         renames)]
       (map (fn [f] (if (seq? f) (cons (first f) (rename-syms (rest f) renames)) f)) body))))
 
+(defn- print-forms [type-name print]
+  (when print
+    [(sio/print-method-form type-name print)
+     (list 'eve.type-readers/register-print! type-name)]))
+
 (defn- hooks
   "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
    value as a literal, which a map of functions is not)."
@@ -836,7 +862,7 @@
                        [`(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
                            ~@(lpy-impls->forms translated))]
                        (lpy-protocol-arity-fixups type-name translated)
-                       (when print [(sio/print-method-form type-name print)]))))
+                       (print-forms type-name print))))
    :build (fn [type-name _fields _new-name args] (list* 'new type-name args))
    :factory-via-var? false
    :slab-prepare (fn [parsed _type-name] parsed)
@@ -844,7 +870,7 @@
    :slab-define (fn [type-name fields forms]
                   (let [translated (lpy-translate-protos type-name (parse-protocol-impls forms))]
                     (into (vec (concat (lpy-carrier-forms translated)
-                                       [`(~'deftype ~type-name ~(mapv lpy-field fields)
+                                       [`(clojure.core/deftype ~type-name ~(mapv lpy-field fields)
                                            ~@(lpy-impls->forms translated))]))
                           (lpy-protocol-arity-fixups type-name translated))))})
 
@@ -879,7 +905,7 @@
          (clojure.core/deftype ~type-name ~(mapv lpy-field fields)
            ~@(lpy-impls->forms translated))
          ~@(lpy-protocol-arity-fixups type-name translated)
-         ~@(when print [(sio/print-method-form type-name print)])
+         ~@(print-forms type-name print)
          ~type-name)))
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))

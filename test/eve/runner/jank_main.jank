@@ -39,12 +39,12 @@
   "The test namespaces jank runs as written, by default (adopting-eve-minimal §5's order first: the byte format and
    the hashes, the thread contract, then every shared suite but eve.net's, which need the http feature, and
    aegis's, whose RSA rows run past 30 min on the portable crypto). eve.rrb-vector-test runs when named."
-  '[eve.hamt-util-test eve.eve-bytes-fixture-test eve.thread-host-test
+  '[eve.type-io-test eve.clock-uuid-test eve.associative-transient-test eve.hamt-util-test eve.eve-bytes-fixture-test eve.thread-host-test
     eve.coalesc-align-test eve.array-hosts-test eve.dataset-test eve.tensor-test
-    eve.deftype.rb-tree-test eve.numeric-tags-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test
+    eve.deftype.rb-tree-test eve.numeric-tags-test eve.numeric-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test
     eve.sorted-coll-test eve.keyring-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test
     eve.descriptor-table-test eve.tally-test eve.read-region-test eve.domain-open-test eve.deftype.int-map-test
-    eve.deftype.type-id-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-fold-test
+    eve.record-test eve.deftype.type-id-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-fold-test
     eve.thread-fold-group-test])
 
 (defn -main [& [cmd & args]]

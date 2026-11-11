@@ -163,7 +163,13 @@
   [type-name print-fn]
   (when print-fn
     (let [x (gensym "x") w (gensym "w")]
-      `(defmethod print-method ~type-name [~x ~w] (~print-fn ~x ~w nil)))))
+      `(do
+         (defmethod print-method ~type-name [~x ~w] (~print-fn ~x ~w nil))
+         ;; Only emit the optional host surface when present. This is
+         ;; macro-time capability detection, not a Java MultiFn assumption.
+         ~@(when #?(:bb false :default (resolve 'print-dup))
+             [(list 'defmethod 'print-dup type-name [x w]
+                    (list print-fn x w nil))])))))
 
 ;;-----------------------------------------------------------------------------
 ;; eve-deftype
