@@ -81,6 +81,10 @@
        "  --ants N            ants per member process (default 2 small, 4 at 144)\n"
        "  --world DIR         world root (default: a fresh dir inside --run)\n"
        "  --run DIR           run dir for logs/configs (default ./ants-demo-<stamp>)\n"
+       "  --keep-run          keep the world after the run (default: it is deleted at the end; ~10 GB at dim 60)\n"
+       "  --min-free-gb N     refuse to start with less free space (default 15 at dim>=60, else 5)\n"
+       "  --disk-floor-gb N   abort, kill the seats and delete the world below this free space (default 3)\n"
+       "  --log-cap-mb N      trim any log file over N MB to its last 1 MB at the end (default 50)\n"
        "  --members a,b,c     only these seats may join (subset of the roster)\n"
        "  --exclude a,b,c     these seats are treated as unavailable (fallback proof)\n"
        "  --gate SECONDS      144 only: the driver's expect-gate (default 7200)\n"
@@ -99,6 +103,10 @@
       (= a "--ants") (recur (rest more) (assoc opts :ants (parse-long (first more))))
       (= a "--world") (recur (rest more) (assoc opts :world (first more)))
       (= a "--run") (recur (rest more) (assoc opts :run (first more)))
+      (= a "--keep-run") (recur more (assoc opts :keep-run true))
+      (= a "--min-free-gb") (recur (rest more) (assoc opts :min-free (parse-double (first more))))
+      (= a "--disk-floor-gb") (recur (rest more) (assoc opts :floor (parse-double (first more))))
+      (= a "--log-cap-mb") (recur (rest more) (assoc opts :cap-mb (parse-long (first more))))
       (= a "--members") (recur (rest more) (assoc opts :members (first more)))
       (= a "--exclude") (recur (rest more) (assoc opts :exclude (first more)))
       (= a "--gate") (recur (rest more) (assoc opts :gate (parse-long (first more))))
@@ -586,6 +594,117 @@
   (flush)
   (System/exit code))
 
+;; ---------------------------------------------------------------------------
+;; disk safety — the demo writes a world to disk (one Eve domain per board
+;; cell: ~10 GB at dim 60, measured on the Mac in the perf-venues ants
+;; ladder that filled an operator's disk). Safe by default: refuse to start
+;; short of space, abort while running if space runs out, and delete the
+;; world when the run ends unless --keep-run.
+
+(def disk (atom {:world nil :rundir nil :keep? false :cleaned? false}))
+
+(defn usable-gb
+  "Usable GB on the volume holding path (nearest existing ancestor)."
+  [path]
+  (let [f (loop [f (java.io.File. (str path))]
+            (cond (.exists f) f
+                  (.getParentFile f) (recur (.getParentFile f))
+                  :else (java.io.File. ".")))]
+    (/ (.getUsableSpace f) 1073741824.0)))
+
+(defn du-human [path]
+  (try (str/trim (:out (p/sh "du" "-sh" (str path)))) (catch Throwable _ "?")))
+
+(defn- self-pid [] (str/trim (:out (p/sh "sh" "-c" "echo $PPID"))))
+
+(defn- descendants-of [pid]
+  (let [kids (try (remove str/blank? (str/split-lines (:out (p/sh "pgrep" "-P" (str pid))))) (catch Throwable _ []))]
+    (vec (concat (mapcat descendants-of kids) kids))))
+
+(defn kill-children!
+  "Kill every process this launcher started (all seats, whole trees), deepest first."
+  []
+  (try
+    (let [pids (descendants-of (or (:pid @disk) (self-pid)))]
+      (doseq [k pids] (try (p/sh "kill" "-9" (str k)) (catch Throwable _))))
+    (catch Throwable _)))
+
+(defn trim-logs!
+  "Cap per-file log size: a file over cap-mb keeps only its last 1 MB."
+  [rundir cap-mb]
+  (try
+    (doseq [^java.io.File f (file-seq (java.io.File. (str rundir)))
+            :when (and (.isFile f) (> (.length f) (* cap-mb 1048576)))]
+      (try
+        (with-open [raf (java.io.RandomAccessFile. f "rw")]
+          (let [keep 1048576 n (.length raf) buf (byte-array keep)]
+            (.seek raf (- n keep))
+            (.readFully raf buf)
+            (.setLength raf 0)
+            (.write raf (.getBytes (str "[log trimmed to its last 1 MB; cap " cap-mb " MB]\n")))
+            (.write raf buf)))
+        (catch Throwable _)))
+    (catch Throwable _)))
+
+(defn cleanup!
+  "Idempotent. Kills the seats, trims logs, prints the world's size, then
+   deletes the world unless --keep-run."
+  []
+  (let [{:keys [world rundir keep? cleaned? cap-mb]} @disk]
+    (when (and world (not cleaned?))
+      (swap! disk assoc :cleaned? true)
+      (kill-children!)
+      (Thread/sleep 300)
+      (trim-logs! rundir (or cap-mb 50))
+      (when (fs/exists? world)
+        (println (str "world size: " (du-human world) "  (" world ")"))
+        (if keep?
+          (println "world kept (--keep-run); delete it when done:" world)
+          (do (try (fs/delete-tree world) (catch Throwable _))
+              (println (if (fs/exists? world) "world delete FAILED — remove it by hand" "world deleted")))))
+      (flush))))
+
+(defn shutdown!
+  "Kill the seats, clean the world, kill again (the supervising thread may spawn once more while this runs)."
+  []
+  (kill-children!)
+  (cleanup!)
+  (Thread/sleep 200)
+  (kill-children!))
+
+(defn est-min-free-gb [dim] (if (>= dim 60) 15.0 5.0))
+
+(defn install-disk-guard!
+  "Preflight (refuse to start short of --min-free-gb), shutdown hook
+   (cleanup on success, failure, Ctrl-C, timeout), and a 5 s watchdog
+   (abort below --disk-floor-gb)."
+  [{:keys [world rundir dim keep? min-free floor cap-mb]}]
+  (let [need (or min-free (est-min-free-gb dim))
+        floor (or floor 3.0)
+        free (usable-gb rundir)]
+    (println (format "disk: estimate %.0f GB needed (%s; use --min-free-gb to override), %.1f GB free, abort floor %.1f GB, world %s"
+                     (double need) (if min-free "--min-free-gb" "default for this dim, not measured per member")
+                     free (double floor) (if keep? "kept (--keep-run)" "deleted at the end")))
+    (flush)
+    (when (< free need)
+      (fail! 2 (format "DISK-PREFLIGHT refuse: %.1f GB free < %.0f GB needed on the volume of %s." free (double need) rundir)
+             "Free space, pass --run/--world on a bigger volume, or lower --min-free-gb at your own risk."))
+    (reset! disk {:pid (self-pid) :world world :rundir rundir :keep? keep? :cleaned? false :cap-mb (or cap-mb 50)})
+    (.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (shutdown!))))
+    (doto (Thread.
+           (fn []
+             (loop []
+               (Thread/sleep 5000)
+               (let [f (usable-gb rundir)]
+                 (if (< f floor)
+                   (do (println (format "DISK-FLOOR abort %.2f GB (floor %.1f GB)" f (double floor)))
+                       (flush)
+                       (shutdown!)
+                       (System/exit 4))
+                   (recur))))))
+      (.setDaemon true)
+      (.start))))
+
 (defn main [args]
   (let [opts (parse-args args)
         root (or (:root opts) (find-root))
@@ -611,6 +730,8 @@
         excluded (seat-set (:exclude opts))
         _ (fs/create-dirs rundir)
         _ (fs/create-dirs (fs/path rundir "logs"))
+        _ (install-disk-guard! {:world world :rundir rundir :dim dim :keep? (:keep-run opts)
+                                :min-free (:min-free opts) :floor (:floor opts) :cap-mb (:cap-mb opts)})
         _ (when (and (fs/exists? world) (seq (fs/list-dir world)))
             (fail! 2 (str "ants demo: the world dir " world " already has content.")
                    "Worlds are single-run: pass a fresh --world (or let the launcher create one)."))]
