@@ -169,6 +169,11 @@
                ;; next splits to INext on CLJS
                next  {:cljs-name -next  :cljs-proto-override INext :arities [[_]]}}}
 
+    clojure.lang.IMapEntry
+    {:cljs-proto IMapEntry
+     :methods {key {:cljs-name -key :arities [[_]]}
+               val {:cljs-name -val :arities [[_]]}}}
+
     clojure.lang.Sequential
     {:cljs-proto ISequential
      :marker? true

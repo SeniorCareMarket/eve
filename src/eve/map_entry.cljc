@@ -6,6 +6,7 @@
   (:require [eve.deftype :as edt]
             [eve.core :as e]
             [eve.encoding :as enc]
+            [eve.process-slab]
             [eve.vec]
             [eve.map]))
 
@@ -20,6 +21,23 @@
   (nth [_ i]
     (case i 0 k 1 v (enc/throw-index-out-of-bounds (str "Map entry index " i))))
   (nth [_ i not-found] (case i 0 k 1 v not-found))
+  ;; Like Clojure's own MapEntry, an entry is also a two-element vector.
+  ;; JavaScript map conj consumes IVector, not just IMapEntry.
+  clojure.lang.ILookup
+  (valAt [_ i] (case i 0 k 1 v nil))
+  (valAt [_ i not-found] (case i 0 k 1 v not-found))
+  clojure.lang.Associative
+  (containsKey [_ i] (and (integer? i) (<= 0 i) (< i 2)))
+  (assoc [_ i x] (assoc [k v] i x))
+  clojure.lang.IPersistentVector
+  (assocN [_ i x] (assoc [k v] i x))
+  (length [_] 2)
+  (entryAt [_ i]
+    (when (and (integer? i) (<= 0 i) (< i 2))
+      (->MapEntry i (case i 0 k 1 v))))
+  clojure.lang.IPersistentStack
+  (peek [_] v)
+  (pop [_] [k])
   clojure.lang.Seqable
   (seq [_] (seq [k v]))
   clojure.lang.IPersistentCollection
