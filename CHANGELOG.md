@@ -1,13 +1,17 @@
 # Changelog
 
-- #56: add `eve.map-entry/map-entry`, a single slab-backed Eve MapEntry with Clojure map-entry, indexed, sequence, equality and hash semantics.
-
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+- #56: add `eve.map-entry/map-entry`, a single slab-backed Eve MapEntry with Clojure map-entry, indexed, sequence, equality and hash semantics.
+
+- #56: translate `IMapEntry` key/val into JavaScript protocols, give Eve MapEntry Clojure's vector face for native map conj, and initialize the slab adapter on standalone require.
+- #56: realize `eve.host/byte-array` in signed JavaScript byte storage on interpreted JS hosts, including size/sequence initialization; JVM behavior is unchanged.
+- #404: add an isolated bb/bb-minimal regression for `eve.core/nth` bootstrap (the existing E1 completion fix is present on this release).
 
 ## [0.9.3.2] - 2026-11-10
 
