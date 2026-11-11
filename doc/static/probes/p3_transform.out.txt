@@ -1,0 +1,149 @@
+P3 ? eve ref: refs/heads/claude/sweet-carson-6pt29d | clojure 1.12.0 | java 21.0.12.1 | cores 4 | load1 0.91
+
+== map 10k int->int
+    sizes                                          edn 107,780 B | transit-json 137,786 | transit-msgpack 59,235 | flat codec 220,007
+                                                   image 299,324 B (2,380 blocks, 2,379 pointers) | class-padded in slab 390,944 B | block table 19,040 B | reloc table 28,548 B
+                                                   block census by class {32 35, 64 1179, 128 216, 256 780, 512 170}
+  to a slab domain
+    plain -> slab, eve's default domain (grows)       130.19 ms (med    149.97)
+    plain -> slab, pre-sized domain                   128.14 ms (med    133.03)
+    plain -> bump buffer (no allocator)                47.65 ms (med     51.31)
+    (creating the pre-sized domain alone)               0.80 ms (med      0.86)
+    image -> slab, per-block allocation                 2.22 ms (med      2.30)
+    image -> slab, one run per class                    1.25 ms (med      1.73)
+  out of a slab domain
+    slab -> plain (eve->clj)                            2.80 ms (med      3.09)
+    slab -> image (relocating copy)                     2.15 ms (med      4.81)
+    image -> plain (eve->clj over the view)             3.09 ms (med      3.42)
+  the byte codecs (plain on both sides)
+    plain -> flat codec bytes                           9.14 ms (med     10.13)
+    flat codec bytes -> plain                           2.56 ms (med      2.62)
+    plain -> transit-json                               2.17 ms (med      2.81)
+    transit-json -> plain                               2.33 ms (med      5.34)
+    plain -> transit-msgpack                            1.83 ms (med      1.98)
+    transit-msgpack -> plain                            4.19 ms (med      4.28)
+    plain -> edn text                                   1.40 ms (med      1.60)
+    edn text -> plain                                   9.28 ms (med      9.43)
+  reading in place: 100k point reads
+    plain host collection                               2.66 ms (med      2.68)
+    slab value (heap fast path)                        19.01 ms (med     19.25)
+    image view (through the slab I/O protocol)         30.68 ms (med     30.92)
+
+== vector 100k ints
+    sizes                                          edn 588,891 B | transit-json 588,891 | transit-msgpack 368,549 | flat codec 1,100,007
+                                                   image 1,613,208 B (103,229 blocks, 103,228 pointers) | class-padded in slab 3,613,216 B | block table 825,832 B | reloc table 1,238,736 B
+                                                   block census by class {32 100001, 128 3228}
+  to a slab domain
+    plain -> slab, eve's default domain (grows)       118.10 ms (med    126.89)
+    plain -> slab, pre-sized domain                   115.95 ms (med    118.59)
+    plain -> bump buffer (no allocator)                18.28 ms (med     19.20)
+    (creating the pre-sized domain alone)               2.12 ms (med      2.15)
+    image -> slab, per-block allocation                27.69 ms (med     27.93)
+    image -> slab, one run per class                    4.92 ms (med      4.99)
+  out of a slab domain
+    slab -> plain (eve->clj)                           13.99 ms (med     14.32)
+    slab -> image (relocating copy)                    28.37 ms (med     30.67)
+    image -> plain (eve->clj over the view)            14.27 ms (med     14.37)
+  the byte codecs (plain on both sides)
+    plain -> flat codec bytes                           4.15 ms (med      4.26)
+    flat codec bytes -> plain                           7.09 ms (med      9.02)
+    plain -> transit-json                               3.92 ms (med      4.06)
+    transit-json -> plain                               2.35 ms (med      2.40)
+    plain -> transit-msgpack                            4.72 ms (med      4.79)
+    transit-msgpack -> plain                           19.18 ms (med     19.87)
+    plain -> edn text                                   6.88 ms (med      7.11)
+    edn text -> plain                                  35.69 ms (med     36.40)
+  reading in place: 100k point reads
+    plain host collection                               2.17 ms (med      2.25)
+    slab value (heap fast path)                        18.05 ms (med     18.93)
+    image view (through the slab I/O protocol)         16.28 ms (med     24.65)
+
+== vector 10k records
+    sizes                                          edn 595,373 B | transit-json 565,390 | transit-msgpack 358,526 | flat codec 1,098,897
+                                                   image 1,561,456 B (30,325 blocks, 30,324 pointers) | class-padded in slab 1,961,504 B | block table 242,600 B | reloc table 363,888 B
+                                                   block census by class {32 20001, 128 10324}
+  to a slab domain
+    plain -> slab, eve's default domain (grows)       298.93 ms (med    314.02)
+    plain -> slab, pre-sized domain                   287.02 ms (med    297.95)
+    plain -> bump buffer (no allocator)               150.43 ms (med    153.38)
+    (creating the pre-sized domain alone)               1.55 ms (med      1.62)
+    image -> slab, per-block allocation                 9.72 ms (med      9.88)
+    image -> slab, one run per class                    2.49 ms (med      2.55)
+  out of a slab domain
+    slab -> plain (eve->clj)                           15.77 ms (med     15.92)
+    slab -> image (relocating copy)                    14.08 ms (med     15.53)
+    image -> plain (eve->clj over the view)            13.45 ms (med     13.54)
+  the byte codecs (plain on both sides)
+    plain -> flat codec bytes                          17.86 ms (med     18.14)
+    flat codec bytes -> plain                           9.50 ms (med      9.75)
+    plain -> transit-json                               5.78 ms (med      6.10)
+    transit-json -> plain                               4.51 ms (med      5.45)
+    plain -> transit-msgpack                            6.38 ms (med      6.50)
+    transit-msgpack -> plain                           20.56 ms (med     21.15)
+    plain -> edn text                                  10.82 ms (med     11.39)
+    edn text -> plain                                  32.00 ms (med     32.20)
+  reading in place: 100k point reads
+    plain host collection                               2.37 ms (med      2.45)
+    slab value (heap fast path)                        50.60 ms (med     52.50)
+    image view (through the slab I/O protocol)         54.68 ms (med     56.73)
+
+== map 1k kw->vec(20 ints)
+    sizes                                          edn 58,890 B | transit-json 60,896 | transit-msgpack 29,893 | flat codec 242,897
+                                                   image 424,496 B (22,313 blocks, 22,312 pointers) | class-padded in slab 851,008 B | block table 178,504 B | reloc table 267,744 B
+                                                   block census by class {32 21008, 64 11, 128 1259, 256 4, 512 31}
+  to a slab domain
+    plain -> slab, eve's default domain (grows)        56.64 ms (med     61.21)
+    plain -> slab, pre-sized domain                    56.87 ms (med     73.98)
+    plain -> bump buffer (no allocator)                30.21 ms (med     32.34)
+    (creating the pre-sized domain alone)               1.51 ms (med      1.59)
+    image -> slab, per-block allocation                 8.21 ms (med      9.91)
+    image -> slab, one run per class                    2.38 ms (med      2.51)
+  out of a slab domain
+    slab -> plain (eve->clj)                            3.61 ms (med      5.34)
+    slab -> image (relocating copy)                     5.72 ms (med      6.38)
+    image -> plain (eve->clj over the view)             3.09 ms (med      3.25)
+  the byte codecs (plain on both sides)
+    plain -> flat codec bytes                           2.37 ms (med      2.64)
+    flat codec bytes -> plain                           1.60 ms (med      1.64)
+    plain -> transit-json                               2.79 ms (med      2.80)
+    transit-json -> plain                               0.65 ms (med      0.76)
+    plain -> transit-msgpack                            1.02 ms (med      1.12)
+    transit-msgpack -> plain                            4.41 ms (med      4.58)
+    plain -> edn text                                   1.44 ms (med      1.55)
+    edn text -> plain                                   5.65 ms (med      6.60)
+  reading in place: 100k point reads
+    plain host collection                               2.18 ms (med      2.39)
+    slab value (heap fast path)                        35.17 ms (med     35.45)
+    image view (through the slab I/O protocol)         58.03 ms (med     75.61)
+
+== 5k chat messages
+    sizes                                          edn 1,204,681 B | transit-json 1,196,021 | transit-msgpack 840,236 | flat codec 2,050,152
+                                                   image 3,712,760 B (70,997 blocks, 70,996 pointers) | class-padded in slab 5,789,440 B | block table 567,976 B | reloc table 851,952 B
+                                                   block census by class {32 41668, 64 5416, 128 15721, 256 8192}
+  to a slab domain
+    plain -> slab, eve's default domain (grows)       684.80 ms (med    739.25)
+    plain -> slab, pre-sized domain                   699.88 ms (med    732.33)
+    plain -> bump buffer (no allocator)               419.59 ms (med    444.79)
+    (creating the pre-sized domain alone)               3.14 ms (med      3.36)
+    image -> slab, per-block allocation                23.16 ms (med     23.61)
+    image -> slab, one run per class                    5.29 ms (med      5.40)
+  out of a slab domain
+    slab -> plain (eve->clj)                           31.67 ms (med     33.05)
+    slab -> image (relocating copy)                    40.23 ms (med     43.73)
+    image -> plain (eve->clj over the view)            27.40 ms (med     27.54)
+  the byte codecs (plain on both sides)
+    plain -> flat codec bytes                          32.39 ms (med     32.81)
+    flat codec bytes -> plain                          22.34 ms (med     22.82)
+    plain -> transit-json                              11.29 ms (med     11.51)
+    transit-json -> plain                               6.47 ms (med      7.00)
+    plain -> transit-msgpack                           13.20 ms (med     13.30)
+    transit-msgpack -> plain                           34.56 ms (med     36.58)
+    plain -> edn text                                  29.46 ms (med     30.22)
+    edn text -> plain                                  54.66 ms (med     55.32)
+  reading in place: 100k point reads
+    plain host collection                               1.95 ms (med      2.01)
+    slab value (heap fast path)                        54.40 ms (med     54.99)
+    image view (through the slab I/O protocol)         60.08 ms (med     60.60)
+
+P3 done
+exit 0
