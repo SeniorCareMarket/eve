@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- #56: BEAM `eve.types/clje-translate-protos` emits persistent and transient protocol sets independently, so a type that implements `ITransientCollection` (for example a DataScript DB) still gets persistent `assoc` / `entry_at` / `contains_key` / `cons` / `empty`. Transient associative methods are only emitted when the type actually implements `ITransientAssociative` / `ITransientMap` / `ITransientVector`. Source: atom.broker `lane-m/eve-db-ds-gaps-eve-e2` `46ce4bae62`.
+- #56: add `eve.clock/current-time-millis` (delegates to `eve.process/now-ms`) and `eve.uuid` (`from-string`, `from-longs`, signed-64-bit accessors, `to-words`, `random-uuid`, `squuid`, `squuid-time-millis`) with tests registered on the bb, nbb, basilisp, BEAM, CLR and jank runners.
+- #56: `eve.deftype-proto.data` refers `eve.host/long` so the heap bitmap-class growth-cap helper resolves on clojerl.
+
 - #56: on babashka, an Eve MapEntry (eve.map-entry/MapEntry) is presented as a host `clojure.lang.MapEntry` of key/val with the Eve value kept behind it; the byte-array codec writes the Eve value behind a presented entry (`eve.deftype-proto.serialize/presentation-backing`, nil on other hosts), so it round-trips as an Eve MapEntry.
 - #56: eve.thread-pending-test runs the future's work as a registered task (`deftask`), since nbb pool threads do not share the heap.
 - #56: `clojure.core/realized?` works on eve.thread promise and future (they implement IPending).

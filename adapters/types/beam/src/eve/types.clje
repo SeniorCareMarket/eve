@@ -110,6 +110,12 @@
         i? #(contains? jvm-ifaces %)
         transient? (some #(str/starts-with? (str %) "clojure.lang.ITransient") jvm-ifaces)
         vector? (i? 'clojure.lang.IPersistentVector)
+        ;; JVM types can implement both surfaces (e.g. DataScript DB).
+        ;; Method names remain pooled just as on the JVM, but implementing
+        ;; ITransientCollection must not suppress the persistent interfaces.
+        persistent? (some i? '[clojure.lang.Associative clojure.lang.IPersistentCollection
+                              clojure.lang.IPersistentMap clojure.lang.IPersistentSet
+                              clojure.lang.IPersistentVector clojure.lang.ISeq])
         rw (fn [m] (-> m (update :args clje-rewrite) (update :body #(map clje-rewrite %))))
         ms (map rw (mapcat :methods (filter iface? impls)))
         by-name (group-by :name ms)
@@ -197,18 +203,20 @@
                   (if print-as
                     {:name 'str :args '[this] :body [(list 'clojure.core/pr-str print-as)]}
                     (as 'str (one 'toString))))]
-          (if transient?
+          (when transient?
             [(proto 'eve.core/ITransientCollection
                     (as '-conj! (arity 'conj 2)) (as '-persistent! (one 'persistent)))
-             (proto 'eve.core/ITransientAssociative
+             (when (some i? '[clojure.lang.ITransientAssociative clojure.lang.ITransientMap clojure.lang.ITransientVector])
+               (proto 'eve.core/ITransientAssociative
                     (as '-assoc! (if (i? 'clojure.lang.ITransientVector)
                                    (or (arity 'assocN 3) (arity 'assoc 3))
-                                   (arity 'assoc 3))))
+                                   (arity 'assoc 3)))))
              (when (i? 'clojure.lang.ITransientMap) (proto 'eve.core/ITransientMap (as '-dissoc! (arity 'without 2))))
              (when (i? 'clojure.lang.ITransientVector)
                (proto 'eve.core/ITransientVector
                       (as '-assoc-n! (or (arity 'assocN 3) (arity 'assoc 3))) (as '-pop! (one 'pop))))
-             (when (i? 'clojure.lang.ITransientSet) (proto 'eve.core/ITransientSet (as '-disjoin! (arity 'disjoin 2))))]
+             (when (i? 'clojure.lang.ITransientSet) (proto 'eve.core/ITransientSet (as '-disjoin! (arity 'disjoin 2))))])
+          (when (or (not transient?) persistent?)
             [(proto 'clojerl.ISeq (as 'first (one 'first)) (as 'next (one 'next)) (as 'more (one 'more)))
              (proto 'clojerl.IColl (as 'cons (arity 'cons 2)) (as 'empty (one 'empty)))
              (proto 'clojerl.IAssociative
