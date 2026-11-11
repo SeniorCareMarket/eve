@@ -113,8 +113,13 @@
   atoms only, so the port surface per target is the seat's atom +
   domain affordances."
   (:refer-clojure :exclude [ref alter commute ref-set ensure sync dosync
-                            ref-history-count ref-min-history ref-max-history])
+                            ref-history-count ref-min-history ref-max-history
+                            swap! reset! compare-and-set!])
   (:require [eve.atom :as ea]
+            ;; The core of some seats (notably clojerl) accepts only its
+            ;; own Atom. Ref cells / seated clocks and locks are Eve atoms;
+            ;; the host seam dispatches both those and ordinary host atoms.
+            [eve.host :refer [swap! reset! compare-and-set!]]
             ;; eve.process exists only in the adapter Eve tree; the
             ;; seats that need its clock (below) are exactly the ones
             ;; that tree serves
