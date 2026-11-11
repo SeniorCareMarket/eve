@@ -297,8 +297,10 @@
               (nil? n-or-seq) (array/array "b")
               :else (array/array "b" (python/list (python/map i8 n-or-seq)))))
          ([n init] (let [b (array/array "b" (python/bytes n))]
-                     (doseq [[i x] (map-indexed vector (take n init))]
-                       (aset b i (i8 x)))
+                     (if (number? init)
+                       (dotimes [i n] (aset b i (i8 init)))
+                       (doseq [[i x] (map-indexed vector (take n init))]
+                         (aset b i (i8 x))))
                      b))))
 
 ;; a numeric array starts at zero, as Clojure's: basilisp's int-array, long-array, short-array, float-array and
