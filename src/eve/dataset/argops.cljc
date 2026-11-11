@@ -2,11 +2,11 @@
   "Index-space operations on EveArrays. Return EveArray :int32 of indices."
   (:refer-clojure :exclude [aget aset alength int-array double-array unchecked-inc-int
                             unchecked-dec-int unsigned-bit-shift-right double transient
-                            persistent! conj! long ints doubles])
+                            persistent! conj! long ints doubles #?@(:clje [assoc!])])
   (:require
    [eve.host :refer [aget aset alength int-array double-array unchecked-inc-int
                      unchecked-dec-int unsigned-bit-shift-right double transient persistent!
-                     conj! long ints doubles]]
+                     conj! long ints doubles #?@(:clje [assoc!])]]
    [eve.core :as e]
    [eve.array :as arr]
    [eve.deftype-proto.data :as d]))
