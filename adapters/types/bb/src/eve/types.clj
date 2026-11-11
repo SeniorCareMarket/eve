@@ -251,6 +251,81 @@
                           [{:protocol 'eve.deftype-proto.data/IsEve
                             :methods [{:name '-eve? :args '[_] :body '[true]}]}]))))))
 
+;; Map entries: an eve-deftype heading clojure.lang.IMapEntry (eve.map-entry's
+;; MapEntry) is PRESENTED as a clojure.lang.MapEntry on this seat. sci's
+;; deftype cannot carry IMapEntry, IPersistentVector, Counted or Indexed, and
+;; clojure.core's count and nth are compiled past their vars (measured on bb
+;; 1.13.226: a re-rooted count/nth is not reached), so a SciType entry answered
+;; map-entry? false, key/val/conj/count with a ClassCastException or
+;; "count not supported on this type: SciType", and (empty entry) nil. The
+;; type's constructor and its loader (an entry read back from eve memory) build
+;; the Eve value as before, then hand the program a host MapEntry of its key and
+;; val: a map entry to every clojure.core fn. The Eve value stays behind it
+;; (presented-backing, a weak identity table) for eve's own reach: the codec
+;; writes it (eve.deftype-proto.serialize/presented-backing) and
+;; eve.deftype-proto.data/-eve-sio answers its domain.
+(def ^:private map-entry-types
+  "The qualified names of the eve-deftypes presented as host map entries
+   (recorded at :define, read at :build, both at macroexpansion)."
+  (atom #{}))
+
+(defn- qualified-type [type-name] (symbol (str *ns*) (name type-name)))
+
+(def ^:private backings
+  "System/identityHashCode of a presented entry → [(WeakReference entry) eve-value]."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(def ^:private backing-puts (atom 0))
+
+(defn- sweep-backings!
+  "Drops the rows whose presented entry is gone."
+  []
+  (doseq [k (vec (.keySet backings))]
+    (when-let [row (.get backings k)]
+      (when (nil? (.get ^java.lang.ref.WeakReference (first row)))
+        (.remove backings k row)))))
+
+(defn presented-backing
+  "The Eve value the host map entry x presents, or nil (x a host value of its own)."
+  [x]
+  (when (instance? clojure.lang.MapEntry x)
+    (when-let [row (.get backings (System/identityHashCode x))]
+      (when (identical? x (.get ^java.lang.ref.WeakReference (first row)))
+        (second row)))))
+
+(def ^:private presentation-installed (atom false))
+
+(defn- install-presentation!
+  "Once, at the first presented entry (eve.types loads before the
+   serializer and eve's data protocols, which it must not require): the
+   codec's backing lookup, and -eve-sio on a presented entry."
+  []
+  (when (compare-and-set! presentation-installed false true)
+    (reset! @(resolve 'eve.deftype-proto.serialize/presentation-backing) presented-backing)
+    (let [eve-sio @(resolve 'eve.deftype-proto.data/-eve-sio)]
+      (extend clojure.lang.MapEntry
+        @(resolve 'eve.deftype-proto.data/IEveSio)
+        {:-eve-sio (fn [e] (some-> (presented-backing e) eve-sio))}))
+    ;; clojure.core/empty of a host MapEntry is nil (AMapEntry); the Eve
+    ;; entry's is its own (eve.map-entry: [], as a vector's). A presented
+    ;; entry answers the Eve entry's; every other value the seat's own.
+    (let [host-empty @#'clojure.core/empty]
+      (alter-var-root #'clojure.core/empty
+                      (fn [_] (fn [coll]
+                                (if-let [e (presented-backing coll)]
+                                  (eve.core/-empty e)
+                                  (host-empty coll))))))))
+
+(defn present-map-entry
+  "The Eve map entry e as a clojure.lang.MapEntry of its key and val, e kept behind it."
+  [e]
+  (install-presentation!)
+  (let [x (clojure.lang.MapEntry. (eve.core/-nth e 0) (eve.core/-nth e 1))]
+    (.put backings (System/identityHashCode x) [(java.lang.ref.WeakReference. x) e])
+    (when (zero? (mod (swap! backing-puts inc) 4096))
+      (sweep-backings!))
+    x))
+
 (defn- define [type-name fields forms]
   [`(~'deftype ~type-name ~fields ~@forms)])
 
@@ -262,13 +337,19 @@
    ;; the interfaces go onto eve.core's protocols; an IPrintWithWriter body
    ;; is the print-method
    :define (fn [type-name fields impls _forms _print]
+             (when (some #(= 'clojure.lang.IMapEntry (:protocol %)) impls)
+               (swap! map-entry-types conj (qualified-type type-name)))
              (let [bb-impls (bb-translate-protos impls type-name)]
                (concat [`(~'deftype ~type-name ~fields ~@(impls->forms bb-impls))]
                        (when (some #(= 'eve.core/IPrintWithWriter (:protocol %)) bb-impls)
                          [(sio/print-method-form type-name 'eve.core/-pr-writer)]))))
    ;; sci builds (T. x) through the ->T var: the deftype's own factory, kept
    ;; as T__new before ->T becomes the constructor, builds instances
-   :build (fn [_type-name _fields new-name args] (list* new-name args))
+   ;; a map-entry type's instances are presented as host map entries
+   :build (fn [type-name _fields new-name args]
+            (if (contains? @map-entry-types (qualified-type type-name))
+              (list 'eve.types/present-map-entry (list* new-name args))
+              (list* new-name args)))
    :factory-via-var? true
    ;; a map type keeps the map interfaces; another's go onto eve.core's protocols
    :slab-prepare (fn [parsed type-name]

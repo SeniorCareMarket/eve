@@ -681,6 +681,12 @@
           (uuid? v) (enc/date? v) (enc/ratio? v) (enc/bigdec? v))
       (value->eve-bytes v)
 
+      ;; A host value presenting an Eve value (babashka's map entry, a
+      ;; clojure.lang.MapEntry there: eve.types/present-map-entry) is
+      ;; written as the Eve value it presents. nil on a host presenting none.
+      (some? (ser/presented-backing v))
+      (value+sio->eve-bytes sio (ser/presented-backing v))
+
       ;; Already slab-backed Eve type — return pointer to existing header.
       ;; The tag is the header's own type-id byte, so nested eve-deftype
       ;; values (Dataset, NDBuffer, …) round-trip through the registry.
