@@ -1,6 +1,6 @@
 # Consumer deletion audit for ds-lanes e1
 
-Source audited: atom.broker `lane-m/eve-db-ds-one-eve-impl`,
+Source audited: the eve.db.ds one-eve implementation branch,
 `a3b0d8bfdd9e7bf1a18ea445573042c01ac41e13`. No DataScript files were edited.
 
 | File:base line | Snippet | Follow-up / deletion |
