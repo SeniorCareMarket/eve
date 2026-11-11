@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- #56: Basilisp byte-array size/scalar initialization fills signed bytes instead of trying to iterate the scalar (shared host byte-storage regression).
+
 - #56: add `eve.map-entry/map-entry`, a single slab-backed Eve MapEntry with Clojure map-entry, indexed, sequence, equality and hash semantics.
 
 - #56: translate `IMapEntry` key/val into JavaScript protocols, give Eve MapEntry Clojure's vector face for native map conj, and initialize the slab adapter on standalone require.
