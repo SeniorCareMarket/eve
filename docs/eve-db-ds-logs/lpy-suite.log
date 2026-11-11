@@ -1,0 +1,64 @@
+ok eve.hamt-util-test/get-index-rows 0.0s
+ok eve.hamt-util-test/last-level-has-two-bits 0.0s
+ok eve.hamt-util-test/mask-hash-reads-the-32-bit-pattern 0.0s
+ok eve.hamt-util-test/node-bit-rows 0.0s
+ok eve.hamt-util-test/popcount32-rows 0.0s
+Ran eve.hamt-util-test
+eve-bytes fixtures on lpy: 67 rows, 5 skipped
+not ok eve.eve-bytes-fixture-test/eve-bytes-fixtures 0.9s
+ERROR in eve.eve-bytes-fixture-test/eve-bytes-fixtures {:message "Unexpected exception thrown during test run: ArithmeticException('integer overflow')", :test-section "decimal past int64 unscaled", :expected (= bytes (bytes->hex (encode-key value))), :actual ArithmeticException('integer overflow')}
+ok eve.eve-bytes-fixture-test/key-hash-fixtures 0.0s
+ok eve.eve-bytes-fixture-test/long-symbol-has-no-encoding 0.0s
+Ran eve.eve-bytes-fixture-test
+ok eve.deftype.type-id-test/the-same-ids-on-every-host 0.0s
+ok eve.deftype.type-id-test/types-that-share-a-type-id 0.8s
+Ran eve.deftype.type-id-test
+ok eve.deftype.rb-tree-test/black-height-test 8.5s
+ok eve.deftype.rb-tree-test/duplicate-insert-test 0.2s
+ok eve.deftype.rb-tree-test/empty-tree-test 0.0s
+ok eve.deftype.rb-tree-test/find-test 0.1s
+ok eve.deftype.rb-tree-test/height-bound-test 22.3s
+ok eve.deftype.rb-tree-test/invariants-medium-test 23.7s
+ok eve.deftype.rb-tree-test/invariants-reverse-test 8.3s
+ok eve.deftype.rb-tree-test/invariants-small-test 1.1s
+ok eve.deftype.rb-tree-test/keyword-values-test 0.2s
+ok eve.deftype.rb-tree-test/member-test 0.3s
+ok eve.deftype.rb-tree-test/print-test 0.6s
+ok eve.deftype.rb-tree-test/rb-delete-test 106.5s
+ok eve.deftype.rb-tree-test/single-insert-test 0.0s
+ok eve.deftype.rb-tree-test/sorted-seq-test 0.8s
+ok eve.deftype.rb-tree-test/sorted-set-conj-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-construction-test 0.5s
+ok eve.deftype.rb-tree-test/sorted-set-disj-test 1.6s
+ok eve.deftype.rb-tree-test/sorted-set-empty-test 0.0s
+ok eve.deftype.rb-tree-test/sorted-set-equality-test 0.3s
+ok eve.deftype.rb-tree-test/sorted-set-in-an-atom-test 1.1s
+ok eve.deftype.rb-tree-test/sorted-set-keywords-test 0.3s
+ok eve.deftype.rb-tree-test/sorted-set-lookup-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-meta-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-print-test 0.1s
+ok eve.deftype.rb-tree-test/sorted-set-strings-test 0.2s
+ok eve.deftype.rb-tree-test/string-values-test 0.2s
+ok eve.deftype.rb-tree-test/three-insert-test 0.1s
+ok eve.deftype.rb-tree-test/two-insert-test 0.0s
+Ran eve.deftype.rb-tree-test
+ok eve.numeric-tags-test/big-integers-round-trip 6.6s
+not ok eve.numeric-tags-test/decimals-round-trip 204.3s
+ERROR in eve.numeric-tags-test/decimals-round-trip {:message "Unexpected exception thrown during test run: ArithmeticException('integer overflow')", :test-section nil, :expected (= v (round-trip v)), :actual ArithmeticException('integer overflow')}
+ERROR in eve.numeric-tags-test/decimals-round-trip {:message "Unexpected exception thrown during test run: ArithmeticException('integer overflow')", :test-section nil, :expected (decimal? (round-trip v)), :actual ArithmeticException('integer overflow')}
+ERROR in eve.numeric-tags-test/decimals-round-trip {:message "Unexpected exception thrown during test run: ArithmeticException('integer overflow')", :test-section nil, :expected (= v (in-map v)), :actual ArithmeticException('integer overflow')}
+ERROR in eve.numeric-tags-test/decimals-round-trip {:message "Unexpected exception thrown during test run: ArithmeticException('integer overflow')", :test-section nil, :expected (= v (round-trip v)), :actual ArithmeticException('integer overflow')}
+ERROR in eve.numeric-tags-test/decimals-round-trip {:message "Unexpected exception thrown during test run: ArithmeticException('integer overflow')", :test-section nil, :expected (decimal? (round-trip v)), :actual ArithmeticException('integer overflow')}
+ERROR in eve.numeric-tags-test/decimals-round-trip {:message "Unexpected exception thrown during test run: ArithmeticException('integer overflow')", :test-section nil, :expected (= v (in-map v)), :actual ArithmeticException('integer overflow')}
+ok eve.numeric-tags-test/one-key-for-equal-integers 171.3s
+ok eve.numeric-tags-test/ratios-round-trip 8.7s
+Ran eve.numeric-tags-test
+ok eve.overflow-test/checked-throws-on-overflow 0.0s
+ok eve.overflow-test/primed-promotes 0.0s
+ok eve.overflow-test/unchecked-wraps 0.0s
+Ran eve.overflow-test
+ok eve.collection-hash-test/a-map-built-by-its-constructors-holds-its-entries 0.0s
+ok eve.collection-hash-test/an-eve-collection-hashes-as-the-host-value 0.3s
+Ran eve.collection-hash-test
+ok eve.reference-tag-test/a-closure-reads-back-by-identity 2.0s
+ok eve.reference-tag-test/a-foreign-or-unknown-reference-is-refused 0.5s

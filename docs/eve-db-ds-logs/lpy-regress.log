@@ -1,0 +1,18 @@
+ok eve.map-entry-test/map-entry-contract 0.6s
+ok eve.map-entry-test/map-entry-memory-roundtrip 0.0s
+Ran eve.map-entry-test
+ok eve.host-bytes-test/primitive-byte-storage 0.0s
+Ran eve.host-bytes-test
+ok eve.collection-hash-test/a-map-built-by-its-constructors-holds-its-entries 0.0s
+ok eve.collection-hash-test/an-eve-collection-hashes-as-the-host-value 0.3s
+Ran eve.collection-hash-test
+ok eve.deftype.type-id-test/the-same-ids-on-every-host 0.0s
+ok eve.deftype.type-id-test/types-that-share-a-type-id 0.6s
+Ran eve.deftype.type-id-test
+ok eve.hamt-util-test/get-index-rows 0.0s
+ok eve.hamt-util-test/last-level-has-two-bits 0.0s
+ok eve.hamt-util-test/mask-hash-reads-the-32-bit-pattern 0.0s
+ok eve.hamt-util-test/node-bit-rows 0.0s
+ok eve.hamt-util-test/popcount32-rows 0.0s
+Ran eve.hamt-util-test
+:summary {:pass 152, :test 12, :fail 0, :error 0}

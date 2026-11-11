@@ -1,0 +1,133 @@
+
+Testing eve.hamt-util-test
+
+Testing eve.coalesc-align-test
+
+Testing eve.eve-bytes-fixture-test
+eve-bytes fixtures on cljs: 53 rows, 19 skipped
+
+Testing eve.array-hosts-test
+
+Testing eve.dataset-test
+
+Testing eve.tensor-test
+
+Testing eve.deftype.rb-tree-test
+
+Testing eve.numeric-tags-test
+
+Testing eve.collection-hash-test
+
+Testing eve.reference-tag-test
+
+Testing eve.big-value-test
+
+Testing eve.sorted-coll-test
+
+Testing eve.keyring-test
+
+ERROR in (f9-1-and-2-an-encrypted-domain-writes-closes-and-reads-back) (todo:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #error {:message "mmap_cas native addon not found — run npm install to build it", :data {:type :sci/error, :line 223, :column 7, :message "mmap_cas native addon not found — run npm install to build it", :sci.impl/callstack #object[cljs.core.Volatile {:val (#sci.impl.utils.StackFrame{:line 133, :column 20, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring-test], :file "/workspace/ds-wt-eve/test/eve/keyring_test.cljc", :f-meta {:arglists ([base-path {:keys [create? status key capacities], :or {status KEY_STATUS_AUTO, capacities {}}}]), :doc "The encrypted mmap domain at base-path, [slab-io ring]. opts: :create?\n   (initialise the domain's files and its ring), :status (1 auto, the default:\n   a fresh GAK kept in the ring; 2 user; 3 user, not stored), :key (the user's\n   32-byte key for a user ring, created or opened), :capacities (as\n   alloc/mmap-domain-sio!'s).", :line 377, :column 1, :ns #object[Ls eve.keyring], :name open-encrypted-domain!, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 385, :column 11, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([base-path]), :doc "The key ring of the domain at base-path, its file created when missing.", :line 370, :column 1, :ns #object[Ls eve.keyring], :name open-ring, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 375, :column 3, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([path size-bytes] [path size-bytes opts]), :doc "Open (or create) a file-backed shared memory region at path.\n   If the file is new it is truncated to size-bytes.\n   Returns a NodeMmapRegion (default) or LustreMmapRegion (when opts\n   carries :lustre? true — a provider choice at domain-open time, never\n   an ambient flag).\n\n   Example:\n     (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))", :line 319, :column 1, :ns #object[Ls eve.region], :name open-mmap-region, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 335, :column 23, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta {:private true, :arglists ([]), :doc "Return the loaded native addon, auto-loading if needed.", :line 218, :column 1, :ns #object[Ls eve.region], :name native, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 223, :column 7, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta nil, :special true})}], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :cause #error {:message "mmap_cas native addon not found — run npm install to build it", :data {}}}
+
+ERROR in (f9-3-the-off-posture-is-plaintext-and-reads-back) (todo:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #error {:message "mmap_cas native addon not found — run npm install to build it", :data {:type :sci/error, :line 223, :column 7, :message "mmap_cas native addon not found — run npm install to build it", :sci.impl/callstack #object[cljs.core.Volatile {:val (#sci.impl.utils.StackFrame{:line 156, :column 13, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring-test], :file "/workspace/ds-wt-eve/test/eve/keyring_test.cljc", :f-meta {:arglists ([base-path opts]), :doc "The slab I/O of the mmap domain at base-path: {base}.slab0–5 (+ .bm) and\n   .slab6. opts: :create? (initialise fresh files; else open existing),\n   :capacities {class-idx blocks}, :lustre? (fcntl-locked regions),\n   :mem-budget (domain byte budget; growth past it is refused and named),\n   :segment-bytes (region mapping window; absent = the adapter's default).", :line 1683, :column 1, :ns #object[Ls eve.deftype-proto.alloc], :name mmap-domain-sio!, :file "/workspace/ds-wt-eve/src/eve/deftype_proto/alloc.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 1691, :column 5, :end-line nil, :end-column nil, :ns #object[Ls eve.deftype-proto.alloc], :file "/workspace/ds-wt-eve/src/eve/deftype_proto/alloc.cljc", :f-meta {:sci.impl/op :resolve-sym, :sci.impl/idx 4}, :special false} #sci.impl.utils.StackFrame{:line 1311, :column 11, :end-line nil, :end-column nil, :ns #object[Ls eve.process-slab], :file "/workspace/ds-wt-eve/adapters/slab/module/src/eve/process_slab.cljs", :f-meta {:arglists ([class-idx path & {:keys [capacity]}]), :doc "Initialize a slab class backed by two mmap files on Node.js:\n   data file (header + blocks) and bitmap file.\n   bitmap-offset is 0 within the bitmap file, data-offset is SLAB_HEADER_SIZE.", :line 956, :column 1, :ns #object[Ls eve.process-slab], :name init-mmap-slab!, :file "/workspace/ds-wt-eve/adapters/slab/module/src/eve/process_slab.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 968, :column 22, :end-line nil, :end-column nil, :ns #object[Ls eve.process-slab], :file "/workspace/ds-wt-eve/adapters/slab/module/src/eve/process_slab.cljs", :f-meta {:arglists ([path size-bytes] [path size-bytes opts]), :doc "Open (or create) a file-backed shared memory region at path.\n   If the file is new it is truncated to size-bytes.\n   Returns a NodeMmapRegion (default) or LustreMmapRegion (when opts\n   carries :lustre? true — a provider choice at domain-open time, never\n   an ambient flag).\n\n   Example:\n     (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))", :line 319, :column 1, :ns #object[Ls eve.region], :name open-mmap-region, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 328, :column 22, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta {:name open-mmap-region, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 335, :column 23, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta {:private true, :arglists ([]), :doc "Return the loaded native addon, auto-loading if needed.", :line 218, :column 1, :ns #object[Ls eve.region], :name native, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 223, :column 7, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta nil, :special true})}], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :cause #error {:message "mmap_cas native addon not found — run npm install to build it", :data {}}}
+
+ERROR in (f9-4-an-explicit-enable-with-the-program-s-key) (todo:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #error {:message "mmap_cas native addon not found — run npm install to build it", :data {:type :sci/error, :line 223, :column 7, :message "mmap_cas native addon not found — run npm install to build it", :sci.impl/callstack #object[cljs.core.Volatile {:val (#sci.impl.utils.StackFrame{:line 170, :column 20, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring-test], :file "/workspace/ds-wt-eve/test/eve/keyring_test.cljc", :f-meta {:arglists ([base-path {:keys [create? status key capacities], :or {status KEY_STATUS_AUTO, capacities {}}}]), :doc "The encrypted mmap domain at base-path, [slab-io ring]. opts: :create?\n   (initialise the domain's files and its ring), :status (1 auto, the default:\n   a fresh GAK kept in the ring; 2 user; 3 user, not stored), :key (the user's\n   32-byte key for a user ring, created or opened), :capacities (as\n   alloc/mmap-domain-sio!'s).", :line 377, :column 1, :ns #object[Ls eve.keyring], :name open-encrypted-domain!, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 385, :column 11, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([base-path]), :doc "The key ring of the domain at base-path, its file created when missing.", :line 370, :column 1, :ns #object[Ls eve.keyring], :name open-ring, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 375, :column 3, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([path size-bytes] [path size-bytes opts]), :doc "Open (or create) a file-backed shared memory region at path.\n   If the file is new it is truncated to size-bytes.\n   Returns a NodeMmapRegion (default) or LustreMmapRegion (when opts\n   carries :lustre? true — a provider choice at domain-open time, never\n   an ambient flag).\n\n   Example:\n     (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))", :line 319, :column 1, :ns #object[Ls eve.region], :name open-mmap-region, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 335, :column 23, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta {:private true, :arglists ([]), :doc "Return the loaded native addon, auto-loading if needed.", :line 218, :column 1, :ns #object[Ls eve.region], :name native, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 223, :column 7, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta nil, :special true})}], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :cause #error {:message "mmap_cas native addon not found — run npm install to build it", :data {}}}
+
+ERROR in (a-key-not-stored-is-not-in-the-ring) (todo:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #error {:message "mmap_cas native addon not found — run npm install to build it", :data {:type :sci/error, :line 223, :column 7, :message "mmap_cas native addon not found — run npm install to build it", :sci.impl/callstack #object[cljs.core.Volatile {:val (#sci.impl.utils.StackFrame{:line 188, :column 20, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring-test], :file "/workspace/ds-wt-eve/test/eve/keyring_test.cljc", :f-meta {:arglists ([base-path {:keys [create? status key capacities], :or {status KEY_STATUS_AUTO, capacities {}}}]), :doc "The encrypted mmap domain at base-path, [slab-io ring]. opts: :create?\n   (initialise the domain's files and its ring), :status (1 auto, the default:\n   a fresh GAK kept in the ring; 2 user; 3 user, not stored), :key (the user's\n   32-byte key for a user ring, created or opened), :capacities (as\n   alloc/mmap-domain-sio!'s).", :line 377, :column 1, :ns #object[Ls eve.keyring], :name open-encrypted-domain!, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 385, :column 11, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([base-path]), :doc "The key ring of the domain at base-path, its file created when missing.", :line 370, :column 1, :ns #object[Ls eve.keyring], :name open-ring, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 375, :column 3, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([path size-bytes] [path size-bytes opts]), :doc "Open (or create) a file-backed shared memory region at path.\n   If the file is new it is truncated to size-bytes.\n   Returns a NodeMmapRegion (default) or LustreMmapRegion (when opts\n   carries :lustre? true — a provider choice at domain-open time, never\n   an ambient flag).\n\n   Example:\n     (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))", :line 319, :column 1, :ns #object[Ls eve.region], :name open-mmap-region, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 335, :column 23, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta {:private true, :arglists ([]), :doc "Return the loaded native addon, auto-loading if needed.", :line 218, :column 1, :ns #object[Ls eve.region], :name native, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 223, :column 7, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta nil, :special true})}], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :cause #error {:message "mmap_cas native addon not found — run npm install to build it", :data {}}}
+
+ERROR in (an-encrypted-domain-is-shared) (todo:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #error {:message "mmap_cas native addon not found — run npm install to build it", :data {:type :sci/error, :line 223, :column 7, :message "mmap_cas native addon not found — run npm install to build it", :sci.impl/callstack #object[cljs.core.Volatile {:val (#sci.impl.utils.StackFrame{:line 201, :column 17, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring-test], :file "/workspace/ds-wt-eve/test/eve/keyring_test.cljc", :f-meta {:arglists ([base-path {:keys [create? status key capacities], :or {status KEY_STATUS_AUTO, capacities {}}}]), :doc "The encrypted mmap domain at base-path, [slab-io ring]. opts: :create?\n   (initialise the domain's files and its ring), :status (1 auto, the default:\n   a fresh GAK kept in the ring; 2 user; 3 user, not stored), :key (the user's\n   32-byte key for a user ring, created or opened), :capacities (as\n   alloc/mmap-domain-sio!'s).", :line 377, :column 1, :ns #object[Ls eve.keyring], :name open-encrypted-domain!, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 385, :column 11, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([base-path]), :doc "The key ring of the domain at base-path, its file created when missing.", :line 370, :column 1, :ns #object[Ls eve.keyring], :name open-ring, :file "/workspace/ds-wt-eve/src/eve/keyring.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 375, :column 3, :end-line nil, :end-column nil, :ns #object[Ls eve.keyring], :file "/workspace/ds-wt-eve/src/eve/keyring.cljc", :f-meta {:arglists ([path size-bytes] [path size-bytes opts]), :doc "Open (or create) a file-backed shared memory region at path.\n   If the file is new it is truncated to size-bytes.\n   Returns a NodeMmapRegion (default) or LustreMmapRegion (when opts\n   carries :lustre? true — a provider choice at domain-open time, never\n   an ambient flag).\n\n   Example:\n     (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))", :line 319, :column 1, :ns #object[Ls eve.region], :name open-mmap-region, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 335, :column 23, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta {:private true, :arglists ([]), :doc "Return the loaded native addon, auto-loading if needed.", :line 218, :column 1, :ns #object[Ls eve.region], :name native, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 223, :column 7, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta nil, :special true})}], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :cause #error {:message "mmap_cas native addon not found — run npm install to build it", :data {}}}
+
+Testing eve.int-key-nested-value-test
+
+Testing eve.value-buffer-test
+
+Testing eve.vec-retire-test
+
+Testing eve.reclaim-test
+
+Testing eve.tally-test
+
+Testing eve.domain-open-test
+
+ERROR in (a-reopened-domain-joins-what-it-wrote) (todo:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: #error {:message "mmap_cas native addon not found — run npm install to build it", :data {:type :sci/error, :line 223, :column 7, :message "mmap_cas native addon not found — run npm install to build it", :sci.impl/callstack #object[cljs.core.Volatile {:val (#sci.impl.utils.StackFrame{:line 29, :column 13, :end-line nil, :end-column nil, :ns #object[Ls eve.domain-open-test], :file "/workspace/ds-wt-eve/test/eve/domain_open_test.cljc", :f-meta {:arglists ([base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes], :or {capacities {}, lustre? false, durable? true}}]), :doc "Open or create the mmap domain at base-path (joins when its files exist).\n   Cached by path: the same path returns the same domain until\n   close-atom-domain!. Returns an MmapAtomDomain. The process whose exclusive\n   create of the .root file succeeds creates the domain; every other joins —\n   never a check of the file's existence then a create, which two processes\n   opening a fresh domain together both pass (each initialised the domain\n   over the other's writes).\n\n   Durability is the default shape of a disk domain: unless the opener\n   says otherwise, the domain is JOURNALED — commits append a record to\n   <base>.journal and the journal force is the commit point; the .root\n   file is a checkpoint (cleanup-sweep journal verdict, 2026-11-07: the\n   disk tier is journaled by design). The named opt-outs: :journal? false\n   keeps durable commits without the journal file (the pre-CAS sweep +\n   root-range force per commit carry durability alone); :durable? false\n   is the non-durable comms form — no journal, no forces, sync! is the\n   caller's explicit barrier. :mem-budget (bytes) caps the domain's total\n   region growth — refused growth names the budget, never the host's\n   out-of-memory; the MEM-BUDGET-* constants are the per-target defaults.\n   :segment-bytes (a power of two) sets the region mapping window —\n   presentation, not format: it is stored nowhere in the domain's\n   files, and processes may join the same domain with different\n   windows.", :line 1267, :column 1, :ns #object[Ls eve.atom], :name persistent-atom-domain, :file "/workspace/ds-wt-eve/src/eve/atom.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 1294, :column 16, :end-line nil, :end-column nil, :ns #object[Ls eve.atom], :file "/workspace/ds-wt-eve/src/eve/atom.cljc", :f-meta {:private true, :arglists ([base-path {:keys [capacities lustre? create?], :as opts}]), :doc "Create (create? true) or join the mmap domain at base-path. Returns the\n   domain state. The process's slabs are this domain's from here on (CLJS\n   slabs are module state: one mmap domain per process). A creator writes the\n   slabs, then the root, its magic last; a joiner opens the slabs only once\n   the magic is there.", :line 678, :column 1, :ns #object[Ls eve.atom], :name open-mmap-domain!, :file "/workspace/ds-wt-eve/src/eve/atom.cljc"}, :special false} #sci.impl.utils.StackFrame{:line 686, :column 16, :end-line nil, :end-column nil, :ns #object[Ls eve.atom], :file "/workspace/ds-wt-eve/src/eve/atom.cljc", :f-meta {:arglists ([path size-bytes] [path size-bytes opts]), :doc "Open (or create) a file-backed shared memory region at path.\n   If the file is new it is truncated to size-bytes.\n   Returns a NodeMmapRegion (default) or LustreMmapRegion (when opts\n   carries :lustre? true — a provider choice at domain-open time, never\n   an ambient flag).\n\n   Example:\n     (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))", :line 319, :column 1, :ns #object[Ls eve.region], :name open-mmap-region, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 335, :column 23, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta {:private true, :arglists ([]), :doc "Return the loaded native addon, auto-loading if needed.", :line 218, :column 1, :ns #object[Ls eve.region], :name native, :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :special false} #sci.impl.utils.StackFrame{:line 223, :column 7, :end-line nil, :end-column nil, :ns #object[Ls eve.region], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs", :f-meta nil, :special true})}], :file "/workspace/ds-wt-eve/adapters/region/js/src/eve/region.cljs"}, :cause #error {:message "mmap_cas native addon not found — run npm install to build it", :data {}}}
+
+Testing eve.deftype.int-map-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.rrb-vector-test
+
+Testing eve.thread-host-test
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+eve.thread-host round trips: :nbb ms per 100 (5 batches, sorted): [9 20 22 23 29]
+true
+true
+
+Testing eve.thread-test
+eve.thread S1 identity: :nbb [[:binding 10] [:binding-task [10 20 30]] [:error [false eve.thread: task failed: boom {:x 7}]] [:future 3] [:future-local 21] [:laziness 7] [:nested 7] [:nested-pool-of-1 6] [:nested-task 112] [:pcalls [1 4]] [:pmap-2colls [11 22 33]] [:pmap-task [2000 134100 (0 1 7 2 5)]] [:pmap-tfn [3 6 9 12]] [:pvalues [3 12 ab]] [:with-pool [:p :q :p]]]
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
