@@ -1,13 +1,15 @@
 # DataScript for Eve — the guide
 
 **This is DataScript** — the immutable database and Datalog query engine
-by Nikita Prokopov (Tonsky) — running on **Eve** as an external library.
-Not a re-implementation, not a lookalike: the upstream library
-(DataScript 1.8.1) ported near-verbatim onto Eve's value substrate, with
-the same namespaces, the same public API, and the upstream test suite as
-its conformance bar. Where it came from and under what license:
-[PROVENANCE.md](PROVENANCE.md). What changed release by release:
-[CHANGELOG.md](CHANGELOG.md).
+by Nikita Prokopov (Tonsky) — running on **Eve** as an external library,
+**[eve.db.ds](https://github.com/johnmn3/eve.db.ds)**. Not a re-implementation,
+not a lookalike: the upstream library (DataScript 1.8.1) ported near-verbatim
+onto Eve's value substrate, with the same public API under the `eve.db.ds.*`
+namespaces (`eve.db.ds.core`), reader tags `#eve.db.ds/DB` and `#eve.db.ds/Datom`
+(no compatibility with the old `datascript.*` names or `#datascript/*` tags),
+and the upstream test suite as its conformance bar. Where it came from and
+under what license: [PROVENANCE.md](PROVENANCE.md). What changed release by
+release: [CHANGELOG.md](CHANGELOG.md).
 
 Why this matters is what Eve puts underneath it. In ordinary DataScript,
 a database is a value in one process's memory. On Eve, a database is
@@ -55,11 +57,10 @@ plain .cljc — running everywhere Eve runs.
 
 ### Plain form — a conn in your process
 
-This is ordinary DataScript, unchanged (the port's first-light driver,
-`contract-test/drivers/contract/ds_behave.cljc`, runs exactly this):
+This is ordinary DataScript's API, under the `eve.db.ds` names:
 
 ```clojure
-(require '[datascript.core :as d])
+(require '[eve.db.ds.core :as d])
 
 (def conn (d/create-conn))                    ; optionally (d/create-conn schema)
 
@@ -89,7 +90,7 @@ the flagship driver pattern, verbatim in shape
 ```clojure
 (require '[eve.atom :as atom]
          '[eve.host :refer [swap!]]
-         '[datascript.core :as d])
+         '[eve.db.ds.core :as d])
 
 (def domain (atom/persistent-atom-domain "/path/to/domain-dir"))
 (def db-atom (atom/lookup-or-create-mmap-atom! domain "my/db" nil))
@@ -107,7 +108,7 @@ the flagship driver pattern, verbatim in shape
 ```
 
 Any Eve program — on any proven seat — that opens the same domain sees
-the same database. A second process derefs a real `datascript.db.DB`,
+the same database. A second process derefs a real `eve.db.ds.db.DB`,
 queries it identically, and its seal matches the writer's exactly
 (measured first on the JVM seat: residence proof, PORTING-DS.md T1–T3).
 
@@ -134,7 +135,7 @@ see CHANGELOG.md). Babashka's behave driver runs **fully green**.
 | Cross-runtime | JVM *or* ClojureScript builds, separately | the same .cljc library on every Eve seat; a DB written by the JVM seat is read — identically, seal and all — by Babashka, Jolt, nbb, glojure |
 | Concurrent writers | one process transacts at a time | multiple host processes transact **in parallel** into one shared DB via atom swaps |
 | Indexes | persistent-sorted-set (host arrays underneath) | the same library's Eve port — Eve vectors, slab-resident sets |
-| API | `datascript.core` | `datascript.core` — unchanged |
+| API | `datascript.core` | `eve.db.ds.core` — the same API, under the new names |
 
 What is identical: the API, the transaction format, the query language,
 the data model, the failure modes of the library itself. What changes
@@ -190,30 +191,29 @@ have not earned their place.
 
 ## Where things live
 
-The port lives in the 0.9.3.1 release tree under
-`contract-test/lib-ds/` (the library), `contract-test/lib/` (the sorted
-set), `contract-test/lib-ds-deps/` (extend-clj), with drivers under
-`contract-test/drivers/`. Development happens in the
-private atom.broker repository; public repositories receive releases
-only, as collated snapshots, on the operator's word.
-
-It is consumed **as a dependency**, the way any library made for Eve
-is: each of the three directories carries its own `deps.edn`, and
-`contract-test/lib-ds/deps.edn` declares the port's deps (Eve, the
-sorted-set library, extend-clj) as `:local/root` deps. A consumer
-names the library, nothing else:
+The library lives in its own repository, **[eve.db.ds](https://github.com/johnmn3/eve.db.ds)**
+(namespaces `eve.db.ds.*`, sources under `src/eve/db/ds/`). Eve does not depend
+on eve.db.ds. You depend on eve.db.ds, and it pulls Eve in transitively (pinned
+in that library's `deps.edn` to the shipped 0.9.3.1 tree,
+`SeniorCareMarket/eve` @ `4a921298`). Until a tag exists, pin the `release/0.1`
+sha:
 
 ```clojure
-;; in this repo
-{:deps {datascript-on-eve/datascript-on-eve {:local/root "contract-test/lib-ds"}}}
-
-;; from your own project (git dep; the nested :local/root deps
-;; resolve inside the checkout)
-{:deps {datascript-on-eve/datascript-on-eve
-        {:git/url "https://github.com/SeniorCareMarket/eve"
-         :git/tag "v0.9.3.1"
-         :deps/root "contract-test/lib-ds"}}}
+;; deps.edn
+{:deps {eve.db.ds/eve.db.ds
+        {:git/url "https://github.com/johnmn3/eve.db.ds"
+         :git/sha "bfae0409e5bb24f78c8180431ffef8a2ab3ed30d"}}}
 ```
 
-The contract drivers under `contract-test/drivers/` consume it in the
-first form, from their own `deps.edn`.
+```clojure
+(require '[eve.db.ds.core :as d])
+```
+
+The in-tree copy under `contract-test/lib-ds/` (the library),
+`contract-test/lib/` (the sorted set) and `contract-test/lib-ds-deps/`
+(extend-clj), with drivers under `contract-test/drivers/`, is a **test-only
+fixture** for those drivers. It still uses the old `datascript.*` names and
+is not the consume path. Development of the library happens in
+[johnmn3/eve.db.ds](https://github.com/johnmn3/eve.db.ds) (and, for work in
+flight, in the private atom.broker repository); public repositories receive
+releases as collated snapshots, on the operator's word.

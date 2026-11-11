@@ -82,16 +82,29 @@ served by a gateway (`network_atom.cljc`).
 
 ## DataScript on eve
 
-This release includes **DataScript** — Tonsky's immutable database and Datalog query engine
-(upstream DataScript 1.8.1) — ported near-verbatim onto eve's value substrate: the same namespaces,
-the same `datascript.core` API, the upstream test suite as its conformance bar. The port lives at
-[contract-test/lib-ds/](contract-test/lib-ds/); the full guide is
-[docs/datascript-eve/GUIDE.md](docs/datascript-eve/GUIDE.md), with provenance and licensing alongside it.
+**[eve.db.ds](https://github.com/johnmn3/eve.db.ds)** is DataScript — Tonsky's immutable
+database and Datalog query engine (upstream DataScript 1.8.1) — ported onto eve's value
+substrate as a **separate library**. The public API is the same, under the `eve.db.ds.*`
+namespaces (`eve.db.ds.core`); the reader tags are `#eve.db.ds/DB` and `#eve.db.ds/Datom`.
+There is no compatibility with the old `datascript.*` names or `#datascript/*` tags. The
+upstream test suite is its conformance bar. The library's home and guide are in that
+repository; a copy of the consume guide also lives here at
+[docs/datascript-eve/GUIDE.md](docs/datascript-eve/GUIDE.md), with provenance and licensing
+alongside it.
 
-Plain DataScript works exactly as upstream:
+Eve does not depend on eve.db.ds. You depend on eve.db.ds, and it pulls Eve in
+transitively (pinned in that library's `deps.edn` to the shipped 0.9.3.1 tree). Until a
+tag exists, pin the `release/0.1` sha:
 
 ```clojure
-(require '[datascript.core :as d])
+;; deps.edn
+{:deps {eve.db.ds/eve.db.ds
+        {:git/url "https://github.com/johnmn3/eve.db.ds"
+         :git/sha "bfae0409e5bb24f78c8180431ffef8a2ab3ed30d"}}}
+```
+
+```clojure
+(require '[eve.db.ds.core :as d])
 
 (def conn (d/create-conn))
 (d/transact! conn [{:db/id 1 :name "Ivan" :age 34}
@@ -107,7 +120,7 @@ any proven host, that opens the same domain derefs the same database, transacts 
 parallel with the others, and reads back byte-identical state (seals match):
 
 ```clojure
-(require '[eve.atom :as atom] '[eve.host :refer [swap!]] '[datascript.core :as d])
+(require '[eve.atom :as atom] '[eve.host :refer [swap!]] '[eve.db.ds.core :as d])
 
 (def domain (atom/persistent-atom-domain "/path/to/domain-dir"))
 (def db-atom (atom/lookup-or-create-mmap-atom! domain "my/db" nil))
@@ -121,23 +134,9 @@ Five host runtimes — JVM, babashka, jolt, nbb and glojure — have transacted 
 such shared database in the flagship test. The guide covers the day-to-day API, what eve provides
 underneath (the journal, the sorted-set indexes, the seal), the porting deltas, and what is proven where.
 
-The port is a **library**, consumed as a dependency — the pattern this
-release demonstrates for libraries made for Eve. Its own
-[contract-test/lib-ds/deps.edn](contract-test/lib-ds/deps.edn) declares
-it and everything it needs (Eve, the sorted-set library, extend-clj).
-From your own project:
-
-```clojure
-;; deps.edn
-{:deps {datascript-on-eve/datascript-on-eve
-        {:git/url "https://github.com/SeniorCareMarket/eve"
-         :git/tag "v0.9.3.2"
-         :deps/root "contract-test/lib-ds"}}}
-```
-
-(In this repo the same lib is named `{:local/root "contract-test/lib-ds"}` —
-the contract drivers under `contract-test/drivers/` consume it exactly
-that way.)
+The in-tree copy at [contract-test/lib-ds/](contract-test/lib-ds/) still uses the old
+`datascript.*` names. It is a test-only fixture for the contract drivers under
+`contract-test/drivers/`, not the consume path.
 
 Beside it sits the release's other worked example: **the ants demo** —
 Rich Hickey's ants re-hosted on Eve's STM ([doc/stm.md](doc/stm.md)),

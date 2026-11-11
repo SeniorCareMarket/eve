@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - #56: realize `eve.host/byte-array` in signed JavaScript byte storage on interpreted JS hosts, including size/sequence initialization; JVM behavior is unchanged.
 - #404: add an isolated bb/bb-minimal regression for `eve.core/nth` bootstrap (the existing E1 completion fix is present on this release).
 
+- **DataScript on Eve is consumed from its own repository.** The library is [`eve.db.ds`](https://github.com/johnmn3/eve.db.ds) (namespaces `eve.db.ds.*`, require `eve.db.ds.core`, reader tags `#eve.db.ds/DB` and `#eve.db.ds/Datom`). Depend on it as a git dep pinned to `release/0.1` at `bfae0409e5bb24f78c8180431ffef8a2ab3ed30d` until a tag exists; it pulls Eve in transitively. The in-tree `contract-test/lib-ds` copy under `datascript.*` is a test-only fixture for the contract drivers. See the README and `docs/datascript-eve/GUIDE.md`.
+
 ## [0.9.3.2] - 2026-11-10
 
 ### Fixed
