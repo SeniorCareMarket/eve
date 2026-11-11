@@ -1,0 +1,217 @@
+Cloning: https://github.com/cognitect-labs/test-runner.git
+Checking out: https://github.com/cognitect-labs/test-runner.git at 48c3c67f98362ba1e20526db4eeb6996209c050a
+Downloading: org/clojure/tools.namespace/1.1.0/tools.namespace-1.1.0.pom from central
+Downloading: org/clojure/tools.reader/1.3.4/tools.reader-1.3.4.pom from central
+Downloading: org/clojure/tools.cli/1.0.206/tools.cli-1.0.206.jar from central
+Downloading: org/clojure/tools.namespace/1.1.0/tools.namespace-1.1.0.jar from central
+Downloading: org/clojure/tools.reader/1.3.4/tools.reader-1.3.4.jar from central
+
+Running tests in #{"test"}
+WARNING: aclone already refers to: #'clojure.core/aclone in namespace: eve.char-key-test, being replaced by: #'eve.host/aclone
+WARNING: sorted-set already refers to: #'clojure.core/sorted-set in namespace: eve.deftype.rb-tree-test, being replaced by: #'eve.deftype.rb-tree/sorted-set
+WARNING: to-array already refers to: #'clojure.core/to-array in namespace: eve.alpha.tensor, being replaced by: #'eve.alpha.tensor/to-array
+WARNING: pop! already refers to: #'clojure.core/pop! in namespace: eve.deftype.value-buffer, being replaced by: #'eve.deftype.value-buffer/pop!
+
+Testing eve.aegis.clsag-test
+clsag verify ring 8: 101 ms (through eve.crypto's ed25519-mul-add rows)
+clsag verify ring 16: 101 ms (through eve.crypto's ed25519-mul-add rows)
+clsag verify ring 32: 200 ms (through eve.crypto's ed25519-mul-add rows)
+clsag verify ring 64: 377 ms (through eve.crypto's ed25519-mul-add rows)
+
+Testing eve.aegis.h2c-test
+
+Testing eve.aegis.hpke-test
+
+Testing eve.aegis.merkle-test
+
+Testing eve.aegis.pages-v3-test
+pages_v3_test: SKIP cross — VS_DIR is not set; the kernel side is a cross-repo opt-in (set VS_DIR to a ValueScript checkout to run it)
+pages_v3_test: SKIP the-kernel-gets-what-eve-wrote — VS_DIR is not set; the kernel side is a cross-repo opt-in (set VS_DIR to a ValueScript checkout to run it)
+
+Testing eve.aegis.regions-claims-test
+
+Testing eve.aegis.regions-test
+
+Testing eve.aegis.rsabssa-test
+
+Testing eve.alloc-growth-race-test
+
+Testing eve.array-hosts-test
+
+Testing eve.array-legacy-read-test
+
+Testing eve.atom-repro-scanner-test
+
+Testing eve.big-value-test
+
+Testing eve.char-key-test
+
+Testing eve.coalesc-align-test
+
+Testing eve.collection-hash-test
+
+Testing eve.dataset-test
+
+Testing eve.deftype.int-map-test
+
+Testing eve.deftype.rb-tree-test
+
+Testing eve.deftype.type-id-steps-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.descriptor-table-test
+
+Testing eve.digest-cache-test
+
+Testing eve.domain-open-test
+
+Testing eve.durability-spike-test
+
+Testing eve.equiv-fuzz-test
+equiv-fuzz pairs= 6000 disagreements= 0
+
+Testing eve.equiv-self-test
+
+Testing eve.eve-bytes-fixture-test
+eve-bytes fixtures on clj: 72 rows, 0 skipped
+
+Testing eve.guard-test
+
+Testing eve.hamt-util-test
+
+Testing eve.host-bytes-test
+
+ERROR in (primitive-byte-storage) (RT.java:577)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: java.lang.IllegalArgumentException: Don't know how to create ISeq from: java.lang.Long
+ at clojure.lang.RT.seqFrom (RT.java:577)
+    clojure.lang.RT.seq (RT.java:557)
+    clojure.lang.Numbers.byte_array (Numbers.java:1415)
+    eve.host_bytes_test$fn__17587.invokeStatic (host_bytes_test.cljc:8)
+    eve.host_bytes_test/fn (host_bytes_test.cljc:6)
+    clojure.test$test_var$fn__9894.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9920$fn__9925.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9920.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5954.invoke (core.clj:2772)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:89)
+    clojure.lang.LazySeq.seq (LazySeq.java:106)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.next (RT.java:733)
+    clojure.core$next__5470.invokeStatic (core.clj:64)
+    clojure.core$reduce1.invokeStatic (core.clj:946)
+    clojure.core$reduce1.invokeStatic (core.clj:936)
+    clojure.core$merge_with.invokeStatic (core.clj:3083)
+    clojure.core$merge_with.doInvoke (core.clj:3075)
+    clojure.lang.RestFn.applyTo (RestFn.java:142)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    cognitect.test_runner$test.invokeStatic (test_runner.clj:74)
+    cognitect.test_runner$test.invoke (test_runner.clj:62)
+    cognitect.test_runner$_main.invokeStatic (test_runner.clj:127)
+    cognitect.test_runner$_main.doInvoke (test_runner.clj:115)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.main$main_opt.invokeStatic (main.clj:515)
+    clojure.main$main_opt.invoke (main.clj:511)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+Testing eve.identity-test
+
+Testing eve.int-key-nested-value-test
+
+Testing eve.journal-open-test
+
+Testing eve.journal-recovery-test
+
+Testing eve.jvm-array-test
+
+Testing eve.jvm-atom-cas-test
+
+Testing eve.jvm-atom-lost-attempt-test
+
+Testing eve.jvm-atom-retire-test
+
+Testing eve.jvm-atom-test
+
+Testing eve.jvm-conformance-test
+
+Testing eve.jvm-deftype-cas-test
+
+Testing eve.jvm-fuzz-test
+
+Testing eve.jvm-legacy-index-test
+
+Testing eve.jvm-list-test
+
+Testing eve.jvm-map-test
+
+Testing eve.jvm-obj-test
+
+Testing eve.jvm-set-test
+
+Testing eve.jvm-slab-test
+
+Testing eve.jvm-vec-test
+
+Testing eve.keyring-test
+
+Testing eve.map-entry-test
+
+Testing eve.map-last-level-test
+
+Testing eve.net.broker-disk-test
+
+Testing eve.net.broker-test
+
+Testing eve.net.bytes-codec-test
+
+Testing eve.net.codec-compat-test
+
+Testing eve.net.codec-fixture-test
+
+Testing eve.net.crypto-fast-path-test
+x25519: adapter 0 ms, portable 28 ms
+ed25519-mul-add: adapter 2.8 ms
+ed25519-mul-add: portable 103 ms
+aes256-gcm 1000 B: adapter 1 ms, portable 27 ms
+
+Testing eve.net.crypto-test
+
+Testing eve.net.ed25519-test
+
+Testing eve.net.graft-test
+
+Testing eve.net.json-test
+
+Testing eve.net.pruned-swap-test
+MD4-COUNT scenario=flat entries=10000 value-blocks=2380 new-blocks=5 heads=6 puts=7 gets=0 presign=2 presign-by-mode={"head" 1, "write" 1} presign-keys-by-mode={"head" 6, "write" 7} broker={"cas-root" 1, "deref" 1, "presign" 2, "release-reader" 1} put-block=5 frames=1 ms=167
+MD4-COUNT scenario=nested entries=10000 value-blocks=22380 new-blocks=7 heads=8 puts=9 gets=0 presign=2 presign-by-mode={"head" 1, "write" 1} presign-keys-by-mode={"head" 8, "write" 9} broker={"cas-root" 1, "deref" 1, "presign" 2, "release-reader" 1} put-block=7 frames=1 ms=2037
+MD4-COUNT scenario=second-writer entries=2000 value-blocks=6685 new-blocks=5 heads=6 puts=7 gets=2 presign=4 presign-by-mode={"head" 1, "read" 2, "write" 1} presign-keys-by-mode={"head" 6, "read" 2, "write" 7} broker={"cas-root" 1, "deref" 1, "presign" 4, "release-reader" 2} put-block=9 frames=1 ms=397
+MD4-COUNT scenario=subtree entries=1000 value-blocks=307 new-blocks=4 heads=5 puts=6 gets=0 presign=2 presign-by-mode={"head" 1, "write" 1} presign-keys-by-mode={"head" 5, "write" 6} broker={"cas-root" 1, "deref" 1, "presign" 2, "release-reader" 1} put-block=4 frames=1 ms=2
+MD4-COUNT scenario=subtree-retire a-blocks=5 a-blocks-still-reached=2 a-blocks-retired=3 retired=6
+
+Testing eve.net.remote-atom-test
+
+Testing eve.net.seen-set-test

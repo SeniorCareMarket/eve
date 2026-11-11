@@ -1,0 +1,53 @@
+
+Testing eve.hamt-util-test
+
+Testing eve.coalesc-align-test
+
+Testing eve.eve-bytes-fixture-test
+eve-bytes fixtures on bb: 72 rows, 0 skipped
+
+Testing eve.array-hosts-test
+
+Testing eve.dataset-test
+
+Testing eve.tensor-test
+
+Testing eve.deftype.rb-tree-test
+
+Testing eve.numeric-tags-test
+
+Testing eve.overflow-test
+
+Testing eve.collection-hash-test
+
+Testing eve.reference-tag-test
+
+Testing eve.big-value-test
+
+Testing eve.sorted-coll-test
+
+Testing eve.keyring-test
+
+Testing eve.int-key-nested-value-test
+
+Testing eve.value-buffer-test
+
+Testing eve.vec-retire-test
+
+Testing eve.reclaim-test
+
+Testing eve.descriptor-table-test
+
+Testing eve.tally-test
+
+Testing eve.read-region-test
+
+Testing eve.domain-open-test
+
+Testing eve.journal-open-test
+
+Testing eve.deftype.int-map-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.rrb-vector-test
