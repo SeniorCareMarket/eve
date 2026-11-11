@@ -86,6 +86,10 @@
     {:cljs-proto IDeref
      :methods {deref {:cljs-name -deref :arities [[_]]}}}
 
+    clojure.lang.IPending
+    {:cljs-proto IPending
+     :methods {isRealized {:cljs-name -realized? :arities [[_]]}}}
+
     ;; (compare-and-set! on ClojureScript is its own Atom's; eve's atom has
     ;; eve.atom/compare-and-set!*)
     clojure.lang.IAtom

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- #56: `clojure.core/realized?` works on eve.thread promise and future (they implement IPending).
+- #56: fix a JVM `lookup-ns?` NPE and an unresolved `satisfies?` on jank in eve.atom.
+- #56: the JS encoding adapter grows `unsupported` (it had only no-arg `throw-unsupported`), so eve.db.ds FilteredDB can analyze on nbb.
+- #56: the CLJS/nbb module process slab initializes itself on first `cljs-sio` or `alloc`. Without eve.alpha or an explicit `init!`, `alloc-from-slab` was reading a nil `:region` and `mem/load-i32` found no IMemRegion implementation.
+- #56: on babashka, process-local map types that name `IPersistentMap` stay in SciMap mode (keeping their `IPersistentMap` methods and `Iterable`), and `lookup-ns?` carves out `eve.db.ds.*` so library keyword/`get` lookup is presented as `eve.core/get`.
+
 - #56: Basilisp byte-array size/scalar initialization fills signed bytes instead of trying to iterate the scalar (shared host byte-storage regression).
 
 - #56: add `eve.map-entry/map-entry`, a single slab-backed Eve MapEntry with Clojure map-entry, indexed, sequence, equality and hash semantics.

@@ -53,7 +53,12 @@
   (hashCode [_] (hash [k v]))
   (toString [_] (pr-str [k v])))
 
+
 (defn map-entry
-  "An immutable Eve map entry with Clojure's key/val, indexed and seq semantics."
+  "An immutable Eve map entry with Clojure's key/val, indexed and seq semantics.
+   Call this (not eve.encoding/map-entry) when the entry must survive an Eve
+   atom/codec round trip. enc/map-entry stays the host MapEntry constructor:
+   Eve maps use it in seq, and a slab-backed entry allocated in the process
+   slab cannot be put in another domain."
   [k v]
   (->MapEntry k v))

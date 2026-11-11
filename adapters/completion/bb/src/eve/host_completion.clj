@@ -279,7 +279,14 @@
    presenter runs (measured)."
   []
   (let [n (str *ns*)]
-    (not (or (str/starts-with? n "eve.")
+    ;; eve.db.ds is a library written against clojure.core's
+    ;; vocabulary (keyword lookup, get, nth) on Eve types (Datom
+    ;; is the measured case). The eve.* skip is for Eve's own
+    ;; sources, which already use eve.core; without this carve-out
+    ;; (:e datom) in eve.db.ds stays a host keyword invoke and
+    ;; answers nil on SciType (bb contract.only-core: #{[nil]}).
+    (not (or (and (str/starts-with? n "eve.")
+                  (not (str/starts-with? n "eve.db.ds")))
              (str/starts-with? n "clojure.")
              (= n "eve.host-completion")))))
 
@@ -1345,6 +1352,23 @@
 ;; slice).
 (alter-var-root #'clojure.core/not-empty
                 (fn [_] (fn [x] (when (presented-seq x) x))))
+
+;; clojure.core/realized? is (.isRealized ^clojure.lang.IPending x) and
+;; sci's deftype will not carry IPending (the types adapter homes it on
+;; this protocol). Host delays, promises, futures and lazy seqs stay on
+;; the original path; an eve.thread promise or future — the measured
+;; case, DataScript users calling realized? on transact's result —
+;; answers through -realized?, which is isRealized / d/done?.
+(defprotocol IPending
+  (-realized? [o]))
+
+(def ^:private sci-realized? @#'clojure.core/realized?)
+(alter-var-root #'clojure.core/realized?
+                (fn [_]
+                  (fn [x]
+                    (if (instance? clojure.lang.IPending x)
+                      (sci-realized? x)
+                      (-realized? x)))))
 
 ;; A hand-rolled loop, not doseq: while presented-seq carried
 ;; a host-seq pass-through branch (since moved to presented

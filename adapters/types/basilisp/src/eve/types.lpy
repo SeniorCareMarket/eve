@@ -53,6 +53,7 @@
     clojure.lang.IRef basilisp.lang.interfaces/IRef
     clojure.lang.IReference basilisp.lang.interfaces/IReference
     clojure.lang.IDeref basilisp.lang.interfaces/IDeref
+    clojure.lang.IPending basilisp.lang.interfaces/IPending
     clojure.lang.IReduceInit basilisp.lang.interfaces/IReduce
     clojure.lang.IReduce basilisp.lang.interfaces/IReduce
     clojure.lang.IKVReduce basilisp.lang.interfaces/IReduceKV
@@ -304,6 +305,9 @@
          (when-let [m (one 'meta)] [(lpy-prop 'meta m)])
          (when-let [m (one 'withMeta)] [(lpy-method 'with-meta m)])
          (when-let [m (one 'deref)] [(lpy-method 'deref m)])
+         ;; basilisp.lang.interfaces/IPending.is_realized is a property;
+         ;; clojure.core/realized? is (.-is-realized o).
+         (when-let [m (one 'isRealized)] [(lpy-prop 'is-realized m)])
          ;; IAtom: no basilisp interface; basilisp's swap!, reset! and
          ;; compare-and-set! call the atom's swap, reset and compare_and_set
          (when (get by-name 'swap) [(lpy-swap (get by-name 'swap))])
