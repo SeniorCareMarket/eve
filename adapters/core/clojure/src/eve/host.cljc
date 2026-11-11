@@ -51,6 +51,18 @@
   #?(:cljs    (js/Uint8Array. (clojure.core/into-array values))
      :default (clojure.core/byte-array values)))
 
+#?(:cljs
+   (defn js-byte-array
+     "Signed byte storage on a JavaScript host: a size or a sequence."
+     ([x]
+      (js/Int8Array. (if (number? x) x (clojure.core/into-array x))))
+     ([size init]
+      (let [a (js/Int8Array. size)]
+        (if (number? init)
+          (.fill a init)
+          (.set a (clojure.core/into-array (take size init))))
+        a))))
+
 (defn expand
   "clojure.core's call of name n on args. (token) is a fresh cell, identical?
    only to itself; const-bytes is built by expand-const-bytes (some
@@ -67,7 +79,12 @@
       defdelay (let [[nm & body] args] (list (c 'defonce) nm (list* (c 'delay) body)))
       vswap! (let [[v f & more] args sym (gensym "vol")]
                (list 'let [sym v] (list (c 'vreset!) sym (list* f (list (c 'deref) sym) more))))
-      (cons (c n) args))))
+      ;; SCI's JavaScript core has no byte-array (nbb/scittle). Keep the
+      ;; memory facility in the host adapter, not in applications.
+      #?(:cljs (if (= n 'byte-array)
+                 (cons 'eve.host/js-byte-array args)
+                 (cons (c n) args))
+         :default (cons (c n) args)))))
 
 (defmacro ^:private defcore []
   (cons 'do (map (fn [n] (list 'defmacro n '[& args] (list 'eve.host/expand (list 'quote n) 'args)))
