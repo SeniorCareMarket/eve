@@ -133,8 +133,11 @@
    ClojureScript table; ones without an eve.core protocol dropped), the type's
    own protocols as written, and Object's toString/equals/hashCode — equals
    and hashCode the type's equiv and hasheq where it has them, so = and hash
-   agree with them. Self-calls in bodies go through eve.core."
-  [parsed-protos type-name]
+   agree with them. Self-calls in bodies go through eve.core.
+   opts :slab? true marks a slab-backed type (eve-deftype, eve/deftype):
+   IPersistentMap is a collection-kind head for it (see map-signature?)."
+  ([parsed-protos type-name] (bb-translate-protos parsed-protos type-name nil))
+  ([parsed-protos type-name {:keys [slab?]}]
   (let [object? #(contains? '#{Object java.lang.Object} (:protocol %))
         rewrite (fn [m] (update m :body (fn [body] (map #(rewrite-self-calls % (first (:args m))) body))))
         objects (mapcat :methods (filter object? parsed-protos))
@@ -198,17 +201,28 @@
         ;; (eve-vec [1 2 3])) threw "Method not implemented:
         ;; iterator" in map mode, and is the eve hash as a SciType).
         ;; Kind-headed types keep the plain translation only.
-        ;; IPersistentMap is NOT in that exclusion: a process-local
-        ;; defrecord-like type (ILookup+Associative+Counted plus
-        ;; IPersistentMap, no vector/set/list/stack head) needs SciMap
-        ;; mode so clojure.core/assoc and dissoc reach the type
+        ;; IPersistentMap is in that exclusion for a slab-backed type
+        ;; only (opts :slab?, from this seat's :define hook):
+        ;; PersistentIntMap and EveSortedMap name it and are the
+        ;; seat's own map collections, defined through :define. As
+        ;; SciMaps their host hash walked an iterator they do not
+        ;; carry ("Method not implemented: iterator", int-map
+        ;; hash-test), and an instance is a babashka.impl.SciMap, so
+        ;; retire-diff's (instance? PersistentIntMap new) is false and
+        ;; the walk counts every block of old as reclaimed, the ones
+        ;; new still holds too (measured: (e/assoc (im/int-map 1 1 2 2)
+        ;; 3 3) diffed 6 of 6 blocks, not 2; reclaim-test 266 fails).
+        ;; A process-local defrecord-like type
+        ;; (eve.deftype/deftype: ILookup+Associative+Counted plus
+        ;; IPersistentMap, no vector/set/list/stack head) still gets
+        ;; SciMap mode so clojure.core/assoc and dissoc reach it
         ;; (eve.db.ds def-eve-record; naming IPersistentMap used to
-        ;; force SciType and ClassCast on assoc). EveMap itself is
-        ;; eve-deftype and goes through slab-prepare, not this path.
+        ;; force SciType and ClassCast on assoc).
         map-signature? (let [ps (set (map :protocol parsed-protos))]
                          (and (contains? ps 'clojure.lang.ILookup)
                               (contains? ps 'clojure.lang.Associative)
                               (contains? ps 'clojure.lang.Counted)
+                              (not (and slab? (contains? ps 'clojure.lang.IPersistentMap)))
                               (not-any? ps '#{clojure.lang.IPersistentVector
                                               clojure.lang.IPersistentSet
                                               clojure.lang.IPersistentList
@@ -249,7 +263,7 @@
                         ;; already carries the mark keeps its own impl.
                         (when-not (some #(= "IsEve" (name (:protocol %))) translated)
                           [{:protocol 'eve.deftype-proto.data/IsEve
-                            :methods [{:name '-eve? :args '[_] :body '[true]}]}]))))))
+                            :methods [{:name '-eve? :args '[_] :body '[true]}]}])))))))
 
 ;; Map entries: an eve-deftype heading clojure.lang.IMapEntry (eve.map-entry's
 ;; MapEntry) is PRESENTED as a clojure.lang.MapEntry on this seat. sci's
@@ -339,7 +353,7 @@
    :define (fn [type-name fields impls _forms _print]
              (when (some #(= 'clojure.lang.IMapEntry (:protocol %)) impls)
                (swap! map-entry-types conj (qualified-type type-name)))
-             (let [bb-impls (bb-translate-protos impls type-name)]
+             (let [bb-impls (bb-translate-protos impls type-name {:slab? true})]
                (concat [`(~'deftype ~type-name ~fields ~@(impls->forms bb-impls))]
                        (when (some #(= 'eve.core/IPrintWithWriter (:protocol %)) bb-impls)
                          [(sio/print-method-form type-name 'eve.core/-pr-writer)]))))
@@ -355,7 +369,7 @@
    :slab-prepare (fn [parsed type-name]
                    (if (v/user-provides-protocol? parsed 'clojure.lang.IPersistentMap)
                      (bb-filter-protos parsed)
-                     (bb-translate-protos parsed type-name)))
+                     (bb-translate-protos parsed type-name {:slab? true})))
    ;; sci rejects IHashEq on a non-map type and Object equals/hashCode
    :object-boilerplate? false
    :slab-define define})
