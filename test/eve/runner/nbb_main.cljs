@@ -22,6 +22,7 @@
             [eve.tensor-test]
             [eve.deftype.rb-tree-test]
             [eve.deftype.int-map-test]
+            [eve.heap-class-growth-cap-test]
             [eve.vec-retire-test]
             [eve.reclaim-test]
             [eve.tally-test]
@@ -41,7 +42,7 @@
 (def shared-tests
   "The test namespaces every host runs as written."
   '[eve.map-entry-test eve.host-bytes-test eve.hamt-util-test eve.coalesc-align-test eve.eve-bytes-fixture-test
-    eve.array-hosts-test eve.dataset-test eve.tensor-test eve.deftype.rb-tree-test eve.numeric-tags-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.int-key-nested-value-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.tally-test eve.domain-open-test eve.deftype.int-map-test
+    eve.array-hosts-test eve.dataset-test eve.tensor-test eve.deftype.rb-tree-test eve.numeric-tags-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.int-key-nested-value-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.tally-test eve.domain-open-test eve.deftype.int-map-test eve.heap-class-growth-cap-test
     eve.deftype.type-id-test eve.rrb-vector-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-net-test eve.thread-fold-test eve.thread-fold-group-test
     ;; the crypto feature's fast-path rows
     eve.net.crypto-fast-path-test])
