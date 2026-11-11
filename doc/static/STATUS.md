@@ -27,3 +27,18 @@ CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes).
      (the network atom's region) and as the JVM heap slab's default capacity per class. Page ownership / return
      queues are the VS kernel's allocator (atom.broker `vs/src/vs/kernel/wasm/alloc.vs`).
 - 3:05 PM — census fan-out dispatched (formats; VS kernel; types+deref; byte paths; deftype+columnar).
+- 3:10–3:58 PM — firsthand reads: `eve.deftype-proto.{data,alloc}`, `eve.deftype{,.macros,.registry,.slab-runtime}`,
+  `eve.retire`, `eve.net.pages`, `doc/{memory-model,internals}.md`, `doc/network-atoms/WIRE.md`; atom.broker
+  `vs/docs/{memory-model,extcid-v3-format}.md`. JVM probe harness stood up (Clojure 1.12.0 + test.check + transit
+  jars from Maven Central; classpath = deps.edn `:paths` + `test`; `doc/static/probes/eve-cp.sh`).
+- 3:58 PM — **P1 PASS 19/19** (`doc/static/probes/p1_bump_sio.clj`, output `p1_bump_sio.out.txt`; JVM 21.0.12,
+  Clojure 1.12.0, eve `4a92129`): Eve's own EveHashMap / EveVector / EveHashSet run unchanged over ONE append-only
+  byte array presented as an `ISlabIO` (alloc = bump the tail, free = nothing). `(= static plain)` both ways, equal
+  `hash`, lookups in place; an update appends and never rewrites a byte below the old length; every earlier
+  `(length, root)` view stays equal, truncatable at its own length and hash-stable (property: 80 random maps × 15
+  updates); file out → file in → read in place with no transform. Same session, same data: building 100k ints into a
+  1 MB-per-class heap slab domain 358.9 ms vs 32.2 ms into the bump buffer; 10k-entry map 121.0 ms vs 23.1 ms — the
+  slab allocator, not the encoding, is most of a build. (Diagnostic numbers: the builder used is the path-copying
+  one and the slab domain grows by replacement; P3 separates the two.)
+- 4:00 PM — session hit the account usage limit; all five census agents stopped before writing a file.
+- 5:02 PM — resumed. Census agents resumed from their saved context with an instruction to bank early.
