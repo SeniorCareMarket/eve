@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- #56: on babashka, an Eve MapEntry (eve.map-entry/MapEntry) is presented as a host `clojure.lang.MapEntry` of key/val with the Eve value kept behind it; the byte-array codec writes the Eve value behind a presented entry (`eve.deftype-proto.serialize/presentation-backing`, nil on other hosts), so it round-trips as an Eve MapEntry.
+- #56: eve.thread-pending-test runs the future's work as a registered task (`deftask`), since nbb pool threads do not share the heap.
 - #56: `clojure.core/realized?` works on eve.thread promise and future (they implement IPending).
 - #56: fix a JVM `lookup-ns?` NPE and an unresolved `satisfies?` on jank in eve.atom.
 - #56: the JS encoding adapter grows `unsupported` (it had only no-arg `throw-unsupported`), so eve.db.ds FilteredDB can analyze on nbb.

@@ -275,6 +275,19 @@
 ;; direct HAMT/trie writers a codec may write a host collection with (eve.codec)
 (defonce coll-writers (atom {}))
 
+;; (fn [v] → the Eve value presenting as v, or nil): registered by a host
+;; whose types cannot stand in for one of its own values and so presents an
+;; Eve value AS that host value (babashka: an Eve map entry is a
+;; clojure.lang.MapEntry there, eve.types/present-map-entry). A codec writes
+;; the Eve value behind a presented one (eve.codec value+sio->eve-bytes).
+;; nil on a host that presents nothing.
+(defonce presentation-backing (atom nil))
+
+(defn presented-backing
+  "The Eve value v presents (a host value standing for an Eve value), or nil."
+  [v]
+  (when-let [f @presentation-backing] (f v)))
+
 ;; (fn [] → ISlabIO): the default slab I/O, registered by alloc.cljc at load
 (defonce default-sio-fn (atom nil))
 

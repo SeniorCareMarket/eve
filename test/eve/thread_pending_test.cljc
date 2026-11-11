@@ -14,8 +14,13 @@
     (is (= (realized? p) (t/realized? p)))
     (is (= :ok @p))))
 
+;; The future's work is a registered task, not a plain closure: eve.thread runs a closure only where the pool's
+;; threads share this heap and refuses it where they do not (eve.thread's ns doc; nbb's :io pool is isolates —
+;; "a closure cannot cross a heap boundary"). A deftask crosses by name on every host, as thread-test's default-pools.
+(t/deftask done [] :done)
+
 (deftest core-realized?-on-eve-future
-  (let [f (t/future-call (fn [] :done))]
+  (let [f (t/future-call done)]
     (is (= :done @f))
     (is (true? (realized? f)))
     (is (= (realized? f) (t/realized? f)))))
