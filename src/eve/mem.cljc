@@ -244,11 +244,17 @@
 (defn- i32-pattern-bytes
   "A byte array of SLOTS i32 slots, each holding VAL little-endian."
   [slots val]
-  (let [bs (byte-array (* 4 slots))
-        b0 (unchecked-byte (bit-and val 0xFF))
-        b1 (unchecked-byte (bit-and (unsigned-bit-shift-right val 8) 0xFF))
-        b2 (unchecked-byte (bit-and (unsigned-bit-shift-right val 16) 0xFF))
-        b3 (unchecked-byte (bit-and (unsigned-bit-shift-right val 24) 0xFF))]
+  ;; SCI's JS core has no byte-array or unchecked-byte. A Uint8Array
+  ;; carries the identical low eight bits consumed by IMemRegion writes;
+  ;; keep signed JVM bytes on the other seats (including CLR and lpy).
+  (let [bs #?(:cljs (js/Uint8Array. (* 4 slots))
+              :default (byte-array (* 4 slots)))
+        octet (fn [x] #?(:cljs (bit-and x 0xFF)
+                         :default (unchecked-byte (bit-and x 0xFF))))
+        b0 (octet val)
+        b1 (octet (unsigned-bit-shift-right val 8))
+        b2 (octet (unsigned-bit-shift-right val 16))
+        b3 (octet (unsigned-bit-shift-right val 24))]
     (loop [i 0]
       (when (< i slots)
         (let [o (* 4 i)]
