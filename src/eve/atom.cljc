@@ -19,6 +19,15 @@
                             aget alength long class
                             volatile! vswap! locking transient persistent! conj! bytes])
   (:require
+   ;; jank's clojure.core has none of these. eve.host-completion interns
+   ;; them, but this namespace is created (refer-clojure) before that
+   ;; require loads, so the interns are invisible here — later requires
+   ;; such as eve.mem see them. Refer the completion's names so a module
+   ;; that requires eve.atom first (the #418 / #461 plain jank probe)
+   ;; can analyze write-typed-root!, resolve-new-ptr, and IEveAtom.
+   #?@(:jank [[eve.host-completion :refer [defprotocol deftype defrecord reify
+                                           extend-type extend-protocol extend
+                                           satisfies? extends? halt-when]]])
    [eve.host :refer [aget alength long class volatile!
                      vswap! locking transient persistent! conj! bytes token]]
    [eve.encoding :as enc]

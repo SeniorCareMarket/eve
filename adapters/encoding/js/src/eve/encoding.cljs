@@ -19,6 +19,11 @@
   []
   (throw (js/Error. "Unsupported operation")))
 
+(defn unsupported
+  "The host's unsupported-operation exception, with message msg."
+  [msg]
+  (js/Error. msg))
+
 (defn map-entry
   "A map entry [k v] (what seq on a map answers), on every host."
   [k v]

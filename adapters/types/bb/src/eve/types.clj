@@ -102,6 +102,15 @@
    compare-and-set! reach them): kept as written."
   '#{clojure.lang.IDeref clojure.lang.IAtom})
 
+(def ^:private bb-completion-interfaces
+  "Interfaces sci's deftype will not carry, answered instead by a protocol
+   on eve.host-completion. clojure.lang.IPending is refused (measured on
+   bb 1.13.226: 'deftype currently only support protocol implementations'),
+   and clojure.core/realized? otherwise reaches only a host IPending; the
+   completion re-roots realized? onto this protocol."
+  '{clojure.lang.IPending {:protocol eve.host-completion/IPending
+                           :methods {isRealized -realized?}}})
+
 (defn- sci-swap-arities
   "IAtom's swap as sci calls it: it spreads swap!'s extra arguments flat over
    the method's arity (measured: (swap! a f x y z) reaches [_ f a b xs] with
@@ -134,6 +143,12 @@
                                   (cond
                                     (contains? sci-native-interfaces (:protocol impl))
                                     [(update impl :methods sci-swap-arities)]
+
+                                    (contains? bb-completion-interfaces (:protocol impl))
+                                    (let [{:keys [protocol methods]} (bb-completion-interfaces (:protocol impl))]
+                                      [(assoc impl :protocol protocol
+                                              :methods (mapv #(update % :name (fn [n] (get methods n n)))
+                                                             (:methods impl)))])
 
                                     (interface-sym? (:protocol impl))
                                     (keep (fn [{:keys [protocol] :as t}]
@@ -175,7 +190,7 @@
         ;; eve.core protocols).
         ;; The exclusion that keeps this honest: a type that names
         ;; a host collection-KIND head (IPersistentVector,
-        ;; IPersistentMap, IPersistentSet, IPersistentList, IList,
+        ;; IPersistentSet, IPersistentList, IList,
         ;; IPersistentStack, IPersistentQueue, Sequential) is one of
         ;; the seat's own collection types — EveVector carries the
         ;; signature too, and as a SciMap its host hash/iteration
@@ -183,12 +198,18 @@
         ;; (eve-vec [1 2 3])) threw "Method not implemented:
         ;; iterator" in map mode, and is the eve hash as a SciType).
         ;; Kind-headed types keep the plain translation only.
+        ;; IPersistentMap is NOT in that exclusion: a process-local
+        ;; defrecord-like type (ILookup+Associative+Counted plus
+        ;; IPersistentMap, no vector/set/list/stack head) needs SciMap
+        ;; mode so clojure.core/assoc and dissoc reach the type
+        ;; (eve.db.ds def-eve-record; naming IPersistentMap used to
+        ;; force SciType and ClassCast on assoc). EveMap itself is
+        ;; eve-deftype and goes through slab-prepare, not this path.
         map-signature? (let [ps (set (map :protocol parsed-protos))]
                          (and (contains? ps 'clojure.lang.ILookup)
                               (contains? ps 'clojure.lang.Associative)
                               (contains? ps 'clojure.lang.Counted)
                               (not-any? ps '#{clojure.lang.IPersistentVector
-                                              clojure.lang.IPersistentMap
                                               clojure.lang.IPersistentSet
                                               clojure.lang.IPersistentList
                                               clojure.lang.IList
@@ -196,15 +217,19 @@
                                               clojure.lang.IPersistentQueue
                                               clojure.lang.Sequential})))
         map-kept (when map-signature?
-                   (into [{:protocol 'clojure.lang.IPersistentMap :methods []}]
-                         (filter (fn [impl]
-                                   (contains? '#{clojure.lang.ILookup
-                                                 clojure.lang.Associative
-                                                 clojure.lang.IPersistentCollection
-                                                 clojure.lang.Counted
-                                                 clojure.lang.Seqable}
-                                              (:protocol impl)))
-                                 parsed-protos)))]
+                   (let [kept (filterv (fn [impl]
+                                         (contains? '#{clojure.lang.ILookup
+                                                       clojure.lang.Associative
+                                                       clojure.lang.IPersistentCollection
+                                                       clojure.lang.IPersistentMap
+                                                       clojure.lang.Counted
+                                                       clojure.lang.Seqable
+                                                       java.lang.Iterable}
+                                                    (:protocol impl)))
+                                       parsed-protos)]
+                     (if (some #(= 'clojure.lang.IPersistentMap (:protocol %)) kept)
+                       kept
+                       (into [{:protocol 'clojure.lang.IPersistentMap :methods []}] kept))))]
     (mapv (fn [impl] (update impl :methods #(mapv rewrite %)))
           (into (conj translated
                       {:protocol 'Object :methods (vec (concat to-string equals hash-code))})

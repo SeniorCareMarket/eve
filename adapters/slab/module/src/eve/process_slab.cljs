@@ -233,6 +233,17 @@
                   {:sab sab :base aligned})))))
         (js/Promise.all slab-promises)))))
 
+(defn- ensure-init!
+  "Ready the module slabs on first use. Instances (and their :region)
+   are registered synchronously; WASM upgrades stay async. Libraries that
+   allocate Eve values without loading eve.alpha or calling init!
+   themselves (eve.db.ds contract.only-core on nbb is the measured case)
+   otherwise hit alloc-from-slab with a nil :region, and mem/load-i32
+   reports no IMemRegion implementation for an empty type."
+  []
+  (when-not initialized?
+    (init!)))
+
 (defn reset-all-slabs!
   "Reset all slab bitmaps to free state. Nuclear reset for test runners."
   []
@@ -414,6 +425,7 @@
    Returns {:offset :class-idx :block-idx} or {:error ...}.
    A slab that grows (mmap-backed, or in a growable SharedArrayBuffer) grows on OOM and retries."
   [size-bytes]
+  (ensure-init!)
   (let [class-idx (d/size->class-idx size-bytes)]
     (if (== class-idx -1)
       ;; Overflow path — prefer mmap coalesc if registered, else legacy
@@ -856,6 +868,7 @@
 (defn cljs-sio
   "The CLJS slab I/O token: the module slab every CLJS Eve value lives in."
   []
+  (ensure-init!)
   the-cljs-sio)
 
 ;; The default a builder given no slab I/O allocates in is alloc's current-sio — inside a swap!'s f and while the
