@@ -257,6 +257,32 @@
      :data-offset   data-offset
      :total-blocks  total-blocks}))
 
+(def ^:const MAX_HEAP_CLASS_BYTES
+  "The largest one-buffer heap slab a bitmap class may grow to, in bytes. Its
+   offsets (header data/bitmap offsets, block addresses) are i32, and a JVM
+   heap region is one byte array, indexed by int (Integer/MAX_VALUE - 8, the
+   array headroom the JDK's own collections keep)."
+  2147483639)
+
+(defn heap-class-growth-total
+  "The block count a heap bitmap class of block-size holding old-total blocks
+   grows to: double, capped by max-blocks when positive. nil when that does
+   not grow the class, or when the grown class's one-buffer layout
+   (slab-layout) would pass MAX_HEAP_CLASS_BYTES: growth is then refused (the
+   allocator spills to the next class) instead of asking the host for a region
+   its offsets cannot address."
+  [block-size old-total max-blocks]
+  (let [block-size (long block-size)
+        old-total  (long old-total)
+        max-blocks (long max-blocks)
+        new-total  (if (pos? max-blocks)
+                     (min (* 2 old-total) max-blocks)
+                     (* 2 old-total))]
+    (when (and (> new-total old-total)
+               (<= (long (:total-bytes (slab-layout block-size (* new-total block-size))))
+                   MAX_HEAP_CLASS_BYTES))
+      new-total)))
+
 (defn mmap-slab-layout
   "Calculate split-file layout for an mmap slab.
    Bitmap, descriptor table and data live in separate files so data_offset is always

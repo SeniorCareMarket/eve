@@ -470,6 +470,8 @@
         descriptor columns and data copied at the new layout's offsets —
         block i stays block i, so no live reference moves. The class-6 heap
         arm's shape (a larger region and a copy), for the bitmap classes.
+        A doubling past d/MAX_HEAP_CLASS_BYTES is refused (false: the caller
+        spills to the next class), never an int overflow in make-heap-region.
         Under the caller's regions lock; true when grown."
        [^JvmSlabCtx ctx ci]
        (let [^objects regions (field ctx regions)
@@ -477,11 +479,10 @@
              blk-size           (long (aget ^ints (field ctx block-sizes) ci))
              old-total          (long (aget ^ints (field ctx total-blocks) ci))
              max-blks           (long (aget ^ints (field ctx max-blocks) ci))
-             new-total          (if (pos? max-blks)
-                                  (min (* 2 old-total) max-blks)
-                                  (* 2 old-total))
-             layout             (d/slab-layout blk-size (* new-total blk-size))]
-         (when (and old-r (> new-total old-total)
+             new-total          (d/heap-class-growth-total blk-size old-total max-blks)
+             layout             (when new-total
+                                  (d/slab-layout blk-size (* (long new-total) blk-size)))]
+         (when (and old-r new-total
                     ;; a :mem-budget refuses the growth whose replacement
                     ;; region would push the domain past it
                     (budget-allows? ctx (- (long (:total-bytes layout))
