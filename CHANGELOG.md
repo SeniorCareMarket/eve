@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3.2] - 2026-11-12
+
+- **DataScript on Eve is consumed from its own repository.** The library is [`eve.db.ds`](https://github.com/johnmn3/eve.db.ds) (namespaces `eve.db.ds.*`, require `eve.db.ds.core`, reader tags `#eve.db.ds/DB` and `#eve.db.ds/Datom`); it pulls Eve in transitively. The in-tree `contract-test/lib-ds` copy under `datascript.*` is a test-only fixture for the contract drivers. See the README and `docs/datascript-eve/GUIDE.md`.
 - Fixed (babashka): `clojure.core` fns that walk a collection argument natively (`zipmap`, `set`, `apply`, `every?`, `not-every?`, `some`, `not-any?`, `partition`, `partition-all`, `partition-by`, `interleave`, `frequencies`, `reverse`) now accept Eve collections; they raised "Don't know how to create ISeq from: sci.impl.deftype.SciType" (eve.db.ds's `d/q` failed in `zipmap` on the parser's `:in` bindings). `nth` and `count` on an Eve vector or set stay the seat's named limit.
 - #56: on babashka, an Eve MapEntry (eve.map-entry/MapEntry) is presented as a host `clojure.lang.MapEntry` of key/val with the Eve value kept behind it; the byte-array codec writes the Eve value behind a presented entry (`eve.deftype-proto.serialize/presentation-backing`, nil on other hosts), so it round-trips as an Eve MapEntry.
 - #56: eve.thread-pending-test runs the future's work as a registered task (`deftask`), since nbb pool threads do not share the heap.
@@ -15,21 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - #56: the JS encoding adapter grows `unsupported` (it had only no-arg `throw-unsupported`), so eve.db.ds FilteredDB can analyze on nbb.
 - #56: the CLJS/nbb module process slab initializes itself on first `cljs-sio` or `alloc`. Without eve.alpha or an explicit `init!`, `alloc-from-slab` was reading a nil `:region` and `mem/load-i32` found no IMemRegion implementation.
 - #56: on babashka, process-local map types that name `IPersistentMap` stay in SciMap mode (keeping their `IPersistentMap` methods and `Iterable`), and `lookup-ns?` carves out `eve.db.ds.*` so library keyword/`get` lookup is presented as `eve.core/get`.
-
 - #56: Basilisp byte-array size/scalar initialization fills signed bytes instead of trying to iterate the scalar (shared host byte-storage regression).
-
 - #56: add `eve.map-entry/map-entry`, a single slab-backed Eve MapEntry with Clojure map-entry, indexed, sequence, equality and hash semantics.
-
 - #56: translate `IMapEntry` key/val into JavaScript protocols, give Eve MapEntry Clojure's vector face for native map conj, and initialize the slab adapter on standalone require.
 - #56: realize `eve.host/byte-array` in signed JavaScript byte storage on interpreted JS hosts, including size/sequence initialization; JVM behavior is unchanged.
 - #404: add an isolated bb/bb-minimal regression for `eve.core/nth` bootstrap (the existing E1 completion fix is present on this release).
-
 - Fixed: on babashka, an `eve.record/defrecord` record answers `clojure.core/get` and keyword lookup (`(:x r)`, `(get r :x)`). It was a plain `SciType` whose `ILookup`/`IPersistentMap` interfaces were translated onto eve.core's protocols only, which clojure.core's fns cannot see, so both returned nil while `eve.core/get` returned the value; a record now keeps its map interfaces as written (SciMap mode), like a process-local record-like type. Eve's own map collections (int-map, sorted map), which name `IPersistentMap` and stay excluded, are unchanged. JVM behavior is unchanged.
 
-## [0.9.3.2] - 2026-11-10
-
 ### Fixed
-
 - **clojerl STM writes use Eve atom dispatch.** `eve.stm` called native core `swap!` on an Eve ref cell, failing in `clojerl.Atom:swap/2` with `:function_clause`. It now imports the existing `eve.host` atom operations (also covering seated clocks/locks). Verified on the original S3 probe: write and committed read both return 42; the write/abort regression passes on clojerl, JVM and Babashka (2 tests / 14 assertions), and JVM portable STM passes all 15 checks. See `doc/stm-clojerl-write-fix.md`.
 - **nbb can load the bulk-fill default in `eve.mem`.** The new i32 pattern builder used `byte-array` / `unchecked-byte`, which SCI JavaScript does not provide. Its JS arm now uses `Uint8Array` and masked octets; other hosts retain signed byte arrays. Verified: nbb 1.6.214, Babashka 1.13.226 and JVM 21 each pass the default-fill regression (1 test / 108 assertions, chunk boundaries and signed patterns); nbb release one-datum returns `ONE-DONE`, 2 datoms.
 - **`eve.tally` loads on clojerl.** `eve.hamt-util/popcount32`'s `^long` return tag is resolved by clojerl in the caller's namespace, so `(require 'eve.tally)` failed with "Unable to resolve symbol: long" at tally.cljc:190. `eve.tally` now takes `eve.host`'s `long` under `:clje`. Source: `clje-tally-long` dab410673579c8abf9d4eab90baafa3d28f7f2bc. (Verified on the JVM suite only; the clojerl load check is a separate run.)
@@ -38,9 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The ants demo (`docs/stm-ants/demo/run.cljc`) is disk-safe by default.** It wrote a world to disk (about 10 GB at dim 60, one Eve domain per board cell) and never deleted it or checked space: an operator's disk filled. Now it refuses to start below `--min-free-gb` free (default 15 GB at dim >= 60, else 5), a 5 s watchdog aborts below `--disk-floor-gb` (default 3: kills every seat's process tree, prints `DISK-FLOOR abort <free>`, deletes the world, exits 4), the world is deleted when the run ends by any route unless `--keep-run`, and any log over `--log-cap-mb` (50) is trimmed. Source: lane-m/stm-standing c7bb992c. Proof: on babashka 1.13.226, a preflight refusal (rc=2) and a forced floor trip with a 21 MB world and a live child (world size printed, world deleted, child killed, rc=3/4) were run on a stand-in root; the full launcher against a real driver was not run (no Clojure CLI on that box).
 - **basilisp: `eve.host-completion` carries `sorted-set-by`, `comparator`, `array-map`, `transient`/`persistent!` duck-typing and the lpy lane's other completion deltas.** basilisp could not resolve `clojure.core/sorted-set-by`, which walled the DataScript one-datum run. Source: atom.broker lane-m/perf-doc-0931-lpyfix 5d1775f1 (`host_completion.lpy` only; byte-identical at the proven tip 01c42450). Proof: vm RESULT #55 (2026-11-10 20:35 ET), lpy one-datum 5/5 ONE-DONE on basilisp 0.5.1 (median 25,071 ms warm, 132,023 ms cold); and `(require 'eve.atom)` on the release tree with this file loads rc=0 with `sorted-set-by` resolved.
 - **`eve.mem` bulk extend-default fill.** The fill is chunked through `-write-bytes!`. Source: `eve-bulk-fill-fix` f3a1e76d32e1ae8cd0896a52d879c5656831178b (record: BULK-FILL-FIX-REPORT.md).
-
 ### Added
-
 - **`eve.aegis.chat-spec`** (`test/eve/aegis/chat_spec.cljc`): the self-contained data namespace the aegis chat's JVM suite requires, absent from 0.9.3.1. Source: `aegis-chat-spec` 032a6f1d23700ab69b624eab0cc00bbde612cf78 (sha256 3cb414f8d8362a61c25da0185033553adbeb0e427eadddeb0a13141d453bb823).
 
 ## [0.9.3.1] - 2026-11-09
