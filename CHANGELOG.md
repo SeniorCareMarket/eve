@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Fixed (babashka): `clojure.core` fns that walk a collection argument natively (`zipmap`, `set`, `apply`, `every?`, `not-every?`, `some`, `not-any?`, `partition`, `partition-all`, `partition-by`, `interleave`, `frequencies`, `reverse`) now accept Eve collections; they raised "Don't know how to create ISeq from: sci.impl.deftype.SciType" (eve.db.ds's `d/q` failed in `zipmap` on the parser's `:in` bindings). `nth` and `count` on an Eve vector or set stay the seat's named limit.
 - #56: on babashka, an Eve MapEntry (eve.map-entry/MapEntry) is presented as a host `clojure.lang.MapEntry` of key/val with the Eve value kept behind it; the byte-array codec writes the Eve value behind a presented entry (`eve.deftype-proto.serialize/presentation-backing`, nil on other hosts), so it round-trips as an Eve MapEntry.
 - #56: eve.thread-pending-test runs the future's work as a registered task (`deftask`), since nbb pool threads do not share the heap.
 - #56: `clojure.core/realized?` works on eve.thread promise and future (they implement IPending).
