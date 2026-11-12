@@ -1235,7 +1235,14 @@
                   (fn [_] (fn [x m]
                             (if (eve-typed? x)
                               (if-let [t (map-mode-type x)]
-                                (eve-with-meta x (assoc m :type t))
+                                ;; the stamp is a SCI type value, never Eve data:
+                                ;; keep it out of the Eve-side meta (an eve.record
+                                ;; refuses it as non-portable) and re-stamp the
+                                ;; result's SCI-side meta.
+                                (let [r (eve-with-meta x m)]
+                                  (if (scimap? r)
+                                    (sci-with-meta r (assoc (sci-meta r) :type t))
+                                    r))
                                 (eve-with-meta x m))
                               (sci-with-meta x m))))))
 
