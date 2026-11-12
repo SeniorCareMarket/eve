@@ -146,7 +146,24 @@ over column-major (1.10×: its typed vectors cover numbers only).
 Kill check — "a size that dominates 64 KiB on the heterogeneous mix, with numbers": none found.
 *Prov: eve `4a92129`; measured (P2 §2, P4); primary sources for the precedents.*
 
-### A8 — a static chunk can live in an Eve page · **DEAD as worded (the kill check is met); one narrower form survives**
+### A8 — a static chunk can live in an Eve page · **as the operator means it: A9's placement, validated by probe; as first read (bytes resident uncopied): false on both trees**
+
+**Operator's clarification, 2026-11-12 12:23 AM ET, verbatim:** "So, when I say live in it... I'm saying, what if the chunk
+came with a mapping that allowed the allocator to quickly "zip" an object into place, when it knows there's a whole
+block available in that size, accounting for header spacing that'd placed, etc."
+
+Under that meaning this row does not claim that a chunk's bytes sit in a page uncopied; it claims that a chunk can
+carry its own placement map. That is what `FORMAT-V1.md` §9 specifies — the block table is the allocation plan, the
+relocation table the pointer pass — and what the probe did (`probes/lib.clj`, `claim-run!` and `ingest!`): in a
+domain known to have the room, one run of consecutive blocks claimed per size class, each block copied to its slot,
+each pointer rewritten from the table. Measured: 1.2–3.4 ms for 2,380–103,229 blocks, where building the same
+values from plain data takes 72–883 ms (M5). Header spacing: in canonical Eve a class run has none — the bitmap and
+the count rows are separate columns — so the stride is the class size; in the kernel each block begins with its own
+256-byte header and a page with its header, bitmap and rows, so a kernel layout must count them (read, not run).
+Not removed by the map as measured: the count the tally takes of each placed block at commit, ≈ 1 µs a block
+(fork F5 would write it from the same table). The probe has no answer for a class without a free run; it throws.
+
+The first reading, kept for the record:
 
 Corrected 2026-11-11 11:40 PM ET. This row first read "validated on the kernel"; the second kernel census
 (`census/VS-KERNEL-2.md`, "Kill/support evidence") read it as killed, and on the plan's own kill check it is.
@@ -163,7 +180,8 @@ Corrected 2026-11-11 11:40 PM ET. This row first read "validated on the kernel";
   into, uncounted, frees refused, in-place builders trap, evicted whole, and at this pin evictable under an atom
   that names it (`census/VS-KERNEL-2.md` §3.7 (e)). That is not co-residence with persistent blocks.
 
-Kill check — "an ownership or class rule that makes co-residence a copy anyway": **met on both trees.** A chunk
+Kill check, under the first reading — "an ownership or class rule that makes co-residence a copy anyway": **met on
+both trees.** A chunk
 enters allocator memory by a copy to an address the allocator chose, or by being produced there.
 What survives, and all the design uses: a chunk as **one opaque leaf block** that the domain's own reclamation
 counts and frees as a unit. The copy is one `memcpy` of at most 64 KiB — no re-layout, no per-value work — and
@@ -324,7 +342,9 @@ The research plan: "If a load-bearing assumption (A4, A8, A9) dies, stop and rep
 corpse."
 
 - **A4 holds**, with one type's read path to fix (the list's seq).
-- **A8 is dead as worded.** No chunk shares a page with persistent blocks without a copy, on either tree.
+- **A8**, read as bytes resident in a page uncopied, is false on both trees. As the operator has since said he
+  means it — a chunk carrying the map by which the allocator zips it into free blocks — it is A9's mechanism and
+  stands with it.
 - **A9 is dead as a present capability** on both trees. Its kill check — a shape that cannot use placement — is
   not met on canonical Eve by a probe on one host, and not met on the kernel by reading only.
 
@@ -332,4 +352,5 @@ What this lane did, stated rather than buried: its first verdict on these rows w
 written under it. The second kernel census then read A8 and A9 as killed; this register now agrees for A8 and for
 A9's present capability. D4 and D5 already stood only on the two survivors — a chunk as one leaf block; placement
 as a new allocator entry plus a relocating copy — but those are replacements, not validations, and they are the
-operator's to accept before anything is built. `IMPL-PLAN.md` §0 names which phases stand on which.
+operator's to accept before anything is built. `IMPL-PLAN.md` §0 names which phases stand on which. Under the
+clarified A8, one thing is missing on both trees: the allocator entry that claims a run.

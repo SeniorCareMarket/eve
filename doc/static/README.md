@@ -18,10 +18,11 @@ Pins: `SeniorCareMarket/eve` `4a92129`; `johnmn3/atom.broker` `163cb656c`. Every
 
 ## Read this before the findings
 
-- **Two of the plan's three stop conditions fired.** A8 ("a static chunk can live in an Eve page") is dead as
-  worded on both trees; A9 ("the allocator can consume pre-mapped spacing") is dead as a present capability on
-  both. The design stands on two replacements — a chunk as one leaf block; a new run entry in the allocator plus a
-  relocating copy — which are the operator's to accept (`IMPL-PLAN.md` §0; `ASSUMPTIONS.md`, last section).
+- **The stop conditions.** A9 ("the allocator can consume pre-mapped spacing") is absent as a present capability
+  on both trees. A8 was first reported dead, read as bytes resident in a page uncopied; as the operator has since
+  clarified it — a chunk carrying the map by which the allocator zips it into free blocks — it is the mechanism
+  this lane measured. What is missing on both trees is one allocator entry, a run claim (`IMPL-PLAN.md` §0;
+  `ASSUMPTIONS.md` A8, A9).
 - **The review of these documents was cut short** (two of six reviewers, about six minutes each, five errors found
   and fixed — `review/`). The format's soundness as an implementer or an attacker would read it, the kernel
   citations and the plan's thresholds were not independently checked (`IMPL-PLAN.md` R11).

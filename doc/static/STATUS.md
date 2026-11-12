@@ -64,6 +64,11 @@ CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes).
   the tally's share of a placed swap 50–97 %; P2 re-run (the column-major row now round-trips: 1.10× MessagePack);
   three risks added (R9–R11).
 
+- 2026-11-12 — found on the operator's question: the ClojureScript slab's uncalled `batch-alloc` (an A9
+  correction, `9d0695c`) and atom.broker's struct-array design. Then the operator said what "live in it" means
+  (verbatim in `ASSUMPTIONS.md` A8): a chunk carrying its placement map. A8 re-read as A9's mechanism; the plan's
+  §0 and the README changed to say one thing is missing, the run entry.
+
 ## Open questions (for the next reader of this file, not for the operator)
 
 - A14 is open until a ClojureScript build packs the same value to the same bytes (plan probe 2.2).

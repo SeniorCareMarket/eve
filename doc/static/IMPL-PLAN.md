@@ -5,17 +5,19 @@ before it, passing after. The evidence is `ASSUMPTIONS.md` (A*n*, C*n*), `MEASUR
 `BLIND-SPOTS.md` (Q*n*) and `FORMAT-V1.md` (§). Sizes of work are not estimated here: no phase has been built, so
 there is no measurement to cite for one.
 
-## 0. Read first — two stop conditions fired
+## 0. Read first — the stop conditions
 
-The research plan's stop conditions were A4, A8 and A9 (`ASSUMPTIONS.md`, last section). A4 holds. **A8 is dead as
-worded** — no chunk lives in a page beside persistent blocks without a copy, on either tree — and **A9 is dead as a
-present capability** — neither allocator takes placement. This plan stands on what survived, and each survivor is a
-replacement to accept or refuse, not a validated assumption:
+The research plan's stop conditions were A4, A8 and A9 (`ASSUMPTIONS.md`, last section). A4 holds. A9 is absent as
+a present capability: neither allocator takes placement. A8 this lane first read as "a chunk's bytes sit in a page
+beside persistent blocks, uncopied" — false on both trees — and reported dead. The operator has since said what he
+means by it (2026-11-12 12:23 AM ET): a chunk that carries the map by which the allocator zips its objects into free blocks.
+That is A9's mechanism, and a probe measured it. So one thing is missing, and it is an addition to accept or
+refuse, not a capability that exists:
 
-| Survivor | What it replaces | Phases that need it | Phases that do not |
+| What the plan stands on | Status | Phases that need it | Phases that do not |
 |---|---|---|---|
-| A **run entry** in the allocator (n blocks of one class claimed in one call) plus a relocating block copy | "the allocator consumes pre-mapped spacing" (A9) | 1; 5 on the kernel | 0 (which places per block), 2, 3 |
-| A chunk as **one opaque leaf block** in an atom, entered by one `memcpy` | "a static chunk lives in an Eve page alongside persistent data" (A8) | 4 | 0–3 (statics outside domains) |
+| A **run entry** in the allocator — n blocks of one class claimed in one call where the room is known to be free — driven by the image's block and relocation tables | measured in a probe on the JVM heap slab (M5, M6); in neither product allocator | 1; 5 on the kernel | 0 (which places per block), 2, 3 |
+| A chunk as **one opaque leaf block** in an atom, entered by one `memcpy` — for packed, columnar data that should stay packed | fork F3 | 4 | 0–3 |
 
 Phases 0, 2 and 3 — a value leaving a domain and coming back, and the packed wire, storage and columnar form
 outside domains — depend on neither.

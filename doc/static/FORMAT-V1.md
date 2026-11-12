@@ -217,6 +217,11 @@ byte-identical to the slab's but for pointers, which hold buffer offsets where t
   pointer pass, and it is who-holds-whom: the in-degree of every block, which is what the tally counts (M6).
 - the **type table** of §6 for every eve-deftype in it — an image's blocks carry 32 bits of name, not the name.
 
+These two tables are the mapping by which an allocator *zips* an image into place (the operator's word): given
+room it knows is free, it claims one run per size class, copies each block to its slot and rewrites each pointer.
+Header spacing is the layout's to state — layout 1's class runs have nothing between blocks; layout 2's blocks
+each begin with their own 256-byte header, and its pages with a header, bitmap and rows.
+
 Either table may be left out (a flag): a consumer then finds blocks and pointers by reading each block by its kind,
 as `eve.retire` does. With them the image is ~1.5–2.3× its blocks (8 bytes a block, 12 a pointer; M5), so a
 same-process hand-off keeps them and a stored image drops them.
