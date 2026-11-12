@@ -1136,6 +1136,53 @@
                 (fn [_] (fn [x] (sci-last (presented-seq x)))))
 (alter-var-root #'clojure.core/empty?
                 (fn [_] (fn [x] (not (presented-seq x)))))
+;; Native clojure.core fns that walk a collection argument with RT/seq
+;; directly (zipmap, set, apply, every?, some, partition, interleave,
+;; frequencies, reverse ...) bypass the presented seq above, so on bb an
+;; Eve collection (a SciType) reaching one of them answered "Don't know
+;; how to create ISeq from: sci.impl.deftype.SciType" (measured: BB-FIX-3,
+;; ds's resolve-ins calling zipmap on the parser's :in bindings). Each
+;; is re-rooted to hand the native a host seq view of an Eve-typed
+;; collection argument, exactly as vec is above; host values and every
+;; non-collection argument pass through untouched. Only the collection
+;; argument is converted: apply's LAST argument (an Eve value earlier in
+;; the list is an argument to the applied fn, not the seq).
+(def ^:private sci-apply @#'clojure.core/apply)
+
+(defn- seq-arg [x]
+  (if (eve-typed? x) (presented-seq x) x))
+
+(defn- coll-last-arg
+  "f with its last argument presented as a host seq if it is Eve-typed."
+  [f]
+  (fn
+    ([a] (f (seq-arg a)))
+    ([a b] (f a (seq-arg b)))
+    ([a b c] (f a b (seq-arg c)))
+    ([a b c d] (f a b c (seq-arg d)))
+    ([a b c d & more]
+     (let [args (vec (list* a b c d more))
+           n (count args)]
+       (sci-apply f (conj (subvec args 0 (dec n)) (seq-arg (nth args (dec n)))))))))
+
+(defn- coll-all-args
+  "f with every argument presented as a host seq if it is Eve-typed."
+  [f]
+  (fn
+    ([] (f))
+    ([a] (f (seq-arg a)))
+    ([a b] (f (seq-arg a) (seq-arg b)))
+    ([a b & more] (sci-apply f (map seq-arg (list* a b more))))))
+
+(doseq [v [#'clojure.core/apply #'clojure.core/set #'clojure.core/every?
+           #'clojure.core/not-every? #'clojure.core/some #'clojure.core/not-any?
+           #'clojure.core/partition #'clojure.core/partition-all
+           #'clojure.core/partition-by #'clojure.core/frequencies
+           #'clojure.core/reverse]]
+  (alter-var-root v coll-last-arg))
+(doseq [v [#'clojure.core/zipmap #'clojure.core/interleave]]
+  (alter-var-root v coll-all-args))
+
 ;; clojure.core's meta / with-meta, presented for the seat's own
 ;; types: SCI's with-meta on a SciType / SciMap keeps the map on
 ;; SCI's side of the value and never calls the type's IObj group,
