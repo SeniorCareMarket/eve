@@ -42,7 +42,7 @@ back into an atom, buffer to file and back, measured against `eve->clj`". The ev
 2. **The allocator comes second, not last.** The transformation the operator asked about is bounded by allocation
    and then by the commit's holder count, not by encoding (M5, M6). A run claim and a count written from the
    image's tables are the two changes that make "placement, not planning" true.
-3. **The generated sister is the columnar phase.** On the ISlabIO hosts a sister is needed only for the packed,
+3. **The generated sister belongs with the columns (lane H5).** On the ISlabIO hosts a sister is needed only for the packed,
    columnar form (A2); generating it earlier would generate something nothing reads.
 
 ## 3. The work, in waves and lanes
@@ -73,11 +73,11 @@ N runs, and appends the result to `doc/static/SPIKE-LOG.md`.
 | B1 zip, alone | an image laid into a domain's blocks, net of creating the domain | — | 2.2 / 3.4 / 1.3 / 2.5 ms (33–42 ns a block on the larger three) | ≤ 50 ns a block | M5 |
 | B2 zip, committed | a `swap!` that places an image, net of the domain | 202 / 325 / 475 / 1,190 ms for the plain store | 4.4 / 105 / 34 / 77 ms (≈ 1 µs a block) | ≤ 2× row B1 | M6 — the gap is the count |
 | B3 detach | an image copied under the pin, against `@a` | 3.3 / 19.1 / 20.7 / 43.9 ms | 0.40 / 9.63 / 3.27 / 10.54 ms | at least 2× faster than `@a` on every corpus | M6 |
-| B4 atom → atom | a value of atom A stored into atom B, one process | never measured as one run; its parts (`eve->clj` + plain store) sum to 205 / 344 / 496 / 1,234 ms. W0.6 measures it | parts (detach + placed `swap!`): 10.9 / 118 / 39.9 / 90.8 ms | ≤ 2× (row B3 + row B1) | M5, M6 |
+| B4 atom → atom | a value of atom A stored into atom B, one process | never measured as one run; its parts (`eve->clj` + plain store) sum to 206 / 344 / 496 / 1,234 ms. W0.6 measures it | parts (detach + placed `swap!`): 10.9 / 118 / 39.9 / 90.9 ms | ≤ 2× (row B3 + row B1) | M5, M6 |
 | B5 plain → atom | a `swap!` of plain data | 202 / 325 / 475 / 1,190 ms | 76 / 154 / 242 / 666 ms with today's writers into a buffer | under the probe's figure on every corpus; a direct builder has no measurement yet | M6 |
 | B6 chunk bytes | packed in 64 KiB chunks, against Transit MessagePack | — | 0.86× messages, 0.55× records, 0.56× datoms | ≤ 0.9× on messages and records | M2, M3 |
 | B7 chunk reads | decode · column scan · filter · one cell · row view, at 64 KiB | Transit decode 4.18 µs a row; host scan 23.3 ns a row | 0.77 µs · 1.44 ns · 2.96 ns · 106 ns · 0.64 µs | decode ≥ 2.5× Transit · ≤ 2 ns · ≤ 4 ns · ≤ 2× the host map's cell · ≤ 1 µs | M4 |
-| B8 container | sixteen chunks compressed as one, against the whole value compressed as one chunk | — | +1–4 % at 1 MiB; +23–35 % when each 64 KiB chunk is compressed alone | ≤ 5 % | M3, M8 |
+| B8 container | sixteen chunks compressed as one, against the whole value compressed as one chunk | — | a proxy only: 1 MiB chunks each compressed alone are +0–4 %; 64 KiB chunks each compressed alone +23–35 %. Sixteen chunks under one compression was not run | ≤ 5 % | M3, M8 |
 
 **The loop**, for every perf lane: run the board → change one thing → run the board → keep the change if its row
 moved and every requirement test is green, else revert → log the row either way. Two iterations in a row that move
@@ -114,7 +114,7 @@ the downstream lane runs on the Wave 0 default (per-block `alloc-run!`, a hand-b
 | Z1.4 | A detach under the pin is one committed value while another thread swaps | `detach-under-concurrent-writes` |
 | Z1.5 | An earlier `(length, root)` view stays equal, hash-stable and readable from a buffer cut at its length while the builder appends | `views-survive-appends` (property, from P1) |
 | Z1.6 | Detaching a build that left garbage yields no dead byte | `detach-compacts` (live ratio 1.0) |
-| Z1.7 | Hot path: a static reads at slab speed, not through protocol dispatch | `image-read-speed` (within 1.2× of a slab read; M5 measured 16–60 against 18–54 ms) |
+| Z1.7 | Hot path: a static reads at slab speed, not through protocol dispatch | `image-read-speed` (within 1.2× of a slab read; through protocol dispatch the probe was 0.9–1.65×, M5) |
 
 **Z2 — the run claim.** Files: `src/eve/deftype_proto/alloc.cljc` (heap and mmap slabs). Board: B1.
 
@@ -277,7 +277,7 @@ runs of the kernel's memory, not kernel blocks (`census/VS-KERNEL-2.md` §4), so
 | # | Risk | What bounds it |
 |---|---|---|
 | R1 | Writing counts at placement is a change inside the tally, where the standing rule is "the walk, exactly" | It adds no mechanism beside the count — it writes the same words the walk would. Lane Z4's tests (Z4.1–Z4.3) are equality with the walk and exactness on won, lost and thrown swaps. If it cannot be made exact it is dropped and placement stays at M6's 3–45× |
-| R2 | Two forms are two reader surfaces | The image's reader is Eve's existing types; only the packed form is new code. If Phase 2's readers reach slab read speed, the image stays an internal transport and is not a public form |
+| R2 | Two forms are two reader surfaces | The image's reader is Eve's existing types; only the packed form is new code. If the chunk readers (lanes C1, C2) reach slab read speed, the image stays an internal transport and is not a public form |
 | R3 | ClojureScript cannot read an image as its types stand | Lane H4; until then ClojureScript has `pack` and the packed readers only. A14 is open until X1.2 |
 | R4 | Reading Eve's block layouts in place is 7–31× a host collection (M5) | Not made worse by this plan; the packed readers are the fast path (one cell 68–156 ns against 59) |
 | R5 | A static wire is a generation ValueScript's client cannot read (A17) | Wave 3; until then statics travel between Eve hosts and to stores, and the live network atom is untouched |
