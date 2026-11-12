@@ -1,0 +1,32 @@
+P5 ? eve ref: refs/heads/claude/sweet-carson-6pt29d | clojure 1.12.0 | java 21.0.12.1
+== P5.1 the other collections: bump buffer, image read in place, image placed by run claim
+  list of 200                                                      ERROR  ExceptionInfo: static view: allocation in a frozen buffer
+  hash set of 200                                                  PASS
+  eve.sorted sorted-map of 300 (a treap of eve-deftypes)           PASS
+    sorted-map: lookup and subseq in place over the image          PASS
+  eve.sorted sorted-set of 200                                     PASS
+  rb-tree sorted-set of 200                                        PASS
+  int-map of 300                                                   PASS
+  eve array :float64 of 200                                        PASS
+  dataset of 2 columns x 200 rows                                  PASS
+    dataset: column read in place over the image                   PASS
+== P5.2 a user eve-deftype (primitive, serialized, reference and mutable fields)
+  user type: every field reads the same from all four              PASS
+  user type: the SAME class reads the image (no sister type was needed on this host) PASS
+  user type: default = is block identity, so image != slab original (census 1.6: equals = same offset) PASS
+  user type: a later in-place write to the slab original is not seen by the image (snapshot) PASS
+  user type: a write through a frozen view is NOT refused today (the view only refuses allocation) PASS
+== P5.3 a DataScript database (the repository's port): DB / BTSet / Node / Leaf / Datom are eve-deftypes
+  built 150 people = 900 datoms in 1369 ms; reach 7951 blocks; image 127,576 B (7,951 blocks, 8,965 pointers); class-padded 266,688 B; {32 7824, 64 1, 128 125, 256 1}
+  per datom: 296 B in the slab (class-padded), 142 B in the image; copy out 44.5 ms
+  DataScript: reach and image agree on the block count             PASS
+  DataScript: the DB read in place from the image has the same datoms PASS
+  DataScript: a Datalog query runs over the image view             PASS
+  scan all datoms: slab 1.6 ms, image view 4.6 ms
+  image -> a fresh slab domain by run claims: 11.0 ms (the build took 1369 ms)
+  DataScript: the image placed in a fresh domain has the same datoms PASS
+  DataScript: and can be transacted on there                       PASS
+
+P5 RESULT: 19 PASS, 0 FAIL, 1 ERROR of 20
+   ERROR - list of 200
+exit 0
