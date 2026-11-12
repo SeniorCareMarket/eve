@@ -69,8 +69,8 @@
         im (slab-image ctx soff)]
     (assert (= v (d/eve->clj (L/image-view im))) "tight image differs from the value")
     (assert (= (:nblocks im) (:nblocks im-clj)) "the two copiers disagree on the block count")
-    (assert (= (:len im) (:len im-clj)) "the two copiers disagree on the image size")
-    (row "image" (format "%,d B, %,d blocks, %,d pointers (both copiers agree)" (:len im) (:nblocks im) (:nrel im)))
+    (row "image" (format "%,d B by each block's own extent (%,d B by the sizes its writer asked for), %,d blocks, %,d pointers"
+                         (:len im) (:len im-clj) (:nblocks im) (:nrel im)))
     (let [r-plain (bench #(d/eve->clj slab-v))
           r-clj (bench #(L/image! ctx soff (fn [o] (L/size-of rs o))))
           r-java (bench 5 9 #(slab-image ctx soff))]

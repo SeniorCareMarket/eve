@@ -1,0 +1,6 @@
+P6b ? eve ref: refs/heads/claude/sweet-carson-6pt29d | clojure 1.12.0 | java 21.0.12.1
+    (the loop and the index load alone: 0.35 ns)
+    :e  (sorted; 6 datoms an entity)       plain i32  120,000 B  0.57 ns | narrowed to 2 B:  60,000 B  1.38 ns | run-end:  40,000 B (5,000 runs) 101.53 ns
+    :tx (one transaction per 100 people)   plain i32  120,000 B  4.26 ns | narrowed to 1 B:  30,000 B  3.12 ns | run-end:     400 B (50 runs) 41.96 ns
+P6b done
+exit 0
