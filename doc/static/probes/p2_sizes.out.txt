@@ -29,11 +29,11 @@ P2 ? eve ref: refs/heads/claude/sweet-carson-6pt29d | clojure 1.12.0 | java 21.0
    transit-json                  2,937,566  (   550,540)   x1.35 of transit-msgpack
    transit-msgpack               2,178,675  (   577,008)   x1.00 of transit-msgpack
    eve flat codec                4,704,284  (   584,035)   x2.16 of transit-msgpack
-   packed: bare                  4,004,276  ( 1,036,940)   x1.84 of transit-msgpack   tables 4 B, 0 symbols, 0 shapes
-   packed: +symbols              3,389,693  (   995,882)   x1.56 of transit-msgpack   tables 675 B, 65 symbols, 0 shapes
-   packed: +shapes               3,389,662  (   995,869)   x1.56 of transit-msgpack   tables 686 B, 65 symbols, 1 shapes
-   packed: +batches              3,389,662  (   995,869)   x1.56 of transit-msgpack   tables 686 B, 65 symbols, 1 shapes
-   packed: +typed vectors        2,395,925  (   697,017)   x1.10 of transit-msgpack   tables 686 B, 65 symbols, 1 shapes   ROUND-TRIP DIFFERS
+   packed: bare                  4,004,280  ( 1,036,944)   x1.84 of transit-msgpack   tables 4 B, 0 symbols, 0 shapes
+   packed: +symbols              3,389,697  (   995,892)   x1.56 of transit-msgpack   tables 675 B, 65 symbols, 0 shapes
+   packed: +shapes               3,389,664  (   995,868)   x1.56 of transit-msgpack   tables 686 B, 65 symbols, 1 shapes
+   packed: +batches              3,389,664  (   995,868)   x1.56 of transit-msgpack   tables 686 B, 65 symbols, 1 shapes
+   packed: +typed vectors        2,395,927  (   697,015)   x1.10 of transit-msgpack   tables 686 B, 65 symbols, 1 shapes
 
 -- 30k datoms (5k people)
    edn text                      1,459,941  (   146,687)   x1.45 of transit-msgpack

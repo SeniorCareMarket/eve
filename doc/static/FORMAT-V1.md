@@ -145,9 +145,9 @@ can be handed to an Arrow consumer, a typed array, a `double[]` or DLPack as the
 Arrow requires and 64 what it recommends; a JS typed array needs its offset to be a multiple of the element size —
 `research/FORMATS.md` B1, A7). Nothing opaque and no delta coding is admitted inside a chunk (A18).
 
-Measured on these columns: a sum over an f64 column at 1.3–1.4 ns a row, a keyword count at 2.4–2.7 — 17× and 6×
-the host's vector of maps; one cell at 49–152 ns against the host's 59; a row assembled into a plain map in
-0.6–1.0 µs (M4).
+Measured on these columns: a sum over an f64 column at 1.3–1.4 ns a row, a keyword count at 2.6–3.0 — 16–18× and
+6–7× the host's vector of maps; one cell at 68–156 ns against the host's 59; a row assembled into a plain map in
+0.6–0.8 µs (M4).
 
 ## 6. Types
 
@@ -177,13 +177,16 @@ sister — the type itself reads it.
 - **In an Eve atom** (canonical Eve): one leaf block of the overflow class, 8-aligned, with a block type id from
   the unassigned `0x20–0x3F` (proposed `0x20`), the chunk after its 8-byte block header. Stored and read back by
   `memcpy`; counted and freed by the tally as one leaf; pointed at from a map or vector by an ordinary 7-byte
-  pointer. This needs the type id registered as a leaf kind in `eve.tally` and `eve.retire` and as a pointer tag
+  pointer. A chunk stored this way is **closed** — nothing in it names a block of the domain, since a leaf's
+  contents are never walked. This needs the type id registered as a leaf kind in `eve.tally` and `eve.retire` and as a pointer tag
   (`src/eve/retire.cljc:23-27`) — without that the tally holds an unknown block and never frees it
   (`census/TYPES-AND-DEREF-2.md` §4.4). Whether a chunk in an atom is in-band is fork F3.
 - **In the kernel**: a flat value block (ExtCID v3 invariant J: a 16-byte type CID, then the payload, identity = the
   SHA-256 of its bytes) under one new type CID, of class 15 — fifteen 64 KiB chunks to a 1 MiB region, 4-byte
-  aligned (A8); or, without a copy, inside an adopted page. The kernel's page writer refuses class-15 blocks today
-  (`vs.tier`), so the blob wire is the route until it does not.
+  aligned, entered by a copy or produced in place (A8). An adopted page takes bytes without a copy, but it stays
+  beside the allocator for good and at this pin can be evicted under an atom that names it, so it is not a home for
+  atom state. The kernel's page writer refuses class-15 blocks today (`vs.tier`), so the blob wire is the route
+  until it does not.
 
 ## 8. Equality, hash, digest
 

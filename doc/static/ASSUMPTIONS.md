@@ -19,7 +19,7 @@ what stands in its place.
 |---|---|---|---|
 | C1 | "The integration census additionally covers atom.broker main's `eve/` subtree, because the net/codec surface lives there" | atom.broker has no `eve/` subtree: `163cb656c` "Land the Eve extraction: eve/ subtree removed; Eve lives in SeniorCareMarket/eve and atom.broker consumes it as a dep pin (0.9.3.1)". The net layer is 29 files of canonical Eve, `src/eve/net/` | TREE — `git log -1`, `ls` |
 | C2 | "Container = the 1 MiB Eve page"; "only a page's owner allocates / frees in it; foreign frees go through return queues" | That is the **kernel's** allocator (atom.broker `vs/src/vs/kernel/wasm/alloc.vs`: `REGION_SIZE` 1,048,576, sub-pages of 64 KiB / 256 KiB / 1 MiB, 16 classes, owner-only allocation, return queues). Canonical Eve has **no pages**: six bitmap classes of 32–1024 B and a coalescing class 6, any thread or process allocating by CAS on a bitmap (`src/eve/deftype_proto/alloc.cljc:533-606`). In canonical Eve, 1 MiB appears as `eve.net.pages`' `REGION` (a writer of kernel pages with no caller in `src/`) and as a heap class's starting capacity | TREE — `census/VS-KERNEL.md` §1.1, §1.4; `census/BYTE-PATHS.md` §4.4 |
-| C3 | "Registry ids are expansion-order and cannot travel" | Ids are derived from the type's name: `type-id = 0x40 + (h mod 173)`, `name-hash = h & 0xFFFFFF`, `h` = the int32 fold of XXH3-128 of the name's key bytes — "the same in every process" (`src/eve/deftype/registry.cljc:12-67`; declared break 2026-10-25; pinned on every host by `test/eve/deftype/type_id_test.cljc`) | TREE |
+| C3 | "Registry ids are expansion-order and cannot travel" | Ids are derived from the type's name: `type-id = 0x40 + (h mod 173)`, `name-hash = h & 0xFFFFFF`, `h` = the int32 fold of XXH3-128 of the name's key bytes — "the same in every process" (`src/eve/deftype/macros.cljc:96-97`; the derivation is `src/eve/deftype/registry.cljc:25-26,47-67`; declared break 2026-10-25; pinned on every host by `test/eve/deftype/type_id_test.cljc`) | TREE |
 | C4 | "Under the construction law (Eve data constructed outside a swap throws; the heap-slab fallback is abolished)" | Not in the tree. `current-sio` is `(or d/*domain-sio* (default-sio))` (`alloc.cljc:1726-1731`): a constructor outside a swap allocates in the process's heap domain; **nothing throws at construction**; the refusal is at store time. "The deftype constructor guard" (`data.cljc:557-563`) is a stale comment; `eve.guard` is a read guard. On ClojureScript a value built outside a swap lands in the module slab every in-process atom uses — and in an open disk domain's files, unlogged | TREE + ran — `census/TYPES-AND-DEREF.md` §0 C1–C3, §2.8 (probes A1–A11) |
 | C5 | "The flat codec … is exactly your packed/wire format … cross-process" | At the pin flat bytes are **key bytes and digest input only**: map keys, set elements, sorted-collection keys, the type-id hash, the root digest. No thread descriptor, journal record or network payload uses them; the JS codec refuses `value->eve-bytes` outright. They decode to plain data only, and nothing reads inside them without decoding the whole | TREE — `census/BYTE-PATHS.md` §2.2, §2.7 |
 | C6 | "`eve->clj` has produced plain host data … atom deref was explicitly contracted not to return Eve wrappers" | A deref returns a **live slab-backed value** for every type with no `IPlain` — every user `eve-deftype` (a DataScript `DB`), `ValueArray` — through `eve->clj`'s `:else v` arm; `swap!` returns whatever its function returned, unpinned; `eve.sorted`'s `-plain` answers another slab collection built in the process domain | TREE + ran — `census/TYPES-AND-DEREF.md` §2.2, §3.1, §3.3 |
@@ -57,9 +57,11 @@ scalar and an explicit nil, and carries f32 / f64 / i64 exactly in typed columns
 - `eve-deftype*` is one portable function for every host that expands the macro
   (`src/eve/deftype/macros.cljc:54-153`). At that point the parsed fields with offsets, sizes, hints and classes,
   the total size, the type key, the type id and name hash, and the user's protocol bodies are all in scope.
-- They are in local bindings, not in the registry: the compile-time `registry` is keyed by the type's simple name
-  and read only by `eve-extend-type`. At runtime a process knows, per type, a constructor and *which offsets hold
-  references* — no field names, no primitive types, no total size (`census/DEFTYPE-AND-COLUMNAR.md` §1.4–1.5).
+- The compile-time `registry` holds the slab-field layout, total size and identity (`macros.cljc:106-112`), keyed
+  by the type's simple name, read only by `eve-extend-type`, and absent at runtime; the protocol bodies and the
+  host-local fields are only in the expansion's locals. At runtime a process knows, per type, a constructor and
+  *which offsets hold references* — no field names, no primitive types, no total size
+  (`census/DEFTYPE-AND-COLUMNAR.md` §1.4–1.5).
 - One edit reaches every host: the `(list 'do …)` at `macros.cljc:130-153` (hook H1, same file §1.6).
 - Two emission families. On the ISlabIO hosts (JVM, babashka, CLR, basilisp, jolt, clojerl, glojure, jank) an
   instance is `[… slab-off__ sio__]` — parametric in its slab I/O — and **the same class reads an image** (ran,
@@ -123,14 +125,15 @@ its parent is copied out).
 Measured (M2, M3): on messages / records / datoms the symbol table takes 24 / 31 / 21 % off, shapes a further 22 /
 32 / 33 %, batches 6 / 7 / 9 %, typed vectors 9 / 36 / 35 %; the result is 0.55–0.86× Transit MessagePack (0.83× on
 the repository's own EDN files); hit rates at 64 KiB are 99.1–99.6 %. Against the flat codec: 0.36–0.19×.
-Not covered by the prototype: a map with non-symbol keys (3.04× MessagePack on int → int).
+Not covered by the prototype: a map with non-symbol keys (3.04× MessagePack on int → int), and plain data handed
+over column-major (1.10×: its typed vectors cover numbers only).
 *Prov: eve `4a92129`; measured (P2).*
 
 ### A7 — 64 KiB is the right chunk · **VALIDATED as a target, not a cap**
 
 - Bytes (M3): 64 KiB is within 1.2 % of one chunk on rows, under it on messages, and the smallest total on datoms
   (16-bit offsets inside a chunk). 4–16 KiB cost +3 to +46 %. 256 KiB – 1 MiB gain at most 1 % on rows.
-- Reading (M4): warm scans and point reads are flat from 32 KiB up; the decode unit is 1.4 ms at 64 KiB against
+- Reading (M4): warm scans and point reads are flat from 32 KiB up; the decode unit is 1.3 ms at 64 KiB against
   20 ms at 1 MiB; a cold scan pays the chunk's open cost once per chunk.
 - The counter-design, Lance's 4–8 KiB mini-blocks, is refuted for a self-contained chunk that carries its own
   tables; mini-blocks share their page's metadata.
@@ -143,36 +146,50 @@ Not covered by the prototype: a map with non-symbol keys (3.04× MessagePack on 
 Kill check — "a size that dominates 64 KiB on the heterogeneous mix, with numbers": none found.
 *Prov: eve `4a92129`; measured (P2 §2, P4); primary sources for the precedents.*
 
-### A8 — a static chunk can live in an Eve page · **VALIDATED on the kernel, with two corrections; not the question on canonical Eve**
+### A8 — a static chunk can live in an Eve page · **DEAD as worded (the kill check is met); one narrower form survives**
 
-- Kernel: no fixed class holds 64 KiB (the largest is 10,240 B); one class-15 block does. A 1 MiB region's class-15
-  data region is 989,600 B, so **15** such blocks fit, not 16; a class-15 block is 4-byte aligned, so 8-byte columns
-  need the chunk to pad from its own start (`census/VS-KERNEL.md` §1.3, §1.6).
-- Kernel, without a copy: a page image is adopted *beside* the allocator — decoded or mapped straight into a region,
-  registered under its page CID, every pointer into it rebased at read time by one table probe; with
-  `vs.mmap/map-value-page!` the adoption is zero-copy. An adopted page is never allocated into and is evicted whole
-  (§2.2).
-- Canonical Eve: there is no page. A chunk is one class-6 block (8-aligned, any size). The tally holds it as one
-  leaf only if its header byte is a known leaf kind; any unknown byte is `:opaque` and never freed
-  (`census/TYPES-AND-DEREF-2.md` §4.4).
+Corrected 2026-11-11 11:40 PM ET. This row first read "validated on the kernel"; the second kernel census
+(`census/VS-KERNEL-2.md`, "Kill/support evidence") read it as killed, and on the plan's own kill check it is.
 
-Kill check — "an ownership or class rule that makes co-residence a copy anyway": placing a chunk into an allocator
-block is one `memcpy` of the chunk — no re-layout, no per-value work; the kernel's adoption path is no copy at all.
-*Prov: atom.broker `163cb656c`, eve `4a92129`; read (`census/VS-KERNEL.md`); nothing was run in the kernel.*
+- Canonical Eve has no page (C2). A chunk's only home is one block of the coalescing class 6 — 8-aligned, any
+  size, at an address the allocator picks. Bytes that already exist arrive by one `memcpy`; only a producer writing
+  into the block it was handed avoids that. The tally holds it as one leaf only if its header byte is a known leaf
+  kind; any unknown byte is `:opaque` and never freed (`census/TYPES-AND-DEREF-2.md` §4.4).
+- Kernel: no fixed class holds 64 KiB (the largest is 10,240 B); the only allocator home is one class-15 block —
+  **15** to a 1 MiB region, not 16 (its data region is 989,600 B), 4-byte aligned, at an allocator-picked address
+  (`census/VS-KERNEL.md` §1.3, §1.6). Nothing inside such a block is a block to the tally, and the page writer
+  refuses class 15 (`vs/src/vs/tier.vs:326-327`), so it cannot travel as kernel pages.
+- Kernel, without a copy: page adoption — but an adopted page is *beside* the allocator for good: never allocated
+  into, uncounted, frees refused, in-place builders trap, evicted whole, and at this pin evictable under an atom
+  that names it (`census/VS-KERNEL-2.md` §3.7 (e)). That is not co-residence with persistent blocks.
 
-### A9 — the allocator can consume pre-mapped spacing · **REFUTED as a present capability; VALIDATED as a mechanism**
+Kill check — "an ownership or class rule that makes co-residence a copy anyway": **met on both trees.** A chunk
+enters allocator memory by a copy to an address the allocator chose, or by being produced there.
+What survives, and all the design uses: a chunk as **one opaque leaf block** that the domain's own reclamation
+counts and frees as a unit. The copy is one `memcpy` of at most 64 KiB — no re-layout, no per-value work — and
+none when the decoder writes into the block. "Sixteen chunks to a page, the hand-off page-aligned" (O8) is not
+available on either tree, and nothing in `FORMAT-V1.md` depends on it.
+*Prov: atom.broker `163cb656c`, eve `4a92129`; read (`census/VS-KERNEL.md`, `-2`); nothing was run in the kernel.*
+
+### A9 — the allocator can consume pre-mapped spacing · **DEAD as a present capability on both trees; the shape admits it (a probe, one host)**
 
 - Neither allocator has a bulk, reserve, placement or adoption entry. Eve: `-sio-alloc!` takes one size and answers
   one block (`alloc.cljc:95-139`, `:533-606`). Kernel: `alloc_blocks` is a loop over `alloc_block`
-  (`alloc.vs:4188-4201`); the nearest things are whole-page adoption and the bump-filled BLOCK PAGES for blocks
-  rebuilt from wire images (`census/VS-KERNEL.md` §1.7, §2.5).
-- Measured on Eve's JVM heap domain (M5, M6): claiming one run of blocks per size class by CAS on whole bitmap words
-  places an image 5–12× faster than per-block allocation; through a real `swap!` the placed path is 3–45× the plain
-  one, and the tally's hold of the new blocks is then ≈ 97 % of it.
-- What per-value allocation costs today (the plan's "say what it costs instead"): ≈ 250 ns a block to allocate, and
-  ≈ 1 µs a block to count at commit, on the JVM.
+  (`alloc.vs:4188-4201`); it takes memory only by claiming regions; page adoption and the bump-filled BLOCK PAGES
+  keep their bytes out of the allocator for good (`census/VS-KERNEL.md` §1.7, §2.5; `-2` "A9").
+- The plan's kill check is about the allocator's *shape* — "placement information cannot be used and ingest is
+  necessarily per-value allocation". On canonical Eve that is not so: a research probe (not product code) claimed
+  one run of blocks per size class by CAS on whole bitmap words of the unchanged JVM heap slab, and placed an image
+  3–9× faster than per-block allocation, net of creating the domain (M5). On the kernel a run entry on an owned
+  page is additive by reading (`census/VS-KERNEL-2.md` O10, option 2); it is not built and not measured.
+- "Say what it costs instead" — today, per block on the JVM: ≈ 250 ns to allocate, and ≈ 1 µs for the tally to
+  count it at commit. No run claim touches the second: through a real `swap!` a placed image is 3–45× the plain
+  store, and the tally's hold is then 50–97 % of it (M6).
 
-*Prov: eve `4a92129`; read; measured (P3, P3c, P6 — JVM heap domains only; no disk domain, no other host).*
+So O5's "placement, not planning" is false today; true of allocation once a run entry exists; true of a whole
+commit only if the count is also taken from the image's tables (fork F5).
+*Prov: eve `4a92129`, atom.broker `163cb656c`; read; measured (P3, P3c, P6 — JVM heap domains only; no disk domain,
+no second process, no other host, nothing in the kernel).*
 
 ### A10 — hash and equality from the binary · **split**
 
@@ -180,7 +197,7 @@ block is one `memcpy` of the chunk — no re-layout, no per-value work; the kern
 |---|---|---|
 | equality of two eve roots | the content digest when both carry one — SHA-256 of the root's flat bytes (`src/eve/digest.cljc:163-199`) — else an element walk | **yes**: canonical bytes are already Eve's equality on byte-array hosts; and they already disagree with Clojure's `=` at the float edges (`{:a 0.0}` ≠ `{:a -0.0}`, `{:a ##NaN}` = `{:a ##NaN}`; ran, `census/BYTE-PATHS-2.md` §1.3) |
 | `hash` of a collection | the host's fold over the host's `hash` of each decoded element; host-specific by ruling (`test/eve/collection_hash_test.cljc:18-26`) | **no** without decoding every element; it cannot ride in a cross-host form. It is computed once by a walk and kept on the static object, as the slab keeps it in the digest side block |
-| a user `eve-deftype` with no `IEquiv` / `IHash` of its own | `hash` = the block's offset; `=` = same type and same offset (`src/eve/deftype_proto/sio.cljc:215-231`) | **no** — a copy has another offset. Ran (P5.2): the image of an instance is not `=` its slab original |
+| a user `eve-deftype` that supplies no hash or equals of its own | `hash` = the host's hash of the block's offset; `equals` = same type and same offset (`src/eve/deftype_proto/sio.cljc:215-231`) | **no** — a copy has another offset. Ran (P5.2): the image of an instance is not `=` its slab original |
 
 Kill check — "a type whose Eve hash cannot be produced from the packed form without a full walk that
 materialization would beat": the collection hash needs the walk either way (it does not need the host collections);
@@ -291,14 +308,24 @@ generation that ValueScript's own client cannot read until the kernel reads chun
 
 ### A18 — encodings keep random access · **VALIDATED for dictionary codes and narrowing; run-end admitted with its cost stated**
 
-Measured (M4, M7): a dictionary-coded cell 49–152 ns against the host's 59; a narrowed (frame-of-reference) column
+Measured (M4, M7): a dictionary-coded cell 68–156 ns against the host's 59; a narrowed (frame-of-reference) column
 1.4–3.1 ns a read at half or a quarter of the bytes; a run-end column 42–102 ns a read (a binary search over the
 runs) at 3–300× fewer bytes. Nothing opaque is admitted inside a chunk; delta coding is not admitted (a read would
 need a prefix sum).
 *Prov: eve `4a92129`; measured (P4, P6b).*
 
-## The three load-bearing rows
+## The three load-bearing rows — the stop conditions
 
-The research plan names A4, A8 and A9 as stop conditions. None died: A4 holds with one type's read path to fix; A8
-holds with "15, not 16" and the page tier where it actually lives; A9's capability does not exist and its mechanism
-measures well. The lane ran to D5.
+The research plan: "If a load-bearing assumption (A4, A8, A9) dies, stop and report before designing around its
+corpse."
+
+- **A4 holds**, with one type's read path to fix (the list's seq).
+- **A8 is dead as worded.** No chunk shares a page with persistent blocks without a copy, on either tree.
+- **A9 is dead as a present capability** on both trees. Its kill check — a shape that cannot use placement — is
+  not met on canonical Eve by a probe on one host, and not met on the kernel by reading only.
+
+What this lane did, stated rather than buried: its first verdict on these rows was "none died", and D4 and D5 were
+written under it. The second kernel census then read A8 and A9 as killed; this register now agrees for A8 and for
+A9's present capability. D4 and D5 already stood only on the two survivors — a chunk as one leaf block; placement
+as a new allocator entry plus a relocating copy — but those are replacements, not validations, and they are the
+operator's to accept before anything is built. `IMPL-PLAN.md` §0 names which phases stand on which.

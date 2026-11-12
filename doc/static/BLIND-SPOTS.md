@@ -110,7 +110,7 @@ The line: **a static is a value; it holds no state, and nothing in Eve holds sta
 | An open builder | one thread's scratch until sealed: never shared, never published, thrown away — the four conditions of the 2026-10-29 ruling, read as the kernel already reads them for its own per-thread memos (`census/VS-KERNEL-2.md` §3.6) |
 | A registry of live buffers; a cache keyed by buffer; a shared mutable tail; "the newest root of this static" | **banned** — that is state outside an atom. The design contains none |
 | A static stored in an atom | becomes blocks of that atom's domain (placed), or one leaf block the domain's own reclamation counts and frees (a chunk). Never a pointer out of the domain: FORMAT-DECISIONS §11 forbids a plain cross-domain reference and nothing would reclaim it |
-| A chunk as a leaf block in an atom, read in place by Eve's own types | the one place rule 26 ("no out-of-band stand-ins") could be read either way — fork F3. The case for in-band: it has a block header and type id, it is counted, freed, digested and pointed at like an eve array block, and Eve reads inside it natively; it stands in for nothing |
+| A chunk as a leaf block in an atom, read in place by Eve's own types | the one place rule 26 ("no out-of-band stand-ins") could be read either way — fork F3. Such a chunk must be **closed**: it names no block of the domain, because the tally does not descend into a leaf and anything reachable only through it would be freed under it (`census/VS-KERNEL-2.md` §3.7 (b), the same on canonical Eve). The case for in-band: it has a block header and type id, it is counted, freed, digested and pointed at like an eve array block, and Eve reads inside it natively; it stands in for nothing |
 
 On the kernel the same line has a sharper edge, found by reading: a region registered as an adopted or block page
 **can be evicted and reused while an atom's slot still names a block in it**, once no compiled form binds a value
@@ -129,8 +129,8 @@ any, run-end; M7) with each chunk's first and last key in a directory — which 
 current one; it is the plan's fourth phase and not promised earlier.
 
 **(b) A Dataset under columnar ops with row assembly interleaved.** The packed batch *is* a Dataset with more
-column types; measured on 50,000 rows × 7 columns at 64 KiB chunks: scan 1.4 ns a row, filter 2.7, one cell 88 ns,
-a row assembled in 0.68 µs (M4). Today's Dataset has numeric columns only, no row view, and its bulk path copies a
+column types; measured on 50,000 rows × 7 columns at 64 KiB chunks: scan 1.4 ns a row, filter 3.0, one cell 106 ns,
+a row assembled in 0.64 µs (M4). Today's Dataset has numeric columns only, no row view, and its bulk path copies a
 column out and back (`census/DEFTYPE-AND-COLUMNAR.md` §2.2, §2.5).
 
 The design is not vectors-of-scalars only. Its weak case is named: a map with non-symbol keys (M2).
@@ -191,11 +191,21 @@ allocator, not the encoding, is most of a build. No writer changes.
   blocks at final in-region offsets, registered by page CID) — and then it is an arena by rule 12's own test, it
   can never have a block freed singly, in-place builders trap inside it, and its eviction can pull it from under an
   atom (Q8). Not recommended.
-- So the shape that fits: a **per-thread build region** — a raw claimed region, bump-filled in final block layout,
-  never published, thrown away at the unit's end — and a **copier** that places what survives into allocator
-  blocks, class by class, with the run claim the allocator lacks today. That is scratch by conditions (a), (c) and
-  (d) of the 2026-10-29 ruling; condition (b), "holds no value", it fails as worded, as the kernel's own binding
-  stack and boxing memos already do. That wording is the operator's to settle — fork F4.
+- **The general question is already ruled on.** 2026-10-18, on the nursery ("a thread-local pool of short-lived
+  eve values, promoted only when published"): "Let's fix the transients and go with that for local state."
+  (atom.broker `docs/port-gap-closure/lanes/L22-eve-kernel.md:612-631`); its reason is on record — such a pool is
+  "sound only if its regions die by scope and every publish point promotes" (`docs/eve-migration/ARCHITECTURE.md`
+  §5.1). And rule 12's scratch conditions of 2026-10-29. So this lane proposes no thread-local space of values.
+- **What is left, in the order the code supports** (`census/VS-KERNEL-2.md`, the O10 table — six options priced):
+  1. The incumbent: transients, the linear conj, the per-form scope — blocks born at their final addresses.
+  2. **A run entry in the allocator**: n consecutive blocks of one class on an owned page in one call. A decoder or
+     a builder then lays blocks by pointer bump *inside allocator memory*; every guard, count, free and seal is
+     unchanged; no standing rule is touched. This is what static Eve needs from the kernel, and it is the same
+     operation the plan's Phase 1 adds to canonical Eve.
+  3. A relocating block copier — the piece "a crossing copies" lacks. It may read from a thread's scratch only
+     while that scratch is a call temporary: nothing in it published, dropped when the call returns.
+  Neither 2 nor 3 is built or measured in the kernel. The two numbers to take first: the cost of one `alloc_block`
+  call, and a block copy against a rebuild.
 
 **What the Eve-side format must guarantee for ValueScript to use it:**
 

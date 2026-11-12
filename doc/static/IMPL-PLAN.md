@@ -5,6 +5,21 @@ before it, passing after. The evidence is `ASSUMPTIONS.md` (A*n*, C*n*), `MEASUR
 `BLIND-SPOTS.md` (Q*n*) and `FORMAT-V1.md` (§). Sizes of work are not estimated here: no phase has been built, so
 there is no measurement to cite for one.
 
+## 0. Read first — two stop conditions fired
+
+The research plan's stop conditions were A4, A8 and A9 (`ASSUMPTIONS.md`, last section). A4 holds. **A8 is dead as
+worded** — no chunk lives in a page beside persistent blocks without a copy, on either tree — and **A9 is dead as a
+present capability** — neither allocator takes placement. This plan stands on what survived, and each survivor is a
+replacement to accept or refuse, not a validated assumption:
+
+| Survivor | What it replaces | Phases that need it | Phases that do not |
+|---|---|---|---|
+| A **run entry** in the allocator (n blocks of one class claimed in one call) plus a relocating block copy | "the allocator consumes pre-mapped spacing" (A9) | 1; 5 on the kernel | 0 (which places per block), 2, 3 |
+| A chunk as **one opaque leaf block** in an atom, entered by one `memcpy` | "a static chunk lives in an Eve page alongside persistent data" (A8) | 4 | 0–3 (statics outside domains) |
+
+Phases 0, 2 and 3 — a value leaving a domain and coming back, and the packed wire, storage and columnar form
+outside domains — depend on neither.
+
 ## 1. The shape, in one paragraph
 
 A static value is immutable Eve bytes outside every domain, in one of two forms (`FORMAT-V1.md` §1). The **image**
@@ -40,7 +55,7 @@ Built, in a new namespace `eve.static` (name: fork F1):
 - **A static slab I/O** over one byte array: reads only; `alloc!`, `free!`, `write-*`, `cas!` throw. A builder
   variant bumps a tail and ignores frees. Recognised by the hot read path (`alloc/node-heap-array`,
   `src/eve/deftype_proto/alloc.cljc:1127-1168`) so a static reads at slab speed rather than through protocol
-  dispatch (M5: 16–60 ms against 18–54 ms per 100,000 reads, both 7–27× a host collection).
+  dispatch (M5: 16–60 ms against 18–54 ms per 100,000 reads, both 7–31× a host collection).
 - **`detach`** — the relocating copy, generic over the block kinds `eve.retire` reads
   (`src/eve/retire.cljc:145-179`), with each block's size taken from the block. It needs one addition to what a
   type registers: an eve-deftype's total size beside its pointer offsets
@@ -70,18 +85,22 @@ Built:
 
 - **A run claim** as a slab-I/O operation (`alloc-run! sio class n` → first block), default implementation a loop
   of `alloc!` so every host is correct at once; the heap and mmap slabs claim whole bitmap words by CAS (measured:
-  5–12× per-block, M5). It must hold under another process allocating in the same class (word CAS, no lock) and
+  3–9× per-block net of the domain, M5). It must hold under another process allocating in the same class (word CAS, no lock) and
   under growth.
 - **`place` by runs**, with the conditions `ASSUMPTIONS.md` A15 lists: bits set before the hold, clean rows, final
   offsets, **validation before the claim** (a throw inside a swap frees nothing today), touches for the force.
 - **The count written, not walked.** The image's relocation table is every block's holders; placement writes each
   new block's count and flags as it writes the block, and the commit's hold of the root does not descend into
-  blocks it is told are freshly and fully counted. This is the measured bottleneck (M6: ≈ 97 % of a placed swap)
+  blocks it is told are freshly and fully counted. This is the measured bottleneck (M6: ≈ 1 µs a block, 50–97 % of
+  a placed swap)
   and the one change here that touches `eve.tally`; it is specified against the tally's own words for "counted"
   (`src/eve/tally.cljc:10-17,314-358`) and proven by the exactness probe, not argued.
 - **Building off-allocator.** `swap!`'s store of a plain value builds in a thread-private buffer, compacts, and
-  places (M6: 0.37–0.56× today's time with the writers untouched). The buffer is scratch: never published, thrown
-  away.
+  places (M6: 0.37–0.56× today's time with the writers untouched). The buffer is a call temporary under the
+  2026-10-29 ruling's four conditions: it lives inside one store call, no reader, slot or count names it, each use
+  overwrites it, and it is dropped when the call returns; on a GC host it is a host byte array, never slab memory.
+  Nothing built this way outlives the call in that form — a thread-local space of values that live *across* calls
+  is the nursery the operator set aside on 2026-10-18, and is not proposed (§6).
 - **A crossing copies.** A slab value of another domain stored into an atom is detached and placed, root or
   nested — the model's rule, which Eve refuses today and `:foreign-policy :copy` approximates by materializing
   (`doc/memory-model.md` D5; `src/eve/atom.cljc:852-876`).
@@ -93,7 +112,7 @@ Acceptance:
 | 1.1 | Run claim under contention: N threads and two processes allocating runs and single blocks in one disk domain; no block handed out twice; free counts exact | JVM, then bb |
 | 1.2 | Exactness (0.6) with run claims and written counts, on heap and disk domains, including a lost CAS and a throw in the swap's function after placement | JVM |
 | 1.3 | A journal domain: place, kill the process before the next commit, reopen, the value reads and the allocated set is exact | JVM (`test/eve/journal_recovery_test.clj`'s shape) |
-| 1.4 | A placed `swap!` within 2× of placement alone on the four corpora (today 4–30×) | JVM |
+| 1.4 | A placed `swap!` within 2× of placement alone on the four corpora (today 2–31×: M6 net of the domain over M5 net of the domain) | JVM |
 | 1.5 | The plain `swap!` on the four corpora no slower than today on any, and the off-allocator arm at or under 0.6× | JVM |
 | 1.6 | `(swap! a assoc :k v)` with `v` from another domain stores and reads back, root and nested; two-ref STM transaction storing a foreign value commits both or neither (it commits one today: A16) | JVM |
 
@@ -143,7 +162,7 @@ Acceptance:
 | # | Probe | Host |
 |---|---|---|
 | 3.1 | A vector of instances of a user type → batch → instances: equal by fields; the sister satisfies the type's own protocols | JVM, Node |
-| 3.2 | Column scan and filter over a 64 KiB-chunked batch at or under 2 ns and 4 ns a row; one cell at or under 2× the host map's; a row view built in under 1 µs (research: 1.4, 2.7, 88 ns against 59, 0.68 µs — M4) | JVM |
+| 3.2 | Column scan and filter over a 64 KiB-chunked batch at or under 2 ns and 4 ns a row; one cell at or under 2× the host map's; a row view built in under 1 µs (research: 1.4, 3.0, 106 ns against 59, 0.64 µs — M4) | JVM |
 | 3.3 | `test/eve/columnar_bench.cljc`'s five pipelines over a static batch against today's Dataset, same session | JVM, Node |
 | 3.4 | A map of vectors and a vector of maps of the same data pack to the same bytes | JVM |
 | 3.5 | A typed column handed to a `double[]` / `Float64Array` shares memory (a write through the host array is forbidden; identity of the backing store is the check) | JVM, Node |
@@ -162,8 +181,10 @@ datoms at or under 25 B each in segments against 296 B today (M2, M1); a range s
 Not this lane's to build; stated so the format does not close doors. A chunk with a digest is one blob on the live
 blob wire, put and fetched by presigned URL (`doc/network-atoms/WIRE.md` §7); the gateway moves slab ↔ wire without
 materializing (it materializes both ways today, `src/eve/net/gateway.cljc:164,203`); the kernel gets a type CID for
-a chunk, a reader in `.vs`, an 8-aligned large-block allocation, and — if F4 is ruled in — a build region and the
-block copier it lacks (`BLIND-SPOTS.md`, the aside).
+a chunk, a reader in `.vs`, an 8-aligned large-block allocation, a run entry in its allocator — the one fast feed
+that touches no standing rule — and the block copier "a crossing copies" lacks (`BLIND-SPOTS.md`, the aside;
+`census/VS-KERNEL-2.md` O10 options 2 and 3). Canonical Eve on ValueScript today runs its own slab inside foreign
+runs of the kernel's memory, not kernel blocks (`census/VS-KERNEL-2.md` §4), so the two sides meet only as bytes.
 
 ## 4. Host order
 
@@ -179,10 +200,13 @@ not expand `eve-deftype` at this pin and is Phase 5.
 | R1 | Writing counts at placement is a change inside the tally, where the standing rule is "the walk, exactly" | It adds no mechanism beside the count — it writes the same words the walk would. Probe 1.2 is exactness against the allocation log, on won, lost and thrown swaps. If it cannot be made exact it is dropped and placement stays at M6's 3–45× |
 | R2 | Two forms are two reader surfaces | The image's reader is Eve's existing types; only the packed form is new code. If Phase 2's readers reach slab read speed, the image stays an internal transport and is not a public form |
 | R3 | ClojureScript cannot read an image as its types stand | Phase 3's hook; until then ClojureScript has `pack` and the packed readers only. A14 is open until probe 2.2 |
-| R4 | Reading Eve's block layouts in place is 7–27× a host collection (M5) | Not made worse by this plan; the packed readers are the fast path (one cell 49–152 ns against 59) |
+| R4 | Reading Eve's block layouts in place is 7–31× a host collection (M5) | Not made worse by this plan; the packed readers are the fast path (one cell 68–156 ns against 59) |
 | R5 | A static wire is a generation ValueScript's client cannot read (A17) | Phase 5; until then statics travel between Eve hosts and to stores, and the live network atom is untouched |
 | R6 | Equality at the float edges differs from Clojure's (A10) | Inherited from the digest, pinned by a fixture row rather than left implicit |
 | R7 | Everything was measured on one JVM | Each phase's probes run on a second host before it is called done |
+| R9 | Shared map shapes have no shipped precedent: FlexBuffers' key-vector sharing is unimplemented in its C++ and Rust writers (`research/FORMATS-2.md` B4) | The evidence is this lane's own measurement (M2: shapes take a further 22–33 %); probe 2.4 re-measures it in product code |
+| R10 | Append-only forms accumulate garbage: LMDB's author measured 1,027 pages for 10 live and abandoned the design; CouchDB compacts by copy at about twice the storage (`research/FORMATS-2.md` B6); here a 10,000-entry build is 6.2 % live (M7) | The rule in §3: a build is compacted before it is kept, and nothing long-lived is an append log. Appending is for builders and for short chains of versions |
+| R11 | The review of these documents was cut short: of six adversarial reviewers, two ran for about six minutes before the lane was told to stop spending (2026-11-11 11:33 PM ET). They found five errors, all fixed (`review/`). The kernel-and-rulings, format-soundness, completeness and plan lenses did not run | The untested claims are the ones those lenses would have checked: `FORMAT-V1.md` §4 and §10 as an implementer and an attacker would read them; every kernel citation; the probes' thresholds. Treat them as drafted, not reviewed |
 | R8 | Findings outside this lane that it will trip over: a root scalar past 1,016 bytes reads `nil`; a two-ref STM transaction can half-commit; `eve.sorted`'s `-plain` and the list's seq allocate on read; an adopted kernel page can be evicted under an atom | Recorded with provenance in `CENSUS.md` §"Defects found on the way"; each is re-derived at its own pin before anyone fixes it |
 
 ## 6. Decided here — not forks
@@ -197,7 +221,8 @@ not expand `eve-deftype` at this pin and is Phase 5.
 | Compression in v1? | None; later, per run of chunks | M3 |
 | Reuse the scalar tags? | Verbatim, plus bytes and nil | A1, A17 |
 | Does the wire header carry the registry id? | The type key string and a layout fingerprint | A11, C3 |
-| Which SOTA design to follow? | Three, each for one mechanism: an in-chunk key table with binary-searchable objects (Parquet's VARIANT; FlexBuffers), column batches with dictionaries (Arrow IPC), a per-segment spec the consumer places by (Vortex's footer). Not Transit's cache, which cannot be entered mid-stream | C10; `research/FORMATS.md` |
+| Which SOTA design to follow? | Three, each for one mechanism: an in-chunk key table with binary-searchable objects (Parquet's VARIANT; FlexBuffers), column batches with dictionaries (Arrow IPC), a per-segment spec the consumer places by (Vortex's footer). Not Transit's cache, which cannot be entered mid-stream. The second research pass reaches the same composition on its own: VARIANT-style values with FlexBuffers' root-at-end and shape vectors, in a PAX / Vortex-style chunk, framed by an Arrow / Ion-style explicit table — "no single format is the answer" | C10; `research/FORMATS.md`; `research/FORMATS-2.md` C2 |
+| The ValueScript aside: a thread-local region for values built off the allocator? | No. What the kernel needs is a run entry in its allocator and a block copier; a build buffer is a call temporary and nothing more | Two standing rulings. 2026-10-18, on the nursery ("a thread-local pool of short-lived eve values, promoted only when published"): "Let's fix the transients and go with that for local state." (atom.broker `docs/port-gap-closure/lanes/L22-eve-kernel.md:612-631`). 2026-10-29, rule 12's scratch conditions (a)–(d). `census/VS-KERNEL-2.md` O10 prices six options; only the run entry touches no rule. The request that opened this lane asks for "off-allocator, ephemeral constructions of objects that are thread local and safe"; a call temporary plus a run entry is the reading of it that those rulings allow, and this plan assumes no other |
 
 ## 7. Forks for the operator
 
@@ -207,6 +232,6 @@ Genuine preferences; each with a recommendation.
 |---|---|---|---|
 | F1 | **The name** | `eve.static` with `detach` / `pack` / `place` / `open`; or `eve->static` as one verb with a `:form` option; or other words for the two forms | The namespace and four verbs: the two forms do different jobs and one verb would hide which one a caller is paying for |
 | F2 | **Equality of a user type that defines none** | (a) in a static, by type key and fields — so a static copy is `=` its twin, and a slab instance stays identity-compared as today; (b) change the slab default to by-fields as well, a behaviour change for existing types; (c) keep identity everywhere, so no static of such a type is ever `=` anything but itself | (a) now; (b) is the consistent end state and is its own decision |
-| F3 | **A chunk as a leaf block inside an atom** (Phase 4) | (a) yes — a typed, counted, digested leaf Eve reads in place, like an eve array block; (b) no — a packed value stored into an atom is always exploded into ordinary collection blocks, and chunks live only outside domains | (a). It is the "static types living in pages with persistent types" of the original ask, and it is what makes storing bulk data a copy instead of a build. It is flagged because rule 26 ("no out-of-band stand-ins") is the operator's to read |
-| F4 | **The ValueScript aside** | (a) amend the per-thread scratch ruling's condition (b) so a thread's build region may hold values under construction, never published, copied out by placement; (b) leave it, and keep VS temporaries as allocator blocks | (a), scoped to exactly that. The kernel's binding stack and boxing memos already hold values under that ruling (`census/VS-KERNEL-2.md` §3.6); the copy-out is the copier "a crossing copies" has always needed |
+| F3 | **A chunk as a leaf block inside an atom** (Phase 4) | (a) yes — a typed, counted, digested leaf Eve reads in place, like an eve array block; (b) no — a packed value stored into an atom is always exploded into ordinary collection blocks, and chunks live only outside domains | (a). It is all that survives of "static types living in pages with persistent types" (A8 is dead as worded), and it is what makes storing bulk data a copy instead of a build. It is flagged because rule 26 ("no out-of-band stand-ins") is the operator's to read |
+| F4 | *Withdrawn.* It asked whether to amend the scratch ruling for a per-thread build region. Standing rulings already answer it (§6, last row) | — | — |
 | F5 | **How far Phase 1 may go inside the tally** | (a) counts written at placement (R1); (b) placement only, the hold left as it is | (a), behind probe 1.2 |

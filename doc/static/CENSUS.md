@@ -56,6 +56,12 @@ Every row in those files is tagged *read*, *ran* or *doc*, with the path and lin
 | What `eve.net` in canonical Eve speaks | — | the kernel's formats, re-implemented portably over vectors of bytes (`eve.net.codec`, `eve.net.pages`) |
 | The `eve/` subtree in atom.broker | — | removed at `163cb656c`; Eve is a dependency pin |
 
+One more difference, read in two census files and **not reconciled by execution**: the kernel's comment derives a
+type's 32-bit word "through Clojure's `hash` of a string" (`program_runtime.vs:85453-85458`,
+`census/VS-KERNEL-2.md` §5), while canonical Eve at the pin derives it from XXH3-128 of the name's key bytes
+(`src/eve/deftype/registry.cljc:47-67`, a declared break of 2026-10-25). If both are as read, the two sides do not
+agree on a type's word.
+
 ## Defects found on the way
 
 Not this lane's to fix. Each is a measurement at the pin with its provenance; each is re-derived at its own pin

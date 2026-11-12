@@ -7,7 +7,7 @@ Every figure here was produced in this lane, on this box, by a probe whose sourc
 `git diff 4a92129 HEAD -- . ':!doc/static'` is empty. Tools on the PATH: OpenJDK 21.0.12, Clojure 1.12.0 (jar from
 Maven Central; no `clojure` CLI, no `bb` on the box), transit-clj 1.0.333 / transit-java 1.0.371. Box: 4 cores, 15 GB,
 Linux; load1 0.8–0.9 when the timed probes started (census agents were reading files in the background — they wait on
-the network, they do not compute). Dates: 2026-11-11 3:58 PM – 2026-11-12 12:30 AM ET. Timings are the minimum of 5–9
+the network, they do not compute). Dates: 2026-11-11, 3:58 PM – 11:40 PM ET (the earlier "– 2026-11-12 12:30 AM" was written without reading the clock). Timings are the minimum of 5–9
 runs after 2–5 warm-up runs unless a row says otherwise. Nothing here ran on ClojureScript, babashka or any host but
 the JVM: there is no such host on this box.
 
@@ -53,13 +53,18 @@ zlib level 6.
 | 50k records, as rows | 5,512,613 | 5,037,512 | **3,278,635** (726,632) | 9,404,124 | 6,354,153 | 4,389,597 | 2,989,608 | 2,789,664 | **1,795,907** (556,463) |
 | 30k datoms (5k people) | 1,459,941 | 1,750,033 | **1,003,917** (133,385) | 2,927,681 | 1,817,710 | 1,434,155 | 954,163 | 864,196 | **564,188** (100,306) |
 | the repo's own EDN files (6) | 57,298 | 57,554 | **46,839** (15,686) | 84,478 | 64,338 | 48,404 | 42,139 | 40,484 | **38,688** (17,460) |
+| 50k records, column-major (a map of 7 vectors) | 3,062,674 | 2,937,566 | **2,178,675** (577,008) | 4,704,284 | 4,004,280 | 3,389,697 | 3,389,664 | 3,389,664 | 2,395,927 (697,015) |
 | map 10k int → int | 107,780 | 137,786 | **59,235** (23,972) | 220,007 | 180,035 | — | — | — | 180,035 (71,403) |
 | vector 100k ints | 588,891 | 588,891 | **368,549** (211,988) | 1,100,007 | 900,036 | — | — | — | 400,040 (138,413) |
 
 Ratios to Transit MessagePack: the flat codec 1.8–3.7×; packed with everything on **0.55–0.86×** on the four
 Eve-shaped corpora; **3.04×** on the int → int map and 1.09× on the int vector (the two shapes the prototype has no
 compact form for: a map whose keys are not symbols keeps a tag and a 4-byte payload per integer plus two 16-bit
-offsets; dense i32 loses to MessagePack's 1–3-byte small integers).
+offsets; dense i32 loses to MessagePack's 1–3-byte small integers). And **1.10×** on the same 50,000 records handed
+over column-major as plain data: the prototype's typed vectors cover numbers only, so its string and keyword
+vectors stay generic — the row form, whose batches dictionary-code them, is the smaller of the two (1,795,907 B
+against 2,395,927). That row was missing here until the probe was re-run at 11:40 PM ET after an alignment fix in
+the prototype; every other line of the output is byte-identical to the first run.
 
 What each mechanism took off, on the three row corpora (messages / records / datoms): the symbol table −24 / −31 /
 −21 %; shapes a further −22 / −32 / −33 %; batches −6 / −7 / −9 %; typed vectors −9 / −36 / −35 %.
@@ -109,25 +114,32 @@ Probe: `p4_access.clj`, output `p4_access.out.txt`. 50,000 records (7 columns); 
 
 | | open µs/chunk | decode ms/chunk | decode µs/row | scan sum ns/row (tables open / opened per chunk) | filter count ns/row | row → plain map µs (open / cold) | one cell ns |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| host vector of maps | — | — | — | 22.90 | 16.21 | 0.052 | 59.4 |
-| Transit MessagePack, whole value | — | 214.5 | 4.03 | — | — | — | — |
-| Eve flat codec, whole value | — | 104.8 | 2.20 | — | — | — | — |
-| packed 4 KiB | 9.0 | 0.054 | 0.85 | 18.29 / 90.67 | 24.01 | 0.985 / 6.27 | 151.5 |
-| packed 16 KiB | 7.3 | 0.258 | 0.80 | 1.95 / 26.74 | 3.67 | 0.698 / 9.76 | 119.2 |
-| packed 32 KiB | 7.3 | 0.677 | 0.80 | 1.54 / 11.07 | 2.95 | 0.638 / 8.85 | 101.4 |
-| **packed 64 KiB** | 7.0 | **1.389** | 0.81 | **1.38** / 6.02 | **2.67** | 0.680 / 9.49 | **88.1** |
-| packed 256 KiB | 7.3 | 5.101 | 0.82 | 1.34 / 2.60 | 2.46 | 0.618 / 9.84 | 75.8 |
-| packed 1 MiB | 7.2 | 20.475 | 0.82 | 1.25 / 1.58 | 2.38 | 0.594 / 9.23 | 60.2 |
-| packed, one chunk | 7.7 | 41.190 | 0.82 | 1.29 / 1.45 | 2.44 | 0.575 / 8.71 | 49.3 |
+| host vector of maps | — | — | — | 23.34 | 17.86 | 0.054 | 59.4 |
+| Transit MessagePack, whole value | — | 226.3 | 4.18 | — | — | — | — |
+| Eve flat codec, whole value | — | 109.7 | 2.18 | — | — | — | — |
+| packed 4 KiB | 5.7 | 0.053 | 0.82 | 20.30 / 92.41 | 23.75 | 0.844 / 6.39 | 155.8 |
+| packed 8 KiB | 12.9 | 0.120 | 0.78 | 3.08 / 50.06 | 4.79 | 0.782 / 8.34 | 144.4 |
+| packed 16 KiB | 6.6 | 0.251 | 0.78 | 2.15 / 26.50 | 4.05 | 0.736 / 8.54 | 132.5 |
+| packed 32 KiB | 6.8 | 0.620 | 0.73 | 1.55 / 10.77 | 3.23 | 0.696 / 9.04 | 122.0 |
+| **packed 64 KiB** | 6.5 | **1.331** | 0.77 | **1.44** / 5.84 | **2.96** | 0.636 / 8.55 | **106.4** |
+| packed 256 KiB | 6.6 | 4.926 | 0.79 | 1.35 / 2.55 | 2.67 | 0.631 / 9.59 | 92.6 |
+| packed 1 MiB | 7.3 | 19.704 | 0.79 | 1.34 / 1.67 | 2.72 | 0.601 / 9.10 | 74.9 |
+| packed, one chunk | 7.5 | 42.040 | 0.84 | 1.29 / 1.45 | 2.62 | 0.595 / 8.39 | 68.2 |
 
-- A column scan over packed bytes is **~17× faster than the host's vector of maps** (1.3–1.4 ns/row against 22.9);
-  a keyword-equality count ~6× (2.4–2.7 against 16.2).
-- Whole-chunk decode to plain rows: 0.8 µs/row — 5× Transit MessagePack's 4.03 and 2.7× the flat codec's 2.20.
-- Assembling one row into a fresh plain map costs 0.6–1.0 µs with the chunk's tables open — 11–19× a host `nth`,
-  because it builds a map. Reading one cell is 49–152 ns against the host's 59.
-- What chunk size changes: the decode unit (1.4 ms at 64 KiB, 20 ms at 1 MiB) and the fixed cost of opening a chunk
-  (≈ 7 µs in the prototype, which decodes every symbol eagerly) — 4 ns/row of a cold scan at 64 KiB, 0.3 at 1 MiB.
-  Warm scans and point reads are flat from 32 KiB up.
+*Corrected 2026-11-11 11:40 PM ET (review finding R1-1): an earlier revision of this table carried the figures of
+an earlier, uncommitted run of the same probe. Every cell above is now the committed `p4_access.out.txt`; the
+readings below are recomputed from it.*
+
+- A column scan over packed bytes is **16–18× faster than the host's vector of maps** from 64 KiB up (1.29–1.44
+  ns/row against 23.34); a keyword-equality count 6–7× (2.6–3.0 against 17.86).
+- Whole-chunk decode to plain rows: 0.73–0.84 µs/row — 5–6× Transit MessagePack's 4.18 and 2.6–3.0× the flat
+  codec's 2.18.
+- Assembling one row into a fresh plain map costs 0.60–0.84 µs with the chunk's tables open — 11–16× a host `nth`
+  (0.054), because it builds a map. Reading one cell is 68–156 ns against the host's 59.
+- What chunk size changes: the decode unit (1.3 ms at 64 KiB, 19.7 ms at 1 MiB); the fixed cost of opening a chunk
+  (≈ 6–7 µs in the prototype, which decodes every symbol eagerly) — 4.4 ns/row of a cold scan at 64 KiB, 0.3 at
+  1 MiB; and a one-cell read, which falls from 122 ns at 32 KiB to 68 ns in one chunk. Warm scans and row assembly
+  are flat from 32 KiB up.
 
 10,000 chat messages (nested maps, sets, small vectors of maps): decode 2.5 µs/row (Transit MessagePack 7.1, flat
 codec 5.85); a row assembled in 2.4–2.8 µs at every chunk size; one cell 68–197 ns.
@@ -148,7 +160,8 @@ shown alone in its own column.
 
 From P3 (same session as each other, an earlier run): placing the same image by **per-block** allocation cost 2.22 /
 27.69 / 9.72 / 8.21 / 23.16 ms against 1.25 / 4.92 / 2.49 / 2.38 / 5.29 ms by run claims (both including the
-domain) — the run claim is 5–12× the per-block path net of the domain. Pre-sizing the domain does not help the direct
+domain) — the run claim is 3–9× the per-block path net of the domain (3.2 / 9.1 / 8.7 / 7.7 / 9.3; 1.8–5.6× including
+it; corrected from "5–12×", review finding R1-2). Pre-sizing the domain does not help the direct
 writer (130.19 → 128.14 ms on the first row): its cost is not growth.
 
 Readings:
@@ -161,7 +174,7 @@ Readings:
    then compacted and placed, finish in 0.25–0.64× the time — with no change to any writer.
 
 Point reads, 100,000 random (P3): host collection 2.0–2.7 ms; slab value 18–54 ms; image through the slab-I/O
-protocol 16–60 ms. Reading Eve's block layouts in place costs 7–27× a host collection, in a slab or out of it.
+protocol 16–60 ms. Reading Eve's block layouts in place costs 7–31× a host collection, in a slab or out of it.
 
 ## M6 — one `swap!`, end to end (P6)
 
@@ -224,4 +237,4 @@ and are superseded by these):
 
 (The loop and the index load alone: 0.35 ns.) Narrowing keeps a read at a load and an add and halves or quarters the
 column; run-end shrinks it 3–300× and turns one read into a binary search over the runs (6–13 steps here, 42–102 ns).
-Dictionary codes are in M4: a keyword column counted at 2.4–2.7 ns a row, one cell read at 49–152 ns.
+Dictionary codes are in M4: a keyword column counted at 2.6–3.0 ns a row from 64 KiB up, one cell read at 68–156 ns.

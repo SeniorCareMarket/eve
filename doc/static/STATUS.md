@@ -47,11 +47,22 @@ CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes).
   bank after each section instead of resuming large contexts.
 - 10:49 PM — resumed. Census files read; four gap-fill agents run as one workflow (deref/STM/threads; digests,
   defenses, fixtures; the kernel's remainder; format mechanism cards).
-- 11:00 PM – 12:35 AM (Nov 12) — P2 (sizes, chunk sweep), P5 (type generality, 19/20), P4 (access by chunk size), P3c
-  (the copier written tight), P6 (one `swap!` end to end; sharing; retention), P6b (column encodings).
-- 12:35–1:30 AM — D1–D5 drafted: `ASSUMPTIONS.md`, `CENSUS.md`, `BLIND-SPOTS.md`, `FORMAT-V1.md`, `IMPL-PLAN.md`,
-  with `MEASUREMENTS.md` and `README.md`. No stop condition fired (A4, A8, A9 each hold, with the corrections D1
-  records).
+- 10:50–11:14 PM — P2 (sizes, chunk sweep), P5 (type generality, 19/20), P4 (access by chunk size), P3c (the
+  copier written tight), P6 (one `swap!` end to end; sharing; retention), P6b (column encodings). (An earlier
+  revision of this file gave these two entries as "11:00 PM – 12:35 AM" and "12:35–1:30 AM": written without
+  reading the clock. The times here are the output files' and the commits'.)
+- 11:14–11:24 PM — D1–D5 committed: `ASSUMPTIONS.md`, `CENSUS.md`, `BLIND-SPOTS.md`, `FORMAT-V1.md`,
+  `IMPL-PLAN.md`, with `MEASUREMENTS.md` and `README.md`. First verdict on the stop conditions: "none died".
+- 11:25 PM — a six-reviewer adversarial pass launched over the deliverables.
+- 11:30 PM — the gap-fill census finished (`census/VS-KERNEL-2.md`, `research/FORMATS-2.md`), committed `b302609`.
+  It reads A8 and A9 as killed as worded, and records the 2026-10-18 determination against a nursery.
+- 11:33 PM — the operator reported the weekly quota nearly spent; the review was stopped with two reviewers about
+  six minutes in. Their five findings were checked against the raw outputs and the source, and fixed: the M4 table
+  had been transcribed from an uncommitted run; "5–12×" for the run claim is 3–9×; three citations were imprecise.
+- 11:33 PM – 11:40 PM ET — corrections: A8 dead as worded, A9 dead as a present capability, and the plan's §0 says
+  which phases stand on the replacements; fork F4 withdrawn (standing rulings answer it); point-read range 7–31×;
+  the tally's share of a placed swap 50–97 %; P2 re-run (the column-major row now round-trips: 1.10× MessagePack);
+  three risks added (R9–R11).
 
 ## Open questions (for the next reader of this file, not for the operator)
 
@@ -59,3 +70,6 @@ CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes).
 - The count written at placement (plan Phase 1) is unmeasured; M6 is the decomposition that motivates it.
 - `pack` from a slab value has no speed figure: only the image's walk was built.
 - Nothing ran on a disk domain, on a second host, or in the kernel.
+- The four review lenses that did not run: kernel and rulings; format soundness; completeness against the research
+  plan; the plan itself. Their prompts are in the session's workflow script and can be re-run as they are.
+- The kernel's type word against canonical Eve's (`CENSUS.md`, "Where the trees differ", last paragraph).
