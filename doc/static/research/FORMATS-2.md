@@ -1,4 +1,4 @@
-STATUS: PARTIAL — cards B3–B10 banked (rkyv, FlexBuffers, Ion, append-only trees, Cap'n Proto, PAX + Data Blocks, row formats, CBOR). Remaining: B11 (Clojure incumbents), B12 (Zarr/HDF5), C1 additions, C2, C3.
+STATUS: COMPLETE — cards B3–B12 (all ten requested), C1 additions, C2, C3. Open items are listed in the last section.
 
 # Static Eve — format research, part 2 (FORMATS-2.md)
 
@@ -9,7 +9,7 @@ over the fetched file here; **doc read** = a spec/doc page read here; nothing is
 in a primary source this session is marked **UNVERIFIED-HERE** with the URL tried.
 
 Pins: branch heads as served on 2026-11-12 — `rkyv/rkyv` `main` (`Cargo.toml` `version = "0.8.18"`),
-`google/flatbuffers` `master`.
+`google/flatbuffers` `master`; every other card names its branch in its Sources line. No commit ids were recorded.
 
 ---
 
@@ -25,7 +25,7 @@ Sources (ran): book <https://rkyv.org/format.html>, <https://rkyv.org/validation
 - **Format knobs are compile-time features, not bytes**: endianness, `aligned`/`unaligned`, `pointer_width_16/32/64`; defaults "Little-endian · Aligned · 32-bit relative pointers". Nothing in the buffer says which were used (no header found in the pages read).
 - **Relative pointer**: "An untyped pointer which resolves relative to its position in memory" (offset from the pointer's own address); "Relative pointers don't require write access to memory either, so we can memory map entire files".
 - **Root at the end**: "rkyv lays out subobjects in depth-first order from the leaves to the root. This means that the root object is stored at the end of the buffer" → "you don't need to store the position of the root object"; root = buffer length − size of the root type.
-- **`ArchivedVec<T>`** = `#[repr(C)] { ptr: RelPtr<T>, len: ArchivedUsize }` (8 bytes at defaults) over a contiguous `[Archived<T>]`.
+- **`ArchivedVec<T>`** = `#[repr(C)] { ptr: RelPtr<T>, len: ArchivedUsize }` (8 bytes at the 32-bit defaults — inference) over a contiguous `[Archived<T>]`.
 - **`ArchivedHashMap`** = SwissTable: `ArchivedHashTable<T> { ptr: RawRelPtr, len, cap }`, one control byte per bucket (`h2 = (hash >> 57) as u8`, EMPTY `0xFF`); "The number of control bytes is rounded up to a maximum group width (16) instead of the next power of two … Since this collection is immutable after writing, we'll never benefit from having more buckets than we need." Hash is "a target-independent version of FxHash to ensure that all targets compute the same hashes".
 - **`ArchivedBTreeMap<K, V, const E = 5>`** = `{ root: RelPtr<Node>, len }`; `Node { kind, keys: [K; E], values: [V; E] }`, `InnerNode { node, lesser_nodes: [RelPtr; E], greater_node: RelPtr }`, `LeafNode { node, len }`; `DEFAULT_ENTRIES_PER_NODE: usize = 5` (branching 6).
 - **Validation (`bytecheck`, a default feature)**: "All pointers are checked to make sure that they: Point inside the archive · Are properly aligned · And have enough space afterward to hold the desired object", plus *subtree ranges* so "the archive follows its strict ownership model" (against "recursion attacks and memory sharing violations"); shared pointers "will fail to validate if they are different types". Cost model: one whole-archive pass before the first access (`access::<ArchivedExample, Failure>(buffer)`), "can generally be done without allocations"; the alternative is `unsafe access_unchecked` plus "checksums and cryptographic signatures".
@@ -105,7 +105,7 @@ Lang et al., "Data Blocks", SIGMOD 2016 <https://db.in.tum.de/downloads/publicat
 - **Row view = mini-join**: "To reconstruct a record one needs to perform a mini-join among minipages, which incurs minimal cost because it does not have to look beyond the page." Record *i* = position *i* in every minipage; the header's offsets are the whole plan.
 - **Data Blocks — what**: "Data Blocks are self-contained containers that store one or more attribute chunks in a byte-addressable compressed format." "Typically, we store up to 2^16 records in a Data Block" (C1).
 - **Byte-addressable, on purpose**: "While many OLAP systems employ bit-packing techniques to achieve higher compression ratios, we refrain from doing so." Reason: "In case early filtering produces a sparse set of qualifying tuple positions, the cost of bit-unpacking the scan columns dwarfs …". Schemes kept: "(i) single value compression, (ii) ordered dictionary compression, and (iii) truncation", chosen "for each column in each block".
-- **Point access without decompressing the block**: codes are 1/2/4/8-byte integers at a computable position, so tuple *i* of attribute *a* is one indexed load (plus a dictionary lookup) — "OLTP transactions can still quickly access individual tuples".
+- **Point access without decompressing the block**: "Our choice for byte-aligned storage mostly avoids this penalty"; a code sits at a computable byte position, so tuple *i* of attribute *a* is one indexed load (plus a dictionary lookup) — "OLTP transactions can still quickly access individual tuples". Price, per the paper: "byte-aligned compression on average increases space consumption" versus bit-packing (factor not legible in the extracted text).
 - **PSMA**: beyond min/max, "lightweight indexes called Positional SMAs (PSMAs) that narrow the scan ranges on a per-attribute basis"; "a concise lookup table that is computed when a cold chunk is "frozen" into a Data Block. Each table entry contains a scan range [b, e)", "represented as two unsigned 4-byte integers", indexed by the leading non-zero byte of (value − min).
 - **For static Eve**: the two papers that already define "columnar chunk with a cheap row view". PAX: per-chunk header of column offsets + presence bits → row = same index in each column. Data Blocks: stay byte-aligned (no bit-packing) so a row view is O(1) loads; freeze-time per-column encoding choice; a positional index per column. Both assume a fixed schema per page — the heterogeneous EDN part needs B2/B4 beside them.
 
@@ -125,7 +125,7 @@ Sources (ran): `sql/catalyst/src/main/java/org/apache/spark/sql/catalyst/express
 
 Sources (ran): RFC 8949 <https://www.rfc-editor.org/rfc/rfc8949.txt> · <https://datatracker.ietf.org/doc/draft-ietf-cbor-packed/> and <https://www.ietf.org/archive/id/draft-ietf-cbor-packed-19.txt> · <https://github.com/FasterXML/smile-format-specification/blob/master/smile-specification.md>.
 
-- **Tags** (major type 6): "A tagged data item ("tag") whose tag number, an integer in the range 0..2^(64)-1 inclusive, is the argument and whose enclosed data item (_tag content_) is the single encoded data item that follows the head." "IANA maintains a registry of tag numbers". A decoder that does not know a tag still gets (number, content) — Transit's `TaggedValue`, with integers for names.
+- **Tags** (major type 6): "A tagged data item ("tag") whose tag number, an integer in the range 0..2^(64)-1 inclusive, is the argument and whose enclosed data item (_tag content_) is the single encoded data item that follows the head." "IANA maintains a registry of tag numbers". A decoder that does not know a tag can still hand back (number, content) (inference from the head + single-content shape) — Transit's `TaggedValue`, with integers for names.
 - **Deterministic encoding, RFC 8949 §4.2.1** ("core deterministic encoding requirements"): "Preferred serialization MUST be used … arguments … MUST be as short as possible"; "Floating-point values also MUST use the shortest form that preserves the value"; "Indefinite-length items MUST NOT appear."; "The keys in every map MUST be sorted in the bytewise lexicographic order of their deterministic encodings." → one byte string per value, the precedent for canonical bytes (hash / compare without decoding).
 - **Packed CBOR status**: datatracker (read 2026-11-12) shows `draft-ietf-cbor-packed-19`, "Latest revision 2026-02-02", **"Expired Internet-Draft (cbor WG) · Expired & archived"**, intended status "Proposed Standard"; the draft's footer reads "Expires 6 August 2026". -19 calls itself "a work-in-progress release". Not an RFC.
 - **Packed CBOR mechanism**: two tables per active set — a shared item table and an argument table. *Item sharing*: "substructures (data items) that occur repeatedly … can be collapsed to a simple reference … The processing required during consumption is limited to following that reference". *Argument sharing*: "Data items (strings, containers) that share a prefix or suffix … can be replaced by a reference to the shared argument plus a rump data item."
@@ -133,4 +133,105 @@ Sources (ran): RFC 8949 <https://www.rfc-editor.org/rfc/rfc8949.txt> · <https:/
 - **Why it matters**: the stated aim is "a Packed CBOR data item that is almost as easy to consume as the original … A separate decompression step is therefore often not required" — an explicit, *transmitted* table (unlike Transit's implicit order-of-traversal cache), so references resolve without replaying the stream.
 - **Smile back-references**: shared key names and (optionally) shared string values, each a "tumbling-window" buffer of 1,024 entries addressed by a 10-bit reference; only strings of "64 bytes or less" are shareable; "If it already has 1024 values, it MUST clear out buffer and start from first entry." Implicit, order-dependent (like Transit's 1,936-entry cache, A9).
 - **For static Eve**: tags = integer tag ids resolved through the chunk's table; §4.2.1 = the rulebook for a canonical packed form; Packed CBOR's table-in-front + small-integer reference is the closest wire design to "chunk + its cache" for EDN-shaped data — but it is an expired draft, and CBOR itself has no offsets (sequential decode only).
+
+### B11. Clojure incumbents — nippy, tech.ml.dataset / dtype-next, DataScript + persistent-sorted-set
+
+Sources (ran): `taoensso/nippy` `master` (README: "Latest release: v3.9.0 (2026-09-06)"): `README.md`, `src/taoensso/nippy.clj`, `src/taoensso/nippy/impl.clj` · `techascent/tech.ml.dataset` `master`: `src/tech/v3/dataset/io/nippy.clj`, `src/tech/v3/libs/arrow.clj` · `cnuernber/dtype-next` `master`: `README.md`, `src/tech/v3/datatype/native_buffer.clj` · `tonsky/datascript` `master` `docs/storage.md` · `tonsky/persistent-sorted-set` `master`: `src-java/me/tonsky/persistent_sorted_set/{IStorage,Settings}.java`.
+
+- **nippy custom types** (`extend-freeze` docstring): id is "ℕ∈[1, 128] - 0 byte overhead. You are responsible for managing ids." or "(Namespaced) keyword - 2 byte overhead. Keyword will be hashed to 16 bit int, collisions will throw at compile-time." Wire: `[const byte id][cust hash id][payload]` or `[cust byte id][payload]`. Readers live in a process-global `*custom-readers*` map; the payload has no length prefix in this layout, so an unknown custom type cannot be skipped (inference from the write form).
+- **nippy cache**: `(cache x)` — "Wraps value so that future writes of the same wrapped value with same metadata will be efficiently encoded as references to this one … a single "foo", plus 2x single-byte references"; "Repeated keywords are cached automatically". Scope is a `with-cache` session: "ALL values frozen within a single `with-cache` body MUST be thawed together within a single corresponding `with-cache` body." Index space capped at `max-dict-count 32767`. New: `*shared-dict*` — "Experimental, subject to change … Optional shared dictionary to use when freezing/thawing", fingerprinted with FNV-1a because "these hashes go to the wire and so must be stable across JVM/Clojure/Nippy versions".
+- **nippy stability promise**: "data serialized today should be readable by all future versions of Nippy" (backward only: "`vX` **may/not** be able to read all data from Nippy `vY>X`"); new types ship over "two version releases" (read, then write). But: "It has **never been an objective** of Nippy to offer **predictable byte output**" — no canonical bytes.
+- **tech.ml.dataset**: nippy path = `(nippy/extend-freeze Dataset :tech.ml/dataset …)` over `dataset->data` (a decode-everything path). Arrow path: `:open-type` "Either `:mmap` or `:input-stream` defaulting to the slower but more robust `:input-stream` pathway"; "uncompressed mmap pathways typically have the highest performance - roughly 100x any other method" (the project's own figure); "Using compression makes loading via mmap non-lazy"; string dictionaries "have to be done greedily".
+- **dtype-next**: "native buffers: "off-heap" container storage"; "a language independent ABI which allows zerocopy to C-based systems". A native buffer is a `long` address + datatype + length; element *i* is `address + i * width` (`adj-address`).
+- **DataScript storage**: "DataScript consists of three B-trees … We store them per-node"; "`d/restore` does exactly zero reads! … restoring a database is lazy"; "one storage can only hold one database. This is because it uses constant addr to write its root." Garbage: old nodes "are still in storage" until the user runs the collector, which needs `-list-addresses` and a delete.
+- **persistent-sorted-set `IStorage<Key, Address>`**: `restore(Address)` and `store(ANode)` — "For node instanceof Leaf, store node.keys() · For node instanceof Branch, store node.level(), node.keys() and node.addresses() · Generate and return new address for node". Branching factor default 512 (`branchingFactor = 512`; docs: "each node will contain 256...512 keys"); node refs default `RefType.SOFT`.
+- **For static Eve**: the incumbents split the job in two — nippy = opaque sequential blob with a session cache (no in-place access, no canonical bytes); Arrow-mmap / native buffers = in-place but columnar-typed only. DataScript shows the Clojure-native shape of "persistent tree whose nodes are addressed blobs, loaded lazily" — and that its garbage is the user's problem.
+
+### B12. Two-level containers — Zarr v3 sharding codec, HDF5 chunk cache
+
+Sources (ran): `zarr-developers/zarr-specs` `main` `docs/v3/codecs/sharding-indexed/index.rst` = <https://zarr-specs.readthedocs.io/en/latest/v3/codecs/sharding-indexed/index.html> · `HDFGroup/hdf5` `develop` `src/H5Ppublic.h` (doc comments of `H5Pset_cache`, `H5Pset_chunk_cache`).
+
+- **Zarr shard** = one stored object holding many inner chunks + an index. "The index contains the `offset` and `nbytes` values for each inner chunk"; index shape = chunks-per-shard + a trailing dimension of 2; "Empty inner chunks are denoted by setting both offset and nbytes to `2^64 - 1`"; "The index always has the full shape of all possible inner chunks per shard".
+- **Index size is computable before reading it**: "`16 (2x uint64) * 4 (chunks per shard) + 4 (crc32c checksum) = 68 bytes`" → a reader asks the store for "the `n` first or last bytes" and then range-reads single chunks. `index_location` "must be either the string `start` or `end`. If the parameter is not present, the value defaults to `end`."
+- **Write strategies named by the spec**: fixed order (replace in place, "leaving unused space"), and "**Append-only**: Any chunk to write is appended to the existing shard, followed by an updated index. If previous inner chunks are updated, their storage space becomes unused, as well as the previous index."
+- **HDF5 chunk cache default — current tree**: `rdcc_nbytes` "The default size is 8 MiB per dataset."; `rdcc_nslots` "The default value is 8191." (hash slots, "should ideally be a prime number … at least 10 times the number of chunks that can fit in `rdcc_nbytes`"). The widely repeated 1 MiB / 521 slots was not found in `develop` (looked in `H5Ppublic.h`; the constants `H5D_CHUNK_CACHE_NSLOTS_DEFAULT` / `NBYTES_DEFAULT` are `SIZE_MAX` sentinels in `H5Dpublic.h`).
+- **For static Eve**: a fixed-shape (offset, length) table at a known end of the container, with a sentinel for "absent" and a checksum, is the standard second level; "append chunk, then append a new index" is a spec-blessed write path whose garbage is the superseded chunk plus the superseded index.
+
+---
+
+## Part C — synthesis (continued)
+
+### C1 additions. Chunk / unit-size precedents — transport, platform, containers
+
+Same marks as FORMATS.md C1 (**◆64K** = exactly 65,536 bytes · **◆1M** = exactly 1,048,576 · (≈) close). All rows **ran** (grep over the fetched primary text) unless marked.
+
+| System | Unit | Value | Mark | Primary source and quote |
+|---|---|---|---|---|
+| TLS 1.3 | record plaintext max | 2^14 = 16,384 bytes | | RFC 8446 §5.1: "The length MUST NOT exceed 2^14 bytes."; §5.2 ciphertext "MUST NOT exceed 2^14 + 256 bytes" |
+| HTTP/2 | default max frame payload | 2^14 = 16,384 (max 2^24 − 1) | | RFC 9113 §6.5.2: "The initial value is 2^14 (16,384) octets." |
+| WebSocket | frame / message | no protocol cap: length is "7 bits, 7+16 bits, or 7+64 bits" | | RFC 6455 §5.2. Limits are per implementation (next rows). |
+| WebRTC data channel | message | 16 KB without interleaving; SDP default 64K | (≈) | RFC 8831 §6.6: "the sender SHOULD limit the maximum message size to 16 KB to avoid monopolization"; RFC 8841: "If the SDP "max-message-size" attribute is not present, the default value is 64K." |
+| Cloudflare Durable Objects | WebSocket message | "32 MiB (only for received messages)" | | <https://developers.cloudflare.com/durable-objects/platform/limits/> (both backends) |
+| Cloudflare DO, SQLite-backed | key + value; row | "Key and value combined cannot exceed 8 MB"; "Maximum string, `BLOB` or table row size: 8 MB" | | same page |
+| Cloudflare DO, key-value backed | value / key | "128 KiB (131072 bytes)" / "2 KiB (2048 bytes)" | 2 × ◆64K | same page |
+| Cloudflare Workers KV | value / key / metadata | "25 MiB" / "512 bytes" / "1024 bytes" | | <https://developers.cloudflare.com/kv/platform/limits/> |
+| Cloudflare Workers | WebSocket message size | not found — looked in `workers/platform/limits` (only the DO page states one) | | <https://developers.cloudflare.com/workers/platform/limits/> |
+| Amazon S3 | multipart part size | "5 MiB to 5 GiB. There is no minimum size limit on the last part"; 10,000 parts; max object "48.8 TiB" | | <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html> |
+| Avro object container (Java) | sync interval | `DEFAULT_SYNC_INTERVAL = 4000 * SYNC_SIZE` with `SYNC_SIZE = 16` → 64,000 bytes | (≈) not 65,536 | `lang/java/avro/…/file/DataFileConstants.java` (`apache/avro` `main`) |
+| HDF5 | raw-data chunk cache | "The default size is 8 MiB per dataset."; slots "The default value is 8191." | | `src/H5Ppublic.h` (`develop`); B12 |
+| Zarr v3 sharding | shard index entry | 16 bytes per inner chunk (2 × uint64) + 4-byte crc32c | | B12 |
+| Smile | shared-string window | 1,024 entries, strings ≤ 64 bytes | | B10 |
+| nippy | cache index space | `max-dict-count 32767` | | B11 |
+| FlatBuffers / Cap'n Proto | verifier / reader limits | depth 64, 1,000,000 tables / 8 × 1024 × 1024 words (64 MiB), nesting 64 | | B4 / B7 |
+| CouchDB | file block / B-tree node chunk | 4,096 / 4,096 bytes | | B6 |
+| persistent-sorted-set | branching factor | 512 keys per node | | B11 |
+
+**CPU caches** — to test "a 64 KiB chunk plus its dictionary fits L2, not L1d".
+
+| Core | L1d | L2 (per core) | Source |
+|---|---|---|---|
+| AMD Zen 5 (EPYC 9005 "Turin") | "D-Cache: 48KB, 12-way" | "L2-Cache: 1MB, 16-way" | AMD, Hot Chips 2024 deck <https://www.hc2024.hotchips.org/assets/program/conference/day2/24_HC2024.AMD.Cohen.Subramony.final.pdf> (ran `pdftotext`). The amd.com product page failed here (HTTP/2 stream error; HTTP 503 via WebFetch). |
+| Intel Granite Rapids P-core (Xeon 6) | **UNVERIFIED-HERE** (48 KB appears only in secondary pages returned by search) | "2MB L2 Cache"; I-cache "64KB, 16-way" | Intel, Hot Chips 2023 deck <https://hc2023.hotchips.org/assets/program/conference/day1/Platforms/HC2023.Intel.Gianos.v7.pdf> (ran) |
+| Arm Neoverse V2 | **UNVERIFIED-HERE** (not on the page read) | "up to double the L2 cache size (2MB per core)" | <https://www.arm.com/products/silicon-ip-cpu/neoverse/neoverse-v2> (doc read) |
+| Apple M4-family P-core | **UNVERIFIED-HERE** — Apple publishes no figure; secondary only: a user-posted `sysctl` readout `hw.perflevel0.l1dcachesize: 131072`, `hw.perflevel0.l2cachesize: 16777216`, `cpusperl2: 5` | same readout | <https://forums.macrumors.com/threads/request-for-some-system-information-about-cpu-caches.2478481/> (search result, not a primary source) |
+
+Verdict on the claim: **holds for the chunk, fails for "plus its dictionary" unless the dictionary is capped far below 1 MiB.** A 65,536-byte chunk exceeds Zen 5's 48 KB L1d and fits a 1 MB or 2 MB L2. But a dictionary allowed to reach the Vortex / Parquet cap of 1 MiB (FORMATS.md C1) is by itself the whole Zen 5 L2. And if the Apple readout is right, a 64 KiB chunk fits *inside* a 128 KiB L1d there, so "not L1d" is not universal. The claim needs a stated dictionary budget (e.g. chunk + dictionary ≤ half of the smallest target L2) and a measurement per target.
+
+### C2. Ranking — inspiration for a format that is at once (i) a Transit-like wire form for EDN-shaped data with tags and a per-chunk cache, (ii) operable in place, (iii) columnar with cheap row views
+
+| # | Design | Why (one line) | What it lacks |
+|---|---|---|---|
+| 1 | **Parquet VARIANT + shredding** (the encoding, B2) | The only shipped design that does all three in one model: key dictionary + O(log n) field / O(1) index in place + typed columns shredded out of the same value. | String keys only; closed primitive set (no tags); dictionary scope = one value, not a chunk. |
+| 2 | **Vortex** (A1) | Best container and columnar half: layouts, run dictionaries cut at 1 MiB / 65,535 entries, cascaded encodings, zone maps, extension dtypes, frozen editions, segment (offset, length, alignment) table. | Not a wire form for heterogeneous values; its own answer for them is #1 (`encodings/parquet-variant`). |
+| 3 | **FlexBuffers** (B4) | Best in-place tree: root at end (append-friendly), width per container, keys-vector / values-vector split (a map's key vector is its shape — the hook for shredding), pooling. | No tags; `strcmp` string keys; key-vector sharing unimplemented; no columns. |
+| 4 | **Arrow IPC** (B1) | Best wire framing for "chunk + dictionary": explicit dictionary messages, delta = append, no replacement in the seekable file; extension types degrade to storage; C Data Interface hand-off. | Strictly typed; heterogeneous = unions (5 bytes/value) or the variant extension. |
+| 5 | **Ion** (B5) | Best cache semantics for the Transit role: in-band, appendable, resettable symbol tables; shared tables with reserved id ranges; annotations as tags; 1.1 macros = shredding at the encoding level. | No offsets (skip-scan only); 1.1 is a working draft. |
+
+Also-rans worth one idea each: rkyv (sister types), Cap'n Proto (lazy checks + budgets), Packed CBOR (transmitted table, small-integer references), PAX / Data Blocks (row view, byte-aligned codes).
+
+**Does "Vortex, and it isn't close" survive?** Only on axis (iii). Checked against each named rival:
+- vs **Arrow IPC dictionaries** — survives as a *storage* layout (cascaded encodings, zone maps, 1 MiB coalescing); does not survive as a *wire* form: Arrow has the stream framing, delta dictionaries and the zero-copy C hand-off, and Vortex's canonical arrays are Arrow-shaped anyway.
+- vs **Parquet VARIANT + shredding** — does not survive. Vortex has no native encoding for heterogeneous values; `develop` imports Arrow's `arrow.parquet.variant` and its shredding (B2). On axes (i)+(ii) for EDN-shaped data, VARIANT is the design and Vortex is its host.
+- vs **FlexBuffers** — does not survive on (ii) for nested values: FlexBuffers reads any node with zero decode; Vortex's read unit is a whole segment ("Vortex never reads less than one segment") and encoded arrays need a kernel or canonicalization.
+- vs **Ion** — does not survive on (i): Vortex has no in-band, appendable key/tag cache and no per-value user tags (extension dtypes are per column; the footer's id dictionary is per file).
+So the honest verdict is a composition, and it is close: **VARIANT-style values (with FlexBuffers' root-at-end and shape vectors) inside a Vortex/PAX-style chunk, framed with an Arrow/Ion-style explicit, append-only cache.** No single format is the answer.
+
+### C3. Mechanisms — best precedent for each
+
+| Mechanism | Best precedent | How it works (2 lines) | URL |
+|---|---|---|---|
+| Per-chunk cache / dictionary | Arrow IPC `DictionaryBatch` (+ Ion local symbol table append) | The dictionary is its own message, defined before first use; `isDelta` appends to it; the seekable file forbids replacement, so ids are stable. Ion adds: in-band `imports:$ion_symbol_table` append, reset marker, shared tables with reserved id ranges. | <https://arrow.apache.org/docs/format/Columnar.html> · <https://amazon-ion.github.io/ion-docs/docs/symbols.html> |
+| Generated sister types | rkyv `derive(Archive)` | Emits `ArchivedT`: `#[repr(C)]`, fields swapped for archived counterparts, fixed-endian primitives, self-relative pointers; built by serialize-children-then-resolve, root last. | <https://rkyv.org/format.html> |
+| Untrusted-bytes validation | Two schools: full pre-pass (rkyv `bytecheck`, FlatBuffers `Verifier`) vs lazy + budget (Cap'n Proto) | Pre-pass: bounds, alignment, ownership ranges, depth 64, ≤ 1,000,000 tables — cost O(buffer) before first read. Lazy: bounds-check each pointer at its getter, charge a traversal counter (64 MiB default), cap nesting at 64 — cost O(touched). | <https://rkyv.org/validation.html> · <https://capnproto.org/encoding.html#security-considerations> |
+| Versioning / evolution | Vortex editions (A1g–i), with Ion's per-segment version marker | Magic and version are frozen forever; a release names an *edition* = the frozen set of wire ids a reader must know; writers pick an older edition for old readers. Ion: a 4-byte marker may recur mid-stream and resets decoder state. | <https://docs.vortex.dev/specs/file-format.html> · <https://amazon-ion.github.io/ion-docs/docs/binary.html> |
+| Append-only mutation of packed data | CouchDB file (path copy + tail root) and Bw-tree (delta records) | CouchDB appends changed nodes then a header on a 4 KiB boundary; open = scan back for the newest checksummed header; garbage = copy-compact. Bw-tree prepends deltas, consolidates later, reclaims by epoch. LMDB is the measured warning (1027 pages for 10 live). | <https://github.com/apache/couchdb/blob/main/src/couch/src/couch_file.erl> · Bw-tree paper (B6) |
+| Row view over a columnar chunk | PAX minipages (+ Data Blocks byte-aligned codes) | Chunk header holds each column's offset and width; presence bits per column; row *i* = element *i* of every column ("mini-join … does not have to look beyond the page"). Byte-aligned codes keep each field one load. | <https://research.cs.wisc.edu/multifacet/papers/vldb01_pax.pdf> · <https://db.in.tum.de/downloads/publications/datablocks.pdf> |
+| Pre-mapped placement (consumer places without planning) | Vortex footer `SegmentSpec { offset: uint64; length: uint32; alignment_exponent: uint8 }` (A1f); Zarr shard index; safetensors header (A7) | Every unit's offset, length and required alignment are in one small table read first (Zarr: 16 bytes × chunks + 4, size known in advance), so the reader allocates and reads each unit straight to its final aligned place. (Vortex's ≥ 64 KB tail read is guaranteed to cover the postscript, which locates the footer.) | <https://github.com/vortex-data/vortex/blob/develop/vortex-file/flatbuffers/vortex-file/footer.fbs> · <https://zarr-specs.readthedocs.io/en/latest/v3/codecs/sharding-indexed/index.html> |
+
+### Not done / limits of this pass
+
+- All ten cards were written. Within them: the **append-only trie** reference (card 4) was not looked for; Ion **shared symbol table** catalog mechanics and Ion 1.1 opcode tables were not read beyond the "What's new" page; `arrow-row` field encodings were read only at overview level; dtype-next's zero-copy path was read from the README and `native_buffer.clj` header only.
+- **UNVERIFIED-HERE**: L1d for Intel Granite Rapids and Arm Neoverse V2; every Apple figure; AMD's amd.com product page (the Hot Chips deck was used instead); the exact space factor of Data Blocks' byte alignment; whether Vortex `Variant` is in a frozen edition (carried over from B2).
+- One fetch was refused by the session's permission layer (a retry of the amd.com page with a browser User-Agent); it was not retried.
+- Pins are branch heads as served on 2026-11-12 (no commit ids were recorded for the web trees).
 
