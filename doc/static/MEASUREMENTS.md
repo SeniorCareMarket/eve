@@ -238,3 +238,42 @@ and are superseded by these):
 (The loop and the index load alone: 0.35 ns.) Narrowing keeps a read at a load and an add and halves or quarters the
 column; run-end shrinks it 3–300× and turns one read into a binary search over the runs (6–13 steps here, 42–102 ns).
 Dictionary codes are in M4: a keyword column counted at 2.6–3.0 ns a row from 64 KiB up, one cell read at 68–156 ns.
+
+## M8 — 64 KiB against 1 MiB as the unit (P7, a spike; with M3 and M4 re-read)
+
+Probe: `p7_unit_size.clj`, output `p7_unit_size.out.txt`, run 2026-11-12 12:30 AM ET. An image cut in buffer order into units
+of at most 64 KiB or 1 MiB (each block charged its 8-byte table row and 12 bytes a pointer) and placed unit by
+unit: one run claimed per (unit, size class), the unit's blocks copied, pointers rewritten when every unit is in.
+Every arm reads back equal to the plain value.
+
+| Corpus (image bytes, blocks) | units: 64 KiB / 1 MiB | pointers leaving their unit | run claims |
+|---|---:|---:|---:|
+| map 10k int → int (299,324 B, 2,380) | 6 / 1 | 2.98 % / 0 | 30 / 5 |
+| vector 100k ints (1,613,208 B, 103,229) | 55 / 4 | 1.47 % / 0.11 % | 110 / 8 |
+| vector 10k records (1,561,456 B, 30,325) | 33 / 3 | 2.45 % / 0.08 % | 66 / 6 |
+| 5k chat messages (3,710,432 B, 70,997) | 78 / 5 | 2.25 % / 0.26 % | 312 / 20 |
+
+Placement time: no difference this probe can resolve. Every arm is 0.3–7.7 ms net of creating the domain and one
+came out negative (−1.29 ms), so the domain's own variance is as large as the effect; the copies and the pointer
+stores are the same at every unit size. Which pointers leave a unit depends on the copier's walk order.
+
+The packed form at the same two sizes, from the runs already committed (M3, M4):
+
+| | 64 KiB | 1 MiB |
+|---|---:|---:|
+| total bytes, messages / records / datoms | 1,469,968 / 1,817,668 / 507,264 | 1,471,180 / 1,796,701 / 564,196 |
+| the same, each chunk under zlib | 402,606 / 684,762 / 127,242 | 311,054 / 562,656 / 100,306 |
+| tables' share of a chunk (messages) | 1.21 % | 0.08 % |
+| one chunk decoded to plain rows, records / messages | 1.33 ms / 0.88 ms | 19.70 ms / 12.26 ms |
+| column scan, chunk opened each time (ns a row) | 5.84 | 1.67 |
+| column scan, tables open (ns a row) | 1.44 | 1.34 |
+| one cell (ns), records / messages | 106.4 / 110.4 | 74.9 / 80.8 |
+| chunks for 50,000 records | 29 | 2 |
+
+Reading: for **placement** 1 MiB is the better unit — 12–16× fewer units, a tenth or less of the pointers crossing
+a unit boundary, 6–16× fewer run claims, at no measurable cost. For the **packed** form the two sizes trade: 1 MiB
+is 18–23 % smaller when each chunk is compressed on its own and 3.5× faster on a scan that opens every chunk;
+64 KiB decodes a unit 14–15× sooner, is 10 % smaller on datoms uncompressed (16-bit offsets), and pins or fetches a
+sixteenth as much to read one row. That is the two-level shape of the original ask with the jobs assigned by
+measurement: 64 KiB the cache, decode and wire unit; 1 MiB the placement, compression and stored-object unit.
+

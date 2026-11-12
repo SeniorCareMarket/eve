@@ -1,0 +1,28 @@
+P7 ? eve ref: refs/heads/claude/sweet-carson-6pt29d | clojure 1.12.0 | java 21.0.12.1
+
+== map 10k int->int ? image 299,324 B, 2,380 blocks, 2,379 pointers
+   unit    | units | blocks/unit | pointers leaving their unit | run claims | place ms (net of domain) | reads back equal
+   64 KiB  |     6 |         397 |        71 ( 2.98 %)          |         30 |     3.18                 | true
+   1 MiB   |     1 |        2380 |         0 ( 0.00 %)          |          5 |     3.00                 | true
+   whole   |     1 |        2380 |         0 ( 0.00 %)          |          5 |     2.20                 | true
+
+== vector 100k ints ? image 1,613,208 B, 103,229 blocks, 103,228 pointers
+   unit    | units | blocks/unit | pointers leaving their unit | run claims | place ms (net of domain) | reads back equal
+   64 KiB  |    55 |        1877 |     1,513 ( 1.47 %)          |        110 |     7.73                 | true
+   1 MiB   |     4 |       25807 |       110 ( 0.11 %)          |          8 |     3.29                 | true
+   whole   |     1 |      103229 |         0 ( 0.00 %)          |          2 |     3.33                 | true
+
+== vector 10k records ? image 1,561,456 B, 30,325 blocks, 30,324 pointers
+   unit    | units | blocks/unit | pointers leaving their unit | run claims | place ms (net of domain) | reads back equal
+   64 KiB  |    33 |         919 |       744 ( 2.45 %)          |         66 |     1.02                 | true
+   1 MiB   |     3 |       10108 |        24 ( 0.08 %)          |          6 |    -1.29                 | true
+   whole   |     1 |       30325 |         0 ( 0.00 %)          |          2 |     1.08                 | true
+
+== 5k chat messages ? image 3,710,432 B, 70,997 blocks, 70,996 pointers
+   unit    | units | blocks/unit | pointers leaving their unit | run claims | place ms (net of domain) | reads back equal
+   64 KiB  |    78 |         910 |     1,597 ( 2.25 %)          |        312 |     3.05                 | true
+   1 MiB   |     5 |       14199 |       187 ( 0.26 %)          |         20 |     0.30                 | true
+   whole   |     1 |       70997 |         0 ( 0.00 %)          |          4 |     2.67                 | true
+
+P7 done
+exit 0

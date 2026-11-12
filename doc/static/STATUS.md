@@ -69,6 +69,8 @@ CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes).
   (verbatim in `ASSUMPTIONS.md` A8): a chunk carrying its placement map. A8 re-read as A9's mechanism; the plan's
   §0 and the README changed to say one thing is missing, the run entry.
 
+- 2026-11-12 12:30 AM ET — P7, a spike asked for by the operator: 64 KiB against 1 MiB as the unit (`MEASUREMENTS.md` M8).
+
 ## Open questions (for the next reader of this file, not for the operator)
 
 - A14 is open until a ClojureScript build packs the same value to the same bytes (plan probe 2.2).
