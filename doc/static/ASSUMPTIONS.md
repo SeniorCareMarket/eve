@@ -173,8 +173,12 @@ available on either tree, and nothing in `FORMAT-V1.md` depends on it.
 
 ### A9 — the allocator can consume pre-mapped spacing · **DEAD as a present capability on both trees; the shape admits it (a probe, one host)**
 
-- Neither allocator has a bulk, reserve, placement or adoption entry. Eve: `-sio-alloc!` takes one size and answers
-  one block (`alloc.cljc:95-139`, `:533-606`). Kernel: `alloc_blocks` is a loop over `alloc_block`
+- Neither allocator has a placement or adoption entry, and the slab I/O every Eve type allocates through takes one
+  size and answers one block (`alloc.cljc:95-139`, `:533-606`). **Correction, 2026-11-12:** one bulk entry does
+  exist and the first pass missed it — the ClojureScript module slab's `batch-alloc`
+  (`adapters/slab/module/src/eve/process_slab.cljs:517-562`): up to n blocks of one size class in one pass,
+  answering their offsets. It takes the next free bits from the cursor, so the blocks are consecutive on a fresh
+  slab and not guaranteed contiguous; nothing in the tree calls it. It is the precedent for the run claim. Kernel: `alloc_blocks` is a loop over `alloc_block`
   (`alloc.vs:4188-4201`); it takes memory only by claiming regions; page adoption and the bump-filled BLOCK PAGES
   keep their bytes out of the allocator for good (`census/VS-KERNEL.md` §1.7, §2.5; `-2` "A9").
 - The plan's kill check is about the allocator's *shape* — "placement information cannot be used and ingest is

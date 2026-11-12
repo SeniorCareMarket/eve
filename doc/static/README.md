@@ -35,7 +35,8 @@ Pins: `SeniorCareMarket/eve` `4a92129`; `johnmn3/atom.broker` `163cb656c`. Every
 2. Leaving a domain as a block image is 2–8× `eve->clj`; entering one from an image through a real `swap!` is 3–45×
    storing the plain value — and the commit's holder count (≈ 1 µs a block), not placement, is then most of the
    cost.
-3. Neither allocator can take more than one block per call. A run claimed per size class is the missing entry
+3. No allocator entry Eve's types use takes more than one block per call (the ClojureScript slab has an uncalled
+   `batch-alloc`, not guaranteed contiguous). A run claimed per size class is the missing entry
    (3–9× per-block allocation in a probe).
 4. Eve's existing byte forms are not a wire format: the flat codec is the key encoding, 1.8–3.7× Transit
    MessagePack, with no bytes scalar and no validation; a block image is 2.6–7× EDN.

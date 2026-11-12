@@ -84,7 +84,10 @@ Acceptance (JVM; each fails before, passes after):
 Built:
 
 - **A run claim** as a slab-I/O operation (`alloc-run! sio class n` → first block), default implementation a loop
-  of `alloc!` so every host is correct at once; the heap and mmap slabs claim whole bitmap words by CAS (measured:
+  of `alloc!` so every host is correct at once. Precedents already in the trees: the ClojureScript slab's uncalled
+  `batch-alloc` (`adapters/slab/module/src/eve/process_slab.cljs:517-562` — n blocks of one class in one pass, not
+  guaranteed contiguous) and atom.broker's struct-array design, which reserves one contiguous run for a whole array
+  whose count and stride are known up front (`docs/struct-arrays/master-plan.md`, `phase-3-lazy-fill.md`); the heap and mmap slabs claim whole bitmap words by CAS (measured:
   3–9× per-block net of the domain, M5). It must hold under another process allocating in the same class (word CAS, no lock) and
   under growth.
 - **`place` by runs**, with the conditions `ASSUMPTIONS.md` A15 lists: bits set before the hold, clean rows, final
