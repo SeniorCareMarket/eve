@@ -15,7 +15,7 @@
      (e/seq my-set)             ;; sorted traversal
      (e/count my-set)           ;; element count
 
-   Nodes allocate in the running swap!'s domain, else this process's own —
+   Nodes allocate in the running swap!'s domain (outside a context they throw) —
    users never pass a slab or domain."
   (:refer-clojure :exclude [sorted-set])
   (:require

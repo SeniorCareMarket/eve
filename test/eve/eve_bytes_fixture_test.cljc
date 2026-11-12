@@ -11,13 +11,32 @@
    named skips it, and the skips are counted."
   ;; the host's arrays and integer casts are eve.host's (HOST-CONTRACT §10)
   (:refer-clojure :exclude [aclone alength byte-array unchecked-byte bytes])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.deftype-proto.data :as d]
             [eve.host :refer [field aclone alength byte-array unchecked-byte bytes]]
             #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn])
             [clojure.string :as str]
             [eve.hamt-util :as hu]
             [eve.codec :as codec]
             [eve.deftype-proto.alloc :as alloc]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                                         {:capacities {0 (* 64 1024 1024)
+                                                       1 (* 16 1024 1024)
+                                                       2 (* 16 1024 1024)
+                                                       3 (* 192 1024 1024)
+                                                       4 (* 16 1024 1024)
+                                                       5 (* 16 1024 1024)}})]
+                (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
+
 
 (def host #?(:cljs :cljs :bb :bb :clj :clj :cljr :cljr :lpy :lpy :clje :clje :jank :jank))
 

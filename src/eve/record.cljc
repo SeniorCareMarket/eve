@@ -69,9 +69,16 @@
             (fail! path "opaque Eve type is not certified portable")))
         ;; Do not trust encode-value here: its pointer fast path bypasses REF
         ;; validation of an already-existing collection in a private domain.
-        (when-not (satisfies? d/IPlain x)
-          (fail! path "Eve value has no portable data view"))
-        (assert-portable! sio (d/-plain x) path)
+        ;; A value WITH an IPlain view is walked through it. A certified Eve
+        ;; type with no IPlain view is accepted on its certification: its
+        ;; persisted fields were encoded by the slab codec at its own
+        ;; construction, so no function or host value can be inside an
+        ;; existing block (eve.db.ds's DB/Datom are this shape). Giving every
+        ;; eve-deftype a default IPlain instead would make eve->clj descend
+        ;; into them — the F-BB-DATOM-CMP landmine eve->clj's IsEve arm
+        ;; exists to avoid.
+        (when (satisfies? d/IPlain x)
+          (assert-portable! sio (d/-plain x) path))
         (when-let [m (e/meta x)] (assert-portable! sio m (conj path :meta))))
 
     (map? x)
@@ -84,7 +91,12 @@
 
     :else
     (do
-      (when (and (ifn? x) (not (keyword? x)))
+      ;; ifn? is a lookup protocol, not callability: symbols and keywords
+      ;; implement it and are data. Only a value that is invocable as a
+      ;; function and is not one of those data types is refused here
+      ;; (a plain fn is already refused by the fn? check above; this net
+      ;; catches the fn values a host's fn? does not recognize).
+      (when (and (ifn? x) (not (keyword? x)) (not (symbol? x)))
         (throw (ex-info "functions can't be stored in Eve memory; pass them as call arguments"
                         {:eve.record/error :function :path path})))
       (try
@@ -264,40 +276,40 @@
          (~'-extras [~this] ~'record-extmap__)
          (~'-record-meta [~this] ~'record-meta__)
          (~'-copy-slot [~this ~k ~val] (copy-slot! ~this ~(:total-size layout) '~specs ~k ~val))
-         clojure.lang.ILookup
+         ~'clojure.lang.ILookup
          (~'valAt [~this ~k] (lookup ~this ~k nil))
          (~'valAt [~this ~k ~nf] (lookup ~this ~k ~nf))
-         clojure.lang.Associative
+         ~'clojure.lang.Associative
          (~'containsKey [~this ~k] (contains-key? ~this ~k))
          (~'assoc [~this ~k ~val] (assoc-record ~this ~k ~val))
-         clojure.lang.IPersistentMap
+         ~'clojure.lang.IPersistentMap
          (~'entryAt [~this ~k] (entry-at ~this ~k))
          (~'without [~this ~k] (dissoc-record ~this ~k))
          (~'assocEx [~this ~k ~val]
            (if (contains-key? ~this ~k)
              (throw (ex-info "Key already present" {:key ~k}))
              (assoc-record ~this ~k ~val)))
-         clojure.lang.Counted
+         ~'clojure.lang.Counted
          (~'count [~this] (+ ~(count fields) (e/count ~'record-extmap__)))
-         clojure.lang.Seqable
+         ~'clojure.lang.Seqable
          (~'seq [~this] (seq (entries ~this)))
-         java.lang.Iterable
-         (~'iterator [~this] (clojure.lang.SeqIterator. (seq (entries ~this))))
-         clojure.lang.IPersistentCollection
+         ~'java.lang.Iterable
+         (~'iterator [~this] (~'clojure.lang.SeqIterator. (seq (entries ~this))))
+         ~'clojure.lang.IPersistentCollection
          (~'cons [~this ~val] (conj-record ~this ~val))
          (~'empty [~this] (em/empty-hash-map (d/-eve-sio ~this)))
          (~'equiv [~this ~other] (equiv-record ~this ~other))
-         clojure.lang.IMeta
+         ~'clojure.lang.IMeta
          (~'meta [~this] ~'record-meta__)
-         clojure.lang.IObj
+         ~'clojure.lang.IObj
          (~'withMeta [~this ~m] (with-record-meta ~this ~m))
-         clojure.lang.IHashEq
+         ~'clojure.lang.IHashEq
          (~'hasheq [~this] (hash-record ~this))
          d/IsEve
          (~'-eve? [~this] true)
          ~'IPrintWithWriter
          (~'-pr-writer [~this w# opts#] (e/-write w# (print-record ~this)))
-         java.lang.Object
+         ~'java.lang.Object
          (~'equals [~this ~other] (equiv-record ~this ~other))
          (~'hashCode [~this] (hash-record ~this))
          (~'toString [~this] (print-record ~this))

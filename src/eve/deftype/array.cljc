@@ -5,7 +5,7 @@
    table.
 
    (make-array n) allocates the array in the current eve domain (the running
-   swap!'s, else this process's own), as an eve-deftype's constructor does.
+   swap!'s; outside a context it throws), as an eve-deftype's constructor does.
    aget, aset, alength, aclone, array-copy, array-seq and array-chunk take an
    eve array or a host array, so code written against ClojureScript's array
    functions reads the same; an eve array is seqable by clojure.core on every

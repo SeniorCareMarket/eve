@@ -13,7 +13,7 @@
 
    The comparator: nil for compare; a fn otherwise (a boolean predicate such as > is read as Clojure reads one).
    It is a value with no eve bytes, so the collection holds it by reference (FORMAT-DECISIONS.md §9): readable in
-   this process, refused by a shared domain. Nodes allocate in the running swap!'s domain, else this process's own.
+   this process, refused by a shared domain. Nodes allocate in the running swap!'s domain (outside a context they throw).
 
    Use eve.core's vocabulary on them (e/assoc, e/get, e/conj, e/seq, e/rseq, e/transient, e/assoc!, ...), and this
    namespace's subseq, rsubseq, rank, nth-entry, find, dissoc! and disj!."
@@ -381,7 +381,7 @@
   [sc]
   (let [c (-cmp sc)
         ns (nodes (-root sc) true)]
-    (binding [d/*domain-sio* nil]
+    (binding [d/*domain-sio* (alloc/plumbing-sio)]
       (if (-map? sc)
         (build-map c (map (fn [n] [(d/eve->clj (-sk n)) (d/eve->clj (-sv n))]) ns))
         (build-set c (map (fn [n] (d/eve->clj (-sk n))) ns))))))

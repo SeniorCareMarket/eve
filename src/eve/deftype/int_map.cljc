@@ -15,7 +15,7 @@
      (e/assoc m 42 :x) (e/dissoc m 42) (e/get m 42) (e/count m) (e/seq m)
      (merge a b) (merge-with f a b) (update m k f) (range m lo hi)
 
-   Nodes allocate in the running swap!'s domain, else this process's own; an
+   Nodes allocate in the running swap!'s domain (outside a context they throw); an
    int-map is an eve value (it lives in an atom like any other)."
   (:refer-clojure :exclude [merge merge-with update range deftype])
   (:require
@@ -876,7 +876,7 @@
 
 (defn int-map
   "An integer map: empty, or of alternating keys and values. Its nodes
-   allocate in the running swap!'s domain, else this process's own."
+   allocate in the running swap!'s domain (outside a context they throw)."
   ([]
    (->PersistentIntMap -1 0 nil))
   ([k v]

@@ -68,6 +68,15 @@
   (registry/register-type! type-key
     {:type-key type-key :type-io {:tag tag :read read-fn :print print-info}})
   #?(:cljs (reader/register-tag-parser! tag read-fn)
+     ;; clojerl var roots are backed by compiled module functions and
+     ;; cannot be altered (its alter-var-root throws "unsupported").
+     ;; On BEAM the registration above IS the installation: Eve's own
+     ;; registry holds the tag, and every Eve read path consults it
+     ;; (reader-options / eve.edn), which is the only reader surface
+     ;; Eve controls there. Host read-string without explicit readers
+     ;; does not see Eve tags on clje — a named limitation of the host,
+     ;; not a branch in Eve's semantics.
+     :clje nil
      :default
      (do
        (alter-var-root #'*data-readers* assoc tag read-fn)

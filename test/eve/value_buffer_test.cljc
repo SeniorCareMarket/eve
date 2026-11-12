@@ -1,11 +1,31 @@
 (ns eve.value-buffer-test
   "EVM-11e (EM5): eve.deftype.array as a runtime's arrays' home — fixed captures and argument vectors as eve
    arrays, a growing accumulator as eve.deftype.value-buffer (sarr.vs's operations)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]
             [eve.deftype.array :as arr]
             [eve.deftype.value-buffer :as vb]
             ;; a collection in a slot is written through its writer
             [eve.map] [eve.set] [eve.vec] [eve.list]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                                         {:capacities {0 (* 64 1024 1024)
+                                                       1 (* 16 1024 1024)
+                                                       2 (* 16 1024 1024)
+                                                       3 (* 192 1024 1024)
+                                                       4 (* 16 1024 1024)
+                                                       5 (* 16 1024 1024)}})]
+                (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
+
 
 (defn- caught [f] (try (f) nil (catch #?(:cljs :default :jank jank.runtime.object_ref :default Exception) ex (or (:type (ex-data ex)) :thrown))))
 

@@ -463,7 +463,7 @@
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
-   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+   domain; outside a swap/domain context it throws (:no-domain-context)."
   []
   (alloc/current-sio))
 
@@ -480,21 +480,23 @@
      (eve-array sio :int32 10)
      (eve-array sio :float64 10 0.0)
 
-   Without an explicit sio the array is the host's own typed array where the
-   host has them (a HeapEveArray: the JVM, bb, jolt — eve.encoding's
-   typed-array), else it is allocated in this process's slab (default-sio).
+   Without an explicit sio the array is allocated in the running domain
+   (default-sio: the bound swap!'s domain, else this process's own) on
+   EVERY host — a public constructor obeys the construction law the same
+   way everywhere. eve-array no longer substitutes the host-heap form (a
+   HeapEveArray: the JVM, bb, jolt — eve.encoding's typed-array) silently,
+   as it did on heap hosts, ignoring a bound domain entirely while cljs
+   allocated in-domain — the asymmetry the law lane's P1 finding names.
+   The heap form remains this namespace's own (heap-array, and the
+   from-*-array adoption conversions).
 
    Supported types: :int8 :uint8 :int16 :uint16 :int32 :uint32 :float32 :float64"
   ([type-kw size-or-coll]
-   (if (heap-arrays?)
-     (heap-array type-kw size-or-coll)
-     (eve-array (default-sio) type-kw size-or-coll)))
+   (eve-array (default-sio) type-kw size-or-coll))
   ([a b c]
    (if (keyword? a)
-     ;; (eve-array type-kw n init-val) — this process's
-     (if (heap-arrays?)
-       (heap-array a b c)
-       (eve-array (default-sio) a b c))
+     ;; (eve-array type-kw n init-val) — the running domain's
+     (eve-array (default-sio) a b c)
      ;; (eve-array sio type-kw size-or-coll) — explicit sio
      (let [sio a type-kw b size-or-coll c]
        (if (number? size-or-coll)

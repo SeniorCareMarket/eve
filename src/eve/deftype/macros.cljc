@@ -166,7 +166,11 @@
                                :type-tag type-tag
                                :total-size total-size
                                :fields slab-fields
-                               :type-key type-key})
+                               :type-key type-key
+                               ;; an eve-deftype's persisted form is its
+                               ;; IPlain field view: certifiably portable
+                               ;; as an eve.record field value.
+                               :record/portable? true})
 
         ;; the fields set!/cas! rewrite to eve memory (a host-local field's
         ;; set! is the instance's own)
@@ -194,7 +198,8 @@
                        :name-hash-bytes name-hash-bytes :sab-tag-kw sab-tag-kw})
           (reg/registration-form env type-name
             {:type-id type-id :name-hash name-hash :type-key type-key
-             :storage :slab :total-size total-size :fields slab-fields})
+             :storage :slab :total-size total-size :fields slab-fields
+             :record/portable? true})
           ;; the fields that point at other blocks, so eve.retire walks a stored value of this type as it walks
           ;; its own collections (a cons cell's tail is the value it replaced, and stays) — a tree's nodes too
           (list 'eve.deftype-proto.serialize/register-deftype-layout! type-id name-hash

@@ -12,8 +12,8 @@
 
 (def shared-tests
   "The test namespaces every host runs as written."
-  '[eve.portable-surface-test eve.type-io-test eve.clock-uuid-test eve.associative-transient-test eve.map-entry-test eve.host-bytes-test eve.bb-adapter-test eve.hamt-util-test eve.coalesc-align-test eve.eve-bytes-fixture-test
-    eve.array-hosts-test eve.dataset-test eve.tensor-test eve.deftype.rb-tree-test eve.numeric-tags-test eve.numeric-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.int-key-nested-value-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.descriptor-table-test eve.tally-test eve.read-region-test eve.domain-open-test eve.journal-open-test eve.deftype.int-map-test eve.heap-class-growth-cap-test
+  '[eve.portable-surface-test eve.type-io-test eve.clock-uuid-test eve.associative-transient-test eve.map-entry-test eve.construction-law-test eve.host-bytes-test eve.bb-adapter-test eve.hamt-util-test eve.coalesc-align-test eve.eve-bytes-fixture-test
+    eve.array-hosts-test eve.dataset-test eve.tensor-test eve.deftype.rb-tree-test eve.numeric-tags-test eve.numeric-test eve.edn-test eve.overflow-test eve.collection-hash-test eve.reference-tag-test eve.big-value-test eve.sorted-coll-test eve.keyring-test eve.int-key-nested-value-test eve.value-buffer-test eve.vec-retire-test eve.reclaim-test eve.descriptor-table-test eve.tally-test eve.read-region-test eve.domain-open-test eve.journal-open-test eve.deftype.int-map-test eve.heap-class-growth-cap-test
     eve.bb-logical-protocol-test eve.record-test eve.deftype.type-id-test eve.rrb-vector-test eve.thread-host-test eve.thread-test eve.thread-meta-test eve.thread-domain-test eve.thread-net-test eve.thread-fold-test eve.thread-fold-group-test
     ;; aegis's clear-evaluation primitives (the crypto feature's fast-path rows)
     ;; the claims test is held back with the chat spec pending the aegis split (release/eve/exclude)

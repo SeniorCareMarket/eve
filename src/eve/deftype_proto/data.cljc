@@ -591,9 +591,10 @@
 
 ;; *domain-sio* is the slab domain a constructor allocates in while a swap!'s
 ;; f runs: the attempt's logging sio over the atom's domain (bound by
-;; eve.atom/swap-attempt!). Outside a swap it is nil and constructors use the
-;; process's own domain — see eve.deftype-proto.alloc/current-sio. Users of
-;; deftype, eve-array, dataset, tensor and the collections never pass an sio.
+;; eve.atom/swap-attempt!). Outside a swap it is nil and constructors THROW
+;; (construction law, 2026-11-11) — see eve.deftype-proto.alloc/current-sio.
+;; Users of deftype, eve-array, dataset, tensor and the collections never
+;; pass an sio; they construct inside a swap! or an explicit domain context.
 (def ^:dynamic *domain-sio* nil)
 
 ;;=============================================================================

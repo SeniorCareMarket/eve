@@ -41,8 +41,7 @@
   [k k2]
   (let [s (sio)] (e/get (codec/decode s (codec/encode-value s {k :hit})) k2)))
 
-#?(:cljs
-   (do
+#?@(:cljs [
      (deftest js-bigint-round-trips
        (testing "a BigInt past int64 is BIGINT and reads back a BigInt"
          (let [b (js/BigInt "18446744073709551616")]
@@ -66,7 +65,7 @@
            (is (num/equiv fifteen-tenths (num/bigdec "1.5")))
            (is (= "eedb1701000000010100000002" (key-hex (num/ratio 1 2))))
            (is (= "eedb1801000000010000000f" (key-hex (num/bigdec "1.5"))))
-           (is (= "eedb1801000000010000000f" (key-hex (num/bigdec "1.50")))))))))
+           (is (= "eedb1801000000010000000f" (key-hex (num/bigdec "1.50")))))))])
 
 #?(:cljs nil
    :clje nil

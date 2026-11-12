@@ -86,7 +86,9 @@
 
 (defn set-direct-map-encoder!
   "Set the direct map encoder function. Called by sab_map.cljs at load.
-   encoder: (fn [cljs-map] -> Uint8Array) — builds SAB map and returns pointer bytes"
+   encoder: (fn [sio cljs-map] -> Uint8Array) — builds the SAB map in sio
+   (the running encode's, encoding-sio; nil outside an encode) and returns
+   pointer bytes"
   [encoder]
   (set! direct-map-encoder encoder))
 
@@ -648,7 +650,7 @@
 
           ;; CLJS maps — direct encode (skip builder registry + EveHashMap allocation)
           (and direct-map-encoder (map? elem))
-          (direct-map-encoder elem)
+          (direct-map-encoder encoding-sio elem)
 
           ;; UUID
           (uuid? elem)
@@ -780,7 +782,7 @@
 
           ;; CLJS maps — direct encode (skip builder registry + EveHashMap allocation)
           (and direct-map-encoder (map? elem))
-          (direct-map-encoder elem)
+          (direct-map-encoder encoding-sio elem)
 
           (uuid? elem)
           (let [buf (js/Uint8Array. 19)

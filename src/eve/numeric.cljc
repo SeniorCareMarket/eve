@@ -181,8 +181,7 @@
 ;; Host-specific exact integer (the value inside a bigint).
 ;; ---------------------------------------------------------------------------
 
-#?(:cljs
-   (do
+#?@(:cljs [
      (def ^:private BI-0 (js/BigInt 0))
      (def ^:private BI-1 (js/BigInt 1))
      (def ^:private BI-10 (js/BigInt 10))
@@ -234,7 +233,7 @@
                (vec acc)
                (recur (bi-quot n BI-MOD32)
                       (cons (js/Number (bi-rem n BI-MOD32)) acc)))))))
-     ))
+     ])
 
 #?(:cljs nil
    :default
@@ -266,13 +265,27 @@
      (defn- bi-zero? [a] (zero? a))
      (defn- bi-neg? [a] (neg? a))
      (defn- bi-pos? [a] (pos? a))
-     (defn- bi-abs [a] (if (neg? a) #?(:clj (-' a) :default (- a)) a))
-     (defn- bi-neg [a] #?(:clj (-' a) :default (- a)))
-     (defn- bi+ [a b] #?(:clj (+' a b) :default (+ a b)))
-     (defn- bi- [a b] #?(:clj (-' a b) :default (- a b)))
-     (defn- bi* [a b] #?(:clj (*' a b) :default (* a b)))
-     (defn- bi-quot [a b] (quot a b))
-     (defn- bi-rem [a b] (rem a b))
+     ;; basilisp's unprimed + - * are checked long ops (an exact token
+     ;; past a long threw ArithmeticException: integer overflow); its
+     ;; primed ops promote, exactly as on :clj.
+     (defn- bi-abs [a] (if (neg? a) #?(:clj (-' a) :lpy (-' a) :default (- a)) a))
+     (defn- bi-neg [a] #?(:clj (-' a) :lpy (-' a) :default (- a)))
+     (defn- bi+ [a b] #?(:clj (+' a b) :lpy (+' a b) :default (+ a b)))
+     (defn- bi- [a b] #?(:clj (-' a b) :lpy (-' a b) :default (- a b)))
+     (defn- bi* [a b] #?(:clj (*' a b) :lpy (*' a b) :default (* a b)))
+     ;; basilisp's quot/rem are long ops: an unscaled value past a long
+     ;; threw ArithmeticException: integer overflow (numeric-tags
+     ;; decimals-round-trip). Python's floordiv/mod floor; Clojure's
+     ;; quot truncates toward zero — adjust by one when a nonzero
+     ;; remainder's sign differs from the dividend's.
+     (defn- bi-quot [a b]
+       #?(:lpy (let [q (operator/floordiv a b)
+                     r (operator/mod a b)]
+                 (if (or (zero? r) (= (neg? a) (neg? b))) q (+' q 1)))
+          :default (quot a b)))
+     (defn- bi-rem [a b]
+       #?(:lpy (bi- a (bi* (bi-quot a b) b))
+          :default (rem a b)))
      (defn- bi-cmp [a b] (compare a b))
      (defn- bi= [a b] (= a b))
      (defn- bi-gcd [a b]
@@ -391,8 +404,7 @@
   (str "#" tag " " (pr-str (str payload))))
 
 
-#?(:cljs
-   (do
+#?@(:cljs [
      (deftype EveBigInt [n]
        IEquiv
        (-equiv [_ other]
@@ -461,7 +473,7 @@
        (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
        Object
        (toString [_] (decimal-layout unscaled scale)))
-     ))
+     ])
 
 #?(:clje
    (do
@@ -548,22 +560,25 @@
 
 ;; Java BigDecimal.toString layout (used by str; pr adds M).
 (defn- decimal-layout [unscaled scale]
-  (let [neg? (bi-neg? unscaled)
+  ;; the sign local is `neg`, never `neg?`: the scientific branch calls
+  ;; clojure.core/neg? on the exponent, and a boolean local of that name
+  ;; shadows it (basilisp: 'bool' object is not callable).
+  (let [neg (bi-neg? unscaled)
         digits (bi-str (bi-abs unscaled))
         ulen (count digits)
         adj (clojure.core/- ulen 1 scale)]
     (if (and (>= scale 0) (>= adj -6))
       (cond
-        (zero? scale) (str (when neg? "-") digits)
+        (zero? scale) (str (when neg "-") digits)
         (>= ulen scale)
-        (str (when neg? "-") (subs digits 0 (- ulen scale)) "." (subs digits (- ulen scale)))
+        (str (when neg "-") (subs digits 0 (- ulen scale)) "." (subs digits (- ulen scale)))
         :else
-        (str (when neg? "-") "0." (apply str (repeat (- scale ulen) "0")) digits))
+        (str (when neg "-") "0." (apply str (repeat (- scale ulen) "0")) digits))
       ;; scientific
       (let [exp adj
             unsig (if (= ulen 1) digits (str (subs digits 0 1) "." (subs digits 1)))
             exp-str (if (neg? exp) (str "E" exp) (str "E+" exp))]
-        (str (when neg? "-") unsig exp-str)))))
+        (str (when neg "-") unsig exp-str)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public predicates and constructors
@@ -667,11 +682,25 @@
   ([unscaled scale]
    (make-bigdec (unwrap-bi unscaled) (int scale))))
 
+#?(:clj
+   (defn- bi->biginteger
+     "unscaled as a java.math.BigInteger, whatever host integer reaches
+      make-bigdec (a clojure.lang.BigInt from unscaled-value / +' sums —
+      which has no BigDecimal ctor at all — or a long). The ctor call
+      below is hinted, never reflective."
+     ^java.math.BigInteger [x]
+     (cond
+       (instance? java.math.BigInteger x) x
+       (instance? clojure.lang.BigInt x) (.toBigInteger ^clojure.lang.BigInt x)
+       (instance? java.math.BigDecimal x) (.toBigIntegerExact ^java.math.BigDecimal x)
+       (number? x) (java.math.BigInteger/valueOf (long x))
+       :else (java.math.BigInteger. (str x)))))
+
 (defn- make-bigdec [unscaled scale]
-  #?(:clj (.movePointLeft (java.math.BigDecimal. (if (instance? java.math.BigInteger unscaled)
-                                                   ^java.math.BigInteger unscaled
-                                                   (bi-from unscaled)))
-                          (int scale))
+  ;; The (BigInteger, scale) ctor, not movePointLeft: the scale IS the
+  ;; value's (1E+2M is unscaled 1 at scale -2), and movePointLeft
+  ;; normalizes a negative scale away (1E+2 came back as 100).
+  #?(:clj (java.math.BigDecimal. (bi->biginteger unscaled) (int scale))
      :lpy (decimal/Decimal (str unscaled "E" (- scale)))
      :cljs (EveBigDec. (bi-from unscaled) (int scale))
      :clje (EveBigDec. unscaled (int scale))
@@ -757,9 +786,13 @@
 (defn- as-double [x]
   (cond
     (number? x) (double x)
-    (bigint? x) #?(:cljs (js/Number (unwrap-bi x)) :default (double x))
+    (bigint? x) #?(:cljs (js/Number (unwrap-bi x))
+                   ;; basilisp: (double an EveBigInt) is float() of the
+                   ;; wrapper, which is not a number; unwrap first.
+                   :lpy (double (unwrap-bi x))
+                   :default (double x))
     (js-bigint? x) #?(:cljs (js/Number x) :default (double x))
-    (ratio? x) (/ (double (numerator x)) (double (denominator x)))
+    (ratio? x) (/ (as-double (numerator x)) (as-double (denominator x)))
     (decimal? x) #?(:clj (double x)
                     :cljs (let [u (.-unscaled x) s (.-scale x)]
                             (if (zero? s) (js/Number u)
@@ -1454,6 +1487,13 @@
                                (fn
                                  ([s] (read-edn s))
                                  ([a b] (if (map? a) (read-edn b a) (read-edn a b)))))))))
+       :clje
+       ;; clojerl var roots cannot be altered (module-backed vars;
+       ;; alter-var-root is unsupported). register-exact-io! above has
+       ;; already installed the exact tag readers in Eve's own registry
+       ;; via eve.type-readers/register!, and read-edn's rewrite path
+       ;; passes them explicitly — there is no host root to merge into.
+       nil
        :default
        (do
          ;; JVM / bb already print and read these tokens natively. Still

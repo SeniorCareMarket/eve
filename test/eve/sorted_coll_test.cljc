@@ -16,12 +16,10 @@
    the JVM and bb each test builds in a heap domain of its own, dropped with the test (rrb_vector_test's fixture).
    ClojureScript's module slab grows on demand."
   [f]
-  #?(:cljs (f)
-     :default
-     (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
+  (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
                                                                     2 (* 8 1024 1024) 3 (* 8 1024 1024)
                                                                     4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
-       (f))))
+       (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
 

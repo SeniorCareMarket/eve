@@ -64,7 +64,7 @@
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
-   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+   domain; outside a swap/domain context it throws (:no-domain-context)."
   []
   (alloc/current-sio))
 

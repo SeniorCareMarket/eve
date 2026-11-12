@@ -290,8 +290,8 @@
 
 (defn obj
   "A new typed object of a schema (or a field map) with initial values; fields
-   not given are 0. It lives in the running swap!'s domain, else this
-   process's (alloc/current-sio)."
+   not given are 0. It lives in the running swap!'s domain; outside a context
+   (alloc/current-sio) throws."
   ([schema-or-field-map]
    (obj schema-or-field-map {}))
   ([schema-or-field-map init-values]

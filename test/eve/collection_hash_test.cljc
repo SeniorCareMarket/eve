@@ -8,7 +8,9 @@
    map hashed wrong on ValueScript (2026-10-18 ET, EM4's in-program differential): an entry is a host [k v], which
    eve.core's protocols hashed with the host's hash, blind to the eve value in it; they now hash a host collection's
    elements through -hash."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]
             [eve.core :as e]
             [eve.hamt-util :as hu]
             [eve.encoding :as enc]
@@ -16,6 +18,24 @@
             [eve.set :as s]
             [eve.vec :as v]
             [eve.list :as l]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                                         {:capacities {0 (* 64 1024 1024)
+                                                       1 (* 16 1024 1024)
+                                                       2 (* 16 1024 1024)
+                                                       3 (* 192 1024 1024)
+                                                       4 (* 16 1024 1024)
+                                                       5 (* 16 1024 1024)}})]
+                (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
+
 
 ;; Ruling (John, 2026-11-05, the hash facade): eve's hash is authoritative inside
 ;; eve. A host value is re-homed on entry, never wrapped, so an eve map's hash is
@@ -126,3 +146,23 @@
     (is (= value (e/get a "large")))
     (is (= "ok" (e/get a "small")))
     (is (= value (e/get (e/assoc a "other" 1) "large")))))
+
+(deftest validate-from-header-offset-reads-the-named-slab
+  ;; The HAMT diagnostic takes its sio explicitly (the construction law's
+  ;; follow-up row): it validates the tree in the slab the caller names,
+  ;; with no ambient domain bound at the call.
+  #?(:cljs (let [mm (m/hash-map :a 1 :b 2 :c 3)
+                 res (m/validate-from-header-offset (d/-eve-sio mm) (d/-root-header-off mm))]
+             (is (:valid? res))
+             ;; :root-off is the tree root's slab offset, read FROM the
+             ;; header the caller named — not the header offset itself.
+             (is (pos? (:root-off res))))
+     :default (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
+                                                                              2 (* 8 1024 1024) 3 (* 8 1024 1024)
+                                                                              4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
+                (let [mm (m/hash-map :a 1 :b 2 :c 3)
+                      sio (d/-eve-sio mm)
+                      res (m/validate-from-header-offset sio (d/-root-header-off mm))]
+                  (is (:valid? res))
+                  (is (pos? (:node-count res)))
+                  (is (pos? (:root-off res)))))))

@@ -105,7 +105,7 @@
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
-   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+   domain; outside a swap/domain context it throws (:no-domain-context)."
   []
   (alloc/current-sio))
 
@@ -1459,10 +1459,17 @@
 (defn disable-pool-track! [] nil)
 
 ;; The direct map encoder: how a codec that builds a host map into eve memory
-;; (ClojureScript's) writes a plain map nested in a value
+;; (ClojureScript's) writes a plain map nested in a value. The codec hands
+;; over the running encode's sio — the domain the caller of encode-value
+;; named — and the nested map is built THERE, never in whatever domain
+;; happens to be ambient: with an explicit sio that differs from the bound
+;; one, the ambient choice silently put a second domain inside one encoded
+;; value (and under the construction law it throws despite the supplied
+;; domain — the law lane's P2 finding). Outside an encode (sio nil) the
+;; ambient domain is the only one there is, as before.
 (codec/set-direct-map-encoder!
- (fn [m]
-   (let [sio (alloc/current-sio)
+ (fn [sio m]
+   (let [sio (or sio (alloc/current-sio))
          eve-m (into-hash-map sio m)]
      ;; built here from host data, held here only: no stored piece to report (9.31)
      (codec/encode-fresh-pointer eve-m))))
@@ -1792,10 +1799,12 @@
                 (recur new-queue)))))))))
 
 (defn validate-from-header-offset
-  "Validate HAMT tree given an EveHashMap header slab-qualified offset."
-  [header-off]
-  (let [sio (alloc/current-sio)
-        root-off (slab/read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)
+  "Validate HAMT tree given an EveHashMap header slab-qualified offset.
+   The sio is explicit (first parameter, as everywhere in this namespace):
+   a diagnostic reads the slab its caller names — under the construction
+   law there is no ambient domain for it to borrow."
+  [sio header-off]
+  (let [root-off (slab/read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)
         result (validate-hamt-tree sio root-off)]
     (assoc result :root-off root-off)))
 

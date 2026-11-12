@@ -243,8 +243,28 @@
        (let [r (-persistent! (transduce xform (completing -conj!) t (seq from))) m (meta to)]
          (if (some? m) (with-meta r m) r))
        (transduce xform (completing -conj) to (seq from))))))
-(defn assoc [coll k v] (-assoc coll k v))
-(defn dissoc [coll k] (-dissoc coll k))
+(defn assoc
+  "As clojure.core/assoc: one or more key/value pairs, applied in order.
+   The JVM and cljs eve.core alias their host's variadic assoc; this
+   surface must not be narrower — a 3-arity-only assoc left variadic
+   calls unresolvable under SCI (bb), where this file is eve.core."
+  ([coll k v] (-assoc coll k v))
+  ([coll k v & kvs]
+   (let [ret (-assoc coll k v)]
+     (if kvs
+       (if (next kvs)
+         (recur ret (first kvs) (second kvs) (nnext kvs))
+         (throw (ex-info "assoc expects even number of arguments after map, found odd number."
+                         {:eve.core/error :odd-assoc-args})))
+       ret))))
+(defn dissoc
+  "As clojure.core/dissoc: zero or more keys, removed in order.
+   The JVM and cljs eve.core alias their host's variadic dissoc; this
+   surface must not be narrower — the same truncation the variadic
+   assoc fix removed, one definition down."
+  ([coll] coll)
+  ([coll k] (-dissoc coll k))
+  ([coll k & ks] (clojure.core/reduce -dissoc (-dissoc coll k) ks)))
 (defn pop [coll] (-pop coll))
 (defn peek [coll] (-peek coll))
 (defn rseq [coll] (seq (-rseq coll)))

@@ -167,8 +167,9 @@
 
      ;; Every ISlabIO operation takes an explicit sio (JvmSlabCtx). Constructors
      ;; called without one allocate in current-sio: the running swap!'s domain
-     ;; (d/*domain-sio*), else this process's heap domain — automatic for every
-     ;; user of deftype and the collections (2026-10-16).
+     ;; (d/*domain-sio*). Outside a swap/domain context current-sio THROWS
+     ;; (construction law, 2026-11-11) — the 2026-10-16 automatic process-heap
+     ;; fallback is abolished; only Eve plumbing uses plumbing-sio.
 
      ;; There is no thread-local allocation log either: a swap's allocations
      ;; are recorded by the per-swap LoggingSlabIO wrapper (below), and the
@@ -1724,11 +1725,29 @@
     (f)
     @process-heap-ctx))
 
+(defn no-domain-context!
+  "The construction law (John, 2026-11-11): all Eve data must be constructed
+   in a swapping operation, in the atom domain. Instantiating Eve data
+   outside an Eve context throws — there is no silent process-heap fallback."
+  []
+  (throw (ex-info "Eve data must be constructed inside a swap! (or an explicit Eve domain context)"
+                  {:eve.alloc/error :no-domain-context})))
+
 (defn current-sio
   "The slab I/O a constructor allocates in when given none: inside a swap!'s
-   f, that attempt's sio over the atom's domain (d/*domain-sio*); otherwise
-   this process's own (default-sio)."
+   f (or another binding of d/*domain-sio* over a value's own domain), that
+   sio. Outside any Eve domain context it throws (no-domain-context!) —
+   constructors never fall back to this process's own domain."
+  []
+  (or d/*domain-sio* (no-domain-context!)))
+
+(defn plumbing-sio
+  "Eve's OWN plumbing only: the sio a converter/materializer uses when its
+   caller passes none — deref materialization, codec/read paths, serialize's
+   builders. Inside a context, that context's sio; outside, this process's
+   own (default-sio). User-level construction must NOT call this: it goes
+   through current-sio and throws outside a context."
   []
   (or d/*domain-sio* (default-sio)))
 
-(ser/register-default-sio! current-sio)
+(ser/register-default-sio! plumbing-sio)

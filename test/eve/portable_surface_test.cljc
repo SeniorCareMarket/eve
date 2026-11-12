@@ -1,8 +1,10 @@
 (ns eve.portable-surface-test
   (:refer-clojure :exclude [deftype defprotocol])
-  (:require #?(:cljs [cljs.test :refer [deftest is testing]]
-               :lpy [basilisp.test :refer [deftest is testing]]
-               :default [clojure.test :refer [deftest is testing]])
+  (:require #?(:cljs [cljs.test :refer [deftest is testing use-fixtures]]
+               :lpy [basilisp.test :refer [deftest is testing use-fixtures]]
+               :default [clojure.test :refer [deftest is testing use-fixtures]])
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]
             [eve.deftype :refer [deftype eve-deftype]]
             [eve.deftype.registry :as registry]
             [eve.deftype-proto.serialize :as serialize]
@@ -15,6 +17,23 @@
             [eve.compare :as c]
             [eve.math :as math]
             [eve.encoding :as enc]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                              {:capacities {0 (* 64 1024 1024)
+                                            1 (* 16 1024 1024)
+                                            2 (* 16 1024 1024)
+                                            3 (* 192 1024 1024)
+                                            4 (* 16 1024 1024)
+                                            5 (* 16 1024 1024)}})]
+    (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
 
 (defprotocol PartialProtocol
   :extend-via-metadata true

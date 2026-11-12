@@ -64,14 +64,16 @@
                               {:type-id type-id
                                :total-size total-size
                                :fields fields
-                               :type-key type-key})
+                               :type-key type-key
+                               :record/portable? true})
         parsed-protos (v/parse-protocol-impls body)]
     (list 'do
       (t/slab-type {:env &env :type-name type-name :fields fields :parsed-protos parsed-protos
                   :type-id type-id :total-size total-size
                   :emit-type-id-def? emit-type-id-def? :type-key type-key})
       (dt-reg/registration-form &env type-name
-        {:type-id type-id :total-size total-size :type-key type-key :storage :slab :fields fields}))))
+        {:type-id type-id :total-size total-size :type-key type-key :storage :slab :fields fields
+         :record/portable? true}))))
 
 ;;=============================================================================
 ;; Registration Macro

@@ -3,11 +3,33 @@
    eve-array is and on the one an atom answers, each subtype's full range
    through an atom (its subtype too), and an array as an atom's root. Runs on
    the JVM, CLJS, nbb and bb."
-  (:require #?(:cljs [cljs.test :refer [deftest testing is]]
-               :clj  [clojure.test :refer [deftest testing is]])
+  (:require #?(:cljs [cljs.test :refer [deftest testing is use-fixtures]]
+               :clj  [clojure.test :refer [deftest testing is use-fixtures]])
             [eve.core :as e]
             [eve.array :as arr]
-            [eve.atom :as atom]))
+            [eve.atom :as atom]
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test. Collation fix
+   (eve-final): with the pinfix P1 fix, eve-array's no-sio arities allocate
+   in the running domain on every host, so these test bodies need the
+   fixture on JVM/bb too, not only on ClojureScript."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                              {:capacities {0 (* 64 1024 1024)
+                                            1 (* 16 1024 1024)
+                                            2 (* 16 1024 1024)
+                                            3 (* 192 1024 1024)
+                                            4 (* 16 1024 1024)
+                                            5 (* 16 1024 1024)}})]
+    (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
 
 (def ^:private ranges
   {:int8    [-128 127]

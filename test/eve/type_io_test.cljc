@@ -1,7 +1,9 @@
 (ns eve.type-io-test
   (:refer-clojure :exclude [deftype])
-  (:require #?(:cljs [cljs.test :refer-macros [deftest is testing]]
-               :default [clojure.test :refer [deftest is testing]])
+  (:require #?(:cljs [cljs.test :refer-macros [deftest is testing use-fixtures]]
+               :default [clojure.test :refer [deftest is testing use-fixtures]])
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]
             #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn])
             [eve.deftype #?@(:cljs [:refer-macros [deftype eve-deftype]]
                              :default [:refer [deftype eve-deftype]])]
@@ -9,6 +11,23 @@
             [eve.deftype.registry :as registry]
             [eve.deftype.registry :as registry]
             [eve.encoding :as enc]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                              {:capacities {0 (* 64 1024 1024)
+                                            1 (* 16 1024 1024)
+                                            2 (* 16 1024 1024)
+                                            3 (* 192 1024 1024)
+                                            4 (* 16 1024 1024)
+                                            5 (* 16 1024 1024)}})]
+    (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
 
 (deftype Point [x y])
 (deftype LegacyPoint [x] {:tag example.LegacyPoint})

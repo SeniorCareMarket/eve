@@ -1,10 +1,11 @@
 (ns eve.record-test
   (:refer-clojure :exclude [defrecord])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             #?(:cljs [cljs.reader :as reader] :default [clojure.edn :as reader])
             [eve.host :refer [swap!]]
             [eve.record :as r #?@(:cljs [:refer-macros [defrecord]] :default [:refer [defrecord]])]
+            [eve.deftype #?@(:cljs [:refer-macros [eve-deftype]] :default [:refer [eve-deftype]])]
             [eve.core :as e]
             [eve.atom :as a]
             [eve.deftype-proto.alloc :as alloc]
@@ -15,6 +16,23 @@
             [eve.retire :as retire]
             [eve.process :as proc]
             [eve.vec :as ev]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                              {:capacities {0 (* 64 1024 1024)
+                                            1 (* 16 1024 1024)
+                                            2 (* 16 1024 1024)
+                                            3 (* 192 1024 1024)
+                                            4 (* 16 1024 1024)
+                                            5 (* 16 1024 1024)}})]
+    (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
 
 (defn field [r k] (e/get r k))
 
@@ -138,6 +156,24 @@
                       (catch #?(:cljs :default :lpy python/Exception :default Exception) error
                         (ex-message error)))]
       (is (and message (str/includes? message "functions can't be stored in Eve memory; pass them as call arguments"))))))
+
+(eve-deftype Gem [^:int32 x])
+(defrecord Bag [v])
+
+(deftest portable-field-values
+  (testing "symbols and keywords are data, not functions: ifn? is their
+            lookup protocol, and assert-portable! must not refuse them"
+    (is (= 'some-symbol (field (->Bag 'some-symbol) :v)))
+    (is (= :kw (field (->Bag :kw) :v)))
+    (is (= 'a (first (field (->Bag ['a 'b]) :v))))
+    (is (= 1 (e/get (field (->Bag {'k 1}) :v) 'k))))
+  (testing "a field may hold a value of a registered eve-deftype type
+            (its registry entry certifies :record/portable?)"
+    ;; Gem declares no equiv group, so views of its block are compared
+    ;; by field, not by =.
+    (let [g (->Gem 7)]
+      (is (= 7 (.-x (field (->Bag g) :v))))
+      (is (= 7 (.-x (e/get (field (->Bag {:inner g}) :v) :inner)))))))
 
 (deftest hidden-payloads-are-reclaimed-after-last-root
   (let [dom (a/atom-domain nil)

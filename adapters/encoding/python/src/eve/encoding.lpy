@@ -112,14 +112,18 @@
   "[unscaled scale] of decimal d in its canonical form: trailing zeros stripped
    down to scale 0 (so (= 1.5M 1.50M) has one form), never a negative scale."
   [d]
+  ;; the magnitude is an arbitrary-precision int: the primed ops and
+  ;; Python's own division, never basilisp's checked long ops (an
+  ;; unscaled past a long threw ArithmeticException: integer overflow).
+  ;; floordiv is exact here: it only runs when 10 divides u.
   (let [t (.as-tuple d)
-        mag (reduce (fn [acc x] (+ (* acc 10) x)) 0 (.-digits t))
-        u (if (= 1 (.-sign t)) (- mag) mag)]
+        mag (reduce (fn [acc x] (+' (*' acc 10) x)) 0 (.-digits t))
+        u (if (= 1 (.-sign t)) (-' mag) mag)]
     (loop [u u s (- (.-exponent t))]
       (cond
         (zero? u) [0 0]
-        (and (pos? s) (zero? (mod u 10))) (recur (quot u 10) (dec s))
-        (neg? s) [(* u (python/pow 10 (- s))) 0]
+        (and (pos? s) (zero? (operator/mod u 10))) (recur (operator/floordiv u 10) (dec s))
+        (neg? s) [(*' u (python/pow 10 (- s))) 0]
         :else [u s]))))
 
 (defn make-bigdec
