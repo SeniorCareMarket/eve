@@ -1186,6 +1186,17 @@
                                 (sci-with-meta x (assoc (sci-meta x) :type t)))))))
   t)
 
+(defn stamp-map-mode-type
+  "Stamp T on one instance of a map-mode type, as the factory wrapper of
+   present-map-mode-type! does: for an instance built another way than a
+   presented factory (an eve.record record, built by its slab constructor
+   and read back from eve memory), so (type x), instance? and the logical
+   protocol dispatch see T and not babashka.impl.SciMap."
+  [x t]
+  (if (scimap? x)
+    (sci-with-meta x (assoc (sci-meta x) :type t))
+    x))
+
 (let [^clojure.lang.MultiFn pm print-method]
   (.addMethod pm (Class/forName "babashka.impl.SciMap")
               (fn [x w]
@@ -1224,7 +1235,14 @@
                   (fn [_] (fn [x m]
                             (if (eve-typed? x)
                               (if-let [t (map-mode-type x)]
-                                (eve-with-meta x (assoc m :type t))
+                                ;; the stamp is a SCI type value, never Eve data:
+                                ;; keep it out of the Eve-side meta (an eve.record
+                                ;; refuses it as non-portable) and re-stamp the
+                                ;; result's SCI-side meta.
+                                (let [r (eve-with-meta x m)]
+                                  (if (scimap? r)
+                                    (sci-with-meta r (assoc (sci-meta r) :type t))
+                                    r))
                                 (eve-with-meta x m))
                               (sci-with-meta x m))))))
 
