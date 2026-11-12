@@ -42,3 +42,20 @@ CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes).
   one and the slab domain grows by replacement; P3 separates the two.)
 - 4:00 PM — session hit the account usage limit; all five census agents stopped before writing a file.
 - 5:02 PM — resumed. Census agents resumed from their saved context with an instruction to bank early.
+- 5:02–5:45 PM — P3 (transformation costs), the packed-codec prototype; census agents banked partial files.
+- 5:45 PM — the usage limit cut the lane a second time (all five agents). Lesson applied: fresh, narrow agents that
+  bank after each section instead of resuming large contexts.
+- 10:49 PM — resumed. Census files read; four gap-fill agents run as one workflow (deref/STM/threads; digests,
+  defenses, fixtures; the kernel's remainder; format mechanism cards).
+- 11:00 PM – 12:35 AM (Nov 12) — P2 (sizes, chunk sweep), P5 (type generality, 19/20), P4 (access by chunk size), P3c
+  (the copier written tight), P6 (one `swap!` end to end; sharing; retention), P6b (column encodings).
+- 12:35–1:30 AM — D1–D5 drafted: `ASSUMPTIONS.md`, `CENSUS.md`, `BLIND-SPOTS.md`, `FORMAT-V1.md`, `IMPL-PLAN.md`,
+  with `MEASUREMENTS.md` and `README.md`. No stop condition fired (A4, A8, A9 each hold, with the corrections D1
+  records).
+
+## Open questions (for the next reader of this file, not for the operator)
+
+- A14 is open until a ClojureScript build packs the same value to the same bytes (plan probe 2.2).
+- The count written at placement (plan Phase 1) is unmeasured; M6 is the decomposition that motivates it.
+- `pack` from a slab value has no speed figure: only the image's walk was built.
+- Nothing ran on a disk domain, on a second host, or in the kernel.

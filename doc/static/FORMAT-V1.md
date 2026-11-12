@@ -201,8 +201,12 @@ sister — the type itself reads it.
 
 ## 9. The image, exactly
 
-`kind` 1. After the header: the blocks, each at a 4-aligned offset, byte-identical to the slab's but for pointers,
-which hold buffer offsets where the slab holds `[class:3 | block:29]`; the root block's offset in `root`. Then:
+`kind` 1. The image is the **consumer's** block layout, so its header names which: a layout id in the `nsym`
+field — 1 = canonical Eve's blocks (`doc/internals.md`), 2 = the kernel's ExtCID v3 blocks (256-byte own headers,
+64-byte slots). The container and the two tables below are shared; the blocks are each side's own, and a reader
+refuses a layout it does not place. For layout 1, after the header: the blocks, each at a 4-aligned offset,
+byte-identical to the slab's but for pointers, which hold buffer offsets where the slab holds
+`[class:3 | block:29]`; the root block's offset in `root`. Then:
 
 - the **block table** — `{offset u32, size u32}` per block, in buffer order. It is the consumer's allocation plan:
   the count and size class of every block, before any byte is read.
