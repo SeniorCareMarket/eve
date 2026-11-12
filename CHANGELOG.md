@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - #56: realize `eve.host/byte-array` in signed JavaScript byte storage on interpreted JS hosts, including size/sequence initialization; JVM behavior is unchanged.
 - #404: add an isolated bb/bb-minimal regression for `eve.core/nth` bootstrap (the existing E1 completion fix is present on this release).
 
+- Fixed: on babashka, an `eve.record/defrecord` record answers `clojure.core/get` and keyword lookup (`(:x r)`, `(get r :x)`). It was a plain `SciType` whose `ILookup`/`IPersistentMap` interfaces were translated onto eve.core's protocols only, which clojure.core's fns cannot see, so both returned nil while `eve.core/get` returned the value; a record now keeps its map interfaces as written (SciMap mode), like a process-local record-like type. Eve's own map collections (int-map, sorted map), which name `IPersistentMap` and stay excluded, are unchanged. JVM behavior is unchanged.
+
 ## [0.9.3.2] - 2026-11-10
 
 ### Fixed

@@ -220,11 +220,23 @@
         ;; SciMap mode so clojure.core/assoc and dissoc reach it
         ;; (eve.db.ds def-eve-record; naming IPersistentMap used to
         ;; force SciType and ClassCast on assoc).
-        map-signature? (let [ps (set (map :protocol parsed-protos))]
+        ;; An eve.record record (eve.record/defrecord: slab-backed, naming the
+        ;; full map signature with IPersistentMap, marked by its own
+        ;; eve.record/IRecordData) is NOT one of the seat's map collections
+        ;; the exclusion above protects: it is a nominal record whose
+        ;; fields clojure.core's get and keyword lookup must reach, as a
+        ;; JVM record's do. Without SciMap mode those fns are blind to the
+        ;; eve.core translations (measured on bb 1.13.226: (:x r) and
+        ;; (get r :x) answered nil on a 2-field record while eve.core/get
+        ;; answered the value, and (instance? clojure.lang.ILookup r) was
+        ;; false), so a record keeps its map groups as written, like a
+        ;; process-local record-like type does.
+        map-signature? (let [ps (set (map :protocol parsed-protos))
+                             record? (contains? ps 'eve.record/IRecordData)]
                          (and (contains? ps 'clojure.lang.ILookup)
                               (contains? ps 'clojure.lang.Associative)
                               (contains? ps 'clojure.lang.Counted)
-                              (not (and slab? (contains? ps 'clojure.lang.IPersistentMap)))
+                              (not (and slab? (not record?) (contains? ps 'clojure.lang.IPersistentMap)))
                               (not-any? ps '#{clojure.lang.IPersistentVector
                                               clojure.lang.IPersistentSet
                                               clojure.lang.IPersistentList
