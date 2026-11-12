@@ -4,7 +4,7 @@ A research lane, not a feature: verdicts with evidence, and a plan. Nothing unde
 
 | Read | For |
 |---|---|
-| `IMPL-PLAN.md` (D5) | what to build, in what order, the probe that closes each phase, what is decided, the two stop conditions that fired (§0), and the four forks that are the operator's |
+| `IMPL-PLAN.md` (D5) | what to build as waves of parallel lanes, every lane's requirements each with its test, the scoreboard the spike is driven by, what is decided, the two stop conditions that fired (§0), and the four forks that are the operator's |
 | `ASSUMPTIONS.md` (D1) | ten premises that died at the pin, and the 18 assumptions with verdict, evidence and provenance |
 | `FORMAT-V1.md` (D4) | the format: container, scalars, packed nodes, columns, types, the image, validation, evolution |
 | `BLIND-SPOTS.md` (D3) | the twelve questions nobody had asked, and the ValueScript aside assessed |

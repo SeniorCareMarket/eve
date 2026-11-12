@@ -1,8 +1,11 @@
 # D5 — static Eve, the implementation plan
 
-What to build, in what order, and the probe that says each phase is done — written before the phase, failing
-before it, passing after. The evidence is `ASSUMPTIONS.md` (A*n*, C*n*), `MEASUREMENTS.md` (M*n*),
-`BLIND-SPOTS.md` (Q*n*) and `FORMAT-V1.md` (§). Sizes of work are not estimated here: no phase has been built, so
+What to build, as waves of lanes that run in parallel; every lane's requirements, each with the test that fails
+before it and passes after; and the scoreboard the spike is driven by. Rewritten 2026-11-12 12:45 AM ET at the operator's
+instruction: "spike out all these ideas. 64K chunks. High speed zipping. High speed atom to atom transfer.
+Iterative, perf-driven spike. And update the phases for high lane fan out. Ensure tests are made for all
+requirements in each phase lane." The evidence is `ASSUMPTIONS.md` (A*n*, C*n*), `MEASUREMENTS.md` (M*n*),
+`BLIND-SPOTS.md` (Q*n*) and `FORMAT-V1.md` (§). Sizes of work are not estimated: nothing here has been built, so
 there is no measurement to cite for one.
 
 ## 0. Read first — the stop conditions
@@ -14,13 +17,10 @@ means by it (2026-11-12 12:23 AM ET): a chunk that carries the map by which the 
 That is A9's mechanism, and a probe measured it. So one thing is missing, and it is an addition to accept or
 refuse, not a capability that exists:
 
-| What the plan stands on | Status | Phases that need it | Phases that do not |
+| What the plan stands on | Status | Lanes that need it | Lanes that do not |
 |---|---|---|---|
-| A **run entry** in the allocator — n blocks of one class claimed in one call where the room is known to be free — driven by the image's block and relocation tables | measured in a probe on the JVM heap slab (M5, M6); in neither product allocator | 1; 5 on the kernel | 0 (which places per block), 2, 3 |
-| A chunk as **one opaque leaf block** in an atom, entered by one `memcpy` — for packed, columnar data that should stay packed | fork F3 | 4 | 0–3 |
-
-Phases 0, 2 and 3 — a value leaving a domain and coming back, and the packed wire, storage and columnar form
-outside domains — depend on neither.
+| A **run entry** in the allocator — n blocks of one class claimed in one call where the room is known to be free — driven by the image's block and relocation tables | measured in a probe on the JVM heap slab (M5, M6); in neither product allocator | Z2, Z3, Z4, T1, H1, H2 | Z1, B1, C1–C4, L1, X1 |
+| A chunk as **one opaque leaf block** in an atom, entered by one `memcpy` — for packed, columnar data that should stay packed | fork F3 | H7 | all of Waves 0 and 1 |
 
 ## 1. The shape, in one paragraph
 
@@ -45,143 +45,213 @@ back into an atom, buffer to file and back, measured against `eve->clj`". The ev
 3. **The generated sister is the columnar phase.** On the ISlabIO hosts a sister is needed only for the packed,
    columnar form (A2); generating it earlier would generate something nothing reads.
 
-## 3. Phases
+## 3. The work, in waves and lanes
 
-Each phase lists what is built, where, and its acceptance probes. A probe is a test in the repository's own
-suites, run on the host named; the research probes in `doc/static/probes/` are their seeds and stay research code.
+A **wave** is a set of lanes that start together and run in parallel sessions. A **lane** owns its files, has
+numbered requirements, and has one named test per requirement. Rules every lane follows:
 
-### Phase 0 — the spike: a value leaves a domain and comes back (JVM)
+1. **Tests first.** A lane's first commit is its tests, red, one per requirement, each registered in
+   `test/eve/static/requirements.edn` (requirement id → test var). `requirements-covered` (W0.2) fails when an id in
+   this plan has no test var or names a var that does not exist: a requirement without a test is a red build.
+2. **Step 1 is the measurement.** A perf lane runs the scoreboard at its starting commit and logs the row before it
+   changes anything; it is judged against that row, taken in its own session.
+3. **Done** = every requirement test green on the JVM runner, and the lane's board row logged with its commit. A
+   lane that cannot reach its gate reports the gap and the reason. It does not relabel the gate.
+4. **Files are owned.** A lane edits only the files listed for it. What lanes share is frozen in Wave 0; a change
+   to a contract is its own commit, read by every lane that uses it.
+5. Where a lane needs another's code it builds against the Wave 0 contract and the default that ships with it; the
+   lane table says where the two meet. The probes in `doc/static/probes/` are seeds and stay research code.
 
-Built, in a new namespace `eve.static` (name: fork F1):
+### 3.1 The scoreboard — what "perf-driven" means here
 
-- **A static slab I/O** over one byte array: reads only; `alloc!`, `free!`, `write-*`, `cas!` throw. A builder
-  variant bumps a tail and ignores frees. Recognised by the hot read path (`alloc/node-heap-array`,
-  `src/eve/deftype_proto/alloc.cljc:1127-1168`) so a static reads at slab speed rather than through protocol
-  dispatch (M5: 16–60 ms against 18–54 ms per 100,000 reads, both 7–31× a host collection).
-- **`detach`** — the relocating copy, generic over the block kinds `eve.retire` reads
-  (`src/eve/retire.cljc:145-179`), with each block's size taken from the block. It needs one addition to what a
-  type registers: an eve-deftype's total size beside its pointer offsets
-  (`register-deftype-layout!`, `src/eve/deftype/macros.cljc:140-146`).
-- **`place`** — an image into the running swap's domain. In this phase by per-block `alloc!` (correct on every
-  host as it stands).
-- **Asked-for exits**: a deref that answers a static (`(static/deref a)` or an option on the read region), beside
-  `@a`, which is unchanged.
-- **Bytes out and in**: `bytes`, `open`, to a file and back.
-- **The list's seq** made a host cursor, so reading a list allocates nothing
-  (`src/eve/list.cljc:157-161,195-203`) — the one read path A4 found that needs an allocator.
+One command, built in Wave 0 (`test/eve/static/scoreboard.clj`), runs every row on the four corpora of M6 — map
+10k int → int · vector 100k ints · vector 10k records · 5k chat messages — both arms in one session, the minimum of
+N runs, and appends the result to `doc/static/SPIKE-LOG.md`.
 
-Acceptance (JVM; each fails before, passes after):
+| Row | What is timed or sized | Today | Research probe | Spike gate | From |
+|---|---|---|---|---|---|
+| B1 zip, alone | an image laid into a domain's blocks, net of creating the domain | — | 2.2 / 3.4 / 1.3 / 2.5 ms (33–42 ns a block on the larger three) | ≤ 50 ns a block | M5 |
+| B2 zip, committed | a `swap!` that places an image, net of the domain | 202 / 325 / 475 / 1,190 ms for the plain store | 4.4 / 105 / 34 / 77 ms (≈ 1 µs a block) | ≤ 2× row B1 | M6 — the gap is the count |
+| B3 detach | an image copied under the pin, against `@a` | 3.3 / 19.1 / 20.7 / 43.9 ms | 0.40 / 9.63 / 3.27 / 10.54 ms | at least 2× faster than `@a` on every corpus | M6 |
+| B4 atom → atom | a value of atom A stored into atom B, one process | never measured as one run; its parts (`eve->clj` + plain store) sum to 205 / 344 / 496 / 1,234 ms. W0.6 measures it | parts (detach + placed `swap!`): 10.9 / 118 / 39.9 / 90.8 ms | ≤ 2× (row B3 + row B1) | M5, M6 |
+| B5 plain → atom | a `swap!` of plain data | 202 / 325 / 475 / 1,190 ms | 76 / 154 / 242 / 666 ms with today's writers into a buffer | under the probe's figure on every corpus; a direct builder has no measurement yet | M6 |
+| B6 chunk bytes | packed in 64 KiB chunks, against Transit MessagePack | — | 0.86× messages, 0.55× records, 0.56× datoms | ≤ 0.9× on messages and records | M2, M3 |
+| B7 chunk reads | decode · column scan · filter · one cell · row view, at 64 KiB | Transit decode 4.18 µs a row; host scan 23.3 ns a row | 0.77 µs · 1.44 ns · 2.96 ns · 106 ns · 0.64 µs | decode ≥ 2.5× Transit · ≤ 2 ns · ≤ 4 ns · ≤ 2× the host map's cell · ≤ 1 µs | M4 |
+| B8 container | sixteen chunks compressed as one, against the whole value compressed as one chunk | — | +1–4 % at 1 MiB; +23–35 % when each 64 KiB chunk is compressed alone | ≤ 5 % | M3, M8 |
 
-| # | Probe | From |
+**The loop**, for every perf lane: run the board → change one thing → run the board → keep the change if its row
+moved and every requirement test is green, else revert → log the row either way. Two iterations in a row that move
+nothing end that line of attack: log the number and the reason, take the next idea. A gate is a threshold on the
+board. It is not an estimate of effort.
+
+### 3.2 Wave 0 — contracts and the board (one lane, serial; every other lane waits on it)
+
+Files: `src/eve/static.cljc`, `src/eve/static/contract.cljc`, `test/eve/static/requirements.edn`,
+`requirements_test.cljc`, `contract_test.cljc`, `corpora.cljc`, `scoreboard.clj`.
+
+| Req | Requirement | Test |
 |---|---|---|
-| 0.1 | Property test: generated values × generated updates; every earlier `(length, root)` view equal, readable from a buffer truncated at its length, hash-stable — including lists | `probes/p1_bump_sio.clj` |
-| 0.2 | Every type of `probes/p5_types.clj` — sorted, rb-tree, int-map, array, Dataset, a user type with all four field classes, the DataScript DB — through detach → read in place → place → read; the list included (it errors today) | P5 |
-| 0.3 | A static view refuses every write (the prototype accepts one) | P5.2 |
-| 0.4 | File out, new process, file in, read in place, equal | P1.3 |
-| 0.5 | In one session, the four corpora of `probes/p6_end_to_end.clj`: `detach` under the pin against `@a`; a placed `swap!` against a plain one. Recorded, not thresholded — the research figures (2–8× and 3–45×) are what to compare against | P6 |
-| 0.6 | `eve.reclaim-test`-style exactness: after a placed swap and after a lost one, the domain's allocated set is exactly the value's blocks | new, from `test/eve/reclaim_test.cljc` |
+| W0.1 | `eve.static` exposes `detach`, `place`, `transfer!`, `pack`, `open`, `open-checked`, `bytes`; each delegates to its lane's namespace and answers "not built" until that lane lands | `api-surface` |
+| W0.2 | Every requirement id in this plan maps to an existing test var | `requirements-covered` |
+| W0.3 | The image's block table and relocation table, and the chunk header, read and write exactly as `FORMAT-V1.md` §2 and §9 state | `contract-roundtrip` |
+| W0.4 | `alloc-run!` exists on the slab I/O with a default that loops `alloc!`, so every host is correct before any is fast | `alloc-run-default` |
+| W0.5 | The scoreboard runs every row, both arms in one session, and appends to the log | `scoreboard-smoke` (a tiny corpus) |
+| W0.6 | Baselines logged — including atom → atom through today's `:foreign-policy :copy` as one run | first row of `SPIKE-LOG.md` |
 
-### Phase 1 — placement: the allocator and the count
+### 3.3 Wave 1 — the spike (JVM; twelve lanes)
 
-Built:
+Meeting points: Z1 + Z2 → Z3 → Z4 and T1. C1 → C2, C3, C4, X1. L1 and B1 meet nothing. Until a meeting point lands,
+the downstream lane runs on the Wave 0 default (per-block `alloc-run!`, a hand-built image, the contract's header).
 
-- **A run claim** as a slab-I/O operation (`alloc-run! sio class n` → first block), default implementation a loop
-  of `alloc!` so every host is correct at once. Precedents already in the trees: the ClojureScript slab's uncalled
-  `batch-alloc` (`adapters/slab/module/src/eve/process_slab.cljs:517-562` — n blocks of one class in one pass, not
-  guaranteed contiguous) and atom.broker's struct-array design, which reserves one contiguous run for a whole array
-  whose count and stride are known up front (`docs/struct-arrays/master-plan.md`, `phase-3-lazy-fill.md`); the heap and mmap slabs claim whole bitmap words by CAS (measured:
-  3–9× per-block net of the domain, M5). It must hold under another process allocating in the same class (word CAS, no lock) and
-  under growth.
-- **`place` by runs**, with the conditions `ASSUMPTIONS.md` A15 lists: bits set before the hold, clean rows, final
-  offsets, **validation before the claim** (a throw inside a swap frees nothing today), touches for the force.
-- **The count written, not walked.** The image's relocation table is every block's holders; placement writes each
-  new block's count and flags as it writes the block, and the commit's hold of the root does not descend into
-  blocks it is told are freshly and fully counted. This is the measured bottleneck (M6: ≈ 1 µs a block, 50–97 % of
-  a placed swap)
-  and the one change here that touches `eve.tally`; it is specified against the tally's own words for "counted"
-  (`src/eve/tally.cljc:10-17,314-358`) and proven by the exactness probe, not argued.
-- **Building off-allocator.** `swap!`'s store of a plain value builds in a thread-private buffer, compacts, and
-  places (M6: 0.37–0.56× today's time with the writers untouched). The buffer is a call temporary under the
-  2026-10-29 ruling's four conditions: it lives inside one store call, no reader, slot or count names it, each use
-  overwrites it, and it is dropped when the call returns; on a GC host it is a host byte array, never slab memory.
-  Nothing built this way outlives the call in that form — a thread-local space of values that live *across* calls
-  is the nursery the operator set aside on 2026-10-18, and is not proposed (§6).
-- **A crossing copies.** A slab value of another domain stored into an atom is detached and placed, root or
-  nested — the model's rule, which Eve refuses today and `:foreign-policy :copy` approximates by materializing
-  (`doc/memory-model.md` D5; `src/eve/atom.cljc:852-876`).
+**Z1 — the image: a static slab I/O and `detach`.** Files: `src/eve/static/sio.cljc`, `src/eve/static/image.cljc`,
+`register-deftype-layout!` in `src/eve/deftype/macros.cljc` (adds a type's total size). Board: B3.
 
-Acceptance:
-
-| # | Probe | Host |
+| Req | Requirement | Test |
 |---|---|---|
-| 1.1 | Run claim under contention: N threads and two processes allocating runs and single blocks in one disk domain; no block handed out twice; free counts exact | JVM, then bb |
-| 1.2 | Exactness (0.6) with run claims and written counts, on heap and disk domains, including a lost CAS and a throw in the swap's function after placement | JVM |
-| 1.3 | A journal domain: place, kill the process before the next commit, reopen, the value reads and the allocated set is exact | JVM (`test/eve/journal_recovery_test.clj`'s shape) |
-| 1.4 | A placed `swap!` within 2× of placement alone on the four corpora (today 2–31×: M6 net of the domain over M5 net of the domain) | JVM |
-| 1.5 | The plain `swap!` on the four corpora no slower than today on any, and the off-allocator arm at or under 0.6× | JVM |
-| 1.6 | `(swap! a assoc :k v)` with `v` from another domain stores and reads back, root and nested; two-ref STM transaction storing a foreign value commits both or neither (it commits one today: A16) | JVM |
+| Z1.1 | A read-only slab I/O over one byte array: every `alloc!`, `free!`, `write-*`, `cas!` throws (the prototype accepted writes) | `view-refuses-every-mutator` |
+| Z1.2 | Every type of `probes/p5_types.clj` reads in place from an image — sorted, rb-tree, int-map, arrays, Dataset, a user type with all four field classes, a DataScript DB, the list (with L1) | `image-reads-every-type` (table-driven) |
+| Z1.3 | `detach` copies exactly the reachable blocks, root first, generic over the kinds `eve.retire` reads, and emits both tables: the block table names each block once, the relocation table names every pointer `eve.retire/children` finds | `detach-tables-complete` (generated values) |
+| Z1.4 | A detach under the pin is one committed value while another thread swaps | `detach-under-concurrent-writes` |
+| Z1.5 | An earlier `(length, root)` view stays equal, hash-stable and readable from a buffer cut at its length while the builder appends | `views-survive-appends` (property, from P1) |
+| Z1.6 | Detaching a build that left garbage yields no dead byte | `detach-compacts` (live ratio 1.0) |
+| Z1.7 | Hot path: a static reads at slab speed, not through protocol dispatch | `image-read-speed` (within 1.2× of a slab read; M5 measured 16–60 against 18–54 ms) |
 
-### Phase 2 — the packed form: chunks, the wire role
+**Z2 — the run claim.** Files: `src/eve/deftype_proto/alloc.cljc` (heap and mmap slabs). Board: B1.
 
-Built:
-
-- **The chunk writer and reader** of `FORMAT-V1.md` §2–4, 8, 10–11 — scalars, symbol table, shapes, MAP / VEC /
-  SET / LIST / KMAP / META / TAGGED, standalone columns — on the byte-array hosts and the ClojureScript family from
-  the first commit, because the byte contract is only real when two codecs agree.
-- **Static collection types** that satisfy the protocols over a chunk: lookup, nth, count, seq, reduce, equiv,
-  hash, print; `assoc` / `conj` answering a new static.
-- **`pack`** from plain data and from a slab value (keeping one node per shared block, Q2); **`open-checked`**.
-- **A writer / reader pair** with handlers keyed by type key and the generic record as the default (Q7).
-- **The two scalars Eve lacks** (bytes, an addressable nil) in the static form; whether bytes also becomes a slab
-  scalar is a separate change and not required here.
-- **Fixtures**: `test/eve/fixtures/static-bytes.edn` and a malformed-chunk file, in every host's runner list.
-
-Acceptance:
-
-| # | Probe | Host |
+| Req | Requirement | Test |
 |---|---|---|
-| 2.1 | Golden bytes: every fixture row encodes to its bytes and decodes to its value | every host with a runner |
-| 2.2 | The same value packed on the JVM and on Node is the same bytes (settles A14 for the format) | JVM + Node |
-| 2.3 | Malformed chunks: each refused with its named check; no `Error`; nesting 10,000 deep refused | JVM, Node |
-| 2.4 | Bytes: at or under 0.9× Transit MessagePack on the message and record corpora without batches; hit rate and table share reported per chunk size | JVM (`probes/p2_sizes.clj`) |
-| 2.5 | `(= packed plain)`, `(= packed slab)`, `(= packed image)` both ways; hashes equal; the float edges behave as the digest already does (A10) | JVM |
-| 2.6 | A type the reader does not have round-trips as the generic record, bytes unchanged | JVM ↔ Node |
+| Z2.1 | `alloc-run! sio class n` answers the first of n consecutive blocks, all marked allocated | `run-is-consecutive-and-allocated` |
+| Z2.2 | Whole bitmap words by one CAS, partial words masked at both ends: a run of any n at any cursor wastes no block (the probe wasted up to 31 a claim) | `run-wastes-nothing` (free count exact; no bit set outside the run) |
+| Z2.3 | No free run → answers none and claims nothing | `no-run-claims-nothing` (a fragmented class) |
+| Z2.4 | N threads claiming runs and single blocks in one domain: no block handed out twice, free counts exact | `run-claim-contention` |
+| Z2.5 | Correct across growth of a heap class | `run-claim-across-growth` |
+| Z2.6 | Works in an encrypted domain | `run-claim-encrypted` |
+| Gate | claim and copy at least 3× per-block allocation, net of the domain (probe: 3–9×) | board row B1 |
 
-### Phase 3 — columns and the generated sister
+**Z3 — the zip (`place`).** Files: `src/eve/static/place.cljc`. Board: B1.
 
-Built:
-
-- **BATCH and the column kinds** (§5), with the narrowed and run-end encodings behind a writer choice.
-- **`eve-deftype` emits the sister** at `src/eve/deftype/macros.cljc:130-153`: a typed shape (key, fingerprint,
-  field classes), a row type whose field reads go to `column[row]`, the user's protocol bodies expanded against it.
-  On the ClojureScript family the same hook emits the image's reader too.
-- **Dataset ↔ batch**: a Dataset's columns are already dense blocks; packing one is a copy per column. Row views
-  on a batch; the column functions of `eve.alpha.col` over a batch in place (they copy a column out and back
-  today, `census/DEFTYPE-AND-COLUMNAR.md` §2.5).
-- **Column types Eve's Dataset lacks**: strings, keywords (dictionary), booleans, nulls, int64, instants.
-- **Hand-offs without a copy**: a dense column as the host's typed array / buffer; an Arrow C-data or DLPack export
-  where the host has one — a consumer, not a dependency.
-
-Acceptance:
-
-| # | Probe | Host |
+| Req | Requirement | Test |
 |---|---|---|
-| 3.1 | A vector of instances of a user type → batch → instances: equal by fields; the sister satisfies the type's own protocols | JVM, Node |
-| 3.2 | Column scan and filter over a 64 KiB-chunked batch at or under 2 ns and 4 ns a row; one cell at or under 2× the host map's; a row view built in under 1 µs (research: 1.4, 3.0, 106 ns against 59, 0.64 µs — M4) | JVM |
-| 3.3 | `test/eve/columnar_bench.cljc`'s five pipelines over a static batch against today's Dataset, same session | JVM, Node |
-| 3.4 | A map of vectors and a vector of maps of the same data pack to the same bytes | JVM |
-| 3.5 | A typed column handed to a `double[]` / `Float64Array` shares memory (a write through the host array is forbidden; identity of the backing store is the check) | JVM, Node |
+| Z3.1 | An image placed inside a `swap!` reads back equal, and a further write on top of it is sound | `place-reads-back-and-updates` |
+| Z3.2 | Tables are checked before anything is claimed — an offset out of range, overlapping blocks, a pointer to a non-block, a size the class cannot hold, an unknown kind — each a typed refusal that leaves the domain's allocated set unchanged | `place-refuses-bad-tables` (one case per check) |
+| Z3.3 | When a class has no free run the zip falls back to shorter runs, then single blocks, with the same result | `place-fallback-equal` |
+| Z3.4 | After a lost CAS, and after a throw in the swap's function once placement is done, the allocated set is what it was | `place-exact-on-loss-and-throw` (the shape of `test/eve/reclaim_test.cljc`) |
+| Z3.5 | Blocks of the large class are placed 8-aligned | `place-large-blocks` |
+| Z3.6 | In an encrypted domain placed bytes pass through the domain's keystream | `place-encrypted` |
+| Z3.7 | An image in 1 MiB units places unit by unit, pointers that leave a unit resolved from the plan in the first unit | `place-by-units` (M8) |
+| Gate | ≤ 50 ns a block | board row B1 |
 
-### Phase 4 — chunks in atoms; segments
+**Z4 — the count taken at the zip (this is fork F5, spiked behind a flag).** Files: `src/eve/tally.cljc`. Board: B2.
 
-Gated on fork F3. Built: the chunk block kind (a leaf to the tally and to `eve.retire`, a pointer tag), store and
-read-back by `memcpy`; a persistent spine over chunk leaves (a directory by index or by key range, itself an Eve
-collection); for the DataScript port, a sorted datom batch with a first / last key per chunk as an index leaf.
+| Req | Requirement | Test |
+|---|---|---|
+| Z4.1 | Counts and flags written from the relocation table equal, row for row, what `hold-root!` writes for the same value | `written-counts-equal-walked` (generated values, two domains) |
+| Z4.2 | Exactness on a won swap, a lost CAS and a throw | `written-counts-exact` |
+| Z4.3 | Dropping the root afterwards frees the domain to empty | `written-counts-release-clean` |
+| Z4.4 | A block with several holders is counted once per holder | `written-counts-shared` (the k = 100 corpus of M7) |
+| Z4.5 | Flag off: behaviour identical to Z3 with the walk | `flag-off-is-the-walk` |
+| Gate | a placed `swap!` ≤ 2× placement alone (today 2–31×) | board row B2 |
 
-Acceptance: `(swap! a assoc :t batch)` costs a copy of the batch's bytes and one block; exactness (0.6) holds;
-datoms at or under 25 B each in segments against 296 B today (M2, M1); a range scan over segments in place.
+If Z4.1 or Z4.2 cannot be made exact the lane ends there and reports; placement stays at row B2's probe figure.
 
-### Phase 5 — the network and the kernel
+**T1 — atom to atom.** Files: `src/eve/static/transfer.cljc`, the foreign-value branch of `resolve-new-ptr` in
+`src/eve/atom.cljc`. Board: B4.
+
+| Req | Requirement | Test |
+|---|---|---|
+| T1.1 | A slab value of atom A stored into atom B, at the root or nested, is detached and zipped — no host collection is built — and reads back equal; A is unchanged; B's allocated set is exactly the value's blocks | `transfer-in-process` |
+| T1.2 | The source is pinned for the copy: concurrent writes to A never tear the value B receives | `transfer-under-writes` |
+| T1.3 | A two-ref STM transaction that stores a foreign value commits both refs or neither (it commits one today, A16) | `stm-foreign-value-atomic` |
+| T1.4 | Process to process: A's value → bytes → a file → B in a second JVM, equal | `transfer-cross-process` |
+| T1.5 | A value holding a process-local reference is refused by name | `transfer-refuses-local-reference` |
+| T1.6 | If a direct domain-to-domain copy (no buffer between) is tried, it gives the same blocks | `transfer-direct-equal` |
+| Gate | ≤ 2× (detach + zip alone): ≤ 5 / 26 / 9 / 26 ms on the four corpora | board row B4 |
+
+**B1 — a builder with no garbage.** Files: `src/eve/static/build.cljc`. Board: B5.
+
+| Req | Requirement | Test |
+|---|---|---|
+| B1.1 | Plain data → blocks in final layout in one pass; the value is `=` today's writer's, has the same root digest, and takes a further `assoc` | `direct-build-equal-and-updatable` |
+| B1.2 | Every byte written is reachable — no compaction pass | `direct-build-no-garbage` |
+| B1.3 | Its output is an image with both tables, so Z3 places it | `direct-build-is-placeable` |
+| B1.4 | A type it does not cover falls back to today's writer and says so | `direct-build-fallback` |
+| Gate | plain → atom under the probe's 0.37–0.56× on every corpus | board row B5 |
+
+**C1 — the 64 KiB chunk.** Files: `src/eve/static/chunk.cljc`, `test/eve/fixtures/static-bytes.edn`. Board: B6, B7.
+
+| Req | Requirement | Test |
+|---|---|---|
+| C1.1 | Header, scalars, symbol table, shapes and nodes as `FORMAT-V1.md` §2–4; every fixture row encodes to its bytes and decodes to its value | `golden-bytes` |
+| C1.2 | Round trip: every corpus and generated values — nil, bytes, big numbers, uuids, instants, chars, sets, lists, metadata | `chunk-roundtrip` (property) |
+| C1.3 | Fill: a chunk seals when the next row would pass 65,535 bytes; an oversize value makes one wide chunk; small values share a chunk | `chunk-fill-policy` |
+| C1.4 | Lookup, nth, count, seq, reduce, equiv, hash, print over the bytes, with no whole-chunk decode | `chunk-protocols-in-place` (a decode counter stays at zero) |
+| C1.5 | `assoc` / `conj` answer a new static; the sealed bytes of the old one are untouched | `chunk-update-appends` |
+| C1.6 | A type the reader lacks round-trips as a generic record, bytes unchanged | `chunk-unknown-type` |
+| C1.7 | `=` and `hash` agree across packed, image, slab and plain, both ways; the float edges behave as the digest does (A10) | `chunk-equality-domain` |
+| Gate | ≤ 0.9× Transit MessagePack; decode ≥ 2.5× Transit | board rows B6, B7 |
+
+**C2 — columns and batches.** Files: `src/eve/static/column.cljc`. Board: B7.
+
+| Req | Requirement | Test |
+|---|---|---|
+| C2.1 | BATCH and every column kind of §5 round-trip | `column-roundtrip` |
+| C2.2 | Scan, filter, one cell and a row view computed in place equal the host's answers | `column-ops-equal-host` |
+| C2.3 | Narrowed and run-end columns read correctly at random indexes | `column-encodings-point-read` |
+| C2.4 | A vector of maps and a map of vectors of the same data pack to the same bytes (the prototype: 0.55× against 1.10×) | `rows-and-columns-same-bytes` |
+| C2.5 | A dense column is handed to the host as its typed array without a copy, read-only | `column-zero-copy-handoff` |
+| Gate | ≤ 2 ns and ≤ 4 ns a row; one cell ≤ 2× the host map's; a row view ≤ 1 µs | board row B7 |
+
+**C3 — the container: sixteen chunks, 1 MiB.** Files: `src/eve/static/container.cljc`. Board: B8.
+
+| Req | Requirement | Test |
+|---|---|---|
+| C3.1 | A value past one chunk is a directory and chunks; a reader finds its chunk by binary search and opens no other | `directory-opens-one-chunk` (an open counter) |
+| C3.2 | A container holds up to sixteen chunks under one directory and is the unit of compression | `container-compression` |
+| C3.3 | A reader can enter a stream at any chunk | `enter-mid-stream` |
+| C3.4 | Appending makes a new chunk and a new root; the old `(chunks, root)` still reads the old value | `append-keeps-old-value` |
+| C3.5 | A container is the unit of placement for an image, with its cross-unit plan in the first unit | `container-is-placement-unit` (with Z3.7) |
+| Gate | ≤ 5 % over the whole value compressed as one | board row B8 |
+
+**C4 — bytes nobody vouches for.** Files: `src/eve/static/check.cljc`, `test/eve/fixtures/static-malformed.edn`.
+
+| Req | Requirement | Test |
+|---|---|---|
+| C4.1 | `open-checked` refuses every malformed fixture with its named check and never a host `Error` | `malformed-refused-by-name` |
+| C4.2 | Limits: nesting 64; a count times its smallest element never exceeds the bytes left | `limits-enforced` (10,000 levels; a lying count) |
+| C4.3 | Random mutations of valid chunks end in a typed refusal or a value — no crash, no hang | `fuzz-never-crashes` |
+| C4.4 | `place` and `transfer!` accept only checked bytes | `place-requires-checked` |
+
+**L1 — the list reads without allocating.** Files: `src/eve/list.cljc`.
+
+| Req | Requirement | Test |
+|---|---|---|
+| L1.1 | Walking a list allocates nothing (a deref of 50 elements takes 50 blocks today) | `list-seq-allocates-nothing` |
+| L1.2 | A list reads from a frozen view (P5's one failing row) | `list-reads-from-view` |
+| L1.3 | The list's existing tests stay green | the existing list suite |
+
+**X1 — the same bytes on a second host.** Files: the ClojureScript side of `chunk`, a Node runner entry.
+
+| Req | Requirement | Test |
+|---|---|---|
+| X1.1 | The golden fixtures encode and decode on Node | `golden-bytes` on Node |
+| X1.2 | One value packed on the JVM and on Node is the same bytes (settles A14 for the format) | `jvm-node-same-bytes` |
+| X1.3 | i64 columns exact through `BigInt64Array`; −0.0 and integral doubles kept in typed columns | `node-numeric-edges` |
+| X1.4 | A chunk viewed through typed arrays starts 8-aligned | `node-alignment` |
+
+### 3.4 Wave 2 — hardening and hosts (eight lanes; opens when Wave 1's gates are met or reported)
+
+| Lane | Owns | Requirements, each with its test |
+|---|---|---|
+| H1 disk domains | mmap slab path of `alloc-run!` | two processes claiming runs and blocks in one disk domain: no block twice, free counts exact (`run-claim-two-process`) · `place` exact on won, lost and thrown swaps in a disk domain (`place-exact-disk`) |
+| H2 journal | — (tests and whatever they force) | place, kill before the next commit, reopen: the value reads and the allocated set is exact (`place-survives-crash`, the shape of `test/eve/journal_recovery_test.clj`) |
+| H3 other hosts | runner lists, adapters | Wave 1's Z, T and C tests green on babashka, then the remaining slab-I/O hosts (`<host>-static-suite`) |
+| H4 ClojureScript image | `adapters/types/js`, the module slab | Eve's types read an image on Node (`image-reads-every-type` on Node) · the module slab's uncalled `batch-alloc` becomes the run claim (`run-wastes-nothing` on Node) |
+| H5 the generated sister | `src/eve/deftype/macros.cljc:130-153` | a vector of instances → batch → instances, equal by fields (`sister-roundtrip`) · the sister satisfies the type's own protocols (`sister-protocols`) · a changed layout reads as a generic record (`sister-fingerprint-mismatch`) · no hand-written code per type (`sister-is-generated`) |
+| H6 Dataset | `src/eve/dataset*`, `eve.alpha.col` | Dataset ↔ batch is a copy per column (`dataset-batch-roundtrip`) · `test/eve/columnar_bench.cljc`'s five pipelines over a batch against today's Dataset, one session (`columnar-pipelines`) · strings, keywords, booleans, nulls, int64 and instants as columns (`dataset-column-types`) |
+| H7 a chunk inside an atom (needs F3) | `eve.tally`, `eve.retire`, the pointer tag | `(swap! a assoc :t batch)` costs one block and a copy of the bytes (`chunk-leaf-store`) · a chunk that names a block of the domain is refused (`chunk-leaf-closed`) · exactness (`chunk-leaf-exact`) · datoms ≤ 25 B each in sorted segments, against 296 B today (`datom-segments-size`) · a range scan over segments in place (`datom-segment-scan`) |
+| H8 writer and reader | `src/eve/static/io.cljc` | a stream of values with handlers keyed by type key (`writer-reader-handlers`) · the default handler answers the generic record (`reader-default`) · a file written in one process reads in another (`file-roundtrip`) |
+
+### 3.5 Wave 3 — the network and the kernel
 
 Not this lane's to build; stated so the format does not close doors. A chunk with a digest is one blob on the live
 blob wire, put and fetched by presigned URL (`doc/network-atoms/WIRE.md` §7); the gateway moves slab ↔ wire without
@@ -191,25 +261,29 @@ that touches no standing rule — and the block copier "a crossing copies" lacks
 `census/VS-KERNEL-2.md` O10 options 2 and 3). Canonical Eve on ValueScript today runs its own slab inside foreign
 runs of the kernel's memory, not kernel blocks (`census/VS-KERNEL-2.md` §4), so the two sides meet only as bytes.
 
-## 4. Host order
+## 4. Fan-out, hosts and merge order
 
-JVM first for every phase (it is where everything here was measured). Phase 2's bytes land on Node in the same
-change (2.2). The other ISlabIO hosts follow the JVM with their existing adapters: the image and placement are
-shared `.cljc` over `eve.slab-io`. ClojureScript's image reader comes with Phase 3's emission hook. ValueScript does
-not expand `eve-deftype` at this pin and is Phase 5.
+- Wave 0 is one session. Wave 1 is up to twelve; Wave 2 up to eight. No lane of a wave waits for another to start.
+- Merge order inside Wave 1 follows the meeting points: Z1 and Z2, then Z3, then Z4 and T1; C1, then C2, C3, C4
+  and X1; L1 and B1 whenever green. A lane rebases on what merged before it and re-runs its tests and its board row.
+- Hosts: Wave 1 is the JVM, where everything in `MEASUREMENTS.md` was taken, plus Node for the chunk's bytes (X1).
+  The other slab-I/O hosts, ClojureScript's image and disk domains are Wave 2. ValueScript does not expand
+  `eve-deftype` at this pin and is Wave 3.
+- What Wave 1 leaves untouched: what `@a` returns, the journal, the network layer, every public API outside
+  `eve.static`. Z4 is behind a flag and T1 behind the foreign-value branch that refuses today.
 
 ## 5. Risks that remain
 
 | # | Risk | What bounds it |
 |---|---|---|
-| R1 | Writing counts at placement is a change inside the tally, where the standing rule is "the walk, exactly" | It adds no mechanism beside the count — it writes the same words the walk would. Probe 1.2 is exactness against the allocation log, on won, lost and thrown swaps. If it cannot be made exact it is dropped and placement stays at M6's 3–45× |
+| R1 | Writing counts at placement is a change inside the tally, where the standing rule is "the walk, exactly" | It adds no mechanism beside the count — it writes the same words the walk would. Lane Z4's tests (Z4.1–Z4.3) are equality with the walk and exactness on won, lost and thrown swaps. If it cannot be made exact it is dropped and placement stays at M6's 3–45× |
 | R2 | Two forms are two reader surfaces | The image's reader is Eve's existing types; only the packed form is new code. If Phase 2's readers reach slab read speed, the image stays an internal transport and is not a public form |
-| R3 | ClojureScript cannot read an image as its types stand | Phase 3's hook; until then ClojureScript has `pack` and the packed readers only. A14 is open until probe 2.2 |
+| R3 | ClojureScript cannot read an image as its types stand | Lane H4; until then ClojureScript has `pack` and the packed readers only. A14 is open until X1.2 |
 | R4 | Reading Eve's block layouts in place is 7–31× a host collection (M5) | Not made worse by this plan; the packed readers are the fast path (one cell 68–156 ns against 59) |
-| R5 | A static wire is a generation ValueScript's client cannot read (A17) | Phase 5; until then statics travel between Eve hosts and to stores, and the live network atom is untouched |
+| R5 | A static wire is a generation ValueScript's client cannot read (A17) | Wave 3; until then statics travel between Eve hosts and to stores, and the live network atom is untouched |
 | R6 | Equality at the float edges differs from Clojure's (A10) | Inherited from the digest, pinned by a fixture row rather than left implicit |
-| R7 | Everything was measured on one JVM | Each phase's probes run on a second host before it is called done |
-| R9 | Shared map shapes have no shipped precedent: FlexBuffers' key-vector sharing is unimplemented in its C++ and Rust writers (`research/FORMATS-2.md` B4) | The evidence is this lane's own measurement (M2: shapes take a further 22–33 %); probe 2.4 re-measures it in product code |
+| R7 | Everything was measured on one JVM | Wave 2's H3 and H4 run Wave 1's tests on a second host before anything is called done |
+| R9 | Shared map shapes have no shipped precedent: FlexBuffers' key-vector sharing is unimplemented in its C++ and Rust writers (`research/FORMATS-2.md` B4) | The evidence is this lane's own measurement (M2: shapes take a further 22–33 %); lane C1's gate (board row B6) re-measures it in product code |
 | R10 | Append-only forms accumulate garbage: LMDB's author measured 1,027 pages for 10 live and abandoned the design; CouchDB compacts by copy at about twice the storage (`research/FORMATS-2.md` B6); here a 10,000-entry build is 6.2 % live (M7) | The rule in §3: a build is compacted before it is kept, and nothing long-lived is an append log. Appending is for builders and for short chains of versions |
 | R11 | The review of these documents was cut short: of six adversarial reviewers, two ran for about six minutes before the lane was told to stop spending (2026-11-11 11:33 PM ET). They found five errors, all fixed (`review/`). The kernel-and-rulings, format-soundness, completeness and plan lenses did not run | The untested claims are the ones those lenses would have checked: `FORMAT-V1.md` §4 and §10 as an implementer and an attacker would read them; every kernel citation; the probes' thresholds. Treat them as drafted, not reviewed |
 | R8 | Findings outside this lane that it will trip over: a root scalar past 1,016 bytes reads `nil`; a two-ref STM transaction can half-commit; `eve.sorted`'s `-plain` and the list's seq allocate on read; an adopted kernel page can be evicted under an atom | Recorded with provenance in `CENSUS.md` §"Defects found on the way"; each is re-derived at its own pin before anyone fixes it |
@@ -218,7 +292,7 @@ not expand `eve-deftype` at this pin and is Phase 5.
 
 | Question | Decision | Why it is not the operator's to re-decide |
 |---|---|---|
-| Vector first or columnar first? | Neither: the image first, the allocator second, chunks third, columns fourth | M1, M5, M6 (§2 above) |
+| Vector first or columnar first? | Neither first: after Wave 0 the image, the run claim, the zip, atom-to-atom, the chunk and its columns are parallel lanes of one spike, each judged on its board row | M1, M5, M6, M8 (§2, §3.1) |
 | Is 64 KiB right? | Yes, as a target | A7 |
 | Is the page 1 MiB with 16 chunks? | The container is "a run of chunks"; in a kernel region 15 fit; nothing in the format depends on 16 | A8, C2 |
 | Does `@a` change? | No. Static is asked for | A13 — a silent change would break programs that mutate through a deref |
@@ -237,6 +311,6 @@ Genuine preferences; each with a recommendation.
 |---|---|---|---|
 | F1 | **The name** | `eve.static` with `detach` / `pack` / `place` / `open`; or `eve->static` as one verb with a `:form` option; or other words for the two forms | The namespace and four verbs: the two forms do different jobs and one verb would hide which one a caller is paying for |
 | F2 | **Equality of a user type that defines none** | (a) in a static, by type key and fields — so a static copy is `=` its twin, and a slab instance stays identity-compared as today; (b) change the slab default to by-fields as well, a behaviour change for existing types; (c) keep identity everywhere, so no static of such a type is ever `=` anything but itself | (a) now; (b) is the consistent end state and is its own decision |
-| F3 | **A chunk as a leaf block inside an atom** (Phase 4) | (a) yes — a typed, counted, digested leaf Eve reads in place, like an eve array block; (b) no — a packed value stored into an atom is always exploded into ordinary collection blocks, and chunks live only outside domains | (a). It is all that survives of "static types living in pages with persistent types" (A8 is dead as worded), and it is what makes storing bulk data a copy instead of a build. It is flagged because rule 26 ("no out-of-band stand-ins") is the operator's to read |
+| F3 | **A chunk as a leaf block inside an atom** (lane H7) | (a) yes — a typed, counted, digested leaf Eve reads in place, like an eve array block; (b) no — a packed value stored into an atom is always exploded into ordinary collection blocks, and chunks live only outside domains | (a). It is all that survives of "static types living in pages with persistent types" (A8 is dead as worded), and it is what makes storing bulk data a copy instead of a build. It is flagged because rule 26 ("no out-of-band stand-ins") is the operator's to read |
 | F4 | *Withdrawn.* It asked whether to amend the scratch ruling for a per-thread build region. Standing rulings already answer it (§6, last row) | — | — |
-| F5 | **How far Phase 1 may go inside the tally** | (a) counts written at placement (R1); (b) placement only, the hold left as it is | (a), behind probe 1.2 |
+| F5 | **How far the zip may go inside the tally** | (a) counts written at placement (R1); (b) placement only, the hold left as it is | Lane Z4 spikes (a) behind a flag and reports board row B2 with its exactness tests; decide on those numbers. (a) if Z4.1–Z4.3 are green |

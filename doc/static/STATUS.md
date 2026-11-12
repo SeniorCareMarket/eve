@@ -71,6 +71,11 @@ CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes).
 
 - 2026-11-12 12:30 AM ET — P7, a spike asked for by the operator: 64 KiB against 1 MiB as the unit (`MEASUREMENTS.md` M8).
 
+- 2026-11-12 12:45 AM ET — `IMPL-PLAN.md` §3–§4 rewritten at the operator's instruction: Wave 0 (contracts, scoreboard),
+  Wave 1 (a twelve-lane, perf-driven spike: the image, the run claim, the zip, the count, atom to atom, a direct
+  builder, the 64 KiB chunk, columns, the 1 MiB container, untrusted bytes, the list, a second host), Wave 2
+  (hardening and hosts), Wave 3 (network, kernel). Every lane requirement names its test.
+
 ## Open questions (for the next reader of this file, not for the operator)
 
 - A14 is open until a ClojureScript build packs the same value to the same bytes (plan probe 2.2).
