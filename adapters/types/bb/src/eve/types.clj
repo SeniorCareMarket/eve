@@ -371,6 +371,26 @@
       (sweep-backings!))
     x))
 
+(def ^:private map-mode-record-types
+  "The qualified names of the eve.record records kept in SciMap mode (recorded
+   at :define, read at :build, both at macroexpansion)."
+  (atom #{}))
+
+(defn- record-map-mode?
+  "True for an eve.record record's impls: the full map signature, marked by
+   eve.record/IRecordData, and no host collection-kind head. The same
+   condition as the record carve-out of map-signature? in bb-translate-protos."
+  [impls]
+  (let [ps (set (map :protocol impls))]
+    (and (contains? ps 'eve.record/IRecordData)
+         (contains? ps 'clojure.lang.ILookup)
+         (contains? ps 'clojure.lang.Associative)
+         (contains? ps 'clojure.lang.Counted)
+         (not-any? ps '#{clojure.lang.IPersistentVector clojure.lang.IPersistentSet
+                         clojure.lang.IPersistentList clojure.lang.IList
+                         clojure.lang.IPersistentStack clojure.lang.IPersistentQueue
+                         clojure.lang.Sequential}))))
+
 (defn- define [type-name fields forms]
   [`(clojure.core/deftype ~type-name ~fields ~@forms)])
 
@@ -384,6 +404,8 @@
    :define (fn [type-name fields impls _forms _print]
              (when (some #(= 'clojure.lang.IMapEntry (:protocol %)) impls)
                (swap! map-entry-types conj (qualified-type type-name)))
+             (when (record-map-mode? impls)
+               (swap! map-mode-record-types conj (qualified-type type-name)))
              (let [bb-impls (bb-translate-protos impls type-name {:slab? true})]
                (concat [`(clojure.core/deftype ~type-name ~fields ~@(impls->forms bb-impls))]
                        (when (some #(= 'eve.core/IPrintWithWriter (:protocol %)) bb-impls)
@@ -392,9 +414,14 @@
    ;; as T__new before ->T becomes the constructor, builds instances
    ;; a map-entry type's instances are presented as host map entries
    :build (fn [type-name _fields new-name args]
-            (if (contains? @map-entry-types (qualified-type type-name))
+            (cond
+              (contains? @map-entry-types (qualified-type type-name))
               (list 'eve.types/present-map-entry (list* new-name args))
-              (list* new-name args)))
+              ;; a record in map mode carries its type as a stamp on every
+              ;; instance (see map-signature? in bb-translate-protos)
+              (contains? @map-mode-record-types (qualified-type type-name))
+              (list 'eve.host-completion/stamp-map-mode-type (list* new-name args) type-name)
+              :else (list* new-name args)))
    :factory-via-var? true
    ;; a map type keeps the map interfaces; another's go onto eve.core's protocols
    :slab-prepare (fn [parsed type-name]
