@@ -1129,18 +1129,28 @@
   {:data (.slice slab-data-offsets) :bm (.slice slab-bitmap-offsets)
    :total (.slice slab-total-blocks) :paths (.slice slab-file-paths)
    :bm-paths (.slice slab-bitmap-paths)
+   ;; the descriptor columns too: left pointing at a released mmap domain's
+   ;; .slabN.desc-* regions, the restored slabs' tallies would write through
+   ;; them at the restored layout's offsets (nbb segfault, #490/#492/#494)
+   :desc (.slice slab-desc-regions) :desc-flags (.slice slab-desc-flags-regions)
+   :desc-pointer (.slice slab-desc-pointer-regions) :desc-off (.slice slab-desc-offsets)
    :instances (wasm/snapshot-slab-instances)
    :coalesc [mmap-coalesc-region mmap-coalesc-path
              mmap-coalesc-max-data-size mmap-coalesc-cached-data-size]
    :ks [domain-ks domain-ks-bytes]})
 
-(defn- restore-module-slabs! [{:keys [data bm total paths bm-paths instances coalesc ks]}]
+(defn- restore-module-slabs! [{:keys [data bm total paths bm-paths desc desc-flags desc-pointer desc-off
+                                      instances coalesc ks]}]
   (dotimes [i 7]
     (aset slab-data-offsets i (aget data i))
     (aset slab-bitmap-offsets i (aget bm i))
     (aset slab-total-blocks i (aget total i))
     (aset slab-file-paths i (aget paths i))
-    (aset slab-bitmap-paths i (aget bm-paths i)))
+    (aset slab-bitmap-paths i (aget bm-paths i))
+    (aset slab-desc-regions i (aget desc i))
+    (aset slab-desc-flags-regions i (aget desc-flags i))
+    (aset slab-desc-pointer-regions i (aget desc-pointer i))
+    (aset slab-desc-offsets i (aget desc-off i)))
   (wasm/restore-slab-instances! instances)
   (let [[r p mx cached] coalesc]
     (set! mmap-coalesc-region r)
