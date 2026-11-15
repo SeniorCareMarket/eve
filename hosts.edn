@@ -121,4 +121,13 @@
               "adapters/types/bb/src"
               "adapters/slab-io/protocol/src" "adapters/core/clojure/src" "adapters/completion/bb/src" "adapters/completion/clojure/src"
               "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/int32/portable/src"
-              "adapters/codec/byte-array/src" "adapters/crypto/portable/src" "adapters/thread/none/src" "adapters/journal-file/java/src"]}
+              "adapters/codec/byte-array/src" "adapters/crypto/portable/src" "adapters/thread/none/src" "adapters/journal-file/java/src"]
+ ;; TeaVM wasm-gc seat. Region windows are the imported eve.region memory.
+ ;; The journal is Eve's EVJ1 records on a host file (eve.journal imports),
+ ;; the same bytes adapters/journal-file/java writes.
+ :teavm ["adapters/slab-io/protocol/src" "adapters/crypto/teavm/src"
+         "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/jvm/src" "adapters/slab/heap/src"
+         "adapters/region/teavm/src" "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src"
+         "adapters/process/teavm/src" "adapters/thread/teavm/src" "adapters/types/jvm/src" "adapters/types/js/src"
+         "adapters/journal-file/teavm/src" "adapters/http/teavm/src" "adapters/http-server/teavm/src"]
+}
