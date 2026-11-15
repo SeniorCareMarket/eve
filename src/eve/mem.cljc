@@ -247,14 +247,22 @@
   ;; SCI's JS core has no byte-array or unchecked-byte. A Uint8Array
   ;; carries the identical low eight bits consumed by IMemRegion writes;
   ;; keep signed JVM bytes on the other seats (including CLR and lpy).
+  ;; Each octet is computed in place, not through a local fn: a fn
+  ;; returns Object, which left the JVM-family compile of the four asets
+  ;; below as reflective RT.aset calls (byte[], int, Object). A reflective
+  ;; aset does not resolve in the TeaVM image (heron RESULT #20: "No
+  ;; matching method aset found taking 3 args" at this frame); inline,
+  ;; each octet is a primitive byte and aset binds statically.
   (let [bs #?(:cljs (js/Uint8Array. (* 4 slots))
               :default (byte-array (* 4 slots)))
-        octet (fn [x] #?(:cljs (bit-and x 0xFF)
-                         :default (unchecked-byte (bit-and x 0xFF))))
-        b0 (octet val)
-        b1 (octet (unsigned-bit-shift-right val 8))
-        b2 (octet (unsigned-bit-shift-right val 16))
-        b3 (octet (unsigned-bit-shift-right val 24))]
+        b0 #?(:cljs (bit-and val 0xFF)
+              :default (unchecked-byte (bit-and val 0xFF)))
+        b1 #?(:cljs (bit-and (unsigned-bit-shift-right val 8) 0xFF)
+              :default (unchecked-byte (bit-and (unsigned-bit-shift-right val 8) 0xFF)))
+        b2 #?(:cljs (bit-and (unsigned-bit-shift-right val 16) 0xFF)
+              :default (unchecked-byte (bit-and (unsigned-bit-shift-right val 16) 0xFF)))
+        b3 #?(:cljs (bit-and (unsigned-bit-shift-right val 24) 0xFF)
+              :default (unchecked-byte (bit-and (unsigned-bit-shift-right val 24) 0xFF)))]
     (loop [i 0]
       (when (< i slots)
         (let [o (* 4 i)]
