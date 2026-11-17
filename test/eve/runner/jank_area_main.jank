@@ -1,0 +1,25 @@
+(ns eve.runner.jank-area-main
+  "Crash bisect for the release suite on jank: run ONE suite area in
+   its own process and print PROBE-START / PROBE-DONE around it, so a
+   native crash names the area it died in. Driven by
+   scripts/jank-area-probe.sh via the bb probe:jank-area task.
+
+     bb probe:jank-area thread"
+  (:require [eve.host-completion]
+            [clojure.test :as t]
+            [eve.process :as proc]
+            [eve.release-suite-test]))
+
+(defn -main [& args]
+  (let [area (first args)
+        v (ns-resolve 'eve.release-suite-test (symbol (str area "-properties")))]
+    (println "PROBE-START" area)
+    (if (nil? v)
+      (println "PROBE-UNKNOWN-AREA" area)
+      (try ((:test (meta v)))
+           (catch jank.runtime.object_ref e
+             (println "PROBE-ERROR" area (pr-str e)))
+           (catch std.exception e
+             (println "PROBE-CPP-ERROR" area (cpp/.what e)))))
+    (println "PROBE-DONE" area)
+    (proc/exit! 0)))

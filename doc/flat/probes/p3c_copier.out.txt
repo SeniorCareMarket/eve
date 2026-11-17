@@ -1,0 +1,54 @@
+P3c ? eve ref: refs/heads/claude/sweet-carson-6pt29d | clojure 1.12.0 | java 21.0.12.1
+
+== map 10k int->int
+    image                                                      299,332 B by each block's own extent (299,324 B by the sizes its writer asked for), 2,380 blocks, 2,379 pointers
+    slab -> plain (eve->clj)                                        3.66 ms (med     11.14)
+    slab -> image, Clojure prototype                                3.72 ms (med      7.15)
+    slab -> image, tight                                            0.70 ms (med      1.47)   = 295 ns/block, 5.2x eve->clj
+    (a pre-sized domain alone)                                      2.01 ms (med      2.20)
+    image -> slab, one run per class (incl. the domain)             4.19 ms (med      7.85)
+    plain -> slab, the direct writer (incl. the domain)           162.98 ms (med    166.12)
+    plain -> bump -> image -> slab by runs (incl. the domain)      61.30 ms (med     64.82)   = 0.38x the direct writer
+
+== vector 100k ints
+    image                                                      1,613,216 B by each block's own extent (1,613,208 B by the sizes its writer asked for), 103,229 blocks, 103,228 pointers
+    slab -> plain (eve->clj)                                       17.54 ms (med     18.88)
+    slab -> image, Clojure prototype                               41.01 ms (med     47.03)
+    slab -> image, tight                                            9.55 ms (med      9.84)   = 92 ns/block, 1.8x eve->clj
+    (a pre-sized domain alone)                                      2.32 ms (med      2.38)
+    image -> slab, one run per class (incl. the domain)             5.73 ms (med      5.98)
+    plain -> slab, the direct writer (incl. the domain)           151.47 ms (med    158.61)
+    plain -> bump -> image -> slab by runs (incl. the domain)      38.19 ms (med     41.86)   = 0.25x the direct writer
+
+== vector 10k records
+    image                                                      1,561,464 B by each block's own extent (1,561,456 B by the sizes its writer asked for), 30,325 blocks, 30,324 pointers
+    slab -> plain (eve->clj)                                       20.69 ms (med     21.90)
+    slab -> image, Clojure prototype                               14.36 ms (med     14.96)
+    slab -> image, tight                                            3.30 ms (med      3.51)   = 109 ns/block, 6.3x eve->clj
+    (a pre-sized domain alone)                                      1.68 ms (med      1.74)
+    image -> slab, one run per class (incl. the domain)             2.96 ms (med      3.04)
+    plain -> slab, the direct writer (incl. the domain)           367.52 ms (med    387.40)
+    plain -> bump -> image -> slab by runs (incl. the domain)     201.35 ms (med    214.19)   = 0.55x the direct writer
+
+== map 1k kw->vec(20 ints)
+    image                                                      424,504 B by each block's own extent (424,496 B by the sizes its writer asked for), 22,313 blocks, 22,312 pointers
+    slab -> plain (eve->clj)                                        5.74 ms (med      5.87)
+    slab -> image, Clojure prototype                               11.41 ms (med     12.96)
+    slab -> image, tight                                            2.02 ms (med      3.00)   = 90 ns/block, 2.8x eve->clj
+    (a pre-sized domain alone)                                      1.81 ms (med      1.84)
+    image -> slab, one run per class (incl. the domain)             3.02 ms (med      3.08)
+    plain -> slab, the direct writer (incl. the domain)            71.90 ms (med     75.22)
+    plain -> bump -> image -> slab by runs (incl. the domain)      35.34 ms (med     37.00)   = 0.49x the direct writer
+
+== 5k chat messages
+    image                                                      3,746,412 B by each block's own extent (3,746,404 B by the sizes its writer asked for), 70,997 blocks, 70,996 pointers
+    slab -> plain (eve->clj)                                       41.14 ms (med     46.88)
+    slab -> image, Clojure prototype                               44.23 ms (med     47.63)
+    slab -> image, tight                                           11.94 ms (med     13.33)   = 168 ns/block, 3.4x eve->clj
+    (a pre-sized domain alone)                                      3.02 ms (med      3.07)
+    image -> slab, one run per class (incl. the domain)             5.51 ms (med      5.91)
+    plain -> slab, the direct writer (incl. the domain)           882.82 ms (med    915.12)
+    plain -> bump -> image -> slab by runs (incl. the domain)     567.52 ms (med    597.03)   = 0.64x the direct writer
+
+P3c done
+exit 0

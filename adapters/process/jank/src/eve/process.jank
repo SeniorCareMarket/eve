@@ -46,10 +46,14 @@ namespace eve_proc {
     GC_add_roots(&t->f, &t->f + 1);
     GC_allow_register_threads();
     std::thread([t, period_ms]() {
-      struct GC_stack_base sb; GC_get_stack_base(&sb); GC_register_my_thread(&sb);
+      /* no manual GC registration: jank's Boehm build intercepts pthread_create and
+         registers threads itself; a manual register/unregister pair double-tears-down
+         the thread-local record at exit (GC_destroy_thread_local segfault when this
+         timer thread returns during exit! -- see adapters/thread/jank's spawn note,
+         Nov 13 2026) */
       while(true) {
         std::this_thread::sleep_for(std::chrono::milliseconds(period_ms));
-        if(exiting.load()) { GC_unregister_my_thread(); return; }
+        if(exiting.load()) { return; }
         if(!t->running.load()) break;
         /* a throw out of f is the timer's to report, never to end the thread: a jank value by its string, a C++
            exception by what() (a lock jank takes around the call would otherwise leak silently) */
@@ -59,7 +63,6 @@ namespace eve_proc {
         catch(...) { std::fprintf(stderr, \"eve.process timer: unknown exception\\n\"); }
       }
       GC_remove_roots(&t->f, &t->f + 1);
-      GC_unregister_my_thread();
       delete t;
     }).detach();
     return (long)reinterpret_cast<uintptr_t>(t);

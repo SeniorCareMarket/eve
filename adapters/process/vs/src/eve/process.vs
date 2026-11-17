@@ -1,7 +1,9 @@
 (ns eve.process
   "eve's process primitives (HOST-CONTRACT §5) over ValueScript's: the clock, sleep, and the running thread's identity
-   (vs.thread/worker-id: 0 on the main thread, a mesh worker its id — answered + 1, so no thread is 0). No timer
-   thread, no exit hook, no files yet; standard input's lines (WASI fd 0).
+   (vs.thread/worker-id: 0 on the main thread, a mesh worker its id — answered + 1, so no thread is 0). Files
+   over the runtime's wasi/path-* arms (file-exists?, create-exclusive!, ensure-parent-dir!). No timer
+   thread and no exit hook: the fixed WASI surface has no timer or exit-hook arm, and a mesh's workers are
+   a build-time shape, not a runtime spawn; standard input's lines (WASI fd 0).
 
    random-bytes is the language's own generator (vs.core's RANDOM rows, core.vs: xorshift128 seeded from the clocks,
    \"not cryptographically strong\"): a compiled VS program has no entropy source of its own. It serves the reference
@@ -16,8 +18,41 @@
 (defn start-timer! [period-ms f] nil)
 (defn stop-timer! [h] nil)
 (defn on-process-exit! [f] nil)
-(defn file-exists? [path] false)
-(defn ensure-parent-dir! [base-path] nil)
+
+;; ── files: the program runtime's wasi/path-* arms (the same arms
+;; java.io.File is written over; a success answers a value, a failure
+;; the WASI errno as a number — 44 ENOENT, 20 EXIST). Paths resolve in
+;; the program's first preopened directory, a leading / stripped.
+
+(defn file-exists? [path]
+  (not (number? (wasi/path-filestat path))))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step
+   against every other process (wasi/path-write's create-exclusive mode):
+   true for the process that created it, false when it already existed."
+  [path]
+  (let [r (wasi/path-write path "" 2)]
+    (cond (zero? r) true
+          (= 20 r) false
+          :else (throw (ex-info (str "eve.process/create-exclusive!: WASI errno " r
+                                     " creating " path)
+                                {:path path :errno r})))))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in: the parent of
+   (str base-path \".root\"), segment by segment (an EXIST answer is the
+   already-there case, ignored — the calls that need the directory
+   surface any real failure)."
+  [base-path]
+  (let [parent (str/join "/" (drop-last (str/split (str base-path ".root") #"/")))]
+    (when (seq parent)
+      (loop [acc nil segs (filter seq (str/split parent #"/"))]
+        (when (seq segs)
+          (let [dir (if acc (str acc "/" (first segs)) (first segs))]
+            (wasi/path-create-directory dir)
+            (recur dir (rest segs)))))))
+  nil)
 (defn identity-hash
   "An object's identity hash: equal for one object, whatever its own equality or hash — what eve's reference table
    keys by (FORMAT-DECISIONS.md §9)."

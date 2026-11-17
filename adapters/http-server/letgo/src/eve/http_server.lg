@@ -1,0 +1,25 @@
+(ns eve.http-server
+  "eve's http-server feature (adapters/README.md) on let-go (lg-eve): Go's net/http through lg-eve's native
+   (eve.host-native/http-serve, impls/let-go/evenative/httpserver.go) — what a member needs to serve its disk
+   domain's atoms on eve.net's routes (eve.net.gateway). (serve! opts handler) answers {:port :stop}; handler
+   takes {:method :url :headers :body :body-b64} — :url the request's path and query as sent (an atom id's %2F
+   kept), :headers lower-case names, :body UTF-8 text and :body-b64 the same bytes as base64 (a blob) — and
+   answers {:status :headers :body :body-as}: :body text, or with :body-as :b64 the base64 of the bytes to send
+   (eve.net.run's conventions), as the JDK adapter does. A handler that throws answers 500.
+
+   Stock let-go's own http/start is not the route: its response body coercion cannot send the bytes a
+   :body-as :b64 answer names (it sends a sequence's elements as text, and the adapter set's bytes->string
+   sanitizes UTF-8), so the request/response maps are built in the native from the raw bytes.
+
+   net/http serves each connection on its own goroutine; :threads (default 8) is the bound on handlers in
+   flight at once — a handler may block, and excess connections wait, the JDK pool's observable shape.
+   :stop closes the server and its connections at once: the port is released when :stop returns.")
+
+(defn serve!
+  "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1) :threads (default 8)}: {:port :stop}.
+   :port in the answer is the bound port."
+  [opts handler]
+  (eve.host-native/http-serve (or (:host opts) "127.0.0.1")
+                              (long (or (:port opts) 0))
+                              (long (or (:threads opts) 8))
+                              handler))

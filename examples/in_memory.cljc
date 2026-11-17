@@ -14,7 +14,7 @@
   (:require [eve.alpha :as e]
             [eve.atom :as ea]
             [eve.core :as ec]
-            [eve.deftype.int-map :as im]
+            [eve.map :as em]
             [eve.sorted :as sorted]
             [eve.thread :as t]
             [eve.thread.fold :as tf]))
@@ -46,12 +46,12 @@
 (defn assoc-all [m kvs] (reduce (fn [m [k v]] (ec/assoc m k v)) m kvs))
 
 (def colls (e/atom ::colls {}))
-(swap! colls (fn [_] {:ints (im/int-map) :by-name (sorted/sorted-map)}))
+(swap! colls (fn [_] {:ints (em/hash-map) :by-name (sorted/sorted-map)}))
 (swap! colls (fn [v] (-> v
                          (update :ints assoc-all [[3 :c] [1 :a] [-10 :neg]])
                          (update :by-name assoc-all [["carol" 3] ["alice" 1] ["bob" 2]]))))
-;; deref materializes a map, a vector, a set, a list and an int-map into the host's own collections
-(check "int-map, materialized" {-10 :neg 1 :a 3 :c} (into {} (:ints @colls)))
+;; deref materializes a map, a vector, a set, a list and a hash map into the host's own collections
+(check "hash map, materialized" {-10 :neg 1 :a 3 :c} (into {} (:ints @colls)))
 ;; e/$ is a read region: inside it @ answers the stored (lazy, zero-copy) value, held until the region exits; what
 ;; the region answers leaves as plain data
 (check "$: the stored sorted map's keys, in order" ["alice" "bob" "carol"]

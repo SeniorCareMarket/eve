@@ -1,0 +1,272 @@
+(ns eve.thread-host
+  "eve's thread feature (HOST-CONTRACT §11) on ClojureDart: a thread is a
+   Dart isolate (Isolate.spawn, this app's own isolate group). Heaps are
+   separate, so a message is data (EDN): closures never travel
+   (ships-closures? false, Node's configuration), and a non-data value in
+   a message is refused at the sender.
+
+   The mailbox is shared memory, not ports: one heap region from
+   adapters/region/dart's natives, a ring per thread in it, its doorbell
+   a word eveWait32 sleeps on (the futex). receive! blocks the calling
+   isolate on that word — an isolate's thread is its own, as a worker
+   thread's is on Node. The starter passes a worker its init as the
+   spawn message (a map: addresses are ints, the boot is data, and the
+   entry fn — same-group isolates accept a fn object in a spawn
+   message, measured), the worker runs its entry, and answers its
+   starter {:eve.thread/exit addr :reason r} through the mailbox, as
+   Node's workers answer theirs.
+
+   Entry resolution is this host's named limit: a compiled Dart program
+   has no var table to resolve a symbol against, so entries are
+   REGISTERED — (register-entry! 'my.ns/entry my-entry) where the
+   program starts — and start-threads! names a registered entry; the
+   registered fn travels in the spawn message. An entry is a top-level
+   fn that works from its boot argument and the mailbox: state it
+   closes over does not cross (a sent object is copied, not shared),
+   which is ships-closures? false stated for entries.
+   eval-form is refused, as on compiled ClojureScript."
+  (:require ["dart:io" :as io]
+            ["dart:isolate" :as iso]
+            ["dart:convert" :as conv]
+            ["package:eve_region/eve_region.dart" :as region]
+            [cljd.edn :as edn]
+            [eve.process :as proc]
+            [clojure.string :as str]))
+
+;; ---------------------------------------------------------------------------
+;; The shared region and the rings
+;; ---------------------------------------------------------------------------
+
+(def ^:private REGION-SIZE 8388608)          ;; 8 MiB for the whole mesh
+(def ^:private MAX-THREADS 64)
+(def ^:private SLOT-SIZE 131072)             ;; one mailbox ring per thread
+(def ^:private RING-SIZE (- SLOT-SIZE 16))
+(def ^:private NEXT-ID 0)                    ;; i32 word offsets in the region
+(def ^:private SPAWN-MS 1)
+
+(def ^:private ctx
+  "This isolate's {:base :self :starter}: the main isolate makes the
+   region and is thread 0; a worker's is set by worker-main."
+  (volatile! nil))
+
+(defn- ensure-ctx!
+  "This isolate's context, making the shared region when this is the
+   first thread call in the process (the main isolate, thread 0)."
+  []
+  (or @ctx
+      (let [base (region/eveHeapRegion REGION-SIZE)]
+        (vreset! ctx {:base base :self 0 :starter 0}))))
+
+(defn- slot-base [base addr] (+ base 4096 (* addr SLOT-SIZE)))
+(defn- bell [sb] sb)
+(defn- lockw [sb] (+ sb 4))
+(defn- wposw [sb] (+ sb 8))
+(defn- rposw [sb] (+ sb 12))
+(defn- ring [sb] (+ sb 16))
+
+(defn- spin-lock! [addr]
+  (loop [n 0]
+    (when (not= 0 (region/eveCas32 addr 0 1))
+      (when (zero? (mod n 64)) (io/sleep (Duration .milliseconds 1)))
+      (recur (inc n)))))
+
+(defn- spin-unlock! [addr] (region/eveStore32 addr 0))
+
+(defn- ring-write!
+  "Write frame bytes BS (a Uint8List) into the ring at SB: [len i32][bytes],
+   a -1 marker and a dead tail when a frame does not fit what is left."
+  [sb bs]
+  (let [len (.-length bs)
+        need (+ 4 len)]
+    (when (> need RING-SIZE)
+      (throw (ex-info "eve.thread-host: message larger than a mailbox ring"
+                      {:bytes len :ring RING-SIZE})))
+    (spin-lock! (lockw sb))
+    (try
+      (loop []
+        (let [w (region/eveLoad32 (wposw sb))
+              r (region/eveLoad32 (rposw sb))]
+          (if (> (- w r) (- RING-SIZE need))
+            (do (io/sleep (Duration .milliseconds 1)) (recur))
+            (let [off (mod w RING-SIZE)
+                  tail (- RING-SIZE off)]
+              (cond
+                (< tail 4)
+                (do (region/eveStore32 (wposw sb) (+ w tail)) (recur))
+
+                (< tail need)
+                (do (region/eveStore32 (+ (ring sb) off) -1)
+                    (region/eveStore32 (wposw sb) (+ w tail))
+                    (recur))
+
+                :else
+                (do (region/eveStore32 (+ (ring sb) off) len)
+                    (region/eveWriteBytes (ring sb) (+ off 4) bs)
+                    (region/eveStore32 (wposw sb) (+ w need))))))))
+      (finally (spin-unlock! (lockw sb))))))
+
+(defn- ring-read
+  "The next frame's bytes from the ring at SB, or nil when it is empty.
+   Single consumer: the ring's owner."
+  [sb]
+  (loop []
+    (let [w (region/eveLoad32 (wposw sb))
+          r (region/eveLoad32 (rposw sb))]
+      (when (< r w)
+        (let [off (mod r RING-SIZE)
+              tail (- RING-SIZE off)]
+          (cond
+            (< tail 4)
+            (do (region/eveStore32 (rposw sb) (+ r tail)) (recur))
+
+            :else
+            (let [len (region/eveLoad32 (+ (ring sb) off))]
+              (cond
+                (= -1 len)
+                (do (region/eveStore32 (rposw sb) (+ r tail)) (recur))
+
+                (pos? len)
+                (let [bs (region/eveReadBytes (ring sb) (+ off 4) len)]
+                  (region/eveStore32 (rposw sb) (+ r 4 len))
+                  bs)
+
+                :else nil))))))))
+
+;; ---------------------------------------------------------------------------
+;; The contract
+;; ---------------------------------------------------------------------------
+
+(defn parallelism [] (.-numberOfProcessors io/Platform))
+
+(defn ships-closures? [] false)
+
+(defn self [] (:self (ensure-ctx!)))
+
+(defn error-data [e]
+  {:class (str (.-runtimeType e)) :message (ex-message e) :data (ex-data e)})
+
+(defn- data-only?
+  "A message is data: nil, a bool, a number, a string, a keyword, a
+   symbol, or a map/vector/set/seq of data. Anything else (a closure, a
+   host object, a deftype instance) cannot cross to another isolate."
+  [x]
+  (cond (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) true
+        (map? x) (every? (fn [[k v]] (and (data-only? k) (data-only? v))) x)
+        (or (vector? x) (set? x) (seq? x) (list? x)) (every? data-only? x)
+        :else false))
+
+(defn send!
+  "Send data MSG to the thread at ADDR: onto its ring, its doorbell
+   rung. A message that is not data is refused here, at the sender."
+  [addr msg]
+  (when-not (data-only? msg)
+    (throw (ex-info "eve.thread-host: a message to another thread must be data (ships-closures? is false)"
+                    {:to addr})))
+  (let [{:keys [base]} (ensure-ctx!)
+        sb (slot-base base addr)
+        bs (.encode conv/utf8 (pr-str msg))]
+    (ring-write! sb bs)
+    (region/eveAdd32 (bell sb) 1)
+    (region/eveNotify32 (bell sb) 2147483647)
+    nil))
+
+(defn receive!
+  "This thread's next message; :eve.thread/timeout after MS milliseconds
+   (0 polls, a negative MS waits for ever). Blocks this isolate on its
+   doorbell word between drains."
+  [ms]
+  (let [{:keys [base self]} (ensure-ctx!)
+        sb (slot-base base self)
+        deadline (when-not (neg? ms) (+ (proc/now-ms) ms))]
+    (loop []
+      (if-let [bs (ring-read sb)]
+        (edn/read-string (.decode conv/utf8 bs))
+        (let [left (when deadline (- deadline (proc/now-ms)))]
+          (cond (and left (<= left 0)) :eve.thread/timeout
+                :else (let [b (region/eveLoad32 (bell sb))]
+                        (region/eveWait32 (bell sb) b (int (if left (min left 1000) 1000)))
+                        (recur))))))))
+
+;; ---------------------------------------------------------------------------
+;; Starting threads: registered entries, spawned isolates
+;; ---------------------------------------------------------------------------
+
+(def ^:private entries (atom {}))
+
+(defn register-entry!
+  "Register a thread entry: (register-entry! 'my.ns/entry my-entry)
+   where the program starts, before start-threads! names it. A compiled
+   Dart program has no var table; this is how an entry is found."
+  [sym f]
+  (swap! entries assoc (symbol (str sym)) f)
+  nil)
+
+(defn- resolve-entry [sym]
+  (or (get @entries (symbol (str sym)))
+      (throw (ex-info (str "eve.thread-host: no registered entry " sym
+                           " (register-entry! it where the program starts)")
+                      {:entry sym}))))
+
+(defn worker-main
+  "A spawned isolate's entry (top-level, as Isolate.spawn requires):
+   the spawn message {:addr :starter :region :entry-fn :boot}, the
+   entry fn resolved by the starter from its registry. Runs the
+   entry, then answers the starter its exit notice."
+  [init]
+  (let [addr (:addr init)]
+    (vreset! ctx {:base (:region init) :self addr :starter (:starter init)})
+    (let [reason (try ((:entry-fn init) (assoc (:boot init) :self addr))
+                      :normal
+                      (catch dynamic e (error-data e)))]
+      (send! (:starter init) {:eve.thread/exit addr :reason reason}))))
+
+(defn start-threads!
+  "Start N isolates, each running the registered ENTRY with
+   (assoc boot :self addr). Returns their addresses."
+  [n entry boot _opts]
+  (let [{:keys [base self]} (ensure-ctx!)
+        entry-fn (resolve-entry entry)
+        t0 (proc/now-ms)]
+    (mapv (fn [_]
+            (let [addr (inc (region/eveAdd32 (+ base (* 4 NEXT-ID)) 1))]
+              (when (> addr MAX-THREADS)
+                (throw (ex-info "eve.thread-host: too many threads" {:max MAX-THREADS})))
+              (iso/Isolate.spawn worker-main
+                                 {:addr addr :starter self :region base
+                                  :entry-fn entry-fn :boot boot})
+              (region/eveStore32 (+ base (* 4 SPAWN-MS)) (- (proc/now-ms) t0))
+              addr))
+          (range n))))
+
+(defn stop-threads!
+  "Ask each thread to end: the message :eve.thread/stop (a request its
+   loop honours, never a kill)."
+  [addrs]
+  (doseq [a addrs] (send! a :eve.thread/stop)))
+
+(defn run-thread!
+  "Node's pattern, answered for this host: a worker here is a spawned
+   isolate running worker-main, never a re-run of the program's main —
+   so a program's entry point calling this is on its main thread: false."
+  []
+  false)
+
+(defn driving []
+  (let [{:keys [base]} (ensure-ctx!)]
+    {:block :thread :parallel true :closures false :eval false :wake :futex
+     :spawn-ms (region/eveLoad32 (+ base (* 4 SPAWN-MS)))
+     :max-threads MAX-THREADS :runtime :cljd}))
+
+(defn attempt [f]
+  (try [true (f)] (catch dynamic e [false e])))
+
+(defn capture-frame [] nil)
+(defn call-with-frame [_frame f] (f))
+
+(defn var-symbol [v] (symbol (str v)))
+
+(defn eval-form
+  "Refused: a compiled Dart program carries no evaluator."
+  [_form]
+  (throw (ex-info "eve.thread-host: this runtime cannot eval a form (compiled ClojureDart)"
+                  {:eve.thread/refused :eval})))

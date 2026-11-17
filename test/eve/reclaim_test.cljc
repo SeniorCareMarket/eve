@@ -1,9 +1,8 @@
 (ns eve.reclaim-test
   "What a write leaves allocated (2026-10-21 ET: transients reclaim).
-   An int-map, a sorted collection and the red-black tree are walked by their own structure, and the walk between two
+   A sorted collection is walked by its own structure, and the walk between two
    versions is exact: the blocks the old one holds that the new one does not, never one the new holds. One write
-   allocates only what its new version keeps (int-map's leaf split and branch-above, Okasaki's balance, Kahrs' delete
-   and the vector pop that drops a trie level made and dropped nodes). A transient frees what each of its writes
+   allocates only what its new version keeps (the vector pop that drops a trie level made and dropped nodes). A transient frees what each of its writes
    superseded among the blocks it made, so a build keeps its tree, and the value it began from; a constructor begins
    from no tree and keeps its tree only. Each checked against the allocation log (eve.deftype-proto.alloc's logging
    sio), on every host."
@@ -13,8 +12,6 @@
             [eve.set :as es]
             [eve.vec :as v]
             [eve.list :as el]
-            [eve.deftype.int-map :as im]
-            [eve.deftype.rb-tree :as rb]
             [eve.sorted :as so]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]))
@@ -49,9 +46,7 @@
 ;; functions, not defs of values: clojerl's def takes literal values only
 (defn- walks [k]
   (case k
-    :int-map im/collect-retire-diff-offsets
-    :sorted so/collect-retire-diff-offsets
-    :rb rb/collect-retire-diff-offsets))
+    :sorted so/collect-retire-diff-offsets))
 
 (defn- check-walk
   "The walk of old against new, against both versions' own blocks (each walked against nothing)."
@@ -72,25 +67,6 @@
     (check-walk label walk x x')
     (is (= allocs (blocks (walk x' x))) (str label ": allocates only what it keeps"))))
 
-(defn- int-keys []
-  (concat [0 1 2 3 5 299 300 1000 100000 -1 -500 -7 2147483647 -2147483647] (range 0 300 37)))
-
-(deftest int-map-walk-and-writes
-  (let [sio (fresh)
-        walk (walks :int-map)
-        base (binding [d/*domain-sio* sio] (apply im/int-map (interleave (range 0 400 3) (range 0 400 3))))
-        neg (binding [d/*domain-sio* sio] (e/assoc base -5 -5))]
-    (doseq [k (int-keys)]
-      (check-op (str "assoc " k) walk sio base #(e/assoc % k :x))
-      (check-op (str "dissoc " k) walk sio base #(e/dissoc % k)))
-    (check-op "update" walk sio base #(im/update % 3 inc))
-    (check-op "dissoc -5 (the sign split goes)" walk sio neg #(e/dissoc % -5))
-    (check-op "the first key" walk sio (binding [d/*domain-sio* sio] (im/int-map)) #(e/assoc % 7 7))
-    (check-op "a leaf split" walk sio (binding [d/*domain-sio* sio] (im/int-map 7 7)) #(e/assoc % 9 9))
-    (check-walk "merge" walk base (binding [d/*domain-sio* sio] (im/merge base (im/int-map 1 :a 2 :b 100000 :c))))
-    (check-walk "range" walk base (binding [d/*domain-sio* sio] (im/range base 10 200)))
-    (check-walk "rebuilt" walk base (binding [d/*domain-sio* sio] (apply im/int-map (range 100))))))
-
 (deftest sorted-walk-and-writes
   (let [sio (fresh)
         walk (walks :sorted)
@@ -103,17 +79,6 @@
       (check-op (str "dissoc " k) walk sio bm #(e/dissoc % k)))
     (check-op "assoc an existing key" walk sio bm #(e/assoc % 3 1))
     (check-op "by a comparator" walk sio (binding [d/*domain-sio* sio] (so/sorted-set-by > 1 2 3)) #(e/conj % 9))))
-
-(deftest rb-tree-walk-and-writes
-  ;; Okasaki's balance rebuilt the red pair an insert made a level down, a red root was blackened by a copy, and
-  ;; Kahrs' delete made and dropped nodes along its path: each insert or delete left them allocated
-  (let [sio (fresh)
-        walk (walks :rb)
-        base (binding [d/*domain-sio* sio] (apply rb/sorted-set (scrambled (range 0 300 3))))]
-    (doseq [k (concat [-1 1 2 4 150 151 299 300 1000] (range 0 300 7) (range 0 300 9))]
-      (check-op (str "conj " k) walk sio base #(e/conj % k))
-      (check-op (str "disj " k) walk sio base #(e/disj % k)))
-    (is (rb/rb-valid? (rb/-rb-root (binding [d/*domain-sio* sio] (reduce e/disj base (range 0 300 6))))))))
 
 (deftest a-vector-pop-across-a-trie-level-keeps-only-its-vector
   ;; a pop that drops a trie level read the one child of the root it had just cloned and left the clone allocated
@@ -150,9 +115,7 @@
   "Every block x holds, by its own walk against nothing (a vector: what its header makes live)."
   [x]
   (blocks (cond
-            (satisfies? im/IIntMap x) (im/collect-retire-diff-offsets x nil)
             (so/sorted-coll? x) (so/collect-retire-diff-offsets x nil)
-            (satisfies? rb/IRBSet x) (rb/collect-retire-diff-offsets x nil)
             (em/eve-hash-map? x) (em/collect-retire-diff-offsets x nil)
             (es/eve-hash-set? x) (es/collect-retire-diff-offsets x nil)
             :else (v/live-offsets (d/-eve-sio x) (d/-root-header-off x)))))
@@ -169,9 +132,7 @@
 
 (deftest a-transient-build-keeps-its-tree
   (let [squares (into {} (map (fn [k] [k (* k k)])) (range 200))]
-    (check-build "int-map assoc!" (fn [_] (im/int-map))
-                 #(reduce (fn [t k] (e/assoc! t k (* k k))) % (range 200)) as-map squares)
-    (check-build "int-map assoc! over its own keys" (fn [_] (im/int-map))
+    (check-build "hash map assoc! over its own keys" em/empty-hash-map
                  #(reduce (fn [t k] (e/assoc! t (mod k 200) (* k k))) % (range 400)) as-map
                  (into {} (map (fn [k] [k (* (+ k 200) (+ k 200))])) (range 200)))
     (check-build "sorted-map assoc!" (fn [_] (so/sorted-map))
@@ -195,7 +156,7 @@
 
 (deftest a-transient-from-a-held-value-frees-only-its-own
   ;; the value a transient began from is the caller's: every block of it stays, whatever the writes replace
-  (doseq [[label mk build plain] [["int-map" #(apply im/int-map (interleave (range 100) (range 100)))
+  (doseq [[label mk build plain] [["hash map" #(apply em/hash-map (interleave (range 100) (range 100)))
                                    #(reduce (fn [t k] (e/assoc! t k (- k))) % (range 50 150)) as-map]
                                   ["sorted-set" #(apply so/sorted-set (range 100))
                                    #(reduce so/disj! (reduce e/conj! % (range 50 150)) (range 0 100 2)) as-set]]]
@@ -204,15 +165,15 @@
           before (plain origin)
           [x allocs] (logged sio (fn [_] (e/persistent! (build (e/transient origin)))))]
       (is (= before (plain origin)) (str label ": the value it began from is untouched"))
-      (is (= allocs (blocks ((if (so/sorted-coll? x) so/collect-retire-diff-offsets im/collect-retire-diff-offsets) x origin)))
+      (is (= allocs (blocks ((cond (so/sorted-coll? x) so/collect-retire-diff-offsets
+                                   :else em/collect-retire-diff-offsets) x origin)))
           (str label ": what it allocated and kept is exactly what the result holds that the origin does not")))))
 
 (deftest a-constructor-keeps-only-its-tree
   ;; each constructor reduced persistent ops over an empty value: every version but the last stayed allocated
-  (doseq [[label mk] [["int-map" #(apply im/int-map (interleave (range 200) (range 200)))]
-                      ["int-map of one key" #(im/int-map 1 2)]
+  (doseq [[label mk] [["hash map" #(apply em/hash-map (interleave (range 200) (range 200)))]
+                      ["hash map of one key" #(em/hash-map 1 2)]
                       ["sorted-set" #(apply so/sorted-set (range 200))]
-                      ["sorted-map" #(apply so/sorted-map (interleave (range 200) (range 200)))]
-                      ["red-black sorted-set" #(apply rb/sorted-set (scrambled (range 200)))]]]
+                      ["sorted-map" #(apply so/sorted-map (interleave (range 200) (range 200)))]]]
     (let [[x allocs] (logged (fresh) (fn [_] (mk)))]
       (is (= allocs (tree-of x)) (str label ": its tree, nothing more")))))

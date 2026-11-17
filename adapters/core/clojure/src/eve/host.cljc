@@ -39,7 +39,12 @@
    the seat's core has one, a js/Uint8Array over the same values
    where it does not. Readers go through host aget + masking
    (hamt_util's ubyte), so the two representations are
-   indistinguishable to every caller."
+   indistinguishable to every caller. On let-go neither the :clj nor
+   the :cljs arm is read (its reader feature is :lg), so it carries
+   its own arm: without it the body reads empty, const-bytes returns
+   nil there, and everything built on it — hamt-util's xxh3 secret,
+   eve.codec's BYTES-NIL/TRUE/FALSE and small-int cache — is nil
+   with it (measured on :lg, eve-letgo jobs 47/48)."
   [values]
   ;; :default, not :clj — ClojureCLR's reader takes :cljr and basilisp's
   ;; :lpy, so a :clj/:cljs-only body read as EMPTY there and returned nil:
@@ -49,7 +54,30 @@
   ;; alength in value->scalar-block!; basilisp: TypeError len(None)) —
   ;; fix-for-release F4, ants d8-m6 cljr and lpy members, 2026-11-09.
   #?(:cljs    (js/Uint8Array. (clojure.core/into-array values))
+     :lg      (clojure.core/byte-array values)
      :default (clojure.core/byte-array values)))
+
+(defn js-byte-array
+  "Signed byte storage: a size or a sequence, optionally with an init (a
+   fill byte or a sequence). The runtime half of the byte-array routing in
+   expand: a js/Int8Array on JavaScript seats (the compiled seat's runtime
+   copy lives in adapters/core/cljs-compiler's eve/host.cljs, beside
+   expand-const-bytes), the core's byte-array on the JVM."
+  ([x]
+   #?(:cljs (js/Int8Array. (if (number? x) x (clojure.core/into-array x)))
+      :default (clojure.core/byte-array x)))
+  ([size init]
+   #?(:cljs (let [a (js/Int8Array. size)]
+              (if (number? init)
+                (.fill a init)
+                (.set a (clojure.core/into-array (take size init))))
+              a)
+      :default (let [a (clojure.core/byte-array (int size))]
+                 (if (number? init)
+                   (java.util.Arrays/fill a (clojure.core/byte init))
+                   (doseq [i (range (min (int size) (count init)))]
+                     (clojure.core/aset a i (clojure.core/byte (nth init i)))))
+                 a))))
 
 (defn expand
   "clojure.core's call of name n on args. (token) is a fresh cell, identical?
@@ -67,7 +95,17 @@
       defdelay (let [[nm & body] args] (list (c 'defonce) nm (list* (c 'delay) body)))
       vswap! (let [[v f & more] args sym (gensym "vol")]
                (list 'let [sym v] (list (c 'vreset!) sym (list* f (list (c 'deref) sym) more))))
-      (cons (c n) args))))
+      ;; SCI's JavaScript core has no byte-array (nbb/scittle), and neither
+      ;; does ClojureScript's. Keep the memory facility in the host adapter,
+      ;; not in applications. The routing is unconditional on purpose: this
+      ;; file is read by the compiling host's reader, whose features are not
+      ;; the target's, so a reader conditional here decides by the wrong
+      ;; seat (measured on the cohost-media page: the compiled bundle called
+      ;; cljs.core/byte-array, which does not exist, and every snapshot read
+      ;; died on it).
+      (if (= n 'byte-array)
+        (cons 'eve.host/js-byte-array args)
+        (cons (c n) args)))))
 
 (defmacro ^:private defcore []
   (cons 'do (map (fn [n] (list 'defmacro n '[& args] (list 'eve.host/expand (list 'quote n) 'args)))

@@ -1,0 +1,8 @@
+;; network-atoms: the eve.net application (broker / gateway / store / network atom), extracted from Eve's core
+;; (trunk consolidation, audit entry 7, Nov 14 2026). Its classpath is composed the way this tree's other
+;; app satellites compose theirs (capstone/eve-media, net-local): Eve core's src + the host's adapter roots
+;; (hosts.edn) + this directory's src and test. It consumes Eve through the atom API (eve.atom) and the
+;; adapter feature namespaces (eve.http, eve.process, eve.http-server, eve.crypto, eve.encoding, eve.codec);
+;; Eve's core does not depend on it.
+{:paths ["src" "test"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}}

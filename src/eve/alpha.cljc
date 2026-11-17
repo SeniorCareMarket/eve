@@ -25,9 +25,9 @@
             [eve.process-slab :as ps]))
 
 (defmacro deftype
-  "Define a SAB-backed type. See eve.deftype/eve-deftype."
+  "Define a SAB-backed type. See eve.deftype/deftype."
   [& args]
-  `(eve.deftype/eve-deftype ~@args))
+  `(eve.deftype/deftype ~@args))
 
 (defmacro extend-type
   "Extend protocols on an existing eve/deftype."

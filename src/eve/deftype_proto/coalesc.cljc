@@ -91,6 +91,34 @@
 (def ^:const LOCK_SENTINEL 1)  ;; the lock bit
 (def ^:const LOCK_CLEAR -2)    ;; every bit but the lock's
 
+;; Rung blocks (the unified ladder inside class 6): a rung block is a
+;; fixed-size class-6 block stamped in its descriptor's LOCK_OWNER
+;; flags. Bits 1, 2, 7, 8 of that word are eve.tally's (F_PUB, F_QUEUED,
+;; F_LEAF, F_TAKEN); bits 3-6 are assigned nowhere else and carry the
+;; rung field: rung-idx + 1 (1-14), 0 = an ordinary variable block.
+;; The pointer format is untouched — a rung block's slab offset is an
+;; ordinary class-6 offset (its data-region byte offset); the rung
+;; identity lives in the descriptor, never in the pointer.
+(def ^:const RUNG_FIELD_SHIFT 3)
+(def ^:const RUNG_FIELD_MASK 120) ;; bits 3-6
+(def ^:const RUNG_CHUNK 65536)    ;; one chunk, the rung quantum
+(def ^:const RUNG_COUNT 14)       ;; rungs of 2..15 chunks
+
+(defn rung-size
+  "The byte size of rung rung-idx (0-13): (rung-idx + 2) whole chunks."
+  ^long [rung-idx]
+  (* (long RUNG_CHUNK) (+ 2 (long rung-idx))))
+
+(defn rung-idx-for-size
+  "The rung index for an exact whole-chunk size (2..15 chunks of
+   65536), or -1 when size-bytes is not a rung size."
+  ^long [size-bytes]
+  (let [size (long size-bytes)]
+    (if (and (>= size 131072) (<= size 983040)
+             (zero? (mod size (long RUNG_CHUNK))))
+      (- (quot size (long RUNG_CHUNK)) 2)
+      -1)))
+
 ;; Default data region max capacity for growth (4 PiB).
 ;; COALESC_HDR_DATA_SIZE is stored as i64, so the theoretical ceiling is 8 EiB.
 ;; 4 PiB = 2^52 bytes, exactly representable as both JS Number and JVM long.
@@ -340,6 +368,17 @@
 ;; Alloc
 ;;=============================================================================
 
+(defn- desc-rung-field
+  "The rung field of descriptor idx: rung-idx + 1 (1-14) for a rung
+   block, 0 for an ordinary variable block. Read from the LOCK_OWNER
+   word's bits 3-6; the lock bit and eve.tally's flag bits are masked
+   out, so the field reads the same locked or unlocked."
+  ^long [region dt-off max-desc idx]
+  (bit-shift-right
+   (bit-and (desc-load region dt-off max-desc idx DESC_LOCK_OWNER)
+            (long RUNG_FIELD_MASK))
+   (long RUNG_FIELD_SHIFT)))
+
 (defn try-coalesc-alloc!
   "Allocate a contiguous block of at least size-bytes from the coalescing region.
    Returns the byte offset relative to data region start (= block_idx for class 6),
@@ -374,16 +413,21 @@
 
         :else
         (let [status   (desc-load region dt-off max-desc i DESC_STATUS)
-              capacity (when (== status STATUS_FREE)
+              ;; A FREE descriptor stamped with a rung field is reserved
+              ;; to its rung — never a variable candidate.
+              capacity (when (and (== status STATUS_FREE)
+                                  (zero? (desc-rung-field region dt-off max-desc i)))
                          (desc-load region dt-off max-desc i DESC_BLOCK_CAPACITY))]
           (if (and (== status STATUS_FREE)
+                   (not (nil? capacity))
                    (>= capacity size))
             ;; Candidate found — try to lock
             (if (try-lock! region dt-off max-desc i)
-              ;; Got the lock — verify still FREE with sufficient capacity (TOCTOU)
+              ;; Got the lock — verify still FREE, unflagged, with sufficient capacity (TOCTOU)
               (let [status2   (desc-load region dt-off max-desc i DESC_STATUS)
                     capacity2 (desc-load region dt-off max-desc i DESC_BLOCK_CAPACITY)]
                 (if (and (== status2 STATUS_FREE)
+                         (zero? (desc-rung-field region dt-off max-desc i))
                          (>= capacity2 size))
                   ;; Good — allocate
                   (let [data-off (desc-load region dt-off max-desc i DESC_DATA_OFFSET)
@@ -461,6 +505,143 @@
                            :descriptor-exhausted true}))
           (throw (ex-info "coalesc-alloc!: out of memory" {:size size-bytes}))))))
 
+(defn- try-reuse-rung!
+  "Descriptor i is a candidate rung-free block: lock it, verify it is
+   still FREE, stamped with field, and exactly size; publish it
+   ALLOCATED and return its data offset. Any other outcome: nil (the
+   caller keeps scanning); a lock we took is always released."
+  [region dt-off max-desc i size field]
+  (when (and (== (desc-load region dt-off max-desc i DESC_STATUS) STATUS_FREE)
+             (== (desc-rung-field region dt-off max-desc i) field)
+             (try-lock! region dt-off max-desc i))
+    (let [ok?      (and (== (desc-load region dt-off max-desc i DESC_STATUS) STATUS_FREE)
+                        (== (desc-rung-field region dt-off max-desc i) field)
+                        (== (desc-load region dt-off max-desc i DESC_BLOCK_CAPACITY) size))
+          data-off (when ok?
+                     (desc-load region dt-off max-desc i DESC_DATA_OFFSET))]
+      (when ok?
+        (desc-store! region dt-off max-desc i DESC_DATA_LENGTH 0)
+        (desc-store! region dt-off max-desc i DESC_RESERVED -1)
+        (desc-store! region dt-off max-desc i DESC_RESERVED2 0)
+        (desc-store! region dt-off max-desc i DESC_STATUS STATUS_ALLOCATED))
+      (unlock! region dt-off max-desc i)
+      data-off)))
+
+(defn- mark-rung-allocated!
+  "Publish descriptor i (locked by the caller) as an ALLOCATED rung
+   block: its capacity set to size, its count 0, its rung field
+   stamped into the flags the lock word carries."
+  [region dt-off max-desc i size field]
+  (desc-store! region dt-off max-desc i DESC_BLOCK_CAPACITY size)
+  (desc-store! region dt-off max-desc i DESC_DATA_LENGTH 0)
+  (desc-store! region dt-off max-desc i DESC_LOCK_OWNER
+               (bit-or LOCK_SENTINEL
+                       (bit-shift-left field (long RUNG_FIELD_SHIFT))))
+  (desc-store! region dt-off max-desc i DESC_RESERVED -1)
+  (desc-store! region dt-off max-desc i DESC_RESERVED2 0)
+  (desc-store! region dt-off max-desc i DESC_STATUS STATUS_ALLOCATED)
+  (slab/region-store-i32! region d/SLAB_HDR_ALLOC_CURSOR
+                          (mod (inc i) max-desc)))
+
+(defn- try-carve-rung!
+  "Descriptor i is a candidate variable block: lock it, verify it is
+   still FREE, unflagged, and big enough, and carve exactly size as a
+   rung block — whole on an exact fit, by a split that must complete
+   on a remainder >= 32; a remainder in 1..31 or a split that cannot
+   complete is not a carve. Returns the data offset, or nil to keep
+   scanning; a lock we took is always released."
+  [region dt-off max-desc i size field]
+  (when (and (== (desc-load region dt-off max-desc i DESC_STATUS) STATUS_FREE)
+             (zero? (desc-rung-field region dt-off max-desc i))
+             (>= (desc-load region dt-off max-desc i DESC_BLOCK_CAPACITY) size)
+             (try-lock! region dt-off max-desc i))
+    (let [status2   (desc-load region dt-off max-desc i DESC_STATUS)
+          capacity2 (desc-load region dt-off max-desc i DESC_BLOCK_CAPACITY)]
+      (if (and (== status2 STATUS_FREE)
+               (zero? (desc-rung-field region dt-off max-desc i))
+               (>= capacity2 size))
+        (let [data-off  (desc-load region dt-off max-desc i DESC_DATA_OFFSET)
+              remainder (- capacity2 size)]
+          (cond
+            (zero? remainder)
+            (do (mark-rung-allocated! region dt-off max-desc i size field)
+                (unlock! region dt-off max-desc i)
+                data-off)
+
+            (>= remainder 32)
+            (let [split-slot    (find-zeroed-slot region dt-off max-desc
+                                                  (mod (inc i) max-desc))
+                  split-locked? (and (not= split-slot -1)
+                                     (try-lock! region dt-off max-desc split-slot))]
+              (if (and split-locked?
+                       (== (desc-load region dt-off max-desc split-slot DESC_STATUS)
+                           STATUS_ZEROED_UNUSED))
+                (do
+                  (desc-store! region dt-off max-desc split-slot DESC_DATA_OFFSET
+                               (+ data-off size))
+                  (desc-store! region dt-off max-desc split-slot DESC_DATA_LENGTH 0)
+                  (desc-store! region dt-off max-desc split-slot DESC_BLOCK_CAPACITY
+                               remainder)
+                  (desc-store! region dt-off max-desc split-slot DESC_RESERVED -1)
+                  (desc-store! region dt-off max-desc split-slot DESC_RESERVED2 0)
+                  (desc-store! region dt-off max-desc split-slot DESC_LOCK_OWNER LOCK_SENTINEL)
+                  (desc-store! region dt-off max-desc split-slot DESC_STATUS STATUS_FREE)
+                  (unlock! region dt-off max-desc split-slot)
+                  (mark-rung-allocated! region dt-off max-desc i size field)
+                  (unlock! region dt-off max-desc i)
+                  data-off)
+                (do (when split-locked?
+                      (unlock! region dt-off max-desc split-slot))
+                    (unlock! region dt-off max-desc i)
+                    nil)))
+
+            :else
+            (do (unlock! region dt-off max-desc i)
+                nil)))
+        (do (unlock! region dt-off max-desc i)
+            nil)))))
+
+(defn try-coalesc-alloc-rung!
+  "A rung block of rung-idx (0-13; (rung-idx + 2) whole 65536 chunks)
+   from the coalescing region: its data-region byte offset, or nil
+   when no rung block is free and no variable block can be carved to
+   exactly the rung size. Pass 1 reuses a FREE descriptor stamped
+   with this rung's field — the per-rung free list. Pass 2 carves.
+   The rung field is stamped under the descriptor's lock before the
+   block is published ALLOCATED."
+  [region rung-idx]
+  (let [size     (rung-size rung-idx)
+        field    (inc (long rung-idx))
+        dt-off   (desc-table-offset region)
+        max-desc (max-descs region)]
+    (or (loop [i 0]
+          (if (>= i max-desc)
+            nil
+            (or (try-reuse-rung! region dt-off max-desc i size field)
+                (recur (inc i)))))
+        (loop [i 0]
+          (if (>= i max-desc)
+            nil
+            (or (try-carve-rung! region dt-off max-desc i size field)
+                (recur (inc i))))))))
+
+(defn coalesc-alloc-rung!
+  "try-coalesc-alloc-rung!, throwing on failure with the same named
+   distinction as coalesc-alloc!: descriptor-table exhaustion vs a
+   genuinely unplaceable rung."
+  [region rung-idx]
+  (or (try-coalesc-alloc-rung! region rung-idx)
+      (let [dt-off   (desc-table-offset region)
+            max-desc (max-descs region)]
+        (if (== -1 (find-zeroed-slot region dt-off max-desc 0))
+          (throw (ex-info (str "coalesc-alloc-rung!: descriptor table exhausted — all "
+                               max-desc " descriptors are in use. The count is a "
+                               "creation parameter: reopen the domain with a larger "
+                               ":coalesc-descriptors.")
+                          {:rung-idx rung-idx :max-descriptors max-desc
+                           :descriptor-exhausted true}))
+          (throw (ex-info "coalesc-alloc-rung!: out of memory" {:rung-idx rung-idx}))))))
+
 ;;=============================================================================
 ;; Free
 ;;=============================================================================
@@ -496,9 +677,15 @@
    Must be called with idx already locked and marked FREE.
    Releases idx lock when done."
   [region dt-off max-desc idx]
-  (let [our-off (desc-load region dt-off max-desc idx DESC_DATA_OFFSET)
-        our-cap (desc-load region dt-off max-desc idx DESC_BLOCK_CAPACITY)
-        our-end (+ our-off our-cap)]
+  ;; A rung block never merges, on either side: its descriptor keeps
+  ;; its exact capacity for its rung's free list. (Callers never pass
+  ;; a rung idx today — rung free does not call this fn — but the
+  ;; guard keeps the invariant local to the merge itself.)
+  (if (pos? (desc-rung-field region dt-off max-desc idx))
+    (unlock! region dt-off max-desc idx)
+    (let [our-off (desc-load region dt-off max-desc idx DESC_DATA_OFFSET)
+          our-cap (desc-load region dt-off max-desc idx DESC_BLOCK_CAPACITY)
+          our-end (+ our-off our-cap)]
 
     ;; Phase 1: Left coalesce — find FREE block ending at our-off
     (let [left-idx
@@ -508,6 +695,7 @@
               (let [status (desc-load region dt-off max-desc j DESC_STATUS)]
                 (if (and (== status STATUS_FREE)
                          (not= j idx)
+                         (zero? (desc-rung-field region dt-off max-desc j))
                          (let [loff (desc-load region dt-off max-desc j DESC_DATA_OFFSET)
                                lcap (desc-load region dt-off max-desc j DESC_BLOCK_CAPACITY)]
                            (== (+ loff lcap) our-off)))
@@ -519,7 +707,8 @@
           (if (and (not= left-idx -1) (spin-lock! region dt-off max-desc left-idx 200))
             ;; Verify still FREE (TOCTOU)
             (let [ls (desc-load region dt-off max-desc left-idx DESC_STATUS)]
-              (if (== ls STATUS_FREE)
+              (if (and (== ls STATUS_FREE)
+                       (zero? (desc-rung-field region dt-off max-desc left-idx)))
                 (let [loff (desc-load region dt-off max-desc left-idx DESC_DATA_OFFSET)
                       lcap (desc-load region dt-off max-desc left-idx DESC_BLOCK_CAPACITY)]
                   (if (== (+ loff lcap) our-off)
@@ -549,12 +738,14 @@
                 (let [status (desc-load region dt-off max-desc j DESC_STATUS)]
                   (if (and (== status STATUS_FREE)
                            (not= j survivor)
+                           (zero? (desc-rung-field region dt-off max-desc j))
                            (== (desc-load region dt-off max-desc j DESC_DATA_OFFSET) surv-end))
                     j
                     (recur (inc j))))))]
         (when (and (not= right-idx -1) (spin-lock! region dt-off max-desc right-idx 200))
           (let [rs (desc-load region dt-off max-desc right-idx DESC_STATUS)]
             (if (and (== rs STATUS_FREE)
+                     (zero? (desc-rung-field region dt-off max-desc right-idx))
                      (== (desc-load region dt-off max-desc right-idx DESC_DATA_OFFSET) surv-end))
               (let [rcap (desc-load region dt-off max-desc right-idx DESC_BLOCK_CAPACITY)]
                 ;; Merge: survivor absorbs right
@@ -567,7 +758,7 @@
               (unlock! region dt-off max-desc right-idx))))
 
         ;; Release survivor lock
-        (unlock! region dt-off max-desc survivor)))))
+        (unlock! region dt-off max-desc survivor))))))
 
 (defn coalesc-free!
   "Free a block identified by its data-region-relative byte offset.
@@ -581,14 +772,27 @@
       (if (spin-lock! region dt-off max-desc idx 400)
         (let [status (desc-load region dt-off max-desc idx DESC_STATUS)]
           (if (== status STATUS_ALLOCATED)
-            (do
-              ;; Mark FREE: its count and flags go with it (still locked)
-              (desc-store! region dt-off max-desc idx DESC_DATA_LENGTH 0)
-              (desc-store! region dt-off max-desc idx DESC_LOCK_OWNER LOCK_SENTINEL)
-              (desc-store! region dt-off max-desc idx DESC_STATUS STATUS_FREE)
-              ;; Coalesce (releases lock)
-              (coalesce-adjacent! region dt-off max-desc idx)
-              true)
+            (let [rfield (desc-rung-field region dt-off max-desc idx)]
+              (if (pos? rfield)
+                ;; Rung free: mark FREE, KEEP the rung field and the
+                ;; capacity — the block returns to its rung's free
+                ;; list and is never split or coalesced.
+                (do
+                  (desc-store! region dt-off max-desc idx DESC_DATA_LENGTH 0)
+                  (desc-store! region dt-off max-desc idx DESC_LOCK_OWNER
+                               (bit-or LOCK_SENTINEL
+                                       (bit-shift-left rfield (long RUNG_FIELD_SHIFT))))
+                  (desc-store! region dt-off max-desc idx DESC_STATUS STATUS_FREE)
+                  (unlock! region dt-off max-desc idx)
+                  true)
+                (do
+                  ;; Mark FREE: its count and flags go with it (still locked)
+                  (desc-store! region dt-off max-desc idx DESC_DATA_LENGTH 0)
+                  (desc-store! region dt-off max-desc idx DESC_LOCK_OWNER LOCK_SENTINEL)
+                  (desc-store! region dt-off max-desc idx DESC_STATUS STATUS_FREE)
+                  ;; Coalesce (releases lock)
+                  (coalesce-adjacent! region dt-off max-desc idx)
+                  true)))
             ;; Already free or zeroed — release lock
             (do (unlock! region dt-off max-desc idx)
                 false)))

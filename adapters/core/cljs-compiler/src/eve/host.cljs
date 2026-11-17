@@ -14,3 +14,19 @@
    (hamt_util's ubyte), so it is indistinguishable to every caller."
   [values]
   (js/Uint8Array. (into-array values)))
+
+(defn js-byte-array
+  "Runtime half of the byte-array routing (the macro side,
+   adapters/core/clojure's eve.host/expand, sends every byte-array call
+   here): signed byte storage on this seat is a js/Int8Array — a size or
+   a sequence, optionally with an init (a fill byte or a sequence).
+   Lives here for the same reason expand-const-bytes does: on the
+   compiled CLJS seat the runtime side of eve.host is this file."
+  ([x]
+   (js/Int8Array. (if (number? x) x (into-array x))))
+  ([size init]
+   (let [a (js/Int8Array. size)]
+     (if (number? init)
+       (.fill a init)
+       (.set a (into-array (take size init))))
+     a)))

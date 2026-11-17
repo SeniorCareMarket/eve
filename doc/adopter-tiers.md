@@ -109,7 +109,8 @@ four are 650–1,100 lines on a JVM-family host (bb: 290 + 361 + 76 + 245 = 972)
 
 ## 3. THE INBUILT SET — portable, no host code
 
-Nine roots that ship with eve and load on any host that reads `.cljc` (one, `coll/protocols`, is `.clj`) [read]:
+Nine roots that ship with eve and load on any host that reads `.cljc` (one, `coll/protocols`, is `.clj`) [read] — and
+since the flat lanes (2026-11-17) a tenth, `flat-io/portable`, on every `hosts.edn` row (§7's run predates it):
 
 | Root | What you get | Its cost (what the fast replacement buys back) |
 |---|---|---|
@@ -122,6 +123,7 @@ Nine roots that ship with eve and load on any host that reads `.cljc` (one, `col
 | `codec/byte-array` | the whole codec (values ⇄ EVE bytes) over `eve.host`'s byte arrays and `eve.encoding` | ClojureScript's `codec/js` uses typed arrays, DataViews and scratch buffers instead |
 | `crypto/portable` | all of `eve.crypto` from `eve.net.portable-crypto` (SHA-256, HMAC, AES-256-CTR, XXH3-128, Ed25519), random bytes from `eve.process` | 1–3 orders of magnitude on digests, the cipher and signatures: §6 |
 | `thread/none` | `eve.thread-host` for one thread: `start-threads!` refuses (`:max-threads 0`), a thread sends only to itself | no parallelism: `eve.thread`'s pools have no threads; a host with threads plugs its own |
+| `flat-io/portable` | `eve.flat-io` (doc/flat/FLAT-IO.md), the byte seam under eve's flat layer: eve.flat.chunk's byte layer as it stood, moved — little-endian reads, the LEB128 varint, utf-8, the in-place compares (`bytes=`, `bytes-cmp`, `key-cmp`), the children-first writer — with its `:clj` / `:bb` / `:glj` / `:jank` / `:cljs` arms; a tuple a persistent vector built from the reads | per-byte bit assembly on the JVM-class hosts, a fresh DataView per float or i64 read on ClojureScript, a `key-cmp` that encodes the key on every call, tuples copied; `flat-io/jvm` and `flat-io/js` replace them (§4) |
 
 Two caveats a new host meets [read]:
 * `thread/none`'s catch-all is spelled per host (`adapters/thread/none/src/eve/thread_host.cljc:53`:
@@ -149,6 +151,7 @@ every replacement to the portable answer byte for byte.
 | **slab-io** | §12; `adapters/slab-io/test` is the conformance test | `slab-io/protocol` | `slab-io/vs` (plain functions over linear memory: a slab offset is an address in two loads) | `adapters/slab-io/vs/src/eve/slab_io.vs` (242 lines) | `adapters/slab-io/test/eve/slab_io_test.cljc` (`bb test:vs`) |
 | **region** (always host code; fast = hardware atomics) | §1–2 | none — but a lock-only region is the slow form | `region/jvm-varhandle` (VarHandle atomics, park/unpark), `region/js` (SAB + Atomics, the N-API addon), `region/clr`, `region/ctypes`, `region/jolt-ffi`, `region/beam`, `region/glojure`, `region/vs` | `adapters/region/jvm-varhandle` (626 lines) vs `jvm-nio-lock` (290) | every shared suite; the coop capstone |
 | **thread** | §11; `test/eve/thread_host_test.cljc` | `thread/none` | `thread/jvm` (JVM, bb, jolt), `thread/node`, `thread/browser`, `thread/beam`, `thread/python`, `thread/clr`, `thread/glojure` | `adapters/thread/jvm/src/eve/thread_host.clj` (97 lines) | `eve.thread-host-test` on every runner |
+| **flat-io** | doc/flat/FLAT-IO.md: byte for byte the portable answers; `adapters/flat-io/test` is the conformance test | `flat-io/portable` | `flat-io/jvm` (VarHandle loads, `Arrays.mismatch`, tuple views), `flat-io/js` (DataView, TextDecoder, typed-array tuples) — flat lanes U2b, on no host row until collation; `flat-io/vs` (U3, wave 2) | `adapters/flat-io/portable/src/eve/flat_io.cljc` (the inbuilt root; the fast roots land with U2b) | `adapters/flat-io/test/eve/flat_io_conformance_test.cljc` (`clojure -M:flat-io-test`, `bb test:flat-io`, Node's `:flat-io-test` build) |
 | **typed-view** | host extras only | none | `typed-view/js` | `adapters/typed-view/js/src/eve/typed_view.cljs` (194 lines) | `node target/eve-test/all.js typed-array` |
 
 ---
@@ -169,6 +172,7 @@ every replacement to the portable answer byte for byte.
 | coll | I or F (paired with types) | `coll/protocols` (bb, glj, vs) | `coll/jvm` (JVM, cljr, jolt), `coll/cljs`, `coll/nbb`, `coll/basilisp`, `coll/beam` |
 | slab-io | I, F | `slab-io/protocol` (everyone but vs) | `slab-io/vs` |
 | slab | I, F | `slab/heap` (all but cljs, browser, nbb) | `slab/module` (cljs, browser, nbb) |
+| flat-io | I, F | `flat-io/portable` (every row) | `flat-io/jvm`, `flat-io/js` (flat lanes U2b), `flat-io/vs` (U3) — none on a host row yet |
 | int32 | I, F | `int32/portable` (cljr, lpy, clje, glj) | `int32/jvm` (jvm, bb, jolt), `int32/js` (cljs, browser, nbb), `int32/vs` |
 | codec | I, F | `codec/byte-array` (all but cljs, browser, nbb) | `codec/js` |
 | crypto | I, F, C (network atom) | `crypto/portable` (jolt, vs, glj, browser) | `crypto/java` (jvm, bb), `crypto/node` (cljs, nbb), `crypto/python`, `crypto/clr`, `crypto/beam` |
@@ -200,10 +204,13 @@ and the browser carry the JVM's adapters for the compiler's own macro-time Cloju
 | http | java | node | browser | java | node | clr | python | — | beam | — | go |
 | http-server | jdk | node | — | httpkit | — | — | — | — | — | — | — |
 | typed-view | — | js | js | — | js | — | — | — | — | — | — |
+| flat-io | portable | portable | portable | portable | portable | portable | portable | portable | portable | portable | portable |
 
 Unreferenced implementations [ran]: `crypto/vs` (no host row: `hosts.edn :vs` takes `crypto/portable`, and its own
 comment says "VS has no native crypto adapter" — the adapter exists, unwired), `thread/none` (the inbuilt default no
-shipped host needs), `slab-io/test` (the conformance test root, added by `bb test:vs`).
+shipped host needs), `slab-io/test` (the conformance test root, added by `bb test:vs`). Since the flat lanes
+(2026-11-17, read from hosts.edn, not regenerated by the script): `flat-io/jvm`, `flat-io/js` (U2b's fast roots, wired at
+collation), `flat-io/vs` (U3), `flat-io/test` (the conformance test root, added by its runners).
 
 ---
 

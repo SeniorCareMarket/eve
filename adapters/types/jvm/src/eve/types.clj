@@ -21,7 +21,7 @@
   (some? (:ns env)))
 
 (defn- define [type-name fields forms]
-  [`(~'deftype ~type-name ~fields ~@forms)])
+  [`(clojure.core/deftype ~type-name ~fields ~@forms)])
 
 (defn- hooks
   "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
@@ -37,12 +37,23 @@
    :object-boilerplate? true
    :slab-define define})
 
+(declare plain-type)
+
 (defn host-type
-  "A plain type written with the JVM's names (host-deftype)."
+  "A plain type (host-deftype). Its realization is plain-type's,
+   shared: the vocab translation, the derived methods, the reserved
+   field renames, and — the R0 extension's point (plan §6, G3) — an
+   IPrintWithWriter body realized as the type's print-method, where
+   this entry point previously passed impls through verbatim and
+   could not derive one. That verbatim shape is what stopped Lane
+   B's print-carrying callers (RSeq, MmapAtom, the Obj trio,
+   HeapEveArray). host-deftype's contract is the CLJ/JVM API (John,
+   Nov 14 2026: core types standardize on it); the shared
+   realization underneath is this leg's business, as it already was
+   for plain-type. On this host the two entry points differ only in
+   which macro asked."
   [env type-name fields parsed]
-  (if (cljs? env)
-    (js/plain-type type-name fields parsed js/compiler-twist)
-    `(clojure.core/deftype ~type-name ~fields ~@(v/impls->forms parsed))))
+  (plain-type env type-name fields parsed))
 
 (defn plain-type
   "A plain type (eve.deftype/deftype): ClojureScript's names translated, the
@@ -66,6 +77,13 @@
   "An eve-deftype (eve.deftype.macros/eve-deftype*)."
   [ctx]
   (if (cljs? (:env ctx)) (js/eve-type ctx js/compiler-twist) (sio/eve-type ctx (hooks))))
+
+(defn flat-type
+  "An eve-deftype's generated flat sister (eve.deftype.macros/eve-deftype*,
+   lane H5): a ClojureScript compile's from eve.types-js/flat-type (flat
+   lanes U4a), the JVM's from the shared eve.deftype-proto.sio/flat-type."
+  [ctx]
+  (if (cljs? (:env ctx)) (js/flat-type ctx) (sio/flat-type ctx (hooks))))
 
 (defn extend-eve-type
   "eve-extend-type."

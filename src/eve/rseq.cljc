@@ -5,9 +5,15 @@
   (:refer-clojure :exclude [RSeq ->RSeq])
   (:require [eve.core :as e]
             [eve.coll :as c]
-            [eve.deftype :as edt]))
+            [eve.deftype-proto.macros :as eve]
+            ;; Load order: host-deftype's expansion ends in a
+            ;; top-level eve.type-readers/register! call, which needs
+            ;; the registry first in the RUNTIME graph (a macro ns's
+            ;; require is macro-side only). Guard:
+            ;; eve.deftype-guard-test.
+            [eve.type-readers]))
 
-(edt/deftype RSeq [ci i mta]
+(eve/host-deftype RSeq [ci i mta]
   clojure.lang.IMeta
   (meta [_] mta)
   clojure.lang.IObj

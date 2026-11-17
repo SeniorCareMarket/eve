@@ -211,7 +211,13 @@
         (throw (ex-info (str "eve.journal-file: lockf errno " errno)
                         {:errno errno})))
       (try (f)
-           (finally (jf-lockf fd F-ULOCK 0))))))
+           (finally
+             ;; re-seek before unlocking: f's appends moved the fd offset
+             ;; to EOF, and lockf's region runs from the offset — an
+             ;; unlock issued there releases only [EOF, EOF) and leaks
+             ;; the [0, EOF) prefix for the life of the process.
+             (jf-lseek fd 0 SEEK-SET)
+             (jf-lockf fd F-ULOCK 0))))))
 
 (defn journal-record-of
   "The commit record for an explicit EPOCH and TABLE (a byte array)."

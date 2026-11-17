@@ -11,11 +11,11 @@
             [eve.atom :as a]
             [eve.retire :as retire]
             [eve.tally :as tally]
-            [eve.deftype #?@(:cljs [:refer-macros [eve-deftype]] :default [:refer [eve-deftype]])]
+            [eve.deftype :as edt]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
-            [eve.deftype.int-map :as im]
-            [eve.rrb-vector :as fv]
+            [eve.sorted :as so]
+            [eve.vec :as v]
             [eve.core :as e]
             [eve.slab-io :as slab]))
 
@@ -113,7 +113,7 @@
 
 (defprotocol IBox (box-label [b]))
 
-(eve-deftype Box [label]
+(edt/deftype Box [label]
   IBox
   (box-label [_] label))
 
@@ -123,7 +123,7 @@
   (put-box! [h b])
   (put-note! [h n]))
 
-(eve-deftype Holder [^:mutable ^:Box box ^:volatile-mutable note]
+(edt/deftype Holder [^:mutable ^:Box box ^:volatile-mutable note]
   IHolder
   (the-box [_] box)
   (the-note [_] note)
@@ -190,7 +190,10 @@
           (is (not-any? #(alloc/allocated? sio %) [ho bo no])))))))
 
 ;; ---------------------------------------------------------------------------
-;; An int-map: its nodes keep their children in ^:int32 ^:ref fields (any node type), so the count follows them
+;; A sorted map: a treap whose every node is its own block, so the count follows it node by node
+;; (was an int-map until PersistentIntMap was deleted, Nov 15 2026; EveHashMap packs many
+;; entries per node block — some 54 blocks for 200 entries, per eve.vec-retire-test's record —
+;; so it cannot carry this section's >300-blocks shape; the treap is the per-node tree that can)
 ;; ---------------------------------------------------------------------------
 
 (defn- tally-reach
@@ -209,18 +212,18 @@
               (recur work seen)
               (recur (into work (refs sio o k)) (conj seen o)))))))))
 
-(deftest an-int-map-is-counted-node-by-node
+(deftest a-sorted-map-is-counted-node-by-node
   (let [dom (a/atom-domain nil)
         x (a/lookup-or-create-mmap-atom! dom "t/a" nil)
         y (a/lookup-or-create-mmap-atom! dom "t/b" nil)
         d (a/lookup-or-create-mmap-atom! dom "t/d" nil)
         sio (:sio (ds-of x))
         get-m (fn [at k] (a/read-pinned at (fn [m] (e/get (get m :m) k))))]
-    (swap! x (fn [_] {:m (reduce (fn [m i] (e/assoc m i (str "v" i))) (im/int-map) (range 300))}))
+    (swap! x (fn [_] {:m (reduce (fn [m i] (e/assoc m i (str "v" i))) (so/sorted-map) (range 300))}))
     (flush! x)
     (let [blocks (tally-reach x)]
-      (is (> (count blocks) 300) "the reader reaches the int-map's nodes (branches, leaves, their values)")
-      (testing "b holds a's map; a lets go; the int-map is whole"
+      (is (> (count blocks) 300) "the reader reaches the sorted map's nodes (treap nodes, entries, their values)")
+      (testing "b holds a's map; a lets go; the sorted map is whole"
         (a/read-pinned x (fn [m] (swap! y (constantly m)) nil))
         (reset! x nil)
         (flush! x)
@@ -243,17 +246,17 @@
           (is (none-allocated? y last-blocks)))))))
 
 ;; ---------------------------------------------------------------------------
-;; An RRB vector: its nodes keep their children in eve value arrays (eve.deftype.array, 0x1F), which the count reads
-;; slot by slot
+;; An EveVector of 2,000: a multi-level Bagwell trie (eve.vec, the core's one
+;; vector trunk) whose nodes the count reads slot by slot, down to the leaves
 ;; ---------------------------------------------------------------------------
 
-(deftest an-rrb-vector-is-counted-node-by-node
+(deftest an-eve-vector-is-counted-node-by-node
   (let [dom (a/atom-domain nil)
         x (a/lookup-or-create-mmap-atom! dom "t/a" nil)
         y (a/lookup-or-create-mmap-atom! dom "t/b" nil)
         d (a/lookup-or-create-mmap-atom! dom "t/d" nil)
         get-v (fn [at i] (a/read-pinned at (fn [m] (e/nth (get m :v) i))))]
-    (swap! x (fn [_] {:v (fv/vec (range 2000))}))
+    (swap! x (fn [_] {:v (v/eve-vec (range 2000))}))
     (flush! x)
     (let [blocks (tally-reach x)]
       (is (> (count blocks) 60) "the reader reaches the vector's nodes and their arrays")

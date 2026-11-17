@@ -21,6 +21,7 @@
 
    ;; All test namespaces (must be required so they compile)
    [eve.deftype-test :as deftype-test]
+   [eve.type-io-test]
    [eve.array-test :as array-test]
    [eve.map-test :as map-test]
    [eve.vec-test :as vec-test]
@@ -29,6 +30,7 @@
    [eve.tally-test :as tally-test]
    [eve.read-region-test :as read-region-test]
    [eve.thread-host :as thread-host]
+   [eve.portable-surface-test]
    [eve.thread-host-test :as thread-host-test]
    [eve.thread-test :as thread-test]
    [eve.thread-meta-test :as thread-meta-test]
@@ -44,9 +46,9 @@
    [eve.batch2-validation-test :as batch2-test]
    [eve.batch3-validation-test :as batch3-test]
    [eve.batch4-validation-test :as batch4-test]
-   [eve.deftype.int-map-test :as int-map-test]
-   [eve.deftype.rb-tree-test :as rb-tree-test]
+   [eve.sorted-migration-test :as sorted-migration-test]
    [eve.numeric-tags-test :as numeric-tags-test]
+   [eve.numeric-test :as numeric-test]
    [eve.overflow-test :as overflow-test]
    [eve.collection-hash-test :as collection-hash-test]
    [eve.reference-tag-test :as reference-tag-test]
@@ -54,6 +56,7 @@
    [eve.sorted-coll-test :as sorted-coll-test]
    [eve.keyring-test :as keyring-test]
    [eve.value-buffer-test :as value-buffer-test]
+   [eve.record-test]
    [eve.deftype.type-id-test :as type-id-test]
    [eve.typed-array-test :as typed-array-test]
    [eve.mem-test :as mem-test]
@@ -196,17 +199,14 @@
 (defn- run-batch4! []
   (t/run-tests 'eve.batch4-validation-test))
 
-(defn- run-int-map! []
-  (t/run-tests 'eve.deftype.int-map-test))
-
-(defn- run-rb-tree! []
-  (t/run-tests 'eve.deftype.rb-tree-test))
+(defn- run-sorted-migration! []
+  (t/run-tests 'eve.sorted-migration-test))
 
 (defn- run-deftype! []
   (t/run-tests
     'eve.deftype-test
-    'eve.deftype.int-map-test
-    'eve.deftype.rb-tree-test
+    'eve.type-io-test
+    'eve.record-test
     'eve.deftype.type-id-test))
 
 (defn- run-validation! []
@@ -265,7 +265,7 @@
   (t/run-tests 'eve.fuzz-test))
 
 (defn- run-em5! []
-  (t/run-tests 'eve.numeric-tags-test 'eve.collection-hash-test 'eve.reference-tag-test 'eve.big-value-test 'eve.sorted-coll-test 'eve.keyring-test 'eve.int-key-nested-value-test 'eve.value-buffer-test))
+  (t/run-tests 'eve.numeric-tags-test 'eve.numeric-test 'eve.collection-hash-test 'eve.reference-tag-test 'eve.big-value-test 'eve.sorted-coll-test 'eve.keyring-test 'eve.int-key-nested-value-test 'eve.value-buffer-test))
 
 (defn- run-fixtures! []
   (t/run-tests 'eve.eve-bytes-fixture-test))
@@ -354,6 +354,7 @@
 (defn- run-all! []
   (t/run-tests
     'eve.deftype-test
+    'eve.type-io-test
     'eve.array-test
     'eve.map-test
     'eve.vec-test
@@ -369,8 +370,9 @@
     'eve.batch2-validation-test
     'eve.batch3-validation-test
     'eve.batch4-validation-test
-    'eve.deftype.int-map-test
-    'eve.deftype.rb-tree-test
+    'eve.sorted-migration-test
+    'eve.record-test
+    'eve.portable-surface-test
     'eve.deftype.type-id-test
     'eve.typed-array-test
     'eve.dataset-test
@@ -381,6 +383,7 @@
     'eve.hamt-util-test
     'eve.coalesc-align-test
     'eve.numeric-tags-test
+    'eve.numeric-test
     'eve.overflow-test
     'eve.collection-hash-test
     'eve.reference-tag-test
@@ -406,8 +409,7 @@
    "batch2"      run-batch2!
    "batch3"      run-batch3!
    "batch4"      run-batch4!
-   "int-map"     run-int-map!
-   "rb-tree"     run-rb-tree!
+   "sorted-migration" run-sorted-migration!
    "deftype"     run-deftype!
    "validation"  run-validation!
    "typed-array" run-typed-array!
@@ -458,7 +460,7 @@
 
 (def ^:private suite-names
   ["all" "core" "array" "slab" "slab-grow" "large-scale" "epoch-gc" "obj"
-   "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
+   "deftype" "sorted-migration" "batch2" "batch3" "batch4" "validation"
    "typed-array" "mem" "mmap" "mmap-slab" "mmap-atom" "mmap-atom-e2e"
    "mmap-domain" "conformance" "fuzz" "fixtures" "char-key" "em5" "hamt-util" "lustre" "lustre-bench"
    "dataset" "array-hosts" "tensor" "rrb-vector" "columnar-bench" "perf-audit" "perf" "perf-growable" "slab-leak" "net"

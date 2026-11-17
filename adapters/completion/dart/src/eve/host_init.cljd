@@ -1,0 +1,137 @@
+(ns eve.host-init
+  "Load-time registration, replayed as one call: what loading Eve's
+   namespaces does on every other host.
+
+   ClojureDart compiles a namespace to its definitions only — a bare
+   top-level form that is not a definition is not emitted (measured:
+   a top-level println in a required library, and in the entry
+   namespace itself, never runs; only main and def initializers
+   execute). Eve registers its slab machinery by top-level calls —
+   eve.deftype-proto.alloc's register-* into serialize's registry,
+   and each collection type's register-eve-type! — so on this host
+   those registrations are replayed here, with the same arguments,
+   from the definitions the compiler did emit (the named
+   <type-id>--from-header / --dispose / --build fns the
+   register-eve-type! macro defines, the register fns themselves,
+   and the two anonymous fns alloc and eve.array register, whose
+   bodies are replayed below and marked with their source).
+
+   A ClojureDart program that uses Eve's persistent machinery calls
+   (init!) once, before its first domain or codec use — the entry's
+   first act, as a JVM program's namespace loads are its first act.
+   The register fns are resets and assocs over registry atoms, so
+   calling init! again is a no-op in effect.
+
+   Not replayed: eve.deftype.registry's per-type register-host-type!
+   (every eve deftype expansion's last form, also a bare call, also
+   dropped) and eve.record's registrar calls. Reconstructing a
+   user deftype or record value by name hash reads that registry;
+   the collection types below reconstruct through serialize's
+   pointer-tag and header constructors, which are registered here.
+   A program that stores user deftypes replays its own types'
+   register-host-type! calls the same way (type-key, the type, its
+   quoted spec — the expansion's arguments)."
+  (:require [eve.deftype-proto.serialize :as ser]
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]
+            [eve.slab-io :as slab]
+            [eve.vec]
+            [eve.map]
+            [eve.set]
+            [eve.list]
+            [eve.array]))
+
+(defn- register-collection!
+  "One register-eve-type! call, replayed (eve.deftype-proto.macros):
+   the type constructor by pointer tag and header type-id, the
+   header disposer, the plain-collection builder, the direct slab
+   writer. The print form the macro also emits is a definition
+   (an IPrint extension on this host), so it survives compilation
+   and needs no replay."
+  [fast-tag type-id from-header dispose build pred coll-tag coll-writer]
+  (ser/register-type-constructor! fast-tag type-id from-header)
+  (ser/register-header-disposer! type-id dispose)
+  (ser/register-builder! pred build)
+  (ser/register-coll-writer! coll-tag coll-writer))
+
+(defn init!
+  "Replay Eve's load-time registrations. Call once, first."
+  []
+  ;; Fix 0020 (E4 cljd lane): the compiler bakes the collection
+  ;; type-id vars from a claim computed with *ns* bound to the
+  ;; user ns (map 189, vec 114, set 128, list 217, array 123).
+  ;; The fleet's values are the namespaces' own constants;
+  ;; reset the vars before anything reads them.
+  (set! eve.vec/EveVector-type-id 0x12)
+  (set! eve.list/EveList-type-id 0x13)
+  (set! eve.map/EveHashMap-type-id 0xED)
+  (set! eve.set/EveHashSet-type-id 0xEE)
+  (set! eve.array/EveArray-type-id 0x1D)
+  ;; eve.deftype-proto.alloc's plumbing into serialize's registry
+  (ser/register-header-tag-reader! alloc/read-header-tag)
+  (ser/register-sio-root! alloc/sio-root)
+  (ser/register-shared-domain-fn! alloc/shared-domain?)
+  (ser/register-stored-piece! alloc/keep-owned!)
+  ;; alloc's value-block-io map, replayed from
+  ;; eve.deftype-proto.alloc (register-value-block-io!): the :write
+  ;; fn's (alength ^bytes bs) is the byte count of the same value
+  (ser/register-value-block-io!
+   {:read (fn [sio blk len] (slab/read-bytes sio blk 1 len))
+    :write (fn [sio bs]
+             (let [blk (slab/alloc! sio (inc (count bs)))]
+               (slab/write-u8! sio blk 0 ser/SCALAR_BLOCK_TYPE_ID)
+               (slab/write-bytes! sio blk 1 bs)
+               blk))})
+  ;; alloc's read-header-name-hash, replayed from
+  ;; eve.deftype-proto.alloc (it is private there): bytes 1-3 of a
+  ;; deftype block's header, the 24-bit name hash
+  (ser/register-header-name-hash-reader!
+   (fn [sio slab-off]
+     (let [b (fn [k] (slab/read-u8 sio slab-off k))]
+       (bit-or (b 1) (bit-shift-left (b 2) 8) (bit-shift-left (b 3) 16)))))
+  (ser/register-default-sio! alloc/plumbing-sio)
+
+  ;; the collection types (each namespace's register-eve-type!)
+  (register-collection!
+   ser/FAST_TAG_SAB_VEC eve.vec/EveVector-type-id
+   eve.vec/EveVector-type-id--from-header eve.vec/EveVector-type-id--dispose
+   eve.vec/EveVector-type-id--build vector? :vec eve.vec/-write-vec-coll!)
+  (register-collection!
+   ser/FAST_TAG_SAB_MAP eve.map/EveHashMap-type-id
+   eve.map/EveHashMap-type-id--from-header eve.map/EveHashMap-type-id--dispose
+   eve.map/EveHashMap-type-id--build map? :map eve.map/-write-map-coll!)
+  (register-collection!
+   ser/FAST_TAG_SAB_SET eve.set/EveHashSet-type-id
+   eve.set/EveHashSet-type-id--from-header eve.set/EveHashSet-type-id--dispose
+   eve.set/EveHashSet-type-id--build set? :set eve.set/-write-set-coll!)
+  (register-collection!
+   ser/FAST_TAG_SAB_LIST eve.list/EveList-type-id
+   eve.list/EveList-type-id--from-header eve.list/EveList-type-id--dispose
+   eve.list/EveList-type-id--build seq? :list eve.list/-write-list-coll!)
+
+  ;; eve.array's own registrations: the EveArray builder (its fn
+  ;; replayed from eve.array, register-builder!), the slab-type
+  ;; constructor and disposer, the pointer-tag constructor
+  (ser/register-builder!
+   (fn [v] (instance? eve.array/EveArray v))
+   (fn [sio arr]
+     (let [subtype (eve.array/-subtype arr)
+           n (count arr)
+           byte-len (* n (eve.array/subtype->elem-size subtype))
+           blk-off (slab/alloc! sio (+ eve.array/HEADER_SIZE byte-len))]
+       (slab/write-u8!  sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
+       (slab/write-u8!  sio blk-off 1 subtype)
+       (slab/write-u16! sio blk-off 2 0)
+       (slab/write-i32! sio blk-off 4 n)
+       (when (pos? byte-len)
+         (slab/write-bytes! sio blk-off eve.array/HEADER_SIZE
+                            (slab/read-bytes (d/-eve-sio arr) (d/-root-header-off arr) eve.array/HEADER_SIZE byte-len)))
+       (reify d/IEveRoot
+         (-root-header-off [_] blk-off)))))
+  (ser/register-type-constructor!
+   ser/EVE_ARRAY_SLAB_TYPE_ID ser/EVE_ARRAY_SLAB_TYPE_ID eve.array/eve-array-from-offset)
+  (ser/register-header-disposer!
+   ser/EVE_ARRAY_SLAB_TYPE_ID
+   (fn [sio blk-off] (slab/free! sio blk-off)))
+  (ser/register-type-constructor! ser/FAST_TAG_EVE_ARRAY eve.array/eve-array-from-sab-pointer)
+  nil)

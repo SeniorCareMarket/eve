@@ -1,0 +1,88 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2)
+   on ClojureDart, over the adapter's Dart natives (adapters/region/dart/dart,
+   the package:eve_region library): a file mapped MAP_SHARED or a calloc'd
+   heap buffer, both by dart:ffi; the atomics the system libatomic's
+   (__atomic_*_4/_8, sequentially consistent), wait/notify the futex syscall
+   with a bounded-poll fallback. The same construction as region/ctypes
+   (basilisp), in Dart.
+
+   make-heap-region and open-mmap-region open them; lustre-region? says
+   whether a region's atomics are fcntl byte-range locks (a Lustre mount):
+   never here — open-mmap-region refuses :lustre?, as basilisp's does.
+   A region is a deftype holding the mapping's base address; every op is
+   the natives' call at base + offset."
+  (:require ["package:eve_region/eve_region.dart" :as region]
+            [eve.mem :as mem]))
+
+;; Every region has atomic RMW unless it says otherwise.
+(extend-protocol mem/IHostAtomics
+  fallback
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _byte-off f] (f)))
+
+(deftype DartRegion [^int base ^int size ^bool mapped]
+  mem/IMemRegion
+  (-byte-length [_] size)
+  (-load-i32 [_ off] (region/eveLoad32 (+ base off)))
+  (-store-i32! [_ off v] (region/eveStore32 (+ base off) v) nil)
+  (-cas-i32! [_ off expected desired] (region/eveCas32 (+ base off) expected desired))
+  (-add-i32! [_ off delta] (region/eveAdd32 (+ base off) delta))
+  (-sub-i32! [_ off delta] (region/eveAdd32 (+ base off) (- delta)))
+  (-exchange-i32! [_ off v] (region/eveExchange32 (+ base off) v))
+  (-load-i64 [_ off] (region/eveLoad64 (+ base off)))
+  (-store-i64! [_ off v] (region/eveStore64 (+ base off) v) nil)
+  (-cas-i64! [_ off expected desired] (region/eveCas64 (+ base off) expected desired))
+  (-add-i64! [_ off delta] (region/eveAdd64 (+ base off) delta))
+  (-sub-i64! [_ off delta] (region/eveAdd64 (+ base off) (- delta)))
+  (-wait-i32! [_ off expected timeout-ms]
+    (case (region/eveWait32 (+ base off) expected timeout-ms)
+      0 :ok
+      1 :not-equal
+      2 :timed-out))
+  (-notify-i32! [_ off n] (region/eveNotify32 (+ base off) n))
+  (-supports-watch? [_] true)
+  (-read-bytes [_ off len]
+    (when (> (+ off len) size)
+      (throw (ex-info "eve.region: read past the region's end"
+                      {:off off :len len :size size})))
+    (let [u8 (region/eveReadBytes base off len)]
+      (.asInt8List (.-buffer u8) (.-offsetInBytes u8) (.-length u8))))
+  (-write-bytes! [_ off src]
+    (when (> (+ off (.-lengthInBytes src)) size)
+      (throw (ex-info "eve.region: write past the region's end"
+                      {:off off :len (.-lengthInBytes src) :size size})))
+    (region/eveWriteBytes base off
+                          (.asUint8List (.-buffer src) (.-offsetInBytes src) (.-lengthInBytes src)))
+    nil)
+  mem/ISyncableRegion
+  ;; msync under the mapping. A heap region has nothing to force.
+  (-sync! [_]
+    (when mapped (region/eveSync base 0 size))
+    nil)
+  (-sync-range! [_ off len]
+    (when mapped (region/eveSync base off len))
+    nil))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed MAP_SHARED region of size-bytes at
+   path-str. The file grows to size-bytes when it is shorter and is never
+   truncated."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes opts]
+   (when (:lustre? opts)
+     (throw (ex-info "eve.region: no lustre regions on ClojureDart" {:path path-str})))
+   (DartRegion. (region/eveMmapRegion path-str size-bytes) size-bytes true)))
+
+(defn make-heap-region
+  "An IMemRegion over size-bytes of zeroed memory in this process's heap,
+   shared by the process's isolates that are handed its address (a
+   region lives as long as its domain)."
+  [size-bytes]
+  (DartRegion. (region/eveHeapRegion size-bytes) size-bytes false))
+
+(defn lustre-region?
+  "true for a region whose atomics are fcntl byte-range locks (a Lustre
+   mount): never on this host."
+  [_r]
+  false)

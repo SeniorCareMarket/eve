@@ -14,6 +14,57 @@
    :main eve.runner.merkle-phase5-main/main
    :output-to "target/merkle-phase5/main.js"}
 
+  ;; Lane X1 (flat Eve): the packed chunk's bytes on Node (small compile
+  ;; graph: eve.flat.chunk + its codec, no slab; see
+  ;; test/eve/runner/flat_x1_main.cljs)
+  :flat-x1-test
+  {:target :node-script
+   :main eve.runner.flat-x1-main/main
+   :output-to "target/flat-x1-test/main.js"}
+
+  ;; eve.flat-io's conformance test on Node (flat lanes U2a): built through deps.edn's
+  ;; :node-test and :flat-io-node aliases (see test/eve/runner/flat_io_main.cljs)
+  :flat-io-test
+  {:target :node-script
+   :main eve.runner.flat-io-main/main
+   :output-to "target/flat-io-test/main.js"}
+
+  ;; eve's flat sisters on Node (flat lanes U4a): eve.flat.sister-test alone, a :node-test build with a namespace
+  ;; filter. clojure -M:node-test -m shadow.cljs.devtools.cli compile flat-sister-test
+  ;;   && node target/flat-sister-test/main.js
+  :flat-sister-test
+  {:target :node-test
+   :output-to "target/flat-sister-test/main.js"
+   :ns-regexp "eve.flat.sister-test$"}
+
+  ;; flat-all-hosts lane: the flat-abilities smoke on Node
+  ;; (see test/eve/runner/flat_smoke_main.cljs)
+  :flat-smoke-test
+  {:target :node-script
+   :main eve.runner.flat-smoke-main/main
+   :output-to "target/flat-smoke-test/main.js"}
+
+  ;; Trunk merge (flat chunk handles): the CLJS handles answer through
+  ;; the shared walks — parity suite (see
+  ;; test/eve/runner/flat_parity_main.cljs)
+  :flat-parity-test
+  {:target :node-script
+   :main eve.runner.flat-parity-main/main
+   :output-to "target/flat-parity-test/main.js"}
+
+  ;; Lane H4 (flat Eve): the image on Node — detach/place's read side and
+  ;; the module slab's run claim (see test/eve/runner/flat_h4_main.cljs)
+  :flat-h4-test
+  {:target :node-script
+   :main eve.runner.flat-h4-main/main
+   :output-to "target/flat-h4-test/main.js"}
+
+  ;; Lane H4 diagnostic probe (see test/eve/runner/flat_h4_probe_main.cljs)
+  :flat-h4-probe
+  {:target :node-script
+   :main eve.runner.flat-h4-probe-main/main
+   :output-to "target/flat-h4-probe/main.js"}
+
   ;; The thread feature's conformance in a browser (bb test:browser: built through deps.edn's :browser-test
   ;; alias, which puts the browser's thread adapter in place of Node's). :simple with no output wrapper, so the
   ;; kernel a worker importScripts keeps its names global (eve.thread-host resolves a thread's entry by name).
@@ -33,22 +84,22 @@
    :modules {:main {:init-fn eve.runner.perf-browser-main/init}}
    :compiler-options {:optimizations :simple :output-wrapper false}}
 
-  ;; eve-media, the capstone (capstone/eve-media): the Node member, built through deps.edn's :node-test and
-  ;; :eve-media-node aliases (clojure -M:node-test:eve-media-node -m shadow.cljs.devtools.cli release eve-media-node)
-  :eve-media-node
+  ;; cohost-media, the capstone (capstone/cohost-media): the Node member, built through deps.edn's :node-test and
+  ;; :cohost-media-node aliases (clojure -M:node-test:cohost-media-node -m shadow.cljs.devtools.cli release cohost-media-node)
+  :cohost-media-node
   {:target :node-script
-   :main eve-media.node-member/main
-   :output-to "capstone/eve-media/target/node-member.js"
+   :main cohost-media.node-member/main
+   :output-to "capstone/cohost-media/target/node-member.js"
    :compiler-options {:optimizations :simple}}
 
-  ;; eve-media's page, built through :browser-test and :eve-media-page (the browser's http, crypto and thread
+  ;; cohost-media's page, built through :browser-test and :cohost-media-page (the browser's http, crypto and thread
   ;; adapters; reagami): at :simple with no output wrapper, so the workers it starts (eve.thread's browser adapter, the
   ;; fat-kernel route) load it as their kernel with its names global
-  :eve-media-page
+  :cohost-media-page
   {:target :browser
-   :output-dir "capstone/eve-media/target/page/js"
+   :output-dir "capstone/cohost-media/target/page/js"
    :asset-path "/js"
-   :modules {:main {:init-fn eve-media.page/init}}
+   :modules {:main {:init-fn cohost-media.page/init}}
    :compiler-options {:optimizations :simple :output-wrapper false}}
 
   ;; eve's local network, the page (bb net:local; net-local/page): built through deps.edn's :browser-test and

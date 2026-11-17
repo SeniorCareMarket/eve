@@ -19,10 +19,15 @@
        #'eve.atom/try-flush-retires! (fn [_ds] nil)
        #'eve.atom/cas-backoff! (fn [_attempt] nil)
        #'eve.atom/swap-attempt!
-       (fn [_ds _ptr-off f _args _exclusive?]
+       (fn [_ds _ptr-off _slot f _args _exclusive?]
          (let [n (swap! seen inc)
                v (f (nth currents (dec n)))]
-           (if (< n (count currents)) [:retry nil] [:ok v])))}
+           ;; the delivery sentinel is eve.atom's own ::none
+           ;; (:eve.atom/none) — a bare ::none here would resolve to
+           ;; this test's namespace and mmap-swap! would treat the
+           ;; keyword as a delivery pair (watch-fix lane correction:
+           ;; the stub must speak swap-attempt!'s actual contract)
+           (if (< n (count currents)) [:retry nil :eve.atom/none] [:ok v :eve.atom/none])))}
       #(#'eve.atom/mmap-compare-and-set! {} 0 old new))))
 
 (deftest cas-reports-the-attempt-that-committed

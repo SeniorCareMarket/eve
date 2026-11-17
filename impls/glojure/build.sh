@@ -22,7 +22,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES="$(cd "$HERE/../../adapters/completion/glojure/go" && pwd)"
 OUT="${1:-${TMPDIR:-/tmp}/glj-eve}"
-PKGS=syscall,unsafe,eveglj/region,eveglj/types,eveglj/host
+PKGS=syscall,unsafe,eveglj/region,eveglj/types,eveglj/host,eveglj/media
 SUM=sha256sum; command -v sha256sum >/dev/null || SUM="shasum -a 256"   # macOS has shasum
 to() { local s=$1; shift; if command -v timeout >/dev/null; then timeout "$s" "$@"; else "$@"; fi; }
 now() { perl -MTime::HiRes=time -e 'printf("%d\n", time() * 1000)'; }   # (date +%N is GNU's)

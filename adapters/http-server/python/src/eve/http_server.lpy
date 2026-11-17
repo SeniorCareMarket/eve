@@ -1,0 +1,111 @@
+(ns eve.http-server
+  "eve's http-server feature (adapters/README.md) over Python's socket module — basilisp: what a member needs to
+   serve its disk domain's atoms on eve.net's routes (eve.net.gateway). (serve! opts handler) answers
+   {:port :stop}; handler takes {:method :url :headers :body :body-b64} — :url the request's path and query as sent
+   (an atom id's %2F kept), :headers lower-case names, :body UTF-8 text and :body-b64 the same bytes as base64 (a
+   blob) — and answers {:status :headers :body :body-as}: :body text, or with :body-as :b64 the base64 of the bytes
+   to send (eve.net.run's conventions), as the JDK adapter does. A raw socket is the whole platform surface (Python's
+   http.server would do as well; the socket is what the parse is already written for in eve's socket client):
+   HTTP/1.1 read and written here, one thread a connection, as the JDK adapter's pool is (a handler may block). One
+   request a connection (Connection: close), as eve.http's socket client speaks."
+  (:import base64 socket threading))
+
+(def ^:private reasons {200 "OK" 201 "Created" 204 "No Content" 400 "Bad Request"
+                        403 "Forbidden" 404 "Not Found" 500 "Internal Server Error"})
+(def ^:private head-sep (.encode "\r\n\r\n" "ascii"))
+
+(defn- b64 [bs] (.decode (base64/b64encode bs) "ascii"))
+(defn- unb64 [s] (base64/b64decode (str s)))
+(defn- body-text [bs] (.decode bs "utf-8" ** :errors "replace"))
+
+(defn- header-map
+  "lower-case name -> first value, of the head's lines after the request line"
+  [lines]
+  (into {}
+        (keep (fn [line]
+                (let [i (.find line ":")]
+                  (when (<= 0 i)
+                    [(.lower (.strip (subs line 0 i))) (.strip (subs line (inc i)))]))))
+        lines))
+
+(defn- read-request
+  "eve's request map of one connection's bytes, or nil if the peer sent nothing"
+  [conn]
+  (let [ba (python/bytearray)]
+    (loop []
+      (let [parts (.split (python/bytes ba) head-sep 1)]
+        (if (< (python/len parts) 2)
+          (let [chunk (.recv conn 65536)]
+            (when (pos? (python/len chunk))
+              (.extend ba chunk)
+              (recur)))
+          (let [lines (vec (.split (.decode (first parts) "iso-8859-1") "\r\n"))
+                rl (vec (.split (first lines) " "))
+                headers (header-map (rest lines))
+                need (if-let [cl (get headers "content-length")] (python/int cl) 0)
+                body-ba (python/bytearray (second parts))]
+            ;; trim any overshoot past content-length (a pipelined next request: not ours to read)
+            (while (> (python/len body-ba) need) (.pop body-ba))
+            (loop []
+              (when (< (python/len body-ba) need)
+                (let [chunk (.recv conn (min 65536 (- need (python/len body-ba))))]
+                  (when (pos? (python/len chunk))
+                    (.extend body-ba chunk)
+                    (recur)))))
+            (let [bs (python/bytes body-ba)]
+              {:method (first rl)
+               :url (second rl)
+               :headers headers
+               :body (body-text bs)
+               :body-b64 (b64 bs)})))))))
+
+(defn- respond [conn {:keys [status headers body body-as]}]
+  (let [status (or status 200)
+        bs (if (= :b64 body-as) (unb64 (or body "")) (.encode (str (or body "")) "utf-8"))
+        head (str "HTTP/1.1 " status " " (get reasons status "") "\r\n"
+                  (apply str (keep (fn [[k v]]
+                                     (let [k (name k)]
+                                       (when-not (= "content-length" (.lower k))
+                                         (str k ": " v "\r\n"))))
+                                   headers))
+                  "content-length: " (python/len bs) "\r\n"
+                  "connection: close\r\n"
+                  "\r\n")]
+    (.sendall conn (.encode head "iso-8859-1"))
+    (when (pos? (python/len bs)) (.sendall conn bs))))
+
+(defn- serve-conn [handler conn]
+  (try
+    (when-let [req (read-request conn)]
+      (respond conn (try (handler req)
+                         (catch python/Exception e {:status 500 :headers {} :body (str e)}))))
+    (catch python/Exception _ nil)
+    (finally (try (.close conn) (catch python/Exception _ nil)))))
+
+(defn- spawn [f]
+  (let [t (threading/Thread ** :target f :daemon true)]
+    (.start t)
+    t))
+
+(defn serve!
+  "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1)}: {:port :stop}. :stop ends the
+   listener; a connection already being handled finishes its answer."
+  [opts handler]
+  (let [srv (socket/socket socket/AF_INET socket/SOCK_STREAM)]
+    (.setsockopt srv socket/SOL_SOCKET socket/SO_REUSEADDR 1)
+    (.bind srv (python/tuple [(or (:host opts) "127.0.0.1") (int (or (:port opts) 0))]))
+    (.listen srv 64)
+    (.settimeout srv 0.25)
+    (let [port (nth (vec (.getsockname srv)) 1)
+          stopped (atom false)]
+      (spawn (fn []
+               (loop []
+                 (when-not @stopped
+                   (try
+                     (let [conn (first (.accept srv))]
+                       (spawn (fn [] (serve-conn handler conn))))
+                     (catch python/Exception _ nil))
+                   (recur)))))
+      {:port port
+       :stop (fn [] (reset! stopped true)
+               (try (.close srv) (catch python/Exception _ nil)))})))

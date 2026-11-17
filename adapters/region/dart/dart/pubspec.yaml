@@ -1,0 +1,7 @@
+name: eve_region
+description: eve's region natives for the ClojureDart host — mmap (MAP_SHARED) and libatomic over dart:ffi, futex wait/notify. The Dart half of adapters/region/dart; a program on the :cljd host row adds this package by path and eve.region (the .cljd half) calls it.
+publish_to: none
+version: 0.0.0
+
+environment:
+  sdk: ^3.14.0

@@ -17,7 +17,6 @@
   (:require [eve.alpha :as e]
             [eve.atom :as ea]
             [eve.core :as ec]
-            [eve.deftype.int-map :as im]
             [eve.host :refer [swap! reset!]]
             [eve.process :as proc]
             [eve.sorted :as sorted]
@@ -78,9 +77,6 @@
      [:sorted-set-build-200
       (fn [] (e/atom ::sorted {}))
       (fn [a] (swap! a (fn [_] {:s (apply sorted/sorted-set (range 200))})))]
-     [:int-map-build-200
-      (fn [] (e/atom ::int-map {}))
-      (fn [a] (swap! a (fn [_] {:m (apply im/int-map (interleave (range 200) (range 200)))})))]
      [:disk-swap-counter
       (fn [] (let [path (str dir "/db-" (proc/now-ms))]
                (proc/ensure-parent-dir! path)

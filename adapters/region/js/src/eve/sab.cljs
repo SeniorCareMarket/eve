@@ -5,6 +5,8 @@
    alloc, free)."
   (:require [eve.atom :as a]
             [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]
+            [eve.mem :as mem]
             [eve.process-slab :as ps]
             [eve.wasm-mem :as wasm-mem]))
 
@@ -53,3 +55,48 @@
       :reader-map-sab rmap-sab
       :slab-sabs (ps/get-all-slab-sabs)
       :root-sab (ps/get-root-sab)})))
+
+;; ---------------------------------------------------------------------------
+;; Cross-worker watch signaling — the adapter side of the trunk watch
+;; spec (clause 5). The trunk owns watchers and notification; the
+;; wait/notify machinery is here, on the region's side of the seam.
+;; A successful swap bumps the root epoch word before it publishes, so
+;; the epoch word is the domain's change signal: signaling is waking
+;; its waiters, and waiting is Atomics.waitAsync on the same word.
+;; ---------------------------------------------------------------------------
+
+(defn signal-watchers!
+  "Wake every worker waiting on this domain's root epoch word
+   (eve.mem/-notify-i32! on the root region). No-op when the root
+   cannot back a watch loop. Returns the number of waiters woken,
+   or nil."
+  [ds]
+  (let [root-r (:root-r ds)]
+    (when (and root-r (mem/-supports-watch? root-r))
+      (mem/-notify-i32! root-r d/ROOT_EPOCH_OFFSET 2147483647))))
+
+(defn install-watch-signaling!
+  "Install the trunk notify listener (eve.atom/register-notify-listener!)
+   that signals cross-worker watchers on every successful swap in a
+   SAB-backed domain. Call once in each process that swaps."
+  []
+  (a/register-notify-listener!
+   (fn [ds _slot _old _new] (signal-watchers! ds))))
+
+(defn wait-for-change
+  "A promise for the domain's next change: Atomics.waitAsync on the
+   root epoch word — resolves :ok when a swap bumps it, :not-equal
+   when the epoch already moved past the read. A waiting worker
+   re-derefs on wake; the epoch is domain-wide, so a wake means some
+   atom in the domain changed. nil when this root cannot back a
+   watch loop (no SAB, or no Atomics.waitAsync on this host)."
+  [ds]
+  (let [root-r (:root-r ds)]
+    (when (and root-r (.-sab ^js root-r) (exists? js/Atomics.waitAsync))
+      (let [ia (js/Int32Array. (.-sab ^js root-r))
+            idx (quot d/ROOT_EPOCH_OFFSET 4)
+            seen (js/Atomics.load ia idx)
+            r (js/Atomics.waitAsync ia idx seen)]
+        (if (.-async r)
+          (.then (.-value r) (fn [v] (keyword v)))
+          (js/Promise.resolve (keyword (.-value r))))))))

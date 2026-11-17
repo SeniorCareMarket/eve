@@ -7,14 +7,14 @@ Third-party code distributed with eve
 
 1. core.rrb-vector (ClojureScript sources), Eclipse Public License 1.0
 
-   Files:  src/eve/rrb_vector.cljc
-           src/eve/rrb_vector/interop.cljc
-           src/eve/rrb_vector/macros.cljc
-           src/eve/rrb_vector/nodes.cljc
-           src/eve/rrb_vector/protocols.cljc
-           src/eve/rrb_vector/rrbt.cljc
-           src/eve/rrb_vector/transients.cljc
-           src/eve/rrb_vector/trees.cljc
+   Files:  test/eve/rrb_vector.cljc
+           test/eve/rrb_vector/interop.cljc
+           test/eve/rrb_vector/macros.cljc
+           test/eve/rrb_vector/nodes.cljc
+           test/eve/rrb_vector/protocols.cljc
+           test/eve/rrb_vector/rrbt.cljc
+           test/eve/rrb_vector/transients.cljc
+           test/eve/rrb_vector/trees.cljc
    Upstream: https://github.com/clojure/core.rrb-vector
    Copyright (c) Rich Hickey and contributors. All rights reserved.
    These files are distributed under the Eclipse Public License 1.0, whose

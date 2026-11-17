@@ -90,7 +90,12 @@
 (defmacro bytes-equal-at?
   "Do the (alength b) bytes at slab-off + field-off equal byte array b."
   [sio slab-off field-off b]
-  (let [bs (with-meta (gensym "b") {:tag 'bytes})]
+  ;; the binding's {:tag 'bytes} is a JVM compile hint only. On let-go a
+  ;; metadata-carrying symbol in a let's binding position reaches the
+  ;; compiler as a vm.MetaFn and panics compileBindings (measured,
+  ;; lane-m/eve-letgo #248-#257: the panic behind eve.deftype-proto.
+  ;; alloc's load failure), so the :lg arm binds a plain gensym.
+  (let [bs #?(:lg (gensym "b") :default (with-meta (gensym "b") {:tag 'bytes}))]
     (list 'let [bs b]
           (list 'eve.encoding/bytes=
                 (list 'eve.deftype-proto.alloc/-sio-read-bytes sio slab-off field-off

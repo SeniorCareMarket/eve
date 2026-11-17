@@ -3,8 +3,16 @@
    append-only per-domain file beside the domain root, holding commit
    records only. This host: ClojureScript on Node — an fd opened in
    append mode; the journal's lock is a lock DIRECTORY beside the file
-   (mkdir is the atomic test-and-set; it excludes the JVM's and the
-   other hosts' seats only through the same directory protocol).
+   (mkdir is the atomic test-and-set). The directory protocol excludes
+   the other NODE-seat processes; it does not exclude the POSIX seats:
+   the JVM, jolt, python and beam adapters lock the journal FILE
+   itself with fcntl locks and never look at this directory, so two
+   seats of different families can hold 'the journal lock' at once.
+   That cross-family gap is recorded, not hidden: this adapter's
+   protocol is the honest version of the one this seat can implement
+   in pure JS (Node core has no flock), and within it the fleet's
+   doctrine holds — wait while the holder lives, and a dead holder's
+   lock never blocks the domain (see with-journal-lock).
 
    Record format (identical bytes on every host):
      [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
@@ -49,23 +57,128 @@
   (let [fs (js/require "fs")]
     {:fd (.openSync fs path "a+") :path path}))
 
+;; The lock protocol's only tunables. lock-poll-ms is the contention
+;; spin's sleep. lock-ownerless-stale-ms is the age after which a lock
+;; directory with NO readable owner is judged abandoned (a pre-fix
+;; leftover, or a holder that died in the mkdir→owner-write window —
+;; that window is sub-millisecond, so this is three orders of margin);
+;; a directory whose owner names a pid is judged by the pid's life,
+;; never by age.
+(def ^:private lock-poll-ms 5)
+(def ^:private lock-ownerless-stale-ms 5000)
+
+(defn- pid-alive?
+  "Whether PID names a live process on this machine (signal 0: an
+   ESRCH throw is death; success or EPERM is life)."
+  [pid]
+  (try (.kill js/process pid 0)
+       true
+       (catch :default e (= (.-code e) "EPERM"))))
+
+(defn- read-owner
+  "The lock directory's owner file as {:pid :token}, or nil when it is
+   absent or unparseable. The holder writes it immediately after its
+   mkdir, inside the directory only it can have created."
+  [fs owner-path]
+  (try (let [s (.readFileSync fs owner-path "utf8")
+             [pid token] (.split s " ")
+             pid (js/parseInt pid 10)]
+         (when (and (not (js/isNaN pid)) token)
+           {:pid pid :token token}))
+       (catch :default _ nil)))
+
+(defn- lock-stale?
+  "Whether the lock directory at DIR is abandoned: its owner names a
+   pid and the pid is dead, or it has no readable owner and the
+   directory itself is older than lock-ownerless-stale-ms. A directory
+   whose owner lives is never stale, however long the hold runs — the
+   fleet's other seats wait on their fcntl locks without a timeout,
+   and a peer's cold recovery under this lock takes as long as it
+   takes."
+  [fs dir owner-path]
+  (let [owner (read-owner fs owner-path)]
+    (cond owner (not (pid-alive? (:pid owner)))
+          :else (try (> (- (js/Date.now) (.-mtimeMs (.statSync fs dir)))
+                        lock-ownerless-stale-ms)
+                     (catch :default _ false)))))
+
+(defn- break-lock!
+  "Dispose of a lock directory judged stale, by atomic rename: the
+   directory moves to a graveyard name only one breaker can win, and
+   what landed there is re-judged before anything is deleted — if the
+   rename in fact took a FRESH holder's directory (its owner slipped
+   in between the judgment and the rename), the directory goes back,
+   with its owner file invalidated first so that, the theft having
+   already broken that hold, later waiters judge it by the ownerless
+   age rule instead of waiting on a pid that no longer holds it."
+  [fs dir owner-path]
+  (let [grave (str dir ".stale-" (.-pid js/process) "-"
+                   (.toString (js/Math.random) 36))
+        renamed (try (.renameSync fs dir grave) true
+                     (catch :default _ false))]
+    (when renamed
+      (let [g-owner (read-owner fs (str grave "/owner"))
+            dispose? (cond g-owner (not (pid-alive? (:pid g-owner)))
+                           :else (try (> (- (js/Date.now)
+                                            (.-mtimeMs (.statSync fs grave)))
+                                         lock-ownerless-stale-ms)
+                                      (catch :default _ true)))]
+        (if dispose?
+          (try (.rmSync fs grave #js {:recursive true :force true})
+               (catch :default _ nil))
+          (do (try (.unlinkSync fs (str grave "/owner"))
+                   (catch :default _ nil))
+              (try (.renameSync fs grave dir)
+                   (catch :default _
+                     (try (.rmSync fs grave #js {:recursive true :force true})
+                          (catch :default _ nil))))))))))
+
 (defn with-journal-lock
   "Run F holding the journal's lock: the .journal.lock directory beside
-   the journal file (mkdir is atomic test-and-set). Spins with a short
-   Atomics.wait on contention. A holder that dies leaves the
-   directory; stale-lock recovery is the same heartbeat question as
-   the domain's and out of scope — the lock is only ever held for one
-   flush's duration."
+   the journal file (mkdir is atomic test-and-set), the holder's pid
+   and a per-hold token written to an owner file inside it. On
+   contention, spin with a short Atomics.wait — WITHOUT a timeout: a
+   live holder is waited out, as on every other seat. A lock whose
+   holder is dead is broken by atomic rename (break-lock!) and the
+   directory re-contended, so a member that dies mid-flush or
+   mid-recovery cannot permanently block the domain. The lock is only
+   ever held for one flush's (or one recovery's) duration. A mkdir
+   failure other than EEXIST is an IO error, not contention, and
+   throws at once."
   [{:keys [path]} f]
   (let [fs (js/require "fs")
         dir (str path ".lock")
+        owner-path (str dir "/owner")
+        token (.toString (js/Math.random) 36)
         sab (js/SharedArrayBuffer. 4)
         view (js/Int32Array. sab)]
-    (loop [tries 0]
-      (let [got (try (.mkdirSync fs dir) true (catch :default _ false))]
-        (cond got (try (f) (finally (try (.rmdirSync fs dir) (catch :default _ nil))))
-              (> tries 6000) (throw (ex-info "journal lock timeout" {:dir dir}))
-              :else (do (js/Atomics.wait view 0 0 5) (recur (inc tries))))))))
+    (loop []
+      (let [mkdir-err (try (.mkdirSync fs dir) nil (catch :default e e))]
+        (cond
+          (nil? mkdir-err)
+          (do (try (.writeFileSync fs owner-path
+                      (str (.-pid js/process) " " token))
+                   (catch :default e
+                     (try (.rmdirSync fs dir) (catch :default _ nil))
+                     (throw e)))
+              (try (f)
+                   (finally
+                     ;; Release only a directory that is still ours:
+                     ;; if it was broken as stale and re-taken (or
+                     ;; restored ownerless), the one at this path is
+                     ;; another hold's, or no one's to release here.
+                     (let [owner (read-owner fs owner-path)]
+                       (when (= (:token owner) token)
+                         (try (.unlinkSync fs owner-path)
+                              (catch :default _ nil))
+                         (try (.rmdirSync fs dir)
+                              (catch :default _ nil)))))))
+          (= (.-code mkdir-err) "EEXIST")
+          (do (when (lock-stale? fs dir owner-path)
+                (break-lock! fs dir owner-path))
+              (js/Atomics.wait view 0 0 lock-poll-ms)
+              (recur))
+          :else (throw mkdir-err))))))
 
 (defn journal-record
   "The commit record for ROOT-R's CURRENT epoch and atom table, as a

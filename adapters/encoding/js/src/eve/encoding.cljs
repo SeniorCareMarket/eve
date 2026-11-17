@@ -19,10 +19,20 @@
   []
   (throw (js/Error. "Unsupported operation")))
 
+(defn unsupported
+  "The host's unsupported-operation exception, with message msg."
+  [msg]
+  (js/Error. msg))
+
 (defn map-entry
   "A map entry [k v] (what seq on a map answers), on every host."
   [k v]
   (MapEntry. k v nil))
+
+(defn date-ms
+  "Milliseconds since the Unix epoch of a host instant."
+  [d]
+  (.getTime d))
 
 (defn arraycopy
   "Copy len elements of array src from soff to dst at doff."

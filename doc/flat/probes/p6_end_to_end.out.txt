@@ -1,0 +1,48 @@
+P6 ? eve ref: refs/heads/claude/sweet-carson-6pt29d | clojure 1.12.0 | java 21.0.12.1
+
+== 6.1 one swap! into a fresh in-process atom, end to end (each row creates its own pre-sized domain)
+  -- map 10k int->int
+    (a fresh pre-sized domain + atom alone)                             6.14 ms (med      6.78)
+    swap! of the plain value (direct writer + hold + CAS)             202.31 ms (med    219.75)
+    swap! placing the image by run claims (+ hold + CAS)               10.54 ms (med     10.75)   = 44.6x faster, net of the domain
+    swap! building in a bump buffer, compacting, placing               75.73 ms (med     87.84)   = 0.37x the plain swap
+    @a (eve->clj under the pin)                                         3.30 ms (med      3.35)
+    an image copied under the pin                                       0.40 ms (med      0.45)   = 8.2x faster
+  -- vector 100k ints
+    (a fresh pre-sized domain + atom alone)                             3.34 ms (med      3.54)
+    swap! of the plain value (direct writer + hold + CAS)             324.88 ms (med    341.03)
+    swap! placing the image by run claims (+ hold + CAS)              108.41 ms (med    115.67)   = 3.1x faster, net of the domain
+    swap! building in a bump buffer, compacting, placing              154.08 ms (med    170.72)   = 0.47x the plain swap
+    @a (eve->clj under the pin)                                        19.05 ms (med     19.31)
+    an image copied under the pin                                       9.63 ms (med      9.91)   = 2.0x faster
+  -- vector 10k records
+    (a fresh pre-sized domain + atom alone)                             2.26 ms (med      2.40)
+    swap! of the plain value (direct writer + hold + CAS)             475.17 ms (med    501.46)
+    swap! placing the image by run claims (+ hold + CAS)               36.62 ms (med     43.78)   = 13.8x faster, net of the domain
+    swap! building in a bump buffer, compacting, placing              241.50 ms (med    293.72)   = 0.51x the plain swap
+    @a (eve->clj under the pin)                                        20.73 ms (med     22.41)
+    an image copied under the pin                                       3.27 ms (med      3.70)   = 6.3x faster
+  -- 5k chat messages
+    (a fresh pre-sized domain + atom alone)                             3.37 ms (med      3.54)
+    swap! of the plain value (direct writer + hold + CAS)            1190.14 ms (med   1207.66)
+    swap! placing the image by run claims (+ hold + CAS)               80.31 ms (med     86.22)   = 15.4x faster, net of the domain
+    swap! building in a bump buffer, compacting, placing              666.10 ms (med    703.83)   = 0.56x the plain swap
+    @a (eve->clj under the pin)                                        43.86 ms (med     44.94)
+    an image copied under the pin                                      10.54 ms (med     14.15)   = 4.2x faster
+
+== 6.2 sharing: one 1,000-element vector stored at k places of an eve map (same domain: by pointer)
+    k=1    image    16,308 B ( 1,036 blocks) | eve flat codec     11,028 B | edn     3,897 B | distinct host vectors after eve->clj: 1
+    k=10   image    16,532 B ( 1,036 blocks) | eve flat codec    110,217 B | edn    38,970 B | distinct host vectors after eve->clj: 10
+    k=100  image    19,380 B ( 1,066 blocks) | eve flat codec  1,102,197 B | edn   389,790 B | distinct host vectors after eve->clj: 100
+
+== 6.3 retention
+    a 10k-entry map built by the direct writer into an append-only buffer: buffer 4,833,684 B, live image 299,332 B (6.2% live ? the rest is what the writer's own path copies superseded)
+    + 100 single-key assocs on it: the buffer grew 52,740 B (527 B an update); the newest view's live image is 302,324 B; an old view still reads, and pins the whole 4,886,424 B
+    one message read out of a 5,000-message image: the view pins 3,746,412 B to hold 556 B (0.015%); copied out on its own by the same walk in 108.0 us
+
+== 6.4 column encodings on a datom table (30,000 datoms of 5,000 people, EAVT order): bytes, and one value read
+    :e (sorted, 6 datoms an entity)        plain i32  120,000 B   3.6 ns | narrowed to 2 B   60,000 B  21.0 ns | run-end  40,000 B (5,000 runs) 100.2 ns
+    :tx (one transaction per 100 people)   plain i32  120,000 B   8.0 ns | narrowed to 1 B   30,000 B  23.9 ns | run-end     400 B (50 runs)  57.0 ns
+
+P6 done
+exit 0

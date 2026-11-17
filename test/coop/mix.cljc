@@ -11,7 +11,7 @@
                 in that writer's order}
      :shared   an RRB vector of 0..63 that :rotate ops turn by k places — a catvec of two subvecs, so its tree is
                 rebuilt by concatenation, not by assoc
-     :members  a sorted set (eve.deftype.rb-tree, an eve-deftype red-black tree) of \"writer:i\" strings, added and
+     :members  a sorted set (eve.sorted, the treap) of \"writer:i\" strings, added and
                 removed
      :ledger   nested maps: ten accounts of 1000, :transfer ops moving up to 3 between two of them
      :tally    ops by kind
@@ -22,7 +22,7 @@
    ValueScript, not eve's eve-deftypes, so it is not a writer here."
   (:require [eve.core :as e]
             [eve.rrb-vector :as fv]
-            [eve.deftype.rb-tree :as rb]))
+            [eve.sorted :as so]))
 
 (def kinds "An op's kind, by i mod 4." [:rotate :member+ :member- :transfer])
 
@@ -38,7 +38,7 @@
   {:counter 0
    :logs {}
    :shared (fv/vec (range 64))
-   :members (rb/sorted-set)
+   :members (so/sorted-set)
    :ledger (into {} (map (fn [i] [(str "a" i) {:balance 1000}])) (range 10))
    :tally (zipmap kinds (repeat 0))})
 

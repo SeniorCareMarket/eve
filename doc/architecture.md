@@ -38,8 +38,8 @@ freed when) is `doc/memory-model.md`; the host contract is `doc/unification/HOST
 │  eve.thread           the executor service (pools, future, pmap, fold)     │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  Data structures      eve.map (HAMT) · eve.vec · eve.set · eve.list        │
-│                       eve.deftype.int-map · eve.deftype.rb-tree ·           │
-│                       eve.sorted · eve.rrb-vector · eve.obj · eve.array     │
+│                       eve.deftype.int-map ·                                 │
+│                       eve.sorted · eve.obj · eve.array                      │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  eve.codec            values ⇄ EVE bytes      (adapter: codec/byte-array,  │
 │                                                codec/js)                    │

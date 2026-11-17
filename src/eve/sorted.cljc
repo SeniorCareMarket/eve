@@ -13,14 +13,22 @@
 
    The comparator: nil for compare; a fn otherwise (a boolean predicate such as > is read as Clojure reads one).
    It is a value with no eve bytes, so the collection holds it by reference (FORMAT-DECISIONS.md §9): readable in
-   this process, refused by a shared domain. Nodes allocate in the running swap!'s domain, else this process's own.
+   this process, refused by a shared domain. Nodes allocate in the running swap!'s domain (outside a context they throw).
 
    Use eve.core's vocabulary on them (e/assoc, e/get, e/conj, e/seq, e/rseq, e/transient, e/assoc!, ...), and this
    namespace's subseq, rsubseq, rank, nth-entry, find, dissoc! and disj!."
   (:refer-clojure :exclude [sorted-map sorted-map-by sorted-set sorted-set-by subseq rsubseq find
                             dissoc! disj! aclone bytes deftype])
   (:require
-   [eve.deftype :refer [deftype eve-deftype]]
+   [eve.deftype :as edt]
+            [eve.deftype-proto.macros :as eve]
+   ;; load order: the deftype expansions' top-level register-sister!
+   ;; calls need eve.flat.sister first in the RUNTIME graph (a macro
+   ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.
+   [eve.flat.sister]
+   ;; Load order, same law for the second registry: the expansions
+   ;; also end in eve.type-readers/register! calls.
+   [eve.type-readers]
    [eve.core :as e]
    [eve.host :refer [aclone bytes]]
    [eve.codec :as codec]
@@ -67,12 +75,12 @@
   (-ek [_] nil)
   (-ev [_] nil))
 
-(eve-deftype SortedEntry [k v]
+(edt/deftype SortedEntry [k v]
              ISortedEntry
              (-ek [_] k)
              (-ev [_] v))
 
-(eve-deftype SortedNode [^:int32 prio ^:int32 size ^:SortedNode left ^:SortedNode right ^:SortedEntry entry]
+(edt/deftype SortedNode [^:int32 prio ^:int32 size ^:SortedNode left ^:SortedNode right ^:SortedEntry entry]
              ISortedNode
              (-prio [_] prio)
              (-size [_] size)
@@ -381,7 +389,7 @@
   [sc]
   (let [c (-cmp sc)
         ns (nodes (-root sc) true)]
-    (binding [d/*domain-sio* nil]
+    (binding [d/*domain-sio* (alloc/plumbing-sio)]
       (if (-map? sc)
         (build-map c (map (fn [n] [(d/eve->clj (-sk n)) (d/eve->clj (-sv n))]) ns))
         (build-set c (map (fn [n] (d/eve->clj (-sk n))) ns))))))
@@ -390,7 +398,7 @@
 ;; The sorted map and the sorted set
 ;;-----------------------------------------------------------------------------
 
-(eve-deftype EveSortedMap [^:SortedNode root cmp mta]
+(edt/deftype EveSortedMap [^:SortedNode root cmp mta]
              ISortedColl
              (-root [_] root)
              (-cmp [_] cmp)
@@ -478,7 +486,7 @@
              (equals [this other] (map-equiv this other))
              (hashCode [this] (p/hash-unordered (or (entries this (nodes root true)) ()))))
 
-(eve-deftype EveSortedSet [^:SortedNode root cmp mta]
+(edt/deftype EveSortedSet [^:SortedNode root cmp mta]
              ISortedColl
              (-root [_] root)
              (-cmp [_] cmp)
@@ -612,7 +620,7 @@
     (alloc/stop-logging! sio)
     sc))
 
-(deftype TransientSortedMap [^:mutable root cmp ^:mutable live? sio]
+(eve/host-deftype TransientSortedMap [^:volatile-mutable root cmp ^:volatile-mutable live? sio]
   ISortedTransient
   (-tdissoc! [this k] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) k))) this)
   (-tdisj! [_ _] (throw (ex-info "disj! of a transient sorted map" {})))
@@ -641,7 +649,7 @@
     this)
   (persistent [_] (live! live?) (set! live? false) (end! sio ->EveSortedMap root cmp)))
 
-(deftype TransientSortedSet [^:mutable root cmp ^:mutable live? sio]
+(eve/host-deftype TransientSortedSet [^:volatile-mutable root cmp ^:volatile-mutable live? sio]
   ISortedTransient
   (-tdissoc! [_ _] (throw (ex-info "dissoc! of a transient sorted set" {})))
   (-tdisj! [this x] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) x))) this)

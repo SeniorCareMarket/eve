@@ -1,0 +1,117 @@
+;; The requirement manifest of doc/flat/IMPL-PLAN.md §3: every requirement id in the
+;; plan, mapped to the test that fails before its lane's work and passes after.
+;;
+;; Entry: {:lane "Z1" :test "eve.flat.image-test/view-refuses-every-mutator" :status :planned}
+;;   :test   "ns/name" of the test var; :kind :suite names a whole existing suite instead.
+;;   :status :planned — the lane has not landed; the var need not exist yet.
+;;           :built   — the var exists now and requirements-covered resolves it.
+;; Wave 2's rows are unnumbered in the plan; the H*.n numbering here is Wave 0's, in the
+;; plan's row order, one id per (requirement, test) pair of §3.4.
+;; W0.6's named test is the first row of doc/flat/SPIKE-LOG.md (:kind :log).
+{:W0.1 {:lane "W0" :test "eve.flat.requirements-test/api-surface" :status :built}
+ :W0.2 {:lane "W0" :test "eve.flat.requirements-test/requirements-covered" :status :built}
+ :W0.3 {:lane "W0" :test "eve.flat.contract-test/contract-roundtrip" :status :built}
+ :W0.4 {:lane "W0" :test "eve.flat.contract-test/alloc-run-default" :status :built}
+ :W0.5 {:lane "W0" :test "eve.flat.contract-test/scoreboard-smoke" :status :built}
+ :W0.6 {:lane "W0" :test "doc/flat/SPIKE-LOG.md" :kind :log :status :built}
+
+ :Z1.1 {:lane "Z1" :test "eve.flat.image-test/view-refuses-every-mutator" :status :built}
+ :Z1.2 {:lane "Z1" :test "eve.flat.image-test/image-reads-every-type" :status :built}
+ :Z1.3 {:lane "Z1" :test "eve.flat.image-test/detach-tables-complete" :status :built}
+ :Z1.4 {:lane "Z1" :test "eve.flat.image-test/detach-under-concurrent-writes" :status :built}
+ :Z1.5 {:lane "Z1" :test "eve.flat.image-test/views-survive-appends" :status :built}
+ :Z1.6 {:lane "Z1" :test "eve.flat.image-test/detach-compacts" :status :built}
+ :Z1.7 {:lane "Z1" :test "eve.flat.image-test/image-read-speed" :status :planned}
+
+ :Z2.1 {:lane "Z2" :test "eve.flat.alloc-run-test/run-is-consecutive-and-allocated" :status :built}
+ :Z2.2 {:lane "Z2" :test "eve.flat.alloc-run-test/run-wastes-nothing" :status :built}
+ :Z2.3 {:lane "Z2" :test "eve.flat.alloc-run-test/no-run-claims-nothing" :status :built}
+ :Z2.4 {:lane "Z2" :test "eve.flat.alloc-run-test/run-claim-contention" :status :built}
+ :Z2.5 {:lane "Z2" :test "eve.flat.alloc-run-test/run-claim-across-growth" :status :built}
+ :Z2.6 {:lane "Z2" :test "eve.flat.alloc-run-test/run-claim-encrypted" :status :built}
+
+ :Z3.1 {:lane "Z3" :test "eve.flat.place-test/place-reads-back-and-updates" :status :built}
+ :Z3.2 {:lane "Z3" :test "eve.flat.place-test/place-refuses-bad-tables" :status :built}
+ :Z3.3 {:lane "Z3" :test "eve.flat.place-test/place-fallback-equal" :status :built}
+ :Z3.4 {:lane "Z3" :test "eve.flat.place-test/place-exact-on-loss-and-throw" :status :built}
+ :Z3.5 {:lane "Z3" :test "eve.flat.place-test/place-large-blocks" :status :built}
+ :Z3.6 {:lane "Z3" :test "eve.flat.place-test/place-encrypted" :status :built}
+ :Z3.7 {:lane "Z3" :test "eve.flat.place-test/place-by-units" :status :built}
+
+ :Z4.1 {:lane "Z4" :test "eve.flat.tally-count-test/written-counts-equal-walked" :status :planned}
+ :Z4.2 {:lane "Z4" :test "eve.flat.tally-count-test/written-counts-exact" :status :planned}
+ :Z4.3 {:lane "Z4" :test "eve.flat.tally-count-test/written-counts-release-clean" :status :planned}
+ :Z4.4 {:lane "Z4" :test "eve.flat.tally-count-test/written-counts-shared" :status :planned}
+ :Z4.5 {:lane "Z4" :test "eve.flat.tally-count-test/flag-off-is-the-walk" :status :planned}
+
+ :T1.1 {:lane "T1" :test "eve.flat.transfer-test/transfer-in-process" :status :built}
+ :T1.2 {:lane "T1" :test "eve.flat.transfer-test/transfer-under-writes" :status :built}
+ :T1.3 {:lane "T1" :test "eve.flat.transfer-test/stm-foreign-value-atomic" :status :built}
+ :T1.4 {:lane "T1" :test "eve.flat.transfer-test/transfer-cross-process" :status :built}
+ :T1.5 {:lane "T1" :test "eve.flat.transfer-test/transfer-refuses-local-reference" :status :built}
+ :T1.6 {:lane "T1" :test "eve.flat.transfer-test/transfer-direct-equal" :status :built}
+
+ :B1.1 {:lane "B1" :test "eve.flat.build-test/direct-build-equal-and-updatable" :status :built}
+ :B1.2 {:lane "B1" :test "eve.flat.build-test/direct-build-no-garbage" :status :built}
+ :B1.3 {:lane "B1" :test "eve.flat.build-test/direct-build-is-placeable" :status :built}
+ :B1.4 {:lane "B1" :test "eve.flat.build-test/direct-build-fallback" :status :built}
+
+ :C1.1 {:lane "C1" :test "eve.flat.chunk-test/golden-bytes" :status :built}
+ :C1.2 {:lane "C1" :test "eve.flat.chunk-test/chunk-roundtrip" :status :built}
+ :C1.3 {:lane "C1" :test "eve.flat.chunk-test/chunk-fill-policy" :status :built}
+ :C1.4 {:lane "C1" :test "eve.flat.chunk-test/chunk-protocols-in-place" :status :built}
+ :C1.5 {:lane "C1" :test "eve.flat.chunk-test/chunk-update-appends" :status :built}
+ :C1.6 {:lane "C1" :test "eve.flat.chunk-test/chunk-unknown-type" :status :built}
+ :C1.7 {:lane "C1" :test "eve.flat.chunk-test/chunk-equality-domain" :status :built}
+
+ :C2.1 {:lane "C2" :test "eve.flat.column-test/column-roundtrip" :status :built}
+ :C2.2 {:lane "C2" :test "eve.flat.column-test/column-ops-equal-host" :status :built}
+ :C2.3 {:lane "C2" :test "eve.flat.column-test/column-encodings-point-read" :status :built}
+ :C2.4 {:lane "C2" :test "eve.flat.column-test/rows-and-columns-same-bytes" :status :built}
+ :C2.5 {:lane "C2" :test "eve.flat.column-test/column-zero-copy-handoff" :status :built}
+
+ :C3.1 {:lane "C3" :test "eve.flat.container-test/directory-opens-one-chunk" :status :planned}
+ :C3.2 {:lane "C3" :test "eve.flat.container-test/container-compression" :status :planned}
+ :C3.3 {:lane "C3" :test "eve.flat.container-test/enter-mid-stream" :status :planned}
+ :C3.4 {:lane "C3" :test "eve.flat.container-test/append-keeps-old-value" :status :planned}
+ :C3.5 {:lane "C3" :test "eve.flat.container-test/container-is-placement-unit" :status :planned}
+
+ :C4.1 {:lane "C4" :test "eve.flat.check-test/malformed-refused-by-name" :status :planned}
+ :C4.2 {:lane "C4" :test "eve.flat.check-test/limits-enforced" :status :planned}
+ :C4.3 {:lane "C4" :test "eve.flat.check-test/fuzz-never-crashes" :status :planned}
+ :C4.4 {:lane "C4" :test "eve.flat.check-test/place-requires-checked" :status :planned}
+
+ :L1.1 {:lane "L1" :test "eve.flat.list-test/list-seq-allocates-nothing" :status :built}
+ :L1.2 {:lane "L1" :test "eve.flat.list-test/list-reads-from-view" :status :built}
+ :L1.3 {:lane "L1" :test "eve.jvm-list-test" :kind :suite :status :planned}
+
+ :X1.1 {:lane "X1" :test "eve.flat.chunk-node-test/golden-bytes" :status :planned}
+ :X1.2 {:lane "X1" :test "eve.flat.chunk-node-test/jvm-node-same-bytes" :status :planned}
+ :X1.3 {:lane "X1" :test "eve.flat.chunk-node-test/node-numeric-edges" :status :planned}
+ :X1.4 {:lane "X1" :test "eve.flat.chunk-node-test/node-alignment" :status :planned}
+
+ :H1.1 {:lane "H1" :test "eve.flat.disk-test/run-claim-two-process" :status :built}
+ :H1.2 {:lane "H1" :test "eve.flat.disk-test/place-exact-disk" :status :built}
+ :H2.1 {:lane "H2" :test "eve.flat.journal-test/place-survives-crash" :status :built}
+ :H3.1 {:lane "H3" :test "eve.flat.host-suite-test/host-flat-suite" :status :built}
+ :H4.1 {:lane "H4" :test "eve.flat.image-node-test/image-reads-every-type" :status :planned}
+ :H4.2 {:lane "H4" :test "eve.flat.image-node-test/run-wastes-nothing" :status :built}
+ :H5.1 {:lane "H5" :test "eve.flat.sister-test/sister-roundtrip" :status :built}
+ :H5.2 {:lane "H5" :test "eve.flat.sister-test/sister-protocols" :status :built}
+ :H5.3 {:lane "H5" :test "eve.flat.sister-test/sister-fingerprint-mismatch" :status :built}
+ :H5.4 {:lane "H5" :test "eve.flat.sister-test/sister-is-generated" :status :built}
+ ;; H5.5/H5.6 are the operator's two additions when the lane was pulled forward
+ ;; (2026-11-12): the boundary rule, and CLJC-first generation.
+ :H5.5 {:lane "H5" :test "eve.flat.sister-test/boundary-conversion" :status :built}
+ :H5.6 {:lane "H5" :test "eve.flat.sister-test/cljc-first" :status :built}
+ :H6.1 {:lane "H6" :test "eve.flat.dataset-batch-test/dataset-batch-roundtrip" :status :built}
+ :H6.2 {:lane "H6" :test "eve.flat.dataset-batch-test/columnar-pipelines" :status :built}
+ :H6.3 {:lane "H6" :test "eve.flat.dataset-batch-test/dataset-column-types" :status :built}
+ :H7.1 {:lane "H7" :test "eve.flat.chunk-leaf-test/chunk-leaf-store" :status :planned}
+ :H7.2 {:lane "H7" :test "eve.flat.chunk-leaf-test/chunk-leaf-closed" :status :planned}
+ :H7.3 {:lane "H7" :test "eve.flat.chunk-leaf-test/chunk-leaf-exact" :status :planned}
+ :H7.4 {:lane "H7" :test "eve.flat.chunk-leaf-test/datom-segments-size" :status :planned}
+ :H7.5 {:lane "H7" :test "eve.flat.chunk-leaf-test/datom-segment-scan" :status :planned}
+ :H8.1 {:lane "H8" :test "eve.flat.io-test/writer-reader-handlers" :status :built}
+ :H8.2 {:lane "H8" :test "eve.flat.io-test/reader-default" :status :built}
+ :H8.3 {:lane "H8" :test "eve.flat.io-test/file-roundtrip" :status :built}}

@@ -29,7 +29,14 @@
    [eve.deftype-proto.data :as d]
    [eve.encoding :as enc]
    [eve.deftype-proto.serialize :as ser]
-   [eve.deftype :refer [eve-deftype]]
+   [eve.deftype :as edt]
+   ;; load order: the deftype expansion's top-level register-sister!
+   ;; call needs eve.flat.sister first in the RUNTIME graph (a macro
+   ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.
+   [eve.flat.sister]
+   ;; Load order, same law for the second registry: the expansions
+   ;; also end in eve.type-readers/register! calls.
+   [eve.type-readers]
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype.slab-runtime :as slab-rt]))
 
@@ -50,7 +57,7 @@
 ;; NDBuffer type — eve-deftype backed by slab memory
 ;;-----------------------------------------------------------------------------
 
-(eve-deftype NDBuffer [^:int32 elem-offset
+(edt/deftype NDBuffer [^:int32 elem-offset
                        data ;; serialized: backing EveArray
                        shape ;; serialized: vector of ints
                        strides] ;; serialized: vector of ints
@@ -172,7 +179,7 @@
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
-   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+   domain; outside a swap/domain context it throws (:no-domain-context)."
   []
   (alloc/current-sio))
 

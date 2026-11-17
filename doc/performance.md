@@ -1,130 +1,164 @@
-# Performance — Eve 0.9.3.1
+# Performance — Eve 0.9.3.2
 
 What this release measures, where users look. Every cell below is a
-measured number with its box and load label, or it is marked **GAPPED**
-by name — none is estimated. The full record, with run logs and
-provenance per cell, is the lane report this page is folded from:
-`docs/fix-for-release-2/RELEASE-PERF-REPORT.md` in the development
-repository.
+measured number with its box and pin label, or it is marked **GAPPED**
+by name — none is estimated. Sections carry their own provenance:
+runs are never blended across boxes, pins, or days.
 
-Measurement discipline: "this box" is the fix box (Linux x86-64,
-4 cores, 15 GB RAM); "calm" means load1 < 5 at every banked reading;
-write cells are medians of 3 fresh processes unless a table says
-otherwise; ratios are computed only between two measured cells.
+Measurement discipline: performance measures the operation, not
+compilation — benches run each host's compiled form, and compile time
+is reported on its own line where a run reports it. The current-
+release record was measured on the operator's Mac (macOS, arm64,
+JDK 26) unless a section says otherwise. Older Linux cells from
+earlier rounds are not carried into this record; the 0.9.3.1 record
+stands in this file's git history.
 
-## 1. Eve-DataScript vs stock DataScript
+Pins named below: the Nov 14 ClojureScript run is the perf-doc-inputs
+harness run (tree at harness commit 95c855c1, Nov 14 01:57 ET); the
+Nov 14 ClojureCLR and basilisp runs are at the round-40 tree
+(e8c794be); the Nov 12–13 runs predate the round 38–40 fixes and are
+labeled as such wherever they appear.
 
-Both arms run the same driver (`contract.ds-bench`, the driver every
-Eve-DS number in the lineage used), the same five shapes, generators,
-batch sizes and counts. Eve-DS is the flagship shape: `swap!` on a
-journaled persistent atom domain, the release default. Stock is
-upstream DataScript 1.8.1 with the DB in a `clojure.core/atom` (stock
-has no persistent domain) — its heap-atom twin of the same shapes.
+## 1. Host perf suite — `bb scripts/perf-all.clj`, 10 workloads
 
-**@500 people**
+Compile verdict for the release tree: `test:compile` **OK** (Mac,
+Nov 14, perf-doc-inputs run).
 
-| shape | Eve-DS, JVM | stock 1.8.1 heap atom, JVM | **Eve ÷ stock JVM** | stock 1.8.1 heap atom, bb (native) |
-|---|---:|---:|---:|---:|
-| batched build, 100-person swaps (total ms) | **3,267** | 102.69 | **32×** | 17.98 |
-| bulk-load, 2,000-datom swaps (total ms) | **2,721** | 30.91 | **88×** | 9.15 |
-| one person per swap (ms per swap; first 500) | **9.13** | 0.129 | **71×** | 0.049 |
-| one datom per swap (ms per swap; ×100) | **4.53** | 0.019 | **244×** | 0.0029 |
-| retract one entity per swap (ms per swap; first 500) | **10.82** | 0.079 | **138×** | 0.014 |
+### ClojureScript (node) — Mac, Nov 14, exit 0, 37 s wall
 
-**@1,000 people**
+| workload | ns/op |
+|---|---:|
+| atom-swap-counter | 13,214 |
+| atom-deref-small | 2,792 |
+| atom-swap-map-1k | 4,127 |
+| atom-deref-map-1k | 589,843 |
+| atom-$-get-map-1k | 3,168 |
+| atom-reset-vec-1k | 6,085,937 |
+| sorted-set-build-200 | 14,320,312 |
+| int-map-build-200 | 3,599,609 |
+| disk-swap-counter | 6,117,187 |
+| thread-submit-64 | 2,158,203 |
 
-| shape | Eve-DS, JVM | stock 1.8.1 heap atom, JVM | **Eve ÷ stock JVM** | stock 1.8.1 heap atom, bb (native) |
-|---|---:|---:|---:|---:|
-| batched build, 100-person swaps (total ms) | **5,488** | 167.62 | **33×** | 39.56 |
-| bulk-load, 2,000-datom swaps (total ms) | **4,858** | 43.68 | **111×** | 23.11 |
-| one person per swap (ms per swap; first 500) | **9.58** | 0.102 | **94×** | 0.028 |
-| one datom per swap (ms per swap; ×100) | **4.82** | 0.018 | **275×** | 0.0033 |
-| retract one entity per swap (ms per swap; first 500) | **12.67** | 0.060 | **210×** | 0.016 |
+### ClojureCLR — Mac, Nov 14, round-40 pin, exit 0, 44 s wall
 
-Read the ratios for what they are: the Eve column pays a **durable
-journaled commit per swap** (fsync-class costs); stock pays none. The
-ratio is the price of persistence plus Eve's encoding, not a
-like-for-like in-memory comparison. (@1,000 the single-swap rows use
-the first 500 people/entities, per the driver, on both arms.
-Eve-DS load1 0.81–1.79, calm; stock JVM 1.22–4.39, bb 1.05–1.77, calm.)
+All 10 workloads pass. Verified rows in hand: atom-swap-counter
+**27,114 ns/op**, atom-deref-small **5,142 ns/op**. The remaining
+eight rows are in that run's `doc/hosts/perf-results.edn` on the
+operator's Mac and are **GAPPED** in this record — not estimated.
 
-The same writes in upstream-harness form (`suite-n 500`, ms per op;
-add-all / init / add-5 / add-1 / retract-5): stock JVM **21.07 / 1.31 /
-22.25 / 12.71 / 29.22**; stock bb **12.97 / 2.74 / 13.52 / 7.24 /
-21.21**. (Stock DataScript does not exist on a standard bb — its
-optional feature pins 1.3.10; the bb arm is bb v1.13.226 rebuilt
-natively from its tag with datascript 1.8.1.) The Eve port cannot run
-these in-process at bench scale, which is why the comparison above
-goes through the flagship shape.
+### Basilisp (lpy) — Mac, Nov 14, round-40 pin, exit 0, 121 s wall
 
-Stock reads (`suite-n 1000`, ms per op, JVM): q1 0.024 · q2 0.080 ·
-q3 0.110 · q4 0.158 · q5-shortcircuit 0.021 · qpred1 0.175 ·
-qpred2 0.281 · find-datoms 0.129 · find-datom 0.137 · pull-one 0.514 ·
-pull-many 0.978 · pull-wildcard 2.627 · pull-one-entities 0.847 ·
-pull-many-entities 2.283. **Eve-DS read cells on the final tree are
-GAPPED** — not re-measured this round.
+All 10 workloads pass. Its honest weak rows, named: sorted-set-build-200
+at **22,695 ms for 1 op** (≈22.7 s/op) and atom-reset-vec-1k at
+**1,399 ms for 1 op** (≈1.4 s/op). The remaining rows are in the same
+Mac `perf-results.edn` and are **GAPPED** here on the same terms.
 
-### The single-swap write cost (E2) — improved, not closed
+### JVM / nbb / jolt — Mac, Nov 12 (earlier pin, pre-rounds 38–40)
 
-A/B on fresh domains, write-domain @500, interleaved final / notally /
-pin, load1 0.81–1.79 (calm), ms per commit, medians of 3:
+All three hosts green, 10/10 workloads (walls: JVM 35 s, nbb 34 s,
+jolt 34 s). Headline rows: JVM atom-swap-counter **4,215 ns/op**;
+JVM disk-swap-counter **4,542,968 ns/op**; jolt disk-swap-counter
+**262,695 ns/op** — the durable commit ≈17× cheaper on jolt than on
+the JVM in this run; nbb roughly even with jolt on the swap rows.
+These rows were **not re-run at the round-40 pin**; the full tables
+are in that run's Mac `perf-results.edn` and are **GAPPED** here.
 
-| shape | final | notally (measurement arm) | pin | final ÷ notally |
-|---|---:|---:|---:|---:|
-| add-1 | **4.53** | 3.00 | 7.73 | **1.51×** |
-| add-5 | **9.13** | 7.39 | 15.13 | **1.24×** |
-| retract-5 | **10.82** | 6.94 | 17.95 | **1.56×** |
+### Nov 13 rerun (Mac, after the round-4 pull) — spot rows
 
-65–78% of the pin's excess over the no-tally arm was removed this
-round; the verdict is PARTIAL. The remainder is the journal forcing
-the descriptor pages each commit's holds touched — holds must be on
-disk before the record: the price of durable counts. "notally" is a
-measurement arm only (it never frees — the DS11 leak), never a
-candidate configuration.
+The rerun completed with cljs, bb, bb-minimal and glojure legs in the
+table. Glojure is interpreted and shows it: atom-swap-map-1k
+**7,175,781 ns/op** against the JVM's **1,283 ns/op** in the same run.
+ClojureCLR and basilisp columns were still dashes in this run (their
+pass at the round-40 pin is recorded above). Full table **GAPPED**
+here on the same terms as the Nov 12 run.
 
-### Tier warm reads (E3) — improved, bar not met
+Jolt and clojerl full perf-all tables from the Nov 13 runs are not in
+this record's sources and are **GAPPED** by name rather than rebuilt
+from summaries.
 
-Warm get ≈ **12× a plain map get** on this box's method (pin
-≈ 13.4×); the two landed causes took get 281.7 → 252.0 ns/op and
-allocation 122.4 → 69.6 B/op. **The heap-speed bar is NOT met** —
-PARTIAL; the remaining causes (a per-word region dispatch, an in-place
-codec entry, one unexplained type check) are priced in the lane
-record, not yet built.
+## 2. Columnar bench (node) — Mac, Nov 13
 
-## 2. Startup shootout — one-datum cold, per host
+Eve vs stock collections over columnar shapes, 10K–1M rows:
+**30/30 cells result-match**. Eve wins arithmetic, dataset and tensor
+at 100K–1M rows (up to **4.18×**). Eve **loses filter+aggregate and
+sort at every size** — named, not softened. The per-cell table is in
+the run's output on the operator's Mac and is **GAPPED** in this
+record; the win/loss verdicts above are the measured summary in hand.
 
-Contract `one`: cold process, fresh journaled domain, one datum,
-`{:mark :ONE-DONE :datoms 2}` checked each run; ×5, shell wall clock,
-median. Rows are not comparable across boxes, trees and routes (source
-vs AOT) — the labels say which.
+## 3. Startup shootout — NO ROWS at the 0.9.3.2 pin (convicted)
 
-| host | box | cold, median | label / source |
-|---|---|---:|---|
-| jank (AOT, `-O2 --no-debug`, 16.3 MB binary) | finisher's box (4-core Ubuntu VM) | **0.231 s** | take 2 (was 2.940 s) |
-| compiled ClojureScript (shadow :simple, node) | finisher's box | **0.235 s** | banked record; another tree carries 0.253 s |
-| jank (take-2 AOT, built at the 0.9.3.1 pin, 16.4 MB) | this box | **0.317 s** | ONE-DONE 5/5; load1 1.39 |
-| jolt 0.8.25 | this box, final tree | **0.665 s** | pin 0.704 s |
-| bb 1.13.226 (eve.host-completion first) | this box, final tree | **2.221 s** | pin 2.234 s |
-| nbb (node 22, mmap_cas addon) | this box, final tree | **2.284 s** | pin not run |
-| JVM (java 21) | this box, final tree | **4.308 s** | pin 4.323 s |
-| bb 1.12.218 | macOS (JDK 26 box) | 3,561 ms | pre take 2 |
-| bb 1.13.226 | Grok box | 3,891 ms | **LOAD-POISONED (load1 100+)** |
-| bb 1.13.226 | hatch | 18,086 ms | interim source route, load ~2–4 |
-| basilisp 0.5.1 | hatch | 15,603 ms | source route |
-| glojure, ClojureCLR, clojerl, basilisp | this box | **GAPPED** | not in this round's set |
+Contract `one` (cold process, fresh journaled domain, one datum,
+`{:mark :ONE-DONE :datoms 2}` checked each run; ×5, median) produced
+**no row** at the round-40 pin: the full ×5 run went **0/5 ONE-DONE**,
+so there is no median to quote. Two causes, measured and separated:
 
-## 3. Gaps, named
+- **(A) Product wall.** Every run that reached the transact (2/2)
+  died with a ClassCastException at `datascript.db` compare
+  (db.cljc:1053): `Datom__Flat` cannot be cast to `Datom`. The
+  construction-law relaxation makes a no-domain Datom construction
+  yield its flat sister, and DataScript's `^Datom`-hinted index
+  comparators hard-cast. The fix belongs to the release/flat line
+  (bind the domain through db-with's datom construction, or thaw at
+  the comparator boundary). Post-fix re-runs belong on the Mac or J.
+- **(B) Venue wall.** Runs 2–5 also died at
+  `UnixFileDispatcherImpl.map0` EPERM — the hatch sandbox's
+  intermittent mmap ban (run 1 mapped fine). Hatch-only; it does not
+  explain (A), which reproduces from the transact path itself.
 
-- **Eve-DS on bb (and every non-JVM host) for the write shapes** — not
-  measured this round; the bb stock column has no Eve partner.
-- **Eve-DS read cells on the final tree** (`suite-domain` @1,000) —
-  not re-measured this round.
-- **Startup on glojure, ClojureCLR, clojerl, basilisp, this box** —
-  not in this round's set. nbb has no pin-tree row.
-- **Stock DataScript on hosts other than the JVM and bb** (jolt, nbb,
-  glojure, CLR, basilisp, clojerl, jank): GAPPED — not asked of this
-  round.
-- **E2** remains PARTIAL (final ÷ notally 1.24–1.56×) and **E3**
-  remains PARTIAL (≈12× a plain map get; the heap-speed bar is not
-  met) — measured, not gaps; their remaining causes are priced in the
-  lane record.
+For contrast, the previous release's record (0.9.3.1 pin, pre-
+relaxation — **not** 0.9.3.2 rows): JVM passed at 747/695 ms; cljs
+216 ms (J) / 83 ms (Mac); ClojureCLR 6,303 ms; nbb 6,501 ms; basilisp
+7,767 ms; bb 3,099 ms calm (15,014 ms under load); jolt 969 ms with
+the journal **off** — not a product row, a journal-engaged row is
+still owed. Clojerl was walled at that pin; glojure, jank,
+ClojureDart, cherry and VS had no rows.
+
+## 4. Eve-DataScript vs stock DataScript (runtime) — GAPPED at the 0.9.3.2 pin
+
+No runtime rows are quoted for 0.9.3.2: the comparison was not re-run
+at this pin, and the 0.9.3.1 tables are not carried forward — the port
+and the tree have both moved since (construction law, the collation).
+
+Exact state of the missing measurement:
+
+- The canonical bench driver is located and byte-verified:
+  branch `lane-m/ds-perf-bench` @ d309f1fc, path
+  `docs/datascript-perf/bench/contract/ds_bench.cljc`,
+  sha256 `7ef8a26485767732d3e20cad0555920f042df6e133bacaafb522154ebfaa9b45`
+  (re-verified by this lane, Nov 15). **Warning:** eve.db.ds's own
+  `test/drivers/contract/ds_bench.cljc` hashes 759a6f68… — a
+  different driver; its numbers do not compare and it is never a
+  substitute.
+- Rows were filed for production on Nov 15: heron DISPATCH #46,
+  kind-hypatia DISPATCH #37, and job-agent task
+  `perf-doc-s04-ds-runtime-jvm` (JVM arm first, both arms, driver
+  hash checked by the runner before executing). Until a venue
+  returns, this section stays GAPPED.
+- Port coverage is not runtime rows, and is labeled as such: at the
+  DataScript lane's Nov 14 census the port was proven on 7 hosts
+  (JVM, bb, jolt, nbb, glojure, ClojureCLR, jank), partial on cljs
+  and basilisp, not proven on clojerl, ClojureDart or cherry.
+- One priced read cell from the same census, named as an open cost:
+  find-datom at **170.53 ms/op** (≈389× stock); a write regression in
+  the same record was convicted to the DS11 tally fix.
+
+## 5. Gaps, named
+
+- **DataScript runtime tables at the 0.9.3.2 pin** — driver located
+  and hash-verified, rows filed to three venues Nov 15, none returned
+  at this writing.
+- **Startup shootout, all hosts, at the 0.9.3.2 pin** — blocked on
+  the Datom__Flat comparator fix (§3A); the venue wall (§3B) routes
+  the re-run to the Mac or J.
+- **ClojureCLR / basilisp full perf-all tables** — headline and weak
+  rows in §1; the full tables sit in the operator's Mac
+  `perf-results.edn`.
+- **JVM / nbb / jolt perf-all at the round-40 pin** — Nov 12 rows
+  (§1) predate rounds 38–40 and were not re-run.
+- **Jolt / clojerl full perf-all tables (Nov 13 runs)** — not in this
+  record's sources.
+- **Columnar bench per-cell table** — win/loss verdicts in §2; the
+  cells themselves are in the Mac run output.
+- **Single-swap write cost and tier warm reads** (the 0.9.3.1
+  record's E2/E3 items) — not re-measured for 0.9.3.2; their
+  0.9.3.1 verdicts are not carried forward as current.

@@ -50,6 +50,16 @@
 (def hash-unordered-coll cljs.core/hash-unordered-coll)
 (def -write cljs.core/-write)
 
+;; ClojureScript has no IRef protocol (its validators are an Atom
+;; field behind the plain set-validator!/get-validator fns), so
+;; eve.core's IRef is the JS family's home for the validator half
+;; of clojure.lang.IRef: eve.atom's types carry their IRef sections
+;; onto it through the proto map's split (the watch methods land on
+;; cljs.core's IWatchable). The semantics are eve.atom's trunk
+;; watch core, as on every host.
+(defprotocol IRef (-set-validator! [ref f]) (-get-validator [ref])
+  (-get-watches [ref]))
+
 ;; printing: the writer is IWriter (cljs.core's pr-writer is private)
 (defn pr-writer [x w _opts] (cljs.core/-write w (cljs.core/pr-str x)))
 (def pr-str* cljs.core/pr-str*)

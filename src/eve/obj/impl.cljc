@@ -10,6 +10,12 @@
                      unsigned-bit-shift-right long bytes]]
    [eve.core :as e]
    [eve.deftype :as edt]
+            [eve.deftype-proto.macros :as eve]
+   ;; Load order: host-deftype's expansion ends in a top-level
+   ;; eve.type-readers/register! call, which needs the registry first
+   ;; in the RUNTIME graph (a macro ns's require is macro-side only).
+   ;; Guard: eve.deftype-guard-test.
+   [eve.type-readers]
    [eve.deftype-proto.data :as d]
    [eve.encoding :as enc]
    [eve.slab-io :as slab]
@@ -184,7 +190,9 @@
 
 (declare obj= obj-hash)
 
-(edt/deftype Obj [schema sio slab-off data-off mta]
+(eve/host-deftype Obj [schema sio slab-off data-off mta]
+  {:print (fn [this w _opts]
+            (e/-write w (str "#eve/obj " (e/pr-str* (into {} (e/seq this))))))}
   clojure.lang.IMeta
   (meta [_] mta)
 
@@ -229,10 +237,6 @@
 
   d/IEveSio
   (-eve-sio [_] sio)
-
-  IPrintWithWriter
-  (-pr-writer [this w _opts]
-    (e/-write w (str "#eve/obj " (e/pr-str* (into {} (e/seq this))))))
 
   java.lang.Object
   (toString [this] (str "#eve/obj " (e/pr-str* (into {} (e/seq this)))))
@@ -290,8 +294,8 @@
 
 (defn obj
   "A new typed object of a schema (or a field map) with initial values; fields
-   not given are 0. It lives in the running swap!'s domain, else this
-   process's (alloc/current-sio)."
+   not given are 0. It lives in the running swap!'s domain; outside a context
+   (alloc/current-sio) throws."
   ([schema-or-field-map]
    (obj schema-or-field-map {}))
   ([schema-or-field-map init-values]
@@ -323,7 +327,9 @@
   (let [[schema length] (-obj-array-parts a)]
     (str "#eve/obj-array [schema=" (e/pr-str* (:field-map schema)) " length=" length "]")))
 
-(edt/deftype ObjArrayRow [parent idx]
+(eve/host-deftype ObjArrayRow [parent idx]
+  {:print (fn [this w _opts]
+            (e/-write w (str "#eve/obj-array-row " (e/pr-str* (into {} (e/seq this))))))}
   clojure.lang.ILookup
   (valAt [_ k] (row-value parent idx k nil))
   (valAt [_ k not-found] (row-value parent idx k not-found))
@@ -337,14 +343,11 @@
     (map (fn [k] (enc/map-entry k (row-value parent idx k nil)))
          (:field-keys (first (-obj-array-parts parent)))))
 
-  IPrintWithWriter
-  (-pr-writer [this w _opts]
-    (e/-write w (str "#eve/obj-array-row " (e/pr-str* (into {} (e/seq this))))))
-
   java.lang.Object
   (toString [this] (str "#eve/obj-array-row " (e/pr-str* (into {} (e/seq this))))))
 
-(edt/deftype ObjArray [schema length columns mta]
+(eve/host-deftype ObjArray [schema length columns mta]
+  {:print (fn [this w _opts] (e/-write w (obj-array-str this)))}
   clojure.lang.IMeta
   (meta [_] mta)
 
@@ -371,10 +374,6 @@
 
   IEveObjArray
   (-obj-array-parts [_] [schema length columns])
-
-  ;; a print body is the type's print-method on some hosts: no fields in it
-  IPrintWithWriter
-  (-pr-writer [this w _opts] (e/-write w (obj-array-str this)))
 
   java.lang.Object
   (toString [this] (obj-array-str this)))

@@ -11,6 +11,16 @@
 
 (def tools (or (System/getenv "EVE_TOOLS") "/opt/eve-tools"))
 (def path (str/join ":" [(str tools "/jolt/bin") (str tools "/chez/bin") (str tools "/clojerl/bin") (System/getenv "PATH")]))
+
+;; ClojureCLR's apphost needs DOTNET_ROOT when the .NET runtime lives in a
+;; keg-only prefix (Homebrew's dotnet@8) instead of a standard location.
+(def dotnet-root
+  (or (System/getenv "DOTNET_ROOT")
+      (first (filter (fn [d] (fs/exists? (fs/file d "host" "fxr")))
+                     ["/opt/homebrew/opt/dotnet@8/libexec" "/usr/local/opt/dotnet@8/libexec"
+                      "/opt/homebrew/opt/dotnet/libexec" "/usr/local/opt/dotnet/libexec"
+                      (str (System/getProperty "user.home") "/.dotnet")
+                      "/usr/local/share/dotnet" "/usr/lib/dotnet"]))))
 (def hosts-edn (edn/read-string (slurp "hosts.edn")))
 
 (defn roots [host & more]
@@ -26,7 +36,7 @@
    :bb         [{} ["bb" "-cp" (cp :bb) "-m" "eve.runner.bb-main" "perf"]]
    :bb-minimal [{} ["bb" "-cp" (cp :bb-minimal) "-m" "eve.runner.bb-main" "perf"]]
    :nbb        [{} ["nbb" "--classpath" (cp :nbb) "-m" "eve.runner.nbb-main" "perf"]]
-   :cljr       [{"CLOJURE_LOAD_PATH" (cp :cljr)} ["cljr" "-m" "eve.runner.cljr-main" "perf"]]
+   :cljr       [(cond-> {"CLOJURE_LOAD_PATH" (cp :cljr)} dotnet-root (assoc "DOTNET_ROOT" dotnet-root)) ["cljr" "-m" "eve.runner.cljr-main" "perf"]]
    :lpy        [{"PYTHONPYCACHEPREFIX" (str (fs/absolutize "target/lpycache-perf"))}
                 (concat ["basilisp" "run"] (mapcat (fn [r] ["-p" r]) (reverse (roots :lpy "test")))
                         ["-n" "eve.runner.lpy-main" "perf"])]
@@ -52,7 +62,7 @@
   (keep (fn [l] (when (str/starts-with? l "{")
                   (let [m (try (edn/read-string l) (catch Exception _ nil))]
                     (when (and (map? m) (:perf m)) m))))
-        (str/split-lines out)))
+        (str/split-lines (or out ""))))
 
 (defn run-host [h]
   (let [[env & cmds] (get hosts h)
@@ -68,7 +78,11 @@
                   (quot (- (System/currentTimeMillis) t0) 1000) " s"))
     (doseq [l lines] (println "  " (pr-str l)))
     (when (empty? lines)
-      (println "   (no results)" (subs (str (:err res)) 0 (min 400 (count (str (:err res)))))))
+      ;; a failed host's error is the diagnostic: print ALL of it.
+      ;; Truncating it (400 chars, then head-8000, then tail-8000 across
+      ;; three rounds) kept hiding the exception that mattered; the
+      ;; output is a log, and a log does not edit its evidence.
+      (println "   (no results)" (str (:err res))))
     {:host h :exit (:exit res) :wall-s (quot (- (System/currentTimeMillis) t0) 1000) :lines lines}))
 
 (defn table [results]
@@ -82,7 +96,12 @@
                       (for [w ws] (str "| `" (name w) "` | " (str/join " | " (map #(cell % w) results)) " |"))))))
 
 (let [named (map keyword *command-line-args*)
-      hs (if (seq named) named order)
+      known (vec (filter #(contains? hosts %) named))
+      hs (cond (empty? named) order
+               (seq known) known
+               :else (do (println (str "perf-all: no known hosts among: " (str/join " " *command-line-args*)
+                                       " — known hosts: " (str/join " " (map name order))))
+                         (System/exit 1)))
       results (mapv run-host hs)
       out "doc/hosts/perf-results.edn"
       prior (when (fs/exists? out) (edn/read-string (slurp out)))

@@ -104,14 +104,18 @@
 
 (defn date? "The host's instant type (let-go's inst)." [v] (boolean (try (inst? v) (catch Throwable _ false))))
 
-(defn date-ms "Milliseconds since the Unix epoch of an instant." [d] (inst-ms d))
+(defn date-ms "Milliseconds since the Unix epoch of an instant." [d] (eve.host-native/inst-ms d))
 
-(defn ms->date "The host's instant at ms milliseconds since the Unix epoch (UTC)." [ms] (Instant/ofEpochMilli (long ms)))
+(defn ms->date "The host's instant at ms milliseconds since the Unix epoch (UTC)." [ms] (eve.host-native/ms->inst (long ms)))
 
 (defn uuid->bytes!
   "Write uuid u's 16 bytes, big-endian (network order), into b at off."
   [u b off]
-  (let [bs (eve.host-native/hex->bytes (clojure.string/replace (str u) "-" ""))]
+  ;; (str u) on let-go is the tagged literal (#uuid "..."), not the
+  ;; bare form Clojure answers; strip the tag before the hex read.
+  (let [s (str u)
+        s (if (clojure.string/starts-with? s "#uuid") (subs s 7 (dec (count s))) s)
+        bs (eve.host-native/hex->bytes (clojure.string/replace s "-" ""))]
     (dotimes [i 16] (aset b (+ off i) (nth bs i)))))
 
 (defn bytes->uuid

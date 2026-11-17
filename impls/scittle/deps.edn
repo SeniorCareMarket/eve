@@ -1,0 +1,13 @@
+{;; Eve's scittle seat application build.
+ ;; Stock scittle (unmodified) is compiled as the :scittle module and
+ ;; Eve's seat plugin (src/eve/scittle_seat.cljs) as a dependent module,
+ ;; mirroring upstream's own module structure (scittle.promesa &c).
+ ;; Vendor pins (fetch-deps.sh): scittle v0.8.33 (tag), sci @ the exact
+ ;; sha scittle v0.8.33's deps.edn pins (6790624776b09297a22100438f05b6555a4ff56d).
+ :paths ["src" "vendor/scittle-src/src" "vendor/scittle-src/resources"
+         "vendor/sci-src/src" "vendor/sci-src/resources"]
+ :deps {thheller/shadow-cljs {:mvn/version "3.3.6"}
+        ;; sci's own deps (its deps.edn does not ride along on :paths)
+        borkdude/edamame {:mvn/version "1.6.43"}
+        org.babashka/sci.impl.types {:mvn/version "0.0.3"}
+        borkdude/graal.locking {:mvn/version "0.0.2"}}}

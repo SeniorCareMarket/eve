@@ -63,8 +63,8 @@
    via i8x16.bitmask + ctz. Scans 128 bits (128 blocks) per
    SIMD iteration. For a 1MB slab with 64B blocks (16384 blocks),
    the full bitmap is 2KB = 128 v128 loads worst case."
-  (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes])
-  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes extend-default]]))
+  (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes long])
+  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes long extend-default]]))
 
 ;;=============================================================================
 ;; Size Classes
@@ -256,6 +256,32 @@
      :desc-offset   desc-offset
      :data-offset   data-offset
      :total-blocks  total-blocks}))
+
+(def ^:const MAX_HEAP_CLASS_BYTES
+  "The largest one-buffer heap slab a bitmap class may grow to, in bytes. Its
+   offsets (header data/bitmap offsets, block addresses) are i32, and a JVM
+   heap region is one byte array, indexed by int (Integer/MAX_VALUE - 8, the
+   array headroom the JDK's own collections keep)."
+  2147483639)
+
+(defn heap-class-growth-total
+  "The block count a heap bitmap class of block-size holding old-total blocks
+   grows to: double, capped by max-blocks when positive. nil when that does
+   not grow the class, or when the grown class's one-buffer layout
+   (slab-layout) would pass MAX_HEAP_CLASS_BYTES: growth is then refused (the
+   allocator spills to the next class) instead of asking the host for a region
+   its offsets cannot address."
+  [block-size old-total max-blocks]
+  (let [block-size (long block-size)
+        old-total  (long old-total)
+        max-blocks (long max-blocks)
+        new-total  (if (pos? max-blocks)
+                     (min (* 2 old-total) max-blocks)
+                     (* 2 old-total))]
+    (when (and (> new-total old-total)
+               (<= (long (:total-bytes (slab-layout block-size (* new-total block-size))))
+                   MAX_HEAP_CLASS_BYTES))
+      new-total)))
 
 (defn mmap-slab-layout
   "Calculate split-file layout for an mmap slab.
@@ -495,6 +521,14 @@
 (defprotocol ISabpType
   (-sabp-type-key [this]))
 
+(defn type-key-of
+  "The type key of an eve-deftype value, as a string — its persistent
+   form and its flat sister carry the same key (both implement
+   ISabpType) — or nil when x is not an eve-deftype value at all."
+  [x]
+  (when (satisfies? ISabpType x)
+    (-sabp-type-key x)))
+
 (defprotocol IsEve
   "Marker protocol for EVE types. Used by serialization to detect
    EVE objects without walking into their internals."
@@ -565,9 +599,13 @@
 
 ;; *domain-sio* is the slab domain a constructor allocates in while a swap!'s
 ;; f runs: the attempt's logging sio over the atom's domain (bound by
-;; eve.atom/swap-attempt!). Outside a swap it is nil and constructors use the
-;; process's own domain — see eve.deftype-proto.alloc/current-sio. Users of
-;; deftype, eve-array, dataset, tensor and the collections never pass an sio.
+;; eve.atom/swap-attempt!). Outside a swap it is nil: eve-deftype, dataset
+;; and eve-array constructors then take the FLAT path and produce the type's
+;; flat variant (Nov 14 2026 — the construction law's no-domain throw,
+;; 2026-11-11, survives only for direct alloc/current-sio callers with no
+;; flat form). Users of deftype, eve-array, dataset, tensor and the
+;; collections never pass an sio; they construct inside a swap!, in an
+;; explicit domain context, or — outside both — as flat values.
 (def ^:dynamic *domain-sio* nil)
 
 ;;=============================================================================

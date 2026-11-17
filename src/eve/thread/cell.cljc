@@ -22,11 +22,12 @@
    the waiter is running one. Every wake is consumed by the thread it was sent to (a registered waiter leaves only by
    its wake or by deregistering), so no eve.thread message is left in a mailbox; a message that is not eve.thread's
    is kept and handed back, in order, when the thread's outermost wait ends."
-  (:require [eve.deftype :as edt]
+  (:require [eve.deftype-proto.macros :as eve]
             [eve.process :as proc]
             [eve.thread-host :as h]
             [eve.thread.descriptor :as d]
-            [eve.thread.task :as task]))
+            [eve.thread.task :as task]
+            [eve.type-readers]))
 
 (defn now [] (proc/now-ms))
 
@@ -188,7 +189,7 @@
 
 (defn remote? [e] (satisfies? IRemoteEntry e))
 
-(edt/deftype RemoteEntry [read-fn await-fn cancel-fn]
+(eve/host-deftype RemoteEntry [read-fn await-fn cancel-fn]
   clojure.lang.IDeref
   (deref [_] (read-fn))
   IRemoteEntry

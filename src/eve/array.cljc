@@ -35,7 +35,18 @@
    [eve.codec :as codec]
    [eve.mem :as mem]
    [eve.deftype-proto.macros :as eve]
-   [eve.deftype :as edt]))
+   [eve.deftype :as edt]
+   ;; load order: the deftype expansion's top-level register-sister!
+   ;; call needs eve.flat.sister first in the RUNTIME graph (a macro
+   ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.
+   [eve.flat.sister]
+   ;; ClojureScript only: the flat constructor below reaches
+   ;; eve.flat.chunk's pack statically (cljs has no working
+   ;; runtime resolve in a compiled build — measured). No cycle:
+   ;; the chunk's own cone never requires this namespace, and
+   ;; eve.deftype already pulls the chunk in through
+   ;; eve.flat.sister on this host.
+   #?@(:cljs [[eve.flat.chunk :as flat-chunk]])))
 
 ;; Forward declarations
 (declare eve-array aget aset!)
@@ -201,7 +212,7 @@
 
 (defprotocol IEveArray
   "An array's element subtype and element access, answered by the slab-backed
-   EveArray and the heap-backed HeapEveArray alike. Array fns reach an
+   EveArray. Array fns reach an
    array through this, d/-eve-sio and d/-root-header-off — never through its
    fields, which bb's EveArray (a reify) does not have."
   (-subtype [arr] "The element subtype code (1-9).")
@@ -463,11 +474,31 @@
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
-   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+   domain; outside a swap/domain context it throws (:no-domain-context)."
   []
   (alloc/current-sio))
 
-(declare heap-arrays? heap-array)
+(defn- flat-eve-array
+  "The flat variant of a typed array built with no domain bound
+   (John, Nov 14 2026): a packed flat chunk holding the array's
+   elements as a flat vector — the array's value in flat form.
+   Reads with nth/count/seq like the array; swapped into an atom
+   it embeds by reference. eve.flat.chunk is resolved lazily:
+   this namespace sits below it in the load order."
+  [type-kw size-or-coll init-val]
+  (let [elems (if (number? size-or-coll)
+                (vec (repeat (int size-or-coll)
+                             (if (some? init-val)
+                               init-val
+                               (if (#{:float32 :float64} type-kw) 0.0 0))))
+                (vec size-or-coll))
+        pack #?(:cljs flat-chunk/pack
+                :default (try (requiring-resolve 'eve.flat.chunk/pack)
+                              (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil)))]
+    (when-not pack
+      (throw (ex-info "eve-array: the flat path is unavailable on this host"
+                      {:eve.alloc/error :no-flat-path})))
+    (pack elems)))
 
 (defn eve-array
   "Create a typed array.
@@ -480,21 +511,29 @@
      (eve-array sio :int32 10)
      (eve-array sio :float64 10 0.0)
 
-   Without an explicit sio the array is the host's own typed array where the
-   host has them (a HeapEveArray: the JVM, bb, jolt — eve.encoding's
-   typed-array), else it is allocated in this process's slab (default-sio).
+   Without an explicit sio the array is allocated in the running domain
+   (default-sio: the bound swap!'s domain, else this process's own) on
+   EVERY host — a public constructor obeys the construction law the same
+   way everywhere. eve-array no longer substitutes the host-heap form (a
+   HeapEveArray: the JVM, bb, jolt — eve.encoding's typed-array) silently,
+   as it did on heap hosts, ignoring a bound domain entirely while cljs
+   allocated in-domain — the asymmetry the law lane's P1 finding names.
+   The heap form is deleted (2026-11-14): a fresh eve array is a slab
+   object in a domain or a flat object outside one; the from-*-array
+   adoption conversions below follow the same split.
 
    Supported types: :int8 :uint8 :int16 :uint16 :int32 :uint32 :float32 :float64"
   ([type-kw size-or-coll]
-   (if (heap-arrays?)
-     (heap-array type-kw size-or-coll)
-     (eve-array (default-sio) type-kw size-or-coll)))
+   (if d/*domain-sio*
+     (eve-array (default-sio) type-kw size-or-coll)
+     (flat-eve-array type-kw size-or-coll nil)))
   ([a b c]
    (if (keyword? a)
-     ;; (eve-array type-kw n init-val) — this process's
-     (if (heap-arrays?)
-       (heap-array a b c)
-       (eve-array (default-sio) a b c))
+     ;; (eve-array type-kw n init-val) — the running domain's,
+     ;; or the flat variant when no domain is bound
+     (if d/*domain-sio*
+       (eve-array (default-sio) a b c)
+       (flat-eve-array a b c))
      ;; (eve-array sio type-kw size-or-coll) — explicit sio
      (let [sio a type-kw b size-or-coll c]
        (if (number? size-or-coll)
@@ -837,142 +876,23 @@
 (ser/register-type-constructor! ser/FAST_TAG_EVE_ARRAY eve-array-from-sab-pointer)
 
 ;;=============================================================================
-;; HeapEveArray: a fresh eve array on a host with its own typed arrays
-;; (eve.encoding's typed-array, typed-aget, typed-aset!: the JVM's primitive
-;; arrays on the JVM, bb and jolt). It belongs to no slab domain; storing it in
-;; an atom writes its elements into the atom's slab (its IBackingArray). On a
-;; host without typed arrays a fresh eve array is slab-backed (eve-array).
+;; HeapEveArray — DELETED (2026-11-14, John's ruling: "All such 'heap-'
+;; like things should be deleted... Our flat objects are those now.")
+;;
+;; The heap-backed host-object simulation of an eve array (a hand-written
+;; class wrapping a raw host typed array) is gone, with its heap-array
+;; constructor and the heap-arrays host registry. A fresh eve array is a
+;; slab object in a domain or a flat object outside one (eve-array). The
+;; from-*-array adoption conversions below follow the same split: the
+;; elements are written into the running domain's slab when one is bound,
+;; else the array is built in its flat form. Bulk access survives through
+;; EveArray's own IBulkAccess (a copy); the zero-copy aliasing of a live
+;; host array does not — no in-tree consumer relied on it (census in
+;; dev/fan3/STATUS.md).
 ;;=============================================================================
 
-(defdelay ^:private heap-arrays
-  (some? (enc/typed-array ser/TYPED_ARRAY_INT32 0)))
-
-(defn- heap-arrays?
-  "A fresh eve array is the host's own typed array here."
-  []
-  @heap-arrays)
-
-(defn- array-hash [a]
-  (loop [i 0 h (unchecked-int (+ 1 (* 31 (-subtype a))))]
-    (if (< i (e/count a))
-      (recur (inc i) (unchecked-int (+ (* 31 h) (hash (-aget a i)))))
-      h)))
-
-(defn- array-str [a]
-  (str "#eve/array " (subtype->type-kw (-subtype a)) " "
-       (e/pr-str* (mapv #(-aget a %) (range (e/count a))))))
-
-(edt/deftype HeapEveArray [cnt subtype-code backing]
-  clojure.lang.Counted
-  (count [_] (int cnt))
-
-  clojure.lang.Indexed
-  (nth [_ i]
-    (if (and (>= i 0) (< i cnt))
-      (enc/typed-aget backing subtype-code i)
-      (throw (enc/index-out-of-bounds (str "Index " i " out of bounds for length " cnt)))))
-  (nth [_ i not-found]
-    (if (and (>= i 0) (< i cnt))
-      (enc/typed-aget backing subtype-code i)
-      not-found))
-
-  clojure.lang.ILookup
-  (valAt [this k] (e/nth this (int k)))
-  (valAt [this k not-found] (e/nth this (int k) not-found))
-
-  clojure.lang.Seqable
-  (seq [this]
-    (when (pos? cnt)
-      (letfn [(arr-seq [i]
-                (when (< i cnt)
-                  (lazy-seq (cons (enc/typed-aget backing subtype-code i) (arr-seq (inc i))))))]
-        (arr-seq 0))))
-
-  clojure.lang.IReduce
-  (reduce [this f]
-    (if (zero? cnt)
-      (f)
-      (loop [i 1 acc (enc/typed-aget backing subtype-code 0)]
-        (if (or (>= i cnt) (reduced? acc))
-          (unreduced acc)
-          (recur (inc i) (f acc (enc/typed-aget backing subtype-code i)))))))
-
-  clojure.lang.IReduceInit
-  (reduce [this f init]
-    (loop [i 0 acc init]
-      (if (or (>= i cnt) (reduced? acc))
-        (unreduced acc)
-        (recur (inc i) (f acc (enc/typed-aget backing subtype-code i))))))
-
-  clojure.lang.IFn
-  (invoke [this i] (e/nth this (int i)))
-  (invoke [this i not-found] (e/nth this (int i) not-found))
-
-  java.lang.Iterable
-  (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
-
-  clojure.lang.IHashEq
-  (hasheq [this] (array-hash this))
-
-  ;; cons and empty too: basilisp's types refuse a partial interface
-  clojure.lang.IPersistentCollection
-  (cons [_ _] (enc/throw-unsupported))
-  (empty [_] nil)
-  (equiv [this other] (array= this other))
-
-  ;; (the type's print-method on some hosts: it names no field)
-  IPrintWithWriter
-  (-pr-writer [this writer _opts] (e/-write writer (array-str this)))
-
-  java.lang.Object
-  (toString [this] (array-str this))
-  (equals [this other] (array= this other))
-  (hashCode [this] (array-hash this))
-
-  IEveArray
-  (-subtype [_] subtype-code)
-  (-aget [_ i] (enc/typed-aget backing subtype-code i))
-  (-aset! [_ i v] (enc/typed-aset! backing subtype-code i v))
-  (-update-elem! [this i f]
-    (locking this
-      (let [old (enc/typed-aget backing subtype-code i)]
-        (enc/typed-aset! backing subtype-code i (f old))
-        old)))
-
-  d/IBackingArray
-  (-backing-array [_] backing)
-  (-backing-subtype [_] subtype-code)
-
-  d/IBulkAccess
-  (-as-double-array [_]
-    (when (== subtype-code 9) backing))
-  (-as-int-array [_]
-    (when (== subtype-code 6) backing)))
-
-(defn- heap-array
-  "A HeapEveArray: (heap-array type-kw n), (heap-array type-kw n init-val),
-   (heap-array type-kw coll)."
-  ([type-kw size-or-coll]
-   (if (number? size-or-coll)
-     (heap-array type-kw size-or-coll nil)
-     (let [sc (type-kw->subtype type-kw)
-           coll (vec (e/seq size-or-coll))
-           n (count coll)
-           backing (enc/typed-array sc n)]
-       (dotimes [i n]
-         (enc/typed-aset! backing sc i (nth coll i)))
-       (->HeapEveArray n sc backing))))
-  ([type-kw n init-val]
-   (let [sc (type-kw->subtype type-kw)
-         backing (enc/typed-array sc n)]
-     (when init-val
-       (dotimes [i n]
-         (enc/typed-aset! backing sc i init-val)))
-     (->HeapEveArray (long n) sc backing))))
-
-;; A host array as an eve array: the array itself (zero-copy) where fresh
-;; arrays are the host's own, else its elements written into a slab array in
-;; one go (eve.encoding's bytes)
+;; A host array as an eve array, in-domain: its elements written into a
+;; slab array in one go (eve.encoding's bytes)
 (defn- from-element-bytes [type-kw n bs]
   (let [arr (eve-array-uninit type-kw n)]
     (when (pos? n)
@@ -980,26 +900,26 @@
     arr))
 
 (defn from-double-array
-  "An eve :float64 array of the host double array's elements: the array
-   itself on a host whose fresh arrays are heap arrays, else a slab copy."
+  "An eve :float64 array of the host double array's elements: a slab copy
+   in the running domain when one is bound, else the flat form."
   [^doubles arr]
-  (if (heap-arrays?)
-    (->HeapEveArray (alength arr) 9 arr)
-    (from-element-bytes :float64 (alength arr) (enc/f64s->bytes-le arr))))
+  (if d/*domain-sio*
+    (from-element-bytes :float64 (alength arr) (enc/f64s->bytes-le arr))
+    (flat-eve-array :float64 (mapv (fn [i] (enc/typed-aget arr 9 i)) (range (alength arr))) nil)))
 
 (defn from-int-array
   "An eve :int32 array of the host int array's elements (as from-double-array)."
   [^ints arr]
-  (if (heap-arrays?)
-    (->HeapEveArray (alength arr) 6 arr)
-    (from-element-bytes :int32 (alength arr) (enc/i32s->bytes-le arr))))
+  (if d/*domain-sio*
+    (from-element-bytes :int32 (alength arr) (enc/i32s->bytes-le arr))
+    (flat-eve-array :int32 (mapv (fn [i] (enc/typed-aget arr 6 i)) (range (alength arr))) nil)))
 
 (defn from-byte-array
   "An eve :uint8 array of the host byte array's bytes (as from-double-array)."
   [^bytes arr]
-  (if (heap-arrays?)
-    (->HeapEveArray (alength arr) 1 arr)
-    (from-element-bytes :uint8 (alength arr) arr)))
+  (if d/*domain-sio*
+    (from-element-bytes :uint8 (alength arr) arr)
+    (flat-eve-array :uint8 (mapv (fn [i] (enc/typed-aget arr 1 i)) (range (alength arr))) nil)))
 
 ;;-----------------------------------------------------------------------------
 ;; Portable accessors (after all types are defined)
@@ -1007,6 +927,6 @@
 
 (defn array-subtype-code
   "Return the subtype code of an EveArray (portable across hosts).
-   Works for both slab-backed EveArray and heap-backed HeapEveArray."
+   Works for any IEveArray — the slab-backed EveArray."
   [arr]
   (-subtype arr))

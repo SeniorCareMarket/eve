@@ -107,10 +107,13 @@
 (defn- free-locals
   "The locals of a macro's env the body names (cljs-thread's leaf-symbol analysis): the values a travelling form must
    carry. An env whose keys are not the locals (a ClojureScript compiler's) answers none — that runtime has no
-   evaluator, and its forms are refused before they travel."
+   evaluator, and its forms are refused before they travel. A host whose &env is not a map at all answers none the
+   same way: jank (0.1-alpha, measured 2026-11-12) binds &env to the macro's own name symbol, and (keys <symbol>)
+   throws there — the require-phase crash of the thread-family suites."
   [env body]
   (let [syms (body-symbols body)]
-    (vec (filter (fn [k] (and (symbol? k) (contains? syms k))) (keys env)))))
+    (vec (filter (fn [k] (and (symbol? k) (contains? syms k)))
+                 (when (map? env) (keys env))))))
 
 (defn- qualify
   "body with every symbol that names a var here written fully qualified (eve.thread-host/var-symbol), so the runtime that evaluates
@@ -118,7 +121,7 @@
   [env body]
   (let [bound (set (filter symbol? (mapcat (fn [x] (when (vector? x) (tree-seq coll? seq x)))
                                            (tree-seq coll? seq body))))
-        locals (set (filter symbol? (keys env)))]
+        locals (set (filter symbol? (when (map? env) (keys env))))]
     (walk/postwalk
      (fn [x]
        (if (and (symbol? x) (not (bound x)) (not (locals x)))
@@ -172,7 +175,7 @@
    nothing is read as core's: =>>'s registry is core's transducers."
   [env form]
   (let [hd (cond (symbol? form) form (and (seq? form) (symbol? (first form))) (first form))]
-    (when (and hd (not (contains? env hd)) (not (and (map? (:locals env)) (contains? (:locals env) hd))))
+    (when (and hd (not (and (map? env) (contains? env hd))) (not (and (map? env) (map? (:locals env)) (contains? (:locals env) hd))))
       (let [v (resolve hd)]
         (cond (var? v) (eve.thread-host/var-symbol v)
               (and (nil? v) (nil? (namespace hd))) (symbol "clojure.core" (name hd)))))))

@@ -1,0 +1,19 @@
+{:deps {:aliases []}
+ :builds
+ {:seat
+  {:target :browser
+   ;; :simple — the release default (:advanced) was OOM-killed on this
+   ;; box (6 GB cell shared with the fleet); :simple keeps the two
+   ;; modules in one compilation, which is the property the plugin
+   ;; mechanism needs (upstream's own dev builds use :simple).
+   :compiler-options {:optimizations :simple}
+   :output-dir "out"
+   :asset-path "."
+   ;; Module structure mirrors upstream scittle's own build: the stock
+   ;; runtime as the base module, Eve's seat plugin depending on it, so
+   ;; both share one compilation (and one $APP) — the only form in which
+   ;; a plugin can register into the stock context.
+   :modules {:scittle {:entries [scittle.core]
+                       :append "globalThis.import = (x) => import(x);"}
+             :eve-scittle-seat {:entries [eve.scittle-seat]
+                                :depends-on #{:scittle}}}}}}

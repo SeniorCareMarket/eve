@@ -1,0 +1,86 @@
+(ns eve.http-server
+  "eve's http-server feature (adapters/README.md) over glojure's httpserver bridge to Go's net/http — what a
+   member needs to serve its disk domain's atoms on eve.net's routes (eve.net.gateway). (serve! opts handler)
+   answers {:port :stop}; handler takes {:method :url :headers :body :body-b64} — :url the request's path and
+   query as sent (an atom id's %2F kept), :headers lower-case names, :body UTF-8 text and :body-b64 the same bytes
+   as base64 (a blob) — and answers {:status :headers :body :body-as}: :body text, or with :body-as :b64 the
+   base64 of the bytes to send (eve.net.run's conventions), as the JDK adapter does.
+
+   The bridge (github.com/glojurelang/glojure/pkg/httpserver, glojure's own) owns the listener — net is not in
+   glj-eve's registered package set, net/http alone cannot hand back a chosen port — and calls the handler with a
+   Ring map (io.ReadCloser :body, :uri and :query-string apart); the translation to eve's map is this file's.
+   net/http serves each connection on its own goroutine (a handler may block), as the JDK adapter's pool. Header
+   values that arrived more than once are the bridge's comma-join of them (the JDK adapter takes the first).
+   Base64 is written here (encoding/base64 is not in the registered set either); UTF-8 between Go strings and
+   byte slices is eveglj:host's, as in eve.http's go client."
+  (:require [clojure.string :as str]))
+
+(def ^:private b64-chars "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+
+(defn- b64-encode
+  "the base64 of a byte slice, standard alphabet, padded"
+  [raw]
+  (let [v (vec raw) n (count v)]
+    (apply str
+           (mapcat (fn [i]
+                     (let [a (nth v i)
+                           b (if (< (+ i 1) n) (nth v (+ i 1)) 0)
+                           c (if (< (+ i 2) n) (nth v (+ i 2)) 0)]
+                       [(nth b64-chars (bit-shift-right a 2))
+                        (nth b64-chars (bit-or (bit-shift-left (bit-and a 3) 4) (bit-shift-right b 4)))
+                        (if (< (+ i 1) n)
+                          (nth b64-chars (bit-or (bit-shift-left (bit-and b 15) 2) (bit-shift-right c 6)))
+                          \=)
+                        (if (< (+ i 2) n) (nth b64-chars (bit-and c 63)) \=)]))
+                   (range 0 n 3)))))
+
+(defn- b64-decode
+  "a []byte of the bytes a base64 string names"
+  [s]
+  (let [rev (into {} (map-indexed (fn [i c] [c i]) b64-chars))
+        cs (vec (remove (fn [c] (= c \=)) (str/trim (str s))))
+        n (count cs)
+        out (reduce (fn [acc i]
+                      (let [a (get rev (nth cs i) 0)
+                            b (if (< (+ i 1) n) (get rev (nth cs (+ i 1)) 0) 0)
+                            c (if (< (+ i 2) n) (get rev (nth cs (+ i 2)) 0) 0)
+                            d (if (< (+ i 3) n) (get rev (nth cs (+ i 3)) 0) 0)]
+                        (cond-> (conj acc (bit-or (bit-shift-left a 2) (bit-shift-right b 4)))
+                          (< (+ i 2) n) (conj (bit-or (bit-shift-left (bit-and b 15) 4) (bit-shift-right c 2)))
+                          (< (+ i 3) n) (conj (bit-or (bit-shift-left (bit-and c 3) 6) d)))))
+                    []
+                    (range 0 n 4))
+        bs (go/make (go/slice-of go/byte) (count out))]
+    (dotimes [i (count out)] (aset bs i (unchecked-byte (nth out i))))
+    bs))
+
+(defn- ring->eve
+  "eve's request map of the bridge's Ring map"
+  [ring]
+  (let [[raw _] (io.ReadAll (:body ring))]
+    {:method (str/upper-case (name (:request-method ring)))
+     :url (str (:uri ring) (when-let [q (:query-string ring)] (str "?" q)))
+     :headers (:headers ring)
+     :body (eveglj:host.Utf8String (eveglj:host.Int8Slice raw) 0 (count raw))
+     :body-b64 (b64-encode raw)}))
+
+(defn- eve->ring
+  "the bridge's response map of eve's: a string body as-is, a :body-as :b64 body decoded to its bytes"
+  [{:keys [status headers body body-as]}]
+  {:status (or status 200)
+   :headers (into {} (remove (fn [[k _]] (= "content-length" (str/lower-case (name k))))) headers)
+   :body (if (= :b64 body-as) (b64-decode (or body "")) (str (or body "")))})
+
+(defn serve!
+  "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1)}: {:port :stop}. :stop shuts the
+   server down (the bridge's graceful stop); a connection already being handled finishes its answer."
+  [opts handler]
+  (let [[srv err] (github.com/glojurelang/glojure/pkg/httpserver.Start
+                   (fn [ring]
+                     (try (eve->ring (handler (ring->eve ring)))
+                          (catch Exception e {:status 500 :headers {} :body (str e)})))
+                   (or (:host opts) "127.0.0.1")
+                   (int (or (:port opts) 0)))]
+    (when err (throw (ex-info (str "eve.http-server: listen failed: " (.Error err)) {})))
+    {:port (.Port srv)
+     :stop (fn [] (.Stop srv))}))

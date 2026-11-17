@@ -1,0 +1,7 @@
+;; aegis: the blind-signature / attestation application stack, extracted from Eve's core (trunk
+;; consolidation, audit entry 8 placement, Nov 14 2026). Classpath composed like this tree's other app
+;; satellites: Eve core's src + the host's adapter roots (hosts.edn) + this directory's src and test.
+;; It sits above the crypto feature: its curve/bignum libraries are the crypto adapter's portable rows
+;; (adapters/crypto/portable, crypto lane), and it consumes eve.net.bytes (the net foundation, core).
+{:paths ["src" "test"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}}

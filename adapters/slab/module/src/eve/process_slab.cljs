@@ -17,9 +17,9 @@
                      unsigned-bit-shift-right long double locking bytes shorts ints floats
                      doubles objects defdelay]]
    [eve.deftype-proto.alloc :as alloc
-    :refer [ISlabIO ISlabRegion NIL_OFFSET OVERFLOW_CLASS_IDX
+    :refer [ISlabIO ISlabRegion ISlabRunAlloc IFlatDoor NIL_OFFSET OVERFLOW_CLASS_IDX
             decode-block-idx decode-class-idx encode-slab-offset
-            -sio-alloc! -sio-cas-i32! -sio-copy-block! -sio-free! -sio-mem-region
+            -sio-alloc! -sio-alloc-flat-block! -sio-alloc-run! -sio-cas-i32! -sio-copy-block! -sio-free! -sio-mem-region
             -sio-read-bytes -sio-read-i32 -sio-read-u16 -sio-read-u8
             -sio-write-bytes! -sio-write-i32! -sio-write-u16! -sio-write-u8!]]
    [eve.deftype-proto.coalesc :as coalesc]
@@ -233,6 +233,17 @@
                   {:sab sab :base aligned})))))
         (js/Promise.all slab-promises)))))
 
+(defn- ensure-init!
+  "Ready the module slabs on first use. Instances (and their :region)
+   are registered synchronously; WASM upgrades stay async. Libraries that
+   allocate Eve values without loading eve.alpha or calling init!
+   themselves (eve.db.ds contract.only-core on nbb is the measured case)
+   otherwise hit alloc-from-slab with a nil :region, and mem/load-i32
+   reports no IMemRegion implementation for an empty type."
+  []
+  (when-not initialized?
+    (init!)))
+
 (defn reset-all-slabs!
   "Reset all slab bitmaps to free state. Nuclear reset for test runners."
   []
@@ -414,6 +425,7 @@
    Returns {:offset :class-idx :block-idx} or {:error ...}.
    A slab that grows (mmap-backed, or in a growable SharedArrayBuffer) grows on OOM and retries."
   [size-bytes]
+  (ensure-init!)
   (let [class-idx (d/size->class-idx size-bytes)]
     (if (== class-idx -1)
       ;; Overflow path — prefer mmap coalesc if registered, else legacy
@@ -475,6 +487,48 @@
       (throw (js/Error. (str "Slab alloc failed: " (:error result)
                              " for " size-bytes " bytes")))
       (:offset result))))
+
+(defn alloc-flat-block-offset
+  "The flat door (the unified ladder's alloc_flat_block, plan §2.4):
+   like alloc-offset, but a whole-chunk size (2..15 chunks of 65536)
+   takes its rung in the coalescing region, and a non-chunk-aligned
+   size above 65536 is refused — the caller decomposes (whole chunks
+   on rungs, the tail in the variable class). At most 65536 and at
+   least 1048576 are alloc-offset itself."
+  ^number [^number size-bytes]
+  (ensure-init!)
+  (cond
+    (or (<= size-bytes 65536) (>= size-bytes 1048576))
+    (alloc-offset size-bytes)
+
+    :else
+    (let [rung-idx (coalesc/rung-idx-for-size size-bytes)]
+      (cond
+        (== rung-idx -1)
+        (throw (js/Error. (str "alloc-flat-block!: flat block of " size-bytes
+                               " bytes is not chunk-aligned — refused "
+                               "(decompose it: whole chunks on rungs, tail in the variable class)")))
+
+        mmap-coalesc-region
+        (let [byte-off (try
+                         (coalesc/coalesc-alloc-rung! mmap-coalesc-region rung-idx)
+                         (catch :default _
+                           (loop [attempts 0]
+                             (let [grew? (or (grow-mmap-coalesc!) (grow-sab-coalesc!))]
+                               (if-let [result (try
+                                                 (coalesc/coalesc-alloc-rung! mmap-coalesc-region rung-idx)
+                                                 (catch :default _ nil))]
+                                 result
+                                 (if (and grew? (< attempts 20))
+                                   (recur (inc attempts))
+                                   (throw (ex-info "alloc-flat-block!: out of memory after growth"
+                                                   {:size size-bytes}))))))))
+              slab-offset (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)]
+          (when alloc-hook (alloc-hook slab-offset))
+          slab-offset)
+
+        :else
+        (throw (js/Error. "alloc-flat-block!: no coalescing region for a rung block"))))))
 
 (defn free!
   "Free a block identified by its slab-qualified offset.
@@ -560,6 +614,86 @@
             (when (and (< attempts 20)
                        (grow-slab! class-idx))
               (recur (inc attempts)))))))))
+
+(defn- batch-alloc-run-once
+  "Single pass: claim a run of exactly n consecutive free blocks of
+   class-idx, or claim nothing. Returns the first block's slab-qualified
+   offset, or nil. This is the run claim (alloc/ISlabRunAlloc) built from
+   batch-alloc's machinery — the cursor scan, bitmap-find-free,
+   bitmap-alloc-cas!, and the one-shot cursor/free-count bookkeeping of
+   batch-alloc-once. A candidate run is verified free bit by bit (the
+   next free bit after each claimed position must be the next position);
+   a CAS lost mid-claim frees the claimed prefix before the scan moves
+   on, so a failed claim leaves the bitmap exactly as it found it."
+  [class-idx n]
+  (let [bm-offset  (aget slab-bitmap-offsets class-idx)
+        total-bits (aget slab-total-blocks class-idx)
+        inst       (wasm/get-slab-instance class-idx)
+        region     (:region inst)
+        cursor     (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)]
+    (when (<= n total-bits)
+      (loop [start-bit cursor wrapped? false]
+        (let [cand (wasm/bitmap-find-free class-idx bm-offset total-bits start-bit)]
+          (cond
+            ;; no free bit at or after start-bit: wrap once, then give up
+            (== cand -1)
+            (when (and (not wrapped?) (pos? cursor))
+              (recur 0 true))
+
+            ;; the run would run past the class: no run starts here or later
+            (> (+ cand n) total-bits)
+            (when (and (not wrapped?) (pos? cursor))
+              (recur 0 true))
+
+            :else
+            (let [run-end (+ cand n)
+                  ;; the whole run free? the next free bit after each
+                  ;; position of the run must be that next position
+                  free-run? (loop [k (inc cand)]
+                              (if (== k run-end)
+                                true
+                                (let [f (wasm/bitmap-find-free class-idx bm-offset total-bits k)]
+                                  (if (== f k)
+                                    (recur (inc k))
+                                    false))))
+                  next-start (wasm/bitmap-find-free class-idx bm-offset total-bits (inc cand))]
+              (if-not free-run?
+                ;; no run at cand; resume after the first gap (next-start
+                ;; is the first free bit past cand, -1 when none is left)
+                (cond (not= next-start -1) (recur next-start wrapped?)
+                      (and (not wrapped?) (pos? cursor)) (recur 0 true)
+                      :else nil)
+                ;; claim it, one CAS per bit; a lost CAS rolls the
+                ;; claimed prefix back and the scan resumes past it
+                (let [claimed (loop [k cand]
+                                (cond (== k run-end) run-end
+                                      (wasm/bitmap-alloc-cas! class-idx bm-offset k) (recur (inc k))
+                                      :else k))]
+                  (if (== claimed run-end)
+                    (do (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR
+                                        (mod run-end total-bits))
+                        (mem/sub-i32! region d/SLAB_HDR_FREE_COUNT n)
+                        (encode-slab-offset class-idx cand))
+                    (do (dotimes [i (- claimed cand)]
+                          (wasm/bitmap-free! class-idx bm-offset (+ cand i)))
+                        (let [f (wasm/bitmap-find-free class-idx bm-offset total-bits (inc claimed))]
+                          (cond (not= f -1) (recur f wrapped?)
+                                (and (not wrapped?) (pos? cursor)) (recur 0 true)
+                                :else nil)))))))))))))
+
+(defn batch-alloc-run
+  "The run claim over the module slab: the slab-qualified offset of the
+   first of n consecutive blocks of class-idx, or nil when no free run
+   of n exists (nothing claimed). Grows the class and retries, as
+   batch-alloc does — a grown class's new territory is one free run."
+  [class-idx n]
+  (loop [attempts 0]
+    (let [first (batch-alloc-run-once class-idx n)]
+      (if (some? first)
+        first
+        (when (and (< attempts 20)
+                   (grow-slab! class-idx))
+          (recur (inc attempts)))))))
 
 ;; -----------------------------------------------------------------------
 ;; DataView-based Data Access  (CLJS hot path)
@@ -847,7 +981,11 @@
   (-sio-mem-region [_ slab-offset field-off]
     (when (some? domain-ks)
       (throw (js/Error. "eve: an encrypted domain's blocks are read through its slab I/O, never as a region")))
-    (resolve-slab-mem-region slab-offset field-off)))
+    (resolve-slab-mem-region slab-offset field-off))
+  ISlabRunAlloc
+  (-sio-alloc-run! [_ class-idx n] (batch-alloc-run class-idx n))
+  IFlatDoor
+  (-sio-alloc-flat-block! [_ size-bytes] (alloc-flat-block-offset size-bytes)))
 
 ;; The one module-slab token. CljsSlabIO is stateless (it reads the
 ;; module-level slab state), so one instance serves every caller.
@@ -856,6 +994,7 @@
 (defn cljs-sio
   "The CLJS slab I/O token: the module slab every CLJS Eve value lives in."
   []
+  (ensure-init!)
   the-cljs-sio)
 
 ;; The default a builder given no slab I/O allocates in is alloc's current-sio — inside a swap!'s f and while the
@@ -1116,18 +1255,28 @@
   {:data (.slice slab-data-offsets) :bm (.slice slab-bitmap-offsets)
    :total (.slice slab-total-blocks) :paths (.slice slab-file-paths)
    :bm-paths (.slice slab-bitmap-paths)
+   ;; the descriptor columns too: left pointing at a released mmap domain's
+   ;; .slabN.desc-* regions, the restored slabs' tallies would write through
+   ;; them at the restored layout's offsets (nbb segfault, #490/#492/#494)
+   :desc (.slice slab-desc-regions) :desc-flags (.slice slab-desc-flags-regions)
+   :desc-pointer (.slice slab-desc-pointer-regions) :desc-off (.slice slab-desc-offsets)
    :instances (wasm/snapshot-slab-instances)
    :coalesc [mmap-coalesc-region mmap-coalesc-path
              mmap-coalesc-max-data-size mmap-coalesc-cached-data-size]
    :ks [domain-ks domain-ks-bytes]})
 
-(defn- restore-module-slabs! [{:keys [data bm total paths bm-paths instances coalesc ks]}]
+(defn- restore-module-slabs! [{:keys [data bm total paths bm-paths desc desc-flags desc-pointer desc-off
+                                      instances coalesc ks]}]
   (dotimes [i 7]
     (aset slab-data-offsets i (aget data i))
     (aset slab-bitmap-offsets i (aget bm i))
     (aset slab-total-blocks i (aget total i))
     (aset slab-file-paths i (aget paths i))
-    (aset slab-bitmap-paths i (aget bm-paths i)))
+    (aset slab-bitmap-paths i (aget bm-paths i))
+    (aset slab-desc-regions i (aget desc i))
+    (aset slab-desc-flags-regions i (aget desc-flags i))
+    (aset slab-desc-pointer-regions i (aget desc-pointer i))
+    (aset slab-desc-offsets i (aget desc-off i)))
   (wasm/restore-slab-instances! instances)
   (let [[r p mx cached] coalesc]
     (set! mmap-coalesc-region r)
@@ -1302,6 +1451,16 @@
   "The mmap domain at base-path as the module slabs: the slab files (created
    or opened), the module's own slabs saved first."
   [base-path {:keys [create? capacities] :or {capacities {}}}]
+  ;; The module slabs must exist before they are saved and replaced: the
+  ;; lazy init (ensure-init!, fired by the first allocation) re-registers
+  ;; SAB instances and layout caches unconditionally, so a domain bound
+  ;; before it has run is silently unbound by the first allocation inside
+  ;; the domain — its atoms then live in the process SABs while the atom
+  ;; table and journal record their ptrs as the domain's, and the slab
+  ;; files stay virgin (a fresh opener reads header tag 0). Running the
+  ;; init first makes the saved state the real SAB state and leaves no
+  ;; deferred init to fire under a live binding.
+  (ensure-init!)
   (save-module-slabs!)
   ;; plain until its key ring installs a keystream (eve.keyring)
   (set! domain-ks nil)

@@ -28,6 +28,12 @@
      ones wrap here as the JVM's (over the promoting +' -' *' above). instance?, locking,
      hash-ordered-coll, hash-unordered-coll, mix-collection-hash, subseq, rsubseq, sequence, rseq, requiring-resolve,
      reversible?, indexed?, into-array, cast likewise.
+   - format: jank's core format is an identity stub (the template itself comes back), so every name a host
+     builds with format came out literal on this seat — cohost's shard names, atom_eve_file's
+     %04d shard-index call, wrote prog-%04d.* files while every other host wrote prog-0001.*, and
+     cross-host readers of one domain diverged at quiescence (jank-sister lane, measured 2026-11-12).
+     A real formatter is re-rooted below: the printf subset eve and its seats call, with
+     java.util.Formatter's answers where hosts could differ (the section names the subset and the rest).
    - A name interned into clojure.core here is seen by every namespace created after this one loads (measured), so
      the launcher requires eve.host-completion first (test/eve/runner/jank_main.jank).
 
@@ -1871,7 +1877,7 @@ namespace eve_arith {
                 ;; unquoted (the value-quote below would hand the spec parser a (quote …)
                 ;; seq where it expects a symbol: measured, ds-collate DB3); subforms
                 ;; (method entries, bodies) are walked as their own forms as usual
-                :else (if (contains? '#{deftype eve-deftype defrecord reify extend-type
+                :else (if (contains? '#{deftype eve-deftype host-deftype defrecord reify extend-type
                                         extend-protocol defprotocol eve-extend-type
                                         defrecord-updatable}
                                      ;; the head matched by NAME: a spec head is spelled
@@ -1885,7 +1891,15 @@ namespace eve_arith {
                                      ;; bare class symbol) in the preceding group: every
                                      ;; JVM-named group of every eve deftype corrupted on this
                                      ;; seat, crashing where such an entry reaches the deftype
-                                     ;; machinery (eve.rseq's RSeq: F-JANK-FACE-SPEC-HEADS)
+                                     ;; machinery (eve.rseq's RSeq: F-JANK-FACE-SPEC-HEADS).
+                                     ;; host-deftype (eve.deftype's plain host type — the spelling
+                                     ;; the Nov 15 collation respelled the exact numerics to) was
+                                     ;; missing from the set: a host-deftype's spec heads
+                                     ;; (java.lang.Object & kin) took the value-quote below,
+                                     ;; (quote java.lang.Object) reached the deftype machinery as
+                                     ;; a method entry named quote with the symbol as its args,
+                                     ;; and the suite died at load in clj-rewrite-entry, calling
+                                     ;; first on that symbol (eve.numeric's EveRatio, measured)
                                      (if (symbol? h) (symbol (name h)) h))
                         (apply list (map (fn [el] (if (symbol? el) el (clj-face el))) form))
                         (apply list (map clj-face form)))))
@@ -2586,6 +2600,286 @@ namespace eve_load {
   (intern 'Math 'abs (fn [x] (if (neg? x) (- x) x)))
   (intern 'Math 'min (fn [x y] (min x y)))
   (intern 'Math 'max (fn [x y] (max x y))))
+
+;; ---------------------------------------------------------------------------
+;; format — re-rooted to a real formatter
+;; ---------------------------------------------------------------------------
+;; jank's core format is an identity stub: (format "prog-%04d" 1) answers "prog-%04d" (measured on hatch
+;; and J, jank-format lane 2026-11-12; the jank-sister lane's ring found it by its files — a jank body's
+;; prog-domain held prog-%04d.* beside the JVM's prog-0001.* family, and the two seats' readers diverged
+;; at quiescence while the mailbox calls crossed). The subset below is what eve and its seats call (grep
+;; of eve's src, adapters, test and bench, and cohost's atom_eve_file): %d %s %f %x with their flags,
+;; plus %S %X %b %% %n as cheap completes.
+;;
+;; The answers are java.util.Formatter's, Clojure's format being Formatter:
+;; - %f rounds HALF_UP on the value's canonical decimal digits (the digits (str x) prints), not the C
+;;   library's half-even on the binary value: (format "%.0f" 2.5) is "3" here as on the JVM, and
+;;   (format "%.2f" 2.675) is "2.68".
+;; - a negative %x prints the two's-complement hex of the 64-bit value, as for a Long.
+;; - %s of nil is "null"; the zero flag pads after the sign (and after a 0x prefix).
+;; Not covered, and named rather than approximated — each throws an ex-info: argument indexes (n$),
+;; %e %g %a %c, the %t date/time family, the ( flag, a precision on %d/%x/%b, an unknown conversion.
+;; A %f argument is read through (double x): eve's sites pass doubles; an integer widens, where the JVM
+;; would throw — the one deliberate widening, named here. The , and 0 flags together pad after grouping
+;; (eve combines them nowhere). A non-decimal %f value (NaN, an infinity) prints its (str x), space-padded.
+
+(defn- fmt-digit-val
+  "The value of a one-character digit string, or -1."
+  [ch]
+  (get {"0" 0 "1" 1 "2" 2 "3" 3 "4" 4 "5" 5 "6" 6 "7" 7 "8" 8 "9" 9} ch -1))
+
+(defn- fmt-small-int
+  "A digit string's value (widths, precisions, exponents — all small)."
+  [s]
+  (loop [i 0 acc 0]
+    (if (< i (count s))
+      (recur (inc i) (+ (* acc 10) (fmt-digit-val (subs s i (inc i)))))
+      acc)))
+
+(def ^:private fmt-digit-succ
+  {"0" "1" "1" "2" "2" "3" "3" "4" "4" "5" "5" "6" "6" "7" "7" "8" "8" "9" "9" "0"})
+
+(defn- fmt-inc-digits
+  "A non-empty decimal digit string, plus one (the string may grow)."
+  [s]
+  (if (empty? s)
+    "1"
+    (let [n (count s)
+          last (subs s (dec n) n)]
+      (if (= "9" last)
+        (str (fmt-inc-digits (subs s 0 (dec n))) "0")
+        (str (subs s 0 (dec n)) (get fmt-digit-succ last))))))
+
+(defn- fmt-group-digits
+  "The , flag: a comma every three digits from the right."
+  [digits]
+  (loop [d digits acc ""]
+    (if (<= (count d) 3)
+      (str d acc)
+      (recur (subs d 0 (- (count d) 3))
+             (str "," (subs d (- (count d) 3)) acc)))))
+
+(defn- fmt-repeat [s n] (apply str (repeat n s)))
+
+(defn- fmt-pad
+  "Pad a rendered body to width: the - flag left-justifies with spaces, the 0 flag pads with zeros
+   after any sign or 0x prefix, otherwise spaces on the left. strip-zero drops the 0 flag (for %s,
+   and for a non-decimal %f value, where Formatter space-pads)."
+  [body width flags strip-zero]
+  (let [missing (if width (- width (count body)) 0)]
+    (cond (<= missing 0) body
+          (contains? flags "-") (str body (fmt-repeat " " missing))
+          (and (contains? flags "0") (not strip-zero))
+          (let [plen (cond (or (str/starts-with? body "0x")
+                               (str/starts-with? body "0X")) 2
+                           (or (str/starts-with? body "-")
+                               (str/starts-with? body "+")
+                               (str/starts-with? body " ")) 1
+                           :else 0)]
+            (str (subs body 0 plen) (fmt-repeat "0" missing) (subs body plen)))
+          :else (str (fmt-repeat " " missing) body))))
+
+(defn- fmt-sign [neg flags]
+  (cond neg "-" (contains? flags "+") "+" (contains? flags " ") " " :else ""))
+
+(defn- fmt-int-body
+  "%d's body: sign + digits, grouped under the , flag."
+  [x flags]
+  (let [s (str x)
+        neg (str/starts-with? s "-")
+        digits (subs s (if neg 1 0))
+        digits (if (contains? flags ",") (fmt-group-digits digits) digits)]
+    (str (fmt-sign neg flags) digits)))
+
+(defn- fmt-divmod-16
+  "A non-negative decimal digit string divided by 16, as [quotient-digit-string remainder]:
+   string arithmetic, exact at any size. (jank's quot on a big integer is not: it answers
+   (quot 18446744073709551615 16) one too high — the low bits drop through a double on the
+   way; measured by this lane's battery, whose first %x of -1 came back 1000000000000000f.)"
+  [digits]
+  (loop [i 0 carry 0 q ""]
+    (if (>= i (count digits))
+      [(if (empty? q) "0" q) carry]
+      (let [cur (+ (* carry 10) (fmt-digit-val (subs digits i (inc i))))
+            qd (quot cur 16)
+            r (- cur (* qd 16))]
+        (recur (inc i) r
+               (if (and (empty? q) (zero? qd))
+                 q
+                 (str q (nth ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"] qd))))))))
+
+(defn- fmt-hex-body
+  "%x/%X's body (before padding): two's-complement at 64 bits for a negative, as Formatter's Long.
+   The hex digits come from the value's decimal string (str is exact at any size), divided by 16
+   in string arithmetic — never from quot on the value itself (see fmt-divmod-16)."
+  [x flags upper]
+  (let [v (if (neg? x) (+' x (*' 4294967296 4294967296)) x)
+        hexd ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "a" "b" "c" "d" "e" "f"]
+        digits (loop [ds (str v) acc ""]
+                 (let [[q r] (fmt-divmod-16 ds)
+                       acc (str (nth hexd r) acc)]
+                   (if (= "0" q) acc (recur q acc))))
+        digits (if upper (str/upper-case digits) digits)]
+    (str (when (contains? flags "#") (if upper "0X" "0x")) digits)))
+
+(defn- fmt-index-of
+  "The index of the one-character string ch in s, or -1 (a scan; no regex)."
+  [s ch]
+  (loop [i 0]
+    (cond (>= i (count s)) -1
+          (= ch (subs s i (inc i))) i
+          :else (recur (inc i)))))
+
+(defn- fmt-expand-decimal
+  "A real's canonical string ((str x): plain or e-notation) as [negative? int-digits frac-digits] in
+   plain positional notation, or nil when the string is not a decimal numeral (NaN, an infinity)."
+  [s]
+  (let [neg (str/starts-with? s "-")
+        s (if neg (subs s 1) s)
+        ei (fmt-index-of s "e")
+        ei (if (neg? ei) (fmt-index-of s "E") ei)
+        [exp mant] (if (neg? ei)
+                     [0 s]
+                     (let [es (subs s (inc ei))
+                           eneg (str/starts-with? es "-")
+                           edigits (if (or eneg (str/starts-with? es "+")) (subs es 1) es)
+                           ev (fmt-small-int edigits)]
+                       [(if eneg (- ev) ev) (subs s 0 ei)]))
+        di (fmt-index-of mant ".")
+        int-d (if (neg? di) mant (subs mant 0 di))
+        frac-d (if (neg? di) "" (subs mant (inc di)))
+        digits (str int-d frac-d)
+        point (+ (count int-d) exp)
+        all-digits (loop [i 0]
+                     (cond (>= i (count digits)) true
+                           (neg? (fmt-digit-val (subs digits i (inc i)))) false
+                           :else (recur (inc i))))]
+    (when (and (pos? (count digits)) all-digits)
+      [neg
+       (cond (<= point 0) "0"
+             (>= point (count digits)) (str digits (fmt-repeat "0" (- point (count digits))))
+             :else (subs digits 0 point))
+       (cond (<= point 0) (str (fmt-repeat "0" (- point)) digits)
+             (>= point (count digits)) ""
+             :else (subs digits point))])))
+
+(defn- fmt-round-frac
+  "Round int-digits.frac-digits to exactly p fraction digits, HALF_UP on the digits (Formatter's rule)."
+  [int-digits frac-digits p]
+  (cond (= (count frac-digits) p) [int-digits frac-digits]
+        (< (count frac-digits) p) [int-digits (str frac-digits (fmt-repeat "0" (- p (count frac-digits))))]
+        :else (let [kept (subs frac-digits 0 p)
+                    dropped (subs frac-digits p (inc p))]
+                (if (>= (fmt-digit-val dropped) 5)
+                  (let [all (fmt-inc-digits (str int-digits kept))
+                        int-len (- (count all) p)]
+                    [(subs all 0 int-len) (subs all int-len)])
+                  [int-digits kept]))))
+
+(defn- fmt-float
+  "%f as [body decimal?]: the rounded, grouped, signed body; decimal? is false for a non-decimal
+   value (NaN, an infinity), whose body is its (str x)."
+  [x flags prec]
+  (let [parsed (fmt-expand-decimal (str (double x)))]
+    (if (nil? parsed)
+      [(str (double x)) false]
+      (let [[neg int-digits frac-digits] parsed
+            [i f] (fmt-round-frac int-digits frac-digits prec)
+            i (if (contains? flags ",") (fmt-group-digits i) i)]
+        [(str (fmt-sign neg flags) i (when (pos? prec) (str "." f))) true]))))
+
+(defn- fmt-parse-spec
+  "Parse the conversion spec at fmt[i] (a %). Returns {:next :flags :width :prec :conv}; throws an
+   ex-info on the spec shapes this completion does not cover."
+  [fmt i]
+  (let [n (count fmt)]
+    (loop [j (inc i) flags #{}]
+      (when (>= j n)
+        (throw (ex-info "format: a dangling % at the end of the format string" {:format fmt})))
+      (let [ch (subs fmt j (inc j))]
+        (cond (contains? #{"-" "+" " " "0" "," "#"} ch)
+              (recur (inc j) (conj flags ch))
+              (= "(" ch)
+              (throw (ex-info "format: the ( flag is not covered by eve.host-completion's format"
+                              {:format fmt}))
+              :else
+              (let [w-end (loop [k j]
+                            (if (and (< k n) (not (neg? (fmt-digit-val (subs fmt k (inc k))))))
+                              (recur (inc k))
+                              k))
+                    width (when (> w-end j) (fmt-small-int (subs fmt j w-end)))
+                    [prec p-end] (if (and (< w-end n) (= "." (subs fmt w-end (inc w-end))))
+                                   (let [p0 (inc w-end)
+                                         p1 (loop [k p0]
+                                              (if (and (< k n) (not (neg? (fmt-digit-val (subs fmt k (inc k))))))
+                                                (recur (inc k))
+                                                k))]
+                                     (when (= p1 p0)
+                                       (throw (ex-info "format: a precision with no digits"
+                                                       {:format fmt})))
+                                     [(fmt-small-int (subs fmt p0 p1)) p1])
+                                   [nil w-end])]
+                (when (>= p-end n)
+                  (throw (ex-info "format: a dangling conversion at the end of the format string"
+                                  {:format fmt})))
+                {:next (inc p-end) :flags flags :width width :prec prec
+                 :conv (subs fmt p-end (inc p-end))}))))))
+
+(defn- fmt-render
+  "Render one conversion of arg under a parsed spec."
+  [{:keys [flags width prec conv]} arg]
+  (let [no-prec (fn [] (when prec
+                         (throw (ex-info (str "format: a precision is not covered for %" conv
+                                              " by eve.host-completion's format")
+                                         {:conversion conv}))))]
+    (case conv
+      "d" (do (no-prec)
+              (when-not (integer? arg)
+                (throw (ex-info "format: %d wants an integer" {:arg arg})))
+              (fmt-pad (fmt-int-body arg flags) width flags false))
+      "f" (let [[body decimal] (fmt-float arg flags (or prec 6))]
+            (fmt-pad body width flags (not decimal)))
+      ("x" "X") (do (no-prec)
+                    (when-not (integer? arg)
+                      (throw (ex-info "format: %x wants an integer" {:arg arg})))
+                    (fmt-pad (fmt-hex-body arg flags (= conv "X")) width flags false))
+      ("s" "S") (let [s (if (nil? arg) "null" (str arg))
+                      s (if prec (subs s 0 (min prec (count s))) s)
+                      s (if (= conv "S") (str/upper-case s) s)]
+                  (fmt-pad s width (disj flags "0") false))
+      "b" (do (no-prec)
+              (fmt-pad (cond (nil? arg) "false" (true? arg) "true" (false? arg) "false" :else "true")
+                       width (disj flags "0") false))
+      (throw (ex-info (str "format: the conversion %" conv
+                           " is not covered by eve.host-completion's format"
+                           " (covered: %d %s %S %f %x %X %b %% %n)")
+                      {:conversion conv})))))
+
+(defn- fmt-format
+  "clojure.core/format, re-rooted (see the section head): the printf subset eve and its seats call."
+  [fmt & args]
+  (when-not (string? fmt)
+    (throw (ex-info "format: the format is not a string" {:format fmt})))
+  (loop [i 0 args (seq args) out ""]
+    (if (>= i (count fmt))
+      out
+      (let [ch (subs fmt i (inc i))]
+        (if (not= "%" ch)
+          (recur (inc i) args (str out ch))
+          (let [spec (fmt-parse-spec fmt i)
+                nxt (:next spec)
+                conv (:conv spec)]
+            (cond (= conv "%") (recur nxt args (str out "%"))
+                  (= conv "n") (recur nxt args (str out "\n"))
+                  :else (do (when (nil? args)
+                              (throw (ex-info "format: a missing argument"
+                                              {:format fmt :conversion conv})))
+                            (recur nxt (next args)
+                                   (str out (fmt-render spec (first args))))))))))))
+
+(if (ns-resolve 'clojure.core 'format)
+  (re-root! 'format fmt-format)
+  (intern 'clojure.core 'format fmt-format))
 
 ;; ---------------------------------------------------------------------------
 ;; (refer 'clojure.core), the one every ns form expands to

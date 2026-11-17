@@ -138,6 +138,58 @@
     "Bulk copy len bytes from src to dst within slab memory.
      Both offsets are slab-qualified; field-offs are byte offsets within block."))
 
+(defprotocol ISlabRunAlloc
+  "A run claim (flat Eve, IMPL-PLAN lane Z2): n consecutive blocks of one
+   class, claimed in one call where the room is known to be free. A slab I/O
+   that can claim runs implements this; every other slab I/O is served by
+   alloc-run!'s default, which loops -sio-alloc!."
+  (-sio-alloc-run! [ctx class-idx n]
+    "The slab offset of the first of n consecutive allocated blocks of
+     class-idx, or nil when no free run of n exists (nothing claimed)."))
+
+(defprotocol IFlatDoor
+  "The flat door (the unified ladder's alloc_flat_block, plan §2.4):
+   a slab I/O that can place flat blocks on ladder rungs implements
+   this; every other slab I/O is served by alloc-flat-block!'s
+   default, which degrades to -sio-alloc! (placement only — the
+   block is an ordinary block there)."
+  (-sio-alloc-flat-block! [ctx size-bytes]
+    "A flat block of size-bytes: its slab-qualified offset. At most
+     65536 and at least 1048576 take the ordinary path; a whole-chunk
+     size (2..15 chunks of 65536) takes its rung; any other size
+     above 65536 is a single non-decomposed flat block — refused."))
+
+(defn alloc-flat-block!
+  "A flat block of size-bytes through ctx's flat door: its
+   slab-qualified offset. See IFlatDoor for the routing; on a ctx
+   without the door this is -sio-alloc!."
+  [ctx size-bytes]
+  (if (satisfies? IFlatDoor ctx)
+    (-sio-alloc-flat-block! ctx size-bytes)
+    (-sio-alloc! ctx size-bytes)))
+
+(def ^:const CLASS_BLOCK_SIZES [32 64 128 256 512 1024])
+
+(defn alloc-run!
+  "n blocks of class-idx (0-5) for sio: a vector of the blocks' slab-qualified
+   offsets in ascending order, or nil when a run-claiming slab I/O has no
+   free run of n. The default (W0.4) loops -sio-alloc! once per block, so
+   every host is correct before any is fast; the offsets it answers are
+   allocated but not consecutive. Throws for the overflow class, whose
+   blocks have no fixed size."
+  [sio class-idx n]
+  (cond
+    (zero? n) []
+    (= class-idx OVERFLOW_CLASS_IDX)
+    (throw (ex-info "alloc-run!: the overflow class has no fixed block size"
+                    {:class-idx class-idx :n n}))
+    (satisfies? ISlabRunAlloc sio)
+    (when-let [first (-sio-alloc-run! sio class-idx n)]
+      (let [base (decode-block-idx first)]
+        (mapv (fn [i] (encode-slab-offset class-idx (+ base i))) (range n))))
+    :else
+    (mapv (fn [_] (-sio-alloc! sio (nth CLASS_BLOCK_SIZES class-idx))) (range n))))
+
 (defprotocol ISlabRegion
   "Where a slab block's field lives, for the region's own operations that
    ISlabIO does not carry (wait/notify on an i32)."
@@ -163,12 +215,13 @@
      ;; The slab context over a set of IMemRegions — every host's (its regions
      ;; are each host's adapter's; this code is not). A domain is one of these.
 
-     (declare ctx-alloc! ctx-free!)
+     (declare ctx-alloc! ctx-free! ctx-alloc-run!)
 
      ;; Every ISlabIO operation takes an explicit sio (JvmSlabCtx). Constructors
      ;; called without one allocate in current-sio: the running swap!'s domain
-     ;; (d/*domain-sio*), else this process's heap domain — automatic for every
-     ;; user of deftype and the collections (2026-10-16).
+     ;; (d/*domain-sio*). Outside a swap/domain context current-sio THROWS
+     ;; (construction law, 2026-11-11) — the 2026-10-16 automatic process-heap
+     ;; fallback is abolished; only Eve plumbing uses plumbing-sio.
 
      ;; There is no thread-local allocation log either: a swap's allocations
      ;; are recorded by the per-swap LoggingSlabIO wrapper (below), and the
@@ -326,6 +379,9 @@
 
        (-sio-free! [ctx slab-offset] (ctx-free! ctx slab-offset))
 
+       ISlabRunAlloc
+       (-sio-alloc-run! [ctx class-idx n] (ctx-alloc-run! ctx class-idx n))
+
        ISlabRegion
        (-sio-mem-region [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
@@ -464,12 +520,67 @@
            (throw (ex-info "JvmSlabCtx: no .slab6 region for overflow alloc"
                            {:size-bytes size-bytes})))))
 
+     (defn- coalesc-rung-alloc-growing!
+       "A rung block of rung-idx in ctx, growing the region until the
+        block fits (20 growth steps at most): its slab-qualified
+        offset. Mirrors coalesc-alloc-growing!'s discipline."
+       [^JvmSlabCtx ctx rung-idx]
+       (let [^objects regions (field ctx regions)
+             size-bytes       (coalesc/rung-size rung-idx)]
+         (if (aget regions OVERFLOW_CLASS_IDX)
+           (or (when-let [byte-off (coalesc/try-coalesc-alloc-rung!
+                                    (aget regions OVERFLOW_CLASS_IDX) rung-idx)]
+                 (encode-slab-offset OVERFLOW_CLASS_IDX byte-off))
+               (loop [attempts 0]
+                 (if (coalesc/descriptors-exhausted? (aget regions OVERFLOW_CLASS_IDX))
+                   (encode-slab-offset OVERFLOW_CLASS_IDX
+                                       (coalesc/coalesc-alloc-rung!
+                                        (aget regions OVERFLOW_CLASS_IDX) rung-idx))
+                   (let [grew? (grow-coalesc-once! ctx)]
+                     (if-let [byte-off (coalesc/try-coalesc-alloc-rung!
+                                        (aget regions OVERFLOW_CLASS_IDX) rung-idx)]
+                       (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)
+                       (if (and grew? (< attempts 20))
+                         (recur (inc attempts))
+                         (throw (ex-info "alloc-flat-block!: out of memory after growth"
+                                         {:size size-bytes}))))))))
+           (throw (ex-info "JvmSlabCtx: no .slab6 region for overflow alloc"
+                           {:size-bytes size-bytes})))))
+
+     (defn ctx-alloc-flat-block!
+       "A flat block of size-bytes in ctx's slabs through the flat
+        door (IFlatDoor): its slab-qualified offset. At most 65536
+        and at least 1048576 take the ordinary path (ctx-alloc!); a
+        whole-chunk size (2..15 chunks) takes its rung; any other
+        size above 65536 is a single non-decomposed flat block —
+        refused (the kernel's -3): the caller decomposes (whole
+        chunks on rungs, the tail in the variable class)."
+       [^JvmSlabCtx ctx size-bytes]
+       (cond
+         (<= size-bytes 65536)   (ctx-alloc! ctx size-bytes)
+         (>= size-bytes 1048576) (ctx-alloc! ctx size-bytes)
+         :else
+         (let [rung-idx (coalesc/rung-idx-for-size size-bytes)]
+           (if (== rung-idx -1)
+             (throw (ex-info (str "alloc-flat-block!: flat block of " size-bytes
+                                  " bytes is not chunk-aligned — refused "
+                                  "(decompose it: whole chunks on rungs, tail in the variable class)")
+                             {:size size-bytes :refusal -3}))
+             (coalesc-rung-alloc-growing! ctx rung-idx)))))
+
+     (extend-type JvmSlabCtx
+       IFlatDoor
+       (-sio-alloc-flat-block! [ctx size-bytes]
+         (ctx-alloc-flat-block! ctx size-bytes)))
+
      (defn- grow-heap-class!
        "Grow heap bitmap class ci of ctx by replacement: a new heap region at
         double the blocks (max-blocks caps it when positive), header, bitmap,
         descriptor columns and data copied at the new layout's offsets —
         block i stays block i, so no live reference moves. The class-6 heap
         arm's shape (a larger region and a copy), for the bitmap classes.
+        A doubling past d/MAX_HEAP_CLASS_BYTES is refused (false: the caller
+        spills to the next class), never an int overflow in make-heap-region.
         Under the caller's regions lock; true when grown."
        [^JvmSlabCtx ctx ci]
        (let [^objects regions (field ctx regions)
@@ -477,11 +588,10 @@
              blk-size           (long (aget ^ints (field ctx block-sizes) ci))
              old-total          (long (aget ^ints (field ctx total-blocks) ci))
              max-blks           (long (aget ^ints (field ctx max-blocks) ci))
-             new-total          (if (pos? max-blks)
-                                  (min (* 2 old-total) max-blks)
-                                  (* 2 old-total))
-             layout             (d/slab-layout blk-size (* new-total blk-size))]
-         (when (and old-r (> new-total old-total)
+             new-total          (d/heap-class-growth-total blk-size old-total max-blks)
+             layout             (when new-total
+                                  (d/slab-layout blk-size (* (long new-total) blk-size)))]
+         (when (and old-r new-total
                     ;; a :mem-budget refuses the growth whose replacement
                     ;; region would push the domain past it
                     (budget-allows? ctx (- (long (:total-bytes layout))
@@ -698,6 +808,194 @@
                            (throw
                              (ex-info "JvmSlabCtx: all slab classes full"
                                       {:class-idx ci}))))))))))))
+
+     ;; --------------------------------------------------------------------
+     ;; The run claim (flat lane Z2): n consecutive blocks of one class
+     ;; --------------------------------------------------------------------
+     ;; ctx-alloc! hands out one block per call: a bitmap scan and a CAS per
+     ;; block. Placing a pre-laid-out image (the flat zip, IMPL-PLAN §3.3)
+     ;; wants the image's blocks of a class as ONE run: the relocation the
+     ;; image carries is then one base per class, and claiming costs a CAS
+     ;; per bitmap word, not a scan per block. A run is found from the
+     ;; class's alloc cursor, wrapping once; it is claimed word by word —
+     ;; whole interior words by one CAS of mask -1, the head and tail words
+     ;; masked at both ends — so a run of any n at any start wastes no block
+     ;; (the research probe's claim started at the cursor's next word and
+     ;; threw when the run was not free: up to 31 blocks lost a claim).
+
+     (defn- claim-mask!
+       "CAS the bitmap word at byte offset woff of bm-rgn so every bit of
+        mask is set, the word's other bits untouched: true when the mask's
+        bits are ours. False when any of them was set already — the caller
+        releases what it claimed and searches again."
+       [bm-rgn woff mask]
+       (loop []
+         (let [cur (mem/-load-i32 bm-rgn woff)]
+           (cond
+             (not (zero? (bit-and cur mask))) false
+             (== cur (mem/-cas-i32! bm-rgn woff cur (unchecked-int (bit-or cur mask)))) true
+             :else (recur)))))
+
+     (defn- release-mask!
+       "Clear exactly mask's bits of the bitmap word at woff (the undo of a
+        partial claim-mask!: the bits were set by this claim, and no other
+        holder can have freed what was never handed out)."
+       [bm-rgn woff mask]
+       (loop []
+         (let [cur (mem/-load-i32 bm-rgn woff)]
+           (when-not (== cur (mem/-cas-i32! bm-rgn woff cur (unchecked-int (bit-and cur (bit-not mask)))))
+             (recur)))))
+
+     (defn- run-mask
+       "The bits of the run [s, e) inside the bitmap word starting at wstart,
+        as an int mask (0 when the word holds none of the run)."
+       [^long s ^long e ^long wstart]
+       (let [lo (max s wstart)
+             hi (min e (+ wstart 32))]
+         (if (>= lo hi)
+           0
+           (let [bits (- hi lo)
+                 m    (if (== bits 32) -1 (dec (bit-shift-left 1 bits)))]
+             (unchecked-int (bit-shift-left m (- lo wstart)))))))
+
+     (defn- claim-run-at!
+       "Claim the run [s, s+n) in the bitmap at bm-off of bm-rgn, one CAS per
+        word. True when claimed; on a lost word, the words already claimed
+        are released and false is answered — no partial claim survives."
+       [bm-rgn ^long bm-off ^long s ^long n]
+       (let [e  (+ s n)
+             w0 (unsigned-bit-shift-right s 5)
+             w1 (unsigned-bit-shift-right (dec e) 5)]
+         (loop [wi w0 claimed []]
+           (if (> wi w1)
+             true
+             (let [mask (run-mask s e (* wi 32))]
+               (if (claim-mask! bm-rgn (+ bm-off (* 4 wi)) mask)
+                 (recur (inc wi) (conj claimed wi))
+                 (do (doseq [cw claimed]
+                       (release-mask! bm-rgn (+ bm-off (* 4 cw)) (run-mask s e (* cw 32))))
+                     false)))))))
+
+     (defn- find-run
+       "The start of the first run of n clear bits in the total-bit bitmap at
+        bm-off of bm-rgn, searching from bit `from` and wrapping once; -1
+        when there is none. Bits below the search's start in its first word
+        and bits at or past total read as set, so a run never straddles the
+        class's end and never starts before `from` in the first pass."
+       [bm-rgn bm-off total n from]
+       (let [bm-off     (long bm-off)
+             total      (long total)
+             n          (long n)
+             from       (long from)
+             nwords     (unsigned-bit-shift-right (+ total 31) 5)
+             start-word (unsigned-bit-shift-right from 5)]
+         (loop [k 0 run-start -1 run-len 0]
+           (if (>= k nwords)
+             -1
+             (let [wi     (mod (+ start-word k) nwords)
+                   wstart (* wi 32)
+                   lo     (if (zero? k) from wstart)
+                   hi     (min total (+ wstart 32))
+                   ;; the wrapped segment starts at word 0: a run in progress
+                   ;; at the class's last bit does not continue at bit 0 —
+                   ;; a run is [s, s+n) inside the class, never around its end
+                   run-start (if (and (pos? k) (zero? wi)) -1 run-start)
+                   run-len   (if (and (pos? k) (zero? wi)) 0 run-len)
+                   word   (bit-and (long (mem/-load-i32 bm-rgn (+ bm-off (* 4 wi)))) 0xFFFFFFFF)
+                   eff    (long (bit-or word
+                                        (if (> lo wstart) (dec (bit-shift-left 1 (- lo wstart))) 0)
+                                        (if (< hi (+ wstart 32))
+                                          (bit-and (bit-shift-left -1 (- hi wstart)) 0xFFFFFFFF)
+                                          0)))]
+               (cond
+                 ;; the whole window clear: the run grows by it
+                 (zero? eff)
+                 (let [rs (if (neg? run-start) lo run-start)
+                       rl (+ run-len (- hi lo))]
+                   (if (>= rl n) rs (recur (inc k) rs rl)))
+
+                 ;; the whole window set: any run is broken
+                 (== eff 0xFFFFFFFF)
+                 (recur (inc k) -1 0)
+
+                 :else
+                 ;; walk the window's bits
+                 (let [[rs rl found]
+                       (loop [b lo rs run-start rl run-len]
+                         (cond
+                           (>= rl n) [rs rl true]
+                           (>= b hi) [rs rl false]
+                           (zero? (bit-and eff (bit-shift-left 1 (- b wstart))))
+                           (if (neg? rs)
+                             (recur (inc b) b 1)
+                             (recur (inc b) rs (inc rl)))
+                           :else (recur (inc b) -1 0)))]
+                   (if found rs (recur (inc k) rs rl)))))))))
+
+     (defn ctx-alloc-run!
+       "n consecutive blocks of bitmap class ci (0–5) of ctx, claimed as one
+        run: the slab-qualified offset of the first block, or nil when the
+        class holds no run of n and none can be grown — a fragmented class
+        (free blocks, no run) answers nil and claims nothing, and no claim
+        ever spills into a larger class (placement fallback is the zip's
+        own, Z3.3). A heap class too small for the run grows by replacement
+        (grow-heap-class!, under the regions lock, 20 steps as ctx-alloc!)
+        and the search repeats; a file-backed class's growth belongs to
+        its cross-process discipline and is not led from here.
+        The (bitmap-region, total) snapshot is certified the way
+        try-alloc certifies its own: total read on both sides of the
+        region read, a torn pair re-read under the regions lock, so a
+        concurrent remap can never pair an old bitmap with a new total."
+       [^JvmSlabCtx ctx ci n]
+       (when (or (< ci 0) (>= ci OVERFLOW_CLASS_IDX))
+         (throw (ex-info "alloc-run!: a run is claimed in a bitmap class (0-5)"
+                         {:class-idx ci :n n})))
+       (when (< n 1)
+         (throw (ex-info "alloc-run!: n must be positive" {:n n})))
+       (let [^objects regions        (field ctx regions)
+             ^objects bitmap-regions (field ctx bitmap-regions)
+             ^ints    bitmap-offsets (field ctx bitmap-offsets)
+             ^ints    total-blocks   (field ctx total-blocks)
+             ^objects file-paths     (field ctx file-paths)]
+         (loop [grow-attempts 0 claim-retries 0]
+           (let [total0  (aget total-blocks ci)
+                 bm-rgn0 (aget bitmap-regions ci)
+                 bm-off0 (aget bitmap-offsets ci)
+                 [bm-rgn bm-off total]
+                 (if (= total0 (aget total-blocks ci))
+                   [bm-rgn0 bm-off0 total0]
+                   (locking regions
+                     [(aget bitmap-regions ci)
+                      (aget bitmap-offsets ci)
+                      (aget total-blocks ci)]))
+                 hdr-rgn (aget regions ci)
+                 free    (slab/region-load-i32 hdr-rgn d/SLAB_HDR_FREE_COUNT)
+                 cursor  (slab/region-load-i32 hdr-rgn d/SLAB_HDR_ALLOC_CURSOR)
+                 start   (find-run bm-rgn bm-off total n (mod cursor total))]
+             (cond
+               (not (neg? start))
+               (if (claim-run-at! bm-rgn bm-off start n)
+                 (do (slab/region-sub-i32! hdr-rgn d/SLAB_HDR_FREE_COUNT (int n))
+                     (slab/region-store-i32! hdr-rgn d/SLAB_HDR_ALLOC_CURSOR
+                                             (int (mod (+ start n) total)))
+                     (encode-slab-offset ci start))
+                 ;; a word of the run was taken under us and the partial
+                 ;; claim released: search again on a fresh snapshot
+                 (if (< claim-retries 10000)
+                   (recur grow-attempts (inc claim-retries))
+                   nil))
+
+               ;; no run in the class as it stands
+               (>= free n)
+               nil ;; fragmented: free blocks, no run — claims nothing
+
+               (< grow-attempts 20)
+               (if (and (nil? (aget file-paths ci))
+                        (locking regions (grow-heap-class! ctx ci)))
+                 (recur (inc grow-attempts) claim-retries)
+                 nil)
+
+               :else nil)))))
 
      (defn- desc-handle
        "The tally handle of block block-idx of bitmap class ci in ctx: [[count-region count-off]
@@ -1095,6 +1393,33 @@
     (when @log (swap! log disj (bit-and (long o) 0xFFFFFFFF)))
     (slab/free! inner o))
   (-sio-copy-block! [_ d df s sf n] (slab/copy-block! inner d df s sf n))
+  ISlabRunAlloc
+  (-sio-alloc-run! [this ci n]
+    ;; the zip places inside a swap, through the attempt's log: the claim
+    ;; is the inner sio's, and every block of the run joins the log, as
+    ;; -sio-alloc! logs its one block (a lost swap frees the whole run)
+    (if (satisfies? ISlabRunAlloc inner)
+      (when-let [first (-sio-alloc-run! inner ci n)]
+        (when @log
+          (let [s (decode-block-idx first)]
+            (dotimes [i n]
+              (swap! log conj
+                     (bit-and (long (encode-slab-offset ci (+ s i))) 0xFFFFFFFF)))))
+        first)
+      ;; no run claim inside: one by one through this sio's own logging
+      ;; alloc, kept when they land consecutive — freed, and nil answered,
+      ;; when they do not (a run claim answers a run or nothing)
+      (loop [attempt 0]
+        (let [offs (mapv (fn [_] (slab/alloc! this (d/slab-size ci))) (range n))
+              s    (decode-block-idx (first offs))]
+          (if (every? (fn [i]
+                        (let [o (nth offs i)]
+                          (and (= ci (decode-class-idx o))
+                               (= (+ s i) (decode-block-idx o)))))
+                      (range n))
+            (first offs)
+            (do (doseq [o offs] (slab/free! this o))
+                (when (< attempt 10) (recur (inc attempt)))))))))
   ISlabRegion
   (-sio-mem-region [_ o f]      (slab/mem-region inner o f)))
 
@@ -1723,11 +2048,44 @@
     (f)
     @process-heap-ctx))
 
+(defn no-domain-context!
+  "The construction law (John, 2026-11-11; relaxed 2026-11-14): Eve data is
+   constructed in a swapping operation, in the atom domain — there is no
+   silent process-heap fallback. Since Nov 14 2026, eve-deftype constructors
+   (and the dataset / eve-array constructors) take the FLAT path when no
+   domain is bound — instantiating an eve type outside a transaction
+   produces its flat variant (eve.flat.sister/construct-flat) — so this
+   throw remains only for direct current-sio callers that have no flat
+   form (the collections' internal node builders, eve-array-uninit)."
+  []
+  (throw (ex-info "Eve data must be constructed inside a swap! (or an explicit Eve domain context)"
+                  {:eve.alloc/error :no-domain-context})))
+
 (defn current-sio
   "The slab I/O a constructor allocates in when given none: inside a swap!'s
-   f, that attempt's sio over the atom's domain (d/*domain-sio*); otherwise
-   this process's own (default-sio)."
+   f (or another binding of d/*domain-sio* over a value's own domain), that
+   sio. Outside any Eve domain context it throws (no-domain-context!) —
+   constructors never fall back to this process's own domain."
+  []
+  (or d/*domain-sio* (no-domain-context!)))
+
+(defn transient-scope
+  "A transient's scope over a value's own sio: when the caller is in a log over the same domain (a swap attempt's,
+   or any binding of d/*domain-sio* over that domain), the scope sits over that log, so what the transient allocates
+   is logged there too. Else over the value's sio as it is."
+  [own]
+  (let [cur d/*domain-sio*]
+    (scope-sio (if (and (some? cur) (instance? LoggingSlabIO cur) (identical? (sio-root cur) (sio-root own)))
+                 cur
+                 own))))
+
+(defn plumbing-sio
+  "Eve's OWN plumbing only: the sio a converter/materializer uses when its
+   caller passes none — deref materialization, codec/read paths, serialize's
+   builders. Inside a context, that context's sio; outside, this process's
+   own (default-sio). User-level construction must NOT call this: it goes
+   through current-sio and throws outside a context."
   []
   (or d/*domain-sio* (default-sio)))
 
-(ser/register-default-sio! current-sio)
+(ser/register-default-sio! plumbing-sio)

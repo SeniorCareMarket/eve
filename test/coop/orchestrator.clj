@@ -467,7 +467,7 @@
 
 ;; ── the capstone: eve data structures on eve data structures, every eve host at once (coop/mix.cljc) ──────────────
 ;; One atom holds RRB vectors (eve.rrb-vector: an eve-deftype over eve arrays) of eve maps, a shared RRB vector turned
-;; by catvec/subvec, a sorted set (eve.deftype.rb-tree: an eve-deftype red-black tree) and nested maps; every op is
+;; by catvec/subvec, a sorted set (eve.sorted: the treap) and nested maps; every op is
 ;; one swap! that changes several of them. Writers: JVM threads in this process, Node (compiled ClojureScript), nbb,
 ;; bb, ClojureCLR, basilisp, jolt and clojerl processes, all at once. Each host then reads the final value and computes the snapshot itself: every
 ;; snapshot must be the one mix/expected derives from the op counts. The types those structures are made of are

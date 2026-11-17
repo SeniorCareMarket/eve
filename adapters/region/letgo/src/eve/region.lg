@@ -1,0 +1,76 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion, IHostAtomics and ISyncableRegion;
+   HOST-CONTRACT §1-2) on let-go, over lg-eve's Go natives (eve.native,
+   eve/impls/let-go/evenative/region.go): a region is a let-go byte-array —
+   an ordinary (byte-array n) on the heap, or a MAP_SHARED file mapping
+   wrapped by (eve.native/mmap fd n) — and the natives run Go's
+   sync/atomic on its bytes (sequentially consistent), the futex
+   syscall for wait/notify (a bounded poll off Linux), and msync for
+   force.
+
+   make-heap-region and open-mmap-region open them. A lock-only (Lustre)
+   variant is NOT yet provided: the fcntl natives it needs (lock!/unlock!)
+   already exist in eve.native, and no let-go venue mounts Lustre today;
+   when one does, it lands the way glojure's GljLockedRegion did. A region
+   is a record (let-go's own deftype family) extended to eve.mem's
+   protocols."
+  (:require [eve.mem :as mem]))
+
+(defrecord LgRegion [r size fd])
+
+(extend-type LgRegion
+  mem/IMemRegion
+  (-byte-length [this] (:size this))
+  (-load-i32 [this off] (eve.native/load32 (:r this) off))
+  (-store-i32! [this off v] (eve.native/store32! (:r this) off v) nil)
+  (-cas-i32! [this off expected desired] (eve.native/cas32! (:r this) off expected desired))
+  (-add-i32! [this off delta] (eve.native/add32! (:r this) off delta))
+  (-sub-i32! [this off delta] (eve.native/add32! (:r this) off (- delta)))
+  (-exchange-i32! [this off v] (eve.native/exchange32! (:r this) off v))
+  (-load-i64 [this off] (eve.native/load64 (:r this) off))
+  (-store-i64! [this off v] (eve.native/store64! (:r this) off v) nil)
+  (-cas-i64! [this off expected desired] (eve.native/cas64! (:r this) off expected desired))
+  (-add-i64! [this off delta] (eve.native/add64! (:r this) off delta))
+  (-sub-i64! [this off delta] (eve.native/add64! (:r this) off (- delta)))
+  ;; the native answers the protocol's own keywords: :ok | :not-equal | :timed-out
+  (-wait-i32! [this off expected timeout-ms] (eve.native/wait32! (:r this) off expected timeout-ms))
+  (-notify-i32! [this off n] (eve.native/notify32! (:r this) off n))
+  ;; a futex on the mapping: a watch loop's waiters wake on any process's
+  ;; notify, the cross-process shape Eve's regions promise.
+  (-supports-watch? [_] true)
+  (-read-bytes [this off len] (eve.native/read-bytes (:r this) off len))
+  (-write-bytes! [this off src] (eve.native/write-bytes! (:r this) off src) nil)
+
+  mem/IHostAtomics
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _byte-off f] (f))
+
+  mem/ISyncableRegion
+  ;; the native forces the whole mapping (msync's granularity here);
+  ;; -sync-range! answers with the same whole-mapping force — stronger
+  ;; than the range asked for, never weaker.
+  (-sync! [this] (eve.native/sync! (:r this)) nil)
+  (-sync-range! [this _off _len] (eve.native/sync! (:r this)) nil))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed MAP_SHARED region of size-bytes at
+   path-str. The file grows to size-bytes when it is shorter and is never
+   truncated (eve.native/open-fd). opts is accepted for the shape the
+   other hosts take; no option changes this host's region yet."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes _opts]
+   (let [fd (eve.native/open-fd path-str size-bytes)]
+     (->LgRegion (eve.native/mmap fd size-bytes) size-bytes fd))))
+
+(defn make-heap-region
+  "An IMemRegion over size-bytes of zeroed memory in Go's heap, shared by
+   the process's goroutines (never freed: a region lives as long as its
+   domain)."
+  [size-bytes]
+  (->LgRegion (byte-array size-bytes) size-bytes nil))
+
+(defn lustre-region?
+  "false on this host: no lock-only region type exists here yet (see the
+   namespace doc)."
+  [_r]
+  false)

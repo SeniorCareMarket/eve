@@ -1,12 +1,21 @@
 (ns eve.thread.future
   "The future and the promise as eve types (eve.deftype, written with the JVM's names; each host's types adapter
    realizes them): @ waits by eve.thread's helping wait, deref-within is (deref f ms v), and realized?, future-done?,
-   future-cancel and future-cancelled? read and move the descriptor. A future is its descriptor's state — the value
+   future-cancel and future-cancelled? read and move the descriptor. clojure.core/realized? reaches the same
+   predicate through IPending (clojure.lang.IPending/isRealized on clj; cljs IPending/-realized? on nbb;
+   basilisp.lang.interfaces/IPending is-realized on basilisp; the bb completion's IPending, because sci's
+   deftype will not carry clojure.lang.IPending). A future is its descriptor's state — the value
    or the error is written there, out of band (P§5.3 items 5, 6) — never a host delay: clojerl runs every delay's
    body inside one shared gen_server (ET-0's finding, clojerl.Delay.erl:69, :108)."
   (:refer-clojure :exclude [promise deliver realized? future-cancel future-cancelled? future-done? future?])
-  (:require [eve.deftype :as edt]
+  (:require [eve.deftype-proto.macros :as eve]
             [eve.thread.cell :as c]
+            ;; Load order: host-deftype's expansion ends in a
+            ;; top-level eve.type-readers/register! call, which needs
+            ;; the registry first in the RUNTIME graph (a macro ns's
+            ;; require is macro-side only). Guard:
+            ;; eve.deftype-guard-test.
+            [eve.type-readers]
             [eve.thread.descriptor :as d]))
 
 (defprotocol IFuture
@@ -29,18 +38,22 @@
   (let [r (c/await! e ms)]
     (if (= r :eve.thread.cell/timeout) v (outcome r))))
 
-(edt/deftype Future [e]
+(eve/host-deftype Future [e]
   clojure.lang.IDeref
   (deref [_] (outcome (c/await! e -1)))
+  clojure.lang.IPending
+  (isRealized [_] (d/done? @e))
   IFuture
   (-entry [_] e)
   (-deref-within [_ ms v] (within e ms v))
   (-cancel! [_] (c/cancel! e))
   (-deliver! [_ v] false))
 
-(edt/deftype Promise [e token]
+(eve/host-deftype Promise [e token]
   clojure.lang.IDeref
   (deref [_] (outcome (c/await! e -1)))
+  clojure.lang.IPending
+  (isRealized [_] (d/done? @e))
   IFuture
   (-entry [_] e)
   (-deref-within [_ ms v] (within e ms v))

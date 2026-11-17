@@ -3,13 +3,14 @@
    (eve/doc/unification/FORMAT-DECISIONS.md §8). The bytes are eve-bytes.edn's rows; this file holds what such a
    value does in eve memory, on every host that has the number: a round trip inline and as a map's value, the
    one-key rule (= 5 5N is one key, as in Clojure's maps), the canonical decimal (= 1.5M 1.50M is one key), and a
-   host without the number refusing its bytes loudly. ClojureScript's big integer is JavaScript's BigInt; it has
-   no ratio and no decimal."
+   host without the number refusing its bytes loudly. ClojureScript now reads RATIO and
+   BIGDEC as Eve types (eve.numeric), same bytes as the other hosts."
   ;; the codec's ^bytes return hint names eve.host's bytes where it is called (clojerl resolves it there)
   (:refer-clojure :exclude [bytes])
   (:require [clojure.test :refer [deftest is testing]]
             [eve.host :refer [bytes]]
             [eve.codec :as codec]
+            [eve.numeric :as num]
             [eve.core :as e]
             [eve.deftype-proto.alloc :as alloc]
             ;; the collection writers a host map or vector is written through
@@ -52,13 +53,20 @@
        (testing "a BigInt in int32 is written by its magnitude: INT32"
          (is (= (key-hex 5) (key-hex (js/BigInt 5))))))
 
-     (deftest no-ratio-no-decimal-here
-       (testing "a RATIO or a BIGDEC another host wrote is refused loudly, never read as a double"
+     (deftest cljs-ratio-and-decimal-round-trip
+       (testing "RATIO and BIGDEC bytes decode to Eve types, never a double"
          (let [s (sio)
                b (fn [h] (js/Uint8Array. (clj->js (map #(js/parseInt (subs h (* 2 %) (+ 2 (* 2 %))) 16)
-                                                       (range (quot (count h) 2))))))]
-           (is (thrown? js/Error (codec/decode s (b "eedb1701000000010100000002"))))
-           (is (thrown? js/Error (codec/decode s (b "eedb1801000000010000000f")))))))))
+                                                       (range (quot (count h) 2))))))
+               half (codec/decode s (b "eedb1701000000010100000002"))
+               fifteen-tenths (codec/decode s (b "eedb1801000000010000000f"))]
+           (is (num/ratio? half))
+           (is (num/equiv half (num/ratio 1 2)))
+           (is (num/decimal? fifteen-tenths))
+           (is (num/equiv fifteen-tenths (num/bigdec "1.5")))
+           (is (= "eedb1701000000010100000002" (key-hex (num/ratio 1 2))))
+           (is (= "eedb1801000000010000000f" (key-hex (num/bigdec "1.5"))))
+           (is (= "eedb1801000000010000000f" (key-hex (num/bigdec "1.50")))))))))
 
 #?(:cljs nil
    :clje nil

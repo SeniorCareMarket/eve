@@ -280,6 +280,19 @@
 ;; eve-deftype, deftype, eve-extend-type
 ;;-----------------------------------------------------------------------------
 
+;; list? on ClojureScript is (implements? IList x): a type declaring
+;; clojure.lang.IPersistentList (an EveList, list? on the JVM) carries the
+;; IList marker here. proto_map keeps IPersistentList CLJ-only for the
+;; other hosts translating through it, whose cores have no IList.
+(defn- js-translate-protos
+  "vocab's :cljs translation, plus IList for a declared IPersistentList."
+  [parsed]
+  (let [t (v/translate-protos parsed :cljs)]
+    (if (and (some #(= 'clojure.lang.IPersistentList (:protocol %)) parsed)
+             (not-any? #(= 'IList (:protocol %)) t))
+      (conj t {:protocol 'IList :methods [] :marker? true})
+      t)))
+
 (defn eve-type
   "An eve-deftype as a ClojureScript type over the module slab
    (eve.deftype.macros/eve-deftype* gives ctx). twist: the host's
@@ -290,7 +303,7 @@
    {:keys [translate declare-type?]}]
   (let [off-sym 'offset__
         ;; one body for every host: JVM names translate to CLJS here
-        parsed-protos (translate (v/translate-protos (v/cljs-own-calls parsed-protos) :cljs))
+        parsed-protos (translate (js-translate-protos (v/cljs-own-calls parsed-protos)))
         inst-syms (mapv #(v/instance-field-sym % {:mutable true}) inst-fields)
 
         ;; Transform user protocol method bodies: the live fields are read
@@ -422,7 +435,7 @@
        ~@(when declare-type? [`(~'declare ~type-name)])
        (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
        ;; The instance: its cached and host-local fields, and its block's offset
-       (~'deftype ~type-name [~@inst-syms ~off-sym]
+       (cljs.core/deftype ~type-name [~@inst-syms ~off-sym]
                   ~@boilerplate
                   ~@transformed-protos)
 
@@ -450,9 +463,19 @@
        ;; open mmap domain once one is open, so the fields are written there.
        ;; A nil sio is the current one (a CLJS instance carries none; its
        ;; d/-eve-sio answers the module slab's cljs-sio).
+       ;; With no domain bound the constructor takes the flat path, as
+       ;; on the JVM and babashka (eve.deftype-proto.sio, John Nov 14
+       ;; 2026): the type's generated flat sister, constructed from the
+       ;; slab-field values (flat lanes U4a — where this arity threw
+       ;; no-domain-context! through current-sio before the sister was
+       ;; realized here).
        (~'defn ~ctor-name
                ([~@ctor-args]
-                (~ctor-name (eve.deftype-proto.alloc/current-sio) ~@ctor-args))
+                (if eve.deftype-proto.data/*domain-sio*
+                  (~ctor-name eve.deftype-proto.data/*domain-sio* ~@ctor-args)
+                  (eve.flat.sister/construct-flat
+                   ~type-key
+                   [~@(map (fn [f] (symbol (:name f))) slab-fields)])))
                ([~'sio__ ~@ctor-args]
                 (let [~off-ctor-sym (eve.deftype-proto.alloc/-sio-alloc!
                                      (or ~'sio__ (eve.deftype-proto.alloc/current-sio))
@@ -529,7 +552,7 @@
    rewrites own-type constructions in method bodies to ->T factory
    calls (see factory-ctor-calls)."
   [type-name fields parsed {:keys [translate] :as twist}]
-  (let [impls (translate (v/translate-protos (v/cljs-own-calls parsed) :cljs))
+  (let [impls (translate (js-translate-protos (v/cljs-own-calls parsed)))
         impls (if (:factory-ctor-calls twist)
                 (factory-ctor-calls impls type-name)
                 impls)
@@ -543,10 +566,102 @@
                      fields)]
     `(cljs.core/deftype ~type-name ~fields ~@(v/impls->forms impls))))
 
+(defn flat-type
+  "An eve-deftype's generated flat sister on ClojureScript (FORMAT-V1 §6,
+   lane H5; realized here by flat lanes U4a, 2026-11-17 — before, this
+   answered nil and a type registered its layout alone): a ClojureScript
+   type over a field source (eve.flat.source/IFieldSource, a record node
+   or a batch row of a packed chunk), the second kind the expansion
+   generates, as eve.deftype-proto.sio/flat-type is on the JVM and
+   babashka. Its cached fields are read once by the factory, its live
+   fields from the source in each method body (vocab's flat-method-body:
+   a field read is the row's column[row], through eve.flat-io), the
+   type's own protocols expanded against it. Its factory, Type__sister,
+   is (fn [field-source] -> sister): the packed reader calls it for the
+   type's records and batch rows. Equality and hash by type key and
+   fields (a flat copy is = its twin); printed #eve.flat/Type {...}."
+  [{:keys [type-name inst-fields live-fields field-map parsed-protos type-key
+           provides? flat-name sister-name]}]
+  (let [parsed-protos (js-translate-protos (v/cljs-own-calls parsed-protos))
+        ;; a synthesized toString of (pr-str this) recurses on a sister
+        ;; (no print method is registered for it; sio/flat-type drops it
+        ;; the same way), and an emptied Object group goes with it
+        parsed-protos (->> parsed-protos
+                           (map (fn [{:keys [protocol] :as g}]
+                                  (if (contains? #{'Object 'js/Object} protocol)
+                                    (update g :methods
+                                            (fn [ms] (vec (remove (fn [m] (and (= 'toString (:name m))
+                                                                              (= '[(pr-str this)] (vec (:body m)))))
+                                                                  ms))))
+                                    g)))
+                           (remove (fn [{:keys [protocol methods]}]
+                                     (and (contains? #{'Object 'js/Object} protocol) (empty? methods))))
+                           vec)
+        inst-syms (mapv #(v/instance-field-sym % {:mutable true}) inst-fields)
+        transformed-protos
+        (mapcat (fn [{:keys [protocol methods]}]
+                  (cons protocol
+                        (map (fn [{:keys [name args body]}]
+                               (list name args (cons 'do (v/flat-method-body body live-fields field-map))))
+                             methods)))
+                parsed-protos)
+        field-map-expr (list 'eve.flat.source/-field-map 'src__)
+        boilerplate
+        (concat
+         (when-not (provides? parsed-protos 'eve.deftype-proto.data/ISabpType 'd/ISabpType)
+           ['eve.deftype-proto.data/ISabpType
+            (list 'eve.deftype-proto.data/-sabp-type-key ['_] type-key)])
+         ;; what the packed machinery knows a sister by
+         ['eve.flat.source/ISister
+          (list 'eve.flat.source/-sister-source ['_] 'src__)
+          (list 'eve.flat.source/-sister-type-key ['_] type-key)]
+         ;; a sister is a flat handle: it stands on the chunk's bytes,
+         ;; and re-packs as its type's typed rep
+         ['eve.flat.chunk/IFlatHandle
+          (list 'eve.flat.chunk/-rep ['this] (list 'eve.flat.sister/instance->typed-rep 'this))
+          (list 'eve.flat.chunk/-chunk-bytes ['_] (list 'eve.flat.source/-source-bytes 'src__))]
+         (when-not (provides? parsed-protos 'IHash)
+           ['IHash
+            (list '-hash ['_]
+                  (list 'or 'sister-hash__
+                        (list 'set! 'sister-hash__
+                              (list 'hash (list 'vector type-key field-map-expr)))))])
+         (when-not (provides? parsed-protos 'IEquiv)
+           ['IEquiv
+            (list '-equiv ['_ 'other]
+                  (list 'and
+                        (list 'instance? flat-name 'other)
+                        (list '= field-map-expr
+                              (list 'eve.flat.source/-field-map
+                                    (list 'eve.flat.source/-sister-source 'other)))))])
+         (when-not (provides? parsed-protos 'IPrintWithWriter)
+           ['IPrintWithWriter
+            (list '-pr-writer ['_ 'writer '_opts]
+                  (list '-write 'writer
+                        (list 'str "#eve.flat/" (name type-name) " " (list 'pr-str field-map-expr))))]))
+        ctor (symbol (str "->" (name flat-name)))]
+    `(do
+       ;; methods may build sisters: the factory, declared first
+       (~'declare ~sister-name)
+       (cljs.core/deftype ~flat-name [~@inst-syms ~'src__ ~(with-meta 'sister-hash__ {:mutable true})]
+         ~@boilerplate
+         ~@transformed-protos)
+       ;; the factory the packed reader calls: the cached fields read
+       ;; from the source once (a :derive field rebuilt by its fn), the
+       ;; host-local ones nil — as T__from-slab builds from a block
+       (~'defn ~sister-name [~'src__]
+               (~ctor ~@(map (fn [f]
+                               (cond (:derive f) (list (:derive f) 'src__)
+                                     (v/cached? f) (list 'eve.flat.source/-field 'src__ (keyword (:name f)))
+                                     :else nil))
+                             inst-fields)
+                      ~'src__ nil))
+       ~flat-name)))
+
 (defn extend-eve-type
   "eve-extend-type on ClojureScript."
   [{:keys [type-name fields field-map parsed-protos has-volatile?]}]
-  (let [parsed-protos (v/translate-protos parsed-protos :cljs)
+  (let [parsed-protos (js-translate-protos parsed-protos)
         transformed-protos
         (mapcat (fn [{:keys [protocol methods]}]
                   (cons protocol
@@ -590,7 +705,10 @@
   ;; a JVM-named java.lang.Object's toString stays on Object (equals and
   ;; hashCode are IEquiv's and IHash's: the type's own or the boilerplate)
   (let [translated (concat (mapcat v/cljs-translate-protocol parsed-protos)
-                           (filter #(= 'Object (:protocol %)) (v/cljs-object-impls parsed-protos)))
+                           (filter #(= 'Object (:protocol %)) (v/cljs-object-impls parsed-protos))
+                           ;; list?: IList for a declared IPersistentList (js-translate-protos)
+                           (when (some #(= 'clojure.lang.IPersistentList (:protocol %)) parsed-protos)
+                             [{:protocol 'IList :methods [] :marker? true}]))
         by-proto (group-by :protocol translated)]
     (mapcat (fn [[proto impls]]
               (let [all-methods (mapcat :methods impls)
@@ -651,7 +769,7 @@
                                   sym)))
                             (filter :cached? fields))]
     `(do
-       (~'deftype ~type-name [~'sio__ ~'offset__ ~@cached-fields]
+       (cljs.core/deftype ~type-name [~'sio__ ~'offset__ ~@cached-fields]
                   ~@boilerplate
                   ~@translated)
 

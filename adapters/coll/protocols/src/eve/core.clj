@@ -64,6 +64,8 @@
 (defprotocol IChunkedNext (-chunked-next [coll]))
 (defprotocol IMapEntry (-key [coll]) (-val [coll]))
 (defprotocol IDeref (-deref [o]))
+(defprotocol ISwap (-swap! [o f] [o f a] [o f a b] [o f a b xs]))
+(defprotocol IReset (-reset! [o v]))
 (defprotocol IPrintWithWriter (-pr-writer [o writer opts]))
 
 ;; seq before any arm that calls it, and no (declare seq): on ValueScript a namespace's declare of a name clojure.core
@@ -96,17 +98,32 @@
   Object (-count [c] (try (clojure.core/count c)
                           (catch UnsupportedOperationException _
                             (clojure.core/count (seq c))))))
-(extend-protocol IIndexed
-  nil (-nth ([_ _] nil) ([_ _ nf] nf))
-  Object (-nth ([c n] (try (clojure.core/nth c n)
-                           (catch UnsupportedOperationException _
-                             (clojure.core/nth (seq c) n))))
-           ([c n nf] (try (clojure.core/nth c n nf)
-                          (catch UnsupportedOperationException _
-                            (clojure.core/nth (seq c) n nf))))))
-(extend-protocol ILookup
-  nil (-lookup ([_ _] nil) ([_ _ nf] nf))
-  Object (-lookup ([o k] (clojure.core/get o k)) ([o k nf] (clojure.core/get o k nf))))
+;; let-go's extend-protocol accepts only one bare single-arity entry per
+;; method — a parenthesized arity list fails there even with named params
+;; ("Can't resolve _ in this context" compiling the first arity vector), and
+;; repeated entries fail too — while its extend-type accepts parenthesized
+;; multi-arity impls on nil and Object targets alike (measured on lg-eve,
+;; let-go 1.13, dialect probes rounds 3-4). The multi-arity protocols below
+;; (IIndexed, ILookup, IFn, IReduce) are therefore extended via extend-type;
+;; the conversion is semantics-identical in Clojure (extend-protocol is sugar
+;; over the same extend machinery), so every host reads the same impls.
+(extend-type nil
+  IIndexed
+  (-nth ([_ _i] nil) ([_ _i nf] nf)))
+(extend-type Object
+  IIndexed
+  (-nth ([c n] (try (clojure.core/nth c n)
+                    (catch UnsupportedOperationException _
+                      (clojure.core/nth (seq c) n))))
+        ([c n nf] (try (clojure.core/nth c n nf)
+                       (catch UnsupportedOperationException _
+                         (clojure.core/nth (seq c) n nf))))))
+(extend-type nil
+  ILookup
+  (-lookup ([_ _k] nil) ([_ _k nf] nf)))
+(extend-type Object
+  ILookup
+  (-lookup ([o k] (clojure.core/get o k)) ([o k nf] (clojure.core/get o k nf))))
 (extend-protocol ISeqable
   nil (-seq [_] nil)
   Object (-seq [o] (clojure.core/seq o)))
@@ -135,27 +152,28 @@
 (extend-protocol IWithMeta
   Object (-with-meta [o m] (clojure.core/with-meta o m)))
 (extend-protocol ISet
-  nil (-disjoin [_ _] nil)
+  nil (-disjoin [_ _v] nil)
   Object (-disjoin [s v] (clojure.core/disj s v)))
-(extend-protocol IFn
-  Object
+(extend-type Object
+  IFn
   (-invoke ([f] (f)) ([f a] (f a)) ([f a b] (f a b)) ([f a b c] (f a b c))))
-(extend-protocol IReduce
-  nil
-  (-reduce ([_ f] (f)) ([_ _ start] start))
-  Object
+(extend-type nil
+  IReduce
+  (-reduce ([_ f] (f)) ([_ _f start] start)))
+(extend-type Object
+  IReduce
   ;; through seq: a type with ISeqable and no IReduce reduces too
   (-reduce ([coll f] (clojure.core/reduce f (seq coll)))
     ([coll f start] (clojure.core/reduce f start (seq coll)))))
 (extend-protocol IKVReduce
-  nil (-kv-reduce [_ _ init] init)
+  nil (-kv-reduce [_ _f init] init)
   Object (-kv-reduce [c f init] (clojure.core/reduce-kv f init c)))
 (extend-protocol IAssociative
-  nil (-contains-key? [_ _] false) (-assoc [_ k v] {k v})
+  nil (-contains-key? [_ _k] false) (-assoc [_ k v] {k v})
   Object (-contains-key? [c k] (clojure.core/contains? c k))
   (-assoc [c k v] (clojure.core/assoc c k v)))
 (extend-protocol IMap
-  nil (-dissoc [_ _] nil)
+  nil (-dissoc [_ _k] nil)
   Object (-dissoc [c k] (clojure.core/dissoc c k)))
 (extend-protocol IStack
   nil (-peek [_] nil) (-pop [_] nil)
@@ -243,8 +261,28 @@
        (let [r (-persistent! (transduce xform (completing -conj!) t (seq from))) m (meta to)]
          (if (some? m) (with-meta r m) r))
        (transduce xform (completing -conj) to (seq from))))))
-(defn assoc [coll k v] (-assoc coll k v))
-(defn dissoc [coll k] (-dissoc coll k))
+(defn assoc
+  "As clojure.core/assoc: one or more key/value pairs, applied in order.
+   The JVM and cljs eve.core alias their host's variadic assoc; this
+   surface must not be narrower — a 3-arity-only assoc left variadic
+   calls unresolvable under SCI (bb), where this file is eve.core."
+  ([coll k v] (-assoc coll k v))
+  ([coll k v & kvs]
+   (let [ret (-assoc coll k v)]
+     (if kvs
+       (if (next kvs)
+         (recur ret (first kvs) (second kvs) (nnext kvs))
+         (throw (ex-info "assoc expects even number of arguments after map, found odd number."
+                         {:eve.core/error :odd-assoc-args})))
+       ret))))
+(defn dissoc
+  "As clojure.core/dissoc: zero or more keys, removed in order.
+   The JVM and cljs eve.core alias their host's variadic dissoc; this
+   surface must not be narrower — the same truncation the variadic
+   assoc fix removed, one definition down."
+  ([coll] coll)
+  ([coll k] (-dissoc coll k))
+  ([coll k & ks] (clojure.core/reduce -dissoc (-dissoc coll k) ks)))
 (defn pop [coll] (-pop coll))
 (defn peek [coll] (-peek coll))
 (defn rseq [coll] (seq (-rseq coll)))

@@ -5,7 +5,7 @@
    table.
 
    (make-array n) allocates the array in the current eve domain (the running
-   swap!'s, else this process's own), as an eve-deftype's constructor does.
+   swap!'s; outside a context it throws), as an eve-deftype's constructor does.
    aget, aset, alength, aclone, array-copy, array-seq and array-chunk take an
    eve array or a host array, so code written against ClojureScript's array
    functions reads the same; an eve array is seqable by clojure.core on every
@@ -42,6 +42,12 @@
             ;; eve's map, vector, set or list (their writers register here)
             [eve.map] [eve.vec] [eve.set] [eve.list]
             [eve.codec :as codec]
+            ;; Load order: host-deftype's expansion ends in a
+            ;; top-level eve.type-readers/register! call, which needs
+            ;; the registry first in the RUNTIME graph (a macro ns's
+            ;; require is macro-side only). Guard:
+            ;; eve.deftype-guard-test.
+            [eve.type-readers]
             [eve.deftype-proto.macros :as pmac]))
 
 (def ^:const ValueArray-type-id 0x1F)
@@ -181,7 +187,7 @@
 ;; the type's print-method.
 (declare va=)
 
-(edt/deftype ValueArray [sio off n]
+(pmac/host-deftype ValueArray [sio off n]
   IValueArray
   (-va-sio [_] sio) (-va-off [_] off) (-va-count [_] n)
   d/IEveRoot (-root-header-off [_] off)

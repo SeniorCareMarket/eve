@@ -1,0 +1,15 @@
+;; cohost-media's boot program: its maven libraries only. Its classpath is composed by the bb cohost-media task
+;; (bb.edn): these jars, eve's src and hosts.edn's :jvm roots, cohost-media's boot.cljc directory and shared src,
+;; and cohost's src. The JVM member runs in the boot process and uses the same jars (Tika for its meta facility).
+{:paths []
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        org.clojure/data.json {:mvn/version "2.5.2"}
+        ;; the browser seat's driver (cohost.cljs-pool) evaluates its realm on GraalJS in the boot process,
+        ;; analyzing cljs with the stock analyzer (cohost.boot-cljs)
+        org.graalvm.polyglot/polyglot {:mvn/version "25.0.1"}
+        org.clojure/clojurescript {:mvn/version "1.12.134"}
+        org.apache.tika/tika-core {:mvn/version "2.9.2"}
+        org.apache.tika/tika-parser-audiovideo-module {:mvn/version "2.9.2"}
+        org.apache.tika/tika-parser-image-module {:mvn/version "2.9.2"}
+        com.drewnoakes/metadata-extractor {:mvn/version "2.19.0"}
+        org.slf4j/slf4j-nop {:mvn/version "2.0.13"}}}

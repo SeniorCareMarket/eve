@@ -1,0 +1,32 @@
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/slab-io/protocol/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/http/java/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/http-server/jdk/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/crypto/java/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/core/clojure/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/completion/clojure/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/coll/jvm/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/slab/heap/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/region/jvm-varhandle/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/encoding/java/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/int32/jvm/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/codec/byte-array/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/process/java/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/thread/jvm/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/types/jvm/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/types/js/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/adapters/journal-file/java/src
+WARNING: Use of :paths external to the project has been deprecated, please remove: /workspace/ds-wt-eve/test
+
+Testing eve.map-entry-test
+
+Testing eve.host-bytes-test
+
+Testing eve.collection-hash-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.hamt-util-test
+
+Ran 12 tests containing 152 assertions.
+0 failures, 0 errors.

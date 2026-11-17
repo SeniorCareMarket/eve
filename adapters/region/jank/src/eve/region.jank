@@ -24,7 +24,18 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#if defined(__APPLE__)
+/* The macOS SDK ships no <sys/ulock.h>: __ulock_wait/__ulock_wake live
+   in libSystem but their prototypes are private, so declare them here
+   (the standard practice — the same two constants every consumer
+   hardcodes: UL_COMPARE_AND_WAIT 1, ULF_WAKE_ALL 0x100). */
+extern \"C\" int __ulock_wait(unsigned int operation, void *addr, unsigned long long value, unsigned int timeout_us);
+extern \"C\" int __ulock_wake(unsigned int operation, void *addr, unsigned long long wake_value);
+#define UL_COMPARE_AND_WAIT 1u
+#define ULF_WAKE_ALL 0x00000100u
+#else
 #include <linux/futex.h>
+#endif
 #include <jank/runtime/object.hpp>
 #include <jank/runtime/core.hpp>
 #include <jank/runtime/core/make_box.hpp>
@@ -88,6 +99,38 @@ namespace eve_region {
   }
   long add_i64(long b, long off, long d) { return __atomic_fetch_add(reinterpret_cast<int64_t *>(P(b, off)), (int64_t)d, __ATOMIC_SEQ_CST); }
   long sub_i64(long b, long off, long d) { return __atomic_fetch_sub(reinterpret_cast<int64_t *>(P(b, off)), (int64_t)d, __ATOMIC_SEQ_CST); }
+#if defined(__APPLE__)
+  /* macOS has no futex: libSystem's __ulock_wait/__ulock_wake
+     (UL_COMPARE_AND_WAIT) are the futex-shaped primitives — the
+     same contract as the Linux arm below (0 woken, 1 not equal,
+     2 timed out; timeout_ms < 0 waits), chunked at 5 s because
+     __ulock_wait's timeout is a uint32 of microseconds; the value
+     pre-check each round keeps the differs-at-entry case exact.
+     The errno values are darwin's: EAGAIN, ETIMEDOUT, EINTR. */
+  long futex_wait(long b, long off, long expected, long timeout_ms) {
+    int32_t *addr = reinterpret_cast<int32_t *>(P(b, off));
+    long waited_ms = 0;
+    for(;;) {
+      if(__atomic_load_n(addr, __ATOMIC_SEQ_CST) != (int32_t)expected) return 1;
+      if(timeout_ms >= 0 && waited_ms >= timeout_ms) return 2;
+      uint32_t chunk_us = 5000000u;
+      if(timeout_ms >= 0) {
+        long rem_us = (timeout_ms - waited_ms) * 1000L;
+        if(rem_us < (long)chunk_us) chunk_us = (uint32_t)rem_us;
+      }
+      int r = __ulock_wait(UL_COMPARE_AND_WAIT, addr, (uint64_t)(uint32_t)(int32_t)expected, chunk_us);
+      if(r == 0) return 0;
+      if(errno == EAGAIN) return 1;
+      if(errno == EINTR) continue;
+      if(errno == ETIMEDOUT) { waited_ms += (long)(chunk_us / 1000u); continue; }
+      return 0; /* anything else: report woken; callers re-check the value */
+    }
+  }
+  long futex_wake(long b, long off, long n) {
+    uint32_t op = UL_COMPARE_AND_WAIT | (n == 1 ? 0u : (uint32_t)ULF_WAKE_ALL);
+    return __ulock_wake(op, reinterpret_cast<int32_t *>(P(b, off)), 0);
+  }
+#else
   /* futex on the mapping (shared): 0 woken or value changed, 1 not equal (EAGAIN), 2 timed out; timeout_ms < 0 waits */
   long futex_wait(long b, long off, long expected, long timeout_ms) {
     struct timespec ts{ timeout_ms / 1000, (timeout_ms % 1000) * 1000000L };
@@ -98,6 +141,7 @@ namespace eve_region {
     return 0; /* EINTR: woken */
   }
   long futex_wake(long b, long off, long n) { return syscall(SYS_futex, reinterpret_cast<int32_t *>(P(b, off)), FUTEX_WAKE, (int)n, nullptr, nullptr, 0); }
+#endif
   /* bulk bytes: a fresh u8 array of the region's bytes; an array's bytes into the region */
   object_ref read_bytes(long b, long off, long len) {
     auto out(make_box<obj::array<jank::i8>>((jank::i64)len));

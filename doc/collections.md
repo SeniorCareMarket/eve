@@ -28,9 +28,10 @@ The standard eve map, set, vector and list cover most uses. eve also has collect
 
 - **Integer map** (`eve.deftype.int-map`): a 16-way PATRICIA trie keyed by 32-bit integers — merge, merge-with,
   range queries.
-- **Sorted set** (`eve.deftype.rb-tree`): a persistent red-black tree — ordered iteration, membership.
 - **Sorted map and sorted set with comparators** (`eve.sorted`): Clojure's `sorted-map`, `sorted-map-by`,
-  `sorted-set`, `sorted-set-by`, `subseq`, `rsubseq`, plus `rank` and `nth-entry`.
+  `sorted-set`, `sorted-set-by`, `subseq`, `rsubseq`, plus `rank` and `nth-entry` — ordered iteration,
+  membership. (The red-black sorted set that used to sit in `eve.deftype.rb-tree` was retired into this
+  trunk Nov 14 2026.)
 
 All three are one `.cljc` source for every host. Their nodes live in slab memory: a constructor allocates in the
 running `swap!`'s domain, else in this process's own slab. **Build them inside the function you pass to `swap!`.** A
@@ -54,7 +55,6 @@ JDK 21) on 2026-10-20 with identical output.
          '[eve.core :as ec]
          '[eve.atom :as ea]
          '[eve.deftype.int-map :as im]
-         '[eve.deftype.rb-tree :as rb]
          '[eve.sorted :as sorted])
 ```
 
@@ -135,16 +135,17 @@ Deref gives a plain map, so every sequence operation works on it:
   (into {} m))       ;=> a regular Clojure map
 ```
 
-## Sorted Set (Red-Black Tree)
+## Sorted Set (`eve.sorted`)
 
-An Okasaki-style persistent red-black tree. Each node lives in slab memory; an insert path-copies (persistent,
-immutable). Useful for sorted iteration and ordered membership.
+A persistent treap. Each node lives in slab memory; an insert path-copies (persistent,
+immutable). Useful for sorted iteration and ordered membership. (This section used to document the
+Okasaki-style red-black tree in `eve.deftype.rb-tree`, retired into this trunk Nov 14 2026.)
 
 ### Basic Usage
 
 ```clojure
 (def tags (e/atom ::tags {}))
-(swap! tags (fn [v] (assoc v :tags (rb/sorted-set))))
+(swap! tags (fn [v] (assoc v :tags (sorted/sorted-set))))
 (swap! tags update :tags e/conj "clojure")
 (swap! tags update :tags e/conj "javascript")
 (swap! tags update :tags e/conj "python")
@@ -158,17 +159,17 @@ immutable). Useful for sorted iteration and ordered membership.
 
 ```clojure
 (def priorities (e/atom ::priorities {}))
-(swap! priorities (fn [v] (assoc v :queue (rb/sorted-set 5 3 8 1 4 7 9 2 6))))
+(swap! priorities (fn [v] (assoc v :queue (sorted/sorted-set 5 3 8 1 4 7 9 2 6))))
 @priorities  ;=> {:queue #{1 2 3 4 5 6 7 8 9}}
 ```
 
 ### Reading the Tree in Place
 
-`rb/member?` and the tree's own seq work on the eve value — inside `swap!`, or inside `e/$`, where `@` answers the
+`ec/contains?` and the set's own seq work on the eve value — inside `swap!`, or inside `e/$`, where `@` answers the
 atom's value in place, held until the region exits, and only the region's result is materialized:
 
 ```clojure
-(e/$ (rb/member? (:tags @tags) "python"))              ;=> true
+(e/$ (ec/contains? (:tags @tags) "python"))            ;=> true
 (e/$ (vec (e/seq (:tags @tags))))                      ;=> ["clojure" "javascript" "python"]
 ```
 
@@ -178,7 +179,7 @@ Sorted sets order by `compare`, so keywords, strings and numbers all work:
 
 ```clojure
 (def kws (e/atom ::kws {}))
-(swap! kws (fn [v] (assoc v :kw-set (rb/sorted-set :z :a :m :f :b :q))))
+(swap! kws (fn [v] (assoc v :kw-set (sorted/sorted-set :z :a :m :f :b :q))))
 (e/$ (vec (e/seq (:kw-set @kws))))              ;=> [:a :b :f :m :q :z]
 ```
 

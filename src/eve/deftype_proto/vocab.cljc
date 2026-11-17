@@ -477,37 +477,95 @@
       s)))
 
 (defn sio-read-expr
-  "ISlabIO read expression for a field."
+  "ISlabIO read expression for a field — the VALUE read of the
+   field's declared type, agreeing with
+   eve.deftype-proto/jvm-read-fn-for-type (and so with the flat
+   descriptor's reads, which are defined to answer as it does):
+   the signed small ints sign-extend, :uint32 masks to the
+   unsigned long, the floats convert from their stored bits.
+   (This generator previously emitted the raw storage read for
+   every width: a body reading its own ^:int16 field got the
+   unsigned value, its ^:float64 field the low word.)"
   [{:keys [type-hint type-class mutability]} offset-sym field-offset]
-  (let [read-fn (case type-class
-                  :primitive
-                  (case type-hint
-                    (:int8 :uint8) 'eve.slab-io/read-u8
-                    (:int16 :uint16) 'eve.slab-io/read-u16
-                    ;; an immutable int32 field is written once, before its instance is published: the hot read
-                    ;; path's plain node read (jvm-heap-grade step 3). A mutable one keeps the atomic read.
-                    :int32 (if (#{:mutable :volatile-mutable} mutability)
-                             'eve.slab-io/read-i32
-                             'eve.deftype-proto.alloc/node-i32)
-                    (:uint32 :float32 :float64)
-                    'eve.slab-io/read-i32)
-                  ;; :eve-type, :serialized — stored as int32
-                  'eve.slab-io/read-i32)]
-    (list read-fn 'sio__ offset-sym field-offset)))
+  (case type-class
+    :primitive
+    (case type-hint
+      :int8    (list 'let ['b__jvm (list 'eve.slab-io/read-u8 'sio__ offset-sym field-offset)]
+                 (list 'if (list '> 'b__jvm 127) (list '- 'b__jvm 256) 'b__jvm))
+      :uint8   (list 'eve.slab-io/read-u8 'sio__ offset-sym field-offset)
+      :int16   (list 'let ['v__jvm (list 'eve.slab-io/read-u16 'sio__ offset-sym field-offset)]
+                 (list 'if (list '> 'v__jvm 32767) (list '- 'v__jvm 65536) 'v__jvm))
+      :uint16  (list 'eve.slab-io/read-u16 'sio__ offset-sym field-offset)
+      ;; an immutable int32 field is written once, before its instance is published: the hot read
+      ;; path's plain node read (jvm-heap-grade step 3). A mutable one keeps the atomic read.
+      :int32   (list (if (#{:mutable :volatile-mutable} mutability)
+                       'eve.slab-io/read-i32
+                       'eve.deftype-proto.alloc/node-i32)
+                 'sio__ offset-sym field-offset)
+      :uint32  (list 'bit-and
+                 (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
+                 0xFFFFFFFF)
+      :float32 (list 'Float/intBitsToFloat
+                 (list 'int (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset)))
+      :float64 (list 'let ['lo__jvm (list 'bit-and
+                                      (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
+                                      0xFFFFFFFF)
+                           'hi__jvm (list 'bit-and
+                                      (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym (+ field-offset 4)))
+                                      0xFFFFFFFF)]
+                 (list 'Double/longBitsToDouble
+                       (list 'bit-or (list 'bit-shift-left 'hi__jvm 32) 'lo__jvm)))
+      ;; an unrecognized primitive hint reads as stored int32
+      (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
+    ;; :eve-type, :serialized — stored as int32
+    (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset)))
 
 (defn sio-write-expr
-  "ISlabIO write expression for a field."
+  "ISlabIO write expression for a field — the VALUE write of the
+   field's declared type, agreeing with
+   eve.deftype-proto/jvm-write-fn-for-type (the write the
+   generated ctor performs): the small ints write through an
+   (int …) coercion, :int32/:uint32 and the stored-offset kinds
+   write their unchecked bits, :float32 writes its raw int bits,
+   :float64 writes both words of its raw long bits.
+   (This generator previously emitted the raw val-expr for every
+   width: a body setting its own ^:float32 or ^:float64 field
+   handed the raw Double to write-i32!, which threw
+   \"bit operation not supported for: class java.lang.Double\"
+   at runtime — measured by the write-widths probe, Nov 15 2026;
+   the int arms' raw pass happened to land the same bits.)"
   [{:keys [type-hint type-class]} offset-sym field-offset val-expr]
-  (let [write-fn (case type-class
-                   :primitive
-                   (case type-hint
-                     (:int8 :uint8) 'eve.slab-io/write-u8!
-                     (:int16 :uint16) 'eve.slab-io/write-u16!
-                     (:int32 :uint32 :float32 :float64)
-                     'eve.slab-io/write-i32!)
-                   ;; :eve-type, :serialized
-                   'eve.slab-io/write-i32!)]
-    (list write-fn 'sio__ offset-sym field-offset val-expr)))
+  (case type-class
+    :primitive
+    (case type-hint
+      (:int8 :uint8)
+      (list 'eve.slab-io/write-u8! 'sio__ offset-sym field-offset
+            (list 'int val-expr))
+      (:int16 :uint16)
+      (list 'eve.slab-io/write-u16! 'sio__ offset-sym field-offset
+            (list 'int val-expr))
+      ;; its 32 bits, not a checked cast (jvm-write-fn-for-type's
+      ;; note: a slab-qualified offset is past 2^31 from class 4 up)
+      (:int32 :uint32)
+      (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
+            (list 'unchecked-int val-expr))
+      :float32
+      (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
+            (list 'Float/floatToRawIntBits (list 'float val-expr)))
+      :float64
+      (list 'let ['bits__jvm (list 'Double/doubleToRawLongBits (list 'double val-expr))]
+        (list 'do
+          (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
+                (list 'unchecked-int (list 'bit-and 'bits__jvm 0xFFFFFFFF)))
+          (list 'eve.slab-io/write-i32! 'sio__ offset-sym (+ field-offset 4)
+                (list 'unchecked-int (list 'unsigned-bit-shift-right 'bits__jvm 32)))))
+      ;; an unrecognized primitive hint writes as stored int32
+      (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
+            (list 'int val-expr)))
+    ;; :eve-type, :serialized — stored as int32; a slab-qualified
+    ;; offset is unsigned 32-bit, so its bits, not a checked cast
+    (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
+          (list 'unchecked-int val-expr))))
 
 (defn field-bindings
   "Generate let-bindings that read all fields from slab via ISlabIO.
@@ -557,6 +615,68 @@
   [body fields field-map]
   (let [field-read-bindings (field-bindings fields)
         rewritten (map #(rewrite-set!-forms % field-map) body)]
+    (if (empty? field-read-bindings)
+      rewritten
+      (list (apply list 'let field-read-bindings (vec rewritten))))))
+
+;;=============================================================================
+;; A flat sister's bodies (FORMAT-V1 §6, lane H5): a field read is the row's
+;;=============================================================================
+
+(defn flat-rewrite-set!-forms
+  "Rewrite (set! field val) and (cas! field ...) on a slab field of a
+   sister method body: a flat value is immutable, so the write is a
+   throw, as a flat view refuses every mutator. Writes to anything
+   else (a host-local field, a local) pass through, as in the
+   persistent kind."
+  [form field-map]
+  (cond
+    (and (seq? form)
+         (contains? #{'set! 'cas!} (first form))
+         (symbol? (second form))
+         (contains? field-map (name (second form))))
+    (list 'throw
+          (list 'ex-info
+                (str "a flat sister is immutable: " (first form)
+                     " on a field of a flat value")
+                {:field (name (second form))}))
+
+    (seq? form)
+    (with-meta (apply list (map #(flat-rewrite-set!-forms % field-map) form))
+               (meta form))
+    (vector? form)
+    (with-meta (mapv #(flat-rewrite-set!-forms % field-map) form)
+               (meta form))
+    (map? form)
+    (with-meta (into {} (map (fn [[k v]]
+                               [(flat-rewrite-set!-forms k field-map)
+                                (flat-rewrite-set!-forms v field-map)])
+                             form))
+               (meta form))
+    :else form))
+
+(defn flat-method-body
+  "A method body of a type's generated flat sister, on every host that
+   realizes one: the live fields the body names bound as locals at the
+   method's entry, each read from the sister's field source
+   (eve.flat.source/-field on src__, the row's column[row] — FORMAT-V1
+   §6) instead of from a slab block; a set!/cas! on a field a throw.
+   Only the fields the body names are read (flat lanes U4a): a field
+   read is one column read at the row, not one per field of the type
+   — a body naming one of four fields reads one. The names are found
+   over the body's forms, so the set is a superset of what the body
+   reads (a local shadowing a field still binds it, harmlessly); the
+   persistent kind binds every live field, and no body can tell the
+   difference."
+  [body live-fields field-map]
+  (let [named (into #{} (comp (filter symbol?) (map name)) (tree-seq coll? seq body))
+        field-read-bindings
+        (vec (mapcat (fn [f]
+                       (when (contains? named (name (:name f)))
+                         [(symbol (:name f))
+                          (list 'eve.flat.source/-field 'src__ (keyword (:name f)))]))
+                     live-fields))
+        rewritten (map #(flat-rewrite-set!-forms % field-map) body)]
     (if (empty? field-read-bindings)
       rewritten
       (list (apply list 'let field-read-bindings (vec rewritten))))))

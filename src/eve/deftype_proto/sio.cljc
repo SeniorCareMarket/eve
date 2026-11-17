@@ -163,7 +163,13 @@
   [type-name print-fn]
   (when print-fn
     (let [x (gensym "x") w (gensym "w")]
-      `(defmethod print-method ~type-name [~x ~w] (~print-fn ~x ~w nil)))))
+      `(do
+         (defmethod print-method ~type-name [~x ~w] (~print-fn ~x ~w nil))
+         ;; Only emit the optional host surface when present. This is
+         ;; macro-time capability detection, not a Java MultiFn assumption.
+         ~@(when #?(:bb false :default (resolve 'print-dup))
+             [(list 'defmethod 'print-dup type-name [x w]
+                    (list print-fn x w nil))])))))
 
 ;;-----------------------------------------------------------------------------
 ;; eve-deftype
@@ -259,12 +265,22 @@
                                          inst-fields)
                                     ['slab-off__ 'sio__])))
 
-       ;; Constructor — the same fields as on CLJS; it allocates in the
-       ;; running swap!'s domain, else this process's (alloc/current-sio).
-       ;; The arity with a leading sio allocates in that one.
+       ;; Constructor — the same fields as on CLJS. Inside a swap!
+       ;; (a domain bound) it allocates in that domain. With NO
+       ;; domain bound it takes the flat path: the type's generated
+       ;; flat sister is constructed from the slab-field values
+       ;; instead (John, Nov 14 2026 — instantiating an eve type
+       ;; outside a transaction produces its flat variant; the
+       ;; no-domain throw survives only for direct current-sio
+       ;; callers with no flat form). The arity with a leading sio
+       ;; allocates in that one.
        (~'defn ~ctor-name
                ([~@ctor-args]
-                (~ctor-name (eve.deftype-proto.alloc/current-sio) ~@ctor-args))
+                (if eve.deftype-proto.data/*domain-sio*
+                  (~ctor-name eve.deftype-proto.data/*domain-sio* ~@ctor-args)
+                  (eve.flat.sister/construct-flat
+                   ~type-key
+                   [~@(map (fn [f] (symbol (:name f))) slab-fields)])))
                ([~'sio__ ~@ctor-args]
                 (let [~'slab-off__ (eve.slab-io/alloc! ~'sio__ ~total-size)]
             ;; Header: type-id byte, name hash
@@ -297,6 +313,163 @@
        (~'def ~(symbol (str (name type-name) "-nil")) -1)
 
        ~type-name)))
+
+;;-----------------------------------------------------------------------------
+;; the generated flat sister (lane H5)
+;;-----------------------------------------------------------------------------
+
+;; a sister method body's transform (its field reads from the source, its
+;; field writes a throw) is the shared vocabulary's: eve.deftype-proto.vocab
+;; flat-method-body, which every host's sister generator calls
+
+(defn flat-type
+  "An eve-deftype's generated flat sister on a host whose types reach
+   eve memory through ISlabIO (eve.deftype.macros/eve-deftype* gives
+   ctx, the host's adapter hooks) — the second kind the same expansion
+   generates (FORMAT-V1 §6, lane H5).
+
+   A host deftype like the persistent kind's, with the same shape: the
+   cached fields as its own fields (read once, when the factory builds
+   it from a field source — as Type__from-slab reads them from the
+   block), the host-local fields nil, and [src__ sister-hash__] where
+   the persistent kind has [slab-off__ sio__]. The user's protocol
+   bodies are expanded against it, their live fields read from the
+   source. Its factory, Type__sister, is (fn [field-source] → sister):
+   the packed reader calls it for the type's records and batch rows."
+  [{:keys [type-name inst-fields live-fields field-map parsed-protos type-key
+           provides? flat-name sister-name]}
+   {:keys [normalize define build]}]
+  (let [inst-syms (mapv #(v/instance-field-sym % {:unsynchronized-mutable true}) inst-fields)
+        {:keys [impls]} (normalize parsed-protos)
+
+        ;; The shared normalization synthesizes an Object group
+        ;; for every type: a toString of (pr-str this) when the
+        ;; type has a print form. On the persistent kind that
+        ;; toString dispatches through a registered print
+        ;; method; no print method is registered for a sister,
+        ;; so there it recurses without bound — and its mere
+        ;; presence suppressed this kind's whole Object
+        ;; boilerplate (the gate below was protocol-level),
+        ;; leaving sisters with identity equals and no
+        ;; hashCode. Drop the synthesized toString for this
+        ;; kind (a user-written Object method, any other body,
+        ;; stays), and drop the group if it empties.
+        impls (mapv (fn [{:keys [protocol] :as group}]
+                      (if (contains? #{'Object 'java.lang.Object} protocol)
+                        (update group :methods
+                                (fn [ms] (vec (remove (fn [m]
+                                                        (and (= 'toString (:name m))
+                                                             (= '[(pr-str this)] (:body m))))
+                                                      ms))))
+                        group))
+                    impls)
+        impls (vec (remove (fn [{:keys [protocol methods]}]
+                             (and (contains? #{'Object 'java.lang.Object} protocol)
+                                  (empty? methods)))
+                           impls))
+        obj-have (into #{}
+                       (comp (filter (fn [g] (contains? #{'Object 'java.lang.Object}
+                                                          (:protocol g))))
+                             (mapcat :methods)
+                             (map :name))
+                       impls)
+
+        transformed-protos
+        (mapcat (fn [{:keys [protocol methods]}]
+                  (cons protocol
+                        (map (fn [{:keys [name args body]}]
+                               (let [tbody (v/flat-method-body
+                                            body live-fields field-map)]
+                                 (list name args (cons 'do tbody))))
+                             methods)))
+                impls)
+
+        field-map-expr (list 'eve.flat.source/-field-map 'src__)
+        boilerplate
+        (concat
+         ;; ISabpType — the sister carries the type's key, as the
+         ;; persistent kind does
+         (when-not (provides? impls 'eve.deftype-proto.data/ISabpType 'd/ISabpType)
+           ['eve.deftype-proto.data/ISabpType
+            (list 'eve.deftype-proto.data/-sabp-type-key ['_] type-key)])
+
+         ;; ISister — what the packed machinery knows a sister by
+         ['eve.flat.source/ISister
+          (list 'eve.flat.source/-sister-source ['_] 'src__)
+          (list 'eve.flat.source/-sister-type-key ['_] type-key)]
+
+         ;; IFlatHandle — a sister is a flat handle: it stands on
+         ;; the chunk's bytes, and re-packs as its type's typed rep
+         ['eve.flat.chunk/IFlatHandle
+          (list 'eve.flat.chunk/-rep ['this]
+                (list 'eve.flat.sister/instance->typed-rep 'this))
+          (list 'eve.flat.chunk/-chunk-bytes ['_]
+                (list 'eve.flat.source/-source-bytes 'src__))]
+
+         ;; IHashEq — by type key and fields (the flat side of fork
+         ;; F2's (a): a flat copy is = its twin; the slab kind's
+         ;; identity comparison is untouched)
+         (when-not (provides? impls 'clojure.lang.IHashEq 'IHash)
+           ['clojure.lang.IHashEq
+            (list 'hasheq ['this]
+                  (list 'or 'sister-hash__
+                        (list 'set! 'sister-hash__
+                              (list 'int (list 'clojure.core/hash
+                                               (list 'vector type-key field-map-expr))))))])
+
+         ;; Object — per method, not per protocol: the impls
+         ;; may still carry user-written Object methods, and
+         ;; each boilerplate method is emitted only when the
+         ;; impls do not already provide that method.
+         (when (not-every? obj-have ['equals 'hashCode 'toString])
+           (into ['java.lang.Object]
+                 (concat
+                  (when-not (contains? obj-have 'equals)
+                    [(list 'equals ['this 'other]
+                           (list 'and
+                                 (list 'instance? flat-name 'other)
+                                 (list '= field-map-expr
+                                       (list 'eve.flat.source/-field-map
+                                             (list 'eve.flat.source/-sister-source
+                                                   (with-meta 'other {:tag flat-name}))))))])
+                  (when-not (contains? obj-have 'hashCode)
+                    [(list 'hashCode ['this] (list '.hasheq 'this))])
+                  (when-not (contains? obj-have 'toString)
+                    [(list 'toString ['this]
+                           (list 'str "#eve.flat/" (name type-name) " "
+                                 (list 'pr-str field-map-expr)))])))))
+
+        all-syms (into (vec inst-syms)
+                       ['src__ (with-meta 'sister-hash__ {:unsynchronized-mutable true})])
+        build-form (fn [args] (build flat-name all-syms sister-name args))
+        body (concat boilerplate transformed-protos)]
+
+    `(do
+       ;; methods may build sisters: the factory, declared first
+       (~'declare ~sister-name)
+       ;; the host's deftype: its cached and host-local fields, [src__
+       ;; sister-hash__], the user's protocols expanded against it
+       ~@(define flat-name all-syms (proto/parse-protocol-impls body) body nil)
+
+       ;; the factory the packed reader calls: the cached fields read
+       ;; from the source once, the host-local fields nil — as
+       ;; Type__from-slab builds an instance from a block. A field
+       ;; carrying a :derive fn (a proto ^:cached field's derivation,
+       ;; plan §3(b)(i)) is rebuilt by that fn from the source —
+       ;; cached values are not packed, so the source cannot answer
+       ;; them by keyword
+       (~'defn ~sister-name [~'src__]
+               ~(build-form (concat (map (fn [f]
+                                           (cond (:derive f)
+                                                 (list (:derive f) 'src__)
+                                                 (v/cached? f)
+                                                 (list 'eve.flat.source/-field
+                                                       'src__ (keyword (:name f)))
+                                                 :else nil))
+                                         inst-fields)
+                                    ['src__ nil])))
+
+       ~flat-name)))
 
 ;;-----------------------------------------------------------------------------
 ;; deftype (a plain type) and eve-extend-type

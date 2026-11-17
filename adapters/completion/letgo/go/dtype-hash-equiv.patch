@@ -1,0 +1,196 @@
+--- a/pkg/vm/deftype.go
++++ b/pkg/vm/deftype.go
+@@ -141,8 +141,23 @@
+ 	return b.String()
+ }
+ 
++// DTypeHashHook and DTypeEqualsHook let a host library give deftype
++// instances content hash/equality: when set, Hash and Equals consult
++// the hook first; a hook answering ok=false declines and the identity
++// default below applies. EVE's completion (its evenative package) sets
++// both once at startup to eve.core's -hash/-equiv protocol fns, the
++// same service glojure's runtime exposes as set-type-equality!. Nil
++// until then: stock let-go behavior is unchanged.
++var DTypeHashHook func(d *DTypeInstance) (uint32, bool)
++var DTypeEqualsHook func(d *DTypeInstance, other Value) (bool, bool)
++
+ // Equals: reference identity, matching JVM deftype semantics.
+ func (d *DTypeInstance) Equals(other Value) bool {
++	if DTypeEqualsHook != nil {
++		if eq, ok := DTypeEqualsHook(d, other); ok {
++			return eq
++		}
++	}
+ 	o, ok := other.(*DTypeInstance)
+ 	if !ok {
+ 		return false
+@@ -152,6 +167,11 @@
+ 
+ // Hash: identity-based (matches JVM default hashCode).
+ func (d *DTypeInstance) Hash() uint32 {
++	if DTypeHashHook != nil {
++		if h, ok := DTypeHashHook(d); ok {
++			return h
++		}
++	}
+ 	return mixFinish(uint32(uintptr(unsafe.Pointer(d))))
+ }
+ 
+--- a/pkg/vm/protocol.go
++++ b/pkg/vm/protocol.go
+@@ -117,6 +117,16 @@
+ 	return fn, ok
+ }
+ 
++// HasDirectImpl reports whether vt carries an exact extension (extend-type),
++// as opposed to being served only by the Object (AnyType) default. A host
++// bridging the runtime's own equality/hashing to a library's protocols
++// (EVE's completion) uses it to decline types whose protocol answer would
++// be the universal default itself — consulting it would be circular.
++func (p *Protocol) HasDirectImpl(vt ValueType) bool { return p.direct[vt] }
++
++// Protocol returns the protocol this fn dispatches for.
++func (f *ProtocolFn) Protocol() *Protocol { return f.protocol }
++
+ // Satisfies returns true if the given value's type has an implementation, or a
+ // universal default was extended onto Object (AnyType).
+ func (p *Protocol) Satisfies(target Value) bool {
+--- a/pkg/rt/lang.go
++++ b/pkg/rt/lang.go
+@@ -273,6 +273,18 @@
+ // not a sound rejection signal there. Clojure's equality treats `[]` and
+ // `'()` as equal regardless.
+ func hashEqShortCircuit(a, b vm.Value) (bool, bool) {
++	// A deftype instance's Hash() is its library's content hash (EVE's
++	// completion hooks it to eve.core's -hash), which is consistent
++	// with the library's equality but not with a host value's Hash()
++	// on the other side of a cross-type comparison — a mismatch here
++	// would decide false before Equals is consulted. Decline: the
++	// full walk decides. (EVE completion patch.)
++	if _, ok := a.(*vm.DTypeInstance); ok {
++		return false, false
++	}
++	if _, ok := b.(*vm.DTypeInstance); ok {
++		return false, false
++	}
+ 	if _, aSeq := a.(vm.Sequable); aSeq {
+ 		if _, bSeq := b.(vm.Sequable); bSeq {
+ 			return false, false
+@@ -1037,6 +1049,19 @@
+ 	if r, decided := hashEqShortCircuit(a, b); decided {
+ 		return r
+ 	}
++	// A deftype instance's equality is its library's, not the
++	// runtime's shape walk: EVE's completion hooks DTypeInstance
++	// .Equals to the type's -equiv, and the collection cases in
++	// valueEqualsCtx know only the runtime's own shapes (a host
++	// PersistentMap against a deftype map returns false there
++	// without ever consulting Equals). When either side is a
++	// deftype instance, its Equals decides. (EVE completion patch.)
++	if ad, ok := a.(*vm.DTypeInstance); ok {
++		return ad.Equals(b)
++	}
++	if bd, ok := b.(*vm.DTypeInstance); ok {
++		return bd.Equals(a)
++	}
+ 	return valueEqualsCtx(a, b, &eqCtx{})
+ }
+ 
+@@ -5061,6 +5086,14 @@
+ 	if serr != nil {
+ 		return vm.NIL, serr
+ 	}
++	// seqOf hands a LazySeq back unrealized (its contract puts empty
++	// handling on the caller); Resolve it here, or an empty lazy
++	// seq's First() (NIL) becomes a spurious element — (byte-array
++	// (map f (range 0))) died 'element must be Int, got nil'.
++	// (EVE completion patch.)
++	if ls, ok := s.(*vm.LazySeq); ok {
++		s = ls.Resolve()
++	}
+ 	var vals []vm.Value
+ 	for ; s != nil; s = s.Next() {
+ 		vals = append(vals, s.First())
+--- a/pkg/vm/atom.go
++++ b/pkg/vm/atom.go
+@@ -190,12 +190,63 @@
+ // CompareAndSet atomically sets the value to newVal only if the current value
+ // is identical to oldVal, returning true on success. Identity comparison (==),
+ // matching Clojure's compare-and-set!.
++// identicalValue is Clojure's identical? as atom CAS needs it: value
++// identity where Go can express it. A raw interface == panics on
++// uncomparable dynamic types (vm.ArrayVector is a slice) — Eve's
++// retire queue CASes a vector value and died on exactly that. For
++// slice-backed values, identity is same backing store and length
++// (a vector value's only identity); anything else uncomparable is
++// never identical. A PersistentVector (a vector past the 32-element
++// promotion) is uncomparable as a struct but carries an identity
++// token made for this: copies retain it, new vectors replace it —
++// without it, a CAS on a >32-element vector (Eve's retire queue at
++// 33+ entries) can never succeed and its drain loop spins forever.
++// Pointer-backed values (PersistentMap, DTypeInstance, records) are
++// the remaining hole in the first cut of this function: it answered
++// false for them, so a CAS on a map-valued atom could never succeed
++// and eve.thread-host's receive! — a CAS loop on a {:q :w} mailbox
++// map — spun forever (measured on the port tree AND the source tip:
++// plain-let-go probe, CAS on (atom {:q [] :w nil}) with its own
++// current value = false; T1 regressed with this patch, it passed
++// at #205 on stock ==). Identity for a pointer is the pointer —
++// exactly what stock == answered. (Port-tree fix, Bucket A Agent P.)
++// (EVE completion patch.)
++func identicalValue(a, b Value) bool {
++	if isComparable(a) && isComparable(b) {
++		return a == b
++	}
++	if av, ok := a.(ArrayVector); ok {
++		bv, ok := b.(ArrayVector)
++		if !ok || len(av) != len(bv) {
++			return false
++		}
++		if len(av) == 0 {
++			return true
++		}
++		return &av[0] == &bv[0]
++	}
++	if av, ok := a.(PersistentVector); ok {
++		bv, ok := b.(PersistentVector)
++		if !ok {
++			return false
++		}
++		return av.IdentityKey() != 0 && av.IdentityKey() == bv.IdentityKey()
++	}
++	if reflect.TypeOf(a) == reflect.TypeOf(b) {
++		va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
++		if va.Kind() == reflect.Ptr && !va.IsNil() {
++			return va.Pointer() == vb.Pointer()
++		}
++	}
++	return false
++}
++
+ func (a *Atom) CompareAndSet(oldVal, newVal Value) (bool, error) {
+ 	if err := a.validate(newVal); err != nil {
+ 		return false, err
+ 	}
+ 	a.mu.Lock()
+-	if a.val != oldVal {
++	if !identicalValue(a.val, oldVal) {
+ 		a.mu.Unlock()
+ 		return false, nil
+ 	}
+--- a/pkg/vm/numbers.go
++++ b/pkg/vm/numbers.go
+@@ -841,6 +841,13 @@
+ 	a = normalizeFloat32(a)
+ 	switch av := a.(type) {
+ 	case Int:
++		// Checked negation: -MinInt64 has no int64 answer. The other
++		// checked ops answer 'integer overflow'; unary minus wrapped
++		// silently. (EVE completion patch; unchecked-negate keeps
++		// its own wrapping int path and never reaches this case.)
++		if int64(av) == math.MinInt64 {
++			return NIL, fmt.Errorf("integer overflow")
++		}
+ 		return MakeInt64(-int64(av)), nil
+ 	case Float:
+ 		return Float(-float64(av)), nil
