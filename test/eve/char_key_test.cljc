@@ -7,12 +7,31 @@
    char key and the one-character string of the same code are two different
    keys in one map, and the map's bytes are the same on every host, so a
    map written on the JVM is read on ClojureScript with both keys found."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.deftype-proto.data :as d]
             #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn])
             [clojure.string :as str]
             [eve.host :refer [aclone]]
             [eve.codec :as codec]
             [eve.deftype-proto.alloc :as alloc]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                                         {:capacities {0 (* 64 1024 1024)
+                                                       1 (* 16 1024 1024)
+                                                       2 (* 16 1024 1024)
+                                                       3 (* 192 1024 1024)
+                                                       4 (* 16 1024 1024)
+                                                       5 (* 16 1024 1024)}})]
+                (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
+
 
 (def a-char
   "The char a, as this host represents it."

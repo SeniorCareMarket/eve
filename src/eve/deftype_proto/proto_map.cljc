@@ -86,6 +86,29 @@
     {:cljs-proto IDeref
      :methods {deref {:cljs-name -deref :arities [[_]]}}}
 
+    clojure.lang.IPending
+    {:cljs-proto IPending
+     :methods {isRealized {:cljs-name -realized? :arities [[_]]}}}
+
+    ;; The JVM's one IRef splits in two on the JS family: the watches
+    ;; are the platform's IWatchable, but ClojureScript has no IRef
+    ;; protocol at all (its validators are an Atom field behind plain
+    ;; fns — cljs/core.cljs carries no IRef), so the validator half
+    ;; and the watch-registry read land on Eve's own IRef, the
+    ;; protocol each JS seat's eve.core face defprotocols (the
+    ;; glojure completion's eve.host-completion/IRef is the same
+    ;; shape: an Eve-owned home for the JVM name). The methods'
+    ;; semantics are the trunk's (eve.atom's watch core) on every
+    ;; host; only the name realization lives here.
+    clojure.lang.IRef
+    {:cljs-proto nil
+     :split? true
+     :methods {addWatch     {:cljs-name -add-watch       :cljs-proto IWatchable    :arities [[_ k f]]}
+               removeWatch  {:cljs-name -remove-watch    :cljs-proto IWatchable    :arities [[_ k]]}
+               setValidator {:cljs-name -set-validator!  :cljs-proto eve.core/IRef :arities [[_ f]]}
+               getValidator {:cljs-name -get-validator   :cljs-proto eve.core/IRef :arities [[_]]}
+               getWatches   {:cljs-name -get-watches     :cljs-proto eve.core/IRef :arities [[_]]}}}
+
     ;; (compare-and-set! on ClojureScript is its own Atom's; eve's atom has
     ;; eve.atom/compare-and-set!*)
     clojure.lang.IAtom
@@ -169,6 +192,11 @@
                ;; next splits to INext on CLJS
                next  {:cljs-name -next  :cljs-proto-override INext :arities [[_]]}}}
 
+    clojure.lang.IMapEntry
+    {:cljs-proto IMapEntry
+     :methods {key {:cljs-name -key :arities [[_]]}
+               val {:cljs-name -val :arities [[_]]}}}
+
     clojure.lang.Sequential
     {:cljs-proto ISequential
      :marker? true
@@ -199,6 +227,15 @@
      :methods {toString {:cljs-name nil :arities [[_]]}
                equals   {:cljs-name nil :arities [[_ other]]}
                hashCode {:cljs-name nil :arities [[_]]}}}
+
+    ;; Added by the trunk-numerics consolidation (audit entry 6): the
+    ;; reverse entry (IComparable {-compare [java.lang.Comparable
+    ;; compareTo]}) existed, but with no forward entry a CLJ-API body
+    ;; carrying java.lang.Comparable passed through verbatim on cljs
+    ;; (unresolvable head) and was dropped by jank's translator.
+    java.lang.Comparable
+    {:cljs-proto IComparable
+     :methods {compareTo {:cljs-name -compare :arities [[_ other]]}}}
 
     ;; A bare Object group is the same body written with the unqualified
     ;; name (a vanilla ClojureScript library's deftype face does this —
@@ -306,6 +343,9 @@
                            -val [clojure.lang.IMapEntry val]}
     IDeref                {-deref [clojure.lang.IDeref deref]}
     IPending              {-realized? [clojure.lang.IPending isRealized]}
+    IRef                  {-set-validator! [clojure.lang.IRef setValidator]
+                           -get-validator  [clojure.lang.IRef getValidator]
+                           -get-watches    [clojure.lang.IRef getWatches]}
     INamed                {-name [clojure.lang.Named getName]
                            -namespace [clojure.lang.Named getNamespace]}
     IIterable             {-iterator [java.lang.Iterable iterator]}

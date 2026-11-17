@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# bench/flat-io/run-bench — lane U2b's eve.flat-io bench (doc/flat/lanes/U2b-flat-io-fast.md), on one host, over one
+# or more eve.flat-io roots, interleaved: round 1 runs every root, then round 2, … (ROUNDS, default 3), so a load swing
+# lands on every root alike. Each run prints load1 (/proc/loadavg) before it starts.
+#
+#   bench/flat-io/run-bench <jvm|node|bb> <seam|flatx> <root-dir>...
+#
+# <root-dir> is a source root holding eve/flat_io.{clj,cljs,cljc} — adapters/flat-io/jvm/src, adapters/flat-io/js/src,
+# adapters/flat-io/portable/src, or any copy. The host's classpath is eve's own for that host (deps.edn :paths for the
+# JVM, deps.edn :node-test for Node, hosts.edn :bb for bb) with every adapters/flat-io/* entry taken out and the
+# given root put first. Node builds each root once (shadow-cljs release, :advanced) into target/u2b/bench/.
+# seam = bench/flat-io/flat_io_seam_bench.cljc (flat-io-seam-bench), flatx = bench/flat-io/flatx.cljc (flatx),
+# rec = bench/flat-io/flatx_rec.cljc (flatx-rec: flatx's rows with vector values, then with Stats record values; U4a).
+# Every command is bounded by `timeout`; nothing is detached.
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+
+host=${1:?host: jvm | node | bb}; which=${2:?which: seam | flatx | rec}; shift 2
+[ $# -ge 1 ] || { echo "run-bench: name at least one root dir" >&2; exit 2; }
+rounds=${ROUNDS:-3}
+node=${NODE:-/opt/node22/bin/node}
+case "$which" in
+  seam) ns=flat-io-seam-bench ;;
+  flatx) ns=flatx ;;
+  rec) ns=flatx-rec ;;
+  *) echo "run-bench: which is seam, flatx or rec" >&2; exit 2 ;;
+esac
+
+strip_flat_io() { tr ':' '\n' | grep -v '^adapters/flat-io/' | paste -sd: -; }
+load1() { cut -d' ' -f1 /proc/loadavg; }
+
+case "$host" in
+  jvm)  base=$(timeout 120 clojure -Spath 2>/dev/null | strip_flat_io) ;;
+  node) base=$(timeout 300 clojure -Spath -M:node-test 2>/dev/null | strip_flat_io) ;;
+  bb)   base=$(timeout 60 bb -e '(->> (edn/read-string (slurp "hosts.edn")) :bb (cons "src") (clojure.string/join ":") println)' | strip_flat_io) ;;
+  *) echo "run-bench: host is jvm, node or bb" >&2; exit 2 ;;
+esac
+
+if [ "$host" = node ]; then
+  mkdir -p target/u2b/bench
+  i=0
+  for root in "$@"; do
+    i=$((i+1)); out="target/u2b/bench/$which-$i.js"
+    echo "# build $root -> $out (load1 $(load1))"
+    # the portable root last, after the root under test (as deps.edn :node-test): the compiler's own Clojure loads
+    # eve's flat code as Clojure when a macro pass needs it (an eve-deftype's expansion loads eve.flat.sister ->
+    # eve.flat.chunk -> eve.flat-io), and a .cljs root is invisible to it; the ClojureScript compile still takes the
+    # root's .cljs (U4a, 2026-11-17: the rec bench's Stats type; flatx and seam define no type and never needed it)
+    timeout 900 java -cp "$root:bench/flat-io:$base:adapters/flat-io/portable/src" clojure.main -e "
+      (require 'shadow.cljs.devtools.api)
+      (do (shadow.cljs.devtools.api/with-runtime
+            (shadow.cljs.devtools.api/release*
+              {:build-id (keyword (str \"u2b-bench-$which-$i\")) :target :node-script :main '$ns/main
+               :output-to \"$out\" :compiler-options {:optimizations :advanced}} {}))
+          (shutdown-agents) nil)" 2>&1 | grep -v '^Picked up JAVA_TOOL_OPTIONS' | grep -iE 'error|exception|warning' | head -20 || true
+    [ -s "$out" ] || { echo "run-bench: no $out" >&2; exit 1; }
+  done
+fi
+
+for r in $(seq 1 "$rounds"); do
+  i=0
+  for root in "$@"; do
+    i=$((i+1))
+    echo "# round $r root $root host $host load1 $(load1) at $(TZ=America/New_York date +%H:%M:%S) ET"
+    case "$host" in
+      jvm)  timeout 600 java -cp "$root:bench/flat-io:$base" clojure.main -m "$ns" 2>&1 | grep -v '^Picked up JAVA_TOOL_OPTIONS' ;;
+      node) timeout 600 "$node" "target/u2b/bench/$which-$i.js" 2>&1 | grep -v 'source-map-support' ;;
+      bb)   timeout 900 bb --classpath "$root:bench/flat-io:$base" -m "$ns" 2>&1 ;;
+    esac
+  done
+done

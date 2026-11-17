@@ -5,9 +5,11 @@
    deftype whose interfaces are translated onto eve.core's protocols, and a
    map type keeps the map interfaces sci accepts.
    The entry points eve's macros call (every eve.types has them):
-     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     host-type, plain-type, slab-type, eve-type, flat-type, extend-eve-type,
      existing-def, rename-fields, reader-of, print-form, vector-types."
   (:require [clojure.string :as str]
+            [eve.logical-protocol :as logical]
+            [eve.record-context :as record-context]
             [eve.core]
             [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
                                                  cljs-protocol? rename-syms parse-protocol-impls
@@ -102,6 +104,15 @@
    compare-and-set! reach them): kept as written."
   '#{clojure.lang.IDeref clojure.lang.IAtom})
 
+(def ^:private bb-completion-interfaces
+  "Interfaces sci's deftype will not carry, answered instead by a protocol
+   on eve.host-completion. clojure.lang.IPending is refused (measured on
+   bb 1.13.226: 'deftype currently only support protocol implementations'),
+   and clojure.core/realized? otherwise reaches only a host IPending; the
+   completion re-roots realized? onto this protocol."
+  '{clojure.lang.IPending {:protocol eve.host-completion/IPending
+                           :methods {isRealized -realized?}}})
+
 (defn- sci-swap-arities
   "IAtom's swap as sci calls it: it spreads swap!'s extra arguments flat over
    the method's arity (measured: (swap! a f x y z) reaches [_ f a b xs] with
@@ -124,8 +135,16 @@
    ClojureScript table; ones without an eve.core protocol dropped), the type's
    own protocols as written, and Object's toString/equals/hashCode — equals
    and hashCode the type's equiv and hasheq where it has them, so = and hash
-   agree with them. Self-calls in bodies go through eve.core."
-  [parsed-protos type-name]
+   agree with them. Self-calls in bodies go through eve.core.
+   opts :slab? true marks a slab-backed type (eve-deftype, eve/deftype):
+   IPersistentMap is a collection-kind head for it (see map-signature?)."
+  ([parsed-protos type-name] (bb-translate-protos parsed-protos type-name nil))
+  ([parsed-protos type-name {:keys [slab?]}]
+  ;; host parity: the host interfaces the spec declared are kept for
+  ;; clojure.core's interface checks (eve.host-completion/register-declared!),
+  ;; though sci's deftype carries only the eve.core translations below
+  (when-let [reg (resolve 'eve.host-completion/register-declared!)]
+    (@reg (str (munge (str *ns*)) "." (name type-name)) (map :protocol parsed-protos)))
   (let [object? #(contains? '#{Object java.lang.Object} (:protocol %))
         rewrite (fn [m] (update m :body (fn [body] (map #(rewrite-self-calls % (first (:args m))) body))))
         objects (mapcat :methods (filter object? parsed-protos))
@@ -134,6 +153,12 @@
                                   (cond
                                     (contains? sci-native-interfaces (:protocol impl))
                                     [(update impl :methods sci-swap-arities)]
+
+                                    (contains? bb-completion-interfaces (:protocol impl))
+                                    (let [{:keys [protocol methods]} (bb-completion-interfaces (:protocol impl))]
+                                      [(assoc impl :protocol protocol
+                                              :methods (mapv #(update % :name (fn [n] (get methods n n)))
+                                                             (:methods impl)))])
 
                                     (interface-sym? (:protocol impl))
                                     (keep (fn [{:keys [protocol] :as t}]
@@ -175,7 +200,7 @@
         ;; eve.core protocols).
         ;; The exclusion that keeps this honest: a type that names
         ;; a host collection-KIND head (IPersistentVector,
-        ;; IPersistentMap, IPersistentSet, IPersistentList, IList,
+        ;; IPersistentSet, IPersistentList, IList,
         ;; IPersistentStack, IPersistentQueue, Sequential) is one of
         ;; the seat's own collection types — EveVector carries the
         ;; signature too, and as a SciMap its host hash/iteration
@@ -183,12 +208,41 @@
         ;; (eve-vec [1 2 3])) threw "Method not implemented:
         ;; iterator" in map mode, and is the eve hash as a SciType).
         ;; Kind-headed types keep the plain translation only.
-        map-signature? (let [ps (set (map :protocol parsed-protos))]
+        ;; IPersistentMap is in that exclusion for a slab-backed type
+        ;; only (opts :slab?, from this seat's :define hook):
+        ;; PersistentIntMap and EveSortedMap name it and are the
+        ;; seat's own map collections, defined through :define. As
+        ;; SciMaps their host hash walked an iterator they do not
+        ;; carry ("Method not implemented: iterator", int-map
+        ;; hash-test), and an instance is a babashka.impl.SciMap, so
+        ;; retire-diff's (instance? PersistentIntMap new) is false and
+        ;; the walk counts every block of old as reclaimed, the ones
+        ;; new still holds too (measured: (e/assoc (im/int-map 1 1 2 2)
+        ;; 3 3) diffed 6 of 6 blocks, not 2; reclaim-test 266 fails).
+        ;; A process-local defrecord-like type
+        ;; (eve.deftype/deftype: ILookup+Associative+Counted plus
+        ;; IPersistentMap, no vector/set/list/stack head) still gets
+        ;; SciMap mode so clojure.core/assoc and dissoc reach it
+        ;; (eve.db.ds def-eve-record; naming IPersistentMap used to
+        ;; force SciType and ClassCast on assoc).
+        ;; An eve.record record (eve.record/defrecord: slab-backed, naming the
+        ;; full map signature with IPersistentMap, marked by its own
+        ;; eve.record/IRecordData) is NOT one of the seat's map collections
+        ;; the exclusion above protects: it is a nominal record whose
+        ;; fields clojure.core's get and keyword lookup must reach, as a
+        ;; JVM record's do. Without SciMap mode those fns are blind to the
+        ;; eve.core translations (measured on bb 1.13.226: (:x r) and
+        ;; (get r :x) answered nil on a 2-field record while eve.core/get
+        ;; answered the value, and (instance? clojure.lang.ILookup r) was
+        ;; false), so a record keeps its map groups as written, like a
+        ;; process-local record-like type does.
+        map-signature? (let [ps (set (map :protocol parsed-protos))
+                             record? (contains? ps 'eve.record/IRecordData)]
                          (and (contains? ps 'clojure.lang.ILookup)
                               (contains? ps 'clojure.lang.Associative)
                               (contains? ps 'clojure.lang.Counted)
+                              (not (and slab? (not record?) (contains? ps 'clojure.lang.IPersistentMap)))
                               (not-any? ps '#{clojure.lang.IPersistentVector
-                                              clojure.lang.IPersistentMap
                                               clojure.lang.IPersistentSet
                                               clojure.lang.IPersistentList
                                               clojure.lang.IList
@@ -196,19 +250,97 @@
                                               clojure.lang.IPersistentQueue
                                               clojure.lang.Sequential})))
         map-kept (when map-signature?
-                   (into [{:protocol 'clojure.lang.IPersistentMap :methods []}]
-                         (filter (fn [impl]
-                                   (contains? '#{clojure.lang.ILookup
-                                                 clojure.lang.Associative
-                                                 clojure.lang.IPersistentCollection
-                                                 clojure.lang.Counted
-                                                 clojure.lang.Seqable}
-                                              (:protocol impl)))
-                                 parsed-protos)))]
+                   (let [kept (filterv (fn [impl]
+                                         (contains? '#{clojure.lang.ILookup
+                                                       clojure.lang.Associative
+                                                       clojure.lang.IPersistentCollection
+                                                       clojure.lang.IPersistentMap
+                                                       clojure.lang.Counted
+                                                       clojure.lang.Seqable
+                                                       java.lang.Iterable}
+                                                    (:protocol impl)))
+                                       parsed-protos)
+                         ;; SCI's map hash and host collection consumers call
+                         ;; iterator directly. A JVM map-shaped declaration can
+                         ;; omit Iterable, but SciMap cannot: derive it from seq.
+                         kept (if (some #(= 'java.lang.Iterable (:protocol %)) kept)
+                                kept
+                                (conj kept
+                                      {:protocol 'java.lang.Iterable
+                                       :methods [{:name 'iterator :args '[this]
+                                                  :body '[(let [state (atom (seq this))]
+                                                            (reify java.util.Iterator
+                                                              (hasNext [_] (boolean @state))
+                                                              (next [_]
+                                                                (if-let [s @state]
+                                                                  (let [v (first s)]
+                                                                    (swap! state next)
+                                                                    v)
+                                                                  (throw (java.util.NoSuchElementException.))))))]}]}))]
+                     (if (some #(= 'clojure.lang.IPersistentMap (:protocol %)) kept)
+                       kept
+                       (into [{:protocol 'clojure.lang.IPersistentMap :methods []}] kept))))
+        ;; A type that declares clojure.lang.ILookup WITHOUT the full map
+        ;; signature (datascript's Entity: ILookup + Associative + IFn, no
+        ;; Counted group — its count rides the Associative group) is not a
+        ;; map and must not become a SciMap; but on the JVM, ILookup alone
+        ;; is what clojure.core's get and keyword lookup dispatch on. The
+        ;; eve.core translation of valAt is invisible to those fns on this
+        ;; seat (measured on bb 1.13.226: (:k e) and (get e :k) answered
+        ;; nil on an Entity whose datoms held the value, and on a bare
+        ;; eve.deftype probe type (satisfies? clojure.lang.ILookup p) was
+        ;; false), so an ILookup-only type ALSO keeps its ILookup group as
+        ;; written, beside the eve.core translation — the same coexistence
+        ;; map-kept establishes for full map types.
+        ;; The seat's own types are excluded, by three measured
+        ;; discriminators. (1) The kind-head test map-signature? uses,
+        ;; extended with the transient family. (2) A type whose method
+        ;; bodies assign a field with set! (TransientEveVector's
+        ;; transient ops, vec.cljc; EveArray's hash cache, array.cljc)
+        ;; fails sci's analysis when its ILookup group is kept as
+        ;; written ("Invalid assignment target" at the set! form).
+        ;; (3) A handle type (IDeref/IAtom: MmapAtom, MmapAtomDomain)
+        ;; treats its bb ILookup as inert BY DESIGN — atom.cljc's own
+        ;; comment: "on babashka, whose deftype takes ILookup only on a
+        ;; map type, it is domain-lookup" — and stamping the raw group
+        ;; onto it reclassifies its instances in the completion's
+        ;; presentation machinery (measured: persistent-atom-domain
+        ;; NPEs inside a stamped factory's apply, record-test).
+        ;; Such types' ILookup stays answered through eve.core only.
+        ;; Entity matches none of the three: a value type, no kind
+        ;; head, no set! (its cache mutates through volatiles), no
+        ;; deref/atom face.
+        ilookup-kept (let [ps (set (map :protocol parsed-protos))
+                           set!-body? (boolean
+                                        (some #(= 'set! %)
+                                              (tree-seq coll? seq
+                                                        (mapcat :body
+                                                                (mapcat :methods parsed-protos)))))]
+                       (when (and (not map-signature?)
+                                  (contains? ps 'clojure.lang.ILookup)
+                                  (not set!-body?)
+                                  (not-any? ps '#{clojure.lang.IPersistentVector
+                                                  clojure.lang.IPersistentSet
+                                                  clojure.lang.IPersistentList
+                                                  clojure.lang.IList
+                                                  clojure.lang.IPersistentStack
+                                                  clojure.lang.IPersistentQueue
+                                                  clojure.lang.Sequential
+                                                  clojure.lang.IEditableCollection
+                                                  clojure.lang.ITransientCollection
+                                                  clojure.lang.ITransientAssociative
+                                                  clojure.lang.ITransientVector
+                                                  clojure.lang.ITransientMap
+                                                  clojure.lang.ITransientSet
+                                                  clojure.lang.IDeref
+                                                  clojure.lang.IAtom}))
+                         (filterv #(= 'clojure.lang.ILookup (:protocol %))
+                                  parsed-protos)))]
     (mapv (fn [impl] (update impl :methods #(mapv rewrite %)))
           (into (conj translated
                       {:protocol 'Object :methods (vec (concat to-string equals hash-code))})
                 (concat map-kept
+                        ilookup-kept
                         ;; Every type this adapter defines is an Eve type:
                         ;; mark it with eve.deftype-proto.data/IsEve, as
                         ;; Eve's own collection types mark themselves in
@@ -224,10 +356,105 @@
                         ;; already carries the mark keeps its own impl.
                         (when-not (some #(= "IsEve" (name (:protocol %))) translated)
                           [{:protocol 'eve.deftype-proto.data/IsEve
-                            :methods [{:name '-eve? :args '[_] :body '[true]}]}]))))))
+                            :methods [{:name '-eve? :args '[_] :body '[true]}]}])))))))
+
+;; Map entries: an eve-deftype heading clojure.lang.IMapEntry (eve.map-entry's
+;; MapEntry) is PRESENTED as a clojure.lang.MapEntry on this seat. sci's
+;; deftype cannot carry IMapEntry, IPersistentVector, Counted or Indexed, and
+;; clojure.core's count and nth are compiled past their vars (measured on bb
+;; 1.13.226: a re-rooted count/nth is not reached), so a SciType entry answered
+;; map-entry? false, key/val/conj/count with a ClassCastException or
+;; "count not supported on this type: SciType", and (empty entry) nil. The
+;; type's constructor and its loader (an entry read back from eve memory) build
+;; the Eve value as before, then hand the program a host MapEntry of its key and
+;; val: a map entry to every clojure.core fn. The Eve value stays behind it
+;; (presented-backing, a weak identity table) for eve's own reach: the codec
+;; writes it (eve.deftype-proto.serialize/presented-backing) and
+;; eve.deftype-proto.data/-eve-sio answers its domain.
+(def ^:private map-entry-types
+  "The qualified names of the eve-deftypes presented as host map entries
+   (recorded at :define, read at :build, both at macroexpansion)."
+  (atom #{}))
+
+(defn- qualified-type [type-name] (symbol (str *ns*) (name type-name)))
+
+(def ^:private backings
+  "System/identityHashCode of a presented entry → [(WeakReference entry) eve-value]."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(def ^:private backing-puts (atom 0))
+
+(defn- sweep-backings!
+  "Drops the rows whose presented entry is gone."
+  []
+  (doseq [k (vec (.keySet backings))]
+    (when-let [row (.get backings k)]
+      (when (nil? (.get ^java.lang.ref.WeakReference (first row)))
+        (.remove backings k row)))))
+
+(defn presented-backing
+  "The Eve value the host map entry x presents, or nil (x a host value of its own)."
+  [x]
+  (when (instance? clojure.lang.MapEntry x)
+    (when-let [row (.get backings (System/identityHashCode x))]
+      (when (identical? x (.get ^java.lang.ref.WeakReference (first row)))
+        (second row)))))
+
+(def ^:private presentation-installed (atom false))
+
+(defn- install-presentation!
+  "Once, at the first presented entry (eve.types loads before the
+   serializer and eve's data protocols, which it must not require): the
+   codec's backing lookup, and -eve-sio on a presented entry."
+  []
+  (when (compare-and-set! presentation-installed false true)
+    (reset! @(resolve 'eve.deftype-proto.serialize/presentation-backing) presented-backing)
+    (let [eve-sio @(resolve 'eve.deftype-proto.data/-eve-sio)]
+      (extend clojure.lang.MapEntry
+        @(resolve 'eve.deftype-proto.data/IEveSio)
+        {:-eve-sio (fn [e] (some-> (presented-backing e) eve-sio))}))
+    ;; clojure.core/empty of a host MapEntry is nil (AMapEntry); the Eve
+    ;; entry's is its own (eve.map-entry: [], as a vector's). A presented
+    ;; entry answers the Eve entry's; every other value the seat's own.
+    (let [host-empty @#'clojure.core/empty]
+      (alter-var-root #'clojure.core/empty
+                      (fn [_] (fn [coll]
+                                (if-let [e (presented-backing coll)]
+                                  (eve.core/-empty e)
+                                  (host-empty coll))))))))
+
+(defn present-map-entry
+  "The Eve map entry e as a clojure.lang.MapEntry of its key and val, e kept behind it."
+  [e]
+  (install-presentation!)
+  (let [x (clojure.lang.MapEntry. (eve.core/-nth e 0) (eve.core/-nth e 1))]
+    (.put backings (System/identityHashCode x) [(java.lang.ref.WeakReference. x) e])
+    (when (zero? (mod (swap! backing-puts inc) 4096))
+      (sweep-backings!))
+    x))
+
+(def ^:private map-mode-record-types
+  "The qualified names of the eve.record records kept in SciMap mode (recorded
+   at :define, read at :build, both at macroexpansion)."
+  (atom #{}))
+
+(defn- record-map-mode?
+  "True for an eve.record record's impls: the full map signature, marked by
+   eve.record/IRecordData, and no host collection-kind head. The same
+   condition as the record carve-out of map-signature? in bb-translate-protos."
+  [impls]
+  (let [ps (set (map :protocol impls))]
+    (and (contains? ps 'eve.record/IRecordData)
+         (contains? ps 'clojure.lang.ILookup)
+         (contains? ps 'clojure.lang.Associative)
+         (contains? ps 'clojure.lang.Counted)
+         (not-any? ps '#{clojure.lang.IPersistentVector clojure.lang.IPersistentSet
+                         clojure.lang.IPersistentList clojure.lang.IList
+                         clojure.lang.IPersistentStack clojure.lang.IPersistentQueue
+                         clojure.lang.Sequential}))))
 
 (defn- define [type-name fields forms]
-  [`(~'deftype ~type-name ~fields ~@forms)])
+  [`(clojure.core/deftype ~type-name ~fields ~@forms)])
 
 (defn- hooks
   "This host's steps for eve.deftype-proto.sio (a function: clojerl compiles a def's
@@ -237,40 +464,80 @@
    ;; the interfaces go onto eve.core's protocols; an IPrintWithWriter body
    ;; is the print-method
    :define (fn [type-name fields impls _forms _print]
-             (let [bb-impls (bb-translate-protos impls type-name)]
-               (concat [`(~'deftype ~type-name ~fields ~@(impls->forms bb-impls))]
+             (when (some #(= 'clojure.lang.IMapEntry (:protocol %)) impls)
+               (swap! map-entry-types conj (qualified-type type-name)))
+             (when (record-map-mode? impls)
+               (swap! map-mode-record-types conj (qualified-type type-name)))
+             (let [bb-impls (bb-translate-protos impls type-name {:slab? true})]
+               (concat [`(clojure.core/deftype ~type-name ~fields ~@(impls->forms bb-impls))]
                        (when (some #(= 'eve.core/IPrintWithWriter (:protocol %)) bb-impls)
                          [(sio/print-method-form type-name 'eve.core/-pr-writer)]))))
    ;; sci builds (T. x) through the ->T var: the deftype's own factory, kept
    ;; as T__new before ->T becomes the constructor, builds instances
-   :build (fn [_type-name _fields new-name args] (list* new-name args))
+   ;; a map-entry type's instances are presented as host map entries
+   :build (fn [type-name _fields new-name args]
+            (cond
+              (contains? @map-entry-types (qualified-type type-name))
+              (list 'eve.types/present-map-entry (list* new-name args))
+              ;; a record in map mode carries its type as a stamp on every
+              ;; instance (see map-signature? in bb-translate-protos)
+              (contains? @map-mode-record-types (qualified-type type-name))
+              (list 'eve.host-completion/stamp-map-mode-type (list* new-name args) type-name)
+              :else (list* new-name args)))
    :factory-via-var? true
    ;; a map type keeps the map interfaces; another's go onto eve.core's protocols
    :slab-prepare (fn [parsed type-name]
                    (if (v/user-provides-protocol? parsed 'clojure.lang.IPersistentMap)
                      (bb-filter-protos parsed)
-                     (bb-translate-protos parsed type-name)))
+                     (bb-translate-protos parsed type-name {:slab? true})))
    ;; sci rejects IHashEq on a non-map type and Object equals/hashCode
    :object-boilerplate? false
    :slab-define define})
 
 (defn host-type
-  "A plain type written with the JVM's names (host-deftype)."
+  "A plain type written with the JVM's names (host-deftype). The fields and
+   bodies take plain-type's renames first (sio/plain-renames, as every other
+   host's host-type does through its shared realization): SCI's deftype
+   takes the JVM's mutability spellings, so a ClojureScript ^:mutable field
+   passed verbatim is inert there and a set! on it — eve.core/caching-hash's
+   on a type's __hash, eve.rrb-vector.rrbt's -hash the measured case — is
+   refused at analysis (\"Invalid assignment target\")."
   [_env type-name fields parsed]
-  `(~'deftype ~type-name ~fields ~@(impls->forms (bb-translate-protos parsed type-name))))
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)]
+    `(clojure.core/deftype ~type-name ~fields ~@(impls->forms (bb-translate-protos parsed type-name)))))
 
 (defn plain-type
   "A plain type (eve.deftype/deftype) on eve.core's protocols."
   [_env type-name fields parsed]
+  (logical/install!)
   (let [[fields parsed] (sio/plain-renames fields parsed nil)
         impls (bb-translate-protos parsed type-name)
-        printed? (some #(= 'eve.core/IPrintWithWriter (:protocol %)) impls)]
+        printed? (some #(= 'eve.core/IPrintWithWriter (:protocol %)) impls)
+        map-mode? (some #(= 'clojure.lang.IPersistentMap (:protocol %)) impls)
+        factory (symbol (str "->" (name type-name)))]
     `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))
          ~@(when printed? [(sio/print-method-form type-name 'eve.core/-pr-writer)])
+         ~@(when map-mode?
+             [`(eve.host-completion/present-map-mode-type! (var ~factory) ~type-name)])
          ~type-name)))
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
-(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx]
+  (logical/install!)
+  (sio/eve-type ctx (hooks)))
+(defn flat-type
+  "An eve-deftype's generated flat sister on babashka (lane H5; realized
+   here by flat lanes U4a, 2026-11-17): the shared generator
+   (eve.deftype-proto.sio/flat-type) with this host's steps — its
+   interfaces onto eve.core's protocols, Object's equals / hashCode /
+   toString as sci's deftype takes them (hashCode the sister's IHash,
+   which the generator's IHashEq translates to). An instance is built by
+   the deftype's own ->T factory: the sister has no T__new var, and sci
+   builds (T. x) through ->T."
+  [ctx]
+  (let [{:keys [build] :as hs} (hooks)]
+    (sio/flat-type ctx (assoc hs :build (fn [type-name fields _new-name args]
+                                          (build type-name fields (symbol (str "->" (name type-name))) args))))))
 (defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
 
 (defn existing-def
@@ -290,7 +557,12 @@
    protocols, not clojure.core's, so what bb reads is the Clojure collection
    clojure.core takes; else its eve type (from-header)."
   [from-header host-value]
-  (or host-value from-header))
+  (if host-value
+    `(fn [sio# header-off#]
+       (if eve.record-context/*slab-values*
+         (~from-header sio# header-off#)
+         (~host-value sio# header-off#)))
+    from-header))
 
 (defn print-form
   "The printer of a registered eve collection: none — babashka (a value read from eve memory is a Clojure

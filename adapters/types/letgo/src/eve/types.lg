@@ -1,0 +1,590 @@
+(ns eve.types
+  "eve's types on let-go: a type is a bare deftype plus extend-type forms.
+   Measured on lg-eve (lane-m/eve-letgo STATUS 10 + dialect rounds 5-7,
+   #212/#214/#216):
+     - a deftype's impl heads must be protocols ('extend-type* expected
+       Protocol' for an Object head); clojure.lang interfaces are not
+       protocols here, so interface impls are translated onto eve.core's
+       protocols (ClojureScript's names), as on babashka and glojure.
+     - clojure.core's own fns do not see a type through those interfaces:
+       deref is native-only ('deref expected Reference' even with an
+       IDeref extension registered), and native = and hash on a deftype
+       are identity and consult no protocol. A type's =, hash and
+       collection access therefore ride eve.core's protocols, through
+       which eve.core's fns answer — the established asymmetry of this
+       host (its completion has no set-type-equality!/set-coll-dispatch!
+       hooks).
+     - field names are bound only in bare single-arity method entries
+       written inline in a deftype; everywhere else (extend-type bodies,
+       parenthesized arities) a body reads a field as (.-field this).
+       So this adapter emits a bare deftype and one extend-type per
+       protocol, with field references rewritten, multi-arity methods
+       parenthesized (repeated bare entries collapse to the last), and
+       single-arity methods bare (the only shapes measured to work).
+     - Object's equals and hashCode are re-homed as eve.core's IEquiv
+       -equiv and IHash -hash where the type does not answer them
+       another way; toString becomes the IPrintWithWriter printer where
+       the type has none, else the print-method stands down.
+   A walker rule for this host: the form walkers below never re-attach
+   (meta form) to a rebuilt form. On let-go a runtime (with-meta x m)
+   produces a wrapped value (a vm.MetaFn) that its compiler mishandles
+   in structural positions — a rebuilt letfn form failed with
+   'unexpected fn form' while the same form as read compiled
+   (measured #316). Location meta is diagnostic only; the walkers
+   drop it.
+   The entry points eve's macros call (every eve.types has them):
+     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     existing-def, rename-fields, reader-of, print-form, vector-types."
+  (:require [clojure.string :as str]
+            [eve.core]
+            [eve.deftype-proto.data]
+            [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
+                                                 cljs-protocol? rename-syms parse-protocol-impls
+                                                 cljs-translate-protocol]]
+            [eve.deftype-proto.sio :as sio]))
+
+(def ^:private eve-core-protocols
+  "The protocols eve.core defines on let-go (adapters/coll/protocols:
+   ClojureScript's names — the same set as babashka's and glojure's)."
+  '#{ICounted IIndexed ILookup ISeqable ICollection IEmptyableCollection IEquiv
+     IHash IMeta IWithMeta IFn IReduce IKVReduce IAssociative IMap ISet IStack
+     IVector ISeq INext ISequential ASeq IReversible IComparable
+     IEditableCollection ITransientCollection ITransientAssociative ITransientMap
+     ITransientVector ITransientSet IChunkedSeq IChunkedNext IMapEntry IDeref
+     ISwap IReset
+     IPrintWithWriter})
+
+(def ^:private self-call->eve-core
+  "A method a body calls on its own instance, (.m this ...), and the
+   eve.core protocol fn that answers it on let-go (where the type has no
+   such method). Babashka's table."
+  '{seq eve.core/-seq count eve.core/-count nth eve.core/-nth
+    valAt eve.core/-lookup equiv eve.core/-equiv hasheq eve.core/-hash
+    cons eve.core/-conj empty eve.core/-empty invoke eve.core/-invoke
+    meta eve.core/-meta withMeta eve.core/-with-meta disjoin eve.core/-disjoin
+    reduce eve.core/-reduce kvreduce eve.core/-kv-reduce
+    containsKey eve.core/-contains-key? assoc eve.core/-assoc without eve.core/-dissoc
+    peek eve.core/-peek pop eve.core/-pop assocN eve.core/-assoc-n})
+
+(defn- rewrite-self-calls
+  "(.m this args...) → (eve.core/-m' this args...) for the methods above."
+  [form this-sym]
+  (let [m (when (and (seq? form) (symbol? (first form)) (= this-sym (second form)))
+            (let [n (name (first form))]
+              (when (and (str/starts-with? n ".") (not (str/starts-with? n ".-")))
+                (self-call->eve-core (symbol (subs n 1))))))]
+    (cond
+      m (apply list m this-sym (map #(rewrite-self-calls % this-sym) (nnext form)))
+      (seq? form) (apply list (map #(rewrite-self-calls % this-sym) form))
+      (vector? form) (mapv #(rewrite-self-calls % this-sym) form)
+      (map? form) (into {} (map (fn [[k v]] [(rewrite-self-calls k this-sym)
+                                                        (rewrite-self-calls v this-sym)])
+                                           form))
+      :else form)))
+
+(defn- in-set?
+  "Membership that works on let-go for literal sets too: a '#{...}
+   constant can materialize as a list there, which contains? refuses
+   ('contains? not supported on let-go.lang.PersistentList', measured
+   #219); some/= accept either."
+  [s x]
+  (boolean (some #(= % x) s)))
+
+(defn- rewrite-fields
+  "A method body with bare field references rewritten as (.-field this):
+   let-go binds field names only inline in a deftype, and every impl this
+   adapter emits goes through extend-type. Quoted forms are left alone;
+   a let's binding names are left alone (their init exprs are rewritten);
+   the method's own this symbol is left alone. A field assignment
+   (set! field value) is emitted as (set-field! this 'field value):
+   let-go's set! takes only a symbol target, and a bare symbol target
+   inside an extend-type fn executes as SET_VAR without touching the
+   field (#44 m2); the host's field-assignment fn mutates the field
+   through a Symbol name (#45/#46)."
+  [form field-set this-sym]
+  (letfn [(rw [form]
+            (cond
+              (symbol? form)
+              (if (and (in-set? field-set form) (not= form this-sym) (nil? (namespace form)))
+                (list (symbol (str ".-" (name form))) this-sym)
+                form)
+
+              (seq? form)
+              (cond
+                (= 'quote (first form)) form
+                ;; the reader's (with-meta sym meta) form is opaque:
+                ;; let-go's compiler understands it natively in
+                ;; binding and formal positions (measured #309), and
+                ;; rebuilding it broke a form that compiled as read
+                (= 'with-meta (first form)) form
+                ;; a field assignment: (set! field value), the
+                ;; target possibly still meta-wrapped — emitted as
+                ;; (set-field! this 'field value) per the docstring;
+                ;; a non-field target (a var set!) walks as written
+                (= 'set! (first form))
+                (let [t (second form)
+                      t (if (and (seq? t) (= 'with-meta (first t))) (second t) t)]
+                  (if (and (symbol? t) (in-set? field-set t) (not= t this-sym))
+                    (list 'set-field! this-sym (list 'quote t) (rw (nth form 2)))
+                    (apply list (map rw form))))
+                ;; caching-hash's third argument is a field position,
+                ;; not a value: rewriting the bare field to
+                ;; (.-field this) there makes the macro emit
+                ;; (set! (.-field this) h), which let-go refuses
+                ;; ('set!: first argument must be a symbol', measured
+                ;; job50, eve.rrb-vector's -hash). Expand the field
+                ;; case here, with set-field! as the write.
+                (in-set? '#{caching-hash eve.core/caching-hash} (first form))
+                (let [[_ coll fnf key] form]
+                  (if (and (symbol? coll) (symbol? key) (in-set? field-set key) (not= key this-sym))
+                    (let [h (gensym "h") h2 (gensym "h")]
+                      (list 'let [h (list (symbol (str ".-" (name key))) coll)]
+                            (list 'if-not (list 'nil? h) h
+                                  (list 'let [h2 (list (rw fnf) coll)]
+                                        (list 'set-field! coll (list 'quote key) h2)
+                                        h2))))
+                    (apply list (map rw form))))
+                (in-set? '#{let loop} (first form))
+                (let [[head bindings & body] form]
+                  (apply list head
+                                    (vec (mapcat (fn [[b init]] [b (rw init)])
+                                                 (partition 2 bindings)))
+                                    (map rw body)))
+                ;; eve.host/field's second argument is a field NAME,
+                ;; not a value: rewriting it as a this-access made the
+                ;; slab equals body read a field named by the form
+                ;; (.-slab-off__ _) — 'no field -(.-slab-off__ _)',
+                ;; measured job50 in a slab type's -equiv. Rewrite
+                ;; only the object argument.
+                (= 'eve.host/field (first form))
+                (list (first form) (rw (second form)) (nth form 2))
+                :else (apply list (map rw form)))
+
+              (vector? form) (mapv rw form)
+              (map? form) (into {} (map (fn [[k v]] [(rw k) (rw v)]) form))
+              (set? form) (into #{} (map rw form))
+              :else form))]
+    (rw form)))
+
+;; ── declared interfaces (instance? truth) ─────────────────────────
+;; A type's body declares clojure.lang/java interfaces (EveVector
+;; declares IPersistentVector, Counted, Sequential, ...). On the JVM
+;; those are real: instance? and the predicates Clojure defines by
+;; them (vector?, map?, set?, counted?, sequential?) see the type —
+;; EveVector's own equals body gates on (instance?
+;; clojure.lang.IPersistentVector other). let-go's type unions hold
+;; only its own vm types, so every eve type answered false here
+;; (measured job50). lg-translate-protos — which both definition
+;; paths pass through with the RAW impls in hand (define for plain
+;; types, the slab-prepare hook for slab types) — records each
+;; type's declared interfaces in this registry, keyed by the type's
+;; name string; the completion's instance?/predicate wrappers
+;; (eve.host-completion) consult it when the runtime's own answer
+;; is false.
+(def lg-dtype-interfaces (atom {}))
+(def lg-dtype-names (atom #{}))
+(defn- note-interfaces! [parsed-protos type-name]
+  (swap! lg-dtype-names conj (str type-name))
+  (let [ifaces (into #{}
+                     (comp (map :protocol) (filter interface-sym?))
+                     parsed-protos)]
+    (when (seq ifaces)
+      (swap! lg-dtype-interfaces assoc (str type-name) (set (map str ifaces))))))
+
+(defn lg-translate-protos
+  "A type's impls ([{:protocol :methods}], JVM names) as let-go takes
+   them: interfaces onto eve.core's protocols (through the ClojureScript
+   table; ones without an eve.core protocol dropped), the type's own
+   protocols as written, Object's equals/hashCode re-homed onto
+   IEquiv/IHash where the type does not answer them another way, and
+   Object's toString as the printer where the type has none. Self-calls
+   in bodies go through eve.core."
+  [parsed-protos type-name]
+  (note-interfaces! parsed-protos type-name)
+  (let [;; method names unqualified: a source that writes its impls
+        ;; with the protocol's alias ((d/-root-header-off [this] ...),
+        ;; eve.vec's and eve.set's eve.deftype-proto.data impls) would
+        ;; otherwise register the method under the qualified symbol,
+        ;; which let-go's dispatch never matches — satisfies? answers
+        ;; true (the type is in the protocol's map) while the call
+        ;; throws 'no implementation' (measured job50). An extend-type
+        ;; method name is unqualified by construction in Clojure.
+        parsed-protos (mapv (fn [impl] (update impl :methods
+                                               (fn [ms] (mapv #(update % :name (fn [n] (symbol (name n)))) ms))))
+                            parsed-protos)
+        object? #(in-set? '#{Object java.lang.Object} (:protocol %))
+        objects (mapcat :methods (filter object? parsed-protos))
+        translated (->> (remove object? parsed-protos)
+                        (mapcat (fn [impl]
+                                  (cond
+                                    (interface-sym? (:protocol impl))
+                                    (keep (fn [{:keys [protocol] :as t}]
+                                            (when (in-set? eve-core-protocols protocol)
+                                              (assoc t :protocol (symbol "eve.core" (name protocol)))))
+                                          (cljs-translate-protocol impl))
+                                    ;; a ClojureScript protocol: eve.core's of that name
+                                    (cljs-protocol? (:protocol impl))
+                                    (let [p (strip-cljs-core (:protocol impl))]
+                                      (when (in-set? eve-core-protocols p)
+                                        [(assoc impl :protocol (symbol "eve.core" (name p)))]))
+                                    :else [impl])))
+                        (group-by :protocol)
+                        (mapv (fn [[p impls]] {:protocol p :methods (vec (mapcat :methods impls))})))
+        has? (fn [p] (some #(= p (:protocol %)) translated))
+        by-name (group-by :name objects)
+        ;; equals re-homed as IEquiv's -equiv, hashCode as IHash's -hash,
+        ;; where the type does not already answer them
+        equals (when-not (has? 'eve.core/IEquiv) (get by-name 'equals))
+        hash-code (when-not (has? 'eve.core/IHash) (get by-name 'hashCode))
+        printed? (has? 'eve.core/IPrintWithWriter)
+        to-string (when-not printed? (first (get by-name 'toString)))
+        ;; a collection type (it implements eve.deftype-proto.data's
+        ;; IPlain): its toString body is (pr-str this), which on let-go
+        ;; cycles — pr-str dispatches print-method, the adapter's
+        ;; print-method calls -pr-writer, and the re-homed -pr-writer
+        ;; would call pr-str again (measured job50: pr-str of an
+        ;; EveVector stack-overflows). Print the plain (host) form
+        ;; instead: eve->clj all the way down, and the host's own
+        ;; printing terminates.
+        plain? (some #(= "IPlain" (name (:protocol %))) parsed-protos)
+        extra (cond-> []
+                (seq equals)
+                (conj {:protocol 'eve.core/IEquiv
+                       :methods (mapv #(assoc % :name '-equiv) equals)})
+                (seq hash-code)
+                (conj {:protocol 'eve.core/IHash
+                       :methods (mapv #(assoc % :name '-hash) hash-code)})
+                to-string
+                (conj {:protocol 'eve.core/IPrintWithWriter
+                       :methods [{:name '-pr-writer
+                                  :args [(first (:args to-string)) '__w '__opts]
+                                  :body [(list 'eve.core/-write '__w
+                                               (if plain?
+                                                 (list 'pr-str (list 'eve.deftype-proto.data/-plain (first (:args to-string))))
+                                                 (cons 'do (:body to-string))))]}]}))]
+    (mapv (fn [impl] (update impl :methods
+                             (fn [ms] (mapv (fn [m] (update m :body
+                                                            (fn [b] (map (fn [f] (rewrite-self-calls f (first (:args m)))) b))))
+                                            ms))))
+          (into (into translated extra)
+                ;; Every type this adapter defines is an Eve type: mark it
+                ;; with eve.deftype-proto.data/IsEve, as Eve's own
+                ;; collection types mark themselves in their sources (the
+                ;; mark is what lets Eve's own traversal tell a presented
+                ;; deftype from a plain collection on this seat, as on
+                ;; babashka). A type that already carries it keeps its own.
+                (when-not (some #(= "IsEve" (name (:protocol %))) translated)
+                  [{:protocol 'eve.deftype-proto.data/IsEve
+                    :methods [{:name '-eve? :args '[_] :body '[true]}]}])))))
+
+(defn- plain-sym
+  "x as a plain symbol. Two metadata representations reach here on
+   let-go: the reader's (with-meta sym meta) list form (^:int32 cnt
+   reads as that list, measured #309) — unwrap it to its symbol; and
+   a runtime with-meta'd symbol value (a vm.MetaFn, not symbol? in
+   macro-land) — detect by exclusion and take it through str, whose
+   rendering of a symbol is its name (measured #266/#270)."
+  [x]
+  (cond
+    (and (seq? x) (= 'with-meta (first x))) (plain-sym (second x))
+    (or (keyword? x) (string? x) (nil? x)) x
+    :else (try (symbol (str x)) (catch Throwable _ x))))
+
+(defn- normalize-name
+  "A binding name with any metadata-carrying symbol in it replaced by
+   its plain symbol (destructuring vectors/maps included; a
+   destructuring :or map's defaults are expressions, not names, and
+   keep their values)."
+  [n]
+  (cond
+    (vector? n) (mapv normalize-name n)
+    (map? n) (into {} (map (fn [[k v]]
+                             [(plain-sym k)
+                              (case k
+                                :keys (normalize-name v)
+                                :as (plain-sym v)
+                                :or (into {} (map (fn [[dk dv]] [(plain-sym dk) dv]) v))
+                                v)])
+                           n))
+    :else (plain-sym n)))
+
+(defn- normalize-bindings
+  "A method body with let's and loop's binding names and fn's arg
+   symbols normalized to plain symbols, for binding names that arrive
+   as runtime with-meta'd symbol values (a macro-built binding of
+   that shape panics let-go's compileBindings — the bytes-equal-at?
+   case). The reader's own (with-meta sym meta) forms are NOT such
+   values: the compiler understands them natively in binding
+   positions (measured #309), so the walker treats them as opaque.
+   This normalization is now a safety net; the -assoc-n 'Can't
+   resolve cnt' failure (#266) was traced instead to the completion's
+   name wrapper producing a garbage field name for parse-field —
+   fixed there, at the layer that sees the reader's form."
+  [form]
+  (letfn [(nb [form]
+            (cond
+              (seq? form)
+              (cond
+                (= 'quote (first form)) form
+                ;; the reader's (with-meta sym meta) form is opaque,
+                ;; as in rewrite-fields (see there)
+                (= 'with-meta (first form)) form
+                (in-set? '#{let loop} (first form))
+                (let [[head bindings & body] form]
+                  (apply list head
+                                    (vec (mapcat (fn [[b init]] [(normalize-name b) (nb init)])
+                                                 (partition 2 bindings)))
+                                    (map nb body)))
+                (= 'fn (first form))
+                (let [[head & rest] form
+                      named? (symbol? (first rest))
+                      arities (if named? (rest rest) rest)]
+                  (apply list head
+                                    (concat (when named? [(normalize-name (first rest))])
+                                            (map (fn [arity]
+                                                   (if (vector? (first arity))
+                                                     (apply list (normalize-name (first arity)) (map nb (rest arity)))
+                                                     (nb arity)))
+                                                 arities))))
+                :else (apply list (map nb form)))
+              (vector? form) (mapv nb form)
+              (map? form) (into {} (map (fn [[k v]] [(nb k) (nb v)]) form))
+              (set? form) (into #{} (map nb form))
+              ;; any other metadata-carrying symbol, wherever it sits
+              ;; (a binding under a head this walker did not special-case
+              ;; — let* is the measured one, EveVector's -assoc-n,
+              ;; #290): meta is inert for resolution on the JVM, and the
+              ;; plain symbol is the same reference
+              :else (if (and (not (keyword? form)) (not (string? form))
+                             (try (meta form) (catch Throwable _ nil)))
+                      (plain-sym form)
+                      form)))]
+    (nb form)))
+
+(defn- field-sym
+  "A field's name as a plain symbol. A metadata-carrying symbol is not
+   safe on let-go: name refuses it (#223), and inside a runtime-built
+   form it reaches the compiler as a vm.MetaFn, which formal positions
+   reject ('all fn formal arguments must be symbols', #228). str
+   strips it to its name. The reader's (with-meta sym meta) list form
+   is unwrapped first, as in plain-sym: str of the LIST is its printed
+   form, so (symbol (str f)) on a meta-carrying field made a symbol
+   named '(with-meta v {:volatile-mutable true})' — the field never
+   entered lg-emit's field-set under its own name, so its bare
+   references were never rewritten to (.-field this) and the deftype
+   declared it under the garbage name (TransientEveVector's v,
+   measured #323/#325; sio beside it, carrying no meta, rewrote fine)."
+  [f]
+  (if (and (seq? f) (= 'with-meta (first f)))
+    (field-sym (second f))
+    (symbol (str f))))
+
+(defn- plain-args
+  "A method's args vector with metadata stripped from its symbols (see
+   field-sym): type hints on formals are JVM dressing this host cannot
+   carry through an expansion. One level into a destructuring vector."
+  [args]
+  (mapv (fn [a]
+          (cond
+            (vector? a) (mapv plain-sym a)
+            :else (plain-sym a)))
+        args))
+
+(defn- lg-extend-forms
+  "One extend-type form per protocol in impls: methods grouped by name,
+   multi-arity parenthesized, single-arity bare. body-fn rewrites each
+   method's body (define passes field rewriting; extend-eve-type passes
+   identity — sio's transform already let-binds its fields)."
+  [type-name impls body-fn]
+  (map (fn [{:keys [protocol methods]}]
+         (let [by-name (group-by :name methods)
+               method-forms
+               (map (fn [[mname ms]]
+                      (if (= 1 (count ms))
+                        (let [{:keys [args body]} (first ms)]
+                          (list* mname (plain-args args) (body-fn (first ms) body)))
+                        (list* mname
+                               (map (fn [{:keys [args] :as m}]
+                                      (apply list (plain-args args) (body-fn m (:body m))))
+                                    ms))))
+                    by-name)]
+           `(~'extend-type ~type-name ~protocol ~@method-forms)))
+       impls))
+
+(defn- lg-emit
+  "A type's definition as let-go takes it: a bare deftype, then one
+   extend-type per protocol, field references in bodies rewritten to
+   (.-field this). Returns a seq of forms."
+  [type-name fields impls]
+  (let [field-set (into #{} (map field-sym) fields)
+        plain-fields (mapv field-sym fields)]
+    ;; clojure.core/deftype, qualified: a namespace that refers
+    ;; eve.deftype/deftype (eve.sorted does) would otherwise re-expand
+    ;; Eve's own deftype macro from this emission — infinite macro
+    ;; recursion, a stack overflow at load (measured job50; rb-tree,
+    ;; which refers only eve-deftype, never hit it).
+    (cons (list 'clojure.core/deftype type-name plain-fields)
+          ;; the deftype's own factory, captured before anything can
+          ;; shadow ->T: on let-go (new T ...) dispatches through the
+          ;; ->T var, and an eve-deftype's slab constructor is itself a
+          ;; (defn ->T ...) — with the var shadowed, (new T ...) inside
+          ;; it recursed to a stack overflow (measured job50). sio's
+          ;; instance construction goes through the :build hook, which
+          ;; names this capture (see hooks).
+          (cons `(~'def ~(symbol (str (name type-name) "__raw-ctor")) ~(symbol (str "->" (name type-name))))
+                (lg-extend-forms type-name impls
+                           (fn [m body] (map (fn [f] (normalize-bindings
+                                                      (rewrite-fields f field-set (field-sym (first (:args m))))))
+                                             body)))))))
+
+(defn- printed? [impls] (some #(= 'eve.core/IPrintWithWriter (:protocol %)) impls))
+
+;; ── core hash/= see eve types (the runtime hooks) ──────────────────
+;; let-go's DTypeInstance Hash()/Equals() are identity by design
+;; ('matches JVM default hashCode'); its completion has none of
+;; glojure's set-type-equality!/set-coll-dispatch! hooks. Eve's
+;; completion patches the runtime with two hook vars (vm.DTypeHash
+;; Hook / DTypeEqualsHook, adapters/completion/letgo/go/
+;; dtype-hash-equiv.patch) and lg-eve's evenative installs them from
+;; eve.core's -hash/-equiv protocol fns — but only for types with an
+;; EXACT impl: the Object default's -equiv IS core = and its -hash
+;; bottoms out at core hash, so consulting it would be circular.
+;; Installed here, at the first type definition: by then eve.core
+;; exists (every eve type's definition requires it), and no eve
+;; value can be hashed or compared before its type is defined.
+(def ^:private dtype-hooks-installed (atom false))
+(defn- install-dtype-hooks! []
+  ;; arm the completion's wrapper registries first (they consult
+  ;; this namespace's lg-dtype-names / lg-dtype-interfaces and
+  ;; eve.core's -hash var; arming is a plain reset!, safe to repeat)
+  (when-let [a (resolve 'eve.host-completion/lg-arm!)]
+    (@a))
+  (when-not @dtype-hooks-installed
+    (when-let [s (resolve 'eve.host-native/set-dtype-hooks!)]
+      (when-let [h (resolve 'eve.core/-hash)]
+        (when-let [e (resolve 'eve.core/-equiv)]
+          (@s @h @e)
+          (reset! dtype-hooks-installed true))))))
+
+
+(defn- define [type-name fields impls]
+  (install-dtype-hooks!)
+  (let [impls (lg-translate-protos impls type-name)]
+    (concat (lg-emit type-name fields impls)
+            (when (printed? impls) [(sio/print-method-form type-name 'eve.core/-pr-writer)]))))
+
+(defn- hooks
+  "This host's steps for eve.deftype-proto.sio (a function, as on the
+   other hosts whose compilers reject a def of literal fns)."
+  []
+  {:normalize (fn [parsed] {:impls parsed})
+   ;; the interfaces go onto eve.core's protocols (lg-translate-protos);
+   ;; an IPrintWithWriter body is the print-method
+   :define (fn [type-name fields impls _forms _print]
+             (define type-name fields impls))
+   ;; instance construction through the deftype's own factory,
+   ;; captured as <T>__raw-ctor by lg-emit: (new T ...) dispatches
+   ;; through the ->T var on let-go, which an eve-deftype's slab
+   ;; constructor (defn ->T ...) shadows — the raw (new T ...) form
+   ;; recursed there (measured job50). For types with no shadowing
+   ;; ctor the capture is the same factory (new T ...) would reach.
+   :build (fn [type-name _fields _new-name args]
+            (list* (symbol (str (name type-name) "__raw-ctor")) args))
+   :factory-via-var? false
+   ;; no map mode on let-go: every type's impls are translated onto
+   ;; eve.core's protocols (glojure's rule)
+   :slab-prepare (fn [parsed type-name] (lg-translate-protos parsed type-name))
+   ;; let-go rejects Object equals/hashCode on a type and IHashEq is
+   ;; translated to IHash, so no JVM boilerplate is emitted
+   :object-boilerplate? false
+   ;; slab-define receives sio's emitted forms (boilerplate + translated
+   ;; protocols as a flat deftype body): parse them back and emit
+   ;; let-go's shape
+   :slab-define (fn [type-name fields forms]
+                  (define type-name fields (parse-protocol-impls forms)))})
+
+(defn host-type
+  "A plain type written with the JVM's names (host-deftype)."
+  [_env type-name fields parsed]
+  `(do ~@(define type-name fields parsed) ~type-name))
+
+(defn plain-type
+  "A plain type (eve.deftype/deftype) on eve.core's protocols."
+  [_env type-name fields parsed]
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)]
+    `(do ~@(define type-name fields parsed) ~type-name)))
+
+(defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
+
+(defn- plain-formals
+  "A defn form with its formal args as plain symbols (plain-args on
+   every arity). sio's eve-type emits its auxiliary defns raw — the
+   from-slab loader, the constructor, from-header, and <T>-offset,
+   whose arg sio builds with a runtime (with-meta 'inst {:tag T}):
+   on let-go that value is a vm.MetaFn, which the fn compiler rejects
+   as a formal ('all fn formal arguments must be symbols', measured
+   job50: the printed expansion compiles when retyped, and the exact
+   object compiles with the arg replaced by (symbol (str arg))).
+   Type hints on formals are JVM dressing this host cannot carry
+   through an expansion, as in plain-args. Non-defn forms pass
+   through; the define output already carries plain args."
+  [form]
+  (if (and (seq? form) (= 'defn (first form)))
+    (let [[head nm & more] form
+          doc (when (string? (first more)) [(first more)])
+          arities (if doc (rest more) more)]
+      (apply list head nm
+             (concat doc
+                     (if (vector? (first arities))
+                       (cons (plain-args (first arities)) (rest arities))
+                       (map (fn [a] (apply list (plain-args (first a)) (rest a)))
+                            arities)))))
+    form))
+
+(defn eve-type
+  "An eve-deftype (eve.deftype.macros/eve-deftype*): sio's expansion
+   with its auxiliary defns' formals plain (plain-formals)."
+  [ctx]
+  (let [exp (sio/eve-type ctx (hooks))]
+    (apply list (first exp) (map plain-formals (rest exp)))))
+(defn extend-eve-type
+  "eve-extend-type: sio's transform binds the fields from the instance
+   (eve.host/field), so the bodies arrive extend-ready; the protocol
+   heads and method names are translated here, and the result is
+   re-emitted one extend-type per protocol with multi-arity methods
+   parenthesized (impls->forms' bare repetition collapses on let-go)."
+  [ctx]
+  (let [form (sio/extend-eve-type ctx)
+        impls (lg-translate-protos (parse-protocol-impls (rest form)) (:type-name ctx))]
+    `(do ~@(lg-extend-forms (:type-name ctx) impls (fn [_m body] (map normalize-bindings body))))))
+
+(defn existing-def
+  "{:value v} when the namespace being compiled already defines sym, else nil."
+  [_env sym]
+  (when-let [v (resolve sym)] {:value @v}))
+
+(defn rename-fields
+  "An eve-deftype's fields and body with the field names the JVM reserves
+   renamed (__hash): [fields body]."
+  [_env fields body]
+  (sio/eve-renames fields body))
+
+(defn reader-of
+  "What a registered eve collection reads as on let-go: the host's own
+   collection where one is given (a type answers eve.core's protocols,
+   not clojure.core's, so what let-go reads natively is the host
+   collection clojure.core takes), else its eve type (from-header) —
+   babashka's and glojure's rule."
+  [from-header host-value]
+  (or host-value from-header))
+
+(defn print-form
+  "The printer of a registered eve collection: none — a value read from
+   eve memory is let-go's own collection there, printed by its own."
+  [_env _type-name _spec]
+  nil)
+
+(defn vector-types
+  "let-go's own vector types: IPersistentVector's implementors."
+  [_env]
+  '[clojure.lang.IPersistentVector])

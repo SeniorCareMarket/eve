@@ -6,7 +6,7 @@
    a map, hash and sorted (B-VEC-ENTRY); compare reaches a type's own comparison (B-COMPARE)."
   (:require [clojure.test :refer [deftest is testing]]
             [eve.host :refer [field]]
-            [eve.deftype #?@(:cljs [:refer-macros [eve-deftype]] :default [:refer [eve-deftype]])]
+            [eve.deftype :as edt]
             [eve.core :as e]
             [eve.map :as m]
             [eve.set :as s]
@@ -52,7 +52,7 @@
       (is (= 2 (e/get r :k))))))
 
 #?(:bb nil :default
-(eve-deftype Rank [^:int32 n]
+(edt/deftype Rank [^:int32 n]
              IComparable
              (-compare [_ o] (compare n (field o n)))))
 
@@ -65,7 +65,7 @@
 ;; A field read written as stock Clojure — (.-f x) on an untyped parameter, as an external .cljc structure writes it
 ;; (the audit's B-RRB class) — reads the Eve object's field on every host (on jank the completion defers it to its
 ;; field read).
-(eve-deftype Tagged [label n])
+(edt/deftype Tagged [label n])
 
 (defn- label-of [t] (.-label t))
 (defn- n-of [t] (.-n t))

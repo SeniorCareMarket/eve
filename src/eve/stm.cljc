@@ -51,9 +51,14 @@
   limit\") instead of spinning.
 
   WATCHES AND VALIDATORS live in the ref record itself: a watch
-  map and a validator fn in the ref's own state atom, run by
-  commit, exactly as Atom's watches/validators run on every
-  reset. Eve atoms have neither — the ref layer carries its own.
+  map and a validator fn in the ref's own state atom. The
+  mechanics are the trunk watch core in eve.atom (registry ops,
+  the validator check, the firing loop) — one implementation
+  for atoms and refs. This layer adds the transactional
+  scheduling: validators run at commit against final values,
+  and watches fire once per written ref after the winning
+  installs, exactly as an atom's watches fire on every
+  successful swap.
 
   The SINGLE-WRITER CONTRACT: a ref's cell is written ONLY
   through this namespace — a winning commit's install CAS, the
@@ -102,19 +107,27 @@
   install and retry are the same code paths, dispatched on where
   the state lives.
 
-  HISTORY ENCODING (0.9.3.1): this release stores the versioned
-  history in the OLD encoding. An accepted flat encoding exists
-  in the development record but is NOT in this release, pending
-  the operator's ruling; the two encodings do not read each
-  other, and worlds seated under one must be re-created under the
-  other — there is no in-place migration.
+  HISTORY ENCODING: this release stores the versioned history
+  in the FLAT encoding — one flat [p1 v1 p2 v2 ...] vector per
+  cell (collated from lane-m/stm-standing on the operator's
+  ruling, Nov 15 2026; the cell comment below gives the
+  measurement that convicted the old shape). The prior encoding
+  (a vector of {:point :value} maps) does not read under this
+  one and this one does not read it: worlds seated under the
+  old encoding must be re-created — there is no in-place
+  migration.
 
   The construction is written against deref / CAS / own-domain
   atoms only, so the port surface per target is the seat's atom +
   domain affordances."
   (:refer-clojure :exclude [ref alter commute ref-set ensure sync dosync
-                            ref-history-count ref-min-history ref-max-history])
+                            ref-history-count ref-min-history ref-max-history
+                            swap! reset! compare-and-set!])
   (:require [eve.atom :as ea]
+            ;; The core of some seats (notably clojerl) accepts only its
+            ;; own Atom. Ref cells / seated clocks and locks are Eve atoms;
+            ;; the host seam dispatches both those and ordinary host atoms.
+            [eve.host :refer [swap! reset! compare-and-set!]]
             ;; eve.process exists only in the adapter Eve tree; the
             ;; seats that need its clock (below) are exactly the ones
             ;; that tree serves
@@ -298,7 +311,15 @@
 
 ;; ---------------------------------------------------------------------------
 ;; cells: a ref's committed state {:value :point :version :history},
-;; history a newest-first vector of {:point :value}. The cell atom is
+;; history a newest-first FLAT vector of [point value] pairs laid out
+;; as [p1 v1 p2 v2 ...]. ENCODING (2026-11-08, STM standing lane):
+;; the retained history used to be a vector of {:point :value} maps;
+;; on the bb seat each retained map is its own published tree inside
+;; the install CAS and cost ~8-10x the history-0 cell per commit
+;; (bisect banks 1-2, docs/stm-standing/STATUS.md). One flat vector
+;; publishes as one tree. Cells persisted by the old encoding are
+;; NOT readable by this one -- seated worlds must be re-created.
+;; The cell atom is
 ;; the sole atom of a fresh Eve domain minted for this ref alone
 ;; (eve.atom/atom-domain), seated by name via
 ;; lookup-or-create-mmap-atom! — the same seat cohost's Eve hosting
@@ -412,13 +433,18 @@
   "The cell entry an attempt with read point rp sees: [point value],
    the newest entry with point <= rp — or ::too-short when the
    ref's retained history no longer reaches rp (the attempt must
-   retry with a fresh point; stock faults the same way)."
+   retry with a fresh point; stock faults the same way).
+   The history is the flat [p1 v1 p2 v2 ...] vector: scan pairs
+   newest-first for the first point <= rp."
   [cell rp]
   (if (<= (:point cell) rp)
     [(:point cell) (:value cell)]
-    (or (first (map (fn [e] [(:point e) (:value e)])
-                    (filter (fn [e] (<= (:point e) rp)) (:history cell))))
-        ::too-short)))
+    (let [h (:history cell)
+          n (count h)]
+      (loop [i 0]
+        (cond (>= i n) ::too-short
+              (<= (nth h i) rp) [(nth h i) (nth h (inc i))]
+              :else (recur (+ i 2)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; the attempt record: a per-scope local atom, dynamically bound.
@@ -625,23 +651,24 @@
     (swap! (:touched att) assoc-in [(:seq r) :ensured] true)
     (view-of e)))
 
-(defn ref-history-count [r] (count (:history (cell-deref r))))
+(defn ref-history-count [r] (quot (count (:history (cell-deref r))) 2))
 (defn ref-min-history [r] (:min-history @(:state r)))
 (defn ref-max-history [r] (:max-history @(:state r)))
 (defn set-min-history! [r n] (swap! (:state r) assoc :min-history n) r)
 (defn set-max-history! [r n] (swap! (:state r) assoc :max-history n) r)
 
-;; watches and validators: the ref's own state atom (non-transactional,
-;; as stock's are)
+;; watches and validators: the registry lives in the ref's own state
+;; atom (non-transactional, as stock's is); the mechanics are the
+;; trunk watch core in eve.atom — this layer keeps the storage and
+;; the transactional scheduling (validators at commit, watches fired
+;; once per written ref by run-in-transaction).
 
-(defn add-watch* [r k f] (swap! (:state r) assoc-in [:watches k] f) r)
-(defn remove-watch* [r k] (swap! (:state r) update :watches dissoc k) r)
+(defn add-watch* [r k f] (swap! (:state r) update :watches ea/watch-add k f) r)
+(defn remove-watch* [r k] (swap! (:state r) update :watches ea/watch-remove k) r)
 (defn get-watches [r] (:watches @(:state r)))
 (defn set-validator* [r f]
   (when f
-    (let [v (deref-ref r)]
-      (when-not (f v)
-        (throw (illegal-state "Invalid reference state")))))
+    (ea/validator-check! f (deref-ref r)))
   (swap! (:state r) assoc :validator f)
   nil)
 (defn get-validator [r] (:validator @(:state r)))
@@ -735,10 +762,11 @@
   nil)
 
 (defn- trim-history
-  "Bound a history vector: never more than max-history entries,
-   never fewer than min-history (stock's fault window lives between
-   the two: a read point older than the oldest retained entry
-   retries with a fresh point).
+  "Bound a flat history vector ([p1 v1 p2 v2 ...], two elements per
+   entry): never more than max-history entries, never fewer than
+   min-history (stock's fault window lives between the two: a read
+   point older than the oldest retained entry retries with a fresh
+   point).
 
    The kept prefix is rebuilt as a FRESH vector, never a subvec:
    a subvec shares the untrimmed vector's backing storage, so the
@@ -748,7 +776,7 @@
    merely unlist (the cohost lane's reclaim probe caught the
    subvec shape retaining exactly one trimmed version)."
   [h mn mx]
-  (let [keep (max mn mx)]
+  (let [keep (* 2 (max mn mx))]
     (if (> (count h) keep)
       (vec (take keep h))
       h)))
@@ -771,7 +799,7 @@
                       :point cp
                       :version (inc (:version cur))
                       :history (trim-history
-                                (into [{:point (:point cur) :value (:value cur)}]
+                                (into [(:point cur) (:value cur)]
                                       (:history cur))
                                 (ref-min-history r)
                                 (ref-max-history r))}]
@@ -823,8 +851,7 @@
             (let [final (if (written? e)
                           (fold-actions (:base-value e) (:actions e))
                           (fold-actions (:value (cell-deref (:ref e))) (:actions e)))]
-              (when-not (validator final)
-                (throw (illegal-state "Invalid reference state")))))))
+              (ea/validator-check! validator final)))))
       ;; (4) claim the commit point -- only an attempt with installs
       ;; claims one: a read-only attempt must not advance the shared
       ;; clock (stock's lastPoint moves on committing writers only;
@@ -953,8 +980,7 @@
                 :else (throw e))
           (do (swap! stats* update :commits inc)
               (doseq [[r old new] (:watches outcome)]
-                (doseq [[k wf] (:watches @(:state r))]
-                  (wf k r old new)))
+                (ea/fire-watches! (:watches @(:state r)) r old new))
               (release-sends! att)
               (:value outcome)))))))
 

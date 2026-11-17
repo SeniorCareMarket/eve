@@ -7,7 +7,8 @@
    as 2 — the last number the value wrote — and (get m 1) found nothing. A
    scalar value, or a keyword or string key, was untouched. encode-key and
    encode-val now hand back bytes of the caller's own."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.deftype-proto.data :as d]
             [eve.codec :as codec]
             [eve.core :as ecore]
             [eve.deftype-proto.alloc :as alloc]
@@ -15,6 +16,24 @@
             ;; the nested values' writers (:vec, :set), registered when their namespaces load
             [eve.set]
             [eve.vec]))
+
+(defn- in-a-domain-of-its-own
+  "Construction law (2026-11-11): Eve data is constructed in a domain
+   context, never through a process-heap fallback (alloc/current-sio throws
+   outside one). Each test here builds in an explicit heap domain of its
+   own (rrb-vector-test's fixture), dropped with the test."
+  [f]
+  (binding [d/*domain-sio* (alloc/heap-domain-sio!
+                                         {:capacities {0 (* 64 1024 1024)
+                                                       1 (* 16 1024 1024)
+                                                       2 (* 16 1024 1024)
+                                                       3 (* 192 1024 1024)
+                                                       4 (* 16 1024 1024)
+                                                       5 (* 16 1024 1024)}})]
+                (f)))
+
+(use-fixtures :each in-a-domain-of-its-own)
+
 
 (def ^:private cases
   "Number keys over values that write numbers of their own when encoded."

@@ -130,10 +130,22 @@
       {:newest nil :oldest nil :torn? false}
       (let [buf (ByteBuffer/allocate (int size))]
         (.position fc 0)
-        (while (.hasRemaining buf) (.read fc buf))
+        ;; Fill what exists: a read at EOF answers -1, and the file can
+        ;; shrink under this scan (another seat's recovery truncates it
+        ;; under its own lock family) — stop there; flip then bounds the
+        ;; scan at the bytes actually read (the loop below measures
+        ;; against the buffer's limit, not the sampled size), exactly
+        ;; as the jolt seat's read-all-bytes rules ("shrank under us:
+        ;; scan what exists"). The unguarded while spun here forever,
+        ;; holding the journal lock (measured: the cohost-media demo's
+        ;; run-7 wedge, 2026-11-14).
+        (loop []
+          (when (.hasRemaining buf)
+            (when (pos? (.read fc buf))
+              (recur))))
         (.flip buf)
         (loop [pos 0 newest nil oldest nil torn? false]
-          (let [remaining (- size pos)]
+          (let [remaining (- (.limit buf) pos)]
             (if (< remaining 8)
               {:newest newest :oldest oldest
                :torn? (or torn? (pos? remaining))}

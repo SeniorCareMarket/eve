@@ -1,13 +1,17 @@
 (ns eve.deftype.registry
   (:require [eve.host]
             [eve.codec :as codec]
+            [eve.deftype-proto.serialize :as serialize]
             [eve.hamt-util :as hu]))
 
-;; Compile-time type registry. Populated by eve-deftype macro during
-;; macro expansion. Read by subsequent macros to resolve type references.
-;;
-;; NOT available at runtime. The macro bakes all needed info into
-;; the generated code.
+;; The existing type registry serves macro expansion and runtime lookup.
+;; Macro expansion records layouts; the generated definition registers its host
+;; realization at load time (also in a separately compiled JS runtime).
+;; A compiler and its target may run in separate processes. The generated
+;; declaration registers its EDN surface here again at runtime. Layouts are
+;; still baked into the generated code; runtime readers use the qualified
+;; per-type entries, never a parallel reader registry.
+;; Qualified :type-key entries are canonical; short names remain macro aliases.
 
 (defonce registry (atom {}))
 
@@ -82,15 +86,71 @@
     id))
 
 (defn register-type!
-  "Register an eve-deftype in the compile-time registry.
-   Called by the eve-deftype macro during expansion."
+  "Register layout and/or runtime IO in the existing per-type registry.
+   Qualified entries are canonical; short names remain macro lookup aliases.
+   A newly loaded declaration owns its tag, including on namespace reload.
+   Specs MERGE into the short-name entry and the :type-key entry, so a
+   later partial registration (host realization, IO) never erases an
+   earlier one (layout, fields)."
   [type-name spec]
-  (swap! registry assoc type-name spec))
+  (swap! registry
+    (fn [types]
+      (let [io (:type-io spec)
+            types (if io
+                    (reduce-kv
+                      (fn [m k entry]
+                        (assoc m k
+                          (if (= (:tag io) (get-in entry [:type-io :tag]))
+                            (assoc-in entry [:type-io :reader-active?] false)
+                            entry)))
+                      {} types)
+                    types)
+            spec (if io (assoc-in spec [:type-io :reader-active?] true) spec)
+            types (update types type-name merge spec)]
+        (if-let [type-key (:type-key spec)]
+          (update types type-key merge spec)
+          types)))))
+
+(defn data-readers
+  "Derive active readers from the canonical per-type runtime entries."
+  []
+  (into {} (keep (fn [[key {:keys [type-key type-io]}]]
+                   (when (and (= key type-key) (:reader-active? type-io))
+                     [(:tag type-io) (:read type-io)]))) @registry))
 
 (defn lookup-type
   "Look up a type by name in the registry. Returns nil if not found."
   [type-name]
   (get @registry type-name))
+
+(defn register-host-type!
+  "Load-time half of type registration, emitted by every Eve type macro.
+   Uses the existing entry, preserving layout and reader/printer information."
+  [type-key host-type spec]
+  (register-type! type-key (assoc spec :type-key type-key :host-type host-type))
+  host-type)
+
+(defn type-key-of
+  "Registered qualified name for an instance; no host class-name heuristics.
+   The host realization is stored on the existing per-type entry, not in a
+   second identity index. Unregistered native values return nil."
+  [value]
+  (when (some? value)
+    (let [value (or (serialize/presented-backing value) value)
+          host-type (type value)]
+      (some (fn [[_ spec]]
+              (when (= host-type (:host-type spec)) (:type-key spec)))
+            @registry))))
+
+(defn qualified-type-key [env type-name]
+  (str (or (get-in env [:ns :name]) (ns-name *ns*)) "/" (name type-name)))
+
+(defn registration-form
+  "Shared producer hook: all adapters receive a definition wrapped by this
+   load-time registration, regardless of their host type implementation."
+  [env type-name spec]
+  (list 'eve.deftype.registry/register-host-type!
+        (qualified-type-key env type-name) type-name (list 'quote spec)))
 
 ;; Primitive types recognized by the macro
 (def primitive-types

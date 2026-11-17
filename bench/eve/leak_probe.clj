@@ -35,19 +35,14 @@
 ;; host data rebuilt each swap: intermediates are host values
 (run "host-data" init (fn [_] (into {} (map (fn [k] [k (rand-int 1000)]) (range 200)))))
 (when-not (= "0" (System/getenv "TREES"))
-  (require '[eve.core :as e] '[eve.deftype.int-map :as im] '[eve.sorted :as so])
-  (let [kv (interleave (range 200) (range 200))
-        e-assoc (resolve 'eve.core/assoc) e-get (resolve 'eve.core/get) e-conj (resolve 'eve.core/conj)
+  (require '[eve.core :as e] '[eve.sorted :as so])
+  (let [e-assoc (resolve 'eve.core/assoc) e-get (resolve 'eve.core/get) e-conj (resolve 'eve.core/conj)
         e-disj (resolve 'eve.core/disj)
-        e-transient (resolve 'eve.core/transient) e-assoc! (resolve 'eve.core/assoc!) e-persistent! (resolve 'eve.core/persistent!)
-        int-map (resolve 'eve.deftype.int-map/int-map) sorted-set (resolve 'eve.sorted/sorted-set)]
-    ;; the perf suite's build workloads: a 200-key int-map, a 200-key sorted set, built in a swap through the constructor
-    (run "int-map-build" {} (fn [_] {:m (apply int-map kv)}))
+        sorted-set (resolve 'eve.sorted/sorted-set)]
+    ;; the perf suite's build workloads: a 200-key sorted set, built in a swap through the constructor
+    ;; (the int-map workloads went with PersistentIntMap's deletion, Nov 15 2026)
     (run "sorted-set-build" {} (fn [_] {:s (apply sorted-set (range 200))}))
-    ;; a transient begun from an empty map the swap made: that empty map's header, one block a build, stays
-    (run "int-map-transient" {} (fn [_] {:m (e-persistent! (reduce (fn [t k] (e-assoc! t k k)) (e-transient (int-map)) (range 200)))}))
-    ;; one assoc on a stored int-map, and one conj on a stored sorted set
-    (run "int-map-assoc" (fn [] {:m (apply int-map kv)}) (fn [m] (e-assoc m :m (e-assoc (e-get m :m) (rand-int 200) (rand-int 9)))))
+    ;; one conj on a stored sorted set
     (run "sorted-set-disj-conj" (fn [] {:s (apply sorted-set (range 200))})
          (fn [m] (let [k (rand-int 200)] (e-assoc m :s (e-conj (e-disj (e-get m :s) k) k)))))))
 (shutdown-agents)

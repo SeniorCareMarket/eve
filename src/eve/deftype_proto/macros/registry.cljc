@@ -64,7 +64,7 @@
                      (:mutable m)          :mutable
                      :else                 :immutable)
         hint-keys (disj (set (keys m))
-                        :cached :mutable :volatile-mutable :tag
+                        :cached :mutable :volatile-mutable :tag :derive
                         :file :line :column :end-line :end-column :source)
         type-hint (first hint-keys)
         type-class (cond
@@ -77,7 +77,12 @@
      :cached?    (boolean cached?)
      :mutability mutability
      :type-hint  type-hint
-     :type-class type-class}))
+     :type-class type-class
+     ;; a ^:cached field's derivation: the symbol of a 1-arg fn of
+     ;; the flat field source that rebuilds the field's value for a
+     ;; sister (plan §3(b)(i)) — cached values are not packed, so a
+     ;; sister's factory derives them from the packed source
+     :derive     (:derive m)}))
 
 (defn- align-offset [offset alignment]
   (let [rem (mod offset alignment)]

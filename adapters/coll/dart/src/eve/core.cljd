@@ -1,0 +1,100 @@
+(ns eve.core
+  "EVE's collection vocabulary (adapters/README.md, coll) on ClojureDart:
+   its types implement cljd.core's protocols (eve.types), so the vocabulary
+   is cljd.core's, (count x) and (e/count x) are the same call, and a type
+   written with ClojureScript's protocol names (ClojureDart's are the same
+   names) calls cljd.core's protocol fns directly. caching-hash is a macro
+   of this namespace itself (ClojureDart evaluates a .cljd macro on the
+   host; there is no :require-macros here)."
+  (:refer-clojure :exclude [count nth get seq first next rest conj into empty
+                            contains? disj subvec meta with-meta reduce
+                            sequential? counted? hash-ordered-coll hash-unordered-coll
+                            assoc dissoc pop peek rseq reduce-kv transient persistent!
+                            conj! assoc! pop! -write pr-str*
+                            -count -nth -conj -with-meta -assoc-n -conj! -assoc-n! -chunked-rest -chunked-next array
+                            caching-hash]))
+
+(defmacro caching-hash
+  "The collection hash, cached in the type's hash field: (caching-hash
+   coll hash-fn __hash) — cljs.core's macro, the same expansion on
+   every host."
+  [coll hash-fn hash-key]
+  `(let [h# ~hash-key]
+     (if-not (nil? h#)
+       h#
+       (let [h# (~hash-fn ~coll)]
+         (set! ~hash-key h#)
+         h#))))
+
+(def count cljd.core/count)
+(def nth cljd.core/nth)
+(def get cljd.core/get)
+(def seq cljd.core/seq)
+(def first cljd.core/first)
+(def next cljd.core/next)
+(def rest cljd.core/rest)
+(def conj cljd.core/conj)
+(def into cljd.core/into)
+(def empty cljd.core/empty)
+(def contains? cljd.core/contains?)
+(def disj cljd.core/disj)
+(def subvec cljd.core/subvec)
+(def meta cljd.core/meta)
+(def with-meta cljd.core/with-meta)
+(defn invoke
+  ([f] (f)) ([f a] (f a)) ([f a b] (f a b)) ([f a b c] (f a b c)))
+(def reduce cljd.core/reduce)
+(def assoc cljd.core/assoc)
+(def dissoc cljd.core/dissoc)
+(def pop cljd.core/pop)
+(def peek cljd.core/peek)
+(def rseq cljd.core/rseq)
+(def reduce-kv cljd.core/reduce-kv)
+(def transient cljd.core/transient)
+(def persistent! cljd.core/persistent!)
+(def conj! cljd.core/conj!)
+(def assoc! cljd.core/assoc!)
+(def pop! cljd.core/pop!)
+(defn equiv [x y] (cljd.core/= x y))
+(def sequential? cljd.core/sequential?)
+(def counted? cljd.core/counted?)
+(def hash-ordered-coll cljd.core/hash-ordered-coll)
+(def hash-unordered-coll cljd.core/hash-unordered-coll)
+(defn -write
+  "Write string s to a print sink w (ClojureDart's IPrint sink is a
+   dart:core StringSink with .write; cljs's -write on its writer)."
+  [w s]
+  (.write w s))
+
+;; printing: ClojureDart's IPrint protocol (-print [o sink]); there is no
+;; IPrintWithWriter/-pr-writer pair — eve.types translates the pair onto
+;; IPrint/-print for this host (adapters/types/dart)
+(defn pr-writer [x w _opts] (-write w (cljd.core/pr-str x)))
+
+(defn pr-str*
+  "cljs's pr-str*: print to a string. ClojureDart's pr-str is the call."
+  [& xs]
+  (apply cljd.core/pr-str xs))
+
+;; ClojureDart's protocol fns under eve.core's names, which a namespace
+;; written for every host refers from here
+(def -count cljd.core/-count)
+(def -nth cljd.core/-nth)
+(def -conj cljd.core/-conj)
+(def -with-meta cljd.core/-with-meta)
+(def -assoc-n cljd.core/-assoc-n)
+(def -conj! cljd.core/-conj!)
+(def -assoc-n! cljd.core/-assoc-n!)
+(def -chunked-rest cljd.core/-chunked-rest)
+(def -chunked-next cljd.core/-chunked-next)
+(defn array
+  "A host array of the arguments (cljs.core/array's call): a fixed
+   dart:core List."
+  [& xs]
+  (cljd.core/into-array xs))
+
+(defn array-chunk
+  "A chunk of host array arr's n values (a chunked seq's chunk-first):
+   cljd.core's ArrayChunk over the list, offsets 0..n."
+  [arr n]
+  (cljd.core/ArrayChunk. arr 0 n))

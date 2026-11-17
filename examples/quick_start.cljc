@@ -2,7 +2,7 @@
 ;;
 ;;   bb -cp "$(bb classpath bb)" examples/quick_start.cljc
 ;;   clojure -M examples/quick_start.cljc
-(require '[eve.alpha :as e] '[eve.atom :as ea] '[eve.deftype.int-map :as im])
+(require '[eve.alpha :as e] '[eve.atom :as ea] '[eve.map :as em])
 
 ;; an atom in this process
 (def counter (e/atom ::counter {:n 0}))
@@ -17,5 +17,5 @@
 
 ;; eve collections live in an atom's own domain: build them inside swap!
 (def idx (e/atom ::index {}))
-(swap! idx (fn [_] {:ids (im/int-map)}))
+(swap! idx (fn [_] {:ids (em/hash-map)}))
 (println "index:" @idx)

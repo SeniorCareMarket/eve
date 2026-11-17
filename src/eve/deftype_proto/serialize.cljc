@@ -275,6 +275,19 @@
 ;; direct HAMT/trie writers a codec may write a host collection with (eve.codec)
 (defonce coll-writers (atom {}))
 
+;; (fn [v] → the Eve value presenting as v, or nil): registered by a host
+;; whose types cannot stand in for one of its own values and so presents an
+;; Eve value AS that host value (babashka: an Eve map entry is a
+;; clojure.lang.MapEntry there, eve.types/present-map-entry). A codec writes
+;; the Eve value behind a presented one (eve.codec value+sio->eve-bytes).
+;; nil on a host that presents nothing.
+(defonce presentation-backing (atom nil))
+
+(defn presented-backing
+  "The Eve value v presents (a host value standing for an Eve value), or nil."
+  [v]
+  (when-let [f @presentation-backing] (f v)))
+
 ;; (fn [] → ISlabIO): the default slab I/O, registered by alloc.cljc at load
 (defonce default-sio-fn (atom nil))
 
@@ -331,17 +344,38 @@
 ;; registers as it is defined.
 (defonce deftype-layouts (atom {}))
 
+;; eve-deftype type-id → {name-hash total-size}: a type's whole block size,
+;; registered beside its layout (eve.flat's detach sizes a deftype block
+;; by it — the block is exactly its total size, and nothing else at runtime
+;; recorded it).
+(defonce deftype-sizes (atom {}))
+
 (defn register-deftype-layout!
   "Register an eve-deftype's pointing fields, [[field-offset kind] …], under
-   its type-id and name hash."
-  [type-id name-hash fields]
-  (swap! deftype-layouts assoc-in [(int type-id) (int name-hash)] fields))
+   its type-id and name hash. The 4-arity also registers the type's total
+   block size."
+  ([type-id name-hash fields]
+   (swap! deftype-layouts assoc-in [(int type-id) (int name-hash)] fields))
+  ([type-id name-hash fields total-size]
+   (swap! deftype-layouts assoc-in [(int type-id) (int name-hash)] fields)
+   ;; clojerl's analyzer cannot resolve clojure.core/long (its one
+   ;; use in this file); Erlang integers need no coercion anyway.
+   (swap! deftype-sizes assoc-in [(int type-id) (int name-hash)] #?(:clje total-size :default (long total-size)))))
 
 (defn deftype-layout
   "The pointing fields of the eve-deftype block at header-off of sio (its
    type-id byte type-id), or nil when the block is no eve-deftype's."
   [sio header-off type-id]
   (when-let [by-hash (get @deftype-layouts (int type-id))]
+    (if (== 1 (count by-hash))
+      (val (first by-hash))
+      (get by-hash (int (@header-name-hash-reader sio header-off))))))
+
+(defn deftype-total-size
+  "The total block size of the eve-deftype block at header-off of sio (its
+   type-id byte type-id), or nil when no size was registered for it."
+  [sio header-off type-id]
+  (when-let [by-hash (get @deftype-sizes (int type-id))]
     (if (== 1 (count by-hash))
       (val (first by-hash))
       (get by-hash (int (@header-name-hash-reader sio header-off))))))
@@ -430,6 +464,19 @@
   "The direct writer for a collection kind, or nil."
   [tag]
   (get @coll-writers tag))
+
+;; (fn [sio v] -> EVE pointer bytes | nil): a writer-side hook
+;; for values that carry their own slab form — eve.flat heap
+;; handles, registered by eve.flat.freeze. The codec consults
+;; it before its collection arms, so a flat handle nested in
+;; host data is embedded as its flat form instead of being
+;; walked into plain blocks; nil means not such a value.
+(defonce flat-embed-fn (atom nil))
+
+(defn register-flat-embed!
+  "Register the flat-handle embed hook (eve.flat.freeze)."
+  [f]
+  (reset! flat-embed-fn f))
 
 ;; {:read (fn [sio block len] → the len EVE bytes of a value block)
 ;;  :write (fn [sio bytes] → a new value block's offset)}, registered by alloc

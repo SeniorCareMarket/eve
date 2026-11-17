@@ -102,7 +102,7 @@
           a    (e/atom {:id (keyword "eve.columnar-bench" label)
                         :persistent path}
                        nil)]
-      (reset! a (seed-fn))
+      (swap! a (fn [_] (seed-fn)))
       (try
         (f a)
         (finally
@@ -110,7 +110,7 @@
           (cleanup-persistent-files! path))))
     ;; in-memory atom (SAB on CLJS, heap on JVM)
     (let [a (e/atom {:id (keyword "eve.columnar-bench" (str label "-mem"))} nil)]
-      (reset! a (seed-fn))
+      (swap! a (fn [_] (seed-fn)))
       (try
         (f a)
         (finally

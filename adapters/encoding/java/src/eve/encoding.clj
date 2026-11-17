@@ -177,9 +177,12 @@
   (char? v))
 
 (defn host-array?
-  "A host array (a Java or CLR array; on clojerl one of eve.host's)."
+  "A host typed array with an Eve element subtype. Object arrays (including
+   String[] and Number[]) have no typed-array image: the codec keeps them
+   as process-local references, just like other opaque host objects."
   [v]
-  (.isArray (class v)))
+  (and (some? v)
+       (contains? #{"[B" "[S" "[I" "[F" "[D"} (.getName (class v)))))
 
 (defn new-cache
   "A thread-safe map for small caches (cache-get / cache-put!): a

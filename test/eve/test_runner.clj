@@ -191,14 +191,14 @@
 
 (def ^:private suite-names
   ["all" "core" "array" "slab" "large-scale" "epoch-gc" "xray" "direct-sab"
-   "obj" "deftype" "int-map" "rb-tree" "batch2" "batch3" "batch4" "validation"
+   "obj" "deftype" "sorted-migration" "batch2" "batch3" "batch4" "validation"
    "dom-proxy"])
 
 (def ^:private all-suites
   "Individual suites run when 'all' is requested via :node.
    Each runs in its own node process for clean allocator state."
   ["core" "array" "slab" "large-scale" "epoch-gc" "xray" "direct-sab" "obj"
-   "int-map" "rb-tree" "batch2" "batch3" "batch4"])
+   "sorted-migration" "batch2" "batch3" "batch4"])
 
 ;;-----------------------------------------------------------------------------
 ;; Sequential multi-suite runner

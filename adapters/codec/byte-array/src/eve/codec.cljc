@@ -23,7 +23,7 @@
   "Encode a slab pointer: [0xEE 0xDB tag off0 off1 off2 off3], a fresh byte
    array."
    [tag offset]
-  (let [b (byte-array 7)
+  (let [^bytes b (byte-array 7)
         off (long offset)]
     (aset b 0 (unchecked-byte 0xEE))
     (aset b 1 (unchecked-byte 0xDB))
@@ -90,13 +90,13 @@
 (defn- read-u8  [^bytes b ^long i]
   (bit-and (aget b i) 0xFF))
 
-(defn- read-u32-le  ^long [^bytes b ^long i]
+(defn- read-u32-le  [^bytes b ^long i]
   (bit-or (bit-and (long (aget b i)) 0xFF)
           (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
           (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
           (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)))
 
-(defn- read-i32-le  ^long [^bytes b ^long i]
+(defn- read-i32-le  [^bytes b ^long i]
   (let [u (read-u32-le b i)]
     (if (>= u 0x80000000)
       (- u 0x100000000)
@@ -164,6 +164,29 @@
   [^bytes b off]
   (let [n (read-u32-le b off)]
     [(enc/twos->integer (mapv #(read-u8 b (+ off 4 %)) (range n))) (+ off 4 n)]))
+
+(defonce ^:private frozen-ctor-hook (atom nil))
+
+(defn- frozen-ctor
+  "The constructor for a frozen flat subtree (tag 0x20), or nil when
+   eve.flat.freeze is not on the classpath. freeze registers the
+   constructor at load (ser/register-type-constructor!), but a process
+   that has only ever decoded — the cohost-media demo's bb launcher
+   is one — may never have loaded it, and the registry lookup alone
+   then misses a constructor that exists. Reached the way eve.atom
+   reaches eve.flat.freeze: requiring-resolve, never a static require."
+  []
+  (let [h @frozen-ctor-hook]
+    (cond
+      (fn? h) h
+      (= ::none h) nil
+      :else #?(:cljs nil
+               :clje nil
+               :default (let [v (try (requiring-resolve 'eve.flat.freeze/frozen-value)
+                                      (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+                          (if v
+                            (do (reset! frozen-ctor-hook @v) @v)
+                            (do (reset! frozen-ctor-hook ::none) nil)))))))
 
 ;; --- EVE binary format — deserializer ---
 
@@ -286,6 +309,10 @@
                               (when coll-factory (fn [off] (coll-factory 0x1E sio off))))]
                  (if ctor (ctor sio (read-i32-le b 3))
                    (throw (enc/unsupported "EVE OBJ: no constructor registered."))))
+          0x20 (let [ctor (or (ser/get-type-constructor 0x20)
+                              (frozen-ctor))]
+                 (if ctor (ctor sio (read-i32-le b 3))
+                   (throw (enc/unsupported "EVE FROZEN (0x20): no constructor registered."))))
 
           ;; Flat map — cross-process binary map encoding
           0xED
@@ -321,7 +348,7 @@
                   (recur (+ pos 4 elen) (inc i) (conj! v elem))))))
 
           ;; Any other tag — try the registered JVM type constructors
-          ;; (eve-deftype type-ids, e.g. Dataset, register here).
+          ;; (deftype type-ids, e.g. Dataset, register here).
           (let [ctor (ser/get-type-constructor tag)]
             (if ctor
               (ctor sio (read-i32-le b 3))
@@ -426,8 +453,8 @@
    canonical order every host writes (FORMAT-DECISIONS.md §2)."
    [s]
   (let [items   (seq s)
-        cnt     (count s)
         encoded (sort d/compare-bytes (mapv value->eve-bytes items))
+        cnt     (count encoded)
         body    (reduce + (map (fn [^bytes eb] (+ 4 (alength eb))) encoded))
         b       (byte-array (+ 7 body))]
     (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-SET)
@@ -440,8 +467,11 @@
    Format: [0xEE][0xDB][0xEF][count:i32LE]([e-len:i32LE][e-bytes])*"
    [coll]
   (let [items   (seq coll)
-        count   (count coll)
         encoded (mapv value->eve-bytes items)
+        ;; counted from the encoded host vector, never the collection:
+        ;; on bb an Eve vector is sequential? (presented) yet
+        ;; clojure.core/count cannot see a SciType
+        count   (clojure.core/count encoded)
         body    (reduce + (map (fn [^bytes eb] (+ 4 (alength eb))) encoded))
         b       (byte-array (+ 7 body))]
     (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-FLAT-VEC)
@@ -674,12 +704,24 @@
    before calling this function with collection values.
    Takes an explicit sio — no ambient context."
   ([sio v]
-  (let [writers @ser/coll-writers]
+  (let [writers @ser/coll-writers
+        flat-bs (when-let [embed @ser/flat-embed-fn] (embed sio v))]
     (cond
+      ;; A value carrying its own slab form (a flat heap
+      ;; handle, eve.flat): embedded as that form, never
+      ;; walked into plain blocks.
+      (some? flat-bs) flat-bs
+
       (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
           (keyword? v) (symbol? v) (enc/host-char? v)
           (uuid? v) (enc/date? v) (enc/ratio? v) (enc/bigdec? v))
       (value->eve-bytes v)
+
+      ;; A host value presenting an Eve value (babashka's map entry, a
+      ;; clojure.lang.MapEntry there: eve.types/present-map-entry) is
+      ;; written as the Eve value it presents. nil on a host presenting none.
+      (some? (ser/presented-backing v))
+      (value+sio->eve-bytes sio (ser/presented-backing v))
 
       ;; Already slab-backed Eve type — return pointer to existing header.
       ;; The tag is the header's own type-id byte, so nested eve-deftype

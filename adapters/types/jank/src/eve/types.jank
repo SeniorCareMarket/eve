@@ -162,7 +162,7 @@
 ;; clojure.core/concat*, a private var it refuses from another namespace ("The var `clojure.core/concat*` is private":
 ;; measured at this namespace's load)
 (defn- define [type-name fields forms]
-  (concat [(list* 'deftype type-name fields forms)]
+  (concat [(list* 'clojure.core/deftype type-name fields forms)]
           (when (some #{'eve.core/IPrintWithWriter} forms) [(printer-form type-name)])))
 
 (defn- hooks
@@ -172,7 +172,7 @@
    ;; the interfaces go onto eve.core's protocols; an IPrintWithWriter body is the printer
    :define (fn [type-name fields impls _forms _print]
              (let [impls (jank-translate-protos impls type-name)]
-               (concat [(list* 'deftype type-name fields (impls->forms impls))]
+               (concat [(list* 'clojure.core/deftype type-name fields (impls->forms impls))]
                        (when (printed? impls) [(printer-form type-name)]))))
    ;; the completion's deftype makes T. a var holding the factory (jank keeps T. a plain symbol): the deftype's own
    ;; factory is kept as T__new before ->T becomes the constructor, and builds instances, as on babashka
@@ -188,7 +188,7 @@
   "A plain type written with the JVM's names (host-deftype)."
   [_env type-name fields parsed]
   (let [impls (jank-translate-protos parsed type-name)]
-    (list* 'do (list* 'deftype type-name fields (impls->forms impls))
+    (list* 'do (list* 'clojure.core/deftype type-name fields (impls->forms impls))
            (concat (when (printed? impls) [(printer-form type-name)]) [type-name]))))
 
 (defn plain-type

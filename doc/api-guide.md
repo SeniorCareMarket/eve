@@ -17,8 +17,7 @@ Arglists are the source's. Every sample was run as written on 2026-10-20 ET on b
 | [`eve.keyring`](#evekeyring) | encryption at rest, at the slab level | every host but ValueScript |
 | [`eve.sorted`](#evesorted) | sorted maps and sets with comparators | every host but ValueScript |
 | [`eve.deftype.int-map`](#evedeftypeint-map) | integer maps (a PATRICIA trie) | every host but ValueScript |
-| [`eve.deftype.rb-tree`](#evedeftyperb-tree) | the red-black sorted set | every host but ValueScript |
-| [`eve.rrb-vector`](#everrb-vector) | RRB vectors (core.rrb-vector in eve memory) | every host but ValueScript |
+
 | [`eve.obj`](#eveobj) | typed objects and object arrays | every host but ValueScript |
 | [`eve.array`](#evearray) | typed arrays with atomics | JVM, babashka, ClojureScript, nbb (not yet ClojureCLR, basilisp, jolt, clojerl, glojure) |
 | [`eve.alpha.ds`, `eve.alpha.tensor`, `eve.alpha.col`](#columnar-evealphads-evealphatensor-evealphacol) | datasets, tensors, column ops | as `eve.array` |
@@ -208,8 +207,7 @@ with their bitmaps [ran].
 (require '[eve.core :as ec]
          '[eve.sorted :as sorted]
          '[eve.deftype.int-map :as im]
-         '[eve.deftype.rb-tree :as rb]
-         '[eve.rrb-vector :as rrb]
+
          '[eve.obj :as obj]
          '[eve.array :as arr]
          '[eve.crypto :as crypto])
@@ -225,11 +223,8 @@ with their bitmaps [ran].
 (println (ec/get (im/merge-with + m (im/int-map 1 1 3 3)) 1))  ; 11
 (println (ec/count (im/range (im/int-map 1 :a 5 :e 9 :i) 0 5))) ; 2
 
-(def tags (rb/sorted-set "python" "clojure"))
-(println (rb/member? tags "clojure") (ec/seq tags))            ; true (clojure python)
-
-(def v (rrb/catvec (rrb/vec (range 3)) (rrb/vector 10 11)))
-(println (ec/count v) (ec/nth v 3))                            ; 5 10
+(def tags (sorted/sorted-set "python" "clojure"))
+(println (ec/contains? tags "clojure") (ec/seq tags))          ; true (clojure python)
 
 (def node (obj/obj {:key :int32 :value :float64} {:key 42 :value 3.14}))
 (println (obj/get node :key) (obj/cas! node :key 42 43) (obj/get node :key))   ; 42 true 43
@@ -265,14 +260,16 @@ A 16-way PATRICIA trie over 32-bit integer keys, negative keys included.
 
 ## eve.deftype.rb-tree
 
-An Okasaki-style red-black tree: `sorted-set` (`[]` `[& vals]`), `member?` (`[s v]`). Its node-level `rb-*` functions
-are public for tests.
+Retired Nov 14 2026 (trunk consolidation): the red-black sorted set was a second sorted trunk beside
+[eve.sorted](#evesorted). Sorted sets live in eve.sorted — `sorted-set`, `sorted-set-by`; membership is
+`eve.core/contains?`.
 
 ## eve.rrb-vector
 
-core.rrb-vector's ClojureScript implementation in eve memory (EPL-1.0, see [../NOTICE](../NOTICE)): `vector`, `vec`,
-`catvec` (logarithmic concatenation), `subvec`. It is also the worked example of writing an eve type
-([data-structures.md](data-structures.md)).
+Not a core namespace (single-trunk consolidation, Nov 14 2026): Eve's one persistent vector is
+`eve.vec`'s EveVector. The core.rrb-vector port survives only as the coop test harness's fixture
+under `test/eve/rrb_vector*` (EPL-1.0, see [../NOTICE](../NOTICE)) — its `catvec` is the one
+operation EveVector does not have, and the harness's spliced-tree arms depend on it.
 
 ## eve.obj
 
@@ -335,7 +332,7 @@ To store one in an atom, build it with the atom's slab I/O (`eve.atom/atom-sio`)
 | `extend-host-vectors` | `[proto & impls]` | extend a protocol to the host's own vector types |
 
 `eve.alpha/deftype` and `extend-type` are `eve-deftype` and `eve-extend-type`. The worked example is
-`eve.rrb-vector` ([data-structures.md](data-structures.md)).
+`eve.deftype.rb-tree` ([data-structures.md](data-structures.md)).
 
 ## eve.crypto
 

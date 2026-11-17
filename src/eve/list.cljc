@@ -6,9 +6,10 @@
    Header layout: [type-id:u8 | pad:3 | cnt:i32 | head-off:i32] = 12 bytes
 
    Uses eve/deftype macro: CLJ protocol names, sio threaded everywhere."
-  (:refer-clojure :exclude [alength volatile! vswap! transient persistent! conj! bytes])
+  ;; :clje — callees' ^long return tags resolve in the CALLER's ns on clojerl; take eve.host's `long`.
+  (:refer-clojure :exclude [alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])])
   (:require
-   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes]]
+   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
     :refer [NIL_OFFSET]]
@@ -17,6 +18,10 @@
    [eve.deftype-proto.serialize :as ser]
    [eve.platform :as p]
    [eve.deftype-proto.macros :as eve]
+   ;; load order: the deftype expansion's top-level register-sister!
+   ;; call needs eve.flat.sister first in the RUNTIME graph (a macro
+   ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.
+   [eve.flat.sister]
    [eve.codec :as codec]
    [eve.digest :as dg]))
 
@@ -82,6 +87,20 @@
   [sio node-off]
   (slab/read-i32 sio node-off NODE_NEXT_OFFSET))
 
+(defn- list-seq
+  "A lazy host seq over the chain at off: one node read per step, and no
+   allocation in the list's domain. (EveVector's seq walks by index the
+   same way; a list walks by node offset.) An EveList is not its own seq:
+   the tail views next/more used to hand out each carried a fresh slab
+   header block, so every walk of an N-element list allocated N blocks
+   in its domain — a plain deref of a 50-element list took 50 blocks,
+   and a walk over a frozen view threw on the first step."
+  [sio off remaining]
+  (when (and (pos? remaining) (not= off NIL_OFFSET))
+    (lazy-seq
+     (cons (read-node-value sio off)
+           (list-seq sio (read-node-next sio off) (dec remaining))))))
+
 ;;=============================================================================
 ;; Header read/write
 ;;=============================================================================
@@ -142,7 +161,7 @@
   (count [_] (int cnt))
 
   clojure.lang.Seqable
-  (seq [this] (when (pos? cnt) this))
+  (seq [_] (when (pos? cnt) (list-seq sio__ head-off cnt)))
 
   clojure.lang.IMeta
   (meta [_] nil)
@@ -170,7 +189,7 @@
   (equiv [this other]
     (cond
       (not (sequential? other)) false
-      (not= cnt (count other)) false
+      (not= cnt #?(:bb (ecore/count other) :default (count other))) false
       :else
       (let [verdict (root-digest-verdict this other)]
         (cond
@@ -194,13 +213,11 @@
       (read-node-value sio__ head-off)))
   (more [_]
     (if (<= cnt 1)
-      (make-list sio__ 0 NIL_OFFSET)
-      (let [next-off (read-node-next sio__ head-off)]
-        (make-list sio__ (dec cnt) next-off))))
+      ()
+      (list-seq sio__ (read-node-next sio__ head-off) (dec cnt))))
   (next [_]
     (when (> cnt 1)
-      (let [next-off (read-node-next sio__ head-off)]
-        (make-list sio__ (dec cnt) next-off))))
+      (list-seq sio__ (read-node-next sio__ head-off) (dec cnt))))
 
   clojure.lang.IFn
   (invoke [_ n]
@@ -269,6 +286,12 @@
       :else (.equiv this other)))
   (hashCode [this]
     (clojure.lang.Murmur3/hashOrdered this)))
+
+;; bb: EveList is a SciType with no print-method, so printing fell to its
+;; toString, (pr-str this), and recursed to a StackOverflowError — pr-str,
+;; str and every clojure.test report naming the value died. It prints as
+;; the host collection, as on the JVM.
+#?(:bb (defmethod print-method EveList [x w] (print-method (apply list (ecore/seq x)) w)))
 
 ;;=============================================================================
 ;; Disposal & retirement

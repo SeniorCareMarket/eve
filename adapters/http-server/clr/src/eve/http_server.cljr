@@ -1,0 +1,74 @@
+(ns eve.http-server
+  "eve's http-server feature (adapters/README.md) over .NET's System.Net.HttpListener — ClojureCLR: what a member
+   needs to serve its disk domain's atoms on eve.net's routes (eve.net.gateway). (serve! opts handler) answers
+   {:port :stop}; handler takes {:method :url :headers :body :body-b64} — :url the request's path and query as sent
+   (an atom id's %2F kept: HttpListener's RawUrl), :headers lower-case names, :body UTF-8 text and :body-b64 the
+   same bytes as base64 (a blob) — and answers {:status :headers :body :body-as}: :body text, or with :body-as
+   :b64 the base64 of the bytes to send (eve.net.run's conventions), as the JDK adapter does. A future a
+   connection off the listener loop (a handler may block), as the JDK adapter's pool. HttpListener cannot report
+   an ephemeral port, so :port 0 first probes one free with a TcpListener (the race is the launcher's own trick
+   with ServerSocket in eve-media); a named :port is used as given."
+  (:require [clojure.string :as str])
+  (:import [System.Net HttpListener]
+           [System.Net.Sockets TcpListener]
+           [System.Net IPAddress]
+           [System.IO MemoryStream]
+           [System Convert]
+           [System.Text Encoding]))
+
+(defn- free-port []
+  (let [l (TcpListener. IPAddress/Loopback 0)]
+    (.Start l)
+    (let [p (.Port (.LocalEndpoint l))]
+      (.Stop l)
+      p)))
+
+(defn- read-all [stream]
+  (let [ms (MemoryStream.)]
+    (.CopyTo stream ms)
+    (.ToArray ms)))
+
+(defn- handle [handler ctx]
+  (try
+    (let [req (.Request ctx)
+          raw (read-all (.InputStream req))
+          headers (into {}
+                        (keep (fn [k] (when k [(str/lower-case k)
+                                               (first (seq (.GetValues (.Headers req) k)))])))
+                        (seq (.AllKeys (.Headers req))))
+          r (try (handler {:method (.HttpMethod req)
+                           :url (.RawUrl req)
+                           :headers headers
+                           :body (.GetString Encoding/UTF8 raw)
+                           :body-b64 (Convert/ToBase64String raw)})
+                 (catch Exception e {:status 500 :headers {} :body (.Message e)}))
+          resp (.Response ctx)
+          ^bytes bs (if (= :b64 (:body-as r))
+                      (Convert/FromBase64String (str (or (:body r) "")))
+                      (.GetBytes Encoding/UTF8 (str (or (:body r) ""))))]
+      (set! (.StatusCode resp) (int (or (:status r) 200)))
+      (doseq [[k v] (:headers r)]
+        (when-not (= "content-length" (str/lower-case (name k)))
+          (.Set (.Headers resp) (name k) (str v))))
+      (set! (.ContentLength64 resp) (long (alength bs)))
+      (when (pos? (alength bs)) (.Write (.OutputStream resp) bs 0 (alength bs)))
+      (.Close resp))
+    (catch Exception _ nil)))
+
+(defn serve!
+  "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1)}: {:port :stop}. :stop ends the
+   listener; a connection already being handled finishes its answer."
+  [opts handler]
+  (let [port (int (or (:port opts) 0))
+        port (if (zero? port) (free-port) port)
+        listener (HttpListener.)]
+    (.Add (.Prefixes listener) (str "http://" (or (:host opts) "127.0.0.1") ":" port "/"))
+    (.Start listener)
+    (future
+      (loop []
+        (let [ctx (try (.GetContext listener) (catch Exception _ nil))]
+          (when ctx
+            (future (handle handler ctx))
+            (recur)))))
+    {:port port
+     :stop (fn [] (try (.Stop listener) (catch Exception _ nil)))}))

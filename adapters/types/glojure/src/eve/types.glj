@@ -32,7 +32,12 @@
     clojure.lang.IAtom {:protocol eve.host-completion/IAtom
                         :methods {swap -swap reset -reset compareAndSet -compare-and-set}}
     clojure.lang.IAtom2 {:protocol eve.host-completion/IAtom2 :methods {swapVals -swap-vals resetVals -reset-vals}}
-    clojure.lang.IPending {:protocol eve.host-completion/IPending :methods {isRealized -realized?}}})
+    clojure.lang.IPending {:protocol eve.host-completion/IPending :methods {isRealized -realized?}}
+    clojure.lang.IRef {:protocol eve.host-completion/IRef
+                       :methods {getValidator -get-validator setValidator -set-validator
+                                 getWatches -get-watches addWatch -add-watch removeWatch -remove-watch}}
+    clojure.lang.IReference {:protocol eve.host-completion/IReference
+                             :methods {alterMeta -alter-meta resetMeta -reset-meta}}})
 
 (def ^:private method->eve-core
   "A JVM method a body calls by name, (.m x ...), and the function that answers it on glojure: x a type (whose record

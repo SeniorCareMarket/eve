@@ -19,9 +19,23 @@
                             aget alength long class
                             volatile! vswap! locking transient persistent! conj! bytes])
   (:require
+   ;; jank's clojure.core has none of these. eve.host-completion interns
+   ;; them, but this namespace is created (refer-clojure) before that
+   ;; require loads, so the interns are invisible here — later requires
+   ;; such as eve.mem see them. Refer the completion's names so a module
+   ;; that requires eve.atom first (the #418 / #461 plain jank probe)
+   ;; can analyze write-typed-root!, resolve-new-ptr, and IEveAtom.
+   #?@(:jank [[eve.host-completion :refer [defprotocol deftype defrecord reify
+                                           extend-type extend-protocol extend
+                                           satisfies? extends? halt-when]]])
    [eve.host :refer [aget alength long class volatile!
                      vswap! locking transient persistent! conj! bytes token]]
    [eve.encoding :as enc]
+   ;; Load order: host-deftype's expansion ends in a top-level
+   ;; eve.type-readers/register! call, which needs the registry first
+   ;; in the RUNTIME graph (a macro ns's require is macro-side only).
+   ;; Guard: eve.deftype-guard-test.
+   [eve.type-readers]
    [eve.int32 :as i32]
    [eve.process :as proc]
    [eve.journal-file :as jf]
@@ -49,7 +63,7 @@
    ;; the array and object types, so their blocks read back in any value
    [eve.array :as arr]
    [eve.obj]
-   [eve.deftype-proto.macros]))
+   [eve.deftype-proto.macros :as eve]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -340,6 +354,8 @@
 ;;   :flush-ts        (atom ms)        :pins (atom {thread-id [epoch depth]})
 ;;   :pin-lock        the host's lock  :closed? (atom bool)
 ;;   :holder          (atom thread-id) the thread of this process holding the domain's exclusive hold, nil for none
+;;   :watches         (atom {slot {key cb}})  per-atom watch registries (trunk watch surface)
+;;   :validators      (atom {slot fn})        per-atom validators (trunk watch surface)
 
 (declare park-fn)
 
@@ -358,8 +374,14 @@
             :pin-lock (token)
             :holder (clojure.core/atom nil)
             :closed? (clojure.core/atom false)
+            ;; per-atom watch registries + validators (the trunk watch
+            ;; surface: add-watch*/set-validator*; notification on every
+            ;; successful swap, delivery under the deref law)
+            :watches (clojure.core/atom {})
+            :validators (clojure.core/atom {})
             ;; PROTOTYPE (step 2): what swap! does with a slab-backed value of ANOTHER domain — :throw (today's
-            ;; behaviour) or :copy (materialize it under the reader's pin and write it here). set-foreign-policy!
+            ;; behaviour), :copy (materialize it under the reader's pin and write it here) or :zip (lane T1:
+            ;; detach and place it block for block). set-foreign-policy!
             :foreign-policy (clojure.core/atom :throw)}]
     ;; a reference an eve-deftype writes in place into one of this domain's blocks parks what reaches 0 here
     (tally/register-parker! sio (park-fn ds))
@@ -841,7 +863,7 @@
         (some-> (ser/convert-to-eve sio v) d/-root-header-off)))))
 
 (defn- write-typed-root!
-  "A host typed array (or a heap-backed eve array, its backing array) a swap!
+  "A host typed array (or an IBackingArray value, its backing array) a swap!
    sets, written into sio as an eve array block; nil for any other value."
   [sio v]
   (cond
@@ -849,12 +871,32 @@
     (and (not (scalar-leaf? v)) (satisfies? d/IBackingArray v)) (arr/write-host-array! sio (d/-backing-array v) (d/-backing-subtype v))
     :else nil))
 
+(defn- transfer-fn
+  "eve.flat.transfer's entry points, resolved lazily: that namespace
+   requires this one, so the foreign-policy branch reaches it the way
+   eve.flat's own surface does — by requiring-resolve, never a static
+   require (a cycle). A missing namespace is a named error, not a silent
+   fall back to :throw."
+  [sym]
+  #?(:clj (let [v (try (requiring-resolve sym)
+                       (catch Throwable _ nil))]
+            (if v
+              @v
+              (throw (ex-info (str "swap!: the :zip foreign policy needs " sym ", which is not on the classpath")
+                              {:eve.flat.transfer/not-built sym}))))
+     :cljs (throw (ex-info (str "swap!: the :zip foreign policy needs " sym ", which is not built for this host")
+                           {:eve.flat.transfer/not-built sym}))))
+
 (defn- resolve-new-ptr
   "The slab offset a new root value lives at in sio: NIL for nil, the header
    of a slab-backed value of this domain (its own pointer: shared, not copied), the result of
    writing a plain collection, or a fresh scalar block. A slab-backed value of another domain
-   follows the receiving domain's foreign policy (step-2 prototype): :throw (the default, today's
-   error) or :copy (materialized under the reader's pin, then written here)."
+   follows the receiving domain's foreign policy: :throw (the default, today's
+   error), :copy (materialized under the reader's pin, then written here) or
+   :zip (lane T1: detached and placed block for block by eve.flat.transfer,
+   no host collection built; under :zip a plain value holding foreign slab
+   values nested inside it has each one placed first, so the plain writers
+   never meet a foreign pointer)."
   ([sio new-val] (resolve-new-ptr sio new-val :throw))
   ([sio new-val foreign-policy]
    (cond
@@ -866,13 +908,16 @@
        (if (and vs (not (identical? (alloc/sio-root vs) (alloc/sio-root sio))))
          (case foreign-policy
            :copy (resolve-new-ptr sio (d/eve->clj new-val) :throw)
+           :zip ((transfer-fn 'eve.flat.transfer/zip-root!) sio new-val)
            (throw (ex-info "swap!: Eve value was allocated in a different slab domain; construct it with the atom's domain sio (eve.atom/atom-sio)"
                            {:value-type (str (type new-val))})))
          (d/-root-header-off new-val)))
 
      :else
      (or (write-typed-root! sio new-val)
-         (write-plain-collection! sio new-val)
+         (write-plain-collection! sio (if (= :zip foreign-policy)
+                                        ((transfer-fn 'eve.flat.transfer/zip-nested) sio new-val)
+                                        new-val))
          (alloc/value->scalar-block! sio new-val)))))
 
 ;; ---------------------------------------------------------------------------
@@ -915,10 +960,58 @@
     (refresh-slabs! ds)
     (read-root-value sio ptr)))
 
+(defonce ^:private deref-deliver-hook
+  ;; The flat delivery deref uses (eve.flat.freeze's deliver-flat):
+  ;; freeze registers it at load, and deref-deliver below also resolves
+  ;; it lazily — eve.atom cannot require freeze (freeze requires atom),
+  ;; and delivery must not depend on whether the caller happened to
+  ;; require freeze first. ::none caches "not on the classpath".
+  (clojure.core/atom nil))
+
+(defn register-deref-deliver!
+  "eve.flat.freeze's registration of the flat delivery deref uses:
+   a fn of one argument, the raw root value read under the pin,
+   answering the delivered flat object (which owns its bytes)."
+  [f]
+  (reset! deref-deliver-hook f))
+
+(defn- deref-deliver
+  "The delivery fn for flat-deref, or nil when eve.flat.freeze is not
+   on the classpath (deref then falls back to plain-deref — Eve
+   without flat behaves exactly as before). Reached the way
+   transfer-fn reaches eve.flat.transfer: requiring-resolve, never a
+   static require."
+  []
+  (let [h @deref-deliver-hook]
+    (cond
+      (fn? h) h
+      (= ::none h) nil
+      :else #?(:cljs nil
+               :clje nil
+               :default (let [v (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
+                                      (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+                          (if v
+                            (do (reset! deref-deliver-hook @v) @v)
+                            (do (reset! deref-deliver-hook ::none) nil)))))))
+
 (defn- plain-deref
   "The atom's value as plain data (d/eve->clj), read under a pinned epoch.
-   Slab-backed wrappers must not escape: the epoch is unpinned on return."
+   Slab-backed wrappers must not escape: the epoch is unpinned on return.
+   The freeze load is ensured BEFORE the pin, in flat-deref's order:
+   a value embedding frozen subtrees decodes through the serialize
+   registry, whose 0x20 constructor eve.flat.freeze registers at
+   load, and inside the pin that load cannot run on every host —
+   measured on bb-source, where SCI's namespace load fails under
+   the pinned epoch / lock-only region context and the codec's own
+   lazy resolver answers nil there, so a freeze-less process's
+   plain deref threw \"no constructor registered\" even though the
+   identical resolve succeeds at top level and in a bare decode
+   (tag-32 verification narrowing, 2026-11-16). deref-deliver is
+   this file's existing ensure; its value is not used here — plain
+   data is this path's contract — and with freeze absent it caches
+   ::none and this path behaves exactly as before."
   [{:keys [root-r sio] :as ds} atom-slot-idx]
+  (deref-deliver)
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
   (try
@@ -929,6 +1022,29 @@
       (d/eve->clj (read-root-value sio ptr)))
     (finally
       (unpin-epoch! ds))))
+
+(defn- flat-deref
+  "The atom's value as a flat object (FLAT-IN-ATOM R5): read under a
+   pinned epoch, the root converted by the registered delivery INSIDE
+   the pin — the snapshot discipline plain-deref's materialization
+   obeys, so a concurrent swap retiring the old root cannot tear the
+   delivery. What crosses the pin boundary owns its bytes: no pin, no
+   epoch, no coupling to the domain's lifetime. With no delivery
+   registered (eve.flat.freeze not loaded), plain-deref answers."
+  [{:keys [root-r sio] :as ds} atom-slot-idx]
+  (if-let [deliver (deref-deliver)]
+    (do (refresh-slabs! ds)
+        (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+        (try
+          (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+            ;; the root may name blocks another process allocated after
+            ;; growing a class past the refresh above: re-check behind
+            ;; the load, exactly as plain-deref does
+            (refresh-slabs! ds)
+            (deliver (read-root-value sio ptr)))
+          (finally
+            (unpin-epoch! ds))))
+    (plain-deref ds atom-slot-idx)))
 
 #?(:bb nil
    :glj nil
@@ -953,17 +1069,128 @@
          (guard/wrap v (guard/current-cell))))))
 
 (defn- mmap-deref
-  "deref: the atom's value as plain data (plain-deref); inside a `$`, the lazy value (region-deref); inside a guard
-   extent (step-2 prototype, JVM), the lazy value behind the guard (guard-deref)."
+  "deref: the atom's value as a flat object (flat-deref, FLAT-IN-ATOM R5);
+   inside a `$`, the lazy value (region-deref); inside a guard extent
+   (step-2 prototype, JVM), the lazy value behind the guard (guard-deref).
+   Deref delivers the flat form on every host — there is no plain
+   opt-out: materialization is the caller's explicit eve->clj, never a
+   deref mode (operator ruling, 2026-11-16)."
   [ds atom-slot-idx]
   (cond
     (rr/active?) (region-deref ds atom-slot-idx)
     #?@(:bb [] :glj [] :clj [(guard/active?) (guard-deref ds atom-slot-idx)])
-    :else (plain-deref ds atom-slot-idx)))
+    :else (flat-deref ds atom-slot-idx)))
+
+;; ---------------------------------------------------------------------------
+;; The trunk watch surface — registries, delivery, the notify hook.
+;; Spec: the atoms consolidation lane's watch-surface spec (clauses 1–6).
+;; ---------------------------------------------------------------------------
+
+(defonce ^:private watch-notify-listeners
+  ;; Notify listeners installed by adapters (spec clause 5): a listener is
+  ;; (fn [ds atom-slot-idx old new]), called with the DELIVERED old/new on
+  ;; every successful swap in the domain, after the atom's own watchers.
+  ;; Registered the way deref-deliver is — eve.atom cannot require the
+  ;; adapter (eve.sab), so the adapter installs at its load. The wait/notify
+  ;; machinery itself lives on the adapter's side of the seam.
+  (clojure.core/atom []))
+
+(defn register-notify-listener!
+  "Install a notify listener (spec clause 5): (f ds atom-slot-idx old new),
+   called with the delivered old/new values on every successful swap in
+   the domain. For region/adapter cross-worker signaling (eve.sab).
+   Returns f."
+  [f]
+  (swap! watch-notify-listeners conj f)
+  f)
+
+(defn- watches-for
+  [ds atom-slot-idx]
+  (when-let [w (:watches ds)]
+    (get @w atom-slot-idx)))
+
+(defn- validator-for
+  [ds atom-slot-idx]
+  (when-let [v (:validators ds)]
+    (get @v atom-slot-idx)))
+
+(defn- watched?
+  "True when a successful swap of this atom must compute delivered old/new
+   values: the atom has watchers, or a notify listener is installed."
+  [ds atom-slot-idx]
+  (or (boolean (seq (watches-for ds atom-slot-idx)))
+      (boolean (seq @watch-notify-listeners))))
+
+(defn- deliver-value
+  "Notify delivery of a raw root value read under the pin: the deref law's
+   funnel, minus deref's read contexts (region/guard) — the flat form via
+   the registered deliver-flat; the eve->clj materialization only when no
+   delivery is registered (Eve without flat). The caller holds the pin;
+   what this returns owns its bytes."
+  [ds atom-slot-idx raw]
+  (if-let [deliver (deref-deliver)]
+    (deliver raw)
+    (d/eve->clj raw)))
+
+(defn- illegal-state
+  [msg]
+  #?(:lpy (IllegalStateException. msg)
+     :jank (ex-info msg {:eve.atom/illegal-state true})
+     :clj (IllegalStateException. msg)
+     :cljr (System.InvalidOperationException. msg)
+     :cljs (js/Error. msg)
+     :default (ex-info msg {:eve.atom/illegal-state true})))
+
+(declare notify-watchers!)
+
+;; ---------------------------------------------------------------------------
+;; The trunk watch core — THE one watch/validator implementation.
+;; The registry ops, the validator check and the firing loop live here
+;; once. eve.atom's surface below and eve.stm's ref surface both run on
+;; these fns; what differs per surface is residence state (where the
+;; registry lives), delivery (each surface delivers what its deref
+;; delivers) and scheduling (the atom fires per successful swap, after
+;; its write hold releases; STM folds a transaction's writes and fires
+;; once per written ref at commit). Callback shape everywhere:
+;; (cb key target old new); callback exceptions propagate to the
+;; committer, and the committed change stands.
+;; ---------------------------------------------------------------------------
+
+(defn watch-add
+  "Registry op: the watches map with cb installed under key k."
+  [watches k f]
+  (assoc watches k f))
+
+(defn watch-remove
+  "Registry op: the watches map with key k removed."
+  [watches k]
+  (dissoc watches k))
+
+(defn validator-check!
+  "Run validator vf against the value about to be committed: a false
+   result throws the illegal-state abort (\"Invalid reference state\")
+   and nothing is installed or notified; vf's own exception propagates
+   the same way. A nil vf passes. Returns true when the value stands."
+  [vf v]
+  (when (and (some? vf) (not (vf v)))
+    (throw (illegal-state "Invalid reference state")))
+  true)
+
+(defn fire-watches!
+  "Fire a watches map ({key cb}) at target with old/new:
+   (cb key target old new), in map order, exceptions propagating
+   to the caller."
+  [watches target old new]
+  (doseq [[k cb] watches]
+    (cb k target old new)))
 
 (defn- swap-attempt!
   "One CAS attempt: read the old root, apply f, write the new value, CAS the
-   root pointer. Returns [:ok new-val] or [:retry nil]. Runs under the
+   root pointer. Returns [:ok new-val delivery] or [:retry nil ::none] —
+   delivery is [old-delivered new-delivered], the deref-law deliveries of
+   the old and new roots computed under this attempt's pin when the atom
+   is watched (spec clause 6: the :ok tuple threads the old root's
+   delivered value through), else ::none. Runs under the
    epoch pin for the whole attempt — the old value is lazy, and the commit's
    hold reads the new tree (round 2, 0008). exclusive? is the call
    convention with-domain-write hands the attempt (in the count-pages
@@ -973,6 +1200,7 @@
    needs the hold and there is no [:hold nil] return."
   [{:keys [root-r sio durable-commits? journal] :as ds}
    ptr-off
+   atom-slot-idx
    f
    args
    exclusive?]
@@ -987,16 +1215,26 @@
             new-val (binding [d/*parent-atom* ds
                               d/*domain-sio* lsio]
                       (apply f old-val args))
+            ;; the validator (spec clause 6 — new mechanism, Clojure-shaped):
+            ;; runs on the new value pre-commit; false or an exception
+            ;; aborts the swap, unwinding through the pin's finally exactly
+            ;; as a throwing f does — nothing is written, nothing notifies
+            _ (validator-check! (validator-for ds atom-slot-idx) new-val)
             ;; written in the attempt's domain too: a codec that allocates a nested collection in the running domain
             ;; (ClojureScript's) logs it here, so a lost CAS frees what the attempt allocated unheld
             new-ptr (binding [d/*domain-sio* lsio]
                       (resolve-new-ptr lsio new-val
                                        (some-> (:foreign-policy ds) deref)))]
         (if (== new-ptr old-ptr)
-          ;; the same value: nothing to publish, nothing to retire
-          (do
+          ;; the same value: nothing to publish, nothing to retire — but
+          ;; the swap SUCCEEDED, so a watched atom still notifies (spec
+          ;; clause 2: notification is not gated by the change decision)
+          (let [delivery (if (watched? ds atom-slot-idx)
+                           (let [dv (deliver-value ds atom-slot-idx old-val)]
+                             [dv dv])
+                           ::none)]
             (alloc/stop-logging! lsio)
-            [:ok new-val])
+            [:ok new-val delivery])
           ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
           (let [_ (tally/hold-root! sio new-ptr)
                 ;; durability (a disk domain with :durable-commits?): everything this
@@ -1059,8 +1297,17 @@
                     ;; force above covered the root's own range only)
                     (when (and durable-commits? (nil? journal))
                       (alloc/sync-touched! sio @tally/*touches*))))
-                (alloc/stop-logging! lsio)
-                [:ok new-val])
+                ;; delivery computed HERE, under the attempt's pin: the old
+                ;; root is retired by this commit, so converting it after
+                ;; the pin drops would read retired blocks (the discipline
+                ;; flat-deref's in-pin conversion obeys)
+                (let [delivery (if (watched? ds atom-slot-idx)
+                                 [(deliver-value ds atom-slot-idx old-val)
+                                  (deliver-value ds atom-slot-idx
+                                                 (read-root-value sio new-ptr))]
+                                 ::none)]
+                  (alloc/stop-logging! lsio)
+                  [:ok new-val delivery]))
               (let [offs (alloc/logged-allocs lsio)]
                 ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
                 ;; share with other values keeps its count), and every other block this attempt allocated that no
@@ -1081,25 +1328,31 @@
                 ;; allocated, the leak direction only.
                 (when (and durable-commits? (nil? journal))
                   (alloc/sync-touched! sio (into @tally/*touches* offs)))
-                [:retry nil])))))
+                [:retry nil ::none])))))
       (finally (unpin-epoch! ds)))))
 
 (defn- mmap-swap!
   "CAS-loop swap. Accepts any slab-backed value of this domain, a plain
-   collection, a scalar or nil."
+   collection, a scalar or nil. A successful attempt notifies the atom's
+   watchers with the delivered old/new its :ok tuple threaded through
+   (spec clauses 2–4) — here, outside the domain write hold, so a
+   callback that swaps cannot deadlock the domain."
   [ds atom-slot-idx f args]
   (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
     (loop [attempt 0]
       (when (>= attempt d/MAX_SWAP_RETRIES)
         (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
-      (let [[tag result] (with-domain-write ds false
-                           (fn [exclusive?]
-                             (let [r (swap-attempt! ds ptr-off f args exclusive?)]
-                               (when (= :ok (first r))
-                                 (try-flush-retires! ds))
-                               r)))]
+      (let [[tag result delivery] (with-domain-write ds false
+                                    (fn [exclusive?]
+                                      (let [r (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?)]
+                                        (when (= :ok (first r))
+                                          (try-flush-retires! ds))
+                                        r)))]
         (case tag
-          :ok result
+          :ok (do (when (not= ::none delivery)
+                    (notify-watchers! ds atom-slot-idx
+                                      (nth delivery 0) (nth delivery 1)))
+                  result)
           :retry (do (cas-backoff! attempt)
                      (recur (inc attempt))))))))
 
@@ -1140,9 +1393,12 @@
 
 ;; PROTOTYPE (step 2)
 (defn set-foreign-policy!
-  "What swap! on a's domain does with a slab-backed value of another domain: :throw (default) or :copy."
+  "What swap! on a's domain does with a slab-backed value of another domain:
+   :throw (default), :copy (materialize it through the host and write it
+   here) or :zip (lane T1: detach and place it block for block, no host
+   collection built — eve.flat.transfer)."
   [a policy]
-  {:pre [(#{:throw :copy} policy)]}
+  {:pre [(#{:throw :copy :zip} policy)]}
   (reset! (:foreign-policy (atom-domain-state a)) policy))
 
 (defn read-pinned
@@ -1163,6 +1419,60 @@
         (unpin-epoch! ds)))))
 
 ;; ---------------------------------------------------------------------------
+;; Watches and validators — the public trunk surface (spec clauses 1–3, 6).
+;; The host's own add-watch / set-validator! reach the same impls through
+;; MmapAtom's IRef section below; these fns are the every-host path
+;; (eve.stm's ref surface delegates to the watch core above — one
+;; implementation; STM adds only its storage and commit scheduling).
+;; ---------------------------------------------------------------------------
+
+(defn add-watch*
+  "Add a watcher to an Eve atom: (f key atom old new) fires on every
+   successful swap!/reset! (spec clauses 2–3), old/new delivered under
+   the deref law — the flat form (clause 4).
+   Returns the atom."
+  [a k f]
+  (let [slot (-atom-slot-idx a)]
+    (swap! (:watches (atom-domain-state a))
+           (fn [m] (assoc m slot (watch-add (get m slot) k f)))))
+  a)
+
+(defn remove-watch*
+  "Remove the watcher under key k from an Eve atom. Returns the atom."
+  [a k]
+  (let [slot (-atom-slot-idx a)]
+    (swap! (:watches (atom-domain-state a))
+           (fn [m]
+             (let [ws (watch-remove (get m slot) k)]
+               (if (empty? ws) (dissoc m slot) (assoc m slot ws))))))
+  a)
+
+(defn get-watches
+  "An Eve atom's watchers, {key cb}."
+  [a]
+  (get @(:watches (atom-domain-state a)) (-atom-slot-idx a) {}))
+
+(defn set-validator*
+  "Set an Eve atom's validator (spec clause 6): a fn of the new value,
+   run pre-commit on every swap!/reset!/compare-and-set!* — false or an
+   exception aborts the swap and nothing notifies. The validator sees
+   the new value in the form swap functions traffic in (the Eve value f
+   returned, or the value reset! was given). Setting one validates the
+   atom's current value first (read raw under a pin, STM's shape): a
+   current value it rejects throws and nothing is installed. nil clears
+   the validator. Returns nil (clojure.core/set-validator!'s shape)."
+  [a f]
+  (when f
+    (read-pinned a (fn [v] (validator-check! f v))))
+  (swap! (:validators (atom-domain-state a)) assoc (-atom-slot-idx a) f)
+  nil)
+
+(defn get-validator
+  "An Eve atom's validator fn, or nil."
+  [a]
+  (get @(:validators (atom-domain-state a)) (-atom-slot-idx a)))
+
+;; ---------------------------------------------------------------------------
 ;; MmapAtom / MmapAtomDomain — the host's atom interfaces are the one
 ;; difference (cljs.core protocols vs clojure.lang interfaces); the bodies
 ;; are the same calls.
@@ -1171,7 +1481,7 @@
 ;; One definition for every host, written with the JVM's names: each host's
 ;; types adapter realizes it (ClojureScript's ISwap/IReset, sci's own IAtom,
 ;; basilisp's duck-typed swap/reset, clojerl's through eve.host).
-(edt/deftype MmapAtom [domain-state atom-slot-idx]
+(eve/host-deftype MmapAtom [domain-state atom-slot-idx]
   clojure.lang.IDeref
   (deref [_] (mmap-deref domain-state atom-slot-idx))
   clojure.lang.IAtom
@@ -1182,6 +1492,16 @@
   (reset [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) []))
   (compareAndSet [_ old-val new-val]
     (mmap-compare-and-set! domain-state atom-slot-idx old-val new-val))
+  ;; the watch/validator surface (spec clause 1): the host's add-watch /
+  ;; set-validator! land here; the bodies are the trunk fns above, and
+  ;; each host's types adapter realizes IRef the way it realizes
+  ;; IDeref/IAtom (basilisp's and glojure's completions map
+  ;; clojure.lang.IRef; a seat with no IRef home uses the trunk fns)
+  clojure.lang.IRef
+  (addWatch [this k f] (add-watch* this k f))
+  (removeWatch [this k] (remove-watch* this k))
+  (setValidator [this f] (set-validator* this f))
+  (getValidator [this] (get-validator this))
   IEveAtom
   (-domain-state [_] domain-state)
   (-atom-slot-idx [_] atom-slot-idx)
@@ -1190,7 +1510,25 @@
   IPrintWithWriter
   (-pr-writer [this writer _opts]
     (let [i (-atom-slot-idx this)]
-      (ecore/-write writer (str "#eve/shared-atom {:id " i " :idx " i "}")))))
+      (ecore/-write writer (str "#eve/shared-atom {:id " i " :idx " i "}"))))
+  ;; str is the print form, stated in the CLJ/JVM API directly (the fake
+  ;; deftype derived toString from the printer; host-deftype does not)
+  java.lang.Object
+  (toString [this]
+    (let [i (-atom-slot-idx this)]
+      (str "#eve/shared-atom {:id " i " :idx " i "}"))))
+
+(defn- notify-watchers!
+  "Fire a slot's watchers with the delivered old/new (spec clauses 2–4:
+   (cb key atom old new)), then the registered notify listeners
+   (clause 5). The atom argument is the canonical handle for the slot —
+   (MmapAtom. ds slot), the same object domain-lookup returns. Callback
+   exceptions propagate to the swapper, as in Clojure."
+  [ds atom-slot-idx old-delivered new-delivered]
+  (let [a (MmapAtom. ds atom-slot-idx)]
+    (fire-watches! (watches-for ds atom-slot-idx) a old-delivered new-delivered)
+    (doseq [listener @watch-notify-listeners]
+      (listener ds atom-slot-idx old-delivered new-delivered))))
 
 (defn compare-and-set!*
   "compare-and-set! for an Eve atom on every host (CLJS's core
@@ -1203,7 +1541,7 @@
 ;; SharedAtom compat alias (tests reference a/SharedAtom)
 (def SharedAtom MmapAtom)
 
-(edt/deftype MmapAtomDomain [domain-state registry-cache]
+(eve/host-deftype MmapAtomDomain [domain-state registry-cache]
   clojure.lang.IDeref
   (deref [_] (mmap-deref domain-state 0))
   ;; the domain's own value (slot 0) is an atom as well
@@ -1215,6 +1553,12 @@
   (reset [_ v] (mmap-swap! domain-state 0 (constantly v) []))
   (compareAndSet [_ old-val new-val]
     (mmap-compare-and-set! domain-state 0 old-val new-val))
+  ;; the domain is slot 0's atom: the same watch/validator surface
+  clojure.lang.IRef
+  (addWatch [this k f] (add-watch* this k f))
+  (removeWatch [this k] (remove-watch* this k))
+  (setValidator [this f] (set-validator* this f))
+  (getValidator [this] (get-validator this))
   ;; (:key domain): on babashka, whose deftype takes ILookup only on a map
   ;; type, it is domain-lookup
   clojure.lang.ILookup
@@ -1605,8 +1949,9 @@
    Returns an MmapAtom."
   [& args]
   (let [{:keys [value opts]} (parse-persistent-atom-args args)
-        domain (resolve-domain opts)]
-    (lookup-or-create-mmap-atom! domain (atom-name (:id opts)) value)))
+        domain (resolve-domain opts)
+        a (lookup-or-create-mmap-atom! domain (atom-name (:id opts)) value)]
+    a))
 
 ;; ---------------------------------------------------------------------------
 ;; In-process atoms — heap slabs (JVM, bb) or the module SABs (CLJS)

@@ -892,7 +892,9 @@
 (defn pump-entry
   "A pump thread of a domain pool (boot: its runtime's handle as data, :pool, :batch): claim, run, complete — idle,
    it waits on the pool's doorbell (a futex, which a submission rings) where its host's region has one, else reads
-   spaced 1 ms growing to poll-cap — until stopped, or the pool is shut down and holds nothing for it."
+   spaced 1 ms growing to poll-cap; while the doorbell's count stands where an empty claim left it, it waits
+   without re-reading (every queue transition rings the bell), re-reading at least every second — until stopped,
+   or the pool is shut down and holds nothing for it."
   [b]
   (let [dh (resolve-handle b)
         nm (:pool b)
@@ -905,20 +907,33 @@
        (with-pool*
          p
          (fn []
-           (loop [bo 1]
+           (loop [bo 1 last-seen ::none last-read 0]
              ;; a stop that came while a task ran is seen before the next claim
              (let [msg (h/receive! 0)] (when-not (= msg :eve.thread/timeout) (c/handle! msg)))
              (if (c/stop-requested?)
                :stopped
-               (let [seen (rung/bell-value (mcell dh) (rung/pool-word nm))
-                     {:keys [claimed state unmarked]} (claim! dh nm tid (or (:batch b) 1))]
-                 ;; (recorded pulling again after its runtime joined again: a pool's start waits on it)
-                 (when unmarked (swap-meta! dh (fn [v] [(mt/thread-up v (:rid dh) tid) nil])))
-                 (cond
-                   (seq claimed) (do (doseq [x claimed] (run-claimed! dh x tid)) (recur 1))
-                   (not= :running state) :done
-                   :else (do (idle-wait! dh (rung/pool-word nm) seen bo)
-                             (recur (min (poll-cap dh) (* 2 bo))))))))))))))
+               (let [seen (rung/bell-value (mcell dh) (rung/pool-word nm))]
+                 (if (and (= seen last-seen) (< (- (now) last-read) 1000))
+                   ;; The pool's bell has not moved since a claim found the queue
+                   ;; empty: every transition that stocks or empties the queue
+                   ;; rings the pool's word (submit, submit-all, complete,
+                   ;; shutdown, the sweep's adoptions), so the queue is as it
+                   ;; was — wait without the claim's read of the meta-atom,
+                   ;; whose cost on a slow host or a network rung is the idle
+                   ;; burn of an otherwise idle runtime. The 1 s bound re-reads
+                   ;; anyway, for any transition that did not ring (a rung
+                   ;; without doorbells, where seen is always nil, polls at
+                   ;; that bound and no faster).
+                   (do (idle-wait! dh (rung/pool-word nm) seen bo)
+                       (recur (min 250 (* 2 bo)) seen last-read))
+                   (let [{:keys [claimed state unmarked]} (claim! dh nm tid (or (:batch b) 1))]
+                     ;; (recorded pulling again after its runtime joined again: a pool's start waits on it)
+                     (when unmarked (swap-meta! dh (fn [v] [(mt/thread-up v (:rid dh) tid) nil])))
+                     (cond
+                       (seq claimed) (do (doseq [x claimed] (run-claimed! dh x tid)) (recur 1 ::none 0))
+                       (not= :running state) :done
+                       :else (do (idle-wait! dh (rung/pool-word nm) seen bo)
+                                 (recur (min (poll-cap dh) (* 2 bo)) seen (now)))))))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Drivers: how a thread waiting on many descriptors waits (P§5.7)

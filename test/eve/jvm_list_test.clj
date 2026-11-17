@@ -114,7 +114,20 @@
     (with-heap-slab
       (let [            hdr (eve-list/jvm-write-list! sio (partial codec/value+sio->eve-bytes sio) '(1 2 3))
             l   (eve-list/jvm-sab-list-from-offset sio hdr)]
-        (is (instance? eve.list.EveList (next l)))
+        ;; L1 disposition (2026-11-12, see doc/flat/L1-STATUS.md): this
+        ;; deftest used to assert (instance? eve.list.EveList (next l)).
+        ;; An EveList value is only (sio, header-offset) — its cnt/head
+        ;; exist solely as bytes in a slab header block — so next could
+        ;; answer an EveList only by minting a fresh header per step:
+        ;; the representation the assertion pinned WAS the L1 defect
+        ;; (197 domain blocks leaked over 4 walks of a 50-list, re-derived
+        ;; at 7402ef9). next/more now walk lazily and allocate nothing;
+        ;; the ISeq contract (values, order, termination) is asserted by
+        ;; the seq assertions below, and EveList-ness of a tail is
+        ;; asserted on pop — the update whose result is a first-class
+        ;; EveList tail and which rightly pays for its header.
+        (is (instance? eve.list.EveList (pop l)))
+        (is (= '(2 3) (seq (pop l))))
         (is (= '(2 3) (seq (next l))))
         (is (= '(3) (seq (next (next l)))))
         (is (nil? (next (next (next l)))))))))
@@ -124,7 +137,11 @@
     (with-heap-slab
       (let [            hdr (eve-list/jvm-write-list! sio (partial codec/value+sio->eve-bytes sio) '(42))
             l   (eve-list/jvm-sab-list-from-offset sio hdr)]
-        (is (instance? eve.list.EveList (rest l)))
+        ;; Same L1 disposition as list-next: (rest l) walks lazily and
+        ;; allocates nothing, so it is a seq, not an EveList; the EveList
+        ;; tail of a one-element list is (pop l), the empty EveList.
+        (is (instance? eve.list.EveList (pop l)))
+        (is (zero? (count (pop l))))
         (is (zero? (count (rest l))))))))
 
 (deftest plain-data-keeps-lists

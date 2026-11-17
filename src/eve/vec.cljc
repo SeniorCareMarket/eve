@@ -5,11 +5,12 @@
    Uses ISlabIO protocol for all memory access, sio threaded everywhere.
 
    Uses eve/deftype macro: CLJ protocol names, auto-translated on CLJS."
+  ;; :clje — callees' ^long return tags (alloc/node-i32) resolve in the CALLER's ns on clojerl; take eve.host's `long`.
   (:refer-clojure :exclude [alength unsigned-bit-shift-right volatile! vswap! transient
-                            persistent! conj! bytes])
+                            persistent! conj! bytes #?@(:clje [long])])
   (:require
    [eve.host :refer [field alength unsigned-bit-shift-right volatile! vswap! transient persistent!
-                     conj! bytes]]
+                     conj! bytes #?@(:clje [long])]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
     :refer [NIL_OFFSET]]
@@ -20,6 +21,13 @@
    [eve.core :as ecore]
    [eve.rseq :as ers]
    [eve.deftype-proto.macros :as eve]
+   ;; load order: the deftype expansion's top-level register-sister!
+   ;; call needs eve.flat.sister first in the RUNTIME graph (a macro
+   ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.
+   [eve.flat.sister]
+   ;; Load order, same law for the second registry: the expansions
+   ;; also end in eve.type-readers/register! calls.
+   [eve.type-readers]
    [eve.codec :as codec]
    [eve.digest :as dg]))
 
@@ -30,6 +38,15 @@
 (def ^:const NODE_SIZE 32)
 (def ^:const SHIFT_STEP 5)
 (def ^:const MASK 0x1f)
+
+;; equiv's view of the other collection. On bb an Eve collection is a
+;; SciType, which clojure.core/count and nth cannot see (the analyzer
+;; compiles them past the var to host fns; host_completion.clj
+;; rewrite-lookup) — (= ev ev2) threw "count not supported on this type:
+;; SciType". eve.core's count/nth reach the type's ICounted/IIndexed and
+;; delegate to the host fns for host values.
+(defn- other-count [x] #?(:bb (ecore/count x) :default (count x)))
+(defn- other-nth [x i] #?(:bb (ecore/nth x i) :default (nth x i)))
 
 (def EveVector-type-id 0x12)
 (def SabVecRoot-type-id EveVector-type-id) ;; backward compat
@@ -69,6 +86,19 @@
   (let [node-off (slab/alloc! sio (* NODE_SIZE 4))]
     (dotimes [i NODE_SIZE]
       (slab/write-i32! sio node-off (* i 4) NIL_OFFSET))
+    node-off))
+
+(defn- write-node!
+  "A fresh node holding the i32 words offs (at most NODE_SIZE, the rest
+   NIL_OFFSET), written with ONE block write — not alloc-node!'s NODE_SIZE
+   NIL writes and then one write per word. Same bytes. (A PSS leaf insert
+   assembles its whole vector; on basilisp the per-word writes were most
+   of it, 2026-11-15.)"
+  [sio offs]
+  (let [node-off (slab/alloc! sio (* NODE_SIZE 4))
+        n (count offs)
+        words (if (< n NODE_SIZE) (into (vec offs) (repeat (- NODE_SIZE n) NIL_OFFSET)) (vec offs))]
+    (slab/write-bytes! sio node-off 0 (enc/i32s->bytes-le (eve.host/int-array words)))
     node-off))
 
 ;; A published node's (or this thread's own transient node's) words: the hot read path's plain node read
@@ -441,7 +471,7 @@
   (equiv [this other]
     (cond
       (not (sequential? other)) false
-      (not= cnt (count other)) false
+      (not= cnt (other-count other)) false
       :else
       (let [verdict (root-digest-verdict this other)]
         (cond
@@ -451,7 +481,7 @@
           (loop [i 0]
             (if (>= i cnt)
               true
-              (if (= (nth-impl sio__ cnt shift root tail i) (nth other i))
+              (if (= (nth-impl sio__ cnt shift root tail i) (other-nth other i))
                 (recur (inc i))
                 false)))))))
 
@@ -597,6 +627,12 @@
                    (recur (inc i)) false)))))))
   (hashCode [this] (p/hash-ordered this)))
 
+;; bb: EveVector is a SciType with no print-method, so printing fell to its
+;; toString, (pr-str this), and recursed to a StackOverflowError — pr-str,
+;; str and every clojure.test report naming the value died. It prints as
+;; the host collection, as on the JVM.
+#?(:bb (defmethod print-method EveVector [x w] (print-method (vec (ecore/seq x)) w)))
+
 ;;=============================================================================
 ;; Transients (the JVM's and ClojureCLR's): a persistent EveVector behind a
 ;; transient's interface — each op makes the next persistent vector, and frees
@@ -654,7 +690,7 @@
 
      (defn ->transient-vec [v]
        ;; the vector read through a scope of its own over its domain: what its ops allocate is logged there
-       (let [sio (alloc/scope-sio (d/-eve-sio v))]
+       (let [sio (alloc/transient-scope (d/-eve-sio v))]
          (->TransientEveVector (vec-from-header sio (d/-root-header-off v)) sio))))
 
 ;;=============================================================================
@@ -842,46 +878,22 @@
   [sio val-offs]
   (let [cnt (count val-offs)]
     (if (zero? cnt)
-      (let [empty-tail (alloc-node! sio)]
+      (let [empty-tail (write-node! sio [])]
         (write-vec-header! sio 0 SHIFT_STEP NIL_OFFSET empty-tail 0))
       (let [toff     (tail-offset-calc cnt)
-            tail-off (let [t-off (alloc-node! sio)]
-                       (dorun (map-indexed
-                                (fn [i v-off]
-                                  (slab/write-i32! sio t-off (* i 4) v-off))
-                                (subvec val-offs toff cnt)))
-                       t-off)
+            tail-off (write-node! sio (subvec val-offs toff cnt))
             trie-val-offs (subvec val-offs 0 toff)
             [root sft]
             (if (empty? trie-val-offs)
               [NIL_OFFSET SHIFT_STEP]
-              (let [leaf-nodes
-                    (mapv (fn [chunk]
-                            (let [node-off (alloc-node! sio)]
-                              (dorun (map-indexed
-                                       (fn [i v-off]
-                                         (slab/write-i32! sio node-off (* i 4) v-off))
-                                       chunk))
-                              node-off))
-                          (partition-all NODE_SIZE trie-val-offs))]
+              (let [leaf-nodes (mapv (fn [chunk] (write-node! sio chunk))
+                                     (partition-all NODE_SIZE trie-val-offs))]
                 (loop [nodes leaf-nodes sh SHIFT_STEP]
                   (if (<= (count nodes) NODE_SIZE)
-                    (let [root-off (alloc-node! sio)]
-                      (dorun (map-indexed
-                               (fn [i child-off]
-                                 (slab/write-i32! sio root-off (* i 4) child-off))
-                               nodes))
-                      [root-off sh])
-                    (let [parent-nodes
-                          (mapv (fn [chunk]
-                                  (let [node-off (alloc-node! sio)]
-                                    (dorun (map-indexed
-                                             (fn [i child-off]
-                                               (slab/write-i32! sio node-off (* i 4) child-off))
-                                             chunk))
-                                    node-off))
-                                (partition-all NODE_SIZE nodes))]
-                      (recur parent-nodes (+ sh SHIFT_STEP)))))))]
+                    [(write-node! sio nodes) sh]
+                    (recur (mapv (fn [chunk] (write-node! sio chunk))
+                                 (partition-all NODE_SIZE nodes))
+                           (+ sh SHIFT_STEP))))))]
         (write-vec-header! sio cnt sft root tail-off (- cnt toff))))))
 
 (defn- -write-vec-coll!
@@ -909,15 +921,22 @@
   (let [sio (d/-eve-sio v)
         [cnt shift root tail _tail-len] (read-vec-header sio (d/-root-header-off v))
         toff (tail-offset-calc cnt)]
-    (mapv (fn [n]
-            (if (>= n toff)
-              (node-get sio tail (- n toff))
-              (loop [node-off root sh shift]
-                (let [idx (bit-and (unsigned-bit-shift-right n sh) MASK)]
-                  (if (zero? sh)
-                    (node-get sio node-off idx)
-                    (recur (node-get sio node-off idx) (- sh SHIFT_STEP)))))))
-          (range cnt))))
+    ;; one trie descent per leaf node, then its words in order (not a
+    ;; root-to-leaf descent per element)
+    (let [words (fn [acc node-off n]
+                  (loop [acc acc i 0]
+                    (if (< i n) (recur (conj acc (node-get sio node-off i)) (inc i)) acc)))
+          trie (reduce
+                 (fn [acc base]
+                   (let [leaf (loop [node-off root sh shift]
+                                (if (zero? sh)
+                                  node-off
+                                  (recur (node-get sio node-off (bit-and (unsigned-bit-shift-right base sh) MASK))
+                                         (- sh SHIFT_STEP))))]
+                     (words acc leaf (min NODE_SIZE (- toff base)))))
+                 []
+                 (range 0 toff NODE_SIZE))]
+      (words trie tail (- cnt toff)))))
 
 (defn build-vec
   "An EveVector whose elements are the EXISTING value blocks

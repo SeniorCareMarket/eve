@@ -114,7 +114,12 @@ namespace eve_httpd {
     }
     ::close(fd);
   }
-  static void gc_register() { struct GC_stack_base sb; GC_get_stack_base(&sb); GC_register_my_thread(&sb); }
+  /* no manual GC registration: jank's Boehm build intercepts pthread_create and
+     registers threads itself; a manual register/unregister pair double-tears-down
+     the thread-local record at exit (GC_destroy_thread_local segfault — see
+     adapters/thread/jank's spawn note, Nov 13 2026). Kept as a no-op so the
+     worker/accept loops keep their shape. */
+  static void gc_register() {}
   static void worker_loop(server *s) {
     gc_register();
     for(;;) {
@@ -127,7 +132,6 @@ namespace eve_httpd {
       }
       serve_conn(s, fd);
     }
-    GC_unregister_my_thread();
   }
   static void accept_loop(server *s) {
     gc_register();
@@ -137,7 +141,6 @@ namespace eve_httpd {
       { std::lock_guard<std::mutex> lk(s->m); s->q.push_back(fd); }
       s->cv.notify_one();
     }
-    GC_unregister_my_thread();
   }
   long serve(object_ref handler, std::string const &host, long port, long threads) {
     set_err(std::string());

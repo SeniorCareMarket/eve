@@ -30,9 +30,13 @@
    [eve.codec :as codec]
    [eve.encoding :as enc]
    [eve.platform :as p]
-   [eve.deftype :refer [eve-deftype]]
+   [eve.deftype :as edt]
    [eve.deftype-proto.alloc :as alloc]
-   [eve.deftype.slab-runtime :as slab-rt]))
+   [eve.deftype.slab-runtime :as slab-rt]
+   [eve.flat.sister :as sister]
+   ;; Load order, same law for the second registry: eve.deftype's
+   ;; expansion also ends in an eve.type-readers/register! call.
+   [eve.type-readers]))
 
 ;;-----------------------------------------------------------------------------
 ;; Protocol for accessing Dataset internals from standalone functions
@@ -47,7 +51,7 @@
 ;; Dataset type — eve-deftype backed by slab memory
 ;;-----------------------------------------------------------------------------
 
-(eve-deftype Dataset [^:int32 nrows
+(edt/deftype Dataset [^:int32 nrows
                       col-order  ;; serialized: vector of keyword column names
                       col-map]   ;; serialized: map of keyword → EveArray
 
@@ -98,9 +102,10 @@
 ;;-----------------------------------------------------------------------------
 
 (defn dataset?
-  "True if x is a Dataset."
+  "True if x is a Dataset — its persistent form or its flat sister.
+   Wraps the predicate eve-deftype generates (Dataset?)."
   [x]
-  (instance? Dataset x))
+  (Dataset? x))
 
 ;;-----------------------------------------------------------------------------
 ;; Domain helpers — explicit slab contexts (no ambient state)
@@ -108,7 +113,7 @@
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
-   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+   domain; outside a swap/domain context it throws (:no-domain-context)."
   []
   (alloc/current-sio))
 
@@ -123,31 +128,42 @@
 ;; Construction
 ;;-----------------------------------------------------------------------------
 
+(defn- dataset-parts
+  "A col-map's constructor parts, validated: [nrows col-order col-map]."
+  [col-map]
+  (let [entries (e/seq col-map)
+        _ (when (empty? entries)
+            (throw (enc/illegal-argument
+                    "Dataset requires at least one column")))
+        col-order (vec (map first entries))
+        lengths (map #(e/count (second %)) entries)
+        n (first lengths)]
+    (when-not (every? #(= n %) lengths)
+      (throw (enc/illegal-argument
+              (str "All columns must have same length. Got: "
+                   (zipmap col-order lengths)))))
+    [n col-order (into {} entries)]))
+
 (defn dataset
   "Create a dataset from a map of {keyword → EveArray}.
    All columns must have the same length.
 
-   ([col-map]) allocates in a fresh heap slab domain (JVM; no ambient state)
-   — the dataset is self-contained and fully usable for reads and structural
-   ops, but it can NOT be stored in an atom: atom roots must live in the
-   atom's own slab domain.
+   ([col-map]) inside a swap! allocates in the swap's domain. With
+   NO domain bound it produces the dataset's FLAT variant — the
+   generated sister over a packed chunk, its columns the flat
+   values they were given (John, Nov 14 2026: instantiating an
+   eve type outside a transaction takes the flat path). Swapped
+   into an atom, the flat dataset embeds by reference.
    ([sio col-map]) allocates in sio's domain. When the dataset will be stored
    in an atom, pass that atom's domain sio (eve.atom/atom-sio):
      (swap! ea (fn [_] (dataset (eve.atom/atom-sio ea) {...})))"
-  ([col-map] (dataset (default-sio) col-map))
+  ([col-map]
+   (if d/*domain-sio*
+     (dataset (default-sio) col-map)
+     (sister/construct-flat "eve.dataset/Dataset" (dataset-parts col-map))))
   ([sio col-map]
-   (let [entries (e/seq col-map)
-         _ (when (empty? entries)
-             (throw (enc/illegal-argument
-                     "Dataset requires at least one column")))
-         col-order (vec (map first entries))
-         lengths (map #(e/count (second %)) entries)
-         n (first lengths)]
-     (when-not (every? #(= n %) lengths)
-       (throw (enc/illegal-argument
-               (str "All columns must have same length. Got: "
-                    (zipmap col-order lengths)))))
-     (->Dataset sio n col-order (into {} entries)))))
+   (let [[n col-order cm] (dataset-parts col-map)]
+     (->Dataset sio n col-order cm))))
 
 ;;-----------------------------------------------------------------------------
 ;; Core accessors

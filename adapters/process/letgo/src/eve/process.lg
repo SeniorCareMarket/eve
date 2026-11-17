@@ -2,9 +2,10 @@
   "eve's process primitives (HOST-CONTRACT §5) on let-go (lg-eve: eve/impls/let-go, its Go package linked into a
    custom lg): the clock, sleep, the operating system's entropy and standard input's lines are lg-eve's natives
    (eve.host-native, impls/let-go/evenative/host.go); a periodic timer runs on a let-go future (a goroutine); files'
-   existence is let-go's os/stat. What let-go reaches no word for — a file's exclusive creation, a signalled exit's
-   hooks, an object's address — throws: a disk domain's creation needs them, the network atom does not
-   (eve/doc/network-atoms/ADAPTERS.md §2)."
+   existence is let-go's os/stat; a file's exclusive creation and a domain directory's creation are lg-eve's
+   natives too (eve.native, impls/let-go/evenative/region.go) — a disk domain's creation needs them, the network
+   atom does not (eve/doc/network-atoms/ADAPTERS.md §2). What let-go still reaches no word for — a signalled
+   exit's hooks, an object's address — throws or approximates, as below."
   (:refer-clojure :exclude [read-line file-exists?]))
 
 (defn now-ms [] (eve.host-native/now-ms))
@@ -35,22 +36,38 @@
 (defn stop-timer! [h]
   (when h (reset! h false)))
 
+(def ^:private exit-hooks (atom []))
+
 (defn on-process-exit!
-  "Refused: let-go gives a program no signal handler."
-  [_f]
-  (throw (ex-info "eve.process/on-process-exit!: not on let-go" {:eve.process/refused :exit-hooks})))
+  "let-go gives a program no exit hook (no atexit/exit native in eve.native,
+   no hook var in let-go's core — checked against the v1.13.0 host surface):
+   f is kept, never called — the beam/dart shape for seats with no exit hook.
+   The hook eve.atom registers here only releases the domain's worker slot;
+   that release rides the heartbeat instead: the slot is freed when its
+   heartbeat goes stale (HEARTBEAT_TIMEOUT_MS), as for a killed process, and
+   Eve's domains are built to be re-opened after a death (the journal and
+   the root publication are atomic), so nothing is lost by the hook never
+   firing. (Was: THREW {:eve.process/refused :exit-hooks} — but eve.atom's
+   open-mmap-domain! calls this unconditionally, so the throw made every
+   disk domain unopenable on :lg; measured, wall L2, go-bodies STATUS-L.)"
+  [f]
+  (swap! exit-hooks conj f)
+  nil)
 
 (defn file-exists? [path] (some? (os/stat path)))
 
 (defn create-exclusive!
-  "Refused: let-go opens no file with O_CREAT|O_EXCL (an mmap domain's creator needs it)."
+  "Create the file at path, empty, if no file is there — one atomic step
+   against every other process: true for the process that created it, false
+   when it already existed (an mmap domain's creator is the one that gets
+   true). lg-eve's native (O_CREAT|O_EXCL)."
   [path]
-  (throw (ex-info (str "eve.process/create-exclusive!: not on let-go (" path ")") {:eve.process/refused :exclusive-create})))
+  (eve.native/create-exclusive! path))
 
 (defn ensure-parent-dir!
-  "Refused with create-exclusive!: a disk domain's files are not on let-go."
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
   [base-path]
-  (throw (ex-info (str "eve.process/ensure-parent-dir!: not on let-go (" base-path ")") {:eve.process/refused :disk-domain})))
+  (eve.native/ensure-parent-dir! base-path))
 
 (defn identity-hash
   "An object's identity hash: let-go's hash (no address is reachable; eve's reference table tells equal values apart by

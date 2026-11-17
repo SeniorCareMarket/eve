@@ -3,6 +3,62 @@
    lacks and eve's shared code calls. A ClojureDart namespace is compiled ahead of time and cljd.core cannot be added
    to, so a name here is found where cljd.core has none: a program's build resolves an unqualified symbol no namespace defines to the one here.
 
-   - type: x's :type metadata, else its runtime type (Clojure's; cljd.core has no type)")
+   - type: x's :type metadata, else its runtime type (Clojure's; cljd.core has no type)
+   - ns-name: the name of a namespace (Clojure's; cljd.core has no ns-name)
+   - resolve: the var a symbol names (Clojure's; cljd.core has no resolve)
+   - eval: evaluate a form (Clojure's; a compiled ClojureDart program has no eval)
+   - alter-var-root: change a var's root (Clojure's; ClojureDart vars have no alterable roots)
+   - array-map: a map from keyvals in order (Clojure's; cljd.core has hash-map only)")
 
 (defn type [x] (or (get (meta x) :type) (.-runtimeType ^Object x)))
+
+(defn array-map
+  "A map built from keyvals in order. ClojureDart's {} is its own
+   persistent map (insertion-ordered at small counts, as an array
+   map is); building one by assoc in order is the value."
+  [& keyvals]
+  (reduce (fn [m [k v]] (assoc m k v)) {} (partition 2 keyvals)))
+
+(defn alter-var-root
+  "Change a var's root value. ClojureDart's vars are compiled Dart
+   declarations — they have no alterable root, so the compiled body
+   leaves the root unchanged and answers nil. The shared caller
+   (eve.type-readers/register!) installs Eve's tags into Eve's own
+   registry FIRST, and every Eve read path consults that registry
+   (reader-options); what is lost is only the host reader's own
+   *data-readers* seeing Eve's tags — the same named limitation
+   clojerl carries in eve.type-readers' :clje arm. Calls made at
+   macro time run on the host, where the real alter-var-root answers."
+  [var & args]
+  nil)
+
+(defn eval
+  "Evaluate a form. eve's macro machinery calls this only at macro
+   time — (eval opts-map) on a symbol naming the options — where the
+   host's own clojure.core/eval answers. A compiled ClojureDart
+   program has no evaluator: the compiled body throws."
+  [form]
+  (throw (ex-info "eval is not available in a compiled ClojureDart program"
+                  {:form form})))
+
+(defn resolve
+  "The var a symbol names, or nil. A ClojureDart program is compiled
+   ahead of time — there is no runtime var table to resolve against.
+   The shared caller (eve.deftype-proto.sio's print-method-form) asks
+   only at macro time, on the host, where the host's own resolve
+   answers; the compiled body answers nil: no var is resolvable in a
+   running Dart program."
+  [sym]
+  nil)
+
+(defn ns-name
+  "The name of a namespace object, as a symbol. eve.deftype.registry's
+   qualified-type-key calls this only as the fallback when a macro env
+   carries no :ns :name — a compile-time call, on the host, where the
+   env is present; the Dart-compiled body exists so the shared source
+   compiles, and answers for the namespace objects ClojureDart does
+   have (its *ns* is a symbol at compile time)."
+  [ns]
+  (cond (symbol? ns) ns
+        (nil? ns) nil
+        :else (symbol (str ns))))

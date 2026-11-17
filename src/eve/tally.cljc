@@ -52,8 +52,14 @@
    resets the freed block's row (its management record), never its bytes. The zero queue is the domain state's own
    queue, as eve's retire queue was: each process's holds what it parked, freed behind the pins every process
    publishes; the rows are in the domain's files, so every process sees one count."
-  (:refer-clojure :exclude [unsigned-bit-shift-right volatile! vswap!])
-  (:require [eve.host :refer [unsigned-bit-shift-right volatile! vswap!]]
+  ;; :clje — eve.hamt-util/popcount32 carries a ^long return tag that clojerl resolves as a symbol in
+  ;; the CALLER's ns (clojerl has no JVM `long` coercion); take eve.host's `long`, as hamt_util itself does.
+  ;; locking likewise: the F5 block below locks its registration atom,
+  ;; and the name is eve.host's on every host (cljd's core has none —
+  ;; an isolate is one thread, so its locking runs the body), as in
+  ;; eve.atom / eve.mem / eve.deftype-proto.alloc.
+  (:refer-clojure :exclude [unsigned-bit-shift-right volatile! vswap! locking #?@(:clje [long])])
+  (:require [eve.host :refer [unsigned-bit-shift-right volatile! vswap! locking #?@(:clje [long])]]
             [eve.slab-io :as slab]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.serialize :as ser]
@@ -115,6 +121,7 @@
     0x1D :leaf      ;; an array
     0x1E :leaf      ;; an obj
     0x1F :varray    ;; an eve value array (eve.deftype.array)
+    0x20 :frozen    ;; a frozen flat chunk chain header (eve.flat.freeze)
     (let [t (int (slab/read-u8 sio off 0))]
       (if (and (>= t 0x40) (<= t 0xEC)) :deftype :opaque))))
 
@@ -127,6 +134,7 @@
         (== tag 0x13) :list
         (and (>= tag 0x1C) (<= tag 0x1E)) :leaf
         (== tag 0x1F) :varray
+        (== tag 0x20) :frozen
         (and (>= tag 0x40) (<= tag 0xEC)) :deftype
         :else nil))
 
@@ -289,6 +297,12 @@
                    r (value-ref sio off 8 (slab/read-i32 sio off 4))]
                (cond-> [] (live? nx) (conj [nx :lnode]) r (conj r)))
       :varray (varray-refs sio off)
+      ;; a frozen chunk (eve.flat.freeze): the header references
+      ;; its first payload segment; a segment references the next.
+      ;; The payload bytes are never pointer-interpreted (the
+      ;; value is closed) — the chain is the whole graph.
+      :frozen (let [seg (slab/read-i32 sio off 8)] (if (live? seg) [[seg :frozen-seg]] []))
+      :frozen-seg (let [nx (slab/read-i32 sio off 0)] (if (live? nx) [[nx :frozen-seg]] []))
       :deftype (into [] (keep (fn [[foff fk]]
                                 (let [c (slab/read-i32 sio off foff)] (when (live? c) [c fk]))))
                      (type-layout sio off))
@@ -437,16 +451,177 @@
           (hold! sio new kind)
           (drop! sio old kind (parker sio)))))))
 
+;; ---------------------------------------------------------------------------
+;; The count written at placement (fork F5, spiked behind *count-at-place*)
+;;
+;; The walk above discovers a new root's counts by reading the tree: per
+;; block a flags CAS, a count add, a read of the block's references and a
+;; swap! on a host set (MEASUREMENTS M6: ~1 µs a block, the whole cost of a
+;; placed commit). An image's block table and relocation table already say
+;; who holds whom (FORMAT-V1 §9: the relocation table is the in-degree of
+;; every block, which is what the tally counts). When a placement registers
+;; its tables, hold-root! writes the counts from them instead -- the same
+;; words the walk would write, no mechanism beside the count: no journal,
+;; no liveness scan, no new counter. Behind the flag the operator decides
+;; on lane Z4's numbers (IMPL-PLAN §7 F5); flag off, nothing here runs.
+;; ---------------------------------------------------------------------------
+
+(def ^:dynamic *count-at-place*
+  "Fork F5's flag: when true, a root whose placement was registered
+   (register-placed!) has its counts written from the placement's tables
+   by hold-root! instead of discovered by the walk. Default false: every
+   root is walked, exactly as before, and register-placed! records
+   nothing."
+  false)
+
+(defonce ^:private placed-registrations
+  ;; [[domain-root root-off tables] ...], matched by identity on the domain
+  ;; root, as parkers: a domain root is a host slab context no host's map
+  ;; may be asked to hash. A registration is made by a placement inside a
+  ;; swap attempt and consumed by that attempt's hold-root!; drop-root!
+  ;; forgets any residue of its root.
+  (atom []))
+
+(defonce ^:private placed-write-counter (atom 0))
+
+(defn placed-write-count
+  "How many roots have had their counts written from placement tables in
+   this process (the spike's instrument: the proof, in a test or a bench,
+   that the written path ran and not the walk)."
+  []
+  @placed-write-counter)
+
+(defn register-placed!
+  "A placement (eve.flat.place, inside the swap function) has laid an
+   image's blocks into sio's domain, unpublished. Record its tables for
+   hold-root!: root-off is the placed root; blocks names every placed
+   block once, {offset kind} with the kind the tally's reader names it by
+   (the root's, its root kind); edges is the image's relocation table
+   resolved to this domain's offsets, one [owner target] entry per
+   pointer, duplicates kept -- a block pointed at twice is held twice.
+
+   Answers true when the registration was taken (*count-at-place* bound);
+   with the flag off it records nothing and answers false. The tables are
+   validated by hold-root! against the domain's blocks before a single
+   word is written from them; a registration that does not validate is
+   dropped and the root is walked."
+  [sio root-off blocks edges]
+  (if *count-at-place*
+    (let [root (alloc/domain-root sio)]
+      (swap! placed-registrations
+             (fn [rs]
+               (conj (filterv (fn [[r o _]] (not (and (identical? r root) (== o root-off)))) rs)
+                     [root root-off {:blocks blocks :edges edges}])))
+      true)
+    false))
+
+(defn forget-placed!
+  "Drop any registration for root-off in sio's domain without using it (a
+   placement rolled back by its owner). Answers whether one was present."
+  [sio root-off]
+  (let [root (alloc/domain-root sio)]
+    (locking placed-registrations
+      (let [rs @placed-registrations
+            kept (filterv (fn [[r o _]] (not (and (identical? r root) (== o root-off)))) rs)]
+        (reset! placed-registrations kept)
+        (< (count kept) (count rs))))))
+
+(defn- take-placed!
+  "The registration for (sio's domain, root-off), removed and answered, or nil."
+  [sio root-off]
+  (let [root (alloc/domain-root sio)]
+    (locking placed-registrations
+      (let [rs @placed-registrations
+            hit (some (fn [[r o t]] (when (and (identical? r root) (== o root-off)) t)) rs)]
+        (when hit
+          (reset! placed-registrations
+                  (filterv (fn [[r o _]] (not (and (identical? r root) (== o root-off)))) rs)))
+        hit))))
+
+(defn- fresh-placed-block?
+  "The block at off is as a placement leaves it: allocated, rowed, and
+   uncounted (no PUB, a zero count word). Anything else and the tables do
+   not describe this domain's blocks -- a block another holder has counted
+   fails here by construction, so written counts can never stomp a live
+   count."
+  [sio off]
+  (and (live? off)
+       (alloc/allocated? sio off)
+       (boolean
+        (when-let [row (alloc/desc-of sio off)]
+          (and (zero? (bit-and (flags row) F_PUB))
+               (zero? (cnt row)))))))
+
+(defn- placed-counts
+  "The counts the walk would write over a freshly placed tree, computed
+   from its tables: {off count}. The propagation is hold!'s own shape,
+   minus the CASes: from the root (the slot's hold) each arrival at a
+   block raises its count once, and a block's edges are followed once,
+   when it is first reached -- and only when the block is read here (a
+   block held as a leaf is counted and not descended, as in hold!)."
+  [sio root-off blocks edges]
+  (let [out (reduce (fn [m [o t]] (update m o (fnil conj []) t)) {} edges)]
+    (loop [work [root-off] counts {} descended #{}]
+      (if (empty? work)
+        counts
+        (let [o (peek work) work (pop work)
+              counts (assoc counts o (inc (get counts o 0)))
+              down (and (not (contains? descended o))
+                        (readable? sio o (get blocks o)))]
+          (recur (if down (into work (get out o)) work)
+                 counts
+                 (if down (conj descended o) descended)))))))
+
+(defn- write-placed-counts!
+  "Write a freshly placed tree's counts from its registration's tables:
+   true when the tables validated and the counts are written. The tables
+   must name the root, keep every edge inside the table, and describe
+   blocks this domain holds fresh (fresh-placed-block?); any failure and
+   nothing is written -- the caller walks.
+
+   Each counted block gets the walk's words: PUB (and LEAF when the walk
+   would hold it as a leaf), its count stored, its row noted as touched,
+   so a durable commit forces exactly the rows the walk's writes would.
+   A block the propagation never reaches is left uncounted, as the walk
+   leaves what it never reaches."
+  [sio root-off {:keys [blocks edges]}]
+  (and (contains? blocks root-off)
+       (every? (fn [[o t]] (and (contains? blocks o) (contains? blocks t))) edges)
+       (every? (fn [[off _]] (fresh-placed-block? sio off)) blocks)
+       (let [counts (placed-counts sio root-off blocks edges)]
+         (doseq [[off n] counts]
+           (let [row (alloc/desc-of sio off)]
+             (set-flag! row (if (readable? sio off (get blocks off))
+                              F_PUB
+                              (bit-or F_PUB F_LEAF)))
+             (slab/region-store-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) (int n))
+             (note-touch! off)))
+         (swap! placed-write-counter inc)
+         true)))
+
 (defn hold-root!
   "An atom slot's hold of root value ptr, taken BEFORE the CAS that publishes it: a write that won the slot after
-   this one cannot drop ptr before it is counted. A lost CAS takes it back with drop-root!."
+   this one cannot drop ptr before it is counted. A lost CAS takes it back with drop-root!.
+
+   With *count-at-place* bound and a placement of ptr registered
+   (register-placed!), the hold is taken by writing the counts from the
+   placement's tables when they validate against the placed blocks; any
+   doubt and the walk decides, exactly as it does for every other root.
+   Written state is indistinguishable from walked state, so a lost CAS
+   and a won one are unwound and kept by the same drop and flush either
+   way."
   [sio ptr]
-  (when (live? ptr) (hold! sio ptr (root-kind sio ptr))))
+  (when (live? ptr)
+    (let [reg (when *count-at-place* (take-placed! sio ptr))]
+      (when-not (and reg (write-placed-counts! sio ptr reg))
+        (hold! sio ptr (root-kind sio ptr))))))
 
 (defn drop-root!
   "An atom slot lets root value ptr go: the old value after a won CAS, the attempt's own new value after a lost one."
   [sio ptr park!]
-  (when (live? ptr) (drop! sio ptr (root-kind sio ptr) park!)))
+  (when (live? ptr)
+    (forget-placed! sio ptr)
+    (drop! sio ptr (root-kind sio ptr) park!)))
 
 (defn free-unheld!
   "A lost attempt's allocations freed: every block of offs no holder took (still uncounted). Answers how many."

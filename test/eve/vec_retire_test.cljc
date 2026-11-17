@@ -14,7 +14,7 @@
             [eve.map :as em]
             [eve.set :as es]
             [eve.atom :as a]
-            [eve.deftype.int-map :as im]
+            [eve.sorted :as so]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser]))
@@ -123,10 +123,12 @@
       (is (= xs (set (e/seq (es/hash-set-from-header sio hdr)))) (str "a set of " n ": its members")))))
 
 (deftest an-int32-field-holds-an-offset-past-2-31
-  ;; a slab-qualified offset is [class:3 | block:29], past 2^31 from class 4 up: an int-map's children are int32 fields,
-  ;; and the field writer's checked cast threw ("integer overflow") once a heap domain's small classes filled and its
-  ;; nodes spilled upward (30 rebuilds of a 200-key int-map in one atom)
+  ;; a slab-qualified offset is [class:3 | block:29], past 2^31 from class 4 up: a tree's children are int32 fields
+  ;; (the field writer's own comment names the red-black tree's children beside the int-map's), and the field writer's
+  ;; checked cast threw ("integer overflow") once a heap domain's small classes filled and its nodes spilled upward
+  ;; (30 rebuilds of a 200-key int-map in one atom). The vehicle was an int-map until PersistentIntMap was deleted
+  ;; (Nov 15 2026); the sorted map's treap children ride the same int32 field writer, so it carries the check now.
   (let [sio (alloc/heap-domain-sio! {:capacities {0 4096 1 4096 2 4096 3 4096}})
-        m (binding [d/*domain-sio* sio] (reduce (fn [m k] (e/assoc m k (* k k))) (im/int-map) (range 300)))]
+        m (binding [d/*domain-sio* sio] (reduce (fn [m k] (e/assoc m k (* k k))) (so/sorted-map) (range 300)))]
     (is (= (into {} (map (fn [k] [k (* k k)])) (range 300)) (into {} (map (fn [k] [k (e/get m k)])) (range 300)))
         "every key reads back, its nodes in the classes past 2^31")))

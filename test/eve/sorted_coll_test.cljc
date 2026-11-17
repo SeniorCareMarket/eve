@@ -16,12 +16,10 @@
    the JVM and bb each test builds in a heap domain of its own, dropped with the test (rrb_vector_test's fixture).
    ClojureScript's module slab grows on demand."
   [f]
-  #?(:cljs (f)
-     :default
-     (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
+  (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
                                                                     2 (* 8 1024 1024) 3 (* 8 1024 1024)
                                                                     4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
-       (f))))
+       (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
 
@@ -251,7 +249,7 @@
     (is (= (hash #{1 2 3}) (hash st)) "a set's hash")
     (testing "equal either way round to the host's own map and set (C1: Clojure's sorted map is = to its hash
               map), in the host's vocabulary: clojure.core's =, or eve.core's equiv on bb, where an eve type
-              answers eve.core's protocols (an eve-deftype is no sci map: rb-tree's set is the same there)"
+              answers eve.core's protocols (an eve-deftype is no sci map: the treap's set is the same there)"
       (let [eq #?(:bb e/equiv :default =)]
         (is (eq m {1 :a 2 :b}))
         (is (eq {1 :a 2 :b} m))

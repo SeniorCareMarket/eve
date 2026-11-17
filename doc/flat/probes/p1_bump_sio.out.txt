@@ -1,0 +1,36 @@
+== P1.1 the slab types over a bump buffer (no new type code)
+  built: eve.map.EveHashMap tail 4700 bytes, 143 blocks
+  eve->clj of the bump-buffer value equals the source        PASS
+  lookup, nested lookup, nth, count, contains? in place      PASS
+  (= static plain) and (= plain static)                      PASS
+  hash of static value = hash of plain value                 PASS
+  seq / reduce over it                                       PASS
+== P1.2 a view is (buffer, length, root); an update appends; the old view never sees it
+  append: tail 4700 -> 6024 (+ 1324 bytes) root 4688 -> 6012 frees ignored: 2
+  new view has the update                                    PASS
+  old root still reads the old value over the GROWN buffer   PASS
+  old view's hash unchanged after the append                 PASS
+  no byte below the old length was rewritten by the append   PASS
+  the old view reads from a buffer truncated at its length   PASS
+  old view = new view minus the change (structural sharing by offset) PASS
+  property: 80 random maps x 15 updates; every earlier view stable, truncatable, hash-stable PASS  
+== P1.3 the buffer is the storage form: file out, file in, read in place
+  file round trip: reopened value equals, no transform       PASS
+  reopened value: lookup without materializing               PASS
+  frozen view refuses allocation (assoc throws)              PASS
+== P1.4 what it costs: plain -> eve in a slab domain vs in a bump buffer; bytes; the block census
+  map 10k int->int             build: slab    121.0 ms  bump     23.1 ms | eve->clj: slab      8.9 ms  bump      2.1 ms
+                               blocks 40469  exact bytes 4953676  class-padded bytes 7922816  edn bytes 107780  census {32 10076, 64 2496, 128 3140, 256 22039, 512 2708, 1024 10}
+  map 10k int->int: equal after build                        PASS
+  vector 100k ints             build: slab    358.9 ms  bump     32.2 ms | eve->clj: slab     17.0 ms  bump     13.5 ms
+                               blocks 308318  exact bytes 17464600  class-padded bytes 20264608  edn bytes 588891  census {32 200001, 128 108317}
+  vector 100k ints: equal after build                        PASS
+  vector 10k small maps        build: slab    321.6 ms  bump    159.0 ms | eve->clj: slab     17.7 ms  bump     15.7 ms
+                               blocks 80594  exact bytes 5195448  class-padded bytes 6795936  edn bytes 595373  census {32 30001, 64 10000, 128 40593}
+  vector 10k small maps: equal after build                   PASS
+  map 1k kw->vector(20 ints)   build: slab     55.0 ms  bump     28.4 ms | eve->clj: slab      4.0 ms  bump      3.8 ms
+                               blocks 25355  exact bytes 855740  class-padded bytes 1533504  edn bytes 58890  census {32 22010, 64 30, 128 1471, 256 1204, 512 634, 1024 6}
+  map 1k kw->vector(20 ints): equal after build              PASS
+
+P1 RESULT: 19/19 checks pass
+exit 0

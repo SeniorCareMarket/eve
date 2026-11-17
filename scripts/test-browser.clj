@@ -6,7 +6,10 @@
 ;; 127.0.0.1, opens it in headless Chromium and waits for the page to POST its result to /result. Exits 0 when the
 ;; suite and the main thread's rows are green.
 ;;
-;;   EVE_CHROME (default /opt/pw-browsers/chromium), EVE_BROWSER_TIMEOUT_S (default 300).
+;;   EVE_CHROME (default: /opt/pw-browsers/chromium when present, else a
+;;   Playwright-installed Chromium from the per-OS cache — `npx playwright
+;;   install chromium` puts it in ~/Library/Caches/ms-playwright on macOS,
+;;   ~/.cache/ms-playwright on Linux), EVE_BROWSER_TIMEOUT_S (default 300).
 ;;   EVE_BROWSER_PERF=1: eve's performance suite instead (the :eve-perf-browser build, eve.runner.perf-browser-main),
 ;;   its lines printed.
 (require '[babashka.fs :as fs]
@@ -54,12 +57,37 @@
            :body f}
           {:status 404 :headers isolated :body "not found"})))))
 
+(defn- find-chrome
+  "EVE_CHROME wins; then the fleet path /opt/pw-browsers/chromium; then a
+   Playwright-installed Chromium under the per-OS cache dir (the fleet
+   path exists on the Linux boxes; a Mac only has the cache)."
+  []
+  (or (System/getenv "EVE_CHROME")
+      (let [fleet "/opt/pw-browsers/chromium"
+            home (System/getProperty "user.home")
+            mac? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
+            cache (if mac?
+                    (str home "/Library/Caches/ms-playwright")
+                    (str home "/.cache/ms-playwright"))
+            full (if mac?
+                   ["chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium"]
+                   ["chromium-*/chrome*/chrome"])
+            shell (if mac?
+                    ["chromium_headless_shell-*/chrome-mac*/headless_shell"]
+                    ["chromium_headless_shell-*/chrome*/chrome-headless-shell"
+                     "chromium_headless_shell-*/chrome*/headless_shell"])
+            newest (fn [pats] (last (sort (map str (mapcat #(fs/glob cache %) pats)))))]
+        (or (when (fs/exists? fleet) fleet)
+            (newest full)
+            (newest shell)))))
+
 (def stop (http/run-server serve {:ip "127.0.0.1" :port 0 :legacy-return-value? false}))
 (def port (http/server-port stop))
 (def profile (str (fs/create-temp-dir {:prefix "eve-chrome-"})))
 (step (str "serving on 127.0.0.1:" port "; opening headless Chromium"))
 (def chrome (p/process {:out :string :err :string}
-                       (or (System/getenv "EVE_CHROME") "/opt/pw-browsers/chromium")
+                       (or (find-chrome)
+                           (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
                        "--headless=new" "--no-sandbox" "--disable-gpu" "--no-proxy-server" "--no-first-run"
                        "--enable-logging=stderr" "--v=0"
                        (str "--user-data-dir=" profile) (str "http://127.0.0.1:" port "/index.html")))

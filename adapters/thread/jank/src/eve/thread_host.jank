@@ -31,8 +31,14 @@ namespace eve_thread {
   using namespace jank::runtime;
   long parallelism() { unsigned n(std::thread::hardware_concurrency()); return n == 0 ? 1 : (long)n; }
   /* a worker thread for f: f rooted while the thread lives (statics and the heap of
-     JIT-compiled code are not scanned — process/jank's timer note), the thread registered
-     with the collector, its end unregistering both. thread-main attempts the entry
+     JIT-compiled code are not scanned — process/jank's timer note). The collector's own
+     pthread interposition registers the thread (GC_pthread_start_inner /
+     GC_call_with_stack_base wrap every pthread_create in this build): a manual
+     GC_register_my_thread/GC_unregister_my_thread pair on top of that double-tears-down
+     at thread exit — the wrapper's GC_thread_exit_proc then runs GC_destroy_thread_local
+     on the already-unregistered record and segfaults (macOS crash report, 2026-11-13:
+     faulting thread's whole stack was those GC exit frames, fault address 0x1000).
+     So: roots by hand, registration by the collector. thread-main attempts the entry
      already; the catch-all here is for what escapes it, so a worker never takes the
      process down with it. */
   struct job { object_ref f; };
@@ -41,9 +47,7 @@ namespace eve_thread {
     GC_add_roots(&j->f, &j->f + 1);
     GC_allow_register_threads();
     std::thread([j]() {
-      struct GC_stack_base sb; GC_get_stack_base(&sb); GC_register_my_thread(&sb);
       try { j->f.call(); } catch(...) {}
-      GC_unregister_my_thread();
       GC_remove_roots(&j->f, &j->f + 1);
       delete j;
     }).detach();

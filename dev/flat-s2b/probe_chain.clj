@@ -1,0 +1,75 @@
+;; S2b chain form: freeze past one rung and past one chunk.
+;;   mid:       2,000 rows (2 chunks, framed stream, chained)
+;;   canonical: 10,000 rows (~6 chunks)
+;;   retire:    the chain's first segment address is reused
+;;              after the root retires (coalesc proof, the
+;;              s1extent pattern)
+;;   deliver:   deliver-flat of the canonical value spans chunks
+(require '[eve.atom :as ea] '[eve.flat.freeze :as freeze]
+         '[eve.flat.corpora :as corpora] '[eve.flat.chunk :as chunk]
+         '[eve.digest :as digest] '[eve.slab-io :as slab]
+         '[eve.deftype-proto.data :as d]
+         '[eve.deftype-proto.alloc :as alloc])
+(def cmap (into {} (corpora/corpora :canonical)))
+(def rows (:records-10k cmap))
+(def rows2000 (subvec rows 0 2000))
+(println :stage :corpora-done) (flush)
+(def packs2000 (chunk/pack-all rows2000))
+(def packs10k (chunk/pack-all rows))
+(println :chunks-2000 (count packs2000)
+         :bytes-2000 (reduce + (map alength packs2000))
+         :chunks-10k (count packs10k)
+         :bytes-10k (reduce + (map alength packs10k)))
+(flush)
+(def dir (str (System/getProperty "java.io.tmpdir") "/chain-1"))
+(def a (ea/atom rows2000 {:mmap-dir dir :file-size (* 256 1024 1024)}))
+(def sio (ea/atom-sio a))
+;; mid: freeze 2,000 rows -> framed chain
+(def fv (freeze/freeze-value sio rows2000))
+(swap! a (fn [_] fv))
+(def got @a)
+(println :mid {:frozen (instance? eve.flat.freeze.FrozenValue got)
+               :count (count got)
+               :nth0 (= (:name (nth got 0)) "user-0")
+               :nth-mid (= (:name (nth got 1500)) (:name (nth rows2000 1500)))
+               :nth-last (= (:name (nth got 1999)) (:name (nth rows2000 1999)))
+               :equal (= got rows2000)
+               :hash (= (hash got) (hash rows2000))
+               :seq-count (count (seq got))
+               :digest (= (freeze/chain-digest-words sio (d/-root-header-off got))
+                          (digest/digest-words-of rows2000))})
+;; canonical: freeze 10,000 rows -> bigger chain
+(def fv10 (freeze/freeze-value sio rows))
+(swap! a (fn [_] fv10))
+(def got10 @a)
+(println :canonical {:count (count got10)
+                     :nth-last (= (:name (nth got10 9999)) (:name (nth rows 9999)))
+                     :equal (= got10 rows)
+                     :hash (= (hash got10) (hash rows))})
+;; retire: fresh atom, canonical chain, then reuse of segment 0
+(def dir2 (str (System/getProperty "java.io.tmpdir") "/chain-2"))
+(def b (ea/atom [] {:mmap-dir dir2 :file-size (* 256 1024 1024)}))
+(def bsio (ea/atom-sio b))
+(swap! b (fn [_] (freeze/freeze-value bsio rows)))
+(def bv (ea/read-pinned b (fn [r] r)))
+(def bhdr (d/-root-header-off bv))
+(def seg0 (slab/read-i32 bsio bhdr 8))
+(println :chain-head {:hdr-class (alloc/decode-class-idx bhdr)
+                      :seg0-class (alloc/decode-class-idx seg0)
+                      :seg0-idx (alloc/decode-block-idx seg0)})
+(reset! b [])
+(dotimes [_ 3]
+  (dotimes [i 40] (swap! b conj {:i i :s (str "churn-" i)}))
+  (Thread/sleep 150))
+(let [off2 (alloc/-sio-alloc! bsio (+ 8 freeze/SEG-PAYLOAD))]
+  (println :retire {:realloc-class (alloc/decode-class-idx off2)
+                    :realloc-idx (alloc/decode-block-idx off2)
+                    :seg0-idx (alloc/decode-block-idx seg0)
+                    :reused (= (alloc/decode-block-idx off2)
+                               (alloc/decode-block-idx seg0))}))
+;; deliver-flat spans chunks now
+(def dl (freeze/deliver-flat rows))
+(println :deliver {:type (type dl) :count (count dl) :equal (= dl rows)
+                   :nth-last (= (:name (nth dl 9999)) (:name (nth rows 9999)))})
+(println :DONE)
+(System/exit 0)

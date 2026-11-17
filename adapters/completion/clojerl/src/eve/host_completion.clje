@@ -1,0 +1,16 @@
+(ns eve.host-completion
+  "ClojureErlang's completion of its core to Clojure's, loaded first by
+   eve.host (HOST-CONTRACT §10): what clojerl's clojure.core lacks and
+   Eve's shared code calls. ClojureErlang's core is a real mutable
+   core, so the binding is interned into clojure.core at load — the
+   shape jank's and let-go's completions use for the same name.
+
+   - requiring-resolve: the var a fully-qualified symbol names,
+     requiring its namespace first if it is not yet loaded
+     (Clojure's; clojerl's core has none — eve.flat.sister's
+     chunk-var calls clojure.core/requiring-resolve).")
+
+(intern 'clojure.core 'requiring-resolve
+        (fn [sym] (or (resolve sym)
+                      (do (require (symbol (namespace sym)))
+                          (resolve sym)))))

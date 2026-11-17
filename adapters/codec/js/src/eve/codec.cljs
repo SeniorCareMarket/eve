@@ -8,6 +8,7 @@
    The interface every eve.codec has is at the end (adapters/README.md);
    eve.deftype-proto.serialize is what the codecs share."
   (:require [eve.hamt-util :as hu]
+            [eve.numeric :as num]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser
              :refer [FAST_TAG_CHAR FAST_TAG_DATE FAST_TAG_EVE_ARRAY FAST_TAG_FALSE
@@ -85,7 +86,9 @@
 
 (defn set-direct-map-encoder!
   "Set the direct map encoder function. Called by sab_map.cljs at load.
-   encoder: (fn [cljs-map] -> Uint8Array) — builds SAB map and returns pointer bytes"
+   encoder: (fn [sio cljs-map] -> Uint8Array) — builds the SAB map in sio
+   (the running encode's, encoding-sio; nil outside an encode) and returns
+   pointer bytes"
   [encoder]
   (set! direct-map-encoder encoder))
 
@@ -450,9 +453,9 @@
 (declare serialize-flat-collection)
 
 ;;-----------------------------------------------------------------------------
-;; The numbers past a fixed width (FORMAT-DECISIONS.md §8): JavaScript's BigInt,
-;; written by its magnitude (INT32, INT64, else BIGINT); ClojureScript has no
-;; ratio and no decimal, so their bytes are refused, never read as a double.
+;; The numbers past a fixed width (FORMAT-DECISIONS.md §8): JavaScript's BigInt
+;; (wrapped by eve.numeric so it prints and equals as in Clojure), written by its
+;; magnitude (INT32, INT64, else BIGINT); Ratio and BigDecimal are Eve types.
 ;; References (§9): a value with no eve bytes, by its handle in this process's
 ;; table, never into a shared domain.
 ;;-----------------------------------------------------------------------------
@@ -511,6 +514,55 @@
       (.set buf tw 7)
       buf)))
 
+
+(defn- as-js-bigint
+  "A JS BigInt for an eve.numeric bigint, a raw JS BigInt, or an integer."
+  [x]
+  (cond
+    (js-bigint? x) x
+    (num/bigint? x) (js/BigInt (num/str-number x))
+    (number? x) (js/BigInt (js/Math.trunc x))
+    :else (js/BigInt (str x))))
+
+(defn- serialize-ratio
+  "RATIO [0xEE][0xDB][0x17][len:u32LE][numerator][len:u32LE][denominator]."
+  [r]
+  (let [nb (bigint->twos (as-js-bigint (num/numerator r)))
+        db (bigint->twos (as-js-bigint (num/denominator r)))
+        buf (js/Uint8Array. (+ 11 (.-length nb) (.-length db)))
+        dv (js/DataView. (.-buffer buf))]
+    (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 ser/FAST_TAG_RATIO)
+    (.setUint32 dv 3 (.-length nb) true)
+    (.set buf nb 7)
+    (.setUint32 dv (+ 7 (.-length nb)) (.-length db) true)
+    (.set buf db (+ 11 (.-length nb)))
+    buf))
+
+(defn- serialize-bigdec
+  "BIGDEC [0xEE][0xDB][0x18][scale:i32LE][len:u32LE][unscaled], canonical
+   (trailing zeros stripped, a negative scale raised to 0)."
+  [d]
+  (let [u (as-js-bigint (num/unscaled-value d))
+        s (num/scale d)
+        ;; strip trailing zeros, then raise a negative scale to 0
+        ten (js/BigInt 10)
+        [u s] (loop [u u s s]
+                (if (and (not= u (js/BigInt 0)) (= (js/BigInt 0) (- u (* (/ u ten) ten))))
+                  (recur (/ u ten) (dec s))
+                  [u s]))
+        [u s] (if (neg? s)
+                (loop [u u k s]
+                  (if (neg? k) (recur (* u ten) (inc k)) [u 0]))
+                [u s])
+        ub (bigint->twos u)
+        buf (js/Uint8Array. (+ 11 (.-length ub)))
+        dv (js/DataView. (.-buffer buf))]
+    (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 ser/FAST_TAG_BIGDEC)
+    (.setInt32 dv 3 s true)
+    (.setUint32 dv 7 (.-length ub) true)
+    (.set buf ub 11)
+    buf))
+
 (defn- twos->bigint
   "The BigInt at off of u8: [len:u32LE][two's complement, big-endian]."
   [^js u8 off]
@@ -542,11 +594,16 @@
    ::none for another tag."
   [^js u8 off tag]
   (cond
-    (== tag ser/FAST_TAG_BIGINT) (twos->bigint u8 (+ off 3))
+    (== tag ser/FAST_TAG_BIGINT) (num/bigint (twos->bigint u8 (+ off 3)))
     (== tag ser/FAST_TAG_RATIO)
-    (throw (js/Error. "eve: a ratio has no representation on ClojureScript (FORMAT-DECISIONS.md §8)"))
+    (let [n (twos->bigint u8 (+ off 3))
+          nlen (.getUint32 (js/DataView. (.-buffer u8) (.-byteOffset u8) (.-byteLength u8)) (+ off 3) true)
+          d (twos->bigint u8 (+ off 3 4 nlen))]
+      (num/ratio n d))
     (== tag ser/FAST_TAG_BIGDEC)
-    (throw (js/Error. "eve: an arbitrary-precision decimal has no representation on ClojureScript (FORMAT-DECISIONS.md §8)"))
+    (let [scale (.getInt32 (js/DataView. (.-buffer u8) (.-byteOffset u8) (.-byteLength u8)) (+ off 3) true)
+          u (twos->bigint u8 (+ off 7))]
+      (num/bigdec u scale))
     (== tag ser/FAST_TAG_REF)
     (let [dv (js/DataView. (.-buffer u8) (.-byteOffset u8) (.-byteLength u8))]
       (ser/handle->ref (.getUint32 dv (+ off 3) true) (.getUint32 dv (+ off 7) true)))
@@ -593,7 +650,7 @@
 
           ;; CLJS maps — direct encode (skip builder registry + EveHashMap allocation)
           (and direct-map-encoder (map? elem))
-          (direct-map-encoder elem)
+          (direct-map-encoder encoding-sio elem)
 
           ;; UUID
           (uuid? elem)
@@ -661,9 +718,15 @@
                 (.set buf encoded 7)
                 buf)))
 
-          ;; a BigInt, by its magnitude (§8)
-          (js-bigint? elem)
-          (serialize-bigint elem)
+          ;; a BigInt, by its magnitude (§8); Ratio / BigDecimal (§8)
+          (or (js-bigint? elem) (num/bigint? elem))
+          (serialize-bigint (as-js-bigint elem))
+
+          (num/ratio? elem)
+          (serialize-ratio elem)
+
+          (num/decimal? elem)
+          (serialize-bigdec elem)
 
           ;; JS typed arrays — serialize as flat byte blob
           (some? (typed-array-subtype elem))
@@ -719,7 +782,7 @@
 
           ;; CLJS maps — direct encode (skip builder registry + EveHashMap allocation)
           (and direct-map-encoder (map? elem))
-          (direct-map-encoder elem)
+          (direct-map-encoder encoding-sio elem)
 
           (uuid? elem)
           (let [buf (js/Uint8Array. 19)
@@ -783,9 +846,15 @@
                 (.set buf encoded 7)
                 buf)))
 
-          ;; a BigInt, by its magnitude (§8)
-          (js-bigint? elem)
-          (serialize-bigint elem)
+          ;; a BigInt, by its magnitude (§8); Ratio / BigDecimal (§8)
+          (or (js-bigint? elem) (num/bigint? elem))
+          (serialize-bigint (as-js-bigint elem))
+
+          (num/ratio? elem)
+          (serialize-ratio elem)
+
+          (num/decimal? elem)
+          (serialize-bigdec elem)
 
           ;; JS typed arrays — serialize as flat byte blob
           (some? (typed-array-subtype elem))
@@ -1132,7 +1201,7 @@
                     (recur (+ pos 4 elen) (inc i) (conj! v elem))))))
 
             :else
-            ;; Unknown tag — check registered constructors (eve-deftype types)
+            ;; Unknown tag — check registered constructors (deftype types)
             (let [ctor (get-type-constructor tag)]
               (when ctor
                 (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
@@ -1468,9 +1537,18 @@
     (throw (ex-info (str "write-collection!: no writer for " tag) {:tag tag}))))
 
 (defn value->eve-bytes
-  "The flat form of v (the byte-array codec's): this codec has none, so a caller that asks — eve.digest's root digest,
-   under eve.thread-host/attempt — gets no digest and walks, as it did when the name was missing here (the shadow
-   build's undeclared-var warning, a TypeError at the call). Declared so a host that resolves names when it loads a
-   namespace (nbb) can load eve.digest."
-  [_v]
-  (throw (ex-info "eve.codec: no flat form on this codec (value->eve-bytes)" {:codec :js})))
+  "The flat form of v, the byte-array codec's canonical bytes (FORMAT-DECISIONS.md §2): scalars inline, a map, set or
+   sequential flat and in canonical order (serialize-flat-element), never a slab pointer. Byte-equal to the
+   byte-array codec's value->eve-bytes on the shared value set (measured 2026-11-16 over scalars, strings, keywords,
+   symbols, uuid, inst and nested map/set/vec/list). A value held by reference is refused under a shared write
+   (ser/ref->handle!), so eve.digest's root digest gets no digest and walks, as on the byte-array codec. eve.net.snapshot's
+   trunk bytes are this form."
+  [v]
+  (serialize-flat-element v))
+
+(defn eve-bytes->value
+  "The inverse of value->eve-bytes: decode flat bytes (FLAT_MAP/SET/VEC and every scalar tag) to a CLJS value. sio is
+   the slab I/O a nested pointer would be read through (none for flat bytes)."
+  ([bs] (deserialize-element nil bs))
+  ([bs sio] (deserialize-element sio bs))
+  ([bs sio _coll-factory] (deserialize-element sio bs)))

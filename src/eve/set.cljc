@@ -19,10 +19,18 @@
    [eve.encoding :as enc]
    [eve.core :as ecore]
    [eve.deftype-proto.serialize :as ser]
+   [eve.hamt-batch :as batch]
    [eve.hamt-util :as hu :refer [portable-hash-bytes popcount32
                                   bitpos node-bit has-bit? get-index]]
    [eve.platform :as p]
    [eve.deftype-proto.macros :as eve]
+   ;; load order: the deftype expansion's top-level register-sister!
+   ;; call needs eve.flat.sister first in the RUNTIME graph (a macro
+   ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.
+   [eve.flat.sister]
+   ;; Load order, same law for the second registry: the expansions
+   ;; also end in eve.type-readers/register! calls.
+   [eve.type-readers]
    [eve.codec :as codec]
    [eve.digest :as dg]))
 
@@ -63,7 +71,7 @@
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
-   domain, else this process's own (eve.deftype-proto.alloc/current-sio)."
+   domain; outside a swap/domain context it throws (:no-domain-context)."
   []
   (alloc/current-sio))
 
@@ -849,6 +857,12 @@
   (asTransient [this]
     (eve.set/->transient-set this)))
 
+;; bb: EveHashSet is a SciType with no print-method, so printing fell to its
+;; toString, (pr-str this), and recursed to a StackOverflowError — pr-str,
+;; str and every clojure.test report naming the value died. It prints as
+;; the host collection, as on the JVM.
+#?(:bb (defmethod print-method EveHashSet [x w] (print-method (into #{} (ecore/seq x)) w)))
+
 ;;=============================================================================
 ;; Offset Collection (for epoch-based retirement in mmap atoms)
 ;;=============================================================================
@@ -956,17 +970,18 @@
    If first arg satisfies ISlabIO, uses it as sio.
    Otherwise uses platform default sio and all args as values."
   [& args]
-  (let [sio-or-default (default-sio)
+  (let [;; the explicit sio first: (default-sio) throws outside a swap!/domain
+        ;; context, so it is only asked for when no sio was given
         [sio vals] (if (and (seq args) (satisfies? alloc/ISlabIO (first args)))
                      [(first args) (rest args)]
-                     [sio-or-default args])]
+                     [(default-sio) args])]
     (reduce ecore/conj (empty-hash-set sio) vals)))
 )
 
 ;;=============================================================================
-;; Transients: a persistent collection behind a transient's interface — each
-;; op makes the next persistent one (eve.core's ops: on bb the type answers
-;; eve.core's protocols), and frees what it superseded in the one before
+;; Transients: empty-source builds batch canonical encoded entries and write
+;; each final node once. Observation/removal flushes the batch. Nonempty
+;; sources and post-flush edits use the persistent path with owned-node reclaim.
 ;;=============================================================================
 
 (defn collect-member-path-diff-offsets
@@ -1008,26 +1023,71 @@
       (alloc/free-owned! sio (collect-member-path-diff-offsets s s' v)))
     s'))
 
+
+(defn- build-batch-set [sio entries]
+  (let [entries (batch/unique-entries entries)
+        root (if (empty? entries) NIL_OFFSET
+                 (batch/build
+                  entries 0
+                  (fn [db nb data children]
+                    (let [size (+ NODE_HEADER_SIZE (* 4 (count children))
+                                  (reduce (fn [n [_ vb]] (+ n 4 (bytes-length vb))) 0 data))
+                          off (slab/alloc! sio size)]
+                      (slab/write-u8! sio off 0 NODE_TYPE_BITMAP)
+                      (slab/write-u8! sio off 1 0)
+                      (slab/write-u16! sio off 2 0)
+                      (slab/write-i32! sio off 4 db)
+                      (slab/write-i32! sio off 8 nb)
+                      (doseq [[i child] (map-indexed vector children)]
+                        (slab/write-i32! sio off (+ NODE_HEADER_SIZE (* i 4)) child))
+                      (reduce (fn [p [_ vb]] (write-value! sio off p vb))
+                              (values-start-off nb) data)
+                      off))
+                  (fn [entries]
+                    (make-collision-node! sio (ffirst entries)
+                                          (mapv (fn [[_ vb]] [vb]) entries)))))]
+    (hash-set-from-header sio (write-set-header! sio (count entries) root))))
+
 (do
-     (eve/host-deftype TransientEveHashSet [^:volatile-mutable s sio]
+     (eve/host-deftype TransientEveHashSet [^:volatile-mutable s sio ^:volatile-mutable pending]
        clojure.lang.ITransientSet
        (disjoin [this v]
+         (when pending
+           (set! s (build-batch-set sio (persistent! pending)))
+           (set! pending nil))
          (set! s (edit sio s #(ecore/disj % v) v))
          this)
-       (contains [_ v] (ecore/contains? s v))
-       (get [_ v] (ecore/get s v))
-       (count [_] (ecore/count s))
-
+       (contains [_ v]
+         (when pending
+           (set! s (build-batch-set sio (persistent! pending)))
+           (set! pending nil))
+         (ecore/contains? s v))
+       (get [_ v]
+         (when pending
+           (set! s (build-batch-set sio (persistent! pending)))
+           (set! pending nil))
+         (ecore/get s v))
+       (count [_]
+         (when pending
+           (set! s (build-batch-set sio (persistent! pending)))
+           (set! pending nil))
+         (ecore/count s))
        clojure.lang.ITransientCollection
        (conj [this v]
-         (set! s (edit sio s #(ecore/conj % v) v))
+         (if pending
+           (let [vb (serialize-val-bytes sio v)]
+             (set! pending (conj! pending [(portable-hash-bytes vb) vb])))
+           (set! s (edit sio s #(ecore/conj % v) v)))
          this)
-       (persistent [_] (alloc/stop-logging! sio) s))
-
+       (persistent [_]
+         (when pending
+           (set! s (build-batch-set sio (persistent! pending)))
+           (set! pending nil))
+         (alloc/stop-logging! sio) s))
      (defn ->transient-set [s]
-       ;; the set read through a scope of its own over its domain: what its ops allocate is logged there
-       (let [sio (alloc/scope-sio (d/-eve-sio s))]
-         (->TransientEveHashSet (hash-set-from-header sio (d/-root-header-off s)) sio))))
+       (let [sio (alloc/transient-scope (d/-eve-sio s))]
+         (->TransientEveHashSet (hash-set-from-header sio (d/-root-header-off s)) sio
+                                (when (zero? (ecore/count s)) (transient []))))))
 
 (defn eve-hash-set?
   "True for a slab-backed EveHashSet. On babashka a set read from eve memory is

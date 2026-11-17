@@ -15,14 +15,36 @@ collection in the atom's domain; every thread of the process, and on disk every 
 | Vector | `eve.vec/eve-vec`, or any vector stored in an atom | persistent vector trie in slab memory |
 | List | `eve.list/eve-list`, or any list stored in an atom | persistent list in slab memory |
 | Array | `e/eve-array` | typed array (a heap array on the JVM family; a slab block elsewhere) |
-| Integer map, sorted set, sorted map | `eve.deftype.int-map`, `eve.deftype.rb-tree`, `eve.sorted` | `doc/collections.md` |
-| RRB vector | `eve.rrb-vector/vec` | below |
+| Integer map, sorted set, sorted map | `eve.deftype.int-map`, `eve.sorted` | `doc/collections.md` |
 | Dataset | `eve.alpha.ds/dataset` | columnar data frame (named EveArray columns) |
 | Tensor | `eve.alpha.tensor/from-array` | N-dimensional view over an EveArray |
 | Custom types | `e/deftype` (`eve.deftype/eve-deftype`) | user-defined types in slab memory |
 
 Most user code needs only `eve.alpha`. Atoms and domains in depth — disk domains, member atoms, meta-atoms, `$` — are
 `doc/atom-domains.md`.
+
+## Two forms of every value: persistent and flat
+
+Every Eve type exists in two mirror forms. The **persistent** form lives inside an atom domain: a tree of slab
+blocks, structurally shared, updated by path-copying — the form for data at rest in an atom, and the form that
+carries identity. The **flat** form is the same value laid out in one linear buffer: append-only, immutable, read
+in place, with no identity — value semantics in the Valhalla sense. `eve-deftype` generates both from a single
+definition: write the type once and its flat sister is generated alongside it, satisfying the type's own protocols
+over the flat bytes, with a generated `freeze`/`thaw` pair converting between the forms. Eve's built-in
+collections and types have flat forms the same way.
+
+The two forms convert where values cross boundaries. Constructing an Eve type outside a transaction produces
+the flat form automatically; swapping a value that contains flat parts into an atom embeds those parts by
+reference at their positions; reading out of an atom delivers a value's flat parts whole. Inside an atom, a
+subtree can be frozen into its flat form in place, and editing it upgrades just that subtree back toward
+persistent — the edit lives in a persistent overlay over the flat base, at the cost of the edit, not the value.
+
+Flat is the ideal form for everything a value has to travel through: **storage** (one linear buffer instead of
+a scattered block tree), **wire transfer** (self-describing bytes, identical on every host, with a content
+digest for verification), and **atom-to-atom transfer** (the value moves as its bytes and is laid down in the
+target domain directly, not rebuilt value by value). The full rundown — how flat values work, how they behave
+in atoms, on the heap, over the wire and on disk, and what they cost — is the
+[flat objects doc](flat/FLAT.md).
 
 ## Setup
 
@@ -212,12 +234,15 @@ protocol) passes through. The constructor is the same on every host —
 process's own: nobody passes a slab. (`Counter.` builds an instance on the
 host, not in eve memory: an eve type is always built with `->Counter`.)
 
-Two worked examples, one source each, their tests run on the JVM, Node, nbb
-and babashka, their values live in atoms like any Eve value:
-[the RRB vector](#rrb-vector--corerrb-vector-in-eve-memory) — core.rrb-vector's
-ClojureScript implementation, written the ClojureScript way — and
-`src/eve/deftype/rb_tree.cljc`, a red-black tree and a `SortedSet` over it,
-written with the JVM's names.
+Two worked examples stood here, one source each, their tests run on the
+JVM, Node, nbb and babashka, their values live in atoms like any Eve value:
+the RRB vector — core.rrb-vector's ClojureScript implementation, written
+the ClojureScript way — and `src/eve/deftype/rb_tree.cljc`, a red-black
+tree and a `SortedSet` over it, written with the JVM's names. Both left
+core in the Nov 14 2026 trunk consolidation: the RRB family was rehomed
+to `test/eve/rrb_vector*` as the coop contention harness's fixture, and
+rb_tree was deleted — sorted collections are `eve.sorted`, and Eve's one
+persistent vector is `eve.vec`'s EveVector.
 
 ### Hosts
 
@@ -460,82 +485,16 @@ Field names from the type's declaration are available as local bindings in metho
 
 ## RRB vector — core.rrb-vector in eve memory
 
-`eve.rrb-vector` is [core.rrb-vector](https://github.com/clojure/core.rrb-vector)'s
-ClojureScript implementation — relaxed radix balanced trees: vectors with
-logarithmic `catvec` and `subvec` — as one `.cljc` source for every EVE host,
-with the vector in eve memory. It is the worked example of writing an eve
-type: the same algorithm, the same functions in the same files, line for
-line, so reading the two side by side shows what EVE asks of a data
-structure and nothing else.
-
-```clojure
-(require '[eve.rrb-vector :as fv] '[eve.atom :as atom] '[eve.core :as e])
-
-(def a (atom/atom {:id ::playlist} nil))
-(swap! a (fn [_] {:v (fv/vec (range 1000))}))          ; built in the atom's domain
-(swap! a update :v #(fv/catvec % (fv/vec (range 1000 1500))))
-(swap! a update :v #(fv/subvec % 10))
-(e/count (:v @a))                                        ; => 1490, in any process sharing the atom
-```
-
-**Reading it against upstream.** The first commit of the example imports
-upstream's sources byte for byte (core.rrb-vector `d1cc27f1`,
-`src/main/cljs`, EPL 1.0 notices kept); the next one ports them. `git diff`
-between the two, over `src/eve/rrb_vector*`, is exactly what EVE changes,
-and every change is marked `;; eve:` in the source:
-
-| core.rrb-vector (ClojureScript) | `eve.rrb-vector` | Why |
-|---|---|---|
-| `(deftype Vector [cnt shift root tail meta ^:mutable __hash] …)` | `(eve-deftype Vector [^:int32 cnt ^:int32 shift root tail meta ^:mutable __hash] …)` — the body is upstream's | the vector lives in eve memory; `cnt`/`shift` are int32s there; `__hash` (`^:mutable`, no slab type) stays a cache on the instance |
-| cljs.core's `VectorNode [edit arr]` | `(eve-deftype VectorNode [^:host edit arr])` | a node lives in eve memory; its edit token never enters it — a token in shared memory could match another process's transient, which would then edit a node it does not own |
-| JS arrays: `make-array`, `aget`, `aset`, `aclone`, `array-copy` | eve arrays (`eve.deftype.array`), the same calls | a node's children, a leaf's elements, a range table, in eve memory |
-| `(Vector. …)`, `(VectorNode. …)` | `(->Vector …)`, `(->VectorNode …)` | the constructor allocates in the current eve domain |
-| `cljs.core.PersistentVector.EMPTY_NODE`, one node every vector shares | `(empty-node)`, one per vector | an eve value cannot point into another domain (another atom, another process's own memory) |
-| `-empty`, and `pop` of the last element: a cljs.core vector | an empty eve vector | the result stays an eve value |
-| `-as-rrbt` of a cljs.core vector: its nodes, shared | its elements, copied into eve memory | a host vector's nodes are in the host's memory |
-| transient `persistent!`: `(set! (.-edit root) nil)` | `(set! root (->VectorNode nil (.-arr root)))` | the token is on the root instance; the JVM and bb cannot `set!` another object's field |
-
-What remains is portability, not EVE: `Box` (a field another type sets) is a
-`volatile!`, `js/Error.` is `ex-info`, `RSeq.` is `->RSeq` (nbb names
-another namespace's type only through its factory), `-lookup` of a key that
-is not a number answers not-found (as cljs.core's own vector does — `(<= 0
-:k)` throws on the JVM), and `remove-leftmost-child` stops adjusting the
-range table at the entries it copied (upstream also adjusts the slot it
-overwrites next, unset — `NaN` on a JS array, `nil` here). The namespace
-forms differ, and that is all.
-
-**On each host.** On the JVM, ClojureScript and nbb an RRB vector is a vector
-to `clojure.core` (`vector?`, `=`, `nth`, `conj`, `reduce`, transients). On
-babashka its `clojure.core` cannot see the type: say it through `eve.core`
-(`e/count`, `e/conj`, `e/equiv`, `e/transient`, ...), which is what the shared
-test does on every host.
-
-**Memory.** Every persistent step allocates eve memory (an `assoc` copies its
-path), and what a computation drops is reclaimed only when an atom's
-`swap!` replaces it: build inside `swap!`, in the atom's domain. Outside an
-atom a value lands in the process's own domain — on the JVM family a heap domain of 1 MB per slab
-class. The ported test suite (`test/eve/rrb_vector_test.cljc`: upstream's
-`test_common.cljs`, deftest by deftest, the same data and checks) builds each
-test in a domain of its own for that reason.
-
-**Across processes and hosts.** An RRB vector is an eve value like a map:
-one atom can hold them on every host at once. The cross-host contention
-scenario (its value written in eve's
-`test/coop/mix.cljc`) keeps RRB vectors of eve maps, a shared RRB vector turned
-by `catvec` of two `subvec`s, an `eve.deftype.rb-tree` sorted set and nested maps
-in one mmap atom, and has the JVM, Node, nbb, bb, ClojureCLR, basilisp, jolt and clojerl
-`swap!` it at once; each host then reads the final value back and must find what the op counts
-predict.
-
-**Status.** The ported suite (`test/eve/rrb_vector_test.cljc`, 22 tests) runs on
-the JVM (inside `clojure -M:jvm-test`), on ClojureScript (`node
-target/eve-test/all.js rrb-vector`), and in the default runs of nbb, babashka,
-ClojureCLR, jolt and clojerl; on basilisp and glojure it runs when named (`bb test:lpy
-eve.rrb-vector-test`, `bb test:glj eve.rrb-vector-test`), where it takes a long
-time: upstream's data reaches 300,000 elements. nbb and babashka skip the
-host-specific checks in `test-seq` (nbb has no chunked seqs; bb's `e/seq` is a
-Clojure seq walking the vector). The final pass's `bb test:bb` run (2026-10-21 ET,
-247 tests, 0 failures) includes it.
+Not a core namespace. Eve's core has ONE persistent vector: `eve.vec`'s
+EveVector. The core.rrb-vector port that used to live at `src/eve/rrb_vector*`
+was a second vector trunk with no in-core consumers; in the single-trunk
+consolidation (Nov 14 2026) it was rehomed to `test/eve/rrb_vector*`, where it
+survives as the coop contention harness's fixture (`test/coop/mix.cljc` builds
+spliced RRB trees with its `catvec` — the one operation EveVector does not
+have). Its ported suite (`test/eve/rrb_vector_test.cljc`) still runs as that
+fixture's guard. The full porting narrative that stood in this section is in
+this tree's git history at the consolidation's base pin. Upstream:
+https://github.com/clojure/core.rrb-vector (EPL-1.0, see NOTICE).
 
 ## Memory
 

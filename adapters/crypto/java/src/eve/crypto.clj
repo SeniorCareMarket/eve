@@ -17,7 +17,10 @@
            [javax.crypto Cipher Mac]
            [javax.crypto.spec GCMParameterSpec SecretKeySpec IvParameterSpec]))
 
-(defn- arr ^bytes [bs] (byte-array (map unchecked-byte bs)))
+;; a byte array is taken as it is (eve.flat.chunk's sha-vec hands one over on the JVM and bb: MEASURED, JDK 21, its
+;; byte -> vector -> lazy-seq -> byte round trip was ~17 % of fc/pack of the 1BRC result shape); anything else is
+;; converted as before (bb's native byte-array of a seq beats an interpreted loop)
+(defn- arr ^bytes [bs] (if (bytes? bs) bs (byte-array (map unchecked-byte bs))))
 (defn- vec* [^bytes a] (mapv (fn [b] (bit-and b 255)) a))
 
 (defn sha256 "the 32-byte digest" [bs] (vec* (.digest (MessageDigest/getInstance "SHA-256") (arr bs))))

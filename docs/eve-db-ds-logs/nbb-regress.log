@@ -1,0 +1,11 @@
+
+Testing eve.map-entry-test
+
+Testing eve.host-bytes-test
+
+Testing eve.collection-hash-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.hamt-util-test
+:summary {:test 12, :pass 152, :fail 0, :error 0}

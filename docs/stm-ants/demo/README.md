@@ -176,3 +176,5 @@ full render/audit log plus one stdout/stderr pair per member),
 `members/` (each process's generated config/deps and working
 dir), and `world/` (the shared world itself — one clock domain
 plus one domain per cell).
+
+**Disk use:** the demo writes a world to disk (about 10 GB at dim 60: one Eve domain per board cell). It refuses to start below `--min-free-gb` free space, aborts and cleans up below `--disk-floor-gb` (default 3 GB), and deletes the world when the run ends; pass `--keep-run` to keep it.

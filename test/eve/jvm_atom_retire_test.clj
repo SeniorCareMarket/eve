@@ -1,6 +1,6 @@
 (ns eve.jvm-atom-retire-test
   "What a committed write releases, for values that hold eve-deftypes (2026-10-21
-   ET; the counts on the blocks' descriptor rows, eve.tally). A tree — an int-map, a sorted collection, the
+   ET; the counts on the blocks' descriptor rows, eve.tally). A tree — a sorted collection, the
    red-black set — replaced at the root or at a map's key releases what it dropped (it released its header only:
    every node stayed allocated), a collection one of its values points at the same way, and a cons cell whose tail
    is the value it replaced keeps that value (the old root block was freed: a list kept at an atom root broke once
@@ -14,9 +14,8 @@
             [eve.alpha]
             [eve.atom]
             [eve.core :as e]
-            [eve.deftype :refer [eve-deftype]]
-            [eve.deftype.int-map :as im]
-            [eve.deftype.rb-tree :as rb]
+            [eve.deftype :as edt]
+            [eve.map :as em]
             [eve.sorted :as so]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
@@ -25,7 +24,7 @@
 
 (defprotocol ICell (-hd [c]) (-tl [c]))
 
-(eve-deftype RetireCell [head ^:RetireCell tail]
+(edt/deftype RetireCell [head ^:RetireCell tail]
              ICell
              (-hd [_] head)
              (-tl [_] tail))
@@ -35,7 +34,7 @@
 ;; a user's binary search tree: a path-copying insert, its nodes eve-deftypes
 (defprotocol INode (-k [n]) (-l [n]) (-r [n]))
 
-(eve-deftype RetireNode [k ^:RetireNode left ^:RetireNode right]
+(edt/deftype RetireNode [k ^:RetireNode left ^:RetireNode right]
              INode
              (-k [_] k)
              (-l [_] left)
@@ -54,8 +53,8 @@
     (let [m (quot (count ks) 2)]
       (->RetireNode (nth ks m) (bst-of (subvec ks 0 m)) (bst-of (subvec ks (inc m)))))))
 
-;; a record whose fields are values: a map, an int-map
-(eve-deftype RetireBox [label data])
+;; a record whose fields are values: a map, a collection
+(edt/deftype RetireBox [label data])
 
 (def ^:private resolve-new-ptr #'eve.atom/resolve-new-ptr)
 (def ^:private read-root-value #'eve.atom/read-root-value)
@@ -107,33 +106,49 @@
 
 (def ^:private kv (interleave (range 200) (range 200)))
 
+(defn- batch-hash-map
+  "A hash map of the [k v] pairs, built the way the codec's bulk builders build: the empty map's
+   transient batches the entries and writes each final node once. The batch result stands under a
+   fresh header, so the empty source's header is the build's one residue — retired here through
+   the map's own sio (free-owned!: a block the logging sio allocated and has not freed), the
+   owner's half of eve's retirement split, done by hand because this builder is the owner.
+   A persistent-assoc build cannot stand in for this check: assoc path-copies and frees nothing
+   (retirement is owner-driven by design), so its write log carries every superseded path — a
+   200-entry assoc build logs 591 blocks for a 54-block tree. That over-count is the build's
+   garbage, not a footprint the retire accounting ever claimed; the rows below therefore build
+   by batch, as the int-map rows they replaced built by an assoc that freed what it superseded."
+  [pairs]
+  (let [empty (em/hash-map)
+        m (persistent! (reduce (fn [t [k v]] (assoc! t k v)) (transient empty) pairs))]
+    (alloc/free-owned! (d/-eve-sio empty) [(d/-root-header-off empty)])
+    m))
+
 (deftest a-value-reach-is-what-writing-it-allocated
-  (doseq [[label mk] [["an int-map" #(apply im/int-map kv)]
+  (doseq [[label mk] [["a hash map" #(batch-hash-map (partition 2 kv))]
                       ["a sorted set" #(apply so/sorted-set (range 200))]
-                      ["a red-black set" #(apply rb/sorted-set (range 200))]
                       ["a cons list" #(reduce (fn [c i] (->RetireCell i c)) nil (range 50))]
-                      ["a map of each" (fn [] {:m (apply im/int-map kv) :s (apply so/sorted-set (range 50))
+                      ["a map of each" (fn [] {:m (batch-hash-map (partition 2 kv)) :s (apply so/sorted-set (range 50))
                                                :l (reduce (fn [c i] (->RetireCell i c)) nil (range 10)) :n 1})]
-                      ["an int-map of maps" #(apply im/int-map (mapcat (fn [k] [k {:k k :v [k]}]) (range 50)))]]]
+                      ["a hash map of maps" #(batch-hash-map (map (fn [k] [k {:k k :v [k]}]) (range 50)))]]]
     (let [[reach allocs] (written-reach mk)]
       (is (= allocs reach) (str label ": its reach is every block writing it allocated")))))
 
 (deftest a-tree-retires-by-its-own-walk
   (let [sio (alloc/heap-domain-sio! {})]
-    (check "an int-map at the root, one assoc" sio #(apply im/int-map kv) #(e/assoc % 7 :x))
-    (check "an int-map at the root, rebuilt" sio #(apply im/int-map kv) (fn [_] (apply im/int-map (range 40))))
-    (check "an int-map at a key, one assoc" sio (fn [] {:m (apply im/int-map kv) :x 1})
+    (check "a hash map at the root, one assoc" sio #(apply em/hash-map kv) #(e/assoc % 7 :x))
+    (check "a hash map at the root, rebuilt" sio #(apply em/hash-map kv) (fn [_] (apply em/hash-map (range 40))))
+    (check "a hash map at a key, one assoc" sio (fn [] {:m (apply em/hash-map kv) :x 1})
            #(e/assoc % :m (e/assoc (e/get % :m) 7 :x)))
-    (check "an int-map at a key, rebuilt" sio (fn [] {:m (apply im/int-map kv)}) (fn [_] {:m (apply im/int-map kv)}))
-    (check "an int-map dropped from a map" sio (fn [] {:m (apply im/int-map kv) :x 1}) (fn [_] {:x 2}))
-    (check "an int-map of maps, one value replaced" sio
-           #(apply im/int-map (mapcat (fn [k] [k {:k k}]) (range 50)))
+    (check "a hash map at a key, rebuilt" sio (fn [] {:m (apply em/hash-map kv)}) (fn [_] {:m (apply em/hash-map kv)}))
+    (check "a hash map dropped from a map" sio (fn [] {:m (apply em/hash-map kv) :x 1}) (fn [_] {:x 2}))
+    (check "a hash map of maps, one value replaced" sio
+           #(apply em/hash-map (mapcat (fn [k] [k {:k k}]) (range 50)))
            #(e/assoc % 3 {:k :new}))
     (check "a sorted set at a key" sio (fn [] {:s (apply so/sorted-set (range 200))})
            #(e/assoc % :s (e/conj (e/get % :s) 1000)))
     (check "a sorted map at the root" sio #(apply so/sorted-map kv) #(e/dissoc % 50))
-    (check "a red-black set at the root" sio #(apply rb/sorted-set (range 200)) #(e/disj (e/conj % 1000) 3))
-    (is (seq (check "a tree replaced by a map" sio #(apply im/int-map kv) (fn [_] {:a 1})))
+    (check "a treap set at the root" sio #(apply so/sorted-set (range 200)) #(e/disj (e/conj % 1000) 3))
+    (is (seq (check "a tree replaced by a map" sio #(apply em/hash-map kv) (fn [_] {:a 1})))
         "the tree's blocks are retired")))
 
 (deftest a-list-retires-only-the-cells-it-drops
@@ -166,7 +181,7 @@
       (check "a tree's subtree as the value" sio mk -l)
       (check "a tree rebuilt" sio mk (fn [_] (bst-of (vec (range 50))))))
     (check "a box's map replaced" sio #(->RetireBox "b" {:a [1 2 3]}) (fn [_] (->RetireBox "b" {:b 2})))
-    (check "a box's int-map grown" sio #(->RetireBox "b" (apply im/int-map kv)) #(->RetireBox "c" (e/assoc (.-data %) 7 :x)))
+    (check "a box's hash map grown" sio #(->RetireBox "b" (apply em/hash-map kv)) #(->RetireBox "c" (e/assoc (.-data %) 7 :x)))
     (check "a box replaced by a map" sio #(->RetireBox "b" {:a 1}) (fn [_] {:z 1}))))
 
 (deftest a-list-at-an-atom-root-survives-its-blocks-reuse

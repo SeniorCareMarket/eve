@@ -1,7 +1,7 @@
 (ns eve.region
   "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2)
    over .NET (ClojureCLR): a MemoryMappedFile, its atomics Interlocked over the
-   mapped pointer, wait/notify the futex syscall.
+   mapped pointer, wait/notify the futex syscall (Linux) or __ulock (macOS).
 
    make-heap-region and open-mmap-region open them; lustre-region? says
    whether a region's atomics are fcntl byte-range locks (a Lustre mount)."
@@ -24,7 +24,7 @@
    [System.IO.MemoryMappedFiles MemoryMappedFile MemoryMappedFileAccess]
    [System.IO FileStream FileMode FileAccess FileShare HandleInheritability]
    [System.Threading Interlocked Volatile]
-   [System.Runtime.InteropServices Marshal GCHandle GCHandleType NativeLibrary]
+   [System.Runtime.InteropServices Marshal GCHandle GCHandleType NativeLibrary OSPlatform RuntimeInformation]
    [System.Reflection.Emit DynamicMethod OpCodes]))
 
 ;; Every region has atomic RMW unless it says otherwise.
@@ -88,12 +88,42 @@
                 (into-array Type (repeat 6 Int64)))
     (.Emit il OpCodes/Ret)
     (.CreateDelegate dm (apply func-type IntPtr (repeat 7 Int64)))))
+;; the wait primitives live in libc on Linux (syscall() -> futex) and in
+;; libSystem on macOS (__ulock_wait/__ulock_wake — darwin has no futex,
+;; and no libc.so.6: the old unconditional Load died there at startup)
+(def ^:private darwin?
+  (RuntimeInformation/IsOSPlatform OSPlatform/OSX))
+(def ^:private native-lib
+  (NativeLibrary/Load (if darwin? "libSystem.dylib" "libc.so.6")))
 (def ^:private ^IntPtr fp-syscall
-  (NativeLibrary/GetExport (NativeLibrary/Load "libc.so.6") "syscall"))
+  (when-not darwin? (NativeLibrary/GetExport native-lib "syscall")))
+(def ^:private ^IntPtr fp-ulock-wait
+  (when darwin? (NativeLibrary/GetExport native-lib "__ulock_wait")))
+(def ^:private ^IntPtr fp-ulock-wake
+  (when darwin? (NativeLibrary/GetExport native-lib "__ulock_wake")))
+(def ^:private ^IntPtr fp-msync
+  (when darwin? (NativeLibrary/GetExport native-lib "msync")))
 
 ;; base + off (a macro: ClojureCLR takes no value-type hint on a fn's
 ;; parameters, and in a ClrRegion method base is the typed field)
 (defmacro ^:private at [base off] `(IntPtr/Add ~base (int ~off)))
+
+(defn- msync!
+  "msync(addr, len) forced to disk. Linux: the syscall() route (number
+   26, MS_SYNC 4). Darwin has no syscall() to route through — fp-syscall
+   is nil there, and -sync! called through it anyway: a call to address
+   0, the cljr disk-atom segfault (Mac crash report, Nov 14 2026: main
+   thread, EXC_BAD_ACCESS at 0x0, first sync = first persistent-atom
+   publish). Darwin calls libSystem's msync directly; its MS_SYNC is
+   0x10, and the range alignment widens to its 16 KiB arm64 pages (the
+   wider alignment is legal on x86_64 too)."
+  [addr len]
+  (let [r (if darwin?
+            (.Invoke syscall6 fp-msync (long addr) (long len) 16 0 0 0)
+            (.Invoke syscall6 fp-syscall 26 (long addr) (long len) 4 0 0))]
+    (when-not (zero? r)
+      (throw (Exception. (str "msync failed, errno "
+                              (int (Marshal/GetLastSystemError))))))))
 
 (deftype ClrRegion [^IntPtr base ^long size owner]
   mem/IMemRegion
@@ -113,18 +143,41 @@
   (-add-i64! [_ off delta] (let [d (long delta)] (- (.Invoke add64* (at base off) d) d)))
   (-sub-i64! [this off delta] (.-add-i64! this off (- delta)))
   (-wait-i32! [_ off expected timeout-ms]
-    (let [ts (Marshal/AllocHGlobal 16)]
-      (try
-        (Marshal/WriteInt64 ts 0 (long (quot timeout-ms 1000)))
-        (Marshal/WriteInt64 ts 8 (long (* 1000000 (mod timeout-ms 1000))))
-        (let [r (.Invoke syscall6 fp-syscall 202 (.ToInt64 (at base off)) 0
-                         (long (unchecked-int expected)) (.ToInt64 ts) 0)]
-          (if (zero? r)
-            :ok
-            (case (int (Marshal/GetLastSystemError)) 11 :not-equal 110 :timed-out :ok)))
-        (finally (Marshal/FreeHGlobal ts)))))
+    (if darwin?
+      ;; __ulock_wait (UL_COMPARE_AND_WAIT = 1) in 5 s chunks — its
+      ;; timeout is a uint32 of microseconds; the value is re-checked
+      ;; each round. Errno is darwin's: EAGAIN 35, ETIMEDOUT 60, EINTR 4.
+      (let [addr (.ToInt64 (at base off))
+            exp (unchecked-int expected)]
+        (loop [waited 0]
+          (cond
+            (not= exp (.Invoke load32* (at base off))) :not-equal
+            (and (not (neg? timeout-ms)) (>= waited timeout-ms)) :timed-out
+            :else (let [chunk-us (if (neg? timeout-ms)
+                                   5000000
+                                   (min 5000000 (* 1000 (- timeout-ms waited))))
+                        r (.Invoke syscall6 fp-ulock-wait 1 addr (long exp) (long chunk-us) 0 0)]
+                    (cond (zero? r) :ok
+                          :else (case (int (Marshal/GetLastSystemError))
+                                  35 :not-equal
+                                  4 (recur waited)
+                                  60 (recur (+ waited (quot chunk-us 1000)))
+                                  :ok))))))
+      (let [ts (Marshal/AllocHGlobal 16)]
+        (try
+          (Marshal/WriteInt64 ts 0 (long (quot timeout-ms 1000)))
+          (Marshal/WriteInt64 ts 8 (long (* 1000000 (mod timeout-ms 1000))))
+          (let [r (.Invoke syscall6 fp-syscall 202 (.ToInt64 (at base off)) 0
+                           (long (unchecked-int expected)) (.ToInt64 ts) 0)]
+            (if (zero? r)
+              :ok
+              (case (int (Marshal/GetLastSystemError)) 11 :not-equal 110 :timed-out :ok)))
+          (finally (Marshal/FreeHGlobal ts))))))
   (-notify-i32! [_ off n]
-    (int (.Invoke syscall6 fp-syscall 202 (.ToInt64 (at base off)) 1 (long n) 0 0)))
+    (if darwin?
+      ;; UL_COMPARE_AND_WAIT, plus ULF_WAKE_ALL (0x100) unless one waiter was asked for
+      (int (.Invoke syscall6 fp-ulock-wake (if (= 1 n) 1 257) (.ToInt64 (at base off)) 0 0 0 0))
+      (int (.Invoke syscall6 fp-syscall 202 (.ToInt64 (at base off)) 1 (long n) 0 0))))
   (-supports-watch? [_] true)
   (-read-bytes [_ off len]
     (let [b (byte-array (int len))]
@@ -135,26 +188,20 @@
       (Marshal/Copy src 0 (at base off) (int (alength src))))
     nil)
   mem/ISyncableRegion
-  ;; msync(2) = 26 on x86-64, MS_SYNC = 4. A heap region (owner's first
-  ;; is its byte[]) has nothing to force. Before this, mem/sync-region!
-  ;; answered nil for every CLR region, so the journal flush's slab
-  ;; sweep and the recovery root force were silent no-ops on this host.
+  ;; A heap region (owner's first is its byte[]) has nothing to force.
+  ;; Before this, mem/sync-region! answered nil for every CLR region,
+  ;; so the journal flush's slab sweep and the recovery root force were
+  ;; silent no-ops on this host. The forcing itself is msync! above
+  ;; (per-OS route: syscall() on Linux, libSystem msync on Darwin).
   (-sync! [_]
     (when (instance? FileStream (first owner))
-      (let [r (.Invoke syscall6 fp-syscall 26 (.ToInt64 base) (long size) 4 0 0)]
-        (when-not (zero? r)
-          (throw (Exception. (str "msync failed, errno "
-                                  (int (Marshal/GetLastSystemError))))))))
+      (msync! (.ToInt64 base) size))
     nil)
   (-sync-range! [_ off len]
     (when (instance? FileStream (first owner))
       (let [start (+ (.ToInt64 base) (long off))
-            aligned (bit-and start (long -4096))
-            r (.Invoke syscall6 fp-syscall 26 aligned
-                       (long (- (+ start (long len)) aligned)) 4 0 0)]
-        (when-not (zero? r)
-          (throw (Exception. (str "msync failed, errno "
-                                  (int (Marshal/GetLastSystemError))))))))
+            aligned (bit-and start (long (if darwin? -16384 -4096)))]
+        (msync! aligned (- (+ start (long len)) aligned))))
     nil))
 
 (defn open-mmap-region

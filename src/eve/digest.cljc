@@ -198,6 +198,33 @@
                            (slab/write-i32! sio b (+ F_DIGEST (* 4 i)) (nth d i))))))
         d))))
 
+(defn digest-words-of
+  "The root value v's digest words, computed now; nothing is read
+   from or written to any cache. nil when the content has no digest
+   (by-reference content). The verifier's tool: a receiver in
+   untrusted mode recomputes a placed root's digest with this and
+   compares it against the digest it was shipped before latching
+   anything."
+  [v]
+  (compute-digest v))
+
+(defn latch-digest-words!
+  "Stamp a root's digest from words computed elsewhere — a stream
+   receiver that was shipped the sender's digest for this root. The
+   side block is allocated if needed and the words are latched under
+   the same write-once discipline as a locally computed digest.
+   Answers true when the root's latched digest is these words
+   afterwards; already-latched words are never rewritten — a
+   mismatch answers false and leaves the latched words standing."
+  [sio hdr words]
+  (when-let [b (ensure-block! sio hdr)]
+    (if (latched? sio b FLAG_DIGEST)
+      (= words (mapv (fn [i] (slab/read-i32 sio b (+ F_DIGEST (* 4 i)))) (range 8)))
+      (do (latch! sio b FLAG_DIGEST
+                  (fn [] (doseq [i (range 8)]
+                           (slab/write-i32! sio b (+ F_DIGEST (* 4 i)) (nth words i)))))
+          true))))
+
 (defn root-hash
   "The root's hash word: the latched word when the cache block carries
    one, else (compute) — a 0-arg fn answering the resident hash exactly

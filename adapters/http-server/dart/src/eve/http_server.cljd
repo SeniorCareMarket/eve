@@ -1,0 +1,78 @@
+(ns eve.http-server
+  "eve's HTTP server on ClojureDart (dart:io's HttpServer) — the surface
+   of adapters/http-server/node: (serve! opts handler) with opts
+   {:port :host} returns at once; the Dart Future @(:bound srv)
+   resolves to {:port} with the bound port (the requested port when
+   nonzero is on srv's :port already); (:stop srv) closes the server.
+
+   The handler runs on the isolate's event loop (Dart has one thread
+   per isolate): it is called synchronously with
+   {:method :url :headers :body :body-b64} once the request body has
+   been read in full (bodies are small: a ladder ticket, a presign, a
+   blob PUT), and answers {:status :headers :body} or with
+   :body-as \"base64\" and :body a base64 string for binary payloads —
+   the eve.net.store / presign / gateway shapes. {:threads n} is
+   ignored: concurrency here is the event loop's."
+  (:require ["dart:io" :as io]
+            ["dart:convert" :as conv]
+            ["dart:typed_data" :as td]))
+
+(defn- request-map
+  "The eve request map for a dart:io HttpRequest REQ whose body bytes
+   are BYTES (a Uint8List)."
+  [^io/HttpRequest req ^td/Uint8List bytes]
+  (let [headers (volatile! {})]
+    (.forEach (.-headers req)
+              (fn [name values] (vswap! headers assoc name (apply str (interpose "," values)))))
+    {:method (.-method req)
+     :url (.toString (.-uri req))
+     :headers @headers
+     :body (.decode conv/utf8 bytes)
+     :body-b64 (.encode conv/base64 bytes)}))
+
+(defn- answer!
+  "Write HANDLER's response map RESP onto REQ's response and close it."
+  [^io/HttpRequest req resp]
+  (let [^io/HttpResponse out (.-response req)]
+    (set! (.-statusCode out) (or (:status resp) 200))
+    (doseq [[k v] (:headers resp)]
+      (.set (.-headers out) (str k) (str v)))
+    (if (= "base64" (:body-as resp))
+      (.add out (.decode conv/base64 (or (:body resp) "")))
+      (.add out (.encode conv/utf8 (or (:body resp) ""))))
+    (.close out)))
+
+(defn- on-request
+  "Read REQ's body, call HANDLER with the request map, write its answer.
+   A handler throw answers 500, as the node adapter's does."
+  [handler ^io/HttpRequest req]
+  ((fn ^:async []
+     (try
+       (let [b (td/BytesBuilder.)]
+         (await (.forEach req (fn [chunk] (.add b chunk))))
+         (answer! req (handler (request-map req (.takeBytes b)))))
+       (catch dynamic e
+         (try
+           (let [^io/HttpResponse out (.-response req)]
+             (set! (.-statusCode out) 500)
+             (.set (.-headers out) "content-type" "text/plain; charset=utf-8")
+             (.add out (.encode conv/utf8 (str "handler error: " e)))
+             (.close out))
+           (catch dynamic _ nil)))))))
+
+(defn serve!
+  "Start an HTTP server: opts {:port :host}, HANDLER (fn request-map →
+   response-map). Returns {:port <requested> :stop (fn) :bound Future}
+   at once; the Future resolves to {:port <bound>}."
+  [opts handler]
+  (let [port (or (:port opts) 0)
+        host (or (:host opts) "127.0.0.1")
+        state (volatile! nil)
+        bound (.then (io/HttpServer.bind host port)
+                     (fn [^io/HttpServer server]
+                       (vreset! state server)
+                       (.listen server (fn [req] (on-request handler req)))
+                       {:port (.-port server)}))]
+    {:port port
+     :bound bound
+     :stop (fn [] (when-let [^io/HttpServer server @state] (.close server)))}))

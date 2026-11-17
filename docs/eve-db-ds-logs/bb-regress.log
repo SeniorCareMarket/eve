@@ -1,0 +1,12 @@
+
+Testing eve.host-bytes-test
+
+Testing eve.collection-hash-test
+
+Testing eve.deftype.type-id-test
+
+Testing eve.hamt-util-test
+
+Ran 10 tests containing 81 assertions.
+0 failures, 0 errors.
+:summary {:test 10, :pass 81, :fail 0, :error 0}

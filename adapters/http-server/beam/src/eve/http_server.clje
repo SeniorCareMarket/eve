@@ -1,0 +1,116 @@
+(ns eve.http-server
+  "eve's http-server feature (adapters/README.md) over OTP's gen_tcp — clojerl: what a member needs to serve its
+   disk domain's atoms on eve.net's routes (eve.net.gateway). (serve! opts handler) answers {:port :stop}; handler
+   takes {:method :url :headers :body :body-b64} — :url the request's path and query as sent (an atom id's %2F
+   kept), :headers lower-case names, :body UTF-8 text and :body-b64 the same bytes as base64 (a blob) — and answers
+   {:status :headers :body :body-as}: :body text, or with :body-as :b64 the base64 of the bytes to send
+   (eve.net.run's conventions), as the JDK adapter does. HTTP/1.1 is read and written here over a raw socket, as in
+   eve's socket client: a process a connection, spawned by the acceptor (a handler may block), as the JDK adapter's
+   pool. One request a connection (Connection: close), as the socket client speaks. :host is a dotted-quad or
+   localhost (inet name resolution is the deployer's, here)."
+  (:require [clojure.string :as str]))
+
+(def ^:private reasons {200 "OK" 201 "Created" 204 "No Content" 400 "Bad Request"
+                        403 "Forbidden" 404 "Not Found" 500 "Internal Server Error"})
+
+(defn- ok? [r] (= :ok (erlang/element 1 r)))
+(defn- el2 [r] (erlang/element 2 r))
+
+(defn- digits->long [ints] (reduce (fn [a c] (+ (* a 10) (- c 48))) 0 ints))
+
+(defn- head-end
+  "the index just past the CRLF CRLF in the int list, or nil"
+  [ints]
+  (let [v (vec ints) n (count v)]
+    (loop [i 0]
+      (cond (> (+ i 4) n) nil
+            (and (= 13 (nth v i)) (= 10 (nth v (+ i 1))) (= 13 (nth v (+ i 2))) (= 10 (nth v (+ i 3)))) (+ i 4)
+            :else (recur (inc i))))))
+
+(defn- recv-more
+  "the int list grown by one recv, or nil at close/error"
+  [sock ints]
+  (let [r (gen_tcp/recv sock 0 30000)]
+    (when (ok? r) (concat ints (erlang/binary_to_list (el2 r))))))
+
+(defn- read-request
+  "eve's request map of one connection, or nil if the peer sent nothing"
+  [sock]
+  (loop [ints ()]
+    (if-let [he (head-end ints)]
+      (let [head (erlang/list_to_binary (clj->erl (apply list (take (- he 4) ints))))
+            lines (str/split head #"\r\n")
+            rl (str/split (first lines) #" ")
+            headers (into {}
+                          (keep (fn [l]
+                                  (let [i (str/index-of l ":")]
+                                    (when i [(str/lower-case (str/trim (subs l 0 i)))
+                                             (str/trim (subs l (inc i)))]))))
+                          (rest lines))
+            need (if-let [cl (get headers "content-length")]
+                   (digits->long (erlang/binary_to_list cl))
+                   0)]
+        (loop [have (drop he ints)]
+          (if (>= (count have) need)
+            (let [bs (erlang/list_to_binary (clj->erl (apply list (take need have))))]
+              {:method (first rl)
+               :url (second rl)
+               :headers headers
+               :body bs
+               :body-b64 (base64/encode bs)})
+            (when-let [more (recv-more sock have)]
+              (recur more)))))
+      (when-let [more (recv-more sock ints)]
+        (recur more)))))
+
+(defn- respond [sock {:keys [status headers body body-as]}]
+  (let [status (or status 200)
+        bs (if (= :b64 body-as) (base64/decode (str (or body ""))) (str (or body "")))
+        head (str "HTTP/1.1 " status " " (get reasons status "") "\r\n"
+                  (apply str (keep (fn [[k v]]
+                                     (let [k (name k)]
+                                       (when-not (= "content-length" (str/lower-case k))
+                                         (str k ": " v "\r\n"))))
+                                   headers))
+                  "content-length: " (erlang/byte_size bs) "\r\n"
+                  "connection: close\r\n"
+                  "\r\n")]
+    (gen_tcp/send sock head)
+    (when (pos? (erlang/byte_size bs)) (gen_tcp/send sock bs))))
+
+(defn- serve-conn [handler sock]
+  (try
+    (when-let [req (read-request sock)]
+      (respond sock (try (handler req)
+                         (catch _ e {:status 500 :headers {} :body (str e)}))))
+    (catch _ _ nil)
+    (finally (gen_tcp/close sock))))
+
+(defn- host-tuple [host]
+  (if (or (nil? host) (= "localhost" host))
+    #erl[127 0 0 1]
+    (clj->erl (apply list (map (fn [p] (digits->long (erlang/binary_to_list p))) (str/split host #"\."))))))
+
+(defn- accept-loop
+  "Accept one connection, spawn the next acceptor, then handle this connection in this process (so the socket's
+   controlling process is always its handler — no controlling-process handoff). Ends when the listener closes."
+  [lsock handler]
+  (let [a (gen_tcp/accept lsock)]
+    (when (ok? a)
+      (erlang/spawn (fn [] (accept-loop lsock handler)))
+      (serve-conn handler (el2 a)))))
+
+(defn serve!
+  "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1)}: {:port :stop}. :stop ends the
+   listener; a connection already being handled finishes its answer."
+  [opts handler]
+  (let [r (gen_tcp/listen (int (or (:port opts) 0))
+                          (clj->erl (list :binary #erl[:packet :raw]
+                                          #erl[:active false] #erl[:reuseaddr true]
+                                          #erl[:ip (host-tuple (:host opts))])))]
+    (when-not (ok? r) (throw (ex-info (str "eve.http-server: listen failed: " (el2 r)) {})))
+    (let [lsock (el2 r)
+          port (el2 (inet/port lsock))]
+      (erlang/spawn (fn [] (accept-loop lsock handler)))
+      {:port port
+       :stop (fn [] (gen_tcp/close lsock))})))

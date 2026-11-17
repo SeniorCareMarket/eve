@@ -56,6 +56,15 @@
 ;; protocols above; eve.types interns it into the core namespace and
 ;; remaps deftype bodies to it.
 (defprotocol IDerefWithTimeout (-deref-with-timeout [ref timeout-ms timeout-val]))
+;; ClojureScript has no IRef protocol (its validators are an Atom
+;; field behind plain fns), and nbb's core is no exception (measured:
+;; cljs.core/IRef does not resolve on this seat), so eve.core's IRef
+;; is the home for the validator half of clojure.lang.IRef, as with
+;; the chunked protocols above: eve.atom's types carry their IRef
+;; sections onto it through the proto map's split (the watch
+;; methods land on IWatchable).
+(defprotocol IRef (-set-validator! [ref f]) (-get-validator [ref])
+  (-get-watches [ref]))
 (defn pr-writer [x w _opts] (-write w (pr-str x)))
 (defn pr-str* [x] (pr-str x))
 (defmacro caching-hash [coll hash-fn hash-key]

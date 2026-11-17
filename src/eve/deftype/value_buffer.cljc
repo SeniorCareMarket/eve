@@ -14,7 +14,13 @@
    array is never seen by anyone else, which is what lets it be written after it is new. An array the buffer
    outgrew stays where it is, as a dropped value does outside an atom."
   (:refer-clojure :exclude [deftype])
-  (:require [eve.deftype :refer [deftype]]
+  (:require [eve.deftype-proto.macros :as eve]
+            ;; Load order: host-deftype's expansion ends in a
+            ;; top-level eve.type-readers/register! call, which needs
+            ;; the registry first in the RUNTIME graph (a macro ns's
+            ;; require is macro-side only). Guard:
+            ;; eve.deftype-guard-test.
+            [eve.type-readers]
             [eve.deftype.array :as arr]
             [eve.process :as proc]))
 
@@ -25,7 +31,7 @@
   (-set-varr! [b a])
   (-set-vn! [b n]))
 
-(deftype ValueBuffer [^:mutable a ^:mutable n owner]
+(eve/host-deftype ValueBuffer [^:volatile-mutable a ^:volatile-mutable n owner]
   IValueBuffer
   (-varr [_] a)
   (-vn [_] n)

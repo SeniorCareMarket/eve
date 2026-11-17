@@ -530,6 +530,34 @@ func init() {
 		return vm.String(strings.TrimSuffix(strings.TrimSuffix(l, "\n"), "\r")), nil
 	})
 	def(ns, "now-ms", func(vs []vm.Value) (vm.Value, error) { return vm.Int(time.Now().UnixMilli()), nil })
+	// ── instants (eve.encoding, adapters/encoding/letgo) ──
+	// let-go has two time shapes: vm.Instant (what #inst reads as and
+	// inst? recognizes) and a raw time.Time (what (now) returns).
+	// core inst-ms calls .UnixMilli, which works on the raw Time and
+	// fails on an Instant ('method-invoke expected Receiver'). These
+	// two natives are the encoding adapter's inst surface for both.
+	def(ns, "inst-ms", func(vs []vm.Value) (vm.Value, error) {
+		if err := argc("inst-ms", vs, 1); err != nil {
+			return vm.NIL, err
+		}
+		switch v := vs[0].(type) {
+		case *vm.Instant:
+			return vm.Int(v.Time().UnixMilli()), nil
+		case *vm.Boxed:
+			// (now) answers a boxed raw time.Time
+			if t, ok := v.Unbox().(time.Time); ok {
+				return vm.Int(t.UnixMilli()), nil
+			}
+		}
+		return vm.NIL, fmt.Errorf("inst-ms expected an instant, got %s", vs[0].Type().Name())
+	})
+	def(ns, "ms->inst", func(vs []vm.Value) (vm.Value, error) {
+		ms, err := intOf(vs[0], "ms")
+		if err != nil {
+			return vm.NIL, err
+		}
+		return vm.NewInstant(time.UnixMilli(ms).UTC()), nil
+	})
 	def(ns, "sleep-ms", func(vs []vm.Value) (vm.Value, error) {
 		ms, err := intOf(vs[0], "ms")
 		if err != nil {
@@ -614,6 +642,56 @@ func init() {
 		return vm.EmptyPersistentMap.Assoc(kw("status"), vm.Int(resp.StatusCode)).
 			Assoc(kw("headers"), hs).Assoc(kw("body"), bv), nil
 	})
+
+	// ── deftype content hash/equiv (eve.core's IHash/IEquiv) ─────────────
+	// (set-dtype-hooks! hash-fn equiv-fn): installs vm.DTypeHashHook /
+	// vm.DTypeEqualsHook (let-go patched for eve, go/dtype-hash-equiv
+	// .patch) so clojure.core/hash and = on an eve deftype instance
+	// answer the type's eve.core -hash/-equiv instead of the runtime's
+	// identity default. The two arguments are eve.core's protocol fns
+	// themselves. A type with no EXACT impl of the protocol (served
+	// only by the Object default, whose -equiv is core = itself) is
+	// declined without a call — consulting it would be circular — and
+	// a call that errors declines too; identity then applies, plain
+	// deftype semantics. Installed once by eve.types at the first
+	// type definition.
+	def(ns, "set-dtype-hooks!", func(vs []vm.Value) (vm.Value, error) {
+		if err := argc("set-dtype-hooks!", vs, 2); err != nil {
+			return vm.NIL, err
+		}
+		hashFn, ok1 := vs[0].(*vm.ProtocolFn)
+		equivFn, ok2 := vs[1].(*vm.ProtocolFn)
+		if !ok1 || !ok2 {
+			return vm.NIL, fmt.Errorf("eve.host-native/set-dtype-hooks!: both arguments must be protocol fns")
+		}
+		vm.DTypeHashHook = func(d *vm.DTypeInstance) (uint32, bool) {
+			if !hashFn.Protocol().HasDirectImpl(d.Type()) {
+				return 0, false
+			}
+			r, err := vm.RootExecContext.Invoke(hashFn, []vm.Value{d})
+			if err != nil {
+				return 0, false
+			}
+			if n, ok := r.(vm.Int); ok {
+				return uint32(n), true
+			}
+			return 0, false
+		}
+		vm.DTypeEqualsHook = func(d *vm.DTypeInstance, other vm.Value) (bool, bool) {
+			if !equivFn.Protocol().HasDirectImpl(d.Type()) {
+				return false, false
+			}
+			r, err := vm.RootExecContext.Invoke(equivFn, []vm.Value{d, other})
+			if err != nil {
+				return false, false
+			}
+			return r != vm.NIL && r != vm.FALSE, true
+		}
+		return vm.NIL, nil
+	})
+
+	// ── http-server (eve.http-server, adapters/http-server/letgo; httpserver.go) ──
+	registerHTTPServer(ns)
 
 	rt.RegisterNS(ns)
 }

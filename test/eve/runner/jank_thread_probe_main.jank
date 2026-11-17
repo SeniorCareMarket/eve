@@ -1,0 +1,34 @@
+(ns eve.runner.jank-thread-probe-main
+  "Step bisect inside the release suite's thread area on jank. Round 3
+   findings: a pool worker DOES claim and run a plain-fn future and
+   completes it (realized? flips true) -- death follows within a few
+   hundred ms of completion, either in the worker's post-completion
+   path or in main's deref-within on the completed future. This round
+   keeps main's hands off after completion (idle ticks for 3s): death
+   during the idle window indicts the worker side; survival indicts
+   the deref path, which is then called and named.
+
+     bb probe:jank-thread"
+  (:require [eve.host-completion]
+            [eve.process :as proc]
+            [eve.thread :as t]))
+
+(defn- mark [s] (println s) (flush))
+
+(defn -main [& _]
+  (mark "STEP 0 loaded")
+  (let [f (t/future-call (fn [] (proc/sleep-ms! 2000) :plain-done))]
+    (mark "STEP 1 future-call (fn, 2s task) returned")
+    (loop [i 0]
+      (when (and (< i 40) (not (realized? f)))
+        (proc/sleep-ms! 250)
+        (recur (inc i))))
+    (mark (str "STEP 2 realized=" (realized? f) " -- hands off for 3s"))
+    (dotimes [i 12]
+      (proc/sleep-ms! 250)
+      (mark (str "IDLE tick " i " realized=" (realized? f))))
+    (mark "STEP 3 survived idle window")
+    (mark (str "STEP 4 deref-within => " (t/deref-within f 200 :timeout)))
+    (mark (str "STEP 5 deref => " @f)))
+  (mark "PROBE-DONE thread-steps")
+  (proc/exit! 0))

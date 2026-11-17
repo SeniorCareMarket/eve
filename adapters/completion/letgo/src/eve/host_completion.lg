@@ -41,6 +41,23 @@
 (intern-core 'with-bindings* (fn [_frame f & args] (apply f args)))
 (intern-core 'uuid (fn [s] (UUID/fromString s)))
 
+;; let-go has no requiring-resolve (measured on lg-eve: the name does not
+;; resolve, and eve.thread-host's start-threads! died compiling its call —
+;; silently, exit 1 with no output). Clojure's contract in one fn: require
+;; the symbol's namespace if it is not loaded, then resolve the var. The
+;; require+resolve shape was validated inline on lg-eve before landing here.
+(intern-core 'requiring-resolve
+             (fn [sym] (let [ns-sym (symbol (namespace sym))]
+                         (when-not (find-ns ns-sym) (require ns-sym))
+                         ;; let-go's resolve/ns-resolve do not see
+                         ;; PRIVATE vars (measured 2026-11-12, Tail A
+                         ;; closer: 'eve.digest/compute-digest is
+                         ;; defn- and resolved nil, so the caller's
+                         ;; @var died "deref expected Reference");
+                         ;; ns-interns does see them — fall back to it.
+                         (or (resolve sym)
+                             (get (ns-interns ns-sym) (symbol (name sym)))))))
+
 ;; let-go's into and select-keys answer without the target's metadata (measured, lg-eve 1.13.0); Clojure's keep it — and
 ;; an attested record's attestation is its metadata (eve.net.codec/attest), so a record placed by into lost its header
 (defn- keep-meta [src r] (let [m (meta src)] (if (and m (not= m (meta r))) (with-meta r m) r)))
@@ -51,3 +68,365 @@
 ;; let-go's bitwise ops take exactly two arguments; Clojure's take two or more
 (doseq [v [#'clojure.core/bit-and #'clojure.core/bit-or #'clojure.core/bit-xor]]
   (alter-var-root v (fn [core] (fn ([a b] (core a b)) ([a b & more] (reduce core (core a b) more))))))
+
+;; let-go has no locking, and eve.vec does not compile without the name
+;; (measured #219). A macro cannot be interned as a fn on let-go (an
+;; interned {:macro true} fn's expansion is returned as data, measured
+;; #221), so the macro is written into clojure.core by name. Semantics:
+;; the body runs, the monitor is not held — no mutual exclusion. That is
+;; a named debt, not a silent one: Eve's locking sites guard short
+;; critical sections, and a real exclusion on this host needs a
+;; reentrant goroutine-aware lock (the JVM monitor is reentrant; a CAS
+;; spinlock is not, and would deadlock nested sites). Owed before the
+;; contention stages; the load and single-process proofs do not wait
+;; for it.
+(in-ns 'clojure.core)
+(defmacro locking [x & body] `(do ~@body))
+;; let-go has no lazy-cat either, and eve.deftype.rb-tree's rb-seq does
+;; not compile without the name (measured job50). Clojure's lazy-cat
+;; delays each coll's evaluation until the seq is realized; a lazy-seq
+;; around concat has exactly that shape (concat seqs its arguments as
+;; it consumes them, and the whole body waits inside lazy-seq).
+(defmacro lazy-cat [& colls] `(lazy-seq (concat ~@colls)))
+(in-ns 'eve.host-completion)
+
+;; let-go has no aset-byte (measured job50: eve.reference-tag-test's
+;; :default with-byte arm does not compile); its aset on a byte array
+;; with a byte value is the same write.
+(intern-core 'aset-byte (fn [arr i v] (aset arr i (byte v))))
+
+;; let-go has no halt-when (measured job50: eve.thread-fold-test's
+;; transducer table does not compile). Clojure's, verbatim semantics.
+(intern-core 'halt-when
+             (fn self
+               ([pred] (self pred (fn [_rf result _input] result)))
+               ([pred retf]
+                (fn [rf]
+                  (fn
+                    ([] (rf))
+                    ([result] (rf result))
+                    ([result input]
+                     (if (pred input)
+                       (reduced (retf rf result input))
+                       (rf result input))))))))
+
+;; let-go's READER represents ^meta as a (with-meta sym meta) list
+;; form — it does not attach metadata to the symbol (measured #309:
+;; (read-string "^:int32 cnt") is a PersistentList, symbol? false,
+;; meta nil) — and its native name refuses such a form ("name
+;; expected Symbol, Keyword or String"). Clojure's reader attaches
+;; the meta, and shared code calls name and meta on hinted field
+;; symbols: eve.deftype-proto.macros.registry/parse-field died on
+;; name inside EveVector's deftype expansion (measured #260; the
+;; same refusal hit this lane's types adapter at #223). So name and
+;; namespace see through the reader's form to the symbol inside,
+;; and meta answers the form's meta map. (A runtime with-meta'd
+;; symbol value — a vm.MetaFn — still falls back to its name through
+;; str.)
+(alter-var-root #'clojure.core/name
+  (fn [core] (fn [x] (try (core x)
+                          (catch Throwable _
+                            (core (if (and (seq? x) (= 'with-meta (first x)))
+                                    (second x)
+                                    (symbol (str x)))))))))
+(alter-var-root #'clojure.core/namespace
+  (fn [core] (fn [x] (try (core x)
+                          (catch Throwable _
+                            (core (if (and (seq? x) (= 'with-meta (first x)))
+                                    (second x)
+                                    (symbol (str x)))))))))
+
+;; the same representation reaches meta: (meta field-sym) in shared
+;; macro code (eve.deftype-proto.macros.registry/parse-field reads the
+;; field's type hint from it) must answer the reader's meta map, not
+;; nil — a nil hint reclassifies every hinted field as :serialized.
+(alter-var-root #'clojure.core/meta
+  (fn [core] (fn [x] (if (and (seq? x) (= 'with-meta (first x)))
+                       (nth x 2)
+                       (core x)))))
+
+;; vary-meta on a symbol at macro time (eve.thread's defconveyed:
+;; (def ~(vary-meta name assoc :dynamic true) init)) produces a
+;; vm.MetaFn value on let-go, and a MetaFn in a def's name position
+;; kills the compile with a Go type assertion ('interface conversion:
+;; vm.Value is *vm.MetaFn, not vm.Symbol', measured job50 —
+;; eve.thread-test and both fold tests died there). The compiler
+;; accepts the reader's own representation of a meta'd symbol, the
+;; (with-meta sym meta) list form, in def and formal positions
+;; (measured #309, and job50 for def: the meta lands and binding
+;; works). So vary-meta of a symbol answers that list form; the
+;; name/namespace/meta wrappers above already see through it, and
+;; the types adapter's plain-sym unwraps it. Non-symbol values keep
+;; the core's answer.
+(alter-var-root #'clojure.core/vary-meta
+  (fn [core] (fn [x f & args]
+               (let [r (apply core x f args)]
+                 (if (symbol? x)
+                   (list 'with-meta x (meta r))
+                   r)))))
+
+;; ── registries, armed by eve.types ────────────────────────────────
+;; The wrappers below consult eve.types' registries (defined types'
+;; names and declared interfaces) and eve.core's -hash var. They must
+;; never resolve those vars on a call: seq/get/hash are called
+;; pervasively by macro expansion, and resolving a not-yet-loaded
+;; namespace from inside a wrapper made namespace loads crawl and
+;; spin (measured job50). eve.types arms this slot when it loads and
+;; again at its first type definition; before that, every wrapper
+;; answers with the runtime's own fns, exactly as stock let-go.
+(def ^:private lg-registries (atom {}))
+(defn lg-arm! []
+  (reset! lg-registries
+          {:names (some-> (resolve 'eve.types/lg-dtype-names) deref)
+           :ifaces (some-> (resolve 'eve.types/lg-dtype-interfaces) deref)
+           :hash-var (resolve 'eve.core/-hash)}))
+
+;; ── core hash answers Clojure's hasheq ─────────────────────────────
+;; let-go's own collection hash is its private bucketing scheme
+;; (hash.go: parity with Clojure deliberately dropped), so (hash
+;; [1 2 3]) here is not Clojure's hasheq while eve.core's -hash IS —
+;; on the other protocol hosts the host hash and eve's agree, which
+;; is what the shared suites assert (collection-hash-test: an eve
+;; collection hashes as the host value). So core hash delegates to
+;; eve.core/-hash once eve.core exists; its Object impl walks host
+;; collections through -hash and bottoms out at core hash for the
+;; rest, and the busy flag keeps that bottoming-out from re-entering
+;; this delegation. Before eve.core loads, and for values -hash
+;; declines, the runtime's own hash answers, unchanged.
+(let [busy (atom false)]
+  (alter-var-root #'clojure.core/hash
+    (fn [core]
+      (fn [x]
+        (if @busy
+          (core x)
+          (let [h (:hash-var @lg-registries)]
+            (if h
+              (do (reset! busy true)
+                  (try (@h x)
+                       (catch Throwable _ (core x))
+                       (finally (reset! busy false))))
+              (core x))))))))
+
+;; ── instance? and the definitional predicates see eve types ───────
+;; let-go's type unions hold only its own vm types, so (instance?
+;; clojure.lang.IPersistentVector <an EveVector>) answered false —
+;; and vector?/map?/set?/counted?/sequential?/associative?/coll?/
+;; list?, which Clojure defines by those interfaces, answered false
+;; for every eve type (measured job50; EveVector's own equals body
+;; gates on the instance? and so refused eve vectors themselves).
+;; eve.types records each type's declared interfaces as it defines
+;; them (eve.types/lg-dtype-interfaces); when the runtime's own
+;; answer is false, these wrappers consult that registry.
+(def ^:private lg-iface-registry (atom nil))
+(defn- lg-dtype-iface-name? [iname x]
+  (let [ts (str (type x))]
+    (and (neg? (.indexOf ts "."))
+         (let [r (:ifaces @lg-registries)]
+           (boolean (and r (contains? (get @r ts #{}) iname)))))))
+(alter-var-root #'clojure.core/instance?
+  (fn [core] (fn [c x] (or (core c x) (lg-dtype-iface-name? (str c) x)))))
+(alter-var-root #'clojure.core/vector?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.IPersistentVector" x)))))
+(alter-var-root #'clojure.core/map?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.IPersistentMap" x)))))
+(alter-var-root #'clojure.core/set?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.IPersistentSet" x)))))
+(alter-var-root #'clojure.core/sequential?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.Sequential" x)))))
+(alter-var-root #'clojure.core/counted?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.Counted" x)))))
+(alter-var-root #'clojure.core/associative?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.Associative" x)))))
+(alter-var-root #'clojure.core/coll?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.IPersistentCollection" x)))))
+(alter-var-root #'clojure.core/list?
+  (fn [core] (fn [x] (or (core x) (lg-dtype-iface-name? "clojure.lang.IPersistentList" x)))))
+
+;; ── core collection fns route eve types to eve.core's protocols ──
+;; Translated method bodies call the clojure.core names (vocab's
+;; jvm-method->core: (.count ov) is (clojure.core/count ov) on every
+;; host). On the JVM/bb/glj those dispatch to the type; let-go's are
+;; Go prims that refuse a DTypeInstance ('count expected Counted',
+;; 'seq expected Seqable', measured job50 in EveVector's own equals)
+;; or silently misanswer (core get of an eve map is nil). eve.core's
+;; seq answers HOST seqs, so first/next/rest need no routing (their
+;; core forms work on those seqs); the accessors below route by
+;; first argument: an eve deftype instance (eve.types records every
+;; defined type's name) goes to eve.core's protocol fn of the same
+;; name, anything else to the runtime's own fn, untouched. The busy
+;; flag keeps eve.core's Object impls — which name the core fns —
+;; from re-entering the route for a type with no exact impl.
+;; assoc/dissoc/disj fold: core is variadic, eve.core's fixed-arity.
+(defn- lg-dtype? [x]
+  ;; the dot pre-filter keeps this near-free on host values: an eve
+  ;; type's name is bare (EveVector), a host type's is qualified
+  ;; (let-go.lang.PersistentList).
+  (let [ts (str (type x))]
+    (and (neg? (.indexOf ts "."))
+         (let [s (:names @lg-registries)]
+           (boolean (and s (contains? @s ts)))))))
+(defn- lg-route! [core-var eve-sym]
+  (let [busy (atom false) efn (atom nil)]
+    (alter-var-root core-var
+      (fn [core]
+        (fn [& args]
+          (if (and (not @busy) (lg-dtype? (first args)))
+            (do (reset! busy true)
+                (try (apply (or @efn (reset! efn @(resolve eve-sym))) args)
+                     (finally (reset! busy false))))
+            (apply core args)))))))
+(defn- lg-route-fold! [core-var eve-sym pairs?]
+  (let [busy (atom false) efn (atom nil)]
+    (alter-var-root core-var
+      (fn [core]
+        (fn [x & args]
+          (if (and (not @busy) (lg-dtype? x))
+            (do (reset! busy true)
+                (try (let [f (or @efn (reset! efn @(resolve eve-sym)))]
+                       (if pairs?
+                         (reduce (fn [c [k v]] (f c k v)) x (partition 2 args))
+                         (reduce f x args)))
+                     (finally (reset! busy false))))
+            (apply core x args)))))))
+(lg-route! #'clojure.core/count 'eve.core/count)
+(lg-route! #'clojure.core/nth 'eve.core/nth)
+(lg-route! #'clojure.core/get 'eve.core/get)
+;; seq takes a fixed-arity wrapper: a variadic one made the
+;; compiler's own macro machinery spin during namespace loads
+;; (measured job50 — seq is special to it in a way count/get are not).
+(let [busy (atom false) efn (atom nil)]
+  (alter-var-root #'clojure.core/seq
+    (fn [core]
+      (fn [x]
+        (if (and (not @busy) (lg-dtype? x))
+          (do (reset! busy true)
+              (try ((or @efn (reset! efn @(resolve 'eve.core/seq))) x)
+                   (finally (reset! busy false))))
+          (core x))))))
+(lg-route! #'clojure.core/empty 'eve.core/empty)
+(lg-route! #'clojure.core/peek 'eve.core/peek)
+(lg-route! #'clojure.core/pop 'eve.core/pop)
+(lg-route! #'clojure.core/rseq 'eve.core/rseq)
+(lg-route! #'clojure.core/reduce-kv 'eve.core/reduce-kv)
+(lg-route! #'clojure.core/transient 'eve.core/transient)
+(lg-route! #'clojure.core/persistent! 'eve.core/persistent!)
+(lg-route! #'clojure.core/with-meta 'eve.core/with-meta)
+(lg-route! #'clojure.core/contains? 'eve.core/contains?)
+(lg-route! #'clojure.core/conj 'eve.core/conj)
+(lg-route-fold! #'clojure.core/assoc 'eve.core/assoc true)
+(lg-route-fold! #'clojure.core/dissoc 'eve.core/dissoc false)
+(lg-route-fold! #'clojure.core/disj 'eve.core/disj false)
+;; transient ops route the same way: core conj! does not dispatch to
+;; a dtype's ITransientCollection ('conj! not supported on
+;; TransientEveVector', measured job50 in reclaim-test's into over a
+;; transient). eve.core has conj!/assoc!/pop! fns; for dissoc!/disj!
+;; eve.core itself defers to the host's, so those route straight to
+;; the protocol fns.
+(lg-route! #'clojure.core/conj! 'eve.core/conj!)
+(lg-route-fold! #'clojure.core/assoc! 'eve.core/assoc! true)
+(lg-route! #'clojure.core/pop! 'eve.core/pop!)
+(lg-route-fold! #'clojure.core/dissoc! 'eve.core/-dissoc! false)
+(lg-route-fold! #'clojure.core/disj! 'eve.core/-disjoin! false)
+
+;; ── seq-consuming core fns pre-seq through the routed seq ─────────
+;; let-go's own core.lg implementations of every?/some/map/filter/
+;; reduce seq their collection argument internally, past the seq
+;; var — so an eve collection reaches their Go Seq check raw and
+;; dies ('reduce expected Seq', measured job50 in EveHashMap's
+;; map-equiv?). Pre-seq'ing through the routed clojure.core/seq
+;; (which answers a host seq for an eve value) leaves host behavior
+;; identical — seq of a host collection is its own seq — and gives
+;; these fns the shape they expect.
+(alter-var-root #'clojure.core/every?
+  (fn [core] (fn [pred coll] (core pred (seq coll)))))
+(alter-var-root #'clojure.core/some
+  (fn [core] (fn [pred coll] (core pred (seq coll)))))
+(alter-var-root #'clojure.core/not-any?
+  (fn [core] (fn [pred coll] (core pred (seq coll)))))
+(alter-var-root #'clojure.core/map
+  (fn [core] (fn ([f] (core f))
+                 ([f & colls] (apply core f (core (fn [c] (seq c)) colls))))))
+(alter-var-root #'clojure.core/filter
+  (fn [core] (fn ([pred] (core pred))
+                 ([pred coll] (core pred (seq coll))))))
+(alter-var-root #'clojure.core/reduce
+  (fn [core] (fn ([f coll] (core f (seq coll)))
+                 ([f init coll] (core f init (seq coll))))))
+
+;; ── atom ops route eve atoms to eve's own machinery ───────────────
+;; An eve deftype's clojure.lang.IDeref impl rides eve.core's IDeref
+;; (-deref works, measured job50); its clojure.lang.IAtom impls have
+;; no protocol home in eve.core on this host (ISwap/IReset are
+;; cljs.core protocols eve.core does not define), so swap!/reset!
+;; route to a CAS loop over eve.core/-deref + eve.atom's public
+;; compare-and-set!*, and compare-and-set! straight to it.
+;; clojure.core's own are native-only ('deref expected Reference',
+;; 'swap expected Atom'). Host atoms pass through untouched; the
+;; eve fns resolve once, on first use — code that swaps an eve atom
+;; has eve.atom loaded by construction.
+
+;; ── inst-ms answers for the reader's Instant ──────────────────────
+;; let-go has two time shapes: a boxed raw time.Time (what (now)
+;; returns; core inst-ms's .UnixMilli works on it) and vm.Instant
+;; (what #inst reads as and inst? recognizes; .UnixMilli fails on it
+;; with 'method-invoke expected Receiver'). eve.encoding's instants
+;; are vm.Instant, so core inst-ms routes those to the evenative
+;; native, which answers for both shapes.
+(let [efn (atom nil)]
+  (alter-var-root #'clojure.core/inst-ms
+    (fn [core]
+      (fn [d]
+        (if (inst? d)
+          ((or @efn (reset! efn @(resolve 'eve.host-native/inst-ms))) d)
+          (core d))))))
+(let [ops (atom nil)]
+  (defn- lg-atom-ops! []
+    ;; the type's own IAtom impls, translated onto eve.core's ISwap /
+    ;; IReset (proto_map's split of clojure.lang.IAtom): swap runs
+    ;; eve.atom's own mmap-swap!, whose f sees the slab value in the
+    ;; atom's domain — a CAS loop over the PLAIN deref corrupts sorted
+    ;; collections, whose -plain rebuilds in the process domain
+    ;; (measured job50, rb-tree). compare-and-set!* is eve.atom's
+    ;; public entry to the same machinery.
+    (or @ops
+        (reset! ops {:deref @(resolve 'eve.core/-deref)
+                     :swap @(resolve 'eve.core/-swap!)
+                     :reset @(resolve 'eve.core/-reset!)
+                     :cas @(resolve 'eve.atom/compare-and-set!*)})))
+  (defn- lg-eve-swap [a f args]
+    ;; eve.core/-swap!'s 4-arity takes the rest args as one seq (the
+    ;; ClojureScript ISwap convention proto_map's split encodes, and
+    ;; the deftype impl's (concat [a b] xs) expects) — pack them.
+    (let [swap-f (:swap (lg-atom-ops!))]
+      (case (count args)
+        0 (swap-f a f)
+        1 (swap-f a f (first args))
+        2 (swap-f a f (first args) (second args))
+        (swap-f a f (first args) (second args) (drop 2 args)))))
+  (alter-var-root #'clojure.core/deref
+    (fn [core]
+      (fn ([x] (if (lg-dtype-iface-name? "clojure.lang.IDeref" x)
+                 ((:deref (lg-atom-ops!)) x)
+                 (core x)))
+          ([x timeout-ms timeout-val]
+           (if (lg-dtype-iface-name? "clojure.lang.IDeref" x)
+             ((:deref (lg-atom-ops!)) x)
+             (core x timeout-ms timeout-val))))))
+  (alter-var-root #'clojure.core/swap!
+    (fn [core]
+      (fn [a f & args]
+        (if (lg-dtype-iface-name? "clojure.lang.IAtom" a)
+          (lg-eve-swap a f args)
+          (apply core a f args)))))
+  (alter-var-root #'clojure.core/reset!
+    (fn [core]
+      (fn [a v]
+        (if (lg-dtype-iface-name? "clojure.lang.IAtom" a)
+          ((:reset (lg-atom-ops!)) a v)
+          (core a v)))))
+  (alter-var-root #'clojure.core/compare-and-set!
+    (fn [core]
+      (fn [a old-val new-val]
+        (if (lg-dtype-iface-name? "clojure.lang.IAtom" a)
+          ((:cas (lg-atom-ops!)) a old-val new-val)
+          (core a old-val new-val))))))

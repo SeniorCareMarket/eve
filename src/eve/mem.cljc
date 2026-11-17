@@ -223,20 +223,85 @@
 ;; protocol at ~1.07 us each = ~2.2 s for a default domain, where one fill
 ;; per column costs ~1-2 ms. A region with a native fill implements
 ;; IFillRegion itself; every other region answers through the
-;; extend-default below, one -store-i32! per slot (the same stores the
-;; caller's loop made, so its bytes and ordering contract are unchanged).
+;; extend-default below, which patterns the value into a local byte-array
+;; chunk once and hands each span to -write-bytes! — 16 region writes for
+;; a 1,048,575-slot column instead of 1,048,575 single stores. The bytes
+;; written are identical (the i32 little-endian — the region byte order
+;; on every seat) and land in the same ascending order. The bulk write
+;; is non-atomic per slot, which the fill's contract allows: the range
+;; is fresh and unpublished, so no reader can observe a partial fill —
+;; the native jank/js fills are plain fills on the same basis.
 ;; Not for zeroing reused memory (the memory rules forbid that): a writer
 ;; that must set every slot of a fresh, unpublished range to one value.
 (defprotocol IFillRegion
   (-fill-i32! [r byte-off count val]
     "Store the i32 VAL at COUNT consecutive 4-byte slots from BYTE-OFF."))
 
+(def ^:private fill-chunk-slots
+  "Slots per -write-bytes! span in the bulk fill default (256 KiB)."
+  65536)
+
+(defn- i32-pattern-bytes
+  "A byte array of SLOTS i32 slots, each holding VAL little-endian."
+  [slots val]
+  #?(:lpy
+     ;; basilisp: the four octets repeated SLOTS times by CPython's own
+     ;; bytes repetition, not a per-byte aset loop. Interpreted, that loop
+     ;; cost ~1.1 s per 65,536-slot chunk (four aset calls per slot, each a
+     ;; patched-var lookup) — the whole ~4 s of a fresh persistent domain
+     ;; open, which fills its coalesc region through here. The octets are
+     ;; the same masked low bytes, VAL little-endian, and byte-array (the
+     ;; completion's signed array('b') over Python bytes) reads each one as
+     ;; the signed byte unchecked-byte gave the loop: byte-identical output
+     ;; of the same type.
+     (byte-array (.__mul__ (python/bytes [(bit-and val 0xFF)
+                                          (bit-and (unsigned-bit-shift-right val 8) 0xFF)
+                                          (bit-and (unsigned-bit-shift-right val 16) 0xFF)
+                                          (bit-and (unsigned-bit-shift-right val 24) 0xFF)])
+                           slots))
+     :default
+     ;; SCI's JS core has no byte-array or unchecked-byte. A Uint8Array
+     ;; carries the identical low eight bits consumed by IMemRegion writes;
+     ;; keep signed JVM bytes on the other seats (CLR included; lpy above).
+     ;; Each octet is computed in place, not through a local fn: a fn
+     ;; returns Object, which left the JVM-family compile of the four asets
+     ;; below as reflective RT.aset calls (byte[], int, Object). A reflective
+     ;; aset does not resolve in the TeaVM image (heron RESULT #20: "No
+     ;; matching method aset found taking 3 args" at this frame); inline,
+     ;; each octet is a primitive byte and aset binds statically.
+     (let [bs #?(:cljs (js/Uint8Array. (* 4 slots))
+                 :default (byte-array (* 4 slots)))
+           b0 #?(:cljs (bit-and val 0xFF)
+                 :default (unchecked-byte (bit-and val 0xFF)))
+           b1 #?(:cljs (bit-and (unsigned-bit-shift-right val 8) 0xFF)
+                 :default (unchecked-byte (bit-and (unsigned-bit-shift-right val 8) 0xFF)))
+           b2 #?(:cljs (bit-and (unsigned-bit-shift-right val 16) 0xFF)
+                 :default (unchecked-byte (bit-and (unsigned-bit-shift-right val 16) 0xFF)))
+           b3 #?(:cljs (bit-and (unsigned-bit-shift-right val 24) 0xFF)
+                 :default (unchecked-byte (bit-and (unsigned-bit-shift-right val 24) 0xFF)))]
+       (loop [i 0]
+         (when (< i slots)
+           (let [o (* 4 i)]
+             (aset bs o b0)
+             (aset bs (+ o 1) b1)
+             (aset bs (+ o 2) b2)
+             (aset bs (+ o 3) b3))
+           (recur (inc i))))
+       bs)))
+
 (extend-default IFillRegion
   (-fill-i32! [r byte-off count val]
-    (loop [i 0]
-      (when (< i count)
-        (-store-i32! r (+ byte-off (* 4 i)) val)
-        (recur (inc i))))
+    (when (pos? count)
+      (let [span  (min fill-chunk-slots count)
+            chunk (i32-pattern-bytes span val)]
+        (loop [done 0]
+          (let [remain (- count done)]
+            (cond
+              (> remain span) (do (-write-bytes! r (+ byte-off (* 4 done)) chunk)
+                                  (recur (+ done span)))
+              (= remain span) (-write-bytes! r (+ byte-off (* 4 done)) chunk)
+              (pos? remain)   (-write-bytes! r (+ byte-off (* 4 done))
+                                             (i32-pattern-bytes remain val)))))))
     nil))
 
 ;; ---------------------------------------------------------------------------

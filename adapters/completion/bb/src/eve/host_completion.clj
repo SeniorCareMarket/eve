@@ -279,7 +279,14 @@
    presenter runs (measured)."
   []
   (let [n (str *ns*)]
-    (not (or (str/starts-with? n "eve.")
+    ;; eve.db.ds is a library written against clojure.core's
+    ;; vocabulary (keyword lookup, get, nth) on Eve types (Datom
+    ;; is the measured case). The eve.* skip is for Eve's own
+    ;; sources, which already use eve.core; without this carve-out
+    ;; (:e datom) in eve.db.ds stays a host keyword invoke and
+    ;; answers nil on SciType (bb contract.only-core: #{[nil]}).
+    (not (or (and (str/starts-with? n "eve.")
+                  (not (str/starts-with? n "eve.db.ds")))
              (str/starts-with? n "clojure.")
              (= n "eve.host-completion")))))
 
@@ -996,6 +1003,50 @@
                                 (recur)))
                             (sci-reset! a v)))))
 
+;; clojure.core/add-watch, remove-watch, set-validator! and
+;; get-validator, presented for Eve atoms: clojure.core's own fns
+;; cast the reference to clojure.lang.IRef, which an Eve atom (a
+;; sci deftype answering eve.atom/IEveAtom) cannot be — the seat
+;; has no IRef home for it. Eve atoms route to eve.atom's trunk
+;; watch surface (add-watch*/remove-watch*/set-validator*/
+;; get-validator, the one watch implementation); every other
+;; reference takes the seat's own fn untouched.
+(def sci-add-watch @#'clojure.core/add-watch)
+(def sci-remove-watch @#'clojure.core/remove-watch)
+(def sci-set-validator! @#'clojure.core/set-validator!)
+(def sci-get-validator @#'clojure.core/get-validator)
+
+(defn- eve-atom-value?
+  "True when a is an Eve atom (satisfies eve.atom/IEveAtom),
+   resolved lazily: eve.atom loads on demand, and a process that
+   never loads it has no Eve atoms to route."
+  [a]
+  (boolean
+   (when-let [p (try (requiring-resolve 'eve.atom/IEveAtom)
+                     (catch Throwable _ nil))]
+     (satisfies? @p a))))
+
+(alter-var-root #'clojure.core/add-watch
+                (fn [_] (fn [a k f]
+                          (if (eve-atom-value? a)
+                            ((requiring-resolve 'eve.atom/add-watch*) a k f)
+                            (sci-add-watch a k f)))))
+(alter-var-root #'clojure.core/remove-watch
+                (fn [_] (fn [a k]
+                          (if (eve-atom-value? a)
+                            ((requiring-resolve 'eve.atom/remove-watch*) a k)
+                            (sci-remove-watch a k)))))
+(alter-var-root #'clojure.core/set-validator!
+                (fn [_] (fn [a f]
+                          (if (eve-atom-value? a)
+                            ((requiring-resolve 'eve.atom/set-validator*) a f)
+                            (sci-set-validator! a f)))))
+(alter-var-root #'clojure.core/get-validator
+                (fn [_] (fn [a]
+                          (if (eve-atom-value? a)
+                            ((requiring-resolve 'eve.atom/get-validator) a)
+                            (sci-get-validator a)))))
+
 ;; clojure.core's seq family, presented for this seat's own
 ;; types. The seat's seq/first/rest/next are host fns: they
 ;; cannot create an ISeq from, or walk, a SciType (a sorted
@@ -1016,6 +1067,14 @@
 (def sci-first @#'clojure.core/first)
 (def sci-rest @#'clojure.core/rest)
 (def sci-cons @#'clojure.core/cons)
+
+;; The seat's own instance? and seq? (host semantics), for this
+;; completion's internals: the host-parity presenters at the end of this
+;; file answer instance?/seq? from a type's DECLARED interfaces (an Eve
+;; RSeq declares ISeq), while these internals ask whether a value is a
+;; host seq the seat's own first/next/cons can walk.
+(def ^:private host-instance? @#'clojure.core/instance?)
+(def ^:private host-seq? @#'clojure.core/seq?)
 
 (defn- eve-typed?
   "x's type is one of this seat's own: a SciType, or a SciMap
@@ -1038,7 +1097,7 @@
          (cons (f s)
                (let [r (rf s)]
                  (cond (nil? r) nil
-                       (instance? clojure.lang.ISeq r) r
+                       (host-instance? clojure.lang.ISeq r) r
                        :else (view r))))))
      s)))
 
@@ -1051,11 +1110,20 @@
                  (catch Throwable _ ::sci))]
       (cond (identical? s ::sci) (sci-seq x)
             (nil? s) nil
-            (instance? clojure.lang.ISeq s) s
+            (host-instance? clojure.lang.ISeq s) s
             :else (host-seq-view s)))
     :else (sci-seq x)))
 
 (alter-var-root #'clojure.core/seq (fn [_] presented-seq))
+
+;; vec calls RT/toArray directly, bypassing the presented seq function.
+;; Only Eve instances need a host seq view; retain vec's identity/metadata
+;; behavior for native vectors and its normal array conversion path.
+(def ^:private sci-vec @#'clojure.core/vec)
+(alter-var-root #'clojure.core/vec
+                (fn [_] (fn [x]
+                          (sci-vec (if (eve-typed? x) (presented-seq x) x)))))
+
 
 ;; first/rest/next on the seat's own types go through eve.core's
 ;; -first/-next directly, NOT through presented-seq's host view:
@@ -1092,7 +1160,7 @@
         (let [s (seq-of x)]
           (cond (identical? s ::sci) (sci-first x)
                 (nil? s) nil
-                (instance? clojure.lang.ISeq s) (sci-first s)
+                (host-instance? clojure.lang.ISeq s) (sci-first s)
                 :else ((eve-or-sci '-first sci-first :first) s)))
         :else (sci-first x)))
 
@@ -1103,7 +1171,7 @@
         (let [s (seq-of x)]
           (cond (identical? s ::sci) (sci-next x)
                 (nil? s) nil
-                (instance? clojure.lang.ISeq s) (sci-next s)
+                (host-instance? clojure.lang.ISeq s) (sci-next s)
                 :else ((eve-or-sci '-next sci-next :next) s)))
         :else (sci-next x)))
 
@@ -1120,6 +1188,106 @@
                 (fn [_] (fn [x] (sci-last (presented-seq x)))))
 (alter-var-root #'clojure.core/empty?
                 (fn [_] (fn [x] (not (presented-seq x)))))
+;; Native clojure.core fns that walk a collection argument with RT/seq
+;; directly (zipmap, set, apply, every?, some, partition, interleave,
+;; frequencies, reverse ...) bypass the presented seq above, so on bb an
+;; Eve collection (a SciType) reaching one of them answered "Don't know
+;; how to create ISeq from: sci.impl.deftype.SciType" (measured: BB-FIX-3,
+;; ds's resolve-ins calling zipmap on the parser's :in bindings). Each
+;; is re-rooted to hand the native a host seq view of an Eve-typed
+;; collection argument, exactly as vec is above; host values and every
+;; non-collection argument pass through untouched. Only the collection
+;; argument is converted: apply's LAST argument (an Eve value earlier in
+;; the list is an argument to the applied fn, not the seq).
+(def ^:private sci-apply @#'clojure.core/apply)
+
+(defn- seq-arg [x]
+  (if (eve-typed? x) (presented-seq x) x))
+
+(defn- coll-last-arg
+  "f with its last argument presented as a host seq if it is Eve-typed."
+  [f]
+  (fn
+    ([a] (f (seq-arg a)))
+    ([a b] (f a (seq-arg b)))
+    ([a b c] (f a b (seq-arg c)))
+    ([a b c d] (f a b c (seq-arg d)))
+    ([a b c d & more]
+     (let [args (vec (list* a b c d more))
+           n (count args)]
+       (sci-apply f (conj (subvec args 0 (dec n)) (seq-arg (nth args (dec n)))))))))
+
+(defn- coll-all-args
+  "f with every argument presented as a host seq if it is Eve-typed."
+  [f]
+  (fn
+    ([] (f))
+    ([a] (f (seq-arg a)))
+    ([a b] (f (seq-arg a) (seq-arg b)))
+    ([a b & more] (sci-apply f (map seq-arg (list* a b more))))))
+
+(doseq [v [#'clojure.core/apply #'clojure.core/set #'clojure.core/every?
+           #'clojure.core/not-every? #'clojure.core/some #'clojure.core/not-any?
+           #'clojure.core/partition #'clojure.core/partition-all
+           #'clojure.core/partition-by #'clojure.core/frequencies
+           #'clojure.core/reverse]]
+  (alter-var-root v coll-last-arg))
+(doseq [v [#'clojure.core/zipmap #'clojure.core/interleave]]
+  (alter-var-root v coll-all-args))
+
+;; clojure.core's collection predicates are interface checks
+;; (sequential? is instance? of clojure.lang.Sequential, seqable?
+;; of Seqable, coll? of IPersistentCollection): on this seat they
+;; answer false for every SciType, though the value seqs, walks and
+;; reduces through the presented seq above. Code that branches on a
+;; predicate before walking — eve.db.ds's parser, whose
+;; collect-vars-acc gates on sequential? over a Pattern's :pattern
+;; field (an EveVector) — therefore reads an Eve collection as "not
+;; a collection" and drops its contents silently: every
+;; collection-find query ([:find [?e ...] :where [?e :name _]])
+;; parsed to "Query for unknown vars: [?e]" on bb while relation
+;; finds passed (PERF-4 diagnosis, measured: sequential?/seqable?/
+;; coll? all false on an EveVector whose seq walks fine). Present
+;; the three predicates for the seat's own types. sequential? is
+;; keyed on a positive list of the seat's sequential type names —
+;; it fails closed: a sequential type not named here keeps the
+;; seat's false, and no map, set or record can answer true by
+;; accident. seqable? is "eve.core's -seq answers" (a record seqs
+;; as its entries, as on the JVM); coll? is eve-typed? itself
+;; (records included, as IPersistentCollection covers them on the
+;; JVM). Host values keep the seat's own answers untouched.
+(def ^:private sci-sequential? @#'clojure.core/sequential?)
+(def ^:private sci-seqable? @#'clojure.core/seqable?)
+(def ^:private sci-coll? @#'clojure.core/coll?)
+
+(def ^:private eve-sequential-type-names
+  #{"eve.vec.EveVector"
+    "eve.list.EveList"
+    "eve.array.EveArray"
+    "eve.rseq.RSeq"
+    "eve.rrb_vector.rrbt.RRBChunkedSeq"
+    "me.tonsky.persistent-sorted-set.Iter"})
+
+(defn- eve-has-seq? [x]
+  (try (do ((eve-method '-seq) x) true)
+       (catch Throwable _ false)))
+
+(defn- presented-sequential? [x]
+  (boolean (or (sci-sequential? x)
+               (and (eve-typed? x)
+                    (contains? eve-sequential-type-names (str (type x)))))))
+
+(defn- presented-seqable? [x]
+  (boolean (or (sci-seqable? x)
+               (and (eve-typed? x) (eve-has-seq? x)))))
+
+(defn- presented-coll? [x]
+  (boolean (or (sci-coll? x) (eve-typed? x))))
+
+(alter-var-root #'clojure.core/sequential? (fn [_] presented-sequential?))
+(alter-var-root #'clojure.core/seqable? (fn [_] presented-seqable?))
+(alter-var-root #'clojure.core/coll? (fn [_] presented-coll?))
+
 ;; clojure.core's meta / with-meta, presented for the seat's own
 ;; types: SCI's with-meta on a SciType / SciMap keeps the map on
 ;; SCI's side of the value and never calls the type's IObj group,
@@ -1170,12 +1338,39 @@
                                 (sci-with-meta x (assoc (sci-meta x) :type t)))))))
   t)
 
+(defn stamp-map-mode-type
+  "Stamp T on one instance of a map-mode type, as the factory wrapper of
+   present-map-mode-type! does: for an instance built another way than a
+   presented factory (an eve.record record, built by its slab constructor
+   and read back from eve memory), so (type x), instance? and the logical
+   protocol dispatch see T and not babashka.impl.SciMap."
+  [x t]
+  (if (scimap? x)
+    (sci-with-meta x (assoc (sci-meta x) :type t))
+    x))
+
 (let [^clojure.lang.MultiFn pm print-method]
   (.addMethod pm (Class/forName "babashka.impl.SciMap")
               (fn [x w]
                 (if-let [own (some-> (map-mode-type x) sci-meta :sci.impl/print-method)]
                   (own x w)
                   ((.getMethod pm clojure.lang.IPersistentMap) x w)))))
+
+;; SCI stores deftype print-methods on type metadata, whereas the native
+;; print-dup dispatches on the implementation class shared by all SCI types.
+;; Route those classes through the declared printer just as normal printing
+;; does; leave ordinary SciMap values on their original map duplicate printer.
+(clojure.core/deftype PrintDupProbe [])
+(let [^clojure.lang.MultiFn dup print-dup]
+  ;; Native-image Class/forName does not expose SciType by its class name.
+  ;; Obtain the actual implementation class from an ordinary SCI type.
+  (.addMethod dup (class (->PrintDupProbe))
+              (fn [x w] (print-method x w)))
+  (.addMethod dup (Class/forName "babashka.impl.SciMap")
+              (fn [x w]
+                (if (map-mode-type x)
+                  (print-method x w)
+                  ((.getMethod dup clojure.lang.IPersistentMap) x w)))))
 
 (defn- user-meta
   "Meta as the program sees it: the stamp removed."
@@ -1192,7 +1387,14 @@
                   (fn [_] (fn [x m]
                             (if (eve-typed? x)
                               (if-let [t (map-mode-type x)]
-                                (eve-with-meta x (assoc m :type t))
+                                ;; the stamp is a SCI type value, never Eve data:
+                                ;; keep it out of the Eve-side meta (an eve.record
+                                ;; refuses it as non-portable) and re-stamp the
+                                ;; result's SCI-side meta.
+                                (let [r (eve-with-meta x m)]
+                                  (if (scimap? r)
+                                    (sci-with-meta r (assoc (sci-meta r) :type t))
+                                    r))
                                 (eve-with-meta x m))
                               (sci-with-meta x m))))))
 
@@ -1215,7 +1417,7 @@
 ;; branch in presented-seq made Eve's own namespace load spin
 ;; (measured; the site inside Eve's load was not isolated).
 (alter-var-root #'clojure.core/cons
-                (fn [_] (fn [x s] (sci-cons x (if (seq? s) s (presented-seq s))))))
+                (fn [_] (fn [x s] (sci-cons x (if (host-seq? s) s (presented-seq s))))))
 
 ;; The seq-CONSUMING core fns, presented the same way: the
 ;; seat's own are host fns whose internals seq their argument
@@ -1272,6 +1474,13 @@
         ([x] (g x f))
         ([x nf] (g x f nf))))
     f))
+
+(def ^:private sci-juxt @#'clojure.core/juxt)
+;; A composite fn hides its keyword invocations from map/mapv's presenter.
+;; Normalize the constituent fns at construction, not the returned values.
+(alter-var-root #'clojure.core/juxt
+                (fn [_] (fn [& fs]
+                          (apply sci-juxt (sci-map presented-fn fs)))))
 
 (defn- xf-last
   "Like seq-last, but a single argument is the transducer arity
@@ -1346,6 +1555,23 @@
 (alter-var-root #'clojure.core/not-empty
                 (fn [_] (fn [x] (when (presented-seq x) x))))
 
+;; clojure.core/realized? is (.isRealized ^clojure.lang.IPending x) and
+;; sci's deftype will not carry IPending (the types adapter homes it on
+;; this protocol). Host delays, promises, futures and lazy seqs stay on
+;; the original path; an eve.thread promise or future — the measured
+;; case, DataScript users calling realized? on transact's result —
+;; answers through -realized?, which is isRealized / d/done?.
+(defprotocol IPending
+  (-realized? [o]))
+
+(def ^:private sci-realized? @#'clojure.core/realized?)
+(alter-var-root #'clojure.core/realized?
+                (fn [_]
+                  (fn [x]
+                    (if (host-instance? clojure.lang.IPending x)
+                      (sci-realized? x)
+                      (-realized? x)))))
+
 ;; A hand-rolled loop, not doseq: while presented-seq carried
 ;; a host-seq pass-through branch (since moved to presented
 ;; cons), SCI's doseq (whose chunked expansion walks the pairs
@@ -1353,6 +1579,39 @@
 ;; vars at load — a named SCI quirk, mechanism not isolated.
 ;; The loop is the same iteration and is verified in this
 ;; configuration, so it stays.
+;; into onto an Eve type: coll? is presented above (true for an Eve
+;; value, as on the JVM), so code that sends a coll? target to
+;; clojure.core/into — eve.core/into's host-coll? among it — handed
+;; SCI's into a SciType, whose conj casts it to IPersistentCollection
+;; (ClassCastException, measured: collection-hash bulk-into on
+;; 352189e2). A SciType target conjs through eve.core's protocols,
+;; as eve.core/into does: its transient when it has one, keeping its
+;; meta, else -conj by -conj. A SciMap target (an Eve map here) is a
+;; host IPersistentMap SCI's into already conjs onto; it, and every
+;; host target, keep seq-last's into.
+(defn- sci-type? [x]
+  (= "class sci.impl.deftype.SciType" (str (class x))))
+
+(defn- eve-type-into [to from]
+  (let [t (try ((eve-method '-as-transient) to) (catch Exception _ nil))]
+    (if (some? t)
+      (let [conj! (eve-method '-conj!)
+            r ((eve-method '-persistent!) (clojure.core/reduce conj! t from))
+            m (clojure.core/meta to)]
+        (if (some? m) (clojure.core/with-meta r m) r))
+      (clojure.core/reduce (eve-method '-conj) to from))))
+
+(defn- presented-into [f]
+  (let [g (seq-last f)]
+    (fn
+      ([] (f))
+      ([to] (f to))
+      ([to from] (if (sci-type? to) (eve-type-into to from) (g to from)))
+      ([to xform from]
+       (if (sci-type? to)
+         (eve-type-into to (sequence xform (presented-seq from)))
+         (g to xform from))))))
+
 (loop [ps (seq [[#'clojure.core/map xf-map]
                 ;; mapv/filterv (fix-for-release B2): the eager
                 ;; spellings of map/filter, measured missing —
@@ -1367,7 +1626,7 @@
                 [#'clojure.core/keep xf-last]
                 [#'clojure.core/concat seq-args]
                 [#'clojure.core/reduce seq-last]
-                [#'clojure.core/into seq-last]
+                [#'clojure.core/into presented-into]
                 [#'clojure.core/transduce seq-last]
                 [#'clojure.core/sort seq-last]
                 [#'clojure.core/sort-by seq-last-fn]
@@ -1406,3 +1665,303 @@
                  ~@body)))))
 (alter-meta! (find-var 'clojure.pprint/print-length-loop)
              assoc :macro true)
+
+;; ---------------------------------------------------------------------------
+;; Host parity (John's ruling, 2026-11-16): an Eve collection acts like its
+;; host twin under clojure.core's own fns on this seat too.
+;;
+;; SCI's deftype carries protocols only: a non-map type that declares
+;; clojure.lang.IPersistentVector, IPersistentSet, IPersistentList, Counted,
+;; IFn, java.util.List ... is a sci.impl.deftype.SciType implementing none of
+;; them ("defrecord/deftype currently only support protocol implementations",
+;; bb 1.13.226), and its methods land on eve.core's protocols
+;; (eve.types/bb-translate-protos). clojure.core's fns that test those
+;; interfaces or call them host-side therefore saw "not a collection":
+;; (= ev [1 2 3]) false both ways, (count ev) "not supported on this type:
+;; SciType", (vector? ev) false, (conj ev 4) a cast error, (get ev 1) nil.
+;;
+;; The producer-level answer, in two parts:
+;;  1. The declaration is kept. bb-translate-protos registers every type's
+;;     declared host interfaces here (register-declared!), closed over their
+;;     superinterfaces (IPersistentVector => Associative, Sequential,
+;;     Reversible, Counted, ...: the JVM's own hierarchy, read with supers).
+;;     instance? and the interface predicates (vector? set? list? seq?
+;;     associative? counted? reversible? sorted? ifn? sequential? record?)
+;;     answer from it for the seat's own types: exactly what the JVM class
+;;     would answer, for every eve-deftype, not a list of names.
+;;  2. The collection fns that dispatch on those interfaces host-side (=,
+;;     not=, count, nth, get, contains?, conj, peek, pop, assoc, dissoc,
+;;     disj, empty) go through eve.core's protocol for a SciType argument —
+;;     the very methods the type declared, translated — and keep the seat's
+;;     own fn for every other value (one class identity test on the hot path).
+;;     = also answers a host collection holding Eve values ([ev] vs [[1 2 3]],
+;;     {:k ev}): on a false host answer between same-kind, same-count host
+;;     collections, it compares their host forms; contains?/get on a host
+;;     collection with an Eve key look up the key's host form.
+;;
+;; What cannot be reached from here (bb's limits, named in the parity test's
+;; seat notes): invoking an Eve vector or set as a function ((ev 1)), which
+;; SCI's call site decides; and host Java code that calls .equals/.equiv on
+;; a SciType directly.
+;; ---------------------------------------------------------------------------
+
+(def ^:private sci-type-class (class (->PrintDupProbe)))
+(def ^:private sci-map-class (Class/forName "babashka.impl.SciMap"))
+
+(defn- scitype?
+  "x is a sci.impl.deftype.SciType (a non-map deftype instance): one class
+   identity test, cheap enough for the hot path of = and count."
+  [x]
+  (identical? (class x) sci-type-class))
+
+(defonce ^:private declared-interfaces
+  ;; type name (the str of the SCI type) -> the host interfaces its deftype
+  ;; declared, closed over their superinterfaces
+  (atom {}))
+
+(defn register-declared!
+  "Called by eve.types/bb-translate-protos at definition: type-str names
+   the SCI type (its str), syms the interface/protocol symbols its spec
+   listed. Only symbols naming a host Class are kept."
+  [type-str syms]
+  (let [classes (keep (fn [s] (let [c (try (resolve s) (catch Throwable _ nil))]
+                                (when (class? c) c)))
+                      syms)
+        closed (into #{} (mapcat (fn [^Class c] (cons c (supers c)))) classes)]
+    (swap! declared-interfaces assoc type-str closed)
+    nil))
+
+(defn- declared
+  "The closed interface set of x's type when x is one of the seat's own
+   registered types (a SciType, or a stamped map-mode instance), else nil."
+  [x]
+  (cond (scitype? x) (get @declared-interfaces (str (sci-type x)))
+        (identical? (class x) sci-map-class)
+        (when-let [t (map-mode-type x)] (get @declared-interfaces (str t)))
+        :else nil))
+
+(defn- declares? [x ^Class c]
+  (when-let [ifs (declared x)] (contains? ifs c)))
+
+;; --- 1. instance? and the interface predicates -------------------------------
+
+(let [inst @#'clojure.core/instance?]
+  (alter-var-root #'clojure.core/instance?
+                  (fn [_] (fn [c x]
+                            (or (inst c x)
+                                (boolean (and (class? c) (declares? x c))))))))
+
+(defn- present-predicate!
+  "Re-root the predicate v so a registered type answers (contains? its
+   declared interfaces c); every other value keeps the seat's answer."
+  [v ^Class c]
+  (let [orig @v]
+    (alter-var-root v (fn [_] (fn [x]
+                                (if-let [ifs (declared x)]
+                                  (contains? ifs c)
+                                  (orig x)))))))
+
+(present-predicate! #'clojure.core/vector? clojure.lang.IPersistentVector)
+(present-predicate! #'clojure.core/set? clojure.lang.IPersistentSet)
+(present-predicate! #'clojure.core/list? clojure.lang.IPersistentList)
+(present-predicate! #'clojure.core/seq? clojure.lang.ISeq)
+(present-predicate! #'clojure.core/associative? clojure.lang.Associative)
+(present-predicate! #'clojure.core/counted? clojure.lang.Counted)
+(present-predicate! #'clojure.core/reversible? clojure.lang.Reversible)
+(present-predicate! #'clojure.core/sorted? clojure.lang.Sorted)
+(present-predicate! #'clojure.core/ifn? clojure.lang.IFn)
+(present-predicate! #'clojure.core/record? clojure.lang.IRecord)
+;; sequential? keeps its name list for the seat's seq objects (an RSeq, a PSS
+;; Iter: not all of them reach bb-translate-protos) and adds the registry
+(let [orig @#'clojure.core/sequential?]
+  (alter-var-root #'clojure.core/sequential?
+                  (fn [_] (fn [x] (if-let [ifs (declared x)]
+                                    (or (contains? ifs clojure.lang.Sequential) (orig x))
+                                    (orig x))))))
+;; an unstamped SciMap is one of Eve's map collections (EveHashMap): the
+;; JVM type is IFn but not Reversible, where SCI's map class answers both
+(let [orig @#'clojure.core/reversible?]
+  (alter-var-root #'clojure.core/reversible?
+                  (fn [_] (fn [x] (if (and (identical? (class x) sci-map-class)
+                                           (nil? (map-mode-type x)))
+                                    false
+                                    (orig x))))))
+
+;; --- 2. the collection fns ----------------------------------------------------
+
+(def ^:private sci-= @#'clojure.core/=)
+(def ^:private sci-count @#'clojure.core/count)
+(def ^:private sci-nth @#'clojure.core/nth)
+(def ^:private sci-get @#'clojure.core/get)
+(def ^:private sci-contains? @#'clojure.core/contains?)
+(def ^:private sci-conj @#'clojure.core/conj)
+(def ^:private sci-peek @#'clojure.core/peek)
+(def ^:private sci-pop @#'clojure.core/pop)
+(def ^:private sci-assoc @#'clojure.core/assoc)
+(def ^:private sci-dissoc @#'clojure.core/dissoc)
+(def ^:private sci-disj @#'clojure.core/disj)
+(def ^:private sci-empty @#'clojure.core/empty)
+
+(def ^:private eve-equiv (eve-or-sci '-equiv sci-= :equiv))
+(def ^:private eve-count (eve-or-sci '-count sci-count :count))
+(def ^:private eve-nth (eve-or-sci '-nth sci-nth :nth))
+(def ^:private eve-lookup (eve-or-sci '-lookup sci-get :lookup))
+(def ^:private eve-contains-key? (eve-or-sci '-contains-key? sci-contains? :contains-key))
+(def ^:private eve-conj (eve-or-sci '-conj sci-conj :conj))
+(def ^:private eve-peek (eve-or-sci '-peek sci-peek :peek))
+(def ^:private eve-pop (eve-or-sci '-pop sci-pop :pop))
+(def ^:private eve-assoc (eve-or-sci '-assoc sci-assoc :assoc))
+(def ^:private eve-dissoc (eve-or-sci '-dissoc sci-dissoc :dissoc))
+(def ^:private eve-disj (eve-or-sci '-disjoin sci-disj :disjoin))
+(def ^:private eve-empty (eve-or-sci '-empty sci-empty :empty))
+
+(defn- host-form
+  "x with every SciType collection in it (x itself, its elements, keys and
+   values, any depth) as the host collection of the kind its type declares;
+   host values untouched where nothing in them changes."
+  [x]
+  (cond
+    (scitype? x)
+    ;; a SciType that is not a collection (eve.flat.chunk's BytesVal
+    ;; is one) has no seq to view: presented-seq throws for it, and
+    ;; the value passes through untouched, as the :else below
+    ;; intends for non-collection types (measured: (contains? syms
+    ;; a-bytes-val) in chunk's column plan threw ISeq-from-SciType
+    ;; here before ever reaching the interface check).
+    (let [s (try (presented-seq x) (catch Throwable _ ::no-seq))]
+      (if (identical? s ::no-seq)
+        x
+        (let [ifs (declared x)
+              xs (map host-form s)]
+          (cond (contains? ifs clojure.lang.IPersistentVector) (vec xs)
+                (contains? ifs clojure.lang.IPersistentSet) (set xs)
+                (contains? ifs clojure.lang.IPersistentMap) (into {} xs)
+                (contains? ifs clojure.lang.Sequential) (apply list xs)
+                :else x))))
+    (map-entry? x) (clojure.lang.MapEntry. (host-form (key x)) (host-form (val x)))
+    (record? x) x
+    (map? x) (if (identical? (class x) sci-map-class) x
+                 (persistent! (reduce-kv (fn [m k v] (assoc! m (host-form k) (host-form v)))
+                                         (transient (sci-empty x)) x)))
+    (vector? x) (mapv host-form x)
+    (set? x) (if (sorted? x) x (into #{} (map host-form) x))
+    (seq? x) (apply list (map host-form x))
+    :else x))
+
+(defn- host-coll-kind [x]
+  (cond (map? x) :map (set? x) :set (sequential? x) :seq :else nil))
+
+(defn- presented-=2 [a b]
+  (cond
+    (identical? a b) true
+    (scitype? a) (boolean (eve-equiv a b))
+    (scitype? b) (boolean (eve-equiv b a))
+    (sci-= a b) true
+    ;; a host collection holding Eve values: the host equiv refused the
+    ;; SciType inside; compare host forms (same kind, same count only)
+    :else (let [ka (host-coll-kind a)]
+            (boolean (and ka (= ka (host-coll-kind b))
+                          (== (sci-count a) (sci-count b))
+                          (sci-= (host-form a) (host-form b)))))))
+
+(defn- presented-=
+  ([_] true)
+  ([a b] (presented-=2 a b))
+  ([a b & more]
+   (if (presented-=2 a b)
+     (if (next more)
+       (recur b (first more) (next more))
+       (presented-=2 b (first more)))
+     false)))
+
+(alter-var-root #'clojure.core/= (fn [_] presented-=))
+(alter-var-root #'clojure.core/not= (fn [_] (fn ([_] false)
+                                              ([a b] (not (presented-=2 a b)))
+                                              ([a b & more] (not (apply presented-= a b more))))))
+
+(alter-var-root #'clojure.core/count
+                (fn [_] (fn [x] (if (scitype? x) (eve-count x) (sci-count x)))))
+(alter-var-root #'clojure.core/nth
+                (fn [_] (fn ([x i] (if (scitype? x) (eve-nth x i) (sci-nth x i)))
+                          ([x i nf] (if (scitype? x) (eve-nth x i nf) (sci-nth x i nf))))))
+(alter-var-root #'clojure.core/get
+                (fn [_] (fn ([x k] (cond (scitype? x) (eve-lookup x k)
+                                         (scitype? k) (sci-get x (host-form k))
+                                         :else (sci-get x k)))
+                          ([x k nf] (cond (scitype? x) (eve-lookup x k nf)
+                                          (scitype? k) (sci-get x (host-form k) nf)
+                                          :else (sci-get x k nf))))))
+(alter-var-root #'clojure.core/contains?
+                (fn [_] (fn [x k]
+                          (cond
+                            (scitype? x)
+                            (if (declares? x clojure.lang.Associative)
+                              (boolean (eve-contains-key? x k))
+                              (not (identical? ::absent (eve-lookup x k ::absent))))
+                            (scitype? k) (sci-contains? x (host-form k))
+                            :else (sci-contains? x k)))))
+(alter-var-root #'clojure.core/conj
+                (fn [_] (fn ([] [])
+                          ([x] x)
+                          ([x a] (if (scitype? x) (eve-conj x a) (sci-conj x a)))
+                          ([x a & more] (reduce (fn [c v] (if (scitype? c) (eve-conj c v) (sci-conj c v)))
+                                                (if (scitype? x) (eve-conj x a) (sci-conj x a)) more)))))
+(alter-var-root #'clojure.core/peek
+                (fn [_] (fn [x] (if (scitype? x) (eve-peek x) (sci-peek x)))))
+(alter-var-root #'clojure.core/pop
+                (fn [_] (fn [x] (if (scitype? x) (eve-pop x) (sci-pop x)))))
+(alter-var-root #'clojure.core/assoc
+                (fn [_] (fn ([x k v] (if (scitype? x) (eve-assoc x k v) (sci-assoc x k v)))
+                          ([x k v & kvs]
+                           (let [r (if (scitype? x) (eve-assoc x k v) (sci-assoc x k v))]
+                             (if kvs (recur r (first kvs) (second kvs) (nnext kvs)) r))))))
+(alter-var-root #'clojure.core/dissoc
+                (fn [_] (fn ([x] x)
+                          ([x k] (if (scitype? x) (eve-dissoc x k) (sci-dissoc x k)))
+                          ([x k & ks] (reduce (fn [m k] (if (scitype? m) (eve-dissoc m k) (sci-dissoc m k)))
+                                              x (cons k ks))))))
+(alter-var-root #'clojure.core/disj
+                (fn [_] (fn ([x] x)
+                          ([x k] (if (scitype? x) (eve-disj x k) (sci-disj x k)))
+                          ([x k & ks] (reduce (fn [s k] (if (scitype? s) (eve-disj s k) (sci-disj s k)))
+                                              x (cons k ks))))))
+(alter-var-root #'clojure.core/empty
+                (fn [_] (fn [x] (if (scitype? x) (eve-empty x) (sci-empty x)))))
+
+;; Printing: a SciType with no print-method of its own (an Eve RSeq, a
+;; sorted-set slice, any eve-deftype collection whose namespace installs
+;; none) fell to its str, whose pr-str recursed or printed #eve/T. A
+;; registered type declaring a host collection kind prints as that host
+;; collection (its host form); a type with its own print-method, and every
+;; other SciType, print exactly as before.
+(let [^clojure.lang.MultiFn pm print-method
+      prior (.getMethod pm sci-type-class)]
+  (.addMethod pm sci-type-class
+              (fn [x w]
+                (let [own (some-> (sci-type x) sci-meta :sci.impl/print-method)
+                      ifs (declared x)]
+                  (cond own (own x w)
+                        (and ifs (contains? ifs clojure.lang.IPersistentCollection)
+                             (not (contains? ifs clojure.lang.IPersistentMap)))
+                        (print-method (host-form x) w)
+                        :else (prior x w))))))
+
+;; SCI compiles a direct call to some clojure.core fns (=, count, nth, get,
+;; ...: the vars whose meta carries :sci.impl/inlined) straight to the fn
+;; held in that meta, past the var root: a re-rooted presenter was reached
+;; only through apply or a fn value, never through (= a b) written in code
+;; (measured, bb 1.13.226: (= ev [1 2 3]) false, (apply = [ev [1 2 3]])
+;; true). The vars presented above therefore have their inlined fn moved to
+;; the presenter too, so a direct call site compiles to the presented fn.
+;; Only these: an inlined var this completion does not present keeps SCI's
+;; own fn (its root may be a different wrapper, alength's is).
+(doseq [v [#'clojure.core/= #'clojure.core/not= #'clojure.core/count #'clojure.core/nth
+           #'clojure.core/get #'clojure.core/contains? #'clojure.core/conj #'clojure.core/peek
+           #'clojure.core/pop #'clojure.core/assoc #'clojure.core/dissoc #'clojure.core/disj
+           #'clojure.core/empty #'clojure.core/instance? #'clojure.core/vector? #'clojure.core/set?
+           #'clojure.core/list? #'clojure.core/seq? #'clojure.core/associative?
+           #'clojure.core/counted? #'clojure.core/reversible? #'clojure.core/sorted?
+           #'clojure.core/ifn? #'clojure.core/record? #'clojure.core/sequential?
+           #'clojure.core/coll? #'clojure.core/seqable?]]
+  (when (:sci.impl/inlined (meta v))
+    (alter-meta! v assoc :sci.impl/inlined @v)))

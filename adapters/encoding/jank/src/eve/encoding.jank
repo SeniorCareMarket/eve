@@ -63,6 +63,8 @@ namespace eve_enc {
   /* IEEE-754 */
   double long_bits_to_double(long x) { int64_t i = x; double d; std::memcpy(&d, &i, 8); return d; }
   long double_to_long_bits(double d) { int64_t i; std::memcpy(&i, &d, 8); return (long)i; }
+  double int_bits_to_float(int x) { int32_t i = (int32_t)x; float f; std::memcpy(&f, &i, 4); return (double)f; }
+  int float_to_int_bits(double d) { float f = (float)d; int32_t i; std::memcpy(&i, &f, 4); return (int)i; }
   double read_f32_le(object_ref b, long off) { float f; std::memcpy(&f, B(b) + off, 4); return (double)f; }
   double read_f64_le(object_ref b, long off) { double d; std::memcpy(&d, B(b) + off, 8); return d; }
   object_ref f32_le_bytes(double v) { float f = (float)v; auto out(make_box<obj::array<jank::i8>>((jank::i64)4)); std::memcpy(out->data.data, &f, 4); return out; }
@@ -194,6 +196,16 @@ namespace eve_enc {
   "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
   [d]
   (cpp/eve_enc.double_to_long_bits (clojure.core/double d)))
+
+(defn int-bits->float
+  "The float32 whose IEEE-754 bits are x, as a double."
+  [x]
+  (cpp/eve_enc.int_bits_to_float (int x)))
+
+(defn float->int-bits
+  "The IEEE-754 bits of the float32 nearest d, as an int."
+  [d]
+  (cpp/eve_enc.float_to_int_bits (clojure.core/double d)))
 
 (defn fixed-integer?
   "An integer of a fixed-width host type — jank's 64-bit integers (small_integer, integer), the ones eve's format
