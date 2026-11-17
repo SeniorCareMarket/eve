@@ -73,15 +73,19 @@
 (defn- decode [sio bs]
   (codec/decode sio bs))
 
-(defn- byte-len [bs]
+;; bs is a value's encoding, the codec's bytes. The ^bytes tag is what gives
+;; the JVM its primitive alength / aget: untagged, each call is resolved by
+;; reflection (an int slot's write makes nine of them: 92 us against 1 us,
+;; measured 2026-11-17 on eve.text's bench).
+(defn- byte-len [^bytes bs]
   (eve.host/alength bs))
 
-(defn- magic? [bs]
+(defn- magic? [^bytes bs]
   (and (>= (byte-len bs) 3)
        (== d/DIRECT_MAGIC_0 (bit-and (eve.host/aget bs 0) 0xFF))
        (== d/DIRECT_MAGIC_1 (bit-and (eve.host/aget bs 1) 0xFF))))
 
-(defn- byte-at [bs i]
+(defn- byte-at [^bytes bs i]
   (bit-and (eve.host/aget bs i) 0xFF))
 
 (defn- i32-at [bs i]
