@@ -1617,15 +1617,11 @@
    opening a fresh domain together both pass (each initialised the domain
    over the other's writes).
 
-   Durability is the default shape of a disk domain: unless the opener
-   says otherwise, the domain is JOURNALED — commits append a record to
-   <base>.journal and the journal force is the commit point; the .root
-   file is a checkpoint (cleanup-sweep journal verdict, 2026-11-07: the
-   disk tier is journaled by design). The named opt-outs: :journal? false
-   keeps durable commits without the journal file (the pre-CAS sweep +
-   root-range force per commit carry durability alone); :durable? false
-   is the non-durable comms form — no journal, no forces, sync! is the
-   caller's explicit barrier. :mem-budget (bytes) caps the domain's total
+   Durability is the shape of a disk domain: the domain is JOURNALED —
+   commits append a record to <base>.journal and the journal force is
+   the commit point; the .root file is a checkpoint (cleanup-sweep
+   journal verdict, 2026-11-07: the disk tier is journaled by design).
+   :mem-budget (bytes) caps the domain's total
    region growth — refused growth names the budget, never the host's
    out-of-memory; the MEM-BUDGET-* constants are the per-target defaults.
    :segment-bytes (a power of two) sets the region mapping window —

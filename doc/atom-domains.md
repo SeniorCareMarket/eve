@@ -89,9 +89,7 @@ join the same domain with different windows.
 
 ### Journal durability and the retention floor
 
-A disk domain carries `<base>.journal` by default (the disk tier is journaled by design; the named
-opt-outs are `:journal? false` — durable commits carried by the sweep + root force alone — and
-`:durable? false`, the non-durable comms form), written through the host's
+A disk domain carries `<base>.journal` (the disk tier is journaled by design), written through the host's
 `eve.journal-file` adapter (`adapters/journal-file/`): the shared code in `src/eve/atom.cljc` owns the sequence —
 lock, sweep, append, force — and the adapter owns only the file, its lock and its forces. Each record is one epoch
 and the atom table that epoch published, so recovery installs the newest valid record whole. The domain keeps a
