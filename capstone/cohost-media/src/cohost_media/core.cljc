@@ -4,8 +4,9 @@
    cohost-media.tasks, under members/<host>/).
 
    The domain (a disk domain, durable) holds:
-     cohost-media/jobs      the rendezvous atom: its meta-atom is eve.thread's metadata — the runtime registry, the pools,
-                         every job as a thread descriptor (eve.thread.domain; P§5.4's eve.thread/meta)
+     cohost-media/jobs      the rendezvous atom: the pools live beside it — the runtime registry, the pools,
+                         every job as a descriptor — private machinery the program reaches only as data
+                         through cohost.pool (the registry, the descriptors), never by name
      cohost-media/library   {:files {path entry}} — every media file, its status, its jobs' ids and results
      cohost-media/index     {:complete? :files n :duplicates [[id …] …] :loudness {id lufs} :generation g}
      cohost-media/control   the run's shared notes: its configuration (the coordinator named), the children the supervisor

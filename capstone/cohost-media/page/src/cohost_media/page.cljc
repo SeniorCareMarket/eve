@@ -2,18 +2,18 @@
   "cohost-media's frontend: eve on ClojureScript in the browser — a runtime of the application's data plane, and its view.
 
    The runtime (a worker this page starts: the main thread cannot block): it joins the job atom's registry over the
-   network rung (eve.thread.net, through the gateway the media server proxies on this origin) as runtime \"browser\",
-   with the cap :browser, and serves the :browser pool on threads of its own (eve.thread's browser adapter: Web
+   network (through the gateway the media server proxies on this origin) as runtime \"browser\",
+   with the cap :browser, and serves the :browser pool on threads of its own (Web
    Workers, every one running this program). The coordinator — the member the launcher names, the JVM's — plans a
    :waveform job per file into that pool, after its loudness; the browser's threads claim it, draw the waveform from the peaks the loudness job recorded, and write it into the library. The runtime also
-   submits what the page asks for (a re-queue) with eve.thread.domain's moves, so a swap that keeps losing takes a turn.
+   submits what the page asks for (a re-queue) through the pools, so a submission that keeps losing takes a turn.
 
    The view: reagami — the UI the cljs-thread reagami-counter example renders with — on the main thread, over what a
    reader worker sends it: the library's file entries that changed, the index, and the control atom's notes (each
    process's run, the supervisor), read as network atoms once a second. It says what the application is doing: what
    each runtime is, what it is running now and has run, and a feed of every step it sees.
    The main thread does no network I/O of its own (a synchronous request would block it), so it is free to fetch its
-   workers' batched requests at once (eve's browser http adapter).
+   workers' batched requests at once (the browser's http adapter).
 
    ?check=<file-id>:<kind> — the done bar's row: once the index is complete, re-queue that job, watch it to :done, and
    write what the page saw into cohost-media/control (:page-check), where the launcher reads it."
@@ -22,13 +22,8 @@
   ;; reagami), so they are required under :cljs and the clj side
   ;; requires none
   #?@(:cljs [(:require [clojure.string :as str]
-                        [eve.process :as proc]
-                        [eve.thread :as t]
-                        [eve.thread-host :as h]
-                        [eve.thread.domain :as dom]
-                        [eve.thread.meta :as mt]
-                        [eve.thread.net :as tn]
-                        [eve.thread.rung :as rung]
+                        [cohost.pool :as pool]
+                        [cohost.thread-host :as h]
                         [cohost-media.core :as em]
                         [cohost-media.tasks :as tasks]
                         [reagami.core :as reagami])]))
@@ -40,25 +35,22 @@
 ;; ===========================================================================
 
 (defn- requeue-in!
-  "Job kind of the file at path submitted again, from this runtime: one swap of the metadata (eve.thread.meta/submit;
-   a starved swap takes a turn), then the file's entry pointed at the new descriptor. Its id."
+  "Job kind of the file at path submitted again, from this runtime: one submission through the pool
+   (a starved submission takes a turn), then the file's entry pointed at the new descriptor. Its id."
   [dh library path kind]
-  (let [e (get-in (rung/value library) [:files path])
+  (let [e (get-in (pool/read-atom library) [:files path])
         {:keys [out window]} (:cfg (tasks/ctx))
         args {:path path :id (:id e) :kind (:kind e) :out out :window window}
-        id (dom/swap-meta! dh (fn [m]
-                                (let [offered (reduce into #{} (map (fn [[_ r]] (set (:caps r))) (:runtimes m)))
-                                      [m ids] (mt/submit m (em/job-pool kind) [{:task (em/task-sym kind) :args [args]}]
-                                                         (:rid dh) {:retry :restart :needs (em/needs kind offered)
-                                                                    :scope (:id e)}
-                                                         (now))]
-                                  [m (first ids)])))]
+        offered (reduce into #{} (map (fn [[_ r]] (set (:caps r))) (pool/runtimes dh)))
+        id (pool/submit-one dh (em/job-pool kind) {:task (em/task-sym kind) :args [args]}
+                            {:retry :restart :needs (em/needs kind offered)
+                             :scope (:id e)})]
     (when-not id (throw (ex-info "the pool took no submission" {:kind kind})))
-    (rung/-swap! library (fn [v] (-> v
-                                     (assoc-in [:files path :jobs kind] id)
-                                     (assoc-in [:files path :status] :planned)
-                                     (update-in [:files path :requeued] (fnil conj []) {:kind kind :id id :at (now)
-                                                                                        :by (:rid dh)}))))
+    (pool/swap-atom! library (fn [v] (-> v
+                                         (assoc-in [:files path :jobs kind] id)
+                                         (assoc-in [:files path :status] :planned)
+                                         (update-in [:files path :requeued] (fnil conj []) {:kind kind :id id :at (now)
+                                                                                            :by (:rid dh)}))))
     id))
 
 (defn runtime-main
@@ -66,32 +58,32 @@
   [{:keys [reply]}]
   (let [{:keys [cfg p library]} (tasks/ctx)
         nc (tasks/net-cfg cfg)
-        jobs (tn/rung nc em/jobs-name p)
-        control (tn/rung nc em/control-name p)
+        jobs (pool/net-atom nc em/jobs-name p)
+        control (pool/net-atom nc em/control-name p)
         ;; (60 s: a network runtime's first beat comes after its ticker worker has loaded the program and read the
-        ;; metadata cold — ~1,100 blocks over the browser's six connections, beside its other workers' reads)
-        dh (dom/attach! jobs {:rid "browser" :ttl 60000 :caps [:browser] :requires '[cohost-media.tasks]})]
+        ;; pools' state cold — ~1,100 blocks over the browser's six connections, beside its other workers' reads)
+        dh (pool/attach jobs {:rid "browser" :ttl 60000 :caps [:browser] :requires '[cohost-media.tasks]})]
     (js/console.log "cohost-media runtime: joined the registry as" (:rid dh))
-    (dom/pool dh :browser {:threads 2 :retry :restart})
+    (pool/serve-pool dh :browser {:threads 2 :retry :restart})
     (js/console.log "cohost-media runtime: serving :browser on 2 threads")
-    (rung/-swap! control (fn [v] (assoc-in v [:members "browser" :joined] true)))
+    (pool/swap-atom! control (fn [v] (assoc-in v [:members "browser" :joined] true)))
     (h/send! reply {:op :joined})
     ;; every read here is a network request: one that fails is reported and the loop goes on (a throw would end it,
     ;; the page's re-queues with it, while the pool's own workers kept drawing waveforms)
     (loop [t0 0]
-      (let [[ok? stop] (h/attempt (fn [] (:stop (rung/value control))))]
+      (let [[ok? stop] (h/attempt (fn [] (:stop (pool/read-atom control))))]
         (when-not ok? (js/console.log "cohost-media runtime: reading control failed:" (str stop)))
         (if (and ok? stop)
-          (do (dom/detach! dh) (h/send! reply {:op :stopped}))
+          (do (pool/detach dh) (h/send! reply {:op :stopped}))
           (let [m (h/receive! 500)
                 t0 (if (> (- (now) t0) 5000)
                      (let [[ok? e] (h/attempt
                                     (fn []
-                                      (let [r (dom/registry dh)]
-                                        (h/send! reply {:op :registry :runtimes (vec (sort (keys (:runtimes r))))
+                                      (let [r (pool/registry dh)]
+                                        (h/send! reply {:op :registry :runtimes (vec (sort (keys r)))
                                                         :caps (into {} (map (fn [[rid x]] [rid (vec (sort (map name (:caps x))))])
-                                                                            (:runtimes r)))
-                                                        :coordinator (get-in (rung/value control) [:config :coordinator])}))))]
+                                                                            r))
+                                                        :coordinator (get-in (pool/read-atom control) [:config :coordinator])}))))]
                        (when-not ok? (js/console.log "cohost-media runtime: reading the registry failed:" (str e)))
                        (now))
                      t0)]
@@ -103,17 +95,17 @@
                                    {:op :error :error (str (or (ex-message v) v))}))))
             (recur t0)))))))
 
-;; ?probe=1: the network rung's cost from a worker, printed to the console (a diagnostic)
+;; ?probe=1: the network reach's cost from a worker, printed to the console (a diagnostic)
 (defn probe-main [_]
   (let [t (fn [label f] (let [t0 (now) r (f)] (js/console.log "cohost-media probe:" label (- (now) t0) "ms") r))
         [ok? v] (h/attempt
                  (fn []
                    (let [{:keys [cfg p]} (t "open the library's rung" tasks/ctx)
-                         jobs (t "open the jobs rung" (fn [] (tn/rung (tasks/net-cfg cfg) em/jobs-name p)))
-                         meta (t "open the metadata's rung" (fn [] (rung/-meta-rung jobs {})))]
-                     (dotimes [i 3] (t (str "read the metadata #" i) (fn [] (count (rung/value meta)))))
-                     (dotimes [i 2] (t (str "swap a key of the metadata #" i)
-                                       (fn [] (rung/-swap! meta (fn [v] (assoc v :probe (now))))))))))]
+                         jobs (t "open the jobs rung" (fn [] (pool/net-atom (tasks/net-cfg cfg) em/jobs-name p)))
+                         control (t "open the control rung" (fn [] (pool/net-atom (tasks/net-cfg cfg) em/control-name p)))]
+                     (dotimes [i 3] (t (str "read the descriptors #" i) (fn [] (count (pool/descriptors-of jobs)))))
+                     (dotimes [i 2] (t (str "swap a key of the control atom #" i)
+                                       (fn [] (pool/swap-atom! control (fn [v] (assoc v :probe (now))))))))))]
     (when-not ok? (js/console.log "cohost-media probe: failed" (str (or (ex-message v) v))))))
 
 ;; ===========================================================================
@@ -127,7 +119,7 @@
     (let [[ok? e] (h/attempt (fn [] (h/send! reply msg)))]
       (when-not ok?
         (if (and (< n 600) (re-find #"mailbox is full" (str (ex-message e))))
-          (do (proc/sleep-ms! 50) (recur (inc n)))
+          (do (pool/sleep-ms! 50) (recur (inc n)))
           (throw e))))))
 
 (defn- control-view
@@ -150,11 +142,11 @@
   [{:keys [reply]}]
   (let [{:keys [cfg p library]} (tasks/ctx)
         nc (tasks/net-cfg cfg)
-        index (tn/rung nc em/index-name p)
-        control (tn/rung nc em/control-name p)]
+        index (pool/net-atom nc em/index-name p)
+        control (pool/net-atom nc em/control-name p)]
     (loop [sent {} ix ::none cv ::none]
-      (let [[ok? v] (h/attempt (fn [] [(:files (rung/value library)) (rung/value index)
-                                       (control-view (rung/value control))]))
+      (let [[ok? v] (h/attempt (fn [] [(:files (pool/read-atom library)) (pool/read-atom index)
+                                       (control-view (pool/read-atom control))]))
             [sent ix cv] (if ok?
                            (let [[files ix' cv'] v]
                              (when (not= cv cv') (send-to-page! reply {:op :control :control cv'}))
@@ -168,7 +160,7 @@
                            (do (send-to-page! reply {:op :error :error (str (or (ex-message v) v))}) [sent ix cv]))
             m (h/receive! 1000)]
         (when (and (map? m) (= :page-check (:op m)))
-          (rung/-swap! control (fn [c] (assoc c :page-check (:check m)))))
+          (pool/swap-atom! control (fn [c] (assoc c :page-check (:check m)))))
         (recur sent ix cv)))))
 
 ;; ===========================================================================
@@ -209,7 +201,7 @@
              :role (str "Draws each file's waveform from its loudness peaks — this page's own workers, a runtime like "
                         "the others. The ↻ buttons below submit jobs from here.")}
    :gateway {:runtime "JVM" :lang "Clojure" :reach "maps the atoms' files"
-             :role (str "Runs no jobs: serves the atoms over HTTP (eve.net's routes) to the runtimes that cannot map "
+             :role (str "Runs no jobs: serves the atoms over HTTP (the gateway's routes) to the runtimes that cannot map "
                         "their files — babashka and this browser.")}})
 
 (def ^:private host-colours

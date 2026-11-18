@@ -11,7 +11,7 @@
 ;; args as data: the bootstream (a shell page in the run's page directory whose iframe is the
 ;; app page itself) and the server (its port, and a :handler carrying the gateway's endpoints
 ;; in-process and the run's output files). The seat serves the page from the run's first
-;; second; its runtime joins over the network rung, as every browser runtime does.
+;; second; its runtime joins over the network, as every browser runtime does.
 ;;
 ;;   bb cohost-media demo [--hosts bb,jvm,...] [--kill transcode|coordinator]   (from eve/)
 ;;   bb cohost-media scan <dir> [--hosts ...]     the library of a folder of your own
@@ -19,15 +19,15 @@
 ;;
 ;; A run's directory (~/.cohost-media/runs/<stamp>) holds media/ (the demo's generated files), out/ (transcodes,
 ;; thumbnails, contact sheets), d (the disk domain's files), logs/ (each member's), report.edn. The window is
-;; /dev/shm/cohost-media/<stamp> (decoded PCM; the system's temporary directory where there is no /dev/shm, as on macOS). The boot program reads and writes the domain's atoms directly; the members join eve.thread.
+;; /dev/shm/cohost-media/<stamp> (decoded PCM; the system's temporary directory where there is no /dev/shm, as on macOS). The boot program reads and writes the domain's atoms directly; the members join the pools.
 (ns cohost-media.start
   "The boot program (cohost-media.boot is its host entry): a run's pools and their watches, the
    page, the checks. Portable cljc over cohost.thread and the app's facilities
-   (cohost-media.boot-fs, cohost-media.boot-proc, eve.process); the seat's own leaves — its
+   (cohost-media.boot-fs, cohost-media.boot-proc, cohost.pool); the seat's own leaves — its
    environment and its own process, its sockets and the browser's DevTools protocol — are
    the :clj arms below and in the facility namespaces."
-  (:refer-clojure :exclude [swap!])
-  (:require [cohost.thread :as thread]
+  (:require [cohost.pool :as pool]
+            [cohost.thread :as thread]
             ;; the browser seat's driver is a JVM-seat facility (its server
             ;; and browser live in this process): the :clj arm only
             #?(:clj [cohost.cljs-pool :as cljs-pool])
@@ -36,9 +36,6 @@
             [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [eve.host :refer [swap!]]
-            [eve.atom :as ea]
-            [eve.process :as proc]
             [cohost-media.core :as em]
             [cohost-media.domain :as domain]
             [cohost-media.gateway :as gateway]
@@ -51,7 +48,7 @@
 ;; Host leaves: the few places the program touches its own seat directly —
 ;; its environment, its properties, its own process, the time as a stamp.
 ;; One #? arm each; everything else in this namespace is portable over the
-;; facilities (boot-fs, boot-proc, eve.process, cohost.thread).
+;; facilities (boot-fs, boot-proc, cohost.pool, cohost.thread).
 ;; ---------------------------------------------------------------------------
 
 (defn- getenv
@@ -82,11 +79,17 @@
 (def app-dir (str (fs/path eve-dir "capstone" "cohost-media")))
 (def hosts-edn (edn/read-string (slurp (str (fs/path eve-dir "hosts.edn")))))
 
-(defn now [] (proc/now-ms))
+(def cohost-src
+  "cohost's sources: the members load the cohost surface (cohost.pool above all) from them, as the
+   boot program does — COHOST_HOME's src, else the sibling cohost.cljc clone the boot task's own
+   rule names. Every member classpath (roots) and the page's build carry it."
+  (str (fs/path (or (getenv "COHOST_HOME") (fs/path eve-dir ".." "cohost.cljc")) "src")))
+
+(defn now [] (pool/now-ms))
 (defn log [& xs] (println (str "[cohost-media " #?(:clj (java.time.LocalTime/now) :cljs (.toLocaleTimeString (js/Date.))) "]") (str/join " " xs)) (flush))
 
 (defn roots [host & more]
-  (str/join ":" (concat [(str (fs/path eve-dir "src"))]
+  (str/join ":" (concat [(str (fs/path eve-dir "src")) cohost-src]
                         (map #(str (fs/path eve-dir %)) (get hosts-edn host))
                         [(str (fs/path app-dir "src"))]
                         (map #(str (fs/path app-dir %)) more))))
@@ -172,14 +175,13 @@
   "The node pool's args, as data — the one source the start call (start-seat!) reads: the seat
    (:node); its require root, the app directory (the realm's require anchors there, so it resolves
    the app's npm libraries — and, through the app package's eve-native link, eve's N-API addon —
-   as a node process started in that directory would); and the namespaces the realm boots with
-   (:load-ns): the type registrations first (eve.type-readers and eve.flat.sister — their
-   register! calls run at load in the type-defining namespaces, which do not require the
-   registrars, so both load before any type in the graph registers), then the member."
+   as a node process started in that directory would); and the namespace the realm boots with
+   (:load-ns): the member. (The realm's own type registrations are the seat's boot, not the
+   app's: the node seat loads them before any namespace the app names.)"
   []
   {:seat :node
    :require-root (str app-dir)
-   :load-ns '[eve.type-readers eve.flat.sister cohost-media.member]})
+   :load-ns '[cohost-media.member]})
 
 (defn member-cmd
   "The command line starting member rid of host h on domain base (out, window) as a process-backed
@@ -373,7 +375,7 @@
      (loop []
        (cond (sv/stopping? (:control atoms)) nil
              (sv/ready? (:control atoms) child) (spawn-child! atoms procs rid child)
-             :else (do (proc/sleep-ms! 200) (recur)))))))
+             :else (do (pool/sleep-ms! 200) (recur)))))))
 
 (defn- watch-jvm-member!
   "The JVM member's pool: its serve! on the host executor ex, watched (this watch is a
@@ -418,7 +420,7 @@
            (sv/restarting! (:control atoms) rid (now))
            (when (and pid (p/proc? (get @procs rid)))
              (p/shell {:continue true} "kill" "-9" (str pid))))
-         (proc/sleep-ms! 300)
+         (pool/sleep-ms! 300)
          (recur))))))
 
 ;; ---------------------------------------------------------------------------
@@ -537,7 +539,7 @@
                                 (thread/submit-call ex 'cohost-media.member/node-state))]
                         (if (= :stopped st)
                           [0 nil]
-                          (do (proc/sleep-ms! 300) (recur)))))
+                          (do (pool/sleep-ms! 300) (recur)))))
                     (catch Throwable t [1 t]))]
               (when-not (zero? code)
                 (log "the node member errored:" (ex-message err))
@@ -598,7 +600,7 @@
                             {:unready true}))
             :else (do (when (and (pos? waited) (zero? (mod waited 30000)))
                         (log "the gateway is still starting (" (quot waited 1000) "s)"))
-                      (proc/sleep-ms! 300) (recur (+ waited 300)))))))
+                      (pool/sleep-ms! 300) (recur (+ waited 300)))))))
 
 (defn alive? [pid] (zero? (:exit (p/shell {:continue true :out :string :err :string} "kill" "-0" (str pid)))))
 
@@ -618,7 +620,7 @@
     (fs/create-dirs window)
     {:dir dir :base (str (fs/path dir "d")) :out (str (fs/path dir "out")) :window window :opts opts}))
 
-(defn descs [atoms] (:descs (domain/meta-value atoms)))
+(defn descs [atoms] (pool/descriptors-of (:jobs atoms)))
 
 (defn complete? [{:keys [library index]}]
   (let [files (:files @library) ix @index]
@@ -687,12 +689,12 @@
   90000)
 
 (defn- pointer-sig
-  "The four run atoms' root pointers (eve.atom/version's second word — two i32 loads each): a member's
-   commit to any of them moves its pointer, so an unchanged signature means none of their values changed.
-   The full check below runs on a moved pointer, and at least every 5 s for the progress print regardless."
+  "The four run atoms' root versions (the pool's root-version — two loads each): a member's
+   commit to any of them moves its version, so an unchanged signature means none of their values changed.
+   The full check below runs on a moved version, and at least every 5 s for the progress print regardless."
   [atoms]
-  [(second (ea/version (:jobs atoms))) (second (ea/version (:control atoms)))
-   (second (ea/version (:library atoms))) (second (ea/version (:index atoms)))])
+  [(pool/root-version (:jobs atoms)) (pool/root-version (:control atoms))
+   (pool/root-version (:library atoms)) (pool/root-version (:index atoms))])
 
 (defn wait-complete! [run atoms procs state timeout-ms]
   (let [t0 (now)]
@@ -707,7 +709,7 @@
           ;; deref of a tiny value measures 102–272 ms, so the cycle outlasted its own sleep and
           ;; the wait pinned a core for the whole run, idle or not.)
           (and (= psig last-psig) (< (- t last-full) 5000))
-          (do (proc/sleep-ms! 300)
+          (do (pool/sleep-ms! 300)
               (recur last-print last-sig last-change psig last-full))
           (complete? atoms) true
           :else
@@ -731,7 +733,7 @@
                                (apply log (if u (conj head u) head))
                                (now))
                              last-print)]
-                    (proc/sleep-ms! 300)
+                    (pool/sleep-ms! 300)
                     (recur lp sig last-change psig (now)))))))))))
 
 (defn stop-members!
@@ -750,7 +752,7 @@
                                               (p/proc? v) (p/alive? v))) @procs)
                      (and (contains? @procs "jvm")
                           (not= :stopped (get-in @(:control atoms) [:members "jvm" :state])))))
-        (proc/sleep-ms! 300)
+        (pool/sleep-ms! 300)
         (recur))))
   (doseq [[_ v] @procs
           :when (p/proc? v)]
@@ -800,7 +802,7 @@
 (defn check [run atoms state]
   (let [files (:files @(:library atoms))
         ix @(:index atoms)
-        meta (domain/meta-value atoms)
+        rts (pool/runtimes-of (:jobs atoms))
         by-id (into {} (map (fn [[_ e]] [(:id e) e]) files))
         transcodes (keep (fn [[_ e]] (when-let [t (get-in e [:results :transcode :path])] [(:id e) (:kind e) t])) files)
         thumbs (keep (fn [[_ e]] (when-let [t (get-in e [:results :thumb :path])] [(:id e) t])) files)
@@ -811,7 +813,7 @@
         ctl @(:control atoms)
         started (set (keep (fn [[rid m]] (when (:member? m) rid)) (:members ctl)))
         children (set (keys (:children ctl)))
-        registry (set (keys (:runtimes meta)))
+        registry (set (keys rts))
         mp4 (mapv (fn [[id k t]] (let [c (probe-codecs t)]
                                    {:id id :codecs c :ok (if (= :audio k) (= #{"aac"} c) (and (contains? c "h264") (or (= c #{"h264"}) (contains? c "aac"))))}))
                   transcodes)
@@ -977,7 +979,7 @@
                              (seq (str/trim (slurp port-file))))
                         (first (str/split-lines (slurp port-file))) (< i 200)
                         (do
-                          (proc/sleep-ms! 100)
+                          (pool/sleep-ms! 100)
                           (recur (inc i)))
                         :else
                         (throw (ex-info "Chromium opened no DevTools port" {}))))
@@ -1025,10 +1027,10 @@
                         (if (or (>= r n) (> (- (now) t0) timeout-ms))
                           r
                           (do
-                            (proc/sleep-ms! 500)
+                            (pool/sleep-ms! 500)
                             (recur)))))]
            ;; (the thumbnails load after their rows)
-           (proc/sleep-ms! 1500)
+           (pool/sleep-ms! 1500)
            (when-let [png (:data (call "Page.captureScreenshot" {:format "png"}))]
              (fs/write-bytes shot
                              (.decode (java.util.Base64/getDecoder) ^String png)))
@@ -1046,7 +1048,7 @@
      (let [t0 (now)
            got (loop []
                  (or (:page-check @(:control atoms))
-                     (when (< (- (now) t0) timeout-ms) (proc/sleep-ms! 500) (recur))))
+                     (when (< (- (now) t0) timeout-ms) (pool/sleep-ms! 500) (recur))))
            shot (str (fs/path (:dir run) "page.png"))
            n (count (:files @(:library atoms)))
            [ok? seen] (try
@@ -1286,9 +1288,14 @@
                            [eve-src
                             eve-adapters
                             app-src
+                            cohost-src
                             (str (fs/path app-dir "page" "src"))])))
+      ;; (cohost's src rides as an -Sdeps ALIAS's :extra-paths, never as -Sdeps :paths:
+      ;; :paths there replaces the root paths and :browser-test's :replace-paths vanish
+      ;; with them — eve.atom "not available", measured 2026-11-17)
       (sh! "the page (shadow-cljs release cohost-media-page)" eve-dir "clojure"
-           "-M:browser-test:cohost-media-page" "-m" "shadow.cljs.devtools.cli"
+           "-Sdeps" (pr-str {:aliases {:cohost-src {:extra-paths [cohost-src]}}})
+           "-M:browser-test:cohost-media-page:cohost-src" "-m" "shadow.cljs.devtools.cli"
            "release" "cohost-media-page"))
     (when (:glj hosts)
       (sh! "glj-cohost-media (eve's impls/glojure/build.sh; cached by its source stamp)" app-dir
@@ -1314,7 +1321,7 @@
                      (> (- (now) t0) 30000) nil
                      :else
                      (do
-                       (proc/sleep-ms! 200)
+                       (pool/sleep-ms! 200)
                        (recur))))
             ok? (and seen (wait-complete! run atoms procs state timeout-ms))
             e (get-in @(:library atoms) [:files dest])]

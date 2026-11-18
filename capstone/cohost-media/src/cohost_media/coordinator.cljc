@@ -1,18 +1,14 @@
 (ns cohost-media.coordinator
   "The coordinator — run by the one member the launcher names (control :config :coordinator: the JVM's; babashka's in a
    run without a JVM), no election. Each pass it: plans every :new file's DAG and submits it
-   into the pools in ONE swap of the metadata — deferring, and naming in the library entry, the jobs whose caps no
+   into the pools in ONE act — deferring, and naming in the library entry, the jobs whose caps no
    lease-alive runtime covers, and submitting those on the first later pass whose coverage reaches them; reads the jobs' descriptors and mirrors their states into the library;
    resubmits a job that failed, escalating it after three failures; schedules the index (and, on its own queue, the
    duplicate grouping) once every file is settled; and asks the supervisor to restart a member whose lease lapsed.
    Everything it knows is in the domain, so when the supervisor restarts it, it carries on where it stopped.
 
-   Portable cljc over eve.thread.domain and eve.thread.meta's pure moves."
-  (:refer-clojure :exclude [swap!])
-  (:require [eve.host :refer [swap!]]
-            [eve.process :as proc]
-            [eve.thread.domain :as dom]
-            [eve.thread.meta :as mt]
+   Portable cljc over cohost.pool: the pools are the only surface it touches."
+  (:require [cohost.pool :as pool]
             [cohost-media.core :as em]
             [cohost-media.domain :as domain]))
 
@@ -23,25 +19,24 @@
   120000)
 
 (defn- offered-caps [dh]
-  (reduce into #{} (map (fn [[_ r]] (set (:caps r))) (:runtimes (dom/registry dh)))))
+  (reduce into #{} (map (fn [[_ r]] (set (:caps r))) (pool/registry dh))))
 
 (defn- live-caps
-  "The caps the lease-alive runtimes offer now — planning's coverage. Read from the metadata's runtimes on
-   mt/runtime-alive?'s own terms (the registry view strips the leases): a runtime whose lease lapsed covers
+  "The caps the lease-alive runtimes offer now — planning's coverage. Read from the runtimes on
+   pool/runtime-alive?'s own terms (the registry view strips the leases): a runtime whose lease lapsed covers
    nothing until it beats again, and one that has not joined covers nothing yet. Recomputed every pass, so a
    member that joins mid-run covers the jobs deferred for its caps from that pass on."
   [dh]
-  (let [runtimes (dom/read-meta dh [:runtimes])
-        m {:runtimes runtimes}
-        now (proc/now-ms)]
+  (let [runtimes (pool/runtimes dh)
+        now (pool/now-ms)]
     (reduce (fn [caps [rid r]]
-              (if (mt/runtime-alive? m rid now) (into caps (set (:caps r))) caps))
+              (if (pool/runtime-alive? dh rid now) (into caps (set (:caps r))) caps))
             #{} runtimes)))
 
 (defn- work [kind args] {:task (em/task-sym kind) :args args})
 
 (defn submit-dag!
-  "The file entry e's (path p) jobs submitted in one swap of the job atom's metadata — those whose :needs the
+  "The file entry e's (path p) jobs submitted in one act — those whose :needs the
    lease-alive runtimes cover. A job whose needs no live runtime covers (or whose input is itself deferred) is
    DEFERRED, not submitted: {:jobs {kind id} :deferred {kind {:needs :missing}}}. A descriptor queued for a cap
    no member of the shape advertises would sit :queued in silence while its file reads planned and can never
@@ -51,34 +46,29 @@
   (let [offered (offered-caps dh)
         coverage (live-caps dh)
         args {:path p :id (:id e) :kind (:kind e) :out out-dir :window window}
-        rid (:rid dh)]
-    (dom/swap-meta!
-     dh
-     (fn [m]
-       (let [now (proc/now-ms)
-             [m jobs deferred]
-             (reduce (fn [[m ids deferred] [kind after]]
-                       (let [needs (em/needs kind offered)
-                             missing (into (into #{} (remove coverage needs))
-                                           (mapcat (fn [a] (:missing (get deferred a))) after))]
-                         (if (seq missing)
-                           [m ids (assoc deferred kind {:needs needs :missing missing})]
-                           (let [[m' got] (mt/submit m (em/job-pool kind) [(work kind [args])] rid
-                                                     {:retry :restart :needs needs
-                                                      :after (mapv ids after) :scope (:id e)}
-                                                     now)]
-                             (if got [m' (assoc ids kind (first got)) deferred]
-                               (reduced [m ids deferred]))))))
-                     [m {} {}]
-                     (em/file-jobs (:kind e) offered))]
-         [m {:jobs jobs :deferred deferred}])))))
+        ;; the plan is decided whole, before anything is submitted:
+        ;; each kind's fate from coverage and its inputs' fates
+        [entries deferred]
+        (reduce (fn [[entries deferred] [kind after]]
+                  (let [needs (em/needs kind offered)
+                        missing (into (into #{} (remove coverage needs))
+                                      (mapcat (fn [a] (:missing (get deferred a))) after))]
+                    (if (seq missing)
+                      [entries (assoc deferred kind {:needs needs :missing missing})]
+                      [(conj entries {:key kind
+                                      :pool (em/job-pool kind)
+                                      :work (work kind [args])
+                                      :opts {:retry :restart :needs needs
+                                             :after (vec after) :scope (:id e)}})
+                       deferred])))
+                [[] {}]
+                (em/file-jobs (:kind e) offered))]
+    {:jobs (pool/submit-batch dh entries) :deferred deferred}))
 
-(defn- submit-one! [dh pool kind args opts]
-  (first (dom/swap-meta! dh (fn [m] (let [[m ids] (mt/submit m pool [(work kind [args])] (:rid dh)
-                                                             (merge {:retry :restart} opts) (proc/now-ms))]
-                                      [m ids])))))
+(defn- submit-one! [dh pool-name kind args opts]
+  (pool/submit-one dh pool-name (work kind [args]) (merge {:retry :restart} opts)))
 
-(defn- descs [dh ids] (let [all (dom/read-meta dh [:descs])] (into {} (map (fn [id] [id (get all id)]) ids))))
+(defn- descs [dh ids] (let [all (pool/descriptors dh)] (into {} (map (fn [id] [id (get all id)]) ids))))
 
 (defn- settled? [d] (contains? #{:done :failed :cancelled} (:state d)))
 
@@ -87,7 +77,7 @@
    each one's start), so a job is routed by the caps of the whole set (a slow-starting member's native transcoder, not
    the CLI's because it was still loading)."
   [{:keys [dh library control out window]}]
-  (let [now (proc/now-ms)
+  (let [now (pool/now-ms)
         pending (some (fn [[_ m]]
                         (and (= :running (:state m)) (not (:joined m))
                              (< (- now (:started m 0)) join-wait)))
@@ -109,9 +99,9 @@
                        v)))))))))
 
 (defn- job-state
-  "Job kind k's state for the file entry e: its descriptor d's while the metadata holds it; else :done when the job
+  "Job kind k's state for the file entry e: its descriptor d's while the pools hold it; else :done when the job
    recorded its result in the library (every job records before it completes), :lost when it did not. A descriptor can
-   go before this coordinator mirrors it: eve.thread forgets a departed runtime's settled descriptors past a horizon
+   go before this coordinator mirrors it: the pools forget a departed runtime's settled descriptors past a horizon
    (the coordinator that submitted them was killed), and a descriptor whose input was forgotten is cancelled."
   [e k d]
   (cond
@@ -149,7 +139,7 @@
         deferred (:deferred e)
         args {:path p :id (:id e) :kind (:kind e) :out out :window window}
         dag (em/file-jobs (:kind e) offered)
-        present (volatile! (set (keys (dom/read-meta dh [:descs]))))]
+        present (volatile! (set (keys (pool/descriptors dh))))]
     (second
      (reduce (fn [[ids submitted] [k after]]
                (if (contains? deferred k)
@@ -176,8 +166,8 @@
    a job that failed, was cancelled or was lost (job-state) submitted again with its dependents, escalated after
    max-failures; the file settled when every job is. A file's deferred jobs (plan time: no live runtime covered
    their needs) are retried against this pass's coverage: newly covered ones are submitted, one whose input was
-   escalated is escalated with it, and the file does not settle while a deferred job remains. Settled descriptors are forgotten from the metadata once mirrored
-   (eve.thread.meta/forget): the library is their record, and the metadata — every runtime's hot atom, network
+   escalated is escalated with it, and the file does not settle while a deferred job remains. Settled descriptors are forgotten from the pools once mirrored
+   (pool/forget): the library is their record, and the coordination state — every runtime's hot atom, network
    members' included — stays the size of the work in flight."
   [{:keys [dh library out window]}]
   (let [coverage (live-caps dh)]
@@ -257,7 +247,7 @@
                              (assoc-in [:files p :status]
                                (if (seq escalated) :error :done)))))
       (when (seq forget)
-        (dom/swap-meta! dh (fn [m] [(mt/forget m forget) nil])))))))
+        (pool/forget dh forget))))))
 
 (defn- index! [{:keys [dh library index]}]
   (let [files (:files (domain/read-atom library))
@@ -271,17 +261,8 @@
         (not= gen (:generation (:job ix)))
         (let [ii (submit-one! dh :index :index {:generation gen}
                               {:needs #{:index}})
-              gi (dom/swap-meta! dh
-                                 (fn [m]
-                                   (let [[m ids] (mt/submit m
-                                                            (em/group-pool (:rid dh))
-                                                            [(work :group
-                                                                   [{:generation gen}])]
-                                                            (:rid dh)
-                                                            {:retry :restart
-                                                             :after [ii]}
-                                                            (proc/now-ms))]
-                                     [m (first ids)])))]
+              gi (submit-one! dh (em/group-pool (:rid dh)) :group {:generation gen}
+                              {:retry :restart :after [ii]})]
           (domain/swap-atom! index
                              (fn [v]
                                (assoc v :complete? false :job
@@ -306,12 +287,12 @@
                                           :ran-on
                                           {:index (:ran-on (get ds ii))
                                            :group (:ran-on (get ds gi))})))
-              (dom/swap-meta! dh (fn [m] [(mt/forget m [ii gi]) nil])))
+              (pool/forget dh [ii gi]))
 
             ;; failed, cancelled or lost: the generation's jobs submitted afresh on the next pass
             (some #{:failed :cancelled :lost} states)
             (do
-              (dom/swap-meta! dh (fn [m] [(mt/forget m [ii gi]) nil]))
+              (pool/forget dh [ii gi])
               (domain/swap-atom! index (fn [v] (assoc v :job nil))))))))))
 
 ;; A member marks itself :joined once it has attached (cohost-media.member, the Node member, the page's runtime); the
@@ -319,8 +300,8 @@
 ;; process's entry under the same rid until that lease lapses, and a member marked :joined from it would be asked to
 ;; restart while it is still starting (verify's full-kill, 2026-10-22: jolt's second start killed by a restart ask).
 (defn- restarts! [{:keys [dh control]}]
-  (let [live (set (keys (:runtimes (dom/registry dh))))
-        now (proc/now-ms)]
+  (let [live (set (keys (pool/registry dh)))
+        now (pool/now-ms)]
     (doseq [[rid m] (:members (domain/read-atom control))
             :when (and (= :running (:state m)) (:joined m) (not (contains? live rid))
                        (> (- now (:started m 0)) (* 2 em/ttl)))]

@@ -4,9 +4,7 @@
    and the gateway's routes proxied (glj/media/media.go) — the folder watcher, which adds every new
    media file of the watched folder to the library (cohost-media.core/add-files, one swap), and the
    publish job's range check. Loaded only on this runtime (cohost-media.media resolves it lazily)."
-  (:refer-clojure :exclude [swap!])
-  (:require [eve.host :refer [swap!]]
-            [eve.process :as proc]
+  (:require [cohost.pool :as pool]
             [cohost-media.core :as em]
             [cohost-media.state :as st]
             [cohost-media.work :as work]))
@@ -26,7 +24,7 @@
         fresh (keep (fn [p] (when (and (em/media-kind p) (not (contains? held p))) (stat p))) (eveglj:media.ListDir dir))]
     (when (seq fresh)
       (swap! library em/add-files fresh rid)
-      (println (pr-str {:step :watcher-added :rid rid :files (mapv :path fresh) :t (proc/now-ms)})))))
+      (println (pr-str {:step :watcher-added :rid rid :files (mapv :path fresh) :t (pool/now-ms)})))))
 
 (defn init!
   "Start the media server on the launcher's port (the control atom's :config), proxying the gateway's routes, and the
@@ -36,11 +34,11 @@
         port (eveglj:media.Serve (str "127.0.0.1:" (or media-port 0)) out (or page out)
                                  (if gateway-port (str "http://127.0.0.1:" gateway-port) ""))]
     (when (neg? port) (throw (ex-info "the media server did not start" {:port media-port})))
-    (swap! control assoc-in [:servers :media] {:port port :rid rid :t (proc/now-ms)})
+    (swap! control assoc-in [:servers :media] {:port port :rid rid :t (pool/now-ms)})
     (println (pr-str {:step :media-server :rid rid :port port :watch watch}))
     (reset! served {:port port
                     :watcher (when watch
-                               (proc/start-timer! 1000 (fn [] (watch-once! ctx watch))))})
+                               (pool/start-timer! 1000 (fn [] (watch-once! ctx watch))))})
     (when watch (watch-once! ctx watch))
     nil))
 
