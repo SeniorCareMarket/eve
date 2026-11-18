@@ -448,7 +448,10 @@
       the old page server's file answer, as a handler value instead of a
       socket's. nil when the path names no output file (the seat's 404)."
      [out-dir req]
-     (let [rel (URLDecoder/decode (subs (:uri req) 1) "UTF-8")
+     (let [path (URLDecoder/decode (subs (:uri req) 1) "UTF-8")
+           ;; the page names its outputs under /media/ (the media server's
+           ;; prefix); the files themselves live at the top of out-dir
+           rel (if (str/starts-with? path "media/") (subs path 6) path)
            f (fs/file out-dir rel)]
        (when (and (not (str/includes? rel "..")) (fs/exists? f) (not (fs/directory? f)))
          (let [total (fs/size f)
@@ -966,11 +969,15 @@
       the network rung while virtual time ran on, and the shot caught an empty table.) Answers the rows it saw."
      [url shot n timeout-ms]
      (let [dir (str (fs/create-temp-dir {:prefix "cohost-media-shot-"}))
-           proc (p/process {:out :string :err :string} (:chrome tools)
-                           "--headless=new" "--no-sandbox" "--disable-gpu"
-                           "--no-proxy-server" "--hide-scrollbars"
-                           (str "--user-data-dir=" dir) "--window-size=1400,1100"
-                           "--remote-debugging-port=0" "about:blank")
+           ;; --no-sandbox only where Chrome refuses to run without it (root);
+           ;; anywhere else Chrome itself flags the flag as unsupported
+           flags (cond-> ["--headless=new" "--disable-gpu"
+                          "--no-proxy-server" "--hide-scrollbars"
+                          (str "--user-data-dir=" dir) "--window-size=1400,1100"
+                          "--remote-debugging-port=0" "about:blank"]
+                   (= "root" (System/getProperty "user.name"))
+                   (into ["--no-sandbox"]))
+           proc (apply p/process {:out :string :err :string} (:chrome tools) flags)
            port-file (str (fs/path dir "DevToolsActivePort"))]
        (try
          (let [port (loop [i 0]
