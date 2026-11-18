@@ -9,7 +9,8 @@
      eve.alpha.ds      — Dataset (columnar data frames)
      eve.alpha.tensor  — Tensor (N-dimensional arrays)
      eve.alpha.col     — Columnar ops (element-wise + index-space)"
-  (:refer-clojure :exclude [deftype extend-type atom swap! aget hash-map hash-set
+  (:refer-clojure :exclude [deftype extend-type atom swap! aget aset alength
+                            aclone make-array hash-map hash-set
                             count nth get seq conj empty contains? disj meta
                             with-meta reduce])
   ;; the api table names its values by these aliases (adapters/core/
@@ -19,6 +20,7 @@
             [eve.core :as ec]
             [eve.atom :as atm]
             [eve.array :as arr]
+            [eve.deftype.array :as darr]
             [eve.map :as emap]
             [eve.set :as eset]
             [eve.vec]
@@ -68,10 +70,24 @@
     [empty-hash-map emap/empty-hash-map]
     [hash-set eset/hash-set]
     [empty-hash-set eset/empty-hash-set]
+    ;; Value array API: an array of eve values, any value in a slot —
+    ;; the array a deftype's fields are stored as, and a standalone
+    ;; structure in its own right. aget dispatches: a value array
+    ;; reads its slot, anything else is the host's own aget.
+    [value-array? darr/value-array?]
+    [make-array darr/make-array]
+    [aget darr/aget]
+    [aset darr/aset]
+    [alength darr/alength]
+    [aclone darr/aclone]
+    [array-copy darr/array-copy]
+    [array-seq darr/array-seq]
+    [array-chunk darr/array-chunk]
     ;; Typed array API (eve-array after the other eve.array names: basilisp
     ;; reaches eve.array through the module's munged name, eve_array, which
-    ;; (def eve-array ...) then rebinds in this module)
-    [aget arr/aget]
+    ;; (def eve-array ...) then rebinds in this module). The typed arrays'
+    ;; own aget stays in eve.array — alpha's aget above is the value
+    ;; array's.
     [aset! arr/aset!]
     [eve-array arr/eve-array]
     ;; Collection vocabulary (eve.core): what every EVE value answers on every
