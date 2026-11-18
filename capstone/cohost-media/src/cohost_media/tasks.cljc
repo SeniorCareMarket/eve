@@ -17,15 +17,16 @@
    namespace has one home again."
   (:refer-clojure :exclude [meta])
   (:require [clojure.string :as str]
-            [cohost.pool :as pool]
             [cohost-media.av :as av]
             [cohost-media.core :as em]
             [cohost-media.media :as media]
             [cohost-media.state :as st]
             [cohost-media.work :as work]
-            #?@(:clj [[cohost-media.phash :as ph]
+            #?@(:clj [[cohost.pool :as pool]
+                      [cohost-media.phash :as ph]
                       [cohost-media.r128 :as r128]
-                      [cohost.region :as region]])))
+                      [cohost.region :as region]]
+                :cljs [[cohost.pool :as pool :include-macros true]])))
 
 (pool/deftask index [job] (work/index! job))
 
