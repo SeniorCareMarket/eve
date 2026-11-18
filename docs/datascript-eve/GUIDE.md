@@ -33,9 +33,7 @@ plain .cljc — running everywhere Eve runs.
   journaled by design, and the flagship shape below depends on it: every commit of the
   DB atom appends a journal record and the journal force is the commit point. This is
   a requirement, not an option to design around: a seat with no journal adapter cannot
-  carry a durable shared database (ValueScript is the one such seat), and a domain
-  opened `:journal? false` gives up the journal's durability story by the opener's own
-  choice.
+  carry a durable shared database (ValueScript is the one such seat).
 - **The sorted set.** DataScript's EAVT/AEVT/AVET indexes *are*
   persistent sorted sets upstream — tonsky's persistent-sorted-set.
   Eve's port of that same library (upgraded to 0.3.1, the version

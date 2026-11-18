@@ -1617,26 +1617,24 @@
    opening a fresh domain together both pass (each initialised the domain
    over the other's writes).
 
-   Durability is the shape of a disk domain: the domain is JOURNALED —
-   commits append a record to <base>.journal and the journal force is
-   the commit point; the .root file is a checkpoint (cleanup-sweep
-   journal verdict, 2026-11-07: the disk tier is journaled by design).
-   :mem-budget (bytes) caps the domain's total
+   Durability is the shape of a disk domain: the domain is
+   JOURNALED — commits append a record to
+   <base>.journal and the journal force is the commit point; the .root
+   file is a checkpoint (cleanup-sweep journal verdict, 2026-11-07: the
+   disk tier is journaled by design). :mem-budget (bytes) caps the domain's total
    region growth — refused growth names the budget, never the host's
    out-of-memory; the MEM-BUDGET-* constants are the per-target defaults.
    :segment-bytes (a power of two) sets the region mapping window —
    presentation, not format: it is stored nowhere in the domain's
    files, and processes may join the same domain with different
    windows."
-  [base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes] :or {capacities {} lustre? false durable? true}}]
+  [base-path & {:keys [capacities lustre? durable? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes] :or {capacities {} lustre? false durable? true}}]
   (or (get @domain-cache base-path)
       (let [_  (proc/ensure-parent-dir! base-path)
             ds (open-mmap-domain! base-path (cond-> {:capacities capacities
                                                      :lustre? lustre?
                                              :durable? durable?
-                                             :journal? (if (nil? journal?)
-                                                         (not (false? durable?))
-                                                         journal?)
+                                             :journal? (not (false? durable?))
                                              :journal-batch journal-batch
                                              :journal-window-ms journal-window-ms
                                              :create? (proc/create-exclusive! (str base-path ".root"))}
