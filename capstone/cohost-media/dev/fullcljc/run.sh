@@ -30,4 +30,4 @@ timeout 300 clojure -M reader_check.clj \
   "$CAP/src/cohost_media/gateway.cljc" \
   "$CAP/src/cohost_media/meta.cljc" \
   "$CAP/src/cohost_media/av_jolt.cljc" \
-  "$CAP/node/src/cohost_media/node_member.cljc"
+  "$CAP/src/cohost_media/member.cljc"

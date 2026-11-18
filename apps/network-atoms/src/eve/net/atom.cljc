@@ -36,7 +36,7 @@
    The wire and store exchanges are STEPS (eve.net.run), run over the handle's platform — by default the host's own
    (eve.net.platform: a Clojure-like host plugs in its http adapter, adapters/http, and gets the rest from eve). Every
    operation is synchronous on every host: deref and swap! answer the value, never a promise. Config: eve.net.wire's {:endpoint :domain-id :atom-id :api-key}, plus :gak to encrypt (eve.net.blobs)."
-  (:refer-clojure :exclude [deref swap! reset!])
+  (:refer-clojure :exclude [deref swap! reset! compare-and-set!])
   (:require [eve.net.run :as r]
             [eve.net.wire :as wire]
             [eve.net.blobs :as blobs]

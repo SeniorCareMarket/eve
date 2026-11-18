@@ -20,7 +20,7 @@
    words a writer bumps and notifies after it commits, and a waiter blocks on — a real futex where the host's region
    has one ((driving) :wake :futex), a poll where it does not (:wake :poll: the JVM's region parks only threads of its
    own process). A waiter on another process's commit is woken without a swap or a read of the meta-atom."
-  (:refer-clojure :exclude [swap!])
+  (:refer-clojure :exclude [swap! -swap!])
   (:require [eve.host :refer [swap!]]
             [eve.atom :as ea]
             [eve.deftype-proto.data :as ed]

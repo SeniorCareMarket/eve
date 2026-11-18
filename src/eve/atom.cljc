@@ -17,7 +17,7 @@
    hold around each swap (ROOT_HOLD/ROOT_INFLIGHT, eve.deftype-proto.data)."
   (:refer-clojure :exclude [atom
                             aget alength long class
-                            volatile! vswap! locking transient persistent! conj! bytes])
+                            volatile! vswap! locking transient persistent! conj! bytes get-validator])
   (:require
    ;; jank's clojure.core has none of these. eve.host-completion interns
    ;; them, but this namespace is created (refer-clojure) before that

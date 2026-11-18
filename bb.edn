@@ -32,7 +32,7 @@
                                   (str (System/getenv "HOME") "/.dotnet")])))))
   classpath {:doc "Print a host's classpath (src + its hosts.edn roots, absolute): bb classpath <host>, e.g. bb, jvm, glj, bb-minimal"
              :task (println (str/join ":" (roots (keyword (first *command-line-args*)))))}
-  cohost-media {:doc "cohost-media, the capstone (capstone/cohost-media/README.md): bb cohost-media demo|scan <dir>|verify|setup|build — launches the boot program (capstone/cohost-media/boot.cljc, cohost-media.boot) on the JVM: eve's src and the :jvm roots, the capstone's sources and maven deps (its deps.edn), and cohost's src (COHOST_HOME, else a ../cohost.cljc clone beside this one)"
+  cohost-media {:doc "cohost-media, the capstone (capstone/cohost-media/README.md): bb cohost-media demo|scan <dir>|verify|setup|build — launches the boot program (capstone/cohost-media/boot.cljc, cohost-media.boot) on the JVM: eve's src and the :jvm roots, the capstone's sources and maven deps (its deps.edn), eve's :cljs roots (the node member's realm compiles its graph from them), and cohost's src (COHOST_HOME, else a ../cohost.cljc clone beside this one)"
              :task (let [cohost (or (System/getenv "COHOST_HOME")
                                     (let [sib "../cohost.cljc"]
                                       (when (fs/exists? (fs/file sib "src" "cohost" "thread.cljc")) sib)))]
@@ -40,6 +40,12 @@
                        (throw (ex-info "cohost-media: its boot program runs on cohost (cohost.thread) — clone johnmn3/cohost.cljc beside this eve clone, or set COHOST_HOME to a cohost.cljc checkout" {})))
                      (let [cap-deps (:deps (edn/read-string (slurp "capstone/cohost-media/deps.edn")))
                            paths (vec (concat (roots :jvm "capstone/cohost-media/src")
+                                              ;; the :cljs roots too (src is in both compositions, once):
+                                              ;; the node member's realm compiles eve's cljs graph from this
+                                              ;; classpath — its analyzer's sources, as eve's own :node-test
+                                              ;; alias composes them for a cljs build. The JVM seat's own
+                                              ;; roots come first, so what it requires resolves as before.
+                                              (rest (roots :cljs))
                                               [(str (fs/absolutize (fs/file cohost "src")))]))
                            sdeps (pr-str {:paths paths :deps cap-deps})]
                        (apply shell "clojure" "-J--add-opens=java.base/java.lang=ALL-UNNAMED"

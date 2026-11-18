@@ -35,6 +35,7 @@
    field's bits are decoded by eve.flat-io (fio/f32, fio/f64 over the
    field's bytes), with no host branch (flat lanes U4a, 2026-11-17:
    the sister realized on the JVM, babashka and ClojureScript)."
+  (:refer-clojure :exclude [unchecked-multiply])
   (:require [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as serialize]
             [eve.deftype.slab-runtime :as slab-runtime]

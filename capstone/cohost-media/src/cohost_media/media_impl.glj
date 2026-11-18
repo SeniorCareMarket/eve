@@ -1,6 +1,6 @@
 (ns cohost-media.media-impl
-  "The media facility's implementation on glojure (glj-eve with cohost-media's media package,
-   glj/build.sh): the media server — Go's net/http serving the outputs with range requests, the page,
+  "The media facility's implementation on glojure (glj-eve with eve's media package,
+   built by eve's impls/glojure/build.sh): the media server — Go's net/http serving the outputs with range requests, the page,
    and the gateway's routes proxied (glj/media/media.go) — the folder watcher, which adds every new
    media file of the watched folder to the library (cohost-media.core/add-files, one swap), and the
    publish job's range check. Loaded only on this runtime (cohost-media.media resolves it lazily)."

@@ -13,6 +13,7 @@
    surfaces) live in reader conditionals, and the byte layout is the
    host-independent contract of FORMAT-V1 §2–5 — one value packs to the
    same bytes on the JVM and on Node (X1.2)."
+  (:refer-clojure :exclude [bytes])
   (:require [eve.codec :as codec]
             [eve.encoding :as enc]
             #?(:clj [eve.crypto :as crypto]
@@ -462,7 +463,7 @@
   "A type-table field class from the first instance's rep (§6):
    [:prim subtype] [:ref type-index] [:ser]. Subtype codes are Eve's
    typed-array codes where the value has one, else 0 (a general scalar)."
-  [rep types]
+  [rep ^java.util.Map types]
   (cond
     (instance? TypedVal rep) [:ref (.get types [(.-tkey ^TypedVal rep) (.-fp ^TypedVal rep)])]
     (instance? BytesVal rep) [:prim 1]
@@ -1196,22 +1197,22 @@
             fits? (fn [from k]
                     (<= (byte-len (pack-rep (subvec reps from (+ from k))))
                         CHUNK-TARGET))]
-        (loop [from 0 out []]
+        (loop [from (long 0) out []]
           (if (== from n)
             out
             (let [remaining (- n from)
-                  k (if (fits? from remaining)
+                  k (long (if (fits? from remaining)
                       remaining
                       ;; largest k in [1, remaining) measured fitting;
                       ;; lo only ever takes a measured-fitting count,
                       ;; or the lone-row floor (the oversize rule)
-                      (loop [lo 1 hi remaining]
+                      (loop [lo (long 1) hi (long remaining)]
                         (if (>= lo hi)
                           lo
                           (let [mid (quot (+ lo hi 1) 2)]
                             (if (fits? from mid)
                               (recur mid hi)
-                              (recur lo (dec mid)))))))]
+                              (recur lo (dec mid))))))))]
               (recur (+ from k)
                      (conj out (pack-rep (subvec reps from (+ from k))))))))))))
 
@@ -1836,7 +1837,7 @@
 
 (defn flat-emit!
   "Write the flat (eve.codec) bytes of the node at off into out."
-  [ctx off out]
+  [^Ctx ctx off out]
   (let [b (.-b ctx) t (tag-at ctx off)]
     (cond
       (== t 0x00) nil
@@ -1878,7 +1879,7 @@
 (defn- handle-digest
   "The content digest of the node at off, or nil when any leaf has none
    (a value Eve cannot digest: the walk decides equality instead)."
-  [ctx off]
+  [^Ctx ctx off]
   (or (when (and (== off (.-root ctx)) (some? (.-rdigest ctx)))
         ;; the root recipe (R12): the digest latched at pack time
         (.-rdigest ctx))
@@ -1931,7 +1932,7 @@
 
 (defn- sym-entry-bytes
   "The stored scalar bytes of symbol code c (no magic)."
-  [ctx c]
+  [^Ctx ctx c]
   (let [b (.-b ctx) symtab (fio/u32 b 20) nsym (fio/u16 b 16) w (width-of ctx)
         entries (+ symtab (* w (inc nsym)))
         start (+ entries (off-at b (+ symtab (* w c)) (.-wide? ctx)))
@@ -2145,6 +2146,13 @@
   [entries]
   (into {} (map (fn [[k v]] [(rep-of k) (rep-of v)])) entries))
 
+;; -entries is IMapSource's first method: the protocol is defined in
+;; the JVM-family arm above (the cljs handles implement the surface by
+;; name through entries-of-node, and these shared helpers are the JVM
+;; protocol's callers). Declared here so the helpers below name it
+;; before either host's definition point.
+(declare -entries)
+
 (defn- record-entries-rep
   "The rep of a typed value: a TypedVal over its entries' reps."
   [tkey fp entries]
@@ -2235,8 +2243,10 @@
    fns of (ctx off) (nthf also takes i); flags pick the interfaces."
   [tname fields nthf countf seqf repf & {:keys [vector? stack? list?]}]
   (let [remake (map (fn [f] (if (= f 'mm) 'm f)) fields)
-        mfields (mapv (fn [f] (if (#{'_h '_d} f)
-                                (with-meta f {:unsynchronized-mutable true}) f)) fields)
+        mfields (mapv (fn [f] (cond (#{'_h '_d} f)
+                                    (with-meta f {:unsynchronized-mutable true})
+                                    (= f 'ctx) (with-meta f {:tag 'Ctx})
+                                    :else f)) fields)
         base-interfaces '[clojure.lang.IHashEq clojure.lang.IObj clojure.lang.Counted
                           clojure.lang.Seqable clojure.lang.IReduce clojure.lang.IReduceInit
                           clojure.lang.Indexed java.lang.Iterable
@@ -2343,10 +2353,10 @@
                                      (cond (neg? i#) -1
                                            (= (nth this i#) o) i#
                                            :else (recur (dec i#))))))
-             (^java.util.ListIterator listIterator [this] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. (seq this)))))
-             (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. (seq this))) i))
+             (^java.util.ListIterator listIterator [this] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this)))))
+             (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this))) i))
              (^java.util.List subList [this ^int s ^int e] (java.util.Collections/unmodifiableList
-                                  (java.util.ArrayList. (map (fn [i#] (nth this i#)) (range s e)))))])
+                                  (java.util.ArrayList. ^java.util.Collection (map (fn [i#] (nth this i#)) (range s e)))))])
        ~@(when list?
            '[clojure.lang.IPersistentList
              (peek [this] (when (pos? (.count this)) (nth this 0)))
@@ -2388,8 +2398,10 @@
    print a handle through its toString must terminate."
   [tname fields entries lookup countf repf digestf assocf dissocf & {:keys [record? row? generic?]}]
   (let [factory (symbol (str "->" tname))
-        mfields (mapv (fn [f] (if (#{'_h '_d} f)
-                                (with-meta f {:unsynchronized-mutable true}) f)) fields)
+        mfields (mapv (fn [f] (cond (#{'_h '_d} f)
+                                    (with-meta f {:unsynchronized-mutable true})
+                                    (= f 'ctx) (with-meta f {:tag 'Ctx})
+                                    :else f)) fields)
         wm-args (map (fn [f] (case f mm 'm f)) fields)
         ifaces (cond-> '[eve.flat.chunk.IFlatHandle eve.flat.chunk.IHandlePos
                          eve.flat.chunk.IFlatDigest eve.flat.chunk.IMapSource
@@ -2576,7 +2588,7 @@
 #?@(:jank []
     :bb []
     :glj []
-    :clj [(deftype FlatSet [ctx off mm ^:unsynchronized-mutable _h ^:unsynchronized-mutable _d]
+    :clj [(deftype FlatSet [^Ctx ctx off mm ^:unsynchronized-mutable _h ^:unsynchronized-mutable _d]
   ;; a deftype, not a proxy over APersistentSet, for the same
   ;; reason as the map handles (defmaphandle): the interfaces
   ;; carry the surface on every host of this family.
@@ -4815,15 +4827,15 @@
   FlatSet (-empty [_] #{}))
 
 (extend-protocol IReduce
-  FlatVec (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatColVec (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatList (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatBatch (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatMap (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatRecord (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatTagged (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatRow (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h)))
-  FlatSet (-reduce [h f] (reduce f (seq h))) (-reduce [h f init] (reduce f init (seq h))))
+  FlatVec (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatColVec (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatList (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatBatch (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatMap (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatRecord (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatTagged (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatRow (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
+  FlatSet (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h)))))
 
 ))
 
@@ -4980,7 +4992,7 @@
   (let [ctx (handle-ctx h) off (handle-off h) t (tag-at ctx off) vr (to-rep v)
         n (elem-count ctx off)]
     (cond
-      (or (< i 0) (> i n)) (throw (IndexOutOfBoundsException. (str i)))
+      (or (< i 0) (> i n)) (throw #?(:cljs (js/Error. (str i)) :default (IndexOutOfBoundsException. (str i))))
       (== i n) (cons-flat h v)
       (== t 0x22)
       (or (when (appendable? ctx vr)
@@ -4999,6 +5011,7 @@
       (let [offs (child-offsets-of ctx off)]
         (if (empty? offs)
           (throw #?(:jank (ex-info "Can't pop empty vector" {})
+                    :cljs (js/Error. "Can't pop empty vector")
                     :default (IllegalStateException. "Can't pop empty vector")))
           (or (append-attempt
                (fn [] (let [w (grown-buf ctx)
@@ -5009,6 +5022,7 @@
       (let [offs (child-offsets-of ctx off)]
         (if (empty? offs)
           (throw #?(:jank (ex-info "Can't pop empty list" {})
+                    :cljs (js/Error. "Can't pop empty list")
                     :default (IllegalStateException. "Can't pop empty list")))
           (or (append-attempt
                (fn [] (let [w (grown-buf ctx)
@@ -5018,7 +5032,7 @@
       :else (repack h (fn [r] (pop r))))))
 
 (defn assoc-flat [h k v]
-  (let [ctx (handle-ctx h) off (handle-off h) t (tag-at ctx off) vr (to-rep v)]
+  (let [^Ctx ctx (handle-ctx h) off (handle-off h) t (tag-at ctx off) vr (to-rep v)]
     (cond
       ;; a row, a record, a tagged record: the rep path (a row's assoc
       ;; answers a plain flat map; a record stays a record)
@@ -5057,14 +5071,14 @@
   "The handle reading the packed chunk in bs — the trusted door of
    FORMAT-V1 §10: the header is checked, the nodes are not."
   [^bytes bs]
-  (let [ctx (header-ctx bs false)]
+  (let [^Ctx ctx (header-ctx bs false)]
     (read-value ctx (.-root ctx))))
 
 (defn open-checked
   "The untrusted door of §10 (header checks here; the deep node checks
    are lane C4's eve.flat.check, which this delegates to when present)."
   [^bytes bs]
-  (let [ctx (header-ctx bs true)]
+  (let [^Ctx ctx (header-ctx bs true)]
     (read-value ctx (.-root ctx))))
 
 (defn chunk-bytes
@@ -5168,7 +5182,7 @@
         (unpack (open x))
         x))
     (flat-handle? x)
-    (let [ctx (handle-ctx x)]
+    (let [^Ctx ctx (handle-ctx x)]
       (swap! (.-decodes ctx) inc)
       (let [v (if (satisfies? IRowHandle x)
                 (materialize-row ctx (handle-off x) (-row-index x))

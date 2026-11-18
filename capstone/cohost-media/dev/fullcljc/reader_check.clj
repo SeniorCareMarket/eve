@@ -61,11 +61,16 @@
                  :cljs '#{clojure.string eve.host eve.process cohost-media.domain cohost-media.serve}}
    "meta"       {:clj  '#{clojure.string clojure.java.io cohost-media.work}
                  :cljs '#{clojure.string cohost-media.work}}
-   "node_member" {:clj  '#{}
-                  :cljs '#{eve.type-readers eve.flat.sister cljs.reader
-                           eve.host eve.process eve.thread.domain eve.thread.meta
-                           eve.thread.task cohost-media.core cohost-media.domain
-                           cohost-media.state cohost-media.tasks}}
+   "member"     {:clj  '#{clojure.edn clojure.string
+                          eve.host eve.atom eve.process
+                          eve.thread.domain eve.thread.meta eve.thread.rung eve.thread.task
+                          cohost-media.core cohost-media.coordinator cohost-media.domain
+                          cohost-media.media cohost-media.state cohost-media.tasks}
+                 :cljs '#{clojure.edn clojure.string
+                          eve.host eve.atom eve.process
+                          eve.thread.domain eve.thread.meta eve.thread.rung eve.thread.task
+                          cohost-media.core cohost-media.coordinator cohost-media.domain
+                          cohost-media.media cohost-media.state cohost-media.tasks}}
    "av_jolt"    {:clj  '#{clojure.string jolt.ffi cohost-media.core cohost-media.work}
                  :cljs '#{clojure.string jolt.ffi cohost-media.core cohost-media.work}}})
 
