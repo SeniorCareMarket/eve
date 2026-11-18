@@ -9,14 +9,13 @@
      eve.alpha.ds      — Dataset (columnar data frames)
      eve.alpha.tensor  — Tensor (N-dimensional arrays)
      eve.alpha.col     — Columnar ops (element-wise + index-space)"
-  (:refer-clojure :exclude [deftype extend-type atom swap! aget aset alength
+  (:refer-clojure :exclude [deftype extend-type atom aget aset alength
                             aclone make-array hash-map hash-set
                             count nth get seq conj empty contains? disj meta
                             with-meta reduce])
   ;; the api table names its values by these aliases (adapters/core/
   ;; cljs-compiler's eve/alpha.cljs requires the same ones)
   (:require [eve.deftype]
-            [eve.host]
             [eve.core :as ec]
             [eve.atom :as atm]
             [eve.array :as arr]
@@ -31,15 +30,6 @@
   "Define a SAB-backed type. See eve.deftype/deftype."
   [& args]
   `(eve.deftype/deftype ~@args))
-
-(defmacro swap!
-  "Swap an eve atom's value: (swap! a f args...) is the host's own
-   swap! (eve.host/swap!), which is what an eve atom answers.
-   Consumers take every eve name from this namespace — eve/atom,
-   eve/swap!, eve/deftype — never the implementation namespaces
-   behind it."
-  [& args]
-  `(eve.host/swap! ~@args))
 
 (defmacro extend-type
   "Extend protocols on an existing eve/deftype."
