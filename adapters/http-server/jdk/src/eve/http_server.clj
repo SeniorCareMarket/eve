@@ -24,8 +24,17 @@
                       (.decode (Base64/getDecoder) ^String (str (or body "")))
                       (.getBytes (str (or body "")) "UTF-8"))]
       (doseq [[k v] headers] (.add (.getResponseHeaders ex) (str k) (str v)))
-      (.sendResponseHeaders ex (int (or status 200)) (if (zero? (alength bs)) -1 (alength bs)))
-      (when (pos? (alength bs)) (with-open [o (.getResponseBody ex)] (.write o bs))))
+      ;; A HEAD answer carries the GET answer's headers, Content-Length
+      ;; included, and no body. The JDK logs a warning when
+      ;; sendResponseHeaders is given a length for a HEAD request, so the
+      ;; length rides as an explicit header and the call itself gets -1.
+      (if (= "HEAD" (:method req))
+        (do (when (and (pos? (alength bs))
+                       (nil? (.getFirst (.getResponseHeaders ex) "Content-Length")))
+              (.set (.getResponseHeaders ex) "Content-Length" (str (alength bs))))
+            (.sendResponseHeaders ex (int (or status 200)) -1))
+        (do (.sendResponseHeaders ex (int (or status 200)) (if (zero? (alength bs)) -1 (alength bs)))
+            (when (pos? (alength bs)) (with-open [o (.getResponseBody ex)] (.write o bs))))))
     (finally (.close ex))))
 
 (defn serve!
