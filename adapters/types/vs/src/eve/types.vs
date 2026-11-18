@@ -1,5 +1,12 @@
 (ns eve.types
-  "eve's types on ValueScript. A VS deftype takes protocols and Java blocks, but VS's core reads a deftype instance as
+  "eve's types on ValueScript — THE JVM MODEL (2026-11-18, valuescript specs/eve-surface/IMPL-PLAN.md S2): VS's core now
+   reads a deftype instance through Clojure's interface map (count, seq, get, =, hash, invoke, conj, assoc, the
+   predicates, the item readers — valuescript landing ad574d2f2, the interface matrix 55 / 55), so a type keeps the
+   JVM's interface blocks as eve's type language writes them (eve.deftype-proto.vocab/jvm-translate-protos, as
+   adapters/types/jvm does) and clojure.core answers eve values through their interfaces. The babashka-style
+   translation below (translate-protos onto eve.core's protocols) is kept as the record of the previous route.
+
+   Before (measured on the landed builder, 2026-10-19): A VS deftype takes protocols and Java blocks, but VS's core reads a deftype instance as
    its own typed map or struct block: clojure.core's count, seq, get, deref, invoke and = never reach the type's
    interface methods (measured on the landed builder, 2026-10-19: count and seq refuse, get and invoke answer nil, =
    is identity; hash reads a registered hashCode, str a registered toString). That is babashka's capability, so a type
@@ -152,7 +159,20 @@
   [`(~'deftype ~type-name ~fields ~@forms)])
 
 (defn- hooks
-  "This host's steps for eve.deftype-proto.sio."
+  "This host's steps for eve.deftype-proto.sio — the JVM model (adapters/types/jvm's hooks)."
+  []
+  {:normalize v/jvm-translate-protos
+   :define (fn [type-name fields _impls forms print]
+             (concat [`(~'deftype ~type-name ~fields ~@forms)]
+                     (when print [(sio/print-method-form type-name print)])))
+   :build (fn [type-name _fields _new-name args] (list* 'new type-name args))
+   :factory-via-var? false
+   :slab-prepare (fn [parsed _type-name] parsed)
+   :object-boilerplate? true
+   :slab-define define})
+
+(defn- translated-hooks
+  "The babashka-style steps (the previous route): interfaces translated onto eve.core's protocols."
   []
   {:normalize (fn [parsed] {:impls parsed})
    ;; the interfaces go onto eve.core's protocols; an IPrintWithWriter body is the print-method
@@ -168,18 +188,21 @@
    :object-boilerplate? false
    :slab-define define})
 
+(declare plain-type)
+
 (defn host-type
-  "A plain type written with the JVM's names (host-deftype)."
-  [_env type-name fields parsed]
-  `(~'deftype ~type-name ~fields ~@(impls->forms (translate-protos parsed type-name))))
+  "A plain type written with the JVM's names (host-deftype): plain-type's realization, as on the JVM."
+  [env type-name fields parsed]
+  (plain-type env type-name fields parsed))
 
 (defn plain-type
-  "A plain type (eve.deftype/deftype) on eve.core's protocols."
+  "A plain type (eve.deftype/deftype): ClojureScript's names translated onto the JVM's interfaces, the JVM's reserved
+   field names renamed, an IPrintWithWriter body its print-method (adapters/types/jvm's plain-type)."
   [_env type-name fields parsed]
   (let [[fields parsed] (sio/plain-renames fields parsed nil)
-        impls (translate-protos parsed type-name)]
+        {:keys [impls print]} (v/jvm-translate-protos parsed)]
     `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))
-         ~@(when (printed? impls) [(sio/print-method-form type-name 'eve.core/-pr-writer)])
+         ~@(when print [(sio/print-method-form type-name print)])
          ~type-name)))
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
@@ -198,10 +221,10 @@
   (sio/eve-renames fields body))
 
 (defn reader-of
-  "What a registered eve collection reads as on VS: the host's own collection (host-value) where one is given —
-   VS's core reads VS's own collections, not an eve type's protocols — else its eve type (from-header)."
-  [from-header host-value]
-  (or host-value from-header))
+  "What a registered eve collection reads as on VS: its eve type (from-header), as on the JVM — VS's core reads an eve
+   type through its interfaces. (The previous route answered the host's own collection where one was given.)"
+  [from-header _host-value]
+  from-header)
 
 (defn print-form
   "The printer of a registered eve collection: none — VS prints what it reads (a host value) by its own printer, and
