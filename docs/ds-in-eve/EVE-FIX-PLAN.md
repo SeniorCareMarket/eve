@@ -38,14 +38,15 @@ fn, a `$` region) = persistent, slab-backed. The atom confers identity.
 
 | Law | Statement |
 |---|---|
-| V1 | Every exit from an atom delivers flat data on the host heap: deref, `$` exit, `swap!`/`swap-vals!`/`reset!` return, watch old/new, the value `compare-and-set!` compares. No slab-backed object ever leaves. |
-| V2 | An exit delivers the whole value as ONE complete packed value, whatever it holds inside — persistent eve data, flat values stored earlier, deftypes, value arrays. No in-atom wrapper (`FrozenValue`, `BasedValue`, `ConcatBatch`) ever surfaces. |
+| V1 | Every exit from an atom delivers flat data on the host heap: the end of a read (V9), `$` exit, `swap!`/`swap-vals!`/`reset!` return, watch old/new, the value `compare-and-set!` compares. No slab-backed object ever leaves a read. |
+| V2 | An exit delivers what the read reached — the whole value for `swap!`'s return, a watch, `$`'s result; the subtree at the end of the lookups for a deref read (V9) — as ONE complete packed value, whatever it holds inside — persistent eve data, flat values stored earlier, deftypes, value arrays. No in-atom wrapper (`FrozenValue`, `BasedValue`, `ConcatBatch`) ever surfaces. |
 | V3 | `eve/deftype` construction outside every atom gives the flat instance; inside a `swap!` gives the persistent instance. Both answer the type's protocols and field reads. Same for `e/make-array` and every other eve constructor. |
 | V4 | Clojure data with flat eve values nested in it, stored into an atom, becomes persistent eve data holding those flat values. Read back inside the atom, a flat value answers as its type (a flat `Box` is still a `Box` to protocol dispatch). |
 | V5 | `eve->clj` is `eve->cljs`'s rule on every host: eve maps, vectors, sets, lists → host collections, recursively. One generic fn; no per-type protocol. Inside an atom its result stored back is eve data again; outside it runs on flat data. |
 | V6 | Values have no identity outside atoms: two deliveries of one value are `=` and need not be `identical?`. `=` is value equality on every delivered form. |
 | V7 | `compare-and-set!` compares by value: `(compare-and-set! a @a x)` succeeds when no swap intervened. |
 | V8 | Flat delivered values live on the host heap: they need no pin, no epoch, no domain, read correctly after any number of later swaps and after the domain closes, and are reclaimed by the host GC. |
+| V9 | A deref reads lazily and ends its own read (John, 2026-11-19: "the scope returns from the deref after the `:c`"; packing the whole atom per deref "not going to work"). `@a` answers a pinned lazy view over the stored root — no copy. Lookups (`get`, keyword invoke, `get-in`, `nth`, `find`, `contains?`) read one level in place: a scalar answers itself and releases the pin; a subtree answers a child view on the same pin. The first operation that is not a lookup (`seq`/`reduce`/`into`, `count` of a subtree, `=`, `hash`, print, storing it into an atom, passing it to a protocol method) packs the subtree at the end of the path (V2) and releases the pin. A view never ended keeps its pin while reachable (a live reader of its version) and releases it when the host GC collects it. `(-> @a :b :c (into [1 2 3]))` packs `:c` only; `(let [v @a] (:x v) (:y v))` reads one version. `$` is optional: one snapshot over a larger body. |
 
 `eve->clj` on a deftype (my reading of "produce clj on that host" — John to
 confirm in one word): a deftype has no Clojure collection shape, so
@@ -78,6 +79,7 @@ not run.
 | V6 | `identical?` false, `=` true | green |
 | V7 | always `false`: compares `(d/eve->clj cur)` (IPlain) to the delivered value (`atom.cljc` `compare-and-set`) | RED |
 | V8 | deref'd flat `Box` reads after 1,000 swaps | green (domain-close and GC unmeasured) |
+| V9 | deref packs the whole root every call (`deliver-flat`: "Cost = one pack"); no lazy view outside `$`. `eve.guard` (JVM-only prototype) has the lazy views, released at a `with-guard` extent's end, not at the read's | RED |
 
 ## 2. How it got here (measured from history)
 
@@ -124,7 +126,26 @@ instance (§0 reading); an eve value array → the vector of its slots'
 One `.cljc`, no host branch beyond the shape predicates each host already
 has. All 57 `eve->clj` call sites keep the name and get the generic rule.
 
-X2. **One exit (V1, V2, V8).** Every exit — deref, `$*` (today
+X10. **The read ends itself (V9). Lands before X2: it decides what X2's
+exit is for a deref.** Start from `eve.guard`'s lazy views (`LazyMap` /
+`LazyColl`: in-place leaf decode, child views on the same pin, a validity
+check on every access), moved into `.cljc` for the gate hosts. Replace its
+release point: not the end of a `with-guard` extent, but (a) the first
+non-lookup operation on the view or any child view — which packs the
+subtree there through X2's delivery and releases the pin — or (b) the host
+GC collecting an unended view (JVM `java.lang.ref.Cleaner`, JS
+`FinalizationRegistry`, Python `weakref.finalize`; jolt: its host's
+equivalent, named here when measured). A lookup that lands on a scalar
+releases at once. Views stay read-only (assoc/conj on a view end the read
+first, then act on the flat value). `$` stays, as one snapshot over a body;
+its exit is X2's. Done when: `(-> @a :b :c (into [1 2 3]))` packs only
+`:c` (bytes packed measured against the whole root); a chain of lookups
+ending in a scalar takes one pin and releases it before returning; an
+unended view's pin is released after GC; 1,000 swaps while a view is held
+leave the view reading its own version; and V1–V8 hold for every value a
+read ends with.
+
+X2. **One exit (V1, V2, V8).** Every exit — the end of a deref read (X10), `$*` (today
 `(rr/run f d/eve->clj)`), `swap!`/`swap-vals!`/`reset!` returns, watch
 delivery, the `:copy` foreign policy, the freeze-absent `plain-deref`
 fallback — calls the one delivery (`eve.flat.freeze/deliver-flat`, inside
@@ -195,5 +216,5 @@ DS repo copies it as its first commit.
 
 Each commit message carries the §1 rows it moves, before → after, and the
 hosts it ran on. A law is not green from one host. Report row counts, not
-prose. Order: X0 (one pass) alongside the §5 test; then X1, X2, X3, X4, X5,
+prose. Order: X0 (one pass) alongside the §5 test; then X1, X10, X2, X3, X4, X5,
 X6, X7, X8, X9.
