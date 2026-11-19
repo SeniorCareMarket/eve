@@ -3,8 +3,8 @@
    outside an atom, data is flat, value-only, without identity; inside an
    atom (a swap! fn, a $ region) it is persistent; the atom confers
    identity. One deftest per row of the plan's §1, against eve.alpha only.
-   V9 (a deref outside $ ending its own read) is the plan's X10 spike and
-   has no row here until the spike's go/no-go."
+   V9: a read outside $ answers a view of the version it pinned (X10);
+   its GC end is pinned by eve.view-test on the JVM."
   (:require [clojure.test :refer [deftest is testing]]
             [eve.alpha :as e]))
 
@@ -201,3 +201,30 @@
     (is (true? (e/$ (e/same? (:db @a) (:db @a)))))
     (is (false? (e/$ (e/same? (:db @a) (:arr @a)))))
     (is (some? (err-type #(e/same? (:db @a) (:db @a)))) "same? outside an atom throws")))
+
+;; ---------------------------------------------------------------------------
+;; V9 — a read outside $ answers a view: lookups in place, its own version
+;; ---------------------------------------------------------------------------
+
+(deftest v9-read-answers-a-view
+  (let [a (db-atom)
+        root @a
+        db (:db root)]
+    (is (not (e/persistent? root)) "a view is not a persistent value")
+    (is (= (db-val 1) (v db)) "a deftype's view answers its protocols")
+    (churn! a 1000)
+    (is (= (db-val 1) (v db)) "a view reads the version it pinned, after 1,000 swaps")
+    (is (= (db-val 1) (v (:db (e/eve->clj root))))
+        "eve->clj of a view is its version as host data")))
+
+(deftest v9-view-flows-back-into-an-atom
+  (let [a (db-atom)
+        b (e/atom {})
+        r @a]
+    (churn! a 10)
+    (swap! b assoc :copy (:arr r) :m (:db r))
+    (churn! a 1000)
+    (is (= [1 2 3] (vec (e/array-seq (:copy @b)))) "a stored view is its subtree's value")
+    (is (= (db-val 1) (v (:m @b))))
+    (swap! a (fn [m] (assoc m :back (:arr r))))
+    (is (= [1 2 3] (vec (e/array-seq (:back @a)))) "a view stored back into its own atom")))
