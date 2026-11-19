@@ -168,12 +168,22 @@ X9. **Docs where users see them.** `doc/api-guide.md` and
 
 ## 4. Hosts
 
-"All eve platforms" = the JVM plus the 17 rows of `hosts.edn`: `:cljs`,
-`:browser`, `:bb`, `:bb-minimal`, `:nbb`, `:scittle`, `:cherry`, `:squint`,
-`:cljr`, `:lpy`, `:jolt`, `:clje`, `:vs`, `:glj`, `:jank`, `:lg`, `:cljd`.
-A law is done when the §5 test is green on every host that runs eve's
-suite. Gate order: JVM and browser first (DS needs them), then every other
-host; a host with no runner is named in this file with what it lacks.
+The model holds on every eve platform (the JVM plus the 17 rows of
+`hosts.edn`), and the code is written host-generic (one `.cljc`). The gate
+for this fix is the top hosts (John, 2026-11-19: "Testing all 17 for this
+fix will take forever. You can target the top few for now - jvm, cljs,
+jolt, basilisp, etc."):
+
+| Gate host | Row | Why |
+|---|---|---|
+| JVM | `deps.edn` | named |
+| ClojureScript on Node | `:cljs` | named |
+| ClojureScript in a browser | `:browser` | DS's second host (DS plan §1) |
+| jolt | `:jolt` | named |
+| basilisp | `:lpy` | named |
+
+A law is done when the §5 test is green on all five. The other 13 rows are
+not run for this fix.
 
 ## 5. The laws test (`test/eve/value_model_laws_test.cljc`)
 
