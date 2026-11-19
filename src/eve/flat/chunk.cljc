@@ -322,6 +322,13 @@
 
 (declare to-rep)
 
+(defn- host-object-array?
+  "x is a host object array: the JVM's Object[], a JS array."
+  [x]
+  #?(:clj (instance? (Class/forName "[Ljava.lang.Object;") x)
+     :cljs (array? x)
+     :default false))
+
 ;; Converters for values that are neither plain data nor flat handles:
 ;; (fn [value] -> rep or nil). The generated sister registers one for
 ;; eve-deftype instances (eve.flat.sister, lane H5): an instance of a
@@ -381,6 +388,9 @@
               (flat-handle? v) (-rep v)
               (some? nom) nom
               (host-bytes? v) (BytesVal. v)
+              ;; a host object array (an eve array's flat form, made outside
+              ;; every atom): its elements, as a vector
+              (host-object-array? v) (mapv to-rep v)
               #?@(:jank [] :glj [] :clj [(record? v) (typed-rep v)])
               (map? v) (into {} (map (fn [[k val]] [(to-rep k) (to-rep val)])) v)
               (set? v) (into #{} (map to-rep) v)

@@ -254,10 +254,21 @@
 ;; The array functions — an eve array, or a host array
 ;;-----------------------------------------------------------------------------
 
+(declare make-array-in)
+
 (defn make-array
-  "A new eve array of n slots (each nil), in the current eve domain."
+  "A new eve array of n slots (each nil): in the current eve domain inside an
+   atom (a swap!, an explicit domain context); outside every atom, its flat
+   form — a host array, written while new like any array (the value model,
+   EVE-FIX-PLAN V3)."
   ([n]
-   (let [sio (alloc/current-sio)
+   (if (nil? d/*domain-sio*)
+     (object-array n)
+     (make-array-in n)))
+  ([_type n] (make-array n)))
+
+(defn- make-array-in [n]
+  (let [sio (alloc/current-sio)
          off (slab/alloc! sio (block-size n))]
      (slab/write-u8! sio off 0 ValueArray-type-id)
      (slab/write-i32! sio off 4 n)
@@ -266,7 +277,6 @@
      (when (pos? n)
        (slab/write-bytes! sio off HEADER (enc/make-bytes n)))
      (->value-array sio off n)))
-  ([_type n] (make-array n)))
 
 (defn aget
   "The value at index i: an eve array's slot, a delivered (flat) eve array's

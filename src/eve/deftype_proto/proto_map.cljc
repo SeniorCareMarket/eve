@@ -118,6 +118,14 @@
                reset         {:cljs-name -reset! :cljs-proto IReset :arities [[_ v]]}
                compareAndSet {:cljs-name nil :arities [[_ o n]]}}}
 
+    ;; swap-vals!/reset-vals! on ClojureScript go through the atom's
+    ;; -swap!/-deref (cljs.core's non-Atom arm): no protocol to realize
+    clojure.lang.IAtom2
+    {:cljs-proto nil
+     :split? true
+     :methods {swapVals  {:cljs-name nil :arities [[_ f] [_ f a] [_ f a b] [_ f a b xs]]}
+               resetVals {:cljs-name nil :arities [[_ v]]}}}
+
     ;; --- transients: a JVM transient interface carries the methods it
     ;; inherits, which split across ClojureScript's transient protocols ---
 

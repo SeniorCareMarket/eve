@@ -80,12 +80,15 @@
         r (swap! a (fn [m] (assoc m :db (mk-db 2))))]
     (is (not (e/persistent? r)) "swap! returns flat data")
     (is (= (db-val 2) (v (:db r))))
-    (let [[o n] (swap-vals! a (fn [m] (assoc m :db (mk-db 3))))]
-      (is (not (e/persistent? o)))
-      (is (not (e/persistent? n)))
-      (is (= (db-val 2) (v (:db o))))
-      (is (= (db-val 3) (v (:db n)))))
     (is (= {:x 1} (reset! a {:x 1})))))
+
+(deftest v1-swap-vals
+  (let [a (db-atom)
+        [o n] (swap-vals! a (fn [m] (assoc m :db (mk-db 3))))]
+    (is (not (e/persistent? o)))
+    (is (not (e/persistent? n)))
+    (is (= (db-val 1) (v (:db o))))
+    (is (= (db-val 3) (v (:db n))))))
 
 (deftest v1-watch
   (let [a (db-atom)

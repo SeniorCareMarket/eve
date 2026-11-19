@@ -117,6 +117,8 @@
   ([sio ^bytes stream-bytes] (write-chain! sio stream-bytes nil false))
   ([sio ^bytes stream-bytes digest-words] (write-chain! sio stream-bytes digest-words false))
   ([sio ^bytes stream-bytes digest-words framed?]
+   (write-chain! sio stream-bytes digest-words framed? false))
+  ([sio ^bytes stream-bytes digest-words framed? typed?]
    (let [total (alength stream-bytes)
          nseg (int (quot (+ total (dec SEG-PAYLOAD)) SEG-PAYLOAD))
          ;; segments last-to-first, so each knows its next
@@ -144,8 +146,11 @@
      (put-i32! harr 8 first-seg)
      (when digest-words
        (dotimes [w 8] (put-i32! harr (+ 12 (* 4 w)) (long (nth digest-words w)))))
+     ;; flags: 1 digest latched, 2 framed stream, 4 typed root (a flat
+     ;; eve-deftype: it reads back as its sister, EVE-FIX-PLAN X4)
      (put-u8! harr 44 (bit-or (if digest-words 1 0)
-                              (if framed? 2 0)))
+                              (if framed? 2 0)
+                              (if typed? 4 0)))
      (alloc/-sio-write-bytes! sio hdr 0 harr)
      hdr)))
 
@@ -847,9 +852,14 @@
   [sio header-off]
   #?(:clj (let [cells (object-array 2)
                 flags (slab/read-i32 sio header-off 44)]
-            (when (== (bit-and flags 2) 2)
-              (aset cells 1 :framed))
-            (->FrozenValue sio (long header-off) cells))
+            (if (== (bit-and flags 4) 4)
+              ;; a typed root (a flat eve-deftype stored in the atom): it
+              ;; answers as its type inside the atom — its sister over the
+              ;; chunk, as the ClojureScript arm below opens every chain
+              (chunk/open (read-chain-bytes sio header-off))
+              (do (when (== (bit-and flags 2) 2)
+                    (aset cells 1 :framed))
+                  (->FrozenValue sio (long header-off) cells))))
      :cljs (chunk/open (read-chain-bytes sio header-off))))
 
 (defn enter-checked!
@@ -976,7 +986,8 @@
           [stream framed?] (if (concat-batch? h)
                               [(frame-stream (mapv chunk/bytes-of (.-handles h))) true]
                               [(chunk/bytes-of h) false])
-          hdr (long (write-chain! sio stream nil framed?))
+          hdr (long (write-chain! sio stream nil framed?
+                                  (satisfies? source/ISister h)))
           ^bytes b (enc/make-bytes 7)]
       (aset b 0 (unchecked-byte 0xEE))
       (aset b 1 (unchecked-byte 0xDB))

@@ -1203,7 +1203,8 @@
    atom-slot-idx
    f
    args
-   exclusive?]
+   exclusive?
+   want-vals?]
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
   (binding [tally/*touches* (clojure.core/atom #{})]
@@ -1229,7 +1230,7 @@
           ;; the same value: nothing to publish, nothing to retire — but
           ;; the swap SUCCEEDED, so a watched atom still notifies (spec
           ;; clause 2: notification is not gated by the change decision)
-          (let [delivery (if (watched? ds atom-slot-idx)
+          (let [delivery (if (or want-vals? (watched? ds atom-slot-idx))
                            (let [dv (deliver-value ds atom-slot-idx old-val)]
                              [dv dv])
                            ::none)]
@@ -1301,7 +1302,7 @@
                 ;; root is retired by this commit, so converting it after
                 ;; the pin drops would read retired blocks (the discipline
                 ;; flat-deref's in-pin conversion obeys)
-                (let [delivery (if (watched? ds atom-slot-idx)
+                (let [delivery (if (or want-vals? (watched? ds atom-slot-idx))
                                  [(deliver-value ds atom-slot-idx old-val)
                                   (deliver-value ds atom-slot-idx
                                                  (read-root-value sio new-ptr))]
@@ -1336,25 +1337,28 @@
    collection, a scalar or nil. A successful attempt notifies the atom's
    watchers with the delivered old/new its :ok tuple threaded through
    (spec clauses 2–4) — here, outside the domain write hold, so a
-   callback that swaps cannot deadlock the domain."
-  [ds atom-slot-idx f args]
+   callback that swaps cannot deadlock the domain. With want-vals? it
+   answers [old new], both delivered flat under the attempt's pin
+   (swap-vals!, reset-vals!)."
+  ([ds atom-slot-idx f args] (mmap-swap! ds atom-slot-idx f args false))
+  ([ds atom-slot-idx f args want-vals?]
   (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
     (loop [attempt 0]
       (when (>= attempt d/MAX_SWAP_RETRIES)
         (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
       (let [[tag result delivery] (with-domain-write ds false
                                     (fn [exclusive?]
-                                      (let [r (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?)]
+                                      (let [r (swap-attempt! ds ptr-off atom-slot-idx f args exclusive? want-vals?)]
                                         (when (= :ok (first r))
                                           (try-flush-retires! ds))
                                         r)))]
         (case tag
-          :ok (do (when (not= ::none delivery)
+          :ok (do (when (and (not= ::none delivery) (watched? ds atom-slot-idx))
                     (notify-watchers! ds atom-slot-idx
                                       (nth delivery 0) (nth delivery 1)))
-                  result)
+                  (if want-vals? delivery result))
           :retry (do (cas-backoff! attempt)
-                     (recur (inc attempt))))))))
+                     (recur (inc attempt)))))))))
 
 (defn- mmap-compare-and-set!
   "Set the atom to new-val iff its value equals old-val. One CAS loop: f
@@ -1527,6 +1531,12 @@
   (reset [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) []))
   (compareAndSet [_ old-val new-val]
     (mmap-compare-and-set! domain-state atom-slot-idx old-val new-val))
+  clojure.lang.IAtom2
+  (swapVals [_ f] (mmap-swap! domain-state atom-slot-idx f [] true))
+  (swapVals [_ f a] (mmap-swap! domain-state atom-slot-idx f [a] true))
+  (swapVals [_ f a b] (mmap-swap! domain-state atom-slot-idx f [a b] true))
+  (swapVals [_ f a b xs] (mmap-swap! domain-state atom-slot-idx f (concat [a b] xs) true))
+  (resetVals [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) [] true))
   ;; the watch/validator surface (spec clause 1): the host's add-watch /
   ;; set-validator! land here; the bodies are the trunk fns above, and
   ;; each host's types adapter realizes IRef the way it realizes
@@ -1588,6 +1598,12 @@
   (reset [_ v] (mmap-swap! domain-state 0 (constantly v) []))
   (compareAndSet [_ old-val new-val]
     (mmap-compare-and-set! domain-state 0 old-val new-val))
+  clojure.lang.IAtom2
+  (swapVals [_ f] (mmap-swap! domain-state 0 f [] true))
+  (swapVals [_ f a] (mmap-swap! domain-state 0 f [a] true))
+  (swapVals [_ f a b] (mmap-swap! domain-state 0 f [a b] true))
+  (swapVals [_ f a b xs] (mmap-swap! domain-state 0 f (concat [a b] xs) true))
+  (resetVals [_ v] (mmap-swap! domain-state 0 (constantly v) [] true))
   ;; the domain is slot 0's atom: the same watch/validator surface
   clojure.lang.IRef
   (addWatch [this k f] (add-watch* this k f))
