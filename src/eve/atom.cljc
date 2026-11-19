@@ -790,6 +790,45 @@
                               m)))]
       (slot-pin! root-r slot-idx p))))
 
+(defn- view-pin!
+  "A view's pin: keyed by its read's token, not the thread, so any thread
+   (the GC's, when it collects the read's last view) releases it."
+  [{:keys [root-r slot-idx pins pin-lock]} token epoch]
+  (locking pin-lock
+    (slot-pin! root-r slot-idx (swap! pins assoc token [epoch 1]))))
+
+(defn- view-unpin! [{:keys [root-r slot-idx pins pin-lock]} token]
+  (locking pin-lock
+    (slot-pin! root-r slot-idx (swap! pins dissoc token))))
+
+(defonce ^:private view-read-hook
+  ;; eve.view's registration (it requires this namespace): (fn [raw release]
+  ;; -> the read's answer). Registered only on a host whose GC can end a
+  ;; read; with none, reads outside `$` deliver flat.
+  (clojure.core/atom nil))
+
+(defn register-view-read!
+  "eve.view's registration of the view a read outside `$` answers."
+  [f]
+  (reset! view-read-hook f))
+
+(declare deliver-value)
+
+(defn- read-answer
+  "The answer a read gives for raw, read now under the caller's pin: a view
+   holding a pin of its own (from the current epoch) when views are built
+   here, else raw delivered flat."
+  [{:keys [root-r] :as ds} atom-slot-idx raw]
+  (if-let [h @view-read-hook]
+    (let [token #?(:cljs (js-obj) :default (Object.))]
+      (view-pin! ds token (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+      (try (h raw (fn [] (view-unpin! ds token)))
+           (catch #?(:cljs :default :default Throwable) e
+             (view-unpin! ds token)
+             (throw e))))
+    (deliver-value ds atom-slot-idx raw)))
+
+
 (defn- refresh-slabs! [{:keys [base-path sio]}]
   (when base-path (alloc/refresh! sio)))
 
@@ -1023,6 +1062,22 @@
     (finally
       (unpin-epoch! ds))))
 
+(declare read-root-value)
+
+(defn- view-deref
+  "deref outside `$` (and outside a swap!), where views are built: the root
+   read under a pin and answered as a view that holds a pin of its own until
+   the GC collects it (eve.view)."
+  [{:keys [root-r sio] :as ds} atom-slot-idx]
+  (refresh-slabs! ds)
+  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (try
+    (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+      (refresh-slabs! ds)
+      (read-answer ds atom-slot-idx (read-root-value sio ptr)))
+    (finally
+      (unpin-epoch! ds))))
+
 (defn- flat-deref
   "The atom's value as a flat object (FLAT-IN-ATOM R5): read under a
    pinned epoch, the root converted by the registered delivery INSIDE
@@ -1079,6 +1134,7 @@
   (cond
     (rr/active?) (region-deref ds atom-slot-idx)
     #?@(:bb [] :glj [] :clj [(guard/active?) (guard-deref ds atom-slot-idx)])
+    (and (some? @view-read-hook) (nil? d/*parent-atom*)) (view-deref ds atom-slot-idx)
     :else (flat-deref ds atom-slot-idx)))
 
 ;; ---------------------------------------------------------------------------
@@ -1245,8 +1301,9 @@
           ;; clause 2: notification is not gated by the change decision)
           ;; swap!'s return is the new value delivered flat (the value
           ;; model: what leaves an atom is flat), under this attempt's pin
-          (let [delivery (let [dv (deliver-value ds atom-slot-idx old-val)]
-                           [dv dv])]
+          (let [delivery (let [w? (or want-vals? (watched? ds atom-slot-idx))
+                               dv (when w? (deliver-value ds atom-slot-idx old-val))]
+                           [dv dv (read-answer ds atom-slot-idx old-val)])]
             (alloc/stop-logging! lsio)
             [:ok new-val delivery])
           ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
@@ -1317,10 +1374,13 @@
                 ;; flat-deref's in-pin conversion obeys)
                 ;; the new value delivered flat always (swap!'s return); the
                 ;; old one only when a watcher or swap-vals! reads it
-                (let [delivery [(when (or want-vals? (watched? ds atom-slot-idx))
-                                  (deliver-value ds atom-slot-idx old-val))
-                                (deliver-value ds atom-slot-idx
-                                               (read-root-value sio new-ptr))]]
+                ;; [old new] flat when a watcher or swap-vals! reads them;
+                ;; swap!'s answer (a view, or flat) for the new root always
+                (let [w? (or want-vals? (watched? ds atom-slot-idx))
+                      new-raw (read-root-value sio new-ptr)
+                      delivery [(when w? (deliver-value ds atom-slot-idx old-val))
+                                (when w? (deliver-value ds atom-slot-idx new-raw))
+                                (read-answer ds atom-slot-idx new-raw)]]
                   (alloc/stop-logging! lsio)
                   [:ok new-val delivery]))
               (let [offs (alloc/logged-allocs lsio)]
@@ -1373,9 +1433,9 @@
           :ok (do (when (and (not= ::none delivery) (watched? ds atom-slot-idx))
                     (notify-watchers! ds atom-slot-idx
                                       (nth delivery 0) (nth delivery 1)))
-                  (cond want-vals? delivery
+                  (cond want-vals? [(nth delivery 0) (nth delivery 1)]
                         (= ::none delivery) result
-                        :else (nth delivery 1)))
+                        :else (nth delivery 2)))
           :retry (do (cas-backoff! attempt)
                      (recur (inc attempt)))))))))
 
@@ -1389,7 +1449,7 @@
                   ;; f runs once per attempt; only the attempt whose CAS
                   ;; commits counts, so every attempt overwrites the flag (a
                   ;; matching attempt that lost its CAS used to leave it true)
-                  (let [hit? (= (d/eve->clj cur) old-val)]
+                  (let [hit? (= (d/eve->clj cur) (d/eve->clj old-val))]
                     (vreset! set? hit?)
                     (if hit? new-val cur)))
                 [])

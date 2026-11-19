@@ -556,14 +556,15 @@
   (reset! flat-of-hook f))
 
 (defonce ^:private unwrap-hook
-  ;; a read-proxy layer's unwrap (eve.guard's validity proxies): the value
-  ;; under a proxy, checked; anything else as is. eve->clj looks through it.
-  (atom nil))
+  ;; read-proxy layers' unwraps (eve.guard's validity proxies, eve.view's
+  ;; views): the value under a proxy; anything else as is. eve->clj looks
+  ;; through them.
+  (atom []))
 
 (defn register-unwrap!
   "A proxy layer's registration of its unwrap fn (x -> the value under x, or x)."
   [f]
-  (reset! unwrap-hook f))
+  (swap! unwrap-hook conj f))
 
 (defn- flat-of-fn
   "The registered kind arm, loading eve.flat.freeze (which registers it) the
@@ -615,8 +616,7 @@
     (or (string? v) (number? v) (boolean? v)
         (keyword? v) (symbol? v) (char? v)) v
     :else
-    (let [uh @unwrap-hook
-          u (if uh (uh v) v)]
+    (let [u (reduce (fn [x uf] (let [y (uf x)] (if (identical? y x) x (reduced y)))) v @unwrap-hook)]
       (if-not (identical? u v)
         (eve->clj u)
     (let [h (flat-of-fn)

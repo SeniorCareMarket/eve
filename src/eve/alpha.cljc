@@ -30,7 +30,9 @@
             ;; basilisp has no flat layer yet (eve.flat-io's reads and
             ;; eve.flat.chunk's handles have no :lpy arms): there, values the
             ;; flat layer would deliver are refused by eve->clj, never leaked.
-            #?@(:lpy [] :default [[eve.flat.freeze]])))
+            #?@(:lpy [] :default [[eve.flat.freeze]
+                                  ;; reads outside `$` answer views (X10)
+                                  [eve.view]])))
 
 (defmacro deftype
   "Define a SAB-backed type. See eve.deftype/deftype."
