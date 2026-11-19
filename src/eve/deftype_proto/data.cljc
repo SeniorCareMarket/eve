@@ -555,6 +555,16 @@
   [f]
   (reset! flat-of-hook f))
 
+(defonce ^:private unwrap-hook
+  ;; a read-proxy layer's unwrap (eve.guard's validity proxies): the value
+  ;; under a proxy, checked; anything else as is. eve->clj looks through it.
+  (atom nil))
+
+(defn register-unwrap!
+  "A proxy layer's registration of its unwrap fn (x -> the value under x, or x)."
+  [f]
+  (reset! unwrap-hook f))
+
 (defn- flat-of-fn
   "The registered kind arm, loading eve.flat.freeze (which registers it) the
    first time it is needed — as eve.atom's deref delivery resolves it: a
@@ -605,6 +615,10 @@
     (or (string? v) (number? v) (boolean? v)
         (keyword? v) (symbol? v) (char? v)) v
     :else
+    (let [uh @unwrap-hook
+          u (if uh (uh v) v)]
+      (if-not (identical? u v)
+        (eve->clj u)
     (let [h (flat-of-fn)
           f (when h (h v))]
       (cond
@@ -618,7 +632,7 @@
         (throw (ex-info "eve->clj: a persistent Eve value of no kind eve->clj knows"
                         {:type :eve/no-materialization
                          :value-type (str (type v))}))
-        :else v))))
+        :else v))))))
 
 (defprotocol IBulkAccess
   "Bulk typed-array access to EveArray data: the host's primitive array of

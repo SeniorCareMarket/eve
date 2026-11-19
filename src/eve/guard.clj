@@ -190,6 +190,8 @@
   [x]
   (if (instance? eve.guard.IGuarded x) (-unwrap x) x))
 
+(d/register-unwrap! unwrap)
+
 (defn materialize
   "The one explicit materialization point: x as plain data (d/eve->clj), checked."
   [x]

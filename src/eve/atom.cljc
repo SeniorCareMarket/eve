@@ -1184,6 +1184,8 @@
   (doseq [[k cb] watches]
     (cb k target old new)))
 
+(declare swap-attempt-vals!)
+
 (defn- swap-attempt!
   "One CAS attempt: read the old root, apply f, write the new value, CAS the
    root pointer. Returns [:ok new-val delivery] or [:retry nil ::none] —
@@ -1198,6 +1200,16 @@
    ran again under the domain's hold); a descriptor count is a CAS word on
    the descriptor row, safe to raise from any write, so no attempt ever
    needs the hold and there is no [:hold nil] return."
+  [{:keys [root-r sio durable-commits? journal] :as ds}
+   ptr-off
+   atom-slot-idx
+   f
+   args
+   exclusive?]
+  (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? false))
+
+
+(defn- swap-attempt-vals!
   [{:keys [root-r sio durable-commits? journal] :as ds}
    ptr-off
    atom-slot-idx
@@ -1348,7 +1360,9 @@
         (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
       (let [[tag result delivery] (with-domain-write ds false
                                     (fn [exclusive?]
-                                      (let [r (swap-attempt! ds ptr-off atom-slot-idx f args exclusive? want-vals?)]
+                                      (let [r (if want-vals?
+                                                (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? true)
+                                                (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?))]
                                         (when (= :ok (first r))
                                           (try-flush-retires! ds))
                                         r)))]

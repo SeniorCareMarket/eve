@@ -86,8 +86,7 @@
         ;; fields were encoded by the slab codec at its own construction, so
         ;; no function or host value can be inside an existing block
         ;; (eve.db.ds's DB/Datom are this shape).
-        (when (and (or (map? x) (set? x) (sequential? x))
-                   (not (satisfies? d/ISabpType x)))
+        (when (contains? #{0xED 0xEE 0x12 0x13} (slab/read-u8 sio (d/-root-header-off x) 0))
           (assert-portable! sio (d/eve->clj x) path))
         (when-let [m (e/meta x)] (assert-portable! sio m (conj path :meta))))
 
