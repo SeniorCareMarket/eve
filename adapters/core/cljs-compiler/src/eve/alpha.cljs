@@ -16,7 +16,10 @@
             [eve.set :as eset]
             [eve.vec]
             [eve.list]
-            [eve.process-slab :as ps])
+            [eve.process-slab :as ps]
+            ;; the flat delivery (deref, eve->clj's kind arm): part of the
+            ;; value model on every host (EVE-FIX-PLAN §0), loaded with alpha
+            [eve.flat.freeze])
   (:require-macros [eve.alpha]))
 
 (eve.alpha/api-defs)

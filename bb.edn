@@ -172,8 +172,13 @@
                              (println (str n " passed, " (- (count (deref results)) n) " failed"))
                              (when-not (= n (count (deref results))) (System/exit 1)))))}
   test:jolt {:doc "The shared (.cljc) tests on jolt (namespaces named after the task run alone)"
-             :task (apply shell "jolt" "-Scp" (str/join ":" (roots :jolt "test")) "-m" "eve.runner.jolt-main" "test"
-                          *command-line-args*)}
+             ;; jolt (v0.8.23) reads ./bb.edn as a deps file and fails on :tasks
+             ;; (jolt.deps.edn/canonicalize: IKVReduce on a Symbol); its roots are
+             ;; absolute, so it runs from a directory with no bb.edn
+             :task (let [cwd (str (fs/absolutize "target/jolt-cwd"))]
+                     (fs/create-dirs cwd)
+                     (apply shell {:dir cwd} "jolt" "-Scp" (str/join ":" (roots :jolt "test")) "-m" "eve.runner.jolt-main" "test"
+                            *command-line-args*))}
   glj-eve   {:doc "Build glj-eve (glojure with eve's Go packages and its completion's patches) into target/glj-eve, unless its source stamp is current"
              :task (shell "bash" "impls/glojure/build.sh" (str (fs/absolutize "target/glj-eve")))}
   lg-eve    {:doc "Build lg-eve (let-go with eve's Go package and its completion's patches) into target/lg-eve, unless its source stamp is current"

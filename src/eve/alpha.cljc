@@ -24,7 +24,13 @@
             [eve.set :as eset]
             [eve.vec]
             [eve.list]
-            [eve.process-slab :as ps]))
+            [eve.process-slab :as ps]
+            ;; the flat delivery (deref, eve->clj's kind arm): part of the
+            ;; value model on every host (EVE-FIX-PLAN §0), loaded with alpha.
+            ;; basilisp has no flat layer yet (eve.flat-io's reads and
+            ;; eve.flat.chunk's handles have no :lpy arms): there, values the
+            ;; flat layer would deliver are refused by eve->clj, never leaked.
+            #?@(:lpy [] :default [[eve.flat.freeze]])))
 
 (defmacro deftype
   "Define a SAB-backed type. See eve.deftype/deftype."

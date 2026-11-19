@@ -72,6 +72,10 @@
                 (.fill a init)
                 (.set a (clojure.core/into-array (take size init))))
               a)
+      ;; basilisp: its completion's byte-array takes the init itself (a
+      ;; java.util.Arrays call here does not compile there: eve.alpha did
+      ;; not load on basilisp, measured 2026-11-19)
+      :lpy (clojure.core/byte-array size init)
       :default (let [a (clojure.core/byte-array (int size))]
                  (if (number? init)
                    (java.util.Arrays/fill a (clojure.core/byte init))

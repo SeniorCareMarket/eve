@@ -87,6 +87,62 @@
 (defn utf8 "The string of the n utf-8 bytes at off." [^bytes c off n] (enc/utf8-string c off n))
 ))
 
+#?(:lpy (do
+;; basilisp: the :clj arm's reads over its byte array (array('b'), signed, as
+;; the JVM's), with Python's unbounded ints sign-converted where the JVM
+;; wraps, and the float widths through eve.encoding (no Float/Double here)
+(defn u8 [c i] (bit-and (aget c i) 0xFF))
+(defn u16 [c i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
+(defn u32 [c i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
+(defn i32 [c i] (let [v (u32 c i)] (if (>= v 0x80000000) (- v 0x100000000) v)))
+(defn i64 [c i]
+  (let [v (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32))]
+    (if (>= v 0x8000000000000000) (- v 0x10000000000000000) v)))
+(defn f64 [c i] (enc/long-bits->double (i64 c i)))
+(defn f32 [c i] (enc/int-bits->float (u32 c i)))
+
+(defn varint
+  "[value next-pos] — unsigned LEB128."
+  [c i]
+  (loop [i i sh 0 v 0]
+    (let [x (u8 c i)]
+      (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
+          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+(defn varint-v
+  "The unsigned LEB128 value at i (varint's first element, no vector)."
+  [c i]
+  (loop [i i sh 0 v 0]
+    (let [x (u8 c i)]
+      (if (< x 128) (bit-or v (bit-shift-left x sh))
+          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+(defn varint-next
+  "The position after the unsigned LEB128 at i (varint's second element)."
+  [c i]
+  (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
+
+(defn varint-len [v]
+  (loop [v v n 1] (if (< v 128) n (recur (bit-shift-right v 7) (inc n)))))
+
+(defn- hb
+  "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
+  [bs i]
+  (bit-and (aget bs i) 0xFF))
+
+(defn- ba-copy-of
+  "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating shrink)."
+  [b n]
+  (let [nb (byte-array n)]
+    (enc/arraycopy b 0 nb 0 (min (alength b) n))
+    nb))
+
+(defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
+(defn chunk-bytes "The host byte array of chunk c." [c] c)
+(defn chunk-len "The byte length of chunk c." [c] (alength c))
+(defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))
+))
+
 #?(:cljs (do
 (defn u8 [^js/Uint8Array c i] (aget c i))
 (defn u16 [^js/Uint8Array c i] (+ (aget c i) (* 256 (aget c (inc i)))))
