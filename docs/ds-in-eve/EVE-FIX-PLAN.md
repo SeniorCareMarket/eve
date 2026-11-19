@@ -57,6 +57,39 @@ collection arm. The deftype arm is checked BEFORE the shape arms, so a
 map-signature deftype (the DataScript DB on bb) is never walked as a map —
 this is what F-BB-DATOM-CMP needed, without a pass-through.
 
+## 0b. Status (2026-11-19, branch `claude/magical-johnson-uv75vf`)
+
+Laws test (`test/eve/value_model_laws_test.cljc`, 13 tests):
+
+| Host | Result | Left |
+|---|---|---|
+| JVM | 46 assertions, 1 fail | `v1-swap-return` (X10) |
+| cljs / Node | 46 assertions, 2 fail | `v1-swap-return`; `v1-swap-vals` (cljs.core's non-Atom `swap-vals!` takes `-swap!`'s return) — both X10 |
+| jolt | 45 pass, 1 fail | `v1-swap-return` (X10) |
+| basilisp | 8 pass, 2 fail, 14 error | no flat layer on basilisp (`eve.flat.chunk` handles, sister, freeze have no `:lpy` arms): the next unit. `eve.alpha` did not load on basilisp at `f4a1c3a`; it loads now |
+| browser | see commit log | |
+
+Landed: X1 (IPlain excised; generic `eve->clj`), X2 part (one flat form;
+own-class heap-domain delivery removed), X3, X4, X5, X6 (via X1), X8
+(`same?`), `swap-vals!`/`reset-vals!` atomic and flat on JVM seats, jolt's
+test task and its atom re-roots.
+
+**`swap!`'s return moves under X10.** Delivering it flat packs the whole new
+value on every `swap!` whether or not the caller reads it — for DS, the whole
+DB per transact: the cost ruled out for deref. It becomes a view under X10's
+rules; until the spike, `swap!` returns what it returns today and its row
+stays red.
+
+**X0 result** (one pass, 17 git commands): of the model, only "deref delivers
+flat" was ever built (`claude/flat-deref-flip`, landed atom.broker
+`e8b087ce30`, still on main). `$`'s result went through `eve->clj` from its
+first commit (`147088b528`, Oct 23); CAS compared `(d/eve->clj cur)` since
+`ba3b4ea275` (Oct 18); `88497b6328` (Nov 13, `claude/flat-reengine`) built
+the flat work on IPlain. No ref built a deftype flat outside an atom or a
+generic `eve->clj`. The one removal found: `fcfe141f15` turns flat deref off
+on bb. Not reachable: the ~190 eve branches' history (fetched depth 1) and
+`c7dc390` (under no ref).
+
 ## 1. Measured against the laws (JVM, `release/eve-0.9.3.3` `f4a1c3a`)
 
 Provenance: OpenJDK 21.0.13, Clojure CLI 1.12.0.1530; fresh `e/atom` per run,
