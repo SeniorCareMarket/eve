@@ -55,6 +55,11 @@
     [persistent-atom-domain atm/persistent-atom-domain]
     [close-atom-domain! atm/close-atom-domain!]
     [shared-atom? atm/shared-atom?]
+    ;; The value model (docs/ds-in-eve/EVE-FIX-PLAN.md §0): flat outside an
+    ;; atom, persistent inside; the atom confers identity
+    [persistent? atm/persistent?]
+    [same? atm/same?]
+    [eve->clj atm/eve->clj]
     ;; Data structure API
     [hash-map emap/hash-map]
     [empty-hash-map emap/empty-hash-map]

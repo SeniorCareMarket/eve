@@ -1384,6 +1384,41 @@
 (defn- atom-domain-state [a]
   (-domain-state a))
 
+(defn persistent?
+  "True for a value inside an atom: slab-backed, rooted in a domain (built in
+   a swap!, or read inside a swap! or a $ region). False for flat data — what
+   every exit from an atom delivers, and what eve constructors give outside
+   every atom (the value model, docs/ds-in-eve/EVE-FIX-PLAN.md §0)."
+  [x]
+  (boolean
+   (and (some? x)
+        (not (or (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x)))
+        (satisfies? d/IEveRoot x)
+        (satisfies? d/IEveSio x)
+        (some? (d/-eve-sio x))
+        (not (== -1 (d/-root-header-off x))))))
+
+(defn eve->clj
+  "Eve data as this host's Clojure data (eve->cljs's rule, on every host):
+   eve maps, vectors, sets, lists → host collections, recursively; an
+   eve-deftype → its flat instance. Inside an atom, storing the result back
+   makes it eve data again; outside, it runs on flat data."
+  [v]
+  (d/eve->clj v))
+
+(defn same?
+  "Inside an atom (a swap! fn or a $ region): true when x and y are the same
+   block of the same domain. Outside every atom values have no identity, and
+   same? throws (:eve/no-identity)."
+  [x y]
+  (when-not (or (rr/active?) (some? d/*parent-atom*))
+    (throw (ex-info "eve/same?: values have no identity outside an atom (use it inside swap! or $)"
+                    {:type :eve/no-identity})))
+  (boolean
+   (and (persistent? x) (persistent? y)
+        (identical? (alloc/sio-root (d/-eve-sio x)) (alloc/sio-root (d/-eve-sio y)))
+        (== (d/-root-header-off x) (d/-root-header-off y)))))
+
 (defn $*
   "`$`'s region (eve.alpha/$ expands to it): (f) with every eve atom deref'd inside answering its lazy, slab-backed
    value under a pin held until the outermost region exits; f's result materialized (d/eve->clj, lazy seqs
