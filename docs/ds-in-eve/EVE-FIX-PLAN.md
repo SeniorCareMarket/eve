@@ -46,7 +46,8 @@ fn, a `$` region) = persistent, slab-backed. The atom confers identity.
 | V6 | Values have no identity outside atoms: two deliveries of one value are `=` and need not be `identical?`. `=` is value equality on every delivered form. |
 | V7 | `compare-and-set!` compares by value: `(compare-and-set! a @a x)` succeeds when no swap intervened. |
 | V8 | Flat delivered values live on the host heap: they need no pin, no epoch, no domain, read correctly after any number of later swaps and after the domain closes, and are reclaimed by the host GC. |
-| V9 | A deref reads lazily and ends its own read (John, 2026-11-19: "the scope returns from the deref after the `:c`"; packing the whole atom per deref "not going to work"). `@a` answers a pinned lazy view over the stored root — no copy. Lookups (`get`, keyword invoke, `get-in`, `nth`, `find`, `contains?`) read one level in place: a scalar answers itself and releases the pin; a subtree answers a child view on the same pin. The first operation that is not a lookup (`seq`/`reduce`/`into`, `count` of a subtree, `=`, `hash`, print, storing it into an atom, passing it to a protocol method) packs the subtree at the end of the path (V2) and releases the pin. A view never ended keeps its pin while reachable (a live reader of its version) and releases it when the host GC collects it. `(-> @a :b :c (into [1 2 3]))` packs `:c` only; `(let [v @a] (:x v) (:y v))` reads one version. `$` is optional: one snapshot over a larger body. |
+| V9 | Outside `$`, a deref reads lazily and its read ends when no view of it can be used again (John, 2026-11-19: packing the whole atom per deref "not going to work"; rules B + C below). `@a` answers a pinned lazy **view** over the stored root — no copy. **Lookups** — `get`, keyword/map invoke, `get-in`, `nth`, `find`, `contains?`, `count`, `empty?`, a deftype field read, a protocol method call on a deftype view (the method runs with the view as `this`) — read in place: a **scalar** (nil, boolean, number, char, string, keyword, symbol, uuid, inst) answers itself; a **subtree** (eve map / vector / set / list, deftype, value array, stored flat value) answers a child view of the same read. **Consuming** operations — `seq` and all built on it (`first`, `map`, `filter`, `reduce`, `into`, `vec`, `keys`, `vals`, `doseq`), `=`, `hash`, `str`/print, `assoc`/`conj`/`dissoc`, storing into an atom, host interop — pack that subtree once (V2) and act on the flat copy. Reaching a scalar or consuming does NOT end the read: `(let [v @a] [(:x v) (:y v)])` reads one version. The read ends by **C** in code ValueScript compiles: the analyzer ends it after the last use of any of its views in their lexical extent (the `->` chain, the `let` body), packing a view at the point it escapes (returned, `def`'d, closed over); and by **B** on every other host: when the host GC collects the read's last view. |
+| V10 | `$` works with the whole system, and is the convention (John, 2026-11-19: "make it a rule of convention to always use `$` for safety, but if anyone ever doesn't then all these fallbacks will work correctly"). Inside `$`: every deref, on every atom, reads lazily as in V9 under one pin per domain; lookups and consuming operations behave exactly as in V9; `swap!`, watches, `compare-and-set!`, construction (V3), `eve->clj` (V5) and nested `$` all work. At `$`'s exit every read taken inside it ends — deterministically, with no GC and no analyzer involved — and the result is delivered flat (V1, V2): no view escapes live. A view used after its `$` exited throws a named error (`:eve/read-ended`). Code inside `$` never depends on rules B or C. |
 
 `eve->clj` on a deftype (my reading of "produce clj on that host" — John to
 confirm in one word): a deftype has no Clojure collection shape, so
@@ -79,7 +80,8 @@ not run.
 | V6 | `identical?` false, `=` true | green |
 | V7 | always `false`: compares `(d/eve->clj cur)` (IPlain) to the delivered value (`atom.cljc` `compare-and-set`) | RED |
 | V8 | deref'd flat `Box` reads after 1,000 swaps | green (domain-close and GC unmeasured) |
-| V9 | deref packs the whole root every call (`deliver-flat`: "Cost = one pack"); no lazy view outside `$`. `eve.guard` (JVM-only prototype) has the lazy views, released at a `with-guard` extent's end, not at the read's | RED |
+| V9 | deref packs the whole root every call (`deliver-flat`: "Cost = one pack"); no lazy view outside `$`. `eve.guard` (JVM-only prototype) has lazy views, released at a `with-guard` extent's end; no GC or analyzer release exists | RED |
+| V10 | `$` reads lazily and pins per domain (green); its exit materializes through `eve->clj`/IPlain, so a deftype or value array escapes live and a stored flat value loses its type (V1/V5 rows above) | RED |
 
 ## 2. How it got here (measured from history)
 
@@ -126,24 +128,36 @@ instance (§0 reading); an eve value array → the vector of its slots'
 One `.cljc`, no host branch beyond the shape predicates each host already
 has. All 57 `eve->clj` call sites keep the name and get the generic rule.
 
-X10. **The read ends itself (V9). Lands before X2: it decides what X2's
-exit is for a deref.** Start from `eve.guard`'s lazy views (`LazyMap` /
-`LazyColl`: in-place leaf decode, child views on the same pin, a validity
-check on every access), moved into `.cljc` for the gate hosts. Replace its
-release point: not the end of a `with-guard` extent, but (a) the first
-non-lookup operation on the view or any child view — which packs the
-subtree there through X2's delivery and releases the pin — or (b) the host
-GC collecting an unended view (JVM `java.lang.ref.Cleaner`, JS
-`FinalizationRegistry`, Python `weakref.finalize`; jolt: its host's
-equivalent, named here when measured). A lookup that lands on a scalar
-releases at once. Views stay read-only (assoc/conj on a view end the read
-first, then act on the flat value). `$` stays, as one snapshot over a body;
-its exit is X2's. Done when: `(-> @a :b :c (into [1 2 3]))` packs only
-`:c` (bytes packed measured against the whole root); a chain of lookups
-ending in a scalar takes one pin and releases it before returning; an
-unended view's pin is released after GC; 1,000 swaps while a view is held
-leave the view reading its own version; and V1–V8 hold for every value a
-read ends with.
+X10. **`$` first, then the spike for life without it (V10, V9).** Lands
+before X2: it decides what X2's exit is for a read.
+
+1. **`$` (V10), unconditionally.** `$*` keeps its pins per domain and gains
+   the V9 view semantics inside it (start from `eve.guard`'s `LazyMap` /
+   `LazyColl` — in-place leaf decode, child views, a validity check on
+   every access — moved into `.cljc` for the gate hosts). Its exit ends
+   every read taken inside it and delivers the result through X2; a view
+   used after exit throws `:eve/read-ended`. Done when every V-law's test
+   also passes with its body wrapped in `$`, and nothing in `$`'s path
+   touches GC hooks or the analyzer. `doc/api-guide.md` states the
+   convention: wrap atom reads in `$`.
+2. **Spike: the GC end (rule B), measured before it ships.** Views outside
+   `$` register their read's pin with the host GC (JVM
+   `java.lang.ref.Cleaner`, JS `FinalizationRegistry`, Python
+   `weakref.finalize`; jolt's host equivalent, named when measured). Load:
+   N threads/workers swapping a DS-sized value while M readers do
+   `(-> @a :b :c (into []))` chains without `$`. Measure, against the same
+   load inside `$`: swap throughput, slab bytes held (peak and steady),
+   reclamation lag (epochs between retire and free), and pin lifetimes.
+   **Go/no-go:** B ships only if Eve's throughput and slab growth are not
+   bounded by the host GC's schedule — the numbers decide, recorded here.
+   On no-go, a deref outside `$` takes the X2 whole-value delivery
+   (correct, costly), and the docs say so.
+3. **Spike: the analyzer end (rule C) in ValueScript.** The analyzer finds
+   each view's lexical extent and escape points and emits the read's end;
+   measured on the same load. Ships with B's verdict or alone.
+4. **Holes.** Every leak or stale-view case found later is pinned by a
+   test in §5 and fixed at its producer; the convention (`$`) is the
+   workaround meanwhile, never the fix.
 
 X2. **One exit (V1, V2, V8).** Every exit — the end of a deref read (X10), `$*` (today
 `(rr/run f d/eve->clj)`), `swap!`/`swap-vals!`/`reset!` returns, watch
