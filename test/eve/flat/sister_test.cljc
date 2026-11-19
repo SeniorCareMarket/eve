@@ -240,7 +240,9 @@
           w (widget-in (ea/atom-sio a))]
       (swap! a (fn [_] w))
       (st/transfer! b a)
-      (is (instance? Widget @b) "what arrived in B is not a Widget")
+      ;; the value model: outside an atom a deftype is flat — B's deref
+      ;; delivers a Widget's flat sister, which answers Widget's protocols
+      (is (instance? Widget__Flat @b) "what arrived in B is not a Widget")
       (is (= (field-map w) (field-map @b)))
       (is (= (reach-count a) (reach-count b))
           "the copy in B is not self-contained: blocks it reads were left behind in A")))
@@ -251,7 +253,7 @@
       (swap! a (fn [_] {:w w}))
       (ea/set-foreign-policy! b :zip)
       (swap! b (fn [_] (ea/read-pinned a (fn [v] v))))
-      (is (instance? Widget (:w @b)))
+      (is (instance? Widget__Flat (:w @b)))
       (is (= (field-map w) (field-map (:w @b))))))
   (testing "leaving the domain as a flat: the sister registration is the conversion"
     (let [desc (sister/descriptor widget-key)]

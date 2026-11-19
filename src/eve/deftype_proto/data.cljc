@@ -555,6 +555,23 @@
   [f]
   (reset! flat-of-hook f))
 
+(defn- flat-of-fn
+  "The registered kind arm, loading eve.flat.freeze (which registers it) the
+   first time it is needed — as eve.atom's deref delivery resolves it: a
+   caller of eve->clj need not have required the flat layer first. ::none
+   caches its absence (a host with no flat layer)."
+  []
+  (let [h @flat-of-hook]
+    (cond
+      (fn? h) h
+      (= ::none h) nil
+      :else #?(:cljs nil
+               :clje nil
+               :default (do (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
+                                 (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
+                            (let [h @flat-of-hook]
+                              (if (fn? h) h (do (reset! flat-of-hook ::none) nil))))))))
+
 (defn- eve-slab-value?
   "x is persistent Eve data: slab-backed, rooted in a domain."
   [x]
@@ -588,7 +605,7 @@
     (or (string? v) (number? v) (boolean? v)
         (keyword? v) (symbol? v) (char? v)) v
     :else
-    (let [h @flat-of-hook
+    (let [h (flat-of-fn)
           f (when h (h v))]
       (cond
         (some? f) f

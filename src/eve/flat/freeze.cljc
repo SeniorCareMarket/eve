@@ -34,6 +34,13 @@
             [eve.flat.chunk :as chunk]
             [eve.flat.sister :as sister]
             [eve.flat.source :as source]
+            ;; Eve's own kinds with no collection shape, which eve->clj's
+            ;; kind arm (flat-of, below) materializes: eve->cljs's tag
+            ;; arms, in the one place that knows them
+            [eve.array :as earr]
+            [eve.dataset :as eds]
+            [eve.tensor :as etensor]
+            [eve.obj.impl :as eobj]
             ;; The protocol hosts (bb, glojure) spell the frozen
             ;; types' surface through the seat's eve.core protocols,
             ;; as chunk's handles do there.
@@ -1040,6 +1047,32 @@
         (if (satisfies? source/ISister h) h (d/eve->clj h)))
 
       (satisfies? source/ISister v) v
+
+      ;; Eve's kinds with no collection shape, as host data
+      (satisfies? eds/IDatasetAccess v)
+      (let [cm (eds/-col-map v)]
+        (into {} (map (fn [k] [k (d/eve->clj (get cm k))])) (eds/-column-names v)))
+
+      (satisfies? etensor/ITensorAccess v)
+      (let [sh (vec (etensor/-shape v))
+            st (vec (etensor/-strides v))
+            eo (long (etensor/-elem-offset v))
+            backing (d/eve->clj (etensor/-data v))]
+        (letfn [(build [dim base]
+                  (if (= dim (count sh))
+                    (nth backing base)
+                    (let [stride (nth st dim)]
+                      (mapv (fn [i] (build (inc dim) (+ base (* i stride))))
+                            (range (nth sh dim))))))]
+          (if (empty? sh) (nth backing eo) (build 0 eo))))
+
+      (satisfies? eobj/IEveObj v)
+      (into {} (map (fn [k] [k (d/eve->clj (eobj/field-value v k nil))]))
+            (:field-keys (first (eobj/-obj-parts v))))
+
+      (and (satisfies? d/ISabStorable v) (= :eve/array (d/-sab-tag v)))
+      (let [n (count v)]
+        (mapv (fn [i] (d/eve->clj (nth v i))) (range n)))
 
       (not (satisfies? d/ISabpType v)) nil
 

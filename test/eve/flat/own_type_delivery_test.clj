@@ -4,8 +4,9 @@
    through the type-id registry (eve.deftype.registry). A user deftype
    SET (set-shaped: the plain set branch of the chunk writer used to
    drop its type) and a user deftype ELEMENT held in its field, stored
-   in a persistent atom, deref back as their own classes — fields and
-   class hints intact — not as a plain flat set proxy or a flat sister.
+   in a persistent atom, deref back as their type's flat sisters (the
+   value model: outside an atom a deftype is flat), type key and fields
+   intact — never as a plain flat set that drops the type.
    The eve.db.ds case behind it: DB -> BTSet (an IPersistentSet with a
    comparator field) -> Datom."
   (:refer-clojure :exclude [swap!])
@@ -47,26 +48,41 @@
   (is (= OneSet (:host-type (reg/lookup-type set-key))))
   (is (some? (sister/descriptor set-key))))
 
-(deftest deftype-set-and-element-deref-as-themselves
+(def ^:private holder-key "eve.flat.own-type-delivery-test/Holder")
+(def ^:private elem-key "eve.flat.own-type-delivery-test/Elem")
+
+(defn- fm
+  "A delivered deftype's field values: it is its type's flat sister (the
+   value model, docs/ds-in-eve/EVE-FIX-PLAN.md §0 — outside an atom a
+   deftype is flat, value-only; the atom confers identity)."
+  [x]
+  (source/-field-map (source/-sister-source x)))
+
+(defn- flat-of-type? [k x]
+  (and (satisfies? source/ISister x) (= k (source/-sister-type-key x))))
+
+(deftest deftype-set-and-element-deref-as-flat-sisters
   ;; the eve.db.ds shape: a root deftype (DB) holding a deftype set
-  ;; (BTSet) holding a deftype element (Datom)
+  ;; (BTSet) holding a deftype element (Datom). Each derefs as its type's
+  ;; flat sister — its type key and its fields intact (was: as its own class
+  ;; in a private heap domain, the Nov 15 design call the value model
+  ;; replaces)
   (let [[d x] (fresh-atom)]
     (try
       (swap! x (fn [_] (->Holder (->OneSet (->Elem 7 "seven") "the-set") "h")))
-      (let [^Holder h @x
-            ^OneSet s (.-s h)]
-        (is (instance? Holder h) "the deftype root did not deref as itself")
-        (is (instance? OneSet s) "the deftype set did not deref as itself")
-        (is (set? s))
-        (is (= "the-set" (.-label s)) "a field read through the class hint failed")
-        (let [^Elem e (.-elem s)]
-          (is (instance? Elem e) "the deftype element did not deref as itself")
-          (is (= 7 (.-k e)))
-          (is (= "seven" (.-tag e)))))
+      (let [h @x
+            s (:s (fm h))
+            e (:elem (fm s))]
+        (is (flat-of-type? holder-key h) "the deftype root did not deref as its flat sister")
+        (is (flat-of-type? set-key s) "the deftype set did not deref as its flat sister")
+        (is (= "the-set" (:label (fm s))))
+        (is (flat-of-type? elem-key e) "the deftype element did not deref as its flat sister")
+        (is (= 7 (:k (fm e))))
+        (is (= "seven" (:tag (fm e)))))
       (testing "the delivery owns its memory: it reads after the domain closes"
-        (let [^Holder h @x]
+        (let [h @x]
           (a/close-atom-domain! d)
-          (is (= "seven" (.-tag ^Elem (.-elem ^OneSet (.-s h)))))))
+          (is (= "seven" (:tag (fm (:elem (fm (:s (fm h))))))))))
       (finally
         (try (a/close-atom-domain! d) (catch Throwable _ nil))))))
 
@@ -83,32 +99,32 @@
       (finally
         (a/close-atom-domain! d)))))
 
-(deftest nested-deftypes-in-plain-collections-deref-as-themselves
-  ;; {:db DB}: own types nested in a plain map / vector / set come back
-  ;; as their own classes too, not only a root. (Not in a set: a set
-  ;; element is keyed by its eve key bytes, and a deftype instance has
-  ;; none — the store refuses it on the base too.)
+(deftest nested-deftypes-in-plain-collections-deref-as-flat-sisters
+  ;; {:db DB}: deftypes nested in a plain map / vector / list deref as
+  ;; their flat sisters too, not only a root. (Not in a set: a set element
+  ;; is keyed by its eve key bytes, and a deftype instance has none — the
+  ;; store refuses it.)
   (let [[d x] (fresh-atom)]
     (try
       (swap! x (fn [_] {:db (->Holder (->OneSet (->Elem 3 "three") "s3") "h3")
                         :n 1
                         :more [(->Elem 4 "four") {:deep (list (->Elem 5 "five"))}]}))
       (let [m @x
-            ^Holder h (:db m)]
+            h (:db m)]
         (is (map? m))
         (is (= 1 (:n m)))
-        (is (instance? Holder h) "a deftype nested in a map did not deref as itself")
-        (is (instance? OneSet (.-s h)))
-        (is (= "three" (.-tag ^Elem (.-elem ^OneSet (.-s h)))))
+        (is (flat-of-type? holder-key h) "a deftype nested in a map did not deref as its flat sister")
+        (is (flat-of-type? set-key (:s (fm h))))
+        (is (= "three" (:tag (fm (:elem (fm (:s (fm h))))))))
         (let [[e4 {:keys [deep]}] (:more m)]
-          (is (instance? Elem e4) "a deftype nested in a vector did not deref as itself")
-          (is (= 4 (.-k ^Elem e4)))
-          (is (every? #(instance? Elem %) deep) "a deftype nested in a list did not deref as itself")
-          (is (= [5] (map #(.-k ^Elem %) deep)))))
+          (is (flat-of-type? elem-key e4) "a deftype nested in a vector did not deref as its flat sister")
+          (is (= 4 (:k (fm e4))))
+          (is (every? #(flat-of-type? elem-key %) deep) "a deftype nested in a list did not deref as its flat sister")
+          (is (= [5] (map #(:k (fm %)) deep)))))
       (testing "the nested delivery owns its memory: it reads after the domain closes"
         (let [m @x]
           (a/close-atom-domain! d)
-          (is (= "h3" (.-note ^Holder (:db m))))))
+          (is (= "h3" (:note (fm (:db m)))))))
       (finally
         (try (a/close-atom-domain! d) (catch Throwable _ nil))))))
 
