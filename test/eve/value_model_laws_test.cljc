@@ -228,3 +228,10 @@
     (is (= (db-val 1) (v (:m @b))))
     (swap! a (fn [m] (assoc m :back (:arr r))))
     (is (= [1 2 3] (vec (e/array-seq (:back @a)))) "a view stored back into its own atom")))
+
+(deftest v10-a-view-ends-with-its-region
+  (let [a (db-atom)
+        leak (volatile! nil)]
+    (e/$ (vreset! leak (swap! a (fn [m] (assoc m :x 1)))) nil)
+    (is (= :eve/read-ended (err-type #(get @leak :db)))
+        "a view escaped from $ is refused after $ exits, never read freed")))

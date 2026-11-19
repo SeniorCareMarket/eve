@@ -765,10 +765,19 @@
 ;; their pinned epochs. A thread's pins nest (a deref inside a swap keeps the
 ;; swap's older epoch): depth counts them, the first wins.
 
-(defn- slot-pin! [root-r slot-idx pins]
-  (if (empty? pins)
-    (mmap-unpin-epoch! root-r slot-idx)
-    (mmap-pin-epoch! root-r slot-idx (reduce min (map first (vals pins))))))
+(defn- slot-pin!
+  "Publish this process's pin: the least epoch any reader holds — the
+   threads' pins (one entry per pinning thread) and the views' (::views, a
+   sorted map epoch -> count, so its least is its first key however many
+   views are alive)."
+  [root-r slot-idx pins]
+  (let [views (get pins ::views)
+        threads (dissoc pins ::views)
+        tmin (when (seq threads) (reduce min (map first (vals threads))))
+        vmin (when (seq views) (key (first views)))]
+    (if (and (nil? tmin) (nil? vmin))
+      (mmap-unpin-epoch! root-r slot-idx)
+      (mmap-pin-epoch! root-r slot-idx (min (or tmin vmin) (or vmin tmin))))))
 
 (defn- pin-epoch! [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
@@ -791,15 +800,21 @@
       (slot-pin! root-r slot-idx p))))
 
 (defn- view-pin!
-  "A view's pin: keyed by its read's token, not the thread, so any thread
-   (the GC's, when it collects the read's last view) releases it."
-  [{:keys [root-r slot-idx pins pin-lock]} token epoch]
+  "A view's pin: counted under its epoch in ::views, not under a thread, so
+   any thread (the GC's, when it collects the read's last view) releases it."
+  [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
-    (slot-pin! root-r slot-idx (swap! pins assoc token [epoch 1]))))
+    (slot-pin! root-r slot-idx
+               (swap! pins update ::views (fnil update (sorted-map)) epoch (fnil inc 0)))))
 
-(defn- view-unpin! [{:keys [root-r slot-idx pins pin-lock]} token]
+(defn- view-unpin! [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
-    (slot-pin! root-r slot-idx (swap! pins dissoc token))))
+    (slot-pin! root-r slot-idx
+               (swap! pins (fn [m]
+                             (let [vs (get m ::views)
+                                   n (dec (get vs epoch 0))
+                                   vs (if (pos? n) (assoc vs epoch n) (dissoc vs epoch))]
+                               (if (seq vs) (assoc m ::views vs) (dissoc m ::views))))))))
 
 (defonce ^:private view-read-hook
   ;; eve.view's registration (it requires this namespace): (fn [raw release]
@@ -820,11 +835,11 @@
    here, else raw delivered flat."
   [{:keys [root-r] :as ds} atom-slot-idx raw]
   (if-let [h @view-read-hook]
-    (let [token #?(:cljs (js-obj) :default (Object.))]
-      (view-pin! ds token (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-      (try (h raw (fn [] (view-unpin! ds token)))
+    (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+      (view-pin! ds epoch)
+      (try (h raw (fn [] (view-unpin! ds epoch)))
            (catch #?(:cljs :default :default Throwable) e
-             (view-unpin! ds token)
+             (view-unpin! ds epoch)
              (throw e))))
     (deliver-value ds atom-slot-idx raw)))
 

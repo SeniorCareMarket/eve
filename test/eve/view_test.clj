@@ -6,9 +6,9 @@
             [eve.atom :as ea]))
 
 (defn- view-pins
-  "The domain's outstanding view pins (pin keys that are not thread ids)."
+  "The domain's outstanding view pins (the counts under :eve.atom/views)."
   [a]
-  (count (remove number? (keys @(:pins (ea/-domain-state a))))))
+  (reduce + 0 (vals (get @(:pins (ea/-domain-state a)) :eve.atom/views))))
 
 (defn- gc-until [pred]
   (loop [i 0]
