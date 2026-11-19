@@ -222,6 +222,31 @@
     "Atomically replace element i (an integer subtype) with (f old); answers
      old (the caller checked bounds and subtype)."))
 
+;; A flat array (an eve array outside every atom: its elements as a flat
+;; vector, its subtype as metadata — flat-eve-array, or a persistent array
+;; leaving an atom) is an array of its subtype: it reads as one, and as a
+;; value it is not written (aset!/update-elem! refuse it).
+(defn- flat-subtype [v]
+  (or (:eve/array-subtype (meta v))
+      (throw (ex-info "eve array: not an array (no subtype)" {:type :eve/not-an-array}))))
+
+(defn- flat-refuse [_]
+  (throw (ex-info "eve array: a flat array is a value; write it inside swap!"
+                  {:type :eve/flat-array-is-a-value})))
+
+#?(:clj (extend-protocol IEveArray
+          clojure.lang.Indexed
+          (-subtype [v] (flat-subtype v))
+          (-aget [v i] (nth v i))
+          (-aset! [v _ _] (flat-refuse v))
+          (-update-elem! [v _ _] (flat-refuse v)))
+   :cljs (extend-protocol IEveArray
+           default
+           (-subtype [v] (flat-subtype v))
+           (-aget [v i] (nth v i))
+           (-aset! [v _ _] (flat-refuse v))
+           (-update-elem! [v _ _] (flat-refuse v))))
+
 ;;-----------------------------------------------------------------------------
 ;; Precondition helpers
 ;;-----------------------------------------------------------------------------
@@ -478,12 +503,16 @@
    it embeds by reference. eve.flat.chunk is resolved lazily:
    this namespace sits below it in the load order."
   [type-kw size-or-coll init-val]
-  (let [elems (if (number? size-or-coll)
-                (vec (repeat (int size-or-coll)
-                             (if (some? init-val)
-                               init-val
-                               (if (#{:float32 :float64} type-kw) 0.0 0))))
-                (vec size-or-coll))
+  (let [elems (with-meta
+                (if (number? size-or-coll)
+                  (vec (repeat (int size-or-coll)
+                               (if (some? init-val)
+                                 init-val
+                                 (if (#{:float32 :float64} type-kw) 0.0 0))))
+                  (vec size-or-coll))
+                ;; the subtype rides as metadata: the flat array is still an
+                ;; array of that subtype (IEveArray below)
+                {:eve/array-subtype (type-kw->subtype type-kw)})
         pack #?(:cljs flat-chunk/pack
                 :default (try (requiring-resolve 'eve.flat.chunk/pack)
                               (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil)))]

@@ -827,7 +827,7 @@
   [f]
   (reset! view-read-hook f))
 
-(declare deliver-value)
+(declare deliver-value deref-deliver)
 
 (defn- read-answer
   "The answer a read gives for raw, read now under the caller's pin: a view
@@ -838,10 +838,15 @@
     (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
       (view-pin! ds epoch)
       (try (h raw (fn [] (view-unpin! ds epoch)))
-           (catch #?(:cljs :default :default Throwable) e
+           (catch #?(:cljs :default :lpy python/Exception :default Throwable) e
              (view-unpin! ds epoch)
              (throw e))))
-    (deliver-value ds atom-slot-idx raw)))
+    ;; no views here: the new value delivered flat; on a host with no flat
+    ;; layer yet (basilisp), the value as before — eve->clj would refuse
+    ;; an eve array on every swap!
+    (if-let [deliver (deref-deliver)]
+      (deliver raw)
+      raw)))
 
 
 (defn- refresh-slabs! [{:keys [base-path sio]}]

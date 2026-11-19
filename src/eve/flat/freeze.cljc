@@ -989,7 +989,13 @@
                  (concat-batch? v)
                  (based-value? v))
              (not (frozen-value? v)))
-    (let [h (if (based-value? v) (deliver-flat (plain-of v)) v)
+    (let [h (cond (based-value? v) (deliver-flat (plain-of v))
+                  ;; a node nested in a larger value's chunk (a lookup into a
+                  ;; delivered flat value): its own chunk, never the whole
+                  ;; chunk it sits in (whose root is the larger value)
+                  (and (satisfies? chunk/IFlatHandle v)
+                       (not (chunk/root-handle? v))) (chunk/pack v)
+                  :else v)
           [stream framed?] (if (concat-batch? h)
                               [(frame-stream (mapv chunk/bytes-of (.-handles h))) true]
                               [(chunk/bytes-of h) false])
@@ -1090,6 +1096,18 @@
       :else nil)))
 
 (d/register-flat-of! flat-of)
+
+;; A persistent eve typed array packs as its elements with its subtype as
+;; metadata — the form eve.array/eve-array builds outside every atom, which
+;; reads as an array of that subtype (eve.array's IEveArray on flat vectors).
+;; A nominal converter: claimed before the plain collection branches, and
+;; registered here because eve.array loads below the chunk on the JVM.
+(chunk/register-nominal-rep-converter!
+  (fn [v]
+    (when (and (satisfies? d/IEveRoot v)
+               (satisfies? d/ISabStorable v)
+               (= :eve/array (d/-sab-tag v)))
+      (chunk/to-rep (with-meta (vec (seq v)) {:eve/array-subtype (earr/-subtype v)})))))
 
 (ser/register-header-constructor! CHUNK-TAG frozen-value)
 (ser/register-header-disposer! CHUNK-TAG dispose-chain!)

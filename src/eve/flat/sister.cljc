@@ -440,13 +440,6 @@
        (when-let [to-rep (chunk-var 'to-rep)]
          (to-rep (vec (seq v))))
 
-       ;; an eve typed array packs as the flat vector of its elements: the
-       ;; form eve.array/eve-array builds outside every atom (a column
-       ;; vector), never a generic tagged record (which reads no element)
-       (and (satisfies? d/ISabStorable v) (= :eve/array (d/-sab-tag v)))
-       (when-let [to-rep (chunk-var 'to-rep)]
-         (to-rep (vec (seq v))))
-
        (satisfies? source/ISister v)
        (let [tkey (source/-sister-type-key v)]
          (when-let [desc (descriptor tkey)]
