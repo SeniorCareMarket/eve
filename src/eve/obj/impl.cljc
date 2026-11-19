@@ -223,10 +223,6 @@
   (empty [_] nil)
   (equiv [this other] (obj= this other))
 
-  d/IPlain
-  (-plain [this]
-    (into {} (map (fn [k] [k (d/eve->clj (field-value this k nil))])) (:field-keys schema)))
-
   IEveObj
   (-obj-parts [_] [schema sio slab-off data-off])
 

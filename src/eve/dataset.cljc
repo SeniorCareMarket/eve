@@ -60,10 +60,6 @@
   (-col-map [_] col-map)
   (-row-count [_] nrows)
 
-  d/IPlain
-  (-plain [_]
-    (into {} (map (fn [k] [k (d/eve->clj (get col-map k))])) col-order))
-
   clojure.lang.Counted
   (count [_] nrows)
 

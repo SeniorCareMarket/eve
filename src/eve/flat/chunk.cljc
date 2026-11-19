@@ -3336,22 +3336,6 @@
   (hashCode [_] (unchecked-int (node-hasheq ctx off)))
   (toString [_] (pr-str (-rep _))))
 
-;; eve->clj (eve.deftype-proto.data) materializes through IPlain
-;; before its collection arms; on the JVM and ClojureScript the
-;; handles are host collections and the arms rebuild them, but here
-;; they are not host collections, so IPlain is the arm that sees
-;; them: -plain is unpack, the seat's own whole-value decode.
-(extend-protocol d/IPlain
-  FlatVec (-plain [h] (unpack h))
-  FlatColVec (-plain [h] (unpack h))
-  FlatList (-plain [h] (unpack h))
-  FlatBatch (-plain [h] (unpack h))
-  FlatMap (-plain [h] (unpack h))
-  FlatRecord (-plain [h] (unpack h))
-  FlatTagged (-plain [h] (unpack h))
-  FlatRow (-plain [h] (unpack h))
-  FlatSet (-plain [h] (unpack h)))
-
 ;; print: SCI's pr-str wraps a deftype object as #object unless a
 ;; print-method answers for its type (the map kinds print through
 ;; SCI's map machinery, but their nested values and every seq/set
@@ -3864,17 +3848,6 @@
 (defmethod print-method FlatRow [x w] (ecore/-pr-writer x w nil))
 (defmethod print-method FlatSet [x w] (ecore/-pr-writer x w nil))
 
-(extend-protocol d/IPlain
-  FlatVec (-plain [h] (unpack h))
-  FlatColVec (-plain [h] (unpack h))
-  FlatList (-plain [h] (unpack h))
-  FlatBatch (-plain [h] (unpack h))
-  FlatMap (-plain [h] (unpack h))
-  FlatRecord (-plain [h] (unpack h))
-  FlatTagged (-plain [h] (unpack h))
-  FlatRow (-plain [h] (unpack h))
-  FlatSet (-plain [h] (unpack h)))
-
 )) ; end glj handles
 
 #?(:jank (do
@@ -4371,17 +4344,6 @@
 (defmethod print-method FlatTagged [x w] (ecore/-pr-writer x w nil))
 (defmethod print-method FlatRow [x w] (ecore/-pr-writer x w nil))
 (defmethod print-method FlatSet [x w] (ecore/-pr-writer x w nil))
-
-(extend-protocol d/IPlain
-  FlatVec (-plain [h] (unpack h))
-  FlatColVec (-plain [h] (unpack h))
-  FlatList (-plain [h] (unpack h))
-  FlatBatch (-plain [h] (unpack h))
-  FlatMap (-plain [h] (unpack h))
-  FlatRecord (-plain [h] (unpack h))
-  FlatTagged (-plain [h] (unpack h))
-  FlatRow (-plain [h] (unpack h))
-  FlatSet (-plain [h] (unpack h)))
 
 )) ; end jank handles
 

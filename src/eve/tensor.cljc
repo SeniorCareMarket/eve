@@ -68,23 +68,6 @@
              (-strides [_] strides)
              (-elem-offset [_] elem-offset)
 
-             d/IPlain
-             (-plain [_]
-               (let [sh (vec shape)
-                     st (vec strides)
-                     eo (eve.host/long elem-offset)
-                     backing (d/eve->clj data)]
-                 (letfn [(build [dim base]
-                           (if (= dim (e/count sh))
-                             (e/nth backing base)
-                             (let [stride (e/nth st dim)
-                                   n (e/nth sh dim)]
-                               (mapv (fn [i] (build (inc dim) (+ base (* i stride))))
-                                     (range n)))))]
-                   (if (empty? sh)
-                     (e/nth backing eo)
-                     (build 0 eo)))))
-
              clojure.lang.Counted
              (count [_]
                (reduce * 1 shape))

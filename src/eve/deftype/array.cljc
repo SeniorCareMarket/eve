@@ -269,11 +269,13 @@
   ([_type n] (make-array n)))
 
 (defn aget
-  "The value at index i."
+  "The value at index i: an eve array's slot, a delivered (flat) eve array's
+   element, or the host array's."
   [a i]
-  (if (value-array? a)
-    (read-slot (-va-sio a) (-va-off a) (-va-count a) i)
-    (eve.host/aget a (int i))))
+  (cond
+    (value-array? a) (read-slot (-va-sio a) (-va-off a) (-va-count a) i)
+    (vector? a) (nth a i)
+    :else (eve.host/aget a (int i))))
 
 (defn aset
   "Store v at index i. An eve array is written while it is new: by the code
@@ -286,9 +288,10 @@
 (defn alength
   "The number of slots."
   [a]
-  (if (value-array? a)
-    (-va-count a)
-    (eve.host/alength a)))
+  (cond
+    (value-array? a) (-va-count a)
+    (vector? a) (count a)
+    :else (eve.host/alength a)))
 
 (defn aclone
   "A new array with a's values (an eve array: a new one in the current domain,

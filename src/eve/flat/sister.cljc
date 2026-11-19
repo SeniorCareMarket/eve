@@ -433,6 +433,13 @@
      (when-not (plain-value? v)
       (or (when-let [h @flat-rep-hook] (h v))
          (cond
+       ;; an eve value array (e/make-array) packs as the vector of its
+       ;; slots: it is content, not a reference (EVE-FIX-PLAN X3)
+       (and (satisfies? d/ISabpType v)
+            (= "eve/ValueArray" (d/-sabp-type-key v)))
+       (when-let [to-rep (chunk-var 'to-rep)]
+         (to-rep (vec (seq v))))
+
        (satisfies? source/ISister v)
        (let [tkey (source/-sister-type-key v)]
          (when-let [desc (descriptor tkey)]
