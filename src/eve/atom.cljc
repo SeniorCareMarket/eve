@@ -1190,8 +1190,9 @@
   "One CAS attempt: read the old root, apply f, write the new value, CAS the
    root pointer. Returns [:ok new-val delivery] or [:retry nil ::none] —
    delivery is [old-delivered new-delivered], the deref-law deliveries of
-   the old and new roots computed under this attempt's pin when the atom
-   is watched (spec clause 6: the :ok tuple threads the old root's
+   the old and new roots computed under this attempt's pin — the new one
+   always (swap!'s return), the old one when the atom is watched or
+   want-vals? asks (spec clause 6: the :ok tuple threads the old root's
    delivered value through), else ::none. Runs under the
    epoch pin for the whole attempt — the old value is lazy, and the commit's
    hold reads the new tree (round 2, 0008). exclusive? is the call
@@ -1242,10 +1243,10 @@
           ;; the same value: nothing to publish, nothing to retire — but
           ;; the swap SUCCEEDED, so a watched atom still notifies (spec
           ;; clause 2: notification is not gated by the change decision)
-          (let [delivery (if (or want-vals? (watched? ds atom-slot-idx))
-                           (let [dv (deliver-value ds atom-slot-idx old-val)]
-                             [dv dv])
-                           ::none)]
+          ;; swap!'s return is the new value delivered flat (the value
+          ;; model: what leaves an atom is flat), under this attempt's pin
+          (let [delivery (let [dv (deliver-value ds atom-slot-idx old-val)]
+                           [dv dv])]
             (alloc/stop-logging! lsio)
             [:ok new-val delivery])
           ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
@@ -1314,11 +1315,12 @@
                 ;; root is retired by this commit, so converting it after
                 ;; the pin drops would read retired blocks (the discipline
                 ;; flat-deref's in-pin conversion obeys)
-                (let [delivery (if (or want-vals? (watched? ds atom-slot-idx))
-                                 [(deliver-value ds atom-slot-idx old-val)
-                                  (deliver-value ds atom-slot-idx
-                                                 (read-root-value sio new-ptr))]
-                                 ::none)]
+                ;; the new value delivered flat always (swap!'s return); the
+                ;; old one only when a watcher or swap-vals! reads it
+                (let [delivery [(when (or want-vals? (watched? ds atom-slot-idx))
+                                  (deliver-value ds atom-slot-idx old-val))
+                                (deliver-value ds atom-slot-idx
+                                               (read-root-value sio new-ptr))]]
                   (alloc/stop-logging! lsio)
                   [:ok new-val delivery]))
               (let [offs (alloc/logged-allocs lsio)]
@@ -1349,8 +1351,9 @@
    collection, a scalar or nil. A successful attempt notifies the atom's
    watchers with the delivered old/new its :ok tuple threaded through
    (spec clauses 2–4) — here, outside the domain write hold, so a
-   callback that swaps cannot deadlock the domain. With want-vals? it
-   answers [old new], both delivered flat under the attempt's pin
+   callback that swaps cannot deadlock the domain. It answers the new value
+   delivered flat under the attempt's pin (the value model: what leaves an
+   atom is flat); with want-vals?, [old new], both delivered flat
    (swap-vals!, reset-vals!)."
   ([ds atom-slot-idx f args] (mmap-swap! ds atom-slot-idx f args false))
   ([ds atom-slot-idx f args want-vals?]
@@ -1370,7 +1373,9 @@
           :ok (do (when (and (not= ::none delivery) (watched? ds atom-slot-idx))
                     (notify-watchers! ds atom-slot-idx
                                       (nth delivery 0) (nth delivery 1)))
-                  (if want-vals? delivery result))
+                  (cond want-vals? delivery
+                        (= ::none delivery) result
+                        :else (nth delivery 1)))
           :retry (do (cas-backoff! attempt)
                      (recur (inc attempt)))))))))
 
