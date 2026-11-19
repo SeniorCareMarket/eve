@@ -43,29 +43,53 @@
 (def expected
   {"boot"       {:clj  '#{cohost.hosts.auto cohost-media.start}
                  :cljs '#{cohost.hosts.auto cohost-media.start}}
-   "start"      {:clj  '#{cohost.thread cohost.cljs-pool cohost-media.boot-fs cohost-media.boot-proc
+   "start"      {:clj  '#{cohost.pool cohost.thread cohost.cljs-pool cohost-media.boot-fs cohost-media.boot-proc
                           clojure.data.json clojure.edn clojure.string
-                          eve.host eve.atom eve.process
                           cohost-media.core cohost-media.domain cohost-media.gateway
                           cohost-media.member cohost-media.supervise}
-                 :cljs '#{cohost.thread cohost-media.boot-fs cohost-media.boot-proc
+                 :cljs '#{cohost.pool cohost.thread cohost-media.boot-fs cohost-media.boot-proc
                           clojure.data.json clojure.edn clojure.string
-                          eve.host eve.atom eve.process
                           cohost-media.core cohost-media.domain cohost-media.gateway
                           cohost-media.member cohost-media.supervise}}
    "boot_fs"    {:clj  '#{clojure.string}
                  :cljs '#{clojure.string}}
    "boot_proc"  {:clj  '#{clojure.string}
                  :cljs '#{clojure.string}}
-   "gateway"    {:clj  '#{clojure.string eve.host eve.process cohost-media.domain cohost-media.serve}
-                 :cljs '#{clojure.string eve.host eve.process cohost-media.domain cohost-media.serve}}
+   "gateway"    {:clj  '#{clojure.string cohost.pool cohost-media.domain cohost-media.serve}
+                 :cljs '#{clojure.string cohost.pool cohost-media.domain cohost-media.serve}}
    "meta"       {:clj  '#{clojure.string clojure.java.io cohost-media.work}
                  :cljs '#{clojure.string cohost-media.work}}
-   "node_member" {:clj  '#{}
-                  :cljs '#{eve.type-readers eve.flat.sister cljs.reader
-                           eve.host eve.process eve.thread.domain eve.thread.meta
-                           eve.thread.task cohost-media.core cohost-media.domain
-                           cohost-media.state cohost-media.tasks}}
+   "member"     {:clj  '#{clojure.edn clojure.string cohost.pool
+                          cohost-media.core cohost-media.coordinator cohost-media.domain
+                          cohost-media.media cohost-media.state cohost-media.tasks}
+                 :cljs '#{clojure.edn clojure.string cohost.pool
+                          cohost-media.core cohost-media.coordinator cohost-media.domain
+                          cohost-media.media cohost-media.state cohost-media.tasks}}
+   ;; the spec-API rewrite (2026-11-17): every file that required eve.*
+   ;; now requires only clojure/cohost/app namespaces; the sets below
+   ;; are the enforcement
+   "coordinator" {:clj  '#{cohost.pool cohost-media.core cohost-media.domain}
+                 :cljs '#{cohost.pool cohost-media.core cohost-media.domain}}
+   "domain"     {:clj  '#{cohost.pool cohost-media.core}
+                 :cljs '#{cohost.pool cohost-media.core}}
+   "tasks"      {:clj  '#{clojure.string cohost.pool cohost.region
+                          cohost-media.av cohost-media.core cohost-media.media
+                          cohost-media.state cohost-media.work
+                          cohost-media.phash cohost-media.r128}
+                 :cljs '#{clojure.string cohost.pool
+                          cohost-media.av cohost-media.core cohost-media.media
+                          cohost-media.state cohost-media.work}}
+   "work"       {:clj  '#{cohost.pool cohost-media.domain cohost-media.phash cohost-media.state}
+                 :cljs '#{cohost.pool cohost-media.domain cohost-media.phash cohost-media.state}}
+   "serve"      {:clj  '#{clojure.string cohost.net cohost.pool}
+                 :cljs '#{clojure.string cohost.net cohost.pool}}
+   "core"       {:clj  '#{clojure.string}
+                 :cljs '#{clojure.string}}
+   "page"       {:clj  '#{}
+                 :cljs '#{clojure.string cohost.pool cohost.thread-host
+                          cohost-media.core cohost-media.tasks reagami.core}}
+   "media_impl" {:clj  '#{cohost.pool cohost-media.core cohost-media.state cohost-media.work}
+                 :cljs '#{cohost.pool cohost-media.core cohost-media.state cohost-media.work}}
    "av_jolt"    {:clj  '#{clojure.string jolt.ffi cohost-media.core cohost-media.work}
                  :cljs '#{clojure.string jolt.ffi cohost-media.core cohost-media.work}}})
 

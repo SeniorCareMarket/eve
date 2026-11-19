@@ -10,14 +10,9 @@
      <host runner> -m cohost-media.member <base> <out-dir> <window> <rid> <config-edn> [<gateway> <api-key>]
 
    Prints EDN lines {:step ...}."
-  (:refer-clojure :exclude [swap!])
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [eve.host :refer [swap!]]
-            [eve.atom :as ea]
-            [eve.process :as proc]
-            [eve.thread.domain :as dom]
-            [eve.thread.rung :as rung]
+            [cohost.pool :as pool]
             [cohost-media.core :as em]
             [cohost-media.coordinator :as coord]
             [cohost-media.domain :as domain]
@@ -52,32 +47,41 @@
           :pools {}
           :options {}}})
 
-(defn say [m] (println (pr-str (assoc m :rid (:rid @st/ctx) :t (proc/now-ms)))))
+(defn say [m] (println (pr-str (assoc m :rid (:rid @st/ctx) :t (pool/now-ms)))))
 
 (defn attempt
   "Run f, answering [true value] or [false error] — each host's own catch, here in the one member
-   namespace instead of repeated per tasks file."
+   namespace instead of repeated per tasks file. The cljs arm catches :default: Throwable
+   names no cljs type, so the shared arm analyzed there referenced an undeclared var and
+   its catch could not fire as written (the analyzer's warning named it, 2026-11-17)."
   [f]
   #?(:glj (try [true (f)] (catch go/any e [false e]))
+     :cljs (try [true (f)] (catch :default e [false e]))
      :default (try [true (f)] (catch Throwable e [false e]))))
 
 (defn exit!
-  "Leave the process with code — each host's own way out."
+  "Leave the process with code — each host's own way out. A realm member (cljs) has no
+   process of its own to leave: the seat owns the process and node-serve! detaches
+   instead, so an exit! from a realm is a programming error and throws. (The arm it
+   replaces named System/exit and shutdown-agents unconditionally, which analyze on
+   no cljs host — the warnings the sweep removed.)"
   [code]
   #?(:glj (os.Exit code)
+     :cljs (throw (ex-info "member: exit! has no realm arm — the seat owns the process; node-serve! detaches"
+                           {:code code}))
      :default (do (try (shutdown-agents) (catch Throwable _ nil))
                   (System/exit code))))
 
 (defn- stop?
   "The control atom's :stop flag, against cache [root-pointer flag]: re-read in full only when the atom's
-   root pointer moved (eve.atom/version's second word — two i32 loads). A full deref of an eve atom costs
+   root version moved (the pool's root-version — two loads, no materialization). A full deref of a shared atom costs
    ~100 ms of interpreter time on the slow hosts (measured on bb at 84bfc7c8: 102–272 ms for a tiny value),
-   and this loop polls for the whole run — polling the value pinned a core. A net-rung
+   and this loop polls for the whole run — polling the value pinned a core. A network-reached
    control atom has no version: read it (its poll is a network fetch by design, at :poll-ms)."
   [cache control]
-  (if (satisfies? rung/IRung control)
-    (:stop (domain/read-atom control))
-    (let [p (second (ea/version control))]
+  (let [p (pool/root-version control)]
+    (if (nil? p)
+      (:stop (domain/read-atom control))
       (if (= p (first @cache))
         (second @cache)
         (let [s (:stop (domain/read-atom control))]
@@ -90,7 +94,7 @@
    :options {...} :init :media (optional) :facilities {:av :native} (optional)}."
   [base out window rid gateway api-key {:keys [caps pools options init facilities] :as config}]
   (let [atoms (domain/open-atoms base)
-        dh (dom/attach! (:jobs atoms)
+        dh (pool/attach (:jobs atoms)
                         {:rid rid
                          :ttl (or (:ttl options) em/ttl)
                          :caps (vec caps)
@@ -105,11 +109,11 @@
       (throw (ex-info "member: unknown :init in pool config" {:init init})))
     ;; every pool registered (a submitter may submit before a server joins), then this member's own served
     (doseq [nm em/pools]
-      (dom/pool dh nm {:retry :restart}))
+      (pool/serve-pool dh nm {:retry :restart}))
     (doseq [[nm n] pools]
-      (dom/pool dh nm {:threads n :retry :restart}))
+      (pool/serve-pool dh nm {:threads n :retry :restart}))
     (when coordinator?
-      (dom/pool dh (em/group-pool rid) {:threads 1 :retry :restart}))
+      (pool/serve-pool dh (em/group-pool rid) {:threads 1 :retry :restart}))
     (domain/swap-atom! (:control atoms) assoc-in [:members rid :joined] true)
     (say {:step :joined
           :caps caps
@@ -119,7 +123,7 @@
       (if (stop? stop-cache (:control atoms))
         (do
           (say {:step :stopping})
-          (dom/detach! dh)
+          (pool/detach dh)
           (say {:step :stopped}))
         (do
           (when coordinator?
@@ -129,8 +133,79 @@
           ;; ms of CPU: at 250 ms that was a fifth of a core, forever, work or no work. 1000 ms: a
           ;; stop is seen within a second, which the boot program's seconds-long shutdown absorbs,
           ;; and the coordinator's pass runs at 1 Hz)
-          (proc/sleep-ms! (or (:poll-ms options) 1000))
+          (pool/sleep-ms! (or (:poll-ms options) 1000))
           (recur stop-cache))))))
+
+;; ---------------------------------------------------------------------------
+;; The node member's life, in a cohost :node realm (cohost-media.start starts
+;; the seat and calls node-serve! there): the same member on Node's event loop
+;; instead of on a thread. Attach with :threads false (a pool pump
+;; thread would be a worker isolate, and npm's libraries are already off the
+;; main thread), pull the :npm pool — claim (a swap), run the task (a promise:
+;; sharp and music-metadata are asynchronous), complete (a swap) — and renew
+;; the lease every ttl/4. Stop is the control atom's :stop, seen by the pump:
+;; clear the beat, detach, and node-state reads :stopped — never
+;; js/process.exit; the seat owns the realm process and its close! ends it.
+;; (The node member's former standalone main, folded in here when the node/
+;; folder went: the member is one namespace on every seat. Never the
+;; coordinator — the boot program names the coordinator, and it is never
+;; this one.)
+
+#?(:cljs
+   (do
+     (defonce ^:private node-life (atom :starting))
+
+     (defn node-state
+       "The node member's life, as the boot program's watch reads it:
+        :starting, :running, :stopped."
+       []
+       @node-life)
+
+     (defn- node-error-data [e] {:class "js/Error" :message (or (.-message e) (str e))})
+
+     (defn- node-run-claimed
+       "x's task called with its arguments: a promise of its value."
+       [x]
+       (let [{:keys [task args]} (:work x)]
+         (js/Promise.resolve (apply (pool/task-fn task) args))))
+
+     (defn node-serve!
+       "Join the domain at base and pull the :npm pool until :stop (see the
+        section comment). config is the member's pool config, as data — the
+        same table serve! takes. Answers :installed: the member's life runs
+        on the realm's timers from here, and node-state reports it."
+       [base out window rid config]
+       (let [caps (:caps config)
+             atoms (domain/open-atoms base)
+             dh (pool/attach (:jobs atoms) {:rid rid :ttl em/ttl :caps (vec caps) :threads false})
+             tid "main"]
+         (reset! st/ctx (merge atoms {:dh dh :rid rid :base base :out out :window window}))
+         (doseq [nm em/pools] (pool/serve-pool dh nm {:retry :restart}))
+         (pool/thread-up dh tid)
+         (swap! (:control atoms) assoc-in [:members rid :joined] true)
+         (reset! node-life :running)
+         (say {:step :joined :caps caps :pools [:npm] :coordinator false})
+         (let [beat (js/setInterval (fn [] (pool/beat dh [tid])) (quot em/ttl 4))
+               stop! (fn []
+                       (js/clearInterval beat)
+                       (say {:step :stopping})
+                       (pool/detach dh)
+                       (reset! node-life :stopped)
+                       (say {:step :stopped}))]
+           (letfn [(pump []
+                     (if (:stop @(:control atoms))
+                       (stop!)
+                       (let [{:keys [claimed]} (pool/claim dh :npm tid 1)]
+                         (if-let [x (first claimed)]
+                           (-> (node-run-claimed x)
+                               (.then (fn [v] (pool/complete dh (:id x) (:claim x) true v)))
+                               (.catch (fn [e]
+                                         (say {:step :task-failed :id (:id x) :error (node-error-data e)})
+                                         (pool/complete dh (:id x) (:claim x) false (node-error-data e))))
+                               (.finally (fn [] (js/setTimeout pump 0))))
+                           (js/setTimeout pump 100)))))]
+             (pump)))
+         :installed))))
 
 (defn -main [& [base out window rid a b c]]
   ;; the boot program's shape: [base out window rid config-edn gateway api-key]; a caller of the

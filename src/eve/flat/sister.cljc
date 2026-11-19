@@ -35,6 +35,7 @@
    field's bits are decoded by eve.flat-io (fio/f32, fio/f64 over the
    field's bytes), with no host branch (flat lanes U4a, 2026-11-17:
    the sister realized on the JVM, babashka and ClojureScript)."
+  (:refer-clojure :exclude [unchecked-multiply])
   (:require [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as serialize]
             [eve.deftype.slab-runtime :as slab-runtime]
@@ -432,6 +433,13 @@
      (when-not (plain-value? v)
       (or (when-let [h @flat-rep-hook] (h v))
          (cond
+       ;; an eve value array (e/make-array) packs as the vector of its
+       ;; slots: it is content, not a reference (EVE-FIX-PLAN X3)
+       (and (satisfies? d/ISabpType v)
+            (= "eve/ValueArray" (d/-sabp-type-key v)))
+       (when-let [to-rep (chunk-var 'to-rep)]
+         (to-rep (vec (seq v))))
+
        (satisfies? source/ISister v)
        (let [tkey (source/-sister-type-key v)]
          (when-let [desc (descriptor tkey)]

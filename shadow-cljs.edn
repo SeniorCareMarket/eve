@@ -84,14 +84,6 @@
    :modules {:main {:init-fn eve.runner.perf-browser-main/init}}
    :compiler-options {:optimizations :simple :output-wrapper false}}
 
-  ;; cohost-media, the capstone (capstone/cohost-media): the Node member, built through deps.edn's :node-test and
-  ;; :cohost-media-node aliases (clojure -M:node-test:cohost-media-node -m shadow.cljs.devtools.cli release cohost-media-node)
-  :cohost-media-node
-  {:target :node-script
-   :main cohost-media.node-member/main
-   :output-to "capstone/cohost-media/target/node-member.js"
-   :compiler-options {:optimizations :simple}}
-
   ;; cohost-media's page, built through :browser-test and :cohost-media-page (the browser's http, crypto and thread
   ;; adapters; reagami): at :simple with no output wrapper, so the workers it starts (eve.thread's browser adapter, the
   ;; fat-kernel route) load it as their kernel with its names global

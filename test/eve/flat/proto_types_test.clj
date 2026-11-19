@@ -53,16 +53,8 @@
   d/IEveRoot
   (d/-root-header-off [_] offset__)
   d/IEveSio
-  (d/-eve-sio [_] sio__)
-  ;; the plain view every materializing type supplies in its body
-  ;; (Dataset's and EveArray's pattern): eve->clj — and with it the
-  ;; deref opt-outs — answer the field map. The macro emits no
-  ;; default IPlain, deliberately (eve.record's certification
-  ;; note). The field locals read the slab on the persistent kind
-  ;; and the packed source on the sister, so the one body is
-  ;; correct on both kinds.
-  d/IPlain
-  (d/-plain [_] {:a (d/eve->clj a) :b (d/eve->clj b) :c (d/eve->clj c)}))
+  (d/-eve-sio [_] sio__))
+
 
 (pm/deftype SerRec [^:int32 n note]
   d/IEveRoot

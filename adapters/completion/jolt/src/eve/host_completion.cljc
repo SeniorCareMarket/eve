@@ -24,6 +24,28 @@
 (alter-var-root #'clojure.core/compare-and-set!
   (fn [core] (fn [a o n] (if (instance? clojure.lang.Atom a) (core a o n) (.compareAndSet a o n)))))
 
+;; swap-vals!/reset-vals! (IAtom2) and the watch surface (IRef) cast the same
+;; way (measured, jolt v0.8.23: swap-vals! "cannot be cast to class
+;; clojure.lang.IAtom", add-watch "not a watchable reference" on an eve
+;; atom): for an atom that is not jolt's, they call its own methods, as
+;; Clojure's do.
+(alter-var-root #'clojure.core/swap-vals!
+  (fn [core]
+    (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swapVals a f)))
+      ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swapVals a f x)))
+      ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swapVals a f x y)))
+      ([a f x y & more]
+       (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swapVals a f x y more))))))
+
+(alter-var-root #'clojure.core/reset-vals!
+  (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.resetVals a v)))))
+
+(alter-var-root #'clojure.core/add-watch
+  (fn [core] (fn [r k f] (if (instance? clojure.lang.Atom r) (core r k f) (do (.addWatch r k f) r)))))
+
+(alter-var-root #'clojure.core/remove-watch
+  (fn [core] (fn [r k] (if (instance? clojure.lang.Atom r) (core r k) (do (.removeWatch r k) r)))))
+
 ;; into takes the transient path for jolt's own collections only and folds
 ;; any other with persistent conj (host/chez/seq.ss jolt-into), though an eve
 ;; vector is an IEditableCollection: a large into allocates a path per

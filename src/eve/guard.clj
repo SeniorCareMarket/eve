@@ -7,7 +7,7 @@
    materializing the whole root (plain-deref's d/eve->clj):
      - scalar access navigates the slab in place and decodes only the leaf (the wrapped value's own hamt-get / nth);
      - subtree access answers a child lazy value, chained to the same cell;
-     - `materialize` (d/eve->clj, through IPlain) is the one explicit materialization point;
+     - `materialize` (d/eve->clj) is the one explicit materialization point;
      - the proxies keep IEveRoot / IEveSio, so a same-domain swap! stores the source's own pointer (no copy).
    Validity is a chain of cells: an extent's cell links to its enclosing extent's cell; a lazy value is valid while
    every cell on its chain is open. Every access checks it; a use after the extent closes throws.
@@ -138,8 +138,6 @@
   Object
   (hashCode [_] (check! cell) (.hashCode ^Object v))
   (equals [this o] (.equiv this o))
-  d/IPlain
-  (-plain [_] (check! cell) (d/eve->clj v))
   d/IEveRoot
   (-root-header-off [_] (check! cell) (d/-root-header-off v))
   d/IEveSio
@@ -173,8 +171,6 @@
   Object
   (hashCode [_] (check! cell) (.hashCode ^Object v))
   (equals [this o] (.equiv this o))
-  d/IPlain
-  (-plain [_] (check! cell) (d/eve->clj v))
   d/IEveRoot
   (-root-header-off [_] (check! cell) (d/-root-header-off v))
   d/IEveSio
@@ -193,6 +189,8 @@
   "The slab-backed value under a proxy (checked); anything else as is."
   [x]
   (if (instance? eve.guard.IGuarded x) (-unwrap x) x))
+
+(d/register-unwrap! unwrap)
 
 (defn materialize
   "The one explicit materialization point: x as plain data (d/eve->clj), checked."

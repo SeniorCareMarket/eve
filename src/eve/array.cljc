@@ -367,14 +367,6 @@
   d/IEveSio
   (-eve-sio [_] sio__)
 
-  d/IPlain
-  (-plain [this]
-    ;; through nth, not seq: bb's EveArray carries Indexed only
-    (let [n cnt]
-      (loop [i 0 acc (transient [])]
-        (if (< i n)
-          (recur (inc i) (conj! acc (d/eve->clj (e/nth this i))))
-          (persistent! acc)))))
 
   IEveArray
   (-subtype [_] subtype__)

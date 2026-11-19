@@ -2,7 +2,8 @@
   "eve.alpha for a ClojureScript compiler whose macros run in its own
    Clojure: the API src/eve/alpha.cljc defines (its api-defs, the same
    names), and its macros (deftype, extend-type)."
-  (:refer-clojure :exclude [deftype extend-type atom aget hash-map hash-set
+  (:refer-clojure :exclude [deftype extend-type atom aget aset alength
+                            aclone make-array hash-map hash-set
                             count nth get seq conj empty contains? disj meta
                             with-meta reduce])
   ;; the aliases src/eve/alpha.cljc's api table names its values by
@@ -10,11 +11,15 @@
             [eve.core :as ec]
             [eve.atom :as atm]
             [eve.array :as arr]
+            [eve.deftype.array :as darr]
             [eve.map :as emap]
             [eve.set :as eset]
             [eve.vec]
             [eve.list]
-            [eve.process-slab :as ps])
+            [eve.process-slab :as ps]
+            ;; the flat delivery (deref, eve->clj's kind arm): part of the
+            ;; value model on every host (EVE-FIX-PLAN §0), loaded with alpha
+            [eve.flat.freeze])
   (:require-macros [eve.alpha]))
 
 (eve.alpha/api-defs)

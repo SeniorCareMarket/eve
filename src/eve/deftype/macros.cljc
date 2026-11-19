@@ -106,7 +106,7 @@
                                :fields slab-fields
                                :type-key type-key
                                ;; an eve-deftype's persisted form is its
-                               ;; IPlain field view: certifiably portable
+                               ;; field values: certifiably portable
                                ;; as an eve.record field value.
                                :record/portable? true})
 

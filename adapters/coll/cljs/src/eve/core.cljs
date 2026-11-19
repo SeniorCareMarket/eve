@@ -10,7 +10,7 @@
                             assoc dissoc pop peek rseq reduce-kv transient persistent!
                             conj! assoc! pop! -write pr-str*
                             -count -nth -conj -with-meta -assoc-n -conj! -assoc-n! -chunked-rest -chunked-next array
-                            caching-hash])
+                            caching-hash array-chunk])
   ;; caching-hash: the macro of eve.core's Clojure side (coll/jvm)
   (:require-macros [eve.core]))
 

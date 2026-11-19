@@ -540,41 +540,99 @@
   (-backing-array [this] "Return the underlying platform array (e.g. int[], double[]).")
   (-backing-subtype [this] "The element subtype code (1-9): a byte[] may hold :uint8 or :int8."))
 
-(defprotocol IPlain
-  "Materialize a slab-backed Eve value into plain Clojure data.
-   Implementations must recursively materialize children via eve->clj.
-   Called with the epoch pinned (atom deref pins it for the read)."
-  (-plain [this]))
+(defonce ^:private flat-of-hook
+  ;; eve.flat.freeze's registration (it loads the packer and the sisters,
+  ;; which this namespace cannot require): (fn [v] -> v's flat form, or nil
+  ;; when v is not a value it delivers by kind). One hook for the delivery
+  ;; subsystem — not a per-type protocol.
+  (atom nil))
+
+(defn register-flat-of!
+  "eve.flat.freeze's registration of the kind arm eve->clj consults: a fn
+   answering a value's flat form (an eve-deftype or record, persistent or
+   flat → its flat instance; a stored flat value → its content; an eve
+   value array → its slots), or nil."
+  [f]
+  (reset! flat-of-hook f))
+
+(defonce ^:private unwrap-hook
+  ;; a read-proxy layer's unwrap (eve.guard's validity proxies): the value
+  ;; under a proxy, checked; anything else as is. eve->clj looks through it.
+  (atom nil))
+
+(defn register-unwrap!
+  "A proxy layer's registration of its unwrap fn (x -> the value under x, or x)."
+  [f]
+  (reset! unwrap-hook f))
+
+(defn- flat-of-fn
+  "The registered kind arm, loading eve.flat.freeze (which registers it) the
+   first time it is needed — as eve.atom's deref delivery resolves it: a
+   caller of eve->clj need not have required the flat layer first. ::none
+   caches its absence (a host with no flat layer)."
+  []
+  (let [h @flat-of-hook]
+    (cond
+      (fn? h) h
+      (= ::none h) nil
+      :else #?(:cljs nil
+               :clje nil
+               :default (do (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
+                                 (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
+                            (let [h @flat-of-hook]
+                              (if (fn? h) h (do (reset! flat-of-hook ::none) nil))))))))
+
+(defn- eve-slab-value?
+  "x is persistent Eve data: slab-backed, rooted in a domain."
+  [x]
+  (and (satisfies? IEveRoot x)
+       (satisfies? IEveSio x)
+       (some? (-eve-sio x))))
+
+(declare eve->clj)
+
+(defn- seq->host [v]
+  (doall (map eve->clj v)))
 
 (defn eve->clj
-  "Recursively materialize an Eve value into plain Clojure data.
-   Portable: works on JVM and (once IPlain is implemented there) CLJS.
-   Scalars and already-plain values pass through unchanged; Eve collections
-   become persistent maps/sets/vectors/lists. Idempotent."
+  "Eve data as this host's Clojure data — eve->cljs's rule, on every host
+   (the value model, docs/ds-in-eve/EVE-FIX-PLAN.md §0, V5). One function,
+   no per-type protocol:
+     nil, scalars, host byte arrays      → themselves
+     an eve-deftype or record, a stored  → its flat form (the registered
+     flat value, an eve value array        flat-of: flat instance, content,
+                                           slots)
+     eve maps, sets, vectors, lists,     → host collections, recursively
+     sequences
+     any other persistent Eve value      → refused (:eve/no-materialization):
+                                           nothing slab-backed passes through
+     anything else                       → itself.
+   Inside an atom, storing the result back makes it eve data again; outside,
+   it runs on flat data. Idempotent."
   [v]
   (cond
     (nil? v) nil
     (or (string? v) (number? v) (boolean? v)
         (keyword? v) (symbol? v) (char? v)) v
-    (satisfies? IPlain v) (-plain v)
-    ;; An Eve type with no IPlain of its own is already the value every
-    ;; seat answers for it: other seats' predicates never mistake it for
-    ;; a plain collection, so it reaches :else untouched. A seat whose
-    ;; core predicates DO mistake it (bb presents a map-signature
-    ;; deftype as a host map, so map? answers true there) must not
-    ;; descend into it either — descending rebuilds it as plain data
-    ;; and materializes its fields out from under the type (measured:
-    ;; a DataScript DB in an atom, whose index sets' IPlain rebuilds
-    ;; lose their registered comparators — F-BB-DATOM-CMP). The bb
-    ;; types adapter marks the types it defines with IsEve so this
-    ;; arm can tell them from plain maps.
-    (satisfies? IsEve v) v
-    (map? v) (into {} (map (fn [[k x]] [(eve->clj k) (eve->clj x)])) v)
-    (set? v) (into #{} (map eve->clj) v)
-    (vector? v) (mapv eve->clj v)
-    (list? v) (apply list (map eve->clj v))
-    (sequential? v) (doall (map eve->clj v))
-    :else v))
+    :else
+    (let [uh @unwrap-hook
+          u (if uh (uh v) v)]
+      (if-not (identical? u v)
+        (eve->clj u)
+    (let [h (flat-of-fn)
+          f (when h (h v))]
+      (cond
+        (some? f) f
+        (map? v) (into {} (map (fn [[k x]] [(eve->clj k) (eve->clj x)])) v)
+        (set? v) (into #{} (map eve->clj) v)
+        (vector? v) (mapv eve->clj v)
+        (list? v) (apply list (map eve->clj v))
+        (sequential? v) (seq->host v)
+        (eve-slab-value? v)
+        (throw (ex-info "eve->clj: a persistent Eve value of no kind eve->clj knows"
+                        {:type :eve/no-materialization
+                         :value-type (str (type v))}))
+        :else v))))))
 
 (defprotocol IBulkAccess
   "Bulk typed-array access to EveArray data: the host's primitive array of

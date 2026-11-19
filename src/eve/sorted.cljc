@@ -382,18 +382,6 @@
                          (->TransientSortedSet nil cmp true (alloc/scope-sio (alloc/current-sio)))
                          ks)))
 
-(defn- to-plain
-  "What a deref of an atom holding sc answers: the same sorted collection, its
-   contents plain, in this process's own domain (never the atom's) — on every
-   host, which need not have a sorted map of its own (basilisp has none)."
-  [sc]
-  (let [c (-cmp sc)
-        ns (nodes (-root sc) true)]
-    (binding [d/*domain-sio* (alloc/plumbing-sio)]
-      (if (-map? sc)
-        (build-map c (map (fn [n] [(d/eve->clj (-sk n)) (d/eve->clj (-sv n))]) ns))
-        (build-set c (map (fn [n] (d/eve->clj (-sk n))) ns))))))
-
 ;;-----------------------------------------------------------------------------
 ;; The sorted map and the sorted set
 ;;-----------------------------------------------------------------------------
@@ -475,8 +463,6 @@
              (clear [_] (enc/throw-unsupported))
 
   ;; what a deref of an atom holding it answers: a Clojure sorted map
-             d/IPlain
-             (-plain [this] (to-plain this))
 
              IPrintWithWriter
              (-pr-writer [this w _] (e/-write w (print-sorted this)))
@@ -550,8 +536,6 @@
              (removeAll [_ _] (enc/throw-unsupported))
              (clear [_] (enc/throw-unsupported))
 
-             d/IPlain
-             (-plain [this] (to-plain this))
 
              IPrintWithWriter
              (-pr-writer [this w _] (e/-write w (print-sorted this)))

@@ -8,10 +8,8 @@
    standalone:
 
      clojure -m cohost-media.gateway <base>"
-  (:refer-clojure :exclude [swap!])
   (:require [clojure.string :as str]
-            [eve.host :refer [swap!]]
-            [eve.process :as proc]
+            [cohost.pool :as pool]
             [cohost-media.domain :as domain]
             [cohost-media.serve :as serve]))
 
@@ -23,7 +21,7 @@
         srv (serve/start-gateway! domain (assoc (select-keys cfg [:domain-id :api-key :store-secret])
                                                 :port (:gateway-port cfg)
                                                 :origin (str "http://127.0.0.1:" (:gateway-port cfg))))]
-    (swap! control assoc-in [:servers :gateway] {:port (:port srv) :process "boot" :t (proc/now-ms)})
+    (swap! control assoc-in [:servers :gateway] {:port (:port srv) :process "boot" :t (pool/now-ms)})
     (println (pr-str {:step :gateway :port (:port srv)}))
     srv))
 
@@ -32,7 +30,7 @@
    serve's own dispatch (srv's :handler), so the page and the members share the one gateway and
    the one store: the /gw/ wire and the /blobs/ store answered in-process, no HTTP hop, and nil
    for every other path (the seat falls through to its statics and the caller's own handlers).
-   The translation is eve.http-server's request convention on both sides: the seat's req
+   The translation is the http server's request convention on both sides: the seat's req
    (:method a keyword, :uri, :query a map, :body text, :body-b64) becomes serve's req (:method
    a string, :url, :body, :body-b64), and serve's answer crosses unchanged — blob traffic is
    already {:body <base64> :body-as :b64}, which the seat puts on the wire as bytes. Presigned
@@ -65,4 +63,4 @@
         (do ((:stop srv)) (println (pr-str {:step :stopped}))
             #?(:clj (do (shutdown-agents) (System/exit 0))
                :cljs (js/process.exit 0)))
-        (do (proc/sleep-ms! 500) (recur))))))
+        (do (pool/sleep-ms! 500) (recur))))))

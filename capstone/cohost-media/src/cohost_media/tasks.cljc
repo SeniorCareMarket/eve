@@ -17,25 +17,22 @@
    namespace has one home again."
   (:refer-clojure :exclude [meta])
   (:require [clojure.string :as str]
-            [eve.thread :as t]
             [cohost-media.av :as av]
             [cohost-media.core :as em]
             [cohost-media.media :as media]
             [cohost-media.state :as st]
             [cohost-media.work :as work]
-            #?@(:clj [[cohost-media.phash :as ph]
+            #?@(:clj [[cohost.pool :as pool]
+                      [cohost-media.phash :as ph]
                       [cohost-media.r128 :as r128]
-                      [eve.mem :as mem]
-                      [eve.region :as region]]
-                :cljs [[eve.net.platform :as platform]
-                       [eve.thread.net :as tn]
-                       [eve.thread.rung :as rung]])))
+                      [cohost.region :as region]]
+                :cljs [[cohost.pool :as pool :include-macros true]])))
 
-(t/deftask index [job] (work/index! job))
+(pool/deftask index [job] (work/index! job))
 
-(t/deftask group [job] (work/group! job))
+(pool/deftask group [job] (work/group! job))
 
-(t/deftask meta [job]
+(pool/deftask meta [job]
   #?(:cljs (throw (ex-info "meta is a JVM facility" {}))
      :default ((requiring-resolve 'cohost-media.meta/run!) job)))
 
@@ -51,7 +48,7 @@
 #?(:clj
    (defn- ffmpeg [& args] (apply sh "ffmpeg" "-nostdin" "-v" "error" "-y" args)))
 
-(t/deftask phash [{:keys [path kind]}]
+(pool/deftask phash [{:keys [path kind]}]
   #?(:clj
      (let [{:keys [exit out err]} (apply ffmpeg (concat (when (= :video kind) ["-ss" "1"])
                                                         ["-i" path "-frames:v" "1" "-vf" "scale=32:32:flags=area,format=gray"
@@ -62,22 +59,21 @@
        (work/record! path :phash {:phash (ph/phash px)}))
      :default (throw (ex-info "phash: no facility on this runtime" {}))))
 
-(t/deftask transcode [job] (av/transcode! job))
+(pool/deftask transcode [job] (av/transcode! job))
 
-(t/deftask pcm [job] (av/pcm! job))
+(pool/deftask pcm [job] (av/pcm! job))
 
 #?(:clj
    (defn- region-floats
-     "The f32le samples of a window region, read in place through eve's region interface."
+     "The f32le samples of a window region, read in place through the pool's region read."
      [{:keys [window offset length]}]
-     (let [r (region/open-mmap-region window (+ offset length))
-           bs ^bytes (mem/-read-bytes r offset length)
+     (let [bs ^bytes (region/read-bytes window offset length)
            fb (.asFloatBuffer (.order (java.nio.ByteBuffer/wrap bs) java.nio.ByteOrder/LITTLE_ENDIAN))
            xs (double-array (.remaining fb))]
        (dotimes [i (alength xs)] (aset xs i (double (.get fb i))))
        xs)))
 
-(t/deftask loudness [{:keys [path]}]
+(pool/deftask loudness [{:keys [path]}]
   #?(:clj
      (let [pcm (get-in @(st/library) [:files path :results :pcm])]
        (work/record! path :loudness
@@ -89,7 +85,7 @@
                           :read-from (:window pcm)}))))
      :default (throw (ex-info "loudness: no facility on this runtime" {}))))
 
-(t/deftask publish [job] (media/publish! job))
+(pool/deftask publish [job] (media/publish! job))
 
 #?(:cljs
    (do
@@ -115,7 +111,7 @@
 
      (defn- join [& xs] (apply (.-join node-path) xs))))
 
-(t/deftask thumb [{:keys [path id kind out]}]
+(pool/deftask thumb [{:keys [path id kind out]}]
   #?(:cljs
      (let [dest (em/output-path out :thumb id)
            src (if (= :image kind)
@@ -128,7 +124,7 @@
            (.then (fn [^js info] (work/record! path :thumb {:path dest :width (.-width info) :height (.-height info)})))))
      :default (throw (ex-info "thumb is an npm task" {}))))
 
-(t/deftask sheet [{:keys [path id out]}]
+(pool/deftask sheet [{:keys [path id out]}]
   #?(:cljs
      (let [dest (em/output-path out :sheet id)
            d (tmp-dir)
@@ -154,7 +150,7 @@
                                                               :tiles (count tiles)}))))))
      :default (throw (ex-info "sheet is an npm task" {}))))
 
-(t/deftask tags [{:keys [path]}]
+(pool/deftask tags [{:keys [path]}]
   #?(:cljs
      (-> (.parseFile mm path)
          (.then (fn [^js m]
@@ -192,19 +188,19 @@
        []
        (or @worker-ctx
            (let [cfg (fetch-config)
-                 p (platform/platform)]
-             (reset! worker-ctx {:cfg cfg :p p :library (tn/rung (net-cfg cfg) em/library-name p)}))))
+                 p (pool/net-platform)]
+             (reset! worker-ctx {:cfg cfg :p p :library (pool/net-atom (net-cfg cfg) em/library-name p)}))))
 
      (defn- fmt [x] (/ (js/Math.round (* 100 x)) 100))))
 
-(t/deftask waveform
+(pool/deftask waveform
   "The waveform of a file's audio, drawn in the browser: the loudness job's peaks (0..1, one per hundredth of the
   file) as the points of a mirrored polygon in a 100×20 box, written into the library."
   [{:keys [path]}]
   #?(:cljs
      (do (js/console.log "cohost-media waveform:" path)
          (let [{:keys [library]} (ctx)
-               peaks (get-in (rung/value library) [:files path :results :loudness :waveform])
+               peaks (get-in (pool/read-atom library) [:files path :results :loudness :waveform])
                v (if (seq peaks)
                    (let [n (count peaks)
                          x (fn [i] (fmt (* 100 (/ i (max 1 (dec n))))))
@@ -212,6 +208,6 @@
                          bottom (reverse (map-indexed (fn [i p] (str (x i) "," (fmt (+ 10 (* 10 p))))) peaks))]
                      {:points (str/join " " (concat top bottom)) :peaks n :drawn-by "browser"})
                    {:none true :drawn-by "browser"})]
-           (rung/-swap! library (fn [lib] (assoc-in lib [:files path :results :waveform] v)))
+           (pool/swap-atom! library (fn [lib] (assoc-in lib [:files path :results :waveform] v)))
            v))
      :default (throw (ex-info "waveform is the browser's task" {}))))

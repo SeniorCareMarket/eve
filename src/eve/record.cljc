@@ -44,7 +44,7 @@
   "Preflight BEFORE allocation, including nested existing slab values. Unknown
    opaque slab types are refused rather than assuming their host caches are data.
    A future producer may certify an entry :record/portable? true, provided its
-   IPlain exposes every persisted field and it has no host-only data."
+   eve->clj exposes every persisted field and it has no host-only data."
   [sio x path]
   ;; the data scalars every slab domain stores as themselves: nothing to
   ;; check, and no trial encode (the :else arm's codec/encode-key was most of
@@ -81,16 +81,13 @@
             (fail! path "opaque Eve type is not certified portable")))
         ;; Do not trust encode-value here: its pointer fast path bypasses REF
         ;; validation of an already-existing collection in a private domain.
-        ;; A value WITH an IPlain view is walked through it. A certified Eve
-        ;; type with no IPlain view is accepted on its certification: its
-        ;; persisted fields were encoded by the slab codec at its own
-        ;; construction, so no function or host value can be inside an
-        ;; existing block (eve.db.ds's DB/Datom are this shape). Giving every
-        ;; eve-deftype a default IPlain instead would make eve->clj descend
-        ;; into them — the F-BB-DATOM-CMP landmine eve->clj's IsEve arm
-        ;; exists to avoid.
-        (when (satisfies? d/IPlain x)
-          (assert-portable! sio (d/-plain x) path))
+        ;; An Eve collection is walked through its host form (eve->clj). A
+        ;; certified Eve type is accepted on its certification: its persisted
+        ;; fields were encoded by the slab codec at its own construction, so
+        ;; no function or host value can be inside an existing block
+        ;; (eve.db.ds's DB/Datom are this shape).
+        (when (contains? #{0xED 0xEE 0x12 0x13} (slab/read-u8 sio (d/-root-header-off x) 0))
+          (assert-portable! sio (d/eve->clj x) path))
         (when-let [m (e/meta x)] (assert-portable! sio m (conj path :meta))))
 
     (map? x)
@@ -188,7 +185,6 @@
   (cond
     (record? x) [:eve.record/value (type-key x)
                  (mapv canonical (-record-values x)) (canonical (-extras x))]
-    (and (satisfies? d/IEveRoot x) (satisfies? d/IPlain x)) (canonical (d/-plain x))
     (map? x) (into {} (map (fn [[k v]] [(canonical k) (canonical v)])) x)
     (set? x) (into #{} (map canonical) x)
     (sequential? x) (mapv canonical x)

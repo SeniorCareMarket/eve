@@ -1,9 +1,7 @@
 (ns cohost-media.work
   "The jobs every host runs the same way — the index and the duplicate grouping — and what every job does with its
    result: the descriptor carries it, and the job swaps it into the file's library entry. Portable cljc."
-  (:refer-clojure :exclude [swap!])
-  (:require [eve.host :refer [swap!]]
-            [eve.thread.fold :as tf]
+  (:require [cohost.pool :as pool]
             [cohost-media.domain :as domain]
             [cohost-media.phash :as ph]
             [cohost-media.state :as st]))
@@ -28,14 +26,14 @@
     totals))
 
 (defn group!
-  "The duplicate grouping: pHash pairs within the threshold found by a fold over the pairs (eve.thread.fold — chunks on
+  "The duplicate grouping: pHash pairs within the threshold found by a fold over the pairs (the pool's fold — chunks on
    this runtime's pools), connected into groups of file ids, swapped into cohost-media/index."
   [{:keys [generation]}]
   (let [files (:files (domain/read-atom (st/library)))
         hashes (into {} (keep (fn [[_ e]] (when-let [h (get-in e [:results :phash :phash])] [(:id e) h])) files))
         ids (vec (sort (keys hashes)))
         pairs (vec (for [i (range (count ids)) j (range (inc i) (count ids))] [(nth ids i) (nth ids j)]))
-        edges (tf/fold (fn ([] []) ([a b] (into a b)))
+        edges (pool/fold (fn ([] []) ([a b] (into a b)))
                        (fn [acc [a b]] (if (<= (ph/distance (get hashes a) (get hashes b)) ph/threshold)
                                          (conj acc [a b]) acc))
                        pairs)

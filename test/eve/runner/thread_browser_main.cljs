@@ -8,7 +8,9 @@
             [eve.thread-host-test]
             [eve.thread-test]
             [eve.thread-meta-test]
-            [eve.thread-fold-test]))
+            [eve.thread-fold-test]
+            ;; the value model's laws (docs/ds-in-eve/EVE-FIX-PLAN.md §5)
+            [eve.value-model-laws-test]))
 
 (def ^:private report-to (atom nil))
 (def ^:private failures (atom []))
@@ -35,7 +37,8 @@
    domain cell itself needs a disk domain, which a browser has not), the summary sent to the page."
   [boot]
   (reset! report-to (:reply boot))
-  (t/run-tests 'eve.thread-host-test 'eve.thread-test 'eve.thread-meta-test 'eve.thread-fold-test))
+  (t/run-tests 'eve.thread-host-test 'eve.thread-test 'eve.thread-meta-test 'eve.thread-fold-test
+               'eve.value-model-laws-test))
 
 (defn- main-rows []
   (let [[ok? e] (h/attempt (fn [] (h/receive! 10)))]

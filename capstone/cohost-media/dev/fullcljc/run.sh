@@ -30,4 +30,12 @@ timeout 300 clojure -M reader_check.clj \
   "$CAP/src/cohost_media/gateway.cljc" \
   "$CAP/src/cohost_media/meta.cljc" \
   "$CAP/src/cohost_media/av_jolt.cljc" \
-  "$CAP/node/src/cohost_media/node_member.cljc"
+  "$CAP/src/cohost_media/member.cljc" \
+  "$CAP/src/cohost_media/coordinator.cljc" \
+  "$CAP/src/cohost_media/domain.cljc" \
+  "$CAP/src/cohost_media/tasks.cljc" \
+  "$CAP/src/cohost_media/work.cljc" \
+  "$CAP/src/cohost_media/serve.cljc" \
+  "$CAP/src/cohost_media/core.cljc" \
+  "$CAP/src/cohost_media/media_impl.glj" \
+  "$CAP/page/src/cohost_media/page.cljc"

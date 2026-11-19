@@ -34,7 +34,7 @@
 
    The Eve wire format is unchanged (FORMAT-DECISIONS.md §8: tags 0x16/0x17/0x18)."
   (:refer-clojure :exclude [bigint biginteger bigdec ratio? decimal?
-                            numerator denominator])
+                            numerator denominator imul divide])
   (:require [clojure.string :as str]
             #?(:cljs [eve.encoding :as enc]
                :clje [eve.encoding :as enc]

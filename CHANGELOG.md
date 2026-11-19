@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **A disk domain's journal is not an opener option.** `eve.atom/persistent-atom-domain` no longer takes `:journal?`: a disk domain is journaled, and the journal force is the commit point. The opt-out's documentation is removed with it (the opener's docstring, `doc/atom-domains.md`, the DataScript guide), and the one deftest of the opt-out's shape is deleted. Callers that passed `:journal? false` (Eve's own tests and probes) now open journaled domains.
+
 ## [0.9.3.2] - 2026-11-17
 
 - **DataScript on Eve is consumed from its own repository.** The library is [`eve.db.ds`](https://github.com/johnmn3/eve.db.ds) (namespaces `eve.db.ds.*`, require `eve.db.ds.core`, reader tags `#eve.db.ds/DB` and `#eve.db.ds/Datom`); it pulls Eve in transitively. The in-tree `contract-test/lib-ds` copy under `datascript.*` is a test-only fixture for the contract drivers. See the README and `docs/datascript-eve/GUIDE.md`.

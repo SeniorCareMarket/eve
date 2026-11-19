@@ -46,11 +46,10 @@
                    "adapters/flat-io/js/src" "adapters/flat-io/portable/src"]
    :extra-paths ["test" "apps/network-atoms/test"]
    :extra-deps {thheller/shadow-cljs {:mvn/version "3.3.6"}}}
-  ;; cohost-media, the capstone (capstone/cohost-media): its ClojureScript sources — the Node member's, added to :node-test,
-  ;; and the page's (the browser runtime and its view, rendered with reagami as the cljs-thread reagami-counter
-  ;; example is), added to :browser-test; both load the one shared cohost-media.tasks
-  :cohost-media-node
-  {:extra-paths ["capstone/cohost-media/src" "capstone/cohost-media/node/src"]}
+  ;; cohost-media, the capstone (capstone/cohost-media): its ClojureScript sources — the page's (the browser
+  ;; runtime and its view, rendered with reagami as the cljs-thread reagami-counter example is), added to
+  ;; :browser-test; it loads the one shared cohost-media.tasks. (The Node member has no build: it is the
+  ;; shared sources loaded into a cohost :node realm at start, on the boot program's classpath.)
   :cohost-media-page
   {:extra-paths ["capstone/cohost-media/src" "capstone/cohost-media/page/src"]
    :extra-deps {io.github.borkdude/reagami {:git/tag "v0.0.36" :git/sha "562cf3d"}}}

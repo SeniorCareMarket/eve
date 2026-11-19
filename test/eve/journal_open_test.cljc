@@ -1,7 +1,6 @@
 (ns eve.journal-open-test
   "A journaled persistent domain must open, write, close and re-open on
-   every seat: the journal is the disk tier's default shape (the named
-   opt-out is :journal? false), so an open that throws is a release
+   every seat: the journal is the disk tier's shape, so an open that throws is a release
    defect on that seat. Regression for the bb seat (2026-11-08): under
    babashka, methods of the returned FileLock (sun.nio.ch.FileLockImpl)
    are unreachable — SCI falls back to a field lookup and
@@ -38,19 +37,6 @@
       (is (= 42 @x2) "the re-open recovers what the journal committed")
       (swap! x2 inc)
       (is (= 43 @x2))
-      (a/close-atom-domain! dom2))))
-
-(deftest journal-off-domain-still-opens
-  (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :journal? false)
-        x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
-    (is (not (proc/file-exists? (str base ".journal")))
-        "the named opt-out writes no journal file")
-    (swap! x + 7)
-    (a/close-atom-domain! dom)
-    (let [dom2 (a/persistent-atom-domain base :journal? false)
-          x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
-      (is (= 7 @x2))
       (a/close-atom-domain! dom2))))
 
 (deftest journal-lock-releases

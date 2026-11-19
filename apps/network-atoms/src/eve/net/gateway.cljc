@@ -76,12 +76,17 @@
       (conj out s))))
 
 (defn- route
-  "[domain-id atom-id-or-nil op] of a URL (full or a path), or nil when it is not a broker route"
+  "[domain-id atom-id-or-nil op] of a URL (full or a path), or nil when it is not a broker route.
+   The atom id is one segment with each / written %2F (atom-id), but an intermediary that decodes
+   %2F before routing (a server that hands handlers a decoded path) splits it into several
+   segments: accept that form too — the op is the last segment and the atom id is everything
+   between \"atoms\" and it, rejoined with / (atom-name maps both forms to the same name)."
   [url]
   (when-let [i (str/index-of url "/v1/domains/")]
     (let [path (first (split-on (subs url (+ i 12)) "?"))
-          parts (split-on path "/")]
-      (cond (and (= 4 (count parts)) (= "atoms" (nth parts 1))) [(nth parts 0) (nth parts 2) (nth parts 3)]
+          parts (vec (split-on path "/"))]
+      (cond (and (<= 4 (count parts)) (= "atoms" (nth parts 1)))
+            [(nth parts 0) (str/join "/" (subvec parts 2 (dec (count parts)))) (nth parts (dec (count parts)))]
             (= 2 (count parts)) [(nth parts 0) nil (nth parts 1)]
             :else nil))))
 

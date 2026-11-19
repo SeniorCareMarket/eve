@@ -56,6 +56,11 @@
   ^double [^long x]
   (first (struct/unpack "<d" (struct/pack "<q" x))))
 
+(defn int-bits->float
+  "The float whose IEEE-754 single bits are x (an int32, either sign)."
+  [x]
+  (first (struct/unpack "<f" (struct/pack "<I" (bit-and x 0xFFFFFFFF)))))
+
 (defn double->long-bits
   "The IEEE-754 bits of the double d, as a long (NaN payloads kept)."
   ^long [^double d]

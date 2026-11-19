@@ -17,7 +17,7 @@
    hold around each swap (ROOT_HOLD/ROOT_INFLIGHT, eve.deftype-proto.data)."
   (:refer-clojure :exclude [atom
                             aget alength long class
-                            volatile! vswap! locking transient persistent! conj! bytes])
+                            volatile! vswap! locking transient persistent! conj! bytes get-validator])
   (:require
    ;; jank's clojure.core has none of these. eve.host-completion interns
    ;; them, but this namespace is created (refer-clojure) before that
@@ -1184,6 +1184,8 @@
   (doseq [[k cb] watches]
     (cb k target old new)))
 
+(declare swap-attempt-vals!)
+
 (defn- swap-attempt!
   "One CAS attempt: read the old root, apply f, write the new value, CAS the
    root pointer. Returns [:ok new-val delivery] or [:retry nil ::none] —
@@ -1204,6 +1206,17 @@
    f
    args
    exclusive?]
+  (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? false))
+
+
+(defn- swap-attempt-vals!
+  [{:keys [root-r sio durable-commits? journal] :as ds}
+   ptr-off
+   atom-slot-idx
+   f
+   args
+   exclusive?
+   want-vals?]
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
   (binding [tally/*touches* (clojure.core/atom #{})]
@@ -1229,7 +1242,7 @@
           ;; the same value: nothing to publish, nothing to retire — but
           ;; the swap SUCCEEDED, so a watched atom still notifies (spec
           ;; clause 2: notification is not gated by the change decision)
-          (let [delivery (if (watched? ds atom-slot-idx)
+          (let [delivery (if (or want-vals? (watched? ds atom-slot-idx))
                            (let [dv (deliver-value ds atom-slot-idx old-val)]
                              [dv dv])
                            ::none)]
@@ -1301,7 +1314,7 @@
                 ;; root is retired by this commit, so converting it after
                 ;; the pin drops would read retired blocks (the discipline
                 ;; flat-deref's in-pin conversion obeys)
-                (let [delivery (if (watched? ds atom-slot-idx)
+                (let [delivery (if (or want-vals? (watched? ds atom-slot-idx))
                                  [(deliver-value ds atom-slot-idx old-val)
                                   (deliver-value ds atom-slot-idx
                                                  (read-root-value sio new-ptr))]
@@ -1336,25 +1349,30 @@
    collection, a scalar or nil. A successful attempt notifies the atom's
    watchers with the delivered old/new its :ok tuple threaded through
    (spec clauses 2–4) — here, outside the domain write hold, so a
-   callback that swaps cannot deadlock the domain."
-  [ds atom-slot-idx f args]
+   callback that swaps cannot deadlock the domain. With want-vals? it
+   answers [old new], both delivered flat under the attempt's pin
+   (swap-vals!, reset-vals!)."
+  ([ds atom-slot-idx f args] (mmap-swap! ds atom-slot-idx f args false))
+  ([ds atom-slot-idx f args want-vals?]
   (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
     (loop [attempt 0]
       (when (>= attempt d/MAX_SWAP_RETRIES)
         (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
       (let [[tag result delivery] (with-domain-write ds false
                                     (fn [exclusive?]
-                                      (let [r (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?)]
+                                      (let [r (if want-vals?
+                                                (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? true)
+                                                (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?))]
                                         (when (= :ok (first r))
                                           (try-flush-retires! ds))
                                         r)))]
         (case tag
-          :ok (do (when (not= ::none delivery)
+          :ok (do (when (and (not= ::none delivery) (watched? ds atom-slot-idx))
                     (notify-watchers! ds atom-slot-idx
                                       (nth delivery 0) (nth delivery 1)))
-                  result)
+                  (if want-vals? delivery result))
           :retry (do (cas-backoff! attempt)
-                     (recur (inc attempt))))))))
+                     (recur (inc attempt)))))))))
 
 (defn- mmap-compare-and-set!
   "Set the atom to new-val iff its value equals old-val. One CAS loop: f
@@ -1383,6 +1401,41 @@
 
 (defn- atom-domain-state [a]
   (-domain-state a))
+
+(defn persistent?
+  "True for a value inside an atom: slab-backed, rooted in a domain (built in
+   a swap!, or read inside a swap! or a $ region). False for flat data — what
+   every exit from an atom delivers, and what eve constructors give outside
+   every atom (the value model, docs/ds-in-eve/EVE-FIX-PLAN.md §0)."
+  [x]
+  (boolean
+   (and (some? x)
+        (not (or (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x)))
+        (satisfies? d/IEveRoot x)
+        (satisfies? d/IEveSio x)
+        (some? (d/-eve-sio x))
+        (not (== -1 (d/-root-header-off x))))))
+
+(defn eve->clj
+  "Eve data as this host's Clojure data (eve->cljs's rule, on every host):
+   eve maps, vectors, sets, lists → host collections, recursively; an
+   eve-deftype → its flat instance. Inside an atom, storing the result back
+   makes it eve data again; outside, it runs on flat data."
+  [v]
+  (d/eve->clj v))
+
+(defn same?
+  "Inside an atom (a swap! fn or a $ region): true when x and y are the same
+   block of the same domain. Outside every atom values have no identity, and
+   same? throws (:eve/no-identity)."
+  [x y]
+  (when-not (or (rr/active?) (some? d/*parent-atom*))
+    (throw (ex-info "eve/same?: values have no identity outside an atom (use it inside swap! or $)"
+                    {:type :eve/no-identity})))
+  (boolean
+   (and (persistent? x) (persistent? y)
+        (identical? (alloc/sio-root (d/-eve-sio x)) (alloc/sio-root (d/-eve-sio y)))
+        (== (d/-root-header-off x) (d/-root-header-off y)))))
 
 (defn $*
   "`$`'s region (eve.alpha/$ expands to it): (f) with every eve atom deref'd inside answering its lazy, slab-backed
@@ -1492,6 +1545,12 @@
   (reset [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) []))
   (compareAndSet [_ old-val new-val]
     (mmap-compare-and-set! domain-state atom-slot-idx old-val new-val))
+  clojure.lang.IAtom2
+  (swapVals [_ f] (mmap-swap! domain-state atom-slot-idx f [] true))
+  (swapVals [_ f a] (mmap-swap! domain-state atom-slot-idx f [a] true))
+  (swapVals [_ f a b] (mmap-swap! domain-state atom-slot-idx f [a b] true))
+  (swapVals [_ f a b xs] (mmap-swap! domain-state atom-slot-idx f (concat [a b] xs) true))
+  (resetVals [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) [] true))
   ;; the watch/validator surface (spec clause 1): the host's add-watch /
   ;; set-validator! land here; the bodies are the trunk fns above, and
   ;; each host's types adapter realizes IRef the way it realizes
@@ -1553,6 +1612,12 @@
   (reset [_ v] (mmap-swap! domain-state 0 (constantly v) []))
   (compareAndSet [_ old-val new-val]
     (mmap-compare-and-set! domain-state 0 old-val new-val))
+  clojure.lang.IAtom2
+  (swapVals [_ f] (mmap-swap! domain-state 0 f [] true))
+  (swapVals [_ f a] (mmap-swap! domain-state 0 f [a] true))
+  (swapVals [_ f a b] (mmap-swap! domain-state 0 f [a b] true))
+  (swapVals [_ f a b xs] (mmap-swap! domain-state 0 f (concat [a b] xs) true))
+  (resetVals [_ v] (mmap-swap! domain-state 0 (constantly v) [] true))
   ;; the domain is slot 0's atom: the same watch/validator surface
   clojure.lang.IRef
   (addWatch [this k f] (add-watch* this k f))
@@ -1617,30 +1682,24 @@
    opening a fresh domain together both pass (each initialised the domain
    over the other's writes).
 
-   Durability is the default shape of a disk domain: unless the opener
-   says otherwise, the domain is JOURNALED — commits append a record to
+   Durability is the shape of a disk domain: the domain is
+   JOURNALED — commits append a record to
    <base>.journal and the journal force is the commit point; the .root
    file is a checkpoint (cleanup-sweep journal verdict, 2026-11-07: the
-   disk tier is journaled by design). The named opt-outs: :journal? false
-   keeps durable commits without the journal file (the pre-CAS sweep +
-   root-range force per commit carry durability alone); :durable? false
-   is the non-durable comms form — no journal, no forces, sync! is the
-   caller's explicit barrier. :mem-budget (bytes) caps the domain's total
+   disk tier is journaled by design). :mem-budget (bytes) caps the domain's total
    region growth — refused growth names the budget, never the host's
    out-of-memory; the MEM-BUDGET-* constants are the per-target defaults.
    :segment-bytes (a power of two) sets the region mapping window —
    presentation, not format: it is stored nowhere in the domain's
    files, and processes may join the same domain with different
    windows."
-  [base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes] :or {capacities {} lustre? false durable? true}}]
+  [base-path & {:keys [capacities lustre? durable? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes] :or {capacities {} lustre? false durable? true}}]
   (or (get @domain-cache base-path)
       (let [_  (proc/ensure-parent-dir! base-path)
             ds (open-mmap-domain! base-path (cond-> {:capacities capacities
                                                      :lustre? lustre?
                                              :durable? durable?
-                                             :journal? (if (nil? journal?)
-                                                         (not (false? durable?))
-                                                         journal?)
+                                             :journal? (not (false? durable?))
                                              :journal-batch journal-batch
                                              :journal-window-ms journal-window-ms
                                              :create? (proc/create-exclusive! (str base-path ".root"))}

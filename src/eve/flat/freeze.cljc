@@ -34,6 +34,13 @@
             [eve.flat.chunk :as chunk]
             [eve.flat.sister :as sister]
             [eve.flat.source :as source]
+            ;; Eve's own kinds with no collection shape, which eve->clj's
+            ;; kind arm (flat-of, below) materializes: eve->cljs's tag
+            ;; arms, in the one place that knows them
+            [eve.array :as earr]
+            [eve.dataset :as eds]
+            [eve.tensor :as etensor]
+            [eve.obj.impl :as eobj]
             ;; The protocol hosts (bb, glojure) spell the frozen
             ;; types' surface through the seat's eve.core protocols,
             ;; as chunk's handles do there.
@@ -117,6 +124,8 @@
   ([sio ^bytes stream-bytes] (write-chain! sio stream-bytes nil false))
   ([sio ^bytes stream-bytes digest-words] (write-chain! sio stream-bytes digest-words false))
   ([sio ^bytes stream-bytes digest-words framed?]
+   (write-chain! sio stream-bytes digest-words framed? false))
+  ([sio ^bytes stream-bytes digest-words framed? typed?]
    (let [total (alength stream-bytes)
          nseg (int (quot (+ total (dec SEG-PAYLOAD)) SEG-PAYLOAD))
          ;; segments last-to-first, so each knows its next
@@ -144,8 +153,11 @@
      (put-i32! harr 8 first-seg)
      (when digest-words
        (dotimes [w 8] (put-i32! harr (+ 12 (* 4 w)) (long (nth digest-words w)))))
+     ;; flags: 1 digest latched, 2 framed stream, 4 typed root (a flat
+     ;; eve-deftype: it reads back as its sister, EVE-FIX-PLAN X4)
      (put-u8! harr 44 (bit-or (if digest-words 1 0)
-                              (if framed? 2 0)))
+                              (if framed? 2 0)
+                              (if typed? 4 0)))
      (alloc/-sio-write-bytes! sio hdr 0 harr)
      hdr)))
 
@@ -223,7 +235,7 @@
 ;; opened chunk. It is an ordinary Eve value in the tree — the
 ;; root pointer neither knows nor cares that it is flat.
 
-(declare -handle)
+(declare -handle frozen-value?)
 #?(:clj (declare based-of based-assoc based-pop))
 ;; The protocol hosts' spellings of the based/concat helpers
 ;; (eve.core calls instead of host collection calls), defined
@@ -242,9 +254,9 @@
     (vector? x) (mapv plain-of x)
     (set? x) (into #{} (map plain-of) x)
     (sequential? x) (mapv plain-of x)
-    ;; a frozen value materializes through its own -plain
-    ;; (the handle it wraps), never as the view object itself
-    (satisfies? d/IPlain x) (d/-plain x)
+    ;; a frozen value materializes as the handle it wraps,
+    ;; never as the view object itself
+    (frozen-value? x) (plain-of (-handle x (.-sio x) (.-hdr x)))
     ;; a generated sister is none of the collection shapes:
     ;; its plain form is its field structure, each field
     ;; materialized in turn (a nested sister recurses here)
@@ -258,8 +270,6 @@
            (-root-header-off [_] hdr)
            d/IEveSio
            (-eve-sio [_] sio)
-           d/IPlain
-           (-plain [this] (plain-of (-handle this sio hdr)))
            ecore/ICounted
            (-count [this] (ecore/count (-handle this sio hdr)))
            ecore/IIndexed
@@ -300,8 +310,6 @@
             (-root-header-off [_] hdr)
             d/IEveSio
             (-eve-sio [_] sio)
-            d/IPlain
-            (-plain [this] (plain-of (-handle this sio hdr)))
             ecore/ICounted
             (-count [this] (ecore/count (-handle this sio hdr)))
             ecore/IIndexed
@@ -340,13 +348,6 @@
      (-root-header-off [_] hdr)
      d/IEveSio
      (-eve-sio [_] sio)
-     ;; materialization (the read-out law): eve->clj walks
-     ;; IPlain, so a frozen subtree — at the root or nested at
-     ;; any depth — derefs to plain data, never to this
-     ;; internal view object. The view exists only inside the
-     ;; atom's tenure (a swap's cur, a fresh freeze).
-     d/IPlain
-     (-plain [this] (plain-of (-handle this sio hdr)))
      clojure.lang.ILookup
      (valAt [this k] (get (-handle this sio hdr) k))
      (valAt [this k nf] (get (-handle this sio hdr) k nf))
@@ -858,9 +859,14 @@
   [sio header-off]
   #?(:clj (let [cells (object-array 2)
                 flags (slab/read-i32 sio header-off 44)]
-            (when (== (bit-and flags 2) 2)
-              (aset cells 1 :framed))
-            (->FrozenValue sio (long header-off) cells))
+            (if (== (bit-and flags 4) 4)
+              ;; a typed root (a flat eve-deftype stored in the atom): it
+              ;; answers as its type inside the atom — its sister over the
+              ;; chunk, as the ClojureScript arm below opens every chain
+              (chunk/open (read-chain-bytes sio header-off))
+              (do (when (== (bit-and flags 2) 2)
+                    (aset cells 1 :framed))
+                  (->FrozenValue sio (long header-off) cells))))
      :cljs (chunk/open (read-chain-bytes sio header-off))))
 
 (defn enter-checked!
@@ -901,86 +907,6 @@
       (frozen-value sio (write-chain! sio (first chunks) words false))
       (frozen-value sio (write-chain! sio (frame-stream chunks) words true)))))
 
-(defn- zip-fn
-  "eve.flat.transfer/zip-root!, resolved lazily (transfer requires atom,
-   as freeze does; reached the way eve.atom's transfer-fn reaches it).
-   Nil where eve.flat.transfer is not built."
-  []
-  #?(:cljs nil
-     :default (try @(requiring-resolve 'eve.flat.transfer/zip-root!)
-                   (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))))
-
-(defn- own-type-in
-  "The own-type instance v placed into the heap domain hs
-   (eve.flat.transfer/zip-root!) and reopened there by its type's
-   registered header constructor: v's own class, owning its memory."
-  [zip hs v]
-  (let [off (zip hs v)
-        ctor (ser/get-header-constructor (ser/read-header-tag hs off))]
-    (when-not ctor
-      (throw (ex-info "deliver-flat: an own-type value has no header constructor after placement"
-                      {:type-key (d/-sabp-type-key v)})))
-    (ctor hs off)))
-
-(defn- own-type-deliver
-  "An own-type root (eve.flat.sister/own-type-instance?: a slab instance
-   of a registered user eve-deftype) delivered as ITS OWN CLASS, owning
-   its memory: its blocks placed into a fresh heap domain
-   (eve.flat.transfer/zip-root!, the same block-for-block placement the
-   :zip foreign policy uses) and reopened there by the type's registered
-   header constructor. No pin, no epoch, no coupling to the source
-   domain, as a packed delivery — and a BTSet or a Datom comes back as
-   itself, its fields and class hints intact (design call, Nov 15 2026).
-   Nil where eve.flat.transfer is not built (the caller then packs)."
-  [v]
-  (when-let [zip (zip-fn)]
-    (own-type-in zip (alloc/heap-domain-sio! {}) v)))
-
-(defn- with-meta-of [src out]
-  (let [m (meta src)]
-    (if (and m #?(:clj (instance? clojure.lang.IObj out) :default (satisfies? IWithMeta out)))
-      (with-meta out m)
-      out)))
-
-(defn- own-type-materialize
-  "A collection root holding own-type instances (nested, e.g. {:db DB}),
-   delivered with each own-type instance as ITS OWN CLASS (placed into
-   one heap domain shared by the delivery) and the collections around
-   them as host collections of the same shape (map, set, vector, list;
-   metadata kept). A bytes-only flat chunk cannot hold an object of
-   another class, so the collections that hold own types are rebuilt;
-   everything else delivers as before: a record (or any other
-   sister-registered value) packs to its flat form, scalars as
-   themselves. Reads under the caller's pin (deliver-atom)."
-  [zip v]
-  (let [hs (delay (alloc/heap-domain-sio! {}))]
-    (letfn [(walk [x]
-              (cond
-                (nil? x) x
-                (sister/own-type-instance? x) (own-type-in zip @hs x)
-                (record? x) (chunk/pack x)
-                (map? x) (with-meta-of x (into {} (map (fn [e] [(walk (key e)) (walk (val e))])) x))
-                (set? x) (with-meta-of x (into #{} (map walk) x))
-                (vector? x) (with-meta-of x (mapv walk x))
-                (sequential? x) (with-meta-of x (apply list (map walk x)))
-                (and (satisfies? d/ISabpType x) (sister/descriptor (d/-sabp-type-key x))) (chunk/pack x)
-                :else x))]
-      (walk v))))
-
-(defn- pack-or-own
-  "pack (the flat delivery of a collection root); when the pack met an
-   own-type instance nested in the collection (eve.flat.sister's
-   writer flags it), the collection is delivered by
-   own-type-materialize instead, so the nested instances come back as
-   their own classes, not as flat sisters. Costs nothing extra when no
-   own type is inside."
-  [v pack]
-  (let [seen (volatile! false)
-        r (binding [sister/*own-type-seen* seen] (pack v))]
-    (if-let [zip (when @seen (zip-fn))]
-      (own-type-materialize zip v)
-      r)))
-
 ;; freeze's wrapper types exist on the runtime-require hosts; on
 ;; ClojureScript a frozen chain opens directly as its chunk handle
 ;; (frozen-value's cljs arm), so the wrappers never occur there —
@@ -1004,10 +930,9 @@
    walk and the delivery comes out torn. For atom values use
    deliver-atom, which packs inside the pin."
   [v]
-  ;; an own-type root (a registered user eve-deftype, consulted through
-  ;; eve.deftype.registry) delivers as its own class; else as before
-  (if-let [own (when (sister/own-type-instance? v) (own-type-deliver v))]
-    own
+  ;; one flat form on every host (the value model, EVE-FIX-PLAN §0): a
+  ;; deftype delivers as its flat sister, never as a copy placed into a
+  ;; private heap domain
   (cond
     ;; already flat: a frozen subtree delivers as its opened
     ;; handle (whose bytes were copied out of the slab — the
@@ -1016,8 +941,8 @@
     (-handle v (.-sio ^FrozenValue v) (.-hdr ^FrozenValue v))
     #?(:clj (instance? ConcatBatch v) :cljs false) v
     (satisfies? chunk/IFlatHandle v) v
-    (sequential? v) (pack-or-own v #(open-stream (chunk/pack-all %)))
-    (coll? v) (pack-or-own v chunk/pack)
+    (sequential? v) (open-stream (chunk/pack-all v))
+    (coll? v) (chunk/pack v)
     ;; a slab instance of a sister-registered type that is not
     ;; itself a collection (a field-oriented deftype root): the
     ;; same pack — the writer's rep converter turns it into its
@@ -1027,7 +952,7 @@
     (and (satisfies? d/ISabpType v)
          (sister/descriptor (d/-sabp-type-key v)))
     (chunk/pack v)
-    :else v)))
+    :else v))
 
 (defn deliver-atom
   "Deliver an Eve atom's current value as a heap flat object,
@@ -1068,7 +993,8 @@
           [stream framed?] (if (concat-batch? h)
                               [(frame-stream (mapv chunk/bytes-of (.-handles h))) true]
                               [(chunk/bytes-of h) false])
-          hdr (long (write-chain! sio stream nil framed?))
+          hdr (long (write-chain! sio stream nil framed?
+                                  (satisfies? source/ISister h)))
           ^bytes b (enc/make-bytes 7)]
       (aset b 0 (unchecked-byte 0xEE))
       (aset b 1 (unchecked-byte 0xDB))
@@ -1103,6 +1029,67 @@
 ;; the delivery with eve.atom, whose deref path calls it inside the
 ;; read pin. Registered here because atom cannot require freeze.
 (ea/register-deref-deliver! deliver-flat)
+
+;; eve->clj's kind arm (eve.deftype-proto.data/register-flat-of!): the one
+;; place eve->clj learns what the flat subsystem knows — a stored flat value
+;; is its content, an eve-deftype or record is its flat instance, an eve value
+;; array is its slots. Plain host collections answer nil at once.
+(defn- host-coll? [v]
+  #?(:clj (and (instance? clojure.lang.IPersistentCollection v)
+               (.startsWith (.getName (class v)) "clojure.lang."))
+     :default false))
+
+(defn- flat-of [v]
+  (when-not (host-coll? v)
+    (cond
+      (frozen-value? v)
+      (let [h (-handle v (.-sio v) (.-hdr v))]
+        (if (satisfies? source/ISister h) h (d/eve->clj h)))
+
+      (satisfies? source/ISister v) v
+
+      ;; Eve's kinds with no collection shape, as host data
+      (satisfies? eds/IDatasetAccess v)
+      (let [cm (eds/-col-map v)]
+        (into {} (map (fn [k] [k (d/eve->clj (get cm k))])) (eds/-column-names v)))
+
+      (satisfies? etensor/ITensorAccess v)
+      (let [sh (vec (etensor/-shape v))
+            st (vec (etensor/-strides v))
+            eo (long (etensor/-elem-offset v))
+            backing (d/eve->clj (etensor/-data v))]
+        (letfn [(build [dim base]
+                  (if (= dim (count sh))
+                    (nth backing base)
+                    (let [stride (nth st dim)]
+                      (mapv (fn [i] (build (inc dim) (+ base (* i stride))))
+                            (range (nth sh dim))))))]
+          (if (empty? sh) (nth backing eo) (build 0 eo))))
+
+      (satisfies? eobj/IEveObj v)
+      (into {} (map (fn [k] [k (d/eve->clj (eobj/field-value v k nil))]))
+            (:field-keys (first (eobj/-obj-parts v))))
+
+      (and (satisfies? d/ISabStorable v) (= :eve/array (d/-sab-tag v)))
+      (let [n (count v)]
+        (mapv (fn [i] (d/eve->clj (nth v i))) (range n)))
+
+      (not (satisfies? d/ISabpType v)) nil
+
+      (= "eve/ValueArray" (d/-sabp-type-key v))
+      (mapv d/eve->clj (seq v))
+
+      (and (satisfies? d/IEveRoot v)
+           (sister/descriptor (d/-sabp-type-key v))
+           (or (record? v)
+               (sister/own-type-instance? v)
+               (not (or (map? v) (set? v) (vector? v) (sequential? v)))))
+      (let [p (chunk/pack v)]
+        (if (satisfies? source/ISister p) p (d/eve->clj p)))
+
+      :else nil)))
+
+(d/register-flat-of! flat-of)
 
 (ser/register-header-constructor! CHUNK-TAG frozen-value)
 (ser/register-header-disposer! CHUNK-TAG dispose-chain!)

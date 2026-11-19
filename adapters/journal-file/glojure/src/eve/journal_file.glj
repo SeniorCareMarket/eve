@@ -16,6 +16,7 @@
    stored as the signed i32 of its bit pattern. The commit point is
    lock, write blocks, force slab, append record, force journal —
    eve.atom runs that sequence over this file."
+  (:refer-clojure :exclude [locking])
   (:require [eve.host :refer [locking]]
             [eve.mem :as mem]
             [eve.deftype-proto.data :as d]))

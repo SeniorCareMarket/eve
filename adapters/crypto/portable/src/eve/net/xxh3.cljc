@@ -6,6 +6,7 @@
    implementation through its platform map; the KATs and the fixture corpus's key pairs hold every override to this.
 
    Input: a byte sequence (anything `nth` and `count` read as 0..255)."
+  (:refer-clojure :exclude [hash-long])
   (:require [eve.net.u64 :as u]))
 
 (def P32-1 [0 2654435761])
