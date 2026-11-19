@@ -1,129 +1,189 @@
-# Eve fix plan — what eve.db.ds needs from Eve
+# Eve fix plan — the value model, and what eve.db.ds needs from Eve
 
-Written Nov 19 2026 for John. Companion: `DS-IN-EVE-PLAN.md` (same folder).
-The DS rewrite does not start a unit that depends on a row below until that
-row is green in a tagged Eve pin.
+v2, Nov 19 2026. Companion: `DS-IN-EVE-PLAN.md` (same folder). The DS rewrite
+does not start a unit that depends on a law below until that law is green in a
+tagged Eve pin.
 
-## 0. Measured state (JVM, `release/eve-0.9.3.3` tip `f4a1c3a`)
+## 0. The value model (John, 2026-11-19, verbatim)
 
-Probe: an in-process `eve/atom` holding `{:db (->Box …)}` where `Box` is an
-`eve/deftype` built inside `swap!`.
+> `eve->clj` needs to do what `eve->cljs` did, but just across all eve
+> platforms. […] IPlain should be excised.
+>
+> When we deref an atom into an eve host's heap, it should come out as flat
+> data.
+>
+> When we instantiate an eve/deftype'd value outside an atom, it should
+> produce a flat version. Inside an atom it should produce a persistent one.
+>
+> Calling `eve->clj` on either of them will produce clj on that host. Calling
+> it in an atom and returning the result in an atom would just turn it right
+> back into eve data. Calling it outside would imply you're calling it on flat
+> data.
+>
+> Putting clojure data with eve flat data nested in it into an atom should
+> result in persistent eve data with that flat eve data in it. Pulling that
+> persistent value back out should result in the whole value being one
+> complete packed value, because value extraction from atoms flatten the data.
+> It basically becomes valhala data outside of atoms, without identity. Atoms
+> confer the data the identity.
+>
+> Everything I'm describing did get impl'd at some point and some how got
+> clobbered by other agents. […] Regardless, that is how it is supposed to
+> work and your impl plan needs to ensure it.
 
-| # | Call | Result today |
-|---|---|---|
-| E1 | `@a` | throws `flat chunk: a value held by reference cannot be packed` |
-| E2 | `add-watch` then `swap!` | same throw |
-| E3 | `compare-and-set!` | same throw |
-| E4 | `reset!` with a deftype built outside | same throw |
-| E5 | `($ (:db @a))` | returns a live `Box` pointing into the atom, unpinned |
-| E6 | two reads of one nested deftype | `identical?` false, `=` false |
-| E7 | old root kept in the atom beside the new one | both readable (works) |
-| E8 | `swap!` return value | slab-backed, unsafe outside |
+### The laws (each one a `deftest`, §5)
 
-Not measured: ClojureScript in a browser; a disk (`:persistent`) atom; what
-happens to an Eve value built outside every `swap!` and never stored.
+Outside an atom = flat, value-only, no identity. Inside an atom (a `swap!`
+fn, a `$` region) = persistent, slab-backed. The atom confers identity.
 
-## 0a. Re-derived at the same pin (2026-11-19, session magical-johnson)
-
-Provenance: tree `release/eve-0.9.3.3` `f4a1c3a`; OpenJDK 21.0.13, Clojure CLI
-1.12.0.1530; fresh `e/atom` per run, fresh JVM per probe. Browser: not run.
-
-§0's table does not reproduce for a deftype by itself. Six field shapes
-(`^:int32`+string, untyped holding map / vector / deftype, `^:Leaf` typed
-nested, `^:volatile-mutable`), each built inside `swap!`:
-
-| # | Measured |
+| Law | Statement |
 |---|---|
-| E1 | green: delivers `<Type>__Flat` (or own class), protocol answers, still reads after 1,000 swaps |
-| E2 | green |
-| E3 | no throw; always `false` — CAS compares `(d/eve->clj cur)` to the deref'd value (atom.cljc `compare-and-set`) |
-| E4 | green |
-| E5a | `$` of a Box built in `swap!`: the live slab `Box` escapes the region (read correctly after 1,000 swaps — unpinned, not safe) |
-| E5b | `$` of a Box built outside then `reset!`: stored as `FrozenValue`; `$` answers `PersistentArrayMap` — the frozen handle's IPlain unpack drops the type |
-| E6 | `identical?` false, `=` true |
-| E7 | RED (§0 says works): a deftype re-stored from inside `swap!` (`(assoc m :old (:db m))`) derefs as `FrozenValue`, no protocol |
-| E8 | `swap!` returns `EveHashMap`; the deftype in it is a `FrozenValue` |
+| V1 | Every exit from an atom delivers flat data on the host heap: deref, `$` exit, `swap!`/`swap-vals!`/`reset!` return, watch old/new, the value `compare-and-set!` compares. No slab-backed object ever leaves. |
+| V2 | An exit delivers the whole value as ONE complete packed value, whatever it holds inside — persistent eve data, flat values stored earlier, deftypes, value arrays. No in-atom wrapper (`FrozenValue`, `BasedValue`, `ConcatBatch`) ever surfaces. |
+| V3 | `eve/deftype` construction outside every atom gives the flat instance; inside a `swap!` gives the persistent instance. Both answer the type's protocols and field reads. Same for `e/make-array` and every other eve constructor. |
+| V4 | Clojure data with flat eve values nested in it, stored into an atom, becomes persistent eve data holding those flat values. Read back inside the atom, a flat value answers as its type (a flat `Box` is still a `Box` to protocol dispatch). |
+| V5 | `eve->clj` is `eve->cljs`'s rule on every host: eve maps, vectors, sets, lists → host collections, recursively. One generic fn; no per-type protocol. Inside an atom its result stored back is eve data again; outside it runs on flat data. |
+| V6 | Values have no identity outside atoms: two deliveries of one value are `=` and need not be `identical?`. `=` is value equality on every delivered form. |
+| V7 | `compare-and-set!` compares by value: `(compare-and-set! a @a x)` succeeds when no swap intervened. |
+| V8 | Flat delivered values live on the host heap: they need no pin, no epoch, no domain, read correctly after any number of later swaps and after the domain closes, and are reclaimed by the host GC. |
 
-The §0 throw (`a value held by reference cannot be packed`) reproduces only
-when an **eve value array** (`e/make-array`, the bset `slots` shape) is in the
-value, at any depth: in a map, in a deftype field, or as the root. Inside
-`swap!` and `$` the array reads; `$` lets the live `ValueArray` escape.
+`eve->clj` on a deftype (my reading of "produce clj on that host" — John to
+confirm in one word): a deftype has no Clojure collection shape, so
+`eve->clj` gives its flat instance; on a flat instance it is the identity.
+Eve's own collection types are not "deftypes" for this rule: they take the
+collection arm. The deftype arm is checked BEFORE the shape arms, so a
+map-signature deftype (the DataScript DB on bb) is never walked as a map —
+this is what F-BB-DATOM-CMP needed, without a pass-through.
 
-User deftypes carry no IPlain (measured: `satisfies? d/IPlain` false in swap
-and in region); `eve->clj` passes them through untouched.
+## 1. Measured against the laws (JVM, `release/eve-0.9.3.3` `f4a1c3a`)
 
-## 1a. Step 1 result
+Provenance: OpenJDK 21.0.13, Clojure CLI 1.12.0.1530; fresh `e/atom` per run,
+fresh JVM per probe; six deftype field shapes (`^:int32`+string, untyped
+holding map / vector / deftype, `^:Leaf` typed nested, `^:volatile-mutable`),
+a DB-shaped type with an `e/make-array` field. Browser and the other 16 hosts:
+not run.
 
-No branch fixes it. `SeniorCareMarket/eve`: every branch holding
-`src/eve/flat/` carries the refusal; `git log --remotes -S` finds only its
-introduction (`b63e3f3`). `johnmn3/atom.broker`: the 189 eve/flat/deftype/
-pack/delivery/ds-named branch tips (of 2,609) were fetched; every one holding
-`src/eve/flat/chunk.cljc` carries the refusal, including
-`lane-m/eve-bb-delivery-fix` (its fix is bb own-type delivery, per the
-eve.db.ds `deps.edn` comment). The other 2,420 tips were not scanned.
-F1's target is therefore value-array packing, not deftype packing.
+| Law | Measured | Status |
+|---|---|---|
+| V1 deref | delivers `<Type>__Flat` or own class (heap domain); protocol answers | green |
+| V1 deref of a value array, any depth | throws `flat chunk: a value held by reference cannot be packed` | RED |
+| V1 `$` exit | a deftype built in `swap!` escapes LIVE (slab `Box`); a value array escapes live (`ValueArray`) | RED |
+| V1 `swap!` return | `EveHashMap` (slab-backed); its deftype a `FrozenValue` | RED |
+| V1 watch old/new | no throw; flatness not checked | unmeasured |
+| V2 | a deftype stored, then re-stored inside `swap!` (`(assoc m :old (:db m))`), derefs as `FrozenValue` — no protocol | RED |
+| V3 deftype | outside → `Box__Flat`; inside → `Box` | green |
+| V3 `e/make-array` outside | throws `Eve data must be constructed inside a swap!` | RED |
+| V4 | a flat `Box` `reset!` in is stored as `FrozenValue`; read inside `swap!` it is a `FrozenValue` — no protocol | RED |
+| V5 | `eve->clj` dispatches on IPlain; user deftypes and value arrays pass through LIVE; a stored flat `Box` (`FrozenValue`) → `PersistentArrayMap`, type lost | RED |
+| V6 | `identical?` false, `=` true | green |
+| V7 | always `false`: compares `(d/eve->clj cur)` (IPlain) to the delivered value (`atom.cljc` `compare-and-set`) | RED |
+| V8 | deref'd flat `Box` reads after 1,000 swaps | green (domain-close and GC unmeasured) |
 
-## 1. Step 1 — find the existing fix before writing one
+## 2. How it got here (measured from history)
 
-John believes an agent already implemented flat packing for deftype values.
-It is not on `release/eve-0.9.3.3`. `SeniorCareMarket/eve` has no branch
-named for it (only `collate/eve-db-ds-gaps-07644be`, `rc/eve-0.9.3.2-ds-gaps`
-matched a search of branch names). Unverified lead: the eve.db.ds `deps.edn`
-comment names `atom.broker` branch `lane-m/eve-bb-delivery-fix`.
+- **Mar 2026** (`SeniorCareMarket/eve` `0d66b99`, newest pre-reunification
+  branch): `eve->cljs` — by shape (`src/eve/atom.cljc:1528`: IMap / IVector /
+  ISet / ISequential → host collections) and by storage tag
+  (`src/eve/shared_atom.cljs:2352`). No protocol. Its last arm passed
+  anything else through, and eve arrays were kept slab-backed on purpose —
+  deftypes and arrays were already not materialized.
+- **Sep 2026** (`c7dc390`, "JVM reunification", a local-only commit, under
+  no ref anywhere): `eve->cljs` renamed `eve->clj` for the JVM and given an
+  IPlain first arm. Materializing became per-type opt-in.
+- **2026-10-15** (atom.broker `b24c8c0347`): EVE at `c7dc390` vendored into
+  atom.broker; IPlain arrives with it.
+- **2026-11-07** (atom.broker `e774995728`, `lane-m/eve-bb-datom-cmp`):
+  "an Eve type materializes through its own IPlain or passes through, on
+  every seat" — an `IsEve` pass-through added to stop a bb defect (the
+  DataScript DB presented as a host map, walked, and its BTSet's `-plain`
+  dropping the comparator). No operator ruling quoted. The BTSet `-plain`
+  defect was routed, not fixed.
+- **2026-11-14** (atom.broker `e8b087ce30`): the above reaches `main` in a
+  squashed rebase; released in 0.9.3.x.
 
-1. In `johnmn3/atom.broker` and `SeniorCareMarket/eve`, list every branch and
-   run `git log --all --oneline -S"held by reference cannot be packed"`.
-2. For each hit, run the probe in §4 on that branch. Record branch, commit,
-   and the E1–E8 results in this file.
-3. If a branch turns E1 green: merge it into the release line (John's word
-   for the push), then go to §3 for whatever is still red.
-4. If none does: build §2.
+## 3. The fixes, in order
 
-## 2. The fixes, in order
+X0. **Find the clobbered implementation, bounded.** John: V1–V8 worked in
+sessions over the last few weeks. Search atom.broker (all 2,609 tips, full
+history) and eve for: a laws/value-model test; commits touching
+`eve->clj`, `deliver-flat`, `$*`, `compare-and-set` whose message names
+flat delivery, valhalla, or identity; and the commits that later changed
+those lines. For each hit: branch, commit, which laws its tree passes (§5
+test). Output: the clobbering commits named in this file. Budget: one
+pass; the fixes below do not wait on it — anything found is merged or
+diffed against them.
 
-F1. **Flat packing for `eve/deftype` values (fixes E1–E4).** In
-`src/eve/flat/` the packer refuses content held by reference. A deftype
-instance is not a reference: it is a type id plus a value array of fields.
-Pack it as: type tag, the type's registered name, field count, each field
-packed recursively. Unpack through the type registry (`eve.type-readers`)
-into a flat object of the same type that answers the type's protocols.
-Fns and host objects stay refused. Done when E1–E4 return values, the
-delivered value answers the deftype's protocol methods after later swaps,
-and an unknown type name at unpack throws a named error.
+X1. **Excise IPlain; one generic `eve->clj` (V5).** Delete `d/IPlain`, every
+`-plain` body (50 lines across 20 files at this pin), the `IsEve`
+pass-through arm, and `eve.record`'s IPlain portability walk (it walks the
+generic `eve->clj` result instead). `eve->clj`, in this order: nil and
+scalars → themselves; an eve-deftype instance or flat sister → its flat
+instance (§0 reading); an eve value array → the vector of its slots'
+`eve->clj`; a flat handle → its host collection; eve maps / vectors / sets
+/ lists, by shape → host collections, recursively; anything else → itself.
+One `.cljc`, no host branch beyond the shape predicates each host already
+has. All 57 `eve->clj` call sites keep the name and get the generic rule.
 
-F2. **`$` must not hand out live deftype objects (fixes E5).** On region
-exit the result is walked; any deftype in it is delivered by F1's packer, the
-same as deref. Done when E5 returns a flat object that still reads correctly
-after 1,000 further swaps on the atom.
+X2. **One exit (V1, V2, V8).** Every exit — deref, `$*` (today
+`(rr/run f d/eve->clj)`), `swap!`/`swap-vals!`/`reset!` returns, watch
+delivery, the `:copy` foreign policy, the freeze-absent `plain-deref`
+fallback — calls the one delivery (`eve.flat.freeze/deliver-flat`, inside
+the pin). The delivery packs the whole value as one chunk (stream for a
+sequential root): a `FrozenValue`/`BasedValue`/`ConcatBatch` met inside is
+packed by its content, never surfaced. The JVM own-class path (zip into a
+heap domain) stays only if its result is heap-owned and passes V2/V8;
+otherwise it is removed so every host delivers the same flat form.
 
-F3. **Block identity in alpha (answers E6).** Add `eve/same?` to
-`eve.alpha`: true when two handles name the same block of the same domain
-(the logic already in narcis `eve.text.store/same-node?`). Document that `=`
-on a deftype is whatever the type defines. Done when
-`($ (eve/same? (:db @a) (:db @a)))` is true and false for distinct blocks.
+X3. **Value arrays pack (V1, V2; the old F1 throw).** The packer gives an
+eve value array a rep (its slots, as a vector rep) instead of refusing it as
+a reference; `e/aget`, `e/alength`, `e/array-seq`, `e/aclone` accept the
+delivered flat form on every host. Fns and host objects stay refused.
 
-F4. **Document E8 where users see it**, and state in `doc/api-guide.md`
-which calls work on an atom holding deftypes after F1.
+X4. **Flat values inside the atom answer as their type (V4).** A flat
+deftype stored in an atom (today a `FrozenValue` around its chunk) reads
+back, inside `swap!` and `$`, as an object of its type — its sister over the
+stored chunk — so protocol dispatch and field reads work in the atom
+exactly as outside.
 
-F5. **Lifetime of values built outside every atom.** Measure it: build
-1,000,000 small deftype values outside any `swap!`, watch used bytes. If the
-process slab never gives them back, say so in `doc/memory-model.md` and add
-the alpha call that releases them, or state that such values must be built
-in an atom. DS unit U3 depends on this answer.
+X5. **Construction (V3).** `e/make-array` (and every eve constructor that
+throws outside a context today) gives its flat form outside every atom,
+as `eve/deftype` already does.
 
-## 3. Hosts
+X6. **CAS by value (V7).** `compare-and-set!` delivers the current value
+under the pin (X2) and compares it to `old` with `=`.
 
-Every fix lands green on the JVM **and** on ClojureScript in a browser
-(`clojure -M:browser-test` per `deps.edn`). A fix green on one is not done.
+X7. **The routed defect, fixed at its producer.** The persistent-sorted-set
+BTSet's lost comparator (F-BB-DATOM-CMP's root, routed 2026-11-07): with X1
+the BTSet is a deftype, takes the deftype arm, and is never rebuilt as a
+set. The bb types adapter's `IsEve` marking is deleted with the arm. Done
+when the eve.db.ds bb leg reads its DB with no pass-through.
 
-## 4. The probe (commit it as `test/eve/deftype_atom_laws_test.cljc`)
+X8. **Identity in the region (DS needs it; was F3).** `eve/same?` in
+`eve.alpha`: inside a `$` or `swap!`, true when two persistent handles name
+the same block of the same domain. Outside an atom it is not defined —
+values there have no identity (V6); it throws there.
 
-One `deftest` per row E1–E8, written against `eve.alpha` only, asserting the
-fixed behavior. It is red today on E1–E6. It runs on the JVM and in the
-browser. The DS repo copies this file as its first commit.
+X9. **Docs where users see them.** `doc/api-guide.md` and
+`doc/memory-model.md`: the §0 model and the V-laws, word for word.
 
-## 5. Rules
+## 4. Hosts
 
-One branch per fix off the release line. Each commit message carries the
-probe's before/after rows. No fix is called done from one host. Report the
-row counts, not prose.
+"All eve platforms" = the JVM plus the 17 rows of `hosts.edn`: `:cljs`,
+`:browser`, `:bb`, `:bb-minimal`, `:nbb`, `:scittle`, `:cherry`, `:squint`,
+`:cljr`, `:lpy`, `:jolt`, `:clje`, `:vs`, `:glj`, `:jank`, `:lg`, `:cljd`.
+A law is done when the §5 test is green on every host that runs eve's
+suite. Gate order: JVM and browser first (DS needs them), then every other
+host; a host with no runner is named in this file with what it lacks.
+
+## 5. The laws test (`test/eve/value_model_laws_test.cljc`)
+
+One `deftest` per row of §1 (V1 split per exit), written against
+`eve.alpha` only, asserting the law. Red today on every RED row of §1. The
+DS repo copies it as its first commit.
+
+## 6. Rules
+
+Each commit message carries the §1 rows it moves, before → after, and the
+hosts it ran on. A law is not green from one host. Report row counts, not
+prose. Order: X0 (one pass) alongside the §5 test; then X1, X2, X3, X4, X5,
+X6, X7, X8, X9.

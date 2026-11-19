@@ -20,13 +20,16 @@ Model: narcis `src/narcis/store_eve.cljc`. One require,
 
 - DB fields are `[schema eavt aevt avet max-eid max-tx rschema]`. There is
   no `vaet`. Datom is `[e a v tx]`; added is the sign of `tx`.
-- `@conn` cannot return the DB (EVE-FIX E1). See §4.
+- `@conn` cannot return the DB (EVE-FIX §1, V1 for value arrays). See §4.
+  The rules in this section that forbid `add-watch`, `compare-and-set!`,
+  `reset!` and `swap!`'s return predate EVE-FIX §0's value model; they are
+  lifted once V1, V2 and V7 are green in the pin.
 - `d/q`, `d/pull`, `d/entity`, `d/datoms` take DB values, not conns.
 - The sorted set never stores its comparator. Every op takes it as an
   argument, as upstream DS already calls it: `(set/conj s datom cmp)`.
 - Never `add-watch`, `compare-and-set!` or `reset!` the conn's Eve atom.
   Never use `swap!`'s return value. Never use `identical?` or `=` on a DB,
-  a set node or a stored Datom; use `eve/same?` (EVE-FIX F3).
+  a set node or a stored Datom; use `eve/same?` (EVE-FIX X8).
 
 ## 3. Source baseline
 
@@ -70,7 +73,7 @@ not listed in §6.
 - **Conn-less values** (`empty-db`, `init-db`, `db-with`, `with`, `filter`):
   each `empty-db`/`init-db` makes a private in-memory conn; `db-with` adds
   the new DB to that atom's `:kept` and returns a handle. OPEN, John's call,
-  blocked on EVE-FIX F5: whether these are released explicitly or by the host.
+  answered by EVE-FIX V8 (flat values are host heap, reclaimed by the GC): whether these are released explicitly or by the host.
 
 ## 5. `eve.db.ds.bset`
 
@@ -109,4 +112,4 @@ alpha lacks stops and files it (v1 §4). No unit edits another's files.
 
 ## 8. Before the swarm starts
 
-John's word on §4's open item, and EVE-FIX F1–F3 green in a tagged pin.
+John's word on §4's open item, and EVE-FIX V1–V8 and X8 green in a tagged pin.
