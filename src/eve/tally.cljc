@@ -633,6 +633,22 @@
                 (if (slab/free! sio off) (inc n) n))))
           0 offs))
 
+(defn free-unreached!
+  "A WON attempt's allocations its new root does not reach, freed: every block of offs that has a row and that no
+   holder took (no PUB) — the swap function's intermediates (the first of a two-key assoc's two maps, a transient's
+   discarded nodes, the value a validator saw and f replaced). hold-root! has already counted everything the new
+   root reaches, and another atom's hold of a block this attempt allocated set its PUB too, so a block still without
+   PUB here is held by nothing: never published, no reader can hold it. A block with no row is kept — hold-one!
+   answers :norow for such a block and holds it uncounted, so it may be part of the published tree (the leak
+   direction, never a use-after-free). Answers how many."
+  [sio offs]
+  (reduce (fn [n off]
+            (let [row (alloc/desc-of sio off)]
+              (if (and row (zero? (bit-and (flags row) F_PUB)) (alloc/allocated? sio off))
+                (if (slab/free! sio off) (inc n) n)
+                n)))
+          0 offs))
+
 (defn count-of
   "How many hold the block at off: -1 uncounted, 0 parked (or claimed by a flush), k, or 2147483647 (held for ever,
    or a count past 2^31 - 1)."

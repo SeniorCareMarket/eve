@@ -1346,6 +1346,8 @@
           (let [delivery (let [w? (or want-vals? (watched? ds atom-slot-idx))
                                dv (when w? (deliver-value ds atom-slot-idx old-val))]
                            [dv dv (read-answer ds atom-slot-idx old-val)])]
+            ;; nothing published: whatever f allocated on the way to the old value is held by nothing
+            (tally/free-unreached! sio (alloc/logged-allocs lsio))
             (alloc/stop-logging! lsio)
             [:ok new-val delivery])
           ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
@@ -1372,6 +1374,10 @@
             (if (== w old-ptr)
               (do
                 (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)
+                ;; what the attempt allocated that the new root does not reach (the swap function's intermediates)
+                ;; is held by nothing: freed now, before the drop and the durable sweeps below, which cover these
+                ;; classes through the logged allocations they already name
+                (tally/free-unreached! sio (alloc/logged-allocs lsio))
                 (if (and durable-commits? journal (<= (:limit journal) 1))
                   ;; J1 (journal, per-commit durability): the slot lets
                   ;; old go FIRST, so the drop's descriptor writes join
@@ -1409,7 +1415,7 @@
                     ;; the drop's descriptor writes are forced too (the root
                     ;; force above covered the root's own range only)
                     (when (and durable-commits? (nil? journal))
-                      (alloc/sync-touched! sio @tally/*touches*))))
+                      (alloc/sync-touched! sio (into @tally/*touches* (alloc/logged-allocs lsio))))))
                 ;; delivery computed HERE, under the attempt's pin: the old
                 ;; root is retired by this commit, so converting it after
                 ;; the pin drops would read retired blocks (the discipline
