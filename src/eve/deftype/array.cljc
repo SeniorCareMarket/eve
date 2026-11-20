@@ -36,6 +36,7 @@
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser]
+            [eve.fast-proto :as fp]
             [eve.encoding :as enc]
             [eve.platform :as p]
             ;; a slot holds any eve value: Clojure data stored in one becomes
@@ -100,6 +101,21 @@
                   (bit-shift-left (byte-at bs (+ i 3)) 24))]
     (p/int32 v)))
 
+(defn- eve-pointer
+  "[tag offset] when v is an eve value of sio's domain the slot can hold by pointer — what the codec's IEveRoot arm
+   would answer as [EE DB tag offset], without building those bytes — else nil (the codec decides, as before)."
+  [sio v]
+  (when (fp/fast-satisfies? d/IEveRoot v)
+    (let [vs (d/-eve-sio v)]
+      (when (or (nil? vs) (ser/same-domain? vs sio))
+        (let [o   (d/-root-header-off v)
+              h   (ser/read-header-tag sio o)
+              tag (case (int h) 0xED 0x10 0xEE 0x11 h)]
+          (when (some? (ser/get-type-constructor tag))
+            ;; an existing piece stored again: a transient's scope stops freeing within itself (the codec's arm)
+            (ser/stored-piece! sio)
+            [tag o]))))))
+
 (defn- write-slot!
   "Store v in slot i of the n-slot array at off."
   [sio off n i v]
@@ -110,6 +126,8 @@
                (slab/write-i32! sio off (+ pb (* 4 i)) payload))]
     (if (nil? v)
       (put! KIND_NIL 0 0)
+      (if-let [[tag o] (eve-pointer sio v)]
+        (put! KIND_POINTER tag o)
       (let [bs  (encode sio v)
             len (byte-len bs)]
         (cond
@@ -128,7 +146,7 @@
           (let [blk (slab/alloc! sio (+ 4 len))]
             (slab/write-i32! sio blk 0 len)
             (slab/write-bytes! sio blk 4 bs)
-            (put! KIND_BLOCK 0 blk)))))))
+            (put! KIND_BLOCK 0 blk))))))))
 
 (defn- read-slot
   "The value in slot i of the n-slot array at off."
@@ -321,8 +339,12 @@
   "Copy len values from (from, i) to (to, j) — ClojureScript's array-copy."
   [from i to j len]
   (if (and (value-array? from) (value-array? to))
-    (copy-slots! (-va-sio from) (-va-off from) (-va-count from) i
-                 (-va-sio to) (-va-off to) (-va-count to) j len)
+    (do (when (pos? len)
+          ;; the copied pointers are existing pieces stored again: a transient's scope stops freeing within
+          ;; itself, as aset's pointer arm does per slot
+          (ser/stored-piece! (-va-sio to)))
+        (copy-slots! (-va-sio from) (-va-off from) (-va-count from) i
+                     (-va-sio to) (-va-off to) (-va-count to) j len))
     (dotimes [k len]
       (aset to (+ j k) (aget from (+ i k)))))
   to)

@@ -21,6 +21,7 @@
   (:require [eve.deftype-proto.data :as d]
             [eve.atom :as ea]
             [eve.flat.chunk :as chunk]
+            [eve.fast-proto :as fp]
             [eve.flat.source :as source]
             [eve.flat.sister :as sister]
             [eve.flat.freeze :as freeze]
@@ -145,7 +146,7 @@
 (defn view?
   "x is a view (a window onto a pinned version, outside `$`)."
   [x]
-  (satisfies? IView x))
+  (fp/fast-satisfies? IView x))
 
 (defn flat
   "x's flat form: a view's subtree packed; anything else as is."

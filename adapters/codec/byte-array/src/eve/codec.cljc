@@ -17,7 +17,8 @@
                      const-objects]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
-   [eve.encoding :as enc]))
+   [eve.encoding :as enc]
+   [eve.fast-proto :as fp]))
 
 (defn encode-sab-pointer
   "Encode a slab pointer: [0xEE 0xDB tag off0 off1 off2 off3], a fresh byte
@@ -721,7 +722,7 @@
       ;; (the RB tree's SortedSet) is not an EveHashSet. The HAMT map and
       ;; set headers (0xED, 0xEE) take their pointer tags (0x10, 0x11);
       ;; every other type-id (vector 0x12, list 0x13, user types) is its own.
-      (satisfies? d/IEveRoot v)
+      (fp/fast-satisfies? d/IEveRoot v)
       (let [vs  (d/-eve-sio v)
             _   (when (and vs (not (ser/same-domain? vs sio)))
                   ;; its offset means nothing in sio's domain: written,

@@ -276,7 +276,10 @@
                (if (identical? hit ::none)
                  (let [r (boolean (satisfies? p x))] (swap! class-answers assoc key r) r)
                  hit)))))
-(defn- flat-handle? [x]
+(defn flat-handle?
+  "THE FAST HANDLE TEST: x implements IFlatHandle. On the JVM one instanceof for every eve handle type, a per-class
+   remembered answer for anything else; satisfies? where protocols generate no JVM interface."
+  [x]
   #?(:jank (satisfies? IFlatHandle x) :bb (satisfies? IFlatHandle x) :glj (satisfies? IFlatHandle x)
      :clj (or (instance? eve.flat.chunk.IFlatHandle x)
               (and (not (plain-non-handle? x)) (class-satisfies? :flat-handle IFlatHandle x)))
