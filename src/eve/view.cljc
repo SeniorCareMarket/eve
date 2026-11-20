@@ -27,78 +27,32 @@
             [eve.read-region :as rr]
             [eve.deftype-proto.macros :as eve]
             [eve.core :as e]
-            #?(:glj [eve.process :as eproc])))
-
-#?(:clj (set! *warn-on-reflection* true))
+            [eve.gc :as gc]))
 
 ;; ---------------------------------------------------------------------------
 ;; the read's cell: holds the pin's release; collected with the last view
 ;; ---------------------------------------------------------------------------
 
+;; gc: what the cell holds for the GC hook to see it collected (eve.gc/on-collect)
 (deftype Cell [release open? acc gc])
 
-;; The host's GC hook, one per host, built into eve: what ends a read whose
-;; last view the program dropped (read hygiene: a pin left open blocks every
-;; process sharing the domain from reclaiming). With none, reads are C (no
-;; pin of their own) — no pin is ever left open.
-;;   JVM          java.lang.ref.Cleaner: runs on the Cleaner's own thread.
-;;   jolt         no Cleaner: weak references on a ReferenceQueue, swept by
-;;                eve itself — at every new read and every swap! (sweep!).
-;;   glojure      Go finalizers: the cell holds a box whose finalizer records
-;;                its id (eve.process/gc-box), swept by eve itself (sweep!).
-;;   JavaScript   FinalizationRegistry.
-(defonce ^:private weak-registry
-  ;; the sweep's state where the host has weak references but no cleaner:
-  ;; [ReferenceQueue, atom {WeakReference release}]; glojure: [id counter,
-  ;; atom {id release}]
-  #?(:clj (try [(java.lang.ref.ReferenceQueue.) (atom {})]
-               (catch Throwable _ nil))
-     :glj [(atom 0) (atom {})]
-     :default nil))
+;; The host's GC hook (feature gc: eve.gc, one adapter per host capability,
+;; adapters/gc): what ends a read whose last view the program dropped (read
+;; hygiene: a pin left open blocks every process sharing the domain from
+;; reclaiming). With none, reads are C (no pin of their own) — no pin is ever
+;; left open.
 
 (defn sweep!
-  "Release every read whose cell the GC has collected (the weak-reference
-   hosts; a no-op elsewhere). eve calls it at every read and swap!."
+  "Release every read whose cell the GC has collected (where the host's hook
+   is swept by eve; a no-op elsewhere). eve calls it at every read."
   []
-  #?(:clj (when-let [[q reg] weak-registry]
-            (loop []
-              (when-let [r (.poll ^java.lang.ref.ReferenceQueue q)]
-                (when-let [release (get @reg r)]
-                  (swap! reg dissoc r)
-                  (release))
-                (recur))))
-     :glj (let [[_ reg] weak-registry]
-            (doseq [id (eproc/collected-ids)]
-              (when-let [release (get @reg id)]
-                (swap! reg dissoc id)
-                (release))))
-     :default nil))
-
-(defonce ^:private gc-hook
-  #?(:clj (or (try (let [c (java.lang.ref.Cleaner/create)]
-                     (fn [cell release] (.register ^java.lang.ref.Cleaner c cell ^Runnable release)))
-                   (catch Throwable _ nil))
-              (when-let [[q reg] weak-registry]
-                (fn [cell release]
-                  (sweep!)
-                  (swap! (second weak-registry) assoc
-                         (java.lang.ref.WeakReference. cell q) release))))
-     :glj (let [[ctr reg] weak-registry]
-            (fn [cell release]
-              (sweep!)
-              (let [id (swap! ctr inc)]
-                (swap! reg assoc id release)
-                (vreset! (.-gc ^Cell cell) (eproc/gc-box id)))))
-     :cljs (when (exists? js/FinalizationRegistry)
-             (let [r (js/FinalizationRegistry. (fn [release] (release)))]
-               (fn [cell release] (.register r cell release))))
-     :default nil))
+  (gc/sweep!))
 
 (defn available?
   "True on a host whose GC can end a read (read-end B is possible there;
    views are built on every host — C needs no GC)."
   []
-  (some? gc-hook))
+  (gc/available?))
 
 (defn- env-setting
   "A setting from the environment (NAME) or a JVM system property (prop),
@@ -116,13 +70,13 @@
   ;;            process): it holds no pin; used after that, it throws
   ;; B needs the host's GC hook; a host with none reads in C, which needs
   ;; no GC (each access pins briefly and checks the domain epoch)
-  (atom (if (or (nil? gc-hook) (= "commit" (env-setting "EVE_READ_END" "eve.read-end"))) :commit :gc)))
+  (atom (if (or (not (gc/available?)) (= "commit" (env-setting "EVE_READ_END" "eve.read-end"))) :commit :gc)))
 
 (defn set-read-end!
   "Where a read outside `$` ends: :gc (B) or :commit (C). B needs the host's
    GC hook; on a host with none the read stays in C."
   [mode]
-  (reset! read-end (if (and (= :gc mode) (nil? gc-hook)) :commit mode)))
+  (reset! read-end (if (and (= :gc mode) (not (gc/available?))) :commit mode)))
 
 (defn read-end-mode [] @read-end)
 
@@ -149,7 +103,7 @@
             c (Cell. once open? nil (volatile! nil))]
         (if (rr/active?)
           (rr/on-exit! once)
-          (gc-hook c once))
+          (vreset! (.-gc c) (gc/on-collect c once)))
         [c once]))))
 
 (defn- ended! [^Cell cell]
