@@ -21,7 +21,7 @@
                    ;; the compiler's own Clojure (a JVM)
                    "adapters/coll/jvm/src" "adapters/slab/heap/src"
                    "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src" "adapters/int32/jvm/src"
-                   "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/thread/jvm/src"
+                   "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/gc/java/src" "adapters/thread/jvm/src"
                    "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/java/src"
                    ;; eve.flat-io, the inbuilt root: its .cljc serves the compile and the compiler's own Clojure
                    ;; (hosts.edn's :cljs row: the ClojureScript fast root first)
@@ -40,7 +40,7 @@
                    "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/gc/js/src"
                    "adapters/thread/browser/src" "adapters/journal-file/node/src"
                    "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src"
-                   "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src"
+                   "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/gc/java/src"
                    "adapters/thread/jvm/src" "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/java/src"
                    ;; eve.flat-io: the ClojureScript fast root, then the inbuilt root (as :node-test)
                    "adapters/flat-io/js/src" "adapters/flat-io/portable/src"]
