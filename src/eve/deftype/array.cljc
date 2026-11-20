@@ -36,6 +36,7 @@
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser]
+            [eve.fast-proto :as fp]
             [eve.encoding :as enc]
             [eve.platform :as p]
             ;; a slot holds any eve value: Clojure data stored in one becomes
@@ -102,14 +103,9 @@
 
 (defn- eve-pointer
   "[tag offset] when v is an eve value of sio's domain the slot can hold by pointer — what the codec's IEveRoot arm
-   would answer as [EE DB tag offset], without building those bytes — else nil (the codec decides, as before). The
-   type test is one instanceof on the JVM, satisfies? on ClojureScript (a property test there); other hosts take the
-   codec's path."
+   would answer as [EE DB tag offset], without building those bytes — else nil (the codec decides, as before)."
   [sio v]
-  (when #?(:bb false :jank false :glj false
-           :clj (instance? eve.deftype_proto.data.IEveRoot v)
-           :cljs (satisfies? d/IEveRoot v)
-           :default false)
+  (when (fp/fast-satisfies? d/IEveRoot v)
     (let [vs (d/-eve-sio v)]
       (when (or (nil? vs) (ser/same-domain? vs sio))
         (let [o   (d/-root-header-off v)
