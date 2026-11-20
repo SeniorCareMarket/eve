@@ -817,9 +817,9 @@
                                (if (seq vs) (assoc m ::views vs) (dissoc m ::views))))))))
 
 (defonce ^:private view-read-hook
-  ;; eve.view's registration (it requires this namespace): (fn [raw release]
-  ;; -> the read's answer). Registered only on a host whose GC can end a
-  ;; read; with none, reads outside `$` deliver flat.
+  ;; eve.view's registration (it requires this namespace): (fn [raw ctx]
+  ;; -> the read's answer), loaded on first need (view-read-fn); ::none where
+  ;; no view layer loads (basilisp), whose reads outside `$` deliver flat.
   (clojure.core/atom nil))
 
 (defn register-view-read!
@@ -829,12 +829,30 @@
 
 (declare deliver-value deref-deliver)
 
+(defn- view-read-fn
+  "The registered view read, loading eve.view (which registers it) the first
+   time a read needs it — a program that reads an atom need not have required
+   eve.view (or eve.alpha) first. ::none caches its absence (a host with no
+   flat layer yet: basilisp)."
+  []
+  (let [h @view-read-hook]
+    (cond
+      (fn? h) h
+      (= ::none h) nil
+      :else #?(:cljs nil
+               :clje nil
+               :lpy (do (reset! view-read-hook ::none) nil)
+               :default (do (try (requiring-resolve 'eve.view/wrap)
+                                 (catch #?(:cljd dynamic :cljr Exception :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
+                            (let [h @view-read-hook]
+                              (if (fn? h) h (do (reset! view-read-hook ::none) nil))))))))
+
 (defn- read-answer
   "The answer a read gives for raw, read now under the caller's pin: a view
    holding a pin of its own (from the current epoch) when views are built
    here, else raw delivered flat."
   [{:keys [root-r] :as ds} atom-slot-idx raw]
-  (if-let [h @view-read-hook]
+  (if-let [h (view-read-fn)]
     (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
       ;; the read api eve.view chooses from: a pin of the read's own (:hold,
       ;; answering its release), or per-access pins (:enter / :exit) checked
@@ -1158,7 +1176,7 @@
   (cond
     (rr/active?) (region-deref ds atom-slot-idx)
     #?@(:bb [] :glj [] :clj [(guard/active?) (guard-deref ds atom-slot-idx)])
-    (and (some? @view-read-hook) (nil? d/*parent-atom*)) (view-deref ds atom-slot-idx)
+    (and (some? (view-read-fn)) (nil? d/*parent-atom*)) (view-deref ds atom-slot-idx)
     :else (flat-deref ds atom-slot-idx)))
 
 ;; ---------------------------------------------------------------------------

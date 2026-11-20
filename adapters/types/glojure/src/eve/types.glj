@@ -145,7 +145,10 @@
 (defn host-type
   "A plain type written with the JVM's names (host-deftype)."
   [_env type-name fields parsed]
-  (let [impls (glj-translate-protos parsed)]
+  (let [impls (glj-translate-protos parsed)
+        ;; a map type stands in for a map (the :define rule above): a plain record would answer a keyword lookup with
+        ;; its own fields (eve.view's ViewMap: (:files v) was nil)
+        type-name (if (some #(= 'eve.core/IMap (:protocol %)) impls) (vary-meta type-name assoc :eve/map true) type-name)]
     `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))
          ~@(when (printed? impls) [(sio/print-method-form type-name 'eve.core/-pr-writer)])
          ~type-name)))
