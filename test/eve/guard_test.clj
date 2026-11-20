@@ -42,9 +42,10 @@
                  [(:id x) (try (:id y) (catch clojure.lang.ExceptionInfo _ :closed))])))))
     (testing "read-only"
       (is (thrown? UnsupportedOperationException (g/with-guard (assoc @a :x 1)))))
-    (testing "pins released at close"
+    (testing "pins released at close (the extent's thread pins; derefs outside
+              it answer views, whose pins the GC ends: :eve.atom/views)"
       (g/with-guard (get @a :k1))
-      (is (empty? @(:pins (ea/-domain-state a)))))))
+      (is (empty? (dissoc @(:pins (ea/-domain-state a)) :eve.atom/views))))))
 
 (deftest same-domain-and-foreign-stores
   (let [a (e/atom src) b (e/atom {}) c (e/atom ::guard-test-other {})]

@@ -2077,6 +2077,20 @@
 (defprotocol IHandlePos (-hctx [h]) (-hoff [h]))
 (defn handle-ctx [h] (-hctx h))
 (defn handle-off [h] (-hoff h))
+(defn root-handle?
+  "h reads its chunk's root (its chunk's bytes are its value's), not a node
+   nested inside a larger value's chunk."
+  [h]
+  (cond
+    (satisfies? IHandlePos h) (== (-hoff h) (.-root ^Ctx (-hctx h)))
+    ;; a sister reads through its field source: a record node is the root
+    ;; only at its chunk's root; a batch row never is
+    (satisfies? source/ISister h)
+    (let [src (source/-sister-source h)]
+      (cond (instance? RecordSource src) (== (.-off ^RecordSource src) (.-root ^Ctx (.-ctx ^RecordSource src)))
+            (instance? RowSource src) false
+            :else true))
+    :else true))
 
 (defprotocol IFlatDigest (-digest [h]))
 (defn digest-of [h] (-digest h))

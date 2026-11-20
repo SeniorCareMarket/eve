@@ -989,7 +989,13 @@
                  (concat-batch? v)
                  (based-value? v))
              (not (frozen-value? v)))
-    (let [h (if (based-value? v) (deliver-flat (plain-of v)) v)
+    (let [h (cond (based-value? v) (deliver-flat (plain-of v))
+                  ;; a node nested in a larger value's chunk (a lookup into a
+                  ;; delivered flat value): its own chunk, never the whole
+                  ;; chunk it sits in (whose root is the larger value)
+                  (and (satisfies? chunk/IFlatHandle v)
+                       (not (chunk/root-handle? v))) (chunk/pack v)
+                  :else v)
           [stream framed?] (if (concat-batch? h)
                               [(frame-stream (mapv chunk/bytes-of (.-handles h))) true]
                               [(chunk/bytes-of h) false])
@@ -1048,6 +1054,14 @@
 
       (satisfies? source/ISister v) v
 
+      ;; a flat handle a host does not see as a collection (glojure, bb, jank:
+      ;; their handles are eve.core types) -> its host data, as the per-host
+      ;; IPlain unpack did (measured: without it, cohost-media's publish on
+      ;; glojure threw "wrong number of arguments (2)" on a FlatMap)
+      (and (satisfies? chunk/IFlatHandle v)
+           (not (or (map? v) (set? v) (vector? v) (sequential? v))))
+      (chunk/unpack v)
+
       ;; Eve's kinds with no collection shape, as host data
       (satisfies? eds/IDatasetAccess v)
       (let [cm (eds/-col-map v)]
@@ -1090,6 +1104,18 @@
       :else nil)))
 
 (d/register-flat-of! flat-of)
+
+;; A persistent eve typed array packs as its elements with its subtype as
+;; metadata — the form eve.array/eve-array builds outside every atom, which
+;; reads as an array of that subtype (eve.array's IEveArray on flat vectors).
+;; A nominal converter: claimed before the plain collection branches, and
+;; registered here because eve.array loads below the chunk on the JVM.
+(chunk/register-nominal-rep-converter!
+  (fn [v]
+    (when (and (satisfies? d/IEveRoot v)
+               (satisfies? d/ISabStorable v)
+               (= :eve/array (d/-sab-tag v)))
+      (chunk/to-rep (with-meta (vec (seq v)) {:eve/array-subtype (earr/-subtype v)})))))
 
 (ser/register-header-constructor! CHUNK-TAG frozen-value)
 (ser/register-header-disposer! CHUNK-TAG dispose-chain!)

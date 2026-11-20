@@ -4,7 +4,8 @@
    region's result leaves as plain data (a lazy seq realized, its elements materialized); nothing the region's own
    writes retire is freed while it runs (the retire queue keeps every entry until the region lets go — without the
    pin the queue drains at each write); a region inside
-   another joins it; the pins go when the body throws. Outside a region deref materializes and holds nothing. On
+   another joins it; the pins go when the body throws. Outside a region deref answers a view (eve.view: no
+   persistent value leaves; this thread holds no pin — the view's read is the GC's to end). On
    every host (a network atom's leases: eve.net.remote-atom-test)."
   (:refer-clojure :exclude [swap!])
   (:require [clojure.test :refer [deftest is testing]]
@@ -32,8 +33,8 @@
 
 (deftest deref-in-a-region-is-the-stored-value
   (let [a (fresh {:by-id {1 {:name "ada"} 2 {:name "bob"}} :n 2})]
-    (testing "outside a region deref materializes and holds nothing"
-      (is (not (stored? @a)))
+    (testing "outside a region deref answers no persistent value, and this thread holds no pin"
+      (is (not (e/persistent? @a)))
       (is (not (pinned? a))))
     (testing "inside, the stored value, its domain pinned; the region's result plain, the pin gone"
       (let [seen (clojure.core/atom nil)

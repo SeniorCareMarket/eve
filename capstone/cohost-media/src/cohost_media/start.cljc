@@ -487,7 +487,7 @@
    under the member's name, and stop-members! shuts it down with the other
    executors. The seat boots lazily, on the first submit: a boot thread
    submits a no-op form (the boot is the realm's, in the shell page), and
-   supervise's started! is recorded when the seat answers — the pid is this
+   supervise's started! is recorded before it is submitted — the pid is this
    process's, as for the JVM member, whose pool also lives here. A seat
    that fails to boot is an exited member (code 1); the seat has no
    restart of its own, where the watched processes had theirs."
@@ -499,9 +499,12 @@
        (thread/spawn
         (fn []
           (try
-            (thread/submit-form ex 'cljs.user '(fn [] true))
+            ;; started before the boot: the page joins (:joined true) as soon
+            ;; as it loads, which can be before the boot form answers, and a
+            ;; started! after it would reset :joined over the join
             (sv/started! (:control atoms) "browser" child (self-pid)
                          (sv/next-start (:control atoms) "browser") (now))
+            (thread/submit-form ex 'cljs.user '(fn [] true))
             (catch Throwable t
               (log "the browser seat failed to start:" (ex-message t))
               (sv/exited! (:control atoms) "browser" 1 (now))))))
