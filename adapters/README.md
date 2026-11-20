@@ -59,6 +59,16 @@ JVM roots that `:cljs` and `:browser` carry for the compiler's own Clojure (its 
 | | | `region/glojure`: eve's Go region package compiled into glj-eve (`impls/glojure/region`: Go's heap or a MAP_SHARED file, `sync/atomic`, futex; a Lustre mount's read-modify-writes under fcntl locks) | glojure |
 | | | `region/vs`: a region is an address in the program's own linear memory — a reserved window (`mmap/reserve!`), or a file mapped over one (`vs.mmap/map-file!` under vs-eve-host); the program-runtime mmap arms | ValueScript |
 | | | `region/jank`: C++ through `cpp/raw` — a `calloc`'d block or a `MAP_SHARED` mapping grown never truncated, the `__atomic` builtins (seq-cst, an unaligned i32 by `memcpy`), the futex syscall (shared), bulk bytes jank's `u8` arrays; `JankLockedRegion` for a Lustre mount by fcntl locks | jank |
+| gc | `eve.gc`: the GC hook that ends a read (eve.view, read-end B) — `(token release)` answers a fresh object whose collection runs `release` (the read's cell holds it alone), `(sweep!)` runs the releases eve collects itself, `(available?)`; a host with none reads in C | `gc/java`: `java.lang.ref.Cleaner`; else weak references on a `ReferenceQueue`, swept by eve | JVM, babashka, jolt |
+| | | `gc/js`: `FinalizationRegistry` | ClojureScript, ClojureScript in a browser, nbb, scittle, cherry, squint |
+| | | `gc/glojure`: a Go finalizer on a box glj-eve allocates (`impls/glojure/host/gc.go`), swept by eve | glojure |
+| | | `gc/letgo`: the same over lg-eve's natives (`impls/let-go/evenative/gc.go`) | let-go |
+| | | `gc/jank`: a Boehm finalizer on an `opaque_box` (`cpp/raw`), swept by eve | jank |
+| | | `gc/python`: `weakref.finalize` | basilisp |
+| | | `gc/beam`: a NIF resource whose destructor records its id (`native/eve_gc_nif.c`, its own library: no hook when it does not load), swept by eve | clojerl |
+| | | `gc/clr`: `System.WeakReference`, polled by eve (amortized) | ClojureCLR |
+| | | `gc/dart`: Dart's `WeakReference`, polled by eve (amortized) | ClojureDart |
+| | | `gc/none`: no hook (reads in C) | ValueScript |
 | journal-file | `eve.journal-file`: the commit journal's file for a durable disk domain — `open-journal`, `with-journal-lock`, `journal-record` / `journal-record-of`, `journal-scan`, `journal-append!`, `journal-write-at!`, `journal-truncate!`, `journal-force!`, `journal-close!`. One record format on every host (an epoch and its atom table, CRC-checked); `eve.atom` owns the lock / sweep / append / force sequence and the retention floor it advances, the adapter owns only the file. A host with no implementation takes `journal-file/unsupported`, where opening a journal domain fails rather than running undurably | `journal-file/java`: a file channel and its lock | JVM, babashka |
 | | | `journal-file/node`: an append-mode fd; the lock a lock directory beside the file | ClojureScript, ClojureScript in a browser, nbb, cherry |
 | | | `journal-file/clr`: .NET file streams and their lock | ClojureCLR |
