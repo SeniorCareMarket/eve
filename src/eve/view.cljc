@@ -126,6 +126,13 @@
 
 (defn read-end-mode [] @read-end)
 
+(defn- release-once
+  "The read's release, run once. Built in its own scope: what the GC hook
+   keeps (the release) must not reach the cell, and an interpreter's closure
+   (glojure's) holds its whole enclosing scope, not only what it names."
+  [open? release]
+  (fn [] (when @open? (vreset! open? false) (release))))
+
 (defn- cell-for
   "The cell of a read (ctx: the atom's read api — :epoch, :hold, :enter,
    :exit). Inside `$`: a pin of its own, released at the region's exit (V10).
@@ -138,8 +145,7 @@
   (let [open? (volatile! true)]
     (if (and (= :commit @read-end) (not (rr/active?)))
       [(Cell. (fn []) open? (select-keys ctx [:enter :exit :epoch]) nil) (fn [])]
-      (let [release ((:hold ctx))
-            once (fn [] (when @open? (vreset! open? false) (release)))
+      (let [once (release-once open? ((:hold ctx)))
             c (Cell. once open? nil (volatile! nil))]
         (if (rr/active?)
           (rr/on-exit! once)
