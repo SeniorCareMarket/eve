@@ -1054,6 +1054,14 @@
 
       (satisfies? source/ISister v) v
 
+      ;; a flat handle a host does not see as a collection (glojure, bb, jank:
+      ;; their handles are eve.core types) -> its host data, as the per-host
+      ;; IPlain unpack did (measured: without it, cohost-media's publish on
+      ;; glojure threw "wrong number of arguments (2)" on a FlatMap)
+      (and (satisfies? chunk/IFlatHandle v)
+           (not (or (map? v) (set? v) (vector? v) (sequential? v))))
+      (chunk/unpack v)
+
       ;; Eve's kinds with no collection shape, as host data
       (satisfies? eds/IDatasetAccess v)
       (let [cm (eds/-col-map v)]
