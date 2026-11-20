@@ -1,0 +1,28 @@
+(ns eve.gc
+  "eve's GC hook (feature gc, adapters/README.md) on let-go (lg-eve): a Go finalizer. on-collect answers a box
+   (lg-eve's natives, impls/let-go/evenative/gc.go) that obj holds; when the GC collects obj the box goes with it, and
+   its finalizer records the box's id. sweep! takes the ids and runs those releases on eve's own goroutine (a Go
+   finalizer runs no let-go code). eve.view sweeps at every read.
+
+   on-collect's release must not reach obj (a release that holds obj keeps it alive).")
+
+(def ^:private counter (atom 0))
+(def ^:private registry (atom {}))
+
+(defn available? [] true)
+
+(defn sweep!
+  "Run the releases of the objects collected since the last sweep."
+  []
+  (doseq [id (eve.gc-native/take-collected)]
+    (when-let [release (get @registry id)]
+      (swap! registry dissoc id)
+      (release))))
+
+(defn on-collect
+  "Run (release) once obj has been collected. Answers the box obj must hold for that to happen."
+  [obj release]
+  (sweep!)
+  (let [id (swap! counter inc)]
+    (swap! registry assoc id release)
+    (eve.gc-native/new-box id)))
