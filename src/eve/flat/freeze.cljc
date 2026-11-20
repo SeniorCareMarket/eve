@@ -1113,8 +1113,10 @@
 ;; registered here because eve.array loads below the chunk on the JVM.
 (chunk/register-nominal-rep-converter!
   (fn [v]
-    (when (and (satisfies? d/IEveRoot v)
-               (satisfies? d/ISabStorable v)
+    ;; fast-satisfies?: this runs for every value a pack converts -- each scalar field value of every value
+    ;; delivered -- and a raw satisfies? miss walked the class's supers each time
+    (when (and (fp/fast-satisfies? d/IEveRoot v)
+               (fp/fast-satisfies? d/ISabStorable v)
                (= :eve/array (d/-sab-tag v)))
       (chunk/to-rep (with-meta (vec (seq v)) {:eve/array-subtype (earr/-subtype v)})))))
 

@@ -186,12 +186,20 @@
        open flat-chunk/open
        nil))
    :default
-   (defn- chunk-var
-     "The var of sym in eve.flat.chunk, or nil when the chunk is not
-      loadable on this host."
-     [sym]
-     (try (requiring-resolve (symbol "eve.flat.chunk" (name sym)))
-          (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))))
+   (do
+     ;; each name resolved once: the delivery path asks for chunk fns for every value it packs, and
+     ;; requiring-resolve built a symbol and walked the namespace map each time (7% of a ds read's samples,
+     ;; 2026-11-20 ET). A name that does not resolve is asked again (the chunk may load later).
+     (defonce ^:private chunk-vars (atom {}))
+     (defn- chunk-var
+       "The var of sym in eve.flat.chunk, or nil when the chunk is not
+        loadable on this host."
+       [sym]
+       (or (get @chunk-vars sym)
+           (when-let [v (try (requiring-resolve (symbol "eve.flat.chunk" (name sym)))
+                             (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+             (swap! chunk-vars assoc sym v)
+             v)))))
 
 ;; defined with the converter at the foot of this namespace; registering
 ;; a descriptor is what first forces it
@@ -203,12 +211,16 @@
    [type key, fingerprint], so the type's typed nodes and batch rows
    read as its sister. Answers the descriptor."
   [desc]
+  ;; whether it is an eve.record type's, answered once here: the delivery path asks it for every value it
+  ;; packs (record->typed-rep, own-type-instance?), and it built a set of the field keywords each time
+  (let [ks (into #{} (map :keyword) (:fields desc))
+        desc (assoc desc :record? (and (contains? ks :record-extmap__) (contains? ks :record-meta__)))]
   (swap! descriptors assoc (:type-key desc) desc)
   @converter-registered
   (when-let [factory (:factory desc)]
     (when-let [register! (chunk-var 'register-type!)]
       (register! (:type-key desc) (:fingerprint desc) factory)))
-  desc)
+  desc))
 
 (defn register-sister!
   "What eve-deftype's expansion calls for every type it defines:
@@ -462,9 +474,11 @@
       record type's slab fields, and they ride the descriptor. The
       collection types' descriptors never carry them."
      [desc]
-     (let [ks (into #{} (map :keyword) (:fields desc))]
-       (and (contains? ks :record-extmap__)
-            (contains? ks :record-meta__))))
+     (if (contains? desc :record?)
+       (:record? desc)                                 ;; register-descriptor!'s answer
+       (let [ks (into #{} (map :keyword) (:fields desc))]
+         (and (contains? ks :record-extmap__)
+              (contains? ks :record-meta__)))))
 
 (defn record->typed-rep
      "A slab-backed eve.record instance as the chunk writer's typed
