@@ -1,0 +1,72 @@
+(ns eve.gc
+  "eve's GC hook (feature gc, adapters/README.md) on jank: a Boehm GC finalizer (jank's collector), over C++ (cpp/raw,
+   called as cpp/eve_gc.<fn>). token answers a box (an opaque_box, collector-allocated) that obj holds; when the
+   collector reclaims obj the box goes with it, and its finalizer records the box's id. sweep! takes the ids and runs
+   those releases on eve's own thread (the finalizer calls no jank code). eve.view sweeps at every read.
+
+   token's release must not reach the box's holder (a release that holds obj keeps it alive).")
+
+(cpp/raw "
+#define GC_THREADS 1
+#include <cstdint>
+#include <mutex>
+#include <vector>
+#include <gc.h>
+#include <jank/runtime/object.hpp>
+#include <jank/runtime/core/make_box.hpp>
+#include <jank/runtime/obj/opaque_box.hpp>
+namespace eve_gc {
+  using namespace jank::runtime;
+  static std::mutex mu;
+  static std::vector<long> *ids = new std::vector<long>();
+  static void on_final(void *, void *cd) {
+    std::lock_guard<std::mutex> g(mu);
+    ids->push_back((long)(intptr_t)cd);
+  }
+  object_ref new_box(long id) {
+    auto b = make_box<obj::opaque_box>(jtl::ptr<void>{ nullptr }, \"eve.gc/box\");
+    /* the object's own address: an object_ref's raw pointer carries jank's tag bits (measured: the collector does
+       not see it as a heap pointer; &*b it does) */
+    void *base = GC_base((void *)&*b);
+    if(base) { GC_register_finalizer_no_order(base, on_final, (void *)(intptr_t)id, nullptr, nullptr); }
+    return b.erase();
+  }
+  long take_one() {
+    std::lock_guard<std::mutex> g(mu);
+    if(ids->empty()) { return -1; }
+    long id = ids->back();
+    ids->pop_back();
+    return id;
+  }
+  void collect() { GC_gcollect(); GC_invoke_finalizers(); }
+}
+")
+
+(def ^:private counter (atom 0))
+(def ^:private registry (atom {}))
+
+(defn available? [] true)
+
+(defn sweep!
+  "Run the releases of the objects collected since the last sweep."
+  []
+  (loop []
+    (let [id (cpp/eve_gc.take_one)]
+      (when-not (neg? id)
+        (when-let [release (get @registry id)]
+          (swap! registry dissoc id)
+          (release))
+        (recur)))))
+
+(defn token
+  "A box whose collection runs (release): whatever holds it (eve.view's read cell) is collected with it."
+  [release]
+  (sweep!)
+  (let [id (swap! counter inc)]
+    (swap! registry assoc id release)
+    (cpp/eve_gc.new_box (long id))))
+
+(defn collect!
+  "Run a full collection and its finalizers (tests)."
+  []
+  (cpp/eve_gc.collect))

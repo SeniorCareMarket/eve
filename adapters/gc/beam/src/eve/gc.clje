@@ -1,0 +1,32 @@
+(ns eve.gc
+  "eve's GC hook (feature gc, adapters/README.md) on clojerl: a NIF resource term (eve.gc-nif). token answers the term;
+   the read's cell holds it (an immutable field — a volatile! here is a process-dictionary entry, never collected);
+   when the process's GC drops it the BEAM runs the resource's destructor, which records the id. sweep! takes the ids
+   and runs those releases. When the NIF does not build or load, there is no hook and eve.view reads in C.
+
+   token's release must not reach the token's holder."
+  (:require [eve.gc-nif :as nif]))
+
+(def ^:private loaded? (= :ok (nif/load!)))
+(def ^:private counter (atom 0))
+(def ^:private registry (atom {}))
+
+(defn available? [] loaded?)
+
+(defn sweep!
+  "Run the releases of the tokens collected since the last sweep."
+  []
+  (when loaded?
+    (doseq [id (nif/take-collected)]
+      (when-let [release (get @registry id)]
+        (swap! registry dissoc id)
+        (release)))))
+
+(defn token
+  "A resource term whose collection runs (release); nil when the NIF is not loaded."
+  [release]
+  (when loaded?
+    (sweep!)
+    (let [id (swap! counter inc)]
+      (swap! registry assoc id release)
+      (nif/new-box id))))

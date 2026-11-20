@@ -1,0 +1,29 @@
+(ns eve.gc
+  "eve's GC hook (feature gc, adapters/README.md) on glojure: a Go finalizer. token answers a box (eve's Go host
+   package in glj-eve: impls/glojure/host/gc.go) that the cell holds; when the GC collects the cell the box goes with it, and its
+   finalizer records the box's id. sweep! takes the ids and runs those releases on eve's own goroutine (a Go finalizer
+   runs no glj code). eve.view sweeps at every read.
+
+   token's release must not reach the box's holder — and a glojure closure holds its whole enclosing scope, not only what it
+   names, so build the release in a scope that cannot see obj.")
+
+(defonce ^:private counter (atom 0))
+(defonce ^:private registry (atom {}))
+
+(defn available? [] true)
+
+(defn sweep!
+  "Run the releases of the objects collected since the last sweep."
+  []
+  (doseq [id (seq (eveglj:host.TakeCollected))]
+    (when-let [release (get @registry id)]
+      (swap! registry dissoc id)
+      (release))))
+
+(defn token
+  "A box whose collection runs (release): whatever holds it (eve.view's read cell) is collected with it."
+  [release]
+  (sweep!)
+  (let [id (swap! counter inc)]
+    (swap! registry assoc id release)
+    (eveglj:host.NewGCBox (long id))))

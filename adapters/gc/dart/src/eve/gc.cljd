@@ -1,0 +1,38 @@
+(ns eve.gc
+  "eve's GC hook (feature gc, adapters/README.md) on ClojureDart: Dart's WeakReference (Dart 2.17+), polled by eve.
+   token answers a fresh object; the read's cell holds it alone, and when the GC collects the cell the token's
+   WeakReference loses its target. sweep! scans the registered tokens and runs the releases of the collected ones —
+   amortized: a scan runs once the registrations since the last one reach half the live count (at least 64).
+
+   token's release must not reach the token's holder. Written 2026-11-20 without a Dart runtime to run it on.")
+
+(def ^:private registry (atom []))
+(def ^:private since (atom 0))
+
+(defn available? [] true)
+
+(defn- scan! []
+  (let [dead (volatile! [])]
+    (swap! registry
+           (fn [rs]
+             (vreset! dead [])
+             (into [] (remove (fn [[w release]]
+                                (when (nil? (.-target ^WeakReference w)) (vswap! dead conj release) true)))
+                   rs)))
+    (reset! since 0)
+    (doseq [release @dead] (release))))
+
+(defn sweep!
+  "Run the releases of the tokens collected since the last scan (when enough registrations have accumulated)."
+  []
+  (when (>= @since (max 64 (quot (count @registry) 2)))
+    (scan!)))
+
+(defn token
+  "A fresh object whose collection runs (release) at a later sweep."
+  [release]
+  (sweep!)
+  (let [t (Object)]
+    (swap! registry conj [(WeakReference t) release])
+    (swap! since inc)
+    t))

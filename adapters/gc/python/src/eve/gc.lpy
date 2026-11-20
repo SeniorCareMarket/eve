@@ -1,0 +1,24 @@
+(ns eve.gc
+  "eve's GC hook (feature gc, adapters/README.md) on basilisp: Python's weakref.finalize, which runs a release when its
+   object is collected (CPython: at once, by reference count; a cycle, at the cycle collector). Measured on a basilisp
+   deftype instance, 2026-11-20.
+
+   token answers a fresh object; whatever holds it (eve.view's read cell) is collected with it, and release runs then.
+   release must not reach the token's holder (the finalizer holds the release strongly)."
+  (:import weakref))
+
+(defn available? [] true)
+
+(defn sweep!
+  "Nothing to sweep: weakref.finalize runs its releases itself."
+  []
+  nil)
+
+(deftype Token [])
+
+(defn token
+  "A fresh object whose collection runs (release)."
+  [release]
+  (let [t (Token.)]
+    (weakref/finalize t release)
+    t))
