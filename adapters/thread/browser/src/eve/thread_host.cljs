@@ -298,7 +298,7 @@
                  req {:id id :starter me :entry (str entry) :boot (pr-str (assoc boot :self id)) :started (js/Date.now)}]
              (when (>= id MAX)
                (throw (ex-info "eve.thread-host: thread limit" {:max (dec MAX)})))
-             (if (ours?) (put! SPAWN (pr-str req)) (spawn! req))
+             (if (ours?) (put! SPAWN (wire/encode req)) (spawn! req))
              id)))))
 
 (defn run-thread!
