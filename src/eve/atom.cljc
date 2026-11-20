@@ -836,11 +836,15 @@
   [{:keys [root-r] :as ds} atom-slot-idx raw]
   (if-let [h @view-read-hook]
     (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-      (view-pin! ds epoch)
-      (try (h raw (fn [] (view-unpin! ds epoch)))
-           (catch #?(:cljs :default :lpy python/Exception :default Throwable) e
-             (view-unpin! ds epoch)
-             (throw e))))
+      ;; the read api eve.view chooses from: a pin of the read's own (:hold,
+      ;; answering its release), or per-access pins (:enter / :exit) checked
+      ;; against the epoch the read was taken at
+      (h raw {:epoch epoch
+              :hold (fn [] (view-pin! ds epoch) (fn [] (view-unpin! ds epoch)))
+              :enter (fn [] (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+                              (pin-epoch! ds e)
+                              e))
+              :exit (fn [] (unpin-epoch! ds))}))
     ;; no views here: the new value delivered flat; on a host with no flat
     ;; layer yet (basilisp), the value as before — eve->clj would refuse
     ;; an eve array on every swap!
@@ -1522,12 +1526,36 @@
         (identical? (alloc/sio-root (d/-eve-sio x)) (alloc/sio-root (d/-eve-sio y)))
         (== (d/-root-header-off x) (d/-root-header-off y)))))
 
+(defn- env-setting
+  "A setting from the environment (NAME) or a JVM system property (prop),
+   else nil."
+  [name prop]
+  #?(:clj (or (System/getenv name) (System/getProperty prop))
+     :cljs (when (and (exists? js/process) (.-env js/process))
+             (aget (.-env js/process) name))
+     :default nil))
+
+(defonce ^:private region-off
+  ;; EVE_REGION=off / eve.region=off: `$` runs its body as a plain call —
+  ;; the measurement of how much code needs `$` (its reads answer views,
+  ;; ended by EVE_READ_END's rule)
+  (clojure.core/atom (= "off" (env-setting "EVE_REGION" "eve.region"))))
+
+(defn- region-off? [] @region-off)
+
+(defn set-region-off!
+  "true: `$` runs its body as a plain call (measurement only)."
+  [off?]
+  (reset! region-off off?))
+
 (defn $*
   "`$`'s region (eve.alpha/$ expands to it): (f) with every eve atom deref'd inside answering its lazy, slab-backed
    value under a pin held until the outermost region exits; f's result materialized (d/eve->clj, lazy seqs
    realized) before the pins go. A region inside another joins it."
   [f]
-  (rr/run f d/eve->clj))
+  (if (region-off?)
+    (d/eve->clj (f))
+    (rr/run f d/eve->clj)))
 
 ;; PROTOTYPE (step 2)
 (defn set-foreign-policy!
