@@ -98,7 +98,6 @@
    [eve.net.remote-atom-test :as net-remote-atom-test]
    [eve.net.crypto-test :as net-crypto-test]
    [eve.net.ed25519-test :as net-ed25519-test]
-   [eve.net.pruned-swap-test :as net-pruned-swap-test]
    [eve.net.bytes-codec-test :as net-bytes-codec-test]))
 
 
@@ -329,7 +328,7 @@
   (t/run-tests 'eve.slab-leak-test))
 
 (defn- run-net! []
-  (t/run-tests 'eve.net.json-test 'eve.net.graft-test 'eve.net.xxh3-test 'eve.net.codec-fixture-test 'eve.net.wire-test 'eve.net.broker-test 'eve.net.broker-disk-test 'eve.net.remote-atom-test 'eve.net.crypto-test 'eve.net.ed25519-test 'eve.net.pruned-swap-test))
+  (t/run-tests 'eve.net.json-test 'eve.net.graft-test 'eve.net.xxh3-test 'eve.net.codec-fixture-test 'eve.net.wire-test 'eve.net.broker-test 'eve.net.broker-disk-test 'eve.net.remote-atom-test 'eve.net.crypto-test 'eve.net.ed25519-test))
 
 (defn- run-thread-host! []
   (t/run-tests 'eve.thread-host-test))
