@@ -50,11 +50,20 @@
 
 (defn error-data [e] {:class (.getName (class e)) :message (ex-message e) :data (ex-data e)})
 
+(defn- wire-encode [msg] ((requiring-resolve 'eve.wire/encode) msg))
+(defn- wire-data? [msg] ((requiring-resolve 'eve.wire/data?) msg))
+(defn- wire-decode [bs] ((requiring-resolve 'eve.wire/decode) bs))
+
 (defn send!
-  "Enqueue msg for the thread at addr; never blocks. A thread that has ended has no mailbox: the message is dropped."
+  "Enqueue msg for the thread at addr; never blocks. A thread that has ended has no mailbox: the message is dropped.
+   The message crosses as eve.wire bytes (one flat chunk, the same bytes on every host); a message eve.wire cannot
+   encode — one carrying a closure, which only threads of one heap can share — is handed over in memory."
   [addr msg]
   (when-let [q (.get ^java.util.Map boxes addr)]
-    (.put ^java.util.concurrent.LinkedBlockingQueue q msg))
+    (.put ^java.util.concurrent.LinkedBlockingQueue q
+          (if (= addr (.get ^ThreadLocal local-id))
+            msg
+            (if (wire-data? msg) (wire-encode msg) msg))))
   nil)
 
 (defn start-threads!
@@ -83,9 +92,10 @@
   "The calling thread's next message; :eve.thread/timeout after ms milliseconds (ms < 0: wait for ever; 0: poll)."
   [ms]
   (let [^java.util.concurrent.LinkedBlockingQueue q (.get ^java.util.Map boxes (self))]
-    (cond (neg? ms) (.take q)
-          (zero? ms) (or (.poll q) :eve.thread/timeout)
-          :else (or (.poll q (long ms) java.util.concurrent.TimeUnit/MILLISECONDS) :eve.thread/timeout))))
+    (let [m (cond (neg? ms) (.take q)
+                  (zero? ms) (or (.poll q) :eve.thread/timeout)
+                  :else (or (.poll q (long ms) java.util.concurrent.TimeUnit/MILLISECONDS) :eve.thread/timeout))]
+      (if (bytes? m) (wire-decode m) m))))
 
 (defn stop-threads!
   "Ask each thread to end: the message :eve.thread/stop (a request its loop honours, never a kill)."

@@ -22,7 +22,8 @@
             ["node:path" :as path]
             ["node:worker_threads" :as wt]
             [cljs.reader :as reader]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [eve.wire :as wire]))
 
 ;; The doorbell: one Int32Array over a SharedArrayBuffer every thread holds.
 (def ^:private HDR 8)
@@ -120,9 +121,11 @@
     (let [got (reduce (fn [got p]
                         (if-let [r (wt/receiveMessageOnPort p)]
                           (let [m (.-message r)]
-                            (if (string? m)
-                              (swap! state update :local conj (read-message m))
-                              (install! (.-peer m) (.-port m)))
+                            (cond
+                              ;; data: eve.wire bytes (one flat chunk)
+                              (instance? js/Uint8Array m) (swap! state update :local conj (wire/decode m))
+                              (string? m) (swap! state update :local conj (read-message m))
+                              :else (install! (.-peer m) (.-port m)))
                             true)
                           got))
                       false (vals (:ports @state)))]
@@ -135,13 +138,14 @@
   (let [{:keys [self ports]} @state]
     (cond
       (= addr self) (swap! state update :local conj msg)
-      (not (data? msg))
-      (throw (ex-info "eve.thread-host: a message to another heap must be data (EDN): a host object is refused"
-                      {:eve.thread/refused :host-object}))
       :else
-      (when-let [p (or (get ports addr) (do (drain-ports!) (get (:ports @state) addr)))]
-        (.postMessage p (pr-str msg))
-        (ring! addr))))
+      (let [bs (try (wire/encode msg)
+                    (catch :default _
+                      (throw (ex-info "eve.thread-host: a message to another heap must be data (eve.wire: one flat chunk): a host object is refused"
+                      {:eve.thread/refused :host-object}))))]
+        (when-let [p (or (get ports addr) (do (drain-ports!) (get (:ports @state) addr)))]
+          (.postMessage p bs)
+          (ring! addr)))))
   nil)
 
 (defn- prune-ended!

@@ -26,6 +26,7 @@
    A worker's end is never silent: the worker itself sends its starter {:eve.thread/exit addr :reason r} when its
    entry returns or throws; the Worker's error event (on the page's event loop) is the backstop."
   (:require [cljs.reader :as reader]
+            [eve.wire :as wire]
             [clojure.string :as str]))
 
 ;; The mailboxes: a ring of RING bytes for each of MAX threads, and the page's spawn ring (SPAWN), after a control
@@ -126,9 +127,8 @@
       (.set out (.subarray bytes base (+ base (- n first-n))) first-n))
     out))
 
-(defn- put! [id s]
+(defn- put! [id payload]
   (let [{:keys [ctl bytes]} (mem)
-        payload (.encode encoder s)
         n (.-length payload)
         need (* 4 (js/Math.ceil (/ (+ 4 n) 4)))
         len (js/Uint8Array. 4)]
@@ -157,11 +157,10 @@
     (when-not (= head tail)
       (let [l (get-bytes bytes id head 4)
             n (+ (aget l 0) (* 256 (aget l 1)) (* 65536 (aget l 2)) (* 16777216 (aget l 3)))
-            s (.decode decoder (get-bytes bytes id (+ head 4) n))]
+            bs (get-bytes bytes id (+ head 4) n)]
         (js/Atomics.store ctl (head-word id) (bit-or (+ head (* 4 (js/Math.ceil (/ (+ 4 n) 4)))) 0))
-        (try (reader/read-string s)
-             (catch :default _ (throw (ex-info (str "eve.thread-host: unreadable message: " (subs s 0 (min 400 (count s))))
-                                               {}))))))))
+        ;; eve.wire bytes (one flat chunk), copied out of the ring
+        (wire/decode bs)))))
 
 (defn send!
   "Write msg into the mailbox of the thread at addr (to oneself: onto this thread's own queue); never blocks. A message
@@ -170,10 +169,11 @@
   [addr msg]
   (cond
     (= addr (self)) (swap! state update :local conj msg)
-    (not (data? msg))
-    (throw (ex-info "eve.thread-host: a message to another heap must be data (EDN): a host object is refused"
-                    {:eve.thread/refused :host-object}))
-    (and (integer? addr) (< -1 addr MAX)) (put! addr (pr-str msg)))
+    (and (integer? addr) (< -1 addr MAX))
+    (put! addr (try (wire/encode msg)
+                    (catch :default _
+                      (throw (ex-info "eve.thread-host: a message to another heap must be data (eve.wire: one flat chunk): a host object is refused"
+                        {:eve.thread/refused :host-object}))))))
   nil)
 
 (defn receive!
