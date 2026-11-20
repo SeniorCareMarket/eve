@@ -33,10 +33,43 @@
 
 (deftype Cell [release open?])
 
-(defonce ^:private gc-hook
-  #?(:clj (try (let [c (java.lang.ref.Cleaner/create)]
-                 (fn [cell release] (.register ^java.lang.ref.Cleaner c cell ^Runnable release)))
+;; The host's GC hook, one per host, built into eve: what ends a read whose
+;; last view the program dropped (read hygiene: a pin left open blocks every
+;; process sharing the domain from reclaiming). With none, no views are built
+;; and reads deliver flat — no pin is ever left open.
+;;   JVM          java.lang.ref.Cleaner: runs on the Cleaner's own thread.
+;;   jolt         no Cleaner: weak references on a ReferenceQueue, swept by
+;;                eve itself — at every new read and every swap! (sweep!).
+;;   JavaScript   FinalizationRegistry.
+(defonce ^:private weak-registry
+  ;; the sweep's state where the host has weak references but no cleaner:
+  ;; [ReferenceQueue, atom {WeakReference release}]
+  #?(:clj (try [(java.lang.ref.ReferenceQueue.) (atom {})]
                (catch Throwable _ nil))
+     :default nil))
+
+(defn sweep!
+  "Release every read whose cell the GC has collected (the weak-reference
+   hosts; a no-op elsewhere). eve calls it at every read and swap!."
+  []
+  #?(:clj (when-let [[q reg] weak-registry]
+            (loop []
+              (when-let [r (.poll ^java.lang.ref.ReferenceQueue q)]
+                (when-let [release (get @reg r)]
+                  (swap! reg dissoc r)
+                  (release))
+                (recur))))
+     :default nil))
+
+(defonce ^:private gc-hook
+  #?(:clj (or (try (let [c (java.lang.ref.Cleaner/create)]
+                     (fn [cell release] (.register ^java.lang.ref.Cleaner c cell ^Runnable release)))
+                   (catch Throwable _ nil))
+              (when-let [[q reg] weak-registry]
+                (fn [cell release]
+                  (sweep!)
+                  (swap! (second weak-registry) assoc
+                         (java.lang.ref.WeakReference. cell q) release))))
      :cljs (when (exists? js/FinalizationRegistry)
              (let [r (js/FinalizationRegistry. (fn [release] (release)))]
                (fn [cell release] (.register r cell release))))
@@ -450,4 +483,4 @@
 
 ;; the atom's reads outside `$` answer views where the host's GC can end them
 (when (available?)
-  (ea/register-view-read! view-of))
+  (ea/register-view-read! (fn [raw release] (sweep!) (view-of raw release))))

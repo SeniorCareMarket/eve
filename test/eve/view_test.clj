@@ -1,9 +1,11 @@
 (ns eve.view-test
-  "eve.view on the JVM: a read's pin is released when the GC collects the
-   read's last view (the value model's V9, EVE-FIX-PLAN X10)."
+  "eve.view on the JVM seats: a read's pin is released when the GC collects
+   the read's last view (the value model's V9, EVE-FIX-PLAN X10) — by the
+   JVM's Cleaner, or on jolt (no Cleaner) at eve's weak-reference sweep."
   (:require [clojure.test :refer [deftest is]]
             [eve.alpha :as e]
-            [eve.atom :as ea]))
+            [eve.atom :as ea]
+            [eve.view :as ev]))
 
 (defn- view-pins
   "The domain's outstanding view pins (the counts under :eve.atom/views)."
@@ -14,6 +16,8 @@
   (loop [i 0]
     (System/gc)
     (Thread/sleep 50)
+    ;; a host with no Cleaner (jolt) releases at eve's own sweep
+    (ev/sweep!)
     (cond (pred) true
           (< i 100) (recur (inc i))
           :else false)))
