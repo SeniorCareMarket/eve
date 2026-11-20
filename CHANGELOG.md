@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3.4] - 2026-11-20
+
+0.9.3.3 breaks cohost-media's publish on glojure (an eve flat handle reached `eve->clj` unpacked); use 0.9.3.4.
+
+- **Fixed (glojure, bb, jank):** `eve->clj` unpacks a flat handle the host does not see as a collection. In 0.9.3.3 cohost-media's publish failed on glojure with "wrong number of arguments (2)".
+- **Reads outside `$` answer views.** A deref, `swap!`/`reset!`, `swap-vals!`/`reset-vals!` and a watch's old/new values answer a view of the version the read pinned: lookups (`get`, keyword invoke, `get-in`, `nth`, `find`, `contains?`, `count`, a deftype's fields and protocol methods) read it in place, a subtree answers a child view, and anything else (seq, `=`, hash, print, assoc/conj, storing into an atom) packs that subtree once into flat data. Deref no longer packs the whole atom. `swap!` no longer returns a persistent value (0.9.3.3 let one escape its pin).
+- **Read end B is the default.** A read's pin is released when the host GC collects its last view (JVM `java.lang.ref.Cleaner`, jolt weak references swept by eve, JS `FinalizationRegistry`), or at `$`'s exit inside `$`. A host with no GC hook (bb, glojure) reads in C: no pin of its own, each access pins briefly, and the read ends at the domain's next commit. `EVE_READ_END=commit` selects C everywhere; `EVE_REGION=off` makes `$` a plain call (load tests). Under B a discarded result keeps its pin until the GC runs.
+- **Views on every host:** one `eve/host-deftype` body per view type (map, vector, set; a deftype's view is its flat sister over the pinned block). eve.atom loads eve.view on first need, so programs that do not require `eve.alpha` get views. `eve.alpha` loads on bb again.
+- **Fixed (bb, glojure):** with no view layer, every `swap!` packed the whole new root: on cohost-media's library atom glojure took 4.7 s per `swap!` (0.9.3.3 base 9 ms) and bb 1.4 s; now 10–15 ms and 3–4 ms.
+- **`eve.wire`:** flat chunk bytes are the codec for every thread message on every host (`encode`, `decode`, `set-codec!`, `data?`); the JVM, Node and browser thread adapters move only those bytes (closures still cross in-heap on shared-heap hosts).
+- **Typed arrays** pack flat; a nested flat handle stores as itself.
+- **cohost-media:** the browser seat's start is recorded before its boot form, so a fast page join is no longer reset (the coordinator waited out its 120 s join window with every file `:new`).
+- Measured (cohost-media, all six hosts): B 127.9 s, B with `$` off 120.9 s (0.9.3.3 base 131–136 s); C fails at boot with `:eve/read-ended` (the supervisor holds a config read across other processes' commits). narcis: every gate passes under B and C. Details: `docs/ds-in-eve/EVE-FIX-PLAN.md`.
+- Known: on bb, `=` between two derefs holding deftypes, `compare-and-set!` with a deref'd value, and `swap-vals!` (no `IAtom2`) fail, as in 0.9.3.3; basilisp has no flat layer yet; printing a flat value throws on glojure.
+
+## [0.9.3.3] - 2026-11-19
+
+- **The value model (`docs/ds-in-eve/EVE-FIX-PLAN.md`).** `IPlain` is excised; one generic `eve->clj` on every host (eve->cljs's rule). A deftype built outside an atom is flat, inside a `swap!` persistent; deref delivers flat data; `eve/make-array` outside an atom gives a flat array; a flat deftype stored in an atom answers as its type; `persistent?`, `same?` and `eve->clj` are on `eve.alpha`; Eve atoms implement `swap-vals!`/`reset-vals!`. The laws test is `test/eve/value_model_laws_test.cljc`.
+- Eve atoms answer stock `swap!` (no `eve/swap!`); `eve.alpha` gains `persistent-atom-domain` and the value array.
+- The cohost-media capstone runs on cohost's surface only; the net gateway accepts the decoded atom-id form; the JDK http-server answers HEAD without the JDK warning.
 - **A disk domain's journal is not an opener option.** `eve.atom/persistent-atom-domain` no longer takes `:journal?`: a disk domain is journaled, and the journal force is the commit point. The opt-out's documentation is removed with it (the opener's docstring, `doc/atom-domains.md`, the DataScript guide), and the one deftest of the opt-out's shape is deleted. Callers that passed `:journal? false` (Eve's own tests and probes) now open journaled domains.
 
 ## [0.9.3.2] - 2026-11-17
