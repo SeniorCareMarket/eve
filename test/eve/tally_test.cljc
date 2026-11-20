@@ -6,7 +6,7 @@
    named it (VS's docs/reclaim/atom-domains.md §1, T5; VS's spike/atom-domain/gaps.py G1). The same for a value moved
    between keys of one atom (G2), and an unshared atom's writes still free exactly what they replace."
   (:refer-clojure :exclude [swap! reset!])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.host :refer [swap! reset!]]
             [eve.atom :as a]
             [eve.retire :as retire]
@@ -17,7 +17,17 @@
             [eve.sorted :as so]
             [eve.vec :as v]
             [eve.core :as e]
-            [eve.slab-io :as slab]))
+            [eve.slab-io :as slab]
+            [eve.view :as view]))
+
+;; These tests flush with no reader pinned and then ask what is freed. Since eve 9addb4f a swap!/reset! answers a
+;; view that, in read-end :gc (B), holds its pin until the host GC collects it — the tests' own discarded answers
+;; pinned the epochs the flushes needed (measured 2026-11-20 ET at dcba2ee: 97 failures in B, 0 in C). Read-end
+;; :commit (C) is the premise the tests state; the fixture runs them in it.
+(use-fixtures :once
+  (fn [t] (let [mode (view/read-end-mode)]
+            (view/set-read-end! :commit)
+            (try (t) (finally (view/set-read-end! mode))))))
 
 (defn- ds-of [x] (a/-domain-state x))
 (defn- flush! [x] (#'a/flush-zero-queue! (ds-of x)))

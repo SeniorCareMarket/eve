@@ -10,9 +10,15 @@
    its CAS, so a lost attempt lets its new value go through the zero queue and
    frees the rest of what it allocated at once: the writes' own flushes are held
    back, then each domain's zero queue is flushed with no reader pinned, so the
-   blocks in use differ only by what the lost attempt kept."
+   blocks in use differ only by what the lost attempt kept.
+
+   No reader pinned means read-end :commit (C): since eve 9addb4f a swap!/reset! answers a view that, in read-end
+   :gc (B), holds its pin until the JVM's GC collects it, so the writes' own discarded answers pinned the epochs the
+   flush needed and the lost domain read 94 blocks against the quiet one's 48 (measured 2026-11-20 ET at dcba2ee;
+   0 failures in C). The test binds C for its body, the premise it states."
   (:require [clojure.test :refer [deftest is testing]]
             [eve.atom :as atom]
+            [eve.view :as view]
             [eve.deftype-proto.data :as d]
             [eve.mem :as mem]))
 
@@ -35,6 +41,9 @@
     {:value @a :used (- (blocks-in-use a) before) :attempts @attempts}))
 
 (deftest a-lost-attempt-frees-what-it-allocated
+  (let [mode (view/read-end-mode)]
+   (view/set-read-end! :commit)
+   (try
   (with-redefs-fn {#'eve.atom/try-flush-retires! (fn [_ds] nil)}
     (fn []
       (let [quiet (writes! ::quiet false)
@@ -44,4 +53,5 @@
           (is (= 2 (:attempts lost))))
         (testing "the lost attempt's blocks are free again"
           (is (pos? (:used quiet)))
-          (is (= (:used quiet) (:used lost))))))))
+          (is (= (:used quiet) (:used lost)))))))
+   (finally (view/set-read-end! mode)))))
