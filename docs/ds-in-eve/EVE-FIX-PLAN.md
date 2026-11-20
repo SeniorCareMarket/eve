@@ -100,6 +100,31 @@ generic `eve->clj`. The one removal found: `fcfe141f15` turns flat deref off
 on bb. Not reachable: the ~190 eve branches' history (fetched depth 1) and
 `c7dc390` (under no ref).
 
+### Load: B vs C on the real apps (2026-11-20, `ce24729` + the cohost-media start fix)
+
+cohost-media (`bb cohost-media demo --headless --hosts jvm,bb,jolt,node,glj,browser`, 240 s cap per run; base
+`f4a1c3a` completes in 131–136 s with `:supervised` and `:two-duplicate-groups` false):
+
+| config | result |
+|---|---|
+| B (`EVE_READ_END=gc`) | complete 127.9 s, base's checks |
+| B, `$` a plain call (`EVE_REGION=off`) | complete 120.9 s, base's checks |
+| C (`EVE_READ_END=commit`) | fails at boot: `:eve/read-ended` in the supervisor (`supervise.cljc` 32, 37, 48) |
+| C, `$` a plain call | the same |
+
+C ends a read at the domain's next commit by anyone: the supervisor holds a member's config read from the control
+atom while the other processes commit, and the next lookup on it throws. B ties a read to the host GC: a discarded
+`swap!` result's view holds its pin until the GC runs (`eve.read-region-test`
+`what-a-region-read-is-not-freed-while-it-runs` fails under B, passes under C).
+
+narcis (jolt; store, buffer, s0, viewport, editor gates): every gate passes under B, C, B and C without `$`. Without
+`$`, bench-open typing under B is 717 ms against 173–201 ms; under C bench-open fails with `:eve/read-ended` in
+`narcis.buffer/read` (a view held across a commit).
+
+Regressions found by these runs and fixed: v0.9.3.3 as tagged breaks cohost-media's publish on glojure (`f02d952`);
+with no view layer on bb/glojure every `swap!` packed the whole root (glojure 9 ms → 4.7 s, bb 1.4 s; `ce24729`);
+`eve.alpha` did not load on bb (`ce24729`); the browser seat's `started!` overwrote its join (`a89927f`).
+
 ## 1. Measured against the laws (JVM, `release/eve-0.9.3.3` `f4a1c3a`)
 
 Provenance: OpenJDK 21.0.13, Clojure CLI 1.12.0.1530; fresh `e/atom` per run,
