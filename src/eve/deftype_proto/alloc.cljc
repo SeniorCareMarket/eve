@@ -74,14 +74,16 @@
 
 (defn decode-class-idx
   "Extract the slab class index from a slab-qualified offset.
-   Treats the offset as an unsigned 32-bit integer (handles sign-extended i32 reads)."
-  [slab-offset]
+   Treats the offset as an unsigned 32-bit integer (handles sign-extended i32 reads).
+   A primitive long on the JVM: every slab address is computed from it (boxed, it was a Long per read)."
+  ^long [slab-offset]
   (unsigned-bit-shift-right (bit-and (long slab-offset) 0xFFFFFFFF) BLOCK_IDX_BITS))
 
 (defn decode-block-idx
   "Extract the block index from a slab-qualified offset.
-   Treats the offset as an unsigned 32-bit integer (handles sign-extended i32 reads)."
-  [slab-offset]
+   Treats the offset as an unsigned 32-bit integer (handles sign-extended i32 reads).
+   A primitive long on the JVM, as decode-class-idx."
+  ^long [slab-offset]
   (bit-and (bit-and (long slab-offset) 0xFFFFFFFF) BLOCK_IDX_MASK))
 
 ;;=============================================================================
@@ -268,7 +270,7 @@
                             (* block-idx (aget block-sizes class-idx)))
                region    (aget regions class-idx)]
            ;; a plain load (eve.mem/IPlainLoad): no allocation where the region has a plain vehicle
-           (mem/-plain-load-u8 region (+ base field-off))))
+           (mem/-plain-load-u8 region (+ base (long field-off)))))
 
        (-sio-write-u8! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
@@ -276,7 +278,7 @@
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
                region    (aget regions class-idx)]
-           (mem/-plain-store-u8! region (+ base field-off) val)))
+           (mem/-plain-store-u8! region (+ base (long field-off)) val)))
 
        (-sio-read-u16 [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
@@ -317,7 +319,7 @@
            ;; read is the correct semantics. Real atomic words (root
            ;; fields, doorbells, CAS) go through mem/ directly, aligned.
            ;; IPlainLoad's i32: plain, any alignment, little-endian -- the same bytes
-           (mem/-plain-load-i32 region (+ base field-off))))
+           (mem/-plain-load-i32 region (+ base (long field-off)))))
 
        (-sio-write-i32! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
@@ -328,7 +330,7 @@
            ;; Plain bytes, as -sio-write-u16!: see -sio-read-i32 --
            ;; payload words are packed, never atomic fields. The byte
            ;; layout is unchanged, so seals stay byte-identical.
-           (mem/-plain-store-i32! region (+ base field-off) val)))
+           (mem/-plain-store-i32! region (+ base (long field-off)) val)))
 
        (-sio-cas-i32! [_ slab-offset field-off expected desired]
          (let [class-idx (decode-class-idx slab-offset)
@@ -993,7 +995,7 @@
        "The tally handle of block block-idx of bitmap class ci in ctx: [[count-region count-off]
         [flags-region flags-off] [pointer-region pointer-off]] — the addresses of the block's COUNT,
         FLAGS and POINTER column entries — or nil when the class carries no columns."
-       [^JvmSlabCtx ctx ci block-idx]
+       [^JvmSlabCtx ctx ^long ci ^long block-idx]
        (let [dr (aget ^objects (field ctx desc-regions) ci)]
          (when dr
            (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)

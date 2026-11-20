@@ -1318,7 +1318,9 @@
    want-vals?]
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-  (binding [tally/*touches* (clojure.core/atom #{})]
+  ;; the touched set feeds the durable sweeps alone (every read of it below is inside a durable-commits? arm):
+  ;; an in-memory domain binds none, and tally/note-touch! is one nil check (it was a set conj per mutation)
+  (binding [tally/*touches* (when durable-commits? (clojure.core/atom #{}))]
     (try
       (let [old-ptr (mem/-load-i32 root-r ptr-off)
             _ (refresh-slabs! ds)  ;; behind the load (0004/0007)
