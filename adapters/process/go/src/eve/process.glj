@@ -92,3 +92,14 @@
    host package's StdinLine (one bufio.Reader for the process)"
   []
   (let [[s ok] (eveglj:host.StdinLine)] (when ok s)))
+
+(defn gc-box
+  "A Go object whose collection by the host GC records id for collected-ids (eve.view's GC hook: read-end B on
+   glojure; eve/impls/glojure/host/gc.go). What holds the box is collected with it."
+  [id]
+  (eveglj:host.NewGCBox (long id)))
+
+(defn collected-ids
+  "The ids of the gc-boxes the GC collected since the last call (nil when none)."
+  []
+  (seq (eveglj:host.TakeCollected)))

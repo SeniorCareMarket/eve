@@ -13,7 +13,7 @@
    (JVM java.lang.ref.Cleaner, jolt weak references, JS
    FinalizationRegistry) — read-end B. Read-end C holds no pin: each access
    pins briefly and the read ends at the domain's next commit; a host with no
-   GC hook (bb, glojure, ...) reads in C. Inside `$` reads stay the region's (pinned until `$` exits).
+   GC hook reads in C. Inside `$` reads stay the region's (pinned until `$` exits).
 
    An eve-deftype's view is its generated flat sister over a field source
    that reads the pinned block: it answers the type's protocols, and the
@@ -26,7 +26,8 @@
             [eve.flat.freeze :as freeze]
             [eve.read-region :as rr]
             [eve.deftype-proto.macros :as eve]
-            [eve.core :as e]))
+            [eve.core :as e]
+            #?(:glj [eve.process :as eproc])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -34,7 +35,7 @@
 ;; the read's cell: holds the pin's release; collected with the last view
 ;; ---------------------------------------------------------------------------
 
-(deftype Cell [release open? acc])
+(deftype Cell [release open? acc gc])
 
 ;; The host's GC hook, one per host, built into eve: what ends a read whose
 ;; last view the program dropped (read hygiene: a pin left open blocks every
@@ -43,12 +44,16 @@
 ;;   JVM          java.lang.ref.Cleaner: runs on the Cleaner's own thread.
 ;;   jolt         no Cleaner: weak references on a ReferenceQueue, swept by
 ;;                eve itself — at every new read and every swap! (sweep!).
+;;   glojure      Go finalizers: the cell holds a box whose finalizer records
+;;                its id (eve.process/gc-box), swept by eve itself (sweep!).
 ;;   JavaScript   FinalizationRegistry.
 (defonce ^:private weak-registry
   ;; the sweep's state where the host has weak references but no cleaner:
-  ;; [ReferenceQueue, atom {WeakReference release}]
+  ;; [ReferenceQueue, atom {WeakReference release}]; glojure: [id counter,
+  ;; atom {id release}]
   #?(:clj (try [(java.lang.ref.ReferenceQueue.) (atom {})]
                (catch Throwable _ nil))
+     :glj [(atom 0) (atom {})]
      :default nil))
 
 (defn sweep!
@@ -62,6 +67,11 @@
                   (swap! reg dissoc r)
                   (release))
                 (recur))))
+     :glj (let [[_ reg] weak-registry]
+            (doseq [id (eproc/collected-ids)]
+              (when-let [release (get @reg id)]
+                (swap! reg dissoc id)
+                (release))))
      :default nil))
 
 (defonce ^:private gc-hook
@@ -73,6 +83,12 @@
                   (sweep!)
                   (swap! (second weak-registry) assoc
                          (java.lang.ref.WeakReference. cell q) release))))
+     :glj (let [[ctr reg] weak-registry]
+            (fn [cell release]
+              (sweep!)
+              (let [id (swap! ctr inc)]
+                (swap! reg assoc id release)
+                (vreset! (.-gc ^Cell cell) (eproc/gc-box id)))))
      :cljs (when (exists? js/FinalizationRegistry)
              (let [r (js/FinalizationRegistry. (fn [release] (release)))]
                (fn [cell release] (.register r cell release))))
@@ -121,10 +137,10 @@
   [ctx]
   (let [open? (volatile! true)]
     (if (and (= :commit @read-end) (not (rr/active?)))
-      [(Cell. (fn []) open? (select-keys ctx [:enter :exit :epoch])) (fn [])]
+      [(Cell. (fn []) open? (select-keys ctx [:enter :exit :epoch]) nil) (fn [])]
       (let [release ((:hold ctx))
             once (fn [] (when @open? (vreset! open? false) (release)))
-            c (Cell. once open? nil)]
+            c (Cell. once open? nil (volatile! nil))]
         (if (rr/active?)
           (rr/on-exit! once)
           (gc-hook c once))
