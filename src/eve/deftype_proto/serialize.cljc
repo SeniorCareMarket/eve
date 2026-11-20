@@ -395,7 +395,9 @@
 (defn type-refs
   "The reference fields of the eve-deftype with type-id and name hash, or nil when no such type is loaded here."
   [type-id name-hash]
-  (get-in @type-refs-registry [(int type-id) (int name-hash)]))
+  ;; two gets, not get-in: the tally asks this of every deftype block it holds or frees, and get-in built a key
+  ;; vector and reduced over it each time (3% of a ds build's transact samples, 2026-11-20 ET)
+  (some-> (get @type-refs-registry (int type-id)) (get (int name-hash))))
 
 (defn register-header-constructor!
   "Register a header constructor without touching the pointer-tag entry."
