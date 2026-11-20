@@ -217,6 +217,35 @@
   (-plain-load-u8 [r byte-off]
     (bit-and (aget ^bytes (-read-bytes r byte-off 1) 0) 0xFF)))
 
+;; Plain (non-atomic) stores into a block being BUILT — IPlainLoad's write
+;; twin. A builder writes a new block before its pointer is published (the
+;; root CAS orders publication), so its words take plain stores on any
+;; backing, as its bulk -write-bytes! already does. The default serves every
+;; region with no plain vehicle of its own through -write-bytes! (the bytes
+;; and their order are the ones the slab's byte path wrote); a region with
+;; one implements IPlainStore itself (the JVM varhandle region does) and a
+;; scalar store then allocates nothing.
+(defprotocol IPlainStore
+  (-plain-store-i32! [r byte-off v]
+    "The little-endian i32 v at byte-off (any alignment), plain stores.
+     An unpublished block's bytes only.")
+  (-plain-store-u8! [r byte-off v]
+    "The byte v at byte-off, a plain store. An unpublished block's bytes
+     only."))
+
+(extend-default IPlainStore
+  (-plain-store-i32! [r byte-off v]
+    (let [b (byte-array 4)]
+      (aset b 0 (unchecked-byte (bit-and v 0xFF)))
+      (aset b 1 (unchecked-byte (bit-and (bit-shift-right v 8) 0xFF)))
+      (aset b 2 (unchecked-byte (bit-and (bit-shift-right v 16) 0xFF)))
+      (aset b 3 (unchecked-byte (bit-and (bit-shift-right v 24) 0xFF)))
+      (-write-bytes! r byte-off b)))
+  (-plain-store-u8! [r byte-off v]
+    (let [b (byte-array 1)]
+      (aset b 0 (unchecked-byte (bit-and v 0xFF)))
+      (-write-bytes! r byte-off b))))
+
 ;; Bulk i32 fill — initialization of a fresh region before it is published
 ;; (coalesc's descriptor table: two columns of max-desc - 1 entries each).
 ;; Measured on the jank seat: 2,097,150 single -store-i32! calls through the

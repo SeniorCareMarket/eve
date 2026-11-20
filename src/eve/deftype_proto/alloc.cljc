@@ -266,9 +266,9 @@
                block-idx (decode-block-idx slab-offset)
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)
-               b         (mem/-read-bytes region (+ base field-off) 1)]
-           (bit-and (aget ^bytes b 0) 0xFF)))
+               region    (aget regions class-idx)]
+           ;; a plain load (eve.mem/IPlainLoad): no allocation where the region has a plain vehicle
+           (mem/-plain-load-u8 region (+ base field-off))))
 
        (-sio-write-u8! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
@@ -276,7 +276,7 @@
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
                region    (aget regions class-idx)]
-           (mem/-write-bytes! region (+ base field-off) (enc/bytes-of [(bit-and val 0xFF)]))))
+           (mem/-plain-store-u8! region (+ base field-off) val)))
 
        (-sio-read-u16 [_ slab-offset field-off]
          (let [class-idx (decode-class-idx slab-offset)
@@ -304,12 +304,7 @@
                block-idx (decode-block-idx slab-offset)
                base      (+ (aget data-offsets class-idx)
                             (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)
-               b         (mem/-read-bytes region (+ base field-off) 4)
-               u         (bit-or (bit-and (aget ^bytes b 0) 0xFF)
-                                 (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8)
-                                 (bit-shift-left (bit-and (aget ^bytes b 2) 0xFF) 16)
-                                 (bit-shift-left (bit-and (aget ^bytes b 3) 0xFF) 24))]
+               region    (aget regions class-idx)]
            ;; Little-endian i32 through the PLAIN byte path (the u16
            ;; pair's shape), never the region's atomic -load-i32: slab
            ;; payload words are packed at arbitrary offsets (HAMT node
@@ -321,7 +316,8 @@
            ;; and publication is ordered by the root CAS, so a plain
            ;; read is the correct semantics. Real atomic words (root
            ;; fields, doorbells, CAS) go through mem/ directly, aligned.
-           (if (>= u 2147483648) (- u 4294967296) u)))
+           ;; IPlainLoad's i32: plain, any alignment, little-endian -- the same bytes
+           (mem/-plain-load-i32 region (+ base field-off))))
 
        (-sio-write-i32! [_ slab-offset field-off val]
          (let [class-idx (decode-class-idx slab-offset)
@@ -332,11 +328,7 @@
            ;; Plain bytes, as -sio-write-u16!: see -sio-read-i32 --
            ;; payload words are packed, never atomic fields. The byte
            ;; layout is unchanged, so seals stay byte-identical.
-           (mem/-write-bytes! region (+ base field-off)
-                              (enc/bytes-of [(bit-and val 0xFF)
-                                             (bit-and (unsigned-bit-shift-right val 8) 0xFF)
-                                             (bit-and (unsigned-bit-shift-right val 16) 0xFF)
-                                             (bit-and (unsigned-bit-shift-right val 24) 0xFF)]))))
+           (mem/-plain-store-i32! region (+ base field-off) val)))
 
        (-sio-cas-i32! [_ slab-offset field-off expected desired]
          (let [class-idx (decode-class-idx slab-offset)

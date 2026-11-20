@@ -276,7 +276,38 @@
                (if (identical? hit ::none)
                  (let [r (boolean (satisfies? p x))] (swap! class-answers assoc key r) r)
                  hit)))))
-(defn- flat-handle? [x]
+;; THE FAST PROTOCOL TEST, generalized (perf probe 2026-11-20 ET): (satisfies? p x) without the supers walk on a
+;; miss. On the JVM: one isInstance on the protocol's interface (every inline implementation), else the class's
+;; answer remembered per protocol -- and forgotten whenever the protocol is extended (its :impls map is replaced), so
+;; a later extend-type is seen. bb, glojure and jank (no JVM interface) and every other host keep satisfies?.
+#?(:clj
+   (def ^:private proto-answers (java.util.concurrent.ConcurrentHashMap.)))
+(defn fast-satisfies? [p x]
+  #?(:jank (satisfies? p x) :bb (satisfies? p x) :glj (satisfies? p x)
+     :clj (let [^Class i (:on-interface p)]
+            (if (and i (.isInstance i x))
+              true
+              (if (nil? x)
+                (boolean (satisfies? p x))
+                (let [impls (:impls p)
+                      ^objects e (.get ^java.util.concurrent.ConcurrentHashMap proto-answers i)
+                      ^java.util.concurrent.ConcurrentHashMap m
+                      (if (and e (identical? (aget e 0) impls))
+                        (aget e 1)
+                        (let [m (java.util.concurrent.ConcurrentHashMap.)]
+                          (.put ^java.util.concurrent.ConcurrentHashMap proto-answers i (object-array [impls m]))
+                          m))
+                      c (class x)
+                      hit (.get m c)]
+                  (if (nil? hit)
+                    (let [r (boolean (satisfies? p x))] (.put m c r) r)
+                    (boolean hit))))))
+     :default (satisfies? p x)))
+
+(defn flat-handle?
+  "THE FAST HANDLE TEST: x implements IFlatHandle. On the JVM one instanceof for every eve handle type, a per-class
+   remembered answer for anything else; satisfies? where protocols generate no JVM interface."
+  [x]
   #?(:jank (satisfies? IFlatHandle x) :bb (satisfies? IFlatHandle x) :glj (satisfies? IFlatHandle x)
      :clj (or (instance? eve.flat.chunk.IFlatHandle x)
               (and (not (plain-non-handle? x)) (class-satisfies? :flat-handle IFlatHandle x)))

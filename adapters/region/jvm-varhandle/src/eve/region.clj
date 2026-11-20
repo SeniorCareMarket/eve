@@ -658,6 +658,26 @@
       (bit-and (.get buf (int (bit-and off (dec (bit-shift-left 1 shift)))))
                0xFF)))
 
+  ;; --- plain stores into an unpublished block (eve.mem/IPlainStore):
+  ;; absolute ByteBuffer puts, no allocation; a straddling i32 byte by
+  ;; byte, as seg-store-i32! does ---
+  mem/IPlainStore
+  (-plain-store-i32! [_ byte-off v]
+    (let [off   (long byte-off)
+          intra (bit-and off (dec (bit-shift-left 1 shift)))]
+      (if (<= (+ intra 4) (bit-shift-left 1 shift))
+        (i32-set-unaligned! (aget segments (int (unsigned-bit-shift-right off shift))) (int intra) (long v))
+        (do (seg-put-byte! segments shift off v)
+            (seg-put-byte! segments shift (+ off 1) (unsigned-bit-shift-right (long v) 8))
+            (seg-put-byte! segments shift (+ off 2) (unsigned-bit-shift-right (long v) 16))
+            (seg-put-byte! segments shift (+ off 3) (unsigned-bit-shift-right (long v) 24))))
+      nil))
+  (-plain-store-u8! [_ byte-off v]
+    (let [off (long byte-off)
+          ^ByteBuffer buf (aget segments (int (unsigned-bit-shift-right off shift)))]
+      (.put buf (int (bit-and off (dec (bit-shift-left 1 shift)))) (unchecked-byte (long v)))
+      nil))
+
   ;; --- durability (eve.mem/ISyncableRegion): mapped segments force;
   ;; a heap region (make-heap-region) has nothing to force ---
   mem/ISyncableRegion

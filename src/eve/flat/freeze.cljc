@@ -940,7 +940,7 @@
     #?(:clj (instance? FrozenValue v) :cljs false)
     (-handle v (.-sio ^FrozenValue v) (.-hdr ^FrozenValue v))
     #?(:clj (instance? ConcatBatch v) :cljs false) v
-    (satisfies? chunk/IFlatHandle v) v
+    (chunk/flat-handle? v) v
     (sequential? v) (open-stream (chunk/pack-all v))
     (coll? v) (chunk/pack v)
     ;; a slab instance of a sister-registered type that is not
@@ -985,7 +985,7 @@
   ;; multi-chunk delivery fell through to the codec's vector
   ;; walk and re-embedded a chunk per element until the domain
   ;; OOMed (probe_embed, 2026-11-14).
-  (when (and (or (satisfies? chunk/IFlatHandle v)
+  (when (and (or (chunk/flat-handle? v)
                  (concat-batch? v)
                  (based-value? v))
              (not (frozen-value? v)))
@@ -993,7 +993,7 @@
                   ;; a node nested in a larger value's chunk (a lookup into a
                   ;; delivered flat value): its own chunk, never the whole
                   ;; chunk it sits in (whose root is the larger value)
-                  (and (satisfies? chunk/IFlatHandle v)
+                  (and (chunk/flat-handle? v)
                        (not (chunk/root-handle? v))) (chunk/pack v)
                   :else v)
           [stream framed?] (if (concat-batch? h)
@@ -1050,24 +1050,24 @@
     (cond
       (frozen-value? v)
       (let [h (-handle v (.-sio v) (.-hdr v))]
-        (if (satisfies? source/ISister h) h (d/eve->clj h)))
+        (if (chunk/fast-satisfies? source/ISister h) h (d/eve->clj h)))
 
-      (satisfies? source/ISister v) v
+      (chunk/fast-satisfies? source/ISister v) v
 
       ;; a flat handle a host does not see as a collection (glojure, bb, jank:
       ;; their handles are eve.core types) -> its host data, as the per-host
       ;; IPlain unpack did (measured: without it, cohost-media's publish on
       ;; glojure threw "wrong number of arguments (2)" on a FlatMap)
-      (and (satisfies? chunk/IFlatHandle v)
+      (and (chunk/flat-handle? v)
            (not (or (map? v) (set? v) (vector? v) (sequential? v))))
       (chunk/unpack v)
 
       ;; Eve's kinds with no collection shape, as host data
-      (satisfies? eds/IDatasetAccess v)
+      (chunk/fast-satisfies? eds/IDatasetAccess v)
       (let [cm (eds/-col-map v)]
         (into {} (map (fn [k] [k (d/eve->clj (get cm k))])) (eds/-column-names v)))
 
-      (satisfies? etensor/ITensorAccess v)
+      (chunk/fast-satisfies? etensor/ITensorAccess v)
       (let [sh (vec (etensor/-shape v))
             st (vec (etensor/-strides v))
             eo (long (etensor/-elem-offset v))
@@ -1080,26 +1080,26 @@
                             (range (nth sh dim))))))]
           (if (empty? sh) (nth backing eo) (build 0 eo))))
 
-      (satisfies? eobj/IEveObj v)
+      (chunk/fast-satisfies? eobj/IEveObj v)
       (into {} (map (fn [k] [k (d/eve->clj (eobj/field-value v k nil))]))
             (:field-keys (first (eobj/-obj-parts v))))
 
-      (and (satisfies? d/ISabStorable v) (= :eve/array (d/-sab-tag v)))
+      (and (chunk/fast-satisfies? d/ISabStorable v) (= :eve/array (d/-sab-tag v)))
       (let [n (count v)]
         (mapv (fn [i] (d/eve->clj (nth v i))) (range n)))
 
-      (not (satisfies? d/ISabpType v)) nil
+      (not (chunk/fast-satisfies? d/ISabpType v)) nil
 
       (= "eve/ValueArray" (d/-sabp-type-key v))
       (mapv d/eve->clj (seq v))
 
-      (and (satisfies? d/IEveRoot v)
+      (and (chunk/fast-satisfies? d/IEveRoot v)
            (sister/descriptor (d/-sabp-type-key v))
            (or (record? v)
                (sister/own-type-instance? v)
                (not (or (map? v) (set? v) (vector? v) (sequential? v)))))
       (let [p (chunk/pack v)]
-        (if (satisfies? source/ISister p) p (d/eve->clj p)))
+        (if (chunk/fast-satisfies? source/ISister p) p (d/eve->clj p)))
 
       :else nil)))
 

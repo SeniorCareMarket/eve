@@ -145,7 +145,7 @@
 (defn view?
   "x is a view (a window onto a pinned version, outside `$`)."
   [x]
-  (satisfies? IView x))
+  (chunk/fast-satisfies? IView x))
 
 (defn flat
   "x's flat form: a view's subtree packed; anything else as is."
