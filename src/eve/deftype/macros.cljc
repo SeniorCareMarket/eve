@@ -113,7 +113,11 @@
         ;; the fields set!/cas! rewrite to eve memory (a host-local field's
         ;; set! is the instance's own)
         field-map (into {} (map (fn [f] [(:name f) f]) slab-fields))
-        ;; Parse user protocol impls
+        ;; Parse user protocol impls -- the type's author's, then the dual-type field lookup
+        ;; every type answers (emission/default-lookup-forms: an ILookup over the slab fields,
+        ;; unless the body answers lookups itself), appended as the author would write it
+        body (concat body (emission/default-lookup-forms (proto/parse-protocol-impls body)
+                                                         (map (comp symbol :name) slab-fields)))
         parsed-protos (proto/parse-protocol-impls body)
         has-volatile? (proto/has-volatile-fields? slab-fields)
         serialized-fields (filter #(= :serialized (:type-class %)) slab-fields)
@@ -147,7 +151,11 @@
         ;; the generated predicate: both forms answer to the type's
         ;; name. Library authors wrap it under their own predicate
         ;; name as they choose (eve.dataset/dataset? wraps Dataset?).
-        pred-form (emission/pred-form type-name type-key "eve-deftype")]
+        ;; the forms' classes, where the host's instance? reads a class (the JVM's; a
+        ;; ClojureScript compile, whose macros run here too): each form one instance? test
+        pred-form (emission/pred-form type-name type-key "eve-deftype"
+                                      (when #?(:bb false :jank false :glj false :clj true :default false)
+                                        (cond-> [type-name] flat-forms (conj flat-name))))]
 
     (apply list 'do
           (t/eve-type {:env env :type-name type-name :inst-fields inst-fields :live-fields live-fields
@@ -179,7 +187,9 @@
                              (when-let [k (v/ref-kind f)] [(:offset f) k]))
                            slab-fields)))
           reader
-          pred-form
+          ;; the predicate is declared here, where it always stood, and defined last: its instance? arms name
+          ;; the flat sister's class, which the forms below define
+          (list 'declare (symbol (str (name type-name) "?")))
           ;; the flat sister (lane H5): its generation, where the host
           ;; realizes one, and its registration — the type key, the slab
           ;; fields as data, and the generated factory — so a packed
@@ -202,7 +212,8 @@
                   ;; kind does not have. Both pairs are built by
                   ;; the shared proto-layer emission (plan §4 M3).
                   (emission/freeze-thaw-forms type-name
-                                               (when flat-forms flat-name))))))
+                                               (when flat-forms flat-name))
+                  [pred-form]))))
 
 ;;-----------------------------------------------------------------------------
 ;; eve-extend-type macro
