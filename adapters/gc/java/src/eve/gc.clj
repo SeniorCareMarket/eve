@@ -4,7 +4,8 @@
    1.13.229), its action on the Cleaner's own thread; else weak references on a ReferenceQueue, swept by eve itself at
    every read (sweep!: jolt).
 
-   on-collect's release must not reach obj (a release that holds obj keeps it alive).")
+   token answers a fresh object; whatever holds it (eve.view's read cell, in an immutable field) is collected with it,
+   and release runs then. release must not reach the token's holder (a release that holds it keeps it alive).")
 
 (set! *warn-on-reflection* true)
 
@@ -33,12 +34,13 @@
           (release))
         (recur)))))
 
-(defn on-collect
-  "Run (release) once obj has been collected. Answers what obj must hold for that to happen (nil here)."
-  [obj release]
-  (cond
-    cleaner (do (.register ^java.lang.ref.Cleaner cleaner obj ^Runnable release) nil)
-    queue (do (sweep!)
-              (swap! registry assoc (java.lang.ref.WeakReference. obj queue) release)
-              nil)
-    :else nil))
+(defn token
+  "A fresh object whose collection runs (release); nil where the host has no hook."
+  [release]
+  (let [t (Object.)]
+    (cond
+      cleaner (do (.register ^java.lang.ref.Cleaner cleaner t ^Runnable release) t)
+      queue (do (sweep!)
+                (swap! registry assoc (java.lang.ref.WeakReference. t queue) release)
+                t)
+      :else nil)))

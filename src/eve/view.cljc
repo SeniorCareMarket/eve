@@ -33,7 +33,8 @@
 ;; the read's cell: holds the pin's release; collected with the last view
 ;; ---------------------------------------------------------------------------
 
-;; gc: what the cell holds for the GC hook to see it collected (eve.gc/on-collect)
+;; gc: the GC hook's token (eve.gc/token), held by the cell alone, so the read
+;; ends when the cell is collected
 (deftype Cell [release open? acc gc])
 
 ;; The host's GC hook (feature gc: eve.gc, one adapter per host capability,
@@ -100,10 +101,10 @@
     (if (and (= :commit @read-end) (not (rr/active?)))
       [(Cell. (fn []) open? (select-keys ctx [:enter :exit :epoch]) nil) (fn [])]
       (let [once (release-once open? ((:hold ctx)))
-            c (Cell. once open? nil (volatile! nil))]
-        (if (rr/active?)
-          (rr/on-exit! once)
-          (vreset! (.-gc c) (gc/on-collect c once)))
+            region? (rr/active?)
+            ;; the GC hook's token, held by the cell alone: collected with it
+            c (Cell. once open? nil (when-not region? (gc/token once)))]
+        (when region? (rr/on-exit! once))
         [c once]))))
 
 (defn- ended! [^Cell cell]

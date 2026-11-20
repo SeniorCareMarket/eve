@@ -1,10 +1,10 @@
 (ns eve.gc
   "eve's GC hook (feature gc, adapters/README.md) on jank: a Boehm GC finalizer (jank's collector), over C++ (cpp/raw,
-   called as cpp/eve_gc.<fn>). on-collect answers a box (an opaque_box, collector-allocated) that obj holds; when the
+   called as cpp/eve_gc.<fn>). token answers a box (an opaque_box, collector-allocated) that obj holds; when the
    collector reclaims obj the box goes with it, and its finalizer records the box's id. sweep! takes the ids and runs
    those releases on eve's own thread (the finalizer calls no jank code). eve.view sweeps at every read.
 
-   on-collect's release must not reach obj (a release that holds obj keeps it alive).")
+   token's release must not reach the box's holder (a release that holds obj keeps it alive).")
 
 (cpp/raw "
 #define GC_THREADS 1
@@ -58,9 +58,9 @@ namespace eve_gc {
           (release))
         (recur)))))
 
-(defn on-collect
-  "Run (release) once obj has been collected. Answers the box obj must hold for that to happen."
-  [obj release]
+(defn token
+  "A box whose collection runs (release): whatever holds it (eve.view's read cell) is collected with it."
+  [release]
   (sweep!)
   (let [id (swap! counter inc)]
     (swap! registry assoc id release)

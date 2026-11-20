@@ -3,7 +3,8 @@
    object is collected (CPython: at once, by reference count; a cycle, at the cycle collector). Measured on a basilisp
    deftype instance, 2026-11-20.
 
-   on-collect's release must not reach obj (the finalizer holds the release strongly)."
+   token answers a fresh object; whatever holds it (eve.view's read cell) is collected with it, and release runs then.
+   release must not reach the token's holder (the finalizer holds the release strongly)."
   (:import weakref))
 
 (defn available? [] true)
@@ -13,8 +14,11 @@
   []
   nil)
 
-(defn on-collect
-  "Run (release) once obj has been collected. Answers what obj must hold for that to happen (nil here)."
-  [obj release]
-  (weakref/finalize obj release)
-  nil)
+(deftype Token [])
+
+(defn token
+  "A fresh object whose collection runs (release)."
+  [release]
+  (let [t (Token.)]
+    (weakref/finalize t release)
+    t))

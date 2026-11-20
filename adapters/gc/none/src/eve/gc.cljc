@@ -4,4 +4,4 @@
 
 (defn available? [] false)
 (defn sweep! [] nil)
-(defn on-collect [_obj _release] nil)
+(defn token [_release] nil)
