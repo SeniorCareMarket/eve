@@ -64,7 +64,8 @@
    SIMD iteration. For a 1MB slab with 64B blocks (16384 blocks),
    the full bitmap is 2KB = 128 v128 loads worst case."
   (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes long])
-  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes long extend-default]]))
+  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes long extend-default]]
+            [eve.fast-proto :as fp]))
 
 ;;=============================================================================
 ;; Size Classes
@@ -526,7 +527,9 @@
    form and its flat sister carry the same key (both implement
    ISabpType) — or nil when x is not an eve-deftype value at all."
   [x]
-  (when (satisfies? ISabpType x)
+  ;; fast-satisfies?: a generated Foo? asks this of every value it is handed, and a miss (any value that is no
+  ;; eve-deftype) walked the class's supers each time on the JVM
+  (when (fp/fast-satisfies? ISabpType x)
     (-sabp-type-key x)))
 
 (defprotocol IsEve

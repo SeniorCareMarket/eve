@@ -12,7 +12,7 @@
             [eve.deftype-proto.data :as d]
             ;; nbb cannot load eve.flat (chunk.cljc uses js*), and basilisp has no flat
             ;; layer (chunk.cljc has no :lpy Buf/IBuf), so those hosts skip it.
-            #?@(:org.babashka/nbb [] :lpy [] :default [[eve.flat.chunk :as chunk]])
+            #?@(:org.babashka/nbb [] :lpy [] :default [[eve.flat.chunk :as chunk] [eve.view :as view]])
             [eve.deftype-proto.serialize :as ser]
             [eve.slab-io :as slab]
             [eve.map :as em]
@@ -183,7 +183,20 @@
       (is (= 7 (.-x (field (->Bag g) :v))))
       (is (= 7 (.-x (e/get (field (->Bag {:inner g}) :v) :inner)))))))
 
+;; read-end :commit (C): the test flushes and asks what is freed, with no reader pinned -- in read-end :gc (B) the
+;; swap!/deref answers here are views that hold their pins until the host GC collects them (since 9addb4f), so
+;; the flush could not free what the test asks (measured 2026-11-20 ET at 47e6dae: this test fails in B, passes in C)
+(defn- in-read-end-c
+  "(f) with reads ending at the next commit (eve.view's C), restored after; where the host has no views, (f)."
+  [f]
+  #?(:org.babashka/nbb (f) :lpy (f)
+     :default (let [mode (view/read-end-mode)]
+                (view/set-read-end! :commit)
+                (try (f) (finally (view/set-read-end! mode))))))
+
 (deftest hidden-payloads-are-reclaimed-after-last-root
+  (in-read-end-c
+   (fn []
   (let [dom (a/atom-domain nil)
         x (a/lookup-or-create-mmap-atom! dom "record/reclaim" nil)
         y (a/lookup-or-create-mmap-atom! dom "record/share" nil)
@@ -197,7 +210,7 @@
       (is (= {:v [5 6]} (field @y :extra)))
       (swap! y (constantly nil))
       (#'a/flush-zero-queue! (a/-domain-state y))
-      (is (not-any? #(alloc/allocated? sio %) before)))))
+      (is (not-any? #(alloc/allocated? sio %) before)))))))
 
 (deftest readers-keep-extension-fields
   (let [original (e/assoc (->Point 11 12) :extension 13)

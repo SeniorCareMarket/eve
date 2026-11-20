@@ -27,6 +27,9 @@
             [eve.flat.freeze :as freeze]
             [eve.read-region :as rr]
             [eve.deftype-proto.macros :as eve]
+            ;; a reader-registering type is defined below: the registry must load first (a ClojureScript
+            ;; bundle orders by requires; eve.deftype-guard-test's reader-registration-load-order)
+            [eve.type-readers]
             [eve.core :as e]
             [eve.gc :as gc]))
 
