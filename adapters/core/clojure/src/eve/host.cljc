@@ -57,7 +57,10 @@
      :lg      (clojure.core/byte-array values)
      :default (clojure.core/byte-array values)))
 
-(defn js-byte-array
+;; tagged bytes on the JVM: byte-array expands to this call, so the tag is what types every (let [b (byte-array n)])
+;; local in eve's shared code — untagged, each aset/aget on such a local went through clojure.lang.Reflector (69 sites
+;; in eve.codec alone, on every value encoded; measured 2026-11-20 ET)
+(defn #?(:clj ^{:tag "[B"} js-byte-array :default js-byte-array)
   "Signed byte storage: a size or a sequence, optionally with an init (a
    fill byte or a sequence). The runtime half of the byte-array routing in
    expand: a js/Int8Array on JavaScript seats (the compiled seat's runtime

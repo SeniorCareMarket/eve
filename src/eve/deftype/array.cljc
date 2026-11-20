@@ -79,18 +79,21 @@
 (defn- decode [sio bs]
   (codec/decode sio bs))
 
-(defn- byte-len [bs]
+;; bs is a byte[] on the JVM (eve.codec's byte-array adapter): hinted, so the host macros' aget/alength compile to
+;; RT's primitive overloads. Unhinted, every byte read went through clojure.lang.Reflector (getMethods, Method.copy)
+;; — measured 2026-11-20 ET, 53% of a ds-in-eve build's samples under write-slot!, 44% in the Reflector.
+(defn- byte-len [#?(:clj ^bytes bs :default bs)]
   (eve.host/alength bs))
 
-(defn- magic? [bs]
+(defn- magic? [#?(:clj ^bytes bs :default bs)]
   (and (>= (byte-len bs) 3)
        (== d/DIRECT_MAGIC_0 (bit-and (eve.host/aget bs 0) 0xFF))
        (== d/DIRECT_MAGIC_1 (bit-and (eve.host/aget bs 1) 0xFF))))
 
-(defn- byte-at [bs i]
+(defn- byte-at [#?(:clj ^bytes bs :default bs) i]
   (bit-and (eve.host/aget bs i) 0xFF))
 
-(defn- i32-at [bs i]
+(defn- i32-at [#?(:clj ^bytes bs :default bs) i]
   (let [v (bit-or (byte-at bs i)
                   (bit-shift-left (byte-at bs (+ i 1)) 8)
                   (bit-shift-left (byte-at bs (+ i 2)) 16)
