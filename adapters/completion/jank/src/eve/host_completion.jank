@@ -2614,13 +2614,27 @@ namespace eve_load {
 
 ;; jank's runtime already creates the System namespace, with its own
 ;; currentTimeMillis / getProperty / identityHashCode vars — the block
-;; above is skipped whole on this host, and its System has no getenv
-;; (measured 2026-11-21: System's interns after this namespace loads
-;; are exactly those three). eve.atom's and eve.view's env-or-property
-;; lookup names System/getenv; complete the namespace with the host's
-;; own answer, the process's environment.
+;; above is skipped whole on this host, and its System lacks two vars
+;; Eve's :clj face names (measured 2026-11-21: System's interns after
+;; this namespace loads are exactly those three). Complete the
+;; namespace per var, with the host's own answers: getenv is the
+;; process's environment (eve.atom's and eve.view's env-or-property
+;; lookup); arraycopy is the flat layer's buffer copy (build, column,
+;; container, image name it) — copied through a temp, as the JVM's
+;; behaves when src and dst are one array with overlapping ranges.
 (when-not (ns-resolve 'System 'getenv)
   (intern 'System 'getenv (fn [name] (cpp/eve_host.getenv name))))
+
+(when-not (ns-resolve 'System 'arraycopy)
+  (intern 'System 'arraycopy
+          (fn [src soff dst doff len]
+            (let [soff (int soff) doff (int doff) len (int len)
+                  tmp (persistent! (loop [i 0 acc (transient [])]
+                                     (if (< i len)
+                                       (recur (inc i) (conj! acc (aget src (+ soff i))))
+                                       acc)))]
+              (dotimes [i len] (aset dst (+ doff i) (nth tmp i))))
+            nil)))
 
 ;; ---------------------------------------------------------------------------
 ;; Math/*: the JVM class-statics vanilla code names (datascript.built-ins'
