@@ -1135,6 +1135,22 @@ namespace eve_arith {
              [(keyword (name nm))
               (cons 'clojure.core/fn (mapcat entry-arities es))])))
 
+(defn- bare-method-entry
+  "A spec method entry with its name bare. A method name in spec position is read by name on
+   every host — the JVM matches it against the interface's methods by name; it is never a var
+   reference — but a defining macro's syntax quote qualifies it: compare, which resolves to a
+   var, arrives as clojure.core/compare; invoke, which does not, as the defining namespace's
+   invoke. Every table the name feeds is keyed by the bare name (clj-method-dest, the reify's
+   closure map, method-map's keywords), so a qualified name routes nowhere in translate-impls
+   and registers under a key no dispatch looks up. Measured (datascript.db's defcomp reify):
+   compare/invoke registered as :compare/:invoke, IFn's -invoke missed to eve.core's Object
+   default, whose body calls the object as a fn — the call recursed through the native
+   dispatch until the process died with a segfault (exit 139)."
+  [e]
+  (if (and (seq? e) (symbol? (first e)) (namespace (first e)))
+    (cons (symbol (name (first e))) (rest e))
+    e))
+
 (defn- parse-impls
   "A body of protocol then its methods, as [[protocol [(name [args] body...) ...]] ...]."
   [specs]
@@ -1155,7 +1171,7 @@ namespace eve_arith {
                 (symbol (name p0))
                 p0)
             [ms more] (split-with seq? (rest s))]
-        (recur (conj out [p (vec ms)]) more))
+        (recur (conj out [p (mapv bare-method-entry ms)]) more))
       out)))
 
 (defmacro extend-type
@@ -1747,23 +1763,42 @@ namespace eve_arith {
 ;; IEquiv/-equiv and IHash/-hash, which is what = and hash reach through the equality hooks; toString
 ;; stays the printer layer's. A spec naming anything else passes through unchanged.
 
+(defn- own-proto
+  "This completion's own protocol atom for a name, when it defines one (IDeref, IBlockingDeref,
+   IAtom, IAtom2, IPending). The types adapter's table puts a JVM interface's impls on these
+   (adapters/types/jank: clojure.lang.IDeref → eve.host-completion/IDeref), because
+   clojure.core's deref, swap!, reset!, compare-and-set! and realized? re-roots dispatch
+   through them; a :clj-face spec completed to eve.core's same-named protocol instead
+   registers where those re-roots never look. Measured (eve.db.ds.conn/Conn, whose deftype
+   names clojure.lang.IDeref): the impl sat on eve.core's IDeref — extends? there true,
+   here false — and @conn threw 'No implementation of method: -deref of protocol:
+   eve.host-completion/IDeref'. eve.core's IDeref keeps its Object default, whose body is
+   (deref o), so a direct eve.core/-deref call still lands here through it."
+  [pname]
+  (when-let [v (ns-resolve 'eve.host-completion pname)]
+    (let [p @v]
+      (when (and (map? @p) (contains? @p :fns)) p))))
+
 (defn clj-proto
-  "eve.core's protocol atom for a protocol name (ILookup, IAssociative, ...): what a clojure.lang
-   interface in a deftype spec translates to. eve.core is required on first use. eve.types is
+  "The seat's protocol atom for a protocol name (ILookup, IAssociative, ...): what a clojure.lang
+   interface in a deftype spec translates to. A name this completion itself owns (own-proto)
+   answers with the completion's atom; the rest are eve.core's. eve.core is required on first
+   use. eve.types is
    required unconditionally: its set-type-collection! call at load is what routes core fns
    (assoc/get/...) to the protocols for eve objects — Eve's own deftype macros pull eve.types
    in at their expansion time, but a completion deftype's expansions must not depend on that
    having happened first (eve.core can be loaded with the table still empty)."
   [pname]
   (require 'eve.types)
-  (if-let [v (when (find-ns 'eve.core) (ns-resolve 'eve.core pname))]
-    @v
-    (do (require 'eve.core)
-        (if-let [v (ns-resolve 'eve.core pname)]
-          @v
-          ;; a protocol this completion owns rather than eve.core — IPending,
-          ;; whose -realized? the realized? re-root above dispatches to
-          @(ns-resolve 'eve.host-completion pname)))))
+  (or (own-proto pname)
+      (if-let [v (when (find-ns 'eve.core) (ns-resolve 'eve.core pname))]
+        @v
+        (do (require 'eve.core)
+            (if-let [v (ns-resolve 'eve.core pname)]
+              @v
+              ;; a protocol this completion owns rather than eve.core — IPending,
+              ;; whose -realized? the realized? re-root above dispatches to
+              @(ns-resolve 'eve.host-completion pname))))))
 
 (def ^:private clj-method-dest
   "A JVM method name → [eve.core protocol, its method name]; entryAt → nil (find synthesizes it).
