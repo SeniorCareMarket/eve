@@ -2566,9 +2566,12 @@ namespace eve_arith {
 #include <jank/runtime/module/loader.hpp>
 #include <jank/runtime/obj/persistent_string.hpp>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <sys/wait.h>
+#include <unistd.h>
 namespace eve_load {
   using namespace jank::runtime;
   /* cljc_source and loadable used to live here, calling module_loader.find.
@@ -2614,6 +2617,56 @@ namespace eve_load {
     auto const r(__rt_ctx->compile_module(name));
     if(r.is_err()) { return make_box<obj::persistent_string>(r.expect_err()->message); }
     return jank_nil;
+  }
+  /* AOT self-staging (aot-stage-and-reexec!, at the end of this file): the
+     primitives the staging driver needs -- writing the translated tree,
+     recovering this process's own command line, running the child compile,
+     and ending this process with the child's status. */
+  object_ref write_text_file(object_ref const path, object_ref const text) {
+    auto const p(expect_object<obj::persistent_string>(path)->data);
+    auto const t(expect_object<obj::persistent_string>(text)->data);
+    std::ofstream out{ std::string(p.data(), p.size()), std::ios::binary | std::ios::trunc };
+    if(!out) { return jank_nil; }
+    out << std::string(t.data(), t.size());
+    return make_box(true);
+  }
+  object_ref make_dirs(object_ref const path) {
+    auto const p(expect_object<obj::persistent_string>(path)->data);
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path{ std::string(p.data(), p.size()) }, ec);
+    return make_box(!ec);
+  }
+  object_ref remove_tree(object_ref const path) {
+    auto const p(expect_object<obj::persistent_string>(path)->data);
+    std::error_code ec;
+    std::filesystem::remove_all(std::filesystem::path{ std::string(p.data(), p.size()) }, ec);
+    return make_box(!ec);
+  }
+  object_ref self_cmdline() {
+    std::ifstream in{ \"/proc/self/cmdline\", std::ios::binary };
+    if(!in) { return jank_nil; }
+    std::string const text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+    return make_box<obj::persistent_string>(jtl::immutable_string(text.data(), text.size()));
+  }
+  object_ref system_command(object_ref const cmd) {
+    auto const c(expect_object<obj::persistent_string>(cmd)->data);
+    int const status = std::system(std::string(c.data(), c.size()).c_str());
+    if(status == -1) { return make_box(static_cast<jank::i64>(1)); }
+    if(WIFEXITED(status)) { return make_box(static_cast<jank::i64>(WEXITSTATUS(status))); }
+    if(WIFSIGNALED(status)) { return make_box(static_cast<jank::i64>(128 + WTERMSIG(status))); }
+    return make_box(static_cast<jank::i64>(1));
+  }
+  object_ref log_stderr(object_ref const msg) {
+    auto const m(expect_object<obj::persistent_string>(msg)->data);
+    std::fwrite(m.data(), 1, m.size(), stderr);
+    std::fputc(10, stderr);
+    std::fflush(stderr);
+    return jank_nil;
+  }
+  void exit_process(long code) {
+    std::fflush(stdout);
+    std::fflush(stderr);
+    _exit((int)code);
   }
 }
 ")
@@ -3721,3 +3774,242 @@ namespace eve_load {
             (if (and (nil? filters) (= 'clojure.core ns-sym))
               (cpp/eve_host.refer_all *ns* (clojure-core-publics))
               (apply core-refer ns-sym filters)))))
+
+;; ---------------------------------------------------------------------------
+;; AOT self-staging: a `jank compile` must compile the graph as this loader
+;; produces it, not as jank's native reader finds it
+;; ---------------------------------------------------------------------------
+;; The per-module hook above (aot-compile-module!) compiles a module by
+;; having the runtime re-load it natively -- and the native re-load is not
+;; this loader: it reads with features #{:jank} only, where eve-load reads
+;; #{:jank :clj} and applies the clj-face / process-ns-form translations as
+;; it evals. Measured over the eve.db.ds graph (JANK-AOT-STATUS, 2026-11-21):
+;; 66 of 76 modules survive the native re-load; the rest fail in three
+;; costumes of the one root -- reader conditionals whose :clj arm the native
+;; reader drops whole (eve.flat.chunk's to-rep loses a binding value and its
+;; let no longer parses), refer conflicts when the re-load re-runs an ns form
+;; against the namespace this loader already built, and raw forms the native
+;; analyzer cannot resolve because this loader's translations never touched
+;; them. No fix inside the re-load exists: compilation IS the load's eval, a
+;; managed load fn is never invoked (its existence short-circuits the load
+;; and compile_module answers vacuous success, emitting nothing), and this
+;; process cannot put a translated source in front of the original (module
+;; path order is user sources first, target cache last; find resolves each
+;; module during its load).
+;;
+;; So the compile re-runs itself over a translated tree, staged by this
+;; completion -- the first module every AOT entry loads -- before the entry's
+;; graph loads: every module whose loader winner is a .cljc (the native
+;; loader prefers .jank, then .cljc, across the whole path, measured; a
+;; module with a .jank or .cpp entry already loads natively) is translated
+;; with this loader's own translation -- the per-form (clj-face
+;; (process-ns-form form)) of eval-cljc-source!, printed as source -- into a
+;; mirror tree under the compile's target dir, and `jank compile` is
+;; re-exec'd as a child with the mirror first on its module path and
+;; EVE_AOT_STAGED in its environment. The mirror carries the .eve-translated
+;; marker, so in the child eve-load steps aside and every module loads (and
+;; compiles) natively from the translated text; the marker in the
+;; environment is the recursion guard that keeps the child's own load of
+;; this completion from staging again. The parent ends with the child's
+;; status: the harness sees one command, one exit, one binary. The
+;; translation is whole-path (every .cljc winner on the module path,
+;; reachable or not), so a namespace first named by a macro at expansion
+;; time is already translated when the child asks for it. Nothing here runs
+;; outside a compile: the hook at the bottom fires only while
+;; *compile-files* is bound and the marker is absent, and a graph with no
+;; .cljc winners (a pure-.jank program) compiles as before.
+
+(def ^:private aot-stage-marker "EVE_AOT_STAGED")
+
+(defn- aot-stage-log [msg]
+  (cpp/eve_load.log_stderr (str "eve aot: " msg)))
+
+;; The translator's printer, ported from eve.host-completion-translate (the
+;; manifest-driven build tool of the same translation): jank's pr-str never
+;; prints metadata, and the graph's semantics ride on it (^:mutable deftype
+;; fields above all), so forms are printed by hand -- collections
+;; recursively, leaves via pr-str, metadata prefixed per stage-meta-text.
+(declare stage-print-form)
+
+(defn- stage-meta-text
+  "The metadata of v as source text (the :jank/source entry stripped), or
+   nil. A single {keyword true} entry prints in the ^:kw shorthand, as
+   written in the sources; anything else prints as a ^{...} map."
+  [v]
+  (let [m (meta v)
+        m (when m (dissoc m :jank/source))]
+    (when (seq m)
+      (let [e (first m)]
+        (if (and (= 1 (count m)) (keyword? (key e)) (true? (val e)))
+          (str "^" (key e))
+          (str "^" (stage-print-form m)))))))
+
+(defn- stage-print-form
+  "A form as source text, metadata included."
+  [v]
+  ;; A space always separates the metadata from its form: `^:private HEX`
+  ;; read back as `^:privateHEX ...` when they touched (the keyword token
+  ;; swallowed the symbol, and the def lost its name).
+  (let [m (stage-meta-text v)
+        m (if m (str m " ") "")]
+    (cond
+      (or (seq? v) (list? v)) (str m "(" (str/join " " (map stage-print-form v)) ")")
+      (vector? v) (str m "[" (str/join " " (map stage-print-form v)) "]")
+      (map? v) (str m "{" (str/join ", " (map (fn [[k x]] (str (stage-print-form k) " " (stage-print-form x))) v)) "}")
+      (set? v) (str m "#{" (str/join " " (map stage-print-form v)) "}")
+      :else (str m (pr-str v)))))
+
+(defn- stage-wire-aliases!
+  "Declare the ns form's :require aliases on the fresh file namespace, so
+   read_string resolves ::alias/kw and #:alias{} forms exactly as eve-load's
+   threaded read resolves them. Alias targets are bare namespace objects
+   (create-ns) carrying the library's name; nothing is loaded."
+  [ns-form]
+  (let [wire-one (fn wire-one [prefix spec]
+                   (cond
+                     (vector? spec)
+                     (let [lib (symbol (if prefix (str prefix "." (first spec)) (str (first spec))))]
+                       (loop [xs (rest spec)]
+                         (when (seq xs)
+                           (cond
+                             (= :as (first xs))
+                             (do (alias (second xs) (create-ns lib))
+                                 (recur (nnext xs)))
+
+                             (or (vector? (first xs)) (seq? (first xs)))
+                             (do (wire-one lib (first xs))
+                                 (recur (rest xs)))
+
+                             :else (recur (rest xs))))))
+                     (seq? spec) (wire-one prefix (vec spec))
+                     :else nil))]
+    (doseq [clause (rest ns-form)]
+      (when (and (seq? clause) (#{:require :require-macros} (first clause)))
+        (doseq [spec (rest clause)]
+          (wire-one nil spec))))))
+
+(defn- stage-read-form
+  "The nth form (1-based) of a .cljc source text, read exactly as
+   eval-cljc-source! reads them, or nil."
+  [src n]
+  (cpp/.read_string cpp/jank.runtime.__rt_ctx src clj-feature-opts n))
+
+(defn- stage-translate-source
+  "One .cljc source text as its translated .jank text -- each form read
+   with this loader's features and passed through (clj-face
+   (process-ns-form form)), then printed -- or nil when the file carries
+   no ns form (not a loadable module: a data file sitting on a source
+   root, e.g. data_readers.cljc). The forms are read with *ns* bound to a
+   fresh namespace object carrying the file's name, its :require aliases
+   declared from the translated ns form, so auto-resolved keywords
+   resolve exactly as under eve-load. A form that reads as nil (a reader
+   conditional whose selected branch is nil) is skipped, as eve-load
+   skips it; the read ends on the same seventeen-nil lookahead
+   eval-cljc-source! uses."
+  [src]
+  (let [f1 (stage-read-form src 1)]
+    (when (and (seq? f1) (= 'ns (first f1)))
+      (binding [*ns* (create-ns (second f1))]
+        (stage-wire-aliases! (clj-face (process-ns-form (stage-read-form src 1))))
+        (loop [n 1 nils 0 acc []]
+          (let [f (stage-read-form src n)]
+            (cond (some? f) (recur (inc n) 0 (conj acc (stage-print-form (clj-face (process-ns-form f)))))
+                  (< nils 16) (recur (inc n) (inc nils) acc)
+                  :else (str (str/join "\n" acc) "\n"))))))))
+
+(defn- aot-cljc-winners
+  "The loader index's modules whose winning source is a .cljc file: a
+   vector of {:module :path :archive} maps. The native loader prefers a
+   .jank entry, then a .cljc, across the whole module path (measured), so
+   a module holding a .jank or .cpp entry already loads natively and is
+   not this loader's to translate; the rest are the modules the AOT
+   compiler cannot see. :archive names the archive path when the winning
+   file lives inside one (a jar on the path) -- such a module has no
+   filesystem source to translate and is counted, not staged."
+  []
+  (let [entries (get (cpp/eve_load.runtime_data) "entries")]
+    (reduce (fn [acc [module e]]
+              (let [data (get (get e "cljc") "data")]
+                (if (and (map? data)
+                         (not (map? (get (get e "jank") "data")))
+                         (not (map? (get (get e "cpp") "data"))))
+                  (conj acc {:module (str module)
+                             :path (get data "path")
+                             :archive (let [a (get data "archive_path")
+                                            d (when (map? a) (get a "data"))]
+                                        (when (string? d) d))})
+                  acc)))
+            [] entries)))
+
+(defn- aot-target-dir
+  "The compile's --target-dir value in argv (either spelling), or the
+   CLI's default when the flag is absent."
+  [argv]
+  (loop [xs (seq argv)]
+    (cond (nil? xs) "target"
+          (= "--target-dir" (first xs)) (second xs)
+          (str/starts-with? (first xs) "--target-dir=") (subs (first xs) (count "--target-dir="))
+          :else (recur (next xs)))))
+
+(defn- aot-quote-arg
+  "One argv element as a shell word (single-quoted; an embedded quote is
+   closed, escaped, and reopened)."
+  [s]
+  (str "'" (str/replace s "'" "'\\''") "'"))
+
+(defn- aot-stage-and-reexec!
+  "Stage the translated tree and re-run this compile over it, ending this
+   process with the child's status. Called once, at this namespace's load,
+   while *compile-files* is bound and the staging marker is absent. A
+   graph with no .cljc winners compiles as before (no respawn); a process
+   whose command line cannot be recovered (no /proc/self/cmdline) also
+   falls through to the per-module hook, with the reason logged -- the
+   hook's partial coverage is the floor this staging raises, not a state
+   it may lower."
+  []
+  (let [winners (aot-cljc-winners)
+        fs-winners (filter #(nil? (:archive %)) winners)
+        n-archived (- (count winners) (count fs-winners))]
+    (when (seq fs-winners)
+      (let [cmdline (cpp/eve_load.self_cmdline)
+            argv (when (some? cmdline)
+                   (vec (remove empty? (str/split cmdline #"\u0000"))))]
+        (if (seq argv)
+          (let [mirror (str (aot-target-dir argv) "/eve-aot-staged")
+                child-path (str/join ":" (cons mirror @module-path-dirs))
+                staged (atom 0)]
+            (cpp/eve_load.remove_tree mirror)
+            (cpp/eve_load.make_dirs mirror)
+            (cpp/eve_load.write_text_file (str mirror "/.eve-translated")
+                                          "translated by eve.host-completion (AOT self-staging)\n")
+            (doseq [{:keys [module path]} fs-winners]
+              (let [src (cpp/eve_load.read_text_file path)]
+                (when (nil? src)
+                  (throw (ex-info (str "eve aot: unreadable module source: " path)
+                                  {:module module :path path})))
+                (if-let [text (stage-translate-source src)]
+                  (let [out (str mirror "/" (module-rel-path module) ".jank")]
+                    (cpp/eve_load.make_dirs (subs out 0 (str/last-index-of out "/")))
+                    (when-not (cpp/eve_load.write_text_file out text)
+                      (throw (ex-info (str "eve aot: cannot write staged module: " out)
+                                      {:module module :path out})))
+                    (swap! staged inc))
+                  (aot-stage-log (str "skipped (no ns form): " module)))))
+            (aot-stage-log (str "staged " @staged " modules -> " mirror
+                                (when (pos? n-archived)
+                                  (str " (" n-archived " archived module(s) not staged)"))
+                                "; re-running the compile over the translated tree"))
+            (let [fwd (loop [xs (seq (rest argv)) acc []]
+                        (cond (nil? xs) acc
+                              (= "--module-path" (first xs)) (recur (nnext xs) acc)
+                              (str/starts-with? (first xs) "--module-path=") (recur (next xs) acc)
+                              :else (recur (next xs) (conj acc (first xs)))))
+                  cmd (str aot-stage-marker "=1 "
+                           (str/join " " (map aot-quote-arg
+                                              (concat [(first argv) "--module-path" child-path] fwd))))]
+              (cpp/eve_load.exit_process (long (cpp/eve_load.system_command cmd)))))
+          (aot-stage-log "cannot recover the compile command (no /proc/self/cmdline); compiling unstaged"))))))
+
+(when (and *compile-files*
+           (nil? (cpp/eve_host.getenv aot-stage-marker)))
+  (aot-stage-and-reexec!))
