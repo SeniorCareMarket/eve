@@ -263,6 +263,8 @@ namespace eve_arith {
 #include <gc.h>
 #include <jank/runtime/obj/detail/base_persistent_map.hpp>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 /* A type hint on a parameter or a let binding is a C++ type to jank's analyzer (^long i makes i a native long,
    which works; an unknown name is \"Unable to find `bytes` within the global namespace\": measured). The names eve's
    shared code and tests hint with — eve.host's array casts, the JVM's root types, the JVM interfaces core.rrb-vector's
@@ -425,6 +427,13 @@ namespace eve_host {
   }
   long addr(object_ref o) { return (long)reinterpret_cast<uintptr_t>(o.ptr()); }
   long now_millis() { return (long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+  /* the process environment, for System/getenv: the variable's value, or nil when it is unset */
+  object_ref getenv(object_ref name) {
+    auto const &d(expect_object<obj::persistent_string>(name)->data);
+    char const *v = std::getenv(std::string(d.data(), d.size()).c_str());
+    if(v == nullptr) return jank_nil;
+    return make_box<obj::persistent_string>(jtl::immutable_string(v, std::strlen(v)));
+  }
   /* a byte array of eve's is signed (HOST-CONTRACT §3: a byte reads back signed, as the JVM's): jank's own
      byte-array is u8, so eve's are obj::array<i8> made here */
   object_ref i8_array(long n) { return make_box<obj::array<jank::i8>>((jank::i64)n); }
@@ -642,6 +651,14 @@ namespace eve_host {
            (extends? @(ns-resolve 'eve.host-completion (get clj-host-protos (class-simple-name t))) (object-tag x)))
       (and (some? x) (some? (find-ns 'eve.core))
            (extends? @(ns-resolve 'eve.core (get clj-class-protos (class-simple-name t))) (type-key x))))))
+
+(defn clj-tag-instance?
+  "instance? against a deftype's JVM class name (eve.flat.sio.FlatSio, in shared code with
+   no host arm — eve.flat.image's FlatSio test): on this seat a deftype's class is its tag
+   (eve.flat.sio/FlatSio), so the question is the value's type-key against the tag.
+   clj-face rewrites the (instance? <dotted program type> x) form to this call."
+  [tag x]
+  (and (some? x) (= tag (type-key x))))
 
 ;; ---------------------------------------------------------------------------
 ;; +' -' *' exact — jank's promoting_sub wraps at the i64 boundary
@@ -1758,6 +1775,10 @@ namespace eve_arith {
     equals clojure.core/= compareTo clojure.core/compare toString clojure.core/str
     size clojure.core/count
     get eve.host-completion/jvm-get add eve.host-completion/jvm-add write eve.host-completion/jvm-write
+    ;; push/pop/isEmpty are ArrayDeque's, on its shim (eve.flat's walk stacks are the
+    ;; tree's only .push/.pop/.isEmpty calls: measured, census of src/adapters/apps)
+    push eve.host-completion/deque-push pop eve.host-completion/deque-pop
+    isEmpty eve.host-completion/deque-empty?
     getMostSignificantBits eve.host-completion/uuid-msb getLeastSignificantBits eve.host-completion/uuid-lsb
     getClass clojure.core/type getName clojure.core/name
     ;; startsWith is String's, answered by clojure.string (eve.atom's eve-class?
@@ -1767,9 +1788,9 @@ namespace eve_arith {
 
 (def ^:private clj-ctor-xlate
   "A JVM class name (the head of a (Class. args...) form, dot stripped) → how the seat builds it:
-   the exception classes are ex-info; MapEntry is its [k v] entry vector; ArrayList and UUID are
-   the completion's shims. A constructor naming anything else — a deftype of the file's own, above
-   all — passes through unchanged."
+   the exception classes are ex-info; MapEntry is its [k v] entry vector; ArrayList, ArrayDeque
+   and UUID are the completion's shims. A constructor naming anything else — a deftype of the
+   file's own, above all — passes through unchanged."
   '{clojure.lang.MapEntry clojure.core/vector
     UnsupportedOperationException eve.host-completion/ex-info-ctor
     IllegalArgumentException eve.host-completion/ex-info-ctor
@@ -1777,6 +1798,8 @@ namespace eve_arith {
     java.lang.IndexOutOfBoundsException eve.host-completion/ex-info-ctor
     Exception eve.host-completion/ex-info-ctor
     java.util.ArrayList eve.host-completion/array-list
+    ArrayDeque eve.host-completion/array-deque
+    java.util.ArrayDeque eve.host-completion/array-deque
     UUID eve.host-completion/uuid-new})
 
 (def ^:private clj-class-value-syms
@@ -1799,6 +1822,25 @@ namespace eve_arith {
      java.util.ListIterator java.util.Iterator java.util.Map java.util.Set java.util.Date
      java.util.UUID java.util.Comparator})
 
+(defn- dotted-tag-symbol
+  "The seat tag a dotted program type name denotes (eve.flat.sio.FlatSio →
+   eve.flat.sio/FlatSio: the name with its last dot as a slash), or nil when
+   sym is not one: a JVM or clojure.lang name (the class tables' business),
+   a name the class tables claim, or a name with no dot. On this seat a
+   dotted symbol is one name, so the split is on the name's string."
+  [sym]
+  (when (and (symbol? sym)
+             (not (contains? clj-class-value-syms sym))
+             (not (contains? clj-class-protos (class-simple-name sym)))
+             (not (contains? clj-class-preds (class-simple-name sym))))
+    (let [n (name sym)]
+      (when (and (clojure.string/includes? n ".")
+                 (not (clojure.string/starts-with? n "java."))
+                 (not (clojure.string/starts-with? n "javax."))
+                 (not (clojure.string/starts-with? n "clojure.lang.")))
+        (let [parts (clojure.string/split n #"\.")]
+          (symbol (str (clojure.string/join "." (butlast parts)) "/" (last parts))))))))
+
 (defn clj-face
   "A form of :clj-face (vanilla JVM) code with its direct JVM-surface calls rewritten to the seat's
    dispatching names: (.name target args...) and (. target (name args...)) method forms by
@@ -1812,6 +1854,31 @@ namespace eve_arith {
                 ;; host has no reflection warnings to toggle, so the statement is read and dropped
                 (and (= h 'set!) (symbol? (second form))
                      (= \* (first (name (second form))))) nil
+                ;; (instance? (Class/forName "[B") x): a class named by its JVM descriptor —
+                ;; this seat has no Class/forName; the array kinds the descriptors name are
+                ;; the completion's own array questions (clj-byte-array? / clj-object-array?,
+                ;; in the Arrays section), as eve.flat.chunk's :jank arm answers the same
+                ;; test through eve.encoding. A descriptor naming anything else passes
+                ;; through unchanged, to fail honestly if reached.
+                (and (contains? '#{instance? clojure.core/instance?} h)
+                     (seq? (second form)) (= 'Class/forName (first (second form)))
+                     (string? (second (second form))))
+                (case (second (second form))
+                  "[B" (list 'eve.host-completion/clj-byte-array? (clj-face (nth form 2)))
+                  "[Ljava.lang.Object;" (list 'eve.host-completion/clj-object-array? (clj-face (nth form 2)))
+                  (apply list (map clj-face form)))
+                ;; (instance? eve.flat.sio.FlatSio x): a program deftype named by its JVM
+                ;; class name in shared code, with no host arm (eve.flat.image's FlatSio
+                ;; test) — the seat's answer is the tag test (clj-tag-instance?). A
+                ;; protocol named this way would take the same rewrite and answer
+                ;; false; Eve's own protocol tests sit in :clj arms with :jank
+                ;; satisfies? siblings (eve.flat.chunk's flat-handle?), so the shape
+                ;; does not occur in Eve's code.
+                (and (contains? '#{instance? clojure.core/instance?} h)
+                     (some? (dotted-tag-symbol (second form))))
+                (list 'eve.host-completion/clj-tag-instance?
+                      (list 'quote (dotted-tag-symbol (second form)))
+                      (clj-face (nth form 2)))
                 ;; (instance? <JVM interface name> x): the name is no value here; the question is
                 ;; the value's type against the interface's eve.core protocol (clj-instance?)
                 (and (contains? '#{instance? clojure.core/instance?} h)
@@ -2434,13 +2501,22 @@ namespace eve_load {
 
 (defn- eval-cljc-source!
   "Read src's forms with :clj among the reader features and eval each in order.
-   Forms live at read_string indices 1..N; a nil read is the end of the source."
+   Forms live at read_string indices 1..N. A nil read is not the end of the
+   source: a form can read as nil — a reader conditional whose selected
+   branch is nil (eve.fast-proto's #?(:jank nil :clj (def ...)) answers,
+   twice, ahead of its defn) — and read_string answers nil past the last
+   form too, so the two are told apart only by what follows: the load ends
+   when a nil read is followed by sixteen more nil reads (no real source
+   stacks sixteen nothing-forms in a row); a nil form between real ones
+   is skipped, as a JVM load skips it. Measured 2026-11-21: without the
+   lookahead, eve.fast-proto loaded as an empty namespace and every
+   fp/fast-satisfies? call downstream was unresolvable."
   [src]
-  (loop [n 1]
+  (loop [n 1 nils 0]
     (let [form (cpp/.read_string cpp/jank.runtime.__rt_ctx src clj-feature-opts n)]
-      (when (some? form)
-        (eval (clj-face (process-ns-form form)))
-        (recur (inc n))))))
+      (cond (some? form) (do (eval (clj-face (process-ns-form form)))
+                             (recur (inc n) 0))
+            (< nils 16) (recur (inc n) (inc nils))))))
 
 (def ^:private translated-tree?
   "True when a module-path dir carries the `.eve-translated` marker that
@@ -2517,6 +2593,31 @@ namespace eve_load {
   [& _]
   (transient []))
 
+(defn array-deque
+  "java.util.ArrayDeque, as an atom of a list whose head is the deque's head:
+   eve.flat's walk stacks (image's and transfer's detach) push, pop and test
+   empty, nothing more — a list's conj, first and rest are those three."
+  [& _]
+  (atom ()))
+
+(defn deque-push
+  "ArrayDeque.push on the deque shim: conj onto the head (the call sites use it for effect)."
+  [d v]
+  (swap! d conj v)
+  d)
+
+(defn deque-pop
+  "ArrayDeque.pop on the deque shim: the head, removed."
+  [d]
+  (let [v (first @d)]
+    (swap! d rest)
+    v))
+
+(defn deque-empty?
+  "ArrayDeque.isEmpty on the deque shim."
+  [d]
+  (empty? @d))
+
 (defn jvm-add
   "List.add on the ArrayList shim: conj!, answering true as List.add does."
   [t x]
@@ -2565,18 +2666,45 @@ namespace eve_load {
 ;; ---------------------------------------------------------------------------
 ;; System/*: the JVM class-statics vanilla code calls by name — identityHashCode
 ;; (datascript.impl.entity's hash-entity), getProperty (datascript.util's log
-;; macro, at expansion time), currentTimeMillis (datascript.util's squuid).
+;; macro, at expansion time), currentTimeMillis (datascript.util's squuid),
+;; getenv (eve.atom's and eve.view's env-or-property lookup).
 ;; There is no System class here; a namespace of that name carrying the vars
 ;; answers the same symbols. Each answer is the honest one for this host: the
 ;; instance's own address is its identity hash; no system properties are set
-;; (getProperty answers nil, or the caller's default); the wall clock is real.
+;; (getProperty answers nil, or the caller's default); the process
+;; environment is the process's own; the wall clock is real.
 ;; ---------------------------------------------------------------------------
 
 (when-not (find-ns 'System)
   (create-ns 'System)
   (intern 'System 'identityHashCode (fn [x] (bit-and (object-addr x) 0x7fffffff)))
   (intern 'System 'getProperty (fn ([_] nil) ([_ d] d)))
+  (intern 'System 'getenv (fn [name] (cpp/eve_host.getenv name)))
   (intern 'System 'currentTimeMillis (fn [] (cpp/eve_host.now_millis))))
+
+;; jank's runtime already creates the System namespace, with its own
+;; currentTimeMillis / getProperty / identityHashCode vars — the block
+;; above is skipped whole on this host, and its System lacks two vars
+;; Eve's :clj face names (measured 2026-11-21: System's interns after
+;; this namespace loads are exactly those three). Complete the
+;; namespace per var, with the host's own answers: getenv is the
+;; process's environment (eve.atom's and eve.view's env-or-property
+;; lookup); arraycopy is the flat layer's buffer copy (build, column,
+;; container, image name it) — copied through a temp, as the JVM's
+;; behaves when src and dst are one array with overlapping ranges.
+(when-not (ns-resolve 'System 'getenv)
+  (intern 'System 'getenv (fn [name] (cpp/eve_host.getenv name))))
+
+(when-not (ns-resolve 'System 'arraycopy)
+  (intern 'System 'arraycopy
+          (fn [src soff dst doff len]
+            (let [soff (int soff) doff (int doff) len (int len)
+                  tmp (persistent! (loop [i 0 acc (transient [])]
+                                     (if (< i len)
+                                       (recur (inc i) (conj! acc (aget src (+ soff i))))
+                                       acc)))]
+              (dotimes [i len] (aset dst (+ doff i) (nth tmp i))))
+            nil)))
 
 ;; ---------------------------------------------------------------------------
 ;; Math/*: the JVM class-statics vanilla code names (datascript.built-ins'
@@ -2600,6 +2728,200 @@ namespace eve_load {
   (intern 'Math 'abs (fn [x] (if (neg? x) (- x) x)))
   (intern 'Math 'min (fn [x y] (min x y)))
   (intern 'Math 'max (fn [x y] (max x y))))
+
+;; ---------------------------------------------------------------------------
+;; java.util.Arrays/*: the array statics vanilla :clj code names — fill,
+;; copyOf, copyOfRange, sort, binarySearch (eve.flat's buffer growth and
+;; image writes name them, spelled both ways: java.util.Arrays/fill, and
+;; Arrays/fill through the ns form's :import — the import is stripped on
+;; this seat, so both names must answer), and the array-class questions
+;; (instance? (Class/forName "[B") x) and its Object[] twin, which
+;; clj-face rewrites to clj-byte-array? / clj-object-array? below.
+;; There is no Arrays class here;
+;; namespaces of both names carrying the vars answer the same symbols, as
+;; System and Math above do. The answers are the JVM's semantics spelled
+;; over aget/aset: fill writes the whole array or a range; copyOf and
+;; copyOfRange build a new array of the source's element type, zero past
+;; the source's end, truncated at it; sort orders in place; binarySearch
+;; answers the key's index or -(insertion point) - 1.
+;;
+;; copyOf's new array must carry the source's element type, and the
+;; instance? questions against (Class/forName "[B") and
+;; (Class/forName "[Ljava.lang.Object;") — eve.flat.chunk's and
+;; eve.wire's byte/object array tests, whose :clj arms name classes
+;; this seat has no Class/forName for — must answer the same fact.
+;; Both read the array's element kind, in one place (arrays-kind):
+;; eve.encoding's subtype names its kinds exactly (the byte kinds are
+;; subtype 2, as eve.flat.chunk's own :jank arm answers host-bytes?),
+;; empty arrays included; the kinds that surface does not name (the
+;; wider integral kinds, object) are read from the array's own
+;; behavior — a slot's value, and the integral kinds' wrap, probed on
+;; slot 0 and restored (300 wraps to 44 only in a byte array, 70000
+;; to 4464 only in a short, 2^33 to 0 only in an int; a string sticks
+;; only in an object array; a real slot that keeps 1.1 exactly is a
+;; double's, a float's rounds). An empty array of an unnamed kind
+;; offers nothing to read: kind nil, and copyOf falls back to
+;; byte-array — every empty array Eve's :clj face copies is a byte
+;; buffer's. An object array whose slot 0 holds a real reads as that
+;; real's kind; Eve's one object array (image's srcs) holds block
+;; sources, never a scalar, so the misread cannot occur on Eve's
+;; own calls.
+;; ---------------------------------------------------------------------------
+
+(defn- arrays-kind-by-probe
+  "The element kind of host array a, read from slot 0's value and wrap
+   (see the section head): :byte :short :int :long :float :double
+   :char :boolean :object, or nil for an empty array."
+  [a]
+  (when (pos? (alength a))
+    (let [v0 (aget a 0)]
+      (cond (boolean? v0) :boolean
+            (char? v0) :char
+            (nil? v0) :object
+            (not (integer? v0))
+            (if (number? v0)
+              (try (aset a 0 1.1)
+                   (if (== (aget a 0) 1.1) :double :float)
+                   (finally (aset a 0 v0)))
+              :object)
+            :else
+            (let [string-sticks (try (aset a 0 "eve.host-completion/kind-probe")
+                                     true
+                                     (catch jank.runtime.object_ref _ false)
+                                     (catch std.exception _ false)
+                                     (finally (aset a 0 v0)))]
+              (if string-sticks
+                :object
+                (try (aset a 0 300)
+                     (cond (== (aget a 0) 44) :byte
+                           :else (do (aset a 0 70000)
+                                     (cond (== (aget a 0) 4464) :short
+                                           :else (do (aset a 0 8589934592)
+                                                     (if (== (aget a 0) 0)
+                                                       :int
+                                                       :long)))))
+                     (finally (aset a 0 v0)))))))))
+
+(defn- arrays-kind
+  "The element kind of a host array (arrays-kind-by-probe's keywords), or
+   nil when a is no host array or an empty array of a kind nothing names.
+   eve.encoding's subtype answers first where it names the kind — it is
+   resolved at call time, as print-via-string-writer resolves it: this
+   namespace loads before eve.encoding exists."
+  [a]
+  (when (= "array" (type-key a))
+    (or (when-let [enc (try (do (require 'eve.encoding) (find-ns 'eve.encoding))
+                            (catch jank.runtime.object_ref _ nil)
+                            (catch std.exception _ nil))]
+          (when-let [sb ((ns-resolve enc 'array-subtype+bytes) a)]
+            (case (nth sb 0) 2 :byte 4 :short 6 :int 8 :float 9 :double nil)))
+        (arrays-kind-by-probe a))))
+
+(defn- arrays-new-like
+  "A new zero-filled array of a's element type, of length n (see the section head)."
+  [a n]
+  ((case (arrays-kind a)
+     :byte byte-array :short short-array :int int-array :long long-array
+     :float float-array :double double-array :char char-array
+     :boolean boolean-array :object object-array
+     byte-array)
+   (int n)))
+
+(defn clj-byte-array?
+  "instance? against the JVM's [B, named in :clj code as
+   (Class/forName \"[B\"): x is one of this seat's byte arrays — the
+   byte kinds of arrays-kind, the same answer eve.flat.chunk's :jank
+   arm gives its host-bytes?. clj-face rewrites the instance? form to
+   this call."
+  [x]
+  (= :byte (arrays-kind x)))
+
+(defn clj-object-array?
+  "instance? against the JVM's [Ljava.lang.Object;, named in :clj code
+   as (Class/forName \"[Ljava.lang.Object;\"): x is one of this seat's
+   object arrays. clj-face rewrites the instance? form to this call."
+  [x]
+  (= :object (arrays-kind x)))
+
+(defn- arrays-fill
+  "java.util.Arrays/fill: the whole array, or the range [from to), set to val."
+  ([a val]
+   (dotimes [i (alength a)] (aset a i val))
+   nil)
+  ([a from to val]
+   (loop [i (int from)]
+     (when (< i (int to))
+       (aset a i val)
+       (recur (inc i))))
+   nil))
+
+(defn- arrays-copy-of
+  "java.util.Arrays/copyOf: a new array of a's element type and length n,
+   holding a's first min(n, alength) elements, zero past them."
+  [a n]
+  (let [n (int n)
+        out (arrays-new-like a n)
+        m (min (alength a) n)]
+    (dotimes [i m] (aset out i (aget a i)))
+    out))
+
+(defn- arrays-copy-of-range
+  "java.util.Arrays/copyOfRange: a new array of a's element type holding
+   a[from .. to), zero past a's end."
+  [a from to]
+  (let [from (int from) to (int to)
+        out (arrays-new-like a (- to from))
+        m (max from (min (alength a) to))]
+    (loop [i from]
+      (when (< i m)
+        (aset out (- i from) (aget a i))
+        (recur (inc i))))
+    out))
+
+(defn- arrays-sort
+  "java.util.Arrays/sort: a's elements ordered ascending, in place (the
+   spelling is kind-blind — the elements order by compare, as the JVM's
+   primitive sorts order by value)."
+  [a]
+  (let [sorted (sort (loop [i 0 acc (transient [])]
+                       (if (< i (alength a))
+                         (recur (inc i) (conj! acc (aget a i)))
+                         (persistent! acc))))]
+    (loop [i 0 s (seq sorted)]
+      (when s
+        (aset a i (first s))
+        (recur (inc i) (next s)))))
+  nil)
+
+(defn- arrays-binary-search
+  "java.util.Arrays/binarySearch over the sorted range [from to): the
+   key's index, or -(insertion point) - 1 when the key is absent."
+  ([a key] (arrays-binary-search a 0 (alength a) key))
+  ([a from to key]
+   (loop [lo (int from) hi (dec (int to))]
+     (if (<= lo hi)
+       (let [mid (bit-shift-right (+ lo hi) 1)
+             v (aget a mid)]
+         (cond (== v key) mid
+               (< v key) (recur (inc mid) hi)
+               :else (recur lo (dec mid))))
+       (- (inc lo))))))
+
+(when-not (find-ns 'java.util.Arrays)
+  (create-ns 'java.util.Arrays)
+  (intern 'java.util.Arrays 'fill arrays-fill)
+  (intern 'java.util.Arrays 'copyOf arrays-copy-of)
+  (intern 'java.util.Arrays 'copyOfRange arrays-copy-of-range)
+  (intern 'java.util.Arrays 'sort arrays-sort)
+  (intern 'java.util.Arrays 'binarySearch arrays-binary-search))
+
+(when-not (find-ns 'Arrays)
+  (create-ns 'Arrays)
+  (intern 'Arrays 'fill arrays-fill)
+  (intern 'Arrays 'copyOf arrays-copy-of)
+  (intern 'Arrays 'copyOfRange arrays-copy-of-range)
+  (intern 'Arrays 'sort arrays-sort)
+  (intern 'Arrays 'binarySearch arrays-binary-search))
 
 ;; ---------------------------------------------------------------------------
 ;; format — re-rooted to a real formatter
