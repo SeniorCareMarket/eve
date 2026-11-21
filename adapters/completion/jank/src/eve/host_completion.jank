@@ -3935,9 +3935,13 @@ namespace eve_load {
                          (not (map? (get (get e "cpp") "data"))))
                   (conj acc {:module (str module)
                              :path (get data "path")
+                             ;; the loader's runtime data renders an empty
+                             ;; option as the string "none" (measured), so an
+                             ;; archive is present only when data is a string
+                             ;; other than "none"
                              :archive (let [a (get data "archive_path")
                                             d (when (map? a) (get a "data"))]
-                                        (when (string? d) d))})
+                                        (when (and (string? d) (not= "none" d)) d))})
                   acc)))
             [] entries)))
 
@@ -3970,6 +3974,8 @@ namespace eve_load {
   (let [winners (aot-cljc-winners)
         fs-winners (filter #(nil? (:archive %)) winners)
         n-archived (- (count winners) (count fs-winners))]
+    (when (and (seq winners) (not (seq fs-winners)))
+      (aot-stage-log (str "all " (count winners) " .cljc module(s) are archived; compiling unstaged")))
     (when (seq fs-winners)
       (let [cmdline (cpp/eve_load.self_cmdline)
             argv (when (some? cmdline)
@@ -4013,3 +4019,4 @@ namespace eve_load {
 (when (and *compile-files*
            (nil? (cpp/eve_host.getenv aot-stage-marker)))
   (aot-stage-and-reexec!))
+
