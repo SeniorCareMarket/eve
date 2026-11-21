@@ -2599,7 +2599,7 @@ namespace eve_load {
      eve-load evaluated never passed through the module loader, so the AOT
      compiler holds no compiled object for it and the collector fails the
      build on the first such module a compiled module references
-     ("Compiled module 'X' not found"). The module IS loaded -- by this
+     ('Compiled module X not found'). The module IS loaded -- by this
      loader -- so marking it loaded in the loader's own registry is the
      truth; compile_module then analyzes its loaded forms and writes its
      object, as for a natively loaded module. Answers nil on success, the
