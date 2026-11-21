@@ -578,6 +578,7 @@ namespace eve_host {
 (defn clj-bigint? [x] (= "big_integer" (type-key x)))
 (defn clj-nan? [x] (not= x x))
 (defn clj-ratio? [x] (= "ratio" (type-key x)))
+(defn clj-double? [x] (= "small_real" (type-key x)))
 (defn clj-bigdecimal? [_] false)
 
 (def ^:private clj-class-preds
@@ -587,6 +588,9 @@ namespace eve_host {
   {"Number" clojure.core/number? "Comparable" clj-comparable?
    "BigInteger" clj-bigint? "BigInt" clj-bigint?
    "Ratio" clj-ratio? "BigDecimal" clj-bigdecimal?
+   ;; a JVM Double/Float is this seat's one real kind (datascript.serialize's
+   ;; number dispatch: (instance? Double v), beside its (Double/isNaN v) clause)
+   "Double" clj-double? "Float" clj-double?
    ;; the scalar-leaf screen of eve.atom's swap! dispatch (ds11-jvm-reads FIX, atom.cljc scalar-leaf?): its :clj
    ;; arm — the one jank's reader takes — tests (instance? String v) and its kin; a JVM class name is no value on
    ;; this seat (measured 2026-11-09, compiled-jank lane: "The symbol `String` could not be resolved" loading
@@ -936,12 +940,28 @@ namespace eve_arith {
         (map? form) (with-meta (into {} (map (fn [[k v]] [(defer-field-reads k) (defer-field-reads v)])) form) (meta form))
         :else form))
 
+(defn- defn-inline?
+  "True when a defn form carries an :inline — in the name's meta or in the
+   docstring/attr-map slots of its tail."
+  [name tail]
+  (or (contains? (meta name) :inline)
+      (boolean (some (fn [el] (and (map? el) (contains? el :inline))) (take 2 tail)))))
+
+(defn- defn-expansion
+  "Core's defn expansion for a defn/defn- form, with the seat's tail rewrites;
+   a defn carrying an :inline gets a trailing clj-face-inline! on its var (the
+   :inline section below): the template's expansion is analyzed raw at call
+   sites, so the inline itself must face what it produces."
+  [core form env name tail]
+  (let [exp (apply core form env (untag-native name) (wide-arities (strip-fn-tail (map defer-field-reads tail))))]
+    (if (defn-inline? name tail)
+      (list 'do exp (list 'eve.host-completion/clj-face-inline! (list 'var (untag-native name))))
+      exp)))
+
 (alter-var-root #'clojure.core/defn
-  (fn [core] (fn [form env name & tail]
-               (apply core form env (untag-native name) (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
+  (fn [core] (fn [form env name & tail] (defn-expansion core form env name tail))))
 (alter-var-root #'clojure.core/defn-
-  (fn [core] (fn [form env name & tail]
-               (apply core form env (untag-native name) (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
+  (fn [core] (fn [form env name & tail] (defn-expansion core form env name tail))))
 (alter-var-root #'clojure.core/fn
   (fn [core] (fn [form env & tail] (apply core form env (wide-arities (strip-fn-tail (map defer-field-reads tail)))))))
 (alter-var-root #'clojure.core/let
@@ -1121,10 +1141,17 @@ namespace eve_arith {
   (loop [out [] s specs]
     (if (seq s)
       (let [p0 (first s)
-            ;; a dotted class name in spec position (java.util.Comparator in a reify spec) arrives
-            ;; qualified by the defining macro's syntax quote (datascript.db/java.util.Comparator):
-            ;; the seat's spec tables are keyed by the bare dotted symbol, so strip the qualification
-            p (if (and (symbol? p0) (namespace p0) (not= (name p0) (class-simple-name p0)))
+            ;; a class name in spec position (java.util.Comparator in a reify spec) arrives
+            ;; qualified by the defining macro's syntax quote (datascript.db/java.util.Comparator,
+            ;; its name the dotted string; IFn$OOL likewise, dotless, qualified into the defining
+            ;; namespace): the seat's spec tables are keyed by the bare symbol, so strip a
+            ;; qualification that names no var AND is either a dotted name or the defining
+            ;; namespace's own qualification. A source-written clojure.lang.IChunk names no var
+            ;; either, but its qualification is a package, not the defining ns — it stays, as
+            ;; the tables are keyed.
+            p (if (and (symbol? p0) (namespace p0) (not (resolve p0))
+                       (or (not= (name p0) (class-simple-name p0))
+                           (= (namespace p0) (str *ns*))))
                 (symbol (name p0))
                 p0)
             [ms more] (split-with seq? (rest s))]
@@ -1695,8 +1722,10 @@ namespace eve_arith {
   "What a deftype here takes no impls for: Object's methods (printing is the types adapter's: set-printer!),
    and clojure.lang.IKeywordLookup — an optimization interface with no eve.core counterpart (keyword
    lookup dispatches through ILookup here); its getLookupThunk method is discarded by the same
-   equals/hashCode-only salvage that handles a dropped Object group's methods."
-  '#{Object java.lang.Object clojure.lang.IKeywordLookup})
+   equals/hashCode-only salvage that handles a dropped Object group's methods. IFn$OOL likewise:
+   its invokePrim is IFn's invoke with a primitive return, and every value here is boxed, so the
+   IFn group a spec carries beside it (datascript.db's defcomp reify) is the whole surface."
+  '#{Object java.lang.Object clojure.lang.IKeywordLookup IFn$OOL clojure.lang.IFn$OOL})
 
 ;; ---------------------------------------------------------------------------
 ;; deftype specs naming clojure.lang interfaces (F-JANK-CLJFACE-DEFTYPE)
@@ -1730,7 +1759,11 @@ namespace eve_arith {
   (if-let [v (when (find-ns 'eve.core) (ns-resolve 'eve.core pname))]
     @v
     (do (require 'eve.core)
-        @(ns-resolve 'eve.core pname))))
+        (if-let [v (ns-resolve 'eve.core pname)]
+          @v
+          ;; a protocol this completion owns rather than eve.core — IPending,
+          ;; whose -realized? the realized? re-root above dispatches to
+          @(ns-resolve 'eve.host-completion pname)))))
 
 (def ^:private clj-method-dest
   "A JVM method name → [eve.core protocol, its method name]; entryAt → nil (find synthesizes it).
@@ -1752,6 +1785,7 @@ namespace eve_arith {
     chunkedFirst [IChunkedSeq -chunked-first] chunkedNext [IChunkedNext -chunked-next]
     chunkedMore [IChunkedSeq -chunked-rest] dropFirst [IChunk -drop-first]
     iterator [IIterable -iterator]
+    isRealized [IPending -realized?]
     equals [IEquiv -equiv] hashCode [IHash -hash] compare [IFn -invoke]})
 
 (def ^:private clj-iface-proto
@@ -1765,6 +1799,7 @@ namespace eve_arith {
     clojure.lang.IPersistentVector IVector clojure.lang.IPersistentSet ISet
     clojure.lang.ISeq ISeq clojure.lang.IChunkedSeq IChunkedSeq clojure.lang.IChunk IChunk
     clojure.lang.Sequential ISequential java.lang.Iterable IIterable
+    clojure.lang.IBlockingDeref IDeref clojure.lang.IPending IPending
     java.util.Comparator IFn})
 
 (def ^:private clj-data-proto-names
@@ -1827,7 +1862,8 @@ namespace eve_arith {
     java.util.ArrayList eve.host-completion/array-list
     ArrayDeque eve.host-completion/array-deque
     java.util.ArrayDeque eve.host-completion/array-deque
-    UUID eve.host-completion/uuid-new})
+    UUID eve.host-completion/uuid-new
+    java.math.BigInteger eve.host-completion/clj-bigint-of-bytes})
 
 (def ^:private clj-class-value-syms
   "Dotted class names a vanilla :clj body may name in VALUE position (a :tag value in a meta
@@ -1843,6 +1879,9 @@ namespace eve_arith {
      clojure.lang.IDeref clojure.lang.Indexed clojure.lang.Sequential clojure.lang.IMapEntry
      clojure.lang.ITransientCollection clojure.lang.IEditableCollection clojure.lang.IObj
      clojure.lang.IHashEq clojure.lang.IReduceInit clojure.lang.IKVReduce clojure.lang.MapEntry
+     ;; clojure.core$long is the AOT class of core's long fn, named as a :tag value by
+     ;; datascript.db's patch-tag (the 'number branch, beside java.lang.Boolean's)
+     clojure.core$long
      java.lang.Object java.lang.String java.lang.Boolean java.lang.Long java.lang.Integer
      java.lang.Double java.lang.Character java.lang.Number java.lang.Comparable
      java.lang.StringBuilder java.lang.Exception java.util.Collection java.util.List
@@ -1922,11 +1961,45 @@ namespace eve_arith {
                                 (and (= h 'clojure.lang.Util/hashCombine) (= 3 (count form)))
                 (list 'eve.host-completion/util-hash-combine
                       (clj-face (nth form 1)) (clj-face (nth form 2)))
+                ;; (clojure.lang.Numbers/compare x y): the JVM's numeric compare —
+                ;; clojure.core/compare over this seat's numbers is the same order
+                ;; (datascript.db's value-compare, its Number branch)
+                (and (= h 'clojure.lang.Numbers/compare) (= 3 (count form)))
+                (list 'clojure.core/compare
+                      (clj-face (nth form 1)) (clj-face (nth form 2)))
+                ;; (LazilyPersistentVector/createOwning arr), imported bare or
+                ;; fully qualified: a vector of the array's elements (clj-vec-owning)
+                (and (symbol? h) (clojure.string/ends-with? (str h) "LazilyPersistentVector/createOwning")
+                     (= 2 (count form)))
+                (list 'eve.host-completion/clj-vec-owning (clj-face (nth form 1)))
                 ;; (. clojure.lang.Util (hasheq x)): the seat's hash, as the :cljs face's
-                ;; (hash x) answers datascript.db's ihash there
-                (and (= h '.) (= (second form) 'clojure.lang.Util)
-                     (seq? (nth form 2)) (= 'hasheq (first (nth form 2))))
+                ;; (hash x) answers datascript.db's ihash there. The class symbol is
+                ;; matched by NAME: in an :inline template (ihash's own) syntax-quote
+                ;; qualifies it into the defining namespace, its name the dotted
+                ;; string either way; the member likewise (above).
+                (and (= h '.) (symbol? (second form)) (= "clojure.lang.Util" (name (second form)))
+                     (seq? (nth form 2)) (symbol? (first (nth form 2)))
+                     (= "hasheq" (name (first (nth form 2)))))
                 (list 'clojure.core/hash (clj-face (second (nth form 2))))
+                ;; (.isArray (class x)) / (.isArray (.getClass x)): the :clj face's array
+                ;; question — no class value exists here to interrogate; the question
+                ;; is the value's own (clj-array?, in the Arrays section)
+                (and (= h '.isArray) (= 2 (count form))
+                     (seq? (second form))
+                     (contains? '#{class clojure.core/class .getClass} (first (second form))))
+                (list 'eve.host-completion/clj-array?
+                      (clj-face (second (second form))))
+                ;; (.digest (java.security.MessageDigest/getInstance "SHA-1") bytes):
+                ;; a MessageDigest object has no seat existence; the one-shot
+                ;; digest is the value the form produces (sha1-digest)
+                (and (= h '.digest) (= 3 (count form)) (seq? (second form))
+                     (= 'java.security.MessageDigest/getInstance (first (second form)))
+                     (= "SHA-1" (second (second form))))
+                (list 'eve.host-completion/sha1-digest (clj-face (nth form 2)))
+                ;; (.getBytes s "UTF-8"): String.getBytes — the named encoding's
+                ;; bytes of the string (clj-get-bytes)
+                (and (= h '.getBytes) (= 3 (count form)))
+                (list 'eve.host-completion/clj-get-bytes (clj-face (second form)) (nth form 2))
                 ;; (.compare cmp a b): a Comparator call — the seat's Comparator is a plain
                 ;; 2-arg fn (the reify translation above), so the call is the call itself
                 (and (= h '.) (seq? (nth form 2)) (= 'compare (first (nth form 2)))
@@ -1948,19 +2021,63 @@ namespace eve_arith {
                                   (first (nth form 3))
                                   (list 'quote (nth form 3))
                                   (list 'quote (apply list (map clj-face (nthnext form 4)))))))
+                ;; (defmethod print-method (Class/forName "a.b.T") [x w] body...): the
+                ;; dispatch value is a JVM class named by string — a flat sister's
+                ;; printer (datascript.db's Datom__Flat / DB__Flat, GAP-U3-3). The
+                ;; seat's registry key is the type's tag: the name with its last dot
+                ;; as a slash (dotted-tag-symbol's rule). The body rides the same
+                ;; string-writer shape as the symbol clause above. (An unrewritten
+                ;; defmethod dies in jank's own macro: it syntax-quotes the private
+                ;; clojure.core/defmethod*, which no other namespace may name.)
+                (and (= h 'defmethod) (= (second form) 'print-method)
+                     (seq? (nth form 2)) (= 'Class/forName (first (nth form 2)))
+                     (string? (second (nth form 2)))
+                     (some? (clojure.string/last-index-of (second (nth form 2)) "."))
+                     (vector? (nth form 3)))
+                (let [n (second (nth form 2))
+                      i (clojure.string/last-index-of n ".")]
+                  (list 'eve.host-completion/set-printer!
+                        (list 'quote (symbol (subs n 0 i) (subs n (inc i))))
+                        (list 'fn [(first (nth form 3))]
+                              (list 'eve.host-completion/print-via-string-writer
+                                    (first (nth form 3))
+                                    (list 'quote (nth form 3))
+                                    (list 'quote (apply list (map clj-face (nthnext form 4))))))))
+                ;; (.compare cmp a b): the dotted spelling of the Comparator call
+                ;; above — the seat's Comparator is a plain 2-arg fn, so the call
+                ;; is the call itself (datascript.db's defcomp reify: its IFn
+                ;; invoke body is (.compare this a b); untranslated, jank's
+                ;; analyzer finds oref's native compare and no matching overload)
+                (and (= h '.compare) (= 4 (count form)))
+                (apply list (clj-face (second form)) (map clj-face (nthnext form 2)))
                 ;; (. target (name args...)) / (. target name args...): normalize to (.name target args...)
+                ;; The method symbol is read by NAME: in a syntax-quote template (an
+                ;; :inline's expansion, faced by clj-face-inline!) jank qualifies it
+                ;; into the defining namespace — (cand/getClass) for (getClass) —
+                ;; and the method is its name part either way.
                 (= h '.)
                 (let [target (second form) r (nthnext form 2)
                       m (first r)]
-                  (if (or (seq? m) (and (symbol? m) (contains? clj-method-xlate m)))
-                    (clj-face (apply list (symbol (str "." (if (seq? m) (first m) m))) target
+                  (if (or (seq? m) (and (symbol? m) (or (contains? clj-method-xlate m)
+                                                        (contains? clj-method-xlate (symbol (name m))))))
+                    (clj-face (apply list (symbol (str "." (name (if (seq? m) (first m) m)))) target
                                      (if (seq? m) (rest m) (rest r))))
                     (apply list (map clj-face form))))
-                ;; (.name target args...)
-                (and (symbol? h) (> (count (name h)) 1) (= "." (subs (name h) 0 1)))
-                (if-let [f (get clj-method-xlate (symbol (subs (name h) 1)))]
+                ;; (.name target args...): the head is a dotted symbol — unqualified
+                ;; (.getName) in source, namespace-qualified (.cand/getClass, the
+                ;; dot riding the namespace part) in a syntax-quote expansion; the
+                ;; printed symbol starts with the dot in both spellings, and the
+                ;; method is the name part (minus the dot when it rides there).
+                (and (symbol? h) (> (count (str h)) 1) (= \. (first (str h))))
+                (if-let [f (get clj-method-xlate (symbol (if (namespace h) (name h) (subs (name h) 1))))]
                   (apply list f (map clj-face (rest form)))
                   (apply list (map clj-face form)))
+                ;; (new Tag args...): the class-named ctor in its long spelling —
+                ;; the seat's is the (Tag. args...) call of the type's factory var.
+                ;; The head is read by name: a syntax-quote expansion qualifies
+                ;; new itself (eve.db.ds.parser/new, from deftrecord's template)
+                (and (symbol? h) (= "new" (name h)) (symbol? (second form)))
+                (apply list (symbol (str (second form) ".")) (map clj-face (nthnext form 2)))
                 ;; (Class. args...)
                 (and (symbol? h) (> (count (name h)) 1) (= "." (subs (name h) (dec (count (name h))))))
                 (if-let [f (get clj-ctor-xlate (symbol (subs (name h) 0 (dec (count (name h))))))]
@@ -1971,7 +2088,7 @@ namespace eve_arith {
                 ;; unquoted (the value-quote below would hand the spec parser a (quote …)
                 ;; seq where it expects a symbol: measured, ds-collate DB3); subforms
                 ;; (method entries, bodies) are walked as their own forms as usual
-                :else (if (contains? '#{deftype eve-deftype host-deftype defrecord reify extend-type
+                :else (if (contains? '#{deftype deftype* eve-deftype host-deftype defrecord reify extend-type
                                         extend-protocol defprotocol eve-extend-type
                                         defrecord-updatable}
                                      ;; the head matched by NAME: a spec head is spelled
@@ -2004,6 +2121,34 @@ namespace eve_arith {
         ;; clj-class-value-syms) — quoted, so the analyzer never tries to resolve it
         (symbol? form) (if (contains? clj-class-value-syms form) (list 'quote form) form)
         :else form))
+
+(defn clj-face-inline!
+  "Wrap a var's :inline so the form it produces is clj-face'd. A template is
+   data at definition (its syntax-quote builds the expansion as quoted data,
+   correctly untouched), but a caller's analysis expands it RAW — no clj-face
+   ever sees the expansion, and jank's analyzer has no member getClass/getName
+   on a generic object (measured on datascript.db's class-name: the dotted
+   spelling dies analyze/invalid-cpp-member-call, the (. x (getClass))
+   member-list spelling analyze/unresolved-cpp-symbol with an empty name).
+   The seat's own core inlines build seat forms with list, so they need no
+   wrap; a :clj-face library's templates name the JVM surface, so theirs do —
+   facing the product is the same translation the loader gives source forms."
+  [v]
+  (when-let [f (:inline (meta v))]
+    (alter-meta! v assoc :inline (fn [& args] (clj-face (apply f args))))))
+
+(defn clj-face-macro!
+  "Wrap a macro var so the form it produces is clj-face'd. A macro's expansion
+   is analyzed raw, like an :inline's (clj-face-inline!): a :clj-face macro
+   whose template names the JVM surface — datascript.parser's deftrecord,
+   whose template builds (new Tag ...) — expands to forms this seat cannot
+   analyze until they are faced. Facing the product is the same translation
+   the loader gives source forms; macros defined through the loader (library
+   code) are wrapped by eval-cljc-source! as they are defined. Jank's own
+   core macros and this file's macros are not defined through the loader and
+   keep their native expansions."
+  [v]
+  (alter-var-root v (fn [f] (fn [& args] (clj-face (apply f args))))))
 
 (defn- clj-body
   "A deftype method body with its direct JVM-surface calls rewritten: clj-face, at method scale."
@@ -2139,7 +2284,7 @@ namespace eve_arith {
   "(reify Protocol (method [this ...] body...) ...): an instance whose one field is a map of its closures; its tag
    made once for this form (at its expansion), its methods extended to the tag, each calling the closure."
   [& specs]
-  (let [impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs))
+  (let [impls (translate-impls (remove #(contains? dropped-protocols (first %)) (parse-impls specs)) [])
         k [(str *ns*) (pr-str specs)]
         tag (or (get @reify-tags k)
                 (let [t (symbol (str *ns*) (str (gensym "reify__")))]
@@ -2519,7 +2664,25 @@ namespace eve_load {
       (apply list (first form) (second form)
              (mapcat (fn [clause]
                        (cond (not (seq? clause)) [clause]
-                             (= :import (first clause)) []
+                             ;; :import of a host package (java.util, clojure.lang) drops:
+                             ;; those names live in hints (stripped) and in dotted forms
+                             ;; clj-face rewrites. An :import naming a loadable module
+                             ;; (datascript's [eve.db.ds.db Datom DB]) names program
+                             ;; types — deftype tag vars of that namespace — and the
+                             ;; bodies use them bare ((instance? DB db)); the seat's
+                             ;; import is a :refer of the same names.
+                             (= :import (first clause))
+                             (let [refers (for [spec (rest clause)
+                                                :when (and (or (vector? spec) (seq? spec))
+                                                           (symbol? (first spec))
+                                                           (= "loadable" (module-state (str (first spec)))))]
+                                            ;; the import names the munged package
+                                            ;; (eve.db.ds.pull_parser); the namespace
+                                            ;; it names is the demunged symbol
+                                            [(symbol (str/replace (str (first spec)) "_" "-")) :refer (vec (rest spec))])]
+                               (if (seq refers)
+                                 [(apply list :require refers)]
+                                 []))
                              (= :require (first clause))
                              [(apply list :require
                                      (remove (fn [spec] (and (simple-libspec? spec)
@@ -2550,6 +2713,12 @@ namespace eve_load {
   (loop [n 1 nils 0]
     (let [form (cpp/.read_string cpp/jank.runtime.__rt_ctx src clj-feature-opts n)]
       (cond (some? form) (do (eval (clj-face (process-ns-form form)))
+                             ;; a macro defined by this file: its expansions are
+                             ;; analyzed raw at call sites, so the macro itself
+                             ;; faces what it produces (clj-face-macro!)
+                             (when (and (seq? form) (contains? '#{defmacro clojure.core/defmacro} (first form)))
+                               (when-let [v (ns-resolve *ns* (second form))]
+                                 (clj-face-macro! v)))
                              (recur (inc n) 0))
             (< nils 16) (recur (inc n) (inc nils))))))
 
@@ -2816,6 +2985,20 @@ namespace eve_load {
 ;; the host's own scalar math (cpp/*) and core's min/max/abs.
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Integer/*: the wrapper-class statics vanilla code names — compare
+;; (datascript.db's int-compare macro expands to (Integer/compare x y)).
+;; A namespace of the name carrying the var answers the symbol, as Math
+;; below does; interned per var, as System's completion above is, in
+;; case the runtime pre-creates the namespace.
+;; ---------------------------------------------------------------------------
+
+(when-not (find-ns 'Integer)
+  (create-ns 'Integer))
+
+(when-not (ns-resolve 'Integer 'compare)
+  (intern 'Integer 'compare (fn [x y] (compare (long x) (long y)))))
+
 (when-not (find-ns 'Math)
   (create-ns 'Math)
   (intern 'Math 'sqrt (fn [x] (cpp/sqrt (double x))))
@@ -2944,6 +3127,107 @@ namespace eve_load {
    object arrays. clj-face rewrites the instance? form to this call."
   [x]
   (= :object (arrays-kind x)))
+
+(defn clj-array?
+  "(.isArray (class x)) and (.isArray (.getClass x)) of the :clj face — the
+   array question datascript.arrays' and datascript.db's array? and
+   datascript.query's tuple dispatch ask. There is no class value here to
+   ask; the question is the value's own: a host array is what answers
+   \"array\" to type-key (arrays-kind's domain, empty arrays included).
+   clj-face rewrites the form to this call."
+  [x]
+  (= "array" (type-key x)))
+
+(defn clj-vec-owning
+  "clojure.lang.LazilyPersistentVector/createOwning: a persistent vector of
+   the array's elements. The JVM wraps the array without copying; this
+   seat's vectors are its own, so the elements are collected into one —
+   the arrays callers hand over are freshly built and unretained
+   (datascript.query's projection tuples), so the value is the same.
+   clj-face rewrites the static call to this."
+  [a]
+  (loop [i 0 v []]
+    (if (< i (alength a)) (recur (inc i) (conj v (aget a i))) v)))
+
+(defn clj-get-bytes
+  "String.getBytes: the string's bytes under a named encoding — UTF-8 is
+   eve.encoding's; another encoding has no seat answer and throws rather
+   than approximating one. clj-face rewrites the method form to this."
+  [s enc]
+  (case enc
+    "UTF-8" (do (require 'eve.encoding) ((ns-resolve 'eve.encoding 'utf8-bytes) s))
+    (throw (ex-info (str "String.getBytes: no seat encoding " enc) {:encoding enc}))))
+
+(defn clj-bigint-of-bytes
+  "(java.math.BigInteger. signum magnitude): the integer of a big-endian
+   magnitude byte array under a -1/0/1 signum, in eve's promoting
+   arithmetic. clj-face rewrites the constructor to this through
+   clj-ctor-xlate."
+  [signum mag]
+  (let [v (loop [i 0 acc 0]
+            (if (< i (alength mag)) (recur (inc i) (+' (*' acc 256) (bit-and (aget mag i) 0xff))) acc))]
+    (case (long signum) 1 v 0 0 -1 (- v))))
+
+(defn- sha1-word
+  "The 32-bit word of bytes b at offset o, big-endian."
+  [b o]
+  (bit-or (bit-shift-left (bit-and (aget b o) 0xff) 24)
+          (bit-or (bit-shift-left (bit-and (aget b (+ o 1)) 0xff) 16)
+                  (bit-or (bit-shift-left (bit-and (aget b (+ o 2)) 0xff) 8)
+                          (bit-and (aget b (+ o 3)) 0xff)))))
+
+(defn- sha1-rotl [x n]
+  (bit-or (bit-and (bit-shift-left x n) 0xffffffff)
+          (unsigned-bit-shift-right (bit-and x 0xffffffff) (- 32 n))))
+
+(defn sha1-digest
+  "The FIPS 180-1 SHA-1 digest of a byte array, as a 20-byte array — what
+   (.digest (java.security.MessageDigest/getInstance \"SHA-1\") bytes)
+   produces on the JVM, which is the form clj-face rewrites to this. The
+   value must be a real SHA-1: datascript.core's db-fn var names are
+   content addresses (the digest's first 12 hex chars) stored in
+   databases, so a name derived here must equal the JVM's."
+  [input]
+  (let [ml (alength input)
+        total (* 64 (quot (+ ml 72) 64))
+        buf (byte-array total)]
+    (loop [i 0] (when (< i ml) (aset buf i (aget input i)) (recur (inc i))))
+    (aset buf ml (unchecked-byte 0x80))
+    (loop [i 0] (when (< i 8)
+                  (aset buf (+ (- total 8) i)
+                        (unchecked-byte (bit-and (unsigned-bit-shift-right (* ml 8) (* 8 (- 7 i))) 0xff)))
+                  (recur (inc i))))
+    (let [h (loop [blk 0 h [0x67452301 0xEFCDAB89 0x98BADCFE 0x10325476 0xC3D2E1F0]]
+              (if (< blk total)
+                (let [w (loop [i 0 w []]
+                          (if (< i 80)
+                            (recur (inc i) (conj w (if (< i 16)
+                                                     (sha1-word buf (+ blk (* 4 i)))
+                                                     (sha1-rotl (bit-xor (nth w (- i 3)) (nth w (- i 8))
+                                                                         (nth w (- i 14)) (nth w (- i 16))) 1))))
+                            w))
+                      [a b c d e] (loop [i 0 [a b c d e] h]
+                                    (if (< i 80)
+                                      (let [f (cond (< i 20) (bit-or (bit-and b c) (bit-and (bit-not b) d))
+                                                    (< i 40) (bit-xor b c d)
+                                                    (< i 60) (bit-or (bit-and b c) (bit-and b d) (bit-and c d))
+                                                    :else (bit-xor b c d))
+                                            k (cond (< i 20) 0x5A827999 (< i 40) 0x6ED9EBA1
+                                                    (< i 60) 0x8F1BBCDC :else 0xCA62C1D6)
+                                            t (bit-and (+ (sha1-rotl a 5) f e k (nth w i)) 0xffffffff)]
+                                        (recur (inc i) [t a (sha1-rotl b 30) c d]))
+                                      [a b c d e]))]
+                  (recur (+ blk 64) (mapv (fn [x y] (bit-and (+ x y) 0xffffffff)) h [a b c d e])))
+                h))]
+      (let [out (byte-array 20)]
+        (loop [i 0] (when (< i 5)
+                      (let [x (nth h i)]
+                        (loop [j 0] (when (< j 4)
+                                      (aset out (+ (* 4 i) j)
+                                            (unchecked-byte (bit-and (unsigned-bit-shift-right x (* 8 (- 3 j))) 0xff)))
+                                      (recur (inc j)))))
+                      (recur (inc i))))
+        out))))
 
 (defn- arrays-fill
   "java.util.Arrays/fill: the whole array, or the range [from to), set to val."
