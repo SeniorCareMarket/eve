@@ -2434,13 +2434,22 @@ namespace eve_load {
 
 (defn- eval-cljc-source!
   "Read src's forms with :clj among the reader features and eval each in order.
-   Forms live at read_string indices 1..N; a nil read is the end of the source."
+   Forms live at read_string indices 1..N. A nil read is not the end of the
+   source: a form can read as nil — a reader conditional whose selected
+   branch is nil (eve.fast-proto's #?(:jank nil :clj (def ...)) answers,
+   twice, ahead of its defn) — and read_string answers nil past the last
+   form too, so the two are told apart only by what follows: the load ends
+   when a nil read is followed by sixteen more nil reads (no real source
+   stacks sixteen nothing-forms in a row); a nil form between real ones
+   is skipped, as a JVM load skips it. Measured 2026-11-21: without the
+   lookahead, eve.fast-proto loaded as an empty namespace and every
+   fp/fast-satisfies? call downstream was unresolvable."
   [src]
-  (loop [n 1]
+  (loop [n 1 nils 0]
     (let [form (cpp/.read_string cpp/jank.runtime.__rt_ctx src clj-feature-opts n)]
-      (when (some? form)
-        (eval (clj-face (process-ns-form form)))
-        (recur (inc n))))))
+      (cond (some? form) (do (eval (clj-face (process-ns-form form)))
+                             (recur (inc n) 0))
+            (< nils 16) (recur (inc n) (inc nils))))))
 
 (def ^:private translated-tree?
   "True when a module-path dir carries the `.eve-translated` marker that
