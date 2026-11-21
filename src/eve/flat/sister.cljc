@@ -123,7 +123,16 @@
      ^long [type-key fields]
      (let [s (pr-str [type-key (mapv (fn [f] [(:name f) (:type-class f) (:type-hint f)])
                                      fields)])]
-       (loop [i 0 h (long -3750763034362895579)]
+       ;; the seed is the FNV offset basis as a signed long,
+       ;; -3750763034362895579 (0xCBF29CE484222325), built from its two
+       ;; 32-bit halves instead of written as a negative literal:
+       ;; jolt's --dev AOT constant path mis-encodes a negative long
+       ;; literal (it emits magnitude - 2^64), so (long -3750763034362895579)
+       ;; throws "Value out of range for long: -14695981039346656037" in
+       ;; the AOT binary while interpreted jolt and the JVM compute it
+       ;; fine — measured 2026-11-21, micro-probe + the fingerprint
+       ;; probe. The bit-built form is bit-exact on all three.
+       (loop [i 0 h (long (bit-or (bit-shift-left 3421674724 32) 2216829733))]
          (if (< i (count s))
            (recur (inc i)
                   ;; the char's code, in eve.numeric/char-code's arms:
