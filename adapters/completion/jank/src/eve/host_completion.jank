@@ -1775,6 +1775,10 @@ namespace eve_arith {
     equals clojure.core/= compareTo clojure.core/compare toString clojure.core/str
     size clojure.core/count
     get eve.host-completion/jvm-get add eve.host-completion/jvm-add write eve.host-completion/jvm-write
+    ;; push/pop/isEmpty are ArrayDeque's, on its shim (eve.flat's walk stacks are the
+    ;; tree's only .push/.pop/.isEmpty calls: measured, census of src/adapters/apps)
+    push eve.host-completion/deque-push pop eve.host-completion/deque-pop
+    isEmpty eve.host-completion/deque-empty?
     getMostSignificantBits eve.host-completion/uuid-msb getLeastSignificantBits eve.host-completion/uuid-lsb
     getClass clojure.core/type getName clojure.core/name
     ;; startsWith is String's, answered by clojure.string (eve.atom's eve-class?
@@ -1784,9 +1788,9 @@ namespace eve_arith {
 
 (def ^:private clj-ctor-xlate
   "A JVM class name (the head of a (Class. args...) form, dot stripped) → how the seat builds it:
-   the exception classes are ex-info; MapEntry is its [k v] entry vector; ArrayList and UUID are
-   the completion's shims. A constructor naming anything else — a deftype of the file's own, above
-   all — passes through unchanged."
+   the exception classes are ex-info; MapEntry is its [k v] entry vector; ArrayList, ArrayDeque
+   and UUID are the completion's shims. A constructor naming anything else — a deftype of the
+   file's own, above all — passes through unchanged."
   '{clojure.lang.MapEntry clojure.core/vector
     UnsupportedOperationException eve.host-completion/ex-info-ctor
     IllegalArgumentException eve.host-completion/ex-info-ctor
@@ -1794,6 +1798,8 @@ namespace eve_arith {
     java.lang.IndexOutOfBoundsException eve.host-completion/ex-info-ctor
     Exception eve.host-completion/ex-info-ctor
     java.util.ArrayList eve.host-completion/array-list
+    ArrayDeque eve.host-completion/array-deque
+    java.util.ArrayDeque eve.host-completion/array-deque
     UUID eve.host-completion/uuid-new})
 
 (def ^:private clj-class-value-syms
@@ -2586,6 +2592,31 @@ namespace eve_load {
   "java.util.ArrayList, as a transient vector under construction (the capacity hint is read and dropped)."
   [& _]
   (transient []))
+
+(defn array-deque
+  "java.util.ArrayDeque, as an atom of a list whose head is the deque's head:
+   eve.flat's walk stacks (image's and transfer's detach) push, pop and test
+   empty, nothing more — a list's conj, first and rest are those three."
+  [& _]
+  (atom ()))
+
+(defn deque-push
+  "ArrayDeque.push on the deque shim: conj onto the head (the call sites use it for effect)."
+  [d v]
+  (swap! d conj v)
+  d)
+
+(defn deque-pop
+  "ArrayDeque.pop on the deque shim: the head, removed."
+  [d]
+  (let [v (first @d)]
+    (swap! d rest)
+    v))
+
+(defn deque-empty?
+  "ArrayDeque.isEmpty on the deque shim."
+  [d]
+  (empty? @d))
 
 (defn jvm-add
   "List.add on the ArrayList shim: conj!, answering true as List.add does."
