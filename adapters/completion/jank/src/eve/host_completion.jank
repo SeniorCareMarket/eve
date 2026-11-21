@@ -2602,6 +2602,200 @@ namespace eve_load {
   (intern 'Math 'max (fn [x y] (max x y))))
 
 ;; ---------------------------------------------------------------------------
+;; java.util.Arrays/*: the array statics vanilla :clj code names — fill,
+;; copyOf, copyOfRange, sort, binarySearch (eve.flat's buffer growth and
+;; image writes name them, spelled both ways: java.util.Arrays/fill, and
+;; Arrays/fill through the ns form's :import — the import is stripped on
+;; this seat, so both names must answer), and the array-class questions
+;; (instance? (Class/forName "[B") x) and its Object[] twin, which
+;; clj-face rewrites to clj-byte-array? / clj-object-array? below.
+;; There is no Arrays class here;
+;; namespaces of both names carrying the vars answer the same symbols, as
+;; System and Math above do. The answers are the JVM's semantics spelled
+;; over aget/aset: fill writes the whole array or a range; copyOf and
+;; copyOfRange build a new array of the source's element type, zero past
+;; the source's end, truncated at it; sort orders in place; binarySearch
+;; answers the key's index or -(insertion point) - 1.
+;;
+;; copyOf's new array must carry the source's element type, and the
+;; instance? questions against (Class/forName "[B") and
+;; (Class/forName "[Ljava.lang.Object;") — eve.flat.chunk's and
+;; eve.wire's byte/object array tests, whose :clj arms name classes
+;; this seat has no Class/forName for — must answer the same fact.
+;; Both read the array's element kind, in one place (arrays-kind):
+;; eve.encoding's subtype names its kinds exactly (the byte kinds are
+;; subtype 2, as eve.flat.chunk's own :jank arm answers host-bytes?),
+;; empty arrays included; the kinds that surface does not name (the
+;; wider integral kinds, object) are read from the array's own
+;; behavior — a slot's value, and the integral kinds' wrap, probed on
+;; slot 0 and restored (300 wraps to 44 only in a byte array, 70000
+;; to 4464 only in a short, 2^33 to 0 only in an int; a string sticks
+;; only in an object array; a real slot that keeps 1.1 exactly is a
+;; double's, a float's rounds). An empty array of an unnamed kind
+;; offers nothing to read: kind nil, and copyOf falls back to
+;; byte-array — every empty array Eve's :clj face copies is a byte
+;; buffer's. An object array whose slot 0 holds a real reads as that
+;; real's kind; Eve's one object array (image's srcs) holds block
+;; sources, never a scalar, so the misread cannot occur on Eve's
+;; own calls.
+;; ---------------------------------------------------------------------------
+
+(defn- arrays-kind-by-probe
+  "The element kind of host array a, read from slot 0's value and wrap
+   (see the section head): :byte :short :int :long :float :double
+   :char :boolean :object, or nil for an empty array."
+  [a]
+  (when (pos? (alength a))
+    (let [v0 (aget a 0)]
+      (cond (boolean? v0) :boolean
+            (char? v0) :char
+            (nil? v0) :object
+            (not (integer? v0))
+            (if (number? v0)
+              (try (aset a 0 1.1)
+                   (if (== (aget a 0) 1.1) :double :float)
+                   (finally (aset a 0 v0)))
+              :object)
+            :else
+            (let [string-sticks (try (aset a 0 "eve.host-completion/kind-probe")
+                                     true
+                                     (catch jank.runtime.object_ref _ false)
+                                     (catch std.exception _ false)
+                                     (finally (aset a 0 v0)))]
+              (if string-sticks
+                :object
+                (try (aset a 0 300)
+                     (cond (== (aget a 0) 44) :byte
+                           :else (do (aset a 0 70000)
+                                     (cond (== (aget a 0) 4464) :short
+                                           :else (do (aset a 0 8589934592)
+                                                     (if (== (aget a 0) 0)
+                                                       :int
+                                                       :long)))))
+                     (finally (aset a 0 v0)))))))))
+
+(defn- arrays-kind
+  "The element kind of a host array (arrays-kind-by-probe's keywords), or
+   nil when a is no host array or an empty array of a kind nothing names.
+   eve.encoding's subtype answers first where it names the kind — it is
+   resolved at call time, as print-via-string-writer resolves it: this
+   namespace loads before eve.encoding exists."
+  [a]
+  (when (= "array" (type-key a))
+    (or (when-let [enc (try (do (require 'eve.encoding) (find-ns 'eve.encoding))
+                            (catch jank.runtime.object_ref _ nil)
+                            (catch std.exception _ nil))]
+          (when-let [sb ((ns-resolve enc 'array-subtype+bytes) a)]
+            (case (nth sb 0) 2 :byte 4 :short 6 :int 8 :float 9 :double nil)))
+        (arrays-kind-by-probe a))))
+
+(defn- arrays-new-like
+  "A new zero-filled array of a's element type, of length n (see the section head)."
+  [a n]
+  ((case (arrays-kind a)
+     :byte byte-array :short short-array :int int-array :long long-array
+     :float float-array :double double-array :char char-array
+     :boolean boolean-array :object object-array
+     byte-array)
+   (int n)))
+
+(defn clj-byte-array?
+  "instance? against the JVM's [B, named in :clj code as
+   (Class/forName \"[B\"): x is one of this seat's byte arrays — the
+   byte kinds of arrays-kind, the same answer eve.flat.chunk's :jank
+   arm gives its host-bytes?. clj-face rewrites the instance? form to
+   this call."
+  [x]
+  (= :byte (arrays-kind x)))
+
+(defn clj-object-array?
+  "instance? against the JVM's [Ljava.lang.Object;, named in :clj code
+   as (Class/forName \"[Ljava.lang.Object;\"): x is one of this seat's
+   object arrays. clj-face rewrites the instance? form to this call."
+  [x]
+  (= :object (arrays-kind x)))
+
+(defn- arrays-fill
+  "java.util.Arrays/fill: the whole array, or the range [from to), set to val."
+  ([a val]
+   (dotimes [i (alength a)] (aset a i val))
+   nil)
+  ([a from to val]
+   (loop [i (int from)]
+     (when (< i (int to))
+       (aset a i val)
+       (recur (inc i))))
+   nil))
+
+(defn- arrays-copy-of
+  "java.util.Arrays/copyOf: a new array of a's element type and length n,
+   holding a's first min(n, alength) elements, zero past them."
+  [a n]
+  (let [n (int n)
+        out (arrays-new-like a n)
+        m (min (alength a) n)]
+    (dotimes [i m] (aset out i (aget a i)))
+    out))
+
+(defn- arrays-copy-of-range
+  "java.util.Arrays/copyOfRange: a new array of a's element type holding
+   a[from .. to), zero past a's end."
+  [a from to]
+  (let [from (int from) to (int to)
+        out (arrays-new-like a (- to from))
+        m (max from (min (alength a) to))]
+    (loop [i from]
+      (when (< i m)
+        (aset out (- i from) (aget a i))
+        (recur (inc i))))
+    out))
+
+(defn- arrays-sort
+  "java.util.Arrays/sort: a's elements ordered ascending, in place (the
+   spelling is kind-blind — the elements order by compare, as the JVM's
+   primitive sorts order by value)."
+  [a]
+  (let [sorted (sort (loop [i 0 acc (transient [])]
+                       (if (< i (alength a))
+                         (recur (inc i) (conj! acc (aget a i)))
+                         (persistent! acc))))]
+    (loop [i 0 s (seq sorted)]
+      (when s
+        (aset a i (first s))
+        (recur (inc i) (next s)))))
+  nil)
+
+(defn- arrays-binary-search
+  "java.util.Arrays/binarySearch over the sorted range [from to): the
+   key's index, or -(insertion point) - 1 when the key is absent."
+  ([a key] (arrays-binary-search a 0 (alength a) key))
+  ([a from to key]
+   (loop [lo (int from) hi (dec (int to))]
+     (if (<= lo hi)
+       (let [mid (bit-shift-right (+ lo hi) 1)
+             v (aget a mid)]
+         (cond (== v key) mid
+               (< v key) (recur (inc mid) hi)
+               :else (recur lo (dec mid))))
+       (- (inc lo))))))
+
+(when-not (find-ns 'java.util.Arrays)
+  (create-ns 'java.util.Arrays)
+  (intern 'java.util.Arrays 'fill arrays-fill)
+  (intern 'java.util.Arrays 'copyOf arrays-copy-of)
+  (intern 'java.util.Arrays 'copyOfRange arrays-copy-of-range)
+  (intern 'java.util.Arrays 'sort arrays-sort)
+  (intern 'java.util.Arrays 'binarySearch arrays-binary-search))
+
+(when-not (find-ns 'Arrays)
+  (create-ns 'Arrays)
+  (intern 'Arrays 'fill arrays-fill)
+  (intern 'Arrays 'copyOf arrays-copy-of)
+  (intern 'Arrays 'copyOfRange arrays-copy-of-range)
+  (intern 'Arrays 'sort arrays-sort)
+  (intern 'Arrays 'binarySearch arrays-binary-search))
+
+;; ---------------------------------------------------------------------------
 ;; format — re-rooted to a real formatter
 ;; ---------------------------------------------------------------------------
 ;; jank's core format is an identity stub: (format "prog-%04d" 1) answers "prog-%04d" (measured on hatch
