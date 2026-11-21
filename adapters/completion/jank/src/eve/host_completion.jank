@@ -1763,23 +1763,42 @@ namespace eve_arith {
 ;; IEquiv/-equiv and IHash/-hash, which is what = and hash reach through the equality hooks; toString
 ;; stays the printer layer's. A spec naming anything else passes through unchanged.
 
+(defn- own-proto
+  "This completion's own protocol atom for a name, when it defines one (IDeref, IBlockingDeref,
+   IAtom, IAtom2, IPending). The types adapter's table puts a JVM interface's impls on these
+   (adapters/types/jank: clojure.lang.IDeref → eve.host-completion/IDeref), because
+   clojure.core's deref, swap!, reset!, compare-and-set! and realized? re-roots dispatch
+   through them; a :clj-face spec completed to eve.core's same-named protocol instead
+   registers where those re-roots never look. Measured (eve.db.ds.conn/Conn, whose deftype
+   names clojure.lang.IDeref): the impl sat on eve.core's IDeref — extends? there true,
+   here false — and @conn threw 'No implementation of method: -deref of protocol:
+   eve.host-completion/IDeref'. eve.core's IDeref keeps its Object default, whose body is
+   (deref o), so a direct eve.core/-deref call still lands here through it."
+  [pname]
+  (when-let [v (ns-resolve 'eve.host-completion pname)]
+    (let [p @v]
+      (when (and (map? @p) (contains? @p :fns)) p))))
+
 (defn clj-proto
-  "eve.core's protocol atom for a protocol name (ILookup, IAssociative, ...): what a clojure.lang
-   interface in a deftype spec translates to. eve.core is required on first use. eve.types is
+  "The seat's protocol atom for a protocol name (ILookup, IAssociative, ...): what a clojure.lang
+   interface in a deftype spec translates to. A name this completion itself owns (own-proto)
+   answers with the completion's atom; the rest are eve.core's. eve.core is required on first
+   use. eve.types is
    required unconditionally: its set-type-collection! call at load is what routes core fns
    (assoc/get/...) to the protocols for eve objects — Eve's own deftype macros pull eve.types
    in at their expansion time, but a completion deftype's expansions must not depend on that
    having happened first (eve.core can be loaded with the table still empty)."
   [pname]
   (require 'eve.types)
-  (if-let [v (when (find-ns 'eve.core) (ns-resolve 'eve.core pname))]
-    @v
-    (do (require 'eve.core)
-        (if-let [v (ns-resolve 'eve.core pname)]
-          @v
-          ;; a protocol this completion owns rather than eve.core — IPending,
-          ;; whose -realized? the realized? re-root above dispatches to
-          @(ns-resolve 'eve.host-completion pname)))))
+  (or (own-proto pname)
+      (if-let [v (when (find-ns 'eve.core) (ns-resolve 'eve.core pname))]
+        @v
+        (do (require 'eve.core)
+            (if-let [v (ns-resolve 'eve.core pname)]
+              @v
+              ;; a protocol this completion owns rather than eve.core — IPending,
+              ;; whose -realized? the realized? re-root above dispatches to
+              @(ns-resolve 'eve.host-completion pname))))))
 
 (def ^:private clj-method-dest
   "A JVM method name → [eve.core protocol, its method name]; entryAt → nil (find synthesizes it).
