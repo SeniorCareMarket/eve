@@ -39,12 +39,14 @@
 
    Re-rooted names hold for namespaces compiled after this one (alter-var-root on the core var: measured)."
   (:refer-clojure :exclude [extend mix-collection-hash hash-ordered-coll hash-unordered-coll locking])
-  ;; Math, System, UUID are real source modules in this adapter (Math.jank,
-  ;; System.jank, UUID.jank beside this file's tree): requiring them makes
-  ;; them compiled modules in every graph that loads the completion, which
-  ;; jank's AOT collector demands; the when-not synthesis blocks at the end
-  ;; of this file remain as the fallback and skip when these have loaded.
-  (:require [Math] [System] [UUID]))
+  ;; Math, System, UUID, Arrays, Integer, java.util.Arrays are real source
+  ;; modules in this adapter (Math.jank, System.jank, UUID.jank, Arrays.jank,
+  ;; Integer.jank, java/util/Arrays.jank beside this file's tree): requiring
+  ;; them makes them compiled modules in every graph that loads the
+  ;; completion, which jank's AOT collector demands; the when-not synthesis
+  ;; blocks at the end of this file remain as the fallback and skip when
+  ;; these have loaded.
+  (:require [Math] [System] [UUID] [Arrays] [Integer] [java.util.Arrays]))
 
 ;; The collector primed first: its heap grown to 64 MiB at once, so the load and a program's first allocations do not
 ;; collect at every few MiB of growth (Boehm's default start). GC_expand_hp in a static initializer runs as this
@@ -2592,6 +2594,27 @@ namespace eve_load {
     auto const p(expect_object<obj::persistent_string>(path)->data);
     return make_box(std::filesystem::exists(std::filesystem::path{ std::string(p.data(), p.size()) }));
   }
+  /* aot_compile_module: the AOT collector's half of eve-load (the Clojure
+     caller is aot-compile-module!, beside eve-load-cljc). A .cljc module
+     eve-load evaluated never passed through the module loader, so the AOT
+     compiler holds no compiled object for it and the collector fails the
+     build on the first such module a compiled module references
+     ("Compiled module 'X' not found"). The module IS loaded -- by this
+     loader -- so marking it loaded in the loader's own registry is the
+     truth; compile_module then analyzes its loaded forms and writes its
+     object, as for a natively loaded module. Answers nil on success, the
+     error's message on failure. Only called while *compile-files* is
+     bound (a `jank compile` process); both symbols are defined in the
+     static runtime archive, so the reference links into a built binary,
+     where the call never runs. */
+  object_ref aot_compile_module(object_ref const m) {
+    auto const s(expect_object<obj::persistent_string>(m)->data);
+    jtl::immutable_string const name(s.data(), s.size());
+    __rt_ctx->module_loader.set_is_loaded(name);
+    auto const r(__rt_ctx->compile_module(name));
+    if(r.is_err()) { return make_box<obj::persistent_string>(r.expect_err()->message); }
+    return jank_nil;
+  }
 }
 ")
 
@@ -2798,6 +2821,26 @@ namespace eve_load {
 
 (declare eve-load-cljc)
 
+(defn- aot-compile-module!
+  "Under `jank compile` (*compile-files* bound), a .cljc module this loader
+   just evaluated must also become a compiled module: it never passed
+   through jank's module loader, so the compiler holds no object for it and
+   the AOT collector fails the build demanding it by name (measured
+   2026-11-21: the eve.db.ds shootout's whole .cljc graph — the collector
+   named eve.db.ds.query first — while the interpreted load completes).
+   eve_load's aot_compile_module marks the module loaded (it is, by this
+   loader) and has the runtime compile its loaded forms. A compile failure
+   is thrown with the module named: the binary cannot be correct without
+   the module's compiled form, and the collector's own later demand would
+   name the module without the cause. Inert on the JIT seat, where
+   *compile-files* is unbound."
+  [module]
+  (when *compile-files*
+    (let [err (cpp/eve_load.aot_compile_module module)]
+      (when (some? err)
+        (throw (ex-info (str "AOT compile of module " module " failed: " err)
+                        {:module module}))))))
+
 (defn- eve-load [& paths]
   (if @translated-tree?
     (apply orig-load paths)
@@ -2823,7 +2866,8 @@ namespace eve_load {
                                (binding [*ns* *ns*]
                                  (eval-cljc-source! src))
                                (swap! eve-loaded-modules conj module)
-                               (finally (swap! eve-loading-modules disj module))))))))))
+                               (finally (swap! eve-loading-modules disj module)))
+                          (aot-compile-module! module))))))))
 
 (alter-var-root #'clojure.core/load (fn [_] eve-load))
 
@@ -3289,8 +3333,9 @@ namespace eve_load {
                       (recur (inc i))))
         out))))
 
-(defn- arrays-fill
-  "java.util.Arrays/fill: the whole array, or the range [from to), set to val."
+(defn arrays-fill
+  "java.util.Arrays/fill: the whole array, or the range [from to), set to val.
+   Public: the Arrays and java.util.Arrays modules delegate to it."
   ([a val]
    (dotimes [i (alength a)] (aset a i val))
    nil)
@@ -3301,9 +3346,10 @@ namespace eve_load {
        (recur (inc i))))
    nil))
 
-(defn- arrays-copy-of
+(defn arrays-copy-of
   "java.util.Arrays/copyOf: a new array of a's element type and length n,
-   holding a's first min(n, alength) elements, zero past them."
+   holding a's first min(n, alength) elements, zero past them.
+   Public: the Arrays and java.util.Arrays modules delegate to it."
   [a n]
   (let [n (int n)
         out (arrays-new-like a n)
@@ -3311,9 +3357,10 @@ namespace eve_load {
     (dotimes [i m] (aset out i (aget a i)))
     out))
 
-(defn- arrays-copy-of-range
+(defn arrays-copy-of-range
   "java.util.Arrays/copyOfRange: a new array of a's element type holding
-   a[from .. to), zero past a's end."
+   a[from .. to), zero past a's end.
+   Public: the Arrays and java.util.Arrays modules delegate to it."
   [a from to]
   (let [from (int from) to (int to)
         out (arrays-new-like a (- to from))
@@ -3324,10 +3371,11 @@ namespace eve_load {
         (recur (inc i))))
     out))
 
-(defn- arrays-sort
+(defn arrays-sort
   "java.util.Arrays/sort: a's elements ordered ascending, in place (the
    spelling is kind-blind — the elements order by compare, as the JVM's
-   primitive sorts order by value)."
+   primitive sorts order by value).
+   Public: the Arrays and java.util.Arrays modules delegate to it."
   [a]
   (let [sorted (sort (loop [i 0 acc (transient [])]
                        (if (< i (alength a))
@@ -3339,9 +3387,10 @@ namespace eve_load {
         (recur (inc i) (next s)))))
   nil)
 
-(defn- arrays-binary-search
+(defn arrays-binary-search
   "java.util.Arrays/binarySearch over the sorted range [from to): the
-   key's index, or -(insertion point) - 1 when the key is absent."
+   key's index, or -(insertion point) - 1 when the key is absent.
+   Public: the Arrays and java.util.Arrays modules delegate to it."
   ([a key] (arrays-binary-search a 0 (alength a) key))
   ([a from to key]
    (loop [lo (int from) hi (dec (int to))]

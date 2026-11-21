@@ -1,0 +1,11 @@
+(ns Integer
+  "The wrapper-class statics vanilla code names (datascript.db's int-compare
+   macro expands to (Integer/compare x y)), as a real namespace of real vars.
+
+   A real module, not eve.host-completion's runtime synthesis, so jank's AOT
+   compiler can analyze and collect it; see Math.jank's docstring.
+   eve.host-completion requires this namespace; its when-not intern block
+   remains as the fallback for any environment where this module was not
+   loaded.")
+
+(defn compare [x y] (clojure.core/compare (long x) (long y)))

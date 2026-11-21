@@ -1,0 +1,20 @@
+(ns java.util.Arrays
+  "java.util.Arrays' statics under their fully qualified name (vanilla :clj
+   code calls java.util.Arrays/fill and kin directly), as a real namespace
+   of real vars.
+
+   A real module, not eve.host-completion's runtime synthesis, so jank's AOT
+   compiler can analyze and collect it; see Math.jank's docstring.
+   eve.host-completion requires this namespace; its when-not intern block
+   remains as the fallback for any environment where this module was not
+   loaded.
+
+   The vars are the Arrays module's — the two names are one answer, as they
+   are in the completion's synthesis this module replaces."
+  (:require [Arrays]))
+
+(def fill Arrays/fill)
+(def copyOf Arrays/copyOf)
+(def copyOfRange Arrays/copyOfRange)
+(def sort Arrays/sort)
+(def binarySearch Arrays/binarySearch)

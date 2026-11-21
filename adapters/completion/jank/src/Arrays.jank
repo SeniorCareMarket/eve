@@ -1,0 +1,33 @@
+(ns Arrays
+  "java.util.Arrays' statics under the bare name vanilla :clj code names
+   through an ns form's :import (eve.flat's buffer growth and image writes
+   call Arrays/fill, Arrays/copyOf, Arrays/copyOfRange, Arrays/sort,
+   Arrays/binarySearch), as a real namespace of real vars.
+
+   A real module, not eve.host-completion's runtime synthesis, so jank's AOT
+   compiler can analyze and collect it; see Math.jank's docstring.
+   eve.host-completion requires this namespace; its when-not intern block
+   remains as the fallback for any environment where this module was not
+   loaded.
+
+   The implementations live in eve.host-completion (arrays-fill and kin,
+   beside the element-kind machinery they share with the completion's
+   clj-array? answers); each var here delegates to them, resolved at call
+   time — this module loads from the completion's ns form, before those
+   vars are defined, and by the time any caller runs the completion has
+   loaded. The same delegation pattern as arrays-kind's call-time resolve
+   of eve.encoding.")
+
+(defn fill
+  ([a val] ((ns-resolve 'eve.host-completion 'arrays-fill) a val))
+  ([a from to val] ((ns-resolve 'eve.host-completion 'arrays-fill) a from to val)))
+
+(defn copyOf [a n] ((ns-resolve 'eve.host-completion 'arrays-copy-of) a n))
+
+(defn copyOfRange [a from to] ((ns-resolve 'eve.host-completion 'arrays-copy-of-range) a from to))
+
+(defn sort [a] ((ns-resolve 'eve.host-completion 'arrays-sort) a))
+
+(defn binarySearch
+  ([a key] ((ns-resolve 'eve.host-completion 'arrays-binary-search) a key))
+  ([a from to key] ((ns-resolve 'eve.host-completion 'arrays-binary-search) a from to key)))
