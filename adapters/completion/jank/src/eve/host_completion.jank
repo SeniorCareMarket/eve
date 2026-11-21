@@ -652,6 +652,14 @@ namespace eve_host {
       (and (some? x) (some? (find-ns 'eve.core))
            (extends? @(ns-resolve 'eve.core (get clj-class-protos (class-simple-name t))) (type-key x))))))
 
+(defn clj-tag-instance?
+  "instance? against a deftype's JVM class name (eve.flat.sio.FlatSio, in shared code with
+   no host arm — eve.flat.image's FlatSio test): on this seat a deftype's class is its tag
+   (eve.flat.sio/FlatSio), so the question is the value's type-key against the tag.
+   clj-face rewrites the (instance? <dotted program type> x) form to this call."
+  [tag x]
+  (and (some? x) (= tag (type-key x))))
+
 ;; ---------------------------------------------------------------------------
 ;; +' -' *' exact — jank's promoting_sub wraps at the i64 boundary
 ;; ---------------------------------------------------------------------------
@@ -1808,6 +1816,25 @@ namespace eve_arith {
      java.util.ListIterator java.util.Iterator java.util.Map java.util.Set java.util.Date
      java.util.UUID java.util.Comparator})
 
+(defn- dotted-tag-symbol
+  "The seat tag a dotted program type name denotes (eve.flat.sio.FlatSio →
+   eve.flat.sio/FlatSio: the name with its last dot as a slash), or nil when
+   sym is not one: a JVM or clojure.lang name (the class tables' business),
+   a name the class tables claim, or a name with no dot. On this seat a
+   dotted symbol is one name, so the split is on the name's string."
+  [sym]
+  (when (and (symbol? sym)
+             (not (contains? clj-class-value-syms sym))
+             (not (contains? clj-class-protos (class-simple-name sym)))
+             (not (contains? clj-class-preds (class-simple-name sym))))
+    (let [n (name sym)]
+      (when (and (clojure.string/includes? n ".")
+                 (not (clojure.string/starts-with? n "java."))
+                 (not (clojure.string/starts-with? n "javax."))
+                 (not (clojure.string/starts-with? n "clojure.lang.")))
+        (let [parts (clojure.string/split n #"\.")]
+          (symbol (str (clojure.string/join "." (butlast parts)) "/" (last parts))))))))
+
 (defn clj-face
   "A form of :clj-face (vanilla JVM) code with its direct JVM-surface calls rewritten to the seat's
    dispatching names: (.name target args...) and (. target (name args...)) method forms by
@@ -1834,6 +1861,18 @@ namespace eve_arith {
                   "[B" (list 'eve.host-completion/clj-byte-array? (clj-face (nth form 2)))
                   "[Ljava.lang.Object;" (list 'eve.host-completion/clj-object-array? (clj-face (nth form 2)))
                   (apply list (map clj-face form)))
+                ;; (instance? eve.flat.sio.FlatSio x): a program deftype named by its JVM
+                ;; class name in shared code, with no host arm (eve.flat.image's FlatSio
+                ;; test) — the seat's answer is the tag test (clj-tag-instance?). A
+                ;; protocol named this way would take the same rewrite and answer
+                ;; false; Eve's own protocol tests sit in :clj arms with :jank
+                ;; satisfies? siblings (eve.flat.chunk's flat-handle?), so the shape
+                ;; does not occur in Eve's code.
+                (and (contains? '#{instance? clojure.core/instance?} h)
+                     (some? (dotted-tag-symbol (second form))))
+                (list 'eve.host-completion/clj-tag-instance?
+                      (list 'quote (dotted-tag-symbol (second form)))
+                      (clj-face (nth form 2)))
                 ;; (instance? <JVM interface name> x): the name is no value here; the question is
                 ;; the value's type against the interface's eve.core protocol (clj-instance?)
                 (and (contains? '#{instance? clojure.core/instance?} h)
