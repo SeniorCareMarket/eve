@@ -65,6 +65,13 @@
 (defprotocol ITransientSet (-disjoin! [tcoll v]))
 (defprotocol IChunkedSeq (-chunked-first [coll]) (-chunked-rest [coll]))
 (defprotocol IChunkedNext (-chunked-next [coll]))
+;; jank only: the JVM's clojure.lang.IChunk — ClojureScript's core carries it as IChunk and the
+;; other seats' coll cores take it from their host core, so it lives here beside IList (a chunk
+;; is what -chunked-first hands back; datascript.bset's Chunk is one)
+(defprotocol IChunk (-drop-first [coll]))
+;; jank only: java.lang.Iterable's seat, as ClojureScript's IIterable is on its seat (a deftype's
+;; :clj arm names Iterable; the iterator it builds is the completion's SeqIterator shim)
+(defprotocol IIterable (-iterator [coll]))
 (defprotocol IMapEntry (-key [coll]) (-val [coll]))
 (defprotocol IDeref (-deref [o]))
 (defprotocol IPrintWithWriter (-pr-writer [o writer opts]))

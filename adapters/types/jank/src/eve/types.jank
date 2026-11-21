@@ -273,6 +273,16 @@
   'key [eve.core/IMapEntry eve.core/-key]
   'val [eve.core/IMapEntry eve.core/-val]
   'rseq [eve.core/IReversible eve.core/rseq]
+  ;; the chunk family, as the JVM's chunked seqs answer them (the completion re-roots the
+  ;; names): chunked-seq? from the type's IChunkedSeq extension, chunk-first/chunk-rest from
+  ;; its IChunkedSeq, chunk-next from its IChunkedNext; chunk-cons is keyed on the chunk
+  ;; (its first argument), the type's IChunk
+  'chunked-seq? [eve.core/IChunkedSeq (fn [_] true)]
+  'chunk-first [eve.core/IChunkedSeq eve.core/-chunked-first]
+  'chunk-rest [eve.core/IChunkedSeq eve.core/-chunked-rest]
+  'chunk-next [eve.core/IChunkedNext eve.core/-chunked-next]
+  'chunk-cons [eve.core/IChunk eve.host-completion/chunk-cons]
+  'reduce [eve.core/IReduce eve.core/reduce]
   'reduce-kv [eve.core/IKVReduce eve.core/reduce-kv]
   'transient [eve.core/IEditableCollection eve.core/transient]
   'persistent! [eve.core/ITransientCollection eve.core/persistent!]
