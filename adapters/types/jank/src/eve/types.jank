@@ -9,8 +9,9 @@
    (set-printer!: jank's str and pr-str reach the object's C++ printer). A registered collection reads as the host's
    own (jank's collections, which clojure.core takes).
    The entry points eve's macros call (every eve.types has them):
-     host-type, plain-type, slab-type, eve-type, extend-eve-type,
-     existing-def, rename-fields, reader-of, print-form, vector-types."
+     host-type, plain-type, slab-type, eve-type, flat-type,
+     extend-eve-type, existing-def, rename-fields, reader-of,
+     print-form, vector-types."
   (:require [clojure.string :as str]
             [eve.core]
             [eve.encoding]
@@ -201,6 +202,21 @@
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
 (defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn flat-type
+  "An eve-deftype's generated flat sister on jank (FORMAT-V1 §6, lane H5;
+   realized here 2026-11-21 — before, this host registered the layout
+   alone and a delivered flat value read as the generic
+   eve.flat.chunk/FlatMap, which carries no per-type protocol impls, so
+   a delivered Datom answered IDatom's methods with a protocol miss):
+   the shared generator (eve.deftype-proto.sio/flat-type) with this
+   host's steps — its interfaces onto eve.core's protocols, as on
+   babashka. An instance is built by the deftype's own ->T factory: the
+   sister has no T__new var, and the completion builds (T. x) through
+   ->T."
+  [ctx]
+  (let [{:keys [build] :as hs} (hooks)]
+    (sio/flat-type ctx (assoc hs :build (fn [type-name fields _new-name args]
+                                          (build type-name fields (symbol (str "->" (name type-name))) args))))))
 (defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
 
 (defn existing-def

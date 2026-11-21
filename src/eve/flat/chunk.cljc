@@ -530,8 +530,15 @@
 ))
 
 #?(:jank (do
+;; The type table on jank: the JVM's walk — a TypedVal registers its
+;; type in first-met order and its shape under that type — over atoms
+;; of persistent maps, a type keyed by [tkey (fp-key fp)]. (Before
+;; 2026-11-21 this host's scan wrote no type table: a typed value
+;; packed as its field map and read back as a generic FlatMap, so a
+;; delivered eve-deftype value carried none of its type's protocol
+;; impls. ClojureScript's arm below is the same port, flat lanes U4a.)
 (defn- scan!
-  [rep counts shapes key?]
+  [rep counts shapes types key?]
   (cond
     (or (keyword? rep) (symbol? rep) (string? rep))
     (let [c (or (get @counts rep) [0 0])
@@ -539,50 +546,90 @@
       (swap! counts assoc rep c))
 
     (instance? MetaVal rep)
-    (do (scan! (.-inner rep) counts shapes key?)
-        (scan! (.-meta-rep rep) counts shapes false))
+    (do (scan! (.-inner rep) counts shapes types key?)
+        (scan! (.-meta-rep rep) counts shapes types false))
+
+    (instance? TypedVal rep)
+    (let [tk [(.-tkey rep) (fp-key (.-fp rep))]
+          fields (.-fields rep)]
+      (when-not (contains? @types tk)
+        (swap! types assoc tk {:i (count @types) :fp (.-fp rep)}))
+      (doseq [[k v] fields] (scan! k counts shapes types true) (scan! v counts shapes types false))
+      (let [ks (sort-by-key-bytes (keys fields)) sk [(:i (get @types tk)) ks]]
+        (when-not (contains? @shapes sk)
+          (swap! shapes assoc sk (count @shapes)))))
 
     (map? rep)
-    (do (doseq [[k v] rep] (scan! k counts shapes true) (scan! v counts shapes false))
+    (do (doseq [[k v] rep] (scan! k counts shapes types true) (scan! v counts shapes types false))
         (when-let [ks (shaped-keys rep)]
           (when-not (contains? @shapes [nil ks])
             (swap! shapes assoc [nil ks] (count @shapes)))))
 
     (instance? BytesVal rep) nil
-    (instance? TypedVal rep)
-    (let [fields (.-fields rep)]
-      (doseq [[k v] fields] (scan! k counts shapes true) (scan! v counts shapes false))
-      (when-let [ks (shaped-keys fields)]
-        (when-not (contains? @shapes [nil ks])
-          (swap! shapes assoc [nil ks] (count @shapes)))))
-    (coll? rep) (doseq [e rep] (scan! e counts shapes false))
+    (coll? rep) (doseq [e rep] (scan! e counts shapes types false))
     :else nil))
 
+(defn- field-class
+  "A type-table field class from the first instance's rep (§6), in
+   this host's number model: an integer is i64's code 10 (jank's one
+   integer type), a Double f64's 9; the rest as on the JVM."
+  [rep types]
+  (cond
+    (instance? TypedVal rep) [:ref (:i (get types [(.-tkey rep) (fp-key (.-fp rep))]))]
+    (instance? BytesVal rep) [:prim 1]
+    (instance? MetaVal rep) (field-class (.-inner rep) types)
+    (coll? rep) [:ser 0]
+    :else [:prim (cond (integer? rep) 10
+                       (instance? Double rep) 9
+                       :else 0)]))
+
 (defn- scan
-  "The chunk context for rep: symbol codes, shapes. No type table on
-   this host in v1 (records pack as field maps, as on ClojureScript),
-   so :types is empty and :type-list []."
+  "The chunk context for rep: symbol codes, shapes, types (FORMAT-V1
+   §4, §6). The :types map is keyed by [tkey (fp-key fp)]; write-node!
+   and the batch writer look types up through typed-index."
   [rep]
-  (let [counts (atom {}) shapes (atom {})]
-    (scan! rep counts shapes false)
+  (let [counts (atom {}) shapes (atom {}) types (atom {})]
+    (scan! rep counts shapes types false)
     (let [member? (fn [[k c]] (or (keyword? k) (symbol? k)
                                   (>= (nth c 0) 2) (pos? (nth c 1))))
           syms (->> (filter member? @counts)
                     (sort-by (fn [[k c]] [(- (nth c 0)) (str k)]))
                     (mapv key))
           shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
-                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))]
+                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))
+          type-list (mapv (fn [[tk t]] {:key (first tk) :fp (:fp t) :tk tk})
+                          (sort-by (fn [[_ t]] (:i t)) @types))
+          instances (atom {})]
+      ;; field classes need one instance per type; find them in the rep
+      (letfn [(find! [r]
+                (cond (instance? TypedVal r)
+                      (let [tk [(.-tkey r) (fp-key (.-fp r))]]
+                        (when-not (contains? @instances tk) (swap! instances assoc tk r))
+                        (doseq [[_ v] (.-fields r)] (find! v)))
+                      (instance? MetaVal r) (find! (.-inner r))
+                      (instance? BytesVal r) nil
+                      (map? r) (doseq [[_ v] r] (find! v))
+                      (coll? r) (doseq [e r] (find! e))
+                      :else nil))]
+        (find! rep))
       {:sym (zipmap syms (range)) :syms syms
        :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
        :shape-list shape-list
-       :types {} :type-list []})))
+       :types (zipmap (map :tk type-list) (range))
+       :type-list (mapv (fn [t]
+                          (let [tv (get @instances (:tk t))]
+                            {:key (:key t) :fp (:fp t)
+                             :fields (mapv (fn [k] {:name k
+                                                    :class (field-class (get (.-fields tv) k) @types)})
+                                           (sort-by-key-bytes (keys (.-fields tv))))}))
+                        type-list)})))
 ))
 
 ;; glojure takes the jank text verbatim: the same walk on the same
-;; substrate (atoms of persistent maps), no type table in v1.
+;; substrate (atoms of persistent maps), the same type table.
 #?(:glj (do
 (defn- scan!
-  [rep counts shapes key?]
+  [rep counts shapes types key?]
   (cond
     (or (keyword? rep) (symbol? rep) (string? rep))
     (let [c (or (get @counts rep) [0 0])
@@ -590,43 +637,83 @@
       (swap! counts assoc rep c))
 
     (instance? MetaVal rep)
-    (do (scan! (.-inner rep) counts shapes key?)
-        (scan! (.-meta-rep rep) counts shapes false))
+    (do (scan! (.-inner rep) counts shapes types key?)
+        (scan! (.-meta-rep rep) counts shapes types false))
+
+    (instance? TypedVal rep)
+    (let [tk [(.-tkey rep) (fp-key (.-fp rep))]
+          fields (.-fields rep)]
+      (when-not (contains? @types tk)
+        (swap! types assoc tk {:i (count @types) :fp (.-fp rep)}))
+      (doseq [[k v] fields] (scan! k counts shapes types true) (scan! v counts shapes types false))
+      (let [ks (sort-by-key-bytes (keys fields)) sk [(:i (get @types tk)) ks]]
+        (when-not (contains? @shapes sk)
+          (swap! shapes assoc sk (count @shapes)))))
 
     (map? rep)
-    (do (doseq [[k v] rep] (scan! k counts shapes true) (scan! v counts shapes false))
+    (do (doseq [[k v] rep] (scan! k counts shapes types true) (scan! v counts shapes types false))
         (when-let [ks (shaped-keys rep)]
           (when-not (contains? @shapes [nil ks])
             (swap! shapes assoc [nil ks] (count @shapes)))))
 
     (instance? BytesVal rep) nil
-    (instance? TypedVal rep)
-    (let [fields (.-fields rep)]
-      (doseq [[k v] fields] (scan! k counts shapes true) (scan! v counts shapes false))
-      (when-let [ks (shaped-keys fields)]
-        (when-not (contains? @shapes [nil ks])
-          (swap! shapes assoc [nil ks] (count @shapes)))))
-    (coll? rep) (doseq [e rep] (scan! e counts shapes false))
+    (coll? rep) (doseq [e rep] (scan! e counts shapes types false))
     :else nil))
 
+(defn- field-class
+  "A type-table field class from the first instance's rep (§6), in
+   this host's number model: an integer is i64's code 10 (glojure's
+   one integer type), a Double f64's 9; the rest as on the JVM."
+  [rep types]
+  (cond
+    (instance? TypedVal rep) [:ref (:i (get types [(.-tkey rep) (fp-key (.-fp rep))]))]
+    (instance? BytesVal rep) [:prim 1]
+    (instance? MetaVal rep) (field-class (.-inner rep) types)
+    (coll? rep) [:ser 0]
+    :else [:prim (cond (integer? rep) 10
+                       (instance? Double rep) 9
+                       :else 0)]))
+
 (defn- scan
-  "The chunk context for rep: symbol codes, shapes. No type table on
-   this host in v1 (records pack as field maps, as on ClojureScript),
-   so :types is empty and :type-list []."
+  "The chunk context for rep: symbol codes, shapes, types (FORMAT-V1
+   §4, §6). The :types map is keyed by [tkey (fp-key fp)]; write-node!
+   and the batch writer look types up through typed-index."
   [rep]
-  (let [counts (atom {}) shapes (atom {})]
-    (scan! rep counts shapes false)
+  (let [counts (atom {}) shapes (atom {}) types (atom {})]
+    (scan! rep counts shapes types false)
     (let [member? (fn [[k c]] (or (keyword? k) (symbol? k)
                                   (>= (nth c 0) 2) (pos? (nth c 1))))
           syms (->> (filter member? @counts)
                     (sort-by (fn [[k c]] [(- (nth c 0)) (str k)]))
                     (mapv key))
           shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
-                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))]
+                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))
+          type-list (mapv (fn [[tk t]] {:key (first tk) :fp (:fp t) :tk tk})
+                          (sort-by (fn [[_ t]] (:i t)) @types))
+          instances (atom {})]
+      ;; field classes need one instance per type; find them in the rep
+      (letfn [(find! [r]
+                (cond (instance? TypedVal r)
+                      (let [tk [(.-tkey r) (fp-key (.-fp r))]]
+                        (when-not (contains? @instances tk) (swap! instances assoc tk r))
+                        (doseq [[_ v] (.-fields r)] (find! v)))
+                      (instance? MetaVal r) (find! (.-inner r))
+                      (instance? BytesVal r) nil
+                      (map? r) (doseq [[_ v] r] (find! v))
+                      (coll? r) (doseq [e r] (find! e))
+                      :else nil))]
+        (find! rep))
       {:sym (zipmap syms (range)) :syms syms
        :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
        :shape-list shape-list
-       :types {} :type-list []})))
+       :types (zipmap (map :tk type-list) (range))
+       :type-list (mapv (fn [t]
+                          (let [tv (get @instances (:tk t))]
+                            {:key (:key t) :fp (:fp t)
+                             :fields (mapv (fn [k] {:name k
+                                                    :class (field-class (get (.-fields tv) k) @types)})
+                                           (sort-by-key-bytes (keys (.-fields tv))))}))
+                        type-list)})))
 ))
 
 #?(:cljs (do
@@ -726,8 +813,8 @@
 ))
 
 ;; A TypedVal's index in the chunk's type table, or nil on a host whose
-;; scan writes none (jank, glojure: the value then writes as its field
-;; map). The scan's :types key is [tkey (fp-key fp)] on every host.
+;; scan writes none (the value then writes as its field map). The
+;; scan's :types key is [tkey (fp-key fp)] on every host.
 (defn- typed-index [cx tv]
   (get (:types cx) [(.-tkey ^TypedVal tv) (fp-key (.-fp ^TypedVal tv))]))
 
@@ -985,8 +1072,8 @@
     (let [tv ^TypedVal rep]
       (if (some? (typed-index cx tv))
         (write-map-node! w cx (typed-shape cx tv) (.-fields tv))
-        ;; a host with no type table in v1 (jank, glojure): the typed
-        ;; value writes as its field map, the posture their scan takes
+        ;; a host with no type table: the typed value writes as its
+        ;; field map, the posture their scan takes
         (write-node! w cx (.-fields tv))))
 
     (map? rep)
