@@ -1961,6 +1961,22 @@ namespace eve_arith {
                                 (and (= h 'clojure.lang.Util/hashCombine) (= 3 (count form)))
                 (list 'eve.host-completion/util-hash-combine
                       (clj-face (nth form 1)) (clj-face (nth form 2)))
+                ;; (thrown? ExceptionInfo ...) / (thrown-with-msg? ExceptionInfo re ...):
+                ;; the JVM shapes carry an exception class argument; jank's
+                ;; clojure.test takes none — its thrown?/thrown-with-msg? assert
+                ;; any throw (and the message), which is the content of the
+                ;; assertion here, every seat throw of these classes being an
+                ;; ex-info or a native error. A leading symbol naming a known
+                ;; exception class, with a body after it, is dropped
+                ;; (datascript's bset test: (thrown-with-msg? ExceptionInfo #"…" …))
+                (and (contains? '#{thrown? thrown-with-msg? clojure.test/thrown? clojure.test/thrown-with-msg?} h)
+                     (symbol? (second form))
+                     (contains? '#{"ExceptionInfo" "ArithmeticException" "Exception"
+                                   "IllegalArgumentException" "UnsupportedOperationException"
+                                   "IndexOutOfBoundsException"}
+                                (name (second form)))
+                     (if (= "thrown-with-msg?" (name h)) (< 3 (count form)) (< 2 (count form))))
+                (apply list h (map clj-face (nthnext form 2)))
                 ;; (clojure.lang.Numbers/compare x y): the JVM's numeric compare —
                 ;; clojure.core/compare over this seat's numbers is the same order
                 ;; (datascript.db's value-compare, its Number branch)
