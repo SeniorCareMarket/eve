@@ -1812,6 +1812,19 @@ namespace eve_arith {
                 ;; host has no reflection warnings to toggle, so the statement is read and dropped
                 (and (= h 'set!) (symbol? (second form))
                      (= \* (first (name (second form))))) nil
+                ;; (instance? (Class/forName "[B") x): a class named by its JVM descriptor —
+                ;; this seat has no Class/forName; the array kinds the descriptors name are
+                ;; the completion's own array questions (clj-byte-array? / clj-object-array?,
+                ;; in the Arrays section), as eve.flat.chunk's :jank arm answers the same
+                ;; test through eve.encoding. A descriptor naming anything else passes
+                ;; through unchanged, to fail honestly if reached.
+                (and (contains? '#{instance? clojure.core/instance?} h)
+                     (seq? (second form)) (= 'Class/forName (first (second form)))
+                     (string? (second (second form))))
+                (case (second (second form))
+                  "[B" (list 'eve.host-completion/clj-byte-array? (clj-face (nth form 2)))
+                  "[Ljava.lang.Object;" (list 'eve.host-completion/clj-object-array? (clj-face (nth form 2)))
+                  (apply list (map clj-face form)))
                 ;; (instance? <JVM interface name> x): the name is no value here; the question is
                 ;; the value's type against the interface's eve.core protocol (clj-instance?)
                 (and (contains? '#{instance? clojure.core/instance?} h)
