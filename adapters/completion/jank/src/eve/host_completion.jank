@@ -1135,6 +1135,22 @@ namespace eve_arith {
              [(keyword (name nm))
               (cons 'clojure.core/fn (mapcat entry-arities es))])))
 
+(defn- bare-method-entry
+  "A spec method entry with its name bare. A method name in spec position is read by name on
+   every host — the JVM matches it against the interface's methods by name; it is never a var
+   reference — but a defining macro's syntax quote qualifies it: compare, which resolves to a
+   var, arrives as clojure.core/compare; invoke, which does not, as the defining namespace's
+   invoke. Every table the name feeds is keyed by the bare name (clj-method-dest, the reify's
+   closure map, method-map's keywords), so a qualified name routes nowhere in translate-impls
+   and registers under a key no dispatch looks up. Measured (datascript.db's defcomp reify):
+   compare/invoke registered as :compare/:invoke, IFn's -invoke missed to eve.core's Object
+   default, whose body calls the object as a fn — the call recursed through the native
+   dispatch until the process died with a segfault (exit 139)."
+  [e]
+  (if (and (seq? e) (symbol? (first e)) (namespace (first e)))
+    (cons (symbol (name (first e))) (rest e))
+    e))
+
 (defn- parse-impls
   "A body of protocol then its methods, as [[protocol [(name [args] body...) ...]] ...]."
   [specs]
@@ -1155,7 +1171,7 @@ namespace eve_arith {
                 (symbol (name p0))
                 p0)
             [ms more] (split-with seq? (rest s))]
-        (recur (conj out [p (vec ms)]) more))
+        (recur (conj out [p (mapv bare-method-entry ms)]) more))
       out)))
 
 (defmacro extend-type
