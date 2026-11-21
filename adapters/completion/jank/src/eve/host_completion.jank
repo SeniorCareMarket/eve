@@ -2306,9 +2306,18 @@ namespace eve_arith {
                 (let [t (symbol (str *ns*) (str (gensym "reify__")))]
                   (swap! reify-tags assoc k t)
                   t))
-        fns (into {} (for [[_ methods] impls [nm entries] (group-by first methods)]
-                       [(list 'quote nm)
-                        (cons 'clojure.core/fn (for [[_ args & body] entries] (list* (mapv untag args) body)))]))]
+        ;; first group wins a method name: two spec groups can translate to the
+        ;; same protocol method — datascript.db's defcomp reify carries
+        ;; java.util.Comparator's compare and clojure.lang.IFn's invoke, both
+        ;; IFn's -invoke here — and the later IFn body only delegates to the
+        ;; first (.compare this …); keeping it makes every call recurse
+        ;; without end (measured: native stack overflow, a segfault, on the
+        ;; reify's first call). The first group's body is the implementation.
+        fns (reduce (fn [acc [qk fv]] (if (contains? acc qk) acc (assoc acc qk fv)))
+                    {}
+                    (for [[_ methods] impls [nm entries] (group-by first methods)]
+                      [(list 'quote nm)
+                       (cons 'clojure.core/fn (for [[_ args & body] entries] (list* (mapv untag args) body)))]))]
     `(do ~@(for [[p methods] impls]
              `(eve.host-completion/extend '~tag ~p
                 ~(into {} (for [[nm entries] (group-by first methods)]
