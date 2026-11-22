@@ -42,7 +42,14 @@
             ;; not exist on this seat (its codec requires no
             ;; eve.numeric). On squint the registry registration IS
             ;; the installation (register-exact-io! / install! below).
-            #?@(:squint [[eve.deftype.registry :as registry]]
+            ;; The protocol names are referred from eve.core for the
+            ;; same seat: SCI resolves a deftype's protocol names from
+            ;; the current ns's refers (eve.core's SCI face carries
+            ;; them as stubs), while the cljs fork below keeps the
+            ;; bare names the ClojureScript compiler requires.
+            #?@(:squint [[eve.deftype.registry :as registry]
+                         [eve.core :refer [IEquiv IHash IComparable
+                                           IPrintWithWriter]]]
                 :default [])
             #?(:cljs [eve.encoding :as enc]
                :clje [eve.encoding :as enc]
@@ -66,11 +73,7 @@
   ;; analyzed. Production chains load it via the coll stack; this
   ;; namespace's own require chain must too. No cycle: eve.core
   ;; requires only eve.host + eve.encoding (encoding already above).
-  ;; cljs: the fork below names its protocols through eve.core for
-  ;; the same reason (an SCI host evaluating this file holds no core
-  ;; protocol objects), so the require is read there too.
-  #?(:jank (:require [eve.core])
-     :cljs (:require [eve.core :as ecore]))
+  #?(:jank (:require [eve.core]))
   #?(:lpy (:import fractions decimal io basilisp.lang.obj)))
 
 ;; ---------------------------------------------------------------------------
@@ -458,7 +461,7 @@
 
 #?(:cljs (do
      (deftype EveBigInt [n]
-       ecore/IEquiv
+       IEquiv
        (-equiv [_ other]
          (cond
            (instance? EveBigInt other) (bi= n (.-n other))
@@ -466,54 +469,54 @@
            (and (number? other) (js/Number.isInteger other)
                 (bi= n (js/BigInt other))) true
            :else false))
-       ecore/IHash
+       IHash
        (-hash [_]
          (if (bi-in-long? n)
            (hash (js/Number n))
            (bigint-jhash n)))
-       ecore/IComparable
+       IComparable
        (-compare [_ other]
          (cond
            (instance? EveBigInt other) (bi-cmp n (.-n other))
            (js-bigint? other) (bi-cmp n other)
            (and (number? other) (js/Number.isInteger other)) (bi-cmp n (js/BigInt other))
            :else (throw (js/Error. (str "Cannot compare bigint to " (pr-str other))))))
-       ecore/IPrintWithWriter
+       IPrintWithWriter
        (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/N" (bi-str n))))
        Object
        (toString [_] (bi-str n)))
 
      (deftype EveRatio [num den]
-       ecore/IEquiv
+       IEquiv
        (-equiv [_ other]
          (and (instance? EveRatio other)
               (bi= num (.-num other))
               (bi= den (.-den other))))
-       ecore/IHash
+       IHash
        (-hash [_] (i32 (bit-xor (bigint-jhash num) (bigint-jhash den))))
-       ecore/IComparable
+       IComparable
        (-compare [_ other]
          (if (instance? EveRatio other)
            (bi-cmp (bi* num (.-den other)) (bi* (.-num other) den))
            (throw (js/Error. (str "Cannot compare ratio to " (pr-str other))))))
-       ecore/IPrintWithWriter
+       IPrintWithWriter
        (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
        Object
        (toString [_] (str (bi-str num) "/" (bi-str den))))
 
      (deftype EveBigDec [unscaled scale]
-       ecore/IEquiv
+       IEquiv
        (-equiv [_ other]
          (if (instance? EveBigDec other)
            (let [a (canonical-unscaled-scale unscaled scale)
                  b (canonical-unscaled-scale (.-unscaled other) (.-scale other))]
              (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
            false))
-       ecore/IHash
+       IHash
        (-hash [_]
          (let [[u s] (canonical-unscaled-scale unscaled scale)]
            (bigdec-jhash u s)))
-       ecore/IComparable
+       IComparable
        (-compare [_ other]
          (if (instance? EveBigDec other)
            (let [s (max scale (.-scale other))
@@ -521,7 +524,7 @@
                  bu (bi* (.-unscaled other) (bi-pow10 (- s (.-scale other))))]
              (bi-cmp au bu))
            (throw (js/Error. (str "Cannot compare decimal to " (pr-str other))))))
-       ecore/IPrintWithWriter
+       IPrintWithWriter
        (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
        Object
        (toString [_] (decimal-layout unscaled scale)))

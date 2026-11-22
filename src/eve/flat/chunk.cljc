@@ -28,17 +28,28 @@
             ;; through the seat's eve.core protocols — the same surface
             ;; eve's other types use there. Their eve.core is the
             ;; coll/protocols adapter, which nothing in this namespace's
-            ;; load path cycles back through. The ClojureScript face
-            ;; reads it too: an SCI host evaluating this file (squint's
-            ;; macro-side load, nbb) holds no core protocol objects, so
-            ;; the cljs faces below name their protocols through
-            ;; eve.core as well — on those seats eve.core's faces are
-            ;; cljs.core's own protocol objects at runtime and
-            ;; defprotocol stubs in SCI (adapters/coll/squint).
+            ;; load path cycles back through.
             #?@(:bb [[eve.core :as ecore]]
                 :glj [[eve.core :as ecore]]
-                :jank [[eve.core :as ecore]]
-                :cljs [[eve.core :as ecore]]))
+                :jank [[eve.core :as ecore]])
+            ;; squint: this file is SCI-evaluated in macro cones there,
+            ;; and SCI resolves a deftype's protocol names from the
+            ;; current ns's refers — eve.core's, whose SCI face carries
+            ;; the protocols as defprotocol stubs and whose runtime
+            ;; face aliases squint core's own protocol objects (the
+            ;; adapters/codec/squint shape). The cljs faces below keep
+            ;; the bare names the ClojureScript compiler requires (a
+            ;; protocol named through a def alias is "not a protocol"
+            ;; to its analyzer, measured); staging keeps this refer
+            ;; for squint only, so no other host's reader sees it.
+            #?@(:squint [[eve.core :refer [ICounted ILookup IAssociative
+                                           ISeqable ISequential IVector
+                                           IEquiv IHash IMeta IWithMeta
+                                           IPrintWithWriter IStack
+                                           ICollection IEmptyableCollection
+                                           IReduce IFn IMap ISet IList
+                                           -lookup]]]
+                :default []))
   #?(:clj (:import [java.util Arrays HashMap ArrayList])))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -407,12 +418,9 @@
               (sequential? v) (apply list (map to-rep v))
               :else (or (convert-rep v) v))
         m #?(:clj (when (instance? clojure.lang.IObj v) (meta v))
-             ;; eve.core/IMeta: a bare IMeta resolves only where
-             ;; cljs.core is the ambient core — under an SCI host
-             ;; evaluating this file (squint's macro-side load, nbb)
-             ;; the unqualified name does not resolve, and neither
-             ;; does cljs.core/IMeta (SCI holds no core protocols).
-             :cljs (when (satisfies? ecore/IMeta v) (meta v)))]
+             ;; bare IMeta: cljs.core's on the ClojureScript face;
+             ;; under squint the ns refer (eve.core's stub) answers it.
+             :cljs (when (satisfies? IMeta v) (meta v)))]
     (if m
       (MetaVal. rep (to-rep m))
       rep)))
@@ -2147,11 +2155,11 @@
         #?(:clj (if (satisfies? IAttachMeta inner)
                   (-attach-meta inner (read-value ctx mo))
                   inner)
-           ;; IWithMeta through eve.core, as at this file's other
-           ;; meta-attach sites: clojure.lang.IObj names nothing on
-           ;; the cljs face (an undeclared var the JVM compiler only
-           ;; warns about; SCI hosts reject it outright).
-           :cljs (if (satisfies? ecore/IWithMeta inner)
+           ;; IWithMeta, as at this file's other meta-attach sites:
+           ;; clojure.lang.IObj names nothing on the cljs face (an
+           ;; undeclared var the JVM compiler only warns about; SCI
+           ;; hosts reject it outright).
+           :cljs (if (satisfies? IWithMeta inner)
                    (with-meta inner (read-value ctx mo))
                    inner)))
       (== t 0x2A)
@@ -4509,32 +4517,32 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (elem-count ctx off))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                    (elem-at ctx off (int k)) nil))
   (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                       (elem-at ctx off (int k)) nf))
-  ecore/IAssociative
+  IAssociative
   (-assoc [_ n v] (assocN-flat _ n v))
   (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (seq-of-node ctx off))
-  ecore/ISequential
-  ecore/IVector
+  ISequential
+  IVector
   (-assoc-n [_ n v] (assocN-flat _ n v))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (node-equiv ctx off other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (node-hasheq ctx off)] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatVec ctx off m _h _d))
-  ecore/IPrintWithWriter
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatColVec [ctx off mm ^:mutable _h ^:mutable _d]
@@ -4549,32 +4557,32 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (elem-count ctx off))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                    (elem-at ctx off (int k)) nil))
   (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                       (elem-at ctx off (int k)) nf))
-  ecore/IAssociative
+  IAssociative
   (-assoc [_ n v] (assocN-flat _ n v))
   (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (seq-of-node ctx off))
-  ecore/ISequential
-  ecore/IVector
+  ISequential
+  IVector
   (-assoc-n [_ n v] (assocN-flat _ n v))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (node-equiv ctx off other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (node-hasheq ctx off)] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatColVec ctx off m _h _d))
-  ecore/IPrintWithWriter
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatList [ctx off mm ^:mutable _h ^:mutable _d]
@@ -4589,26 +4597,26 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (elem-count ctx off))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (seq-of-node ctx off))
-  ecore/ISequential
-  ecore/IList
-  ecore/IStack
+  ISequential
+  IList
+  IStack
   (-peek [_] (when (pos? (elem-count ctx off)) (elem-at ctx off 0)))
   (-pop [_] (pop-flat _))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (node-equiv ctx off other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (node-hasheq ctx off)] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatList ctx off m _h _d))
-  ecore/IPrintWithWriter
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatMap [ctx off mm ^:mutable _h ^:mutable _d]
@@ -4623,32 +4631,32 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (count (entries-of-node ctx off)))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (lookup-node ctx off k nil))
   (-lookup [_ k nf] (lookup-node ctx off k nf))
-  ecore/IAssociative
+  IAssociative
   (-assoc [_ k v] (assoc-flat _ k v))
   (-contains-key? [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (node-seq-entries ctx off))
-  ecore/IMap
+  IMap
   (-dissoc [_ k] (dissoc-flat _ k))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (entries-equiv (entries-of-node ctx off) other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (entries-hasheq-of (entries-of-node ctx off))] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatMap ctx off m _h _d))
-  ecore/IFn
-  (-invoke [this k] (ecore/-lookup this k))
-  (-invoke [this k nf] (ecore/-lookup this k nf))
-  ecore/IPrintWithWriter
+  IFn
+  (-invoke [this k] (-lookup this k))
+  (-invoke [this k nf] (-lookup this k nf))
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatSet [ctx off mm ^:mutable _h ^:mutable _d]
@@ -4663,31 +4671,31 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (first (set-parts ctx off)))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (let [[n ko] (set-parts ctx off)]
                    (loop [i 0] (if (== i n) nil
                                    (let [e (elem-at ctx ko i)] (if (= k e) e (recur (inc i))))))))
   (-lookup [_ k nf] (let [[n ko] (set-parts ctx off)]
                       (loop [i 0] (if (== i n) nf
                                       (let [e (elem-at ctx ko i)] (if (= k e) e (recur (inc i))))))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (let [[n ko] (set-parts ctx off)]
               (seq (map (fn [i] (elem-at ctx ko i)) (range n)))))
-  ecore/ISet
+  ISet
   (-disjoin [_ v] (disjoin-flat _ v))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (node-equiv ctx off other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (node-hasheq ctx off)] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatSet ctx off m _h _d))
-  ecore/IPrintWithWriter
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatBatch [ctx off mm ^:mutable _h ^:mutable _d]
@@ -4702,32 +4710,32 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (:n (batch-parts ctx off)))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off))))
                    (row-handle ctx off (int k)) nil))
   (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off))))
                       (row-handle ctx off (int k)) nf))
-  ecore/IAssociative
+  IAssociative
   (-assoc [_ n v] (assocN-flat _ n v))
   (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off)))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (seq (batch-seq-of ctx off)))
-  ecore/ISequential
-  ecore/IVector
+  ISequential
+  IVector
   (-assoc-n [_ n v] (assocN-flat _ n v))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (node-equiv ctx off other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (node-hasheq ctx off)] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatBatch ctx off m _h _d))
-  ecore/IPrintWithWriter
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatRow [ctx off row mm ^:mutable _h ^:mutable _d]
@@ -4744,32 +4752,32 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (row-digest-of _)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (count (:ks (nth (.-shapes ctx) (:shape (batch-parts ctx off))))))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (row-lookup ctx off row k nil))
   (-lookup [_ k nf] (row-lookup ctx off row k nf))
-  ecore/IAssociative
+  IAssociative
   (-assoc [_ k v] (assoc-flat _ k v))
   (-contains-key? [_ k] (not (identical? ::absent (row-lookup ctx off row k ::absent))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (seq (map (fn [[k v]] (first (seq (array-map k v)))) (row-entries ctx off row))))
-  ecore/IMap
+  IMap
   (-dissoc [_ k] (dissoc-flat _ k))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (entries-equiv (row-entries ctx off row) other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (entries-hasheq-of (row-entries ctx off row))] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatRow ctx off row m _h _d))
-  ecore/IFn
-  (-invoke [this k] (ecore/-lookup this k))
-  (-invoke [this k nf] (ecore/-lookup this k nf))
-  ecore/IPrintWithWriter
+  IFn
+  (-invoke [this k] (-lookup this k))
+  (-invoke [this k nf] (-lookup this k nf))
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatTagged [ctx off mm ^:mutable _h ^:mutable _d tkey fp]
@@ -4791,32 +4799,32 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (count (entries-of-node ctx off)))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (lookup-node ctx off k nil))
   (-lookup [_ k nf] (lookup-node ctx off k nf))
-  ecore/IAssociative
+  IAssociative
   (-assoc [_ k v] (assoc-flat _ k v))
   (-contains-key? [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (node-seq-entries ctx off))
-  ecore/IMap
+  IMap
   (-dissoc [_ k] (dissoc-flat _ k))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (entries-equiv (entries-of-node ctx off) other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (entries-hasheq-of (entries-of-node ctx off))] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatTagged ctx off m _h _d tkey fp))
-  ecore/IFn
-  (-invoke [this k] (ecore/-lookup this k))
-  (-invoke [this k nf] (ecore/-lookup this k nf))
-  ecore/IPrintWithWriter
+  IFn
+  (-invoke [this k] (-lookup this k))
+  (-invoke [this k nf] (-lookup this k nf))
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 (deftype FlatRecord [ctx off mm ^:mutable _h ^:mutable _d tkey fp]
@@ -4839,32 +4847,32 @@
   (-digest [_] (let [d _d]
                  (if (some? d) (when-not (identical? d ::none) d)
                      (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
-  ecore/ICounted
+  ICounted
   (-count [_] (count (entries-of-node ctx off)))
-  ecore/ILookup
+  ILookup
   (-lookup [_ k] (lookup-node ctx off k nil))
   (-lookup [_ k nf] (lookup-node ctx off k nf))
-  ecore/IAssociative
+  IAssociative
   (-assoc [_ k v] (assoc-flat _ k v))
   (-contains-key? [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
-  ecore/ISeqable
+  ISeqable
   (-seq [_] (node-seq-entries ctx off))
-  ecore/IMap
+  IMap
   (-dissoc [_ k] (dissoc-flat _ k))
-  ecore/IEquiv
+  IEquiv
   (-equiv [_ other] (entries-equiv (entries-of-node ctx off) other))
-  ecore/IHash
+  IHash
   (-hash [_] (let [v _h]
                (if (some? v) v
                    (let [n (entries-hasheq-of (entries-of-node ctx off))] (set! _h n) n))))
-  ecore/IMeta
+  IMeta
   (-meta [_] mm)
-  ecore/IWithMeta
+  IWithMeta
   (-with-meta [_ m] (->FlatRecord ctx off m _h _d tkey fp))
-  ecore/IFn
-  (-invoke [this k] (ecore/-lookup this k))
-  (-invoke [this k nf] (ecore/-lookup this k nf))
-  ecore/IPrintWithWriter
+  IFn
+  (-invoke [this k] (-lookup this k))
+  (-invoke [this k nf] (-lookup this k nf))
+  IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
 
 ;; --- collection-op completions (flat-all-hosts lane, Nov 16 2026):
@@ -4884,7 +4892,7 @@
         (map? x) (reduce-kv (fn [m k v] (assoc-flat m k v)) h x)
         :else (reduce (fn [m e] (assoc-flat m (key e) (val e))) h (seq x))))
 
-(extend-protocol ecore/ICollection
+(extend-protocol ICollection
   FlatVec (-conj [h x] (cons-flat h x))
   FlatColVec (-conj [h x] (cons-flat h x))
   FlatList (-conj [h x] (cons-flat h x))
@@ -4895,7 +4903,7 @@
   FlatTagged (-conj [h x] (cljs-map-conj h x))
   FlatRow (-conj [h x] (cljs-map-conj h x)))
 
-(extend-protocol ecore/IStack
+(extend-protocol IStack
   FlatVec (-peek [h] (let [c (elem-count (.-ctx h) (.-off h))]
                        (when (pos? c) (elem-at (.-ctx h) (.-off h) (dec c)))))
           (-pop [h] (pop-flat h))
@@ -4906,7 +4914,7 @@
                          (when (pos? c) (elem-at (.-ctx h) (.-off h) (dec c)))))
             (-pop [h] (pop-flat h)))
 
-(extend-protocol ecore/IEmptyableCollection
+(extend-protocol IEmptyableCollection
   FlatVec (-empty [_] [])
   FlatColVec (-empty [_] [])
   FlatList (-empty [_] ())
@@ -4917,7 +4925,7 @@
   FlatRow (-empty [_] {})
   FlatSet (-empty [_] #{}))
 
-(extend-protocol ecore/IReduce
+(extend-protocol IReduce
   FlatVec (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
   FlatColVec (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
   FlatList (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
@@ -5252,7 +5260,7 @@
             vo (off-at (.-b ctx) (+ off 1) (.-wide? ctx))
             mo (off-at (.-b ctx) (+ off 1 w) (.-wide? ctx))
             inner (materialize ctx vo)]
-        (if #?(:clj (instance? clojure.lang.IObj inner) :cljs (satisfies? ecore/IWithMeta inner))
+        (if #?(:clj (instance? clojure.lang.IObj inner) :cljs (satisfies? IWithMeta inner))
           (with-meta inner (materialize ctx mo))
           inner))
       (== t 0x2A)
@@ -5286,7 +5294,7 @@
             m (if (satisfies? IAttachMeta x) (-hmeta x) (meta x))]
         ;; the handle's offset is the value node; its meta lives on
         ;; the handle (read from the META wrapper), so re-apply it
-        (if (and (some? m) #?(:clj (instance? clojure.lang.IObj v) :cljs (satisfies? ecore/IWithMeta v)))
+        (if (and (some? m) #?(:clj (instance? clojure.lang.IObj v) :cljs (satisfies? IWithMeta v)))
           (with-meta v (if (flat-handle? m) (unpack m) m))
           v)))
     :else x))

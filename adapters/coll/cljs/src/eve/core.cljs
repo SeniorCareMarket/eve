@@ -29,34 +29,6 @@
 (def subvec cljs.core/subvec)
 (def meta cljs.core/meta)
 (def with-meta cljs.core/with-meta)
-
-;; The protocol objects, under eve.core's names: a type written for
-;; ClojureScript names its protocols through eve.core wherever an SCI
-;; host evaluates the file (squint's macro-side load holds no core
-;; protocols; adapters/coll/squint's eve.core carries defprotocol
-;; stubs for that face). Here the names are cljs.core's own objects,
-;; so dispatch is ClojureScript's exactly.
-(def ICounted cljs.core/ICounted)
-(def ILookup cljs.core/ILookup)
-(def IAssociative cljs.core/IAssociative)
-(def ISeqable cljs.core/ISeqable)
-(def ISequential cljs.core/ISequential)
-(def IVector cljs.core/IVector)
-(def IEquiv cljs.core/IEquiv)
-(def IHash cljs.core/IHash)
-(def IMeta cljs.core/IMeta)
-(def IWithMeta cljs.core/IWithMeta)
-(def IPrintWithWriter cljs.core/IPrintWithWriter)
-(def IStack cljs.core/IStack)
-(def ICollection cljs.core/ICollection)
-(def IEmptyableCollection cljs.core/IEmptyableCollection)
-(def IReduce cljs.core/IReduce)
-(def IFn cljs.core/IFn)
-(def IMap cljs.core/IMap)
-(def ISet cljs.core/ISet)
-(def IList cljs.core/IList)
-(def IComparable cljs.core/IComparable)
-(def -lookup cljs.core/-lookup)
 (defn invoke
   ([f] (f)) ([f a] (f a)) ([f a b] (f a b)) ([f a b c] (f a b c)))
 (def reduce cljs.core/reduce)
