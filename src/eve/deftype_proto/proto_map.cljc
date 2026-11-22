@@ -45,7 +45,11 @@
 
     clojure.lang.IObj
     {:cljs-proto IWithMeta
-     :methods {withMeta {:cljs-name -with-meta :arities [[_ m]]}}}
+     :methods {;; meta is IMeta's on the JVM (IObj extends IMeta); a
+               ;; body listing it under IObj (a vanilla IObj face —
+               ;; datascript's bset Iter) keeps it, on IMeta
+               meta     {:cljs-name -meta      :cljs-proto-override IMeta :arities [[_]]}
+               withMeta {:cljs-name -with-meta :arities [[_ m]]}}}
 
     clojure.lang.IFn
     {:cljs-proto IFn
@@ -197,8 +201,28 @@
     {:cljs-proto ISeq
      :methods {first {:cljs-name -first :arities [[_]]}
                more  {:cljs-name -rest  :arities [[_]]}
-               ;; next splits to INext on CLJS
-               next  {:cljs-name -next  :cljs-proto-override INext :arities [[_]]}}}
+               ;; cons is IPersistentCollection's on the JVM (ISeq
+               ;; extends it), homed there in the split table; a body
+               ;; that lists it under ISeq (a vanilla ISeq face —
+               ;; datascript's bset Iter) keeps it, on ICollection
+               next  {:cljs-name -next  :cljs-proto-override INext :arities [[_]]}
+               cons  {:cljs-name -conj  :cljs-proto-override ICollection :arities [[_ x]]}}}
+
+    ;; The chunk faces: ClojureScript core carries both protocols,
+    ;; but the forward table never had the JVM names, so a JVM-named
+    ;; chunked body passed through verbatim (an unresolvable head on
+    ;; CLJS) and was dropped by bb's translation (no eve.core home
+    ;; was admitted for it). chunkedNext is IChunkedSeq's method on
+    ;; the JVM and IChunkedNext's on CLJS, as next is INext's.
+    clojure.lang.IChunk
+    {:cljs-proto IChunk
+     :methods {dropFirst {:cljs-name -drop-first :arities [[_]]}}}
+
+    clojure.lang.IChunkedSeq
+    {:cljs-proto IChunkedSeq
+     :methods {chunkedFirst {:cljs-name -chunked-first :arities [[_]]}
+               chunkedMore  {:cljs-name -chunked-rest  :arities [[_]]}
+               chunkedNext  {:cljs-name -chunked-next  :cljs-proto-override IChunkedNext :arities [[_]]}}}
 
     clojure.lang.IMapEntry
     {:cljs-proto IMapEntry
@@ -347,6 +371,7 @@
     IChunkedSeq           {-chunked-first [clojure.lang.IChunkedSeq chunkedFirst]
                            -chunked-rest [clojure.lang.IChunkedSeq chunkedMore]}
     IChunkedNext          {-chunked-next [clojure.lang.IChunkedSeq chunkedNext]}
+    IChunk                {-drop-first [clojure.lang.IChunk dropFirst]}
     IMapEntry             {-key [clojure.lang.IMapEntry key]
                            -val [clojure.lang.IMapEntry val]}
     IDeref                {-deref [clojure.lang.IDeref deref]}
