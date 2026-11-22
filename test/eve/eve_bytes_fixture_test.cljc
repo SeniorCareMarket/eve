@@ -75,16 +75,26 @@
      ;; squint's EDN reader (its edn module) rejects Clojure number
      ;; tokens outright ("Invalid number: 1/2"); eve.numeric/read-edn
      ;; is Eve's reader for exactly those tokens, on every host. And
-     ;; squint's reader returns one plain string for a string, a
-     ;; keyword and a symbol alike (squint has no ident types), so
-     ;; the string and symbol rows name values this host cannot
-     ;; represent: they are skipped unread, as the :clje arm skips
-     ;; its own unrepresentable rows — a named limitation of the
-     ;; host, not a branch in the format.
+     ;; squint's reader erases distinctions the format keeps: it
+     ;; returns one plain string for a string, a keyword and a
+     ;; symbol alike (squint has no ident types), and it builds a
+     ;; map as a plain JS object, coercing every non-string key to a
+     ;; string at parse. Rows whose values turn on those distinctions
+     ;; — the string and symbol rows, and the collection rows with
+     ;; string elements or non-string keys — name values this host
+     ;; cannot represent: they are skipped unread, as the :clje arm
+     ;; skips its own unrepresentable rows. A named limitation of
+     ;; the host's reader, not a branch in the format.
      (vec (keep (fn [line]
                   (when (str/starts-with? line "{")
                     (when-not (or (str/includes? line ":note \"string")
-                                  (str/includes? line ":note \"symbol"))
+                                  (str/includes? line ":note \"symbol")
+                                  (str/includes? line ":note \"flat map mixed key types")
+                                  (str/includes? line ":note \"flat set mixed element types")
+                                  (str/includes? line ":note \"flat vec with nil and scalars")
+                                  (str/includes? line ":note \"vector key, flat on every host")
+                                  (str/includes? line ":note \"set key")
+                                  (str/includes? line ":note \"map key"))
                       (num/read-edn line
                                     {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}}))))
                 (str/split-lines (.readFileSync (js/require "fs") fixture-path "utf8"))))
