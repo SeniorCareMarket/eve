@@ -242,6 +242,19 @@
            (define (eve-region-pl-u8 r b o) (let ((v (foreign-ref 'unsigned-8 b o))) (keep-live r) v))
            (define (eve-region-ps-i32! r b o v) (foreign-set! 'unsigned-32 b o (bitwise-and v #xFFFFFFFF)) (keep-live r))
            (define (eve-region-ps-u8! r b o v) (foreign-set! 'unsigned-8 b o (bitwise-and v #xFF)) (keep-live r))
+           ;; the worker-registry scan (eve.atom/mmap-min-safe-epoch): from slot i, the first slot whose status word is
+           ;; active and whose epoch word is not 0, as (slot * 2^32) + (epoch + 2^31); -1 when none. The same two
+           ;; aligned seq-cst loads per slot, in the same order, as the loop over -load-i32 (a MOV each on x86-64)
+           (define (eve-region-scan-pinned r b start i n stride soff eoff active)
+             (let loop ((i i))
+               (if (fx>= i n)
+                   (begin (keep-live r) -1)
+                   (let* ((o (fx+ start (fx* i stride)))
+                          (st (foreign-ref 'integer-32 b (fx+ o soff)))
+                          (ep (foreign-ref 'integer-32 b (fx+ o eoff))))
+                     (if (and (fx= st active) (not (fx= ep 0)))
+                         (begin (keep-live r) (+ (* i 4294967296) (+ ep 2147483648)))
+                         (loop (fx+ i 1)))))))
            (define eve-region-libatomic
              (guard (c (#t #f)) (load-shared-object \"libatomic.so.1\") #t))
            (define eve-region-cas4-raw
@@ -285,6 +298,20 @@
        (#{"amd64" "x86_64"} (str/lower-case (or (System/getProperty "os.arch") "")))))
 (def ^:private fast-cas4 (scheme/proc "eve-region-cas4"))
 (def ^:private fast-cas8 (scheme/proc "eve-region-cas8"))
+
+(def ^:private scan-pinned* (scheme/proc "eve-region-scan-pinned"))
+
+(defn scan-pinned-slot
+  "jolt's worker-registry scan for eve.atom/mmap-min-safe-epoch: from slot i of n slots (stride bytes apart from byte
+   start), the first slot whose i32 at soff is active and whose i32 at eoff is not 0, as [slot epoch]; :none when
+   there is none; nil where this region has no fused scan (not a JoltRegion, or not Linux x86-64), for the caller's
+   own loop. Same loads, same order, as that loop's -load-i32 pair per slot."
+  [r start i n stride soff eoff active]
+  (when (and x86-64-linux? (instance? JoltRegion r))
+    (let [x (scan-pinned* r (.-base ^JoltRegion r) start i n stride soff eoff active)]
+      (if (neg? x)
+        :none
+        [(quot x 4294967296) (- (rem x 4294967296) 2147483648)]))))
 
 (def ^:private guard! (scheme/proc "eve-region-guard!"))
 
