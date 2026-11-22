@@ -98,6 +98,24 @@
                      (clojure.core/aset a i (clojure.core/byte (nth init i)))))
                  a))))
 
+#?(:jolt
+   (defn- jolt-ushr
+     "jolt: (unsigned-bit-shift-right x k) with k a literal or a ^:const number in 0..62, as quot by 2^k when x is a
+      non-negative integer — the same value (x >>> k is floor(x / 2^k) for x >= 0). jolt's unsigned-bit-shift-right is
+      never open-coded: its helper masks with the 2^64-1 bignum and wraps to 64 bits on every call (~48 ns, against
+      ~8 ns for the fixnum quot; decode-class-idx/node-at take it per slab read). Any other x (negative, not an
+      integer) and any other k take clojure.core's call unchanged."
+     [[x k :as args] core-call]
+     (let [kv (cond (integer? k) k
+                    (symbol? k) (let [v (resolve k)] (when (and (var? v) (:const (meta v))) (let [x @v] (when (integer? x) x)))))]
+       (if (and (= 2 (count args)) kv (<= 0 kv 62))
+         (let [xs (gensym "x")]
+           (list 'let [xs x]
+                 (list 'if (list 'clojure.core/and (list 'clojure.core/int? xs) (list 'clojure.core/>= xs 0))
+                       (list 'clojure.core/quot xs (bit-shift-left 1 kv))
+                       (list 'clojure.core/unsigned-bit-shift-right xs kv))))
+         core-call))))
+
 (defn expand
   "clojure.core's call of name n on args. (token) is a fresh cell, identical?
    only to itself; const-bytes is built by expand-const-bytes (some
@@ -122,6 +140,9 @@
       ;; seat (measured on the cohost-media page: the compiled bundle called
       ;; cljs.core/byte-array, which does not exist, and every snapshot read
       ;; died on it).
+      unsigned-bit-shift-right
+      #?(:jolt (jolt-ushr args (cons (c n) args))
+         :default (cons (c n) args))
       (if (= n 'byte-array)
         (cons 'eve.host/js-byte-array args)
         (cons (c n) args)))))
