@@ -3769,10 +3769,49 @@ namespace eve_load {
     (if (and c (identical? m (nth c 0)))
       (nth c 1)
       (let [p (ns-publics ns)] (reset! core-publics [m p]) p))))
+;; A name the current namespace has interned as its OWN var (a var whose
+;; home is this namespace) and that also names a clojure.core public:
+;; after any complete load the name maps to the own var -- under this
+;; loader the refer runs first and the shadowing defn replaces the
+;; mapping. A compiled module's load replays its refers AFTER the
+;; runtime has interned the module's vars, so the replay meets the own
+;; var already in place and jank's refer throws "already refers to"
+;; where the ordered load replaced silently (measured: a module
+;; defining its own future-call loads under this loader and dies in its
+;; AOT binary at startup; eve.db.ds.core is that shape at graph scale).
+;; The refers below therefore skip those names -- the own var wins,
+;; which is the loaded state either way. A name mapped to ANOTHER
+;; namespace's var is not skipped: referring over it is a genuine
+;; conflict and still throws.
+(defn- refer-own-skips []
+  (let [pubs (clojure-core-publics)]
+    (into []
+          (comp (filter (fn [[sym _]] (contains? pubs sym)))
+                (filter (fn [[_ v]] (identical? *ns* (:ns (meta v)))))
+                (map key))
+          (ns-interns *ns*))))
 (alter-var-root #'clojure.core/refer
   (fn [_] (fn [ns-sym & filters]
-            (if (and (nil? filters) (= 'clojure.core ns-sym))
-              (cpp/eve_host.refer_all *ns* (clojure-core-publics))
+            (if (= 'clojure.core ns-sym)
+              (let [skips (refer-own-skips)]
+                (cond
+                  (nil? filters)
+                  (cpp/eve_host.refer_all *ns*
+                    (if (empty? skips)
+                      (clojure-core-publics)
+                      (apply dissoc (clojure-core-publics) skips)))
+                  (empty? skips)
+                  (apply core-refer ns-sym filters)
+                  :else
+                  (let [fm (apply hash-map filters)]
+                    (if (contains? fm :only)
+                      (apply core-refer ns-sym filters)
+                      (apply core-refer ns-sym
+                             (mapcat identity
+                                     (update fm :exclude
+                                             (fn [e] (into (vec e)
+                                                           (remove (set (keys (:rename fm)))
+                                                                   skips))))))))))
               (apply core-refer ns-sym filters)))))
 
 ;; ---------------------------------------------------------------------------
