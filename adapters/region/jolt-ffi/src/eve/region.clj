@@ -180,18 +180,27 @@
               (>= (System/nanoTime) deadline) :timed-out
               :else (do (Thread/sleep 0 100000) (recur)))))))
 
+(declare ^:private pl-i32 ^:private pl-u8 ^:private pl-i64 ^:private ps-i32! ^:private ps-u8!
+         ^:private x86-64-linux? ^:private fast-cas4 ^:private fast-cas8)
+
 (deftype JoltRegion [base size backing]
   mem/IMemRegion
   (-byte-length [_] size)
-  (-load-i32 [_ off] (load4 (+ base off)))
+  (-load-i32 [this off] (if x86-64-linux? (pl-i32 this base off) (load4 (+ base off))))
   (-store-i32! [_ off v] (store4 (+ base off) (unchecked-int v)) nil)
-  (-cas-i32! [_ off expected desired] (cas4 (+ base off) (unchecked-int expected) (unchecked-int desired)))
+  (-cas-i32! [_ off expected desired]
+    (if x86-64-linux?
+      (fast-cas4 (+ base off) (unchecked-int expected) (unchecked-int desired))
+      (cas4 (+ base off) (unchecked-int expected) (unchecked-int desired))))
   (-add-i32! [_ off delta] (add4 (+ base off) (unchecked-int delta)))
   (-sub-i32! [_ off delta] (add4 (+ base off) (unchecked-int (- delta))))
   (-exchange-i32! [_ off v] (xchg4 (+ base off) (unchecked-int v)))
-  (-load-i64 [_ off] (load8 (+ base off)))
+  (-load-i64 [this off] (if x86-64-linux? (pl-i64 this base off) (load8 (+ base off))))
   (-store-i64! [_ off v] (store8 (+ base off) (long v)) nil)
-  (-cas-i64! [_ off expected desired] (cas8 (+ base off) (long expected) (long desired)))
+  (-cas-i64! [_ off expected desired]
+    (if x86-64-linux?
+      (fast-cas8 (+ base off) (long expected) (long desired))
+      (cas8 (+ base off) (long expected) (long desired))))
   (-add-i64! [_ off delta] (add8 (+ base off) (long delta)))
   (-sub-i64! [_ off delta] (add8 (+ base off) (long (- delta))))
   (-wait-i32! [_ off expected timeout-ms]
@@ -202,7 +211,13 @@
     (if SYS-futex (first (jolt-futex SYS-futex (+ base off) 1 (int n) ffi/null ffi/null 0)) 0))
   (-supports-watch? [_] true)
   (-read-bytes [_ off len] (ffi/read-array (+ base off) len))
-  (-write-bytes! [_ off src] (ffi/write-array (+ base off) src) nil))
+  (-write-bytes! [_ off src] (ffi/write-array (+ base off) src) nil)
+  mem/IPlainLoad
+  (-plain-load-i32 [this off] (pl-i32 this base off))
+  (-plain-load-u8 [this off] (pl-u8 this base off))
+  mem/IPlainStore
+  (-plain-store-i32! [this off v] (ps-i32! this base off v) nil)
+  (-plain-store-u8! [this off v] (ps-u8! this base off v) nil))
 
 ;; A region's memory goes back when the region does, as a JVM byte array or a Go slice does. A heap region IS Chez heap
 ;; memory: an immobile bytevector (the collector marks it where it is and never moves it, so its address holds for the
@@ -222,7 +237,54 @@
            (define (eve-region-bytes n) (let ((bv (make-immobile-bytevector n))) (bytevector-fill! bv 0) bv))
            (define eve-region-memset (foreign-procedure \"memset\" (u8* int size_t) uptr))
            (define (eve-region-address bv) (eve-region-memset bv 0 0))
+           (define (eve-region-pl-i32 r b o) (let ((v (foreign-ref 'integer-32 b o))) (keep-live r) v))
+           (define (eve-region-pl-i64 r b o) (let ((v (foreign-ref 'integer-64 b o))) (keep-live r) v))
+           (define (eve-region-pl-u8 r b o) (let ((v (foreign-ref 'unsigned-8 b o))) (keep-live r) v))
+           (define (eve-region-ps-i32! r b o v) (foreign-set! 'unsigned-32 b o (bitwise-and v #xFFFFFFFF)) (keep-live r))
+           (define (eve-region-ps-u8! r b o v) (foreign-set! 'unsigned-8 b o (bitwise-and v #xFF)) (keep-live r))
+           (define eve-region-libatomic
+             (guard (c (#t #f)) (load-shared-object \"libatomic.so.1\") #t))
+           (define eve-region-cas4-raw
+             (and eve-region-libatomic
+                  (foreign-procedure \"__atomic_compare_exchange_4\" (uptr u8* integer-32 int int) boolean)))
+           (define eve-region-cas8-raw
+             (and eve-region-libatomic
+                  (foreign-procedure \"__atomic_compare_exchange_8\" (uptr u8* integer-64 int int) boolean)))
+           (define (eve-region-cas4 a e d)
+             (let ((w (make-bytevector 4)))
+               (bytevector-s32-native-set! w 0 e)
+               (eve-region-cas4-raw a w d 5 5)
+               (bytevector-s32-native-ref w 0)))
+           (define (eve-region-cas8 a e d)
+             (let ((w (make-bytevector 8)))
+               (bytevector-s64-native-set! w 0 e)
+               (eve-region-cas8-raw a w d 5 5)
+               (bytevector-s64-native-ref w 0)))
            #t)"))
+
+;; Plain loads and stores of a published (or not yet published) node's words: Chez's foreign-ref / foreign-set!, inline
+;; primitives on an address plus offset — no foreign call, no byte-array per word (the IPlainLoad default composes
+;; each word from a 4-byte -read-bytes copy). Any alignment: these are plain accesses, which x86-64 and arm64 perform
+;; at any address; only the atomics need aligned words. Same bytes, little-endian, as the default's composition.
+(def ^:private pl-i32 (scheme/proc "eve-region-pl-i32"))
+(def ^:private pl-u8 (scheme/proc "eve-region-pl-u8"))
+(def ^:private pl-i64 (scheme/proc "eve-region-pl-i64"))
+(def ^:private ps-i32! (scheme/proc "eve-region-ps-i32!"))
+(def ^:private ps-u8! (scheme/proc "eve-region-ps-u8!"))
+
+;; Linux x86-64 atomics without a foreign call where none is needed, and without a witness malloc per CAS:
+;; - a sequentially consistent LOAD of an aligned word on x86-64 is a plain MOV (the C11 mapping; libatomic's
+;;   __atomic_load_4/8 is that MOV behind a call), so -load-i32/-load-i64 read through foreign-ref. Stores, add and
+;;   exchange stay libatomic's (a seq-cst store needs the locked/fenced form).
+;; - CAS is libatomic's __atomic_compare_exchange_4/8 declared in Scheme with the expected-value witness a fresh
+;;   4/8-byte bytevector (Chez allocation; the u8* argument is its data, which the collector cannot move during the
+;;   call) instead of jolt.ffi alloc + free around each swap. Same call, same orders (SEQ-CST), same answer: the value
+;;   found. Other platforms (macOS, arm64, EVE_JOLT_STRICT_ALIGNMENT) keep the paths above.
+(def ^:private x86-64-linux?
+  (and (= :linux os) (not strict-alignment?) (scheme/eval-string "eve-region-libatomic")
+       (#{"amd64" "x86_64"} (str/lower-case (or (System/getProperty "os.arch") "")))))
+(def ^:private fast-cas4 (scheme/proc "eve-region-cas4"))
+(def ^:private fast-cas8 (scheme/proc "eve-region-cas8"))
 
 (def ^:private guard! (scheme/proc "eve-region-guard!"))
 
