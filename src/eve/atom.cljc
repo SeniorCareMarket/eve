@@ -178,9 +178,8 @@
   [root-r slot-idx]
   (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH) 0))
 
-(defn- mmap-min-safe-epoch
-  "The minimum CURRENT_EPOCH among live, pinned slots; nil when none is
-   pinned (every retired entry is reclaimable)."
+(defn- mmap-min-safe-epoch-loop
+  "mmap-min-safe-epoch's loop: two -load-i32 per slot."
   [root-r]
   (loop [i 0 result nil]
     (if (>= i d/MAX_WORKERS)
@@ -192,6 +191,26 @@
                  (not (heartbeat-stale? root-r i)))
           (recur (inc i) (if (nil? result) epoch (min result epoch)))
           (recur (inc i) result))))))
+
+(defn- mmap-min-safe-epoch
+  "The minimum CURRENT_EPOCH among live, pinned slots; nil when none is
+   pinned (every retired entry is reclaimable)."
+  [root-r]
+  #?(:jolt
+     ;; jolt: the scan is eve.region's fused loop (one Scheme procedure: the same loads in the same order); each slot
+     ;; it stops at takes the heartbeat check as the loop does. nil (no fused scan for this region): the loop.
+     (let [scan (fn [i] (region/scan-pinned-slot root-r d/ROOT_WORKER_REGISTRY_START i d/MAX_WORKERS d/WORKER_SLOT_SIZE
+                                                 d/OFFSET_WS_STATUS d/OFFSET_WS_CURRENT_EPOCH d/WORKER_STATUS_ACTIVE))
+           hit0 (scan 0)]
+       (if (nil? hit0)
+         (mmap-min-safe-epoch-loop root-r)
+         (loop [hit hit0 result nil]
+           (if (= :none hit)
+             result
+             (let [[j epoch] hit
+                   result (if (heartbeat-stale? root-r j) result (if (nil? result) epoch (min result epoch)))]
+               (recur (scan (inc j)) result))))))
+     :default (mmap-min-safe-epoch-loop root-r)))
 
 ;; ---------------------------------------------------------------------------
 ;; The exclusive hold — how a host without atomic RMW takes part
