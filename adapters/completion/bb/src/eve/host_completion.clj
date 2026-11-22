@@ -1274,6 +1274,16 @@
                                 :else (sci-rest x)))))
 (alter-var-root #'clojure.core/second
                 (fn [_] (fn [x] (presented-first (presented-next x)))))
+;; fnext/ffirst are the same shape as second and the seat's own
+;; spellings are native fns that seq host-side (measured: the query
+;; engine's substitute-constant calling (fnext (:tuples rel)) on a
+;; relation's sorted set threw "Don't know how to create ISeq
+;; from: sci.impl.deftype.SciType" where (first (:tuples rel))
+;; beside it was exact).
+(alter-var-root #'clojure.core/fnext
+                (fn [_] (fn [x] (presented-first (presented-next x)))))
+(alter-var-root #'clojure.core/ffirst
+                (fn [_] (fn [x] (presented-first (presented-first x)))))
 (alter-var-root #'clojure.core/last
                 (fn [_] (fn [x] (sci-last (presented-seq x)))))
 (alter-var-root #'clojure.core/empty?
@@ -1615,6 +1625,28 @@
       (apply f args)
       (apply f [(presented-seq (first args))]))))
 
+(defn- presented-mapcat
+  "clojure.core/mapcat, presented on its own (not xf-last): xf-last
+   views the INPUT collection, which is what filter/remove/keep
+   need — their elements come from the input. mapcat's elements
+   are the collections f RETURNS, and the seat's own mapcat seqs
+   those returns host-side (measured: datascript's retractEntity
+   gathering incoming-ref datoms — (mapcat (fn [a] (-search db
+   [nil a e])) attrs) threw \"Don't know how to create ISeq from:
+   sci.impl.deftype.SciType\" though seq/first/next/vec on the
+   same Iters were each exact). So mapcat is rebuilt from the
+   presented pieces: map f over the viewed inputs, view each
+   returned collection, concat the views. The one-argument
+   transducer arity passes through, as xf-last's does."
+  [f]
+  (fn [& args]
+    (if (= 1 (count args))
+      (apply f args)
+      (let [f' (presented-fn (first args))
+            colls (sci-map presented-seq (rest args))]
+        (apply sci-concat
+               (sci-map presented-seq (apply sci-map f' colls)))))))
+
 ;; ->Eduction captures its collection raw, and the host reduce
 ;; an eduction performs later seqs that collection host-side —
 ;; the query engine's -collect-tuples builds eductions over a
@@ -1710,7 +1742,7 @@
                 ;; wraps: f through presented-fn, colls viewed.
                 [#'clojure.core/mapv xf-map]
                 [#'clojure.core/filterv xf-last]
-                [#'clojure.core/mapcat xf-last]
+                [#'clojure.core/mapcat presented-mapcat]
                 [#'clojure.core/filter xf-last]
                 [#'clojure.core/remove xf-last]
                 [#'clojure.core/keep xf-last]
@@ -1851,6 +1883,15 @@
                                   (contains? ifs c)
                                   (orig x)))))))
 
+;; map? was missing from this list: a map-mode type whose spec never
+;; declared IPersistentMap (datascript's Datom: ILookup + Associative
+;; + Counted) is a SciMap, and the seat's own map? answers true for
+;; every SciMap — where the JVM answers false, Datom implementing
+;; ILookup but not IPersistentMap. Code that dispatches on map?
+;; (datascript's validate-tx-data!, which walks a Datom as an entity
+;; map and destructures its slot values) breaks on the divergence;
+;; from the registry the answer is the JVM's.
+(present-predicate! #'clojure.core/map? clojure.lang.IPersistentMap)
 (present-predicate! #'clojure.core/vector? clojure.lang.IPersistentVector)
 (present-predicate! #'clojure.core/set? clojure.lang.IPersistentSet)
 (present-predicate! #'clojure.core/list? clojure.lang.IPersistentList)
