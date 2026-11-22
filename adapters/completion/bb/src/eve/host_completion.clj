@@ -2012,9 +2012,20 @@
 
 (alter-var-root #'clojure.core/count
                 (fn [_] (fn [x] (if (scitype? x) (eve-count x) (sci-count x)))))
+;; nth's test is wider than scitype?: a stamped map-mode instance (a
+;; Datom read back from the store is one) is a SciMap, so the
+;; scitype?-only test sent it to the seat's nth, which refuses a
+;; SciMap outright ("nth not supported on this type: SciMap",
+;; measured on (nth datom 0)) though the type's own -nth answers.
+;; eve-or-sci falls back to the seat's fn when the dispatch refuses,
+;; so a stamped type with no -nth keeps the seat's answer.
+(defn- eve-stamped?
+  [x]
+  (or (scitype? x) (some? (map-mode-type x))))
+
 (alter-var-root #'clojure.core/nth
-                (fn [_] (fn ([x i] (if (scitype? x) (eve-nth x i) (sci-nth x i)))
-                          ([x i nf] (if (scitype? x) (eve-nth x i nf) (sci-nth x i nf))))))
+                (fn [_] (fn ([x i] (if (eve-stamped? x) (eve-nth x i) (sci-nth x i)))
+                          ([x i nf] (if (eve-stamped? x) (eve-nth x i nf) (sci-nth x i nf))))))
 (alter-var-root #'clojure.core/get
                 (fn [_] (fn ([x k] (cond (scitype? x) (eve-lookup x k)
                                          (scitype? k) (sci-get x (host-form k))
