@@ -4996,8 +4996,9 @@
   [thunk]
   (try (thunk)
        (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e
-         (when-not (= ::append-overflow (:type (ex-data e))) (throw e))
-         nil)))
+         (if (= ::append-overflow (:type (ex-data e)))
+           nil
+           (throw e)))))
 
 (defn- repack
   "The update path of last resort: apply f to the handle's rep and
