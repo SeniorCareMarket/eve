@@ -62,6 +62,7 @@
     [atom-domain atm/atom-domain]
     [persistent-atom-domain atm/persistent-atom-domain]
     [close-atom-domain! atm/close-atom-domain!]
+    [close! atm/close!]
     [shared-atom? atm/shared-atom?]
     ;; The value model (docs/ds-in-eve/EVE-FIX-PLAN.md §0): flat outside an
     ;; atom, persistent inside; the atom confers identity
