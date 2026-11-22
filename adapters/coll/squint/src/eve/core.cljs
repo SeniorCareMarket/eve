@@ -298,6 +298,7 @@
 (def IReset cljs.core/IReset)
 (def IReset__reset_BANG_ cljs.core/IReset__reset_BANG_)
 (def ISeqable cljs.core/ISeqable)
+(def IList cljs.core/IList)
 (def ISeqable__seq cljs.core/ISeqable__seq)
 (def ISet cljs.core/ISet)
 (def ISet__disjoin cljs.core/ISet__disjoin)

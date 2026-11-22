@@ -23,7 +23,7 @@
    sci-stub-protocols, applied on the translate path (plain-type,
    eve-type); the slab path has no translate hook and is repaired on
    the emitted form by squint-fix-form instead."
-  '#{IChunkedSeq IChunkedNext ASeq IEquiv IHash IPrintWithWriter ILookup IKVReduce IAssociative ICollection ICounted IDeref IEditableCollection IEmptyableCollection IFn IIndexed IMap IMeta IReduce IReset IReversible ISeq ISeqable ISequential ISet IStack ISwap ITransientAssociative ITransientCollection ITransientMap ITransientSet ITransientVector IVector IWatchable IWithMeta INext IMapEntry IComparable IPending IRef})
+  '#{IChunkedSeq IChunkedNext ASeq IEquiv IHash IPrintWithWriter ILookup IKVReduce IAssociative ICollection ICounted IDeref IEditableCollection IEmptyableCollection IFn IIndexed IMap IMeta IReduce IReset IReversible ISeq ISeqable ISequential ISet IStack ISwap ITransientAssociative ITransientCollection ITransientMap ITransientSet ITransientVector IVector IWatchable IWithMeta INext IMapEntry IComparable IPending IRef IList})
 
 (defn- squint-translate-protos
   "On squint, the ClojureScript protocols its core lacks are eve.core's."
@@ -47,7 +47,7 @@
    name eve.core's, whose runtime face (core.cljs) aliases squint
    core's own protocol object under the name, so the impl lands on
    the same protocol either way."
-  '#{IChunkedSeq IChunkedNext ASeq IEquiv IHash IPrintWithWriter ILookup IKVReduce IAssociative ICollection ICounted IDeref IEditableCollection IEmptyableCollection IFn IIndexed IMap IMeta IReduce IReset IReversible ISeq ISeqable ISequential ISet IStack ISwap ITransientAssociative ITransientCollection ITransientMap ITransientSet ITransientVector IVector IWatchable IWithMeta INext IMapEntry IComparable IPending IRef})
+  '#{IChunkedSeq IChunkedNext ASeq IEquiv IHash IPrintWithWriter ILookup IKVReduce IAssociative ICollection ICounted IDeref IEditableCollection IEmptyableCollection IFn IIndexed IMap IMeta IReduce IReset IReversible ISeq ISeqable ISequential ISet IStack ISwap ITransientAssociative ITransientCollection ITransientMap ITransientSet ITransientVector IVector IWatchable IWithMeta INext IMapEntry IComparable IPending IRef IList})
 
 (def ^:private protocol-fns
   "The protocol fns eve's machinery rewrites a type's own method calls
