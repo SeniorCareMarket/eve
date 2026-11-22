@@ -349,7 +349,16 @@
    conditional: the first of :squint/:cljs present in source order,
    else :default, else the no-branch sentinel."
   [rc]
-  (let [s (pr-str rc)
+  ;; *print-meta* is bound for the round trip: the re-read below is
+  ;; how a conditional's selected branch re-enters the form stream,
+  ;; and metadata inside the branch (^:mutable on a deftype's fields,
+  ;; ^tag hints) is load-bearing downstream — SCI registers a
+  ;; deftype's field mutators from the fields' :mutable meta when it
+  ;; evaluates the staged file in a macro cone, and a stripped field
+  ;; reads as immutable there ("Invalid assignment target" on the
+  ;; body's set!). The final spit binds *print-meta* for the same
+  ;; reason; the round trip must not defeat it.
+  (let [s (binding [*print-meta* true] (pr-str rc))
         splicing (str/starts-with? s "#?@")
         ;; :read-cond :preserve is load-bearing: a plain re-read
         ;; resolves NESTED #?s with bb's own feature set (#{:bb
