@@ -106,51 +106,49 @@
 ;; ClojureScript — the operators are JS's own on BigInt operands, and the
 ;; type tag is Object.prototype.toString's. (js/typeof is not the portable
 ;; spelling either: nbb resolves it to a broken call.)
-#?(:cljs (do
-(defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x)))
-(defn- bi [x] (if (bigint? x) x (js/BigInt x)))
-(defn- bi< [a b] (< (bi a) (bi b)))
-(defn- bi<= [a b] (<= (bi a) (bi b)))
-(defn- bi= [a b] (= (bi a) (bi b)))
-(defn- bi- [a b] (- (bi a) (bi b)))
-(defn- bi+ [a b] (+ (bi a) (bi b)))
-(defn- host-num [x] (if (bigint? x) (js/Number x) x))
-(def ^:private I64-SAFE (js/BigInt "9007199254740991"))
-(def ^:private I64-SAFE-NEG (js/BigInt "-9007199254740991"))
-(defn- i64->host
-  "A BigInt cell as a host value: a JS number while exactly
+#?(:cljs (defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x))))
+#?(:cljs (defn- bi [x] (if (bigint? x) x (js/BigInt x))))
+#?(:cljs (defn- bi< [a b] (< (bi a) (bi b))))
+#?(:cljs (defn- bi<= [a b] (<= (bi a) (bi b))))
+#?(:cljs (defn- bi= [a b] (= (bi a) (bi b))))
+#?(:cljs (defn- bi- [a b] (- (bi a) (bi b))))
+#?(:cljs (defn- bi+ [a b] (+ (bi a) (bi b))))
+#?(:cljs (defn- host-num [x] (if (bigint? x) (js/Number x) x))
+   :default (defn- host-num "A u32 cell's value as the writer takes it: itself." [x] x))
+#?(:cljs (def ^:private I64-SAFE (js/BigInt "9007199254740991")))
+#?(:cljs (def ^:private I64-SAFE-NEG (js/BigInt "-9007199254740991")))
+#?(:cljs (defn- i64->host
+           "A BigInt cell as a host value: a JS number while exactly
    representable, the BigInt itself past that (X1.3)."
-  [v]
-  (if (and (bi<= I64-SAFE-NEG v) (bi<= v I64-SAFE)) (js/Number v) v))
-(defn- i64-add
-  "A narrowed cell (FORMAT-V1 §5 kind 22): base + x, as a host value."
-  [base x]
-  (i64->host (bi+ base x)))
-(defn- i64-delta
-  "A narrowed cell's stored delta, v - base, as a JS number."
-  [v base]
-  (js/Number (bi- (bi v) base)))
-(defn- f32->host "An f32 cell: the JS number fio read." [x] x)
-(defn- fp-key
-  "A layout fingerprint as a registry / scan key: its decimal string. A
+           [v]
+           (if (and (bi<= I64-SAFE-NEG v) (bi<= v I64-SAFE)) (js/Number v) v))
+   :default (defn- i64->host "An i64 cell: the long fio read." [v] v))
+#?(:cljs (defn- i64-add
+           "A narrowed cell (FORMAT-V1 §5 kind 22): base + x, as a host value."
+           [base x]
+           (i64->host (bi+ base x)))
+   :default (defn- i64-add "A narrowed cell (FORMAT-V1 §5 kind 22): base + x." [base x] (+ (long base) (long x))))
+#?(:cljs (defn- i64-delta
+           "A narrowed cell's stored delta, v - base, as a JS number."
+           [v base]
+           (js/Number (bi- (bi v) base)))
+   :default (defn- i64-delta "A narrowed cell's stored delta, v - base." [v base] (- (long v) (long base))))
+#?(:cljs (defn- f32->host "An f32 cell: the JS number fio read." [x] x)
+   :default (defn- f32->host
+              "An f32 cell as this host's float: a Float on the JVM and bb (fio's f32
+   answers it widened to a double, exactly); jank's and glojure's f32 is
+   already the value the column always read back."
+              [x]
+              #?(:jank x :glj x :default (float x))))
+#?(:cljs (defn- fp-key
+           "A layout fingerprint as a registry / scan key: its decimal string. A
    fingerprint is a js/BigInt here (eve.flat.sister's :cljs
    layout-fingerprint; fio/i64 from a type table), and ClojureScript
    hashes no BigInt by value."
-  [fp] (str fp))
-(defn- fp-cell "A fingerprint as the writer's i64 cell: a BigInt." [fp] (bi fp)))
-   :default (do
-(defn- host-num "A u32 cell's value as the writer takes it: itself." [x] x)
-(defn- i64->host "An i64 cell: the long fio read." [v] v)
-(defn- i64-add "A narrowed cell (FORMAT-V1 §5 kind 22): base + x." [base x] (+ (long base) (long x)))
-(defn- i64-delta "A narrowed cell's stored delta, v - base." [v base] (- (long v) (long base)))
-(defn- fp-key "A layout fingerprint as a registry / scan key: the long itself." [fp] fp)
-(defn- fp-cell "A fingerprint as the writer's i64 cell: a long." [fp] (long fp))
-(defn- f32->host
-  "An f32 cell as this host's float: a Float on the JVM and bb (fio's f32
-   answers it widened to a double, exactly); jank's and glojure's f32 is
-   already the value the column always read back."
-  [x]
-  #?(:jank x :glj x :default (float x)))))
+           [fp] (str fp))
+   :default (defn- fp-key "A layout fingerprint as a registry / scan key: the long itself." [fp] fp))
+#?(:cljs (defn- fp-cell "A fingerprint as the writer's i64 cell: a BigInt." [fp] (bi fp))
+   :default (defn- fp-cell "A fingerprint as the writer's i64 cell: a long." [fp] (long fp)))
 
 (defn- off-at ^long [b ^long i wide?]
   (if wide? (fio/u32 b i) (fio/u16 b i)))
@@ -716,7 +714,7 @@
                         type-list)})))
 ))
 
-#?(:cljs (do
+#?@(:cljs [
 (declare plain-integer?)
 ;; The type table on ClojureScript (flat lanes U4a): the JVM's walk — a
 ;; TypedVal registers its type in first-met order and its shape under that
@@ -810,7 +808,7 @@
                                                     :class (field-class (get (.-fields tv) k) @types)})
                                            (sort-by-key-bytes (keys (.-fields tv))))}))
                         type-list)})))
-))
+])
 
 ;; A TypedVal's index in the chunk's type table, or nil on a host whose
 ;; scan writes none (the value then writes as its field map). The
@@ -831,28 +829,23 @@
 ;; narrowed kind and :base-plan/:runs for run-end.
 ;; ---------------------------------------------------------------------------
 
-#?(:clj (do
-(defn- plain-integer? [x]
-  (and (integer? x) (not (instance? clojure.lang.BigInt x))
-       (not (instance? java.math.BigInteger x)) (not (instance? java.math.BigDecimal x))))
-)
-   :cljs (do
-(defn- plain-integer?
-  "An integer on this host: a js/BigInt, or an integral JS number
+#?(:clj (defn- plain-integer? [x]
+          (and (integer? x) (not (instance? clojure.lang.BigInt x))
+               (not (instance? java.math.BigInteger x)) (not (instance? java.math.BigDecimal x))))
+   :cljs (defn- plain-integer?
+           "An integer on this host: a js/BigInt, or an integral JS number
    (Eve's CLJS number model writes those as integers, as its scalar
    codec does). NaN and the infinities are not integers."
-  [x]
-  (or (bigint? x)
-      (and (number? x) (== x (js/Math.floor x)) (js/isFinite x))))
-
-(defn- val=
-  "Column-value equality: integers compare in BigInt space, so a
+           [x]
+           (or (bigint? x)
+               (and (number? x) (== x (js/Math.floor x)) (js/isFinite x)))))
+#?(:cljs (defn- val=
+           "Column-value equality: integers compare in BigInt space, so a
    js/BigInt and an integral number of the same value are one value."
-  [a b]
-  (if (or (bigint? a) (bigint? b))
-    (and (plain-integer? a) (plain-integer? b) (bi= a b))
-    (= a b)))
-))
+           [a b]
+           (if (or (bigint? a) (bigint? b))
+             (and (plain-integer? a) (plain-integer? b) (bi= a b))
+             (= a b))))
 
 (defn- runs-of
   "[[value run-length] ...] over consecutive distinct values."
@@ -869,22 +862,20 @@
 ;; (finding F-C) — the plan the decision tree prescribes was
 ;; unreachable for exactly the columns kind 10 exists for. On
 ;; ClojureScript the math is BigInt throughout and cannot overflow.
-#?(:clj (do
-(defn- col-min [present] (reduce min (map long present)))
-(defn- col-max [present] (reduce max (map long present)))
-(defn- col-range [mn mx] (-' mx mn))
-(defn- ile [a b] (<= a b))
-(def ^:private I32-MIN #?(:jank -2147483648 :default Integer/MIN_VALUE))
-(def ^:private I32-MAX #?(:jank 2147483647 :default Integer/MAX_VALUE)))
-   :cljs (do
-(def ^:private INT32-MIN (js/BigInt "-2147483648"))
-(def ^:private INT32-MAX (js/BigInt "2147483647"))
-(defn- col-min [present] (reduce (fn [a b] (if (bi< b a) b a)) (map bi present)))
-(defn- col-max [present] (reduce (fn [a b] (if (bi< a b) b a)) (map bi present)))
-(defn- col-range [mn mx] (bi- mx mn))
-(defn- ile [a b] (bi<= a b))
-(def ^:private I32-MIN INT32-MIN)
-(def ^:private I32-MAX INT32-MAX)))
+#?(:cljs (def ^:private INT32-MIN (js/BigInt "-2147483648")))
+#?(:cljs (def ^:private INT32-MAX (js/BigInt "2147483647")))
+#?(:clj (defn- col-min [present] (reduce min (map long present)))
+   :cljs (defn- col-min [present] (reduce (fn [a b] (if (bi< b a) b a)) (map bi present))))
+#?(:clj (defn- col-max [present] (reduce max (map long present)))
+   :cljs (defn- col-max [present] (reduce (fn [a b] (if (bi< a b) b a)) (map bi present))))
+#?(:clj (defn- col-range [mn mx] (-' mx mn))
+   :cljs (defn- col-range [mn mx] (bi- mx mn)))
+#?(:clj (defn- ile [a b] (<= a b))
+   :cljs (defn- ile [a b] (bi<= a b)))
+#?(:clj (def ^:private I32-MIN #?(:jank -2147483648 :default Integer/MIN_VALUE))
+   :cljs (def ^:private I32-MIN INT32-MIN))
+#?(:clj (def ^:private I32-MAX #?(:jank 2147483647 :default Integer/MAX_VALUE))
+   :cljs (def ^:private I32-MAX INT32-MAX))
 
 (defn- column-plan
   "The §5 column plan for scalar reps vals (nils allowed), or nil.
@@ -2136,7 +2127,7 @@
         #?(:clj (if (satisfies? IAttachMeta inner)
                   (-attach-meta inner (read-value ctx mo))
                   inner)
-           :cljs (if (instance? clojure.lang.IObj inner)
+           :cljs (if (satisfies? IWithMeta inner)
                    (with-meta inner (read-value ctx mo))
                    inner)))
       (== t 0x2A)
@@ -4461,7 +4452,6 @@
 
 )) ; end jank handles
 
-#?(:cljs (do
 ;; ---------------------------------------------------------------------------
 ;; The ClojureScript handles: the same node walks over the same layout,
 ;; answered through this host's collection protocols. Since the trunk
@@ -4477,12 +4467,14 @@
 ;; (cons-flat & friends below).
 ;; ---------------------------------------------------------------------------
 
+#?@(:cljs [
 (defn- node-seq-entries [ctx off]
   ;; seq-wrapped like seq-of-node: a CLJS -seq must answer nil, not an
   ;; empty LazySeq, for an empty node
   (seq (map (fn [[k v]] (first (seq (array-map k v)))) (entries-of-node ctx off))))
 
-(deftype FlatVec [ctx off mm ^:mutable _h ^:mutable _d]
+])
+#?(:cljs (deftype FlatVec [ctx off mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (vec-rep-of ctx off)]
               (if (some? mm) (MetaVal. r (to-rep mm)) r)))
@@ -4521,8 +4513,8 @@
   (-with-meta [_ m] (->FlatVec ctx off m _h _d))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatColVec [ctx off mm ^:mutable _h ^:mutable _d]
+)
+#?(:cljs (deftype FlatColVec [ctx off mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (vec-rep-of ctx off)]
               (if (some? mm) (MetaVal. r (to-rep mm)) r)))
@@ -4561,8 +4553,8 @@
   (-with-meta [_ m] (->FlatColVec ctx off m _h _d))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatList [ctx off mm ^:mutable _h ^:mutable _d]
+)
+#?(:cljs (deftype FlatList [ctx off mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (list-rep-of ctx off)]
               (if (some? mm) (MetaVal. r (to-rep mm)) r)))
@@ -4595,8 +4587,8 @@
   (-with-meta [_ m] (->FlatList ctx off m _h _d))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatMap [ctx off mm ^:mutable _h ^:mutable _d]
+)
+#?(:cljs (deftype FlatMap [ctx off mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (entries-rep-of (entries-of-node ctx off))]
               (if (some? mm) (MetaVal. r (to-rep mm)) r)))
@@ -4635,8 +4627,8 @@
   (-invoke [this k nf] (-lookup this k nf))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatSet [ctx off mm ^:mutable _h ^:mutable _d]
+)
+#?(:cljs (deftype FlatSet [ctx off mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (into #{} (map rep-of) (set-elements ctx off))]
               (if (some? mm) (MetaVal. r (to-rep mm)) r)))
@@ -4674,8 +4666,8 @@
   (-with-meta [_ m] (->FlatSet ctx off m _h _d))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatBatch [ctx off mm ^:mutable _h ^:mutable _d]
+)
+#?(:cljs (deftype FlatBatch [ctx off mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (batch-rep-of ctx off)]
               (if (some? mm) (MetaVal. r (to-rep mm)) r)))
@@ -4714,8 +4706,8 @@
   (-with-meta [_ m] (->FlatBatch ctx off m _h _d))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatRow [ctx off row mm ^:mutable _h ^:mutable _d]
+)
+#?(:cljs (deftype FlatRow [ctx off row mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (entries-rep-of (row-entries ctx off row))]
               (if (some? mm) (MetaVal. r (to-rep mm)) r)))
@@ -4756,8 +4748,8 @@
   (-invoke [this k nf] (-lookup this k nf))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatTagged [ctx off mm ^:mutable _h ^:mutable _d tkey fp]
+)
+#?(:cljs (deftype FlatTagged [ctx off mm ^:mutable _h ^:mutable _d tkey fp]
   ;; the generic record's marker, as the JVM's and bb's FlatTagged carry
   ;; it: a typed node of a type this reader has no sister for (a changed
   ;; layout's fingerprint) is generic too, not only a 0x2A tagged node
@@ -4803,8 +4795,8 @@
   (-invoke [this k nf] (-lookup this k nf))
   IPrintWithWriter
   (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
-
-(deftype FlatRecord [ctx off mm ^:mutable _h ^:mutable _d tkey fp]
+)
+#?(:cljs (deftype FlatRecord [ctx off mm ^:mutable _h ^:mutable _d tkey fp]
   IRecordInfo
   (-tkey [_] tkey)
   (-fp [_] fp)
@@ -4850,7 +4842,7 @@
   (-invoke [this k] (-lookup this k))
   (-invoke [this k nf] (-lookup this k nf))
   IPrintWithWriter
-  (-pr-writer [_ w _] (-write w (pr-str (-rep _)))))
+  (-pr-writer [_ w _] (-write w (pr-str (-rep _))))))
 
 ;; --- collection-op completions (flat-all-hosts lane, Nov 16 2026):
 ;; cljs.core's conj / pop / empty / reduce dispatch DIRECTLY to
@@ -4863,6 +4855,7 @@
 ;; host's handles use. Map invocation (IFn) is carried in the map
 ;; deftypes' own bodies above — extend-protocol IFn breaks
 ;; shadow-cljs's IFn method synthesis, measured.
+#?@(:cljs [
 (defn- cljs-map-conj [h x]
   (cond (map-entry? x) (assoc-flat h (key x) (val x))
         (vector? x) (assoc-flat h (nth x 0) (nth x 1))
@@ -4913,7 +4906,7 @@
   FlatRow (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
   FlatSet (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h)))))
 
-))
+])
 
 ;; ---------------------------------------------------------------------------
 ;; ---------------------------------------------------------------------------
@@ -4995,7 +4988,7 @@
    case the caller re-packs instead."
   [thunk]
   (try (thunk)
-       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e
+       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs :default) e
          (if (= ::append-overflow (:type (ex-data e)))
            nil
            (throw e)))))
@@ -5274,7 +5267,7 @@
 
 ;; --- the typed-array handoff (ClojureScript's zero-copy column view) --
 
-#?(:cljs (do
+#?@(:cljs [
 (defn- column-typed-array [ctx col]
   (when (:valid col)
     (throw (ex-info "flat chunk: a column with a validity bitmap has no dense typed view"
@@ -5315,4 +5308,4 @@
        (when (neg? i)
          (throw (ex-info "flat chunk: no such field" {:type ::no-field :field field})))
        (column-typed-array ctx (nth @(:cols bp) i))))))
-))
+])

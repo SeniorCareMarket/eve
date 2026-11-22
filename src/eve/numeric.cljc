@@ -195,7 +195,7 @@
 ;; Host-specific exact integer (the value inside a bigint).
 ;; ---------------------------------------------------------------------------
 
-#?(:cljs (do
+#?@(:cljs [
      (def ^:private BI-0 (js/BigInt 0))
      (def ^:private BI-1 (js/BigInt 1))
      (def ^:private BI-10 (js/BigInt 10))
@@ -247,7 +247,8 @@
                (vec acc)
                (recur (bi-quot n BI-MOD32)
                       (cons (js/Number (bi-rem n BI-MOD32)) acc)))))))
-     ))
+     
+])
 
 #?(:cljs nil
    :default
@@ -444,8 +445,7 @@
   (str "#" tag " " (pr-str (str payload))))
 
 
-#?(:cljs (do
-     (deftype EveBigInt [n]
+#?(:cljs (deftype EveBigInt [n]
        IEquiv
        (-equiv [_ other]
          (cond
@@ -469,9 +469,9 @@
        IPrintWithWriter
        (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/N" (bi-str n))))
        Object
-       (toString [_] (bi-str n)))
+       (toString [_] (bi-str n))))
 
-     (deftype EveRatio [num den]
+#?(:cljs (deftype EveRatio [num den]
        IEquiv
        (-equiv [_ other]
          (and (instance? EveRatio other)
@@ -487,9 +487,9 @@
        IPrintWithWriter
        (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
        Object
-       (toString [_] (str (bi-str num) "/" (bi-str den))))
+       (toString [_] (str (bi-str num) "/" (bi-str den)))))
 
-     (deftype EveBigDec [unscaled scale]
+#?(:cljs (deftype EveBigDec [unscaled scale]
        IEquiv
        (-equiv [_ other]
          (if (instance? EveBigDec other)
@@ -512,8 +512,7 @@
        IPrintWithWriter
        (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
        Object
-       (toString [_] (decimal-layout unscaled scale)))
-     ))
+       (toString [_] (decimal-layout unscaled scale))))
 
 ;; ---------------------------------------------------------------------------
 ;; EveRatio / EveBigDec — ONE definition per type (trunk consolidation,
@@ -585,9 +584,9 @@
              (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
            false))
        (toString [_] (decimal-layout unscaled scale))))
-   :cljs (do)
-   :clj (do)
-   :lpy (do)
+   :cljs nil
+   :clj nil
+   :lpy nil
    :default
    (do
      (host-deftype EveRatio [num den]
