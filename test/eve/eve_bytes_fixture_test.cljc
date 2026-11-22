@@ -74,9 +74,20 @@
      :squint
      ;; squint's EDN reader (its edn module) rejects Clojure number
      ;; tokens outright ("Invalid number: 1/2"); eve.numeric/read-edn
-     ;; is Eve's reader for exactly those tokens, on every host.
-     (num/read-edn (.readFileSync (js/require "fs") fixture-path "utf8")
-                   {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}})
+     ;; is Eve's reader for exactly those tokens, on every host. And
+     ;; squint's reader returns one plain string for a string, a
+     ;; keyword and a symbol alike (squint has no ident types), so
+     ;; the string and symbol rows name values this host cannot
+     ;; represent: they are skipped unread, as the :clje arm skips
+     ;; its own unrepresentable rows — a named limitation of the
+     ;; host, not a branch in the format.
+     (vec (keep (fn [line]
+                  (when (str/starts-with? line "{")
+                    (when-not (or (str/includes? line ":note \"string")
+                                  (str/includes? line ":note \"symbol"))
+                      (num/read-edn line
+                                    {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}}))))
+                (str/split-lines (.readFileSync (js/require "fs") fixture-path "utf8"))))
      :default
      (edn/read-string
       ;; clojure.edn reads #uuid and #inst itself (the JVM's UUID and Date, the
@@ -115,7 +126,8 @@
   "Equality that holds a date by its time and NaN to itself."
   [a b]
   (cond
-    (inst? a) (and (inst? b) (= (inst-ms a) (inst-ms b)))
+    (inst? a) (and (inst? b) (= #?(:squint (.getTime a) :default (inst-ms a))
+                                #?(:squint (.getTime b) :default (inst-ms b))))
     :else (= a b)))
 
 (deftest eve-bytes-fixtures
