@@ -35,7 +35,9 @@
    :browser    [{"EVE_BROWSER_PERF" "1"} ["bb" "test:browser"]]
    :bb         [{} ["bb" "-cp" (cp :bb) "-m" "eve.runner.bb-main" "perf"]]
    :bb-minimal [{} ["bb" "-cp" (cp :bb-minimal) "-m" "eve.runner.bb-main" "perf"]]
-   :nbb        [{} ["nbb" "--classpath" (cp :nbb) "-m" "eve.runner.nbb-main" "perf"]]
+   ;; nbb-main's ns form loads the suite's tests (eve.net.stand-in among
+   ;; them), so its classpath is bb test:nbb's — the app test roots too
+   :nbb        [{} ["nbb" "--classpath" (str/join ":" (roots :nbb "test" "apps/aegis/test" "apps/network-atoms/test")) "-m" "eve.runner.nbb-main" "perf"]]
    :cljr       [(cond-> {"CLOJURE_LOAD_PATH" (cp :cljr)} dotnet-root (assoc "DOTNET_ROOT" dotnet-root)) ["cljr" "-m" "eve.runner.cljr-main" "perf"]]
    :lpy        [{"PYTHONPYCACHEPREFIX" (str (fs/absolutize "target/lpycache-perf"))}
                 (concat ["basilisp" "run"] (mapcat (fn [r] ["-p" r]) (reverse (roots :lpy "test")))
