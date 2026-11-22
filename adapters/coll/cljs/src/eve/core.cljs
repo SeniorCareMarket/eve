@@ -55,6 +55,7 @@
 (def IMap cljs.core/IMap)
 (def ISet cljs.core/ISet)
 (def IList cljs.core/IList)
+(def IComparable cljs.core/IComparable)
 (def -lookup cljs.core/-lookup)
 (defn invoke
   ([f] (f)) ([f a] (f a)) ([f a b] (f a b)) ([f a b c] (f a b c)))
