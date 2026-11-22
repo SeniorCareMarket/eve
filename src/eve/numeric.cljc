@@ -195,48 +195,47 @@
 ;; Host-specific exact integer (the value inside a bigint).
 ;; ---------------------------------------------------------------------------
 
-#?@(:cljs [
-     (def ^:private BI-0 (js/BigInt 0))
-     (def ^:private BI-1 (js/BigInt 1))
-     (def ^:private BI-10 (js/BigInt 10))
-     (def ^:private BI-32 (js/BigInt 32))
-     (def ^:private BI-MASK32 (js/BigInt 0xffffffff))
-     (def ^:private BI-MOD32 (js/BigInt 4294967296))
-     (def ^:private BI-LONG-MIN (js/BigInt LONG-MIN))
-     (def ^:private BI-LONG-MAX (js/BigInt LONG-MAX))
-     (defn- bi? [x] (and (some? x) (identical? (.-constructor x) js/BigInt)))
-     (defn- bi= [a b] (= a b))
-     (defn- bi< [a b] (< a b))
-     (defn- bi<= [a b] (<= a b))
-     (defn- bi> [a b] (> a b))
-     (defn- bi+ [a b] (+ a b))
-     (defn- bi- [a b] (- a b))
-     (defn- bi* [a b] (* a b))
-     (defn- bi-quot [a b] (/ a b))
-     (defn- bi-rem [a b] (- a (* (/ a b) b)))
-     (defn- bi-neg [a] (- a))
-     (defn- bi-abs [a] (if (bi< a BI-0) (bi-neg a) a))
-     (defn- bi-zero? [a] (bi= a BI-0))
-     (defn- bi-pos? [a] (bi> a BI-0))
-     (defn- bi-neg? [a] (bi< a BI-0))
-     (defn- bi-cmp [a b] (if (bi< a b) -1 (if (bi> a b) 1 0)))
-     (defn- bi-from [x]
+#?(:cljs (def ^:private BI-0 (js/BigInt 0)))
+#?(:cljs (def ^:private BI-1 (js/BigInt 1)))
+#?(:cljs (def ^:private BI-10 (js/BigInt 10)))
+#?(:cljs (def ^:private BI-32 (js/BigInt 32)))
+#?(:cljs (def ^:private BI-MASK32 (js/BigInt 0xffffffff)))
+#?(:cljs (def ^:private BI-MOD32 (js/BigInt 4294967296)))
+#?(:cljs (def ^:private BI-LONG-MIN (js/BigInt LONG-MIN)))
+#?(:cljs (def ^:private BI-LONG-MAX (js/BigInt LONG-MAX)))
+#?(:cljs (defn- bi? [x] (and (some? x) (identical? (.-constructor x) js/BigInt))))
+#?(:cljs (defn- bi= [a b] (= a b)))
+#?(:cljs (defn- bi< [a b] (< a b)))
+#?(:cljs (defn- bi<= [a b] (<= a b)))
+#?(:cljs (defn- bi> [a b] (> a b)))
+#?(:cljs (defn- bi+ [a b] (+ a b)))
+#?(:cljs (defn- bi- [a b] (- a b)))
+#?(:cljs (defn- bi* [a b] (* a b)))
+#?(:cljs (defn- bi-quot [a b] (/ a b)))
+#?(:cljs (defn- bi-rem [a b] (- a (* (/ a b) b))))
+#?(:cljs (defn- bi-neg [a] (- a)))
+#?(:cljs (defn- bi-abs [a] (if (bi< a BI-0) (bi-neg a) a)))
+#?(:cljs (defn- bi-zero? [a] (bi= a BI-0)))
+#?(:cljs (defn- bi-pos? [a] (bi> a BI-0)))
+#?(:cljs (defn- bi-neg? [a] (bi< a BI-0)))
+#?(:cljs (defn- bi-cmp [a b] (if (bi< a b) -1 (if (bi> a b) 1 0))))
+#?(:cljs (defn- bi-from [x]
        (cond
          (bi? x) x
          (number? x) (js/BigInt (js/Math.trunc x))
          (string? x) (js/BigInt (if (and (pos? (count x)) (= (first x) \+)) (subs x 1) x))
-         :else (js/BigInt (str x))))
-     (defn- bi-str [a] (.toString a 10))
-     (defn- bi-gcd [a b]
+         :else (js/BigInt (str x)))))
+#?(:cljs (defn- bi-str [a] (.toString a 10)))
+#?(:cljs (defn- bi-gcd [a b]
        (loop [a (bi-abs a) b (bi-abs b)]
-         (if (bi-zero? b) a (recur b (bi-rem a b)))))
-     (defn- bi>= [a b] (>= a b))
-     (defn- bi-in-long? [a] (and (bi<= a BI-LONG-MAX) (bi>= a BI-LONG-MIN)))
-     (defn- bi-long [a] (js/Number a))
-     (defn- bi-pow10 [k]
+         (if (bi-zero? b) a (recur b (bi-rem a b))))))
+#?(:cljs (defn- bi>= [a b] (>= a b)))
+#?(:cljs (defn- bi-in-long? [a] (and (bi<= a BI-LONG-MAX) (bi>= a BI-LONG-MIN))))
+#?(:cljs (defn- bi-long [a] (js/Number a)))
+#?(:cljs (defn- bi-pow10 [k]
        (loop [i 0 p BI-1]
-         (if (< i k) (recur (inc i) (bi* p BI-10)) p)))
-     (defn- bi-limbs32
+         (if (< i k) (recur (inc i) (bi* p BI-10)) p))))
+#?(:cljs (defn- bi-limbs32
        "Big-endian unsigned 32-bit limbs of |n|, or empty for 0."
        [n]
        (let [n (bi-abs n)]
@@ -246,9 +245,7 @@
              (if (bi-zero? n)
                (vec acc)
                (recur (bi-quot n BI-MOD32)
-                      (cons (js/Number (bi-rem n BI-MOD32)) acc)))))))
-     
-])
+                      (cons (js/Number (bi-rem n BI-MOD32)) acc))))))))
 
 #?(:cljs nil
    :default

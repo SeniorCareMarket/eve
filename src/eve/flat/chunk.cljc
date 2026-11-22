@@ -714,13 +714,8 @@
                         type-list)})))
 ))
 
-#?@(:cljs [
-(declare plain-integer?)
-;; The type table on ClojureScript (flat lanes U4a): the JVM's walk — a
-;; TypedVal registers its type in first-met order and its shape under that
-;; type — over volatile maps, a type keyed by [tkey (fp-key fp)] (a
-;; fingerprint is a js/BigInt here, hashed by its decimal string).
-(defn- scan!
+#?(:cljs (declare plain-integer?))
+#?(:cljs (defn- scan!
   [rep counts shapes types key?]
   (cond
     (or (keyword? rep) (symbol? rep) (string? rep))
@@ -751,9 +746,8 @@
     (instance? BytesVal rep) nil
 
     (coll? rep) (doseq [e rep] (scan! e counts shapes types false))
-    :else nil))
-
-(defn- field-class
+    :else nil)))
+#?(:cljs (defn- field-class
   "A type-table field class from the first instance's rep (§6), in this
    host's number model: an integer (a BigInt, or an integral number —
    what the column planner writes as an integer) is i64's code 10, any
@@ -766,9 +760,8 @@
     (coll? rep) [:ser 0]
     :else [:prim (cond (plain-integer? rep) 10
                        (number? rep) 9
-                       :else 0)]))
-
-(defn- scan
+                       :else 0)])))
+#?(:cljs (defn- scan
   "The chunk context for rep: symbol codes, shapes, types (FORMAT-V1 §4,
    §6). The :types map is keyed by [tkey (fp-key fp)]; write-node! and
    the batch writer look types up through typed-index."
@@ -807,8 +800,7 @@
                              :fields (mapv (fn [k] {:name k
                                                     :class (field-class (get (.-fields tv) k) @types)})
                                            (sort-by-key-bytes (keys (.-fields tv))))}))
-                        type-list)})))
-])
+                        type-list)}))))
 
 ;; A TypedVal's index in the chunk's type table, or nil on a host whose
 ;; scan writes none (the value then writes as its field map). The
@@ -4467,13 +4459,10 @@
 ;; (cons-flat & friends below).
 ;; ---------------------------------------------------------------------------
 
-#?@(:cljs [
-(defn- node-seq-entries [ctx off]
+#?(:cljs (defn- node-seq-entries [ctx off]
   ;; seq-wrapped like seq-of-node: a CLJS -seq must answer nil, not an
   ;; empty LazySeq, for an empty node
-  (seq (map (fn [[k v]] (first (seq (array-map k v)))) (entries-of-node ctx off))))
-
-])
+  (seq (map (fn [[k v]] (first (seq (array-map k v)))) (entries-of-node ctx off)))))
 #?(:cljs (deftype FlatVec [ctx off mm ^:mutable _h ^:mutable _d]
   IFlatHandle
   (-rep [_] (let [r (vec-rep-of ctx off)]
@@ -4855,14 +4844,12 @@
 ;; host's handles use. Map invocation (IFn) is carried in the map
 ;; deftypes' own bodies above — extend-protocol IFn breaks
 ;; shadow-cljs's IFn method synthesis, measured.
-#?@(:cljs [
-(defn- cljs-map-conj [h x]
+#?(:cljs (defn- cljs-map-conj [h x]
   (cond (map-entry? x) (assoc-flat h (key x) (val x))
         (vector? x) (assoc-flat h (nth x 0) (nth x 1))
         (map? x) (reduce-kv (fn [m k v] (assoc-flat m k v)) h x)
-        :else (reduce (fn [m e] (assoc-flat m (key e) (val e))) h (seq x))))
-
-(extend-protocol ICollection
+        :else (reduce (fn [m e] (assoc-flat m (key e) (val e))) h (seq x)))))
+#?(:cljs (extend-protocol ICollection
   FlatVec (-conj [h x] (cons-flat h x))
   FlatColVec (-conj [h x] (cons-flat h x))
   FlatList (-conj [h x] (cons-flat h x))
@@ -4871,9 +4858,8 @@
   FlatMap (-conj [h x] (cljs-map-conj h x))
   FlatRecord (-conj [h x] (cljs-map-conj h x))
   FlatTagged (-conj [h x] (cljs-map-conj h x))
-  FlatRow (-conj [h x] (cljs-map-conj h x)))
-
-(extend-protocol IStack
+  FlatRow (-conj [h x] (cljs-map-conj h x))))
+#?(:cljs (extend-protocol IStack
   FlatVec (-peek [h] (let [c (elem-count (.-ctx h) (.-off h))]
                        (when (pos? c) (elem-at (.-ctx h) (.-off h) (dec c)))))
           (-pop [h] (pop-flat h))
@@ -4882,9 +4868,8 @@
              (-pop [h] (pop-flat h))
   FlatBatch (-peek [h] (let [c (elem-count (.-ctx h) (.-off h))]
                          (when (pos? c) (elem-at (.-ctx h) (.-off h) (dec c)))))
-            (-pop [h] (pop-flat h)))
-
-(extend-protocol IEmptyableCollection
+            (-pop [h] (pop-flat h))))
+#?(:cljs (extend-protocol IEmptyableCollection
   FlatVec (-empty [_] [])
   FlatColVec (-empty [_] [])
   FlatList (-empty [_] ())
@@ -4893,9 +4878,8 @@
   FlatRecord (-empty [_] {})
   FlatTagged (-empty [_] {})
   FlatRow (-empty [_] {})
-  FlatSet (-empty [_] #{}))
-
-(extend-protocol IReduce
+  FlatSet (-empty [_] #{})))
+#?(:cljs (extend-protocol IReduce
   FlatVec (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
   FlatColVec (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
   FlatList (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
@@ -4904,9 +4888,7 @@
   FlatRecord (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
   FlatTagged (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
   FlatRow (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))
-  FlatSet (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h)))))
-
-])
+  FlatSet (-reduce ([h f] (reduce f (seq h))) ([h f init] (reduce f init (seq h))))))
 
 ;; ---------------------------------------------------------------------------
 ;; ---------------------------------------------------------------------------
@@ -5267,8 +5249,7 @@
 
 ;; --- the typed-array handoff (ClojureScript's zero-copy column view) --
 
-#?@(:cljs [
-(defn- column-typed-array [ctx col]
+#?(:cljs (defn- column-typed-array [ctx col]
   (when (:valid col)
     (throw (ex-info "flat chunk: a column with a validity bitmap has no dense typed view"
                     {:type ::no-dense-view :kind (:kind col)})))
@@ -5281,9 +5262,8 @@
       17 (js/Uint8Array. buf base n)
       18 (js/Uint16Array. buf base n)
       (throw (ex-info "flat chunk: no dense typed view for this column kind"
-                      {:type ::no-dense-view :kind (:kind col)})))))
-
-(defn column-view
+                      {:type ::no-dense-view :kind (:kind col)}))))))
+#?(:cljs (defn column-view
   "The dense typed array over a column of a flat chunk — zero copy,
    a view on the chunk's own buffer (the Node form of the §5/§8
    zero-copy handoff at chunk scope). One argument: the root is a COL
@@ -5307,5 +5287,4 @@
                                :else (recur (inc i))))]
        (when (neg? i)
          (throw (ex-info "flat chunk: no such field" {:type ::no-field :field field})))
-       (column-typed-array ctx (nth @(:cols bp) i))))))
-])
+       (column-typed-array ctx (nth @(:cols bp) i)))))))

@@ -143,32 +143,28 @@
 (defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))
 ))
 
-#?@(:cljs [
-(defn u8 [^js/Uint8Array c i] (aget c i))
-(defn u16 [^js/Uint8Array c i] (+ (aget c i) (* 256 (aget c (inc i)))))
-(defn u32 [^js/Uint8Array c i]
+#?(:cljs (defn u8 [^js/Uint8Array c i] (aget c i)))
+#?(:cljs (defn u16 [^js/Uint8Array c i] (+ (aget c i) (* 256 (aget c (inc i))))))
+#?(:cljs (defn u32 [^js/Uint8Array c i]
   ;; arithmetic, not bit ops: a u32 does not fit a CLJS 32-bit bit-op
-  (+ (u16 c i) (* 65536 (u16 c (+ i 2)))))
-(defn i32
+  (+ (u16 c i) (* 65536 (u16 c (+ i 2))))))
+#?(:cljs (defn i32
   "The i32 at i. `|0` (bit-or 0) is the wrap: cljs.core/unchecked-int is
    Math truncation (fix), which leaves a u32 past 2^31 positive — the
    moved ri32's spelling answered 4294967295 for FF FF FF FF (measured on
    Node, U2a ledger); the conformance test pins -1."
-  [^js/Uint8Array c i] (bit-or (u32 c i) 0))
-
-(defn- dv-of
+  [^js/Uint8Array c i] (bit-or (u32 c i) 0)))
+#?(:cljs (defn- dv-of
   "A DataView over the whole of Uint8Array b (its buffer, its offset)."
   [^js/Uint8Array b]
-  (js/DataView. (.-buffer b) (.-byteOffset b) (.-byteLength b)))
-
-(defn i64
+  (js/DataView. (.-buffer b) (.-byteOffset b) (.-byteLength b))))
+#?(:cljs (defn i64
   "The i64 at i as a js/BigInt (exact past 2^53)."
   [c i]
-  (.getBigInt64 (dv-of c) i true))
-(defn f64 [c i] (.getFloat64 (dv-of c) i true))
-(defn f32 [c i] (.getFloat32 (dv-of c) i true))
-
-(defn varint
+  (.getBigInt64 (dv-of c) i true)))
+#?(:cljs (defn f64 [c i] (.getFloat64 (dv-of c) i true)))
+#?(:cljs (defn f32 [c i] (.getFloat32 (dv-of c) i true)))
+#?(:cljs (defn varint
   "[value next-pos] — unsigned LEB128, accumulated arithmetically
    (CLJS bit ops are 32-bit). Chunk offsets stay under 2^32, counts
    under 2^53, so a JS number is exact."
@@ -176,44 +172,29 @@
   (loop [i i mul 1 v 0]
     (let [x (aget c i)]
       (if (< x 128) [(+ v (* (bit-and x 127) mul)) (inc i)]
-          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
-
-(defn varint-v
+          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul))))))))
+#?(:cljs (defn varint-v
   "The unsigned LEB128 value at i (varint's first element, no vector)."
   [^js/Uint8Array c i]
   (loop [i i mul 1 v 0]
     (let [x (aget c i)]
       (if (< x 128) (+ v (* (bit-and x 127) mul))
-          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
-
-(defn varint-next
+          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul))))))))
+#?(:cljs (defn varint-next
   "The position after the unsigned LEB128 at i (varint's second element)."
   [^js/Uint8Array c i]
-  (loop [i i] (if (< (aget c i) 128) (inc i) (recur (inc i)))))
-
-(defn varint-len [v]
-  (loop [v v n 1] (if (< v 128) n (recur (quot v 128) (inc n)))))
-
-(defn- hb [^js/Uint8Array bs i] (aget bs i))
-
-;; i64 math on this host runs in BigInt space: an i64 does not fit a
-;; JS number. The writer's i64 takes either. Written without js*: nbb's
-;; analyzer has no js* (measured: the flat load died "Unable to resolve
-;; symbol: js*"), and every form below means the same in compiled
-;; ClojureScript — the type tag is Object.prototype.toString's.
-;; (js/typeof is not the portable spelling either: nbb resolves it to a
-;; broken call.)
-(defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x)))
-(defn- bi [x] (if (bigint? x) x (js/BigInt x)))
-
-(def ^:private utf8-decoder (js/TextDecoder. "utf-8"))
-
-(defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
-(defn chunk-bytes "The host byte array of chunk c." [c] c)
-(defn chunk-len "The byte length of chunk c." [c] (.-length c))
-(defn utf8 "The string of the n utf-8 bytes at off." [c off n]
-  (.decode utf8-decoder (.subarray c off (+ off n))))
-])
+  (loop [i i] (if (< (aget c i) 128) (inc i) (recur (inc i))))))
+#?(:cljs (defn varint-len [v]
+  (loop [v v n 1] (if (< v 128) n (recur (quot v 128) (inc n))))))
+#?(:cljs (defn- hb [^js/Uint8Array bs i] (aget bs i)))
+#?(:cljs (defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x))))
+#?(:cljs (defn- bi [x] (if (bigint? x) x (js/BigInt x))))
+#?(:cljs (def ^:private utf8-decoder (js/TextDecoder. "utf-8")))
+#?(:cljs (defn chunk "The chunk over host byte array bs: bs itself." [bs] bs))
+#?(:cljs (defn chunk-bytes "The host byte array of chunk c." [c] c))
+#?(:cljs (defn chunk-len "The byte length of chunk c." [c] (.-length c)))
+#?(:cljs (defn utf8 "The string of the n utf-8 bytes at off." [c off n]
+  (.decode utf8-decoder (.subarray c off (+ off n)))))
 
 ;; ---------------------------------------------------------------------------
 ;; in place: compares over the stored bytes, no copy of them
