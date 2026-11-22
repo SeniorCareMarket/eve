@@ -115,8 +115,18 @@
                 ;; the reader's (with-meta sym meta) form is opaque:
                 ;; let-go's compiler understands it natively in
                 ;; binding and formal positions (measured #309), and
-                ;; rebuilding it broke a form that compiled as read
-                (= 'with-meta (first form)) form
+                ;; rebuilding it broke a form that compiled as read.
+                ;; But the annotation's shape is exactly (with-meta
+                ;; symbol map): a body form of any other shape is a
+                ;; user's with-meta CALL (eve.view's ViewMap withMeta
+                ;; body is (with-meta (consume raw fl cell) m), and a
+                ;; direct (with-meta raw m) carries its meta in an
+                ;; argument, not a literal — both measured 2026-11-22):
+                ;; walk those, so their fields are rewritten.
+                (and (= 'with-meta (first form))
+                     (symbol? (second form))
+                     (map? (nth form 2 nil)))
+                form
                 ;; a field assignment: (set! field value), the
                 ;; target possibly still meta-wrapped — emitted as
                 ;; (set-field! this 'field value) per the docstring;
