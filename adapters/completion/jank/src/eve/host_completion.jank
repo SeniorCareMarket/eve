@@ -770,13 +770,31 @@ namespace eve_arith {
 
 ;; + - * are checked now (the section at the top of this file), so the unchecked ops are built on the promoting
 ;; ops +' -' *' and wrap64: a promoting answer past i64 (a big integer) wraps to its low 64 bits, signed, as the
-;; JVM's unchecked ops answer. wrap64 goes through mod, never (long <big>): what jank's long cast of a big
-;; integer does is not the JVM's BigInteger.longValue contract this needs.
+;; JVM's unchecked ops answer. wrap64 never goes through (long <big>): what jank's long cast of a big
+;; integer does is not the JVM's BigInteger.longValue contract this needs. The wrap itself is computed in
+;; eve_arith.wrap_i64, over the big integer's own arithmetic, and no integer literal outside the i64 range
+;; is written in this file: jank's AOT constant emission materializes such a literal as a small_real with
+;; garbage bits (measured 2026-11-22: a compiled (type 18446744073709551616) answers small_real and prints
+;; a denormal, while the interpreted reader answers big_integer with the exact value; a mod by that
+;; literal returned small_real garbage, so every overflowing unchecked op answered a real -- the init
+;; death of every AOT binary whose load registers an eve.deftype, through eve.flat.sister's
+;; layout-fingerprint FNV loop). In C++ the modulus is built by a shift, not written as a literal.
+(cpp/raw "
+namespace eve_arith {
+  using namespace jank::runtime;
+  object_ref wrap_i64(object_ref const x) {
+    if(x.get_type() != object_type::big_integer) { return x; }
+    auto const two64(jank::native_big_integer(1) << 64);
+    auto m(as_big(x) % two64);
+    if(m < 0) { m += two64; }
+    if(m >= (jank::native_big_integer(1) << 63)) { m -= two64; }
+    return make_box(static_cast<jank::i64>(m));
+  }
+}
+")
+
 (defn- wrap64 [r]
-  (if (cpp/eve_arith.is_big r)
-    (let [u (mod r 18446744073709551616)]
-      (if (>= u 9223372036854775808) (- u 18446744073709551616) u))
-    r))
+  (cpp/eve_arith.wrap_i64 r))
 
 (re-root! 'unchecked-byte i8)
 (re-root! 'unchecked-short i16)
