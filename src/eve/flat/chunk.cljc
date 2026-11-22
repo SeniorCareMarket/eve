@@ -17,7 +17,8 @@
   (:require [eve.codec :as codec]
             [eve.encoding :as enc]
             #?(:clj [eve.crypto :as crypto]
-               :cljs [eve.crypto :as crypto])
+               :cljs [eve.crypto :as crypto]
+               :lg [eve.crypto :as crypto])
             [eve.deftype-proto.data :as d]
             [eve.flat.source :as source]
             ;; every read and write of a chunk's bytes (doc/flat/FLAT-IO.md):
@@ -32,7 +33,8 @@
             ;; cycles back through.
             #?@(:bb [[eve.core :as ecore]]
                 :glj [[eve.core :as ecore]]
-                :jank [[eve.core :as ecore]]))
+                :jank [[eve.core :as ecore]]
+                :lg [[eve.core :as ecore]]))
   #?(:clj (:import [java.util Arrays HashMap ArrayList])))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -241,12 +243,18 @@
 
 (deftype BytesVal [^bytes bs])
 (deftype TypedVal [tkey fp fields])   ;; fields: array-map field-keyword -> rep, declaration order
-(deftype MetaVal [inner meta-rep]
-  Object
-  ;; A rep carrying metadata prints as the value it wraps: reps surface
-  ;; in error messages and debug prints, and the default Object print
-  ;; (eve.flat.chunk.MetaVal@hash) hides the value entirely.
-  (toString [_] (pr-str inner)))
+#?(:lg (deftype MetaVal [inner meta-rep])
+   ;; let-go's extend-type* takes protocols only: an Object section
+   ;; does not compile there (measured on lg-eve, 2026-11-22). Its
+   ;; default deftype print names the fields, which is what this
+   ;; section exists for (reps surface in error messages and debug
+   ;; prints); every other host keeps the wrapped value's print.
+   :default (deftype MetaVal [inner meta-rep]
+              Object
+              ;; A rep carrying metadata prints as the value it wraps: reps surface
+              ;; in error messages and debug prints, and the default Object print
+              ;; (eve.flat.chunk.MetaVal@hash) hides the value entirely.
+              (toString [_] (pr-str inner))))
 
 (defprotocol IFlatHandle
   (-rep [h] "this handle's value as a rep, metadata included")
@@ -716,6 +724,100 @@
                         type-list)})))
 ))
 
+;; let-go takes the glojure text verbatim: the same walk on the same
+;; substrate (atoms of persistent maps), the same type table. Its
+;; field-class differs only in the number checks — an integer is
+;; i64's code 10 (let-go's fixed integer type), a float64 f64's 9;
+;; there is no Double class to instance? against.
+#?(:lg (do
+(defn- scan!
+  [rep counts shapes types key?]
+  (cond
+    (or (keyword? rep) (symbol? rep) (string? rep))
+    (let [c (or (get @counts rep) [0 0])
+          c [(inc (nth c 0)) (if key? (inc (nth c 1)) (nth c 1))]]
+      (swap! counts assoc rep c))
+
+    (instance? MetaVal rep)
+    (do (scan! (.-inner rep) counts shapes types key?)
+        (scan! (.-meta-rep rep) counts shapes types false))
+
+    (instance? TypedVal rep)
+    (let [tk [(.-tkey rep) (fp-key (.-fp rep))]
+          fields (.-fields rep)]
+      (when-not (contains? @types tk)
+        (swap! types assoc tk {:i (count @types) :fp (.-fp rep)}))
+      (doseq [[k v] fields] (scan! k counts shapes types true) (scan! v counts shapes types false))
+      (let [ks (sort-by-key-bytes (keys fields)) sk [(:i (get @types tk)) ks]]
+        (when-not (contains? @shapes sk)
+          (swap! shapes assoc sk (count @shapes)))))
+
+    (map? rep)
+    (do (doseq [[k v] rep] (scan! k counts shapes types true) (scan! v counts shapes types false))
+        (when-let [ks (shaped-keys rep)]
+          (when-not (contains? @shapes [nil ks])
+            (swap! shapes assoc [nil ks] (count @shapes)))))
+
+    (instance? BytesVal rep) nil
+    (coll? rep) (doseq [e rep] (scan! e counts shapes types false))
+    :else nil))
+
+(defn- field-class
+  "A type-table field class from the first instance's rep (§6), in
+   this host's number model: an integer is i64's code 10 (let-go's
+   one fixed integer type), a float64 f64's 9; the rest as on the JVM."
+  [rep types]
+  (cond
+    (instance? TypedVal rep) [:ref (:i (get types [(.-tkey rep) (fp-key (.-fp rep))]))]
+    (instance? BytesVal rep) [:prim 1]
+    (instance? MetaVal rep) (field-class (.-inner rep) types)
+    (coll? rep) [:ser 0]
+    :else [:prim (cond (integer? rep) 10
+                       (float? rep) 9
+                       :else 0)]))
+
+(defn- scan
+  "The chunk context for rep: symbol codes, shapes, types (FORMAT-V1
+   §4, §6). The :types map is keyed by [tkey (fp-key fp)]; write-node!
+   and the batch writer look types up through typed-index."
+  [rep]
+  (let [counts (atom {}) shapes (atom {}) types (atom {})]
+    (scan! rep counts shapes types false)
+    (let [member? (fn [[k c]] (or (keyword? k) (symbol? k)
+                                  (>= (nth c 0) 2) (pos? (nth c 1))))
+          syms (->> (filter member? @counts)
+                    (sort-by (fn [[k c]] [(- (nth c 0)) (str k)]))
+                    (mapv key))
+          shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
+                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))
+          type-list (mapv (fn [[tk t]] {:key (first tk) :fp (:fp t) :tk tk})
+                          (sort-by (fn [[_ t]] (:i t)) @types))
+          instances (atom {})]
+      ;; field classes need one instance per type; find them in the rep
+      (letfn [(find! [r]
+                (cond (instance? TypedVal r)
+                      (let [tk [(.-tkey r) (fp-key (.-fp r))]]
+                        (when-not (contains? @instances tk) (swap! instances assoc tk r))
+                        (doseq [[_ v] (.-fields r)] (find! v)))
+                      (instance? MetaVal r) (find! (.-inner r))
+                      (instance? BytesVal r) nil
+                      (map? r) (doseq [[_ v] r] (find! v))
+                      (coll? r) (doseq [e r] (find! e))
+                      :else nil))]
+        (find! rep))
+      {:sym (zipmap syms (range)) :syms syms
+       :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
+       :shape-list shape-list
+       :types (zipmap (map :tk type-list) (range))
+       :type-list (mapv (fn [t]
+                          (let [tv (get @instances (:tk t))]
+                            {:key (:key t) :fp (:fp t)
+                             :fields (mapv (fn [k] {:name k
+                                                    :class (field-class (get (.-fields tv) k) @types)})
+                                           (sort-by-key-bytes (keys (.-fields tv))))}))
+                        type-list)})))
+))
+
 #?(:cljs (do
 (declare plain-integer?)
 ;; The type table on ClojureScript (flat lanes U4a): the JVM's walk — a
@@ -836,6 +938,11 @@
   (and (integer? x) (not (instance? clojure.lang.BigInt x))
        (not (instance? java.math.BigInteger x)) (not (instance? java.math.BigDecimal x))))
 )
+   ;; let-go: a plain integer is its fixed-width int64 — eve.encoding's
+   ;; own word for exactly this (its BigInt is the separate type)
+   :lg (do
+(defn- plain-integer? [x] (enc/fixed-integer? x))
+)
    :cljs (do
 (defn- plain-integer?
   "An integer on this host: a js/BigInt, or an integral JS number
@@ -858,7 +965,7 @@
   "[[value run-length] ...] over consecutive distinct values."
   [vals]
   (reduce (fn [rs v]
-            (if (and (seq rs) (#?(:clj = :cljs val=) v (first (peek rs))))
+            (if (and (seq rs) (#?(:clj = :cljs val= :lg =) v (first (peek rs))))
               (conj (pop rs) [v (inc (second (peek rs)))])
               (conj rs [v 1])))
           [] vals))
@@ -876,6 +983,16 @@
 (defn- ile [a b] (<= a b))
 (def ^:private I32-MIN #?(:jank -2147483648 :default Integer/MIN_VALUE))
 (def ^:private I32-MAX #?(:jank 2147483647 :default Integer/MAX_VALUE)))
+   ;; let-go: the JVM spellings (its int64 arithmetic and promoting -'
+   ;; behave as the JVM's), with the bounds as literals, as on jank
+   ;; (no Integer statics on either host)
+   :lg (do
+(defn- col-min [present] (reduce min (map long present)))
+(defn- col-max [present] (reduce max (map long present)))
+(defn- col-range [mn mx] (-' mx mn))
+(defn- ile [a b] (<= a b))
+(def ^:private I32-MIN -2147483648)
+(def ^:private I32-MAX 2147483647))
    :cljs (do
 (def ^:private INT32-MIN (js/BigInt "-2147483648"))
 (def ^:private INT32-MAX (js/BigInt "2147483647"))
@@ -916,7 +1033,8 @@
                         (every? #(instance? Double %) present) {:kind 9}]
                   ;; no Float on this host: the numbers that are not
                   ;; integers are doubles (kind 9), as on the JVM
-                  :cljs [(every? number? present) {:kind 9}])
+                  :cljs [(every? number? present) {:kind 9}]
+                  :lg [(every? number? present) {:kind 9}])
               (every? #(contains? (:sym cx) %) present)
               {:kind (if (< (reduce max (map #(get (:sym cx) %) present)) 256) 17 18)}
               (every? string? present) {:kind 19}
@@ -1327,7 +1445,9 @@
 #?(:clj (deftype Ctx [b ^bytes bs ^long root wide?
                       syms shapes types ^clojure.lang.Atom decodes
                       rhq rdigest ^clojure.lang.Atom plans])
-   :cljs (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans]))
+   :cljs (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
+   ;; let-go: the unhinted arm, as on ClojureScript
+   :lg (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans]))
 
 (defn- parse-symtab [b ^long at ^long nsym wide?]
   (let [w (if wide? 4 2)
@@ -2205,6 +2325,19 @@
      :default (satisfies? IMapSource x)))
 ))
 
+;; let-go does not read :clj, so the protocol and its test are stated
+;; for it directly: the protocol text is the :clj block's, the test
+;; the satisfies? spelling (no JVM interface answers on this host).
+#?(:lg (do
+(defprotocol IMapSource
+  (-entries [h] "[[key value] ...] with values as scalars or handles")
+  (-lookup [h k nf])
+  (-mcount [h])
+  (-assoc-entry [h k v])
+  (-dissoc-entry [h k]))
+(defn- map-source? [x] (satisfies? IMapSource x))
+))
+
 (defn rep-of
   "A read value (scalar or handle) as a rep."
   [x]
@@ -2230,6 +2363,10 @@
               (let [es (-entries x)]
                 (emit-magic! out) (fio/buf-u8 out 0xED) (emit-i32le out (count es))
                 (doseq [[k v] es] (emit-framed! out k) (emit-framed! out v)))]
+        :lg [(map-source? x)
+             (let [es (-entries x)]
+               (emit-magic! out) (fio/buf-u8 out 0xED) (emit-i32le out (count es))
+               (doseq [[k v] es] (emit-framed! out k) (emit-framed! out v)))]
         :cljs [(satisfies? IRowHandle x)
                (let [es (row-entries (handle-ctx x) (handle-off x) (-row-index x))]
                  (emit-magic! out) (fio/buf-u8 out 0xED) (emit-i32le out (count es))
@@ -2352,6 +2489,9 @@
     :glj [(defmacro defseqhandle [tname & _]
             `(defn ~(symbol (str "->" tname)) [& ~'args]
                (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
+    :lg [(defmacro defseqhandle [tname & _]
+           `(defn ~(symbol (str "->" tname)) [& ~'args]
+              (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :clj [(defmacro defseqhandle
   "A sequential handle over the node at off. nthf/countf/seqf/repf are
    fns of (ctx off) (nthf also takes i); flags pick the interfaces."
@@ -2486,6 +2626,9 @@
     :glj [(defmacro defmaphandle [tname & _]
             `(defn ~(symbol (str "->" tname)) [& ~'args]
                (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
+    :lg [(defmacro defmaphandle [tname & _]
+           `(defn ~(symbol (str "->" tname)) [& ~'args]
+              (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :clj [(defmacro defmaphandle
   "A map handle as a deftype over the node — one construction for
    every host of this family, replacing the proxy over
@@ -2625,6 +2768,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lg []
     :default [(defseqhandle FlatVec [ctx off mm _h _d] elem-at elem-count seq-of-node vec-rep-of :vector? true)
               (defseqhandle FlatColVec [ctx off mm _h _d] elem-at elem-count seq-of-node vec-rep-of :vector? true)
               (defseqhandle FlatList [ctx off mm _h _d] elem-at elem-count seq-of-node list-rep-of :list? true)
@@ -2658,6 +2802,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lg []
     :default [(defmaphandle FlatMap [ctx off mm _h _d]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2667,6 +2812,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lg []
     :default [(defmaphandle FlatRecord [ctx off mm _h _d tkey fp]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2677,6 +2823,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lg []
     :default [(defmaphandle FlatTagged [ctx off mm _h _d tkey fp]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2687,6 +2834,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lg []
     :default [(defmaphandle FlatRow [ctx off row mm _h _d]
                 (row-entries ctx off row)
                 (row-lookup ctx off row k nf)
@@ -3963,6 +4111,511 @@
 (defmethod print-method FlatSet [x w] (ecore/-pr-writer x w nil))
 
 )) ; end glj handles
+
+;; let-go takes the glojure text: the same protocol surface over the
+;; same walks. Two differences, both the host's own: the map handles
+;; are plain deftypes (glojure's ^:eve/map routing meta has no
+;; let-go counterpart — eve.types/letgo: its completion has no
+;; set-type-equality!/set-coll-dispatch! hooks, so a type's =, hash
+;; and collection access ride eve.core's protocols here), and the
+;; print-methods ride eve.core/-pr-writer onto let-go's print
+;; writer through eve.encoding/write!, as glojure's do.
+#?(:lg (do
+
+(deftype FlatVec [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (vec-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatVec ctx off m _h _d))
+  (-hmeta [_] mm)
+  ecore/ICounted
+  (-count [_] (elem-count ctx off))
+  ecore/IIndexed
+  (-nth [_ i] (let [n (elem-count ctx off)]
+                (if (and (<= 0 i) (< i n))
+                  (elem-at ctx off i)
+                  (throw (IndexOutOfBoundsException. (str i))))))
+  (-nth [_ i nf] (if (and (<= 0 i) (< i (elem-count ctx off)))
+                   (elem-at ctx off i) nf))
+  ecore/ILookup
+  (-lookup [_ k] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
+                   (elem-at ctx off (long k)) nil))
+  (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
+                      (elem-at ctx off (long k)) nf))
+  ecore/IAssociative
+  (-assoc [_ n v] (assocN-flat _ n v))
+  (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
+  ecore/ISeqable
+  (-seq [_] (seq-of-node ctx off))
+  ecore/ISequential
+  ecore/IVector
+  (-assoc-n [_ n v] (assocN-flat _ n v))
+  ecore/ICollection
+  (-conj [_ v] (cons-flat _ v))
+  ecore/IEmptyableCollection
+  (-empty [_] [])
+  ecore/IStack
+  (-peek [_] (when (pos? (elem-count ctx off))
+               (elem-at ctx off (dec (elem-count ctx off)))))
+  (-pop [_] (pop-flat _))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (seq-of-node ctx off)))
+  (-reduce [_ f init] (pg-reduce f init (seq-of-node ctx off)))
+  ecore/IEquiv
+  (-equiv [_ other] (node-equiv ctx off other))
+  ecore/IHash
+  (-hash [_] (node-hasheq ctx off))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatVec ctx off m _h _d))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatColVec [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (vec-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatColVec ctx off m _h _d))
+  (-hmeta [_] mm)
+  ecore/ICounted
+  (-count [_] (elem-count ctx off))
+  ecore/IIndexed
+  (-nth [_ i] (let [n (elem-count ctx off)]
+                (if (and (<= 0 i) (< i n))
+                  (elem-at ctx off i)
+                  (throw (IndexOutOfBoundsException. (str i))))))
+  (-nth [_ i nf] (if (and (<= 0 i) (< i (elem-count ctx off)))
+                   (elem-at ctx off i) nf))
+  ecore/ILookup
+  (-lookup [_ k] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
+                   (elem-at ctx off (long k)) nil))
+  (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
+                      (elem-at ctx off (long k)) nf))
+  ecore/IAssociative
+  (-assoc [_ n v] (assocN-flat _ n v))
+  (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
+  ecore/ISeqable
+  (-seq [_] (seq-of-node ctx off))
+  ecore/ISequential
+  ecore/IVector
+  (-assoc-n [_ n v] (assocN-flat _ n v))
+  ecore/ICollection
+  (-conj [_ v] (cons-flat _ v))
+  ecore/IEmptyableCollection
+  (-empty [_] [])
+  ecore/IStack
+  (-peek [_] (when (pos? (elem-count ctx off))
+               (elem-at ctx off (dec (elem-count ctx off)))))
+  (-pop [_] (pop-flat _))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (seq-of-node ctx off)))
+  (-reduce [_ f init] (pg-reduce f init (seq-of-node ctx off)))
+  ecore/IEquiv
+  (-equiv [_ other] (node-equiv ctx off other))
+  ecore/IHash
+  (-hash [_] (node-hasheq ctx off))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatColVec ctx off m _h _d))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatList [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (list-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatList ctx off m _h _d))
+  (-hmeta [_] mm)
+  ecore/ICounted
+  (-count [_] (elem-count ctx off))
+  ecore/IIndexed
+  (-nth [_ i] (let [n (elem-count ctx off)]
+                (if (and (<= 0 i) (< i n))
+                  (elem-at ctx off i)
+                  (throw (IndexOutOfBoundsException. (str i))))))
+  (-nth [_ i nf] (if (and (<= 0 i) (< i (elem-count ctx off)))
+                   (elem-at ctx off i) nf))
+  ecore/ISeqable
+  (-seq [_] (seq-of-node ctx off))
+  ecore/ISequential
+  ecore/ICollection
+  (-conj [_ v] (cons-flat _ v))
+  ecore/IEmptyableCollection
+  (-empty [_] ())
+  ecore/IStack
+  (-peek [_] (when (pos? (elem-count ctx off)) (elem-at ctx off 0)))
+  (-pop [_] (pop-flat _))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (seq-of-node ctx off)))
+  (-reduce [_ f init] (pg-reduce f init (seq-of-node ctx off)))
+  ecore/IEquiv
+  (-equiv [_ other] (node-equiv ctx off other))
+  ecore/IHash
+  (-hash [_] (node-hasheq ctx off))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatList ctx off m _h _d))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatBatch [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (batch-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatBatch ctx off m _h _d))
+  (-hmeta [_] mm)
+  ecore/ICounted
+  (-count [_] (elem-count ctx off))
+  ecore/IIndexed
+  (-nth [_ i] (let [n (elem-count ctx off)]
+                (if (and (<= 0 i) (< i n))
+                  (row-handle ctx off i)
+                  (throw (IndexOutOfBoundsException. (str i))))))
+  (-nth [_ i nf] (if (and (<= 0 i) (< i (elem-count ctx off)))
+                   (row-handle ctx off i) nf))
+  ecore/ILookup
+  (-lookup [_ k] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
+                   (row-handle ctx off (long k)) nil))
+  (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
+                      (row-handle ctx off (long k)) nf))
+  ecore/IAssociative
+  (-assoc [_ n v] (assocN-flat _ n v))
+  (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
+  ecore/ISeqable
+  (-seq [_] (batch-seq-of ctx off))
+  ecore/ISequential
+  ecore/IVector
+  (-assoc-n [_ n v] (assocN-flat _ n v))
+  ecore/ICollection
+  (-conj [_ v] (cons-flat _ v))
+  ecore/IEmptyableCollection
+  (-empty [_] [])
+  ecore/IStack
+  (-peek [_] (when (pos? (elem-count ctx off))
+               (row-handle ctx off (dec (elem-count ctx off)))))
+  (-pop [_] (pop-flat _))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (batch-seq-of ctx off)))
+  (-reduce [_ f init] (pg-reduce f init (batch-seq-of ctx off)))
+  ecore/IEquiv
+  (-equiv [_ other] (node-equiv ctx off other))
+  ecore/IHash
+  (-hash [_] (node-hasheq ctx off))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatBatch ctx off m _h _d))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatMap [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (entries-rep-of (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatMap ctx off m _h _d))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  ecore/ICounted
+  (-count [_] (count (entries-of-node ctx off)))
+  ecore/ILookup
+  (-lookup [_ k] (lookup-node ctx off k nil))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  ecore/IAssociative
+  (-assoc [_ k v] (assoc-flat _ k v))
+  (-contains-key? [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  ecore/ISeqable
+  (-seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  ecore/IMap
+  (-dissoc [_ k] (dissoc-flat _ k))
+  ecore/ICollection
+  (-conj [_ o] (pg-map-conj _ o))
+  ecore/IEmptyableCollection
+  (-empty [_] {})
+  ecore/IFn
+  (-invoke [_ k] (lookup-node ctx off k nil))
+  (-invoke [_ k nf] (lookup-node ctx off k nf))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (pg-entries-seq (entries-of-node ctx off))))
+  (-reduce [_ f init] (pg-reduce f init (pg-entries-seq (entries-of-node ctx off))))
+  ecore/IEquiv
+  (-equiv [_ other] (entries-equiv (entries-of-node ctx off) other))
+  ecore/IHash
+  (-hash [_] (entries-hasheq-of (entries-of-node ctx off)))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatMap ctx off m _h _d))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatRecord [ctx off mm _h _d tkey fp]
+  IFlatHandle
+  (-rep [_] (let [r (record-entries-rep tkey fp (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatRecord ctx off m _h _d tkey fp))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRecordInfo
+  (-tkey [_] tkey)
+  (-fp [_] fp)
+  ;; a generic record carries its type's identity: the generated
+  ;; <Type>? predicates answer by type key for both of a type's
+  ;; forms (eve.deftype-proto.data/type-key-of)
+  d/ISabpType
+  (-sabp-type-key [_] tkey)
+  ecore/ICounted
+  (-count [_] (count (entries-of-node ctx off)))
+  ecore/ILookup
+  (-lookup [_ k] (lookup-node ctx off k nil))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  ecore/IAssociative
+  (-assoc [_ k v] (assoc-flat _ k v))
+  (-contains-key? [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  ecore/ISeqable
+  (-seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  ecore/IMap
+  (-dissoc [_ k] (dissoc-flat _ k))
+  ecore/ICollection
+  (-conj [_ o] (pg-map-conj _ o))
+  ecore/IEmptyableCollection
+  (-empty [_] {})
+  ecore/IFn
+  (-invoke [_ k] (lookup-node ctx off k nil))
+  (-invoke [_ k nf] (lookup-node ctx off k nf))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (pg-entries-seq (entries-of-node ctx off))))
+  (-reduce [_ f init] (pg-reduce f init (pg-entries-seq (entries-of-node ctx off))))
+  ecore/IEquiv
+  (-equiv [_ other] (entries-equiv (entries-of-node ctx off) other))
+  ecore/IHash
+  (-hash [_] (entries-hasheq-of (entries-of-node ctx off)))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatRecord ctx off m _h _d tkey fp))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatTagged [ctx off mm _h _d tkey fp]
+  IFlatHandle
+  (-rep [_] (let [r (record-entries-rep tkey fp (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatTagged ctx off m _h _d tkey fp))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRecordInfo
+  (-tkey [_] tkey)
+  (-fp [_] fp)
+  IGenericRecord
+  ecore/ICounted
+  (-count [_] (count (entries-of-node ctx off)))
+  ecore/ILookup
+  (-lookup [_ k] (lookup-node ctx off k nil))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  ecore/IAssociative
+  (-assoc [_ k v] (assoc-flat _ k v))
+  (-contains-key? [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  ecore/ISeqable
+  (-seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  ecore/IMap
+  (-dissoc [_ k] (dissoc-flat _ k))
+  ecore/ICollection
+  (-conj [_ o] (pg-map-conj _ o))
+  ecore/IEmptyableCollection
+  (-empty [_] {})
+  ecore/IFn
+  (-invoke [_ k] (lookup-node ctx off k nil))
+  (-invoke [_ k nf] (lookup-node ctx off k nf))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (pg-entries-seq (entries-of-node ctx off))))
+  (-reduce [_ f init] (pg-reduce f init (pg-entries-seq (entries-of-node ctx off))))
+  ecore/IEquiv
+  (-equiv [_ other] (entries-equiv (entries-of-node ctx off) other))
+  ecore/IHash
+  (-hash [_] (entries-hasheq-of (entries-of-node ctx off)))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatTagged ctx off m _h _d tkey fp))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatRow [ctx off row mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (entries-rep-of (row-entries ctx off row))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (row-digest-of _))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatRow ctx off row m _h _d))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (row-entries ctx off row))
+  (-lookup [_ k nf] (row-lookup ctx off row k nf))
+  (-mcount [_] (count (row-entries ctx off row)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRowHandle
+  (-row-index [_] row)
+  ecore/ICounted
+  (-count [_] (count (row-entries ctx off row)))
+  ecore/ILookup
+  (-lookup [_ k] (row-lookup ctx off row k nil))
+  (-lookup [_ k nf] (row-lookup ctx off row k nf))
+  ecore/IAssociative
+  (-assoc [_ k v] (assoc-flat _ k v))
+  (-contains-key? [_ k] (not (identical? ::absent (row-lookup ctx off row k ::absent))))
+  ecore/ISeqable
+  (-seq [_] (pg-entries-seq (row-entries ctx off row)))
+  ecore/IMap
+  (-dissoc [_ k] (dissoc-flat _ k))
+  ecore/ICollection
+  (-conj [_ o] (pg-map-conj _ o))
+  ecore/IEmptyableCollection
+  (-empty [_] {})
+  ecore/IFn
+  (-invoke [_ k] (row-lookup ctx off row k nil))
+  (-invoke [_ k nf] (row-lookup ctx off row k nf))
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (pg-entries-seq (row-entries ctx off row))))
+  (-reduce [_ f init] (pg-reduce f init (pg-entries-seq (row-entries ctx off row))))
+  ecore/IEquiv
+  (-equiv [_ other] (entries-equiv (row-entries ctx off row) other))
+  ecore/IHash
+  (-hash [_] (entries-hasheq-of (row-entries ctx off row)))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatRow ctx off row m _h _d))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(deftype FlatSet [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (into #{} (map rep-of) (set-elements ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatSet ctx off m _h _d))
+  (-hmeta [_] mm)
+  ecore/ICounted
+  (-count [_] (long (first (set-parts ctx off))))
+  ecore/ILookup
+  (-lookup [_ k] (some (fn [e] (when (= e k) e)) (set-elements ctx off)))
+  (-lookup [_ k nf] (let [es (set-elements ctx off)]
+                      (loop [i 0] (cond (== i (count es)) nf
+                                         (= (nth es i) k) (nth es i)
+                                         :else (recur (inc i))))))
+  ecore/ISeqable
+  (-seq [_] (when (pos? (long (first (set-parts ctx off))))
+              (seq (set-elements ctx off))))
+  ecore/ISet
+  (-disjoin [_ v] (disjoin-flat _ v))
+  ecore/ICollection
+  (-conj [_ v] (cons-flat _ v))
+  ecore/IEmptyableCollection
+  (-empty [_] #{})
+  ecore/IReduce
+  (-reduce [_ f] (pg-reduce f (seq (set-elements ctx off))))
+  (-reduce [_ f init] (pg-reduce f init (seq (set-elements ctx off))))
+  ecore/IEquiv
+  (-equiv [_ other] (node-equiv ctx off other))
+  ecore/IHash
+  (-hash [_] (node-hasheq ctx off))
+  ecore/IMeta
+  (-meta [_] mm)
+  ecore/IWithMeta
+  (-with-meta [_ m] (->FlatSet ctx off m _h _d))
+  ecore/IPrintWithWriter
+  (-pr-writer [_ w _] (ecore/-write w (pr-str (-rep _)))))
+
+(defmethod print-method FlatVec [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatColVec [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatList [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatBatch [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatMap [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatRecord [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatTagged [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatRow [x w] (ecore/-pr-writer x w nil))
+(defmethod print-method FlatSet [x w] (ecore/-pr-writer x w nil))
+
+)) ; end lg handles
 
 #?(:jank (do
 
