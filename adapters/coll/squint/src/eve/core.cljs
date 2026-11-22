@@ -298,7 +298,9 @@
 (def IReset cljs.core/IReset)
 (def IReset__reset_BANG_ cljs.core/IReset__reset_BANG_)
 (def ISeqable cljs.core/ISeqable)
-(def IList cljs.core/IList)
+;; squint's core has no IList: a marker object, as ISequential and
+;; IReduce above (an impl marks the type, satisfies? reads the mark).
+(def IList #js {:__sym (js/Symbol.for "squint.core/IList")})
 (def ISeqable__seq cljs.core/ISeqable__seq)
 (def ISet cljs.core/ISet)
 (def ISet__disjoin cljs.core/ISet__disjoin)
