@@ -3785,11 +3785,7 @@ namespace eve_load {
 ;; conflict and still throws.
 (defn- refer-own-skips []
   (let [pubs (clojure-core-publics)]
-    (into []
-          (comp (filter (fn [[sym _]] (contains? pubs sym)))
-                (filter (fn [[_ v]] (identical? *ns* (:ns (meta v)))))
-                (map key))
-          (ns-interns *ns*))))
+    (into [] (filter (fn [sym] (contains? pubs sym))) (keys (ns-interns *ns*)))))
 (alter-var-root #'clojure.core/refer
   (fn [_] (fn [ns-sym & filters]
             (if (= 'clojure.core ns-sym)
