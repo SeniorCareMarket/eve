@@ -2136,6 +2136,14 @@
         #?(:clj (if (satisfies? IAttachMeta inner)
                   (-attach-meta inner (read-value ctx mo))
                   inner)
+           ;; nbb: the :cljs arm's JVM class name does not resolve under SCI
+           ;; (analysis error, 2026-11-22); nbb takes the JVM arm's rule.
+           ;; (On cljs that name compiles to an undefined global: reading a
+           ;; meta-wrapped value throws "reading 'IObj'" — left as is here,
+           ;; it is a semantics question, see REPORT.md.)
+           :org.babashka/nbb (if (satisfies? IAttachMeta inner)
+                               (-attach-meta inner (read-value ctx mo))
+                               inner)
            :cljs (if (instance? clojure.lang.IObj inner)
                    (with-meta inner (read-value ctx mo))
                    inner)))
@@ -4995,7 +5003,7 @@
    case the caller re-packs instead."
   [thunk]
   (try (thunk)
-       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e
+       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :org.babashka/nbb :default :cljs cljs.core/ExceptionInfo) e
          (if (= ::append-overflow (:type (ex-data e)))
            nil
            (throw e)))))

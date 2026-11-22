@@ -774,6 +774,10 @@
 ;; self-calls (.assocN this ...) is a C++ member call on hosts whose
 ;; completion has no such member (jank), so assoc/assocN/cons all
 ;; route here instead.
+;; nbb: no ConcatBatch/BasedValue there (they are host types of the
+;; :clj hosts); SCI's analyzer rejects the unresolved constructors where
+;; ClojureScript only warns (measured 2026-11-22), so nbb skips the pair.
+#?(:org.babashka/nbb nil :default (do
 (defn- concat-assoc-n [handles cums total mm i v]
   (let [j (cb-locate cums i)
         h' (assoc (nth handles j) (- i (nth cums j)) v)]
@@ -789,7 +793,7 @@
     (BasedValue. base edits
                  (if (== i n) (conj tail v)
                      (assoc tail (- i bc) v))
-                 (if (== i n) (inc n) n) bc mm)))
+                 (if (== i n) (inc n) n) bc mm)))))
 
 #?(:clj
    (defn based-of

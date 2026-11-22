@@ -86,6 +86,10 @@
      ;; only reader surface Eve controls there. Host read-string
      ;; without explicit readers does not see Eve tags on squint — a
      ;; named limitation of the host, not a branch in Eve's semantics.
+     ;; nbb: SCI's cljs.reader has read-string but no tag-parser registry
+     ;; (register-tag-parser! does not resolve there, measured 2026-11-22);
+     ;; as on :squint, Eve's registry is the installation.
+     :org.babashka/nbb nil
      :cljs (reader/register-tag-parser! tag read-fn)
      ;; clojerl var roots are backed by compiled module functions and
      ;; cannot be altered (its alter-var-root throws "unsupported").
