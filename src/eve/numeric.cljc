@@ -36,6 +36,14 @@
   (:refer-clojure :exclude [bigint biginteger bigdec ratio? decimal?
                             numerator denominator imul divide])
   (:require [clojure.string :as str]
+            ;; squint: the registry is required statically, as in
+            ;; eve.type-readers — squint has no find-ns/resolve, and
+            ;; the load cycle that keeps cljs from requiring it does
+            ;; not exist on this seat (its codec requires no
+            ;; eve.numeric). On squint the registry registration IS
+            ;; the installation (register-exact-io! / install! below).
+            #?@(:squint [[eve.deftype.registry :as registry]]
+                :default [])
             #?(:cljs [eve.encoding :as enc]
                :clje [eve.encoding :as enc]
                :jank [eve.encoding :as enc]
@@ -1565,7 +1573,11 @@
                   (reg! type-key
                         {:type-key type-key
                          :type-io {:tag tag :read read-fn :print exact-print-info}}))))]
-    #?(:cljs (when (find-ns 'eve.deftype.registry) (go!))
+    #?(:squint (doseq [[type-key tag read-fn] exact-io]
+                 (registry/register-type! type-key
+                   {:type-key type-key
+                    :type-io {:tag tag :read read-fn :print exact-print-info}}))
+       :cljs (when (find-ns 'eve.deftype.registry) (go!))
        :lpy (try (require 'eve.deftype.registry) (go!) (catch python/Exception _))
        :cljr (try (require 'eve.deftype.registry) (go!) (catch Exception _))
        :default (try (require 'eve.deftype.registry) (go!) (catch Throwable _)))))
@@ -1576,9 +1588,10 @@
   []
   (register-exact-io!)
   (let [local (into {} (map (fn [[_ tag read-fn]] [tag read-fn]) exact-io))]
-    (if-let [dr (resolve 'eve.deftype.registry/data-readers)]
-      (merge local (select-keys (dr) (keys local)))
-      local)))
+    #?(:squint (merge local (select-keys (registry/data-readers) (keys local)))
+       :default (if-let [dr (resolve 'eve.deftype.registry/data-readers)]
+                  (merge local (select-keys (dr) (keys local)))
+                  local))))
 
 
 (defn read-edn
@@ -1639,7 +1652,11 @@
   []
   (register-exact-io!)
   (when (compare-and-set! installed* false true)
-    #?(:cljs
+    ;; squint: register-exact-io! above IS the installation, as in
+    ;; eve.type-readers — the cljs arm's var-root and extend-type
+    ;; machinery has no counterpart in squint's module world.
+    #?(:squint nil
+       :cljs
        (do
          ;; (= 5 5N) in either order: keep cljs (= 1 1.0) (do not change it).
          ;; nbb/SCI cannot extend IEquiv onto number; tests use equiv.
