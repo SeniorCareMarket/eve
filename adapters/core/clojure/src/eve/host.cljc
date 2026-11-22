@@ -79,6 +79,16 @@
       ;; java.util.Arrays call here does not compile there: eve.alpha did
       ;; not load on basilisp, measured 2026-11-19)
       :lpy (clojure.core/byte-array size init)
+      ;; let-go compiles :default and has no java.util.Arrays (eve.host did
+      ;; not load on lg, measured 2026-11-22): the fill as plain asets
+      :lg (let [n (int size)
+                a (clojure.core/byte-array n)]
+            (if (number? init)
+              (let [b (clojure.core/byte init)]
+                (dotimes [i n] (clojure.core/aset a i b)))
+              (doseq [i (range (min n (count init)))]
+                (clojure.core/aset a i (clojure.core/byte (nth init i)))))
+            a)
       :default (let [a (clojure.core/byte-array (int size))]
                  (if (number? init)
                    (java.util.Arrays/fill a (clojure.core/byte init))
