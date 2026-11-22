@@ -18,6 +18,7 @@
             [clojure.string :as str]
             [eve.hamt-util :as hu]
             [eve.codec :as codec]
+            [eve.numeric :as num]
             [eve.deftype-proto.alloc :as alloc]))
 
 (defn- in-a-domain-of-its-own
@@ -70,6 +71,12 @@
                       {:hosts #{}}
                       (edn/read-string line))))
                 (str/split-lines (slurp fixture-path :encoding "UTF-8"))))
+     :squint
+     ;; squint's EDN reader (its edn module) rejects Clojure number
+     ;; tokens outright ("Invalid number: 1/2"); eve.numeric/read-edn
+     ;; is Eve's reader for exactly those tokens, on every host.
+     (num/read-edn (.readFileSync (js/require "fs") fixture-path "utf8")
+                   {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}})
      :default
      (edn/read-string
       ;; clojure.edn reads #uuid and #inst itself (the JVM's UUID and Date, the
@@ -133,9 +140,15 @@
 
 (deftest long-symbol-has-no-encoding
   (testing "a symbol name or namespace past 255 UTF-8 bytes is refused on every host, never truncated (seam map L-40)"
-    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
-                 (encode-key (symbol (apply str (repeat 300 "s"))))))
-    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
-                 (encode-key (symbol (apply str (repeat 300 "n")) "k"))))
+    ;; squint has no symbol type: a symbol there is a string (keyword?
+    ;; and symbol? both answer string?), and a long keyword has a
+    ;; lawful long encoding — the refusal's precondition, a symbol
+    ;; distinct from a keyword, cannot be constructed on that host.
+    ;; A named limitation of the host, not a branch in the seam.
+    #?(:squint nil
+       :default (do (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
+                                 (encode-key (symbol (apply str (repeat 300 "s"))))))
+                    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
+                                 (encode-key (symbol (apply str (repeat 300 "n")) "k"))))))
     (is (= 255 (bytes-length (encode-key (symbol (apply str (repeat 251 "s"))))))
         "251 bytes of name + the 4-byte header is the longest symbol")))
