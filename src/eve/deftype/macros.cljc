@@ -212,7 +212,8 @@
                   ;; kind does not have. Both pairs are built by
                   ;; the shared proto-layer emission (plan §4 M3).
                   (emission/freeze-thaw-forms type-name
-                                               (when flat-forms flat-name))
+                                               (when flat-forms flat-name)
+                                               env)
                   [pred-form]))))
 
 ;;-----------------------------------------------------------------------------

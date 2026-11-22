@@ -129,20 +129,28 @@
    realized), the pair on the flat kind, reversed: -thaw thaws it,
    -freeze freezes the flat value into a domain. The dispatcher never
    calls a method a kind does not have."
-  [type-name flat-name]
-  (cond-> [(list 'extend-type type-name
+  ([type-name flat-name] (freeze-thaw-forms type-name flat-name nil))
+  ([type-name flat-name env]
+  ;; A ClojureScript compile (env carries :ns) names cljs.core's
+  ;; extend-type: the expansion lands in the caller's namespace, where a
+  ;; bare extend-type may be a referred eve.alpha/extend-type
+  ;; (eve.deftype-test refers it), which re-expands the pair through
+  ;; eve-extend-type and fails on the unregistered flat name. Other
+  ;; hosts keep the bare symbol their core resolves.
+  (let [xt (if (:ns env) 'cljs.core/extend-type 'extend-type)]
+  (cond-> [(list xt type-name
                  'eve.flat.sister/IFreezeThaw
                  (list '-freeze ['x 'sio]
                        (list 'eve.flat.sister/freeze-instance 'sio 'x))
                  (list '-thaw ['x]
                        (list 'eve.flat.sister/thaw-instance 'x)))]
     flat-name
-    (conj (list 'extend-type flat-name
+    (conj (list xt flat-name
                 'eve.flat.sister/IFreezeThaw
                 (list '-thaw ['x]
                       (list 'eve.flat.sister/thaw-instance 'x))
                 (list '-freeze ['x 'sio]
-                      (list 'eve.flat.sister/freeze-instance 'sio 'x))))))
+                      (list 'eve.flat.sister/freeze-instance 'sio 'x))))))))
 
 (defn flat-forms
   "The sister class generation, where the host realizes one: the

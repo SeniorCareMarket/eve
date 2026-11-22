@@ -691,7 +691,7 @@
                                  (list name args (cons 'do tbody))))
                              methods)))
                 parsed-protos)]
-    `(~'extend-type ~type-name ~@transformed-protos)))
+    `(cljs.core/extend-type ~type-name ~@transformed-protos)))
 
 ;;-----------------------------------------------------------------------------
 ;; A ClojureScript compiler (its macros run in its own Clojure)
@@ -809,7 +809,7 @@
   (let [x (gensym "x") w (gensym "w") s (gensym "s") first? (gensym "first")]
     (if (= :map spec)
       (let [k (gensym "k") v (gensym "v")]
-        `(~'extend-type ~type-name ~'IPrintWithWriter
+        `(cljs.core/extend-type ~type-name ~'IPrintWithWriter
           (~'-pr-writer [~x ~w ~'_]
            (~'-write ~w "{")
            (loop [~s (seq ~x) ~first? true]
@@ -821,7 +821,7 @@
                  (~'-write ~w (pr-str ~v))
                  (recur (next ~s) false))))
            (~'-write ~w "}"))))
-      `(~'extend-type ~type-name ~'IPrintWithWriter
+      `(cljs.core/extend-type ~type-name ~'IPrintWithWriter
         (~'-pr-writer [~x ~w ~'_]
          (~'-write ~w ~(:open spec))
          (loop [~s (seq ~x) ~first? true]
