@@ -261,4 +261,34 @@
                 :task (load-file "scripts/test-browser.clj")}
   test:clje {:doc "The shared (.cljc) tests on clojerl (eve's NIF is built on first load into adapters/core/beam/target/clje/)"
              :task (apply shell "clojerl" (concat (mapcat (fn [r] ["-pa" r]) (roots :clje "test"))
-                                                  ["-m" "eve.runner.clje-main" "test"] *command-line-args*))}}}
+                                                  ["-m" "eve.runner.clje-main" "test"] *command-line-args*))}
+  ;; --- Fleet syntax-formalization tasks (syntax/formalization-1) ---
+  ;; Identical task names in every adopted repo; the fleet templates
+  ;; in ~/workspace/syntax-formalization/templates/ are the source of
+  ;; truth for the config files these tasks read (.cljfmt.edn,
+  ;; .clj-kondo/config.edn, .splint.edn are byte-identical copies).
+  ;; Lint paths are Eve's real source roots (src + adapters + apps +
+  ;; the test trees); lint-docs joins `lint` when dprint.json lands.
+  splint {:doc "Run the Splint linter (fleet pin 1.25.0): bb splint [paths]"
+          :extra-deps {io.github.noahtheduke/splint {:mvn/version "1.25.0"}}
+          :task noahtheduke.splint/-main}
+  lint-kondo {:doc "clj-kondo at the default fail level — warnings fail"
+              :task (shell "clj-kondo --lint src adapters apps test contract-test test-e2e net-local capstone")}
+  lint-splint {:doc "Splint shape/smell rules"
+               :task (shell "bb splint src adapters apps test contract-test test-e2e net-local capstone")}
+  lint-depend {:doc "clj-depend layer check (.clj-depend/config.edn)"
+               :extra-deps {com.fabiodomingues/clj-depend {:mvn/version "0.11.1"}}
+               :task (do (require 'clj-depend.api 'clojure.java.io)
+                         (let [r (clj-depend.api/analyze {:project-root (clojure.java.io/file ".")
+                                                          :files #{(clojure.java.io/file "src") (clojure.java.io/file "adapters") (clojure.java.io/file "apps/aegis/src") (clojure.java.io/file "apps/network-atoms/src")}})
+                               vs (:violations r)]
+                           (doseq [v vs] (println v))
+                           (when (seq vs) (System/exit 1))))}
+  carve-report {:doc "fail if any unused var is reported"
+                :task (shell "carve --opts '{:paths [\"src\" \"adapters\" \"apps\" \"test\"] :report {:format :text}}'")}
+  fmt-check {:doc "cljfmt check — the fleet .cljfmt.edn is the rules"
+             :task (shell "cljfmt check src adapters apps test contract-test test-e2e net-local capstone")}
+  fmt {:doc "apply the fleet formatting"
+       :task (shell "cljfmt fix src adapters apps test contract-test test-e2e net-local capstone")}
+  lint {:doc "the whole gate"
+        :depends [lint-kondo lint-splint lint-depend carve-report fmt-check]}}}

@@ -1,0 +1,7 @@
+; Fleet Splint config — copied byte-identical to .splint.edn in each
+; adopted repo (see cljfmt.edn header for the sync law). v1 runs ALL
+; default Splint rules: the Phase 1 census measures the default gate.
+; A rule is disabled only fleet-wide, here, with the reason recorded —
+; never per repo to make a repo pass. Where a Splint rule duplicates a
+; clj-kondo idiom linter, the dedup choice is recorded here too.
+{}

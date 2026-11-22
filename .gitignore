@@ -1,5 +1,5 @@
 .shadow-cljs/
-.clj-kondo/
+.clj-kondo/.cache/
 .lsp/
 .portal/
 .DS_Store

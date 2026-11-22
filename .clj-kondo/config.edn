@@ -1,0 +1,26 @@
+; Fleet clj-kondo config — copied byte-identical to
+; .clj-kondo/config.edn in each adopted repo (see cljfmt.edn header
+; for the sync law). v1 pins the tool floor and otherwise runs the
+; clj-kondo DEFAULT linter levels: the Phase 1 census measures the
+; default gate. Linter levels are never demoted to make a repo pass;
+; off-by-default idiom linters are enabled in deliberate fleet-wide
+; batches, recorded here.
+;
+; NAMED EVE EXCEPTION (per the sync law: named, reasoned, here):
+; Eve defines its own type/protocol-defining macros, shaped after
+; clojure.core's. Without a model, every use reads as unresolved
+; symbols and unanalyzed bodies — in Eve itself and in every
+; consumer (Phase 1 narcis retro item 1: 49 unresolved-symbol + 23
+; invalid-arity from this one gap). The :lint-as map below teaches
+; kondo the shapes. The SAME map ships to consumers as Eve's
+; clj-kondo export: src/clj-kondo.exports/seniorcaremarket/eve/
+; config.edn — the two must stay identical; this file is the local
+; half, that file is the consumer half.
+{:min-clj-kondo-version "2026.10.26"
+ :lint-as {eve.alpha/deftype clojure.core/deftype
+           eve.deftype/deftype clojure.core/deftype
+           eve.deftype-proto.macros/deftype clojure.core/deftype
+           eve.record/defrecord clojure.core/defrecord
+           eve.protocol/defprotocol clojure.core/defprotocol
+           eve.stm/sync clojure.core/dosync
+           eve.thread/deftask clojure.core/defn}}

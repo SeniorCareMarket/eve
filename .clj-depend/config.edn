@@ -1,0 +1,27 @@
+;; Eve's layers, derived from the tree (hosts.edn + the namespace
+;; census on syntax/formalization-1, Nov 22 2026):
+;;
+;; :host-seam — the primitive namespaces ONLY adapters define
+;; (eve.host, eve.codec, eve.slab-io, eve.crypto, ...): each host
+;; supplies its own file for the same namespace. src/ (the core)
+;; requires these namespaces but never defines them; adapter files
+;; require core namespaces back (host impls build on core utils).
+;; That mutual seam<->core reach is Eve's actual architecture: the
+;; conditional guarantee is "if the adapter primitives satisfy the
+;; contract, the core's guarantees hold" — so seam and core may
+;; access each other, and both are closed to the apps.
+;;
+;; :core — every eve.* namespace defined under src/ (the CLJC core).
+;;
+;; :apps — the two apps' namespaces (eve.aegis.*, eve.net.* as
+;; defined under apps/). Nothing in the core or the seam may depend
+;; on an app; apps may depend on everything below them.
+;;
+;; Namespaces outside eve.* (clojure.*, goog.*) are not layered.
+{:layers
+ {:apps {:defined-by "eve\\.(aegis|net)\\..*"
+         :accessed-by-layers #{:apps}}
+  :host-seam {:defined-by "eve\\.(codec|core|crypto|crypto-bigint|data|deftype-proto\\.wasm|encoding|flat-io|gc|host|host-completion|host-init|host-prim|http|http-server|int32|journal-file|logical-protocol|process|process-slab|region|rrb-vector\\.macros|sab|slab-io|thread-host|typed-view|types|types-js|util|wasm-mem)"
+              :accessed-by-layers #{:host-seam :core :apps}}
+  :core {:defined-by "eve\\..*"
+         :accessed-by-layers #{:host-seam :core :apps}}}}

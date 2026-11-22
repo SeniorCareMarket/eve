@@ -1,0 +1,27 @@
+;; Eve's clj-kondo export — the consumer half of Eve's kondo model.
+;;
+;; Eve defines its own type/protocol-defining macros, shaped after
+;; clojure.core's. Without this config, a consumer's clj-kondo reads
+;; every eve/deftype use as unresolved symbols and leaves the bodies
+;; unanalyzed (Phase 1 narcis census: 49 unresolved-symbol + 23
+;; invalid-arity from this one gap).
+;;
+;; This file sits on Eve's classpath (under src/, a root every
+;; consumer already composes). Consumers import it once:
+;;
+;;   clj-kondo --lint "<classpath>" --copy-configs --dependencies
+;;
+;; which copies it to .clj-kondo/imports/seniorcaremarket/eve/, and
+;; activate it in their .clj-kondo/config.edn:
+;;
+;;   {:config-paths ["imports/seniorcaremarket/eve"]}
+;;
+;; The :lint-as map is identical to the one in Eve's own
+;; .clj-kondo/config.edn (the local half); keep them in sync.
+{:lint-as {eve.alpha/deftype clojure.core/deftype
+           eve.deftype/deftype clojure.core/deftype
+           eve.deftype-proto.macros/deftype clojure.core/deftype
+           eve.record/defrecord clojure.core/defrecord
+           eve.protocol/defprotocol clojure.core/defprotocol
+           eve.stm/sync clojure.core/dosync
+           eve.thread/deftask clojure.core/defn}}
