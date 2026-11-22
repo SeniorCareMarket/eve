@@ -445,6 +445,22 @@
        ;; with T.)
        (~'def ~new-name ~ctor-name)
 
+       ;; Interpreted seats (nbb; declare-type? false): SCI's deftype
+       ;; registers the type in its :types registry — constructors and
+       ;; instance? resolve — but interns no var for the type name, so
+       ;; a consumer's (:refer [~type-name]) throws "does not exist".
+       ;; Capture the type object (via type on a factory instance)
+       ;; into a var of the type's name: SCI's instance? discriminates
+       ;; on the type object, so :refer and instance? both work as on
+       ;; compiled seats. (The raw JS constructor off the prototype
+       ;; does NOT work: SCI shares one constructor across all its
+       ;; types, measured — every instance? would answer true.)
+       ;; Compiled seats intern the var from deftype itself and skip
+       ;; this.
+       ~@(when-not declare-type?
+           [`(~'def ~type-name (~'type (~new-name ~@(repeat (inc (count inst-syms)) nil))))
+            `(~'eve.deftype-proto.data/register-type-object! ~type-name ~type-key)])
+
        ;; An instance read from eve memory: its cached fields read once
        (~'defn ~load-name [~load-off]
                (let [~'slab-off__ ~load-off
@@ -581,8 +597,9 @@
    type's records and batch rows. Equality and hash by type key and
    fields (a flat copy is = its twin); printed #eve.flat/Type {...}."
   [{:keys [type-name inst-fields live-fields field-map parsed-protos type-key
-           provides? flat-name sister-name]}]
-  (let [parsed-protos (js-translate-protos (v/cljs-own-calls parsed-protos))
+           provides? flat-name sister-name]}
+   & [{:keys [translate] :or {translate identity}}]]
+  (let [parsed-protos (translate (js-translate-protos (v/cljs-own-calls parsed-protos)))
         ;; a synthesized toString of (pr-str this) recurses on a sister
         ;; (no print method is registered for it; sio/flat-type drops it
         ;; the same way), and an emptied Object group goes with it
