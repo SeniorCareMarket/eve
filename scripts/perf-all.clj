@@ -64,11 +64,21 @@
                     (when (and (map? m) (:perf m)) m))))
         (str/split-lines (or out ""))))
 
+(defn- host-dir
+  "The working directory a host's commands run in: eve's root, except jolt — jolt reads ./deps.edn and ./bb.edn even when
+   given -Scp, and eve's deps.edn fails its canonicalization (v0.8.26/0.8.28: IKVReduce on a Symbol), so jolt runs
+   from an empty target/jolt-cwd as bb test:jolt does (its classpath is absolute)."
+  [h]
+  (if (= h :jolt)
+    (let [d "target/jolt-cwd"] (fs/create-dirs d) d)
+    "."))
+
 (defn run-host [h]
   (let [[env & cmds] (get hosts h)
+        dir (host-dir h)
         t0 (System/currentTimeMillis)
         res (reduce (fn [_ cmd]
-                      (let [r (try @(apply p/process {:out :string :err :string :dir "." :extra-env (merge {"PATH" path} env)}
+                      (let [r (try @(apply p/process {:out :string :err :string :dir dir :extra-env (merge {"PATH" path} env)}
                                                       (program cmd))
                                    (catch Exception e {:exit -1 :out "" :err (ex-message e)}))]
                         (if (zero? (:exit r)) r (reduced r))))
