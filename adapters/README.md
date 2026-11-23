@@ -59,11 +59,12 @@ JVM roots that `:cljs` and `:browser` carry for the compiler's own Clojure (its 
 | | | `region/glojure`: eve's Go region package compiled into glj-eve (`impls/glojure/region`: Go's heap or a MAP_SHARED file, `sync/atomic`, futex; a Lustre mount's read-modify-writes under fcntl locks) | glojure |
 | | | `region/vs`: a region is an address in the program's own linear memory — a reserved window (`mmap/reserve!`), or a file mapped over one (`vs.mmap/map-file!` under vs-eve-host); the program-runtime mmap arms | ValueScript |
 | | | `region/jank`: C++ through `cpp/raw` — a `calloc`'d block or a `MAP_SHARED` mapping grown never truncated, the `__atomic` builtins (seq-cst, an unaligned i32 by `memcpy`), the futex syscall (shared), bulk bytes jank's `u8` arrays; `JankLockedRegion` for a Lustre mount by fcntl locks | jank |
-| gc | `eve.gc`: the GC hook that ends a read (eve.view, read-end B) — `(token release)` answers a fresh object whose collection runs `release` (the read's cell holds it alone), `(sweep!)` runs the releases eve collects itself, `(available?)`; a host with none reads in C | `gc/java`: `java.lang.ref.Cleaner`; else weak references on a `ReferenceQueue`, swept by eve | JVM, babashka, jolt |
+| gc | `eve.gc`: the GC hook that ends a read (eve.view, read-end B) — `(token release)` answers a fresh object whose collection runs `release` (the read's cell holds it alone), `(sweep!)` runs the releases eve collects itself, `(available?)`; a host with none reads in C | `gc/java`: `java.lang.ref.Cleaner`; else weak references on a `ReferenceQueue`, swept by eve | JVM, babashka |
 | | | `gc/js`: `FinalizationRegistry` | ClojureScript, ClojureScript in a browser, nbb, scittle, cherry, squint |
 | | | `gc/glojure`: a Go finalizer on a box glj-eve allocates (`impls/glojure/host/gc.go`), swept by eve | glojure |
 | | | `gc/letgo`: the same over lg-eve's natives (`impls/let-go/evenative/gc.go`) | let-go |
 | | | `gc/jank`: a Boehm finalizer on an `opaque_box` (`cpp/raw`), swept by eve | jank |
+| | | `gc/jolt`: a Chez Scheme guardian, the release its representative, swept by eve | jolt |
 | | | `gc/python`: `weakref.finalize` | basilisp |
 | | | `gc/beam`: a NIF resource whose destructor records its id (`native/eve_gc_nif.c`, its own library: no hook when it does not load), swept by eve | clojerl |
 | | | `gc/clr`: `System.WeakReference`, polled by eve (amortized) | ClojureCLR |
