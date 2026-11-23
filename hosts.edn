@@ -80,7 +80,7 @@
         "adapters/types/basilisp/src" "adapters/journal-file/python/src" "adapters/http-server/python/src" "adapters/flat-io/portable/src"]
  :jolt ["apps/network-atoms/src" "adapters/slab-io/protocol/src" "adapters/http/socket/src" "adapters/crypto/jolt/src" "adapters/crypto/portable/src"
         "adapters/core/clojure/src" "adapters/completion/jolt/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jolt-ffi/src"
-        "adapters/encoding/java/src" "adapters/int32/jolt/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/gc/java/src" "adapters/thread/jvm/src"
+        "adapters/encoding/jolt/src" "adapters/int32/jolt/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/gc/java/src" "adapters/thread/jvm/src"
         "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/jolt/src" "adapters/http-server/jolt/src" "adapters/flat-io/portable/src"]
  :clje ["apps/network-atoms/src" "adapters/slab-io/protocol/src" "adapters/http/beam/src" "adapters/crypto/beam/src" "adapters/crypto/portable/src"
         "adapters/core/beam/src" "adapters/completion/clojerl/src" "adapters/coll/beam/src" "adapters/slab/heap/src" "adapters/region/beam/src"
