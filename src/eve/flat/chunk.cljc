@@ -18,7 +18,8 @@
             [eve.encoding :as enc]
             #?(:clj [eve.crypto :as crypto]
                :cljs [eve.crypto :as crypto]
-               :lg [eve.crypto :as crypto])
+               :lg [eve.crypto :as crypto]
+               :lpy [eve.crypto :as crypto])
             [eve.deftype-proto.data :as d]
             [eve.flat.source :as source]
             ;; every read and write of a chunk's bytes (doc/flat/FLAT-IO.md):
@@ -265,11 +266,14 @@
    ;; section exists for (reps surface in error messages and debug
    ;; prints); every other host keeps the wrapped value's print.
    :default (deftype MetaVal [inner meta-rep]
-              Object
               ;; A rep carrying metadata prints as the value it wraps: reps surface
               ;; in error messages and debug prints, and the default Object print
-              ;; (eve.flat.chunk.MetaVal@hash) hides the value entirely.
-              (toString [_] (pr-str inner))))
+              ;; (eve.flat.chunk.MetaVal@hash) hides the value entirely. Basilisp's
+              ;; deftype* admits no Object clause — its spelling of the same
+              ;; override is a bare __str__ method.
+              #?@(:lpy [(__str__ [_] (pr-str inner))]
+                  :default [Object
+                            (toString [_] (pr-str inner))])))
 
 (defprotocol IFlatHandle
   (-rep [h] "this handle's value as a rep, metadata included")
@@ -426,7 +430,8 @@
         m #?(:clj (when (instance? clojure.lang.IObj v) (meta v))
              ;; bare IMeta: cljs.core's on the ClojureScript face;
              ;; under squint the ns refer (eve.core's stub) answers it.
-             :cljs (when (satisfies? IMeta v) (meta v)))]
+             :cljs (when (satisfies? IMeta v) (meta v))
+             :lpy (when (python/isinstance v basilisp.lang.interfaces/IMeta) (meta v)))]
     (if m
       (MetaVal. rep (to-rep m))
       rep)))
@@ -448,7 +453,7 @@
   [xs]
   (mapv second (sort-by first d/compare-bytes
                         (map (fn [x] [(try (key-bytes x)
-                                           (catch #?(:clj Throwable :cljs :default) _
+                                           (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _
                                              (utf8-bytes (pr-str x)))) x]) xs))))
 
 (defn- shaped-keys
@@ -835,6 +840,100 @@
                         type-list)})))
 ))
 
+#?(:lpy (do
+;; basilisp takes the jank text: the same walk on the same substrate
+;; (atoms of persistent maps), the same type table. field-class
+;; spells this host's number model: Python's int is code 10, a float
+;; is f64's 9, a boolean is 0 and is tested first (Python's bool is
+;; an int subclass and basilisp's integer? admits it).
+(defn- scan!
+  [rep counts shapes types key?]
+  (cond
+    (or (keyword? rep) (symbol? rep) (string? rep))
+    (let [c (or (get @counts rep) [0 0])
+          c [(inc (nth c 0)) (if key? (inc (nth c 1)) (nth c 1))]]
+      (swap! counts assoc rep c))
+
+    (instance? MetaVal rep)
+    (do (scan! (.-inner rep) counts shapes types key?)
+        (scan! (.-meta-rep rep) counts shapes types false))
+
+    (instance? TypedVal rep)
+    (let [tk [(.-tkey rep) (fp-key (.-fp rep))]
+          fields (.-fields rep)]
+      (when-not (contains? @types tk)
+        (swap! types assoc tk {:i (count @types) :fp (.-fp rep)}))
+      (doseq [[k v] fields] (scan! k counts shapes types true) (scan! v counts shapes types false))
+      (let [ks (sort-by-key-bytes (keys fields)) sk [(:i (get @types tk)) ks]]
+        (when-not (contains? @shapes sk)
+          (swap! shapes assoc sk (count @shapes)))))
+
+    (map? rep)
+    (do (doseq [[k v] rep] (scan! k counts shapes types true) (scan! v counts shapes types false))
+        (when-let [ks (shaped-keys rep)]
+          (when-not (contains? @shapes [nil ks])
+            (swap! shapes assoc [nil ks] (count @shapes)))))
+
+    (instance? BytesVal rep) nil
+    (coll? rep) (doseq [e rep] (scan! e counts shapes types false))
+    :else nil))
+
+(defn- field-class
+  "A type-table field class from the first instance's rep (§6), in
+   this host's number model: an integer is i64's code 10, a float
+   f64's 9, a boolean 0; the rest as on the JVM."
+  [rep types]
+  (cond
+    (instance? TypedVal rep) [:ref (:i (get types [(.-tkey rep) (fp-key (.-fp rep))]))]
+    (instance? BytesVal rep) [:prim 1]
+    (instance? MetaVal rep) (field-class (.-inner rep) types)
+    (coll? rep) [:ser 0]
+    :else [:prim (cond (or (true? rep) (false? rep)) 0
+                       (integer? rep) 10
+                       (float? rep) 9
+                       :else 0)]))
+
+(defn- scan
+  "The chunk context for rep: symbol codes, shapes, types (FORMAT-V1
+   §4, §6). The :types map is keyed by [tkey (fp-key fp)]; write-node!
+   and the batch writer look types up through typed-index."
+  [rep]
+  (let [counts (atom {}) shapes (atom {}) types (atom {})]
+    (scan! rep counts shapes types false)
+    (let [member? (fn [[k c]] (or (keyword? k) (symbol? k)
+                                  (>= (nth c 0) 2) (pos? (nth c 1))))
+          syms (->> (filter member? @counts)
+                    (sort-by (fn [[k c]] [(- (nth c 0)) (str k)]))
+                    (mapv key))
+          shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
+                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))
+          type-list (mapv (fn [[tk t]] {:key (first tk) :fp (:fp t) :tk tk})
+                          (sort-by (fn [[_ t]] (:i t)) @types))
+          instances (atom {})]
+      ;; field classes need one instance per type; find them in the rep
+      (letfn [(find! [r]
+                (cond (instance? TypedVal r)
+                      (let [tk [(.-tkey r) (fp-key (.-fp r))]]
+                        (when-not (contains? @instances tk) (swap! instances assoc tk r))
+                        (doseq [[_ v] (.-fields r)] (find! v)))
+                      (instance? MetaVal r) (find! (.-inner r))
+                      (instance? BytesVal r) nil
+                      (map? r) (doseq [[_ v] r] (find! v))
+                      (coll? r) (doseq [e r] (find! e))
+                      :else nil))]
+        (find! rep))
+      {:sym (zipmap syms (range)) :syms syms
+       :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
+       :shape-list shape-list
+       :types (zipmap (map :tk type-list) (range))
+       :type-list (mapv (fn [t]
+                          (let [tv (get @instances (:tk t))]
+                            {:key (:key t) :fp (:fp t)
+                             :fields (mapv (fn [k] {:name k
+                                                    :class (field-class (get (.-fields tv) k) @types)})
+                                           (sort-by-key-bytes (keys (.-fields tv))))}))
+                        type-list)})))
+))
 ;; The type table on ClojureScript (flat lanes U4a): the JVM's walk — a
 ;; TypedVal registers its type in first-met order and its shape under that
 ;; type — over volatile maps, a type keyed by [tkey (fp-key fp)] (a
@@ -952,6 +1051,7 @@
    ;; let-go: a plain integer is its fixed-width int64 — eve.encoding's
    ;; own word for exactly this (its BigInt is the separate type)
    :lg (defn- plain-integer? [x] (enc/fixed-integer? x))
+   :lpy (defn- plain-integer? [x] (and (integer? x) (not (or (true? x) (false? x)))))
    :cljs (defn- plain-integer?
            "An integer on this host: a js/BigInt, or an integral JS number
    (Eve's CLJS number model writes those as integers, as its scalar
@@ -967,11 +1067,17 @@
              (and (plain-integer? a) (plain-integer? b) (bi= a b))
              (= a b))))
 
+;; basilisp: Python's int is the integer representation, arbitrary
+;; precision — every integer is a plain integer (a boolean is not:
+;; Python's bool is an int subclass, basilisp's integer? admits it),
+;; equality is =, and the planner arithmetic below is the plain ops.
+#?(:lpy (defn- val= [a b] (= a b)))
+
 (defn- runs-of
   "[[value run-length] ...] over consecutive distinct values."
   [vals]
   (reduce (fn [rs v]
-            (if (and (seq rs) (#?(:clj = :cljs val= :lg =) v (first (peek rs))))
+            (if (and (seq rs) (#?(:clj = :cljs val= :lg = :lpy val=) v (first (peek rs))))
               (conj (pop rs) [v (inc (second (peek rs)))])
               (conj rs [v 1])))
           [] vals))
@@ -987,23 +1093,31 @@
 ;; (no Integer statics on either host)
 #?(:cljs (def ^:private INT32-MIN (js/BigInt "-2147483648")))
 #?(:cljs (def ^:private INT32-MAX (js/BigInt "2147483647")))
+;; Python ints do not overflow: the range is the plain subtraction
+;; the JVM needs promotion for and ClojureScript needs BigInt for.
 #?(:clj (defn- col-min [present] (reduce min (map long present)))
    :lg (defn- col-min [present] (reduce min (map long present)))
+   :lpy (defn- col-min [present] (reduce min present))
    :cljs (defn- col-min [present] (reduce (fn [a b] (if (bi< b a) b a)) (map bi present))))
 #?(:clj (defn- col-max [present] (reduce max (map long present)))
    :lg (defn- col-max [present] (reduce max (map long present)))
+   :lpy (defn- col-max [present] (reduce max present))
    :cljs (defn- col-max [present] (reduce (fn [a b] (if (bi< a b) b a)) (map bi present))))
 #?(:clj (defn- col-range [mn mx] (-' mx mn))
    :lg (defn- col-range [mn mx] (-' mx mn))
+   :lpy (defn- col-range [mn mx] (- mx mn))
    :cljs (defn- col-range [mn mx] (bi- mx mn)))
 #?(:clj (defn- ile [a b] (<= a b))
    :lg (defn- ile [a b] (<= a b))
+   :lpy (defn- ile [a b] (<= a b))
    :cljs (defn- ile [a b] (bi<= a b)))
 #?(:clj (def ^:private I32-MIN #?(:jank -2147483648 :default Integer/MIN_VALUE))
    :lg (def ^:private I32-MIN -2147483648)
+   :lpy (def ^:private I32-MIN -2147483648)
    :cljs (def ^:private I32-MIN INT32-MIN))
 #?(:clj (def ^:private I32-MAX #?(:jank 2147483647 :default Integer/MAX_VALUE))
    :lg (def ^:private I32-MAX 2147483647)
+   :lpy (def ^:private I32-MAX 2147483647)
    :cljs (def ^:private I32-MAX INT32-MAX))
 
 (defn- column-plan
@@ -1200,7 +1314,7 @@
     (map? rep)
     (if-let [ks (shaped-keys rep)]
       (write-map-node! w cx (get (:shapes cx) [nil ks]) rep)
-      (let [es (mapv (fn [[k v]] [(try (key-bytes k) (catch #?(:clj Throwable :cljs :default) _ nil)) k v]) rep)
+      (let [es (mapv (fn [[k v]] [(try (key-bytes k) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)) k v]) rep)
             es (sort (fn [a b] (if (and (first a) (first b))
                                  (d/compare-bytes (first a) (first b))
                                  (compare (pr-str (second a)) (pr-str (second b))))) es)
@@ -1363,10 +1477,10 @@
                           ctx (header-ctx out false)
                           hqv (int (or hq
                                        (try (node-hasheq* ctx root)
-                                            (catch #?(:clj Throwable :cljs :default) _ nil))
+                                            (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))
                                        -2147483648))
                           dg (try (handle-digest ctx root)
-                                  (catch #?(:clj Throwable :cljs :default) _ nil))]
+                                  (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))]
                       (fio/buf-patch-u32 w 32 hqv)
                       (when dg
                         (fio/buf-seek w 36)
@@ -1450,7 +1564,8 @@
                       rhq rdigest ^clojure.lang.Atom plans])
    :cljs (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
    ;; let-go: the unhinted arm, as on ClojureScript
-   :lg (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans]))
+   :lg (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
+   :lpy (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans]))
 
 (defn- parse-symtab [b ^long at ^long nsym wide?]
   (let [w (if wide? 4 2)
@@ -1988,8 +2103,8 @@
     (flat-handle? b) (if (sister-value? b) (= b a) (node-equiv (handle-ctx b) (handle-off b) a))
     (and (not (coll? a)) (not (coll? b))
          (not (host-bytes? a)) (not (host-bytes? b)))
-    (let [ba (try (flat-bytes-of-plain a) (catch #?(:clj Throwable :cljs :default) _ nil))
-          bb (try (flat-bytes-of-plain b) (catch #?(:clj Throwable :cljs :default) _ nil))]
+    (let [ba (try (flat-bytes-of-plain a) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))
+          bb (try (flat-bytes-of-plain b) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))]
       (if (and ba bb) (enc/bytes= ba bb) (= a b)))
     (host-bytes? a)
     (and (host-bytes? b) (enc/bytes= a b))
@@ -2109,7 +2224,7 @@
       (try (let [out (fio/buf 4)]
              (flat-emit! ctx off out)
              (sha-vec (buf-bytes-out out)))
-           (catch #?(:clj Throwable :cljs :default) _ nil))))
+           (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))))
 
 ;; --- read-value --------------------------------------------------------
 
@@ -2134,7 +2249,7 @@
 (defn eve-digest
   "Eve's content digest of a plain value, or nil when it has none."
   [v]
-  (try (sha-vec (flat-bytes-of-plain v)) (catch #?(:clj Throwable :cljs :default) _ nil)))
+  (try (sha-vec (flat-bytes-of-plain v)) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)))
 
 (defn- emit-i32le [out v]
   (fio/buf-u8 out (bit-and v 0xFF)) (fio/buf-u8 out (bit-and (bit-shift-right v 8) 0xFF))
@@ -2345,6 +2460,17 @@
 (defn- map-source? [x] (satisfies? IMapSource x))
 ))
 
+;; basilisp reads no :clj arm, so the block above never defines
+;; IMapSource there; the :lpy section's map handles implement it.
+#?(:lpy (do
+(defprotocol IMapSource
+  (-entries [h] "[[key value] ...] with values as scalars or handles")
+  (-lookup [h k nf])
+  (-mcount [h])
+  (-assoc-entry [h k v])
+  (-dissoc-entry [h k]))
+(defn- map-source? [x] (satisfies? IMapSource x))))
+
 (defn rep-of
   "A read value (scalar or handle) as a rep."
   [x]
@@ -2385,7 +2511,7 @@
   (try (let [out (fio/buf 4)]
          (emit-flat-any! out h)
          (sha-vec (buf-bytes-out out)))
-       (catch #?(:clj Throwable :cljs :default) _ nil)))
+       (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)))
 
 (defn- vec-rep-of [ctx off]
   (mapv (fn [i] (rep-of (elem-at ctx off i))) (range (elem-count ctx off))))
@@ -2574,7 +2700,7 @@
              (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
                                   (nth this (long k)) nf))
              clojure.lang.IPersistentCollection
-             (empty [_#] [])
+             (empty [_] [])
              (equiv [this other] (node-equiv ctx off other))])
        ~@(when (or vector? list?)
            '[java.util.List
@@ -2586,13 +2712,13 @@
              ;; family — (= plain flat) is the same question everywhere.
              (size [this] (.count this))
              (isEmpty [this] (zero? (.count this)))
-             (^boolean contains [this o] (boolean (some (fn [e#] (= e# o)) (seq this))))
+             (^boolean contains [this o] (boolean (some (fn [e] (= e o)) (seq this))))
              (^objects toArray [this] (object-array (seq this)))
-             (^objects toArray [this ^objects a] (let [n# (.count this)]
-                                 (if (< (alength a) n#)
+             (^objects toArray [this ^objects a] (let [n (.count this)]
+                                 (if (< (alength a) n)
                                    (object-array (seq this))
-                                   (do (dotimes [i# n#] (aset a i# (nth this i#)))
-                                       (when (> (alength a) n#) (aset a n# nil))
+                                   (do (dotimes [i n] (aset a i (nth this i)))
+                                       (when (> (alength a) n) (aset a n nil))
                                        a))))
              (^boolean add [this o] (throw (UnsupportedOperationException.)))
              (^boolean addAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
@@ -2600,31 +2726,31 @@
              (^boolean remove [this o] (throw (UnsupportedOperationException.)))
              (^boolean removeAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
              (^boolean retainAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
-             (^boolean containsAll [this ^java.util.Collection c] (every? (fn [o#] (.contains this o#)) c))
+             (^boolean containsAll [this ^java.util.Collection c] (every? (fn [o] (.contains this o)) c))
              (^void clear [this] (throw (UnsupportedOperationException.)))
              (get [this ^int i] (nth this i))
              (set [this ^int i o] (throw (UnsupportedOperationException.)))
              (^void add [this ^int i o] (throw (UnsupportedOperationException.)))
              (remove [this ^int i] (throw (UnsupportedOperationException.)))
-             (indexOf [this o] (int (loop [i# 0]
-                                 (cond (== i# (.count this)) -1
-                                       (= (nth this i#) o) i#
-                                       :else (recur (inc i#))))))
-             (lastIndexOf [this o] (int (loop [i# (dec (.count this))]
-                                     (cond (neg? i#) -1
-                                           (= (nth this i#) o) i#
-                                           :else (recur (dec i#))))))
+             (indexOf [this o] (int (loop [i 0]
+                                 (cond (== i (.count this)) -1
+                                       (= (nth this i) o) i
+                                       :else (recur (inc i))))))
+             (lastIndexOf [this o] (int (loop [i (dec (.count this))]
+                                     (cond (neg? i) -1
+                                           (= (nth this i) o) i
+                                           :else (recur (dec i))))))
              (^java.util.ListIterator listIterator [this] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this)))))
              (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this))) i))
              (^java.util.List subList [this ^int s ^int e] (java.util.Collections/unmodifiableList
-                                  (java.util.ArrayList. ^java.util.Collection (map (fn [i#] (nth this i#)) (range s e)))))])
+                                  (java.util.ArrayList. ^java.util.Collection (map (fn [i] (nth this i)) (range s e)))))])
        ~@(when list?
            '[clojure.lang.IPersistentList
              (peek [this] (when (pos? (.count this)) (nth this 0)))
              (pop [this] (pop-flat this))
              clojure.lang.IPersistentCollection
              (cons [this v] (cons-flat this v))
-             (empty [_#] ())
+             (empty [_] ())
              (equiv [this other] (node-equiv ctx off other))]))))])
 
 #?@(:bb [(defmacro defmaphandle [tname & _]
@@ -2714,11 +2840,11 @@
        (-dissoc-entry [this# k#] (~dissocf this# k#))
        ~@(when record?
            '[eve.flat.chunk.IRecordInfo
-             (-tkey [_#] tkey)
-             (-fp [_#] fp)])
+             (-tkey [_] tkey)
+             (-fp [_] fp)])
        ~@(when row?
            '[eve.flat.chunk.IRowHandle
-             (-row-index [_#] row)])
+             (-row-index [_] row)])
        clojure.lang.IPersistentMap
        (assoc [this# k# v#] (-assoc-entry this# k# v#))
        (assocEx [this# k# v#] (if (.containsKey this# k#)
@@ -2776,6 +2902,7 @@
     :bb []
     :glj []
     :lg []
+    :lpy []
     :default [(defseqhandle FlatVec [ctx off mm _h _d] elem-at elem-count seq-of-node vec-rep-of :vector? true)
               (defseqhandle FlatColVec [ctx off mm _h _d] elem-at elem-count seq-of-node vec-rep-of :vector? true)
               (defseqhandle FlatList [ctx off mm _h _d] elem-at elem-count seq-of-node list-rep-of :list? true)
@@ -2810,6 +2937,7 @@
     :bb []
     :glj []
     :lg []
+    :lpy []
     :default [(defmaphandle FlatMap [ctx off mm _h _d]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2820,6 +2948,7 @@
     :bb []
     :glj []
     :lg []
+    :lpy []
     :default [(defmaphandle FlatRecord [ctx off mm _h _d tkey fp]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2831,6 +2960,7 @@
     :bb []
     :glj []
     :lg []
+    :lpy []
     :default [(defmaphandle FlatTagged [ctx off mm _h _d tkey fp]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2842,6 +2972,7 @@
     :bb []
     :glj []
     :lg []
+    :lpy []
     :default [(defmaphandle FlatRow [ctx off row mm _h _d]
                 (row-entries ctx off row)
                 (row-lookup ctx off row k nf)
@@ -3621,6 +3752,503 @@
 (defmethod print-method FlatSet [x w] (.write w (pr-str (-rep x))))
 
 )) ; end bb handles
+
+;; --- the basilisp handles -------------------------------------------------
+;; Hand-written like the bb/glojure sections: the types implement
+;; basilisp's collection interfaces directly (the basilisp coll
+;; adapter's eve.core is clojure.core itself, so there is no eve.core
+;; protocol surface to write against), plus this namespace's handle
+;; protocols. Basilisp mechanics, each proven in miniature before this
+;; section was written: deftype* refuses partial interface
+;; implementations, so every inherited member is spelled; nth arrives
+;; with Python kwargs (the runtime passes notfound= as a keyword, the
+;; NTH_SENTINEL marking the two-arity call); meta is a Python property
+;; on the interfaces, so each type's meta is installed as a property
+;; after its deftype; IReversible is not an abstract class, so it
+;; cannot be claimed in deftype* and rseq is installed the same way;
+;; fields are not assignable, so the _h/_d caches stay uncomputed
+;; fields like the bb section's (its -hash/-digest compute on each
+;; call too).
+
+#?(:lpy (do
+
+(deftype FlatVec [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (vec-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatVec ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentVector
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assocN-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (seq [_] (seq-of-node ctx off))
+  (contains [_ k] (and (integer? k) (<= 0 k) (< k (elem-count ctx off))))
+  (entry [_ k] (when (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                 (basilisp.core/map-entry k (elem-at ctx off k))))
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (elem-at ctx off k)
+                         (second args))))
+  (empty [_] [])
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (elem-at ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  (peek [_] (when (pos? (elem-count ctx off))
+              (elem-at ctx off (dec (elem-count ctx off)))))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq-of-node ctx off))
+                       (pg-reduce (first args) (second args) (seq-of-node ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatVec ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__getitem__ [_ i] (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+                       (elem-at ctx off i)
+                       (throw (python/IndexError (str i)))))
+  (__iter__ [_] (python/iter (seq-of-node ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatVec "meta" (python/property (fn [this] (.-mm this))))
+(python/setattr FlatVec "rseq" (fn [this] (seq (into () (seq-of-node (.-ctx this) (.-off this))))))
+
+(deftype FlatColVec [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (vec-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatColVec ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentVector
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assocN-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (seq [_] (seq-of-node ctx off))
+  (contains [_ k] (and (integer? k) (<= 0 k) (< k (elem-count ctx off))))
+  (entry [_ k] (when (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                 (basilisp.core/map-entry k (elem-at ctx off k))))
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (elem-at ctx off k)
+                         (second args))))
+  (empty [_] [])
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (elem-at ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  (peek [_] (when (pos? (elem-count ctx off))
+              (elem-at ctx off (dec (elem-count ctx off)))))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq-of-node ctx off))
+                       (pg-reduce (first args) (second args) (seq-of-node ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatColVec ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__getitem__ [_ i] (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+                       (elem-at ctx off i)
+                       (throw (python/IndexError (str i)))))
+  (__iter__ [_] (python/iter (seq-of-node ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatColVec "meta" (python/property (fn [this] (.-mm this))))
+(python/setattr FlatColVec "rseq" (fn [this] (seq (into () (seq-of-node (.-ctx this) (.-off this))))))
+
+(deftype FlatList [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (list-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatList ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentStack
+  (peek [_] (when (pos? (elem-count ctx off)) (elem-at ctx off 0)))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IPersistentCollection
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (empty [_] ())
+  (seq [_] (seq-of-node ctx off))
+  basilisp.lang.interfaces/IIndexed
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (elem-at ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  basilisp.lang.interfaces/ILookup
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (elem-at ctx off k)
+                         (second args))))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq-of-node ctx off))
+                       (pg-reduce (first args) (second args) (seq-of-node ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatList ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__iter__ [_] (python/iter (seq-of-node ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatList "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatBatch [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (batch-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatBatch ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentVector
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assocN-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (seq [_] (batch-seq-of ctx off))
+  (contains [_ k] (and (integer? k) (<= 0 k) (< k (elem-count ctx off))))
+  (entry [_ k] (when (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                 (basilisp.core/map-entry k (row-handle ctx off k))))
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (row-handle ctx off k)
+                         (second args))))
+  (empty [_] [])
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (row-handle ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  (peek [_] (when (pos? (elem-count ctx off))
+              (row-handle ctx off (dec (elem-count ctx off)))))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (batch-seq-of ctx off))
+                       (pg-reduce (first args) (second args) (batch-seq-of ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatBatch ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__getitem__ [_ i] (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+                       (row-handle ctx off i)
+                       (throw (python/IndexError (str i)))))
+  (__iter__ [_] (python/iter (batch-seq-of ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatBatch "meta" (python/property (fn [this] (.-mm this))))
+(python/setattr FlatBatch "rseq" (fn [this] (seq (into () (batch-seq-of (.-ctx this) (.-off this))))))
+
+(deftype FlatMap [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (entries-rep-of (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatMap ctx off m _h _d))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  (entry [_ k] (let [v (lookup-node ctx off k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (lookup-node ctx off (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (entries-of-node ctx off)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (entries-of-node ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatMap ctx off m _h _d))
+  (__len__ [_] (count (entries-of-node ctx off)))
+  (__getitem__ [_ k] (let [v (lookup-node ctx off k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (entries-of-node ctx off))))
+  (__eq__ [_ other] (entries-equiv (entries-of-node ctx off) other))
+  (__hash__ [_] (entries-hasheq-of (entries-of-node ctx off)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatMap "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatRecord [ctx off mm _h _d tkey fp]
+  d/ISabpType
+  (-sabp-type-key [_] tkey)
+  IFlatHandle
+  (-rep [_] (let [r (record-entries-rep tkey fp (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatRecord ctx off m _h _d tkey fp))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRecordInfo
+  (-tkey [_] tkey)
+  (-fp [_] fp)
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  (entry [_ k] (let [v (lookup-node ctx off k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (lookup-node ctx off (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (entries-of-node ctx off)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (entries-of-node ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatRecord ctx off m _h _d tkey fp))
+  (__len__ [_] (count (entries-of-node ctx off)))
+  (__getitem__ [_ k] (let [v (lookup-node ctx off k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (entries-of-node ctx off))))
+  (__eq__ [_ other] (entries-equiv (entries-of-node ctx off) other))
+  (__hash__ [_] (entries-hasheq-of (entries-of-node ctx off)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatRecord "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatTagged [ctx off mm _h _d tkey fp]
+  d/ISabpType
+  (-sabp-type-key [_] tkey)
+  IFlatHandle
+  (-rep [_] (let [r (record-entries-rep tkey fp (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatTagged ctx off m _h _d tkey fp))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRecordInfo
+  (-tkey [_] tkey)
+  (-fp [_] fp)
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  (entry [_ k] (let [v (lookup-node ctx off k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (lookup-node ctx off (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (entries-of-node ctx off)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (entries-of-node ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatTagged ctx off m _h _d tkey fp))
+  (__len__ [_] (count (entries-of-node ctx off)))
+  (__getitem__ [_ k] (let [v (lookup-node ctx off k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (entries-of-node ctx off))))
+  (__eq__ [_ other] (entries-equiv (entries-of-node ctx off) other))
+  (__hash__ [_] (entries-hasheq-of (entries-of-node ctx off)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatTagged "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatRow [ctx off row mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (entries-rep-of (row-entries ctx off row))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (row-digest-of _))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatRow ctx off row m _h _d))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (row-entries ctx off row))
+  (-lookup [_ k nf] (row-lookup ctx off row k nf))
+  (-mcount [_] (count (row-entries ctx off row)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRowHandle
+  (-row-index [_] row)
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (row-lookup ctx off row k ::absent))))
+  (entry [_ k] (let [v (row-lookup ctx off row k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (row-lookup ctx off row (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (row-entries ctx off row)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (row-entries ctx off row)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (row-entries ctx off row)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatRow ctx off row m _h _d))
+  (__len__ [_] (count (row-entries ctx off row)))
+  (__getitem__ [_ k] (let [v (row-lookup ctx off row k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (row-entries ctx off row))))
+  (__eq__ [_ other] (entries-equiv (row-entries ctx off row) other))
+  (__hash__ [_] (entries-hasheq-of (row-entries ctx off row)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatRow "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatSet [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (into #{} (map rep-of) (set-elements ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatSet ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentSet
+  (disj [_ & xs] (loop [h _ ps (seq xs)]
+                   (if ps (recur (disjoin-flat h (first ps)) (next ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (empty [_] #{})
+  (seq [_] (when (pos? (long (first (set-parts ctx off))))
+             (seq (set-elements ctx off))))
+  basilisp.lang.interfaces/ILookup
+  (val-at [_ & args] (let [k (first args)
+                           es (set-elements ctx off)]
+                       (loop [i 0]
+                         (cond (== i (count es)) (second args)
+                               (= (nth es i) k) (nth es i)
+                               :else (recur (inc i))))))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq (set-elements ctx off)))
+                       (pg-reduce (first args) (second args) (seq (set-elements ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatSet ctx off m _h _d))
+  (__len__ [_] (long (first (set-parts ctx off))))
+  (__contains__ [_ k] (boolean (some (fn [e] (= e k)) (set-elements ctx off))))
+  (__iter__ [_] (python/iter (seq (set-elements ctx off))))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatSet "meta" (python/property (fn [this] (.-mm this))))
+
+)) ; end lpy handles
 
 #?(:glj (do
 
@@ -5651,7 +6279,7 @@
        ;; names nothing an SCI host evaluating this file can resolve,
        ;; and the body already discriminates on the ex-data type and
        ;; rethrows everything else.
-       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs :default) e
+       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs :default :lpy basilisp.lang.exception/ExceptionInfo) e
          (if (= ::append-overflow (:type (ex-data e)))
            nil
            (throw e)))))
