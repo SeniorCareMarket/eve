@@ -441,3 +441,10 @@ validate-storage-model!, dump-block-detail!,
 dump-block-stats! are called by test tooling but not
 defined at this pin. Remaining: Splint campaign, Carve
 campaign, full baseline reproduction, RETRO completion.
+
+## Bank 8 — 2026-11-23 ~17:35 ET (lane 3, batch C redo + repairs)
+
+- KONDO LEG CLOSED at recount 17 (0E/0W); recounts 19-21 tracked the Splint batches' regressions back to zero: recount 21 = 0 errors, 2 warnings (the eve.set/eve.vec containsAll sites, reverted in c0d19df — a confirming recount is owed at the next checkpoint).
+- Splint: batches A+B committed (9e2db9d, 1691 warnings); batch C attempt 1 REVERTED WHOLESALE (reader-conditional destruction + same-line column collisions — full story in commit c0d19df's message); batch C redo (let-if/let-when/if-nil-else/if-else-nil) committed as c0d19df under the READER-SKIP + DEFERRED-SAME-LINE guards now in tools/splint-fix.bb (BOTH loops — the sugg loop was the unguarded one). Gate cone green at baseline counts after the redo.
+- Tool lesson banked: suggestion mode is only safe with (1) the reader-conditional guard, (2) one edit per row per pass with fresh positions per iteration, (3) a kondo recount after every rule group. Pattern-verified transforms remain preferred.
+- REMAINING: splint restructure families group 2 (if-not-both, if-same-truthy, when-not-call, into-literal, new-object, prefer-condp, assoc-fn, when-do, useless-do, redundant-call, assoc-assoc, mapcat-concat-map, prefer-vary-meta, multiply-by-one/zero, body-unquote-splicing, empty-loop-in-fn, loop-empty-when, redundant-nested-call, redundant-let, no-op-assignment) under the guarded iterate discipline; READER-SKIP hand dispositions (flat.cljc delegate, image, chunk, place sites); the giants (prefer-method-values ~847, lisp-case 392, catch-throwable 49, identical-branches 47, conversion-functions 9, misc naming); then the Carve campaign; then bb lint full pass + baseline reproduction + RETRO.
