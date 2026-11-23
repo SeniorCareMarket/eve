@@ -557,7 +557,13 @@
       (throw (js/Error. (str "Cannot compare " coll " to " other)))))
 
   IPrintWithWriter
+  ;; pr-writer is cljs.core's element writer for pr-sequential-writer;
+  ;; it is defn- in ClojureScript (verified in the pinned 1.12.x
+  ;; core.cljs) and cljs.core offers no public equivalent — this is
+  ;; the standard IPrintWithWriter idiom, so the one :private-call
+  ;; finding is ignored at the site.
   (-pr-writer [coll writer opts]
+    #_{:clj-kondo/ignore [:private-call]}
     (pr-sequential-writer writer pr-writer "[" " " "]" opts coll)))
 
 (defn tuple
