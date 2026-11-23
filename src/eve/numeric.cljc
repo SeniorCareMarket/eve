@@ -1390,7 +1390,7 @@
    0x / 0X is 16, 0 then octal digits is 8, Nr / nR is radix N (2..36)."
   [s]
   (cond
-    (or (or (str/starts-with? s "0x") (str/starts-with? s "0X")))
+    (or (str/starts-with? s "0x") (str/starts-with? s "0X"))
     [16 (subs s 2)]
     (re-matches #"[0-9]+[rR].*" s)
     (let [[_ rs body] (re-matches #"([0-9]+)[rR](.*)" s)

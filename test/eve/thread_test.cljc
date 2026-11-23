@@ -497,7 +497,7 @@
         (when (map? m) (h/send! (:reply m) (:n m)))
         (recur)))))
 
-(defn- median-of-5 [batch] (do (batch) (nth (vec (sort (repeatedly 5 batch))) 2)))
+(defn- median-of-5 [batch] (batch) (nth (vec (sort (repeatedly 5 batch))) 2))
 
 (deftest round-trips
   ;; A future's round trip is two messages and the engine's bookkeeping (descriptor, claim, settle, wait). The bar is

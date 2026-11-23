@@ -1268,8 +1268,7 @@
     "me.tonsky.persistent-sorted-set.Iter"})
 
 (defn- eve-has-seq? [x]
-  (try (do ((eve-method '-seq) x) true)
-       (catch Throwable _ false)))
+  (try ((eve-method '-seq) x) true (catch Throwable _ false)))
 
 (defn- presented-sequential? [x]
   (boolean (or (sci-sequential? x)

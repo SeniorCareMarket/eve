@@ -38,8 +38,7 @@
   (aset b 5 (unchecked-byte kind))
   (put-u32 b 8 length)
   (put-u32 b 12 (or root 0))
-  (when nsym (do (aset b 16 (unchecked-byte (bit-and nsym 0xFF)))
-                 (aset b 17 (unchecked-byte (bit-shift-right nsym 8)))))
+  (when nsym (aset b 16 (unchecked-byte (bit-and nsym 0xFF))) (aset b 17 (unchecked-byte (bit-shift-right nsym 8))))
   (put-u32 b 20 (or symtab 0))
   (put-u32 b 24 (or shapetab 0)))
 

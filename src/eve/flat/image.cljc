@@ -310,7 +310,7 @@
                            :else nil))
                    (recur (inc i)))))
         ;; 0x01 scalar, 0x1D array, 0x1E obj: leaves, as in eve.retire
-        (when (and (<= 0x40 t 0xEC))
+        (when (<= 0x40 t 0xEC)
           (when-let [layout (ser/deftype-layout sio off t)]
             (when (vector? layout)
               (doseq [[foff k] layout]

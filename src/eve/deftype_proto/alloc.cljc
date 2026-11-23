@@ -1191,50 +1191,49 @@
                ^objects desc-regions   (field ctx desc-regions)
                ^objects desc-flags-regions (field ctx desc-flags-regions)
                ^objects desc-pointer-regions (field ctx desc-pointer-regions)]
-           (do
-             (locking regions
-               (when any-grew?
-                 (dotimes [ci d/NUM_SLAB_CLASSES]
-                   (when-let [path (aget file-paths ci)]
-                     (let [cached    (long (aget total-blocks ci))
-                           cur-r     (aget regions ci)
-                           hdr-total (long (slab/region-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                       (when (> hdr-total cached)
-                         (let [blk-size   (long (aget block-sizes ci))
-                               data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
-                               bm-bytes   (d/bitmap-byte-size hdr-total)
-                               new-region (region/open-mmap-region path data-bytes (assoc opts :reuse-from cur-r))
-                               new-bm     (region/open-mmap-region (aget bitmap-paths ci) bm-bytes (assoc opts :reuse-from (aget bitmap-regions ci)))
-                               new-desc   (region/open-mmap-region (str path ".desc-count")
-                                                                   (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-regions ci)))
-                               new-desc-f (region/open-mmap-region (str path ".desc-flags")
-                                                                   (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-flags-regions ci)))
-                               new-desc-p (region/open-mmap-region (str path ".desc-pointer")
-                                                                   (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
-                           (aset regions ci new-region)
-                           (aset bitmap-regions ci new-bm)
-                           (aset desc-regions ci new-desc)
-                           (aset desc-flags-regions ci new-desc-f)
-                           (aset desc-pointer-regions ci new-desc-p)
-                           (aset total-blocks ci (int hdr-total))
-                           (slab/regions-changed! ctx)))))))
-               (when coalesc-grew?
-                 (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
-                   (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
-                         data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
-                     (if (nil? cur-region)
-                       (let [peek-r      (region/open-mmap-region path 64 opts)
-                             hdr-data-sz (long (slab/region-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
-                         (when (pos? hdr-data-sz)
-                           (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) opts)]
-                             (aset regions OVERFLOW_CLASS_IDX new-r)
-                             (slab/regions-changed! ctx))))
-                       (let [hdr-data-sz (long (slab/region-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
-                             cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
-                         (when (> hdr-data-sz cur-size)
-                           (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) (assoc opts :reuse-from cur-region))]
-                             (aset regions OVERFLOW_CLASS_IDX new-r)
-                             (slab/regions-changed! ctx)))))))))))))))
+           (locking regions
+             (when any-grew?
+               (dotimes [ci d/NUM_SLAB_CLASSES]
+                 (when-let [path (aget file-paths ci)]
+                   (let [cached    (long (aget total-blocks ci))
+                         cur-r     (aget regions ci)
+                         hdr-total (long (slab/region-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                     (when (> hdr-total cached)
+                       (let [blk-size   (long (aget block-sizes ci))
+                             data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
+                             bm-bytes   (d/bitmap-byte-size hdr-total)
+                             new-region (region/open-mmap-region path data-bytes (assoc opts :reuse-from cur-r))
+                             new-bm     (region/open-mmap-region (aget bitmap-paths ci) bm-bytes (assoc opts :reuse-from (aget bitmap-regions ci)))
+                             new-desc   (region/open-mmap-region (str path ".desc-count")
+                                                                 (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-regions ci)))
+                             new-desc-f (region/open-mmap-region (str path ".desc-flags")
+                                                                 (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-flags-regions ci)))
+                             new-desc-p (region/open-mmap-region (str path ".desc-pointer")
+                                                                 (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
+                         (aset regions ci new-region)
+                         (aset bitmap-regions ci new-bm)
+                         (aset desc-regions ci new-desc)
+                         (aset desc-flags-regions ci new-desc-f)
+                         (aset desc-pointer-regions ci new-desc-p)
+                         (aset total-blocks ci (int hdr-total))
+                         (slab/regions-changed! ctx)))))))
+             (when coalesc-grew?
+               (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+                 (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
+                       data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
+                   (if (nil? cur-region)
+                     (let [peek-r      (region/open-mmap-region path 64 opts)
+                           hdr-data-sz (long (slab/region-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
+                       (when (pos? hdr-data-sz)
+                         (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) opts)]
+                           (aset regions OVERFLOW_CLASS_IDX new-r)
+                           (slab/regions-changed! ctx))))
+                     (let [hdr-data-sz (long (slab/region-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                           cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                       (when (> hdr-data-sz cur-size)
+                         (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) (assoc opts :reuse-from cur-region))]
+                           (aset regions OVERFLOW_CLASS_IDX new-r)
+                           (slab/regions-changed! ctx))))))))))))))
 
   (defn sync-jvm-slab-regions!
     "Force every region the JVM slab ctx holds — the slab data regions,
