@@ -562,7 +562,7 @@
                    (do (vswap! seen conj key)
                        (vswap! blocks conj (long o))
                        (let [kids (retire/children sio k o)]
-                         (doseq [[pos ck c] kids]
+                         (doseq [[pos _ck c] kids]
                            (vswap! relocs conj {:position (+ (long o) (child-byte-pos sio k o pos))
                                                 :owner (long o)
                                                 :target (long c)}))

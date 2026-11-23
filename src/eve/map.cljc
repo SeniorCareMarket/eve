@@ -432,7 +432,7 @@
         new-kv-total (- old-kv-total removed-size)
         new-cc (popcount32 new-node-bm)
         new-dc (popcount32 new-data-bm)
-        old-cc (popcount32 src-node-bm)
+        _old-cc (popcount32 src-node-bm)
         old-dc (popcount32 src-data-bm)
         nsize (+ NODE_HEADER_SIZE (* 4 new-cc) (* 4 new-dc) new-kv-total)
         dst-off (slab/alloc! sio nsize)]
@@ -1102,7 +1102,7 @@
   (meta [_] nil)
 
   clojure.lang.IObj
-  (withMeta [this m] this)
+  (withMeta [this _m] this)
 
   clojure.lang.ILookup
   (valAt [_ k] (hamt-get sio__ root-off k nil))
@@ -1194,11 +1194,11 @@
   (hasheq [this] (dg/root-hash sio__ offset__ (fn [] (p/hash-unordered this))))
 
   clojure.lang.IFn
-  (invoke [this k] (hamt-get sio__ root-off k nil))
-  (invoke [this k nf] (hamt-get sio__ root-off k nf))
+  (invoke [_this k] (hamt-get sio__ root-off k nil))
+  (invoke [_this k nf] (hamt-get sio__ root-off k nf))
 
   d/IDirectSerialize
-  (-direct-serialize [this] offset__)
+  (-direct-serialize [_this] offset__)
 
   d/ISabStorable
   (-sab-tag [_] :eve-map)
@@ -1209,7 +1209,7 @@
   (-eve? [_] true)
 
   d/IEveRoot
-  (-root-header-off [this] offset__)
+  (-root-header-off [_this] offset__)
 
   d/IEveSio
   (-eve-sio [_] sio__)
@@ -1819,7 +1819,7 @@
 
 (extend-type EveHashMap
   d/ISabRetirable
-  (-sab-retire-diff! [this new-value _slab-env mode]
+  (-sab-retire-diff! [this new-value _slab-env _mode]
     (let [sio (field this sio__)
           old-hdr (field this offset__)
           old-root (slab/read-i32 sio old-hdr SABMAPROOT_ROOT_OFF_OFFSET)]

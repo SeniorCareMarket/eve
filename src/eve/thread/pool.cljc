@@ -471,7 +471,7 @@
   (let [routed-n (max 1 (or (:core opts) (h/parallelism)))
         core (warm-minimum opts)
         opts (assoc opts :core core)
-        [p n'] (new-pool kind (max 1 core) opts)]
+        [p _n'] (new-pool kind (max 1 core) opts)]
     (creator! p)
     (cond
       (zero? (cap 1)) (swap! (:state p) assoc :threadless true)

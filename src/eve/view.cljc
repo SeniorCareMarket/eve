@@ -62,7 +62,7 @@
 (defn- env-setting
   "A setting from the environment (NAME) or a JVM system property (prop),
    else nil."
-  [name prop]
+  [name _prop]
   #?(:clj (or (System/getenv name) (System/getProperty prop))
      :cljs (when (and (exists? js/process) (.-env js/process))
              (aget (.-env js/process) name))

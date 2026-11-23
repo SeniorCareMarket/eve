@@ -74,7 +74,7 @@
   #?(:clj (Arrays/copyOfRange b (int off) (int (+ off len)))
      :cljs (.slice b off (+ off len))))
 
-(defn- concat-bytes ^bytes [parts]
+(defn- concat-bytes ^bytes [_parts]
   #?(:clj (let [out (ByteArrayOutputStream.)]
             (doseq [^bytes p parts] (.write out p 0 (alength p)))
             (.toByteArray out))
@@ -284,7 +284,7 @@
   "A new container with entry's chunk appended and the root moved to it (the
    entry's :root-offset, or the chunk header's root). The old container — its
    chunks, its directory, its written bytes — still reads the old value."
-  [container {:keys [bytes first-key root-offset] :as entry}]
+  [container {:keys [bytes first-key root-offset] :as _entry}]
   (let [chunks (conj (:chunks container) bytes)
         keys (conj (:first-keys container) first-key)]
     (when (> (count chunks) max-chunks)
@@ -306,7 +306,7 @@
 
 (defn deflated-size
   "The size of bs under zlib (level 6) — the probe convention (M3)."
-  ^long [^bytes bs]
+  ^long [^bytes _bs]
   #?(:cljs (throw (ex-info "eve.flat.container: deflate not built on this host" {:check :not-built}))
      :clj (let [df (Deflater. 6) out (byte-array 65536)]
             (.setInput df bs) (.finish df)
@@ -314,7 +314,7 @@
 
 (defn compress-container
   "The whole container — chunks and directory — under one zlib stream."
-  ^bytes [container]
+  ^bytes [_container]
   #?(:cljs (throw (ex-info "eve.flat.container: deflate not built on this host" {:check :not-built}))
      :clj (let [bs (container-bytes container)
                 df (Deflater. 6)
@@ -328,7 +328,7 @@
 
 (defn decompress-container-bytes
   "The container bytes a compress-container stream holds."
-  ^bytes [^bytes z]
+  ^bytes [^bytes _z]
   #?(:cljs (throw (ex-info "eve.flat.container: inflate not built on this host" {:check :not-built}))
      :clj (let [inf (Inflater.) out (ByteArrayOutputStream.) buf (byte-array 65536)]
             (.setInput inf z)

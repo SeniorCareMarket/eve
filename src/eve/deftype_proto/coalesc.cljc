@@ -685,7 +685,7 @@
     (unlock! region dt-off max-desc idx)
     (let [our-off (desc-load region dt-off max-desc idx DESC_DATA_OFFSET)
           our-cap (desc-load region dt-off max-desc idx DESC_BLOCK_CAPACITY)
-          our-end (+ our-off our-cap)]
+          _our-end (+ our-off our-cap)]
 
     ;; Phase 1: Left coalesce — find FREE block ending at our-off
       (let [left-idx
@@ -703,7 +703,7 @@
                     (recur (inc j))))))
 
           ;; If left found, try to lock and merge
-            [survivor surv-off surv-cap left-locked?]
+            [survivor surv-off surv-cap _left-locked?]
             (if (and (not= left-idx -1) (spin-lock! region dt-off max-desc left-idx 200))
             ;; Verify still FREE (TOCTOU)
               (let [ls (desc-load region dt-off max-desc left-idx DESC_STATUS)]

@@ -256,7 +256,7 @@
    for kind 20), :batch-off (the struct column's BATCH node offset, kind
    21), :shape and :ks (a struct column's inner batch), :wide? (the
    chunk's offset width), :base/:width (kind 22)."
-  [values opts]
+  [values _opts]
   #?(:cljs (throw (ex-info "eve.flat.column: encoding is not built on ClojureScript yet (lane H4)"
                            {:values (count values)}))
      :clj (encode-with-plan values (if (:kind opts)
@@ -460,7 +460,7 @@
    order, then [0x26][shape varint][n varint][absolute column offsets].
    Answers {:bytes :node-off :n}. Per-field encode options ride in
    (:field-opts opts) {key opts}; :ks/:shape name the batch's shape."
-  [ks cols opts]
+  [_ks _cols _opts]
   #?(:cljs (throw (ex-info "eve.flat.column: encoding is not built on ClojureScript yet (lane H4)" {}))
      :clj
      (let [n (count (first cols))
@@ -518,7 +518,7 @@
    :data-off :end} plus kind extras (:base/:width for narrowed, :runs/
    :values-col/:ends-off for run-end, :batch-off/:batch for struct).
    Mirrors C1's parse-column, extended with §5's dense kinds 1-5, 7, 11."
-  [ba off n ctx]
+  [_ba _off _n _ctx]
   #?(:cljs (throw (ex-info "eve.flat.column: reading is not built on ClojureScript yet (lane H4)" {}))
      :clj
      (let [b (fio/chunk ba)
@@ -572,7 +572,7 @@
   "Parse the BATCH node at chunk offset off in ba under ctx: [0x26]
    [shape varint][n varint][absolute column offsets of the chunk's
    width]. Answers {:ba :ctx :off :shape :n :ks :cols [column handles]}."
-  [ba off ctx]
+  [_ba _off _ctx]
   #?(:cljs (throw (ex-info "eve.flat.column: reading is not built on ClojureScript yet (lane H4)" {}))
      :clj
      (let [b (fio/chunk ba)
@@ -603,7 +603,7 @@
 (defn col-ref
   "Row i of a column, read in place: the plain value, or nil when the
    validity bitmap marks the row absent."
-  [col ^long i]
+  [_col ^long _i]
   #?(:cljs (throw (ex-info "eve.flat.column: reading is not built on ClojureScript yet (lane H4)" {}))
      :clj
      (let [b (:c col)
@@ -687,7 +687,7 @@
    kinds, a long for the integer kinds. Nil rows contribute nothing
    (their slots are zero by the writer's rule). Kinds without a fast
    path fold over col-ref."
-  [col]
+  [_col]
   #?(:cljs (throw (ex-info "eve.flat.column: reading is not built on ClojureScript yet (lane H4)" {}))
      :clj
      (let [kind (int (:kind col))
@@ -727,7 +727,7 @@
   "How many rows of a column equal v, counted in place. Symbol columns
    compare codes; dense integer columns compare words; anything else
    folds over col-ref."
-  ^long [col v]
+  ^long [_col _v]
   #?(:cljs (throw (ex-info "eve.flat.column: reading is not built on ClojureScript yet (lane H4)" {}))
      :clj
      (let [kind (int (:kind col))
@@ -804,7 +804,7 @@
    column's bytes moves it — and refuses writes. A nilable column hands
    over its data slots as they lie (nil rows read as zero). Any other
    kind is refused by name."
-  [col]
+  [_col]
   #?(:cljs (throw (ex-info "eve.flat.column: the typed-array handoff is not built on ClojureScript yet (lane H4)" {}))
      :clj
      (let [kind (int (:kind col))

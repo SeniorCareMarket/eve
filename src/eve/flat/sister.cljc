@@ -425,7 +425,7 @@
 ;; a slab instance, a sister or a frozen value: answered before any
 ;; satisfies? (eve.flat.chunk's fast handle test, the same rule). bb,
 ;; glojure and jank keep satisfies? (their types generate no JVM classes).
-(defn- plain-value? [x]
+(defn- plain-value? [_x]
   #?(:bb false :jank false :glj false
      :clj (or (nil? x) (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x) (char? x)
               (and (instance? clojure.lang.IPersistentCollection x)

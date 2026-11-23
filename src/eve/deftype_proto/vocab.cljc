@@ -347,7 +347,7 @@
                     others)
         entries
         (mapcat
-         (fn [{:keys [protocol methods] :as impl}]
+         (fn [{:keys [protocol methods] :as _impl}]
            (let [p (strip-cljs-core protocol)
                  spec (get pm/cljs->jvm p)]
              (cond

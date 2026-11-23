@@ -536,10 +536,10 @@
           clojure.lang.Counted
           (count [_] total)
           clojure.lang.Indexed
-          (nth [this i] (if (and (<= 0 i) (< i total))
-                          (let [j (cb-locate cums i)]
-                            (nth (nth handles j) (- i (nth cums j))))
-                          (throw (IndexOutOfBoundsException. (str i)))))
+          (nth [_this i] (if (and (<= 0 i) (< i total))
+                           (let [j (cb-locate cums i)]
+                             (nth (nth handles j) (- i (nth cums j))))
+                           (throw (IndexOutOfBoundsException. (str i)))))
           (nth [this i nf] (if (and (<= 0 i) (< i total))
                              (nth this i) nf))
           clojure.lang.ILookup
@@ -558,18 +558,18 @@
                               :else (concat-assoc-n handles cums total mm (long k) v)))
           clojure.lang.IPersistentVector
           (length [_] total)
-          (assocN [this i v] (concat-assoc-n handles cums total mm i v))
-          (cons [this v] (let [h' (chunk/open (first (chunk/pack-all [v])))]
-                           (ConcatBatch. (conj handles h') (conj cums total)
-                                         (inc total) mm)))
+          (assocN [_this i v] (concat-assoc-n handles cums total mm i v))
+          (cons [_this v] (let [h' (chunk/open (first (chunk/pack-all [v])))]
+                            (ConcatBatch. (conj handles h') (conj cums total)
+                                          (inc total) mm)))
           (peek [this] (when (pos? total) (nth this (dec total))))
-          (pop [this] (if (zero? total)
-                        (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
-                        (let [hl (peek handles)]
-                          (if (== 1 (count hl))
-                            (ConcatBatch. (pop handles) (pop cums) (dec total) mm)
-                            (ConcatBatch. (assoc handles (dec (count handles)) (pop hl))
-                                          cums (dec total) mm)))))
+          (pop [_this] (if (zero? total)
+                         (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
+                         (let [hl (peek handles)]
+                           (if (== 1 (count hl))
+                             (ConcatBatch. (pop handles) (pop cums) (dec total) mm)
+                             (ConcatBatch. (assoc handles (dec (count handles)) (pop hl))
+                                           cums (dec total) mm)))))
           clojure.lang.IPersistentCollection
           (empty [_] [])
           (equiv [this other] (.equals this other))
@@ -721,11 +721,11 @@
           clojure.lang.Counted
           (count [_] n)
           clojure.lang.Indexed
-          (nth [this i] (if (and (<= 0 i) (< i n))
-                          (if (< i bc)
-                            (if (contains? edits i) (get edits i) (nth base i))
-                            (nth tail (- i bc)))
-                          (throw (IndexOutOfBoundsException. (str i)))))
+          (nth [_this i] (if (and (<= 0 i) (< i n))
+                           (if (< i bc)
+                             (if (contains? edits i) (get edits i) (nth base i))
+                             (nth tail (- i bc)))
+                           (throw (IndexOutOfBoundsException. (str i)))))
           (nth [this i nf] (if (and (<= 0 i) (< i n)) (nth this i) nf))
           clojure.lang.ILookup
           (valAt [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
@@ -736,21 +736,21 @@
           (containsKey [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) n)))
           (entryAt [this k] (when (.containsKey this k)
                               (clojure.lang.MapEntry. k (nth this (long k)))))
-          (assoc [this k v] (if (integer? k)
-                              (based-assoc-n base edits tail n bc mm (long k) v)
-                              (throw (IllegalArgumentException.
-                                      "Key must be integer"))))
+          (assoc [_this k v] (if (integer? k)
+                               (based-assoc-n base edits tail n bc mm (long k) v)
+                               (throw (IllegalArgumentException.
+                                       "Key must be integer"))))
           clojure.lang.IPersistentVector
           (length [_] n)
-          (assocN [this i v] (based-assoc-n base edits tail n bc mm i v))
-          (cons [this v] (based-assoc-n base edits tail n bc mm n v))
+          (assocN [_this i v] (based-assoc-n base edits tail n bc mm i v))
+          (cons [_this v] (based-assoc-n base edits tail n bc mm n v))
           (peek [this] (when (pos? n) (nth this (dec n))))
-          (pop [this] (if (zero? n)
-                        (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
-                        (let [i (dec n)]
-                          (if (< i bc)
-                            (BasedValue. base (dissoc edits i) tail i bc mm)
-                            (BasedValue. base edits (pop tail) i bc mm)))))
+          (pop [_this] (if (zero? n)
+                         (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
+                         (let [i (dec n)]
+                           (if (< i bc)
+                             (BasedValue. base (dissoc edits i) tail i bc mm)
+                             (BasedValue. base edits (pop tail) i bc mm)))))
           clojure.lang.IPersistentCollection
           (empty [_] [])
           (equiv [this other] (.equals this other))
@@ -913,9 +913,9 @@
 ;; (frozen-value's cljs arm), so the wrappers never occur there —
 ;; the predicates answer false, the same splice deliver-flat's
 ;; FrozenValue arm already makes inline.
-(defn- frozen-value? [v] #?(:cljs false :default (instance? FrozenValue v)))
-(defn- concat-batch? [v] #?(:cljs false :default (instance? ConcatBatch v)))
-(defn- based-value? [v] #?(:cljs false :default (instance? BasedValue v)))
+(defn- frozen-value? [_v] #?(:cljs false :default (instance? FrozenValue v)))
+(defn- concat-batch? [_v] #?(:cljs false :default (instance? ConcatBatch v)))
+(defn- based-value? [_v] #?(:cljs false :default (instance? BasedValue v)))
 
 (defn deliver-flat
   "The S3 delivery: a HEAP value as a heap flat object that
@@ -1041,7 +1041,7 @@
 ;; place eve->clj learns what the flat subsystem knows — a stored flat value
 ;; is its content, an eve-deftype or record is its flat instance, an eve value
 ;; array is its slots. Plain host collections answer nil at once.
-(defn- host-coll? [v]
+(defn- host-coll? [_v]
   #?(:clj (and (instance? clojure.lang.IPersistentCollection v)
                (.startsWith (.getName (class v)) "clojure.lang."))
      :default false))
