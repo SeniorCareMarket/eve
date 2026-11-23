@@ -29,7 +29,8 @@
    [eve.mem :as mem]
    [eve.deftype-proto.data :as d]
    [clojure.string :as str]
-   [jolt.ffi :as ffi]))
+   [jolt.ffi :as ffi]
+   [jolt.scheme :as scheme]))
 
 (def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
 (def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
@@ -85,43 +86,91 @@
            (bit-shift-left (bit-and (aget b (+ off 2)) 0xFF) 8)
            (bit-and (aget b (+ off 3)) 0xFF))))
 
+;; copy-bytes! and crc32-of on the byte array's own bytevector through
+;; Chez (bytevector-copy!; a slicing-by-8 IEEE CRC-32, the same
+;; polynomial and reflected form as java.util.zip.CRC32 / zlib). The
+;; previous per-byte aset/aget loop and Clojure table walk were 21.4%
+;; and 10.3% of jolt ds tx-single (dsphase r8, 2037223). Defined once
+;; at load through jolt.scheme; output bytes and CRC values are
+;; unchanged.
+(scheme/eval-string
+ "(begin
+    (define eve-jf-crc-t
+      (let ((t (make-vector 8)))
+        (let loop ((k 0))
+          (unless (fx>= k 8)
+            (vector-set! t k (make-fxvector 256))
+            (loop (fx+ k 1))))
+        (let ((t0 (vector-ref t 0)))
+          (let loop ((n 0))
+            (unless (fx>= n 256)
+              (let inner ((c n) (i 0))
+                (if (fx< i 8)
+                    (inner (fxand (if (fxeven? c)
+                                      (fxsrl c 1)
+                                      (fxxor #xEDB88320 (fxsrl c 1)))
+                                  #xFFFFFFFF)
+                           (fx+ i 1))
+                    (fxvector-set! t0 n c)))
+              (loop (fx+ n 1))))
+          (let loopk ((k 1))
+            (unless (fx>= k 8)
+              (let ((tk (vector-ref t k))
+                    (tp (vector-ref t (fx- k 1))))
+                (let loopn ((n 0))
+                  (unless (fx>= n 256)
+                    (let ((c (fxvector-ref tp n)))
+                      (fxvector-set! tk n (fxand (fxxor (fxsrl c 8)
+                                                        (fxvector-ref t0 (fxand c 255)))
+                                                 #xFFFFFFFF)))
+                    (loopn (fx+ n 1)))))
+              (loopk (fx+ k 1)))))
+        t))
+    (define (eve-jf-crc32 a off len)
+      (let* ((bv (jolt-array-vec a))
+             (t eve-jf-crc-t)
+             (t0 (vector-ref t 0)) (t1 (vector-ref t 1))
+             (t2 (vector-ref t 2)) (t3 (vector-ref t 3))
+             (t4 (vector-ref t 4)) (t5 (vector-ref t 5))
+             (t6 (vector-ref t 6)) (t7 (vector-ref t 7)))
+        (let loop ((c #xFFFFFFFF) (i 0))
+          (cond
+            ((fx<= (fx+ i 8) len)
+             (let* ((x (fxand (fxxor c (bytevector-u32-ref bv (fx+ off i) (endianness little)))
+                              #xFFFFFFFF))
+                    (y (bytevector-u32-ref bv (fx+ off i 4) (endianness little)))
+                    (c2 (fxand (fxxor (fxvector-ref t7 (fxand x 255))
+                                      (fxvector-ref t6 (fxand (fxsrl x 8) 255))
+                                      (fxvector-ref t5 (fxand (fxsrl x 16) 255))
+                                      (fxvector-ref t4 (fxsrl x 24))
+                                      (fxvector-ref t3 (fxand y 255))
+                                      (fxvector-ref t2 (fxand (fxsrl y 8) 255))
+                                      (fxvector-ref t1 (fxand (fxsrl y 16) 255))
+                                      (fxvector-ref t0 (fxsrl y 24)))
+                               #xFFFFFFFF)))
+               (loop c2 (fx+ i 8))))
+            ((fx< i len)
+             (loop (fxand (fxxor (fxsrl c 8)
+                                 (fxvector-ref t0 (fxand (fxxor c (bytevector-u8-ref bv (fx+ off i))) 255)))
+                          #xFFFFFFFF)
+                   (fx+ i 1)))
+            (else (fxxor c #xFFFFFFFF))))))
+    (define (eve-jf-copy-bytes! src soff dst doff len)
+      (when (fx> len 0)
+        (bytevector-copy! (jolt-array-vec src) soff (jolt-array-vec dst) doff len))
+      #f)
+    #t)")
+
+(def ^:private copy-bytes!* (scheme/proc "eve-jf-copy-bytes!"))
+(def ^:private crc32-of* (scheme/proc "eve-jf-crc32"))
 (defn- copy-bytes! [src soff dst doff len]
-  (loop [i 0]
-    (when (< i len)
-      (aset dst (+ doff i) (aget src (+ soff i)))
-      (recur (inc i))))
+  (copy-bytes!* src soff dst doff len)
   nil)
-
-;; ---- CRC-32 (IEEE), the node journal record's construction ----
-;; Carried in longs masked to 32 bits so the arithmetic is the
-;; unsigned 32-bit arithmetic every other host's CRC performs.
-
-(defn- crc-table-entry [n]
-  (loop [c n i 0]
-    (if (< i 8)
-      (recur (bit-and (if (zero? (bit-and c 1))
-                        (unsigned-bit-shift-right c 1)
-                        (bit-xor 0xEDB88320
-                                 (unsigned-bit-shift-right c 1)))
-                      0xFFFFFFFF)
-             (inc i))
-      c)))
-
-(def ^:private crc-table (mapv crc-table-entry (range 256)))
-
 (defn- crc32-of
   "CRC-32 of byte-array B from OFF for LEN bytes, as a signed i32
    (the stored form)."
   [b off len]
-  (loop [c 0xFFFFFFFF i 0]
-    (if (< i len)
-      (recur (bit-and (bit-xor (unsigned-bit-shift-right c 8)
-                               (nth crc-table
-                                    (bit-and (bit-xor c (bit-and (aget b (+ off i)) 0xFF))
-                                             0xFF)))
-                      0xFFFFFFFF)
-             (inc i))
-      (unchecked-int (bit-xor c 0xFFFFFFFF)))))
+  (unchecked-int (crc32-of* b off len)))
 
 ;; ---- fd I/O: byte arrays across the FFI through a scratch buffer ----
 
