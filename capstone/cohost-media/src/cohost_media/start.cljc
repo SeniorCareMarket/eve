@@ -145,6 +145,10 @@
    carries it (prepare-page!) and the check that reads it back (browser-check!)."
   "f01:thumb")
 
+;; display? is defined below (its full definition sits with the
+;; seat's display logic); browser-args, compiled before it, calls it.
+(declare display?)
+
 (defn browser-args
   "The browser pool's args, as data — the one source the start call (start-seat!) reads: the
    bootstream the seat opens and the server it serves it with. The bootstream is the run's

@@ -364,6 +364,12 @@
         type-id-node (api/list-node
                       [(api/token-node 'declare)
                        (api/token-node (symbol (str (api/sexpr type-name) "-type-id")))])
+        ;; The macro also emits (defn TypeName-offset [inst] ...)
+        ;; — the field-offset accessor eve.sorted and the flat
+        ;; machinery call (deftype-proto.macros, the sio emission).
+        offset-node (api/list-node
+                     [(api/token-node 'declare)
+                      (api/token-node (symbol (str (api/sexpr type-name) "-offset")))])
         opts-node (when opts
                     (let [binds (referenced-names opts (into ['sio__ 'offset__] field-names))]
                       (api/list-node
@@ -372,5 +378,5 @@
                                                  binds))
                         opts])))]
     {:node (api/list-node
-            (into [(api/token-node 'do) deftype-node ctor-node pred-node type-id-node]
+            (into [(api/token-node 'do) deftype-node ctor-node pred-node type-id-node offset-node]
                   (when opts-node [opts-node])))}))

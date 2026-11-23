@@ -62,7 +62,10 @@
            eve.record/defrecord clojure.core/defrecord
            eve.protocol/defprotocol clojure.core/defprotocol
            eve.stm/sync clojure.core/dosync
-           eve.thread/deftask clojure.core/defn}
+           eve.thread/deftask clojure.core/defn
+           eve.thread/tfn clojure.core/fn
+           eve.thread/defconveyed clojure.core/def
+           cohost.pool/deftask clojure.core/defn}
  :hooks {:analyze-call {eve.alpha/deftype hooks.eve-deftype/deftype
                         eve.deftype/deftype hooks.eve-deftype/deftype
                         eve.deftype-proto.macros/deftype hooks.eve-deftype/deftype
@@ -78,7 +81,15 @@
                         eve.thread/api-defs hooks.eve-api-defs/thread}}
  :linters {:unresolved-symbol {:exclude [sio__ offset__ Throwable Thread
                                          Duration List dynamic java
-                                         clojure]}
+                                         clojure
+                                         ;; ClojureDart core (cljd.core) type and
+                                         ;; constructor names, named in .cljd seats
+                                         ;; with no import: dart:core's own.
+                                         ArgumentError BigInt BigInt.from
+                                         DateTime DateTime.fromMillisecondsSinceEpoch
+                                         MapEntry RangeError RegExp
+                                         String.fromCharCodes StringSink
+                                         UnsupportedError uuid]}
            ;; Host and dialect namespaces, named the same way as the
            ;; unresolved-symbol exclusions above: .NET's System,
            ;; Environment, DateTimeOffset and Thread, Java's Arrays,

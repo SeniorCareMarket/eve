@@ -36,7 +36,9 @@
            eve.record/defrecord clojure.core/defrecord
            eve.protocol/defprotocol clojure.core/defprotocol
            eve.stm/sync clojure.core/dosync
-           eve.thread/deftask clojure.core/defn}
+           eve.thread/deftask clojure.core/defn
+           eve.thread/tfn clojure.core/fn
+           eve.thread/defconveyed clojure.core/def}
  :hooks {:analyze-call {eve.alpha/deftype hooks.eve-deftype/deftype
                         eve.deftype/deftype hooks.eve-deftype/deftype
                         eve.deftype-proto.macros/deftype hooks.eve-deftype/deftype
