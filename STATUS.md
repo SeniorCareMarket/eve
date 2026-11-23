@@ -326,3 +326,29 @@ clj arm). Gate9 (6 ns incl. baseline-red dataset at its
 eve-lane-logs/lane3/tools/: recount.sh (EDN via --config),
 analyze.bb, extract.bb, delform.bb, upv-del.sh,
 uns-fix.bb, uns-batch.bb, whenify.bb + the let tools.
+
+## Third lane — session 2 bank 4 (2026-11-23, ~12:30 ET)
+
+Closed since bank 3: unused-namespace (recount-9
+verified, plus four batch defects repaired — empty
+(:require) clauses, an emptied #?(:clj) arm, the
+eve-test-main attr map moved after its docstring),
+unused-referred-var (285: 17 dead removed, mirror/
+per-pass spec annotations), redefined-var (33:
+:refer-clojure :exclude declarations; one real dead
+duplicate — start.cljc's first display? — deleted),
+unresolved-namespace (54: config exclusion for host/
+dialect namespaces as a named Eve exception + four
+real missing requires), protocol classes (26: Eve
+protocol methods on macro-built deftypes annotated at
+the carrying form; deliberate partial implementations
+named). TWO MECHANISM LESSONS, both measured in
+scratch: (1) stacked #_ discards suppress NOTHING —
+annotations on one spec must be a single combined
+discard (tools/merge-ignores.py repairs blocks);
+(2) derived-location protocol findings answer only to
+an annotation on the whole deftype form. Recount 9:
+1588 total. Remaining: unresolved-var 444,
+unused-binding 427, unresolved-symbol 124E,
+type-mismatch 30E, invalid-arity 15E, plus the two
+by-design info classes (143).
