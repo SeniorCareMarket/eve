@@ -50,6 +50,7 @@
    [eve.process-slab]
    [eve.deftype-proto.serialize :as ser]
    [eve.region :as region]
+   #?(:jolt [jolt.scheme :as scheme])
    [eve.mem :as mem]
    [eve.hamt-util :as hu]
    [eve.map :as eve-map]
@@ -383,6 +384,121 @@
 
 (declare park-fn)
 
+#?(:jolt
+   (do
+     ;; jolt: a mutable pin table (threads + views) and one publish of the worker-slot
+     ;; CURRENT_EPOCH word. Same min-epoch, nesting, and view-count rules as the portable
+     ;; PersistentMap / sorted-map path, without a new map or [epoch depth] vector on
+     ;; every pin or unpin. The store is mmap-pin-epoch! (IMemRegion/-store-i32!, the
+     ;; seq-cst libatomic store): the pin is visible before pin-epoch! / view-pin! returns
+     ;; and the reader loads the root, and the unpin store happens in the caller's finally.
+     (scheme/eval-string
+      "(begin
+         (define (eve-pt-new) (vector (make-eq-hashtable) (make-eq-hashtable) #f #f))
+         (define (eve-pt-threads pt) (vector-ref pt 0))
+         (define (eve-pt-views pt) (vector-ref pt 1))
+         (define (eve-pt-tmin pt) (vector-ref pt 2))
+         (define (eve-pt-vmin pt) (vector-ref pt 3))
+         (define (eve-pt-tmin-set! pt v) (vector-set! pt 2 v))
+         (define (eve-pt-vmin-set! pt v) (vector-set! pt 3 v))
+         (define (eve-pt-recompute-tmin! pt)
+           (let-values (((_ vs) (hashtable-entries (eve-pt-threads pt))))
+             (let loop ((i 0) (m #f))
+               (if (fx>= i (vector-length vs))
+                   (begin (eve-pt-tmin-set! pt m) m)
+                   (let ((e (car (vector-ref vs i))))
+                     (loop (fx+ i 1) (if (or (not m) (< e m)) e m)))))))
+         (define (eve-pt-recompute-vmin! pt)
+           (let-values (((ks vs) (hashtable-entries (eve-pt-views pt))))
+             (let loop ((i 0) (m #f))
+               (if (fx>= i (vector-length ks))
+                   (begin (eve-pt-vmin-set! pt m) m)
+                   (loop (fx+ i 1)
+                         (let ((e (vector-ref ks i)))
+                           (if (or (not m) (< e m)) e m)))))))
+         (define (eve-pt-publish-val pt)
+           (let ((tm (eve-pt-tmin pt)) (vm (eve-pt-vmin pt)))
+             (cond ((and tm vm) (min tm vm))
+                   (tm tm)
+                   (vm vm)
+                   (else 0))))
+         (define (eve-pt-pin! pt tid epoch)
+           (let* ((ht (eve-pt-threads pt))
+                  (cur (hashtable-ref ht tid #f)))
+             (if cur
+                 (let ((e (min (car cur) epoch)) (d (fx+ (cdr cur) 1)))
+                   (hashtable-set! ht tid (cons e d))
+                   (let ((tm (eve-pt-tmin pt)))
+                     (when (or (not tm) (< e tm)) (eve-pt-tmin-set! pt e))))
+                 (begin
+                   (hashtable-set! ht tid (cons epoch 1))
+                   (let ((tm (eve-pt-tmin pt)))
+                     (when (or (not tm) (< epoch tm)) (eve-pt-tmin-set! pt epoch)))))
+             (eve-pt-publish-val pt)))
+         (define (eve-pt-unpin! pt tid)
+           (let* ((ht (eve-pt-threads pt))
+                  (cur (hashtable-ref ht tid #f)))
+             (when cur
+               (let ((e (car cur)) (d (cdr cur)))
+                 (if (fx> d 1)
+                     (hashtable-set! ht tid (cons e (fx- d 1)))
+                     (begin
+                       (hashtable-delete! ht tid)
+                       (let ((tm (eve-pt-tmin pt)))
+                         (when (and tm (= e tm)) (eve-pt-recompute-tmin! pt)))))))
+             (eve-pt-publish-val pt)))
+         (define (eve-pt-view-pin! pt epoch)
+           (let* ((ht (eve-pt-views pt))
+                  (n (hashtable-ref ht epoch 0)))
+             (hashtable-set! ht epoch (fx+ n 1))
+             (when (fx= n 0)
+               (let ((vm (eve-pt-vmin pt)))
+                 (when (or (not vm) (< epoch vm)) (eve-pt-vmin-set! pt epoch))))
+             (eve-pt-publish-val pt)))
+         (define (eve-pt-view-unpin! pt epoch)
+           (let* ((ht (eve-pt-views pt))
+                  (n (hashtable-ref ht epoch 0)))
+             (cond
+               ((fx<= n 1)
+                (when (fx= n 1)
+                  (hashtable-delete! ht epoch)
+                  (let ((vm (eve-pt-vmin pt)))
+                    (when (and vm (= epoch vm)) (eve-pt-recompute-vmin! pt)))))
+               (else (hashtable-set! ht epoch (fx- n 1))))
+             (eve-pt-publish-val pt)))
+         (define (eve-pt-snapshot pt assoc-fn empty-map views-key sm-empty vec-fn)
+           (let-values (((tks tvs) (hashtable-entries (eve-pt-threads pt))))
+             (let loop ((i 0) (m empty-map))
+               (if (fx>= i (vector-length tks))
+                   (if (fx> (hashtable-size (eve-pt-views pt)) 0)
+                       (let-values (((vks vvs) (hashtable-entries (eve-pt-views pt))))
+                         (let vloop ((j 0) (sm sm-empty))
+                           (if (fx>= j (vector-length vks))
+                               (assoc-fn m views-key sm)
+                               (vloop (fx+ j 1)
+                                      (assoc-fn sm (vector-ref vks j) (vector-ref vvs j))))))
+                       m)
+                   (let ((p (vector-ref tvs i)))
+                     (loop (fx+ i 1)
+                           (assoc-fn m (vector-ref tks i)
+                                     (vec-fn (car p) (cdr p)))))))))
+         #t)")
+     (def ^:private pt-new* (scheme/proc "eve-pt-new"))
+     (def ^:private pt-pin!* (scheme/proc "eve-pt-pin!"))
+     (def ^:private pt-unpin!* (scheme/proc "eve-pt-unpin!"))
+     (def ^:private pt-view-pin!* (scheme/proc "eve-pt-view-pin!"))
+     (def ^:private pt-view-unpin!* (scheme/proc "eve-pt-view-unpin!"))
+     (def ^:private pt-snapshot* (scheme/proc "eve-pt-snapshot"))
+     (defn- pt-snapshot [pt]
+       (pt-snapshot* pt assoc {} ::views (sorted-map) vector))
+     (deftype JoltPins [pt]
+       clojure.lang.IDeref
+       (deref [_] (pt-snapshot pt)))
+     (defn- jolt-pins []
+       (JoltPins. (pt-new*)))
+     (defn- pt-of [pins]
+       (.-pt ^JoltPins pins))))
+
 (defn- make-domain-state
   [root-r rmap-r sio base-path slot-idx heartbeat]
   (let [ds {:root-r root-r :rmap-r rmap-r :sio sio :base-path base-path
@@ -395,7 +511,7 @@
             :unforced (clojure.core/atom {})
             :flush-ts (clojure.core/atom 0)
             :flush-n (volatile! 0)
-            :pins (clojure.core/atom {})
+            :pins #?(:jolt (jolt-pins) :default (clojure.core/atom {}))
             :pin-lock (token)
             :holder (clojure.core/atom nil)
             :closed? (clojure.core/atom false)
@@ -808,44 +924,52 @@
 
 (defn- pin-epoch! [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
-    (let [tid (proc/thread-id)
-          p   (swap! pins (fn [m]
-                            (if-let [[e depth] (get m tid)]
-                              (assoc m tid [(min e epoch) (inc depth)])
-                              (assoc m tid [epoch 1]))))]
-      (slot-pin! root-r slot-idx p))))
+    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-pin!* (pt-of pins) (proc/thread-id) epoch))
+       :default
+       (let [tid (proc/thread-id)
+             p   (swap! pins (fn [m]
+                               (if-let [[e depth] (get m tid)]
+                                 (assoc m tid [(min e epoch) (inc depth)])
+                                 (assoc m tid [epoch 1]))))]
+         (slot-pin! root-r slot-idx p)))))
 
 (defn- unpin-epoch! [{:keys [root-r slot-idx pins pin-lock]}]
   (locking pin-lock
-    (let [tid (proc/thread-id)
-          p   (swap! pins (fn [m]
-                            (if-let [[e depth] (get m tid)]
-                              (if (> depth 1)
-                                (assoc m tid [e (dec depth)])
-                                (dissoc m tid))
-                              m)))]
-      (slot-pin! root-r slot-idx p))))
+    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-unpin!* (pt-of pins) (proc/thread-id)))
+       :default
+       (let [tid (proc/thread-id)
+             p   (swap! pins (fn [m]
+                               (if-let [[e depth] (get m tid)]
+                                 (if (> depth 1)
+                                   (assoc m tid [e (dec depth)])
+                                   (dissoc m tid))
+                                 m)))]
+         (slot-pin! root-r slot-idx p)))))
 
 (defn- view-pin!
   "A view's pin: counted under its epoch in ::views, not under a thread, so
    any thread (the GC's, when it collects the read's last view) releases it."
   [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
-    ;; (update m ::views (fnil update (sorted-map)) epoch (fnil inc 0)), spelled out: no fnil closures, no update's
-    ;; apply (a count is never nil)
-    (slot-pin! root-r slot-idx
-               (swap! pins (fn [m]
-                             (let [vs (or (get m ::views) (sorted-map))]
-                               (assoc m ::views (assoc vs epoch (inc (get vs epoch 0))))))))))
+    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-view-pin!* (pt-of pins) epoch))
+       :default
+       ;; (update m ::views (fnil update (sorted-map)) epoch (fnil inc 0)), spelled out: no fnil closures, no update's
+       ;; apply (a count is never nil)
+       (slot-pin! root-r slot-idx
+                  (swap! pins (fn [m]
+                                (let [vs (or (get m ::views) (sorted-map))]
+                                  (assoc m ::views (assoc vs epoch (inc (get vs epoch 0)))))))))))
 
 (defn- view-unpin! [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
-    (slot-pin! root-r slot-idx
-               (swap! pins (fn [m]
-                             (let [vs (get m ::views)
-                                   n (dec (get vs epoch 0))
-                                   vs (if (pos? n) (assoc vs epoch n) (dissoc vs epoch))]
-                               (if (pos? (count vs)) (assoc m ::views vs) (dissoc m ::views))))))))
+    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-view-unpin!* (pt-of pins) epoch))
+       :default
+       (slot-pin! root-r slot-idx
+                  (swap! pins (fn [m]
+                                (let [vs (get m ::views)
+                                      n (dec (get vs epoch 0))
+                                      vs (if (pos? n) (assoc vs epoch n) (dissoc vs epoch))]
+                                  (if (pos? (count vs)) (assoc m ::views vs) (dissoc m ::views)))))))))
 
 (defonce ^:private view-read-hook
   ;; eve.view's registration (it requires this namespace): (fn [raw ctx]
