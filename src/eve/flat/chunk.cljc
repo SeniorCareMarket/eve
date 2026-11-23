@@ -856,13 +856,23 @@
   (if (or (bigint? a) (bigint? b))
     (and (plain-integer? a) (plain-integer? b) (bi= a b))
     (= a b)))
+)
+   :lpy (do
+;; basilisp: Python's int is the integer representation, arbitrary
+;; precision — every integer is a plain integer (a boolean is not:
+;; Python's bool is an int subclass, basilisp's integer? admits it),
+;; equality is =, and the planner arithmetic below is the plain ops.
+(defn- plain-integer? [x]
+  (and (integer? x) (not (or (true? x) (false? x)))))
+
+(defn- val= [a b] (= a b))
 ))
 
 (defn- runs-of
   "[[value run-length] ...] over consecutive distinct values."
   [vals]
   (reduce (fn [rs v]
-            (if (and (seq rs) (#?(:clj = :cljs val=) v (first (peek rs))))
+            (if (and (seq rs) (#?(:clj = :cljs val= :lpy val=) v (first (peek rs))))
               (conj (pop rs) [v (inc (second (peek rs)))])
               (conj rs [v 1])))
           [] vals))
@@ -888,7 +898,16 @@
 (defn- col-range [mn mx] (bi- mx mn))
 (defn- ile [a b] (bi<= a b))
 (def ^:private I32-MIN INT32-MIN)
-(def ^:private I32-MAX INT32-MAX)))
+(def ^:private I32-MAX INT32-MAX))
+   :lpy (do
+;; Python ints do not overflow: the range is the plain subtraction
+;; the JVM needs promotion for and ClojureScript needs BigInt for.
+(defn- col-min [present] (reduce min present))
+(defn- col-max [present] (reduce max present))
+(defn- col-range [mn mx] (- mx mn))
+(defn- ile [a b] (<= a b))
+(def ^:private I32-MIN -2147483648)
+(def ^:private I32-MAX 2147483647)))
 
 (defn- column-plan
   "The §5 column plan for scalar reps vals (nils allowed), or nil.
