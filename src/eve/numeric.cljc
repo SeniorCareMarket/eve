@@ -170,6 +170,7 @@
       (> ca cb) 1
       :else (compare a b))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used on the :clj-family passes (bi-in-long?, in the bigint section below); the :cljs pass reaches the check through its own section
 (defn- in-long-range-str?
   "True when the integer decimal string s (optional sign) fits in a signed long."
   [s]
@@ -422,6 +423,7 @@
          ->exact-int exact-compare hasheq read-bigdec-significand read-number
          divide numerator denominator make-bigdec host-pr-number)
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; the shared print helper for the numeric deftypes' -pr-writer methods across the host sections; kondo attributes the sections' calls to their own branches
 (defn- tagged-form
   "The EDN tagged literal #eve/N|ratio|M with a string form, the host-visible
    spelling on nbb, basilisp and BEAM."
@@ -985,6 +987,7 @@
         (bi-zero? (bi-rem d five)) (recur (bi-quot d five))
         :else d))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; called from the #?(:jank ... :default ...) dispatch in dec-div; kondo credits the call to the branch-local def
 (defn- dec-div-portable [a b]
   (let [ua (unwrap-bi (unscaled-value a))
         ub (unwrap-bi (unscaled-value b))
@@ -1149,9 +1152,6 @@
 ;; ---------------------------------------------------------------------------
 ;; compare and hasheq
 ;; ---------------------------------------------------------------------------
-
-(defn- int-compare [a b]
-  (bi-cmp (unwrap-bi a) (unwrap-bi b)))
 
 (defn- rat-compare [a b]
   (let [na (unwrap-bi (numerator a)) da (unwrap-bi (denominator a))

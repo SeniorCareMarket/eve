@@ -479,6 +479,7 @@
               :body (.encodeToString (java.util.Base64/getEncoder) bs)
               :body-as :b64}))))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the seat wiring in run); no cljs caller exists
 (defn- seat-handler
   "The browser seat's :handler for this run: gateway/seat-handler over the
    started gateway, then the run's output files. The handler runs on the boot

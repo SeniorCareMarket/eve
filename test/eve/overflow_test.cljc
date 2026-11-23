@@ -10,7 +10,9 @@
   (:require [clojure.test :refer [deftest is testing]]
             [eve.host-completion]))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clje (BEAM/clojerl) pass, a host branch kondo does not model
 (def ^:private MAXL 9223372036854775807)
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clje (BEAM/clojerl) pass, a host branch kondo does not model
 (def ^:private MINL (- -9223372036854775807 1))
 
 #?(:cljs
