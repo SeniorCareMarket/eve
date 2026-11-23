@@ -188,7 +188,7 @@
   [ik img]
   (let [v (snap/trunk-value img)]
     (when (not= img (snap/trunk-bytes v))
-      (throw (ex-info (str "eve.net.atom: a fetched image is not in canonical form") {:type :non-canonical :key ik})))
+      (throw (ex-info "eve.net.atom: a fetched image is not in canonical form" {:type :non-canonical :key ik})))
     v))
 
 ;; ── the handle's record of the value: its snapshot entries, imaged per entry ─────────────────────────────────────

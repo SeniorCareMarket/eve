@@ -39,9 +39,9 @@
    Returns the thunk's return value, or throws on invariant failure."
   [label thunk]
   (let [n (swap! step-num inc)]
-    (println (str "\n------------------------------------------------"))
+    (println "\n------------------------------------------------")
     (println (str "  STEP " n ": " label))
-    (println (str "------------------------------------------------"))
+    (println "------------------------------------------------")
     (let [result (thunk)
           env @the-env
           xray (a/validate-storage-model! env {:width 80 :label (str "S" n " " label)})]

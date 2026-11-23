@@ -303,7 +303,7 @@
     (wait-for-port! browser-port)
     (when xray-server (wait-for-port! xray-browser-port))
     (println)
-    (println (str "=== Browser tests ready ==="))
+    (println "=== Browser tests ready ===")
     (if xray?
       (println (str "Open: http://localhost:" xray-browser-port "?suite=xray"))
       (println (str "Open: http://localhost:" browser-port "?suite=" suite)))

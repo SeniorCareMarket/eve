@@ -26,6 +26,14 @@
    (cohost-media.boot-fs, cohost-media.boot-proc, cohost.pool); the seat's own leaves — its
    environment and its own process, its sockets and the browser's DevTools protocol — are
    the :clj arms below and in the facility namespaces."
+  ;; The (str (fs/path ...)) and (str (fs/absolutize ...)) calls
+  ;; below are Path->string coercions: babashka.fs returns a
+  ;; java.nio.file.Path on :clj (a string on :cljs), and every
+  ;; consumer here needs the string. Kondo models the fs return
+  ;; as already-a-string, so its redundant-str-call verdict is a
+  ;; false positive for this namespace; that one linter is
+  ;; scoped off here.
+  {:clj-kondo/config {:linters {:redundant-str-call {:level :off}}}}
   (:require [cohost.pool :as pool]
             [cohost.thread :as thread]
             ;; the browser seat's driver is a JVM-seat facility (its server
