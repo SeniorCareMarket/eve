@@ -402,9 +402,11 @@
          ;; the region has none to store to here) and the root region that address lies in, kept live by the table.
          (define eve-pt-store4
            (and eve-region-libatomic (foreign-procedure \"__atomic_store_4\" (uptr integer-32 int) void)))
-         (define (eve-pt-new addr keep)
-           (vector (make-eq-hashtable) (make-eq-hashtable) #f #f (make-vector 16 0) 0
-                   (make-mutex) (and eve-pt-store4 (fixnum? addr) addr) keep))
+         ;; slot 9: the root region's base address where slot 7 has one (read-pinned's pin-and-read below), else #f
+         (define (eve-pt-new addr keep base)
+           (let ((a (and eve-pt-store4 (fixnum? addr) addr)))
+             (vector (make-eq-hashtable) (make-eq-hashtable) #f #f (make-vector 16 0) 0
+                     (make-mutex) a keep (and a (fixnum? base) base))))
          (define (eve-pt-threads pt) (vector-ref pt 0))
          (define (eve-pt-views pt) (vector-ref pt 1))
          (define (eve-pt-tmin pt) (vector-ref pt 2))
@@ -531,6 +533,22 @@
                       (let ((v e)) (eve-pt-store4 a v 5) (keep-live (vector-ref pt 8)) (mutex-release m) #t))
                     #f)))))
          (define (eve-pt-pin-pub! pt epoch) (eve-pt-locked-pub pt (eve-pt-pin! pt (get-thread-id) epoch)))
+         ;; read-pinned's pin in one call: the root epoch word's load, the pin and its publish (as eve-pt-pin-pub!),
+         ;; then the atom slot's pointer word's load, behind the seq-cst store as pin-epoch! then -load-i32 had it;
+         ;; the pointer, or #f with nothing done where the table has no root base (the caller takes the old path)
+         (define (eve-pt-pin-read! pt eoff poff)
+           (let ((a (vector-ref pt 7)) (rb (vector-ref pt 9)))
+             (if (and a rb)
+                 (let ((m (vector-ref pt 6)))
+                   (mutex-acquire m)
+                   (let* ((e (#3%foreign-ref 'integer-32 rb eoff))
+                          (v (eve-pt-pin! pt (get-thread-id) e)))
+                     (eve-pt-store4 a v 5)
+                     (let ((p (#3%foreign-ref 'integer-32 rb poff)))
+                       (keep-live (vector-ref pt 8))
+                       (mutex-release m)
+                       p)))
+                 #f)))
          (define (eve-pt-unpin-pub! pt) (eve-pt-locked-pub pt (eve-pt-unpin! pt (get-thread-id))))
          (define (eve-pt-view-pin-pub! pt epoch) (eve-pt-locked-pub pt (eve-pt-view-pin! pt epoch)))
          (define (eve-pt-view-unpin-pub! pt epoch) (eve-pt-locked-pub pt (eve-pt-view-unpin! pt epoch)))
@@ -557,6 +575,7 @@
      (def ^:private pt-view-pin!* (scheme/proc "eve-pt-view-pin!"))
      (def ^:private pt-view-unpin!* (scheme/proc "eve-pt-view-unpin!"))
      (def ^:private pt-pin-pub!* (scheme/proc "eve-pt-pin-pub!"))
+     (def ^:private pt-pin-read!* (scheme/proc "eve-pt-pin-read!"))
      (def ^:private pt-unpin-pub!* (scheme/proc "eve-pt-unpin-pub!"))
      (def ^:private pt-view-pin-pub!* (scheme/proc "eve-pt-view-pin-pub!"))
      (def ^:private pt-view-unpin-pub!* (scheme/proc "eve-pt-view-unpin-pub!"))
@@ -574,7 +593,8 @@
        (JoltPins. (pt-new* (or (when (some? slot-idx)
                                  (region/word-address root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH)))
                                false)
-                           root-r)))
+                           root-r
+                           (or (region/word-address root-r 0) false))))
      (defn- pt-of [pins]
        (.-pt ^JoltPins pins))))
 
@@ -1869,17 +1889,35 @@
   [a f & args]
   (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
         slot (-atom-slot-idx a)]
-    ;; jolt: the refresh's test inline (refresh-slabs! is a call and two map lookups on every read)
-    #?(:jolt (when (:base-path ds) (alloc/refresh! sio)) :default (refresh-slabs! ds))
-    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-    (try
-      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
-        #?(:jolt (when (:base-path ds) (alloc/refresh! sio)) :default (refresh-slabs! ds))
-        ;; jolt: (f v) where there are no args (apply builds the arg list, ~90 ns on jolt)
-        #?(:jolt (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args))
-           :default (apply f (read-root-value sio ptr) args)))
-      (finally
-        (unpin-epoch! ds)))))
+    ;; jolt: the refresh's test inline (refresh-slabs! is a call and two map lookups on every read); the epoch
+    ;; load, the pin and the pointer load in one call where the pin table has the root's base (pt-pin-read!*),
+    ;; else pin-epoch! and -load-i32 as on every host; (f v) where there are no args (apply builds the arg list)
+    #?@(:jolt
+        [(let [pt (pt-of (:pins ds))]
+           (when (:base-path ds) (alloc/refresh! sio))
+           (if-let [ptr (pt-pin-read!* pt d/ROOT_EPOCH_OFFSET (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
+             (try
+               (when (:base-path ds) (alloc/refresh! sio))
+               (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args))
+               (finally
+                 (pt-unpin-pub!* pt)))
+             (do
+               (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+               (try
+                 (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
+                   (when (:base-path ds) (alloc/refresh! sio))
+                   (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args)))
+                 (finally
+                   (unpin-epoch! ds))))))]
+        :default
+        [(refresh-slabs! ds)
+         (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+         (try
+           (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
+             (refresh-slabs! ds)
+             (apply f (read-root-value sio ptr) args))
+           (finally
+             (unpin-epoch! ds)))])))
 
 ;; ---------------------------------------------------------------------------
 ;; Watches and validators — the public trunk surface (spec clauses 1–3, 6).

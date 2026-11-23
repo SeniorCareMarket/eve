@@ -773,7 +773,13 @@
                        (if b
                            (let ((v (let-syntax ((i32 (syntax-rules () ((_ x) (#3%foreign-ref 'integer-32 b x))))
                                                  (u8 (syntax-rules () ((_ x) (#3%foreign-ref 'unsigned-8 b x))))
-                                                 (rb (syntax-rules () ((_ x n) (eve-region-rb r b x n)))))
+                                                 ;; an int32 value (EVE tag 3 at byte 2, 7 bytes) is read in place,
+                                                 ;; as eve.codec's decode reads it, without the byte array
+                                                 (rb (syntax-rules ()
+                                                       ((_ x n)
+                                                        (if (and (fx= n 7) (fx= (#3%foreign-ref 'unsigned-8 b (fx+ x 2)) 3))
+                                                            (#3%foreign-ref 'integer-32 b (fx+ x 3))
+                                                            (eve-region-rb r b x n))))))
                                       (eve-hamt-step i32 u8 rb a kh bv klen shift loop))))
                              (keep-live r)
                              v)
@@ -781,22 +787,28 @@
                                         (u8 (syntax-rules () ((_ x) (u8op r x))))
                                         (rb (syntax-rules () ((_ x n) (rbop r x n)))))
                              (eve-hamt-step i32 u8 rb a kh bv klen shift loop)))))))))
-         (define (eve-hamt-get-bytes ctag ltag i32op u8op rbop fallback)
+         ;; the walk's answer as the value: absent where the key is not there, an int32 the walk read in place, else
+         ;; (dec value-bytes sio) — eve.map's deserialize-value-bytes
+         (define (eve-hamt-get-val ctag ltag i32op u8op rbop fallback absent dec)
            (let ((cd #f) (ld #f))
              (lambda (sio root-off kh kb)
                (eve-alloc-unwrap sio s ctag ltag cd ld
-                 (let ((v (jrec*-vals s)))
-                   (eve-hamt-walk (vector-ref v 0) (vector-ref v 2) (vector-ref v 5)
-                                  root-off kh kb i32op u8op rbop))
+                 (let* ((v (jrec*-vals s))
+                        (vb (eve-hamt-walk (vector-ref v 0) (vector-ref v 2) (vector-ref v 5)
+                                           root-off kh kb i32op u8op rbop)))
+                   (cond ((eq? vb jolt-nil) absent)
+                         ((fixnum? vb) vb)
+                         (else (dec vb sio))))
                  fallback))))
          #t)")
      (def ^:private hamt-fallback (Object.))
-     (def ^:private hamt-bytes*
+     (def ^:private hamt-absent (Object.))
+     (def ^:private hamt-val*
        (let [tags (alloc/jolt-ctx-tags)]
-         ((scheme/proc "eve-hamt-get-bytes")
+         ((scheme/proc "eve-hamt-get-val")
           (nth tags 0) (nth tags 1)
           region/plain-load-i32-op region/plain-load-u8-op region/read-bytes-op
-          hamt-fallback)))))
+          hamt-fallback hamt-absent deserialize-value-bytes)))))
 
 (defn- hamt-get
   "Find key k in HAMT rooted at root-off. Returns value or not-found.
@@ -827,14 +839,14 @@
       ;; kbkh is [kb kh]: both descents start at shift 0 when it has no third
       ;; element, so it is passed as it is (no per-lookup vector)
       #?(:jolt
-         (let [vb (hamt-bytes* sio root-off (nth kbkh 1) (nth kbkh 0))]
+         (let [v (hamt-val* sio root-off (nth kbkh 1) (nth kbkh 0))]
            (cond
-             (identical? vb hamt-fallback)
+             (identical? v hamt-fallback)
              (if (alloc/node-viewable? sio)
                (hamt-get-view sio root-off kbkh not-found)
                (hamt-get-words sio root-off kbkh not-found))
-             (nil? vb) not-found
-             :else (deserialize-value-bytes vb sio)))
+             (identical? v hamt-absent) not-found
+             :else v))
          :default
          (if (alloc/node-viewable? sio)
            (hamt-get-view sio root-off kbkh not-found)
