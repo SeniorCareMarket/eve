@@ -471,7 +471,7 @@
       :else false))
 
   IHash
-  (-hash [coll]
+  (-hash [_coll]
     (if (some? __hash)
       __hash
       (let [h (loop [h 1 i 0]
@@ -506,7 +506,7 @@
   (-contains-key? [_ k] (if (integer? k) (and (<= 0 k) (< k n)) false))
 
   IFind
-  (-find [coll k]
+  (-find [_coll k]
     (when (and (integer? k) (<= 0 k) (< k n))
       (MapEntry. k (elem c off kind k) nil)))
 

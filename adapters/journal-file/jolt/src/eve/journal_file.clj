@@ -302,7 +302,7 @@
   "Force the journal file to storage. fsync forces data and
    metadata alike — FULL? is ignored (the stronger force is taken
    on both paths, as the node and python seats do)."
-  [{:keys [fd]} full?]
+  [{:keys [fd]} _full?]
   (jf-fsync fd)
   nil)
 

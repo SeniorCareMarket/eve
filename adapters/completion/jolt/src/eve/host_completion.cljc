@@ -126,7 +126,7 @@
 ;; under their own keys (method bodies are rewritten to match), and
 ;; __hash/__hasheq — named in no method body of that family — go.
 (defmacro jvm-deftype*
-  [qname classname fields & body]
+  [qname _classname fields & body]
   (let [opts    (loop [b (seq body) m {}]
                   (if (keyword? (first b))
                     (recur (nnext b) (assoc m (first b) (second b)))

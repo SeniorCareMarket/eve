@@ -386,5 +386,5 @@
 
 (defn array-chunk
   "A chunk of host array arr's n values: a vector (what bb's seqs read)."
-  [arr n]
+  [arr _n]
   (vec arr))

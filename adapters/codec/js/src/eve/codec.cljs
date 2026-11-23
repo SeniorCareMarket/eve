@@ -312,18 +312,18 @@
   ;; char's canonical key bytes, so a char key hashes here exactly as a
   ;; Character key hashes on the JVM.
   IEquiv
-  (-equiv [this other]
+  (-equiv [_this other]
     (and (instance? EveChar other) (== code (.-code other))))
 
   IHash
-  (-hash [this]
+  (-hash [_this]
     (hu/portable-hash-bytes
      (js/Uint8Array. #js [d/DIRECT_MAGIC_0 d/DIRECT_MAGIC_1 FAST_TAG_CHAR
                           (bit-and code 0xFF)
                           (bit-and (bit-shift-right code 8) 0xFF)])))
 
   IPrintWithWriter
-  (-pr-writer [this writer opts]
+  (-pr-writer [_this writer _opts]
     (-write writer (str "#char " (pr-str (js/String.fromCharCode code))))))
 
 (defn eve-char

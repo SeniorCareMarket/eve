@@ -30,7 +30,7 @@
    *data-readers* seeing Eve's tags — the same named limitation
    clojerl carries in eve.type-readers' :clje arm. Calls made at
    macro time run on the host, where the real alter-var-root answers."
-  [var & args]
+  [_var & _args]
   nil)
 
 (defn eval
@@ -49,7 +49,7 @@
    only at macro time, on the host, where the host's own resolve
    answers; the compiled body answers nil: no var is resolvable in a
    running Dart program."
-  [sym]
+  [_sym]
   nil)
 
 (defn ns-name

@@ -157,7 +157,7 @@
 (defn journal-force!
   "Force the journal file to storage. flushSync is an fsync — FULL? is
    ignored (the stronger force is taken on both paths, as node's is)."
-  [{:keys [raf]} full?]
+  [{:keys [raf]} _full?]
   (.flushSync raf))
 
 (defn journal-close!

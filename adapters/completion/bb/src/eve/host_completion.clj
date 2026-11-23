@@ -835,19 +835,19 @@
 
 (extend-protocol clojure.data/EqualityPartition
   nil
-  (equality-partition [x] :atom)
+  (equality-partition [_x] :atom)
 
   Object
-  (equality-partition [x] :atom)
+  (equality-partition [_x] :atom)
 
   java.util.Set
-  (equality-partition [x] :set)
+  (equality-partition [_x] :set)
 
   java.util.List
-  (equality-partition [x] :sequential)
+  (equality-partition [_x] :sequential)
 
   java.util.Map
-  (equality-partition [x] :map))
+  (equality-partition [_x] :map))
 
 ;; clojure.pprint's logical-block surface, presented: bb's
 ;; clojure.pprint is a partial port without pprint-logical-block,

@@ -111,7 +111,7 @@
    with its owner file invalidated first so that, the theft having
    already broken that hold, later waiters judge it by the ownerless
    age rule instead of waiting on a pid that no longer holds it."
-  [fs dir owner-path]
+  [fs dir _owner-path]
   (let [grave (str dir ".stale-" (.-pid js/process) "-"
                    (.toString (js/Math.random) 36))
         renamed (try (.renameSync fs dir grave) true
@@ -270,7 +270,7 @@
   "Force the journal file to storage. Node's fsyncSync forces data and
    metadata alike — FULL? is ignored (the stronger force is taken on
    both paths, as the spike's JS arm did)."
-  [{:keys [fd]} full?]
+  [{:keys [fd]} _full?]
   (let [fs (js/require "fs")]
     (.fsyncSync fs fd)))
 

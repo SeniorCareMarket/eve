@@ -69,7 +69,7 @@
    call-with-frame below ignores the frame, as none's does, so an
    empty frame loses nothing on a threadless seat."
   [] {})
-(defn call-with-frame [frame f] #?(:cljs (f) :cljd (f) :default (if frame (with-bindings* frame f) (f))))
+(defn call-with-frame [_frame f] #?(:cljs (f) :cljd (f) :default (if frame (with-bindings* frame f) (f))))
 
 (defn var-symbol [v]
   #?(:cljs (symbol v) :glj (symbol v) :cljd (symbol (str v)) :jank (symbol (subs (str v) 2))

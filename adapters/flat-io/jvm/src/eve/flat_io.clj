@@ -611,7 +611,7 @@
           acc))))
 
   java.lang.Comparable
-  (compareTo [this o]
+  (compareTo [_this o]
     (let [^IPersistentVector v (cast IPersistentVector o) vn (.count v)]
       (cond (< n vn) -1
             (> n vn) 1
@@ -621,36 +621,36 @@
                           (if (zero? c) (recur (unchecked-inc i)) c)))))))
 
   java.lang.Iterable
-  (iterator [this] (.iterator ^java.util.List (tuple-vec b off n kind)))
+  (iterator [_this] (.iterator ^java.util.List (tuple-vec b off n kind)))
 
   java.util.RandomAccess
   java.util.Collection
   (contains [this o] (boolean (some #(= % o) this)))
   (containsAll [this c] (every? #(.contains this %) c))
   (isEmpty [_] (zero? n))
-  (toArray [this] (let [a (object-array n)] (dotimes [i n] (aset a i (elem b off kind i))) a))
-  (^objects toArray [this ^objects arr] (.toArray ^java.util.List (tuple-vec b off n kind) arr))
+  (toArray [_this] (let [a (object-array n)] (dotimes [i n] (aset a i (elem b off kind i))) a))
+  (^objects toArray [_this ^objects arr] (.toArray ^java.util.List (tuple-vec b off n kind) arr))
   (size [_] n)
-  (add [_ o] (throw (UnsupportedOperationException.)))
-  (addAll [_ c] (throw (UnsupportedOperationException.)))
+  (add [_ _o] (throw (UnsupportedOperationException.)))
+  (addAll [_ _c] (throw (UnsupportedOperationException.)))
   (clear [_] (throw (UnsupportedOperationException.)))
-  (^boolean remove [_ o] (throw (UnsupportedOperationException.)))
-  (removeAll [_ c] (throw (UnsupportedOperationException.)))
-  (retainAll [_ c] (throw (UnsupportedOperationException.)))
+  (^boolean remove [_ _o] (throw (UnsupportedOperationException.)))
+  (removeAll [_ _c] (throw (UnsupportedOperationException.)))
+  (retainAll [_ _c] (throw (UnsupportedOperationException.)))
 
   java.util.List
   (get [this i] (.nth this i))
-  (indexOf [this o]
+  (indexOf [_this o]
     (loop [i 0] (cond (== i n) -1 (= o (elem b off kind i)) i :else (recur (unchecked-inc i)))))
-  (lastIndexOf [this o]
+  (lastIndexOf [_this o]
     (loop [i (dec n)] (cond (< i 0) -1 (= o (elem b off kind i)) i :else (recur (dec i)))))
-  (listIterator [this] (.listIterator ^java.util.List (tuple-vec b off n kind)))
-  (listIterator [this i] (.listIterator ^java.util.List (tuple-vec b off n kind) (int i)))
+  (listIterator [_this] (.listIterator ^java.util.List (tuple-vec b off n kind)))
+  (listIterator [_this i] (.listIterator ^java.util.List (tuple-vec b off n kind) (int i)))
   (subList [this a z] (subvec this a z))
-  (add [_ i o] (throw (UnsupportedOperationException.)))
-  (addAll [_ i c] (throw (UnsupportedOperationException.)))
-  (^Object remove [_ ^int i] (throw (UnsupportedOperationException.)))
-  (set [_ i e] (throw (UnsupportedOperationException.))))
+  (add [_ _i _o] (throw (UnsupportedOperationException.)))
+  (addAll [_ _i _c] (throw (UnsupportedOperationException.)))
+  (^Object remove [_ ^int _i] (throw (UnsupportedOperationException.)))
+  (set [_ _i _e] (throw (UnsupportedOperationException.))))
 
 (defmethod print-method FlatTuple [t w]
   ((get-method print-method IPersistentVector) t w))

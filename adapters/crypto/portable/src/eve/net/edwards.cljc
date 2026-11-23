@@ -31,7 +31,7 @@
 (defn make [ops]
   (let [{:keys [int from-be to-be add sub mul mod modpow even? zero? eq]} ops
         p (from-be P-BE) d (from-be D-BE) sqrtm1 (from-be SQRTM1-BE)
-        zero (int 0) one (int 1) two (int 2) eight (int 8)
+        zero (int 0) one (int 1) two (int 2) _eight (int 8)
         fmul (fn [a b] (mod (mul a b) p))
         fadd (fn [a b] (mod (add a b) p))
         fsub (fn [a b] (mod (sub a b) p))

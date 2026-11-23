@@ -1367,8 +1367,8 @@
     (let [result (coalesc/grow-coalesc-region!
                   mmap-coalesc-region mmap-coalesc-max-data-size)]
       (when result
-        (let [data-offset (aset slab-data-offsets OVERFLOW_CLASS_IDX
-                                (aget slab-data-offsets OVERFLOW_CLASS_IDX))
+        (let [_data-offset (aset slab-data-offsets OVERFLOW_CLASS_IDX
+                                 (aget slab-data-offsets OVERFLOW_CLASS_IDX))
               total-bytes (+ (aget slab-data-offsets OVERFLOW_CLASS_IDX) result)
               region      (region/open-mmap-region mmap-coalesc-path total-bytes)]
           (set! mmap-coalesc-cached-data-size result)

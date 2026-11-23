@@ -63,7 +63,7 @@
 (defn hold!
   "Outside an extent: nil (the real hold!'s documented answer). This
    seat is always outside an extent."
-  [k acquire release]
+  [_k _acquire _release]
   nil)
 
 (defn guard*
@@ -71,21 +71,21 @@
    sound on this seat). The receiving-domain arity ignores its first
    argument: there is no extent for a domain to own."
   ([f] (f))
-  ([receiving-domain f] (f)))
+  ([_receiving-domain f] (f)))
 
 (defmacro with-guard
   "A guard extent around body — on this seat, the body with no extent."
   [& body]
   (cons 'do body))
 
-(defn valid? [c] true)
+(defn valid? [_c] true)
 
-(defn check! [c] nil)
+(defn check! [_c] nil)
 
 (defn wrap
   "x as the extent's lazy value — on this seat x itself: nothing is
    proxied here."
-  [x cell]
+  [x _cell]
   x)
 
 (defn unwrap
