@@ -101,6 +101,96 @@
 (defn- args4 ^objects [a b c d]
   (let [arr (object-array 4)] (aset arr 0 a) (aset arr 1 b) (aset arr 2 c) (aset arr 3 d) arr))
 
+;; The atomics' exact-typed form (REPORT.md 3.6 #4): the spread handles above box every int/long and build an Object[]
+;; per call (dsrt-alloc: 20-25% of a ds run's allocation). VhOps is the same ten access modes with primitive
+;; signatures; vh-ops implements it in a class generated once here with clojure.asm (no Java build step), each method
+;; one invokevirtual of a static final VarHandle at its exact type -- what a Java call site compiles to, intrinsified
+;; by the JIT. Where the class cannot be made, vh-ops answers through the spread handles: the same results.
+(definterface VhOps
+  (^int getI32 [^java.nio.ByteBuffer b ^int off])
+  (^void setI32 [^java.nio.ByteBuffer b ^int off ^int v])
+  (^int casI32 [^java.nio.ByteBuffer b ^int off ^int expected ^int desired])
+  (^int addI32 [^java.nio.ByteBuffer b ^int off ^int delta])
+  (^int xchgI32 [^java.nio.ByteBuffer b ^int off ^int v])
+  (^long getI64 [^java.nio.ByteBuffer b ^int off])
+  (^void setI64 [^java.nio.ByteBuffer b ^int off ^long v])
+  (^long casI64 [^java.nio.ByteBuffer b ^int off ^long expected ^long desired])
+  (^long addI64 [^java.nio.ByteBuffer b ^int off ^long delta]))
+
+(defn- gen-vh-ops
+  "A VhOps over static final VarHandles, its class generated with clojure.asm."
+  ^VhOps []
+  (let [cname "eve/region/VhOpsExact"
+        vh "java/lang/invoke/VarHandle" vhd "Ljava/lang/invoke/VarHandle;"
+        cw (clojure.asm.ClassWriter. clojure.asm.ClassWriter/COMPUTE_FRAMES)]
+    (.visit cw clojure.asm.Opcodes/V1_8 (bit-or clojure.asm.Opcodes/ACC_PUBLIC clojure.asm.Opcodes/ACC_FINAL)
+            cname nil "java/lang/Object" (into-array String [(.replace (.getName VhOps) \. \/)]))
+    (doseq [f ["I32" "I64"]]
+      (.visitEnd (.visitField cw (bit-or clojure.asm.Opcodes/ACC_STATIC clojure.asm.Opcodes/ACC_FINAL
+                                         clojure.asm.Opcodes/ACC_PRIVATE) f vhd nil nil)))
+    (let [mv (.visitMethod cw clojure.asm.Opcodes/ACC_STATIC "<clinit>" "()V" nil nil)]
+      (.visitCode mv)
+      (doseq [[f arr] [["I32" "[I"] ["I64" "[J"]]]
+        (.visitLdcInsn mv (clojure.asm.Type/getType ^String arr))
+        (.visitFieldInsn mv clojure.asm.Opcodes/GETSTATIC "java/nio/ByteOrder" "LITTLE_ENDIAN" "Ljava/nio/ByteOrder;")
+        (.visitMethodInsn mv clojure.asm.Opcodes/INVOKESTATIC "java/lang/invoke/MethodHandles" "byteBufferViewVarHandle"
+                          (str "(Ljava/lang/Class;Ljava/nio/ByteOrder;)" vhd) false)
+        (.visitFieldInsn mv clojure.asm.Opcodes/PUTSTATIC cname f vhd))
+      (.visitInsn mv clojure.asm.Opcodes/RETURN)
+      (.visitMaxs mv 0 0) (.visitEnd mv))
+    (let [mv (.visitMethod cw clojure.asm.Opcodes/ACC_PUBLIC "<init>" "()V" nil nil)]
+      (.visitCode mv)
+      (.visitVarInsn mv clojure.asm.Opcodes/ALOAD 0)
+      (.visitMethodInsn mv clojure.asm.Opcodes/INVOKESPECIAL "java/lang/Object" "<init>" "()V" false)
+      (.visitInsn mv clojure.asm.Opcodes/RETURN)
+      (.visitMaxs mv 0 0) (.visitEnd mv))
+    ;; [method field VarHandle-method value-args(I|J) return(I|J|V)]
+    (doseq [[m f op args ret] [["getI32" "I32" "getVolatile" "" "I"] ["setI32" "I32" "setVolatile" "I" "V"]
+                               ["casI32" "I32" "compareAndExchange" "II" "I"] ["addI32" "I32" "getAndAdd" "I" "I"]
+                               ["xchgI32" "I32" "getAndSet" "I" "I"] ["getI64" "I64" "getVolatile" "" "J"]
+                               ["setI64" "I64" "setVolatile" "J" "V"] ["casI64" "I64" "compareAndExchange" "JJ" "J"]
+                               ["addI64" "I64" "getAndAdd" "J" "J"]]]
+      (let [d (str "(Ljava/nio/ByteBuffer;I" args ")" ret)
+            mv (.visitMethod cw clojure.asm.Opcodes/ACC_PUBLIC m d nil nil)]
+        (.visitCode mv)
+        (.visitFieldInsn mv clojure.asm.Opcodes/GETSTATIC cname f vhd)
+        (.visitVarInsn mv clojure.asm.Opcodes/ALOAD 1)
+        (.visitVarInsn mv clojure.asm.Opcodes/ILOAD 2)
+        (reduce (fn [slot c] (if (= c \J)
+                               (do (.visitVarInsn mv clojure.asm.Opcodes/LLOAD (int slot)) (+ slot 2))
+                               (do (.visitVarInsn mv clojure.asm.Opcodes/ILOAD (int slot)) (inc slot))))
+                3 args)
+        (.visitMethodInsn mv clojure.asm.Opcodes/INVOKEVIRTUAL vh op d false)
+        (.visitInsn mv (case ret "I" clojure.asm.Opcodes/IRETURN "J" clojure.asm.Opcodes/LRETURN
+                             "V" clojure.asm.Opcodes/RETURN))
+        (.visitMaxs mv 0 0) (.visitEnd mv)))
+    (.visitEnd cw)
+    (let [^Class c (.defineClass ^clojure.lang.DynamicClassLoader (clojure.lang.RT/makeClassLoader)
+                                 "eve.region.VhOpsExact" (.toByteArray cw) nil)]
+      (.newInstance (.getConstructor c (make-array Class 0)) (make-array Object 0)))))
+
+(defn- spread-vh-ops
+  "VhOps through the spread handles: gen-vh-ops's fallback."
+  ^VhOps []
+  (reify VhOps
+    (getI32 [_ b off] (int (.invoke I32-GET (args2 b off))))
+    (setI32 [_ b off v] (.invoke I32-SET (args3 b off v)) nil)
+    (casI32 [_ b off e d] (int (.invoke I32-CAS (args4 b off e d))))
+    (addI32 [_ b off d] (int (.invoke I32-ADD (args3 b off d))))
+    (xchgI32 [_ b off v] (int (.invoke I32-XCHG (args3 b off v))))
+    (getI64 [_ b off] (long (.invoke I64-GET (args2 b off))))
+    (setI64 [_ b off v] (.invoke I64-SET (args3 b off v)) nil)
+    (casI64 [_ b off e d] (long (.invoke I64-CAS (args4 b off e d))))
+    (addI64 [_ b off d] (long (.invoke I64-ADD (args3 b off d))))))
+
+(def ^:private ^VhOps vh-ops
+  (or (try (let [^VhOps o (gen-vh-ops)
+                 b (ByteBuffer/allocateDirect 16)]
+             (.setI64 o b 8 -2)
+             (when (and (== -2 (.getI64 o b 8)) (== 0 (.casI32 o b 0 0 5)) (== 5 (.getI32 o b 0))) o))
+           (catch Throwable _ nil))
+      (spread-vh-ops)))
+
 ;; ------------------------------------------------------------------
 ;; Unaligned i32/i64 access — DataView-style fallback
 ;; ------------------------------------------------------------------
@@ -163,25 +253,25 @@
 (defn- bb-load-i32
   [^ByteBuffer buf off]
   (if (zero? (bit-and off 3))
-    (int (.invoke I32-GET (args2 buf off)))
+    (.getI32 vh-ops buf (int off))
     (i32-get-unaligned buf off)))
 
 (defn- bb-store-i32!
   [^ByteBuffer buf off ^long v]
   (if (zero? (bit-and off 3))
-    (.invoke I32-SET (args3 buf off (unchecked-int v)))
+    (.setI32 vh-ops buf (int off) (unchecked-int v))
     (i32-set-unaligned! buf off v)))
 
 (defn- bb-load-i64
   [^ByteBuffer buf off]
   (if (zero? (bit-and off 7))
-    (long (.invoke I64-GET (args2 buf off)))
+    (.getI64 vh-ops buf (int off))
     (i64-get-unaligned buf off)))
 
 (defn- bb-store-i64!
   [^ByteBuffer buf off ^long v]
   (if (zero? (bit-and off 7))
-    (.invoke I64-SET (args3 buf off v))
+    (.setI64 vh-ops buf (int off) v)
     (i64-set-unaligned! buf off v)))
 
 ;; ------------------------------------------------------------------
@@ -475,35 +565,35 @@
     (let [off (long byte-off)]
       (when-not (zero? (bit-and off 3))
         (unaligned-atomic-ex :cas-i32 byte-off 4))
-      (int (.invoke I32-CAS (args4 (seg-buf segments shift off)
-                                   (int (seg-intra shift off))
-                                   (unchecked-int expected)
-                                   (unchecked-int desired))))))
+      (int (.casI32 vh-ops (seg-buf segments shift off)
+                           (int (seg-intra shift off))
+                           (unchecked-int expected)
+                           (unchecked-int desired)))))
 
   ;; getAndAdd returns the value BEFORE the add.
   (-add-i32! [_ byte-off delta]
     (let [off (long byte-off)]
       (when-not (zero? (bit-and off 3))
         (unaligned-atomic-ex :add-i32 byte-off 4))
-      (int (.invoke I32-ADD (args3 (seg-buf segments shift off)
-                                   (int (seg-intra shift off))
-                                   (unchecked-int delta))))))
+      (int (.addI32 vh-ops (seg-buf segments shift off)
+                           (int (seg-intra shift off))
+                           (unchecked-int delta)))))
 
   (-sub-i32! [_ byte-off delta]
     (let [off (long byte-off)]
       (when-not (zero? (bit-and off 3))
         (unaligned-atomic-ex :sub-i32 byte-off 4))
-      (int (.invoke I32-ADD (args3 (seg-buf segments shift off)
-                                   (int (seg-intra shift off))
-                                   (unchecked-int (- delta)))))))
+      (int (.addI32 vh-ops (seg-buf segments shift off)
+                           (int (seg-intra shift off))
+                           (unchecked-int (- delta))))))
 
   (-exchange-i32! [_ byte-off val]
     (let [off (long byte-off)]
       (when-not (zero? (bit-and off 3))
         (unaligned-atomic-ex :exchange-i32 byte-off 4))
-      (int (.invoke I32-XCHG (args3 (seg-buf segments shift off)
-                                    (int (seg-intra shift off))
-                                    (unchecked-int val))))))
+      (int (.xchgI32 vh-ops (seg-buf segments shift off)
+                            (int (seg-intra shift off))
+                            (unchecked-int val)))))
 
   (-load-i64 [_ byte-off]
     ;; Inlined common path — see -load-i32.
@@ -529,26 +619,26 @@
     (let [off (long byte-off)]
       (when-not (zero? (bit-and off 7))
         (unaligned-atomic-ex :cas-i64 byte-off 8))
-      (long (.invoke I64-CAS (args4 (seg-buf segments shift off)
-                                    (int (seg-intra shift off))
-                                    (long expected)
-                                    (long desired))))))
+      (long (.casI64 vh-ops (seg-buf segments shift off)
+                            (int (seg-intra shift off))
+                            (long expected)
+                            (long desired)))))
 
   (-add-i64! [_ byte-off delta]
     (let [off (long byte-off)]
       (when-not (zero? (bit-and off 7))
         (unaligned-atomic-ex :add-i64 byte-off 8))
-      (long (.invoke I64-ADD (args3 (seg-buf segments shift off)
-                                    (int (seg-intra shift off))
-                                    (long delta))))))
+      (long (.addI64 vh-ops (seg-buf segments shift off)
+                            (int (seg-intra shift off))
+                            (long delta)))))
 
   (-sub-i64! [_ byte-off delta]
     (let [off (long byte-off)]
       (when-not (zero? (bit-and off 7))
         (unaligned-atomic-ex :sub-i64 byte-off 8))
-      (long (.invoke I64-ADD (args3 (seg-buf segments shift off)
-                                    (int (seg-intra shift off))
-                                    (long (- delta)))))))
+      (long (.addI64 vh-ops (seg-buf segments shift off)
+                            (int (seg-intra shift off))
+                            (long (- delta))))))
 
   (-wait-i32! [this byte-off expected timeout-ms]
     (let [exp      (int expected)
