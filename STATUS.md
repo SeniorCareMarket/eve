@@ -455,3 +455,9 @@ campaign, full baseline reproduction, RETRO completion.
 - Suggestion-mode guard set is now complete, each guard measured from a real corruption: READER-SKIP (#? in/around the node), TAG-SKIP (tagged literals — Splint prints them as splint/tagged-literal), DISCARD/COMMENT-SKIP (Splint's printer drops inner #_ and ; content), DEFERRED-SAME-LINE (one edit per row per pass), fresh positions per iteration, kondo recount after every group.
 - Remaining splint: prefer-method-values 847 (per-file exclusion precedent from the valuescript lane where the receiver class is not statically known), naming/lisp-case 392 (per-site verdicts), catch-throwable 49, identical-branches 47, restructure residues ~80 (guard-skips for hand disposition), conversion-functions 9 + naming tail. Then Carve, then the finish line.
 - Environment: a VM cycle wiped /root again mid-batch — /root/.m2/repository symlink and /root/.ssh/config restored; the splint driver now fails loud when splint output lacks its completion line (a deps failure once read as zero sites).
+
+## Bank 10 — 2026-11-23 ~21:10 ET (lane 3, splint at 252 and falling)
+
+- Splint trajectory: census 2532 -> 2268 (lane tip) -> 1478 (batch D) -> 252 (splint10) -> naming cluster committed (tip pushed). Kondo recount 35: 0E/0W — leg remains CLOSED. Gate cone green at gate31.
+- prefer-method-values (847) closed by per-file exception in .splint.edn (all suggestions carry the CLASS/ placeholder; receivers are host-seat values). lisp-case (392) closed by renames: 154 file-local, 85 multi-seat, 143 cross-referenced + generated-family follow-ups, 17 protocol/host-mandated keeps with disables.
+- Remaining splint (~200): catch-throwable 49, identical-branches 47, restructure residues ~85 (guard-skips for hand disposition), prefer-clj-string 11, fn-wrapper 5, redundant-nested-call 5, misc singles. Then Carve, then the finish line (bb lint full, fmt x2, baseline reproduction, RETRO).
