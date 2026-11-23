@@ -427,7 +427,7 @@
   [xs]
   (mapv second (sort-by first d/compare-bytes
                         (map (fn [x] [(try (key-bytes x)
-                                           (catch #?(:clj Throwable :cljs :default) _
+                                           (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _
                                              (utf8-bytes (pr-str x)))) x]) xs))))
 
 (defn- shaped-keys
@@ -1083,7 +1083,7 @@
     (map? rep)
     (if-let [ks (shaped-keys rep)]
       (write-map-node! w cx (get (:shapes cx) [nil ks]) rep)
-      (let [es (mapv (fn [[k v]] [(try (key-bytes k) (catch #?(:clj Throwable :cljs :default) _ nil)) k v]) rep)
+      (let [es (mapv (fn [[k v]] [(try (key-bytes k) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)) k v]) rep)
             es (sort (fn [a b] (if (and (first a) (first b))
                                  (d/compare-bytes (first a) (first b))
                                  (compare (pr-str (second a)) (pr-str (second b))))) es)
@@ -1246,10 +1246,10 @@
                           ctx (header-ctx out false)
                           hqv (int (or hq
                                        (try (node-hasheq* ctx root)
-                                            (catch #?(:clj Throwable :cljs :default) _ nil))
+                                            (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))
                                        -2147483648))
                           dg (try (handle-digest ctx root)
-                                  (catch #?(:clj Throwable :cljs :default) _ nil))]
+                                  (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))]
                       (fio/buf-patch-u32 w 32 hqv)
                       (when dg
                         (fio/buf-seek w 36)
@@ -1869,8 +1869,8 @@
     (flat-handle? b) (if (sister-value? b) (= b a) (node-equiv (handle-ctx b) (handle-off b) a))
     (and (not (coll? a)) (not (coll? b))
          (not (host-bytes? a)) (not (host-bytes? b)))
-    (let [ba (try (flat-bytes-of-plain a) (catch #?(:clj Throwable :cljs :default) _ nil))
-          bb (try (flat-bytes-of-plain b) (catch #?(:clj Throwable :cljs :default) _ nil))]
+    (let [ba (try (flat-bytes-of-plain a) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))
+          bb (try (flat-bytes-of-plain b) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))]
       (if (and ba bb) (enc/bytes= ba bb) (= a b)))
     (host-bytes? a)
     (and (host-bytes? b) (enc/bytes= a b))
@@ -1990,7 +1990,7 @@
       (try (let [out (fio/buf 4)]
              (flat-emit! ctx off out)
              (sha-vec (buf-bytes-out out)))
-           (catch #?(:clj Throwable :cljs :default) _ nil))))
+           (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))))
 
 ;; --- read-value --------------------------------------------------------
 
@@ -2015,7 +2015,7 @@
 (defn eve-digest
   "Eve's content digest of a plain value, or nil when it has none."
   [v]
-  (try (sha-vec (flat-bytes-of-plain v)) (catch #?(:clj Throwable :cljs :default) _ nil)))
+  (try (sha-vec (flat-bytes-of-plain v)) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)))
 
 (defn- emit-i32le [out v]
   (fio/buf-u8 out (bit-and v 0xFF)) (fio/buf-u8 out (bit-and (bit-shift-right v 8) 0xFF))
@@ -2245,7 +2245,7 @@
   (try (let [out (fio/buf 4)]
          (emit-flat-any! out h)
          (sha-vec (buf-bytes-out out)))
-       (catch #?(:clj Throwable :cljs :default) _ nil)))
+       (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)))
 
 (defn- vec-rep-of [ctx off]
   (mapv (fn [i] (rep-of (elem-at ctx off i))) (range (elem-count ctx off))))
@@ -4999,7 +4999,7 @@
    case the caller re-packs instead."
   [thunk]
   (try (thunk)
-       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e
+       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo :lpy basilisp.lang.exception/ExceptionInfo :default clojure.lang.ExceptionInfo) e
          (if (= ::append-overflow (:type (ex-data e)))
            nil
            (throw e)))))
