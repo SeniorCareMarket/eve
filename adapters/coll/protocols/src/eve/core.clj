@@ -1,3 +1,4 @@
+#_{:clj-kondo/ignore [:unused-referred-var]} ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
 (ns eve.core
   "EVE's collection vocabulary (adapters/README.md, coll) on babashka, whose
    deftype takes protocols, Object and IPersistentMap only: a type cannot
@@ -16,9 +17,9 @@
                             unchecked-multiply-int unsigned-bit-shift-right dissoc! disj!
                             long])
   (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
-   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [object-array unchecked-int unchecked-add-int
-                                                                    unchecked-multiply-int unsigned-bit-shift-right dissoc! disj!
-                                                                    long]]
+   [eve.host :refer [object-array unchecked-int unchecked-add-int
+                     unchecked-multiply-int unsigned-bit-shift-right dissoc! disj!
+                     long]]
    [eve.encoding :as enc]))
 
 ;; This namespace's own vocabulary declared before its first defprotocol: ValueScript refuses a def of a name the ns
@@ -317,7 +318,6 @@
   (-nth [_ n] (if (and (<= 0 n) (< n (- end start)))
                 (-nth v (+ start n))
                 (throw (IndexOutOfBoundsException.))))
-  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (-nth [_ n nf] (if (and (<= 0 n) (< n (- end start))) (-nth v (+ start n)) nf))
   ISeqable #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (-seq [_] (when (< start end)

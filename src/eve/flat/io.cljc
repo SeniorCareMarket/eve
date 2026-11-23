@@ -37,7 +37,7 @@
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.check :as check])
   #?(:clj (:import [java.io ByteArrayInputStream ByteArrayOutputStream
                     Closeable File InputStream OutputStream]
-                   [java.util Arrays])))
+                   #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays])))
 
 (def eof
   "What read! answers past the last value of a stream (the reader's

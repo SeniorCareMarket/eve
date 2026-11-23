@@ -60,7 +60,7 @@
             [eve.deftype-proto.serialize :as ser]
             [eve.flat.check :as check]
             [eve.flat.contract :as contract])
-  #?(:clj (:import [java.util Arrays])))
+  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays])))
 
 ;; ---------------------------------------------------------------------------
 ;; Refusals

@@ -15,7 +15,7 @@
    only as an eve.flat.check CheckedBytes handle (lane C4's contract):
    raw byte arrays are refused :unchecked-bytes before any parsing."
   (:require ; the test-framework require (clojure.test on :clj, cljs.test on :cljs); its referred macros are this file's test surface 
-   #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.test :refer [deftest is testing]]
+   #_{:clj-kondo/ignore [:unused-namespace :unused-referred-var]}   [clojure.test :refer [deftest is testing]]
             ; the alias is exercised on the other reader pass; the require loads on both 
    #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.check :as check]
             ; the alias is exercised on the other reader pass; the require loads on both 
@@ -37,8 +37,8 @@
       #_{:clj-kondo/ignore [:unused-namespace]}   [eve.process :as proc])
    #?(:clj [eve.retire :as retire])
    #?(:clj [eve.flat :as flat]))
-  #?(:clj (:import [java.util Arrays ArrayDeque]
-                   [eve.deftype_proto.alloc JvmSlabCtx])))
+  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays ArrayDeque]
+           [eve.deftype_proto.alloc JvmSlabCtx])))
 
 ;; ===========================================================================
 ;; Hand-built images (test code, adapted from doc/flat/probes/lib.clj)

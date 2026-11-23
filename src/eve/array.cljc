@@ -21,6 +21,7 @@
                             unsigned-bit-shift-right long double transient persistent! conj!
                             bytes shorts ints floats doubles locking])
   (:require
+   #_{:clj-kondo/ignore [:unused-referred-var]} ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
    [eve.host :refer [alength byte-array short-array int-array float-array double-array
                      unchecked-byte unchecked-short unchecked-int unsigned-bit-shift-right
                      long double transient persistent! conj! bytes shorts ints floats

@@ -1,5 +1,4 @@
 (ns cohost-media.page
-  {:clj-kondo/config {:linters {:unresolved-namespace {:level :off}}}}
   ;; unresolved-namespace is off for this file alone: the page runs on
   ;; the ClojureScript seat only — its libraries are required under
   ;; :cljs (see the note at the require below) and the shared code's
@@ -23,6 +22,7 @@
 
    ?check=<file-id>:<kind> — the done bar's row: once the index is complete, re-queue that job, watch it to :done, and
    write what the page saw into cohost-media/control (:page-check), where the launcher reads it."
+  {:clj-kondo/config {:linters {:unresolved-namespace {:level :off}}}}
   ;; one codebase, written in cljc like the rest of the app: the
   ;; libraries this namespace uses are cljs-side (eve's browser stack,
   ;; reagami), so they are required under :cljs and the clj side

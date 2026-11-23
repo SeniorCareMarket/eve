@@ -24,7 +24,7 @@
             [eve.hamt-util :as hu]
             [eve.flat.contract :as contract]
             [eve.flat.sio :as ssio])
-  #?(:clj (:import [java.util Arrays ArrayDeque])))
+  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays ArrayDeque])))
 
 (def ^:const NIL -1)
 (def ^:const HEADER 32)

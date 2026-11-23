@@ -3,6 +3,7 @@
                :clj [clojure.test :refer [deftest is]])
             [eve.mem :as mem]))
 
+#_{:clj-kondo/ignore [:missing-protocol-method]} ; a deliberate partial reify inside: the fake implements only the region methods this fill test exercises
 (deftest default-fill-pattern-and-chunk-boundaries
   ;; No native IFillRegion implementation: exercise the portable default.
   (doseq [n [0 1 65536 65537 131073]
@@ -10,7 +11,6 @@
     (let [spans (atom [])
           expected (mapv #(bit-and (unsigned-bit-shift-right value %) 255)
                          [0 8 16 24])
-          #_{:clj-kondo/ignore [:missing-protocol-method]} ; a deliberate partial reify: the fake implements only the region methods this fill test exercises
           region (reify mem/IMemRegion
                    (-write-bytes! [_ offset bs]
                      (let [values (vec bs)]

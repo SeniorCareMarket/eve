@@ -15,9 +15,9 @@
   (:refer-clojure :exclude [aget aset byte-array unchecked-byte unsigned-bit-shift-right
                             long class double bytes])
   (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
-   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
-   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
-                                                                    long class double bytes]]))
+   #_{:clj-kondo/ignore [:unused-referred-var]} ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
+   [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
+                     long class double bytes]]))
 
 (defn throw-index-out-of-bounds
   "Throw an index-out-of-bounds error."

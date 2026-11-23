@@ -8,7 +8,7 @@
             [clojure.java.io :as io]
             [eve.flat.check :as check]
             [eve.flat.chunk-gen :as g])
-  (:import [java.util Arrays Random]))
+  (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays Random]))
 
 (def fixture-path "test/eve/fixtures/flat-malformed.edn")
 

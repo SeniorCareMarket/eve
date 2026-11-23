@@ -8,7 +8,7 @@
    head — and place (Z3) must keep its exactness on atoms whose domain
    lives in those files, including across a close and reopen."
   (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-   #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.test :refer [deftest is testing]]
+   #_{:clj-kondo/ignore [:unused-namespace :unused-referred-var]}   [clojure.test :refer [deftest is testing]]
    #?(:clj [clojure.set :as cset])
    #?(:clj [eve.atom :as ea])
    #?(:clj [eve.deftype-proto.alloc :as alloc])

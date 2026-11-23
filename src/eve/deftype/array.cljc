@@ -26,7 +26,8 @@
    array-copy) share the values a slot points at, as a host array's copy
    shares its elements."
   (:refer-clojure :exclude [make-array aget aset alength aclone array-seq byte-array object-array unchecked-byte unchecked-int long volatile! vswap! bytes objects array-chunk])
-  (:require [eve.host :refer [byte-array object-array unchecked-byte unchecked-int long
+  (:require #_{:clj-kondo/ignore [:unused-referred-var]} ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
+  (:require   (:require [eve.host :refer [byte-array object-array unchecked-byte unchecked-int long
                               volatile! vswap! bytes objects]]
             [eve.core :as e]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 

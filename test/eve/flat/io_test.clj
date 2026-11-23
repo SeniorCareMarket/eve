@@ -11,7 +11,7 @@
             [eve.flat.chunk :as chunk]
             [eve.flat.io :as io])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream File]
-           [java.util Arrays]))
+           #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays]))
 
 (defrecord Widget [name size])
 (defrecord Gadget [label weight])

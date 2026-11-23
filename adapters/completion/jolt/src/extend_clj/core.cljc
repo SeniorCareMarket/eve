@@ -20,6 +20,7 @@
    accepts: Conn becomes an eve.deftype type carrying IAtom3 as a
    protocol group. Everything else is extend-clj as the DataScript
    port carries it, unchanged."
+  (:require [clojure.string])
   #?(:cljs
      (:require-macros
       [extend-clj.core])))

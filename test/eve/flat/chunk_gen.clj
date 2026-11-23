@@ -9,7 +9,7 @@
   (:require [eve.codec :as codec]
             [eve.crypto :as crypto])
   (:import [java.io ByteArrayOutputStream]
-           [java.util Arrays]))
+           #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays]))
 
 ;; ---------------------------------------------------------------- hex
 
