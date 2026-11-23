@@ -6,6 +6,7 @@
    The reader's only door for stream bytes is eve.flat.check —
    there is no unchecked read in this namespace's tests either."
   (:require [clojure.edn :as edn]
+            [clojure.string]
             [clojure.test :refer [deftest is testing]]
             [eve.flat.chunk :as chunk]
             [eve.flat.io :as io])

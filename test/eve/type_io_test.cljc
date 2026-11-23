@@ -43,6 +43,7 @@
   IMove
   (move! [_] (set! x (inc x))))
 
+#_{:clj-kondo/ignore [:unresolved-namespace]} ; example/custom is a tag name carried as data in this deftype's spec map, not a namespace reference
 (host-deftype Custom [x]
               {:tag example/custom
                :print (fn [v w _] (enc/write! w (str "#example/custom " (pr-str (readers/-type-fields v)))))

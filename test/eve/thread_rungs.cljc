@@ -13,6 +13,7 @@
   (:refer-clojure :exclude [swap!])
   (:require [eve.host :refer [swap!]]
             [eve.atom :as ea]
+            [eve.net.platform]
             [eve.process :as proc]
             [eve.thread :as t]
             [eve.thread-host :as h]

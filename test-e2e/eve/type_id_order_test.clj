@@ -6,7 +6,8 @@
    first-loaded type 64 in each process, so the second read Alpha's block as a
    Beta."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.edn :as edn])
+            [clojure.edn :as edn]
+            [clojure.string])
   (:import [java.lang ProcessBuilder]))
 
 (defn- child! [& args]

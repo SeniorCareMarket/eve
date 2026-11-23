@@ -74,5 +74,19 @@
                         jolt.ffi/defcfn hooks.jolt-ffi-defcfn/defcfn
                         eve.thread/api-defs hooks.eve-api-defs/thread}}
  :linters {:unresolved-symbol {:exclude [sio__ offset__ Throwable Thread
-                                          Duration List dynamic java
-                                          clojure]}}}
+                                         Duration List dynamic java
+                                         clojure]}
+           ;; Host and dialect namespaces, named the same way as the
+           ;; unresolved-symbol exclusions above: .NET's System,
+           ;; Environment, DateTimeOffset and Thread, Java's Arrays,
+           ;; Long, Integer and Double appear in the :cljr/:jolt
+           ;; branches of .cljc files; dart, dart:core, cljd.core, int
+           ;; and Uri are ClojureDart's core libraries; js is the
+           ;; ClojureScript host global; cljs.core is referenced from
+           ;; the squint seat's :clj bridge code. None is requireable
+           ;; from the pass that names it.
+           :unresolved-namespace {:exclude [System Environment
+                                            DateTimeOffset Thread
+                                            Arrays Long Integer Double
+                                            Uri int dart dart:core
+                                            cljd.core js cljs.core]}}}

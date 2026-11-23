@@ -1,4 +1,10 @@
 (ns cohost-media.page
+  {:clj-kondo/config {:linters {:unresolved-namespace {:level :off}}}}
+  ;; unresolved-namespace is off for this file alone: the page runs on
+  ;; the ClojureScript seat only — its libraries are required under
+  ;; :cljs (see the note at the require below) and the shared code's
+  ;; aliases (pool, h, em, tasks, str, reagami) resolve on that seat;
+  ;; the :clj pass has no seat here by design.
   "cohost-media's frontend: eve on ClojureScript in the browser — a runtime of the application's data plane, and its view.
 
    The runtime (a worker this page starts: the main thread cannot block): it joins the job atom's registry over the

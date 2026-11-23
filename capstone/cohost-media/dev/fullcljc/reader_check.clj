@@ -8,6 +8,7 @@
 ;;
 ;;   dev/fullcljc/run.sh
 (require '[clojure.java.io :as io]
+         '[clojure.string]
          '[cljs.vendor.clojure.tools.reader :as cljs-reader])
 
 (defn read-all [read-one file]

@@ -39,7 +39,8 @@
    offers only lookup and assoc on the JVM offers only lookup and
    assoc here; nothing it does offer changes meaning (the upstream
    datascript.test.lru suite passes against the presented type)."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [clojure.walk]))
 
 ;; ---------------------------------------------------------------------
 ;; The seat's floor. Eve's types on this seat carry Object's equals and
