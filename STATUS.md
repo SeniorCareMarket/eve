@@ -305,3 +305,24 @@ unused-referred-var 285, unused-namespace 233,
 unresolved-symbol 125E, unresolved-namespace 54,
 redefined-var 33, type-mismatch 30E (pre-existing
 sites), invalid-arity 15E, protocol classes 16+10.
+
+## Third lane — session 2 bank 3 (2026-11-23, ~11:20 ET)
+
+unused-namespace CLOSED (233 -> 0 by per-file standalone
+checks; full recount pending): eve.atom pilot proved
+per-spec #_ ignores work inside ns forms. eve-test-main
+(69) scoped off in its ns config — its require list IS
+the test registry. eve.flat.build (12) + the eve.alpha
+cone (13): per-spec ignores (load-for-registration /
+consumer surface). The remaining 78 files ran through
+tools/uns-batch.bb (boundary-aware alias recount;
+verdicts: per-pass -> ignore, cone -> ignore, dead
+clojure.* library spec -> delete; ~20 clojure.string/
+java.io/edn/data.json specs deleted). Two hand fixes:
+place_test's cone block + framework require, and
+column_test's cljs.test arm (the driver annotated the
+clj arm). Gate9 (6 ns incl. baseline-red dataset at its
+5E) arbitrating the deletions now. New tools in
+eve-lane-logs/lane3/tools/: recount.sh (EDN via --config),
+analyze.bb, extract.bb, delform.bb, upv-del.sh,
+uns-fix.bb, uns-batch.bb, whenify.bb + the let tools.
