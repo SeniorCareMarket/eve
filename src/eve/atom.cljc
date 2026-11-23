@@ -394,7 +394,17 @@
      ;; and the reader loads the root, and the unpin store happens in the caller's finally.
      (scheme/eval-string
       "(begin
-         (define (eve-pt-new) (vector (make-eq-hashtable) (make-eq-hashtable) #f #f))
+         ;; slots 4 and 5: a binary min-heap of view epochs (vector, size), so the least view epoch after the
+         ;; least one's last view goes is the heap's top once the gone epochs above it are popped, not a scan of
+         ;; every live epoch (the sorted map's first key on the portable path). An epoch whose views all went
+         ;; stays in the heap until it reaches the top; the heap is rebuilt from the table when those outnumber it.
+         ;; slots 6-8: the table's mutex, the address of this participant's worker-slot CURRENT_EPOCH word (#f where
+         ;; the region has none to store to here) and the root region that address lies in, kept live by the table.
+         (define eve-pt-store4
+           (and eve-region-libatomic (foreign-procedure \"__atomic_store_4\" (uptr integer-32 int) void)))
+         (define (eve-pt-new addr keep)
+           (vector (make-eq-hashtable) (make-eq-hashtable) #f #f (make-vector 16 0) 0
+                   (make-mutex) (and eve-pt-store4 (fixnum? addr) addr) keep))
          (define (eve-pt-threads pt) (vector-ref pt 0))
          (define (eve-pt-views pt) (vector-ref pt 1))
          (define (eve-pt-tmin pt) (vector-ref pt 2))
@@ -408,14 +418,52 @@
                    (begin (eve-pt-tmin-set! pt m) m)
                    (let ((e (car (vector-ref vs i))))
                      (loop (fx+ i 1) (if (or (not m) (< e m)) e m)))))))
+         (define (eve-pt-heap-push! pt e)
+           (let* ((n (vector-ref pt 5))
+                  (h (let ((h0 (vector-ref pt 4)))
+                       (if (fx< n (vector-length h0))
+                           h0
+                           (let ((g (make-vector (fx* 2 (vector-length h0)) 0)))
+                             (do ((i 0 (fx+ i 1))) ((fx= i n)) (vector-set! g i (vector-ref h0 i)))
+                             (vector-set! pt 4 g)
+                             g)))))
+             (let up ((i n))
+               (if (fx= i 0)
+                   (vector-set! h 0 e)
+                   (let* ((p (fxsrl (fx- i 1) 1)) (pv (vector-ref h p)))
+                     (if (< e pv)
+                         (begin (vector-set! h i pv) (up p))
+                         (vector-set! h i e)))))
+             (vector-set! pt 5 (fx+ n 1))))
+         (define (eve-pt-heap-pop! pt)
+           (let* ((h (vector-ref pt 4)) (n (fx- (vector-ref pt 5) 1)) (e (vector-ref h n)))
+             (vector-set! pt 5 n)
+             (when (fx> n 0)
+               (let down ((i 0))
+                 (let* ((l (fx+ (fx* 2 i) 1)) (r (fx+ l 1)))
+                   (if (fx>= l n)
+                       (vector-set! h i e)
+                       (let* ((c (if (and (fx< r n) (< (vector-ref h r) (vector-ref h l))) r l))
+                              (cv (vector-ref h c)))
+                         (if (< cv e)
+                             (begin (vector-set! h i cv) (down c))
+                             (vector-set! h i e)))))))))
+         (define (eve-pt-heap-add! pt e)
+           (let ((ht (eve-pt-views pt)))
+             (if (fx> (vector-ref pt 5) (fx+ 64 (fx* 2 (hashtable-size ht))))
+                 (let ((ks (hashtable-keys ht)))
+                   (vector-set! pt 5 0)
+                   (do ((i 0 (fx+ i 1))) ((fx= i (vector-length ks))) (eve-pt-heap-push! pt (vector-ref ks i))))
+                 (eve-pt-heap-push! pt e))))
          (define (eve-pt-recompute-vmin! pt)
-           (let-values (((ks vs) (hashtable-entries (eve-pt-views pt))))
-             (let loop ((i 0) (m #f))
-               (if (fx>= i (vector-length ks))
-                   (begin (eve-pt-vmin-set! pt m) m)
-                   (loop (fx+ i 1)
-                         (let ((e (vector-ref ks i)))
-                           (if (or (not m) (< e m)) e m)))))))
+           (let ((ht (eve-pt-views pt)))
+             (let loop ()
+               (if (fx= (vector-ref pt 5) 0)
+                   (begin (eve-pt-vmin-set! pt #f) #f)
+                   (let ((m (vector-ref (vector-ref pt 4) 0)))
+                     (if (hashtable-contains? ht m)
+                         (begin (eve-pt-vmin-set! pt m) m)
+                         (begin (eve-pt-heap-pop! pt) (loop))))))))
          (define (eve-pt-publish-val pt)
            (let ((tm (eve-pt-tmin pt)) (vm (eve-pt-vmin pt)))
              (cond ((and tm vm) (min tm vm))
@@ -452,6 +500,7 @@
                   (n (hashtable-ref ht epoch 0)))
              (hashtable-set! ht epoch (fx+ n 1))
              (when (fx= n 0)
+               (eve-pt-heap-add! pt epoch)
                (let ((vm (eve-pt-vmin pt)))
                  (when (or (not vm) (< epoch vm)) (eve-pt-vmin-set! pt epoch))))
              (eve-pt-publish-val pt)))
@@ -466,6 +515,22 @@
                     (when (and vm (= epoch vm)) (eve-pt-recompute-vmin! pt)))))
                (else (hashtable-set! ht epoch (fx- n 1))))
              (eve-pt-publish-val pt)))
+         ;; a pin or unpin and the publish of its least epoch (the seq-cst libatomic store -store-i32! makes, at the
+         ;; slot word's address) under the table's mutex, as eve.atom's locking + mmap-pin-epoch! did: #t, or #f with
+         ;; nothing done where the table has no address (the caller takes that path)
+         (define-syntax eve-pt-locked-pub
+           (syntax-rules ()
+             ((_ pt e)
+              (let ((a (vector-ref pt 7)))
+                (if a
+                    (let ((m (vector-ref pt 6)))
+                      (mutex-acquire m)
+                      (let ((v e)) (eve-pt-store4 a v 5) (keep-live (vector-ref pt 8)) (mutex-release m) #t))
+                    #f)))))
+         (define (eve-pt-pin-pub! pt epoch) (eve-pt-locked-pub pt (eve-pt-pin! pt (get-thread-id) epoch)))
+         (define (eve-pt-unpin-pub! pt) (eve-pt-locked-pub pt (eve-pt-unpin! pt (get-thread-id))))
+         (define (eve-pt-view-pin-pub! pt epoch) (eve-pt-locked-pub pt (eve-pt-view-pin! pt epoch)))
+         (define (eve-pt-view-unpin-pub! pt epoch) (eve-pt-locked-pub pt (eve-pt-view-unpin! pt epoch)))
          (define (eve-pt-snapshot pt assoc-fn empty-map views-key sm-empty vec-fn)
            (let-values (((tks tvs) (hashtable-entries (eve-pt-threads pt))))
              (let loop ((i 0) (m empty-map))
@@ -488,14 +553,25 @@
      (def ^:private pt-unpin!* (scheme/proc "eve-pt-unpin!"))
      (def ^:private pt-view-pin!* (scheme/proc "eve-pt-view-pin!"))
      (def ^:private pt-view-unpin!* (scheme/proc "eve-pt-view-unpin!"))
+     (def ^:private pt-pin-pub!* (scheme/proc "eve-pt-pin-pub!"))
+     (def ^:private pt-unpin-pub!* (scheme/proc "eve-pt-unpin-pub!"))
+     (def ^:private pt-view-pin-pub!* (scheme/proc "eve-pt-view-pin-pub!"))
+     (def ^:private pt-view-unpin-pub!* (scheme/proc "eve-pt-view-unpin-pub!"))
      (def ^:private pt-snapshot* (scheme/proc "eve-pt-snapshot"))
      (defn- pt-snapshot [pt]
        (pt-snapshot* pt assoc {} ::views (sorted-map) vector))
      (deftype JoltPins [pt]
        clojure.lang.IDeref
        (deref [_] (pt-snapshot pt)))
-     (defn- jolt-pins []
-       (JoltPins. (pt-new*)))
+     (defn- jolt-pins
+       "The domain's pin table. Where root-r is a region whose worker-slot word can be stored to from Chez (a
+        JoltRegion on Linux x86-64: eve.region/word-address), the table's own mutex and that store publish each pin;
+        else (no address) pin-epoch! and the rest take the pin lock and mmap-pin-epoch!, as before."
+       [root-r slot-idx]
+       (JoltPins. (pt-new* (or (when (some? slot-idx)
+                                 (region/word-address root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH)))
+                               false)
+                           root-r)))
      (defn- pt-of [pins]
        (.-pt ^JoltPins pins))))
 
@@ -511,7 +587,7 @@
             :unforced (clojure.core/atom {})
             :flush-ts (clojure.core/atom 0)
             :flush-n (volatile! 0)
-            :pins #?(:jolt (jolt-pins) :default (clojure.core/atom {}))
+            :pins #?(:jolt (jolt-pins root-r slot-idx) :default (clojure.core/atom {}))
             :pin-lock (token)
             :holder (clojure.core/atom nil)
             :closed? (clojure.core/atom false)
@@ -573,18 +649,37 @@
   FLUSH_QUEUE_THRESHOLD — so a force here was a second whole-class
   force per commit, ~3.9 ms of an add-5 commit's 17.9 on the bench
   box.)"
-  [{:keys [root-r sio retire-q journal durable-commits? base-path unforced]}]
-  (let [note? (and durable-commits? base-path unforced)
-        queued (when note? (mapv :off @retire-q))]
-    (tally/flush! sio retire-q
-                  (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-                  (fn [] (let [readers (mmap-min-safe-epoch root-r)
-                               floor   (some-> journal :floor deref)]
-                           (cond (and readers floor) (min readers floor)
-                                 floor   floor
-                                 :else   readers))))
-    (when note?
-      (swap! unforced into (map (fn [o] [(alloc/decode-class-idx o) o])) queued))))
+  [ds]
+  (let [{:keys [root-r sio retire-q journal durable-commits? base-path unforced]} ds
+        note? (and durable-commits? base-path unforced)]
+    ;; jolt: this process's own published pin already bounds the safe epoch from above (the safe epoch is the least
+    ;; live slot's, this slot among them, and the floor only lowers it): when this slot is live and pinned at or
+    ;; below the queue's head epoch, tally/flush! answers 0 at its head test with no other effect, so the 256-slot
+    ;; scan is skipped. A queue past FLUSH_QUEUE_CAP runs the flush on every commit while a view pins an old epoch
+    ;; (views go when jolt's collector finds them, thousands of commits apart). Not on a noting (durable) domain.
+    (when-not #?(:jolt (and (not note?)
+                            (some? (:slot-idx ds))
+                            (let [slot-idx (:slot-idx ds)
+                                  head (first @retire-q)
+                                  e (when head
+                                      (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH)))]
+                              (and head
+                                   (not (zero? e))
+                                   (>= (:epoch head) e)
+                                   (== (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_STATUS))
+                                       d/WORKER_STATUS_ACTIVE)
+                                   (not (heartbeat-stale? root-r slot-idx)))))
+                 :default false)
+      (let [queued (when note? (mapv :off @retire-q))]
+        (tally/flush! sio retire-q
+                      (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+                      (fn [] (let [readers (mmap-min-safe-epoch root-r)
+                                   floor   (some-> journal :floor deref)]
+                               (cond (and readers floor) (min readers floor)
+                                     floor   floor
+                                     :else   readers))))
+        (when note?
+          (swap! unforced into (map (fn [o] [(alloc/decode-class-idx o) o])) queued))))))
 
 (defn- claim-slot-as-participant!
   "Claim a worker slot as a write to the root: a lock-only host holds the
@@ -922,54 +1017,64 @@
       (mmap-unpin-epoch! root-r slot-idx)
       (mmap-pin-epoch! root-r slot-idx (min (or tmin vmin) (or vmin tmin))))))
 
-(defn- pin-epoch! [{:keys [root-r slot-idx pins pin-lock]} epoch]
-  (locking pin-lock
-    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-pin!* (pt-of pins) (proc/thread-id) epoch))
-       :default
-       (let [tid (proc/thread-id)
-             p   (swap! pins (fn [m]
-                               (if-let [[e depth] (get m tid)]
-                                 (assoc m tid [(min e epoch) (inc depth)])
-                                 (assoc m tid [epoch 1]))))]
-         (slot-pin! root-r slot-idx p)))))
+(defn- pin-epoch! [ds epoch]
+  ;; jolt: the table's own mutex and publish (one Chez call, no domain-state lookups) where it has the slot word's
+  ;; address; else the pin lock, as on every host
+  (when-not #?(:jolt (pt-pin-pub!* (pt-of (:pins ds)) epoch) :default false)
+    (let [{:keys [root-r slot-idx pins pin-lock]} ds]
+      (locking pin-lock
+        #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-pin!* (pt-of pins) (proc/thread-id) epoch))
+           :default
+           (let [tid (proc/thread-id)
+                 p   (swap! pins (fn [m]
+                                   (if-let [[e depth] (get m tid)]
+                                     (assoc m tid [(min e epoch) (inc depth)])
+                                     (assoc m tid [epoch 1]))))]
+             (slot-pin! root-r slot-idx p)))))))
 
-(defn- unpin-epoch! [{:keys [root-r slot-idx pins pin-lock]}]
-  (locking pin-lock
-    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-unpin!* (pt-of pins) (proc/thread-id)))
-       :default
-       (let [tid (proc/thread-id)
-             p   (swap! pins (fn [m]
-                               (if-let [[e depth] (get m tid)]
-                                 (if (> depth 1)
-                                   (assoc m tid [e (dec depth)])
-                                   (dissoc m tid))
-                                 m)))]
-         (slot-pin! root-r slot-idx p)))))
+(defn- unpin-epoch! [ds]
+  (when-not #?(:jolt (pt-unpin-pub!* (pt-of (:pins ds))) :default false)
+    (let [{:keys [root-r slot-idx pins pin-lock]} ds]
+      (locking pin-lock
+        #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-unpin!* (pt-of pins) (proc/thread-id)))
+           :default
+           (let [tid (proc/thread-id)
+                 p   (swap! pins (fn [m]
+                                   (if-let [[e depth] (get m tid)]
+                                     (if (> depth 1)
+                                       (assoc m tid [e (dec depth)])
+                                       (dissoc m tid))
+                                     m)))]
+             (slot-pin! root-r slot-idx p)))))))
 
 (defn- view-pin!
   "A view's pin: counted under its epoch in ::views, not under a thread, so
    any thread (the GC's, when it collects the read's last view) releases it."
-  [{:keys [root-r slot-idx pins pin-lock]} epoch]
-  (locking pin-lock
-    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-view-pin!* (pt-of pins) epoch))
-       :default
-       ;; (update m ::views (fnil update (sorted-map)) epoch (fnil inc 0)), spelled out: no fnil closures, no update's
-       ;; apply (a count is never nil)
-       (slot-pin! root-r slot-idx
-                  (swap! pins (fn [m]
-                                (let [vs (or (get m ::views) (sorted-map))]
-                                  (assoc m ::views (assoc vs epoch (inc (get vs epoch 0)))))))))))
+  [ds epoch]
+  (when-not #?(:jolt (pt-view-pin-pub!* (pt-of (:pins ds)) epoch) :default false)
+    (let [{:keys [root-r slot-idx pins pin-lock]} ds]
+      (locking pin-lock
+        #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-view-pin!* (pt-of pins) epoch))
+           :default
+           ;; (update m ::views (fnil update (sorted-map)) epoch (fnil inc 0)), spelled out: no fnil closures, no
+           ;; update's apply (a count is never nil)
+           (slot-pin! root-r slot-idx
+                      (swap! pins (fn [m]
+                                    (let [vs (or (get m ::views) (sorted-map))]
+                                      (assoc m ::views (assoc vs epoch (inc (get vs epoch 0)))))))))))))
 
-(defn- view-unpin! [{:keys [root-r slot-idx pins pin-lock]} epoch]
-  (locking pin-lock
-    #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-view-unpin!* (pt-of pins) epoch))
-       :default
-       (slot-pin! root-r slot-idx
-                  (swap! pins (fn [m]
-                                (let [vs (get m ::views)
-                                      n (dec (get vs epoch 0))
-                                      vs (if (pos? n) (assoc vs epoch n) (dissoc vs epoch))]
-                                  (if (pos? (count vs)) (assoc m ::views vs) (dissoc m ::views)))))))))
+(defn- view-unpin! [ds epoch]
+  (when-not #?(:jolt (pt-view-unpin-pub!* (pt-of (:pins ds)) epoch) :default false)
+    (let [{:keys [root-r slot-idx pins pin-lock]} ds]
+      (locking pin-lock
+        #?(:jolt (mmap-pin-epoch! root-r slot-idx (pt-view-unpin!* (pt-of pins) epoch))
+           :default
+           (slot-pin! root-r slot-idx
+                      (swap! pins (fn [m]
+                                    (let [vs (get m ::views)
+                                          n (dec (get vs epoch 0))
+                                          vs (if (pos? n) (assoc vs epoch n) (dissoc vs epoch))]
+                                      (if (pos? (count vs)) (assoc m ::views vs) (dissoc m ::views)))))))))))
 
 (defonce ^:private view-read-hook
   ;; eve.view's registration (it requires this namespace): (fn [raw ctx]
@@ -1761,12 +1866,15 @@
   [a f & args]
   (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
         slot (-atom-slot-idx a)]
-    (refresh-slabs! ds)
+    ;; jolt: the refresh's test inline (refresh-slabs! is a call and two map lookups on every read)
+    #?(:jolt (when (:base-path ds) (alloc/refresh! sio)) :default (refresh-slabs! ds))
     (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
     (try
       (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
-        (refresh-slabs! ds)
-        (apply f (read-root-value sio ptr) args))
+        #?(:jolt (when (:base-path ds) (alloc/refresh! sio)) :default (refresh-slabs! ds))
+        ;; jolt: (f v) where there are no args (apply builds the arg list, ~90 ns on jolt)
+        #?(:jolt (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args))
+           :default (apply f (read-root-value sio ptr) args)))
       (finally
         (unpin-epoch! ds)))))
 

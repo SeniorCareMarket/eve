@@ -7,8 +7,15 @@
   (:refer-clojure :exclude [read-line])
   (:require [jolt.scheme :as scheme]))
 
+;; the wall clock in ms since the epoch, as System/currentTimeMillis answers it, read through Chez's current-time:
+;; jolt resolves a by-name static call (its class and member looked up by string) on every call, ~3% of an atom swap
+;; on jolt (the flush throttle and each worker slot's heartbeat check read the clock)
+(def ^:private chez-now-ms
+  (scheme/eval-string
+   "(lambda () (let ((t (current-time 'time-utc))) (+ (* (time-second t) 1000) (div (time-nanosecond t) 1000000))))"))
+
 (defn now-ms []
-  (System/currentTimeMillis))
+  (chez-now-ms))
 
 (def ^:private chez-thread-id (scheme/eval-string "(lambda () (get-thread-id))"))
 

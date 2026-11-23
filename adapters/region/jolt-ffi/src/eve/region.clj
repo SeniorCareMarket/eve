@@ -383,6 +383,15 @@
         :none
         [(quot x 4294967296) (- (rem x 4294967296) 2147483648)]))))
 
+(defn word-address
+  "The address of r's word at byte off, for a store eve.atom makes from Chez (its pin table publishes the worker-slot
+   epoch with libatomic's __atomic_store_4, seq-cst, the call -store-i32! makes): a JoltRegion on Linux x86-64 whose
+   base is a fixnum; nil elsewhere (the caller stores through -store-i32!)."
+  [r off]
+  (when (and x86-64-linux? (instance? JoltRegion r))
+    (let [b (.-base ^JoltRegion r)]
+      (when (int? b) (+ b off)))))
+
 (def ^:private guard! (scheme/proc "eve-region-guard!"))
 
 (def ^:private unreachable (scheme/proc "eve-region-unreachable"))
