@@ -1445,7 +1445,8 @@
 #?(:clj (deftype Ctx [b ^bytes bs ^long root wide?
                       syms shapes types ^clojure.lang.Atom decodes
                       rhq rdigest ^clojure.lang.Atom plans])
-   :cljs (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans]))
+   :cljs (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
+   :lpy (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans]))
 
 (defn- parse-symtab [b ^long at ^long nsym wide?]
   (let [w (if wide? 4 2)
