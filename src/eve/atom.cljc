@@ -51,14 +51,20 @@
    [eve.deftype-proto.serialize :as ser]
    [eve.region :as region]
    [eve.mem :as mem]
+   #_{:clj-kondo/ignore [:unused-namespace]} ; load-for-registration: the collection types must be loaded for atom values to read back; the alias is exercised on the :cljs pass
    [eve.hamt-util :as hu]
+   #_{:clj-kondo/ignore [:unused-namespace]} ; load-for-registration: the collection types must be loaded for atom values to read back; the alias is exercised on the :cljs pass
    [eve.map :as eve-map]
+   #_{:clj-kondo/ignore [:unused-namespace]} ; load-for-registration: the collection types must be loaded for atom values to read back; the alias is exercised on the :cljs pass
    [eve.set :as eve-set]
+   #_{:clj-kondo/ignore [:unused-namespace]} ; load-for-registration: the collection types must be loaded for atom values to read back; the alias is exercised on the :cljs pass
    [eve.vec :as eve-vec]
+   #_{:clj-kondo/ignore [:unused-namespace]} ; load-for-registration: the collection types must be loaded for atom values to read back; the alias is exercised on the :cljs pass
    [eve.list :as eve-list]
    [eve.retire :as retire]
    [eve.tally :as tally]
    [eve.core :as ecore]
+   #_{:clj-kondo/ignore [:unused-namespace]} ; load-for-registration: the collection types must be loaded for atom values to read back; the alias is exercised on the :cljs pass
    [eve.deftype :as edt]
    ;; the array and object types, so their blocks read back in any value
    [eve.array :as arr]
