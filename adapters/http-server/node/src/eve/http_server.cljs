@@ -9,12 +9,11 @@
    Node's server runs the handler on its event loop when a request's body has arrived; the handler is synchronous (a
    gateway's swap is an eve swap). Node binds asynchronously: :port is the port asked for (0 asks for any free one, and
    :port is then nil until it is bound — read it from (:bound srv), a JS promise of the port)."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http-server/headers-map]}}}}
-  ;; unresolved-var exclusions, this file only: this namespace is one of
-  ;; several seat files sharing the name; kondo's registry keeps one file's
-  ;; defs and reads the others' as unresolved (standalone lint of this file
-  ;; is clean). The excluded names are this file's own defs, verified
-  ;; against the file.
+
+  ;; this namespace's per-seat defs are in the central config's
+  ;; :unresolved-var exclusions (.clj-kondo/config.edn): one namespace
+  ;; lives in several seat files and kondo's registry keeps one file's
+  ;; defs, reading the others' as unresolved.
 
   (:require ["http" :as http]))
 

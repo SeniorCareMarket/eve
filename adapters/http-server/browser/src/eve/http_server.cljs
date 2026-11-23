@@ -32,12 +32,11 @@
    in a worker, serve! serves in the calling thread until a stop event arrives, then returns {:port :stop} (the
    vs shape); on the page itself, the endpoint's pump runs it — a handler there must not block, the constraint
    the page already lives under. :host is accepted and ignored: the origin is the host."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http-server/body->str eve.http-server/endpoint? eve.http-server/ensure-pump! eve.http-server/on-control! eve.http-server/on-response! eve.http-server/page? eve.http-server/pick eve.http-server/pump! eve.http-server/pump-installed eve.http-server/register! eve.http-server/unregister! eve.http-server/utf8->b64]}}}}
-  ;; unresolved-var exclusions, this file only: this namespace is one of
-  ;; several seat files sharing the name; kondo's registry keeps one file's
-  ;; defs and reads the others' as unresolved (standalone lint of this file
-  ;; is clean). The excluded names are this file's own defs, verified
-  ;; against the file.
+
+  ;; this namespace's per-seat defs are in the central config's
+  ;; :unresolved-var exclusions (.clj-kondo/config.edn): one namespace
+  ;; lives in several seat files and kondo's registry keeps one file's
+  ;; defs, reading the others' as unresolved.
 
   (:require [cljs.reader :as reader]
             [eve.net.bytes :as nb]

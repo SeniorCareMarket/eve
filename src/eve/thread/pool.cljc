@@ -56,7 +56,8 @@
 
 (defn- max-threads [] (:max-threads (h/driving)))
 
-(defn- cap [n] (let [m (max-threads)] (if m (min n m) n)))
+#_{:clj-kondo/ignore [:type-mismatch]} ; (h/driving)'s :max-threads is a number on every host that has one and nil only where the pool is unbounded, which the (nil? m) arm answers; kondo types the lookup nil and does not narrow the let binding through the check
+(defn- cap [n] (let [m (max-threads)] (if (nil? m) n (min n m))))
 
 (defn- routed? [n] (and (pos? n) (not (h/ships-closures?))))
 

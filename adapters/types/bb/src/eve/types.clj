@@ -7,12 +7,11 @@
    The entry points eve's macros call (every eve.types has them):
      host-type, plain-type, slab-type, eve-type, flat-type, extend-eve-type,
      existing-def, rename-fields, reader-of, print-form, vector-types."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.types/backing-puts eve.types/backings eve.types/bb-completion-interfaces eve.types/bb-filter-protos eve.types/bb-map-protocols eve.types/bb-rejected-object-methods eve.types/bb-rejected-protocols eve.types/bb-translate-protos eve.types/eve-core-protocols eve.types/install-presentation! eve.types/map-entry-types eve.types/map-mode-record-types eve.types/presentation-installed eve.types/presented-backing eve.types/qualified-type eve.types/record-map-mode? eve.types/rewrite-self-calls eve.types/sci-native-interfaces eve.types/sci-swap-arities eve.types/self-call->eve-core eve.types/sweep-backings!]}}}}
-  ;; unresolved-var exclusions, this file only: this namespace is one of
-  ;; several seat files sharing the name; kondo's registry keeps one file's
-  ;; defs and reads the others' as unresolved (standalone lint of this file
-  ;; is clean). The excluded names are this file's own defs, verified
-  ;; against the file.
+
+  ;; this namespace's per-seat defs are in the central config's
+  ;; :unresolved-var exclusions (.clj-kondo/config.edn): one namespace
+  ;; lives in several seat files and kondo's registry keeps one file's
+  ;; defs, reading the others' as unresolved.
 
   (:require [clojure.string :as str]
             [eve.logical-protocol :as logical]

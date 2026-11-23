@@ -37,8 +37,7 @@
            eve.protocol/defprotocol clojure.core/defprotocol
            eve.stm/sync clojure.core/dosync
            eve.thread/deftask clojure.core/defn
-           eve.thread/tfn clojure.core/fn
-           eve.thread/defconveyed clojure.core/def}
+           eve.thread/tfn clojure.core/fn}
  :hooks {:analyze-call {eve.alpha/deftype hooks.eve-deftype/deftype
                         eve.deftype/deftype hooks.eve-deftype/deftype
                         eve.deftype-proto.macros/deftype hooks.eve-deftype/deftype
@@ -51,5 +50,6 @@
                         eve.host/extend-default hooks.extend-default/extend-default
                         eve.deftype/extend-host-vectors hooks.extend-default/extend-host-vectors
                         eve.deftype-proto.macros/register-eve-type! hooks.register-eve-type/register-eve-type
-                        eve.thread/api-defs hooks.eve-api-defs/thread}}
+                        eve.thread/api-defs hooks.eve-api-defs/thread
+                        eve.thread/defconveyed hooks.eve-api-defs/defconveyed}}
  :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}

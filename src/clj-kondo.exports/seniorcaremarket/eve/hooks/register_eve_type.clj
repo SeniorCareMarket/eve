@@ -27,8 +27,12 @@
                     (api/vector-node [(api/token-node 'sio)
                                       (api/token-node 'x)])]))]
         (when type-id
+          ;; The opts node itself rides along in the do: its values
+          ;; name the type's own fns (the :host-value, :dispose and
+          ;; :builder-ctor symbols), which the analysis must see as
+          ;; used.
           {:node (api/list-node
-                  (cond-> [(api/token-node 'do) (gen "from-header")]
+                  (cond-> [(api/token-node 'do) opts (gen "from-header")]
                     (:dispose m) (conj (gen "dispose"))
                     (and (:builder-pred m) (:builder-ctor m))
                     (conj (gen "build"))))})))))

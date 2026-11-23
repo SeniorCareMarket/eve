@@ -48,3 +48,14 @@
 
 (defn thread [_ctx]
   (declares thread-names))
+
+(defn defconveyed
+  "eve.thread/defconveyed (name init) defines a conveyed dynamic
+   var: the expansion is a def of a ^:dynamic var. Modeled exactly,
+   so the earmuffed-name linter sees the dynamic declaration."
+  [{:keys [node]}]
+  (let [[_ vname init] (:children node)]
+    {:node (api/list-node
+            [(api/token-node 'def)
+             (with-meta vname {:dynamic true})
+             init])}))

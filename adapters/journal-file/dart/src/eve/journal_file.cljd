@@ -19,12 +19,11 @@
    after a truncate (the checkpoint rewrite), where append-mode's
    write-at-end and write-at-0 are the same bytes; the scan reads by
    path, as node's does, so the append-mode handle needs no read side."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.journal-file/record-bytes]}}}}
-  ;; unresolved-var exclusions, this file only: this namespace is one of
-  ;; several seat files sharing the name; kondo's registry keeps one file's
-  ;; defs and reads the others' as unresolved (standalone lint of this file
-  ;; is clean). The excluded names are this file's own defs, verified
-  ;; against the file.
+
+  ;; this namespace's per-seat defs are in the central config's
+  ;; :unresolved-var exclusions (.clj-kondo/config.edn): one namespace
+  ;; lives in several seat files and kondo's registry keeps one file's
+  ;; defs, reading the others' as unresolved.
 
   (:require ["dart:io" :as io]
             ["dart:typed_data" :as td]

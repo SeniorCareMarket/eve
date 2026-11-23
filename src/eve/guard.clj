@@ -19,7 +19,7 @@
 
    Interception gaps (prototype): assoc/dissoc/conj on a proxy throw (read-only); printing shows the deftype;
    map? is true for LazyMap, vector?/set? are false for LazyColl; a JVM host only (no cljs / bb / basilisp branch)."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.guard/-unwrap eve.guard/Cell eve.guard/IGuarded eve.guard/LazyColl eve.guard/LazyMap eve.guard/held-anywhere? eve.guard/read-only!]}}}}
+
   (:require [eve.deftype-proto.data :as d]))
 
 ;; ---------------------------------------------------------------------------

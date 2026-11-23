@@ -19,7 +19,7 @@
    The entry points eve's macros call (every eve.types has them):
      host-type, plain-type, slab-type, eve-type, extend-eve-type,
      existing-def, rename-fields, reader-of, print-form, vector-types."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.types/cljd-fields eve.types/dart-define-form eve.types/dart-impls->forms eve.types/dart-merge-inext eve.types/dart-object-groups eve.types/dart-print-body eve.types/dart-print-form eve.types/dart-print-rename eve.types/dart-rehome-methods eve.types/dart-syms eve.types/dart-translate-protos]}}}}
+
   (:require [clojure.walk :as walk]
             [eve.deftype-proto :as proto]
             [eve.deftype-proto.vocab :as v :refer [impls->forms]]

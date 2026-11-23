@@ -15,14 +15,12 @@
    eve's thread adapter hands a worker's message to the page's hook, globalThis.__eve_worker_message, which this
    namespace sets on the page) with a SharedArrayBuffer of its own, and waits on it (Atomics.wait); the page fetches
    the batch concurrently (fetch, Promise.all) and writes the answers there. A page that never answers (no hook) is
-  ;; unresolved-var exclusions, this file only: this namespace is one of
-  ;; several seat files sharing the name; kondo's registry keeps one file's
-  ;; defs and reads the others' as unresolved (standalone lint of this file
-  ;; is clean). The excluded names are this file's own defs, verified
-  ;; against the file.
+  ;; this namespace's per-seat defs are in the central config's
+  ;; :unresolved-var exclusions (.clj-kondo/config.edn): one namespace
+  ;; lives in several seat files and kondo's registry keeps one file's
+  ;; defs, reading the others' as unresolved.
   
-   found by a first short wait, and the worker then runs batches in turn, as the page's main thread always does."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http/BATCH-BYTES eve.http/PROBE-MS eve.http/WAIT-MS eve.http/answer! eve.http/b64->bytes eve.http/batch-buffer eve.http/batch-state eve.http/binary-string->b64 eve.http/binary-string->bytes eve.http/bytes->b64 eve.http/fetch-one eve.http/forbidden eve.http/in-turn eve.http/page? eve.http/plain eve.http/response-headers eve.http/serve-batch!]}}}})
+   found by a first short wait, and the worker then runs batches in turn, as the page's main thread always does.")
 
 (defn- b64->bytes [s]
   (let [bin (js/atob s)

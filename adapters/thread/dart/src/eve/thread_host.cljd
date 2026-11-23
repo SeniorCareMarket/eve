@@ -25,12 +25,11 @@
    closes over does not cross (a sent object is copied, not shared),
    which is ships-closures? false stated for entries.
    eval-form is refused, as on compiled ClojureScript."
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.thread-host/MAX-THREADS eve.thread-host/NEXT-ID eve.thread-host/REGION-SIZE eve.thread-host/RING-SIZE eve.thread-host/SLOT-SIZE eve.thread-host/SPAWN-MS eve.thread-host/bell eve.thread-host/ctx eve.thread-host/data-only? eve.thread-host/ensure-ctx! eve.thread-host/entries eve.thread-host/lockw eve.thread-host/resolve-entry eve.thread-host/ring eve.thread-host/ring-read eve.thread-host/ring-write! eve.thread-host/rposw eve.thread-host/slot-base eve.thread-host/spin-lock! eve.thread-host/spin-unlock! eve.thread-host/worker-main eve.thread-host/wposw]}}}}
-  ;; unresolved-var exclusions, this file only: this namespace is one of
-  ;; several seat files sharing the name; kondo's registry keeps one file's
-  ;; defs and reads the others' as unresolved (standalone lint of this file
-  ;; is clean). The excluded names are this file's own defs, verified
-  ;; against the file.
+
+  ;; this namespace's per-seat defs are in the central config's
+  ;; :unresolved-var exclusions (.clj-kondo/config.edn): one namespace
+  ;; lives in several seat files and kondo's registry keeps one file's
+  ;; defs, reading the others' as unresolved.
 
   (:require ["dart:io" :as io]
             ["dart:isolate" :as iso]

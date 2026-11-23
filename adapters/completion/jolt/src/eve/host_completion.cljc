@@ -8,8 +8,7 @@
    jolt's, so do these. into and the chunked-seq fns likewise reach a type's
    own (below). (Calls compiled after this, in any namespace. seq is a native
    op a re-rooted var does not reach: eve.core's seq, adapters/coll/jvm, is
-   Clojure's.)"
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.host-completion/checked-add eve.host-completion/checked-dec eve.host-completion/checked-inc eve.host-completion/checked-mul eve.host-completion/checked-negate eve.host-completion/checked-sub eve.host-completion/core* eve.host-completion/core+ eve.host-completion/core- eve.host-completion/jvm-deftype*]}}}})
+   Clojure's.)")
 
 (alter-var-root #'clojure.core/swap!
                 (fn [core]
