@@ -93,8 +93,7 @@
         (> shift 5)
         (let [new-child (pop-tail (- shift 5) cnt root-edit
                                   (aget (.-arr current-node) subidx))]
-          (if (and (nil? new-child) (zero? subidx))
-            nil
+          (when-not (and (nil? new-child) (zero? subidx))
             (let [arr (aclone (.-arr current-node))]
               (aset arr subidx new-child)
               (->VectorNode root-edit arr))))

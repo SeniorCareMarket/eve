@@ -491,10 +491,7 @@
 
         ;; Load last failures if :retry
         retry-data (when retry?
-                     (let [data (failures/load-failures)]
-                       (when data
-                         (failures/print-failure-summary)
-                         data)))
+                     (when-let [data (failures/load-failures)] (failures/print-failure-summary) data))
 
         ;; Discover tests
         plan (discover-and-plan!
@@ -586,8 +583,9 @@
         (doseq [{:keys [platform exit]} results]
           (when-not (zero? exit)
             (println (str "  [" (get platform-labels platform) "] FAILED (exit " exit ")"))))
-        (let [first-failure (first (filter #(not (zero? (:exit %))) results))]
-          (if first-failure (:exit first-failure) 0)))
+        (if-let [first-failure (first (filter #(not (zero? (:exit %))) results))]
+          (:exit first-failure)
+          0))
       (finally
         (.shutdown pool)))))
 

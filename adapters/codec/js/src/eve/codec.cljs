@@ -1071,32 +1071,29 @@
 
             ;; SAB pointer tags — reconstruct type wrapper from offset
             (and (>= tag fast-tag-sab-map) (<= tag fast-tag-sab-list))
-            (let [ctor (get-type-constructor tag)]
-              (when ctor
-                (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
-                      offset (.getInt32 dv 3 true)]
-                  (ctor s-atom-env offset))))
+            (when-let [ctor (get-type-constructor tag)]
+              (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
+                    offset (.getInt32 dv 3 true)]
+                (ctor s-atom-env offset)))
 
             ;; Record tag — reconstruct record from SabMap + :eve/record-tag
             (== tag fast-tag-record)
-            (let [sab-map-ctor (get-type-constructor fast-tag-sab-map)]
-              (when sab-map-ctor
-                (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
-                      offset (.getInt32 dv 3 true)
-                      sab-m (sab-map-ctor s-atom-env offset)
-                      tag-str (get sab-m :eve/record-tag)]
-                  (if-let [map-fn (and tag-str (.get record-ctor-by-tag tag-str))]
-                    (let [field-map (dissoc (reduce-kv assoc {} sab-m) :eve/record-tag)]
-                      (map-fn field-map))
-                    sab-m))))
+            (when-let [sab-map-ctor (get-type-constructor fast-tag-sab-map)]
+              (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
+                    offset (.getInt32 dv 3 true)
+                    sab-m (sab-map-ctor s-atom-env offset)
+                    tag-str (get sab-m :eve/record-tag)]
+                (if-let [map-fn (and tag-str (.get record-ctor-by-tag tag-str))]
+                  (let [field-map (dissoc (reduce-kv assoc {} sab-m) :eve/record-tag)]
+                    (map-fn field-map))
+                  sab-m)))
 
             ;; EveArray pointer — reconstruct via registered constructor
             (== tag fast-tag-eve-array)
-            (let [ctor (get-type-constructor tag)]
-              (when ctor
-                (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
-                      block-offset (.getInt32 dv 3 true)]
-                  (ctor s-atom-env block-offset))))
+            (when-let [ctor (get-type-constructor tag)]
+              (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
+                    block-offset (.getInt32 dv 3 true)]
+                (ctor s-atom-env block-offset)))
 
             ;; Typed array — SAB pointer format (7 bytes): reconstruct from SAB
             ;; 16-byte header: [subtype:u8][reserved:7][byte-len:u32LE][reserved:4][data at +16]
@@ -1203,11 +1200,10 @@
 
             :else
             ;; Unknown tag — check registered constructors (deftype types)
-            (let [ctor (get-type-constructor tag)]
-              (when ctor
-                (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
-                      offset (.getInt32 dv 3 true)]
-                  (ctor s-atom-env offset))))))
+            (when-let [ctor (get-type-constructor tag)]
+              (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
+                    offset (.getInt32 dv 3 true)]
+                (ctor s-atom-env offset)))))
         ;; No magic prefix — unsupported legacy format
         nil))))
 

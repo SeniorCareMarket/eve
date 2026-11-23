@@ -63,7 +63,7 @@
   (into {}
         (keep (fn [line]
                 (let [i (.indexOf line ":")]
-                  (when (pos? i) [(clojure.string/lower-case (clojure.string/trim (subs line 0 i))) (.trim (subs line (inc i)))])))
+                  (when (pos? i) [(clojure.string/lower-case (clojure.string/trim (subs line 0 i))) (clojure.string/trim (subs line (inc i)))])))
               (clojure.string/split (or (.getAllResponseHeaders xhr) "") "\r\n"))))
 
 (def ^:private forbidden

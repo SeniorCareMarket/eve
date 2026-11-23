@@ -98,11 +98,8 @@
                                  []
                                  (binding [d/*domain-sio* sio]
                                    (alloc/value->scalar-block! sio "hello scalar"))))]
-                 (let [im (step "P-B2 detach-image" (fn [] (img/detach-image sio off)))]
-                   (when im
-                     (step
-                      "P-B3 open+read"
-                      (fn [] (img/image-value (img/open-image (img/image-bytes im))))))))
+                 (when-let [im (step "P-B2 detach-image" (fn [] (img/detach-image sio off)))]
+                   (step "P-B3 open+read" (fn [] (img/image-value (img/open-image (img/image-bytes im)))))))
                (println "== P-C pattern on a reset slab")
                (step "P-C" run-p-c)
                (println "== P-E dataset image forensics")

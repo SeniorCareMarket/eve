@@ -613,10 +613,8 @@
           (when-not (>= i max-desc)
             (or (try-reuse-rung! region dt-off max-desc i size field) (recur (inc i)))))
         (loop [i 0]
-          (if (>= i max-desc)
-            nil
-            (or (try-carve-rung! region dt-off max-desc i size field)
-                (recur (inc i))))))))
+          (when-not (>= i max-desc)
+            (or (try-carve-rung! region dt-off max-desc i size field) (recur (inc i))))))))
 
 (defn coalesc-alloc-rung!
   "try-coalesc-alloc-rung!, throwing on failure with the same named

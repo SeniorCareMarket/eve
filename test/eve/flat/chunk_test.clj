@@ -108,7 +108,7 @@
    (fn [inner]
      (gen/one-of [(gen/vector inner 0 6)
                   (gen/fmap (fn [xs] (apply list xs)) (gen/vector inner 0 6))
-                  (gen/fmap (fn [xs] (set xs)) (gen/vector inner 0 6))
+                  (gen/fmap set (gen/vector inner 0 6))
                   (gen/map (gen/one-of [gen/keyword gen/symbol gen/string-alphanumeric
                                         gen/small-integer])
                            inner {:max-elements 6})]))

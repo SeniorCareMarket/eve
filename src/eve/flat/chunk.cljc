@@ -957,7 +957,7 @@
            ;; byte-len wrapped in a fn, not passed as a value: on bb
            ;; a bare alength var resolves to a reflective RT.alength
            ;; call, which its native image refuses (a direct call is fine).
-           (fio/buf-u32 w (reduce + (map (fn [b] (byte-len b)) bs)))
+           (fio/buf-u32 w (reduce + (map byte-len bs)))
            (doseq [b bs] (fio/buf-bytes w b 0 (byte-len b))))
       20 (doseq [o node-offsets] (fio/buf-off w o))
       22 (let [base (:base plan) width (:width plan)]
@@ -1504,28 +1504,30 @@
         data (long (or (:data col) 0))
         valid (when (:valid col) (long (:valid col)))
         n (long (:n col))]
-    (if (and (:valid col) (zero? (bit-and (fio/u8 b (+ valid (quot i 8)))
-                                          (bit-shift-left 1 (rem i 8)))))
-      nil
+    (when-not (and (:valid col)
+                   (zero?
+                    (bit-and (fio/u8 b (+ valid (quot i 8))) (bit-shift-left 1 (rem i 8)))))
       (case (int (:kind col))
-        16 (not (zero? (bit-and (fio/u8 b (+ data (quot i 8)))
-                                (bit-shift-left 1 (rem i 8)))))
+        16 (not (zero? (bit-and (fio/u8 b (+ data (quot i 8))) (bit-shift-left 1 (rem i 8)))))
         6 (fio/i32 b (+ data (* 4 i)))
         10 (i64->host (fio/i64 b (+ data (* 8 i))))
         8 (f32->host (fio/f32 b (+ data (* 4 i))))
         9 (fio/f64 b (+ data (* 8 i)))
         17 (nth (.-syms ctx) (fio/u8 b (+ data i)))
         18 (nth (.-syms ctx) (fio/u16 b (+ data (* 2 i))))
-        19 (let [d data o (fio/u32 b (+ d (* 4 i))) e (fio/u32 b (+ d (* 4 (inc i))))]
-             (fio/utf8 b (+ d (* 4 (inc n)) o) (- e o)))
+        19
+        (let [d data, o (fio/u32 b (+ d (* 4 i))), e (fio/u32 b (+ d (* 4 (inc i))))]
+          (fio/utf8 b (+ d (* 4 (inc n)) o) (- e o)))
         20 (read-value ctx (off-at b (+ data (* (if (.-wide? ctx) 4 2) i)) (.-wide? ctx)))
         21 (row-handle ctx (long (:batch-off col)) i)
-        22 (let [d (long (:data col)) width (long (:width col))]
-             (i64-add (:base col)
-                      (case (int width)
-                        1 (fio/u8 b (+ d i))
-                        2 (fio/u16 b (+ d (* 2 i)))
-                        4 (fio/u32 b (+ d (* 4 i))))))
+        22
+        (let [d (long (:data col)), width (long (:width col))]
+          (i64-add
+           (:base col)
+           (case (int width)
+             1 (fio/u8 b (+ d i))
+             2 (fio/u16 b (+ d (* 2 i)))
+             4 (fio/u32 b (+ d (* 4 i))))))
         23 (col-at-run ctx col i)
         (throw (ex-info "flat chunk: unknown column kind" {:kind (:kind col)}))))))
 
@@ -2093,7 +2095,7 @@
 
 (deftype RowSource [^Ctx ctx ^long off ^long row fcols]
   source/IFieldSource
-  (-field [_ k] (let [col (get fcols k)] (if (some? col) (col-at ctx col row) nil)))
+  (-field [_ k] (let [col (get fcols k)] (when (some? col) (col-at ctx col row))))
   (-field-map [_] (into (array-map) (row-entries ctx off row)))
   (-source-bytes [_] (.-bs ctx)))
 
@@ -4502,8 +4504,8 @@
              ICounted
              (-count [_] (elem-count ctx off))
              ILookup
-             (-lookup [_ k] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
-                              (elem-at ctx off (int k)) nil))
+             (-lookup [_ k] (when (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
+                              (elem-at ctx off (int k))))
              (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                                  (elem-at ctx off (int k)) nf))
              IAssociative
@@ -4543,8 +4545,8 @@
              ICounted
              (-count [_] (elem-count ctx off))
              ILookup
-             (-lookup [_ k] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
-                              (elem-at ctx off (int k)) nil))
+             (-lookup [_ k] (when (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
+                              (elem-at ctx off (int k))))
              (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                                  (elem-at ctx off (int k)) nf))
              IAssociative
@@ -4660,8 +4662,7 @@
              (-count [_] (first (set-parts ctx off)))
              ILookup
              (-lookup [_ k] (let [[n ko] (set-parts ctx off)]
-                              (loop [i 0] (if (== i n) nil
-                                              (let [e (elem-at ctx ko i)] (if (= k e) e (recur (inc i))))))))
+                              (loop [i 0] (when-not (== i n) (let [e (elem-at ctx ko i)] (if (= k e) e (recur (inc i))))))))
              (-lookup [_ k nf] (let [[n ko] (set-parts ctx off)]
                                  (loop [i 0] (if (== i n) nf
                                                  (let [e (elem-at ctx ko i)] (if (= k e) e (recur (inc i))))))))
@@ -4698,8 +4699,11 @@
              ICounted
              (-count [_] (:n (batch-parts ctx off)))
              ILookup
-             (-lookup [_ k] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off))))
-                              (row-handle ctx off (int k)) nil))
+             (-lookup [_ k] (when (and (number? k)
+                                       (== k (js/Math.floor k))
+                                       (<= 0 k)
+                                       (< k (:n (batch-parts ctx off))))
+                              (row-handle ctx off (int k))))
              (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off))))
                                  (row-handle ctx off (int k)) nf))
              IAssociative
@@ -5003,9 +5007,7 @@
   [thunk]
   (try (thunk)
        (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e
-         (if (= ::append-overflow (:type (ex-data e)))
-           nil
-           (throw e)))))
+         (when-not (= :eve.flat.chunk/append-overflow (:type (ex-data e))) (throw e)))))
 
 (defn- repack
   "The update path of last resort: apply f to the handle's rep and
@@ -5101,7 +5103,7 @@
                (fn [] (let [w (grown-buf ctx)
                             root (append-vec-node w (pop offs))]
                         (finish-append ctx w root))))
-              (repack h (fn [r] (pop r))))))
+              (repack h pop))))
       (== t 0x25)
       (let [offs (child-offsets-of ctx off)]
         (if (empty? offs)
@@ -5112,8 +5114,8 @@
                (fn [] (let [w (grown-buf ctx)
                             root (write-offsets-node! w 0x25 #(fio/buf-varint w (dec (count offs))) (subvec offs 1))]
                         (finish-append ctx w root))))
-              (repack h (fn [r] (pop r))))))
-      :else (repack h (fn [r] (pop r))))))
+              (repack h pop))))
+      :else (repack h pop))))
 
 (defn assoc-flat [h k v]
   (let [^Ctx ctx (handle-ctx h) off (handle-off h) t (tag-at ctx off) vr (to-rep v)]

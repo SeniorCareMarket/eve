@@ -136,9 +136,7 @@
                                  (let [l (alength node)
                                        s (when (< (+ i l) (-count vec))
                                            (rrb-chunked-seq vec (+ i l) 0))]
-                                   (if (nil? s)
-                                     nil
-                                     s)))
+                                   (when-not (nil? s) s)))
 
                   IHash
                   (-hash [coll] (caching-hash coll hash-ordered-coll __hash))
@@ -495,9 +493,7 @@
 
   IReversible
   (-rseq [this]
-    (if (pos? cnt)
-      (->RSeq this (dec cnt) nil)
-      nil))
+    (when (pos? cnt) (->RSeq this (dec cnt) nil)))
 
   IAssociative
   (-assoc [this k v]
@@ -507,7 +503,7 @@
   ;; eve: a key that is not a number is not found, as in cljs.core's vector
   ;; ((<= 0 :k) throws on the JVM)
   (-lookup [this k]
-    (if (number? k) (-nth this k nil) nil))
+    (when (number? k) (-nth this k nil)))
 
   (-lookup [this k not-found]
     (if (number? k) (-nth this k not-found) not-found))

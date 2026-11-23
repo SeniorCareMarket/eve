@@ -105,11 +105,8 @@
           (> shift 5)
           (let [child (pop-tail! (- shift 5) cnt root-edit
                                  (aget (.-arr ret) subidx))]
-            (if (and (nil? child) (zero? subidx))
-              nil
-              (let [arr (.-arr ret)]
-                (aset arr subidx child)
-                ret)))
+            (when-not (and (nil? child) (zero? subidx))
+              (let [arr (.-arr ret)] (aset arr subidx child) ret)))
 
           (zero? subidx)
           nil

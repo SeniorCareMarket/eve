@@ -1363,17 +1363,19 @@
    Returns true if grown/refreshed, false if at max."
   []
   (when (and mmap-coalesc-region mmap-coalesc-path)
-    (let [result (coalesc/grow-coalesc-region!
-                  mmap-coalesc-region mmap-coalesc-max-data-size)]
-      (when result
-        (let [_data-offset (aset slab-data-offsets overflow-class-idx
-                                 (aget slab-data-offsets overflow-class-idx))
-              total-bytes (+ (aget slab-data-offsets overflow-class-idx) result)
-              region      (region/open-mmap-region mmap-coalesc-path total-bytes)]
-          (set! mmap-coalesc-cached-data-size result)
-          (wasm/register-mmap-slab-instance! overflow-class-idx region nil)
-          (set! mmap-coalesc-region region)
-          true)))))
+    (when-let [result (coalesc/grow-coalesc-region!
+                       mmap-coalesc-region
+                       mmap-coalesc-max-data-size)]
+      (let [_data-offset (aset
+                          slab-data-offsets
+                          overflow-class-idx
+                          (aget slab-data-offsets overflow-class-idx))
+            total-bytes (+ (aget slab-data-offsets overflow-class-idx) result)
+            region (region/open-mmap-region mmap-coalesc-path total-bytes)]
+        (set! mmap-coalesc-cached-data-size result)
+        (wasm/register-mmap-slab-instance! overflow-class-idx region nil)
+        (set! mmap-coalesc-region region)
+        true))))
 
 (defn- grow-sab-coalesc!
   "Grow the SharedArrayBuffer-backed class 6 region when its buffer grows: the buffer first, then the header's data

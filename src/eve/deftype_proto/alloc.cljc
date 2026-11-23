@@ -978,19 +978,15 @@
                   (encode-slab-offset ci start))
                  ;; a word of the run was taken under us and the partial
                  ;; claim released: search again on a fresh snapshot
-              (if (< claim-retries 10000)
-                (recur grow-attempts (inc claim-retries))
-                nil))
+              (when (< claim-retries 10000) (recur grow-attempts (inc claim-retries))))
 
                ;; no run in the class as it stands
             (>= free n)
             nil ;; fragmented: free blocks, no run — claims nothing
 
             (< grow-attempts 20)
-            (if (and (nil? (aget file-paths ci))
-                     (locking regions (grow-heap-class! ctx ci)))
-              (recur (inc grow-attempts) claim-retries)
-              nil)
+            (when (and (nil? (aget file-paths ci)) (locking regions (grow-heap-class! ctx ci)))
+              (recur (inc grow-attempts) claim-retries))
 
             :else nil)))))
 
@@ -1111,12 +1107,11 @@
            desc-flags-rgns (object-array n)
            desc-pointer-rgns (object-array n)]
        (dotimes [i n]
-         (let [region (nth regions-vec i)]
-           (when region
-             (aset data-offs  i (int (mem/-load-i32 region d/slab-hdr-data-offset)))
-             (aset bm-offs    i (int (mem/-load-i32 region d/slab-hdr-bitmap-offset)))
-             (aset tot-blocks i (int (mem/-load-i32 region d/slab-hdr-total-blocks)))
-             (aset blk-sizes  i (int (mem/-load-i32 region d/slab-hdr-block-size)))))
+         (when-let [region (nth regions-vec i)]
+           (aset data-offs i (int (mem/-load-i32 region d/slab-hdr-data-offset)))
+           (aset bm-offs i (int (mem/-load-i32 region d/slab-hdr-bitmap-offset)))
+           (aset tot-blocks i (int (mem/-load-i32 region d/slab-hdr-total-blocks)))
+           (aset blk-sizes i (int (mem/-load-i32 region d/slab-hdr-block-size))))
          (when paths-vec
            (aset fpaths i (nth paths-vec i nil)))
          (when bm-paths-vec
@@ -1482,8 +1477,8 @@
 (defn node-heap-array
   "The heap byte array holding the published node at slab-off, or nil (read it with node-i32 then)."
   [sio ^long slab-off]
-  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
-    (when ctx (node-heap-bytes ctx slab-off))))
+  (when-let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
+    (node-heap-bytes ctx slab-off)))
 
 (defn node-base
   "The byte offset in node-heap-array's array of the block at slab-off (call only where node-heap-array answered one)."
@@ -1578,11 +1573,8 @@
    is not a JvmSlabCtx under its wrappers (a foreign sio: the caller
    keeps the per-word path)."
   [sio ^long slab-off]
-  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
-    (when ctx
-      [(node-heap-bytes ctx slab-off)
-       (node-region ctx slab-off)
-       (node-at ctx slab-off 0)])))
+  (when-let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
+    [(node-heap-bytes ctx slab-off) (node-region ctx slab-off) (node-at ctx slab-off 0)]))
 
 (defn node-viewable?
   "Does node-view resolve nodes in sio (a JvmSlabCtx under its wrappers)? The

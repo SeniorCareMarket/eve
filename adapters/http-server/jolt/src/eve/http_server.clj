@@ -43,10 +43,8 @@
                        (keep
                         (fn
                           [l]
-                          (let [i (str/index-of l ":")]
-                            (when i
-                              [(str/lower-case (str/trim (subs l 0 i)))
-                               (str/trim (subs l (inc i)))]))))
+                          (when-let [i (str/index-of l ":")]
+                            [(str/lower-case (str/trim (subs l 0 i))) (str/trim (subs l (inc i)))])))
                        (rest lines))
               need (if-let [cl (get headers "content-length")]
                      (try (Long/parseLong cl) (catch Exception _ 0))

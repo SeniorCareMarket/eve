@@ -355,10 +355,9 @@
 
           ;; Any other tag — try the registered JVM type constructors
           ;; (deftype type-ids, e.g. Dataset, register here).
-           (let [ctor (ser/get-type-constructor tag)]
-             (if ctor
-               (ctor sio (read-i32-le b 3))
-               (throw (ex-info "Unknown EVE type tag" {:tag tag}))))))))))
+           (if-let [ctor (ser/get-type-constructor tag)]
+             (ctor sio (read-i32-le b 3))
+             (throw (ex-info "Unknown EVE type tag" {:tag tag})))))))))
 
 ;; --- EVE binary format — serializer (primitive types only) ---
 
@@ -680,10 +679,9 @@
    Returns the slab-qualified header offset.
    tag — :map, :set, :vec, or :list."
   [tag sio coll]
-  (let [writer (ser/get-coll-writer tag)]
-    (if writer
-      (writer sio (fn [x] (value+sio->eve-bytes sio x)) coll)
-      (throw (ex-info (str "write-collection!: no writer for " tag) {:tag tag})))))
+  (if-let [writer (ser/get-coll-writer tag)]
+    (writer sio (fn [x] (value+sio->eve-bytes sio x)) coll)
+    (throw (ex-info (str "write-collection!: no writer for " tag) {:tag tag}))))
 
 (defn value+sio->eve-bytes
   "Serialize v to EVE bytes, allocating collection structures into sio.

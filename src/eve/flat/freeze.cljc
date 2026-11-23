@@ -728,8 +728,7 @@
                            (throw (IndexOutOfBoundsException. (str i)))))
           (nth [this i nf] (if (and (<= 0 i) (< i n)) (nth this i) nf))
           clojure.lang.ILookup
-          (valAt [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
-                            (nth this (long k)) nil))
+          (valAt [this k] (when (and (integer? k) (<= 0 (long k)) (< (long k) n)) (nth this (long k))))
           (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
                                (nth this (long k)) nf))
           clojure.lang.Associative

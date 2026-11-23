@@ -25,7 +25,7 @@
 ;; ── limbs
 
 #_{:splint/disable [lint/into-literal]} (defn norm "drop trailing zero limbs (a fresh vector: a subvector is not editable)" [v]
-  (loop [v (if (vector? v) (into [] v) (vec v))] (if (and (seq v) (zero? (peek v))) (recur (pop v)) v)))
+                                          (loop [v (if (vector? v) (into [] v) (vec v))] (if (and (seq v) (zero? (peek v))) (recur (pop v)) v)))
 
 (defn from-bytes-be "the number of big-endian bytes" [bs]
   (let [bs (vec bs) n (count bs)]
