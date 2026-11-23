@@ -2472,6 +2472,9 @@
     :glj [(defmacro defseqhandle [tname & _]
             `(defn ~(symbol (str "->" tname)) [& ~'args]
                (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
+    :lpy [(defmacro defseqhandle [tname & _]
+            `(defn ~(symbol (str "->" tname)) [& ~'args]
+               (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :clj [(defmacro defseqhandle
   "A sequential handle over the node at off. nthf/countf/seqf/repf are
    fns of (ctx off) (nthf also takes i); flags pick the interfaces."
@@ -2604,6 +2607,9 @@
            `(defn ~(symbol (str "->" tname)) [& ~'args]
               (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :glj [(defmacro defmaphandle [tname & _]
+            `(defn ~(symbol (str "->" tname)) [& ~'args]
+               (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
+    :lpy [(defmacro defmaphandle [tname & _]
             `(defn ~(symbol (str "->" tname)) [& ~'args]
                (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :clj [(defmacro defmaphandle
