@@ -141,3 +141,50 @@ start at this pin. Re-derived fresh (STATUS.md has the
 provenance); already on the release-line backlog; not fixed by
 this lane. The lane's gate composes the missing root into the
 runner classpath.
+
+## Recounts (successor lane, 2026-11-22 evening)
+
+With the deftype analyze-call hook in (step 2), full-scope recount
+(same command as the census, EDN summary):
+
+    census:            1455 errors / 2195 warnings / 265 info (619 files)
+    + deftype hook:     711 errors / 2225 warnings / 265 info
+    + api-defs hook:    711 errors / 2112 warnings / 225 info
+
+By error rule: unresolved-symbol 1062 -> 535, invalid-arity
+305 -> 89, type-mismatch 58 -> 57, unexpected-recur 16 (all in
+vendored contract-test/lib-ds), unresolved-var (warning)
+594 -> 482. Warnings rose after the deftype hook alone because
+previously opaque method bodies became visible (unused-binding
+in real bodies); the api-defs hook then cleared the generated
+API names (eve.alpha consumers in test: unresolved-var
+124 -> 12; eve.thread's surface likewise).
+
+Where the remaining errors live (recount 2):
+- contract-test vendored trees (lib-ds 491 findings of all
+  levels, lib 95): the exception decided above — the gate scope
+  narrows to contract-test/drivers, which stays fully in scope.
+- capstone/cohost-media: 99 unresolved-symbol + the unused/
+  redundant mass — Eve's own demo snapshot, in scope, fix
+  campaign material.
+- adapters (66 unresolved-symbol, 405 unresolved-var):
+  per-adapter generated surfaces — adapters/completion/bb
+  host_completion.clj alone holds 133 same-ns unresolved vars
+  (intern/presentation machinery). File-by-file modeling in
+  the fix campaign.
+- src (52 unresolved-symbol, 7 unresolved-var), test (72/12):
+  the reader-conditional class-name pattern (Throwable, Thread,
+  java.*, clojure.* in :clj branches) and per-site residue.
+
+Baseline gate (per-namespace, composed classpath): 51 of 54
+namespaces have verdicts; pre-existing reds at the pin:
+eve.type-io-test (2F/6E), eve.array-hosts-test (17E),
+eve.dataset-test (5E), eve.tensor-test (1F/2E), eve.edn-test
+(1F), eve.read-region-test (1F), eve.bb-logical-protocol-test
+(4E), eve.thread-host-test (1F), eve.thread-fold-group-test
+(1E). eve.thread-domain-test SEGFAULTS the bb native image
+(3 attempts, memory-map dump in the log — pre-existing at the
+pin; the lane's changes are kondo-only and bb never reads
+them). eve.aegis.rsabssa-test and eve.net.crypto-fast-path-test
+exceed the 600 s per-namespace timeout on this loaded box;
+no verdict yet.

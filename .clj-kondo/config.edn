@@ -51,5 +51,7 @@
  :hooks {:analyze-call {eve.alpha/deftype hooks.eve-deftype/deftype
                         eve.deftype/deftype hooks.eve-deftype/deftype
                         eve.deftype-proto.macros/deftype hooks.eve-deftype/deftype
-                        eve.deftype-proto.macros/host-deftype hooks.eve-deftype/deftype}}
+                        eve.deftype-proto.macros/host-deftype hooks.eve-deftype/deftype
+                        eve.alpha/api-defs hooks.eve-api-defs/alpha
+                        eve.thread/api-defs hooks.eve-api-defs/thread}}
  :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}
