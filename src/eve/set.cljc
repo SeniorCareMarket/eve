@@ -85,8 +85,6 @@
 ;; Node I/O helpers
 ;;=============================================================================
 
-(defn- children-start  [] NODE_HEADER_SIZE)
-
 (defn- values-start-off
   "Byte offset where inline values begin."
   [node-bm]
@@ -135,20 +133,6 @@
     (slab/write-i32! sio node-off 4 data-bm)
     (slab/write-i32! sio node-off 8 0)
     (write-value! sio node-off NODE_HEADER_SIZE vb)
-    node-off))
-
-(defn- make-two-value-node! [sio data-bm vb1 vb2]
-  (let [vlen1 (bytes-length vb1)
-        vlen2 (bytes-length vb2)
-        nsize (+ NODE_HEADER_SIZE (+ 4 vlen1) (+ 4 vlen2))
-        node-off (slab/alloc! sio nsize)]
-    (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
-    (slab/write-u8!  sio node-off 1 0)
-    (slab/write-u16! sio node-off 2 0)
-    (slab/write-i32! sio node-off 4 data-bm)
-    (slab/write-i32! sio node-off 8 0)
-    (let [next-pos (write-value! sio node-off NODE_HEADER_SIZE vb1)]
-      (write-value! sio node-off next-pos vb2))
     node-off))
 
 (defn- make-single-child-node! [sio node-bm child-off]
@@ -216,7 +200,7 @@
 ;; HAMT Find (unified)
 ;;=============================================================================
 
-(defn- hamt-find [sio root-off v vh vb]
+(defn- hamt-find [sio root-off _v vh vb]
   (loop [off root-off shift 0]
     (if (== off NIL_OFFSET)
       false
@@ -281,16 +265,16 @@
                 (if (value-matches? sio root-off pos vb)
                   [root-off false]
                   (let [[existing-vb _] (read-value-at sio root-off pos)
-                        existing-vh (portable-hash-bytes existing-vb)]
+                        _existing-vh (portable-hash-bytes existing-vb)]
                     (if (>= shift 30)
                       (let [coll (make-collision-node! sio vh [[existing-vb] [vb]])
                             new-data-bm (bit-xor data-bm bit)
                             new-node-bm (bit-or node-bm bit)
                             new-child-idx (get-index new-node-bm bit)]
                         (let [old-dc (popcount32 data-bm)
-                              new-dc (popcount32 new-data-bm)
+                              _new-dc (popcount32 new-data-bm)
                               new-cc (popcount32 new-node-bm)
-                              old-cc (popcount32 node-bm)
+                              _old-cc (popcount32 node-bm)
                               val-list (let [v-off (values-start-off node-bm)]
                                          (loop [i 0 p v-off acc []]
                                            (if (>= i old-dc) acc
@@ -318,8 +302,8 @@
                           [dst-off true]))
                       (let [sub-shift (+ shift SHIFT_STEP)
                             existing-vh (portable-hash-bytes existing-vb)
-                            existing-bit (bitpos existing-vh sub-shift)
-                            new-bit (bitpos vh sub-shift)]
+                            _existing-bit (bitpos existing-vh sub-shift)
+                            _new-bit (bitpos vh sub-shift)]
                         (let [[sub _] (hamt-conj sio NIL_OFFSET existing-vh existing-vb sub-shift)
                               [final-sub _] (hamt-conj sio sub vh vb sub-shift)
                               ;; sub (a single-value node made here, never published) is copied into final-sub,
@@ -330,9 +314,9 @@
                               new-node-bm (bit-or node-bm bit)
                               new-child-idx (get-index new-node-bm bit)]
                           (let [old-dc (popcount32 data-bm)
-                                new-dc (popcount32 new-data-bm)
+                                _new-dc (popcount32 new-data-bm)
                                 new-cc (popcount32 new-node-bm)
-                                old-cc (popcount32 node-bm)
+                                _old-cc (popcount32 node-bm)
                                 val-list (let [v-off (values-start-off node-bm)]
                                            (loop [i 0 p v-off acc []]
                                              (if (>= i old-dc) acc
@@ -363,7 +347,7 @@
               (let [di (get-index data-bm bit)
                     new-data-bm (bit-or data-bm bit)
                     old-dc (popcount32 data-bm)
-                    new-dc (popcount32 new-data-bm)
+                    _new-dc (popcount32 new-data-bm)
                     cc (popcount32 node-bm)
                     val-list (let [v-off (values-start-off node-bm)]
                                (loop [i 0 p v-off acc []]
@@ -718,7 +702,7 @@
   (meta [_] nil)
 
   clojure.lang.IObj
-  (withMeta [this m] this)
+  (withMeta [this _m] this)
 
   clojure.lang.ILookup
   (valAt [_ v]
@@ -783,17 +767,17 @@
   (hasheq [this] (dg/root-hash sio__ offset__ (fn [] (p/hash-unordered this))))
 
   clojure.lang.IFn
-  (invoke [this v]
+  (invoke [_this v]
     (let [vb (serialize-val-bytes sio__ v)
           vh (portable-hash-bytes vb)]
       (when (hamt-find sio__ root-off v vh vb) v)))
-  (invoke [this v nf]
+  (invoke [_this v nf]
     (let [vb (serialize-val-bytes sio__ v)
           vh (portable-hash-bytes vb)]
       (if (hamt-find sio__ root-off v vh vb) v nf)))
 
   d/IDirectSerialize
-  (-direct-serialize [this] offset__)
+  (-direct-serialize [_this] offset__)
 
   d/ISabStorable
   (-sab-tag [_] :hash-set)
@@ -804,7 +788,7 @@
   (-eve? [_] true)
 
   d/IEveRoot
-  (-root-header-off [this] offset__)
+  (-root-header-off [_this] offset__)
 
   d/IEveSio
   (-eve-sio [_] sio__)
@@ -923,7 +907,7 @@
 
 (extend-type EveHashSet
   d/ISabRetirable
-  (-sab-retire-diff! [this new-value _slab-env mode]
+  (-sab-retire-diff! [this new-value _slab-env _mode]
     (let [sio (field this sio__)
           old-root (slab/read-i32 sio (field this offset__) SABSETROOT_ROOT_OFF_OFFSET)]
       (if (eve-hash-set? new-value)
@@ -1146,7 +1130,7 @@
   (defn jvm-write-set!
     "Serialize a Clojure set to slab. Returns header offset.
         Backward-compat alias for the registered :set writer."
-    [sio serialize-val coll]
+    [sio _serialize-val coll]
     (codec/write-collection! :set sio coll))
 
   (defn jvm-eve-hash-set-from-offset
