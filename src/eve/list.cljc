@@ -154,6 +154,7 @@
                        (d/-eve-sio b) (d/-root-header-off b) b)
     :walk))
 
+#_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
 (eve/deftype EveList [^:int32 cnt ^:int32 head-off]
 
   clojure.lang.Sequential
@@ -212,7 +213,6 @@
   (first [_]
     (when (pos? cnt)
       (read-node-value sio__ head-off)))
-  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (more [_]
     (if (<= cnt 1)
       ()
