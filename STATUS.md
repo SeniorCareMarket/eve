@@ -352,3 +352,26 @@ an annotation on the whole deftype form. Recount 9:
 unused-binding 427, unresolved-symbol 124E,
 type-mismatch 30E, invalid-arity 15E, plus the two
 by-design info classes (143).
+
+## Third lane — session 2 bank 5 (2026-11-23, ~13:45 ET)
+
+Recount 10: 1267 total (was 1588). Closed since bank 4:
+invalid-arity (15 — defcfn :& hook fix, extend-default
+and extend-host-vectors hooks, five merged-namespace
+call annotations), type-mismatch (30 — mem cluster died
+with the extend-default hook; pool cap restructured;
+array_test lazy-init scoped at the ns; five per-site
+reasons), unresolved-var merged-namespace batch (22
+seat files, ns-config exclusions of their own qualified
+defs — mechanism miniature-proven: kondo's registry
+keeps one file's defs for a shared ns), register-eve-
+type! hook (type-id fns). Recount-10 repair batch:
+the Arrays inline annotations had commented the import
+specs out on their own lines — repaired across 22
+files, gate-verified (container-test green at gate11);
+deftype/array's duplicated (:require repaired.
+Gate: thread-domain IMPROVED past baseline (exit 0,
+was 1F). Remaining big classes: unresolved-symbol
+126E, unresolved-var residue (~240: squint cljs.core
+family, host_completion internals, proc/exit! drivers,
+runner api-defs vars), unused-binding 427.
