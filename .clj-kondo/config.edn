@@ -18,8 +18,11 @@
 ; half, that file is the consumer half.
 {:min-clj-kondo-version "2026.10.26"
  :lint-as {eve.alpha/deftype clojure.core/deftype
+           eve.alpha/extend-type clojure.core/extend-type
            eve.deftype/deftype clojure.core/deftype
+           eve.deftype/eve-extend-type clojure.core/extend-type
            eve.deftype-proto.macros/deftype clojure.core/deftype
+           eve.deftype-proto.macros/host-deftype clojure.core/deftype
            eve.record/defrecord clojure.core/defrecord
            eve.protocol/defprotocol clojure.core/defprotocol
            eve.stm/sync clojure.core/dosync
