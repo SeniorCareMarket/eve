@@ -440,43 +440,44 @@
         region replaced by a larger copy. Under the regions lock; true when
         the region grew, false when it is at its max or absent."
     [^JvmSlabCtx ctx]
-    (locking (field ctx regions)
-      (let [^objects regions (field ctx regions)
-            region           (aget regions OVERFLOW_CLASS_IDX)]
-        (when region
-          (let [budget   (long (field ctx mem-budget))
+    (let [regions-lock (field ctx regions)]
+      (locking regions-lock
+        (let [^objects regions (field ctx regions)
+              region           (aget regions OVERFLOW_CLASS_IDX)]
+          (when region
+            (let [budget   (long (field ctx mem-budget))
                    ;; under a :mem-budget, class 6 may grow only into the
                    ;; budget the rest of the domain leaves it (the region's
                    ;; total bytes are data-off + data-size); grow-coalesc-
                    ;; region! returns nil at its max, so a capped max is a
                    ;; refused growth, never a partial one
-                max-data (if (pos? budget)
-                           (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
-                                 others   (- (ctx-domain-bytes ctx) (long (mem/-byte-length region)))]
-                             (min coalesc/DEFAULT_DATA_SIZE
-                                  (max 0 (- budget others data-off))))
-                           coalesc/DEFAULT_DATA_SIZE)
-                result (coalesc/grow-coalesc-region! region max-data)]
-            (when result
-              (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
-                    fpath    (aget ^objects (field ctx file-paths) OVERFLOW_CLASS_IDX)
-                    new-r    (if fpath
-                               (region/open-mmap-region fpath (+ data-off result)
-                                                        (cond-> (region-opts region)
-                                                          (pos? (long (field ctx segment-bytes)))
-                                                          (assoc :segment-bytes (long (field ctx segment-bytes)))
-                                                          region
-                                                          (assoc :reuse-from region)))
+                  max-data (if (pos? budget)
+                             (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
+                                   others   (- (ctx-domain-bytes ctx) (long (mem/-byte-length region)))]
+                               (min coalesc/DEFAULT_DATA_SIZE
+                                    (max 0 (- budget others data-off))))
+                             coalesc/DEFAULT_DATA_SIZE)
+                  result (coalesc/grow-coalesc-region! region max-data)]
+              (when result
+                (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
+                      fpath    (aget ^objects (field ctx file-paths) OVERFLOW_CLASS_IDX)
+                      new-r    (if fpath
+                                 (region/open-mmap-region fpath (+ data-off result)
+                                                          (cond-> (region-opts region)
+                                                            (pos? (long (field ctx segment-bytes)))
+                                                            (assoc :segment-bytes (long (field ctx segment-bytes)))
+                                                            region
+                                                            (assoc :reuse-from region)))
                                   ;; Heap-backed: create larger region and copy
-                               (let [old-r   (aget regions OVERFLOW_CLASS_IDX)
-                                     old-sz  (mem/-byte-length old-r)
-                                     new-sz  (+ data-off result)
-                                     new-rgn (region/make-heap-region new-sz)]
-                                 (mem/copy-region! old-r 0 new-rgn 0 old-sz)
-                                 new-rgn))]
-                (aset regions OVERFLOW_CLASS_IDX new-r)
-                (slab/regions-changed! ctx)
-                true)))))))
+                                 (let [old-r   (aget regions OVERFLOW_CLASS_IDX)
+                                       old-sz  (mem/-byte-length old-r)
+                                       new-sz  (+ data-off result)
+                                       new-rgn (region/make-heap-region new-sz)]
+                                   (mem/copy-region! old-r 0 new-rgn 0 old-sz)
+                                   new-rgn))]
+                  (aset regions OVERFLOW_CLASS_IDX new-r)
+                  (slab/regions-changed! ctx)
+                  true))))))))
 
   (defn- coalesc-alloc-growing!
     "A class-6 block of size-bytes in ctx, growing the region until the

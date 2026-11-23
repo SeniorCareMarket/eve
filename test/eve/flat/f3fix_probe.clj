@@ -20,7 +20,7 @@
             [eve.flat.check :as check]
             [eve.flat.chunk :as chunk]
             [eve.flat.corpora :as corpora]
-            [eve.flat.place :as place] [clojure.string]))
+            [eve.flat.place :as place] [clojure.string] [clojure.math]))
 
 (def ^:private capacities
   {0 4194304 1 4194304 2 8388608 3 4194304 4 2097152 5 2097152})

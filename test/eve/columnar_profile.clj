@@ -16,7 +16,7 @@
    [eve.atom :as eve-atom]
    ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
    #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
-   [eve.deftype-proto.data :as d]))
+   [eve.deftype-proto.data :as d] [clojure.math]))
 
 (defn bench [label f & {:keys [warmup runs] :or {warmup 3 runs 7}}]
   (dotimes [_ warmup] (f))
