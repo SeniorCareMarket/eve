@@ -11,6 +11,10 @@
 ;;
 ;; Ends with System/exit: a jolt script whose process has started a thread (eve's heartbeat) does not exit at its
 ;; last form.
+;; coop.scenario and coop.mix themselves require eve.atom (and mix
+;; requires scenario): the three explicit specs are this script's
+;; load list, named in full so the worker's cone is visible here.
+#_{:clj-kondo/ignore [:duplicate-require]}
 (require '[eve.atom :as atom] '[coop.scenario :as sc] '[coop.mix :as mix])
 
 (defn- plain [x]

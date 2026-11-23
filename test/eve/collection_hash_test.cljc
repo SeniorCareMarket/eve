@@ -115,11 +115,10 @@
     (e/assoc! t ["a"] 2)
     (is (= 2 (e/get t ["a"])))
     (e/assoc! t ["b"] 3)
-    ;; dissoc! is called for its mutation; the returned transient
-    ;; is discarded, as with the assoc!/disj! statements above —
-    ;; kondo flags only this one's return as an unused value.
-    #?@(:cljs [#_{:clj-kondo/ignore [:unused-value]} (dissoc! t ["a"])] :default [(e/-dissoc! t ["a"])])
-    (is (= 1 (e/count t)))
+    ;; the dissoc! mutation is folded into the count assertion:
+    ;; a bare (dissoc! ...) statement here reads to clj-kondo's
+    ;; missing-test-assertion linter as an unasserted test form.
+    #?@(:cljs [(is (= 1 (e/count (dissoc! t ["a"]))))] :default [(is (= 1 (e/count (e/-dissoc! t ["a"]))))])
     (is (= 3 (e/get (e/persistent! t) ["b"]))))
   (let [a (e/conj (s/empty-hash-set) ["old"])
         b (e/into a [["new"]])]

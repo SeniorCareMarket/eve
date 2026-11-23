@@ -17,5 +17,9 @@
 (println :p7-deftype-data) (flush)
 (require 'eve.deftype-proto.data)
 (println :p8-eve-atom) (flush)
+;; eve.atom is already loaded transitively by the requires above;
+;; requiring it explicitly, last, is the probe's method — it bisects
+;; the load-order defect by naming each cone member in turn.
+#_{:clj-kondo/ignore [:duplicate-require]}
 (require 'eve.atom)
 (println :probe-v2-complete true)
