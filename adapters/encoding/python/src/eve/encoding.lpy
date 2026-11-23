@@ -307,14 +307,28 @@
 
 (defn typed-array
   "n elements of eve.array subtype code as the host's typed array: none here
-   (a fresh eve array is slab-backed; typed-aget and typed-aset! are never
-   reached)."
+   (a fresh eve array is slab-backed; typed-aget/typed-aset! below
+   serve the host byte arrays that do exist -- see typed-aget)."
   [_subtype _n]
   nil)
 
-(defn typed-aget "Never reached here (typed-array)." [_a _subtype _i] nil)
+(defn typed-aget
+  "The element at index i of a host byte/typed array (a Python
+   bytearray or array.array): plain item access. Freeze's heap
+   header/segment arrays are the counterexample to the old
+   'never reached' stub -- they are plain bytearrays built by
+   make-bytes, and the stub silently dropped every store, so a
+   frozen chain's segment links read as zeros and the chain walk
+   never terminated."
+  [a _subtype i]
+  (aget a (int i)))
 
-(defn typed-aset! "Never reached here (typed-array)." [_a _subtype _i v] v)
+(defn typed-aset!
+  "Store v as the element at index i of a host byte/typed array
+   (see typed-aget). Returns v."
+  [a _subtype i v]
+  (aset a (int i) v)
+  v)
 
 (defn code-points->string
   "The string of a sequence of Unicode code points (a Python string is code points) — the inverse of utf16-units."
