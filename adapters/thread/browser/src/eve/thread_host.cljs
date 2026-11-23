@@ -136,6 +136,7 @@
       (throw (ex-info (str "eve.thread-host: a message of " n " bytes exceeds a mailbox (" RING " bytes)") {:bytes n})))
     (aset len 0 (bit-and n 255)) (aset len 1 (bit-and (unsigned-bit-shift-right n 8) 255))
     (aset len 2 (bit-and (unsigned-bit-shift-right n 16) 255)) (aset len 3 (unsigned-bit-shift-right n 24))
+    #_{:clj-kondo/ignore [:invalid-arity]} ; eve.thread-host is defined per seat: this seat's lock! takes [ctl id]; the node seat's takes [] - kondo merges the seats' namespaces and checks this seat's call against the other seat's def
     (lock! ctl id)
     (let [head (js/Atomics.load ctl (head-word id))
           tail (js/Atomics.load ctl (tail-word id))]

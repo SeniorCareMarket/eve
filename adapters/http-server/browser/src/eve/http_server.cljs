@@ -223,6 +223,7 @@
         (cond
           (contains? m :eve.http-server/control) (on-control! m)
           (contains? m :eve.http-server/request)
+          #_{:clj-kondo/ignore [:invalid-arity]} ; eve.http-server is defined per seat: this seat's dispatch! takes the one event map; the scittle seat's takes [event respond] - kondo merges the seats' namespaces and checks this seat's calls against the other seat's def
           (dispatch! {:id (:eve.http-server/request m) :port (:port m) :req (:req m) :reply (:reply m)})
           (contains? m :eve.http-server/response)
           (do (dbg! "pump: response map arrived, id=" (:eve.http-server/response m))
@@ -287,6 +288,7 @@
                                                           :body (body->str (nb/from-b64 (:body-b64 e)))
                                                           :body-b64 (:body-b64 e)}]
                                                  (dbg! "poll: req built for id=" id)
+                                                 #_{:clj-kondo/ignore [:invalid-arity]} ; eve.http-server is defined per seat: this seat's dispatch! takes the one event map; the scittle seat's takes [event respond] - kondo merges the seats' namespaces and checks this seat's calls against the other seat's def
                                                  (dispatch! {:id id :port port :req req :reply 0})
                                                  (dbg! "poll: dispatch! returned for id=" id))
                                                (catch :default err

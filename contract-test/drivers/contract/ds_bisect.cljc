@@ -4,6 +4,7 @@
             [me.tonsky.persistent-sorted-set :as pss]))
 (defn attempt [label f]
   (let [fut (future (try {:ok (f)} (catch Throwable t {:threw (str (type t) " " (.getMessage t))})))
+        #_{:clj-kondo/ignore [:invalid-arity]} ; deref with a timeout is clojure.core's 3-arity face; this driver runs on CLJ hosts only (contract-test/drivers), the :cljs pass has no seat here
         res (deref fut 15000 ::timeout)]
     (println {:case label :res res})
     (future-cancel fut)))

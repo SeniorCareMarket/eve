@@ -182,6 +182,7 @@
               (when-not keep?
                 (when-some [^Conn c (get @conns k)] (try (.closeSync (.-sock c)) (catch dynamic _ nil)))
                 (vswap! conns dissoc k))
+              #_{:clj-kondo/ignore [:invalid-arity]} ; eve.http is defined per seat: this seat's answer takes [status headers body as]; the beam seat's takes [result as] - kondo merges the seats' namespaces and checks this seat's call against the other seat's def
               (answer status hs bs as))))))
     (catch dynamic e
       {:error (str e)})))
