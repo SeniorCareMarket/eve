@@ -6,6 +6,11 @@
 
    make-heap-region and open-mmap-region open them; lustre-region? says
    whether a region's atomics are fcntl byte-range locks (a Lustre mount)."
+  ;; unresolved-var exclusions, this file only: eve.region is one namespace in
+  ;; several seat files; kondo's registry keeps one file's defs and reads the
+  ;; others' as unresolved (standalone lint of this file is clean). The excluded
+  ;; names are this file's own defs, verified against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.region/JoltRegion eve.region/O-CREAT eve.region/SEQ-CST eve.region/SYS-futex eve.region/add4 eve.region/add8 eve.region/bytes-address eve.region/cas4 eve.region/cas8 eve.region/futex-wait eve.region/guard! eve.region/heap-bytes eve.region/jolt-add4 eve.region/jolt-add8 eve.region/jolt-cas! eve.region/jolt-cas4 eve.region/jolt-cas8 eve.region/jolt-close eve.region/jolt-ftruncate eve.region/jolt-futex eve.region/jolt-load4 eve.region/jolt-load8 eve.region/jolt-mmap eve.region/jolt-munmap eve.region/jolt-open eve.region/jolt-store4 eve.region/jolt-store8 eve.region/jolt-xchg4 eve.region/load-or-plain eve.region/load4 eve.region/load8 eve.region/mac-add4 eve.region/mac-add8 eve.region/mac-cas eve.region/mac-cas4 eve.region/mac-cas8 eve.region/mac-xchg eve.region/os eve.region/poll-wait eve.region/store-or-plain eve.region/store4 eve.region/store8 eve.region/strict-alignment? eve.region/unmap-unreachable! eve.region/unreachable eve.region/xchg4]}}}}
   (:refer-clojure :exclude [aget aset alength byte-array int-array long-array object-array
                             into-array unchecked-byte unchecked-int unchecked-long
                             unchecked-inc-int unsigned-bit-shift-right long double class
