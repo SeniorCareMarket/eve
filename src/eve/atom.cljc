@@ -406,7 +406,7 @@
          (define (eve-pt-new addr keep base)
            (let ((a (and eve-pt-store4 (fixnum? addr) addr)))
              (vector (make-eq-hashtable) (make-eq-hashtable) #f #f (make-vector 16 0) 0
-                     (make-mutex) a keep (and a (fixnum? base) base))))
+                     (make-mutex) a keep (and a (fixnum? base) base) eve-pt-collect-q 1)))
          (define (eve-pt-threads pt) (vector-ref pt 0))
          (define (eve-pt-views pt) (vector-ref pt 1))
          (define (eve-pt-tmin pt) (vector-ref pt 2))
@@ -536,6 +536,41 @@
          ;; read-pinned's pin in one call: the root epoch word's load, the pin and its publish (as eve-pt-pin-pub!),
          ;; then the atom slot's pointer word's load, behind the seq-cst store as pin-epoch! then -load-i32 had it;
          ;; the pointer, or #f with nothing done where the table has no root base (the caller takes the old path)
+         ;; slot 10: the retire-queue length at which a commit whose flush this process's own pin blocks has the
+         ;; collector look for dead views in its older generations (eve-pt-collect-views!).
+         ;; Why: a view's pin ends when jolt's collector finds the view dead (eve.gc's guardian). Chez promotes every
+         ;; object live at a collection into the next generation, and generation g is collected only every 4^g
+         ;; collections, so a view that happened to be live at a collection or two — dead a moment later — can keep
+         ;; its epoch pinned for hundreds of thousands of commits: the zero queue grows without bound and nothing is
+         ;; freed (probe jseam.allocprobe: 120k -> 320k entries; one full collection releases it).
+         (define eve-pt-collect-q 65536)
+         (define (eve-pt-sweep-views!)
+           (when (top-level-bound? 'eve-gc-guardian)
+             (let ((g (top-level-value 'eve-gc-guardian)))
+               (let loop () (let ((r (g))) (when r (r) (loop)))))))
+         ;; qn: the queue's length; e: this process's published pin. Collects generations 0..g (all threads paused,
+         ;; collect-rendezvous under a one-off handler; each survivor moves up one generation only — min target 1 —
+         ;; so the views live now are not sent to the oldest generation to pin there in turn), g from the generation
+         ;; that last released one (slot 11, first
+         ;; 1) up to the oldest, running the released views' unpins after each, until the published pin moves: #t
+         ;; (the caller flushes, the threshold goes back to its base), or #f with the threshold doubled (a pin the
+         ;; program itself still holds is not collected for).
+         (define (eve-pt-collect-views! pt qn)
+           (let ((a (vector-ref pt 7)))
+             (if (and a (fx> qn (vector-ref pt 10)) (top-level-bound? 'eve-gc-guardian))
+                 (let ((e (foreign-ref 'integer-32 a 0)) (mg (collect-maximum-generation)) (h (collect-request-handler)))
+                   (let loop ((g (fxmin (vector-ref pt 11) mg)))
+                     (collect-request-handler (lambda () (collect g 1 (fxmin (fx+ g 1) mg))))
+                     (collect-rendezvous)
+                     (collect-request-handler h)
+                     (eve-pt-sweep-views!)
+                     (cond ((not (= (foreign-ref 'integer-32 a 0) e))
+                            (vector-set! pt 10 eve-pt-collect-q)
+                            (vector-set! pt 11 g)
+                            #t)
+                           ((fx< g mg) (loop (fx+ g 1)))
+                           (else (vector-set! pt 10 (fx* 2 qn)) #f))))
+                 #f)))
          (define (eve-pt-pin-read! pt eoff poff)
            (let ((a (vector-ref pt 7)) (rb (vector-ref pt 9)))
              (if (and a rb)
@@ -576,6 +611,7 @@
      (def ^:private pt-view-unpin!* (scheme/proc "eve-pt-view-unpin!"))
      (def ^:private pt-pin-pub!* (scheme/proc "eve-pt-pin-pub!"))
      (def ^:private pt-pin-read!* (scheme/proc "eve-pt-pin-read!"))
+     (def ^:private pt-collect-views!* (scheme/proc "eve-pt-collect-views!"))
      (def ^:private pt-unpin-pub!* (scheme/proc "eve-pt-unpin-pub!"))
      (def ^:private pt-view-pin-pub!* (scheme/proc "eve-pt-view-pin-pub!"))
      (def ^:private pt-view-unpin-pub!* (scheme/proc "eve-pt-view-unpin-pub!"))
@@ -680,8 +716,10 @@
     ;; below the queue's head epoch, tally/flush! answers 0 at its head test with no other effect, so the 256-slot
     ;; scan is skipped. A queue past FLUSH_QUEUE_CAP runs the flush on every commit while a view pins an old epoch
     ;; (views go when jolt's collector finds them, thousands of commits apart). Not on a noting (durable) domain.
-    (when-not #?(:jolt (and (not note?)
-                            (some? (:slot-idx ds))
+    ;; When that pin has held the queue past the pin table's threshold, the collector looks for the pinning view
+    ;; in its older generations first (pt-collect-views!*: a dead view promoted there pins until that generation
+    ;; is collected); if that moves the pin, the flush runs. A noting domain never asks (its flush always runs).
+    (when-not #?(:jolt (and (some? (:slot-idx ds))
                             (let [slot-idx (:slot-idx ds)
                                   head (first @retire-q)
                                   e (when head
@@ -691,7 +729,9 @@
                                    (>= (:epoch head) e)
                                    (== (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_STATUS))
                                        d/WORKER_STATUS_ACTIVE)
-                                   (not (heartbeat-stale? root-r slot-idx)))))
+                                   (not (heartbeat-stale? root-r slot-idx))))
+                            (not note?)
+                            (not (pt-collect-views!* (pt-of (:pins ds)) (count @retire-q))))
                  :default false)
       (let [queued (when note? (mapv :off @retire-q))]
         (tally/flush! sio retire-q
