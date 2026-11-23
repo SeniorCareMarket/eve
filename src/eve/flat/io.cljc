@@ -54,6 +54,7 @@
   ^bytes [v]
   (chunk/chunk-bytes (chunk/pack [v])))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the read side, below); no cljs caller exists
 (defn- unframe
   "The value a frame's (already checked) chunk carries: element 0 of
    its root vector. A frame whose root is not a 1-vector is refused
@@ -66,6 +67,7 @@
                       {:eve.flat.io/check :bad-frame})))
     (nth root 0)))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (write!/read refusals in the #?(:clj ...) sections); no cljs caller exists
 (defn- refuse-frame
   [check msg & {:as data}]
   (throw (ex-info (str "flat io refused (" (name check) "): " msg)

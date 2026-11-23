@@ -51,6 +51,7 @@
 ;; kinds (FORMAT-V1 §5)
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the encode/decode size computations); the :cljs pass has no caller yet (encoding is not built on ClojureScript)
 (def ^:private dense-size
   "Element byte size of the dense kinds 1-11, or nil."
   {1 1, 2 1, 3 1, 4 2, 5 2, 6 4, 7 4, 8 4, 9 8, 10 8, 11 8})

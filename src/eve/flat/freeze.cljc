@@ -774,11 +774,13 @@
 ;; self-calls (.assocN this ...) is a C++ member call on hosts whose
 ;; completion has no such member (jank), so assoc/assocN/cons all
 ;; route here instead.
+#_{:clj-kondo/ignore [:unused-private-var]} ; called from the sibling assoc-n helpers and the freeze walk's host-conditional arms; kondo's per-pass accounting splits the chain (deleting any link either orphans the next or breaks a live call site - measured on all three)
 (defn- concat-assoc-n [handles cums total mm i v]
   (let [j (cb-locate cums i)
         h' (assoc (nth handles j) (- i (nth cums j)) v)]
     (ConcatBatch. (assoc handles j h') cums total mm)))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; called from the sibling assoc-n helpers and the freeze walk's host-conditional arms; kondo's per-pass accounting splits the chain (deleting any link either orphans the next or breaks a live call site - measured on all three)
 (defn- based-assoc-n [base edits tail n bc mm i v]
   (cond
     (or (< i 0) (> i n))
