@@ -68,7 +68,7 @@
 (host-deftype Variable [v])
 
 (edt/deftype RegisteredSlab [^:int32 n])
-(slab/host-deftype RegisteredHost [n])
+(host-deftype RegisteredHost [n])
 
 (deftest existing-registry-is-the-only-identity-state
   (doseq [[v token storage] [[(->Partial 1) :eve.portable-surface-test/Partial :process-local]

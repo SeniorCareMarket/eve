@@ -25,6 +25,15 @@
 (def ^:private step-num (cljs.core/atom 0))
 (def ^:private the-env (cljs.core/atom nil))
 
+;; The step script's shared fixtures: assigned in order by the
+;; steps in run-tests! and read across steps, so they are vars
+;; defined here and set! there, not defs inside the step fns.
+(def the-atom nil)
+(def e1 nil)
+(def e2 nil)
+(def extra-atoms nil)
+(def stress-atoms nil)
+
 (defn- step!
   "Run one step: print label, execute thunk, X-RAY, check invariant.
    Returns the thunk's return value, or throws on invariant failure."
@@ -55,9 +64,9 @@
 
 (defn- run-tests! []
   ;; Use a modest SAB so problems surface faster
-  (def the-atom (a/atom-domain {}
-                               :sab-size (* 4 1024 1024)
-                               :max-blocks 4096))
+  (set! the-atom (a/atom-domain {}
+                                :sab-size (* 4 1024 1024)
+                                :max-blocks 4096))
   (reset! the-env (.-s-atom-env the-atom))
   ;; Register overflow callbacks for allocations > 1024 bytes
   (let [env @the-env]
@@ -116,8 +125,8 @@
     ;; ─── Phase 2: Embedded atoms ────────────────────────────────────────
 
     (step! "Create embedded atom e1 = {:x 1}"
-           (fn [] (def e1 (binding [d/*parent-atom* the-atom]
-                            (a/atom {:x 1})))))
+           (fn [] (set! e1 (binding [d/*parent-atom* the-atom]
+                             (a/atom {:x 1})))))
 
     (step! "swap! e1 assoc :y 2"
            (fn [] (swap! e1 assoc :y 2)))
@@ -126,8 +135,8 @@
            (fn [] (swap! e1 assoc :z 3)))
 
     (step! "Create embedded atom e2 = {:counter 0}"
-           (fn [] (def e2 (binding [d/*parent-atom* the-atom]
-                            (a/atom {:counter 0})))))
+           (fn [] (set! e2 (binding [d/*parent-atom* the-atom]
+                             (a/atom {:counter 0})))))
 
     (step! "swap! e2 update :counter inc (x10)"
            (fn []
@@ -136,10 +145,10 @@
 
     (step! "Create 5 more embedded atoms"
            (fn []
-             (def extra-atoms
-               (vec (for [i (range 5)]
-                      (binding [d/*parent-atom* the-atom]
-                        (a/atom {:id i :data (str "atom-" i)})))))))
+             (set! extra-atoms
+                   (vec (for [i (range 5)]
+                          (binding [d/*parent-atom* the-atom]
+                            (a/atom {:id i :data (str "atom-" i)})))))))
 
     (step! "swap! each of 5 atoms once"
            (fn []
@@ -184,11 +193,11 @@
 
     (step! "Create 20 embedded atoms with 50-key maps"
            (fn []
-             (def stress-atoms
-               (vec (for [i (range 20)]
-                      (binding [d/*parent-atom* the-atom]
-                        (a/atom (into {} (map (fn [j] [(keyword (str "s" j)) (* i j)])
-                                              (range 50))))))))))
+             (set! stress-atoms
+                   (vec (for [i (range 20)]
+                          (binding [d/*parent-atom* the-atom]
+                            (a/atom (into {} (map (fn [j] [(keyword (str "s" j)) (* i j)])
+                                                  (range 50))))))))))
 
     (step! "Swap each of 20 atoms 10 times"
            (fn []

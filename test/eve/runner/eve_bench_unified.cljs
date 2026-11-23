@@ -21,11 +21,9 @@
    [eve.atom :as a]
    [clojure.string :as str]
    ;; Pull in test namespace with alias to prevent DCE
-   #_{:clj-kondo/ignore [:unused-namespace]}
    [cljs-thread.eve-perf-test :as perf-test]))
 
 ;; Anti-DCE: Export symbol to prevent Closure from eliminating test vars
-#_{:clj-kondo/ignore [:unresolved-symbol]}
 (goog/exportSymbol "cljs_thread.eve_perf_test" perf-test)
 
 ;; ---------------------------------------------------------------------------

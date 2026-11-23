@@ -64,7 +64,7 @@
     (js/plain-type type-name fields parsed js/compiler-twist)
     (let [[fields parsed] (sio/plain-renames fields parsed nil)
           {:keys [impls print]} (v/jvm-translate-protos parsed)]
-      `(do (clojure.core/deftype ~type-name ~fields ~@(v/impls->forms impls))
+      `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms impls))
            ~@(when print [(sio/print-method-form type-name print)])
            ~type-name))))
 
