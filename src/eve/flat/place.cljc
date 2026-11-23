@@ -448,7 +448,7 @@
         ;; PHASE B — copies. fast-arr[ci]: the class's heap array in the
         ;; target domain, or nil (per class, resolved once, after all
         ;; claims — a claim may grow a class and replace its array).
-        (let [_fast-arr (object-array 7)]
+        (let [fast-arr (object-array 7)]
           #?(:clj (dotimes [ci 6]
                     (let [mend (+ (aget starts ci) (aget counts ci))]
                       (when (< (aget starts ci) mend)
@@ -469,7 +469,7 @@
           ;; PHASE C — the pointer pass: every relocation, resolved from
           ;; the completed plan. Owner byte bases are cached per block.
           (let [_owner-base (long-array n)
-                _owner-seen (boolean-array n)]
+                owner-seen (boolean-array n)]
             (dotimes [j nr]
               (let [o (aget rown j) t (aget rtgt j) pos (aget rpos j)
                     arr #?(:clj (aget fast-arr (aget classes o)) :cljs nil)]

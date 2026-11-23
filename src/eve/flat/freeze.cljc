@@ -742,8 +742,8 @@
                                        "Key must be integer"))))
           clojure.lang.IPersistentVector
           (length [_] n)
-          (assocN [_this i v] (based-assoc-n base edits tail n bc mm i v))
-          (cons [_this v] (based-assoc-n base edits tail n bc mm n v))
+          (assocN [this i v] (based-assoc-n base edits tail n bc mm i v))
+          (cons [this v] (based-assoc-n base edits tail n bc mm n v))
           (peek [this] (when (pos? n) (nth this (dec n))))
           (pop [_this] (if (zero? n)
                          (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
@@ -913,9 +913,9 @@
 ;; (frozen-value's cljs arm), so the wrappers never occur there —
 ;; the predicates answer false, the same splice deliver-flat's
 ;; FrozenValue arm already makes inline.
-(defn- frozen-value? [_v] #?(:cljs false :default (instance? FrozenValue v)))
-(defn- concat-batch? [_v] #?(:cljs false :default (instance? ConcatBatch v)))
-(defn- based-value? [_v] #?(:cljs false :default (instance? BasedValue v)))
+(defn- frozen-value? [v] #?(:cljs false :default (instance? FrozenValue v)))
+(defn- concat-batch? [v] #?(:cljs false :default (instance? ConcatBatch v)))
+(defn- based-value? [v] #?(:cljs false :default (instance? BasedValue v)))
 
 (defn deliver-flat
   "The S3 delivery: a HEAP value as a heap flat object that
@@ -1041,7 +1041,7 @@
 ;; place eve->clj learns what the flat subsystem knows — a stored flat value
 ;; is its content, an eve-deftype or record is its flat instance, an eve value
 ;; array is its slots. Plain host collections answer nil at once.
-(defn- host-coll? [_v]
+(defn- host-coll? [v]
   #?(:clj (and (instance? clojure.lang.IPersistentCollection v)
                (.startsWith (.getName (class v)) "clojure.lang."))
      :default false))

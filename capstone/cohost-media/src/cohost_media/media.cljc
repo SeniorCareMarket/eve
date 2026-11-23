@@ -6,7 +6,7 @@
 
 (defn- impl-fn
   "The runtime's media implementation var, when this runtime carries it."
-  [_sym]
+  [sym]
   #?(:cljs nil
      :default (try (requiring-resolve sym) (catch Throwable _ nil))))
 

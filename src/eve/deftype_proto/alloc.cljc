@@ -1170,7 +1170,7 @@
                    (recur (inc ci))))))
              ;; Check coalesc (class 6) growth without lock
            coalesc-grew?
-           (when-let [_path (aget file-paths OVERFLOW_CLASS_IDX)]
+           (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
              (let [cur-region (aget regions OVERFLOW_CLASS_IDX)]
                (if (nil? cur-region)
                  true ;; never opened — must check
@@ -1653,7 +1653,7 @@
    already added by the caller — a fn taking primitives supports at
    most 4 args) of a node given as its view parts, as a new byte
    array."
-  [_arr region ^long abs-off ^long len]
+  [arr region ^long abs-off ^long len]
   (mem/-read-bytes region abs-off len))
 
 (defn parts-bytes-equal?

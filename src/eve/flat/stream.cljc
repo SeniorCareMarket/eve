@@ -256,7 +256,7 @@
    graph the shipped detach walks. The marking discipline is this
    walk's own (mark at push, index at exit); send-stream's pop-time
    discipline is the one the wire order is defined by."
-  [sio ^long _root-off]
+  [sio ^long root-off]
   #?(:clj
      (let [cur (cursor sio)
            seen (idx-new)

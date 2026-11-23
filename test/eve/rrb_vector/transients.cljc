@@ -164,7 +164,7 @@
 
           :else
           (let [arr   (.-arr ret)
-                _child (aget arr subidx)]
+                child (aget arr subidx)]
             (aset arr  subidx nil)
             (aset rngs subidx 0)
             (aset rngs 32     (dec (aget rngs 32)))

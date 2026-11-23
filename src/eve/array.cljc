@@ -295,12 +295,12 @@
   (count [_] (int cnt))
 
   clojure.lang.Indexed
-  (nth [_this n]
+  (nth [this n]
     (if (and (>= n 0) (< n cnt))
       (read-element sio__ offset__ n subtype__)
       (throw (enc/index-out-of-bounds
               (str "Index out of bounds: " n " for length " cnt)))))
-  (nth [_this n not-found]
+  (nth [this n not-found]
     (if (and (>= n 0) (< n cnt))
       (read-element sio__ offset__ n subtype__)
       not-found))
@@ -314,7 +314,7 @@
   (invoke [this k not-found] (e/nth this (int k) not-found))
 
   clojure.lang.Seqable
-  (seq [_this]
+  (seq [this]
     (when (pos? cnt)
       (let [sub subtype__]
         (letfn [(arr-seq [i]
@@ -329,7 +329,7 @@
   (withMeta [this _m] this)
 
   clojure.lang.IReduce
-  (reduce [_this f]
+  (reduce [this f]
     (if (zero? cnt)
       (f)
       (let [sub subtype__]
@@ -340,7 +340,7 @@
             acc)))))
 
   clojure.lang.IReduceInit
-  (reduce [_this f start]
+  (reduce [this f start]
     (let [sub subtype__]
       (loop [i 0 acc start]
         (if (< i cnt)
@@ -349,7 +349,7 @@
           acc))))
 
   clojure.lang.IHashEq
-  (hasheq [_this]
+  (hasheq [this]
     (if hash-cache__
       hash-cache__
       (let [sub subtype__

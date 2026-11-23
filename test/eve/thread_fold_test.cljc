@@ -58,7 +58,7 @@
 (t/deftask third [x] (quot x 3))
 (t/deftask idx-pair [i x] [i x])
 (t/deftask odd-idx [i x] (when (odd? i) x))
-(t/deftask stop-at [_r x] [:stop x])
+(t/deftask stop-at [r x] [:stop x])
 (t/deftask on-thread [[x meet?]] (meet! meet?) [x (h/self)])
 
 (def wait-ms 30000)

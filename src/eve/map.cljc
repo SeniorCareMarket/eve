@@ -1102,7 +1102,7 @@
   (meta [_] nil)
 
   clojure.lang.IObj
-  (withMeta [this _m] this)
+  (withMeta [this m] this)
 
   clojure.lang.ILookup
   (valAt [_ k] (hamt-get sio__ root-off k nil))
@@ -1194,11 +1194,11 @@
   (hasheq [this] (dg/root-hash sio__ offset__ (fn [] (p/hash-unordered this))))
 
   clojure.lang.IFn
-  (invoke [_this k] (hamt-get sio__ root-off k nil))
-  (invoke [_this k nf] (hamt-get sio__ root-off k nf))
+  (invoke [this k] (hamt-get sio__ root-off k nil))
+  (invoke [this k nf] (hamt-get sio__ root-off k nf))
 
   d/IDirectSerialize
-  (-direct-serialize [_this] offset__)
+  (-direct-serialize [this] offset__)
 
   d/ISabStorable
   (-sab-tag [_] :eve-map)
@@ -1209,7 +1209,7 @@
   (-eve? [_] true)
 
   d/IEveRoot
-  (-root-header-off [_this] offset__)
+  (-root-header-off [this] offset__)
 
   d/IEveSio
   (-eve-sio [_] sio__)

@@ -528,7 +528,7 @@
   (size [_] (int (-size root)))
   (isEmpty [_] (zero? (-size root)))
   (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
-  (containsAll [_this c] (boolean (every? #(some? (find-node root (cmp-of cmp) %)) c)))
+  (containsAll [this c] (boolean (every? #(some? (find-node root (cmp-of cmp) %)) c)))
   (add [_ _] (enc/throw-unsupported))
   (remove [_ _] (enc/throw-unsupported))
   (addAll [_ _] (enc/throw-unsupported))

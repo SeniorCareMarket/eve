@@ -121,7 +121,7 @@
 
 (defn- need
   "Refuse with check when pos+n passes limit."
-  [_ctx pos n limit check what]
+  [ctx pos n limit check what]
   (when (> (+ pos n) limit)
     (refuse check (str what " runs past the bytes left")
             :offset pos :needed n :limit limit)))
@@ -442,7 +442,7 @@
 (defn- walk-node
   "The node cases of walk. Answers [height offset-past-the-node]."
   [ctx offset depth tag expect-rows]
-  (let [_bs (:bs ctx)
+  (let [bs (:bs ctx)
         end (:end ctx)
         w (:offw ctx)]
     (case tag

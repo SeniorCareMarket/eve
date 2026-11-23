@@ -131,7 +131,7 @@
       (set! t end)
       (set! na (inc na))
       off))
-  (-sio-free! [_ _o]
+  (-sio-free! [_ o]
     (when frozen? (frozen! "free!"))
     true) ;; a builder frees nothing: superseded blocks stay as garbage until a detach compacts
   (-sio-copy-block! [_ dd df s sf n]

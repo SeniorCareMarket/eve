@@ -400,23 +400,23 @@
 ;; Predicates for host-native exact types (before our wrappers).
 ;; ---------------------------------------------------------------------------
 
-(defn- js-bigint? [_x]
+(defn- js-bigint? [x]
   #?(:cljs (and (some? x) (identical? (.-constructor x) js/BigInt))
      :default false))
 
-(defn- host-ratio? [_v]
+(defn- host-ratio? [v]
   #?(:clj (instance? clojure.lang.Ratio v)
      :lpy (instance? fractions/Fraction v)
      ;; jank's (type x) is the completion's type-key string
      :jank (= "ratio" (type v))
      :default false))
 
-(defn- host-decimal? [_v]
+(defn- host-decimal? [v]
   #?(:clj (instance? java.math.BigDecimal v)
      :lpy (instance? decimal/Decimal v)
      :default false))
 
-(defn- host-bigint? [_v]
+(defn- host-bigint? [v]
   #?(:clj (or (instance? clojure.lang.BigInt v)
               (instance? java.math.BigInteger v))
      ;; jank's (type x) is the completion's type-key string
@@ -647,18 +647,18 @@
      (__repr__ [_] (str n "N"))
      (__str__ [_] (str n))))
 
-(defn- eve-bigint-type? [_x]
+(defn- eve-bigint-type? [x]
   #?(:cljs (instance? EveBigInt x)
      :lpy (instance? EveBigInt x)
      :default false))
 
-(defn- eve-ratio-type? [_x]
+(defn- eve-ratio-type? [x]
   #?(:cljs (instance? EveRatio x)
      :clje (instance? EveRatio x)
      :jank (instance? EveRatio x)
      :default false))
 
-(defn- eve-bigdec-type? [_x]
+(defn- eve-bigdec-type? [x]
   #?(:cljs (instance? EveBigDec x)
      :clje (instance? EveBigDec x)
      :jank (instance? EveBigDec x)
@@ -1648,7 +1648,7 @@
              (let [proto (js/Object.getPrototypeOf (js/BigInt 0))]
                (set! (.-cljs$core$IPrintWithWriter$ proto) true)
                (aset proto "cljs$core$IPrintWithWriter$_pr_writer$arity$3"
-                     (fn [this w _opts] (enc/write! w (host-pr-number this)))))
+                     (fn [this w opts] (enc/write! w (host-pr-number this)))))
              (catch :default _ nil)))
          ;; nbb's cljs.reader has only read-string until eve.types interns
          ;; register-tag-parser! (F-NBB-EDNREADER). Resolve so analysis

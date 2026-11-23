@@ -30,7 +30,7 @@
    *data-readers* seeing Eve's tags — the same named limitation
    clojerl carries in eve.type-readers' :clje arm. Calls made at
    macro time run on the host, where the real alter-var-root answers."
-  [_var & _args]
+  [var & _args]
   nil)
 
 (defn eval

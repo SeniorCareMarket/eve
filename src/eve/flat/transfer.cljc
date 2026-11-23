@@ -145,7 +145,7 @@
   "The block size of class ci in sio's domain (classes 0-5), for the kinds
    whose used size is their allocation: scalar blocks, eve-deftype
    instances, obj blocks. The JVM ctx's own geometry where there is one."
-  ^long [_sio ^long ci]
+  ^long [sio ^long ci]
   #?(:clj (let [root (alloc/sio-root sio)]
             (if (instance? JvmSlabCtx root)
               (long (aget ^ints (.-block-sizes ^JvmSlabCtx root) (int ci)))
@@ -359,7 +359,7 @@
    two parents reach before either is copied is still one block:
      {:chunks [{:bytes .. :size n} ...]          (index = ordinal)
       :relocs [{:owner ordinal :field rel-pos :target ordinal} ...]}"
-  [_sio ^long _root-off]
+  [sio ^long root-off]
   #?(:clj
      (let [ordinals (HashMap.)
            chunks (ArrayList.)

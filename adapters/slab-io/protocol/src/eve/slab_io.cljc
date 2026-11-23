@@ -119,7 +119,7 @@
 
 (defmacro regions-changed!
   "ctx's regions were re-mapped (a class grew): nothing to follow."
-  [_ctx]
+  [ctx]
   nil)
 
 ;; ---------------------------------------------------------------------------

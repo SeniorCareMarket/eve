@@ -69,7 +69,7 @@
                         {:rid "R" :ttl ttl :requires '[eve.thread-ladder]
                          :transports [{:rung :net :endpoint endpoint :domain-id domain-id}]})
         t-attach (- (proc/now-ms) t0)
-        _g (dom/pool dh :g {:threads 2})
+        g (dom/pool dh :g {:threads 2})
         g2 (dom/pool dh :g2 {:threads 0})
         counter (net/rung cfg "test/counter")]
     (say {:step :joined :via (dom/via dh) :attach-ms t-attach})

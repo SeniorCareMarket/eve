@@ -214,7 +214,7 @@
 
 (defn record-leaf [schema record] (merkle/record-leaf (:leaf schema) record))
 
-(defn claim-digest [spec-id {:keys [branch old-root new-root record key] :as _claim} path leaf]
+(defn claim-digest [spec-id {:keys [branch old-root new-root record key] :as claim} path leaf]
   (merkle/chain [(merkle/field-of (vec spec-id)) (merkle/field-of branch) (merkle/field-of (path-string path))
                  leaf (vec old-root) (vec new-root) (merkle/field-of (when key (seg key)))]))
 
@@ -246,7 +246,7 @@
 
 (defn- hex-pubkey? [s] (and (string? s) (= 64 (count s)) (every? (fn [c] (b/hex-value c)) s)))
 
-(defn- check-primitive [ctx claim _branch {:keys [name args]} _schema leaf _path]
+(defn- check-primitive [ctx claim branch {:keys [name args]} schema leaf path]
   (case name
     :p/not-quarantined
     (cond (nil? (:principal claim)) (fail :no-principal)

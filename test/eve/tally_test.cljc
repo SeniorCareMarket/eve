@@ -227,7 +227,7 @@
         x (a/lookup-or-create-mmap-atom! dom "t/a" nil)
         y (a/lookup-or-create-mmap-atom! dom "t/b" nil)
         d (a/lookup-or-create-mmap-atom! dom "t/d" nil)
-        _sio (:sio (ds-of x))
+        sio (:sio (ds-of x))
         get-m (fn [at k] (a/read-pinned at (fn [m] (e/get (get m :m) k))))]
     (swap! x (fn [_] {:m (reduce (fn [m i] (e/assoc m i (str "v" i))) (so/sorted-map) (range 300))}))
     (flush! x)

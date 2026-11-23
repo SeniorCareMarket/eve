@@ -851,7 +851,7 @@
   "The answer a read gives for raw, read now under the caller's pin: a view
    holding a pin of its own (from the current epoch) when views are built
    here, else raw delivered flat."
-  [{:keys [root-r] :as ds} _atom-slot-idx raw]
+  [{:keys [root-r] :as ds} atom-slot-idx raw]
   (if-let [h (view-read-fn)]
     (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
       ;; the read api eve.view chooses from: a pin of the read's own (:hold,
@@ -912,7 +912,7 @@
    bare java.lang names the :clj arm names (Number, String, Boolean,
    Character), so that arm must never be read on the jank seat —
    jank takes the :default behavior explicitly."
-  [_v]
+  [v]
   #?(:jank false
      :clj (boolean (or (instance? Number v)
                        (instance? String v)
@@ -1224,7 +1224,7 @@
    the registered deliver-flat; the eve->clj materialization only when no
    delivery is registered (Eve without flat). The caller holds the pin;
    what this returns owns its bytes."
-  [_ds _atom-slot-idx raw]
+  [ds atom-slot-idx raw]
   (if-let [deliver (deref-deliver)]
     (deliver raw)
     (d/eve->clj raw)))
@@ -1312,7 +1312,7 @@
    atom-slot-idx
    f
    args
-   _exclusive?
+   exclusive?
    want-vals?]
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
@@ -1553,7 +1553,7 @@
 (defn- env-setting
   "A setting from the environment (NAME) or a JVM system property (prop),
    else nil."
-  [name _prop]
+  [name prop]
   #?(:clj (or (System/getenv name) (System/getProperty prop))
      :cljs (when (and (exists? js/process) (.-env js/process))
              (aget (.-env js/process) name))

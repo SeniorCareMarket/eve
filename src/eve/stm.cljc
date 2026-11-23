@@ -230,7 +230,7 @@
      :clje (proc/now-ms)
      :default (System/currentTimeMillis)))
 
-(defn- sleep-ms [_ms]
+(defn- sleep-ms [ms]
   #?(:jank (proc/sleep-ms! ms)
      ;; jank has no Thread shim and claims :clj in reader
      ;; conditionals, so its arm must precede :clj (Eve's own process
@@ -788,7 +788,7 @@
    The CAS gives up after 100 failures and escalates to the retry
    signal (or the basis-fault signal against a beyond-clock cell)
    — the runner re-runs the body against a fresh read point."
-  [_att e cp]
+  [att e cp]
   (let [r (:ref e)]
     (loop [n 0]
       (let [cur (cell-deref r)

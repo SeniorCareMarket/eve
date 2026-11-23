@@ -43,7 +43,7 @@
    read them natively; where a token must survive a host that rounds,
    read the text with read-string instead."
   ([reader] (read {} reader))
-  ([_opts _reader]
+  ([opts reader]
    #?(:cljs (throw (ex-info "eve.edn/read needs a string on this host; use eve.edn/read-string"
                             {:eve.edn/error :no-stream-reader}))
       :lpy (host-edn/read reader (type-readers/reader-options opts))

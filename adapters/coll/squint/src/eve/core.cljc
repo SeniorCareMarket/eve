@@ -176,5 +176,5 @@
 
 (defn array-chunk
   "A chunk of host array arr's n values: a vector (squint has no chunked seqs)."
-  [arr _n]
+  [arr n]
   (vec arr))

@@ -76,11 +76,11 @@
                               (pr-sequential-writer writer pr-writer "(" " " ")" opts this))
 
                   IWithMeta
-                  (-with-meta [_coll m]
+                  (-with-meta [coll m]
                               (rrb-chunked-seq vec node i off m))
 
                   IMeta
-                  (-meta [_coll] meta)
+                  (-meta [coll] meta)
 
                   ISeqable
                   (-seq [coll] coll)
@@ -91,7 +91,7 @@
 
                   ASeq
                   ISeq
-                  (-first [_coll]
+                  (-first [coll]
                           (aget node off))
 
                   (-rest [coll]
@@ -116,14 +116,14 @@
                          (cons o coll))
 
                   IEmptyableCollection
-                  (-empty [_coll]
+                  (-empty [coll]
                           (with-meta () meta))
 
                   IChunkedSeq
-                  (-chunked-first [_coll]
+                  (-chunked-first [coll]
                                   (array-chunk node off))
 
-                  (-chunked-rest [_coll]
+                  (-chunked-rest [coll]
                                  (let [l (alength node)
                                        s (when (< (+ i l) (-count vec))
                                            (rrb-chunked-seq vec (+ i l) 0))]
@@ -132,7 +132,7 @@
                                      s)))
 
                   IChunkedNext
-                  (-chunked-next [_coll]
+                  (-chunked-next [coll]
                                  (let [l (alength node)
                                        s (when (< (+ i l) (-count vec))
                                            (rrb-chunked-seq vec (+ i l) 0))]
@@ -144,10 +144,10 @@
                   (-hash [coll] (caching-hash coll hash-ordered-coll __hash))
 
                   IReduce
-                  (-reduce [_coll f]
+                  (-reduce [coll f]
                            (ci-reduce (subvec vec (+ i off) (count vec)) f))
 
-                  (-reduce [_coll f start]
+                  (-reduce [coll f start]
                            (ci-reduce (subvec vec (+ i off) (count vec)) f start)))
 
 (defn rrb-chunked-seq
@@ -321,11 +321,11 @@
     (pr-sequential-writer writer pr-writer "[" " " "]" opts this))
 
   IWithMeta
-  (-with-meta [_this meta]
+  (-with-meta [this meta]
     (->Vector cnt shift root tail meta __hash))
 
   IMeta
-  (-meta [_this]
+  (-meta [this]
     meta)
 
   ISequential
@@ -394,7 +394,7 @@
     (-nth this 1))
 
   ICollection
-  (-conj [_this val]
+  (-conj [this val]
     (if (< (alength tail) 32)
       (let [tail-len (alength tail)
             new-tail (make-array (inc tail-len))]
@@ -552,7 +552,7 @@
     (compare-indexed this that))
 
   IEditableCollection
-  (-as-transient [_this]
+  (-as-transient [this]
     (->Transient cnt
                  shift
                  (editable-root root)
@@ -615,7 +615,7 @@
     (splice-rrbts this (-as-rrbt that)))
 
   IVecImpl
-  (-tail-offset [_this]
+  (-tail-offset [this]
     (- cnt (alength tail)))
 
   (-array-for [this i]
@@ -1324,7 +1324,7 @@
                                   this))))
                           (throw (ex-info "conj! after persistent!" {}))))
 
-                  (persistent [_this]
+                  (persistent [this]
                               (if (.-edit root)
       ;; eve: the edit token is on the root instance, not in eve memory; the
       ;; transient lets go of it by taking the same node without it (the JVM
@@ -1405,13 +1405,13 @@
                          (throw (ex-info "count after persistent!" {}))))
 
                   clojure.lang.Counted
-                  (count [_this]
+                  (count [this]
                          (if (.-edit root)
                            cnt
                            (throw (ex-info "count after persistent!" {}))))
 
                   IVecImpl
-                  (-tail-offset [_this]
+                  (-tail-offset [this]
                                 (- cnt tidx))
 
                   (-array-for [this i]
