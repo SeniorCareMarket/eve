@@ -96,23 +96,37 @@
 (def ^:private ^:const INT-KEY-MEMO-N 4096)
 (def ^:private ^{:tag "[Ljava.lang.Object;"} int-key-memo (object-array INT-KEY-MEMO-N))
 
+#?(:jolt
+   (do
+     ;; jolt: a small non-negative integer key's memo slot in one Chez call (the integer?/number?/neg?/</aget
+     ;; checks priced ~60 ns a lookup): the slot's pair, nil where it is still empty, or miss for any other key
+     (scheme/eval-string
+      "(define (eve-map-int-memo-ref k memo n miss)
+         (if (and (fixnum? k) (fx>= k 0) (fx< k n)) (vector-ref (jolt-array-vec memo) k) miss))")
+     (def ^:private int-memo-ref* (scheme/proc "eve-map-int-memo-ref"))
+     (def ^:private int-memo-miss (Object.))))
+
 (defn- key-bytes+hash
   "The [kb kh] a HAMT lookup needs for k."
   [k]
-  (if (keyword? k)
-    (or (enc/cache-get key-memo k)
-        (let [kb (serialize-key-bytes k)
-              pair [kb (portable-hash-bytes kb)]]
-          (enc/cache-put! key-memo k pair KEY-MEMO-MAX)
-          pair))
-    (if (and (integer? k) (number? k) (not (neg? k)) (< k INT-KEY-MEMO-N))
-      (or (aget ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k))
+  (if-let [p #?(:jolt (let [p (int-memo-ref* k int-key-memo INT-KEY-MEMO-N int-memo-miss)]
+                        (when-not (identical? p int-memo-miss) p))
+                :default nil)]
+    p
+    (if (keyword? k)
+      (or (enc/cache-get key-memo k)
           (let [kb (serialize-key-bytes k)
                 pair [kb (portable-hash-bytes kb)]]
-            (aset ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k) pair)
+            (enc/cache-put! key-memo k pair KEY-MEMO-MAX)
             pair))
-      (let [kb (serialize-key-bytes k)]
-        [kb (portable-hash-bytes kb)]))))
+      (if (and (integer? k) (number? k) (not (neg? k)) (< k INT-KEY-MEMO-N))
+        (or (aget ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k))
+            (let [kb (serialize-key-bytes k)
+                  pair [kb (portable-hash-bytes kb)]]
+              (aset ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k) pair)
+              pair))
+        (let [kb (serialize-key-bytes k)]
+          [kb (portable-hash-bytes kb)])))))
 
 (defn- serialize-val-bytes
   "Serialize a value to bytes (platform-specific).
@@ -653,24 +667,31 @@
      ;; Clojure, as before.
      (scheme/eval-string
       "(begin
-         (define (eve-hamt-popc n) (eve-i32-popcount n))
-         (define (eve-hamt-bitpos kh shift)
-           (fxsll 1 (fxand (eve-i32-ushr kh shift) #x1f)))
-         (define (eve-hamt-has-bit? bm bit)
-           (not (fxzero? (fxlogand (eve-i32-i32 bm) bit))))
-         (define (eve-hamt-node-bit dbm nbm kh shift)
-           (let ((bit (eve-hamt-bitpos kh shift)))
-             (if (and (fx= shift 30) (fx< (eve-i32-i32 kh) 0)
-                      (not (eve-hamt-has-bit? dbm bit))
-                      (not (eve-hamt-has-bit? nbm bit)))
-                 (let ((old (fxsll bit 28)))
-                   (if (or (eve-hamt-has-bit? dbm old)
-                           (eve-hamt-has-bit? nbm old))
-                       old
-                       bit))
-                 bit)))
-         (define (eve-hamt-index bm bit)
-           (eve-hamt-popc (fxlogand (eve-i32-i32 bm) (fx- bit 1))))
+         ;; the node helpers are macros (eval-string's top-level procedures are called, not inlined); a word load is a
+         ;; signed 32-bit fixnum, and the walk normalises kh to one once
+         (define-syntax eve-hamt-popc
+           (syntax-rules () ((_ n) (fxpopcount32 (fxand n #xFFFFFFFF)))))
+         (define-syntax eve-hamt-bitpos
+           (syntax-rules ()
+             ((_ kh shift)
+              (if (fx< shift 32) (fxsll 1 (fxand (fxsrl (fxand kh #xFFFFFFFF) shift) #x1f)) 1))))
+         (define-syntax eve-hamt-has-bit?
+           (syntax-rules () ((_ bm bit) (not (fxzero? (fxlogand bm bit))))))
+         (define-syntax eve-hamt-node-bit
+           (syntax-rules ()
+             ((_ dbm nbm kh shift)
+              (let ((bit (eve-hamt-bitpos kh shift)))
+                (if (and (fx= shift 30) (fx< kh 0)
+                         (not (eve-hamt-has-bit? dbm bit))
+                         (not (eve-hamt-has-bit? nbm bit)))
+                    (let ((old (fxsll bit 28)))
+                      (if (or (eve-hamt-has-bit? dbm old)
+                              (eve-hamt-has-bit? nbm old))
+                          old
+                          bit))
+                    bit)))))
+         (define-syntax eve-hamt-index
+           (syntax-rules () ((_ bm bit) (eve-hamt-popc (fxlogand bm (fx- bit 1))))))
          ;; one node's step of the walk, over the word loads i32 / u8 and the byte read rb (macro keywords bound by the
          ;; caller): on a JoltRegion with a fixnum base they are the open-coded #3%foreign-ref at base + address (the
          ;; region resolved once per node), else the region's own ops (the same loads, each resolving the region).
@@ -682,12 +703,12 @@
                 (cond
                   ((fx>= j n) #t)
                   ((fx<= (fx+ j 4) n)
-                   (if (fx= (eve-i32-u32 (i32 (fx+ p j)))
+                   (if (fx= (fxand (i32 (fx+ p j)) #xFFFFFFFF)
                             (bytevector-u32-ref bv j (endianness little)))
                        (cmp (fx+ j 4))
                        #f))
                   (else
-                   (if (fx= (eve-i32-u32 (u8 (fx+ p j)))
+                   (if (fx= (u8 (fx+ p j))
                             (bytevector-u8-ref bv j))
                        (cmp (fx+ j 1))
                        #f)))))))
@@ -708,7 +729,7 @@
                         (let* ((di (eve-hamt-index dbm bit))
                                (hs (fx+ 12 (fx* 4 (eve-hamt-popc nbm))))
                                (sh (i32 (fx+ a hs (fx* di 4)))))
-                          (if (not (fx= (eve-i32-i32 sh) (eve-i32-i32 kh)))
+                          (if (not (fx= sh kh))
                               jolt-nil
                               (let* ((kvs (fx+ hs (fx* 4 (eve-hamt-popc dbm))))
                                      (pos (let kvp ((i 0) (p kvs))
@@ -726,8 +747,7 @@
                                     jolt-nil)))))
                        (else jolt-nil))))
                   ((fx= nt 3)
-                   (if (not (fx= (eve-i32-i32 (i32 (fx+ a 4)))
-                                 (eve-i32-i32 kh)))
+                   (if (not (fx= (i32 (fx+ a 4)) kh))
                        jolt-nil
                        (let ((cc (u8 (fx+ a 1))))
                          (let clp ((i 0) (pos 8))
@@ -744,7 +764,7 @@
                                             (fx+ vo 4 (i32 (fx+ a vo))))))))))))
                   (else jolt-nil))))))
          (define (eve-hamt-walk rs dos bss off kh kb i32op u8op rbop)
-           (let* ((bv (jolt-array-vec kb)) (klen (bytevector-length bv)))
+           (let* ((bv (jolt-array-vec kb)) (klen (bytevector-length bv)) (kh (eve-i32-i32 kh)))
              (let loop ((off off) (shift 0))
                (if (eqv? off -1)
                    jolt-nil
