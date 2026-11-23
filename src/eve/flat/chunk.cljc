@@ -23,6 +23,7 @@
             ;; every read and write of a chunk's bytes (doc/flat/FLAT-IO.md):
             ;; the byte layer that stood in this file moved there (flat lanes U2a)
             [eve.flat-io :as fio]
+            #?(:jolt [jolt.scheme :as scheme])
             [eve.platform :as platform]
             ;; The protocol hosts (bb, glojure) spell a handle's surface
             ;; through the seat's eve.core protocols — the same surface
@@ -36,6 +37,11 @@
   #?(:clj (:import [java.util Arrays HashMap ArrayList])))
 
 #?(:clj (set! *warn-on-reflection* true))
+
+#?(:clj
+   (def ^:private byte-array-class
+     ;; the JVM's [B, looked up once (Class/forName per call was a name lookup per value written or read)
+     (Class/forName "[B")))
 
 (defn- host-bytes?
   "x is a host byte array (the JVM's [B): the test the flat writer and
@@ -54,7 +60,7 @@
      :glj (boolean (and (enc/host-array? x)
                         (let [sb (enc/array-subtype+bytes x)]
                           (and sb (= 2 (nth sb 0))))))
-     :clj (instance? (Class/forName "[B") x)
+     :clj (instance? byte-array-class x)
      :cljs (instance? js/Uint8Array x)
      :default false))
 
@@ -252,6 +258,16 @@
   (-rep [h] "this handle's value as a rep, metadata included")
   (-chunk-bytes [h] "the bytes of the chunk this handle reads"))
 
+;; jolt: "a clojure.lang collection" — the JVM arm's class-name test — without (class x), .getName and .startsWith
+;; (measured on jolt v0.8.28: ~400 ns a collection, the class name a hashed string lookup; string-hash was 7% of a ds
+;; find, jseam r6). A jolt built-in collection is a Chez value that is not a jolt record (jrec): every deftype and
+;; defrecord instance is one, and their class names are their own, never clojure.lang's — checked equal to the
+;; class-name test on 37 values (maps, vectors, sets, lists, seqs, sorted, queue, subvec, map entry, records,
+;; deftypes, vector-of, scalars; probe/jseam/src/jseam/hashprobe3.clj). ~40 ns.
+#?(:jolt
+   (do (scheme/eval-string "(define (eve-not-jrec? x) (not (jrec? x)))")
+       (def ^:private not-jrec?* (scheme/proc "eve-not-jrec?"))))
+
 ;; THE FAST HANDLE TEST (2026-11-16, the eve-in-VS unit). `satisfies?` on a value whose class does not implement the
 ;; protocol walks the class's supers on every call (clojure.core/find-protocol-impl -> supers -> a fresh hash set):
 ;; MEASURED on the JVM (the 1BRC result shape, 407 string keys -> [min sum max count]), 64 % of fc/pack in three such
@@ -264,7 +280,8 @@
      #?(:jank false :bb false :glj false
         :clj (or (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x) (char? x)
                  (and (instance? clojure.lang.IPersistentCollection x)
-                      (.startsWith (.getName (class x)) "clojure.lang."))))))
+                      #?(:jolt (not-jrec?* x)
+                         :clj (.startsWith (.getName (class x)) "clojure.lang.")))))))
 ;; the satisfies? answer of a class no interface answers, remembered per class in an atom (these marker protocols are
 ;; only ever implemented inline, so a class's answer never changes): the supers walk once a class, not once a value
 #?(:clj
@@ -325,10 +342,15 @@
 
 (declare to-rep)
 
+#?(:clj
+   (def ^:private object-array-class
+     ;; the JVM's Object[], looked up once (as byte-array-class)
+     (Class/forName "[Ljava.lang.Object;")))
+
 (defn- host-object-array?
   "x is a host object array: the JVM's Object[], a JS array."
   [x]
-  #?(:clj (instance? (Class/forName "[Ljava.lang.Object;") x)
+  #?(:clj (instance? object-array-class x)
      :cljs (array? x)
      :default false))
 
