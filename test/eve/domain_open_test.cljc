@@ -10,6 +10,8 @@
             [eve.host :refer [swap!]]
             [eve.process :as proc]
             [eve.atom :as a]
+            [eve.mem :as mem]
+            [eve.deftype-proto.data :as d]
             #?(:cljs ["os" :as os])))
 
 (defn- fresh-base []
@@ -37,3 +39,105 @@
         (swap! x2 inc)
         (is (= 42 @x2))
         (a/close-atom-domain! dom2)))))
+
+(defn- published-epoch
+  "The worker slot's CURRENT_EPOCH word (0 when nothing is pinned)."
+  [ds]
+  (mem/-load-i32 (:root-r ds) (+ d/ROOT_WORKER_REGISTRY_START
+                                 (* (:slot-idx ds) d/WORKER_SLOT_SIZE)
+                                 d/OFFSET_WS_CURRENT_EPOCH)))
+
+(defn- portable-pin-step
+  "Independent copy of the portable pins-map update (atom.cljc pin-epoch! /
+   unpin-epoch! / view-pin! / view-unpin!)."
+  [m tid op epoch]
+  (case op
+    :pin (if-let [[e depth] (get m tid)]
+           (assoc m tid [(min e epoch) (inc depth)])
+           (assoc m tid [epoch 1]))
+    :unpin (if-let [[e depth] (get m tid)]
+             (if (> depth 1)
+               (assoc m tid [e (dec depth)])
+               (dissoc m tid))
+             m)
+    :view-pin (let [vs (or (get m :eve.atom/views) (sorted-map))]
+                (assoc m :eve.atom/views (assoc vs epoch (inc (get vs epoch 0)))))
+    :view-unpin (let [vs (get m :eve.atom/views)
+                      n (dec (get vs epoch 0))
+                      vs (if (pos? n) (assoc vs epoch n) (dissoc vs epoch))]
+                  (if (pos? (count vs)) (assoc m :eve.atom/views vs) (dissoc m :eve.atom/views)))))
+
+(defn- portable-published
+  "Independent copy of slot-pin!'s published word (0 when no pin remains)."
+  [m]
+  (let [views (get m :eve.atom/views)
+        tmin (reduce-kv (fn [acc k v]
+                          (if (= k :eve.atom/views)
+                            acc
+                            (let [e (first v)]
+                              (if (or (nil? acc) (< e acc)) e acc))))
+                        nil m)
+        vmin (when (pos? (count views)) (key (first views)))]
+    (if (and (nil? tmin) (nil? vmin))
+      0
+      (min (or tmin vmin) (or vmin tmin)))))
+
+(deftest pin-state-matches-portable-path
+  (let [dom (a/atom-domain nil)
+        at (a/lookup-or-create-mmap-atom! dom "pin-table" {})
+        ds (a/-domain-state at)
+        tid (proc/thread-id)
+        apply-live! (fn [op epoch]
+                      (case op
+                        :pin (#'a/pin-epoch! ds epoch)
+                        :unpin (#'a/unpin-epoch! ds)
+                        :view-pin (#'a/view-pin! ds epoch)
+                        :view-unpin (#'a/view-unpin! ds epoch)))
+        live (fn [] {:pins (into {} @(:pins ds)) :published (published-epoch ds)})]
+    (try
+      (let [start (into {} @(:pins ds))]
+        (is (= (portable-published start) (published-epoch ds))
+            "the word already published matches the table (construction may hold views)")
+        (let [script [[:pin 5] [:pin 7] [:unpin] [:unpin]
+                      [:view-pin 10] [:view-pin 10] [:view-pin 4] [:view-unpin 4]
+                      [:pin 8] [:unpin] [:view-unpin 10] [:view-unpin 10]
+                      [:pin 3] [:view-pin 3] [:unpin] [:view-unpin 3]
+                      [:pin 12] [:view-pin 20] [:view-unpin 20] [:unpin]]]
+          (reduce (fn [m [op epoch]]
+                    (apply-live! op epoch)
+                    (let [m (portable-pin-step m tid op epoch)
+                          want {:pins m :published (portable-published m)}
+                          got (live)]
+                      (is (= want got) (str op " " epoch))
+                      m))
+                  start
+                  script)))
+      #?(:cljs nil
+         :clje nil
+         :lpy nil
+         :default
+         (let [before (:pins (live))
+               ready (java.util.concurrent.CountDownLatch. 1)
+               hold (java.util.concurrent.CountDownLatch. 1)
+               other-tid (clojure.core/atom nil)
+               t (Thread. (fn []
+                            (reset! other-tid (proc/thread-id))
+                            (#'a/pin-epoch! ds 9)
+                            (.countDown ready)
+                            (.await hold)
+                            (#'a/unpin-epoch! ds)))]
+           (#'a/pin-epoch! ds 20)
+           (let [m (portable-pin-step before tid :pin 20)]
+             (is (= {:pins m :published (portable-published m)} (live)))
+             (.start t)
+             (.await ready)
+             (let [m2 (portable-pin-step m @other-tid :pin 9)]
+               (is (= {:pins m2 :published (portable-published m2)} (live))
+                   "the slot publishes the min of the threads (and any views)")
+               (.countDown hold)
+               (.join t)
+               (is (= {:pins m :published (portable-published m)} (live))))
+             (#'a/unpin-epoch! ds)
+             (is (= {:pins before :published (portable-published before)} (live))))))
+      (finally
+        (a/close-atom-domain! dom)))))
