@@ -21,7 +21,11 @@
             [eve.process :as proc]
             [eve.sorted :as sorted]
             [eve.thread :as t]
-            [eve.thread-host :as h]))
+            [eve.thread-host :as h]
+            ;; thread-submit-64's messages cross as eve.wire bytes, which the thread host resolves when a task is
+            ;; first sent (requiring-resolve): loaded here, so a built binary (jolt build), which embeds only the
+            ;; namespaces its entry requires, has it
+            [eve.wire]))
 
 (def default-budget-ms 1000)
 
