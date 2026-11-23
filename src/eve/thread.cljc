@@ -135,7 +135,11 @@
 (defmacro with-pool
   "body with *pool* bound to p: futures, pmap, pcalls and pvalues inside it run on p."
   [p & body]
-  `(binding [eve.thread/*pool* ~p] (let [res# (do ~@body)] res#)))
+  ;; the body splice is the macro's contract (the caller's forms under
+  ;; binding); the let-wrap splint suggests changes the expansion's shape
+  ;; for no semantic gain — batch D installed it and the fold repair
+  ;; reverted it together with the comp restorations below
+  #_{:splint/disable [lint/body-unquote-splicing]} `(binding [eve.thread/*pool* ~p] ~@body))
 
 (defmacro deftask
   "defn, and the fn registered under its qualified name with its form's hash: a task that may cross a heap by name."
@@ -187,7 +191,10 @@
   [{:keys [kind forms keys]}]
   (case kind
     :step (first forms)
-    :seq `(eve.thread.fold/seq-run ~@forms)
+    ;; comp over the splice: ~@forms is every transducer form of the segment,
+    ;; composed at expansion — splint's projection reads the splice as one
+    ;; argument and calls the comp redundant; batch D believed it and broke =>>
+    :seq `(eve.thread.fold/seq-run #_{:splint/disable [lint/redundant-call]} (comp ~@forms))
     :par (let [in (gensym "in")
                chunk (gensym "chunk")
                ;; (realized once: a host's lazy seq need not memoize — clojerl's walked again would gensym anew)
@@ -200,9 +207,9 @@
            `((fn [~in]
                (let [~@binds]
                  (eve.thread.fold/par-run
-                  {:xf (fn [] ~@xfs)
+                  {:xf (fn [] #_{:splint/disable [lint/redundant-call]} (comp ~@xfs))
                    :spec ~spec
-                   :tfn (eve.thread/tfn [~chunk] (eve.thread.fold/into-chunk ~@forms ~chunk))}
+                   :tfn (eve.thread/tfn [~chunk] (eve.thread.fold/into-chunk #_{:splint/disable [lint/redundant-call]} (comp ~@forms) ~chunk))}
                   ~in)))))))
 
 (defmacro =>>
