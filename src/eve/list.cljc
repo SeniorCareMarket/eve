@@ -209,10 +209,10 @@
   (hasheq [this] (dg/root-hash sio__ offset__ (fn [] (p/hash-ordered this))))
 
   clojure.lang.ISeq
-  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (first [_]
     (when (pos? cnt)
       (read-node-value sio__ head-off)))
+  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (more [_]
     (if (<= cnt 1)
       ()
