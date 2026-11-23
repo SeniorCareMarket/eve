@@ -362,20 +362,20 @@
   ;; (which is also why splint's :cljs projection reads the if as if-nil-else),
   ;; so an if-let binding reads as unused to kondo on that pass; the if test names the use
   #_{:splint/disable [lint/let-if lint/if-nil-else]} (let [ha #?(:clj (alloc/node-heap-array src off) :cljs nil)]
-                                      (if ha
+                                                       (if ha
       ;; never read past the source array's end: a window copy may ask for
       ;; more than the array holds past this block (the bounded size scan
       ;; then reports the window short instead of copying garbage)
-                                        #?(:clj (System/arraycopy ha (int (alloc/node-base src off)) dst (int dst-off)
-                                                                  (int (min (long size)
-                                                                            (- (alength ha) (alloc/node-base src off)))))
-                                           :cljs nil)
-                                        (if (instance? eve.flat.sio.FlatSio src)
-                                          #?(:clj (System/arraycopy (ssio/-sio-bytes src) (int off) dst (int dst-off) (int size))
-                                             :cljs (.set dst (.subarray (ssio/-sio-bytes src) (int off) (int (+ off size))) (int dst-off)))
-                                          (let [b (alloc/-sio-read-bytes src off 0 size)]
-                                            #?(:clj (System/arraycopy ^bytes b 0 dst (int dst-off) (int size))
-                                               :cljs (.set dst b (int dst-off))))))))
+                                                         #?(:clj (System/arraycopy ha (int (alloc/node-base src off)) dst (int dst-off)
+                                                                                   (int (min (long size)
+                                                                                             (- (alength ha) (alloc/node-base src off)))))
+                                                            :cljs nil)
+                                                         (if (instance? eve.flat.sio.FlatSio src)
+                                                           #?(:clj (System/arraycopy (ssio/-sio-bytes src) (int off) dst (int dst-off) (int size))
+                                                              :cljs (.set dst (.subarray (ssio/-sio-bytes src) (int off) (int (+ off size))) (int dst-off)))
+                                                           (let [b (alloc/-sio-read-bytes src off 0 size)]
+                                                             #?(:clj (System/arraycopy ^bytes b 0 dst (int dst-off) (int size))
+                                                                :cljs (.set dst b (int dst-off))))))))
 
 ;; The detach walk's bookkeeping: one object array of slots —
 ;;   0 keys ^ints (ordinal-table keys: low 32 bits of source offsets)
