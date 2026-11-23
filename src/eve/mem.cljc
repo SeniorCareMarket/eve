@@ -32,9 +32,12 @@
                      unchecked-inc-int unsigned-bit-shift-right long double class locking
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects extend-default]]
-   [eve.deftype-proto.data :as d]
-   [eve.encoding :as enc]
-   [eve.platform :as p]))
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.data :as d]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.encoding :as enc]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.platform :as p]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol

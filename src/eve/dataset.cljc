@@ -26,13 +26,17 @@
    [eve.array :as arr]
    [eve.dataset.argops :as argops]
    [eve.deftype-proto.data :as d]
-   [eve.deftype-proto.serialize :as ser]
-   [eve.codec :as codec]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.serialize :as ser]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.codec :as codec]
    [eve.encoding :as enc]
-   [eve.platform :as p]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.platform :as p]
    [eve.deftype :as edt]
    [eve.deftype-proto.alloc :as alloc]
-   [eve.deftype.slab-runtime :as slab-rt]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype.slab-runtime :as slab-rt]
    [eve.flat.sister :as sister]
    ;; Load order, same law for the second registry: eve.deftype's
    ;; expansion also ends in an eve.type-readers/register! call.

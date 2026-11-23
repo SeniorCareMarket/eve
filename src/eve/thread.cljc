@@ -20,11 +20,14 @@
   ;; the aliases the api table names its values by (adapters/core/cljs-compiler's eve/thread.cljs requires the same)
   (:require [clojure.walk :as walk]
             [eve.thread-host]
-            [eve.thread.cell :as cell]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.thread.cell :as cell]
             [eve.thread.descriptor]
             [eve.thread.fold :as fold]
-            [eve.thread.future :as fut]
-            [eve.thread.pool :as pool]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.thread.future :as fut]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.thread.pool :as pool]
             [eve.thread.task :as task]))
 
 ;; ---------------------------------------------------------------------------

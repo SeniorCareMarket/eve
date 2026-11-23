@@ -13,12 +13,17 @@
    defines (the shipped detach/transfer walk), driven over direct
    per-class slab access instead of the generic per-block read path."
   (:require [eve.atom :as ea]
-            [eve.deftype-proto.alloc :as alloc]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
-            [eve.deftype-proto.serialize :as ser]
-            [eve.digest :as digest]
-            [eve.flat.transfer :as t]
-            [eve.slab-io :as slab])
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.serialize :as ser]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.digest :as digest]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.transfer :as t]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.slab-io :as slab])
   #?(:clj (:import [eve.deftype_proto.alloc JvmSlabCtx]
                    [java.util ArrayList Arrays])))
 
