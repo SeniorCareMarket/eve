@@ -890,7 +890,7 @@
                            (+ sh SHIFT_STEP))))))]
         (write-vec-header! sio cnt sft root tail-off (- cnt toff))))))
 
-(defn- -write-vec-coll!
+(defn -write-vec-coll!
   "Serialize a Clojure vector/seq to slab as an Eve persistent vector trie.
    Returns header offset."
   [sio _serialize-val coll]

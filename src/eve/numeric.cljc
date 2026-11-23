@@ -324,7 +324,7 @@
      (defn- bi-long [a] #?(:clje a :default (long a)))
      (defn- bi-pow10 [k]
        #?(:jank (loop [i 0 p (bi-from 1)] (if (< i k) (recur (inc i) (bi* p (bi-from 10))) p))
-          :clj (.pow (BigInteger/TEN) (int k))
+          :clj (.pow BigInteger/TEN (int k))
           :lpy (python/pow 10 k)
           :default (loop [i 0 p 1] (if (< i k) (recur (inc i) (#?(:clj *' :default *) p 10)) p))))
      (defn- bi-limbs32 [n]

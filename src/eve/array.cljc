@@ -885,7 +885,7 @@
 ;; rewrite it (census D6: a read that writes): the instance takes its
 ;; subtype from byte 0, and the header is converted only when a write
 ;; copies the array (the atom store builder writes a fresh 0x1D block).
-(defn- eve-array-from-sab-pointer [sio slab-off]
+(defn eve-array-from-sab-pointer [sio slab-off]
   (let [byte0 (slab/read-u8 sio slab-off 0)]
     (if (<= byte0 9)
       (->EveArray sio slab-off byte0 (subtype->elem-shift byte0)

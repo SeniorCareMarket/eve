@@ -321,6 +321,11 @@
    earlier defs are Dart-side, not vars, and the derived type-ids are
    name-based, so the two answers agree wherever both could speak."
   [env sym]
+  ;; clj-kondo parses .cljd as :clj and rejects reader conditionals
+  ;; there; #? is ClojureDart-legal in .cljd (features :cljd and
+  ;; :cljd/clj-host), so the one :syntax finding is the tool's
+  ;; limitation, not this form's defect — ignored at the site.
+  #_{:clj-kondo/ignore [:syntax]}
   #?(:cljd/clj-host
      (or (when-let [v (resolve sym)] {:value @v})
          (when-let [ns-name (get-in env [:ns :name])]

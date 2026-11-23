@@ -9,7 +9,6 @@
             [eve.deftype-proto.macros :refer [host-deftype]]
             [eve.type-readers :as readers]
             [eve.deftype.registry :as registry]
-            [eve.deftype.registry :as registry]
             [eve.encoding :as enc]))
 
 (defn- in-a-domain-of-its-own

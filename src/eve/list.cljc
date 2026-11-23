@@ -419,7 +419,7 @@
 
 ;; Collection writer: a host collection written straight into the slab, for a
 ;; codec that writes one directly (eve.codec)
-(defn- -write-list-coll!
+(defn -write-list-coll!
   "Serialize a Clojure list/seq to slab as an Eve linked list. Returns header offset.
    sio is explicit (first parameter)."
   [sio _serialize-elem coll]

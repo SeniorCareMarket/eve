@@ -19,6 +19,11 @@
 ;; (State lives in top-level atoms + one let inside run: Basilisp's
 ;; analyzer does not resolve defs nested in a defn body.)
 
+;; The namespace name is deliberately NOT the file path: dialect
+;; hosts load-file this file and call stm-portable/run (see the
+;; header comment above) — the name is a harness-visible identity,
+;; so :namespace-name-mismatch is ignored at this one site.
+#_{:clj-kondo/ignore [:namespace-name-mismatch]}
 (ns stm-portable
   "The portable check suite as a namespace: dialect hosts load-file
    this file and call stm-portable/run (or -main); the CLJS seats go

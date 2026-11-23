@@ -1076,7 +1076,7 @@
 
 ;; Collection writer: a host collection written straight into the slab, for a
 ;; codec that writes one directly (eve.codec)
-(defn- -write-set-coll!
+(defn -write-set-coll!
   "Serialize a Clojure set to slab as an Eve HAMT set. Returns header offset.
    sio is explicit (first parameter)."
   [sio _serialize-elem coll]
