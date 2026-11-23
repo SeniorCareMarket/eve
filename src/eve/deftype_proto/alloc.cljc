@@ -204,6 +204,10 @@
 ;; byte 0 of a slab block is its type-id. Registered on every host, as a named
 ;; fn: a fn that a top-level form makes is interpreted on clojerl (its Core
 ;; Erlang evaluator), a defn's compiled — and every read of a value calls this.
+;; jolt: eve.slab-io's macros expand to these (defined with LoggingSlabIO, below)
+#?(:jolt (declare fast-read-u8 fast-read-u16 fast-read-i32 fast-read-bytes
+                  fast-write-u8! fast-write-u16! fast-write-i32!))
+
 (defn read-header-tag
   "The type-id byte at the start of the block at slab-off."
   [sio slab-off]
@@ -239,7 +243,9 @@
         (do
           (scheme/eval-string
            "(begin
-              (define (eve-sio-ref a i) (let ((v (jolt-array-vec a))) (if (fxvector? v) (fxvector-ref v i) (vector-ref v i))))
+              (define-syntax eve-sio-ref
+                (syntax-rules ()
+                  ((_ a i) (let ((v (jolt-array-vec a))) (if (fxvector? v) (fxvector-ref v i) (vector-ref v i))))))
               (define-syntax eve-sio-at
                 (syntax-rules ()
                   ((_ rs dos bss so fo r a body)
@@ -291,7 +297,7 @@
        ISlabIO
 
        (-sio-read-u8 [_ slab-offset field-off]
-         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off mem/-plain-load-u8)
+         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off region/plain-load-u8-op)
             :default
             (let [class-idx (decode-class-idx slab-offset)
                  block-idx (decode-block-idx slab-offset)
@@ -302,7 +308,7 @@
              (mem/-plain-load-u8 region (+ base (long field-off))))))
 
        (-sio-write-u8! [_ slab-offset field-off val]
-         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val mem/-plain-store-u8!)
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val region/plain-store-u8-op)
             :default
             (let [class-idx (decode-class-idx slab-offset)
                  block-idx (decode-block-idx slab-offset)
@@ -312,7 +318,7 @@
              (mem/-plain-store-u8! region (+ base (long field-off)) val))))
 
        (-sio-read-u16 [_ slab-offset field-off]
-         #?(:jolt (sio-u16* regions data-offsets block-sizes slab-offset field-off mem/-plain-load-u8)
+         #?(:jolt (sio-u16* regions data-offsets block-sizes slab-offset field-off region/plain-load-u8-op)
             :default
             (let [class-idx (decode-class-idx slab-offset)
                  block-idx (decode-block-idx slab-offset)
@@ -325,7 +331,7 @@
                      (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8)))))
 
        (-sio-write-u16! [_ slab-offset field-off val]
-         #?(:jolt (sio-put-u16* regions data-offsets block-sizes slab-offset field-off val mem/-plain-store-u8!)
+         #?(:jolt (sio-put-u16* regions data-offsets block-sizes slab-offset field-off val region/plain-store-u8-op)
             :default
             (let [class-idx (decode-class-idx slab-offset)
                  block-idx (decode-block-idx slab-offset)
@@ -337,7 +343,7 @@
                                                (bit-and (unsigned-bit-shift-right val 8) 0xFF)])))))
 
        (-sio-read-i32 [_ slab-offset field-off]
-         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off mem/-plain-load-i32)
+         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off region/plain-load-i32-op)
             :default
             (let [class-idx (decode-class-idx slab-offset)
                  block-idx (decode-block-idx slab-offset)
@@ -359,7 +365,7 @@
              (mem/-plain-load-i32 region (+ base (long field-off))))))
 
        (-sio-write-i32! [_ slab-offset field-off val]
-         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val mem/-plain-store-i32!)
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val region/plain-store-i32-op)
             :default
             (let [class-idx (decode-class-idx slab-offset)
                  block-idx (decode-block-idx slab-offset)
@@ -380,7 +386,7 @@
            (mem/-cas-i32! region (+ base field-off) expected desired)))
 
        (-sio-read-bytes [_ slab-offset field-off len]
-         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off len mem/-read-bytes)
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off len region/read-bytes-op)
             :default
             (let [class-idx (decode-class-idx slab-offset)
                  block-idx (decode-block-idx slab-offset)
@@ -1473,7 +1479,82 @@
      (def ^:private tag?* (scheme/proc "eve-alloc-tag?"))
      (def ^:private logging-tag ((scheme/proc "eve-alloc-type-tag") LoggingSlabIO))
      (def ^:private slab-ctx-tag ((scheme/proc "eve-alloc-type-tag") JvmSlabCtx))
-     (defn- slab-ctx? [x] (tag?* x slab-ctx-tag))))
+     (defn- slab-ctx? [x] (tag?* x slab-ctx-tag))
+
+     ;; eve.slab-io's read and write macros on jolt (each was an ISlabIO protocol call, the method's frame, then the
+     ;; region's): through any LoggingSlabIO wrappers to the JvmSlabCtx by descriptor (each type's tag matched once,
+     ;; its descriptor kept for an eq? test after: a type's tag is a string, not one object), then the access above on
+     ;; its regions, data-offsets and block-sizes (fields 0, 2 and 5 of a spilled record's field vector) with the
+     ;; region's own op; any other slab I/O takes the protocol fn. LoggingSlabIO's inner is its field 0 (a 3-field
+     ;; record's). The same accesses, without the dispatch.
+     (scheme/eval-string
+      "(begin
+         (define-syntax eve-alloc-unwrap
+           (syntax-rules ()
+             ((_ sio s ctag ltag cd ld fast slow)
+              (let loop ((s sio))
+                (if (jrec? s)
+                    (let ((d (jrec-desc s)))
+                      (cond ((eq? d cd) fast)
+                            ((eq? d ld) (loop (jrec3-f0 s)))
+                            (else (let ((t (jrdesc-tag d)))
+                                    (cond ((and (string=? t ctag) (jrec*? s)) (set! cd d) fast)
+                                          ((and (string=? t ltag) (jrec3? s)) (set! ld d) (loop (jrec3-f0 s)))
+                                          (else slow))))))
+                    slow)))))
+         (define-syntax eve-alloc-ctx
+           (syntax-rules ()
+             ((_ s p arg ...)
+              (let ((v (jrec*-vals s))) (p (vector-ref v 0) (vector-ref v 2) (vector-ref v 5) arg ...)))))
+         (define (eve-alloc-fast-get ctag ltag get op f)
+           (let ((cd #f) (ld #f))
+             (lambda (sio so fo)
+               (eve-alloc-unwrap sio s ctag ltag cd ld (eve-alloc-ctx s get so fo op) (f s so fo)))))
+         (define (eve-alloc-fast-put ctag ltag put op f)
+           (let ((cd #f) (ld #f))
+             (lambda (sio so fo v)
+               (eve-alloc-unwrap sio s ctag ltag cd ld (eve-alloc-ctx s put so fo v op) (f s so fo v)))))
+         ;; a serialized field's bytes (eve.deftype.slab-runtime): the slot's i32, then the block's length i32 and
+         ;; bytes, through one walk to the context; nil for the slot's -1
+         (define (eve-alloc-fast-ser ctag ltag i32op rbop f)
+           (let ((cd #f) (ld #f))
+             (lambda (sio so fo)
+               (eve-alloc-unwrap sio s ctag ltag cd ld
+                 (let* ((v (jrec*-vals s)) (rs (vector-ref v 0)) (dos (vector-ref v 2)) (bss (vector-ref v 5))
+                        (x (eve-sio-get rs dos bss so fo i32op)))
+                   (if (eqv? x -1)
+                       jolt-nil
+                       (eve-sio-put rs dos bss x 4 (eve-sio-get rs dos bss x 0 i32op) rbop)))
+                 (f s so fo))))))")
+     (def ^:private fast-get (partial (scheme/proc "eve-alloc-fast-get") slab-ctx-tag logging-tag))
+     (def ^:private fast-put (partial (scheme/proc "eve-alloc-fast-put") slab-ctx-tag logging-tag))
+     (def fast-read-u8
+       "eve.slab-io/read-u8 on jolt (above)."
+       (fast-get sio-get* region/plain-load-u8-op -sio-read-u8))
+     (def fast-read-u16
+       "eve.slab-io/read-u16 on jolt (above)."
+       (fast-get sio-u16* region/plain-load-u8-op -sio-read-u16))
+     (def fast-read-i32
+       "eve.slab-io/read-i32 on jolt (above)."
+       (fast-get sio-get* region/plain-load-i32-op -sio-read-i32))
+     (def fast-read-bytes
+       "eve.slab-io/read-bytes on jolt (above)."
+       (fast-put sio-put* region/read-bytes-op -sio-read-bytes))
+     (def fast-write-u8!
+       "eve.slab-io/write-u8! on jolt (above)."
+       (fast-put sio-put* region/plain-store-u8-op -sio-write-u8!))
+     (def fast-write-u16!
+       "eve.slab-io/write-u16! on jolt (above)."
+       (fast-put sio-put-u16* region/plain-store-u8-op -sio-write-u16!))
+     (def fast-write-i32!
+       "eve.slab-io/write-i32! on jolt (above)."
+       (fast-put sio-put* region/plain-store-i32-op -sio-write-i32!))
+     (def fast-read-serialized
+       "A serialized field's bytes on jolt (above): nil where the slot holds -1."
+       ((scheme/proc "eve-alloc-fast-ser") slab-ctx-tag logging-tag region/plain-load-i32-op region/read-bytes-op
+        (fn [sio so fo]
+          (let [x (-sio-read-i32 sio so fo)]
+            (when (not= x -1) (-sio-read-bytes sio x 4 (-sio-read-i32 sio x 0)))))))))
 
 (defn logging-sio?
   [sio]

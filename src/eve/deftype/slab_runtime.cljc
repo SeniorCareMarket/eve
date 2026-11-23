@@ -25,11 +25,14 @@
    slab-off: slab offset of the type instance.
    field-offset: byte offset of the field slot."
   [sio slab-off field-offset]
-  (let [ser-off (slab/read-i32 sio slab-off field-offset)]
-    (when (not= ser-off -1)
-      (let [data-len (slab/read-i32 sio ser-off 0)
-            raw      (slab/read-bytes sio ser-off 4 data-len)]
-        (codec/decode sio raw)))))
+  ;; jolt: the slot, the length and the bytes in one call (eve.deftype-proto.alloc/fast-read-serialized)
+  #?(:jolt (when-let [raw (alloc/fast-read-serialized sio slab-off field-offset)] (codec/decode sio raw))
+     :default
+     (let [ser-off (slab/read-i32 sio slab-off field-offset)]
+       (when (not= ser-off -1)
+         (let [data-len (slab/read-i32 sio ser-off 0)
+               raw      (slab/read-bytes sio ser-off 4 data-len)]
+           (codec/decode sio raw))))))
 
 (defn slab-write-serialized!
   "Write a serialized field.
