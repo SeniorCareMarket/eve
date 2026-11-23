@@ -30,8 +30,8 @@
 ;; Shared Constants
 ;;=============================================================================
 
-(def EveList-type-id 0x13)
-(def sab-list-type-id EveList-type-id) ;; backward compat
+(def eve-list-type-id 0x13)
+(def sab-list-type-id eve-list-type-id) ;; backward compat
 (def ^:const list-cnt-offset 4)
 (def ^:const list-head-offset 8)
 (def ^:const list-header-size 12)
@@ -448,8 +448,8 @@
                (conj! acc (read-node-value sio off)))))))
 
 (eve/register-eve-type!
- {:fast-tag     ser/FAST_TAG_SAB_LIST
-  :type-id      EveList-type-id
+ {:fast-tag     ser/fast-tag-sab-list
+  :type-id      eve-list-type-id
   :from-header  list-from-header
   :host-value   list->host-value
   :dispose      dispose!

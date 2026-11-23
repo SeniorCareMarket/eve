@@ -1341,7 +1341,7 @@
      (let [ev-bytes (codec/encode-value sio v)
            n        (inc (alength ^bytes ev-bytes))
            blk-off  (slab/alloc! sio n)]
-       (slab/write-u8! sio blk-off 0 ser/SCALAR_BLOCK_TYPE_ID)
+       (slab/write-u8! sio blk-off 0 ser/scalar-block-type-id)
        (slab/write-bytes! sio blk-off 1 ev-bytes)
        blk-off)))
 
@@ -1814,7 +1814,7 @@
   (let [ev  (codec/encode-value sio v)
         n   (inc (alength ^bytes ev))
         blk (slab/alloc! sio n)]
-    (slab/write-u8! sio blk 0 ser/SCALAR_BLOCK_TYPE_ID)
+    (slab/write-u8! sio blk 0 ser/scalar-block-type-id)
     (slab/write-bytes! sio blk 1 ev)
     blk))
 
@@ -1826,7 +1826,7 @@
  {:read (fn [sio blk len] (slab/read-bytes sio blk 1 len))
   :write (fn [sio bs]
            (let [blk (slab/alloc! sio (inc (alength ^bytes bs)))]
-             (slab/write-u8! sio blk 0 ser/SCALAR_BLOCK_TYPE_ID)
+             (slab/write-u8! sio blk 0 ser/scalar-block-type-id)
              (slab/write-bytes! sio blk 1 bs)
              blk))})
 

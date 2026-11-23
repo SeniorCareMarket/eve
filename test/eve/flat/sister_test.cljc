@@ -224,7 +224,7 @@
             [a]
             (let [ptr (mem/-load-i32 (:root-r (ea/-domain-state a))
                                      (d/atom-slot-offset (ea/-atom-slot-idx a)
-                                                         d/ATOM_SLOT_PTR_OFFSET))]
+                                                         d/atom-slot-ptr-offset))]
               (count (retire/reach (ea/atom-sio a) ptr))))
 
           (defn- widget-in

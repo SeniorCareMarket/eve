@@ -2,7 +2,7 @@
   "clj-kondo analyze-call hook for eve/register-eve-type!
    (eve.deftype-proto.macros/register-eve-type!).
 
-   A call (register-eve-type! {:type-id EveVector-type-id ...})
+   A call (register-eve-type! {:type-id eve-vector-type-id ...})
    defines, in the calling namespace, named fns the serialize
    registry holds: <type-id>--from-header (always),
    <type-id>--dispose (when :dispose is given) and

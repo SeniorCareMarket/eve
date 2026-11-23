@@ -32,7 +32,7 @@
    [jolt.ffi :as ffi]))
 
 (def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
-(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+(def ^:private journal-table-bytes (* d/max-atom-slots d/atom-slot-size))
 
 (def ^:private os
   (let [n (str/lower-case (or (System/getProperty "os.name") ""))]
@@ -238,7 +238,7 @@
    byte array."
   [root-r]
   (journal-record-of (mem/-load-i32 root-r d/root-epoch-offset)
-                     (mem/-read-bytes root-r d/ATOM_TABLE_START
+                     (mem/-read-bytes root-r d/atom-table-start
                                       journal-table-bytes)))
 
 (defn journal-scan

@@ -2305,7 +2305,7 @@
 (defn- map-equiv-of [h other]
   (entries-equiv (-entries h) other))
 
-(declare cons-flat assocN-flat pop-flat assoc-flat dissoc-flat
+(declare cons-flat assoc-n-flat pop-flat assoc-flat dissoc-flat
          disjoin-flat bytes-of)
 
 ;; row and set element walks, defined on neutral ground: every
@@ -2421,12 +2421,12 @@
                                                                                  ~@(when vector?
                                                                                      '[clojure.lang.IPersistentVector
                                                                                        (length [this] (.count this))
-                                                                                       (assocN [this i v] (assocN-flat this i v))
+                                                                                       (assocN [this i v] (assoc-n-flat this i v))
                                                                                        (cons [this v] (cons-flat this v))
                                                                                        (pop [this] (pop-flat this))
                                                                                        (peek [this] (when (pos? (.count this)) (nth this (dec (.count this)))))
                                                                                        clojure.lang.Associative
-                                                                                       (assoc [this k v] (assocN-flat this (long k) v))
+                                                                                       (assoc [this k v] (assoc-n-flat this (long k) v))
                                                                                        (containsKey [this k] (and (integer? k) (<= 0 (long k)) (< (long k) (.count this))))
                                                                                        (entryAt [this k] (when (.containsKey this k) (clojure.lang.MapEntry. k (nth this (long k)))))
                                                                                        clojure.lang.ILookup
@@ -2864,13 +2864,13 @@
            (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                (elem-at ctx off (long k)) nf))
            ecore/IAssociative
-           (-assoc [_ n v] (assocN-flat _ n v))
+           (-assoc [_ n v] (assoc-n-flat _ n v))
            (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
            ecore/ISeqable
            (-seq [_] (seq-of-node ctx off))
            ecore/ISequential
            ecore/IVector
-           (-assoc-n [_ n v] (assocN-flat _ n v))
+           (-assoc-n [_ n v] (assoc-n-flat _ n v))
            ecore/ICollection
            (-conj [_ v] (cons-flat _ v))
            ecore/IEmptyableCollection
@@ -2923,13 +2923,13 @@
            (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                (elem-at ctx off (long k)) nf))
            ecore/IAssociative
-           (-assoc [_ n v] (assocN-flat _ n v))
+           (-assoc [_ n v] (assoc-n-flat _ n v))
            (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
            ecore/ISeqable
            (-seq [_] (seq-of-node ctx off))
            ecore/ISequential
            ecore/IVector
-           (-assoc-n [_ n v] (assocN-flat _ n v))
+           (-assoc-n [_ n v] (assoc-n-flat _ n v))
            ecore/ICollection
            (-conj [_ v] (cons-flat _ v))
            ecore/IEmptyableCollection
@@ -3030,13 +3030,13 @@
            (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                (row-handle ctx off (long k)) nf))
            ecore/IAssociative
-           (-assoc [_ n v] (assocN-flat _ n v))
+           (-assoc [_ n v] (assoc-n-flat _ n v))
            (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
            ecore/ISeqable
            (-seq [_] (batch-seq-of ctx off))
            ecore/ISequential
            ecore/IVector
-           (-assoc-n [_ n v] (assocN-flat _ n v))
+           (-assoc-n [_ n v] (assoc-n-flat _ n v))
            ecore/ICollection
            (-conj [_ v] (cons-flat _ v))
            ecore/IEmptyableCollection
@@ -3506,13 +3506,13 @@
             (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                 (elem-at ctx off (long k)) nf))
             ecore/IAssociative
-            (-assoc [_ n v] (assocN-flat _ n v))
+            (-assoc [_ n v] (assoc-n-flat _ n v))
             (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
             ecore/ISeqable
             (-seq [_] (seq-of-node ctx off))
             ecore/ISequential
             ecore/IVector
-            (-assoc-n [_ n v] (assocN-flat _ n v))
+            (-assoc-n [_ n v] (assoc-n-flat _ n v))
             ecore/ICollection
             (-conj [_ v] (cons-flat _ v))
             ecore/IEmptyableCollection
@@ -3563,13 +3563,13 @@
             (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                 (elem-at ctx off (long k)) nf))
             ecore/IAssociative
-            (-assoc [_ n v] (assocN-flat _ n v))
+            (-assoc [_ n v] (assoc-n-flat _ n v))
             (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
             ecore/ISeqable
             (-seq [_] (seq-of-node ctx off))
             ecore/ISequential
             ecore/IVector
-            (-assoc-n [_ n v] (assocN-flat _ n v))
+            (-assoc-n [_ n v] (assoc-n-flat _ n v))
             ecore/ICollection
             (-conj [_ v] (cons-flat _ v))
             ecore/IEmptyableCollection
@@ -3666,13 +3666,13 @@
             (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                 (row-handle ctx off (long k)) nf))
             ecore/IAssociative
-            (-assoc [_ n v] (assocN-flat _ n v))
+            (-assoc [_ n v] (assoc-n-flat _ n v))
             (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
             ecore/ISeqable
             (-seq [_] (batch-seq-of ctx off))
             ecore/ISequential
             ecore/IVector
-            (-assoc-n [_ n v] (assocN-flat _ n v))
+            (-assoc-n [_ n v] (assoc-n-flat _ n v))
             ecore/ICollection
             (-conj [_ v] (cons-flat _ v))
             ecore/IEmptyableCollection
@@ -4001,13 +4001,13 @@
              (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                  (elem-at ctx off (long k)) nf))
              ecore/IAssociative
-             (-assoc [_ n v] (assocN-flat _ n v))
+             (-assoc [_ n v] (assoc-n-flat _ n v))
              (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
              ecore/ISeqable
              (-seq [_] (seq-of-node ctx off))
              ecore/ISequential
              ecore/IVector
-             (-assoc-n [_ n v] (assocN-flat _ n v))
+             (-assoc-n [_ n v] (assoc-n-flat _ n v))
              ecore/ICollection
              (-conj [_ v] (cons-flat _ v))
              ecore/IEmptyableCollection
@@ -4058,13 +4058,13 @@
              (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                  (elem-at ctx off (long k)) nf))
              ecore/IAssociative
-             (-assoc [_ n v] (assocN-flat _ n v))
+             (-assoc [_ n v] (assoc-n-flat _ n v))
              (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
              ecore/ISeqable
              (-seq [_] (seq-of-node ctx off))
              ecore/ISequential
              ecore/IVector
-             (-assoc-n [_ n v] (assocN-flat _ n v))
+             (-assoc-n [_ n v] (assoc-n-flat _ n v))
              ecore/ICollection
              (-conj [_ v] (cons-flat _ v))
              ecore/IEmptyableCollection
@@ -4161,13 +4161,13 @@
              (-lookup [_ k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off)))
                                  (row-handle ctx off (long k)) nf))
              ecore/IAssociative
-             (-assoc [_ n v] (assocN-flat _ n v))
+             (-assoc [_ n v] (assoc-n-flat _ n v))
              (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) (elem-count ctx off))))
              ecore/ISeqable
              (-seq [_] (batch-seq-of ctx off))
              ecore/ISequential
              ecore/IVector
-             (-assoc-n [_ n v] (assocN-flat _ n v))
+             (-assoc-n [_ n v] (assoc-n-flat _ n v))
              ecore/ICollection
              (-conj [_ v] (cons-flat _ v))
              ecore/IEmptyableCollection
@@ -4507,14 +4507,14 @@
              (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                                  (elem-at ctx off (int k)) nf))
              IAssociative
-             (-assoc [_ n v] (assocN-flat _ n v))
+             (-assoc [_ n v] (assoc-n-flat _ n v))
              (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off))))
              ISeqable
              #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
              (-seq [_] (seq-of-node ctx off))
              ISequential
              IVector
-             (-assoc-n [_ n v] (assocN-flat _ n v))
+             (-assoc-n [_ n v] (assoc-n-flat _ n v))
              IEquiv
              (-equiv [_ other] (node-equiv ctx off other))
              IHash
@@ -4548,14 +4548,14 @@
              (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off)))
                                  (elem-at ctx off (int k)) nf))
              IAssociative
-             (-assoc [_ n v] (assocN-flat _ n v))
+             (-assoc [_ n v] (assoc-n-flat _ n v))
              (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off))))
              ISeqable
              #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
              (-seq [_] (seq-of-node ctx off))
              ISequential
              IVector
-             (-assoc-n [_ n v] (assocN-flat _ n v))
+             (-assoc-n [_ n v] (assoc-n-flat _ n v))
              IEquiv
              (-equiv [_ other] (node-equiv ctx off other))
              IHash
@@ -4703,14 +4703,14 @@
              (-lookup [_ k nf] (if (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off))))
                                  (row-handle ctx off (int k)) nf))
              IAssociative
-             (-assoc [_ n v] (assocN-flat _ n v))
+             (-assoc [_ n v] (assoc-n-flat _ n v))
              (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off)))))
              ISeqable
              #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
              (-seq [_] (seq (batch-seq-of ctx off)))
              ISequential
              IVector
-             (-assoc-n [_ n v] (assocN-flat _ n v))
+             (-assoc-n [_ n v] (assoc-n-flat _ n v))
              IEquiv
              (-equiv [_ other] (node-equiv ctx off other))
              IHash
@@ -5072,7 +5072,7 @@
           (repack h (fn [r] (conj r vr))))
       :else (repack h (fn [r] (conj r vr))))))
 
-(defn assocN-flat [h i v]
+(defn assoc-n-flat [h i v]
   (let [ctx (handle-ctx h) off (handle-off h) t (tag-at ctx off) vr (to-rep v)
         n (elem-count ctx off)]
     (cond

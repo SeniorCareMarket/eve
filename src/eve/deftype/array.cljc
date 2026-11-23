@@ -88,8 +88,8 @@
 
 (defn- magic? [#?(:clj ^bytes bs :default bs)]
   (and (>= (byte-len bs) 3)
-       (== d/DIRECT_MAGIC_0 (bit-and (eve.host/aget bs 0) 0xFF))
-       (== d/DIRECT_MAGIC_1 (bit-and (eve.host/aget bs 1) 0xFF))))
+       (== d/direct-magic-0 (bit-and (eve.host/aget bs 0) 0xFF))
+       (== d/direct-magic-1 (bit-and (eve.host/aget bs 1) 0xFF))))
 
 (defn- byte-at [#?(:clj ^bytes bs :default bs) i]
   (bit-and (eve.host/aget bs i) 0xFF))
@@ -134,10 +134,10 @@
           ;; [EE DB tag i32]: an int32, or a pointer — a tag the registry
           ;; builds a value for (a short keyword or string is 7 bytes too)
             (and (== len 7) (magic? bs)
-                 (or (== (byte-at bs 2) ser/FAST_TAG_INT32)
+                 (or (== (byte-at bs 2) ser/fast-tag-int32)
                      (some? (ser/get-type-constructor (byte-at bs 2)))))
             (let [tag (byte-at bs 2)]
-              (put! (if (== tag ser/FAST_TAG_INT32) kind-int32 kind-pointer) tag (i32-at bs 3)))
+              (put! (if (== tag ser/fast-tag-int32) kind-int32 kind-pointer) tag (i32-at bs 3)))
 
             (and (== len 3) (magic? bs))
             (put! kind-tag (byte-at bs 2) 0)
@@ -162,7 +162,7 @@
           :else
           (let [tag (slab/read-u8 sio off (+ HEADER n i))]
             (if (== kind kind-tag)
-              (decode sio (enc/bytes-of [d/DIRECT_MAGIC_0 d/DIRECT_MAGIC_1 tag]))
+              (decode sio (enc/bytes-of [d/direct-magic-0 d/direct-magic-1 tag]))
               (if-let [ctor (ser/get-type-constructor tag)]
                 (ctor sio payload)
                 (throw (ex-info "eve array: no constructor for a pointer tag" {:tag tag}))))))))))

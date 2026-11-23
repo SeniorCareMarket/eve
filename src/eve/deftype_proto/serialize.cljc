@@ -15,24 +15,24 @@
 ;; Fast-path type tags (byte after magic prefix 0xEE 0xDB)  — shared
 ;;-----------------------------------------------------------------------------
 
-(def ^:const FAST_TAG_FALSE 0x01)
-(def ^:const FAST_TAG_TRUE 0x02)
-(def ^:const FAST_TAG_INT32 0x03)
-(def ^:const FAST_TAG_FLOAT64 0x04)
-(def ^:const FAST_TAG_STRING_SHORT 0x05)
-(def ^:const FAST_TAG_STRING_LONG 0x06)
-(def ^:const FAST_TAG_KEYWORD_SHORT 0x07)
-(def ^:const FAST_TAG_KEYWORD_LONG 0x08)
-(def ^:const FAST_TAG_KEYWORD_NS_SHORT 0x09)
-(def ^:const FAST_TAG_KEYWORD_NS_LONG 0x0A)
-(def ^:const FAST_TAG_UUID 0x0B)
-(def ^:const FAST_TAG_SYMBOL_SHORT 0x0C)
-(def ^:const FAST_TAG_SYMBOL_NS_SHORT 0x0D)
-(def ^:const FAST_TAG_DATE 0x0E)
-(def ^:const FAST_TAG_INT64 0x0F)
+(def ^:const fast-tag-false 0x01)
+(def ^:const fast-tag-true 0x02)
+(def ^:const fast-tag-int32 0x03)
+(def ^:const fast-tag-float64 0x04)
+(def ^:const fast-tag-string-short 0x05)
+(def ^:const fast-tag-string-long 0x06)
+(def ^:const fast-tag-keyword-short 0x07)
+(def ^:const fast-tag-keyword-long 0x08)
+(def ^:const fast-tag-keyword-ns-short 0x09)
+(def ^:const fast-tag-keyword-ns-long 0x0A)
+(def ^:const fast-tag-uuid 0x0B)
+(def ^:const fast-tag-symbol-short 0x0C)
+(def ^:const fast-tag-symbol-ns-short 0x0D)
+(def ^:const fast-tag-date 0x0E)
+(def ^:const fast-tag-int64 0x0F)
 ;; A character: [0xEE][0xDB][0x14][utf16:u16LE] — a Character on the JVM and
 ;; bb; ClojureScript has no character type, it reads a one-character string
-(def ^:const FAST_TAG_CHAR 0x14)
+(def ^:const fast-tag-char 0x14)
 
 ;; The numbers past a fixed width (FORMAT-DECISIONS.md §8). An integer is
 ;; written by its magnitude — INT32, then INT64, then BIGINT — so (= 5 5N) is
@@ -42,41 +42,41 @@
 ;; BIGINT: [0xEE][0xDB][0x16][len:u32LE][bytes]
 ;; RATIO:  [0xEE][0xDB][0x17][len:u32LE][numerator][len:u32LE][denominator]
 ;; BIGDEC: [0xEE][0xDB][0x18][scale:i32LE][len:u32LE][unscaled]
-(def ^:const FAST_TAG_BIGINT 0x16)
-(def ^:const FAST_TAG_RATIO 0x17)
-(def ^:const FAST_TAG_BIGDEC 0x18)
+(def ^:const fast-tag-bigint 0x16)
+(def ^:const fast-tag-ratio 0x17)
+(def ^:const fast-tag-bigdec 0x18)
 
 ;; A value eve has no bytes for, by reference (FORMAT-DECISIONS.md §9):
 ;; [0xEE][0xDB][0x15][realm:u32LE][handle:u32LE] — the handle names the value in
 ;; this process's reference table (below), the realm is this process's. Never
 ;; written to a shared domain.
-(def ^:const FAST_TAG_REF 0x15)
+(def ^:const fast-tag-ref 0x15)
 
 ;; A map entry's value longer than VALUE_INLINE_MAX bytes, out of line
 ;; (FORMAT-DECISIONS.md §10): [0xEE][0xDB][0x19][block:i32LE][len:u32LE], the
 ;; block a scalar block [0x01][EVE bytes]
-(def ^:const FAST_TAG_VALUE_BLOCK 0x19)
-(def ^:const VALUE_INLINE_MAX 64)
+(def ^:const fast-tag-value-block 0x19)
+(def ^:const value-inline-max 64)
 
 ;; SAB pointer tags — nested collections stored as SAB data structures.
 ;; Each encodes a reference to an existing SAB type instance in shared memory.
 ;; Format: [0xEE][0xDB][tag:u8][instance-offset:i32] = 7 bytes
-(def ^:const FAST_TAG_SAB_MAP 0x10)
-(def ^:const FAST_TAG_SAB_SET 0x11)
-(def ^:const FAST_TAG_SAB_VEC 0x12)
-(def ^:const FAST_TAG_SAB_LIST 0x13)
+(def ^:const fast-tag-sab-map 0x10)
+(def ^:const fast-tag-sab-set 0x11)
+(def ^:const fast-tag-sab-vec 0x12)
+(def ^:const fast-tag-sab-list 0x13)
 
 ;; Record tag — stores a CLJS record as a SabMap with :eve/record-tag metadata.
 ;; Format: [0xEE][0xDB][0x1A][sab-map-offset:i32] = 7 bytes
-(def ^:const FAST_TAG_RECORD 0x1A)
+(def ^:const fast-tag-record 0x1A)
 
 ;; Typed array tag — stores a JS typed array as a flat byte blob.
 ;; Format: [0xEE][0xDB][0x1B][subtype:u8][byte-length:u32][raw bytes...] = 8 + N bytes
-(def ^:const FAST_TAG_TYPED_ARRAY 0x1B)
+(def ^:const fast-tag-typed-array 0x1B)
 
 ;; EveArray tag — SAB pointer to a live eve-array (zero-copy wrapper).
 ;; Format: [0xEE][0xDB][0x1C][block-offset:i32] = 7 bytes.
-(def ^:const FAST_TAG_EVE_ARRAY 0x1C)
+(def ^:const fast-tag-eve-array 0x1C)
 
 ;; Flat collection tags — self-contained binary encoding for cross-process
 ;; maps/sets/vecs. No SAB pointer indirection; the same bytes on every host
@@ -87,34 +87,34 @@
 ;; Map entries are written in ascending order of their key bytes and set
 ;; elements in ascending order of their bytes (d/compare-bytes); a vector
 ;; keeps its order.
-(def ^:const FAST_TAG_FLAT_MAP 0xED)
-(def ^:const FAST_TAG_FLAT_SET 0xEE)
-(def ^:const FAST_TAG_FLAT_VEC 0xEF)
+(def ^:const fast-tag-flat-map 0xED)
+(def ^:const fast-tag-flat-set 0xEE)
+(def ^:const fast-tag-flat-vec 0xEF)
 
 ;; Scalar block type-id — used for primitive values stored at atom root.
 ;; Layout: [0x01][EVE-serialized-bytes...]
-(def ^:const SCALAR_BLOCK_TYPE_ID 0x01)
+(def ^:const scalar-block-type-id 0x01)
 
 ;; EveArray slab block type-id — used when an EveArray is stored as atom root.
 ;; Layout: [0x1D][subtype:u8][pad:u16][count:u32][element-bytes...]
-(def ^:const EVE_ARRAY_SLAB_TYPE_ID 0x1D)
+(def ^:const eve-array-slab-type-id 0x1D)
 
 ;; Obj slab block type-id — used when an Obj (typed object) is stored as atom root.
 ;; Layout: [0x1E][pad:u8][schema-len:u16][schema-bytes...][field-data aligned to 4...]
-(def ^:const EVE_OBJ_SLAB_TYPE_ID 0x1E)
+(def ^:const eve-obj-slab-type-id 0x1E)
 
 ;; Typed array subtype codes
-(def ^:const TYPED_ARRAY_UINT8         0x01)
-(def ^:const TYPED_ARRAY_INT8          0x02)
-(def ^:const TYPED_ARRAY_UINT8_CLAMPED 0x03)
-(def ^:const TYPED_ARRAY_INT16         0x04)
-(def ^:const TYPED_ARRAY_UINT16        0x05)
-(def ^:const TYPED_ARRAY_INT32         0x06)
-(def ^:const TYPED_ARRAY_UINT32        0x07)
-(def ^:const TYPED_ARRAY_FLOAT32       0x08)
-(def ^:const TYPED_ARRAY_FLOAT64       0x09)
-(def ^:const TYPED_ARRAY_BIGINT64      0x0A)
-(def ^:const TYPED_ARRAY_BIGUINT64     0x0B)
+(def ^:const typed-array-uint8         0x01)
+(def ^:const typed-array-int8          0x02)
+(def ^:const typed-array-uint8-clamped 0x03)
+(def ^:const typed-array-int16         0x04)
+(def ^:const typed-array-uint16        0x05)
+(def ^:const typed-array-int32         0x06)
+(def ^:const typed-array-uint32        0x07)
+(def ^:const typed-array-float32       0x08)
+(def ^:const typed-array-float64       0x09)
+(def ^:const typed-array-bigint64      0x0A)
+(def ^:const typed-array-biguint64     0x0B)
 
 ;;-----------------------------------------------------------------------------
 ;; Type registries — one portable registry on every host.
@@ -516,11 +516,11 @@
 ;; ISabStorable tag keyword → pointer tag byte. Extended by eve-deftype types
 ;; at load time via register-sab-fast-tag!.
 (defonce sab-tag->fast-tag*
-  (atom {:eve-map   FAST_TAG_SAB_MAP
-         :hash-set  FAST_TAG_SAB_SET
-         :eve-vec   FAST_TAG_SAB_VEC
-         :eve-list  FAST_TAG_SAB_LIST
-         :eve/array FAST_TAG_EVE_ARRAY}))
+  (atom {:eve-map   fast-tag-sab-map
+         :hash-set  fast-tag-sab-set
+         :eve-vec   fast-tag-sab-vec
+         :eve-list  fast-tag-sab-list
+         :eve/array fast-tag-eve-array}))
 
 (defn register-sab-fast-tag!
   "Register a -sab-tag keyword → pointer tag byte mapping."

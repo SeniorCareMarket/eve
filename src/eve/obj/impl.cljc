@@ -274,7 +274,7 @@
         slen (alength ^bytes sbytes)
         slab-off (slab/alloc! sio (+ 4 slen (:size schema)))
         data-off (+ 4 slen)]
-    (slab/write-u8! sio slab-off 0 ser/EVE_OBJ_SLAB_TYPE_ID)
+    (slab/write-u8! sio slab-off 0 ser/eve-obj-slab-type-id)
     (slab/write-u8! sio slab-off 1 0)
     (slab/write-u16! sio slab-off 2 slen)
     (slab/write-bytes! sio slab-off 4 sbytes)
@@ -407,9 +407,9 @@
 
 ;; An Obj at the atom root or nested in a value (0x1E): the one registry
 (ser/register-type-constructor!
- ser/EVE_OBJ_SLAB_TYPE_ID ser/EVE_OBJ_SLAB_TYPE_ID
+ ser/eve-obj-slab-type-id ser/eve-obj-slab-type-id
  (fn [sio header-off] (obj-from-offset sio header-off)))
 
 (ser/register-header-disposer!
- ser/EVE_OBJ_SLAB_TYPE_ID
+ ser/eve-obj-slab-type-id
  (fn [sio blk-off] (slab/free! sio blk-off)))

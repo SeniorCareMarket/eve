@@ -800,9 +800,9 @@
   [sio v]
   (let [bs (value+sio->eve-bytes sio v)
         n (alength ^bytes bs)]
-    (if (<= n ser/VALUE_INLINE_MAX)
+    (if (<= n ser/value-inline-max)
       bs
-      (let [b (tagged (unchecked-byte ser/FAST_TAG_VALUE_BLOCK) 11)]
+      (let [b (tagged (unchecked-byte ser/fast-tag-value-block) 11)]
         (put-i32-le! b 3 (ser/write-value-block! sio bs))
         (put-i32-le! b 7 n)
         b))))

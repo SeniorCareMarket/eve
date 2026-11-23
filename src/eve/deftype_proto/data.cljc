@@ -399,14 +399,14 @@
 (def ^:const worker-status-stale 2)
 
 ;; Worker slot layout (24 bytes per worker)
-(def ^:const OFFSET_WS_STATUS 0)
-(def ^:const OFFSET_WS_CURRENT_EPOCH 4)
-(def ^:const OFFSET_WS_HEARTBEAT_LO 8)
-(def ^:const OFFSET_WS_HEARTBEAT_HI 12)
-(def ^:const OFFSET_WS_WORKER_ID 16)
+(def ^:const offset-ws-status 0)
+(def ^:const offset-ws-current-epoch 4)
+(def ^:const offset-ws-heartbeat-lo 8)
+(def ^:const offset-ws-heartbeat-hi 12)
+(def ^:const offset-ws-worker-id 16)
 (def ^:const offset-ws-reserved 20)
 
-(def ^:const HEARTBEAT_TIMEOUT_MS 30000)
+(def ^:const heartbeat-timeout-ms 30000)
 
 ;;=============================================================================
 ;; Atom Slot Table (multi-atom domain support)
@@ -415,28 +415,28 @@
 ;; 256 slots × 8 bytes each = 2048 bytes + 64-byte table header.
 ;; Slot 0 is reserved for the registry atom (keyword→slot-idx HAMT).
 
-(def ^:const ROOT_MAGIC_V2 0x524F4F55)       ;; bumped from 0x524F4F54
+(def ^:const root-magic-v2 0x524F4F55)       ;; bumped from 0x524F4F54
 
 ;; Atom table header starts right after the worker registry
-(def ^:const ATOM_TABLE_HEADER_START (+ root-sab-header-size worker-registry-size))
+(def ^:const atom-table-header-start (+ root-sab-header-size worker-registry-size))
 (def ^:const atom-table-header-size 64)
-(def ^:const ATOM_TABLE_MAGIC 0x41544F4D)    ;; 'ATOM' in ASCII
+(def ^:const atom-table-magic 0x41544F4D)    ;; 'ATOM' in ASCII
 
 ;; Atom slots start after the table header
-(def ^:const ATOM_TABLE_START (+ ATOM_TABLE_HEADER_START atom-table-header-size))
-(def ^:const ATOM_SLOT_SIZE 8)
-(def ^:const MAX_ATOM_SLOTS 256)
-(def ^:const ATOM_SLOT_PTR_OFFSET 0)         ;; i32: slab-qualified CAS target
-(def ^:const ATOM_SLOT_HASH_OFFSET 4)        ;; u32: FNV-1a hash of keyword name
+(def ^:const atom-table-start (+ atom-table-header-start atom-table-header-size))
+(def ^:const atom-slot-size 8)
+(def ^:const max-atom-slots 256)
+(def ^:const atom-slot-ptr-offset 0)         ;; i32: slab-qualified CAS target
+(def ^:const atom-slot-hash-offset 4)        ;; u32: FNV-1a hash of keyword name
 
 ;; Total V2 root file size
-(def ^:const ROOT_FILE_SIZE_V2
-  (+ ATOM_TABLE_START (* MAX_ATOM_SLOTS ATOM_SLOT_SIZE)))
+(def ^:const root-file-size-v2
+  (+ atom-table-start (* max-atom-slots atom-slot-size)))
 
 ;; Header field for atom table offset (byte 16 in .root header)
-(def ^:const ROOT_ATOM_TABLE_OFFSET 16)
+(def ^:const root-atom-table-offset 16)
 ;; Header field for atom table capacity (byte 20 in .root header)
-(def ^:const ROOT_ATOM_TABLE_CAPACITY 20)
+(def ^:const root-atom-table-capacity 20)
 
 ;; The exclusive-hold protocol (bytes 24 and 28 of the .root header; zero in
 ;; every domain written before it, which is how a domain without a lock-only
@@ -456,27 +456,27 @@
 ;; eve/doc/unification/FORMAT-DECISIONS.md names the proof and the one gap
 ;; (a participant that does not implement the two words — the wasm host at
 ;; the time of writing — races a lock-only participant, never a lock-free one).
-(def ^:const ROOT_HOLD_OFFSET 24)
-(def ^:const ROOT_INFLIGHT_OFFSET 28)
+(def ^:const root-hold-offset 24)
+(def ^:const root-inflight-offset 28)
 
 ;; Byte 32 of the .root header is reserved (zero). The count-pages tally of the 0.9 line kept its directory in
 ;; this word (1 + the slab offset of the directory block, for the domain's life); the descriptor-row count
 ;; (eve.tally) keeps every count on the block's own descriptor row and reads no directory, so the word is never
 ;; written — a domain whose header carries a nonzero word here simply has it ignored.
-(def ^:const ROOT_SLOT_HINT_OFFSET 36)     ;; FORMAT-DECISIONS §12: the next-free atom slot hint; word 20 is the capacity
+(def ^:const root-slot-hint-offset 36)     ;; FORMAT-DECISIONS §12: the next-free atom slot hint; word 20 is the capacity
 
 (defn atom-slot-offset
   "Byte offset of a field within the atom slot table in the .root file."
   [slot-idx field-offset]
-  (+ ATOM_TABLE_START (* slot-idx ATOM_SLOT_SIZE) field-offset))
+  (+ atom-table-start (* slot-idx atom-slot-size) field-offset))
 
 ;; Block status (for epoch-GC on the bitmap: we only need 1-bit allocated,
 ;; but for retirement we track status per-block in a separate status byte array.
 ;; However, the slab design simplifies this: most blocks are either free or allocated.
 ;; Retired blocks get their bitmap bit set but are tracked in a retired-list.)
-(def ^:const STATUS_FREE 0)
-(def ^:const STATUS_ALLOCATED 1)
-(def ^:const STATUS_RETIRED 2)
+(def ^:const status-free 0)
+(def ^:const status-allocated 1)
+(def ^:const status-retired 2)
 
 ;;=============================================================================
 ;; Protocols (interface-compatible with eve.data)
@@ -707,8 +707,8 @@
 (def ^:const tag-sabp-map-state "eve/SabpMapStateV1")
 (def ^:const tag-sabp-set-state "eve/SabpSetStateV1")
 
-(def ^:const DIRECT_MAGIC_0 0xEE)
-(def ^:const DIRECT_MAGIC_1 0xDB)
+(def ^:const direct-magic-0 0xEE)
+(def ^:const direct-magic-1 0xDB)
 (def ^:const direct-marker-map 0xED)
 ;; Linked list constants
 (def ^:const offset-ll-node-value 0)
@@ -718,7 +718,7 @@
 (def ^:const chunked-list-chunk-size 32)
 
 ;; Max swap retries for CAS loops
-(def ^:const MAX_SWAP_RETRIES 1000)
+(def ^:const max-swap-retries 1000)
 
 ;; Canonical byte order (eve/doc/unification/FORMAT-DECISIONS.md §2): a flat
 ;; set's elements and a flat map's entries are written in ascending order of

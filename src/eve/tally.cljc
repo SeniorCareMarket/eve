@@ -74,10 +74,10 @@
 (def ^:const CPERM -1)      ;; the count all ones: held for ever
 (def ^:const CDEAD -2)      ;; claimed by a flush (being freed): a hold of it is refused
 (def ^:const CMAX -3)       ;; the last count a hold raises by one; the next hold makes it permanent
-(def ^:const F_PUB 2)       ;; bit 1: a holder took it — its references are held
-(def ^:const F_QUEUED 4)    ;; bit 2: its entry is on the zero queue
-(def ^:const F_LEAF 128)    ;; bit 7: held as a leaf
-(def ^:const F_TAKEN 256)   ;; bit 8: taken back while its entry was queued
+(def ^:const f-pub 2)       ;; bit 1: a holder took it — its references are held
+(def ^:const f-queued 4)    ;; bit 2: its entry is on the zero queue
+(def ^:const f-leaf 128)    ;; bit 7: held as a leaf
+(def ^:const f-taken 256)   ;; bit 8: taken back while its entry was queued
 
 (defn- cnt [row] (slab/region-load-i32 (nth (nth row 0) 0) (nth (nth row 0) 1)))
 (defn- ccas [row old new] (slab/region-cas-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) old new))
@@ -333,7 +333,7 @@
   (if-let [row (alloc/desc-of sio off)]
     (loop []
       (let [t (flags row)]
-        (if-not (zero? (bit-and t F_PUB))
+        (if-not (zero? (bit-and t f-pub))
           (let [c (cnt row)]
             (cond
               (== c CPERM) :held
@@ -341,14 +341,14 @@
               :else (do
                       ;; a parked 0 taken back: TAKEN goes on FIRST while its entry is queued, so a flush that sees
                       ;; it at 0 again (dropped since) queues the entry again at the epoch then
-                      (when (and (zero? c) (not (zero? (bit-and t F_QUEUED))))
-                        (set-flag! row F_TAKEN))
+                      (when (and (zero? c) (not (zero? (bit-and t f-queued))))
+                        (set-flag! row f-taken))
                       (if (== c (ccas row c (if (== c CMAX) CPERM (i32/i32 (inc c)))))
                         (do (note-touch! off) :held)
                         (recur)))))
           (when (alloc/allocated? sio off)
             ;; publish: whoever's CAS takes PUB holds the references; the count follows
-            (let [nt (if leaf? (bit-or t F_PUB F_LEAF) (bit-or t F_PUB))]
+            (let [nt (if leaf? (bit-or t f-pub f-leaf) (bit-or t f-pub))]
               (if (== t (fcas row t nt))
                 (do (note-touch! off)
                     (slab/region-add-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) 1)
@@ -382,14 +382,14 @@
    block is a no-op, and a doubly-held cache simply stays."
   [sio hdr cache-off]
   (when-let [row (alloc/desc-of sio hdr)]
-    (when-not (zero? (bit-and (flags row) F_PUB)) (hold! sio cache-off :leaf))))
+    (when-not (zero? (bit-and (flags row) f-pub)) (hold! sio cache-off :leaf))))
 
 (defn- drop-one!
   "One holder lets block off of kind go: :parked when its count reached 0 here (queued by park! unless its earlier
    entry still is), :dropped, or nil (a hold never taken: an uncounted block, a second drop of one hold)."
   [sio off kind park!]
   (when-let [row (alloc/desc-of sio off)]
-    (when-not (zero? (bit-and (flags row) F_PUB))
+    (when-not (zero? (bit-and (flags row) f-pub))
       (loop []
         (let [c (cnt row)]
           (cond
@@ -398,7 +398,7 @@
             (not (== c (ccas row c (i32/i32 (dec c))))) (recur)
             (not (== c 1)) (do (note-touch! off) :dropped)
             :else (do (note-touch! off)
-                      (when-not (set-flag! row F_QUEUED)
+                      (when-not (set-flag! row f-queued)
                         (park! off kind))
                       :parked)))))))
 
@@ -446,7 +446,7 @@
     (note-touch! c)
     (when-let [row (alloc/desc-of sio c)]
       (let [t (flags row)]
-        (when (and (not (zero? (bit-and t F_PUB))) (zero? (bit-and t F_LEAF)))
+        (when (and (not (zero? (bit-and t f-pub))) (zero? (bit-and t f-leaf)))
           (hold! sio new kind)
           (drop! sio old kind (parker sio)))))))
 
@@ -548,7 +548,7 @@
        (alloc/allocated? sio off)
        (boolean
         (when-let [row (alloc/desc-of sio off)]
-          (and (zero? (bit-and (flags row) F_PUB))
+          (and (zero? (bit-and (flags row) f-pub))
                (zero? (cnt row)))))))
 
 (defn- placed-counts
@@ -591,8 +591,8 @@
          (doseq [[off n] counts]
            (let [row (alloc/desc-of sio off)]
              (set-flag! row (if (readable? sio off (get blocks off))
-                              F_PUB
-                              (bit-or F_PUB F_LEAF)))
+                              f-pub
+                              (bit-or f-pub f-leaf)))
              (slab/region-store-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) (int n))
              (note-touch! off)))
          (swap! placed-write-counter inc)
@@ -627,7 +627,7 @@
   [sio offs]
   (reduce (fn [n off]
             (let [row (alloc/desc-of sio off)]
-              (if (and row (not (zero? (bit-and (flags row) F_PUB))))
+              (if (and row (not (zero? (bit-and (flags row) f-pub))))
                 n
                 (if (slab/free! sio off) (inc n) n))))
           0 offs))
@@ -643,7 +643,7 @@
   [sio offs]
   (reduce (fn [n off]
             (let [row (alloc/desc-of sio off)]
-              (if (and row (zero? (bit-and (flags row) F_PUB)) (alloc/allocated? sio off))
+              (if (and row (zero? (bit-and (flags row) f-pub)) (alloc/allocated? sio off))
                 (if (slab/free! sio off) (inc n) n)
                 n)))
           0 offs))
@@ -653,7 +653,7 @@
    or a count past 2^31 - 1)."
   [sio off]
   (if-let [row (alloc/desc-of sio off)]
-    (if (zero? (bit-and (flags row) F_PUB))
+    (if (zero? (bit-and (flags row) f-pub))
       -1
       (let [c (cnt row)]
         (cond (== c CDEAD) 0 (neg? c) 2147483647 :else c)))
@@ -669,9 +669,9 @@
    read (opaque, an eve-deftype not loaded here) and that was not held as a leaf is never freed here: its claimed
    count goes back to 0, uncounted. Answers 1 freed, 0 not."
   [sio off kind row t park!]
-  (if (or (= kind :opaque) (and (zero? (bit-and t F_LEAF)) (not (readable? sio off kind))))
+  (if (or (= kind :opaque) (and (zero? (bit-and t f-leaf)) (not (readable? sio off kind))))
     (do (slab/region-store-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) 0) 0)
-    (let [rs (if (zero? (bit-and t F_LEAF)) (refs sio off kind) [])   ;; read BEFORE the free hands the block back
+    (let [rs (if (zero? (bit-and t f-leaf)) (refs sio off kind) [])   ;; read BEFORE the free hands the block back
           freed? (slab/free! sio off)]
       (doseq [[o k] rs] (drop-one! sio o k park!))
       (if freed? 1 0))))
@@ -737,21 +737,21 @@
                          t (if row (flags row) 0)
                          c (if row (cnt row) CDEAD)]
                      (cond
-                       (or (zero? (bit-and t F_QUEUED)) (== c CDEAD)) n
+                       (or (zero? (bit-and t f-queued)) (== c CDEAD)) n
                        (not (zero? c))
-                       (do (clear-flags! row (bit-or F_QUEUED F_TAKEN))
-                           (when (and (zero? (cnt row)) (not (set-flag! row F_QUEUED)))
+                       (do (clear-flags! row (bit-or f-queued f-taken))
+                           (when (and (zero? (cnt row)) (not (set-flag! row f-queued)))
                              (park! off kind))
                            n)
-                       (not (zero? (bit-and t F_TAKEN)))
-                       (do (clear-flags! row F_TAKEN) (park! off kind) n)
+                       (not (zero? (bit-and t f-taken)))
+                       (do (clear-flags! row f-taken) (park! off kind) n)
                        (not (or (nil? safe) (< epoch safe)))
                        (do (vswap! stay conj e) n)
                    ;; THE STILL-ZERO CHECK, one CAS: 0 -> CDEAD claims it (a hold racing in is refused)
                        (not (zero? (ccas row 0 CDEAD)))
                        (do (vswap! stay conj e) n)
                        :else
-                       (do (clear-flags! row (bit-or F_QUEUED F_PUB))
+                       (do (clear-flags! row (bit-or f-queued f-pub))
                            (+ n (free-claimed! sio off kind row t park!))))))
                  0 prefix)]
           ;; restore in epoch order: stays, then the unexamined

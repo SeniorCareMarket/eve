@@ -78,7 +78,7 @@
 ;; Root pointer format: alloc/encode-slab-offset [class:3 | block:29]
 ;; ---------------------------------------------------------------------------
 
-(def ^:const root-bytes d/ROOT_FILE_SIZE_V2) ;; 8320 (V2 multi-atom)
+(def ^:const root-bytes d/root-file-size-v2) ;; 8320 (V2 multi-atom)
 (def ^:const reader-map-bytes 262144)
 
 ;; Time-throttled retire flush — skip the 256-slot scan when the last scan
@@ -125,19 +125,19 @@
   (let [now (proc/now-ms)
         hi  (quot now 4294967296)
         lo  (- now (* hi 4294967296))]
-    (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_LO)
+    (mem/-store-i32! root-r (worker-slot-offset slot-idx d/offset-ws-heartbeat-lo)
                      (i32/i32 lo))
-    (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_HI)
+    (mem/-store-i32! root-r (worker-slot-offset slot-idx d/offset-ws-heartbeat-hi)
                      (i32/i32 hi))))
 
 (defn- heartbeat-stale?
   "True if slot-idx's heartbeat is older than HEARTBEAT_TIMEOUT_MS."
   [root-r slot-idx]
-  (let [lo (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_LO))
-        hi (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_HEARTBEAT_HI))
+  (let [lo (mem/-load-i32 root-r (worker-slot-offset slot-idx d/offset-ws-heartbeat-lo))
+        hi (mem/-load-i32 root-r (worker-slot-offset slot-idx d/offset-ws-heartbeat-hi))
         lo (if (neg? lo) (+ lo 4294967296) lo)
         ts (+ (* hi 4294967296) lo)]
-    (> (- (proc/now-ms) ts) d/HEARTBEAT_TIMEOUT_MS)))
+    (> (- (proc/now-ms) ts) d/heartbeat-timeout-ms)))
 
 (defn- mmap-claim-slot!
   "CAS-scan the worker registry for the first INACTIVE slot; failing that,
@@ -147,23 +147,23 @@
   (or
    (loop [i 0]
      (when (< i d/max-workers)
-       (let [status-off (worker-slot-offset i d/OFFSET_WS_STATUS)
+       (let [status-off (worker-slot-offset i d/offset-ws-status)
              witness (mem/-cas-i32! root-r status-off
                                     d/worker-status-inactive
                                     d/worker-status-active)]
          (if (== witness d/worker-status-inactive)
-           (do (mem/-store-i32! root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
+           (do (mem/-store-i32! root-r (worker-slot-offset i d/offset-ws-current-epoch) 0)
                i)
            (recur (inc i))))))
    (loop [i 0]
      (when (< i d/max-workers)
-       (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
+       (let [status (mem/-load-i32 root-r (worker-slot-offset i d/offset-ws-status))]
          (if (and (== status d/worker-status-active)
                   (heartbeat-stale? root-r i))
-           (let [witness (mem/-cas-i32! root-r (worker-slot-offset i d/OFFSET_WS_STATUS)
+           (let [witness (mem/-cas-i32! root-r (worker-slot-offset i d/offset-ws-status)
                                         d/worker-status-active d/worker-status-active)]
              (if (== witness d/worker-status-active)
-               (do (mem/-store-i32! root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
+               (do (mem/-store-i32! root-r (worker-slot-offset i d/offset-ws-current-epoch) 0)
                    i)
                (recur (inc i))))
            (recur (inc i))))))
@@ -172,19 +172,19 @@
 (defn- mmap-release-slot!
   "Clear CURRENT_EPOCH then set STATUS back to INACTIVE."
   [root-r slot-idx]
-  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH) 0)
-  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_STATUS)
+  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/offset-ws-current-epoch) 0)
+  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/offset-ws-status)
                    d/worker-status-inactive))
 
 (defn- mmap-pin-epoch!
   "Announce this slot reads at epoch. Before the root pointer is read."
   [root-r slot-idx epoch]
-  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH) epoch))
+  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/offset-ws-current-epoch) epoch))
 
 (defn- mmap-unpin-epoch!
   "Clear the announcement. After the read, in a finally."
   [root-r slot-idx]
-  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH) 0))
+  (mem/-store-i32! root-r (worker-slot-offset slot-idx d/offset-ws-current-epoch) 0))
 
 (defn- mmap-min-safe-epoch
   "The minimum CURRENT_EPOCH among live, pinned slots; nil when none is
@@ -193,8 +193,8 @@
   (loop [i 0 result nil]
     (if (>= i d/max-workers)
       result
-      (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))
-            epoch (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH))]
+      (let [status (mem/-load-i32 root-r (worker-slot-offset i d/offset-ws-status))
+            epoch (mem/-load-i32 root-r (worker-slot-offset i d/offset-ws-current-epoch))]
         (if (and (== status d/worker-status-active)
                  (not (zero? epoch))
                  (not (heartbeat-stale? root-r i)))
@@ -218,7 +218,7 @@
    hold (no slot yet) that a waiter has watched for that long."
   [root-r hold waited-ms]
   (if (== hold hold-joining)
-    (> waited-ms d/HEARTBEAT_TIMEOUT_MS)
+    (> waited-ms d/heartbeat-timeout-ms)
     (heartbeat-stale? root-r (dec hold))))
 
 (defn- wait-hold-clear!
@@ -226,17 +226,17 @@
   [root-r]
   (let [t0 (proc/now-ms)]
     (loop [i 0]
-      (let [hold (mem/-load-i32 root-r d/ROOT_HOLD_OFFSET)]
+      (let [hold (mem/-load-i32 root-r d/root-hold-offset)]
         (when-not (zero? hold)
           (if (and (> i 1000) (hold-holder-stale? root-r hold (- (proc/now-ms) t0)))
-            (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET hold 0)
+            (mem/-cas-i32! root-r d/root-hold-offset hold 0)
             (do (when (> i 100) (proc/sleep-ms! 1))
                 (recur (inc i)))))))))
 
 (defn- inflight-corrupt! [root-r op old]
   (throw (ex-info "exclusive-hold protocol: ROOT_INFLIGHT count is corrupt"
                   {:op op :inflight-before old
-                   :hold (mem/-load-i32 root-r d/ROOT_HOLD_OFFSET)})))
+                   :hold (mem/-load-i32 root-r d/root-hold-offset)})))
 
 (defn- enter-inflight!
   "Lock-free host: count this write in, yielding to a held domain. The
@@ -244,34 +244,34 @@
    is reported, never spun on."
   [root-r]
   (loop []
-    (let [old (mem/-add-i32! root-r d/ROOT_INFLIGHT_OFFSET 1)]
+    (let [old (mem/-add-i32! root-r d/root-inflight-offset 1)]
       (when (neg? old) (inflight-corrupt! root-r :enter old)))
-    (when-not (zero? (mem/-load-i32 root-r d/ROOT_HOLD_OFFSET))
-      (mem/-sub-i32! root-r d/ROOT_INFLIGHT_OFFSET 1)
+    (when-not (zero? (mem/-load-i32 root-r d/root-hold-offset))
+      (mem/-sub-i32! root-r d/root-inflight-offset 1)
       (wait-hold-clear! root-r)
       (recur))))
 
 (defn- leave-inflight! [root-r]
-  (let [old (mem/-sub-i32! root-r d/ROOT_INFLIGHT_OFFSET 1)]
+  (let [old (mem/-sub-i32! root-r d/root-inflight-offset 1)]
     (when (< old 1) (inflight-corrupt! root-r :leave old))))
 
 (defn- with-exclusive-hold*
   "Lock-only host: run f with the domain held — no other participant writes."
   [root-r hold-value f]
-  (mem/-with-file-lock root-r d/ROOT_HOLD_OFFSET
+  (mem/-with-file-lock root-r d/root-hold-offset
                        (fn []
       ;; the region's store is fenced: the hold is visible before the wait
-                         (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET hold-value)
+                         (mem/-store-i32! root-r d/root-hold-offset hold-value)
                          (try
                            (loop [i 0]
-                             (let [n (mem/-load-i32 root-r d/ROOT_INFLIGHT_OFFSET)]
+                             (let [n (mem/-load-i32 root-r d/root-inflight-offset)]
                                (when (neg? n) (inflight-corrupt! root-r :hold n))
                                (when-not (zero? n)
                                  (when (> i 100) (proc/sleep-ms! 1))
                                  (recur (inc i)))))
                            (f)
                            (finally
-                             (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0))))))
+                             (mem/-store-i32! root-r d/root-hold-offset 0))))))
 
 (defn- with-root-write*
   "Run f as a write to the root region: in flight for a lock-free host,
@@ -291,17 +291,17 @@
   [root-r hold-value f]
   (loop []
     (enter-inflight! root-r)
-    (if (zero? (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET 0 hold-value))
+    (if (zero? (mem/-cas-i32! root-r d/root-hold-offset 0 hold-value))
       (try
         (loop [i 0]
-          (let [n (mem/-load-i32 root-r d/ROOT_INFLIGHT_OFFSET)]
+          (let [n (mem/-load-i32 root-r d/root-inflight-offset)]
             (when (neg? n) (inflight-corrupt! root-r :hold n))
             (when (> n 1)
               (when (> i 100) (proc/sleep-ms! 1))
               (recur (inc i)))))
         (f)
         (finally
-          (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET hold-value 0)
+          (mem/-cas-i32! root-r d/root-hold-offset hold-value 0)
           (leave-inflight! root-r)))
       (do (leave-inflight! root-r)
           (wait-hold-clear! root-r)
@@ -334,21 +334,21 @@
   (mem/-store-i32! root-r d/root-atom-ptr-offset 0) ;; now: atom slot count
   (mem/-store-i32! root-r d/root-epoch-offset 1)
   (mem/-store-i32! root-r d/root-worker-reg-offset d/root-worker-registry-start)
-  (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
-  (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
-  (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0)
-  (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
+  (mem/-store-i32! root-r d/root-atom-table-offset d/atom-table-start)
+  (mem/-store-i32! root-r d/root-atom-table-capacity d/max-atom-slots)
+  (mem/-store-i32! root-r d/root-hold-offset 0)
+  (mem/-store-i32! root-r d/root-inflight-offset 0)
   (dotimes [slot d/max-workers]
     (mem/-store-i32! root-r
                      (+ d/root-worker-registry-start (* slot d/worker-slot-size))
                      d/worker-status-inactive))
-  (mem/-store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
-  (mem/-store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
-  (dotimes [s d/MAX_ATOM_SLOTS]
-    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET) alloc/nil-offset)
-    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
+  (mem/-store-i32! root-r d/atom-table-header-start d/atom-table-magic)
+  (mem/-store-i32! root-r (+ d/atom-table-header-start 4) 0) ;; slot count
+  (dotimes [s d/max-atom-slots]
+    (mem/-store-i32! root-r (d/atom-slot-offset s d/atom-slot-ptr-offset) alloc/nil-offset)
+    (mem/-store-i32! root-r (d/atom-slot-offset s d/atom-slot-hash-offset) 0))
   ;; the region's store is fenced: everything above is visible before it
-  (mem/-store-i32! root-r d/root-magic-offset d/ROOT_MAGIC_V2)
+  (mem/-store-i32! root-r d/root-magic-offset d/root-magic-v2)
   root-r)
 
 ;; ---------------------------------------------------------------------------
@@ -467,11 +467,11 @@
     (loop [i 0]
       (let [magic (mem/-load-i32 root-r d/root-magic-offset)]
         (cond
-          (== magic d/ROOT_MAGIC_V2) nil
+          (== magic d/root-magic-v2) nil
           (not (zero? magic))
           (throw (ex-info "mmap-atom: root file has wrong magic (old format?)"
-                          {:expected d/ROOT_MAGIC_V2 :actual magic}))
-          (> (- (proc/now-ms) t0) d/HEARTBEAT_TIMEOUT_MS)
+                          {:expected d/root-magic-v2 :actual magic}))
+          (> (- (proc/now-ms) t0) d/heartbeat-timeout-ms)
           (throw (ex-info "mmap-atom: the domain's creator never finished writing its root"
                           {:base-path base-path}))
           :else (do (when (> i 100) (proc/sleep-ms! 1)) (recur (inc i))))))))
@@ -616,7 +616,7 @@
   [root-r]
   (loop [i 0]
     (cond (>= i d/max-workers) false
-          (and (== (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))
+          (and (== (mem/-load-i32 root-r (worker-slot-offset i d/offset-ws-status))
                    d/worker-status-active)
                (not (heartbeat-stale? root-r i))) true
           :else (recur (inc i)))))
@@ -660,11 +660,11 @@
                                         ;; over the root's corrupted
                                         ;; one (see the docstring).
                                         (not (enc/bytes=
-                                              (mem/-read-bytes root-r d/ATOM_TABLE_START
-                                                               (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+                                              (mem/-read-bytes root-r d/atom-table-start
+                                                               (* d/max-atom-slots d/atom-slot-size))
                                               (:table newest)))))]
                   (when install?
-                    (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
+                    (mem/-write-bytes! root-r d/atom-table-start (:table newest))
                     (mem/-store-i32! root-r d/root-epoch-offset (:epoch newest))
                     (mem/sync-region! root-r))
                   (when (or torn? install?)
@@ -890,7 +890,7 @@
   [sio ptr]
   (when (live-ptr? ptr)
     (let [type-id (alloc/read-header-tag sio ptr)]
-      (if (== type-id ser/SCALAR_BLOCK_TYPE_ID)
+      (if (== type-id ser/scalar-block-type-id)
         (alloc/scalar-block->value sio ptr)
         (if-let [ctor (ser/get-header-constructor type-id)]
           (ctor sio ptr)
@@ -1038,7 +1038,7 @@
               (refresh-slabs! ds)
               (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset)))
             (fn [] (unpin-epoch! ds)))
-  (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+  (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/atom-slot-ptr-offset))]
     (refresh-slabs! ds)
     (read-root-value sio ptr)))
 
@@ -1097,7 +1097,7 @@
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
   (try
-    (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+    (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/atom-slot-ptr-offset))]
       ;; the root may name blocks another process allocated after growing a
       ;; class past the refresh above: re-check behind the load
       (refresh-slabs! ds)
@@ -1113,7 +1113,7 @@
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
   (try
-    (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+    (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/atom-slot-ptr-offset))]
       (refresh-slabs! ds)
       (read-answer ds atom-slot-idx (read-root-value sio ptr)))
     (finally
@@ -1132,7 +1132,7 @@
     (do (refresh-slabs! ds)
         (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
         (try
-          (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+          (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/atom-slot-ptr-offset))]
             ;; the root may name blocks another process allocated after
             ;; growing a class past the refresh above: re-check behind
             ;; the load, exactly as plain-deref does
@@ -1157,7 +1157,7 @@
                     (refresh-slabs! ds)
                     (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset)))
                   (fn [] (unpin-epoch! ds)))
-     (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))
+     (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/atom-slot-ptr-offset))
            _   (refresh-slabs! ds)
            v   (read-root-value sio ptr)]
        (if (and (not guard/*proxy-same-domain?*) (identical? ds (:domain guard/*extent*)))
@@ -1465,9 +1465,9 @@
    (swap-vals!, reset-vals!)."
   ([ds atom-slot-idx f args] (mmap-swap! ds atom-slot-idx f args false))
   ([ds atom-slot-idx f args want-vals?]
-   (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
+   (let [ptr-off (d/atom-slot-offset atom-slot-idx d/atom-slot-ptr-offset)]
      (loop [attempt 0]
-       (when (>= attempt d/MAX_SWAP_RETRIES)
+       (when (>= attempt d/max-swap-retries)
          (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
        (let [[tag result delivery] (with-domain-write ds false
                                      (fn [exclusive?]
@@ -1603,7 +1603,7 @@
     (refresh-slabs! ds)
     (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
     (try
-      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
+      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/atom-slot-ptr-offset))]
         (refresh-slabs! ds)
         (apply f (read-root-value sio ptr) args))
       (finally
@@ -1942,23 +1942,23 @@
   ;; file: eve-disk), the scan starts at the hint (word 36), and a slot whose ptr word is 0 (bytes a grown file gained)
   ;; is free as NIL is. This participant maps the root at ROOT_BYTES: a capacity past that is a domain grown elsewhere
   ;; — it claims what its region holds and says so past it (the remap is test/coop-atom's unit).
-  (let [cap (mem/-load-i32 root-r d/ROOT_ATOM_TABLE_CAPACITY)
-        cap (if (pos? cap) cap d/MAX_ATOM_SLOTS)
-        reach (min cap d/MAX_ATOM_SLOTS)
-        hint (mem/-load-i32 root-r d/ROOT_SLOT_HINT_OFFSET)]
+  (let [cap (mem/-load-i32 root-r d/root-atom-table-capacity)
+        cap (if (pos? cap) cap d/max-atom-slots)
+        reach (min cap d/max-atom-slots)
+        hint (mem/-load-i32 root-r d/root-slot-hint-offset)]
     (loop [i (max 1 hint)]
       (when (>= i reach)
-        (throw (ex-info (if (> cap d/MAX_ATOM_SLOTS)
+        (throw (ex-info (if (> cap d/max-atom-slots)
                           "mmap-atom: the domain's atom slots pass this participant's root region (FORMAT-DECISIONS §12)"
                           "mmap-atom: no free atom slot")
-                        {:capacity cap :region-slots d/MAX_ATOM_SLOTS})))
-      (let [ptr-off (d/atom-slot-offset i d/ATOM_SLOT_PTR_OFFSET)
+                        {:capacity cap :region-slots d/max-atom-slots})))
+      (let [ptr-off (d/atom-slot-offset i d/atom-slot-ptr-offset)
             cur-ptr (mem/-load-i32 root-r ptr-off)]
         (if (or (== cur-ptr alloc/nil-offset) (zero? cur-ptr))
           (let [w (mem/-cas-i32! root-r ptr-off cur-ptr claimed-sentinel)]
             (if (== w cur-ptr)
-              (do (mem/-store-i32! root-r (d/atom-slot-offset i d/ATOM_SLOT_HASH_OFFSET) name-hash)
-                  (mem/-store-i32! root-r d/ROOT_SLOT_HINT_OFFSET (inc i))
+              (do (mem/-store-i32! root-r (d/atom-slot-offset i d/atom-slot-hash-offset) name-hash)
+                  (mem/-store-i32! root-r d/root-slot-hint-offset (inc i))
                   i)
               (recur (inc i))))
           (recur (inc i)))))))
@@ -2059,7 +2059,7 @@
   [a]
   (let [{:keys [root-r]} (atom-domain-state a)
         e (mem/-load-i32 root-r d/root-epoch-offset)]
-    [e (mem/-load-i32 root-r (d/atom-slot-offset (-atom-slot-idx a) d/ATOM_SLOT_PTR_OFFSET))]))
+    [e (mem/-load-i32 root-r (d/atom-slot-offset (-atom-slot-idx a) d/atom-slot-ptr-offset))]))
 
 (defn- fnv-fold [h x] (i32/imul (bit-xor h (i32/i32 x)) 0x01000193))
 
@@ -2076,8 +2076,8 @@
     (refresh-slabs! ds)
     (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
     (try
-      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))
-            nh (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))
+      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/atom-slot-ptr-offset))
+            nh (mem/-load-i32 root-r (d/atom-slot-offset slot d/atom-slot-hash-offset))
             _ (refresh-slabs! ds)
             offs (sort (distinct (when (live-ptr? ptr) (retire/reach sio ptr))))
             digest (reduce (fn [h off]
@@ -2306,7 +2306,7 @@
     (loop [i 0 count 0]
       (if (>= i d/max-workers)
         count
-        (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
+        (let [status (mem/-load-i32 root-r (worker-slot-offset i d/offset-ws-status))]
           (if (and (== status d/worker-status-active)
                    (heartbeat-stale? root-r i))
             (recur (inc i) (inc count))

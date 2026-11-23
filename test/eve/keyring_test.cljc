@@ -53,11 +53,11 @@
            (hex (subvec (kr/keystream-chunk (kr/class-key (vec (range 32)) (vec (range 100 116)) 3) 3 5 1) 0 32))))))
 
 (deftest the-record-is-enc-vs-s
-  (let [r (region/make-heap-region kr/RECORD_BYTES)
+  (let [r (region/make-heap-region kr/record-bytes)
         gak (vec (range 32))]
-    (is (= 1 (kr/init! r gak kr/KEY_STATUS_AUTO)) "this call initialised the ring")
-    (is (zero? (kr/init! r gak kr/KEY_STATUS_AUTO)) "a second initialiser loses the magic's CAS")
-    (is (= -1 (kr/init! (region/make-heap-region kr/RECORD_BYTES) gak 4)) "a bad status")
+    (is (= 1 (kr/init! r gak kr/key-status-auto)) "this call initialised the ring")
+    (is (zero? (kr/init! r gak kr/key-status-auto)) "a second initialiser loses the magic's CAS")
+    (is (= -1 (kr/init! (region/make-heap-region kr/record-bytes) gak 4)) "a bad status")
     (is (= [0x52 0x43 0x4e 0x45] (region-bytes r 0 4)) "magic 'ENCR' (0x454E4352 LE) @0")
     (is (= [1 0 0 0 1 0 0 0 1 0 0 0] (region-bytes r 4 12)) "version 1 @4, status auto @8, AES-256-CTR @12")
     (is (= gak (region-bytes r 16 32)) "the GAK @16")
@@ -70,10 +70,10 @@
   (try (f) nil (catch #?(:cljs :default :jank jank.runtime.object_ref :default Exception) ex (:type (ex-data ex)))))
 
 (deftest the-epoch-key-ring
-  (let [r (region/make-heap-region kr/RECORD_BYTES)
+  (let [r (region/make-heap-region kr/record-bytes)
         k (fn [x] (vec (repeat 32 x)))
         iv (vec (repeat 12 9))]
-    (kr/init! r (k 1) kr/KEY_STATUS_AUTO)
+    (kr/init! r (k 1) kr/key-status-auto)
     (let [i1 (kr/eek-alloc! r 1 (k 11) iv 100)
           i2 (kr/eek-alloc! r 2 (k 12) iv 101)
           i3 (kr/eek-alloc! r 3 (k 13) iv 102)]
@@ -175,7 +175,7 @@
 (deftest f9-4-an-explicit-enable-with-the-program-s-key
   (let [base (fresh-base)
         key (vec (range 17 49))
-        [sio ring] (kr/open-encrypted-domain! base {:create? true :status kr/KEY_STATUS_USER :key key})]
+        [sio ring] (kr/open-encrypted-domain! base {:create? true :status kr/key-status-user :key key})]
     (try
       (let [b (write-secret sio)]
         (is (= 2 (kr/status ring)))
@@ -193,7 +193,7 @@
 (deftest a-key-not-stored-is-not-in-the-ring
   (let [base (fresh-base)
         key (vec (range 200 232))
-        [sio ring] (kr/open-encrypted-domain! base {:create? true :status kr/KEY_STATUS_USER_NO_STORE :key key})]
+        [sio ring] (kr/open-encrypted-domain! base {:create? true :status kr/key-status-user-no-store :key key})]
     (try
       (let [b (write-secret sio)]
         (is (= 3 (kr/status ring)))

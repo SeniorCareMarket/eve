@@ -25,12 +25,12 @@
       (slab/write-i32! sio off 12 20)
       (slab/write-i32! sio off 16 30)
       (let [before (vec (slab/read-bytes sio off 0 20))
-            a      (codec/decode sio (codec/encode-sab-pointer ser/FAST_TAG_EVE_ARRAY off))]
+            a      (codec/decode sio (codec/encode-sab-pointer ser/fast-tag-eve-array off))]
         (is (= 3 (e/count a)) "the old block's count")
         (is (= [10 20 30] [(arr/aget a 0) (arr/aget a 1) (arr/aget a 2)])
             "the old block's elements, read by its own subtype")
         (is (= before (vec (slab/read-bytes sio off 0 20)))
             "the block's bytes are unchanged by the read")
-        (let [a2 (codec/decode sio (codec/encode-sab-pointer ser/FAST_TAG_EVE_ARRAY off))]
+        (let [a2 (codec/decode sio (codec/encode-sab-pointer ser/fast-tag-eve-array off))]
           (is (= [10 20 30] [(arr/aget a2 0) (arr/aget a2 1) (arr/aget a2 2)])
               "a second read answers the same array"))))))

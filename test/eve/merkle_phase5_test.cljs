@@ -43,7 +43,7 @@
 
 (defn- total-used-blocks []
   (loop [i 0 total 0]
-    (if (>= i dd/NUM_SLAB_CLASSES)
+    (if (>= i dd/num-slab-classes)
       total
       (recur (inc i) (+ total (:used-count (ps/slab-stats i)))))))
 

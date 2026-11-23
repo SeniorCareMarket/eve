@@ -442,8 +442,8 @@
       computes, never stamps."
      [sio ^long off]
      (when-let [blk (digest/cache-block sio off)]
-       (when-not (zero? (bit-and (slab/read-i32 sio blk digest/F_FLAGS) digest/FLAG_DIGEST))
-         (mapv (fn [i] (slab/read-i32 sio blk (+ digest/F_DIGEST (* 4 i)))) (range 8))))))
+       (when-not (zero? (bit-and (slab/read-i32 sio blk digest/f-flags) digest/flag-digest))
+         (mapv (fn [i] (slab/read-i32 sio blk (+ digest/f-digest (* 4 i)))) (range 8))))))
 
 #?(:clj
    (defn send-stream

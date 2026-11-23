@@ -63,7 +63,7 @@
     (with-heap-slab
       (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2 3})
             flags (alloc/-sio-read-u8 sio hdr 1)]
-        (is (not (zero? (bit-and flags eve-set/SET_FLAG_PORTABLE_HASH)))
+        (is (not (zero? (bit-and flags eve-set/set-flag-portable-hash)))
             "SET_FLAG_PORTABLE_HASH should be set in header byte 1")))))
 
 ;; jvm-hashed-flag-read test removed — jvm-hashed? field eliminated in R2

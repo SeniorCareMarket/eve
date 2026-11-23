@@ -43,7 +43,7 @@
 (def ^:const shift-step 5)
 (def ^:const MASK 0x1f)
 
-(def ^:const NODE_TYPE_BITMAP 1)
+(def ^:const node-type-bitmap 1)
 (def ^:const node-type-collision 2) ;; Sets use 2, maps use 3
 
 ;; Node header: type:u8 + flags:u8 + pad:u16 + data_bitmap:u32 + node_bitmap:u32 = 12
@@ -51,10 +51,10 @@
 (def ^:const collision-header-size 12)
 
 ;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
-(def EveHashSet-type-id 0xEE)
+(def eve-hash-set-type-id 0xEE)
 (def ^:const sabsetroot-cnt-offset 4)
 (def ^:const sabsetroot-root-off-offset 8)
-(def ^:const SET_FLAG_PORTABLE_HASH 0x01)
+(def ^:const set-flag-portable-hash 0x01)
 
 ;;=============================================================================
 ;; Platform-specific helpers
@@ -129,7 +129,7 @@
   (let [vlen (bytes-length vb)
         nsize (+ node-header-size 4 vlen)
         node-off (slab/alloc! sio nsize)]
-    (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
+    (slab/write-u8!  sio node-off 0 node-type-bitmap)
     (slab/write-u8!  sio node-off 1 0)
     (slab/write-u16! sio node-off 2 0)
     (slab/write-i32! sio node-off 4 data-bm)
@@ -139,7 +139,7 @@
 
 (defn- make-single-child-node! [sio node-bm child-off]
   (let [node-off (slab/alloc! sio (+ node-header-size 4))]
-    (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
+    (slab/write-u8!  sio node-off 0 node-type-bitmap)
     (slab/write-u8!  sio node-off 1 0)
     (slab/write-u16! sio node-off 2 0)
     (slab/write-i32! sio node-off 4 0)
@@ -151,7 +151,7 @@
   (let [vlen (bytes-length vb)
         nsize (+ node-header-size 4 4 vlen)
         node-off (slab/alloc! sio nsize)]
-    (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
+    (slab/write-u8!  sio node-off 0 node-type-bitmap)
     (slab/write-u8!  sio node-off 1 0)
     (slab/write-u16! sio node-off 2 0)
     (slab/write-i32! sio node-off 4 data-bm)
@@ -282,7 +282,7 @@
                             vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
                             nsize (+ node-header-size (* 4 new-cc) vals-size)
                             dst-off (slab/alloc! sio nsize)]
-                        (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                        (slab/write-u8! sio dst-off 0 node-type-bitmap)
                         (slab/write-u8! sio dst-off 1 0)
                         (slab/write-u16! sio dst-off 2 0)
                         (slab/write-i32! sio dst-off 4 new-data-bm)
@@ -328,7 +328,7 @@
                             vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
                             nsize (+ node-header-size (* 4 new-cc) vals-size)
                             dst-off (slab/alloc! sio nsize)]
-                        (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                        (slab/write-u8! sio dst-off 0 node-type-bitmap)
                         (slab/write-u8! sio dst-off 1 0)
                         (slab/write-u16! sio dst-off 2 0)
                         (slab/write-i32! sio dst-off 4 new-data-bm)
@@ -370,7 +370,7 @@
                     vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 new-val-list)
                     nsize (+ node-header-size (* 4 cc) vals-size)
                     dst-off (slab/alloc! sio nsize)]
-                (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                (slab/write-u8! sio dst-off 0 node-type-bitmap)
                 (slab/write-u8! sio dst-off 1 0)
                 (slab/write-u16! sio dst-off 2 0)
                 (slab/write-i32! sio dst-off 4 new-data-bm)
@@ -453,7 +453,7 @@
                             vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
                             nsize (+ node-header-size (* 4 cc) vals-size)
                             dst-off (slab/alloc! sio nsize)]
-                        (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
+                        (slab/write-u8! sio dst-off 0 node-type-bitmap)
                         (slab/write-u8! sio dst-off 1 0)
                         (slab/write-u16! sio dst-off 2 0)
                         (slab/write-i32! sio dst-off 4 new-data-bm)
@@ -545,8 +545,8 @@
 
 (defn write-set-header! [sio cnt root-off]
   (let [off (slab/alloc! sio 12)]
-    (slab/write-u8!  sio off 0 EveHashSet-type-id)
-    (slab/write-u8!  sio off 1 SET_FLAG_PORTABLE_HASH)
+    (slab/write-u8!  sio off 0 eve-hash-set-type-id)
+    (slab/write-u8!  sio off 1 set-flag-portable-hash)
     (slab/write-u16! sio off 2 0)
     (slab/write-i32! sio off sabsetroot-cnt-offset cnt)
     (slab/write-i32! sio off sabsetroot-root-off-offset root-off)
@@ -610,11 +610,11 @@
       (when (and (not= old-off nil-offset) (not= old-off new-off))
         (slab/free! sio old-off)
         (let [old-type (slab/read-u8 sio old-off 0)]
-          (when (== old-type NODE_TYPE_BITMAP)
+          (when (== old-type node-type-bitmap)
             (let [bit-pos (bit-and (unsigned-bit-shift-right vh sh) MASK)
                   old-node-bm (slab/read-i32 sio old-off 8)
                   new-type (when (not= new-off nil-offset) (slab/read-u8 sio new-off 0))
-                  new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                  new-node-bm (when (and new-type (== new-type node-type-bitmap))
                                 (slab/read-i32 sio new-off 8))
                   old-bit (bit-shift-left 1 bit-pos)]
               (when (and (not (zero? (bit-and old-node-bm old-bit)))
@@ -635,10 +635,10 @@
               (when (and (not= old-off nil-offset) (not= old-off new-off))
                 (slab/free! sio old-off)
                 (let [old-type (slab/read-u8 sio old-off 0)]
-                  (when (== old-type NODE_TYPE_BITMAP)
+                  (when (== old-type node-type-bitmap)
                     (let [old-node-bm (slab/read-i32 sio old-off 8)
                           new-type (when (not= new-off nil-offset) (slab/read-u8 sio new-off 0))
-                          new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                          new-node-bm (when (and new-type (== new-type node-type-bitmap))
                                         (slab/read-i32 sio new-off 8))]
                       (loop [remaining (bit-and old-node-bm 0xFFFFFFFF) ;; unsigned: bit 31 as a negative long never reaches zero
                              old-idx 0]
@@ -870,7 +870,7 @@
   (when (not= slab-off nil-offset)
     (vswap! result conj! slab-off)
     (let [node-type (slab/read-u8 sio slab-off 0)]
-      (when (== node-type NODE_TYPE_BITMAP)
+      (when (== node-type node-type-bitmap)
         (let [node-bm (slab/read-i32 sio slab-off 8)
               child-count (popcount32 node-bm)]
           (dotimes [i child-count]
@@ -885,10 +885,10 @@
               (when (and (not= old-off nil-offset) (not= old-off new-off))
                 (vswap! result conj! old-off)
                 (let [old-type (slab/read-u8 sio old-off 0)]
-                  (when (== old-type NODE_TYPE_BITMAP)
+                  (when (== old-type node-type-bitmap)
                     (let [old-node-bm (slab/read-i32 sio old-off 8)
                           new-type (when (not= new-off nil-offset) (slab/read-u8 sio new-off 0))
-                          new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
+                          new-node-bm (when (and new-type (== new-type node-type-bitmap))
                                         (slab/read-i32 sio new-off 8))]
                       (loop [remaining (bit-and old-node-bm 0xFFFFFFFF) ;; unsigned: bit 31 as a negative long never reaches zero
                              old-idx 0]
@@ -993,7 +993,7 @@
         root-of (fn [x] (slab/read-i32 sio (d/-root-header-off x) sabsetroot-root-off-offset))
         ;; the child on vh's path, NIL where vh's slot holds none
         down (fn [off shift]
-               (if (and (not= off nil-offset) (== NODE_TYPE_BITMAP (slab/read-u8 sio off 0)))
+               (if (and (not= off nil-offset) (== node-type-bitmap (slab/read-u8 sio off 0)))
                  (let [dbm (slab/read-i32 sio off 4)
                        nbm (slab/read-i32 sio off 8)
                        bit (node-bit dbm nbm vh shift)]
@@ -1028,7 +1028,7 @@
                     (let [size (+ node-header-size (* 4 (count children))
                                   (reduce (fn [n [_ vb]] (+ n 4 (bytes-length vb))) 0 data))
                           off (slab/alloc! sio size)]
-                      (slab/write-u8! sio off 0 NODE_TYPE_BITMAP)
+                      (slab/write-u8! sio off 0 node-type-bitmap)
                       (slab/write-u8! sio off 1 0)
                       (slab/write-u16! sio off 2 0)
                       (slab/write-i32! sio off 4 db)
@@ -1134,8 +1134,8 @@
     (hamt-val-reduce sio root-off (fn [s v] (conj s v)) #{})))
 
 (eve/register-eve-type!
- {:fast-tag     ser/FAST_TAG_SAB_SET
-  :type-id      EveHashSet-type-id
+ {:fast-tag     ser/fast-tag-sab-set
+  :type-id      eve-hash-set-type-id
   :from-header  hash-set-from-header
   :host-value   set->host-value
   :dispose      dispose!

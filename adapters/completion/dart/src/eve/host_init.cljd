@@ -79,7 +79,7 @@
    {:read (fn [sio blk len] (slab/read-bytes sio blk 1 len))
     :write (fn [sio bs]
              (let [blk (slab/alloc! sio (inc (count bs)))]
-               (slab/write-u8! sio blk 0 ser/SCALAR_BLOCK_TYPE_ID)
+               (slab/write-u8! sio blk 0 ser/scalar-block-type-id)
                (slab/write-bytes! sio blk 1 bs)
                blk))})
   ;; alloc's read-header-name-hash, replayed from
@@ -93,21 +93,21 @@
 
   ;; the collection types (each namespace's register-eve-type!)
   (register-collection!
-   ser/FAST_TAG_SAB_VEC eve.vec/EveVector-type-id
-   eve.vec/EveVector-type-id--from-header eve.vec/EveVector-type-id--dispose
-   eve.vec/EveVector-type-id--build vector? :vec eve.vec/-write-vec-coll!)
+   ser/fast-tag-sab-vec eve.vec/EveVector-type-id
+   eve.vec/eve-vector-type-id--from-header eve.vec/eve-vector-type-id--dispose
+   eve.vec/eve-vector-type-id--build vector? :vec eve.vec/-write-vec-coll!)
   (register-collection!
-   ser/FAST_TAG_SAB_MAP eve.map/EveHashMap-type-id
-   eve.map/EveHashMap-type-id--from-header eve.map/EveHashMap-type-id--dispose
-   eve.map/EveHashMap-type-id--build map? :map eve.map/-write-map-coll!)
+   ser/fast-tag-sab-map eve.map/EveHashMap-type-id
+   eve.map/eve-hash-map-type-id--from-header eve.map/eve-hash-map-type-id--dispose
+   eve.map/eve-hash-map-type-id--build map? :map eve.map/-write-map-coll!)
   (register-collection!
-   ser/FAST_TAG_SAB_SET eve.set/EveHashSet-type-id
-   eve.set/EveHashSet-type-id--from-header eve.set/EveHashSet-type-id--dispose
-   eve.set/EveHashSet-type-id--build set? :set eve.set/-write-set-coll!)
+   ser/fast-tag-sab-set eve.set/EveHashSet-type-id
+   eve.set/eve-hash-set-type-id--from-header eve.set/eve-hash-set-type-id--dispose
+   eve.set/eve-hash-set-type-id--build set? :set eve.set/-write-set-coll!)
   (register-collection!
-   ser/FAST_TAG_SAB_LIST eve.list/EveList-type-id
-   eve.list/EveList-type-id--from-header eve.list/EveList-type-id--dispose
-   eve.list/EveList-type-id--build seq? :list eve.list/-write-list-coll!)
+   ser/fast-tag-sab-list eve.list/EveList-type-id
+   eve.list/eve-list-type-id--from-header eve.list/eve-list-type-id--dispose
+   eve.list/eve-list-type-id--build seq? :list eve.list/-write-list-coll!)
 
   ;; eve.array's own registrations: the EveArray builder (its fn
   ;; replayed from eve.array, register-builder!), the slab-type
@@ -119,7 +119,7 @@
            n (count arr)
            byte-len (* n (eve.array/subtype->elem-size subtype))
            blk-off (slab/alloc! sio (+ eve.array/header-size byte-len))]
-       (slab/write-u8!  sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
+       (slab/write-u8!  sio blk-off 0 ser/eve-array-slab-type-id)
        (slab/write-u8!  sio blk-off 1 subtype)
        (slab/write-u16! sio blk-off 2 0)
        (slab/write-i32! sio blk-off 4 n)
@@ -129,9 +129,9 @@
        (reify d/IEveRoot
          (-root-header-off [_] blk-off)))))
   (ser/register-type-constructor!
-   ser/EVE_ARRAY_SLAB_TYPE_ID ser/EVE_ARRAY_SLAB_TYPE_ID eve.array/eve-array-from-offset)
+   ser/eve-array-slab-type-id ser/eve-array-slab-type-id eve.array/eve-array-from-offset)
   (ser/register-header-disposer!
-   ser/EVE_ARRAY_SLAB_TYPE_ID
+   ser/eve-array-slab-type-id
    (fn [sio blk-off] (slab/free! sio blk-off)))
-  (ser/register-type-constructor! ser/FAST_TAG_EVE_ARRAY eve.array/eve-array-from-sab-pointer)
+  (ser/register-type-constructor! ser/fast-tag-eve-array eve.array/eve-array-from-sab-pointer)
   nil)

@@ -91,8 +91,8 @@
     ;; the wound: XOR the .root atom table, epoch untouched — the
     ;; battery's exact range (ATOM_TABLE_START .. +256 slots x 8 B).
     (xor-range! (str base ".root")
-                d/ATOM_TABLE_START
-                (+ d/ATOM_TABLE_START (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE)))
+                d/atom-table-start
+                (+ d/atom-table-start (* d/max-atom-slots d/atom-slot-size)))
     (let [dom (a/persistent-atom-domain base)
           x   (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 42 @x)

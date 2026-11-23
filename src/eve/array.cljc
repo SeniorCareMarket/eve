@@ -85,15 +85,15 @@
   "Type keyword → serializer subtype code."
   [kw]
   (case kw
-    :uint8         ser/TYPED_ARRAY_UINT8
-    :int8          ser/TYPED_ARRAY_INT8
-    :uint8-clamped ser/TYPED_ARRAY_UINT8_CLAMPED
-    :int16         ser/TYPED_ARRAY_INT16
-    :uint16        ser/TYPED_ARRAY_UINT16
-    :int32         ser/TYPED_ARRAY_INT32
-    :uint32        ser/TYPED_ARRAY_UINT32
-    :float32       ser/TYPED_ARRAY_FLOAT32
-    :float64       ser/TYPED_ARRAY_FLOAT64
+    :uint8         ser/typed-array-uint8
+    :int8          ser/typed-array-int8
+    :uint8-clamped ser/typed-array-uint8-clamped
+    :int16         ser/typed-array-int16
+    :uint16        ser/typed-array-uint16
+    :int32         ser/typed-array-int32
+    :uint32        ser/typed-array-uint32
+    :float32       ser/typed-array-float32
+    :float64       ser/typed-array-float64
     (throw (enc/illegal-argument
             (str "Unknown eve-array type: " kw
                  ". Supported: :int8 :uint8 :uint8-clamped :int16 :uint16 :int32 :uint32 :float32 :float64")))))
@@ -272,7 +272,7 @@
                      :else false))))))
 
 (defn- require-int32! [arr op]
-  (when (not= (-subtype arr) ser/TYPED_ARRAY_INT32)
+  (when (not= (-subtype arr) ser/typed-array-int32)
     (throw (enc/illegal-argument
             (str op " only supported on :int32 arrays")))))
 
@@ -380,7 +380,7 @@
   d/ISabStorable
   (-sab-tag [_] :eve/array)
   (-sab-encode [_this _s-atom-env]
-    (codec/encode-sab-pointer ser/FAST_TAG_EVE_ARRAY offset__))
+    (codec/encode-sab-pointer ser/fast-tag-eve-array offset__))
   (-sab-dispose [_ _s-atom-env]
     (when (and (some? offset__) (not= offset__ alloc/nil-offset))
       (slab/free! sio__ offset__)))
@@ -836,7 +836,7 @@
          n (e/count arr)
          byte-len (* n (subtype->elem-size subtype))
          blk-off (slab/alloc! sio (+ header-size byte-len))]
-     (slab/write-u8!  sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
+     (slab/write-u8!  sio blk-off 0 ser/eve-array-slab-type-id)
      (slab/write-u8!  sio blk-off 1 subtype)
      (slab/write-u16! sio blk-off 2 0)
      (slab/write-i32! sio blk-off 4 n)
@@ -848,11 +848,11 @@
 
 ;; 0x1D: the pointer tag and the header type-id
 (ser/register-type-constructor!
- ser/EVE_ARRAY_SLAB_TYPE_ID ser/EVE_ARRAY_SLAB_TYPE_ID eve-array-from-offset)
+ ser/eve-array-slab-type-id ser/eve-array-slab-type-id eve-array-from-offset)
 
 ;; the block holds its elements: freeing it frees the array
 (ser/register-header-disposer!
- ser/EVE_ARRAY_SLAB_TYPE_ID
+ ser/eve-array-slab-type-id
  (fn [sio blk-off] (slab/free! sio blk-off)))
 
 ;; A host typed array in an eve value: an eve array block (eve.encoding reads
@@ -894,7 +894,7 @@
                   (subtype->atomic? byte0) nil)
       (make-eve-array-instance sio slab-off))))
 
-(ser/register-type-constructor! ser/FAST_TAG_EVE_ARRAY eve-array-from-sab-pointer)
+(ser/register-type-constructor! ser/fast-tag-eve-array eve-array-from-sab-pointer)
 
 ;;=============================================================================
 ;; HeapEveArray — DELETED (2026-11-14, John's ruling: "All such 'heap-'

@@ -25,7 +25,7 @@
             [eve.deftype-proto.data :as d] [clojure.string]))
 
 (def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
-(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+(def ^:private journal-table-bytes (* d/max-atom-slots d/atom-slot-size))
 
 ;; CRC-32 (IEEE), the JS journal record's checksum.
 (def ^:private crc-table
@@ -184,7 +184,7 @@
   "The commit record for ROOT-R's CURRENT epoch and atom table, as a
    Uint8Array."
   [root-r]
-  (let [tbl (js/Uint8Array. (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes))
+  (let [tbl (js/Uint8Array. (mem/-read-bytes root-r d/atom-table-start journal-table-bytes))
         epoch (mem/-load-i32 root-r d/root-epoch-offset)
         len (+ 4 4 (.-length tbl) 4)
         out (js/Uint8Array. (+ 8 len))

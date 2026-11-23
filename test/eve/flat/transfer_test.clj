@@ -55,7 +55,7 @@
 
 (defn- root-ptr [a]
   (mem/-load-i32 (:root-r (ea/-domain-state a))
-                 (d/atom-slot-offset (ea/-atom-slot-idx a) d/ATOM_SLOT_PTR_OFFSET)))
+                 (d/atom-slot-offset (ea/-atom-slot-idx a) d/atom-slot-ptr-offset)))
 
 (defn- free-counts
   "Per-class free-block counts of a's domain, classes 0-5."

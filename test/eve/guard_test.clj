@@ -8,7 +8,7 @@
             [eve.deftype-proto.data :as d]))
 
 (defn- slot-ptr [a]
-  (mem/-load-i32 (:root-r (ea/-domain-state a)) (d/atom-slot-offset (ea/-atom-slot-idx a) d/ATOM_SLOT_PTR_OFFSET)))
+  (mem/-load-i32 (:root-r (ea/-domain-state a)) (d/atom-slot-offset (ea/-atom-slot-idx a) d/atom-slot-ptr-offset)))
 
 (def src (into {} (map (fn [i] [(keyword (str "k" i)) {:id i :name (str "n" i) :tags [i (inc i)]}]) (range 50))))
 

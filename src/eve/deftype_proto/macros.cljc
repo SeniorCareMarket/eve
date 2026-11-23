@@ -364,7 +364,7 @@
 
    Options map keys:
      :fast-tag       — pointer tag constant (e.g. ser/FAST_TAG_SAB_VEC)
-     :type-id        — header type-id constant (e.g. EveVector-type-id)
+     :type-id        — header type-id constant (e.g. eve-vector-type-id)
      :from-header    — (fn [sio header-off] → instance) constructor symbol
      :host-value     — (fn [sio header-off] → the host's own collection), for a
                        host whose types cannot stand in for its collections

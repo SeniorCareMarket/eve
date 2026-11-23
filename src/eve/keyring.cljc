@@ -61,13 +61,13 @@
 (def ^:const eek-active 1)
 (def ^:const eek-draining 2)
 (def ^:const eek-shredded 3)
-(def ^:const KEY_STATUS_AUTO 1)
-(def ^:const KEY_STATUS_USER 2)
-(def ^:const KEY_STATUS_USER_NO_STORE 3)
+(def ^:const key-status-auto 1)
+(def ^:const key-status-user 2)
+(def ^:const key-status-user-no-store 3)
 (def ^:const key-alg-aes-256-ctr 1)
 ;; eve's: the domain's keystream salt, past the kernel's ring (72 + 64 × 60)
 (def ^:const enc-domain-salt 3912)
-(def ^:const RECORD_BYTES 4096)
+(def ^:const record-bytes 4096)
 
 (defn- load [r off] (mem/-load-i32 r off))
 (defn- store! [r off v] (mem/-store-i32! r off (i32/i32 v)))
@@ -108,12 +108,12 @@
    initialiser wins; the key status is published last."
   [r gak status]
   (cond
-    (not (contains? #{KEY_STATUS_AUTO KEY_STATUS_USER KEY_STATUS_USER_NO_STORE} status)) -1
+    (not (contains? #{key-status-auto key-status-user key-status-user-no-store} status)) -1
     (not= 0 (cas! r enc-magic 0 magic-val)) 0
     :else
     (do (store! r enc-version 1)
         (store! r enc-key-algorithm key-alg-aes-256-ctr)
-        (write-vec! r enc-gak-bytes (if (= status KEY_STATUS_USER_NO_STORE) (vec (repeat 32 0)) (vec gak)))
+        (write-vec! r enc-gak-bytes (if (= status key-status-user-no-store) (vec (repeat 32 0)) (vec gak)))
         (write-vec! r enc-gak-fingerprint (fingerprint gak))
         (store! r enc-eek-ring-head -1)
         (store! r enc-eek-ring-size 0)
@@ -139,7 +139,7 @@
   (let [st (status r)]
     (cond
       (<= st 0) nil
-      (= st KEY_STATUS_AUTO) (read-vec r enc-gak-bytes 32)
+      (= st key-status-auto) (read-vec r enc-gak-bytes 32)
       (nil? user-key)
       (throw (ex-info "eve.keyring: this domain is encrypted under a user key, and none was given"
                       {:type :user-key-required}))
@@ -373,7 +373,7 @@
   [base-path]
   ;; lockable: a lock-only host (bb) takes the file lock for the ring's CAS, as
   ;; eve.atom's root does
-  (region/open-mmap-region (keyring-path base-path) RECORD_BYTES {:lockable? true}))
+  (region/open-mmap-region (keyring-path base-path) record-bytes {:lockable? true}))
 
 (defn open-encrypted-domain!
   "The encrypted mmap domain at base-path, [slab-io ring]. opts: :create?
@@ -381,11 +381,11 @@
    a fresh GAK kept in the ring; 2 user; 3 user, not stored), :key (the user's
    32-byte key for a user ring, created or opened), :capacities (as
    alloc/mmap-domain-sio!'s)."
-  [base-path {:keys [create? status key capacities] :or {status KEY_STATUS_AUTO capacities {}}}]
+  [base-path {:keys [create? status key capacities] :or {status key-status-auto capacities {}}}]
   (proc/ensure-parent-dir! base-path)
   (let [r (open-ring base-path)]
     (when create?
-      (let [gak (if (= status KEY_STATUS_AUTO) (proc/random-bytes 32) key)]
+      (let [gak (if (= status key-status-auto) (proc/random-bytes 32) key)]
         (when (not= 32 (count gak))
           (throw (ex-info "eve.keyring: a user ring needs a 32-byte key" {:type :bad-key})))
         (when (neg? (init! r gak status))

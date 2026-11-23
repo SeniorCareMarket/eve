@@ -62,14 +62,14 @@
 
 (def ^:const cache-size 48)
 (def ^:const MAGIC 0x31475344) ;; "DGS1"
-(def ^:const FLAG_DIGEST 1)
+(def ^:const flag-digest 1)
 (def ^:const flag-hash 2)
 ;; side-block field offsets
 (def ^:const f-magic 0)
 (def ^:const f-backptr 4)
-(def ^:const F_FLAGS 8)
+(def ^:const f-flags 8)
 (def ^:const f-hashword 12)
-(def ^:const F_DIGEST 16)
+(def ^:const f-digest 16)
 
 ;; ---------------------------------------------------------------------------
 ;; The pointer word (the POINTER column of the root header's descriptor —
@@ -118,7 +118,7 @@
                                                 (let [blk (slab/alloc! sio cache-size)]
                                                   (slab/write-i32! sio blk f-magic MAGIC)
                                                   (slab/write-i32! sio blk f-backptr hdr)
-                                                  (slab/write-i32! sio blk F_FLAGS 0)
+                                                  (slab/write-i32! sio blk f-flags 0)
                                                   (if (== cur (cas-ptr! row cur blk))
                                                     (do (tally/hold-cache! sio hdr blk) blk)
                                                     (do (slab/free! sio blk)
@@ -130,7 +130,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- latched? [sio blk flag]
-  (not (zero? (bit-and (slab/read-i32 sio blk F_FLAGS) flag))))
+  (not (zero? (bit-and (slab/read-i32 sio blk f-flags) flag))))
 
 (defn- latch!
   "write! stores the field's words; then the field's presence bit is CASed
@@ -138,9 +138,9 @@
   [sio blk flag write!]
   (write!)
   (loop []
-    (let [f (slab/read-i32 sio blk F_FLAGS)]
+    (let [f (slab/read-i32 sio blk f-flags)]
       (cond (not (zero? (bit-and f flag))) true
-            (== f (slab/cas-i32! sio blk F_FLAGS f (bit-or f flag))) true
+            (== f (slab/cas-i32! sio blk f-flags f (bit-or f flag))) true
             :else (recur)))))
 
 (defn- pack-words
@@ -189,13 +189,13 @@
    walk. hdr is v's header-block slab offset; v is the root value itself."
   [sio hdr v]
   (let [blk (cache-block sio hdr)]
-    (if (and blk (latched? sio blk FLAG_DIGEST))
-      (mapv (fn [i] (slab/read-i32 sio blk (+ F_DIGEST (* 4 i)))) (range 8))
+    (if (and blk (latched? sio blk flag-digest))
+      (mapv (fn [i] (slab/read-i32 sio blk (+ f-digest (* 4 i)))) (range 8))
       (when-let [d (compute-digest v)]
         (when-let [b (or blk (ensure-block! sio hdr))]
-          (latch! sio b FLAG_DIGEST
+          (latch! sio b flag-digest
                   (fn [] (doseq [i (range 8)]
-                           (slab/write-i32! sio b (+ F_DIGEST (* 4 i)) (nth d i))))))
+                           (slab/write-i32! sio b (+ f-digest (* 4 i)) (nth d i))))))
         d))))
 
 (defn digest-words-of
@@ -218,11 +218,11 @@
    mismatch answers false and leaves the latched words standing."
   [sio hdr words]
   (when-let [b (ensure-block! sio hdr)]
-    (if (latched? sio b FLAG_DIGEST)
-      (= words (mapv (fn [i] (slab/read-i32 sio b (+ F_DIGEST (* 4 i)))) (range 8)))
-      (do (latch! sio b FLAG_DIGEST
+    (if (latched? sio b flag-digest)
+      (= words (mapv (fn [i] (slab/read-i32 sio b (+ f-digest (* 4 i)))) (range 8)))
+      (do (latch! sio b flag-digest
                   (fn [] (doseq [i (range 8)]
-                           (slab/write-i32! sio b (+ F_DIGEST (* 4 i)) (nth words i)))))
+                           (slab/write-i32! sio b (+ f-digest (* 4 i)) (nth words i)))))
           true))))
 
 (defn root-hash

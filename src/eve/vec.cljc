@@ -36,7 +36,7 @@
 ;; Shared Constants
 ;;=============================================================================
 
-(def ^:const NODE_SIZE 32)
+(def ^:const node-size 32)
 (def ^:const shift-step 5)
 (def ^:const MASK 0x1f)
 
@@ -49,8 +49,8 @@
 (defn- other-count [x] #?(:bb (ecore/count x) :default (count x)))
 (defn- other-nth [x i] #?(:bb (ecore/nth x i) :default (nth x i)))
 
-(def EveVector-type-id 0x12)
-(def sab-vec-root-type-id EveVector-type-id) ;; backward compat
+(def eve-vector-type-id 0x12)
+(def sab-vec-root-type-id eve-vector-type-id) ;; backward compat
 
 (def ^:const sabvecroot-cnt-offset 4)
 (def ^:const sabvecroot-shift-offset 8)
@@ -84,8 +84,8 @@
 ;;=============================================================================
 
 (defn- alloc-node! [sio]
-  (let [node-off (slab/alloc! sio (* NODE_SIZE 4))]
-    (dotimes [i NODE_SIZE]
+  (let [node-off (slab/alloc! sio (* node-size 4))]
+    (dotimes [i node-size]
       (slab/write-i32! sio node-off (* i 4) nil-offset))
     node-off))
 
@@ -96,9 +96,9 @@
    assembles its whole vector; on basilisp the per-word writes were most
    of it, 2026-11-15.)"
   [sio offs]
-  (let [node-off (slab/alloc! sio (* NODE_SIZE 4))
+  (let [node-off (slab/alloc! sio (* node-size 4))
         n (count offs)
-        words (if (< n NODE_SIZE) (into (vec offs) (repeat (- NODE_SIZE n) nil-offset)) (vec offs))]
+        words (if (< n node-size) (into (vec offs) (repeat (- node-size n) nil-offset)) (vec offs))]
     (slab/write-bytes! sio node-off 0 (enc/i32s->bytes-le (eve.host/int-array words)))
     node-off))
 
@@ -112,7 +112,7 @@
   node-off)
 
 (defn- clone-node! [sio src-off]
-  (let [byte-size (* NODE_SIZE 4)
+  (let [byte-size (* node-size 4)
         new-off (slab/alloc! sio byte-size)]
     (slab/copy-block! sio new-off 0 src-off 0 byte-size)
     new-off))
@@ -141,7 +141,7 @@
 ;;=============================================================================
 
 (defn- tail-offset-calc [cnt]
-  (if (< cnt NODE_SIZE)
+  (if (< cnt node-size)
     0
     (bit-shift-left (unsigned-bit-shift-right (dec cnt) shift-step) shift-step)))
 
@@ -253,7 +253,7 @@
   (defn- vec-conj-impl [sio cnt shift root tail tail-len v]
     (let [val-bytes (serialize-element-bytes sio v)
           val-off (make-value-block! sio val-bytes)]
-      (if (< tail-len NODE_SIZE)
+      (if (< tail-len node-size)
         (let [new-tail (clone-node! sio tail)]
           (node-set! sio new-tail tail-len val-off)
           (make-vec-impl sio (inc cnt) shift root new-tail (inc tail-len)))
@@ -345,7 +345,7 @@
     (if (<= n 0)
       0
       (let [w (bit-shift-left 1 sh)]
-        (min NODE_SIZE (quot (+ n (dec w)) w))))))
+        (min node-size (quot (+ n (dec w)) w))))))
 
 (defn- vec-shape
   "[cnt shift root tail tail-len toff]: the header at header-off, and the number of
@@ -656,7 +656,7 @@
   [sio v x]
   (let [hdr (d/-root-header-off v)
         [cnt _ _ tail tl] (read-vec-header sio hdr)]
-    (if (and (< tl NODE_SIZE) (not= tail nil-offset) (alloc/owns? sio hdr) (alloc/owns? sio tail))
+    (if (and (< tl node-size) (not= tail nil-offset) (alloc/owns? sio hdr) (alloc/owns? sio tail))
       (let [val-off (make-value-block! sio (serialize-element-bytes sio x))]
         (node-set! sio tail tl val-off)
         (slab/write-i32! sio hdr sabvecroot-cnt-offset (inc cnt))
@@ -881,12 +881,12 @@
             (if (empty? trie-val-offs)
               [nil-offset shift-step]
               (let [leaf-nodes (mapv (fn [chunk] (write-node! sio chunk))
-                                     (partition-all NODE_SIZE trie-val-offs))]
+                                     (partition-all node-size trie-val-offs))]
                 (loop [nodes leaf-nodes sh shift-step]
-                  (if (<= (count nodes) NODE_SIZE)
+                  (if (<= (count nodes) node-size)
                     [(write-node! sio nodes) sh]
                     (recur (mapv (fn [chunk] (write-node! sio chunk))
-                                 (partition-all NODE_SIZE nodes))
+                                 (partition-all node-size nodes))
                            (+ sh shift-step))))))]
         (write-vec-header! sio cnt sft root tail-off (- cnt toff))))))
 
@@ -924,9 +924,9 @@
                                  node-off
                                  (recur (node-get sio node-off (bit-and (unsigned-bit-shift-right base sh) MASK))
                                         (- sh shift-step))))]
-                    (words acc leaf (min NODE_SIZE (- toff base)))))
+                    (words acc leaf (min node-size (- toff base)))))
                 []
-                (range 0 toff NODE_SIZE))] (words trie tail (- cnt toff))))
+                (range 0 toff node-size))] (words trie tail (- cnt toff))))
 
 (defn build-vec
   "An EveVector whose elements are the EXISTING value blocks
@@ -990,8 +990,8 @@
         (recur (inc i) (conj! acc (nth-impl sio cnt shift root tail i)))))))
 
 (eve/register-eve-type!
- {:fast-tag     ser/FAST_TAG_SAB_VEC
-  :type-id      EveVector-type-id
+ {:fast-tag     ser/fast-tag-sab-vec
+  :type-id      eve-vector-type-id
   :from-header  vec-from-header
   :host-value   vec->host-value
   :dispose      dispose!

@@ -15,7 +15,7 @@
             [eve.wasm-mem :as wasm-mem]))
 
 (defn- require-int32! [a op]
-  (when (not= (arr/array-subtype-code a) ser/TYPED_ARRAY_INT32)
+  (when (not= (arr/array-subtype-code a) ser/typed-array-int32)
     (throw (js/Error. (str op " only supported on :int32 arrays")))))
 
 (defn- make-typed-view

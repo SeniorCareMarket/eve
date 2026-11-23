@@ -17,15 +17,15 @@
             [eve.numeric :as num]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser
-             :refer [FAST_TAG_CHAR FAST_TAG_DATE FAST_TAG_EVE_ARRAY FAST_TAG_FALSE
-                     FAST_TAG_FLAT_MAP FAST_TAG_FLAT_SET FAST_TAG_FLAT_VEC FAST_TAG_FLOAT64
-                     FAST_TAG_INT32 FAST_TAG_INT64 FAST_TAG_KEYWORD_LONG FAST_TAG_KEYWORD_NS_LONG
-                     FAST_TAG_KEYWORD_NS_SHORT FAST_TAG_KEYWORD_SHORT FAST_TAG_RECORD FAST_TAG_SAB_LIST
-                     FAST_TAG_SAB_MAP FAST_TAG_STRING_LONG FAST_TAG_STRING_SHORT FAST_TAG_SYMBOL_NS_SHORT
-                     FAST_TAG_SYMBOL_SHORT FAST_TAG_TRUE FAST_TAG_TYPED_ARRAY FAST_TAG_UUID
-                     TYPED_ARRAY_BIGINT64 TYPED_ARRAY_BIGUINT64 TYPED_ARRAY_FLOAT32 TYPED_ARRAY_FLOAT64
-                     TYPED_ARRAY_INT16 TYPED_ARRAY_INT32 TYPED_ARRAY_INT8 TYPED_ARRAY_UINT16
-                     TYPED_ARRAY_UINT32 TYPED_ARRAY_UINT8 TYPED_ARRAY_UINT8_CLAMPED convert-to-eve
+             :refer [fast-tag-char fast-tag-date fast-tag-eve-array fast-tag-false
+                     fast-tag-flat-map fast-tag-flat-set fast-tag-flat-vec fast-tag-float64
+                     fast-tag-int32 fast-tag-int64 fast-tag-keyword-long fast-tag-keyword-ns-long
+                     fast-tag-keyword-ns-short fast-tag-keyword-short fast-tag-record fast-tag-sab-list
+                     fast-tag-sab-map fast-tag-string-long fast-tag-string-short fast-tag-symbol-ns-short
+                     fast-tag-symbol-short fast-tag-true fast-tag-typed-array fast-tag-uuid
+                     typed-array-bigint64 typed-array-biguint64 typed-array-float32 typed-array-float64
+                     typed-array-int16 typed-array-int32 typed-array-int8 typed-array-uint16
+                     typed-array-uint32 typed-array-uint8 typed-array-uint8-clamped convert-to-eve
                      get-type-constructor sab-tag->fast-tag*]] [clojure.string]))
 
 ;;-----------------------------------------------------------------------------
@@ -41,8 +41,8 @@
   "Encode a slab pointer: [0xEE 0xDB tag off0 off1 off2 off3]: a reusable
    scratch view, valid until the next call."
   [tag offset]
-  (aset sab-ptr-buf 0 d/DIRECT_MAGIC_0)
-  (aset sab-ptr-buf 1 d/DIRECT_MAGIC_1)
+  (aset sab-ptr-buf 0 d/direct-magic-0)
+  (aset sab-ptr-buf 1 d/direct-magic-1)
   (aset sab-ptr-buf 2 tag)
   (.setInt32 sab-ptr-dv 3 offset true)
   sab-ptr-buf)
@@ -143,7 +143,7 @@
     (let [tagged-map (assoc (reduce-kv assoc {} elem) :eve/record-tag tag-str)
           sab-m (convert-to-eve nil tagged-map)]
       (when sab-m
-        (let [bytes (encode-fresh-pointer sab-m)] (aset bytes 2 FAST_TAG_RECORD) bytes)))))
+        (let [bytes (encode-fresh-pointer sab-m)] (aset bytes 2 fast-tag-record) bytes)))))
 
 ;;-----------------------------------------------------------------------------
 ;; Shared resources
@@ -199,18 +199,18 @@
   [elem]
   (cond
     ;; Uint8ClampedArray must be checked before Uint8Array (it's a subclass)
-    (instance? js/Uint8ClampedArray elem)  TYPED_ARRAY_UINT8_CLAMPED
-    (instance? js/Uint8Array elem)        TYPED_ARRAY_UINT8
-    (instance? js/Int8Array elem)          TYPED_ARRAY_INT8
-    (instance? js/Int16Array elem)         TYPED_ARRAY_INT16
-    (instance? js/Uint16Array elem)        TYPED_ARRAY_UINT16
-    (instance? js/Int32Array elem)         TYPED_ARRAY_INT32
-    (instance? js/Uint32Array elem)        TYPED_ARRAY_UINT32
-    (instance? js/Float32Array elem)       TYPED_ARRAY_FLOAT32
-    (instance? js/Float64Array elem)       TYPED_ARRAY_FLOAT64
+    (instance? js/Uint8ClampedArray elem)  typed-array-uint8-clamped
+    (instance? js/Uint8Array elem)        typed-array-uint8
+    (instance? js/Int8Array elem)          typed-array-int8
+    (instance? js/Int16Array elem)         typed-array-int16
+    (instance? js/Uint16Array elem)        typed-array-uint16
+    (instance? js/Int32Array elem)         typed-array-int32
+    (instance? js/Uint32Array elem)        typed-array-uint32
+    (instance? js/Float32Array elem)       typed-array-float32
+    (instance? js/Float64Array elem)       typed-array-float64
     ;; BigInt typed arrays may not be available in all environments
-    (and (exists? js/BigInt64Array)  (instance? js/BigInt64Array elem))  TYPED_ARRAY_BIGINT64
-    (and (exists? js/BigUint64Array) (instance? js/BigUint64Array elem)) TYPED_ARRAY_BIGUINT64
+    (and (exists? js/BigInt64Array)  (instance? js/BigInt64Array elem))  typed-array-bigint64
+    (and (exists? js/BigUint64Array) (instance? js/BigUint64Array elem)) typed-array-biguint64
     :else nil))
 
 (defn- serialize-typed-array
@@ -228,9 +228,9 @@
             byte-len  (.-byteLength elem)
             buf       (js/Uint8Array. (+ 8 byte-len))
             dv        (js/DataView. (.-buffer buf))]
-        (aset buf 0 d/DIRECT_MAGIC_0)
-        (aset buf 1 d/DIRECT_MAGIC_1)
-        (aset buf 2 FAST_TAG_TYPED_ARRAY)
+        (aset buf 0 d/direct-magic-0)
+        (aset buf 1 d/direct-magic-1)
+        (aset buf 2 fast-tag-typed-array)
         (aset buf 3 subtype)
         (.setUint32 dv 4 byte-len true)
         (.set buf byte-view 8)
@@ -255,9 +255,9 @@
                     name-len (.-length name-enc)]
                 (if (and (<= ns-len 255) (<= name-len 255))
                   (let [buf (js/Uint8Array. (+ 5 ns-len name-len))]
-                    (aset buf 0 d/DIRECT_MAGIC_0)
-                    (aset buf 1 d/DIRECT_MAGIC_1)
-                    (aset buf 2 FAST_TAG_KEYWORD_NS_SHORT)
+                    (aset buf 0 d/direct-magic-0)
+                    (aset buf 1 d/direct-magic-1)
+                    (aset buf 2 fast-tag-keyword-ns-short)
                     (aset buf 3 ns-len)
                     (.set buf ns-enc 4)
                     (aset buf (+ 4 ns-len) name-len)
@@ -265,9 +265,9 @@
                     buf)
                   (let [buf (js/Uint8Array. (+ 11 ns-len name-len))
                         dv (js/DataView. (.-buffer buf))]
-                    (aset buf 0 d/DIRECT_MAGIC_0)
-                    (aset buf 1 d/DIRECT_MAGIC_1)
-                    (aset buf 2 FAST_TAG_KEYWORD_NS_LONG)
+                    (aset buf 0 d/direct-magic-0)
+                    (aset buf 1 d/direct-magic-1)
+                    (aset buf 2 fast-tag-keyword-ns-long)
                     (.setUint32 dv 3 ns-len true)
                     (.set buf ns-enc 7)
                     (.setUint32 dv (+ 7 ns-len) name-len true)
@@ -279,17 +279,17 @@
                     len (.-length encoded)]
                 (if (<= len 255)
                   (let [buf (js/Uint8Array. (+ 4 len))]
-                    (aset buf 0 d/DIRECT_MAGIC_0)
-                    (aset buf 1 d/DIRECT_MAGIC_1)
-                    (aset buf 2 FAST_TAG_KEYWORD_SHORT)
+                    (aset buf 0 d/direct-magic-0)
+                    (aset buf 1 d/direct-magic-1)
+                    (aset buf 2 fast-tag-keyword-short)
                     (aset buf 3 len)
                     (.set buf encoded 4)
                     buf)
                   (let [buf (js/Uint8Array. (+ 7 len))
                         dv (js/DataView. (.-buffer buf))]
-                    (aset buf 0 d/DIRECT_MAGIC_0)
-                    (aset buf 1 d/DIRECT_MAGIC_1)
-                    (aset buf 2 FAST_TAG_KEYWORD_LONG)
+                    (aset buf 0 d/direct-magic-0)
+                    (aset buf 1 d/direct-magic-1)
+                    (aset buf 2 fast-tag-keyword-long)
                     (.setUint32 dv 3 len true)
                     (.set buf encoded 7)
                     buf))))]
@@ -320,7 +320,7 @@
   IHash
   (-hash [_this]
     (hu/portable-hash-bytes
-     (js/Uint8Array. #js [d/DIRECT_MAGIC_0 d/DIRECT_MAGIC_1 FAST_TAG_CHAR
+     (js/Uint8Array. #js [d/direct-magic-0 d/direct-magic-1 fast-tag-char
                           (bit-and code 0xFF)
                           (bit-and (bit-shift-right code 8) 0xFF)])))
 
@@ -349,9 +349,9 @@
   (when (instance? EveChar elem)
     (let [buf (js/Uint8Array. 5)
           code (.-code elem)]
-      (aset buf 0 d/DIRECT_MAGIC_0)
-      (aset buf 1 d/DIRECT_MAGIC_1)
-      (aset buf 2 FAST_TAG_CHAR)
+      (aset buf 0 d/direct-magic-0)
+      (aset buf 1 d/direct-magic-1)
+      (aset buf 2 fast-tag-char)
       (aset buf 3 (bit-and code 0xFF))
       (aset buf 4 (bit-and (bit-shift-right code 8) 0xFF))
       buf)))
@@ -368,37 +368,37 @@
     (js/Uint8Array. 0)
 
     (boolean? elem)
-    (do (aset scratch-a-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-a-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-a-u8 2 (if elem FAST_TAG_TRUE FAST_TAG_FALSE))
+    (do (aset scratch-a-u8 0 d/direct-magic-0)
+        (aset scratch-a-u8 1 d/direct-magic-1)
+        (aset scratch-a-u8 2 (if elem fast-tag-true fast-tag-false))
         scratch-a-3)
 
     (and (number? elem) (js/Number.isInteger elem)
          (>= elem -2147483648) (<= elem 2147483647))
-    (do (aset scratch-a-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-a-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-a-u8 2 FAST_TAG_INT32)
+    (do (aset scratch-a-u8 0 d/direct-magic-0)
+        (aset scratch-a-u8 1 d/direct-magic-1)
+        (aset scratch-a-u8 2 fast-tag-int32)
         (.setInt32 scratch-a-dv 3 elem true)
         scratch-a-7)
 
     (and (number? elem) (js/Number.isInteger elem) (js/Number.isSafeInteger elem))
-    (do (aset scratch-a-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-a-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-a-u8 2 FAST_TAG_INT64)
+    (do (aset scratch-a-u8 0 d/direct-magic-0)
+        (aset scratch-a-u8 1 d/direct-magic-1)
+        (aset scratch-a-u8 2 fast-tag-int64)
         (.setBigInt64 scratch-a-dv 3 (js/BigInt elem) true)
         scratch-a-11)
 
     (number? elem)
-    (do (aset scratch-a-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-a-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-a-u8 2 FAST_TAG_FLOAT64)
+    (do (aset scratch-a-u8 0 d/direct-magic-0)
+        (aset scratch-a-u8 1 d/direct-magic-1)
+        (aset scratch-a-u8 2 fast-tag-float64)
         (.setFloat64 scratch-a-dv 3 elem true)
         scratch-a-11)
 
     (inst? elem)
-    (do (aset scratch-a-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-a-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-a-u8 2 FAST_TAG_DATE)
+    (do (aset scratch-a-u8 0 d/direct-magic-0)
+        (aset scratch-a-u8 1 d/direct-magic-1)
+        (aset scratch-a-u8 2 fast-tag-date)
         (.setFloat64 scratch-a-dv 3 (.getTime elem) true)
         scratch-a-11)
 
@@ -412,37 +412,37 @@
     (js/Uint8Array. 0)
 
     (boolean? elem)
-    (do (aset scratch-b-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-b-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-b-u8 2 (if elem FAST_TAG_TRUE FAST_TAG_FALSE))
+    (do (aset scratch-b-u8 0 d/direct-magic-0)
+        (aset scratch-b-u8 1 d/direct-magic-1)
+        (aset scratch-b-u8 2 (if elem fast-tag-true fast-tag-false))
         scratch-b-3)
 
     (and (number? elem) (js/Number.isInteger elem)
          (>= elem -2147483648) (<= elem 2147483647))
-    (do (aset scratch-b-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-b-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-b-u8 2 FAST_TAG_INT32)
+    (do (aset scratch-b-u8 0 d/direct-magic-0)
+        (aset scratch-b-u8 1 d/direct-magic-1)
+        (aset scratch-b-u8 2 fast-tag-int32)
         (.setInt32 scratch-b-dv 3 elem true)
         scratch-b-7)
 
     (and (number? elem) (js/Number.isInteger elem) (js/Number.isSafeInteger elem))
-    (do (aset scratch-b-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-b-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-b-u8 2 FAST_TAG_INT64)
+    (do (aset scratch-b-u8 0 d/direct-magic-0)
+        (aset scratch-b-u8 1 d/direct-magic-1)
+        (aset scratch-b-u8 2 fast-tag-int64)
         (.setBigInt64 scratch-b-dv 3 (js/BigInt elem) true)
         scratch-b-11)
 
     (number? elem)
-    (do (aset scratch-b-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-b-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-b-u8 2 FAST_TAG_FLOAT64)
+    (do (aset scratch-b-u8 0 d/direct-magic-0)
+        (aset scratch-b-u8 1 d/direct-magic-1)
+        (aset scratch-b-u8 2 fast-tag-float64)
         (.setFloat64 scratch-b-dv 3 elem true)
         scratch-b-11)
 
     (inst? elem)
-    (do (aset scratch-b-u8 0 d/DIRECT_MAGIC_0)
-        (aset scratch-b-u8 1 d/DIRECT_MAGIC_1)
-        (aset scratch-b-u8 2 FAST_TAG_DATE)
+    (do (aset scratch-b-u8 0 d/direct-magic-0)
+        (aset scratch-b-u8 1 d/direct-magic-1)
+        (aset scratch-b-u8 2 fast-tag-date)
         (.setFloat64 scratch-b-dv 3 (.getTime elem) true)
         scratch-b-11)
 
@@ -498,20 +498,20 @@
   (cond
     (and (>= x BI-I32-MIN) (<= x BI-I32-MAX))
     (let [buf (js/Uint8Array. 7)]
-      (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 FAST_TAG_INT32)
+      (aset buf 0 d/direct-magic-0) (aset buf 1 d/direct-magic-1) (aset buf 2 fast-tag-int32)
       (.setInt32 (js/DataView. (.-buffer buf)) 3 (js/Number x) true)
       buf)
 
     (and (>= x BI-I64-MIN) (<= x BI-I64-MAX))
     (let [buf (js/Uint8Array. 11)]
-      (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 FAST_TAG_INT64)
+      (aset buf 0 d/direct-magic-0) (aset buf 1 d/direct-magic-1) (aset buf 2 fast-tag-int64)
       (.setBigInt64 (js/DataView. (.-buffer buf)) 3 x true)
       buf)
 
     :else
     (let [tw (bigint->twos x)
           buf (js/Uint8Array. (+ 7 (.-length tw)))]
-      (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 ser/FAST_TAG_BIGINT)
+      (aset buf 0 d/direct-magic-0) (aset buf 1 d/direct-magic-1) (aset buf 2 ser/fast-tag-bigint)
       (.setUint32 (js/DataView. (.-buffer buf)) 3 (.-length tw) true)
       (.set buf tw 7)
       buf)))
@@ -532,7 +532,7 @@
         db (bigint->twos (as-js-bigint (num/denominator r)))
         buf (js/Uint8Array. (+ 11 (.-length nb) (.-length db)))
         dv (js/DataView. (.-buffer buf))]
-    (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 ser/FAST_TAG_RATIO)
+    (aset buf 0 d/direct-magic-0) (aset buf 1 d/direct-magic-1) (aset buf 2 ser/fast-tag-ratio)
     (.setUint32 dv 3 (.-length nb) true)
     (.set buf nb 7)
     (.setUint32 dv (+ 7 (.-length nb)) (.-length db) true)
@@ -558,7 +558,7 @@
         ub (bigint->twos u)
         buf (js/Uint8Array. (+ 11 (.-length ub)))
         dv (js/DataView. (.-buffer buf))]
-    (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 ser/FAST_TAG_BIGDEC)
+    (aset buf 0 d/direct-magic-0) (aset buf 1 d/direct-magic-1) (aset buf 2 ser/fast-tag-bigdec)
     (.setInt32 dv 3 s true)
     (.setUint32 dv 7 (.-length ub) true)
     (.set buf ub 11)
@@ -585,7 +585,7 @@
   (let [h (ser/ref->handle! v)
         buf (js/Uint8Array. 11)
         dv (js/DataView. (.-buffer buf))]
-    (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 ser/FAST_TAG_REF)
+    (aset buf 0 d/direct-magic-0) (aset buf 1 d/direct-magic-1) (aset buf 2 ser/fast-tag-ref)
     (.setUint32 dv 3 (ser/ref-realm) true)
     (.setUint32 dv 7 h true)
     buf))
@@ -595,17 +595,17 @@
    ::none for another tag."
   [^js u8 off tag]
   (cond
-    (== tag ser/FAST_TAG_BIGINT) (num/bigint (twos->bigint u8 (+ off 3)))
-    (== tag ser/FAST_TAG_RATIO)
+    (== tag ser/fast-tag-bigint) (num/bigint (twos->bigint u8 (+ off 3)))
+    (== tag ser/fast-tag-ratio)
     (let [n (twos->bigint u8 (+ off 3))
           nlen (.getUint32 (js/DataView. (.-buffer u8) (.-byteOffset u8) (.-byteLength u8)) (+ off 3) true)
           d (twos->bigint u8 (+ off 3 4 nlen))]
       (num/ratio n d))
-    (== tag ser/FAST_TAG_BIGDEC)
+    (== tag ser/fast-tag-bigdec)
     (let [scale (.getInt32 (js/DataView. (.-buffer u8) (.-byteOffset u8) (.-byteLength u8)) (+ off 3) true)
           u (twos->bigint u8 (+ off 7))]
       (num/bigdec u scale))
-    (== tag ser/FAST_TAG_REF)
+    (== tag ser/fast-tag-ref)
     (let [dv (js/DataView. (.-buffer u8) (.-byteOffset u8) (.-byteLength u8))]
       (ser/handle->ref (.getUint32 dv (+ off 3) true) (.getUint32 dv (+ off 7) true)))
     :else ::none))
@@ -657,9 +657,9 @@
           (uuid? elem)
           (let [buf (js/Uint8Array. 19)
                 uuid-str (clojure.string/lower-case (str elem))]
-            (aset buf 0 d/DIRECT_MAGIC_0)
-            (aset buf 1 d/DIRECT_MAGIC_1)
-            (aset buf 2 FAST_TAG_UUID)
+            (aset buf 0 d/direct-magic-0)
+            (aset buf 1 d/direct-magic-1)
+            (aset buf 2 fast-tag-uuid)
             (let [hex-positions [0 2 4 6 9 11 14 16 19 21 24 26 28 30 32 34]]
               (dotimes [i 16]
                 (let [hex-idx (aget (into-array hex-positions) i)
@@ -676,9 +676,9 @@
                 ns-len (check-symbol-len! elem (.-length ns-enc))
                 name-len (check-symbol-len! elem (.-length name-enc))
                 buf (js/Uint8Array. (+ 5 ns-len name-len))]
-            (aset buf 0 d/DIRECT_MAGIC_0)
-            (aset buf 1 d/DIRECT_MAGIC_1)
-            (aset buf 2 FAST_TAG_SYMBOL_NS_SHORT)
+            (aset buf 0 d/direct-magic-0)
+            (aset buf 1 d/direct-magic-1)
+            (aset buf 2 fast-tag-symbol-ns-short)
             (aset buf 3 ns-len)
             (.set buf ns-enc 4)
             (aset buf (+ 4 ns-len) name-len)
@@ -691,9 +691,9 @@
                 encoded (.encode fast-encoder s)
                 len (check-symbol-len! elem (.-length encoded))
                 buf (js/Uint8Array. (+ 4 len))]
-            (aset buf 0 d/DIRECT_MAGIC_0)
-            (aset buf 1 d/DIRECT_MAGIC_1)
-            (aset buf 2 FAST_TAG_SYMBOL_SHORT)
+            (aset buf 0 d/direct-magic-0)
+            (aset buf 1 d/direct-magic-1)
+            (aset buf 2 fast-tag-symbol-short)
             (aset buf 3 len)
             (.set buf encoded 4)
             buf)
@@ -704,17 +704,17 @@
                 len (.-length encoded)]
             (if (<= len 255)
               (let [buf (js/Uint8Array. (+ 4 len))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_STRING_SHORT)
+                (aset buf 0 d/direct-magic-0)
+                (aset buf 1 d/direct-magic-1)
+                (aset buf 2 fast-tag-string-short)
                 (aset buf 3 len)
                 (.set buf encoded 4)
                 buf)
               (let [buf (js/Uint8Array. (+ 7 len))
                     dv (js/DataView. (.-buffer buf))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_STRING_LONG)
+                (aset buf 0 d/direct-magic-0)
+                (aset buf 1 d/direct-magic-1)
+                (aset buf 2 fast-tag-string-long)
                 (.setUint32 dv 3 len true)
                 (.set buf encoded 7)
                 buf)))
@@ -788,9 +788,9 @@
           (uuid? elem)
           (let [buf (js/Uint8Array. 19)
                 uuid-str (clojure.string/lower-case (str elem))]
-            (aset buf 0 d/DIRECT_MAGIC_0)
-            (aset buf 1 d/DIRECT_MAGIC_1)
-            (aset buf 2 FAST_TAG_UUID)
+            (aset buf 0 d/direct-magic-0)
+            (aset buf 1 d/direct-magic-1)
+            (aset buf 2 fast-tag-uuid)
             (let [hex-positions [0 2 4 6 9 11 14 16 19 21 24 26 28 30 32 34]]
               (dotimes [i 16]
                 (let [hex-idx (aget (into-array hex-positions) i)
@@ -806,9 +806,9 @@
                 ns-len (check-symbol-len! elem (.-length ns-enc))
                 name-len (check-symbol-len! elem (.-length name-enc))
                 buf (js/Uint8Array. (+ 5 ns-len name-len))]
-            (aset buf 0 d/DIRECT_MAGIC_0)
-            (aset buf 1 d/DIRECT_MAGIC_1)
-            (aset buf 2 FAST_TAG_SYMBOL_NS_SHORT)
+            (aset buf 0 d/direct-magic-0)
+            (aset buf 1 d/direct-magic-1)
+            (aset buf 2 fast-tag-symbol-ns-short)
             (aset buf 3 ns-len)
             (.set buf ns-enc 4)
             (aset buf (+ 4 ns-len) name-len)
@@ -820,9 +820,9 @@
                 encoded (.encode fast-encoder s)
                 len (check-symbol-len! elem (.-length encoded))
                 buf (js/Uint8Array. (+ 4 len))]
-            (aset buf 0 d/DIRECT_MAGIC_0)
-            (aset buf 1 d/DIRECT_MAGIC_1)
-            (aset buf 2 FAST_TAG_SYMBOL_SHORT)
+            (aset buf 0 d/direct-magic-0)
+            (aset buf 1 d/direct-magic-1)
+            (aset buf 2 fast-tag-symbol-short)
             (aset buf 3 len)
             (.set buf encoded 4)
             buf)
@@ -832,17 +832,17 @@
                 len (.-length encoded)]
             (if (<= len 255)
               (let [buf (js/Uint8Array. (+ 4 len))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_STRING_SHORT)
+                (aset buf 0 d/direct-magic-0)
+                (aset buf 1 d/direct-magic-1)
+                (aset buf 2 fast-tag-string-short)
                 (aset buf 3 len)
                 (.set buf encoded 4)
                 buf)
               (let [buf (js/Uint8Array. (+ 7 len))
                     dv (js/DataView. (.-buffer buf))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_STRING_LONG)
+                (aset buf 0 d/direct-magic-0)
+                (aset buf 1 d/direct-magic-1)
+                (aset buf 2 fast-tag-string-long)
                 (.setUint32 dv 3 len true)
                 (.set buf encoded 7)
                 buf)))
@@ -893,8 +893,8 @@
         body-size (reduce (fn [acc eb] (+ acc 4 (.-length eb))) 0 encoded)
         buf       (js/Uint8Array. (+ 7 body-size))
         dv        (js/DataView. (.-buffer buf))]
-    (aset buf 0 d/DIRECT_MAGIC_0)
-    (aset buf 1 d/DIRECT_MAGIC_1)
+    (aset buf 0 d/direct-magic-0)
+    (aset buf 1 d/direct-magic-1)
     (aset buf 2 tag)
     (.setInt32 dv 3 cnt true)
     (loop [pos 7 items (seq encoded)]
@@ -927,9 +927,9 @@
                             0 encoded)
           buf (js/Uint8Array. (+ 7 body-size))  ; 3 header + 4 count + body
           dv  (js/DataView. (.-buffer buf))]
-      (aset buf 0 d/DIRECT_MAGIC_0)
-      (aset buf 1 d/DIRECT_MAGIC_1)
-      (aset buf 2 FAST_TAG_FLAT_MAP)
+      (aset buf 0 d/direct-magic-0)
+      (aset buf 1 d/direct-magic-1)
+      (aset buf 2 fast-tag-flat-map)
       (.setInt32 dv 3 cnt true)
       (loop [pos 7 pairs (seq encoded)]
         (when-let [[[kb vb] & rest-pairs] pairs]
@@ -943,11 +943,11 @@
       buf)
 
     (set? coll)
-    (flat-elements-blob FAST_TAG_FLAT_SET
+    (flat-elements-blob fast-tag-flat-set
                         (sort d/compare-bytes (mapv serialize-flat-element (seq coll))))
 
     :else
-    (flat-elements-blob FAST_TAG_FLAT_VEC
+    (flat-elements-blob fast-tag-flat-vec
                         (mapv serialize-flat-element (seq coll)))))
 
 (defn serialize-flat-element
@@ -980,51 +980,51 @@
       nil
       ;; Check for fast-path magic prefix
       (if (and (>= len 3)
-               (== (aget bytes 0) d/DIRECT_MAGIC_0)
-               (== (aget bytes 1) d/DIRECT_MAGIC_1))
+               (== (aget bytes 0) d/direct-magic-0)
+               (== (aget bytes 1) d/direct-magic-1))
         (let [tag (aget bytes 2)]
           (cond
-            (== tag FAST_TAG_FALSE) false
-            (== tag FAST_TAG_TRUE) true
+            (== tag fast-tag-false) false
+            (== tag fast-tag-true) true
 
-            (== tag FAST_TAG_INT32)
+            (== tag fast-tag-int32)
             (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))]
               (.getInt32 dv 3 true))
 
-            (== tag FAST_TAG_INT64)
+            (== tag fast-tag-int64)
             (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))]
               (js/Number (.getBigInt64 dv 3 true)))
 
-            (== tag FAST_TAG_FLOAT64)
+            (== tag fast-tag-float64)
             (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))]
               (.getFloat64 dv 3 true))
 
-            (== tag FAST_TAG_STRING_SHORT)
+            (== tag fast-tag-string-short)
             (let [str-len (aget bytes 3)]
               (decode-text (.subarray bytes 4 (+ 4 str-len))))
 
-            (== tag FAST_TAG_STRING_LONG)
+            (== tag fast-tag-string-long)
             (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                   str-len (.getUint32 dv 3 true)]
               (decode-text (.subarray bytes 7 (+ 7 str-len))))
 
-            (== tag FAST_TAG_KEYWORD_SHORT)
+            (== tag fast-tag-keyword-short)
             (let [str-len (aget bytes 3)]
               (keyword (decode-text (.subarray bytes 4 (+ 4 str-len)))))
 
-            (== tag FAST_TAG_KEYWORD_LONG)
+            (== tag fast-tag-keyword-long)
             (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                   str-len (.getUint32 dv 3 true)]
               (keyword (decode-text (.subarray bytes 7 (+ 7 str-len)))))
 
-            (== tag FAST_TAG_KEYWORD_NS_SHORT)
+            (== tag fast-tag-keyword-ns-short)
             (let [ns-len (aget bytes 3)
                   ns-str (decode-text (.subarray bytes 4 (+ 4 ns-len)))
                   name-len (aget bytes (+ 4 ns-len))
                   name-str (decode-text (.subarray bytes (+ 5 ns-len) (+ 5 ns-len name-len)))]
               (keyword ns-str name-str))
 
-            (== tag FAST_TAG_KEYWORD_NS_LONG)
+            (== tag fast-tag-keyword-ns-long)
             (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                   ns-len (.getUint32 dv 3 true)
                   ns-str (decode-text (.subarray bytes 7 (+ 7 ns-len)))
@@ -1032,17 +1032,17 @@
                   name-str (decode-text (.subarray bytes (+ 11 ns-len) (+ 11 ns-len name-len)))]
               (keyword ns-str name-str))
 
-            (== tag FAST_TAG_CHAR)
+            (== tag fast-tag-char)
             (->EveChar (bit-or (aget bytes 3) (bit-shift-left (aget bytes 4) 8)))
 
-            (or (== tag ser/FAST_TAG_BIGINT) (== tag ser/FAST_TAG_RATIO)
-                (== tag ser/FAST_TAG_BIGDEC) (== tag ser/FAST_TAG_REF))
+            (or (== tag ser/fast-tag-bigint) (== tag ser/fast-tag-ratio)
+                (== tag ser/fast-tag-bigdec) (== tag ser/fast-tag-ref))
             (decode-tagged-number-or-ref bytes 0 tag)
 
-            (== tag ser/FAST_TAG_VALUE_BLOCK)
+            (== tag ser/fast-tag-value-block)
             (decode-value-block s-atom-env bytes 0)
 
-            (== tag FAST_TAG_UUID)
+            (== tag fast-tag-uuid)
             (let [hex-chars (array)]
               (dotimes [i 16]
                 (let [b (aget bytes (+ 3 i))
@@ -1054,23 +1054,23 @@
                     (.push hex-chars "-"))))
               (uuid (.join hex-chars "")))
 
-            (== tag FAST_TAG_SYMBOL_SHORT)
+            (== tag fast-tag-symbol-short)
             (let [str-len (aget bytes 3)]
               (symbol (decode-text (.subarray bytes 4 (+ 4 str-len)))))
 
-            (== tag FAST_TAG_SYMBOL_NS_SHORT)
+            (== tag fast-tag-symbol-ns-short)
             (let [ns-len (aget bytes 3)
                   ns-str (decode-text (.subarray bytes 4 (+ 4 ns-len)))
                   name-len (aget bytes (+ 4 ns-len))
                   name-str (decode-text (.subarray bytes (+ 5 ns-len) (+ 5 ns-len name-len)))]
               (symbol ns-str name-str))
 
-            (== tag FAST_TAG_DATE)
+            (== tag fast-tag-date)
             (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))]
               (js/Date. (.getFloat64 dv 3 true)))
 
             ;; SAB pointer tags — reconstruct type wrapper from offset
-            (and (>= tag FAST_TAG_SAB_MAP) (<= tag FAST_TAG_SAB_LIST))
+            (and (>= tag fast-tag-sab-map) (<= tag fast-tag-sab-list))
             (let [ctor (get-type-constructor tag)]
               (when ctor
                 (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
@@ -1078,8 +1078,8 @@
                   (ctor s-atom-env offset))))
 
             ;; Record tag — reconstruct record from SabMap + :eve/record-tag
-            (== tag FAST_TAG_RECORD)
-            (let [sab-map-ctor (get-type-constructor FAST_TAG_SAB_MAP)]
+            (== tag fast-tag-record)
+            (let [sab-map-ctor (get-type-constructor fast-tag-sab-map)]
               (when sab-map-ctor
                 (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                       offset (.getInt32 dv 3 true)
@@ -1091,7 +1091,7 @@
                     sab-m))))
 
             ;; EveArray pointer — reconstruct via registered constructor
-            (== tag FAST_TAG_EVE_ARRAY)
+            (== tag fast-tag-eve-array)
             (let [ctor (get-type-constructor tag)]
               (when ctor
                 (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
@@ -1104,7 +1104,7 @@
             ;; - In transaction (*parent-atom* bound): return mutable view into SAB
             ;; - Outside transaction: copy bytes to fresh ArrayBuffer (immutable)
             ;; Data is always 16-byte aligned (SIMD-ready), so no alignment check needed.
-            (== tag FAST_TAG_TYPED_ARRAY)
+            (== tag fast-tag-typed-array)
             (let [data-len (.-byteLength bytes)]
               (if (== data-len 7)
                 ;; SAB pointer format (16-byte header)
@@ -1166,7 +1166,7 @@
                 nil))
 
             ;; Flat map — cross-process binary map encoding
-            (== tag FAST_TAG_FLAT_MAP)
+            (== tag fast-tag-flat-map)
             (let [dv    (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                   cnt   (.getInt32 dv 3 true)]
               (loop [pos 7 i 0 m (transient {})]
@@ -1180,7 +1180,7 @@
                     (recur (+ voff 4 vlen) (inc i) (assoc! m k v))))))
 
             ;; Flat set — cross-process binary set encoding
-            (== tag FAST_TAG_FLAT_SET)
+            (== tag fast-tag-flat-set)
             (let [dv    (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                   cnt   (.getInt32 dv 3 true)]
               (loop [pos 7 i 0 s (transient #{})]
@@ -1191,7 +1191,7 @@
                     (recur (+ pos 4 elen) (inc i) (conj! s elem))))))
 
             ;; Flat vec — cross-process binary vector encoding
-            (== tag FAST_TAG_FLAT_VEC)
+            (== tag fast-tag-flat-vec)
             (let [dv    (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                   cnt   (.getInt32 dv 3 true)]
               (loop [pos 7 i 0 v (transient [])]
@@ -1226,38 +1226,38 @@
   (if (zero? data-len)
     nil
     (if (and (>= data-len 3)
-             (== (.getUint8 dv data-offset) d/DIRECT_MAGIC_0)
-             (== (.getUint8 dv (inc data-offset)) d/DIRECT_MAGIC_1))
+             (== (.getUint8 dv data-offset) d/direct-magic-0)
+             (== (.getUint8 dv (inc data-offset)) d/direct-magic-1))
       (let [tag (.getUint8 dv (+ data-offset 2))
             off data-offset]
         (cond
           ;; Boolean — no read needed
-          (== tag FAST_TAG_FALSE) false
-          (== tag FAST_TAG_TRUE) true
+          (== tag fast-tag-false) false
+          (== tag fast-tag-true) true
 
           ;; Numeric — single DataView read, zero allocation
-          (== tag FAST_TAG_INT32)
+          (== tag fast-tag-int32)
           (.getInt32 dv (+ off 3) true)
 
-          (== tag FAST_TAG_INT64)
+          (== tag fast-tag-int64)
           (js/Number (.getBigInt64 dv (+ off 3) true))
 
-          (== tag FAST_TAG_FLOAT64)
+          (== tag fast-tag-float64)
           (.getFloat64 dv (+ off 3) true)
 
           ;; String — subarray view (no copy), TextDecoder
-          (== tag FAST_TAG_STRING_SHORT)
+          (== tag fast-tag-string-short)
           (let [str-len (.getUint8 dv (+ off 3))
                 u8 (:data-view s-atom-env)]
             (decode-text (.subarray u8 (+ off 4) (+ off 4 str-len))))
 
-          (== tag FAST_TAG_STRING_LONG)
+          (== tag fast-tag-string-long)
           (let [str-len (.getUint32 dv (+ off 3) true)
                 u8 (:data-view s-atom-env)]
             (decode-text (.subarray u8 (+ off 7) (+ off 7 str-len))))
 
           ;; Keyword — cached by SAB offset (immutable HAMT nodes never change)
-          (== tag FAST_TAG_KEYWORD_SHORT)
+          (== tag fast-tag-keyword-short)
           (or (.get kw-deser-cache off)
               (let [str-len (.getUint8 dv (+ off 3))
                     u8 (:data-view s-atom-env)
@@ -1266,7 +1266,7 @@
                 (.set kw-deser-cache off kw)
                 kw))
 
-          (== tag FAST_TAG_KEYWORD_LONG)
+          (== tag fast-tag-keyword-long)
           (or (.get kw-deser-cache off)
               (let [str-len (.getUint32 dv (+ off 3) true)
                     u8 (:data-view s-atom-env)
@@ -1275,7 +1275,7 @@
                 (.set kw-deser-cache off kw)
                 kw))
 
-          (== tag FAST_TAG_KEYWORD_NS_SHORT)
+          (== tag fast-tag-keyword-ns-short)
           (or (.get kw-deser-cache off)
               (let [ns-len (.getUint8 dv (+ off 3))
                     u8 (:data-view s-atom-env)
@@ -1287,7 +1287,7 @@
                 (.set kw-deser-cache off kw)
                 kw))
 
-          (== tag FAST_TAG_KEYWORD_NS_LONG)
+          (== tag fast-tag-keyword-ns-long)
           (or (.get kw-deser-cache off)
               (let [ns-len (.getUint32 dv (+ off 3) true)
                     u8 (:data-view s-atom-env)
@@ -1300,12 +1300,12 @@
                 kw))
 
           ;; Symbol
-          (== tag FAST_TAG_SYMBOL_SHORT)
+          (== tag fast-tag-symbol-short)
           (let [str-len (.getUint8 dv (+ off 3))
                 u8 (:data-view s-atom-env)]
             (symbol (decode-text (.subarray u8 (+ off 4) (+ off 4 str-len)))))
 
-          (== tag FAST_TAG_SYMBOL_NS_SHORT)
+          (== tag fast-tag-symbol-ns-short)
           (let [ns-len (.getUint8 dv (+ off 3))
                 u8 (:data-view s-atom-env)
                 ns-str (decode-text (.subarray u8 (+ off 4) (+ off 4 ns-len)))
@@ -1313,20 +1313,20 @@
                 name-str (decode-text (.subarray u8 (+ off 5 ns-len) (+ off 5 ns-len name-len)))]
             (symbol ns-str name-str))
 
-          (or (== tag ser/FAST_TAG_BIGINT) (== tag ser/FAST_TAG_RATIO)
-              (== tag ser/FAST_TAG_BIGDEC) (== tag ser/FAST_TAG_REF))
+          (or (== tag ser/fast-tag-bigint) (== tag ser/fast-tag-ratio)
+              (== tag ser/fast-tag-bigdec) (== tag ser/fast-tag-ref))
           (decode-tagged-number-or-ref (js/Uint8Array. (.-buffer dv) (+ (.-byteOffset dv) off) data-len) 0 tag)
 
-          (== tag ser/FAST_TAG_VALUE_BLOCK)
+          (== tag ser/fast-tag-value-block)
           (decode-value-block s-atom-env (js/Uint8Array. (.-buffer dv) (+ (.-byteOffset dv) off) data-len) 0)
 
-          (== tag FAST_TAG_CHAR)
+          (== tag fast-tag-char)
           (let [u8 (:data-view s-atom-env)]
             (->EveChar (bit-or (aget u8 (+ off 3))
                                (bit-shift-left (aget u8 (+ off 4)) 8))))
 
           ;; UUID — read bytes directly from u8 view
-          (== tag FAST_TAG_UUID)
+          (== tag fast-tag-uuid)
           (let [u8 (:data-view s-atom-env)
                 hex-chars (array)]
             (dotimes [i 16]
@@ -1340,19 +1340,19 @@
             (uuid (.join hex-chars "")))
 
           ;; Date
-          (== tag FAST_TAG_DATE)
+          (== tag fast-tag-date)
           (js/Date. (.getFloat64 dv (+ off 3) true))
 
           ;; SAB pointer tags — direct constructor
-          (and (>= tag FAST_TAG_SAB_MAP) (<= tag FAST_TAG_SAB_LIST))
+          (and (>= tag fast-tag-sab-map) (<= tag fast-tag-sab-list))
           (let [ctor (get-type-constructor tag)]
             (when ctor
               (let [instance-offset (.getInt32 dv (+ off 3) true)]
                 (ctor s-atom-env instance-offset))))
 
           ;; Record tag
-          (== tag FAST_TAG_RECORD)
-          (let [sab-map-ctor (get-type-constructor FAST_TAG_SAB_MAP)]
+          (== tag fast-tag-record)
+          (let [sab-map-ctor (get-type-constructor fast-tag-sab-map)]
             (when sab-map-ctor
               (let [instance-offset (.getInt32 dv (+ off 3) true)
                     sab-m (sab-map-ctor s-atom-env instance-offset)
@@ -1371,7 +1371,7 @@
           ;; - In transaction (*parent-atom* bound): return mutable view into SAB
           ;; - Outside transaction: copy bytes to fresh ArrayBuffer (immutable)
           ;; Data is always 16-byte aligned (SIMD-ready), so no alignment check needed.
-          (== tag FAST_TAG_TYPED_ARRAY)
+          (== tag fast-tag-typed-array)
           (if (== data-len 7)
             ;; SAB pointer format (16-byte header)
             (let [sab-offset (.getInt32 dv (+ off 3) true)
@@ -1438,7 +1438,7 @@
                   dst))))
 
           ;; EveArray pointer — live SAB-backed array (zero-copy reconstruct)
-          (== tag FAST_TAG_EVE_ARRAY)
+          (== tag fast-tag-eve-array)
           (let [ctor (get-type-constructor tag)]
             (when ctor
               (let [block-offset (.getInt32 dv (+ off 3) true)]
@@ -1495,12 +1495,12 @@
   [sio v]
   (let [bs (serialize-val v)
         n (.-length bs)]
-    (if (<= n ser/VALUE_INLINE_MAX)
+    (if (<= n ser/value-inline-max)
       bs
       (let [blk (ser/write-value-block! sio bs)
             buf (js/Uint8Array. 11)
             dv (js/DataView. (.-buffer buf))]
-        (aset buf 0 d/DIRECT_MAGIC_0) (aset buf 1 d/DIRECT_MAGIC_1) (aset buf 2 ser/FAST_TAG_VALUE_BLOCK)
+        (aset buf 0 d/direct-magic-0) (aset buf 1 d/direct-magic-1) (aset buf 2 ser/fast-tag-value-block)
         (.setInt32 dv 3 blk true)
         (.setUint32 dv 7 n true)
         buf))))

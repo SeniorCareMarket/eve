@@ -26,7 +26,7 @@
            [java.util.zip CRC32]))
 
 (def ^:private journal-magic (unchecked-int 0x45564A31))        ;; "EVJ1"
-(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+(def ^:private journal-table-bytes (* d/max-atom-slots d/atom-slot-size))
 
 (def ^:private journal-paths
   "The journal file's path by channel, for with-journal-lock's
@@ -121,7 +121,7 @@
   "The commit record for ROOT-R's CURRENT epoch and atom table."
   [root-r]
   (journal-record-of (mem/-load-i32 root-r d/root-epoch-offset)
-                     (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)))
+                     (mem/-read-bytes root-r d/atom-table-start journal-table-bytes)))
 
 (defn journal-scan
   "Scan the journal's records in order. Returns {:newest {:epoch :table}

@@ -932,10 +932,10 @@
         n        (inc (.-length ev-bytes))   ;; 1 type-id byte + EVE bytes
         blk-off  (alloc-offset n)]
     (if (some? domain-ks)
-      (do (write-u8! blk-off 0 ser/SCALAR_BLOCK_TYPE_ID)
+      (do (write-u8! blk-off 0 ser/scalar-block-type-id)
           (write-bytes! blk-off 1 ev-bytes))
       (do (resolve-dv! blk-off)
-          (.setUint8 resolved-dv resolved-base ser/SCALAR_BLOCK_TYPE_ID)
+          (.setUint8 resolved-dv resolved-base ser/scalar-block-type-id)
           (dotimes [i (.-length ev-bytes)]
             (.setUint8 resolved-dv (+ resolved-base 1 i) (aget ev-bytes i)))))
     blk-off))
@@ -1051,8 +1051,8 @@
                                 d/worker-status-inactive
                                 d/worker-status-active))
             (do
-              (mem/store-i32! rgn (+ slot-byte-off d/OFFSET_WS_WORKER_ID) worker-id)
-              (mem/store-i32! rgn (+ slot-byte-off d/OFFSET_WS_CURRENT_EPOCH) 0)
+              (mem/store-i32! rgn (+ slot-byte-off d/offset-ws-worker-id) worker-id)
+              (mem/store-i32! rgn (+ slot-byte-off d/offset-ws-current-epoch) 0)
               slot-idx)
             (recur (inc slot-idx))))))))
 
@@ -1062,7 +1062,7 @@
   (when (and (>= slot-idx 0) (< slot-idx d/max-workers))
     (let [rgn          @root-region
           slot-byte-off (worker-slot-byte-offset slot-idx)]
-      (mem/store-i32! rgn (+ slot-byte-off d/OFFSET_WS_CURRENT_EPOCH) 0)
+      (mem/store-i32! rgn (+ slot-byte-off d/offset-ws-current-epoch) 0)
       (mem/store-i32! rgn slot-byte-off d/worker-status-inactive))))
 
 ;; -----------------------------------------------------------------------
@@ -1584,13 +1584,13 @@
               ;; Write data at offset+16
              (.set u8 byte-view (+ aligned-offset 16))
               ;; Return 7-byte pointer with slab-qualified offset
-             (codec/encode-sab-pointer ser/FAST_TAG_TYPED_ARRAY slab-off))
+             (codec/encode-sab-pointer ser/fast-tag-typed-array slab-off))
             ;; Fallback for pre-init: inline blob (old 8-byte format for compatibility)
            (let [buf (js/Uint8Array. (+ 8 byte-len))
                  dv (js/DataView. (.-buffer buf))]
-             (cljs.core/aset buf 0 d/DIRECT_MAGIC_0)
-             (cljs.core/aset buf 1 d/DIRECT_MAGIC_1)
-             (cljs.core/aset buf 2 ser/FAST_TAG_TYPED_ARRAY)
+             (cljs.core/aset buf 0 d/direct-magic-0)
+             (cljs.core/aset buf 1 d/direct-magic-1)
+             (cljs.core/aset buf 2 ser/fast-tag-typed-array)
              (cljs.core/aset buf 3 subtype)
              (.setUint32 dv 4 byte-len true)
              (.set buf byte-view 8)

@@ -31,7 +31,7 @@
             [eve.deftype-proto.data :as d]))
 
 (def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
-(def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+(def ^:private journal-table-bytes (* d/max-atom-slots d/atom-slot-size))
 
 ;; CRC-32 (IEEE), the journal record's checksum (journal-file/node's table).
 ;; A Uint32List, not Int32List: Dart's ints are 64-bit, and an Int32List
@@ -100,7 +100,7 @@
    byte array."
   [root-r]
   (record-bytes (mem/-load-i32 root-r d/root-epoch-offset)
-                (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)))
+                (mem/-read-bytes root-r d/atom-table-start journal-table-bytes)))
 
 (defn journal-record-of
   "The commit record for an explicit EPOCH and TABLE (a byte array)."
