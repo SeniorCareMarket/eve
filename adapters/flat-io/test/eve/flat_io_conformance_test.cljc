@@ -210,15 +210,15 @@
       (is (true? (fio/bytes= c 2 0 (hb []) 0)) "zero bytes are equal")
       (is (true? (fio/bytes= c 5 2 (hb [0x80 0x7F]) 0)) "the high bit compares as the byte it is"))
     (testing "bytes-cmp: unsigned, lexicographic, a shorter prefix first"
-      (is (= 0 (fio/bytes-cmp c 2 3 (hb [1 2 3]) 0 3)))
+      (is (zero? (fio/bytes-cmp c 2 3 (hb [1 2 3]) 0 3)))
       (is (= -1 (fio/bytes-cmp c 2 3 (hb [1 2 4]) 0 3)))
       (is (= 1 (fio/bytes-cmp c 2 3 (hb [1 2 2]) 0 3)))
       (is (= -1 (fio/bytes-cmp c 2 2 (hb [1 2 3]) 0 3)) "a prefix sorts first")
       (is (= 1 (fio/bytes-cmp c 2 3 (hb [1 2]) 0 2)))
       (is (= 1 (fio/bytes-cmp c 5 1 (hb [0x7F]) 0 1)) "0x80 > 0x7F, unsigned")
       (is (= -1 (fio/bytes-cmp c 6 1 (hb [0x80]) 0 1)))
-      (is (= 0 (fio/bytes-cmp c 0 0 (hb []) 0 0)))
-      (is (= 0 (fio/bytes-cmp c 3 2 (hb [5 2 3 5]) 1 2)) "from boff"))))
+      (is (zero? (fio/bytes-cmp c 0 0 (hb []) 0 0)))
+      (is (zero? (fio/bytes-cmp c 3 2 (hb [5 2 3 5]) 1 2)) "from boff"))))
 
 (defn- rep* [s n] (apply str (repeat n s)))
 
@@ -243,7 +243,7 @@
                  " / " (subs k 0 (min 12 (count k)))))))
     (testing "the answers the order implies, spelled out"
       (let [kc (fn [stored k] (let [bv (host-bv (enc/utf8-bytes stored))] (fio/key-cmp (ch bv) 0 (count bv) k)))]
-        (is (= 0 (kc "abc" "abc")))
+        (is (zero? (kc "abc" "abc")))
         (is (= -1 (kc "abc" "abd")))
         (is (= -1 (kc "b" "ab")) "a shorter key sorts first: the length byte precedes the bytes")
         (is (= 1 (kc "é" "z")) "é is two bytes")
@@ -264,7 +264,7 @@
 (deftest the-writer
   (testing "every call, at offset width 2"
     (let [w (fio/buf 2)]
-      (is (= 0 (fio/buf-pos w)))
+      (is (zero? (fio/buf-pos w)))
       (fio/buf-u8 w 0xAB)
       (fio/buf-u16 w 0xBEEF)
       (fio/buf-u32 w 0xDEADBEEF)

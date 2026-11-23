@@ -55,7 +55,7 @@
 (deftest empty-set-test
   (testing "Empty sorted set"
     (let [s (so/sorted-set)]
-      (is (= 0 (e/count s)))
+      (is (zero? (e/count s)))
       (is (nil? (e/seq s)))
       (is (= s (so/sorted-set))))))
 
@@ -166,7 +166,7 @@
 (deftest sorted-set-empty-test
   (testing "Empty sorted set"
     (let [s (so/sorted-set)]
-      (is (= 0 (e/count s)))
+      (is (zero? (e/count s)))
       (is (nil? (e/seq s))))))
 
 (deftest sorted-set-construction-test

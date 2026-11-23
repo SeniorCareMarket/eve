@@ -184,7 +184,7 @@
            ctx {:bytes bytes
                 :sym (fn [c] (nth syms c))
                 :code code
-                :shape (fn [i] (when (== 0 i) names))
+                :shape (fn [i] (when (zero? i) names))
                 :wide? wide?}]
        {:bytes bytes
         :node-off (:node-off enc)

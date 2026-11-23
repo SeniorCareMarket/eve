@@ -95,8 +95,8 @@
     (with-heap-slab
       (let [hdr (eve-list/jvm-write-list! sio (partial codec/value+sio->eve-bytes sio) '())
             l   (eve-list/jvm-sab-list-from-offset sio hdr)]
-        (is (= 0 (reduce + 0 l)))
-        (is (= 0 (reduce + l)))))))
+        (is (zero? (reduce + 0 l)))
+        (is (zero? (reduce + l)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Phase 6b: ISeq tests

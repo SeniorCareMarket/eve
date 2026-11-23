@@ -161,7 +161,7 @@
     (fresh-env)
     (let [embedded (a/atom {:old true})]
       (reset! embedded {:new true})
-      (is (= true (get @embedded :new))
+      (is (true? (get @embedded :new))
           "reset! should replace the value")
       (is (nil? (get @embedded :old))
           "Old key should be gone after reset!"))))

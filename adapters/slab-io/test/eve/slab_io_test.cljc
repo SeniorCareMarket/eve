@@ -94,7 +94,7 @@
       (is (= 123456789012 (slab/region-cas-i64! r 16 123456789012 5)))
       (is (= 5 (slab/region-load-i64 r 16))))
     (testing "a 70-bit bitmap at byte 64: find, set, refuse a set bit, free"
-      (is (= 0 (slab/bitmap-find-free r 64 70 0)))
+      (is (zero? (slab/bitmap-find-free r 64 70 0)))
       (is (true? (slab/bitmap-alloc-cas! r 64 0)))
       (is (false? (slab/bitmap-alloc-cas! r 64 0)))
       (is (= 1 (slab/bitmap-find-free r 64 70 0)))

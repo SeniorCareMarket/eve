@@ -71,7 +71,7 @@
          (let [offs (alloc/alloc-run! sio 0 4)]
            (is (= 4 (count offs)))
            (is (= 4 (count (distinct offs))))
-           (is (every? #(= 0 (alloc/decode-class-idx %)) offs))
+           (is (every? #(zero? (alloc/decode-class-idx %)) offs))
            (doseq [o offs] (is (true? (alloc/-sio-free! sio o)) "each block was allocated"))
            (doseq [o offs] (is (false? (alloc/-sio-free! sio o)) "and is free again"))))
        (testing "a run of one is a block; a run of none is empty"

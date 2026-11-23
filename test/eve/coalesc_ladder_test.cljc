@@ -44,7 +44,7 @@
   (testing "the rung table is the kernel's coarse table"
     (is (= 131072 (coalesc/rung-size 0)))
     (is (= 983040 (coalesc/rung-size 13)))
-    (is (= 0 (coalesc/rung-idx-for-size 131072)))
+    (is (zero? (coalesc/rung-idx-for-size 131072)))
     (is (= 13 (coalesc/rung-idx-for-size 983040)))
     (is (= -1 (coalesc/rung-idx-for-size 65536)))
     (is (= -1 (coalesc/rung-idx-for-size 100000)))
@@ -76,12 +76,12 @@
         r1   (coalesc/try-coalesc-alloc-rung! r 0)
         vbig (coalesc/coalesc-alloc! r 817504)]
     (testing "carve: offsets are sequential and exact"
-      (is (= 0 v1))
+      (is (zero? v1))
       (is (= 100000 r1))
       (is (= 231072 vbig))
       (is (= 1 (rung-field-of r r1)))
-      (is (= 0 (rung-field-of r v1)))
-      (is (= 0 (rung-field-of r vbig))))
+      (is (zero? (rung-field-of r v1)))
+      (is (zero? (rung-field-of r vbig))))
     (is (true? (coalesc/coalesc-free! r v1)))
     (is (true? (coalesc/coalesc-free! r r1)))
     (testing "a FREE rung block is reserved: no variable alloc takes it,
@@ -99,11 +99,11 @@
 (deftest rung-top-and-small-in-one-region
   (let [r (fresh-region (* 2 1024 1024) 64)
         top (coalesc/try-coalesc-alloc-rung! r 13)]
-    (is (= 0 top))
+    (is (zero? top))
     (is (= 14 (rung-field-of r top)))
     (is (true? (coalesc/coalesc-free! r top)))
     (testing "the top rung is reused whole, and a small rung carves after it"
-      (is (= 0 (coalesc/try-coalesc-alloc-rung! r 13)))
+      (is (zero? (coalesc/try-coalesc-alloc-rung! r 13)))
       (is (= 983040 (coalesc/try-coalesc-alloc-rung! r 0))))))
 
 ;; ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@
          (is (= 6 (alloc/decode-class-idx seg0)))
          (is (= 14 (field-of seg0)))
          (is (= 14 (field-of seg1)))
-         (is (= 0 (field-of seg2)))
+         (is (zero? (field-of seg2)))
          (is (= -1 (alloc/-sio-read-i32 sio seg2 0)))
          (is (= 983032 (alloc/-sio-read-i32 sio seg0 4)))
          (is (= 33936 (alloc/-sio-read-i32 sio seg2 4))))
@@ -213,7 +213,7 @@
                               (range 5000)))))
         (is (= 50000 (e/count ints)))
         (is (= before-i (e/nth ints 49999)))
-        (is (= 0 (e/nth ints 0)))))))
+        (is (zero? (e/nth ints 0)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; F. An atom value whose frozen form spans the rungs: freeze, install,

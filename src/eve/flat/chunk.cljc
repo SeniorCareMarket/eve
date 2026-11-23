@@ -219,7 +219,7 @@
   [b i]
   (let [t (fio/u8 b i)]
     (cond
-      (== t 0x00) nil
+      (zero? t) nil
       (== t 0x28) (let [[n p] (fio/varint b (inc i))]
                     (bytes-range (fio/chunk-bytes b) p (+ p n)))
       :else (let [n (scalar-len b i)
@@ -1369,7 +1369,7 @@
           symtab (fio/u32 b 20) shapetab (fio/u32 b 24) typetab (fio/u32 b 28)
           wide? (pos? (bit-and flags 1))]
       (when (> version 1) (throw (ex-info "flat chunk: version above this reader's" {:type ::bad-version :version version})))
-      (when-not (== kind 0) (throw (ex-info "flat chunk: not a packed chunk" {:type ::bad-kind :kind kind})))
+      (when-not (zero? kind) (throw (ex-info "flat chunk: not a packed chunk" {:type ::bad-kind :kind kind})))
       (when (pos? (bit-and flags 0xFF00))
         (throw (ex-info "flat chunk: a required feature this reader lacks" {:type ::required-feature :flags flags})))
       (when checked?
@@ -1931,7 +1931,7 @@
   [^Ctx ctx off out]
   (let [b (.-b ctx) t (tag-at ctx off)]
     (cond
-      (== t 0x00) nil
+      (zero? t) nil
       (== t 0x20) (let [[c _] (fio/varint b (inc off)) eb (sym-entry-bytes ctx c)]
                     (emit-magic! out) (fio/buf-bytes out eb 0 (byte-len eb)))
       (or (== t 0x21) (== t 0x27))

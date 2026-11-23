@@ -157,7 +157,7 @@
                          m3 (dissoc m2 k)]
                      (and (= v (get m2 k))
                           (nil? (get m3 k))
-                          (= 0 (count m3))))))))
+                          (zero? (count m3))))))))
 
 ;; ============================================================================
 ;; Vector fuzz tests
@@ -246,7 +246,7 @@
                          s3 (disj s2 e)]
                      (and (contains? s2 e)
                           (not (contains? s3 e))
-                          (= 0 (count s3))))))))
+                          (zero? (count s3))))))))
 
 (deftest fuzz-set-idempotent-conj-test
   (testing "conj same element is idempotent"

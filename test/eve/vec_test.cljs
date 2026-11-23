@@ -11,7 +11,7 @@
     (let [a (e/atom ::empty-vec-test {})
           result (swap! a (fn [_]
                             (let [v (sv/empty-sab-vec)]
-                              (is (= 0 (count v)))
+                              (is (zero? (count v)))
                               (is (nil? (seq v)))
                               :done)))]
       (is (= :done result)))))

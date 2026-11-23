@@ -51,7 +51,7 @@
   (let [r (region/make-heap-region kr/RECORD_BYTES)
         gak (vec (range 32))]
     (is (= 1 (kr/init! r gak kr/KEY_STATUS_AUTO)) "this call initialised the ring")
-    (is (= 0 (kr/init! r gak kr/KEY_STATUS_AUTO)) "a second initialiser loses the magic's CAS")
+    (is (zero? (kr/init! r gak kr/KEY_STATUS_AUTO)) "a second initialiser loses the magic's CAS")
     (is (= -1 (kr/init! (region/make-heap-region kr/RECORD_BYTES) gak 4)) "a bad status")
     (is (= [0x52 0x43 0x4e 0x45] (region-bytes r 0 4)) "magic 'ENCR' (0x454E4352 LE) @0")
     (is (= [1 0 0 0 1 0 0 0 1 0 0 0] (region-bytes r 4 12)) "version 1 @4, status auto @8, AES-256-CTR @12")

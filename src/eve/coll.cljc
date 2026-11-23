@@ -54,7 +54,7 @@
      (cond
        (< xl yl) -1
        (> xl yl) 1
-       (== xl 0) 0
+       (zero? xl) 0
        :else (compare-indexed xs ys xl 0))))
   ([xs ys len n]
    (let [d (compare (nth xs n) (nth ys n))]

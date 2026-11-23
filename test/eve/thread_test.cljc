@@ -219,7 +219,7 @@
         (is (= :b @blocker))
         (let [cancelled (t/future-cancel blocker)] (is (false? cancelled) "done: nothing to cancel"))
         (if (= :local (form-of s))
-          (is (= 0 @(t/submit s ticks-of [k])) "the cancelled task never ran")
+          (is (zero? @(t/submit s ticks-of [k])) "the cancelled task never ran")
           (is (<= 0 @(t/submit s ticks-of [k]) 1)
               "isolates: work routed to a member is its (P§5.4's routing hint); the future answers cancelled"))))
     (testing "the descriptor is the future's state"
@@ -282,7 +282,7 @@
         (is (<= 2 peak 8) "it grew for work no idle thread took")
         (is (= [:ok :ok :ok :ok] (mapv deref fs)))
         (loop [n 0] (when (and (pos? (live)) (< n 100)) (proc/sleep-ms! 20) (recur (inc n))))
-        (is (= 0 (live)) "idle threads ended after the keep-alive, down to the warm minimum")
+        (is (zero? (live)) "idle threads ended after the keep-alive, down to the warm minimum")
         (is (= :ok @(t/submit c nap [1 :ok])) "and it grows again"))
       (is (= [:ok :ok] (mapv deref [(t/submit c nap [10 :ok]) (t/submit c nap [10 :ok])]))
           "isolates (no growth without a shared cell, ET-2) or no threads: the work still runs"))
@@ -314,7 +314,7 @@
             f (t/schedule! s tick [k] 200)]
         (let [cancelled (t/future-cancel f)] (is (true? cancelled)))
         (proc/sleep-ms! 300)
-        (is (= 0 @(t/submit s ticks-of [k])))))
+        (is (zero? @(t/submit s ticks-of [k])))))
     (if (threads?)
       (doseq [[mode sched] [[:rate t/schedule-at-fixed-rate!] [:delay t/schedule-with-fixed-delay!]]]
         (testing (str "periodic, " mode)

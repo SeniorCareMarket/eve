@@ -219,7 +219,7 @@
       (dotimes [i 50]
         (swap! a assoc (keyword (str "k" i)) i))
       (is (= 50 (count @a)))
-      (is (= 0 (:k0 @a)))
+      (is (zero? (:k0 @a)))
       (is (= 49 (:k49 @a))))))
 
 ;; --- Concurrent access (multi-threaded) ---

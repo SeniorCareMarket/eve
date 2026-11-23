@@ -49,7 +49,7 @@
   (testing "Uninitialized int32 fields default to 0"
     (let [o (obj/obj {:a :int32 :b :int32} {:a 10})]
       (is (= 10 (obj/get o :a)))
-      (is (= 0 (obj/get o :b))))))
+      (is (zero? (obj/get o :b))))))
 
 (deftest obj-lookup-test
   (testing "ILookup protocol"
@@ -140,7 +140,7 @@
       (is (= 100 (obj/get-in arr [0 :x])))
       (is (= 200 (obj/get-in arr [0 :y])))
       (is (= 500 (obj/get-in arr [5 :x])))
-      (is (= 0 (obj/get-in arr [5 :y]))))))
+      (is (zero? (obj/get-in arr [5 :y]))))))
 
 (deftest obj-array-row-view-test
   (testing "Row view via nth"

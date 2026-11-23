@@ -8,7 +8,7 @@
 (deftest empty-set-test
   (testing "Empty set"
     (let [s (ss/empty-hash-set)]
-      (is (= 0 (count s)))
+      (is (zero? (count s)))
       (is (nil? (seq s))))))
 
 (deftest conj-test
@@ -111,4 +111,4 @@
 (deftest reduce-without-init-test
   (testing "reduce without an init over an eve set"
     (is (= 6 (reduce + (ss/hash-set 1 2 3))))
-    (is (= 0 (reduce + (ss/empty-hash-set))))))
+    (is (zero? (reduce + (ss/empty-hash-set))))))

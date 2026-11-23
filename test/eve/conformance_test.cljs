@@ -92,7 +92,7 @@
 
   (testing "dissoc from empty map"
     (let [m (dissoc (em/empty-hash-map) :a)]
-      (is (= 0 (count m))))))
+      (is (zero? (count m))))))
 
 (deftest map-get-test
   (testing "get existing key"
@@ -128,7 +128,7 @@
 
 (deftest map-count-test
   (testing "count"
-    (is (= 0 (count (em/empty-hash-map))))
+    (is (zero? (count (em/empty-hash-map))))
     (is (= 1 (count (eve-map :a 1))))
     (is (= 3 (count (eve-map :a 1 :b 2 :c 3))))))
 
@@ -170,7 +170,7 @@
   (testing "empty returns empty map"
     (let [m (eve-map :a 1 :b 2)
           e (empty m)]
-      (is (= 0 (count e))))))
+      (is (zero? (count e))))))
 
 (deftest map-reduce-test
   (testing "reduce over map entries"
@@ -387,7 +387,7 @@
   (let [a (e/atom ::vec-count {})
         result (swap! a (fn [_]
                           (testing "count"
-                            (is (= 0 (count (ev/empty-sab-vec))))
+                            (is (zero? (count (ev/empty-sab-vec))))
                             (is (= 1 (count (ev/sab-vec [42]))))
                             (is (= 5 (count (ev/sab-vec [1 2 3 4 5])))))
                           :done))]
@@ -437,7 +437,7 @@
                           (testing "empty returns empty vector"
                             (let [v (ev/sab-vec [1 2 3])
                                   e (empty v)]
-                              (is (= 0 (count e)))))
+                              (is (zero? (count e)))))
                           :done))]
     (is (= :done result))))
 
@@ -573,7 +573,7 @@
 
   (testing "disj from empty set"
     (let [s (disj (es/empty-hash-set) 1)]
-      (is (= 0 (count s))))))
+      (is (zero? (count s))))))
 
 (deftest set-contains?-test
   (testing "contains? basics"
@@ -588,7 +588,7 @@
 
 (deftest set-count-test
   (testing "count"
-    (is (= 0 (count (es/empty-hash-set))))
+    (is (zero? (count (es/empty-hash-set))))
     (is (= 1 (count (eve-set 42))))
     (is (= 3 (count (eve-set 1 2 3))))))
 
@@ -605,7 +605,7 @@
   (testing "empty returns empty set"
     (let [s (eve-set 1 2 3)
           e (empty s)]
-      (is (= 0 (count e))))))
+      (is (zero? (count e))))))
 
 (deftest set-reduce-test
   (testing "reduce"
@@ -706,7 +706,7 @@
 
 (deftest list-count-test
   (testing "count"
-    (is (= 0 (count (el/empty-sab-list))))
+    (is (zero? (count (el/empty-sab-list))))
     (is (= 1 (count (eve-list 42))))
     (is (= 3 (count (eve-list 1 2 3))))))
 
@@ -723,7 +723,7 @@
   (testing "empty returns empty list"
     (let [l (eve-list 1 2 3)
           e (empty l)]
-      (is (= 0 (count e))))))
+      (is (zero? (count e))))))
 
 (deftest list-reduce-test
   (testing "reduce"
@@ -762,7 +762,7 @@
   (testing "1000-element list"
     (let [l (el/sab-list (range 1000))]
       (is (= 1000 (count l)))
-      (is (= 0 (first l))))))
+      (is (zero? (first l))))))
 
 ;; ============================================================================
 ;; CROSS-TYPE CONFORMANCE

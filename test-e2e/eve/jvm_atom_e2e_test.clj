@@ -126,7 +126,7 @@
       (let [v (node-read b)]
         (is (= "alice" (:name v)))
         (is (= 30 (:age v)))
-        (is (= true (:active v)))
+        (is (true? (:active v)))
         (is (< (Math/abs (- 3.14 (:score v))) 0.001))
         (is (= :admin (:role v)))))))
 
@@ -470,7 +470,7 @@
           (let [prefix (str "n" n)
                 k      (keyword (str prefix "-0"))
                 val    (get v k)]
-            (is (= 0 (:id val))
+            (is (zero? (:id val))
                 (str "Node key " k " :id"))
             (is (= prefix (get-in val [:profile :source]))
                 (str "Node key " k " :profile/:source"))
@@ -599,7 +599,7 @@
                 val    (get v k)]
             (is (some? val) (str "Missing Node key " k))
             (when val
-              (is (= 0 (:id val)) (str k " :id"))
+              (is (zero? (:id val)) (str k " :id"))
               (is (= prefix (:writer val)) (str k " :writer"))
               (is (= (str prefix "-0-deep")
                      (get-in val [:deep :a :b :c :d]))

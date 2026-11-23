@@ -70,6 +70,6 @@
       (is (= (vec xs) (vec (d/eve->clj view))))
       (is (= xs (doall (seq view))))
       (is (= 200 (count view)))
-      (is (= 0 (first view)))
+      (is (zero? (first view)))
       (is (= 199 (last (seq view))))
       (is (= 200 (reduce (fn [a _] (inc a)) 0 view))))))

@@ -247,7 +247,7 @@
                (let [depth (count (:siblings (or lower upper)))]
                  (cond (and lower upper) (= (inc (:index lower)) (:index upper))
                        lower (= (:index lower) (dec (pow2 depth)))
-                       :else (= 0 (:index upper)))))))))
+                       :else (zero? (:index upper)))))))))
 
 (defn- lower-index [nm] (if-let [l (:lower nm)] (:index l) -1))
 

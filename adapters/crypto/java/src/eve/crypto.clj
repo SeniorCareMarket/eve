@@ -105,7 +105,7 @@
     :modinv (fn [^java.math.BigInteger a ^java.math.BigInteger m] (try (.modInverse a m) (catch ArithmeticException _ nil)))
     :even? (fn [^java.math.BigInteger a] (not (.testBit a 0)))
     :zero? (fn [^java.math.BigInteger a] (zero? (.signum a)))
-    :eq (fn [^java.math.BigInteger a ^java.math.BigInteger b] (= 0 (.compareTo a b)))}))
+    :eq (fn [^java.math.BigInteger a ^java.math.BigInteger b] (zero? (.compareTo a b)))}))
 (def ^:private ED (edw/make OPS))
 (defn sha384 "the 48-byte SHA-384 digest" [bs] (vec* (.digest (MessageDigest/getInstance "SHA-384") (arr bs))))
 (defn sha512 "the 64-byte SHA-512 digest" [bs] (vec* (.digest (MessageDigest/getInstance "SHA-512") (arr bs))))

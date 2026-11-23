@@ -76,7 +76,7 @@
          (is (= 6 (* 2 3)))
          (is (= MAXL MAXL))
          (is (= MINL (* MINL 1)))
-         (is (= 0 (* MAXL 0)))
+         (is (zero? (* MAXL 0)))
          (is (= MAXL (inc (dec MAXL))))))
 
      (deftest primed-promotes

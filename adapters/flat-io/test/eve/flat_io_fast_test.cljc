@@ -338,7 +338,7 @@
   (testing "edges: empty, unsigned order (0x80 above 0x7F), a prefix first"
     (let [c (fio/chunk (ba-of [0x80 0x7F 1 2]))]
       (is (true? (fio/bytes= c 0 0 (ba-of []) 0)))
-      (is (= 0 (fio/bytes-cmp c 0 0 (ba-of []) 0 0)))
+      (is (zero? (fio/bytes-cmp c 0 0 (ba-of []) 0 0)))
       (is (= 1 (fio/bytes-cmp c 0 1 (ba-of [0x7F]) 0 1)))
       (is (= -1 (fio/bytes-cmp c 1 1 (ba-of [0x80]) 0 1)))
       (is (= -1 (fio/bytes-cmp c 2 1 (ba-of [1 2]) 0 2)))
@@ -590,7 +590,7 @@
   (is (sequential? t))
   (is (vector? t))
   (is (counted? t))
-  (when (hashable? want) (is (= 0 (compare t want)) "compare"))
+  (when (hashable? want) (is (zero? (compare t want)) "compare"))
   (is (= [] (empty t)))
   (when (seq want)
     (is (same? (first want) (t 0)) "a tuple is a function of its index")

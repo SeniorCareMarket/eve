@@ -53,7 +53,7 @@
   [control rid code now]
   (domain/swap-atom! control update-in [:members rid]
                      (fn [m] (-> m
-                                 (assoc :state (if (= 0 code) :stopped :exited) :code code)
+                                 (assoc :state (if (zero? code) :stopped :exited) :code code)
                                  (update :exits (fnil conj []) {:code code :at now :incarnation (:incarnation m)})))))
 
 (defn gave-up!

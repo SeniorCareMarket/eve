@@ -224,8 +224,8 @@
     (with-heap-slab
       (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
-        (is (= 0 (reduce + 0 v)))
-        (is (= 0 (reduce + v)))))))
+        (is (zero? (reduce + 0 v)))
+        (is (zero? (reduce + v)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Phase 6c: java.util.List tests

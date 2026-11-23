@@ -162,14 +162,14 @@
       (let [[iv _ v] (through-image (fn [sio] (->ZItem sio 7 0 {:k [1 2 3] :s "serialized"}
                                                        (->ZTag sio 42 "the tag"))))]
         (is (= (#_{:clj-kondo/ignore [:unresolved-symbol]} class v) (class iv)) "the same class reads the image — no sister needed on this host")
-        (is (and (= 7 (:n iv)) (= 0 (:hits iv))
+        (is (and (= 7 (:n iv)) (zero? (:hits iv))
                  (= {:k [1 2 3] :s "serialized"} (d/eve->clj (:payload iv)))
                  (some? (:tag iv)) (= 42 (:id (:tag iv))) (= 7 (count iv)))
             "every field reads the same from the image")))
     (testing "list of 200 — header reads, and the walk (the walk is lane L1's fix: make-list allocates)"
       (let [[iv _ _] (through-image (fn [sio] (build-plain sio (apply list xs))))]
         (is (= 200 (count iv)) "count in place")
-        (is (= 0 (first iv)) "first in place")
+        (is (zero? (first iv)) "first in place")
         (is (= 57 (nth iv 57)) "nth in place")
         (is (= xs (vec (d/eve->clj iv))) "the whole list reads in place (needs L1)")))
     (testing "a DataScript database"
@@ -302,7 +302,7 @@
              (let [im (img/detach-image v)]
                (is (= expected (d/eve->clj (img/image-value (img/open-image (img/image-bytes im))))))
                "the detached image is the pinned value, whole")
-             (is (= (:n expected) 0) "the pinned value predates the swaps"))))
+             (is (zero? (:n expected)) "the pinned value predates the swaps"))))
       (finally (reset! stop true) (.join swapper 5000)))
     (is (pos? (:n @a)) "the other thread really swapped during the detach")))
 

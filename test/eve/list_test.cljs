@@ -8,7 +8,7 @@
 (deftest empty-list-test
   (testing "Empty list"
     (let [l (sl/empty-sab-list)]
-      (is (= 0 (count l)))
+      (is (zero? (count l)))
       (is (nil? (seq l))))))
 
 (deftest conj-test
@@ -89,4 +89,4 @@
   (testing "100 elements"
     (let [l (sl/sab-list (range 100))]
       (is (= 100 (count l)))
-      (is (= 0 (first l))))))
+      (is (zero? (first l))))))

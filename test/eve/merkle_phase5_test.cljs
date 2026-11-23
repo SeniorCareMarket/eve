@@ -88,7 +88,7 @@
           _ (swap! a (fn [m] (into {} m))) ;; warm-up: settle pools/caches
           used0 (total-used-blocks)]
       (dotimes [_ 200] (swap! a (fn [m] (into {} m))))
-      (is (= 0 (:k0 @a)) "value still correct after 200 equal swaps")
+      (is (zero? (:k0 @a)) "value still correct after 200 equal swaps")
       (is (= root0 (shared-root-desc-idx a)) "root desc stable across 200 equal swaps")
       (is (= used0 (total-used-blocks)) "slab census unchanged — no leak")
       (atom/close-atom-domain! dom))))

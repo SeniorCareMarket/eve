@@ -35,7 +35,7 @@
     (is (= (map #(* 2 %) (sort shuffled)) (vs m)))
     (is (= (count shuffled) (e/count m)))
     (is (= 34 (e/get m 17)))
-    (is (= nil (e/get m 18)))
+    (is (nil? (e/get m 18)))
     (is (= :nf (e/get m 18 :nf)))
     (is (true? (e/contains? m 46)))
     (is (false? (e/contains? m 47)))
@@ -56,7 +56,7 @@
     (is (= (sort shuffled) (ks m3)))
     (is (= (count shuffled) (e/count m3)))
     (is (nil? (e/seq (reduce e/dissoc m shuffled))))
-    (is (= 0 (e/count (reduce e/dissoc m shuffled))))))
+    (is (zero? (e/count (reduce e/dissoc m shuffled))))))
 
 (deftest default-sorted-set-conj-disj
   (let [st (reduce e/conj (s/sorted-set) shuffled)
@@ -187,7 +187,7 @@
     (is (= sorted (map #(key (s/nth-entry m %)) (range (count sorted)))))
     (is (= [-1 -2] (map #(val (s/nth-entry m %)) [0 1])))
     (is (= (reverse sorted) (map #(s/nth-entry st %) (range (count sorted)))))
-    (is (= 0 (s/rank st 46)))
+    (is (zero? (s/rank st 46)))
     (is (= :thrown (caught #(s/nth-entry m 30))))
     (is (= :thrown (caught #(s/nth-entry m -1))))))
 

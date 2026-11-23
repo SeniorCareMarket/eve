@@ -1961,7 +1961,7 @@
                         {:capacity cap :region-slots d/MAX_ATOM_SLOTS})))
       (let [ptr-off (d/atom-slot-offset i d/ATOM_SLOT_PTR_OFFSET)
             cur-ptr (mem/-load-i32 root-r ptr-off)]
-        (if (or (== cur-ptr alloc/NIL_OFFSET) (== cur-ptr 0))
+        (if (or (== cur-ptr alloc/NIL_OFFSET) (zero? cur-ptr))
           (let [w (mem/-cas-i32! root-r ptr-off cur-ptr CLAIMED_SENTINEL)]
             (if (== w cur-ptr)
               (do (mem/-store-i32! root-r (d/atom-slot-offset i d/ATOM_SLOT_HASH_OFFSET) name-hash)

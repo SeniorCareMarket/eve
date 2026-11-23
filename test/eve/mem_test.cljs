@@ -10,7 +10,7 @@
   (testing "byte-length matches size passed to constructor"
     (is (= 1024 (mem/-byte-length (region/make-js-sab-region 1024))))
     (is (= 4096 (mem/-byte-length (region/make-js-sab-region 4096))))
-    (is (= 0    (mem/-byte-length (region/make-js-sab-region 0))))))
+    (is (zero? (mem/-byte-length (region/make-js-sab-region 0))))))
 
 (deftest test-load-store-i32
   (testing "store and load round-trip"
@@ -59,13 +59,13 @@
   (testing "add-i32! returns old value; memory holds new value"
     (let [r (region/make-js-sab-region 64)]
       (mem/store-i32! r 0 0)
-      (is (= 0 (mem/add-i32! r 0 1)))
+      (is (zero? (mem/add-i32! r 0 1)))
       (is (= 1 (mem/load-i32 r 0)))))
   (testing "add negative delta"
     (let [r (region/make-js-sab-region 64)]
       (mem/store-i32! r 0 1)
       (is (= 1 (mem/add-i32! r 0 -1)))
-      (is (= 0 (mem/load-i32 r 0)))))
+      (is (zero? (mem/load-i32 r 0)))))
   (testing "sub-i32! returns old value; memory holds new value"
     (let [r (region/make-js-sab-region 64)]
       (mem/store-i32! r 0 5)
@@ -120,7 +120,7 @@
 (deftest test-bitmap-ops
   (testing "find-free on fresh region returns 0"
     (let [r (region/make-js-sab-region 64)]
-      (is (= 0 (mem/imr-bitmap-find-free r 0 32 0)))))
+      (is (zero? (mem/imr-bitmap-find-free r 0 32 0)))))
   (testing "alloc-cas! marks bit; find-free then returns next bit"
     (let [r (region/make-js-sab-region 64)]
       (is (true? (mem/imr-bitmap-alloc-cas! r 0 0)))
@@ -129,7 +129,7 @@
     (let [r (region/make-js-sab-region 64)]
       (mem/imr-bitmap-alloc-cas! r 0 0)
       (is (true? (mem/imr-bitmap-free! r 0 0)))
-      (is (= 0 (mem/imr-bitmap-find-free r 0 32 0)))))
+      (is (zero? (mem/imr-bitmap-find-free r 0 32 0)))))
   (testing "find-free on full bitmap returns -1"
     (let [r (region/make-js-sab-region 64)]
       ;; Fill all 4 bits (total-bits=4, one word)

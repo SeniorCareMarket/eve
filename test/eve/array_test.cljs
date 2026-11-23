@@ -38,7 +38,7 @@
     (let [a (arr/eve-array :int32 5)]
       (is (= 5 (count a)))
       (doseq [i (range 5)]
-        (is (= 0 (arr/aget a i)) "zero-filled by default")))
+        (is (zero? (arr/aget a i)) "zero-filled by default")))
 
     (let [a (arr/eve-array :int32 3 42)]
       (is (= 3 (count a)))
@@ -81,7 +81,7 @@
   (testing "eve-array :uint8 construction + access"
     (let [a (arr/eve-array :uint8 [0 128 255])]
       (is (= 3 (count a)))
-      (is (= 0 (arr/aget a 0)))
+      (is (zero? (arr/aget a 0)))
       (is (= 128 (arr/aget a 1)))
       (is (= 255 (arr/aget a 2))))))
 
@@ -90,7 +90,7 @@
     (let [a (arr/eve-array :int8 [-128 0 127])]
       (is (= 3 (count a)))
       (is (= -128 (arr/aget a 0)))
-      (is (= 0 (arr/aget a 1)))
+      (is (zero? (arr/aget a 1)))
       (is (= 127 (arr/aget a 2))))))
 
 (deftest eve-array-int16-test
@@ -98,14 +98,14 @@
     (let [a (arr/eve-array :int16 [-32768 0 32767])]
       (is (= 3 (count a)))
       (is (= -32768 (arr/aget a 0)))
-      (is (= 0 (arr/aget a 1)))
+      (is (zero? (arr/aget a 1)))
       (is (= 32767 (arr/aget a 2))))))
 
 (deftest eve-array-uint16-test
   (testing "eve-array :uint16 construction + access"
     (let [a (arr/eve-array :uint16 [0 1000 65535])]
       (is (= 3 (count a)))
-      (is (= 0 (arr/aget a 0)))
+      (is (zero? (arr/aget a 0)))
       (is (= 1000 (arr/aget a 1)))
       (is (= 65535 (arr/aget a 2))))))
 
@@ -113,7 +113,7 @@
   (testing "eve-array :uint32 construction + access"
     (let [a (arr/eve-array :uint32 [0 1000000 4294967295])]
       (is (= 3 (count a)))
-      (is (= 0 (arr/aget a 0)))
+      (is (zero? (arr/aget a 0)))
       (is (= 1000000 (arr/aget a 1)))
       (is (= 4294967295 (arr/aget a 2))))))
 
@@ -131,14 +131,14 @@
 (deftest empty-array-test
   (testing "Empty int32-array (length 0)"
     (let [a (arr/int32-array 0)]
-      (is (= 0 (count a)))
+      (is (zero? (count a)))
       (is (nil? (seq a))))))
 
 (deftest single-element-test
   (testing "Single element int32-array"
     (let [a (arr/int32-array 1)]
       (is (= 1 (count a)))
-      (is (= 0 (arr/aget a 0)))
+      (is (zero? (arr/aget a 0)))
       ;; Write and read back
       (arr/aset! a 0 42)
       (is (= 42 (arr/aget a 0))))))
@@ -334,11 +334,11 @@
   (testing "afill! with range"
     (let [a (arr/int32-array-from [0 0 0 0 0])]
       (arr/afill! a 99 1 4)
-      (is (= 0 (arr/aget a 0)))
+      (is (zero? (arr/aget a 0)))
       (is (= 99 (arr/aget a 1)))
       (is (= 99 (arr/aget a 2)))
       (is (= 99 (arr/aget a 3)))
-      (is (= 0 (arr/aget a 4))))))
+      (is (zero? (arr/aget a 4))))))
 
 (deftest acopy-test
   (testing "acopy! copies elements"
@@ -355,11 +355,11 @@
     (let [src (arr/int32-array-from [10 20 30 40 50])
           dest (arr/int32-array-from [0 0 0 0 0])]
       (arr/acopy! dest 1 src 2 2)  ;; copy 2 elements from src[2] to dest[1]
-      (is (= 0 (arr/aget dest 0)))
+      (is (zero? (arr/aget dest 0)))
       (is (= 30 (arr/aget dest 1)))
       (is (= 40 (arr/aget dest 2)))
-      (is (= 0 (arr/aget dest 3)))
-      (is (= 0 (arr/aget dest 4))))))
+      (is (zero? (arr/aget dest 3)))
+      (is (zero? (arr/aget dest 4))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Seq
@@ -428,7 +428,7 @@
     (let [a (arr/int32-array-from [-100 -50 0 50 100])]
       (is (= -100 (arr/aget a 0)))
       (is (= -50 (arr/aget a 1)))
-      (is (= 0 (arr/aget a 2)))
+      (is (zero? (arr/aget a 2)))
       (is (= 50 (arr/aget a 3)))
       (is (= 100 (arr/aget a 4)))))
 
@@ -508,7 +508,7 @@
           out (:arr m)]
       (is (some? out))
       (is (= 3 (count out)))
-      (is (= 0 (nth out 0)))
+      (is (zero? (nth out 0)))
       (is (= 128 (nth out 1)))
       (is (= 255 (nth out 2)))
       (swap! _init-atom dissoc :arr))))
@@ -537,7 +537,7 @@
       (is (= 1.1 (nth (:floats m) 0)))
       (is (= 2.2 (nth (:floats m) 1)))
       (is (= 255 (nth (:bytes m) 0)))
-      (is (= 0 (nth (:bytes m) 1)))
+      (is (zero? (nth (:bytes m) 1)))
       (is (= 128 (nth (:bytes m) 2)))
       (swap! _init-atom dissoc :ints :floats :bytes))))
 
@@ -554,7 +554,7 @@
       (swap! a assoc :arr (arr/eve-array :int32 0))
       (let [out (:arr @a)]
         (is (some? out) "array should exist after deref")
-        (is (= 0 (count out)) "empty array has length 0")))))
+        (is (zero? (count out)) "empty array has length 0")))))
 
 (deftest roundtrip-L1-single-element-test
   (testing "L1: Single-element array survives atom round-trip"
@@ -702,7 +702,7 @@
       (swap! a assoc :arr (arr/eve-array :int8 [-128 0 127]))
       (let [arr (:arr @a)]
         (is (= -128 (nth arr 0)))
-        (is (= 0 (nth arr 1)))
+        (is (zero? (nth arr 1)))
         (is (= 127 (nth arr 2)))))))
 
 (deftest roundtrip-L6-int16-test
@@ -711,7 +711,7 @@
       (swap! a assoc :arr (arr/eve-array :int16 [-32768 0 32767]))
       (let [arr (:arr @a)]
         (is (= -32768 (nth arr 0)))
-        (is (= 0 (nth arr 1)))
+        (is (zero? (nth arr 1)))
         (is (= 32767 (nth arr 2)))))))
 
 (deftest roundtrip-L6-uint16-test
@@ -719,7 +719,7 @@
     (let [a (eve/atom {})]
       (swap! a assoc :arr (arr/eve-array :uint16 [0 1000 65535]))
       (let [arr (:arr @a)]
-        (is (= 0 (nth arr 0)))
+        (is (zero? (nth arr 0)))
         (is (= 1000 (nth arr 1)))
         (is (= 65535 (nth arr 2)))))))
 
@@ -728,7 +728,7 @@
     (let [a (eve/atom {})]
       (swap! a assoc :arr (arr/eve-array :uint32 [0 1000000 4294967295]))
       (let [arr (:arr @a)]
-        (is (= 0 (nth arr 0)))
+        (is (zero? (nth arr 0)))
         (is (= 1000000 (nth arr 1)))
         (is (= 4294967295 (nth arr 2)))))))
 
@@ -762,7 +762,7 @@
       (let [arr (:arr @a)]
         (is (= 1000 (count arr)))
         ;; Spot check
-        (is (= 0 (nth arr 0)))
+        (is (zero? (nth arr 0)))
         (is (= 500 (nth arr 500)))
         (is (= 999 (nth arr 999)))))))
 
@@ -876,7 +876,7 @@
         (is (some? out))
         (is (instance? js/Uint8Array out))
         (is (= 3 (.-length out)))
-        (is (= 0 (aget out 0)))
+        (is (zero? (aget out 0)))
         (is (= 128 (aget out 1)))
         (is (= 255 (aget out 2)))))))
 
@@ -903,7 +903,7 @@
         (is (some? out))
         (is (instance? js/Int8Array out))
         (is (= -128 (aget out 0)))
-        (is (= 0 (aget out 1)))
+        (is (zero? (aget out 1)))
         (is (= 127 (aget out 2)))))))
 
 (deftest typed-array-int16-roundtrip-test
@@ -915,7 +915,7 @@
         (is (some? out))
         (is (instance? js/Int16Array out))
         (is (= -32768 (aget out 0)))
-        (is (= 0 (aget out 1)))
+        (is (zero? (aget out 1)))
         (is (= 32767 (aget out 2)))))))
 
 (deftest typed-array-uint16-roundtrip-test
@@ -926,7 +926,7 @@
       (let [out (:arr @a)]
         (is (some? out))
         (is (instance? js/Uint16Array out))
-        (is (= 0 (aget out 0)))
+        (is (zero? (aget out 0)))
         (is (= 1000 (aget out 1)))
         (is (= 65535 (aget out 2)))))))
 
@@ -938,7 +938,7 @@
       (let [out (:arr @a)]
         (is (some? out))
         (is (instance? js/Uint32Array out))
-        (is (= 0 (aget out 0)))
+        (is (zero? (aget out 0)))
         (is (= 1000000 (aget out 1)))
         (is (= 4294967295 (aget out 2)))))))
 
@@ -1017,7 +1017,7 @@
         (is (some? out))
         (is (instance? js/Uint8ClampedArray out))
         (is (= 4 (.-length out)))
-        (is (= 0 (aget out 0)))
+        (is (zero? (aget out 0)))
         (is (= 128 (aget out 1)))
         (is (= 255 (aget out 2)))
         (is (= 64 (aget out 3)))))))
@@ -1161,9 +1161,9 @@
         (is (instance? js/Uint8ClampedArray out))
         (is (= size (.-length out)))
         ;; Spot check values
-        (is (= 0 (aget out 0)))
+        (is (zero? (aget out 0)))
         (is (= 255 (aget out 255)))
-        (is (= 0 (aget out 256)))
+        (is (zero? (aget out 256)))
         (is (= 100 (aget out 100)))))))
 
 (deftest eve-array-roundtrip-with-obj-context-test
@@ -1204,7 +1204,7 @@
              :max-safe js/Number.MAX_SAFE_INTEGER
              :min-safe js/Number.MIN_SAFE_INTEGER)
       (let [m @a]
-        (is (= 0 (:zero m)))
+        (is (zero? (:zero m)))
         (is (= 1 (:one m)))
         (is (= -1 (:neg m)))
         (is (= 42 (:small m)))
@@ -1452,7 +1452,7 @@
       (let [m @a]
         (is (= 50 (count m)) "should have 50 keys")
         ;; Spot check values
-        (is (= 0 (get m :k0)))
+        (is (zero? (get m :k0)))
         (is (= "s11" (get m :k11)))
         (is (= :kw22 (get m :k22)))
         (is (= 33.0 (get m :k33)))

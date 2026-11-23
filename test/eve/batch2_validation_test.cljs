@@ -106,7 +106,7 @@
       (is (= 100 (count hash-map))
           "Slab map should have 100 entries")
       ;; Verify random access works
-      (is (= 0 (get hash-map :key-0))
+      (is (zero? (get hash-map :key-0))
           "First entry should be accessible")
       (is (= 500 (get hash-map :key-50))
           "Middle entry should be accessible")

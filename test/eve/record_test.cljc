@@ -89,7 +89,7 @@
     (is (not= p (->OtherPoint 1 [2 3])))
     (is (not= p {:x 1 :y [2 3]}))
     (is (= p (map->Point {:x 1 :y [2 3]})))
-    (is (= nil (field (map->Point {:x 1}) :y)))
+    (is (nil? (field (map->Point {:x 1}) :y)))
     (is (= 8 (field (map->Point {:x 1 :extra 8}) :extra)))
     (is (= (r/hash-record (->Point 1 2)) (r/hash-record (map->Point {:y 2 :x 1}))))))
 

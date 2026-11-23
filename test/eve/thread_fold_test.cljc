@@ -272,8 +272,8 @@
       (let [m (zipmap (range 300) (range 300 600))]
         (is (= (reduce-kv kv-plus 0 m) (t/with-pool p (fold/fold 16 plus kv-plus m))))
         (is (= (reduce-kv kv-plus 0 m) (t/with-pool p (fold/fold plus kv-plus m)))))
-      (is (= 0 (t/with-pool p (fold/fold plus []))))
-      (is (= 0 (t/with-pool p (fold/fold 8 plus plus [])))))
+      (is (zero? (t/with-pool p (fold/fold plus []))))
+      (is (zero? (t/with-pool p (fold/fold 8 plus plus [])))))
     (testing "reduced ends its chunk, never the fold (clojure.core.reducers/fold's)"
       (is (= (reduce + (map (fn [c] (reduce sum-to-100 0 c)) (partition-all 10 xs)))
              (t/with-pool p (fold/fold 10 plus sum-to-100 xs)))))

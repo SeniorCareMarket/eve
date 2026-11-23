@@ -658,7 +658,7 @@
       (is (arr/value-array? (.-tail v)))
       (is (arr/value-array? (.-arr (.-root v))))
       (is (== 100 (.-cnt v)))
-      (is (= 0 (rrbt/-tail-offset (fv/vector 1 2 3)))))))
+      (is (zero? (rrbt/-tail-offset (fv/vector 1 2 3)))))))
 
 (deftest vector-in-an-atom-test
   (testing "built inside swap!, carried through swap!s, read back"

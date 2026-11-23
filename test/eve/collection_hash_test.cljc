@@ -124,8 +124,8 @@
         b (e/into a [["new"]])]
     (is (= 1 (e/count a)))
     (is (= 2 (e/count b))))
-  (is (= 0 (e/count (e/into (s/empty-hash-set) []))))
-  (is (= 0 (e/count (e/into (m/empty-hash-map) [])))))
+  (is (zero? (e/count (e/into (s/empty-hash-set) []))))
+  (is (zero? (e/count (e/into (m/empty-hash-map) [])))))
 
 (deftest bulk-last-level-natural-collisions
   (let [xs [3870166 8239693 3870166 4140288]

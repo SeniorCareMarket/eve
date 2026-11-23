@@ -31,7 +31,7 @@
   (testing "missing values default to 0"
     (let [ctx   (alloc/make-jvm-heap-slab-ctx {})
           schema   {:a :int32 :b :int32}
-          values   {:a 42} off   (obj-impl/write-obj-block! ctx schema values)   result   (obj-impl/read-obj-block ctx off)] (is (= 42 (get-in result [:values :a]))) (is (= 0 (get-in result [:values :b]))))))
+          values   {:a 42} off   (obj-impl/write-obj-block! ctx schema values)   result   (obj-impl/read-obj-block ctx off)] (is (= 42 (get-in result [:values :a]))) (is (zero? (get-in result [:values :b]))))))
 
 (deftest obj-signed-int8-round-trip
   (testing "int8 handles negative values"

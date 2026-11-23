@@ -95,7 +95,7 @@
                              t (tensor/from-array a [2 3 4])]
                          (tensor/transpose t [2 0 1])))]
       (is (= [4 2 3] (tensor/shape tp)))
-      (is (= 0 (tensor/mget tp 0 0 0)))
+      (is (zero? (tensor/mget tp 0 0 0)))
       (is (= 6 (tensor/mget tp 2 0 1))))))
 
 (deftest slice-axis-test

@@ -157,7 +157,7 @@
        (loop [h (let [p (unchecked-multiply k -7046029254386353131)]
                   (bit-and (bit-xor p (unsigned-bit-shift-right p 16)) mask))]
          (let [kk (aget ks (int h))]
-           (cond (== kk 0) 0
+           (cond (zero? kk) 0
                  (== kk k) (aget vs (int h))
                  :else (recur (bit-and (inc h) mask))))))))
 
@@ -172,10 +172,10 @@
                nmask (dec ncap)]
            (dotimes [i (alength oks)]
              (let [kk (aget oks i)]
-               (when (not (== kk 0))
+               (when (not (zero? kk))
                  (loop [h (let [p (unchecked-multiply kk -7046029254386353131)]
                             (bit-and (bit-xor p (unsigned-bit-shift-right p 16)) nmask))]
-                   (if (== (aget nks (int h)) 0)
+                   (if (zero? (aget nks (int h)))
                      (do (aset nks (int h) kk) (aset nvs (int h) (aget ovs i)))
                      (recur (bit-and (inc h) nmask)))))))
            (aset cells 0 nks) (aset cells 1 nvs)
@@ -185,8 +185,8 @@
          (loop [h (let [p (unchecked-multiply k -7046029254386353131)]
                     (bit-and (bit-xor p (unsigned-bit-shift-right p 16)) mask))]
            (let [kk (aget ks (int h))]
-             (cond (== kk 0) (do (aset ks (int h) k) (aset vs (int h) (int v))
-                                 (aset nc 0 (inc (aget nc 0))))
+             (cond (zero? kk) (do (aset ks (int h) k) (aset vs (int h) (int v))
+                                  (aset nc 0 (inc (aget nc 0))))
                    (== kk k) (aset vs (int h) (int v))
                    :else (recur (bit-and (inc h) mask)))))))
      nil))
@@ -306,7 +306,7 @@
                  (when (>= i 0)
                    (let [pr (nth ptrs i)
                          tgt (long (nth pr 5))]
-                     (when (== (idx-get seen (unchecked-inc (bit-and tgt 0xFFFFFFFF))) 0)
+                     (when (zero? (idx-get seen (unchecked-inc (bit-and tgt 0xFFFFFFFF))))
                        (idx-put seen (unchecked-inc (bit-and tgt 0xFFFFFFFF)) 1)
                        (push-frame! stack f6 tgt (long (nth pr 1)) (long (nth pr 2)) (long (nth pr 3)) (long (nth pr 4)) 0 nil nil)))
                    (recur (dec i))))))))
@@ -528,7 +528,7 @@
                             ;; (header-tagged) block — HAMT interiors,
                             ;; strings and scalar blocks skip the
                             ;; descriptor lookup entirely.
-                            dw (when (and use-digests (== (aget fs (int (inc b))) 0))
+                            dw (when (and use-digests (zero? (aget fs (int (inc b)))))
                                  (latched-digest sio off))
                             hit (when dw (.get dcache dw))]
                         (if hit
@@ -694,7 +694,7 @@
       (let [len (alength wire)
             check? (boolean (:check? opts))]
         (when (or (< len 20) (not= (w-i32 wire 0) 0x54535645)
-                  (not (or (== (aget wire 4) 0) (== (aget wire 4) 1))))
+                  (not (or (zero? (aget wire 4)) (== (aget wire 4) 1))))
           (refuse! :bad-stream "not an EVST v0/v1 stream" {:length len}))
         (let [n (w-i32 wire 8)
               nseg (w-i32 wire 12)

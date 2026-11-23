@@ -42,7 +42,7 @@
     (testing "eve.core/conj is variadic, as on the JVM/cljs surfaces"
       (is (= [1 2 3] (ec/conj [] 1 2 3)))
       (is (= 3 (ec/get (ec/conj d [:b 2] [:c 3]) :c))))
-    (is (= 0 (ec/count (ec/empty d))))
+    (is (zero? (ec/count (ec/empty d))))
     (is (= 3 (ec/get (ec/conj d [:c 3]) :c)))
     (is (= 4 (ec/get (ec/persistent! (ec/conj! (ec/transient d) [:d 4])) :d)))
     #?(:clje (do (is (= [:a 1] (clojerl.IAssociative/entry_at d :a)))

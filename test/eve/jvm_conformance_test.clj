@@ -105,7 +105,7 @@
 
     (testing "dissoc from empty map"
       (let [m (dissoc (eve-map/empty-hash-map) :a)]
-        (is (= 0 (count m)))))))
+        (is (zero? (count m)))))))
 
 (deftest jvm-map-get-test
   (with-heap-slab
@@ -144,7 +144,7 @@
 (deftest jvm-map-count-test
   (with-heap-slab
     (testing "count"
-      (is (= 0 (count (eve-map/empty-hash-map))))
+      (is (zero? (count (eve-map/empty-hash-map))))
       (is (= 1 (count (eve-map* :a 1))))
       (is (= 3 (count (eve-map* :a 1 :b 2 :c 3)))))))
 
@@ -190,7 +190,7 @@
     (testing "empty returns empty map"
       (let [m (eve-map* :a 1 :b 2)
             e (empty m)]
-        (is (= 0 (count e)))))))
+        (is (zero? (count e)))))))
 
 (deftest jvm-map-reduce-test
   (with-heap-slab
@@ -427,7 +427,7 @@
 (deftest jvm-vec-count-test
   (with-heap-slab
     (testing "count"
-      (is (= 0 (count (eve-vec/empty-sab-vec))))
+      (is (zero? (count (eve-vec/empty-sab-vec))))
       (is (= 1 (count (eve-vec/sab-vec [42]))))
       (is (= 5 (count (eve-vec/sab-vec [1 2 3 4 5])))))))
 
@@ -462,7 +462,7 @@
     (testing "empty returns empty vector"
       (let [v (eve-vec/sab-vec [1 2 3])
             e (empty v)]
-        (is (= 0 (count e)))))))
+        (is (zero? (count e)))))))
 
 (deftest jvm-vec-reduce-test
   (with-heap-slab
@@ -604,7 +604,7 @@
 
     (testing "disj from empty set"
       (let [s (disj (eve-set/empty-hash-set) 1)]
-        (is (= 0 (count s)))))))
+        (is (zero? (count s)))))))
 
 (deftest jvm-set-contains?-test
   (with-heap-slab
@@ -621,7 +621,7 @@
 (deftest jvm-set-count-test
   (with-heap-slab
     (testing "count"
-      (is (= 0 (count (eve-set/empty-hash-set))))
+      (is (zero? (count (eve-set/empty-hash-set))))
       (is (= 1 (count (eve-set* 42))))
       (is (= 3 (count (eve-set* 1 2 3)))))))
 
@@ -640,7 +640,7 @@
     (testing "empty returns empty set"
       (let [s (eve-set* 1 2 3)
             e (empty s)]
-        (is (= 0 (count e)))))))
+        (is (zero? (count e)))))))
 
 (deftest jvm-set-reduce-test
   (with-heap-slab
@@ -761,7 +761,7 @@
 (deftest jvm-list-count-test
   (with-heap-slab
     (testing "count"
-      (is (= 0 (count (write-list sio '()))))
+      (is (zero? (count (write-list sio '()))))
       (is (= 1 (count (write-list sio '(42)))))
       (is (= 3 (count (write-list sio '(1 2 3))))))))
 
@@ -778,7 +778,7 @@
     (testing "empty returns empty list"
       (let [l (write-list sio '(1 2 3))
             e (empty l)]
-        (is (= 0 (count e)))))))
+        (is (zero? (count e)))))))
 
 (deftest jvm-list-reduce-test
   (with-heap-slab
@@ -811,7 +811,7 @@
     (testing "1000-element list"
       (let [l (write-list sio (apply list (range 1000)))]
         (is (= 1000 (count l)))
-        (is (= 0 (first l)))))))
+        (is (zero? (first l)))))))
 
 ;; ============================================================================
 ;; CROSS-TYPE CONFORMANCE

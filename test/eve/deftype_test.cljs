@@ -51,7 +51,7 @@
           result (swap! a (fn [_]
                             (let [c (->Counter 0)]
                               (is (some? c) "Counter should be created")
-                              (is (= 0 (count c)) "Initial count should be 0")
+                              (is (zero? (count c)) "Initial count should be 0")
                               (is (satisfies? d/ISabpType c) "Should satisfy ISabpType")
                               :done)))]
       (is (= :done result)))))

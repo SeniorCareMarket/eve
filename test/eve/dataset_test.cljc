@@ -246,13 +246,13 @@
           mask-gt (col/gt col 25)
           mask-lt (col/lt col 25)
           mask-eq (col/eq col 30)]
-      (is (= 0 (e/nth mask-gt 0)))  ;; 10 > 25? no
-      (is (= 0 (e/nth mask-gt 1)))  ;; 20 > 25? no
+      (is (zero? (e/nth mask-gt 0)))  ;; 10 > 25? no
+      (is (zero? (e/nth mask-gt 1)))  ;; 20 > 25? no
       (is (= 1 (e/nth mask-gt 2)))  ;; 30 > 25? yes
       (is (= 1 (e/nth mask-gt 3)))  ;; 40 > 25? yes
       (is (= 1 (e/nth mask-lt 0)))  ;; 10 < 25? yes
-      (is (= 0 (e/nth mask-lt 2)))  ;; 30 < 25? no
-      (is (= 0 (e/nth mask-eq 0)))  ;; 10 == 30? no
+      (is (zero? (e/nth mask-lt 2)))  ;; 30 < 25? no
+      (is (zero? (e/nth mask-eq 0)))  ;; 10 == 30? no
       (is (= 1 (e/nth mask-eq 2)))  ;; 30 == 30? yes
       )))
 
@@ -266,11 +266,11 @@
           idx (col/argsort col :asc)]
       (is (= 1 (e/nth idx 0)))  ;; 10 is at original index 1
       (is (= 2 (e/nth idx 1)))  ;; 20 is at original index 2
-      (is (= 0 (e/nth idx 2)))));; 30 is at original index 0
+      (is (zero? (e/nth idx 2)))));; 30 is at original index 0
   (testing "argsort descending"
     (let [col (e/eve-array :int32 [30 10 20])
           idx (col/argsort col :desc)]
-      (is (= 0 (e/nth idx 0)))
+      (is (zero? (e/nth idx 0)))
       (is (= 2 (e/nth idx 1)))
       (is (= 1 (e/nth idx 2))))))
 

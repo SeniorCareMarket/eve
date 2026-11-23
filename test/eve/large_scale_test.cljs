@@ -25,7 +25,7 @@
        2 (str "string-" i)                      ; strings
        3 (keyword (str "key-" i))               ; keywords
        4 nil                                    ; nil
-       5 (= (mod i 2) 0)                        ; booleans
+       5 (zero? (mod i 2))                        ; booleans
        6 {:nested i :data (str "value-" i)}))))  ; maps
 
 ;;-----------------------------------------------------------------------------
@@ -39,7 +39,7 @@
                             (let [n 2000
                                   v (sv/sab-vec (range n))]
                               (is (= n (count v)) "Count should be 2000")
-                              (is (= 0 (nth v 0)))
+                              (is (zero? (nth v 0)))
                               (is (= 1024 (nth v 1024)))
                               (is (= 1500 (nth v 1500)))
                               (is (= 1999 (nth v 1999)))
@@ -54,7 +54,7 @@
                             (let [n 5000
                                   v (sv/sab-vec (range n))]
                               (is (= n (count v)))
-                              (is (= 0 (nth v 0)))
+                              (is (zero? (nth v 0)))
                               (is (= 31 (nth v 31)))
                               (is (= 32 (nth v 32)))
                               (is (= 1000 (nth v 1000)))
@@ -71,7 +71,7 @@
                             (let [n 10000
                                   v (sv/sab-vec (range n))]
                               (is (= n (count v)))
-                              (is (= 0 (nth v 0)))
+                              (is (zero? (nth v 0)))
                               (is (= 9999 (nth v 9999)))
                               (is (= 5000 (nth v 5000)))
                              ;; Assoc deep in trie
@@ -141,7 +141,7 @@
                             (let [n 2000
                                   l (sl/sab-list (range n))]
                               (is (= n (count l)))
-                              (is (= 0 (first l)))
+                              (is (zero? (first l)))
                               (is (= (vec (range n)) (vec l)))
                               :done)))]
       (is (= :done result)))))
@@ -153,7 +153,7 @@
                             (let [n 5000
                                   l (sl/sab-list (range n))]
                               (is (= n (count l)))
-                              (is (= 0 (first l)))
+                              (is (zero? (first l)))
                               (is (= 2500 (nth l 2500)))
                               (is (= 4999 (nth l 4999)))
                               :done)))]
@@ -182,7 +182,7 @@
                               (is (= n (count l)))
                              ;; Lists conj at front, so last conj'd is first
                               (is (= (dec n) (first l)))
-                              (is (= 0 (nth l (dec n))))
+                              (is (zero? (nth l (dec n))))
                               :done)))]
       (is (= :done result)))))
 
@@ -215,7 +215,7 @@
                                             (sm/empty-hash-map)
                                             (range n))]
                               (is (= n (count m)))
-                              (is (= 0 (get m 0)))
+                              (is (zero? (get m 0)))
                               (is (= 10000 (get m 1000)))
                               (is (= 15000 (get m 1500)))
                               (is (= 19990 (get m 1999)))
@@ -246,7 +246,7 @@
                                             (sm/empty-hash-map)
                                             (range n))]
                               (is (= n (count m)))
-                              (is (= 0 (get m 0)))
+                              (is (zero? (get m 0)))
                               (is (= 37500 (get m 3750)))
                               (is (= 74990 (get m 7499)))
                               :done)))]
@@ -262,7 +262,7 @@
                                             (sm/empty-hash-map)
                                             (range n))]
                               (is (= n (count m)))
-                              (is (= 0 (get m "key-0")))
+                              (is (zero? (get m "key-0")))
                               (is (= 10000 (get m "key-1000")))
                               (is (= 19990 (get m "key-1999")))
                               :done)))]
@@ -296,10 +296,10 @@
                                  ;; Remove every 3rd entry
                                   m2 (reduce (fn [m i] (dissoc m i))
                                              m
-                                             (filter #(= 0 (mod % 3)) (range n)))]
+                                             (filter #(zero? (mod % 3)) (range n)))]
                               (is (< (count m2) n))
                               (is (> (count m2) 0))
-                              (doseq [i (filter #(= 0 (mod % 3)) (range n))]
+                              (doseq [i (filter #(zero? (mod % 3)) (range n))]
                                 (is (nil? (get m2 i))))
                               (doseq [i (filter #(not= 0 (mod % 3)) (range n))]
                                 (is (= i (get m2 i))))
@@ -530,7 +530,7 @@
                             (doseq [n [32 64 1024 1025 2048]]
                               (let [v (sv/sab-vec (range n))]
                                 (is (= n (count v)) (str "Count mismatch for n=" n))
-                                (is (= 0 (nth v 0)))
+                                (is (zero? (nth v 0)))
                                 (is (= (dec n) (nth v (dec n))))))
                             :done))]
       (is (= :done result)))))

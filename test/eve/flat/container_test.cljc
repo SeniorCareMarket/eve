@@ -120,8 +120,8 @@
         dir (cont/read-directory fb)]
     (testing "binary search over the directory finds the chunk for a key"
       (is (nil? (cont/find-chunk-idx dir (kbytes 5))) "below the first key: no chunk")
-      (is (= 0 (cont/find-chunk-idx dir (kbytes 10))))
-      (is (= 0 (cont/find-chunk-idx dir (kbytes 19))))
+      (is (zero? (cont/find-chunk-idx dir (kbytes 10))))
+      (is (zero? (cont/find-chunk-idx dir (kbytes 19))))
       (is (= 1 (cont/find-chunk-idx dir (kbytes 20))))
       (is (= 1 (cont/find-chunk-idx dir (kbytes 27))))
       (is (= 2 (cont/find-chunk-idx dir (kbytes 39))))

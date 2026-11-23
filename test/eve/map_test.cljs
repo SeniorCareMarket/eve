@@ -13,7 +13,7 @@
 (deftest empty-map-test
   (testing "Empty map"
     (let [m (sm/empty-hash-map)]
-      (is (= 0 (count m)))
+      (is (zero? (count m)))
       (is (nil? (get m 1)))
       (is (nil? (seq m))))))
 
@@ -142,7 +142,7 @@
                     (range 1000))]
       (is (= 1000 (count m)))
       ;; Spot check
-      (is (= 0 (get m 0)))
+      (is (zero? (get m 0)))
       (is (= 5000 (get m 500)))
       (is (= 9990 (get m 999))))))
 

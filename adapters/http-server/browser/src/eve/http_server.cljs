@@ -183,11 +183,11 @@
                 (when (and (nil? port) (= 1 (count servers))) (first (vals servers))))]
       (cond
         (nil? s) (do (dbg! "dispatch!: NO SERVER for id=" id " port=" port)
-                     (when (= 0 reply)
+                     (when (zero? reply)
                        (when-let [respond (get (:pending @endpoint) id)]
                          (respond {:status 502 :headers {} :body "eve.http-server: no server at that port"}))))
         (:fn s) (let [resp (run-handler (:fn s) req)]
-                  (if (= 0 reply)
+                  (if (zero? reply)
                     (when-let [respond (get (:pending @endpoint) id)] (respond resp))
                     (h/send! reply {:eve.http-server/response id :resp resp})))
         :else (let [[target s'] (pick s)]

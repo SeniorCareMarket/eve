@@ -93,7 +93,7 @@
           _   (swap! a (fn [_]
                          (let [src (js/Uint8ClampedArray. #js [100 101 102 103])]
                            {:src src}))) retrieved   (:src @a)
-          dest   (js/Uint8ClampedArray. 8)] (.set dest retrieved 2) (is (= 0 (aget dest 0))) (is (= 0 (aget dest 1))) (is (= 100 (aget dest 2))) (is (= 101 (aget dest 3))) (is (= 102 (aget dest 4))) (is (= 103 (aget dest 5))))))
+          dest   (js/Uint8ClampedArray. 8)] (.set dest retrieved 2) (is (zero? (aget dest 0))) (is (zero? (aget dest 1))) (is (= 100 (aget dest 2))) (is (= 101 (aget dest 3))) (is (= 102 (aget dest 4))) (is (= 103 (aget dest 5))))))
 
 (deftest composite-workflow-test
   (testing "raytracer-like workflow: build tiles then composite"
@@ -169,17 +169,17 @@
         ;; Verify composite result
         ;; Top-left pixel (0,0) should be red
         (is (= 255 (aget result 0)) "R of top-left")
-        (is (= 0 (aget result 1)) "G of top-left")
-        (is (= 0 (aget result 2)) "B of top-left")
+        (is (zero? (aget result 1)) "G of top-left")
+        (is (zero? (aget result 2)) "B of top-left")
 
         ;; Top-right pixel (4,0) should be green
         (let [off (* 4 4)]
-          (is (= 0 (aget result off)) "R of top-right")
+          (is (zero? (aget result off)) "R of top-right")
           (is (= 255 (aget result (inc off))) "G of top-right"))
 
         ;; Bottom-left pixel (0,4) should be blue
         (let [off (* 4 img-w 4)]
-          (is (= 0 (aget result off)) "R of bottom-left")
+          (is (zero? (aget result off)) "R of bottom-left")
           (is (= 255 (aget result (+ off 2))) "B of bottom-left"))
 
         ;; Bottom-right pixel (4,4) should be white

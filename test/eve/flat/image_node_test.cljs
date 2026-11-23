@@ -116,7 +116,7 @@
     (testing "list of 200"
       (let [[iv _ _] (through-image (fn [sio] (build-plain sio (apply list xs))))]
         (is (= 200 (count iv)) "count in place")
-        (is (= 0 (first iv)) "first in place")
+        (is (zero? (first iv)) "first in place")
         (is (= 57 (nth iv 57)) "nth in place")
         (is (= xs (vec (d/eve->clj iv))) "the whole list reads in place")))
     (testing "the public verb: eve.flat/detach answers the image bytes"

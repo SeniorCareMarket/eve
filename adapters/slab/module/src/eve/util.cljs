@@ -133,7 +133,7 @@
     (println (str "Buffer: " buffer-total-length " bytes, offset: " view-byte-offset
                   ", display: " effective-display-length " bytes."))
     (if (or (< view-byte-offset 0) (>= view-byte-offset buffer-total-length)
-            (and (= buffer-total-length 0) (> view-byte-offset 0))
+            (and (zero? buffer-total-length) (> view-byte-offset 0))
             (<= effective-display-length 0))
       (println "Invalid offset or length for buffer.")
       (let [u8-data-view (js/Uint8Array. source-buffer view-byte-offset effective-display-length)

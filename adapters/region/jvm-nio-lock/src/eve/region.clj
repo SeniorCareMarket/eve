@@ -585,7 +585,7 @@
                     (throw (ex-info (str "probe mmap: errno " (native-errno api)) {})))
                   (try
                     (let [seg ((:reinterpret api) p 4096)]
-                      (when-not (== 0 (native-load api seg 0 :int32))
+                      (when-not (zero? (native-load api seg 0 :int32))
                         (throw (ex-info "probe: a fresh word is not 0" {})))
                       (native-store api seg 0 :int32 41)
                       (when-not (== 41 (native-cas api seg 0 :int32 41 42))
