@@ -315,7 +315,10 @@
    (def ^:private class-answers (atom {})))
 #?(:clj
    (defn- class-satisfies? [k p x]
-     #?(:jank (satisfies? p x) :bb (satisfies? p x) :glj (satisfies? p x)
+     ;; jolt: satisfies? itself (jolt remembers the answer per type: 20–250 ns measured), where the remembered map
+     ;; below hashes [k (class x)] — the class a name-string lookup — at 130–2,000 ns a call (jseam hashprobe4)
+     #?(:jolt (satisfies? p x)
+        :jank (satisfies? p x) :bb (satisfies? p x) :glj (satisfies? p x)
         :clj (let [c (class x) key [k c] hit (get @class-answers key ::none)]
                (if (identical? hit ::none)
                  (let [r (boolean (satisfies? p x))] (swap! class-answers assoc key r) r)
