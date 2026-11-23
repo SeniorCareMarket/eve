@@ -1319,14 +1319,19 @@
 
      (defn sync-jvm-slab-regions!
        "Force every region the JVM slab ctx holds — the slab data regions,
-        the allocator bitmap regions and the descriptor-table regions — to
-        durable storage (eve.mem/sync-region!: a region that cannot force,
-        a heap region, answers nil). The durability spike's commit ordering
-        calls this before a root pointer is published; eve.atom/sync!
-        calls it for the whole domain."
+        the allocator bitmap regions and the three descriptor-column regions
+        (the table, the flags and the pointer columns: on an mmap domain the
+        last two are files of their own) — to durable storage
+        (eve.mem/sync-region!: a region that cannot force, a heap region,
+        answers nil). The whole-domain force: a batch journal flush,
+        eve.atom/sync! and every checkpoint. (H3, eve-mmap-journal-plan
+        §1.4: the flags and pointer columns were missing here, so a whole-
+        domain force left them in the page cache while sync-jvm-touched-
+        classes! forced them.)"
        [sio]
        (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
-         (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)]
+         (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)
+                               (field ctx desc-flags-regions) (field ctx desc-pointer-regions)]
                  :when arr
                  r arr
                  :when r]

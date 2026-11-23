@@ -39,6 +39,7 @@
    [eve.int32 :as i32]
    [eve.process :as proc]
    [eve.journal-file :as jf]
+   [eve.jlog :as jlog]
    [eve.read-region :as rr]
    ;; PROTOTYPE (jvm-heap-grade step 2): the automatic read guard, JVM only
    ;; (bb and glj read :clj but cannot load the JVM-only eve.guard: no guard there, as on cljs)
@@ -93,6 +94,12 @@
 ;; The exclusive hold a joining lock-only participant takes before it has a
 ;; slot (its value in ROOT_HOLD); cleared by a waiter after HEARTBEAT_TIMEOUT_MS.
 (def ^:const HOLD_JOINING (inc d/MAX_WORKERS))
+
+;; The recovery hold (eve-mmap-journal-plan §4.4): a jlog domain's opener
+;; recovering it, or its creator laying the log down, before it has a slot —
+;; no participant writes and no opener recovers or claims a slot while it is
+;; set; cleared by a waiter after HEARTBEAT_TIMEOUT_MS, as HOLD_JOINING is.
+(def ^:const HOLD_RECOVERING (+ d/MAX_WORKERS 2))
 
 ;; ---------------------------------------------------------------------------
 ;; The host's process primitives — the clock, a thread's identity, sleep, a
@@ -232,9 +239,9 @@
 
 (defn- hold-holder-stale?
   "A hold whose holder's heartbeat is HEARTBEAT_TIMEOUT_MS old, or a joining
-   hold (no slot yet) that a waiter has watched for that long."
+   or recovering hold (no slot yet) that a waiter has watched for that long."
   [root-r hold waited-ms]
-  (if (== hold HOLD_JOINING)
+  (if (or (== hold HOLD_JOINING) (== hold HOLD_RECOVERING))
     (> waited-ms d/HEARTBEAT_TIMEOUT_MS)
     (heartbeat-stale? root-r (dec hold))))
 
@@ -346,27 +353,31 @@
    worker registry, atom table, the hold words, and the magic last — a
    process joining a domain while its creator writes it reads the root once
    the magic is there (await-domain-root!). Slab allocation is the caller's
-   job. Returns root-r."
-  [root-r]
-  (mem/-store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0) ;; now: atom slot count
-  (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
-  (mem/-store-i32! root-r d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
-  (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
-  (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
-  (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0)
-  (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
-  (dotimes [slot d/MAX_WORKERS]
-    (mem/-store-i32! root-r
-                     (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
-                     d/WORKER_STATUS_INACTIVE))
-  (mem/-store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
-  (mem/-store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
-  (dotimes [s d/MAX_ATOM_SLOTS]
-    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET) alloc/NIL_OFFSET)
-    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
+   job. HOLD (default 0) is the hold word's first value: a jlog domain's
+   creator writes HOLD_RECOVERING, so no joiner recovers the log or claims a
+   slot before the creator has laid the log down and holds its own slot
+   (eve-mmap-journal-plan §4.4 step 5). Returns root-r."
+  ([root-r] (init-domain-root! root-r 0))
+  ([root-r hold]
+   (mem/-store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0) ;; now: atom slot count
+   (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
+   (mem/-store-i32! root-r d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
+   (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
+   (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
+   (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET hold)
+   (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
+   (dotimes [slot d/MAX_WORKERS]
+     (mem/-store-i32! root-r
+                      (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
+                      d/WORKER_STATUS_INACTIVE))
+   (mem/-store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
+   (mem/-store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
+   (dotimes [s d/MAX_ATOM_SLOTS]
+     (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET) alloc/NIL_OFFSET)
+     (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
   ;; the region's store is fenced: everything above is visible before it
-  (mem/-store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
-  root-r)
+   (mem/-store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
+   root-r))
 
 ;; ---------------------------------------------------------------------------
 ;; Domain state — one shape on every host
@@ -795,17 +806,17 @@
         t0 (when (and journal *flush-timing*) (now-ms))]
     (when journal
       (jf/with-journal-lock (:file journal)
-                            (fn []
-                              (cond
-                                (coll? sweep)
-                                (alloc/sync-touched! (:sio ds) (into sweep (take-unforced! ds)))
-                                sweep
-                                (do (take-unforced! ds) (alloc/sync-sio! (:sio ds))))
-                              (jf/journal-append! (:file journal)
-                                                  (jf/journal-record (:root-r ds)))
+        (fn []
+          (cond
+            (coll? sweep)
+            (alloc/sync-touched! (:sio ds) (into sweep (take-unforced! ds)))
+            sweep
+            (do (take-unforced! ds) (alloc/sync-sio! (:sio ds))))
+          (jf/journal-append! (:file journal)
+                              (jf/journal-record (:root-r ds)))
                               ;; data force: the record bytes and the file size they need
                               ;; are durable; timestamps are not metadata recovery reads.
-                              (jf/journal-force! (:file journal) false))))
+          (jf/journal-force! (:file journal) false))))
     (when journal
       ;; RETENTION FLOOR — FLUSH-ADVANCE (decision 2026-10-27,
       ;; after the sweep reconciliation measured the checkpoint-only
@@ -839,6 +850,76 @@
         (swap! *flush-log* conj {:at (now-ms) :ms (when t0 (- (now-ms) t0))})))
     (when t0 (swap! *flush-timing* conj (- (now-ms) t0)))))
 
+;; ---------------------------------------------------------------------------
+;; Commit log on the mmapped ring (eve.jlog; eve-mmap-journal-plan §4)
+;;
+;; A journal domain opened with :log :jlog (or whose <base>.jlog exists)
+;; keeps its commit records in <base>.jlog, a fixed-size ring of 4 KiB slots
+;; mapped like the root and claimed by CAS (eve.jlog): no file lock is held
+;; across a commit, so concurrent writers' forces overlap. A record is the
+;; root's epoch label and its whole atom table, read after this commit's
+;; epoch bump; J1 commits force their blocks BEFORE the root CAS (the
+;; force-ordering form's pre-CAS sweep, taken by jlog domains too: no
+;; pointer is visible in the root before the blocks it reaches are durable,
+;; so any snapshot of the table names only forced blocks — H2 closed), then
+;; append and force the record — the commit point. Recovery installs the
+;; valid record with the highest label, never the last in file order, and
+;; erases nothing. The journal map is the legacy one's shape with :log (the
+;; eve.jlog handle) where :file was: :limit, :pending, :floor, :last-epoch.
+;; ---------------------------------------------------------------------------
+
+(defn- jlog-snapshot
+  "[epoch-label table] of ROOT-R: the epoch, then the atom table read after it
+   (§4.3 step 6), so every pointer in the table is at least as new as the
+   label — a record labelled low is the conservative direction for the floor."
+  [root-r]
+  (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+    [e (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES)]))
+
+(defn- jlog-append!
+  "Append one record of KIND to the domain's log, its [label table] from
+   (SNAPSHOT!) — §4.3 steps 5-10 (eve.jlog/append!: reserve, snapshot, write,
+   force the slot: the commit point) — then advance the retention floor by
+   the FLUSH-ADVANCE rule (journal-flush!'s, unchanged) with the record's
+   label as the appended epoch. The stripe is the worker slot's residue; a
+   holder of a slot this append waits on is judged dead by its heartbeat
+   (the domain's own death rule). Answers the record's label."
+  [ds kind snapshot!]
+  (let [{:keys [root-r slot-idx journal]} ds
+        log (:log journal)
+        t0 (when *flush-timing* (now-ms))
+        {:keys [label]} (jlog/append! log (bit-and slot-idx (dec (:s log))) slot-idx snapshot!
+                                      {:kind kind :stale? (fn [w] (heartbeat-stale? root-r w))})]
+    (when (:floor journal)
+      (if (nil? @(:floor journal))
+        (reset! (:floor journal) label)
+        (when (and (:last-epoch journal) @(:last-epoch journal))
+          (reset! (:floor journal)
+                  (max @(:floor journal) @(:last-epoch journal))))))
+    (when (:last-epoch journal) (reset! (:last-epoch journal) label))
+    (when (:last-flush journal) (reset! (:last-flush journal) (now-ms)))
+    (when *flush-log*
+      (swap! *flush-log* conj {:at (now-ms) :ms (when t0 (- (now-ms) t0))}))
+    (when t0 (swap! *flush-timing* conj (- (now-ms) t0)))
+    label))
+
+(defn- jlog-flush!
+  "A jlog domain's flush. J1 (WHOLE? false): its blocks were forced before
+   its CAS, so the record is appended as it stands. A batch boundary or a
+   checkpoint (WHOLE? true): the label and table are read FIRST, then the
+   whole domain is forced, then the record appended — the sweep after the
+   read covers every pointer the snapshot names, whichever process published
+   it (§4.3, J10). KIND is the record's (KIND_COMMIT, or KIND_ANCHOR at a
+   checkpoint)."
+  ([ds whole?] (jlog-flush! ds whole? jlog/KIND_COMMIT))
+  ([ds whole? kind]
+   (if whole?
+     (let [snap (jlog-snapshot (:root-r ds))]
+       (take-unforced! ds)
+       (alloc/sync-sio! (:sio ds))
+       (jlog-append! ds kind (constantly snap)))
+     (jlog-append! ds kind #(jlog-snapshot (:root-r ds))))))
+
 (defn- journal-note-commit!
   "A journal domain's commit published: J1 (limit 1) flushes now — the
    journal force is the commit point. offsets, when the caller hands
@@ -854,15 +935,15 @@
    path — no timer thread; the count batch remains the backstop)."
   ([ds] (journal-note-commit! ds nil))
   ([ds offsets]
-    (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
-      (when journal
-        (if (<= limit 1)
-          (journal-flush! ds offsets)
-          (let [n (swap! pending inc)]
-            (when (or (>= n limit)
-                      (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
-              (reset! pending 0)
-              (journal-flush! ds true))))))))
+   (let [{:keys [limit pending window-ms last-flush log] :as journal} (:journal ds)]
+     (when journal
+       (if (<= limit 1)
+         (if log (jlog-flush! ds false) (journal-flush! ds offsets))
+         (let [n (swap! pending inc)]
+           (when (or (>= n limit)
+                     (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
+             (reset! pending 0)
+             (if log (jlog-flush! ds true) (journal-flush! ds true)))))))))
 
 (defn- domain-live?
   "Any worker slot ACTIVE with a fresh heartbeat: a process holds this
@@ -953,8 +1034,124 @@
                    (reset! (:floor journal) (:epoch newest)))))))))
 
 (defn- journal-close! [journal]
-  (when journal
+  (when (:file journal)
     (jf/journal-close! (:file journal))))
+
+;; ---------------------------------------------------------------------------
+;; Opening a jlog domain: the recovery hold and recovery (eve-mmap-journal-plan §4.4)
+;; ---------------------------------------------------------------------------
+
+(def ^:private RECOVERY_DRAIN_MS
+  "How long a recoverer waits, holding the domain, for writes already in flight to finish before it judges the
+   domain's liveness: a write in flight finishes in microseconds; a count still set after this is a live writer
+   (its slot is live) or one a killed process leaked (H5), which recovery repairs."
+  1000)
+
+(defn- with-recovery-hold*
+  "Run (f) holding the domain's recovery hold, ROOT_HOLD = HOLD_RECOVERING (§4.4 step 2): writers and slot claims
+   back off while it is set. A lock-free host takes it by CAS once the hold is clear (a dead holder's is cleared by
+   wait-hold-clear!), then waits up to RECOVERY_DRAIN_MS for the writes already in flight; a lock-only host takes it
+   under its file lock on the hold word, as with-exclusive-hold* does. No OS lock is involved on a lock-free host."
+  [root-r f]
+  (if (not (mem/-atomic-rmw? root-r))
+    (mem/-with-file-lock root-r d/ROOT_HOLD_OFFSET
+                         (fn []
+                           (wait-hold-clear! root-r)
+                           (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET HOLD_RECOVERING)
+                           (try (f) (finally (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0)))))
+    (loop []
+      (wait-hold-clear! root-r)
+      (if (zero? (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET 0 HOLD_RECOVERING))
+        (try
+          (let [t0 (proc/now-ms)]
+            (loop [i 0]
+              (when (and (pos? (mem/-load-i32 root-r d/ROOT_INFLIGHT_OFFSET))
+                         (< (- (proc/now-ms) t0) RECOVERY_DRAIN_MS))
+                (when (> i 100) (proc/sleep-ms! 1))
+                (recur (inc i)))))
+          (f)
+          (finally (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET HOLD_RECOVERING 0)))
+        (recur)))))
+
+(defn- claim-live-slot!
+  "Claim a worker slot and write its heartbeat in one step, so no recoverer ever sees the slot ACTIVE with a stale
+   heartbeat and judges a live opener dead. Inside a hold this process holds, a direct claim; otherwise a write to
+   the root (claim-slot-as-participant!'s bracket)."
+  ([root-r] (claim-live-slot! root-r false))
+  ([root-r held?]
+   (let [claim (fn [] (let [i (mmap-claim-slot! root-r)] (write-heartbeat! root-r i) i))]
+     (if held?
+       (claim)
+       (with-root-write* root-r (not (mem/-atomic-rmw? root-r)) HOLD_JOINING claim)))))
+
+(defn- jlog-path [base-path] (str base-path ".jlog"))
+
+(defn- jlog-create-opts [opts]
+  {:slots (or (:jlog-slots opts) jlog/DEFAULT_SLOTS)
+   :stripes (or (:jlog-stripes opts) jlog/DEFAULT_STRIPES)})
+
+(defn- jlog-for-recovery
+  "The log a non-live open recovers from: the existing one; a fresh one when there is none, or its creator died
+   before writing its magic (magic 0). A legacy <base>.journal is never silently passed over: migrating it is
+   §4.7's (legacy-migrate!). A wrong magic or version throws (eve.jlog/open): a log is never overwritten."
+  [base-path opts]
+  (let [path (jlog-path base-path)]
+    (if (and (proc/file-exists? path) (not (zero? (jlog/magic path))))
+      (jlog/open path)
+      (do (when (proc/file-exists? (str base-path ".journal"))
+            (throw (ex-info (str "eve: " base-path " is a legacy journal domain; opening it on the jlog needs the"
+                                 " legacy journal migrated (eve-mmap-journal-plan §4.7)")
+                            {:base-path base-path})))
+          (jlog/create! path (jlog-create-opts opts))))))
+
+(defn- jlog-recover!
+  "Recovery of a non-live jlog domain, under the recovery hold (§4.4 step 4): repair a leaked in-flight count (H5);
+   scan the log; install R* — the valid record with the highest label — into the root when its label or table
+   differs from the root's (a CRC-checked record over an unchecked root table: W1/W2), never a record older than
+   R*, never erasing one; rebuild the reservation state; append an ANCHOR of the root as installed; claim this
+   process's slot inside the hold. Answers {:log :slot-idx :floor}."
+  [root-r base-path opts]
+  (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
+  (let [log (jlog-for-recovery base-path opts)
+        recs (jlog/scan log)
+        rstar (jlog/pick recs)
+        e-root (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+    (when (and rstar
+               (or (not (== (:label rstar) e-root))
+                   (not (enc/bytes= (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES) (:table rstar)))))
+      (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table rstar))
+      (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:label rstar))
+      (mem/sync-region! root-r))
+    (jlog/rebuild-header! log recs (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+    (jlog/append! log 0 -1 #(jlog-snapshot root-r) {:kind jlog/KIND_ANCHOR})
+    {:log log :slot-idx (claim-live-slot! root-r true) :floor (if rstar (:label rstar) e-root)}))
+
+(defn- jlog-open!
+  "The jlog side of opening a domain (§4.4). A creator — whose root went down under HOLD_RECOVERING
+   (init-domain-root!) — lays the log down, claims its slot, then lets the hold go. A joiner takes the recovery
+   hold: a live domain is joined as it stands (its floor the highest valid label); a domain no process holds is
+   recovered (jlog-recover!). Answers {:log :slot-idx :floor}."
+  [root-r base-path create? opts]
+  (if create?
+    (let [log (jlog/create! (jlog-path base-path) (jlog-create-opts opts))
+          slot-idx (claim-live-slot! root-r true)]
+      (if (mem/-atomic-rmw? root-r)
+        (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET HOLD_RECOVERING 0)
+        (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0))
+      {:log log :slot-idx slot-idx :floor (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)})
+    (let [res (with-recovery-hold* root-r
+                (fn [] (if (domain-live? root-r) ::live (jlog-recover! root-r base-path opts))))]
+      (if (= ::live res)
+        (let [path (jlog-path base-path)
+              _ (when-not (proc/file-exists? path)
+                  (throw (ex-info (str "eve: " base-path " is live without a jlog (a legacy journal domain in use);"
+                                       " it can move to the jlog only on an open no other process holds")
+                                  {:base-path base-path})))
+              log (jlog/open path)]
+          {:log log
+           :slot-idx (claim-live-slot! root-r)
+           :floor (or (:label (jlog/pick (jlog/scan log))) (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))})
+        res))))
 
 (defn- open-mmap-domain!
   "Create (create? true) or join the mmap domain at base-path. Returns the
@@ -969,9 +1166,19 @@
         _      (when-not create? (await-domain-root! root-r base-path))
         sio    (alloc/mmap-domain-sio! base-path opts)
         rmap-r (region/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES
-                                        {:lustre? lustre?})]
-    (when create? (init-domain-root! root-r))
-    (let [journal  (when (:journal? opts)
+                                        {:lustre? lustre?})
+        jlog? (and (:journal? opts)
+                   (or (= :jlog (:log opts))
+                       (and (not create?) (proc/file-exists? (jlog-path base-path)))))
+        _ (when create? (init-domain-root! root-r (if jlog? HOLD_RECOVERING 0)))
+        jl (when jlog? (jlog-open! root-r base-path create? opts))
+        journal  (when (:journal? opts)
+                   (if jlog?
+                     {:log     (:log jl)
+                      :limit   (or (:journal-batch opts) 1)
+                      :pending (clojure.core/atom 0)
+                      :floor   (clojure.core/atom (:floor jl))
+                      :last-epoch (clojure.core/atom nil)}
                      {:file    (jf/open-journal (str base-path ".journal"))
                       :limit   (or (:journal-batch opts) 1)
                       :pending (clojure.core/atom 0)
@@ -985,25 +1192,25 @@
                       ;; FLUSH-ADVANCE: the epoch of the newest
                       ;; record THIS process has durably appended —
                       ;; the next flush advances :floor to it.
-                      :last-epoch (clojure.core/atom nil)})
-          _        (when journal (journal-recover! root-r journal create?))
-          journal  (cond-> journal
-                     (:journal-window-ms opts)
-                     (assoc :window-ms (:journal-window-ms opts)
-                            :last-flush (clojure.core/atom (now-ms))))
-          slot-idx (claim-slot-as-participant! root-r)
-          _        (write-heartbeat! root-r slot-idx)
-          hb       (proc/start-timer! 10000 #(write-heartbeat! root-r slot-idx))
-          ds       (cond-> (assoc (make-domain-state root-r rmap-r sio base-path slot-idx hb)
+                      :last-epoch (clojure.core/atom nil)}))
+        _        (when (:file journal) (journal-recover! root-r journal create?))
+        journal  (cond-> journal
+                   (:journal-window-ms opts)
+                   (assoc :window-ms (:journal-window-ms opts)
+                          :last-flush (clojure.core/atom (now-ms))))
+        slot-idx (if jl (:slot-idx jl) (claim-slot-as-participant! root-r))
+        _        (write-heartbeat! root-r slot-idx)
+        hb       (proc/start-timer! 10000 #(write-heartbeat! root-r slot-idx))
+        ds       (cond-> (assoc (make-domain-state root-r rmap-r sio base-path slot-idx hb)
                                   ;; commits force before they publish (see swap-attempt!),
                                   ;; unless the opener asked for the group-commit shape;
                                   ;; a journal domain is durable by construction
-                                  :durable-commits? (or (:journal? opts)
-                                                        (not (false? (:durable? opts)))))
-                     journal (assoc :journal journal))]
-      (proc/on-process-exit! (fn [] (when-not @(:closed? ds)
-                                      (mmap-release-slot! root-r slot-idx))))
-      ds)))
+                                :durable-commits? (or (:journal? opts)
+                                                      (not (false? (:durable? opts)))))
+                   journal (assoc :journal journal))]
+    (proc/on-process-exit! (fn [] (when-not @(:closed? ds)
+                                    (mmap-release-slot! root-r slot-idx))))
+    ds))
 
 (defn- open-heap-domain!
   "An in-process domain: heap slabs (JVM, bb) or the module SABs (CLJS), a
@@ -1656,7 +1863,11 @@
                 ;; sweeps the whole domain. Only the force-ordering form
                 ;; (durable, no journal) sweeps here — its root force below
                 ;; is its commit record.
-                _ (when (and durable-commits? (nil? journal))
+                ;; A jlog domain's J1 commit (eve-mmap-journal-plan §4.3 step 2) forces here too: no pointer is
+                ;; visible in the root before the blocks it reaches are durable, so the record its append reads
+                ;; names forced blocks only, whichever process published them (H2).
+                _ (when (and durable-commits?
+                             (or (nil? journal) (and (:log journal) (<= (:limit journal) 1))))
                     (alloc/sync-touched! sio
                                          (into (into @tally/*touches* (take-unforced! ds))
                                                (alloc/logged-allocs lsio))))
@@ -1681,6 +1892,11 @@
                   ;; inside the same lock — at half the forces.)
                   (do
                     (tally/drop-root! sio old-ptr (park-fn ds))
+                    ;; a jlog commit forced before its CAS: the drop's descriptor writes are left to the next
+                    ;; commit's pre-CAS sweep (a crash before it leaves a count above its holders: the leak
+                    ;; direction, never a use-after-free — §4.3 step 4)
+                    (when (and (:log journal) (:unforced ds))
+                      (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*))
                     (journal-note-commit! ds
                                           (into @tally/*touches*
                                                 (alloc/logged-allocs lsio))))
@@ -2140,23 +2356,34 @@
    :segment-bytes (a power of two) sets the region mapping window —
    presentation, not format: it is stored nowhere in the domain's
    files, and processes may join the same domain with different
-   windows."
-  [base-path & {:keys [capacities lustre? durable? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes] :or {capacities {} lustre? false durable? true}}]
+   windows.
+
+   :log :jlog keeps a journaled domain's commit records in <base>.jlog, the
+   mmapped ring (eve.jlog; eve-mmap-journal-plan §4) instead of
+   <base>.journal; :jlog-slots (a power of two, default 1024) and
+   :jlog-stripes (default 1) size it. A domain whose <base>.jlog exists is
+   opened on it by every opener, whatever :log says: the creator's choice is
+   the domain's."
+  [base-path & {:keys [capacities lustre? durable? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes
+                       log jlog-slots jlog-stripes] :or {capacities {} lustre? false durable? true}}]
   (or (get @domain-cache base-path)
       (let [_  (proc/ensure-parent-dir! base-path)
             ds (open-mmap-domain! base-path (cond-> {:capacities capacities
                                                      :lustre? lustre?
-                                             :durable? durable?
-                                             :journal? (not (false? durable?))
-                                             :journal-batch journal-batch
-                                             :journal-window-ms journal-window-ms
-                                             :create? (proc/create-exclusive! (str base-path ".root"))}
-                                      coalesc-descriptors
-                                      (assoc :coalesc-descriptors coalesc-descriptors)
-                                      mem-budget
-                                      (assoc :mem-budget mem-budget)
-                                      segment-bytes
-                                      (assoc :segment-bytes segment-bytes)))
+                                                     :durable? durable?
+                                                     :journal? (not (false? durable?))
+                                                     :journal-batch journal-batch
+                                                     :journal-window-ms journal-window-ms
+                                                     :create? (proc/create-exclusive! (str base-path ".root"))}
+                                              coalesc-descriptors
+                                              (assoc :coalesc-descriptors coalesc-descriptors)
+                                              mem-budget
+                                              (assoc :mem-budget mem-budget)
+                                              segment-bytes
+                                              (assoc :segment-bytes segment-bytes)
+                                              log (assoc :log log)
+                                              jlog-slots (assoc :jlog-slots jlog-slots)
+                                              jlog-stripes (assoc :jlog-stripes jlog-stripes)))
             d  (MmapAtomDomain. ds (clojure.core/atom {}))]
         (swap! domain-cache assoc base-path d)
         d)))
@@ -2183,11 +2410,19 @@
    journal-anchor!). Without a journal this is sync-domain!."
   [ds]
   (let [journal (:journal ds)]
-    (when (and journal (pos? @(:pending journal)))
-      (reset! (:pending journal) 0)
-      (journal-flush! ds true))
-    (sync-domain! ds)
-    (when journal (journal-anchor! journal))))
+    (if (:log journal)
+      ;; jlog (§4.3 checkpoint): no truncation, no rewrite — the label and table are read first, the whole domain
+      ;; is forced (any pending batch's commits with it), then an ANCHOR record is appended
+      (let [_ (reset! (:pending journal) 0)
+            snap (jlog-snapshot (:root-r ds))]
+        (sync-domain! ds)
+        (jlog-append! ds jlog/KIND_ANCHOR (constantly snap)))
+      (do
+        (when (and journal (pos? @(:pending journal)))
+          (reset! (:pending journal) 0)
+          (journal-flush! ds true))
+        (sync-domain! ds)
+        (when journal (journal-anchor! journal))))))
 
 (defn- release-domain! [ds]
   (let [{:keys [root-r slot-idx heartbeat closed? base-path]} ds]
