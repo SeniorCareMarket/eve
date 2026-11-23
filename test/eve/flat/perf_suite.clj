@@ -227,7 +227,7 @@
         runs (let [i (.indexOf (vec args) "--runs")]
                (if (>= i 0) (Integer/parseInt (nth args (inc i))) 3))
         only (let [i (.indexOf (vec args) "--only")]
-               (if (>= i 0) (nth args (inc i)) nil))
+               (when (>= i 0) (nth args (inc i))))
         heap-only? (some #{"--heap"} args)
         opts {:runs runs :warmup 1}]
     (println "PERF SUITE" (name size-set) "runs" runs (when only (str "only " only)) (when heap-only? "heap-battery"))

@@ -291,7 +291,7 @@
                           (if (zero? sh) (fn [_] :vval) (fn [i] [:vnode (- sh 5) (+ base (* i w)) toff]))
                           []))
       :vleaf (slot-refs sio off (nth kind 1) (fn [_] :vval) [])
-      :vval  (let [r (value-ref sio off 4 (slab/read-i32 sio off 0))] (if r [r] []))
+      :vval  (if-let [r (value-ref sio off 4 (slab/read-i32 sio off 0))] [r] [])
       :list  (let [h (slab/read-i32 sio off 8)] (cache+ sio off (if (live? h) [[h :lnode]] [])))
       :lnode (let [nx (slab/read-i32 sio off 0)
                    r (value-ref sio off 8 (slab/read-i32 sio off 4))]

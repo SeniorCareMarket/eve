@@ -427,12 +427,9 @@
 (def ^:private native-scratch-tl (ThreadLocal.))
 
 (defn- native-scratch [api]
-  (let [s (.get native-scratch-tl)]
-    (if s
-      s
-      (let [s ((:alloc api) ((:global-arena api)) 16)]
-        (.set native-scratch-tl s)
-        s))))
+  (if-let [s (.get native-scratch-tl)]
+    s
+    (let [s ((:alloc api) ((:global-arena api)) 16)] (.set native-scratch-tl s) s)))
 
 (defn- native-load [api seg off width]
   (let [addr (+ ((:address api) seg) (long off))

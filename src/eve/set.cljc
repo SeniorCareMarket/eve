@@ -693,7 +693,7 @@
     (let [sio sio__
           vb (serialize-val-bytes sio v)
           vh (portable-hash-bytes vb)]
-      (if (hamt-find sio root-off v vh vb) v nil)))
+      (when (hamt-find sio root-off v vh vb) v)))
   (valAt [_ v not-found]
     (let [sio sio__
           vb (serialize-val-bytes sio v)
@@ -738,10 +738,7 @@
 
   clojure.lang.IReduce
   (reduce [this f]
-    (let [s (.seq this)]
-      (if s
-        (reduce f (first s) (rest s))
-        (f))))
+    (if-let [s (.seq this)] (reduce f (first s) (rest s)) (f)))
 
   clojure.lang.IReduceInit
   (reduce [_ f init]
@@ -804,8 +801,9 @@
   (isEmpty [_] (zero? cnt))
   (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
   ;; contains is already defined via IPersistentSet above
-  (^boolean containsAll [this ^java.util.Collection c]
-    (every? #(clojure.string/includes? this %) c))
+  ;; containsAll is the java.util.Collection face's own method: the receiver is the collection, not a string
+  #_{:splint/disable [style/prefer-clj-string]} (^boolean containsAll [this ^java.util.Collection c]
+                                                  (every? #(.contains this %) c))
   ;; Unsupported mutators (immutable set)
   (add [_ _] (throw (UnsupportedOperationException.)))
   (remove [_ _] (throw (UnsupportedOperationException.)))

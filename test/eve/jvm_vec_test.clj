@@ -240,8 +240,8 @@
         (is (= 3 (.size ^java.util.List v)))
         (is (= 10 (.get ^java.util.List v 0)))
         (is (= 30 (.get ^java.util.List v 2)))
-        (is (clojure.string/includes? v 20))
-        (is (not (clojure.string/includes? v 99)))
+        (is (.contains ^java.util.List v 20))
+        (is (not (.contains ^java.util.List v 99)))
         (is (= 1 (.indexOf ^java.util.List v 20)))
         (is (= -1 (.indexOf ^java.util.List v 99)))))))
 

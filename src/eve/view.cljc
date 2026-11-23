@@ -280,8 +280,8 @@
                   clojure.lang.IObj
                   (withMeta [_ m] (with-meta (consume raw fl cell) m))
                   clojure.lang.ILookup
-                  (valAt [_ k] (if (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw)))))
-                                 (wrap (in cell (fn [] (nth raw k))) cell) nil))
+                  (valAt [_ k] (when (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw)))))
+                                 (wrap (in cell (fn [] (nth raw k))) cell)))
                   (valAt [_ k nf] (if (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw)))))
                                     (wrap (in cell (fn [] (nth raw k))) cell) nf))
                   clojure.lang.Indexed

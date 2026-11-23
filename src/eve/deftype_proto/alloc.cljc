@@ -55,7 +55,7 @@
   "The open-mmap-region opts that reopen a file the way r was opened — a
    slab class grown by another process is re-mapped with the same kind."
   [r]
-  (if (region/lustre-region? r) {:lustre? true} nil))
+  (when (region/lustre-region? r) {:lustre? true}))
 
 ;;=============================================================================
 ;; Slab-Qualified Offset Encoding  (shared)
@@ -801,12 +801,10 @@
                     (recur (inc ci) 0)
                        ;; All bitmap classes full — spill to coalesc, through
                        ;; the same growth discipline as a direct class-6 alloc
-                    (let [region (aget regions OVERFLOW_CLASS_IDX)]
-                      (if region
-                        (coalesc-alloc-growing! ctx size-bytes)
-                        (throw
-                         (ex-info "JvmSlabCtx: all slab classes full"
-                                  {:class-idx ci}))))))))))))
+                    #_{:splint/disable [lint/let-if]} (let [region (aget regions OVERFLOW_CLASS_IDX)]
+                                                        (if region
+                                                          (coalesc-alloc-growing! ctx size-bytes)
+                                                          (throw (ex-info "JvmSlabCtx: all slab classes full" {:class-idx ci}))))))))))))
 
      ;; --------------------------------------------------------------------
      ;; The run claim (flat lane Z2): n consecutive blocks of one class

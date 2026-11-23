@@ -144,16 +144,19 @@
                  (let [needs (em/needs k offered)]
                    (if (and (every? coverage needs)
                             (every? (fn [a] (contains? ids a)) after))
-                     (let [id (submit-one! dh (em/job-pool k) k args
-                                           {:needs needs
-                                            :scope (:id e)
-                                            :after (vec (keep (fn [a]
-                                                                (let [id (get ids a)]
-                                                                  (when (contains? @present id) id)))
-                                                              after))})]
-                       (if id (do (vswap! present conj id)
-                                  [(assoc ids k id) (assoc submitted k id)])
-                           [ids submitted]))
+                     (if-let [id (submit-one!
+                                  dh
+                                  (em/job-pool k)
+                                  k
+                                  args
+                                  {:needs needs,
+                                   :scope (:id e),
+                                   :after (vec
+                                           (keep
+                                            (fn [a] (let [id (get ids a)] (when (contains? @present id) id)))
+                                            after))})]
+                       (do (vswap! present conj id) [(assoc ids k id) (assoc submitted k id)])
+                       [ids submitted])
                      [ids submitted]))
                  [ids submitted]))
              [(:jobs e) {}]

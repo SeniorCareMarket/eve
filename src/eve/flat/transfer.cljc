@@ -572,11 +572,11 @@
   (if-let [st @stream-transfer*]
     (st a x)
     (cond (ea-atom? x)
-          (let [bs (ea/read-pinned x (fn [v] (when (satisfies? d/IEveRoot v)
-                                               (detach-value v))))]
-            (if bs
-              (place-image! a bs)
-              (do (swap! a (fn [_] @x)) a)))
+          (if-let [bs (ea/read-pinned
+                       x
+                       (fn [v] (when (satisfies? d/IEveRoot v) (detach-value v))))]
+            (place-image! a bs)
+            (do (swap! a (fn [_] @x)) a))
           (satisfies? d/IEveRoot x)
           (place-image! a (detach-value x))
           :else

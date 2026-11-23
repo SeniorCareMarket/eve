@@ -564,8 +564,8 @@
         (is (instance? java.util.List v))
         (is (= 3 (.size ^java.util.List v)))
         (is (= 10 (.get ^java.util.List v 0)))
-        (is (clojure.string/includes? v 20))
-        (is (not (clojure.string/includes? v 99)))))))
+        (is (.contains ^java.util.List v 20))
+        (is (not (.contains ^java.util.List v 99)))))))
 
 ;; ============================================================================
 ;; SET CONFORMANCE

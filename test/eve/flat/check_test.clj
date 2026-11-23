@@ -24,8 +24,7 @@
     (check/open-checked bs)
     ::accepted
     (catch clojure.lang.ExceptionInfo e
-      (let [c (:check (ex-data e))]
-        (if c c ::host-error)))
+      (if-let [c (:check (ex-data e))] c :eve.flat.check-test/host-error))
     (catch Throwable _ ::host-error)))
 
 ;; ------------------------------------------------------------------ sanity

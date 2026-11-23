@@ -405,11 +405,8 @@
   "One offset in each slab class the zero-queue flush wrote that no force has covered yet, taken (the note emptied):
    the caller's force sweeps those classes with its own (alloc/sync-touched! forces by class)."
   [{:keys [unforced]}]
-  (if unforced
-    (loop []
-      (let [u @unforced]
-        (if (compare-and-set! unforced u {}) (vals u) (recur))))
-    nil))
+  (when unforced
+    (loop [] (let [u @unforced] (if (compare-and-set! unforced u {}) (vals u) (recur))))))
 
 (defn- flush-zero-queue!
   "Free the zero queue's entries whose epoch no live reader pins
@@ -938,18 +935,14 @@
    one is registered (the JVM codec's HAMT/trie writers), else a builder.
    Returns the header offset, or nil when v is no collection."
   [sio v]
-  (let [direct (cond (map? v) (ser/get-coll-writer :map)
-                     (set? v) (ser/get-coll-writer :set)
-                     (vector? v) (ser/get-coll-writer :vec)
-                     (or (list? v) (seq? v)) (ser/get-coll-writer :list)
-                     :else nil)]
-    (if direct
-      (direct sio nil v)
-      ;; convert-to-eve's builders match Eve values and plain
-      ;; collections only; anything else is a scalar — skip the builder
-      ;; loop (and its satisfies? preds) for it.
-      (when (not (scalar-leaf? v))
-        (some-> (ser/convert-to-eve sio v) d/-root-header-off)))))
+  (if-let [direct (cond
+                    (map? v) (ser/get-coll-writer :map)
+                    (set? v) (ser/get-coll-writer :set)
+                    (vector? v) (ser/get-coll-writer :vec)
+                    (or (list? v) (seq? v)) (ser/get-coll-writer :list)
+                    :else nil)]
+    (direct sio nil v)
+    (when (not (scalar-leaf? v)) (some-> (ser/convert-to-eve sio v) d/-root-header-off))))
 
 (defn- write-typed-root!
   "A host typed array (or an IBackingArray value, its backing array) a swap!

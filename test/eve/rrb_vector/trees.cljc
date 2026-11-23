@@ -58,21 +58,11 @@
           rngs (node-ranges current-node)
           li   (dec (aget rngs 32))
           ret  (->VectorNode (.-edit current-node) arr)
-          cret (if (== shift 5)
-                 nil
+          cret (when-not (== shift 5)
                  (let [child (aget arr li)
-                       ccnt  (+ (if (pos? li)
-                                  (- (aget rngs li) (aget rngs (dec li)))
-                                  (aget rngs 0))
-                                ;; add 32 elems to account for the new
-                                ;; 32-elem tail we plan to add to the
-                                ;; subtree.
-                                32)]
-                   ;; See Note 2 in file transients.cljs
+                       ccnt (+ (if (pos? li) (- (aget rngs li) (aget rngs (dec li))) (aget rngs 0)) 32)]
                    (when-not (overflow? child (- shift 5) ccnt)
-                     (push-tail (- shift 5) ccnt root-edit
-                                child
-                                tail-node))))]
+                     (push-tail (- shift 5) ccnt root-edit child tail-node))))]
       (if cret
         (do (aset arr li cret)
             (aset rngs li (+ (aget rngs li) 32))

@@ -1036,13 +1036,15 @@
 (defn- write-keys-node!
   "A VEC or COL node over already-sorted scalar-or-node elements."
   ^long [w cx elems]
-  (let [plan (when (every? (fn [e] (or (nil? e) (not (coll? e)))) elems)
-               (column-plan cx elems))]
-    (if plan
-      (let [s (fio/buf-pos w)]
-        (fio/buf-u8 w 0x23) (fio/buf-varint w (count elems)) (write-column! w cx plan elems nil) s)
-      (let [offs (mapv (fn [e] (write-node! w cx e)) elems)]
-        (write-offsets-node! w 0x22 #(fio/buf-varint w (count elems)) offs)))))
+  (if-let [plan (when (every? (fn [e] (or (nil? e) (not (coll? e)))) elems)
+                  (column-plan cx elems))]
+    (let [s (fio/buf-pos w)]
+      (fio/buf-u8 w 35)
+      (fio/buf-varint w (count elems))
+      (write-column! w cx plan elems nil)
+      s)
+    (let [offs (mapv (fn [e] (write-node! w cx e)) elems)]
+      (write-offsets-node! w 34 #(fio/buf-varint w (count elems)) offs))))
 
 (defn- write-node!
   ^long [w cx rep]
@@ -1099,7 +1101,17 @@
     (vector? rep)
     (let [bidx (columnable-map-rows? cx rep)]
       (cond
-        bidx (write-batch! w cx bidx rep)
+        (if-let [plan (when (every?
+                             (fn [e] (or (nil? e) (not (coll? e)) (instance? BytesVal e)))
+                             rep)
+                        (when-not (some #(instance? BytesVal %) rep) (column-plan cx rep)))]
+          (let [s (fio/buf-pos w)]
+            (fio/buf-u8 w 35)
+            (fio/buf-varint w (count rep))
+            (write-column! w cx plan rep nil)
+            s)
+          (let [offs (mapv (fn [e] (write-node! w cx e)) rep)]
+            (write-offsets-node! w 34 #(fio/buf-varint w (count rep)) offs))) (write-batch! w cx bidx rep)
         :else
         (let [plan (when (every? (fn [e] (or (nil? e) (not (coll? e)) (instance? BytesVal e))) rep)
                      ;; byte arrays have no §5 column; exclude them

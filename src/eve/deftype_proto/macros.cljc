@@ -305,13 +305,15 @@
                                                       'inst__)]
                                   (apply list class-ctor 'sio__ 'header-off__
                                          (map (fn [f]
-                                                (if (:derive f)
-                                                  (list (:derive f)
-                                                        (list 'reify 'eve.flat.source/IFieldSource
-                                                              (list '-field ['_ 'kw] (list 'get 'vals__ 'kw))
-                                                              (list '-field-map ['_] 'vals__)
-                                                              (list '-source-bytes ['_] nil)))
-                                                  nil))
+                                                (when (:derive f)
+                                                  (list
+                                                   (:derive f)
+                                                   (list
+                                                    'reify
+                                                    'eve.flat.source/IFieldSource
+                                                    (list '-field ['_ 'kw] (list 'get 'vals__ 'kw))
+                                                    (list '-field-map ['_] 'vals__)
+                                                    (list '-source-bytes ['_] nil)))))
                                               cached-fields)))))
                     (list 'eve.deftype-proto.serialize/register-deftype-constructor!
                           type-id name-hash from-header-name)])]

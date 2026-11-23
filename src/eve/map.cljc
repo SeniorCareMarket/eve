@@ -671,49 +671,44 @@
    entry's key, without deserialising."
   [sio ^long root-off kh kb]
   (loop [off root-off shift 0]
-    (if (== off NIL_OFFSET)
-      nil
+    (when-not (== off NIL_OFFSET)
       (let [nt (alloc/node-u8 sio off 0)]
         (case (int nt)
-          1 (let [dbm (alloc/node-i32 sio off 4)
-                  nbm (alloc/node-i32 sio off 8)
-                  bit (node-bit dbm nbm kh shift)]
-              (cond
-                (has-bit? nbm bit)
-                (recur (alloc/node-i32 sio off
-                                       (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
-                       (+ shift SHIFT_STEP))
-
-                (has-bit? dbm bit)
-                (let [di (get-index dbm bit)
-                      hs (hashes-start-off nbm)
-                      sh (alloc/node-i32 sio off (+ hs (* di 4)))]
-                  (when (== sh kh)
-                    (let [kvs (kv-data-start-off dbm nbm)
-                          pos (kv-pos sio off kvs di)
-                          kl (alloc/node-i32 sio off pos)]
-                      (when (and (== kl (bytes-length kb))
-                                 (alloc/node-bytes-equal? sio off (+ pos 4) kb))
-                        (let [vo (+ pos 4 kl)
-                              vl (alloc/node-i32 sio off vo)]
-                          (alloc/node-bytes sio off (+ vo 4) vl))))))
-
-                :else nil))
-
-          3 (let [ch (alloc/node-i32 sio off 4)]
-              (when (== ch kh)
-                (let [cc (alloc/node-u8 sio off 1)]
-                  (loop [i 0 pos COLLISION_HEADER_SIZE]
-                    (when (< i cc)
-                      (let [kl (alloc/node-i32 sio off pos)
-                            vo (+ pos 4 kl)
-                            vl (alloc/node-i32 sio off vo)]
-                        (if (and (== kl (bytes-length kb))
-                                 (alloc/node-bytes-equal? sio off (+ pos 4) kb))
-                          (alloc/node-bytes sio off (+ vo 4) vl)
-                          (recur (inc i) (+ vo 4 vl)))))))))
-
-          nil)))))
+          1
+          (let [dbm (alloc/node-i32 sio off 4)
+                nbm (alloc/node-i32 sio off 8)
+                bit (node-bit dbm nbm kh shift)]
+            (cond
+              (has-bit? nbm bit)
+              (recur
+               (alloc/node-i32 sio off (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+               (+ shift SHIFT_STEP))
+              (has-bit? dbm bit)
+              (let [di (get-index dbm bit)
+                    hs (hashes-start-off nbm)
+                    sh (alloc/node-i32 sio off (+ hs (* di 4)))]
+                (when (== sh kh)
+                  (let [kvs (kv-data-start-off dbm nbm)
+                        pos (kv-pos sio off kvs di)
+                        kl (alloc/node-i32 sio off pos)]
+                    (when (and (== kl (bytes-length kb))
+                               (alloc/node-bytes-equal? sio off (+ pos 4) kb))
+                      (let [vo (+ pos 4 kl), vl (alloc/node-i32 sio off vo)]
+                        (alloc/node-bytes sio off (+ vo 4) vl))))))
+              :else nil))
+          3
+          (let [ch (alloc/node-i32 sio off 4)]
+            (when (== ch kh)
+              (let [cc (alloc/node-u8 sio off 1)]
+                (loop [i 0, pos COLLISION_HEADER_SIZE]
+                  (when (< i cc)
+                    (let [kl (alloc/node-i32 sio off pos)
+                          vo (+ pos 4 kl)
+                          vl (alloc/node-i32 sio off vo)]
+                      (if (and (== kl (bytes-length kb))
+                               (alloc/node-bytes-equal? sio off (+ pos 4) kb))
+                        (alloc/node-bytes sio off (+ vo 4) vl)
+                        (recur (inc i) (+ vo 4 vl))))))))))))))
 
 (defn hamt-assoc
   "Assoc key/value into HAMT. Returns [new-root added?]."
@@ -1743,22 +1738,27 @@
      :errors (conj errors-acc (str "cycle detected: offset " slab-off " already visited"))}
 
     :else
-    (let [offset-err (validate-slab-offset slab-off)]
-      (if offset-err
-        {:valid? false :children [] :visited visited
-         :errors (conj errors-acc (str "invalid offset " slab-off ": " offset-err))}
-        (let [_ (vswap! visited conj slab-off)
-              node-type (slab/read-u8 sio slab-off 0)]
-          (case (int node-type)
-            1 (let [node-bm (slab/read-i32 sio slab-off 8)
-                    child-count (popcount32 node-bm)
-                    children (mapv #(slab/read-i32 sio slab-off (+ NODE_HEADER_SIZE (* % 4)))
-                                   (range child-count))]
-                {:valid? true :children children :visited visited})
-            3 {:valid? true :children [] :visited visited}
-            {:valid? false :children [] :visited visited
-             :errors (conj errors-acc (str "invalid node type " node-type
-                                           " at offset " slab-off))}))))))
+    (if-let [offset-err (validate-slab-offset slab-off)]
+      {:valid? false,
+       :children [],
+       :visited visited,
+       :errors (conj errors-acc (str "invalid offset " slab-off ": " offset-err))}
+      (let [_ (vswap! visited conj slab-off), node-type (slab/read-u8 sio slab-off 0)]
+        (case (int node-type)
+          1
+          (let [node-bm (slab/read-i32 sio slab-off 8)
+                child-count (popcount32 node-bm)
+                children (mapv
+                          #(slab/read-i32 sio slab-off (+ NODE_HEADER_SIZE (* % 4)))
+                          (range child-count))]
+            {:valid? true, :children children, :visited visited})
+          3 {:valid? true, :children [], :visited visited}
+          {:valid? false,
+           :children [],
+           :visited visited,
+           :errors (conj
+                    errors-acc
+                    (str "invalid node type " node-type " at offset " slab-off))})))))
 
 (defn validate-hamt-tree
   "Walk the HAMT tree from root-off and validate all nodes."

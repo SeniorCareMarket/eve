@@ -187,24 +187,24 @@
 
 (defn modinv-odd "a^-1 mod p for odd p and gcd(a, p) = 1, else nil (HAC 14.64)" [a p]
   (let [a (mod-limbs a p)]
-    (if (empty? a) nil
-        (loop [u a v p x1 [1] x2 []]
-          (cond (= u [1]) x1
-                (= v [1]) x2
-                (odd?* u) (if (odd?* v)
-                            (if (neg? (cmp u v))
-                              (recur u (sub v u) x1 (sub-mod x2 x1 p))
-                              (recur (sub u v) v (sub-mod x1 x2 p) x2))
-                            (recur u (shr1 v) x1 (half-mod x2 p)))
-                :else (recur (shr1 u) v (half-mod x1 p) x2))))))
+    (when-not (empty? a)
+      (loop [u a, v p, x1 [1], x2 []]
+        (cond
+          (= u [1]) x1
+          (= v [1]) x2
+          (odd?* u)
+          (if (odd?* v)
+            (if (neg? (cmp u v))
+              (recur u (sub v u) x1 (sub-mod x2 x1 p))
+              (recur (sub u v) v (sub-mod x1 x2 p) x2))
+            (recur u (shr1 v) x1 (half-mod x2 p)))
+          :else (recur (shr1 u) v (half-mod x1 p) x2))))))
 
 (defn modinv-limbs "a^-1 mod n, or nil: n odd (HAC 14.64), or n even with a odd (one division)" [a n]
   (cond (odd?* n) (modinv-odd a n)
-        (odd?* a) (let [t (modinv-odd n a)]          ; t·n ≡ 1 mod a
-                    (when t
-                      (let [[k _] (divmod (sub (mul t n) [1]) a)   ; k·a = t·n − 1 ⇒ k·a ≡ −1 mod n
-                            k (mod-limbs k n)]
-                        (if (empty? k) nil (sub n k)))))
+        (odd?* a) (when-let [t (modinv-odd n a)]
+                    (let [[k _] (divmod (sub (mul t n) [1]) a), k (mod-limbs k n)]
+                      (if (empty? k) nil ((when-not (empty? k) (sub n k)) n k))))
         :else nil))
 
 ;; ── the byte surface

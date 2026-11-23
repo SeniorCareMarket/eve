@@ -92,14 +92,17 @@
                                tg (ser/read-header-tag sio o)]
                            ((ser/get-header-constructor tg) sio o)))))
                (println "== P-B scalar path, step by step")
-               (let [off (step "P-B1 value->scalar-block!"
-                               (fn [] (binding [d/*domain-sio* sio]
-                                        (alloc/value->scalar-block! sio "hello scalar"))))]
-                 (when off
-                   (let [im (step "P-B2 detach-image" (fn [] (img/detach-image sio off)))]
-                     (when im
-                       (step "P-B3 open+read"
-                             (fn [] (img/image-value (img/open-image (img/image-bytes im)))))))))
+               (when-let [off (step
+                               "P-B1 value->scalar-block!"
+                               (fn
+                                 []
+                                 (binding [d/*domain-sio* sio]
+                                   (alloc/value->scalar-block! sio "hello scalar"))))]
+                 (let [im (step "P-B2 detach-image" (fn [] (img/detach-image sio off)))]
+                   (when im
+                     (step
+                      "P-B3 open+read"
+                      (fn [] (img/image-value (img/open-image (img/image-bytes im))))))))
                (println "== P-C pattern on a reset slab")
                (step "P-C" run-p-c)
                (println "== P-E dataset image forensics")

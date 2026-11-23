@@ -75,8 +75,8 @@
   (let [he (or (head-end raw) (throw (ex-info "http: no end to the response's head" {})))
         lines (str/split (String. ^bytes (slice raw 0 (- he 4)) "ISO-8859-1") #"\r\n")
         status (digits->long (second (str/split (first lines) #" ")))
-        headers (into {} (keep (fn [l] (let [i (str/index-of l ":")]
-                                         (when i [(str/lower-case (str/trim (subs l 0 i))) (str/trim (subs l (inc i)))])))
+        headers (into {} (keep (fn [l] (when-let [i (str/index-of l ":")]
+                                         [(str/lower-case (str/trim (subs l 0 i))) (str/trim (subs l (inc i)))]))
                                (rest lines)))
         body (if (= "chunked" (some-> (get headers "transfer-encoding") str/lower-case))
                (dechunk raw he)

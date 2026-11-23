@@ -65,7 +65,7 @@
                                        (= items (.-items ^PrintedSeq other))))
                  clojure.lang.ISeq
                  (first [_] (first items))
-                 (next [_] (let [r (next items)] (when r (PrintedSeq. r))))
+                 (next [_] (when-let [r (next items)] (PrintedSeq. r)))
                  (more [_] (or (next items) ()))
                  IPrintWithWriter
                  (-pr-writer [this w _opts] (.write w (str "#ext/seq " (pr-str (.-items this)))))

@@ -617,8 +617,7 @@
      (let [b (:c col)
            kind (int (:kind col))
            d (long (:data-off col))]
-       (if (and (:valid-off col) (not (bit-set? b (long (:valid-off col)) i)))
-         nil
+       (when-not (and (:valid-off col) (not (bit-set? b (long (:valid-off col)) i)))
          (case kind
            1 (fio/u8 b (+ d i))
            2 (let [v (fio/u8 b (+ d i))] (if (>= v 128) (- v 256) v))
@@ -634,32 +633,33 @@
            16 (bit-set? b d i)
            17 ((:sym (:ctx col)) (fio/u8 b (+ d i)))
            18 ((:sym (:ctx col)) (fio/u16 b (+ d (* 2 i))))
-           19 (let [o (fio/u32 b (+ d (* 4 i)))
-                    e (fio/u32 b (+ d (* 4 (inc i))))]
-                (fio/utf8 b (+ (long (:bytes-off col)) o) (- e o)))
-           20 ((:node (:ctx col))
-               (if (:wide? (:ctx col))
-                 (fio/u32 b (+ d (* 4 i)))
-                 (fio/u16 b (+ d (* 2 i)))))
+           19
+           (let [o (fio/u32 b (+ d (* 4 i))), e (fio/u32 b (+ d (* 4 (inc i))))]
+             (fio/utf8 b (+ (long (:bytes-off col)) o) (- e o)))
+           20
+           ((:node (:ctx col))
+            (if (:wide? (:ctx col)) (fio/u32 b (+ d (* 4 i))) (fio/u16 b (+ d (* 2 i)))))
            21 (batch-row (:batch col) i)
-           22 (let [w (long (:width col))]
-                (+ (long (:base col))
-                   (case (int w)
-                     1 (fio/u8 b (+ d i))
-                     2 (fio/u16 b (+ d (* 2 i)))
-                     4 (fio/u32 b (+ d (* 4 i))))))
-           23 (let [ends (long (:ends-off col))
-                    runs (long (:runs col))
-                    r (loop [lo 0 hi (dec runs)]
-                        (if (== lo hi)
-                          lo
-                          (let [mid (quot (+ lo hi) 2)]
-                            (if (> (fio/u32 b (+ ends (* 4 mid))) i)
-                              (recur lo mid)
-                              (recur (inc mid) hi)))))]
-                (col-ref (:values-col col) r))
-           (throw (ex-info "eve.flat.column: unknown column kind"
-                           {:kind kind})))))))
+           22
+           (let [w (long (:width col))]
+             (+
+              (long (:base col))
+              (case (int w)
+                1 (fio/u8 b (+ d i))
+                2 (fio/u16 b (+ d (* 2 i)))
+                4 (fio/u32 b (+ d (* 4 i))))))
+           23
+           (let [ends (long (:ends-off col))
+                 runs (long (:runs col))
+                 r (loop [lo 0, hi (dec runs)]
+                     (if (== lo hi)
+                       lo
+                       (let [mid (quot (+ lo hi) 2)]
+                         (if (> (fio/u32 b (+ ends (* 4 mid))) i)
+                           (recur lo mid)
+                           (recur (inc mid) hi)))))]
+             (col-ref (:values-col col) r))
+           (throw (ex-info "eve.flat.column: unknown column kind" {:kind kind})))))))
 
 (defn col-values
   "The whole column as a plain vector — the one read that materializes,

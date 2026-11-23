@@ -33,42 +33,38 @@
   (let [is (.getInputStream s)
         acc (ByteArrayOutputStream.)]
     (loop []
-      (let [he (head-end acc)]
-        (if he
-          (let [all (.toByteArray acc)
-                head (String. all 0 (- he 4) "ISO-8859-1")
-                lines (str/split head #"\r\n")
-                rl (str/split (first lines) #" ")
-                headers (into {}
-                              (keep (fn [l]
-                                      (let [i (str/index-of l ":")]
-                                        (when i [(str/lower-case (str/trim (subs l 0 i)))
-                                                 (str/trim (subs l (inc i)))]))))
-                              (rest lines))
-                need (if-let [cl (get headers "content-length")]
-                       (try (Long/parseLong cl) (catch Exception _ 0))
-                       0)
-                body-acc (ByteArrayOutputStream.)]
-            (.write body-acc all (int he) (int (- (alength all) he)))
-            (loop [have (- (alength all) he)]
-              (when (< have need)
-                (let [buf (byte-array (min 65536 (- need have)))
-                      n (.read is buf)]
-                  (when (pos? n)
-                    (.write body-acc buf 0 n)
-                    (recur (+ have n))))))
-            (let [bs (.toByteArray body-acc)
-                  ;; a pipelined overshoot past content-length is not ours to answer
-                  bs (if (> (alength bs) need) (java.util.Arrays/copyOf bs (int need)) bs)]
-              {:method (first rl)
-               :url (second rl)
-               :headers headers
-               :body (String. bs "UTF-8")
-               :body-b64 (.encodeToString (Base64/getEncoder) bs)}))
-          (let [b (.read is)]
-            (when (<= 0 b)
-              (.write acc b)
-              (recur))))))))
+      (if-let [he (head-end acc)]
+        (let [all (.toByteArray acc)
+              head (String. all 0 (- he 4) "ISO-8859-1")
+              lines (str/split head #"\\r\\n")
+              rl (str/split (first lines) #" ")
+              headers (into
+                       {}
+                       (keep
+                        (fn
+                          [l]
+                          (let [i (str/index-of l ":")]
+                            (when i
+                              [(str/lower-case (str/trim (subs l 0 i)))
+                               (str/trim (subs l (inc i)))]))))
+                       (rest lines))
+              need (if-let [cl (get headers "content-length")]
+                     (try (Long/parseLong cl) (catch Exception _ 0))
+                     0)
+              body-acc (ByteArrayOutputStream.)]
+          (.write body-acc all (int he) (int (- (alength all) he)))
+          (loop [have (- (alength all) he)]
+            (when (< have need)
+              (let [buf (byte-array (min 65536 (- need have))), n (.read is buf)]
+                (when (pos? n) (.write body-acc buf 0 n) (recur (+ have n))))))
+          (let [bs (.toByteArray body-acc)
+                bs (if (> (alength bs) need) (java.util.Arrays/copyOf bs (int need)) bs)]
+            {:method (first rl),
+             :url (second rl),
+             :headers headers,
+             :body (String. bs "UTF-8"),
+             :body-b64 (.encodeToString (Base64/getEncoder) bs)}))
+        (let [b (.read is)] (when (<= 0 b) (.write acc b) (recur)))))))
 
 (defn- respond [^Socket s {:keys [status headers body body-as]}]
   (let [status (or status 200)

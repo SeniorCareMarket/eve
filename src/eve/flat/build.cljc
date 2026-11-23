@@ -624,10 +624,9 @@
                       (or (list? v) (seq? v)) (build-list ctx v)
                       (or (satisfies? d/IBackingArray v) (enc/host-array? v))
                       (do (record-fallback! ctx {:reason :host-array :type (type v)})
-                          (let [w (ser/get-coll-writer :array)]
-                            (if w
-                              (w sio nil v)
-                              (throw (ex-info "eve.flat.build: no :array writer registered" {})))))
+                          (if-let [w (ser/get-coll-writer :array)]
+                            (w sio nil v)
+                            (throw (ex-info "eve.flat.build: no :array writer registered" {}))))
                       :else
                       (do (record-fallback! ctx {:reason :reference :type (type v)})
                           (alloc/value->scalar-block! sio v)))]

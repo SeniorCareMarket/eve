@@ -126,7 +126,7 @@
      (let [st {:s s :n (count s) :i (volatile! 0) :opts opts}]
        (loop []
          (let [f (form st)]
-           (if (identical? f st) (do (skip! st) (if (ch st) (recur) nil)) f)))))))
+           (if (identical? f st) (do (skip! st) (when (ch st) (recur))) f)))))))
 
 (defn read
   "One object from string s, as EDN (cherry has no PushbackReader)."

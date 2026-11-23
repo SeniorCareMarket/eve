@@ -751,7 +751,7 @@
 
 (defn- unlock! [att r]
   (if-let [lc (:lock-cell r)]
-    (swap! lc (fn [cur] (if (= cur (:id att)) nil cur)))
+    (swap! lc (fn [cur] (when-not (= cur (:id att)) cur)))
     (let [st (:state r)]
       (loop []
         (let [s @st]
@@ -845,12 +845,11 @@
               (throw (if (beyond-clock? cur) (basis-fault-ex) (retry-ex :validation)))))))
       ;; (3) validators against final values
       (doseq [e installs]
-        (let [validator (:validator @(:state (:ref e)))]
-          (when validator
-            (let [final (if (written? e)
-                          (fold-actions (:base-value e) (:actions e))
-                          (fold-actions (:value (cell-deref (:ref e))) (:actions e)))]
-              (ea/validator-check! validator final)))))
+        (when-let [validator (:validator @(:state (:ref e)))]
+          (let [final (if (written? e)
+                        (fold-actions (:base-value e) (:actions e))
+                        (fold-actions (:value (cell-deref (:ref e))) (:actions e)))]
+            (ea/validator-check! validator final))))
       ;; (4) claim the commit point -- only an attempt with installs
       ;; claims one: a read-only attempt must not advance the shared
       ;; clock (stock's lastPoint moves on committing writers only;

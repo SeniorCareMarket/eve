@@ -114,20 +114,15 @@
 
 (defn remove-leftmost-child [_shift parent]
   (let [arr (.-arr parent)]
-    (if (nil? (aget arr 1))
-      nil
-      (let [r?      (regular? parent)
-            new-arr (make-array (if r? 32 33))]
+    (when-not (nil? (aget arr 1))
+      (let [r? (regular? parent), new-arr (make-array (if r? 32 33))]
         (array-copy arr 1 new-arr 0 31)
         (when-not r?
-          (let [rngs     (node-ranges parent)
-                rng0     (aget rngs 0)
+          (let [rngs (node-ranges parent)
+                rng0 (aget rngs 0)
                 new-rngs (make-array 33)
-                lim      (aget rngs 32)]
+                lim (aget rngs 32)]
             (array-copy rngs 1 new-rngs 0 (dec lim))
-            ;; eve: up to (dec lim), the entries copied — the last one is
-            ;; set below; upstream also subtracts from it, unset (NaN on a
-            ;; JS array, which the next aset overwrites; nil here)
             (loop [i 0]
               (when (< i (dec lim))
                 (aset new-rngs i (- (aget new-rngs i) rng0))

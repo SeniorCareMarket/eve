@@ -84,7 +84,7 @@
                          110 (recur (+ i 2) (conj out 10))
                          114 (recur (+ i 2) (conj out 13))
                          116 (recur (+ i 2) (conj out 9))
-                         117 (let [u (hex4 us (+ i 2))] (when u (recur (+ i 6) (conj out u))))
+                         117 (when-let [u (hex4 us (+ i 2))] (recur (+ i 6) (conj out u)))
                          nil))
             (< c 32) nil                                  ;; a control character must be escaped
             :else (recur (inc i) (conj out c))))))

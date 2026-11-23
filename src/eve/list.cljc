@@ -223,12 +223,9 @@
 
   clojure.lang.IFn
   (invoke [_ n]
-    (if (and (integer? n) (>= n 0) (< n cnt))
-      (loop [off head-off i 0]
-        (if (== i n)
-          (read-node-value sio__ off)
-          (recur (read-node-next sio__ off) (inc i))))
-      nil))
+    (when (and (integer? n) (>= n 0) (< n cnt))
+      (loop [off head-off, i 0]
+        (if (== i n) (read-node-value sio__ off) (recur (read-node-next sio__ off) (inc i))))))
 
   clojure.lang.IReduceInit
   (reduce [_ f init]

@@ -42,7 +42,7 @@
   "Run a shell command synchronously, return trimmed stdout."
   [cmd]
   (try
-    (str/trim (str (.execSync cp cmd {splint/tagged-literal (js {:encoding "utf8"})})))
+    (str/trim (str (.execSync cp cmd #js {:encoding "utf8"})))
     (catch :default _ "")))
 
 (defn- mkdir-p [dir]

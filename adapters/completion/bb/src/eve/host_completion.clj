@@ -507,13 +507,12 @@
                                          clojure.lang.IBlockingDeref
                                          clojure.lang.IPending} h))
                    (keys by-head)))
-      (let [deref1 (first (filter #(and (= "deref" (name (first %)))
-                                        (= 1 (count (second %))))
-                                  (get by-head 'clojure.lang.IDeref)))]
-        (if deref1
-          (apply sci-reify form env
-                 (list 'clojure.lang.IDeref deref1))
-          (apply sci-reify form env specs)))
+      (if-let [deref1 (first
+                       (filter
+                        #(and (= "deref" (name (first %))) (= 1 (count (second %))))
+                        (get by-head 'clojure.lang.IDeref)))]
+        (apply sci-reify form env (list 'clojure.lang.IDeref deref1))
+        (apply sci-reify form env specs))
 
       (and (= '#{java.util.Comparator clojure.lang.IFn}
               (set (keys by-head)))

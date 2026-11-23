@@ -148,15 +148,11 @@
    Stores the record's fields + :eve/record-tag in a SabMap.
    Returns nil if the record type is not registered."
   [elem]
-  (let [tag-str (.get record-tag-by-ctor (type elem))]
-    (when tag-str
-      (let [tagged-map (assoc (reduce-kv assoc {} elem) :eve/record-tag tag-str)
-            sab-m (convert-to-eve nil tagged-map)]
-        (when sab-m
-          ;; Get the SAB_MAP encoding, then change the tag byte to RECORD
-          (let [bytes (encode-fresh-pointer sab-m)]
-            (aset bytes 2 FAST_TAG_RECORD)
-            bytes))))))
+  (when-let [tag-str (.get record-tag-by-ctor (type elem))]
+    (let [tagged-map (assoc (reduce-kv assoc {} elem) :eve/record-tag tag-str)
+          sab-m (convert-to-eve nil tagged-map)]
+      (when sab-m
+        (let [bytes (encode-fresh-pointer sab-m)] (aset bytes 2 FAST_TAG_RECORD) bytes)))))
 
 ;;-----------------------------------------------------------------------------
 ;; Shared resources

@@ -36,7 +36,7 @@
 
 (defn- exec-sync [cmd]
   (try
-    (str/trim (str (.execSync cp cmd {splint/tagged-literal (js {:encoding "utf8"})})))
+    (str/trim (str (.execSync cp cmd #js {:encoding "utf8"})))
     (catch :default _ "")))
 
 (defn- mkdir-p [dir]
@@ -154,7 +154,4 @@
 
 (defn main []
   ;; Check if we're on the main thread (screen)
-  (if (e/in-screen?)
-    (init-main-thread!)
-    ;; On worker: nothing to do. The code is just available for `in` calls.
-    nil))
+  (when (e/in-screen?) (init-main-thread!)))

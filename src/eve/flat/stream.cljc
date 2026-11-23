@@ -893,12 +893,13 @@
      (let [send (fn [v] (send-stream (d/-eve-sio v) (d/-root-header-off v)
                                      (assoc default-send-opts :digests true)))]
        (cond (ea-atom? x)
-             (let [sent (ea/read-pinned x (fn [v] (when (satisfies? d/IEveRoot v)
-                                                    (send v))))]
-               (if sent
-                 (swap! a (fn [_] (receive-value d/*domain-sio* (:bytes sent)
-                                                 {:check? true :digest-trust :trusted})))
-                 (swap! a (fn [_] @x))))
+             (if-let [sent (ea/read-pinned x (fn [v] (when (satisfies? d/IEveRoot v) (send v))))]
+               (swap!
+                a
+                (fn
+                  [_]
+                  (receive-value d/*domain-sio* (:bytes sent) {:check? true, :digest-trust :trusted})))
+               (swap! a (fn [_] @x)))
              (satisfies? d/IEveRoot x)
              (let [sent (send x)]
                (swap! a (fn [_] (receive-value d/*domain-sio* (:bytes sent)

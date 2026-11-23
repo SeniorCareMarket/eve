@@ -471,20 +471,12 @@
           (if-not (:error result)
             result
             ;; OOM — try to grow in a loop (mmap-backed, or a growable SharedArrayBuffer)
-            (let [grew-and-allocated
-                  (loop [attempts 0]
-                    (when (and (< attempts 20) (grow-slab! ci))
-                      (let [retry (alloc-from-slab ci)]
-                        (if-not (:error retry)
-                          retry
-                          (recur (inc attempts))))))]
-              (if grew-and-allocated
-                grew-and-allocated
-                ;; Can't grow or still full — spill to next class
-                (if (< ci 5)
-                  (recur (inc ci))
-                  {:error :all-slab-classes-full
-                   :size size-bytes})))))))))
+            (if-let [grew-and-allocated (loop [attempts 0]
+                                          (when (and (< attempts 20) (grow-slab! ci))
+                                            (let [retry (alloc-from-slab ci)]
+                                              (if-not (:error retry) retry (recur (inc attempts))))))]
+              grew-and-allocated
+              (if (< ci 5) (recur (inc ci)) {:error :all-slab-classes-full, :size size-bytes}))))))))
 
 (defn alloc-offset
   "Like alloc but returns just the slab-qualified offset, or throws on error."

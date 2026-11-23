@@ -112,18 +112,18 @@
    each port's order)."
   []
   (loop []
-    (let [got (reduce (fn [got p]
-                        (if-let [r (wt/receiveMessageOnPort p)]
-                          (let [m (.-message r)]
-                            (cond
+    #_{:splint/disable [lint/let-when]} (let [got (reduce (fn [got p]
+                                                            (if-let [r (wt/receiveMessageOnPort p)]
+                                                              (let [m (.-message r)]
+                                                                (cond
                               ;; data: eve.wire bytes (one flat chunk)
-                              (instance? js/Uint8Array m) (swap! state update :local conj (wire/decode m))
-                              (string? m) (swap! state update :local conj (read-message m))
-                              :else (install! (.-peer m) (.-port m)))
-                            true)
-                          got))
-                      false (vals (:ports @state)))]
-      (when got (recur)))))
+                                                                  (instance? js/Uint8Array m) (swap! state update :local conj (wire/decode m))
+                                                                  (string? m) (swap! state update :local conj (read-message m))
+                                                                  :else (install! (.-peer m) (.-port m)))
+                                                                true)
+                                                              got))
+                                                          false (vals (:ports @state)))]
+                                          (when got (recur)))))
 
 (defn send!
   "Post msg to the thread at addr (to oneself: onto this thread's own queue, no port); never blocks. A message must be

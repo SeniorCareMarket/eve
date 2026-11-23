@@ -79,12 +79,10 @@
 (defn scalar-at
   "The plain scalar value whose body sits at ba[i]."
   [^bytes ba ^long i]
-  (if (zero? (bit-and (aget ba (int i)) 0xFF))
-    nil
-    (let [n (scalar-len ba i)
-          bs (byte-array (+ 2 n))]
-      (aset bs 0 (aget ^bytes magic 0))
-      (aset bs 1 (aget ^bytes magic 1))
+  (when-not (zero? (bit-and (aget ba (int i)) 255))
+    (let [n (scalar-len ba i), bs (byte-array (+ 2 n))]
+      (aset bs 0 (aget magic 0))
+      (aset bs 1 (aget magic 1))
       (System/arraycopy ba (int i) bs 2 (int n))
       (codec/decode nil bs))))
 

@@ -50,14 +50,13 @@
     @failure))
 
 (defn -main [& [dir threads swaps burst]]
-  (let [th (run-storm! (or dir "/home/john/j/alloc-growth-race-run/d1")
-                       (parse-long (or threads "8"))
-                       (parse-long (or swaps "2000"))
-                       (parse-long (or burst "8")))]
-    (if th
-      (do (println "REPRO-FAIL" (str th))
-          (doseq [el (take 16 (.getStackTrace th))]
-            (println "  AT" (str el)))
-          (System/exit 1))
-      (do (println "REPRO-CLEAN")
-          (System/exit 0)))))
+  (if-let [th (run-storm!
+               (or dir "/home/john/j/alloc-growth-race-run/d1")
+               (parse-long (or threads "8"))
+               (parse-long (or swaps "2000"))
+               (parse-long (or burst "8")))]
+    (do
+      (println "REPRO-FAIL" (str th))
+      (doseq [el (take 16 (.getStackTrace th))] (println "  AT" (str el)))
+      (System/exit 1))
+    (do (println "REPRO-CLEAN") (System/exit 0))))

@@ -288,38 +288,37 @@
           ;; SAB pointer types — collection values in slab memory.
           ;; Prefer registry lookup (mirrors CLJS pattern); fall back to
           ;; legacy coll-factory callback for backward compat.
-           0x10 (let [ctor (or (ser/get-type-constructor 0x10)
-                               (when coll-factory (fn [off] (coll-factory 0x10 sio off))))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE SAB_MAP: no constructor registered."))))
-           0x11 (let [ctor (or (ser/get-type-constructor 0x11)
-                               (when coll-factory (fn [off] (coll-factory 0x11 sio off))))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE SAB_SET: no constructor registered."))))
-           0x12 (let [ctor (or (ser/get-type-constructor 0x12)
-                               (when coll-factory (fn [off] (coll-factory 0x12 sio off))))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE SAB_VEC: no constructor registered."))))
-           0x13 (let [ctor (or (ser/get-type-constructor 0x13)
-                               (when coll-factory (fn [off] (coll-factory 0x13 sio off))))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE SAB_LIST: no constructor registered."))))
-           0x1C (let [ctor (or (ser/get-type-constructor 0x1C)
-                               (when coll-factory (fn [off] (coll-factory 0x1C sio off))))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE ARRAY (0x1C): no constructor registered."))))
-           0x1D (let [ctor (or (ser/get-type-constructor 0x1D)
-                               (when coll-factory (fn [off] (coll-factory 0x1D sio off))))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE ARRAY: no constructor registered."))))
-           0x1E (let [ctor (or (ser/get-type-constructor 0x1E)
-                               (when coll-factory (fn [off] (coll-factory 0x1E sio off))))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE OBJ: no constructor registered."))))
-           0x20 (let [ctor (or (ser/get-type-constructor 0x20)
-                               (frozen-ctor))]
-                  (if ctor (ctor sio (read-i32-le b 3))
-                      (throw (enc/unsupported "EVE FROZEN (0x20): no constructor registered."))))
+           0x10 (if-let [ctor (or (ser/get-type-constructor 16)
+                                  (when coll-factory (fn [off] (coll-factory 16 sio off))))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE SAB_MAP: no constructor registered.")))
+           0x11 (if-let [ctor (or (ser/get-type-constructor 17)
+                                  (when coll-factory (fn [off] (coll-factory 17 sio off))))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE SAB_SET: no constructor registered.")))
+           0x12 (if-let [ctor (or (ser/get-type-constructor 18)
+                                  (when coll-factory (fn [off] (coll-factory 18 sio off))))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE SAB_VEC: no constructor registered.")))
+           0x13 (if-let [ctor (or (ser/get-type-constructor 19)
+                                  (when coll-factory (fn [off] (coll-factory 19 sio off))))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE SAB_LIST: no constructor registered.")))
+           0x1C (if-let [ctor (or (ser/get-type-constructor 28)
+                                  (when coll-factory (fn [off] (coll-factory 28 sio off))))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE ARRAY (0x1C): no constructor registered.")))
+           0x1D (if-let [ctor (or (ser/get-type-constructor 29)
+                                  (when coll-factory (fn [off] (coll-factory 29 sio off))))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE ARRAY: no constructor registered.")))
+           0x1E (if-let [ctor (or (ser/get-type-constructor 30)
+                                  (when coll-factory (fn [off] (coll-factory 30 sio off))))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE OBJ: no constructor registered.")))
+           0x20 (if-let [ctor (or (ser/get-type-constructor 32) (frozen-ctor))]
+                  (ctor sio (read-i32-le b 3))
+                  (throw (enc/unsupported "EVE FROZEN (0x20): no constructor registered.")))
 
           ;; Flat map — cross-process binary map encoding
            0xED

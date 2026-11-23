@@ -72,7 +72,7 @@
 
 (defn- until [ms f]
   (let [deadline (+ (proc/now-ms) ms)]
-    (loop [] (or (f) (if (> (proc/now-ms) deadline) nil (do (proc/sleep-ms! 10) (recur)))))))
+    (loop [] (or (f) (when-not (> (proc/now-ms) deadline) (proc/sleep-ms! 10) (recur))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The pairing

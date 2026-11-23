@@ -385,11 +385,9 @@
               (value-args k)
               (let [v (first more)]
                 (case k
-                  "par"     (let [n (when v (try (Integer/parseInt v)
-                                                 (catch NumberFormatException _ nil)))]
-                              (if n
-                                (recur (rest more) (assoc acc :par n))
-                                (recur more (assoc acc :par 2))))
+                  "par"     (if-let [n (when v (try (Integer/parseInt v) (catch NumberFormatException _ nil)))]
+                              (recur (rest more) (assoc acc :par n))
+                              (recur more (assoc acc :par 2)))
                   "tier"    (recur (rest more) (assoc acc :tier (keyword (or v "all"))))
                   "ns"      (recur (rest more) (assoc acc :ns-filter v))
                   "output"  (recur (rest more) (assoc acc :output v))

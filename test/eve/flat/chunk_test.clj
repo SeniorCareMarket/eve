@@ -108,7 +108,7 @@
    (fn [inner]
      (gen/one-of [(gen/vector inner 0 6)
                   (gen/fmap (fn [xs] (apply list xs)) (gen/vector inner 0 6))
-                  (gen/fmap (fn [xs] (into #{} xs)) (gen/vector inner 0 6))
+                  (gen/fmap (fn [xs] (set xs)) (gen/vector inner 0 6))
                   (gen/map (gen/one-of [gen/keyword gen/symbol gen/string-alphanumeric
                                         gen/small-integer])
                            inner {:max-elements 6})]))
@@ -277,7 +277,7 @@
         probes (concat [nil 0 1 5 5N (int 5) 99 100 -1 -25000075 5000000000 5000000007 \a \z \A
                         100000000000000000005N "x3" "Station-5" "Station-406" "Station-407" "" "s3"
                         :k3 :k39 :k40 :ns0/k0 :ns1/k1 :ns1/k0 's3 'y9 'y10 [1 2] #{3} :f3 :a :b
-                        (clojure.string/join (repeat (clojure.string/join (repeat (clojure.string/join (repeat 257 "a")) "a")) "a")) (clojure.string/join (repeat (clojure.string/join (repeat 257 "a")) "a")) (apply str (repeat 257 "a"))
+                        (clojure.string/join (repeat 255 "a")) (clojure.string/join (repeat 256 "a")) (clojure.string/join (repeat 257 "a"))
                         true false]
                        (for [i (range 0 407 13)] (str "Station-" i)))]
     (doseq [[label m] maps]

@@ -610,10 +610,8 @@
         dt-off   (desc-table-offset region)
         max-desc (max-descs region)]
     (or (loop [i 0]
-          (if (>= i max-desc)
-            nil
-            (or (try-reuse-rung! region dt-off max-desc i size field)
-                (recur (inc i)))))
+          (when-not (>= i max-desc)
+            (or (try-reuse-rung! region dt-off max-desc i size field) (recur (inc i)))))
         (loop [i 0]
           (if (>= i max-desc)
             nil

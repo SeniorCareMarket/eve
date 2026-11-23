@@ -265,7 +265,7 @@
 
     :p/field-equals
     (let [a (resolve-eq (:in args) claim) e (resolve-eq (:eq args) claim)]
-      (if (and a (= a e)) nil (fail :field-equals {:in a :eq e})))
+      (when-not (and a (= a e)) (fail :field-equals {:in a, :eq e})))
 
     :p/semaphore-membership nil ; the anonymous gate is checked with the ACL below
 

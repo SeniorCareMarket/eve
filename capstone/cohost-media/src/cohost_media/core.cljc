@@ -29,11 +29,11 @@
    "png" :image "jpg" :image "jpeg" :image "webp" :image})
 
 (defn extension [path]
-  (let [i (str/last-index-of path ".")] (when i (str/lower-case (subs path (inc i))))))
+  (when-let [i (str/last-index-of path ".")] (str/lower-case (subs path (inc i)))))
 
 (defn media-kind [path] (get ext->kind (extension path)))
 
-(defn base-name [path] (let [i (str/last-index-of path "/")] (if i (subs path (inc i)) path)))
+(defn base-name [path] (if-let [i (str/last-index-of path "/")] (subs path (inc i)) path))
 
 ;; ---------------------------------------------------------------------------
 ;; Jobs: each a task (a registered name every member that runs it defines in its cohost-media.tasks), a pool, and the

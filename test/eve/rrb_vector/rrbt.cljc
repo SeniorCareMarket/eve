@@ -108,9 +108,7 @@
                   (-next [coll]
                          (if (< (inc off) (alength node))
                            (let [s (rrb-chunked-seq vec node i (inc off))]
-                             (if (nil? s)
-                               nil
-                               s))
+                             (when-not (nil? s) s))
                            (-chunked-next coll)))
 
                   ICollection

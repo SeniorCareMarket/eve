@@ -152,24 +152,20 @@
   "The value in slot i of the n-slot array at off."
   [sio off n i]
   (let [kind (slab/read-u8 sio off (+ HEADER i))]
-    (if (== kind KIND_NIL)
-      nil
+    (when-not (== kind KIND_NIL)
       (let [payload (slab/read-i32 sio off (+ (payload-base n) (* 4 i)))]
         (cond
           (== kind KIND_INT32) (long payload)
-
           (== kind KIND_BLOCK)
           (let [len (slab/read-i32 sio payload 0)]
             (decode sio (slab/read-bytes sio payload 4 len)))
-
           :else
           (let [tag (slab/read-u8 sio off (+ HEADER n i))]
             (if (== kind KIND_TAG)
               (decode sio (enc/bytes-of [d/DIRECT_MAGIC_0 d/DIRECT_MAGIC_1 tag]))
               (if-let [ctor (ser/get-type-constructor tag)]
                 (ctor sio payload)
-                (throw (ex-info "eve array: no constructor for a pointer tag"
-                                {:tag tag}))))))))))
+                (throw (ex-info "eve array: no constructor for a pointer tag" {:tag tag}))))))))))
 
 (defn- copy-bytes!
   "Copy nbytes from (src-off + from) to (dst-off + to), read whole before the

@@ -445,9 +445,7 @@
 
   clojure.lang.ILookup
   (valAt [_ k]
-    (if (and (integer? k) (>= k 0) (< k cnt))
-      (nth-impl sio__ cnt shift root tail k)
-      nil))
+    (when (and (integer? k) (>= k 0) (< k cnt)) (nth-impl sio__ cnt shift root tail k)))
   (valAt [_ k not-found]
     (if (and (integer? k) (>= k 0) (< k cnt))
       (nth-impl sio__ cnt shift root tail k)
@@ -588,8 +586,9 @@
              :else (recur (dec i))))))
   (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
   (^boolean contains [this o] (not= -1 (.indexOf this o)))
-  (^boolean containsAll [this ^java.util.Collection c]
-    (every? #(clojure.string/includes? this %) c))
+  ;; containsAll is the java.util.Collection face's own method: the receiver is the collection, not a string
+  #_{:splint/disable [style/prefer-clj-string]} (^boolean containsAll [this ^java.util.Collection c]
+                                                  (every? #(.contains this %) c))
   (^java.util.List subList [this ^int from ^int to]
     (java.util.Collections/unmodifiableList
      (java.util.ArrayList. ^java.util.Collection (subvec (vec this) from to))))

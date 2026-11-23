@@ -73,7 +73,4 @@
 
 (defn main []
   ;; Check if we're on the main thread (screen)
-  (if (e/in-screen?)
-    (init-main-thread!)
-    ;; On worker: nothing to do. The code is just available for `in` calls.
-    nil))
+  (when (e/in-screen?) (init-main-thread!)))

@@ -24,8 +24,8 @@
   "Determine the output type for a binary op between two arrays or array+scalar.
    Promotes to :float64 if either operand is floating-point."
   [a b]
-  (let [ta (if (number? a) nil (arr/subtype->type-kw (arr/array-subtype-code a)))
-        tb (if (number? b) nil (arr/subtype->type-kw (arr/array-subtype-code b)))]
+  (let [ta (when-not (number? a) (arr/subtype->type-kw (arr/array-subtype-code a)))
+        tb (when-not (number? b) (arr/subtype->type-kw (arr/array-subtype-code b)))]
     (cond
       (or (= ta :float64) (= tb :float64)) :float64
       (or (= ta :float32) (= tb :float32)) :float64

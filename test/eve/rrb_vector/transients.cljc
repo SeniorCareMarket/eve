@@ -68,21 +68,11 @@
       (let [arr  (.-arr ret)
             rngs (node-ranges ret)
             li   (dec (aget rngs 32))
-            cret (if (== shift 5)
-                   nil
+            cret (when-not (== shift 5)
                    (let [child (ensure-editable root-edit (aget arr li))
-                         ccnt  (+ (if (pos? li)
-                                    (- (aget rngs li) (aget rngs (dec li)))
-                                    (aget rngs 0))
-                                  ;; add 32 elems to account for the
-                                  ;; new full tail we plan to add to
-                                  ;; the subtree.
-                                  32)]
-                     ;; See Note 2
+                         ccnt (+ (if (pos? li) (- (aget rngs li) (aget rngs (dec li))) (aget rngs 0)) 32)]
                      (when-not (overflow? child (- shift 5) ccnt)
-                       (push-tail! (- shift 5) ccnt root-edit
-                                   child
-                                   tail-node))))]
+                       (push-tail! (- shift 5) ccnt root-edit child tail-node))))]
         (if cret
           (do (aset arr  li cret)
               (aset rngs li (+ (aget rngs li) 32))
