@@ -112,36 +112,6 @@
 (when-not (resolve 'es6-entries-iterator)
   (intern 'clojure.core 'es6-entries-iterator nbb-es6-entries-iterator))
 
-;; F-NBB-EDNREADER: nbb's bundled cljs.reader exports only read-string
-;; — no register-tag-parser!, no *data-readers* — so a vanilla
-;; ClojureScript library registering its EDN tag readers at load
-;; (DataScript's core, for datascript/Datom and datascript/DB) fails
-;; to analyse on this seat: "Unable to resolve symbol:
-;; edn/register-tag-parser!". The seat's completion: cljs.reader is
-;; required here, as Eve loads (the goog pattern below), and the
-;; missing registry is interned into it — an atom-backed
-;; *data-readers*, a register-tag-parser! that records into it, and a
-;; read-string that wraps nbb's own, merging the registered tags into
-;; its :readers (nbb's read-string honours a :readers opts map —
-;; probed, fix/probes/probe3.cljs), so a registered tag genuinely
-;; dispatches on read. Guarded by resolve: a future nbb supplying
-;; the registry itself is never shadowed.
-(require 'cljs.reader)
-
-(def ^:private nbb-data-readers (atom {}))
-
-(when-not (resolve 'cljs.reader/register-tag-parser!)
-  (intern 'cljs.reader '*data-readers* nbb-data-readers)
-  (intern 'cljs.reader 'register-tag-parser!
-          (fn [tag f] (swap! nbb-data-readers assoc tag f) nil))
-  (let [orig-read-string @(resolve 'cljs.reader/read-string)]
-    (intern 'cljs.reader 'read-string
-            (fn
-              ([s] (orig-read-string {:readers @nbb-data-readers} s))
-              ([opts s] (orig-read-string
-                         (update opts :readers (fn [r] (merge @nbb-data-readers r)))
-                         s))))))
-
 ;; F-NBB-GOOG (the base namespace): ClojureScript code also names the
 ;; ambient Closure base — (goog/exportSymbol ...), (goog/getUid ...) —
 ;; without requiring it, and sci resolves such a reference only once the
@@ -163,6 +133,29 @@
 (when-not (resolve 'IDerefWithTimeout)
   (intern 'clojure.core 'IDerefWithTimeout eve.core/IDerefWithTimeout)
   (intern 'clojure.core '-deref-with-timeout eve.core/-deref-with-timeout))
+
+;; F-NBB-VALUEPROTOCOLS (companion): ClojureScript's value protocols —
+;; IEquiv, IHash, IComparable, IPrintWithWriter — are likewise absent
+;; from this seat's core as vars, so a host deftype naming one in its
+;; spec (eve.numeric's exact-number types) dies at analysis:
+;; "Protocol not found: IEquiv". eve.core carries the four (see its
+;; note: on this seat eve.numeric dispatches equality, hash, compare
+;; and print through its own fns, so these are the registration
+;; surface, with ClojureScript's method names and arities); interned
+;; here, protocol and method var together, as IDerefWithTimeout
+;; above. Guarded by resolve, as every intern in this file.
+(when-not (resolve 'IEquiv)
+  (intern 'clojure.core 'IEquiv eve.core/IEquiv)
+  (intern 'clojure.core '-equiv eve.core/-equiv))
+(when-not (resolve 'IHash)
+  (intern 'clojure.core 'IHash eve.core/IHash)
+  (intern 'clojure.core '-hash eve.core/-hash))
+(when-not (resolve 'IComparable)
+  (intern 'clojure.core 'IComparable eve.core/IComparable)
+  (intern 'clojure.core '-compare eve.core/-compare))
+(when-not (resolve 'IPrintWithWriter)
+  (intern 'clojure.core 'IPrintWithWriter eve.core/IPrintWithWriter)
+  (intern 'clojure.core '-pr-writer eve.core/-pr-writer))
 
 (def ^:private nbb-absent-protocol-groups
   "Protocol groups that do not exist at all on this seat: nbb's bundled
@@ -207,6 +200,19 @@
   (js/plain-type type-name fields parsed twist))
 (defn slab-type "An eve/deftype type." [m] (js/slab-type m))
 (defn eve-type "An eve-deftype." [ctx] (js/eve-type ctx twist))
+(defn flat-type
+  "An eve-deftype's flat sister. emission/flat-forms resolves
+   eve.types/flat-type; this adapter never re-exported it, so every
+   type on this seat registered its layout alone (factory nil) and
+   packed values read as the generic FlatTagged — a type's own
+   protocols (ds's IDatom on Datom) then had no implementation on
+   the flat kind. The JS realization's generator is the seat's own:
+   the sister it emits is a plain cljs deftype whose protocol names
+   resolve through eve.core's interns on this seat. The seat twist's
+   protocol translation applies to the sister's specs as it does to
+   the main type's (js/flat-type's optional twist): groups this seat
+   cannot host (clojure.data/Diff & friends) are dropped here too."
+  [ctx] (js/flat-type ctx twist))
 (defn extend-eve-type "eve-extend-type." [ctx] (js/extend-eve-type ctx))
 (defn rename-fields "No field name is reserved." [_env fields body] [fields body])
 

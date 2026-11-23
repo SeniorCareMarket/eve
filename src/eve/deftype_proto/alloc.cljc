@@ -213,7 +213,6 @@
 ;; JvmSlabCtx — a slab domain over IMemRegions (every host)
 ;;=============================================================================
 
-   (do
      ;; The slab context over a set of IMemRegions — every host's (its regions
      ;; are each host's adapter's; this code is not). A domain is one of these.
 
@@ -1350,7 +1349,7 @@
         (let [class-idx (decode-class-idx slab-off)
               blk-size  (d/slab-size class-idx)
               ev-bytes  (slab/read-bytes sio slab-off 1 (dec blk-size))]
-          (codec/decode sio ev-bytes)))))
+          (codec/decode sio ev-bytes))))
 
 
 

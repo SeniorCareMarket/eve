@@ -532,6 +532,29 @@
   (when (fp/fast-satisfies? ISabpType x)
     (-sabp-type-key x)))
 
+;; Interpreted seats (SCI/nbb): SCI's instance? discriminates on the
+;; type object, and a flat sister is a distinct SCI type from its
+;; main type, so (instance? T sister) answers false there although
+;; the value model says the sister IS a T (both carry T's key, per
+;; type-key-of above). The seat's eve.core bridges instance? with
+;; this registry: the js types adapter's expansion registers each
+;; type object against its key on those seats, and the bridge
+;; answers by key. Inert on compiled seats — nothing registers and
+;; nothing consults it.
+(defonce ^:private type-object->key (atom {}))
+
+(defn register-type-object!
+  "Register an interpreted seat's type object under its type key
+   (see the note above). Returns nil."
+  [type-obj type-key]
+  (swap! type-object->key assoc type-obj type-key)
+  nil)
+
+(defn type-object-key
+  "The type key a type object was registered under, or nil."
+  [type-obj]
+  (get @type-object->key type-obj))
+
 (defprotocol IsEve
   "Marker protocol for EVE types. Used by serialization to detect
    EVE objects without walking into their internals."

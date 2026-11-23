@@ -244,7 +244,8 @@
 ;; after BasedValue below.
 #?(:bb (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n)
     :glj (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n)
-    :lg (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n))
+    :lg (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n)
+    :cljs (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n))
 
 (defn plain-of
   "Materialize a chunk handle (or a plain value) into plain
@@ -308,6 +309,41 @@
                                     (ecore/equiv (-handle this sio hdr) other)))
            (hashCode [this] (unchecked-int (ecore/-hash (-handle this sio hdr))))
            (toString [_] (str "#eve/frozen " hdr))))
+    :cljs (do (deftype FrozenValue [sio hdr cells]
+           d/IEveRoot
+           (-root-header-off [_] hdr)
+           d/IEveSio
+           (-eve-sio [_] sio)
+           ICounted
+           (-count [this] (count (-handle this sio hdr)))
+           IIndexed
+           (-nth [this i] (nth (-handle this sio hdr) i))
+           (-nth [this i nf] (nth (-handle this sio hdr) i nf))
+           ILookup
+           (-lookup [this k] (get (-handle this sio hdr) k))
+           (-lookup [this k nf] (get (-handle this sio hdr) k nf))
+           IAssociative
+           (-assoc [this k v] (try (assoc (-handle this sio hdr) k v)
+                                   (catch :default _
+                                     (pg-based-assoc this k v))))
+           (-contains-key? [this k] (contains? (-handle this sio hdr) k))
+           ISeqable
+           (-seq [this] (seq (-handle this sio hdr)))
+           ICollection
+           (-conj [this x] (try (conj (-handle this sio hdr) x)
+                                (catch :default _
+                                  (conj (pg-based-of this) x))))
+           IEmptyableCollection
+           (-empty [_] (throw (js/Error. "empty on a frozen value")))
+           IStack
+           (-peek [this] (peek (-handle this sio hdr)))
+           (-pop [this] (try (pop (-handle this sio hdr))
+                             (catch :default _
+                               (pg-based-pop this))))
+           IEquiv
+           (-equiv [this other] (= (-handle this sio hdr) other))
+           IHash
+           (-hash [this] (-hash (-handle this sio hdr)))))
     :glj (do (deftype FrozenValue [sio hdr cells]
             d/IEveRoot
             (-root-header-off [_] hdr)
@@ -513,6 +549,62 @@
                                      (ecore/equiv (vec (ecore/seq this)) (vec (ecore/seq other)))))
            (hashCode [this] (unchecked-int (ecore/hash-ordered-coll (ecore/seq this))))
            (toString [this] (pr-str (ecore/seq this)))))
+    :cljs (do (deftype ConcatBatch [handles cums total mm]
+           chunk/IFlatHandle
+           (-rep [this] (mapv chunk/rep-of this))
+           (-chunk-bytes [_] (frame-stream (mapv chunk/bytes-of handles)))
+           ICounted
+           (-count [_] total)
+           IIndexed
+           (-nth [this i] (if (and (<= 0 i) (< i total))
+                            (let [j (cb-locate cums i)]
+                              (nth (nth handles j) (- i (nth cums j))))
+                            (throw (js/Error. (str i)))))
+           (-nth [this i nf] (if (and (<= 0 i) (< i total)) (nth this i) nf))
+           ILookup
+           (-lookup [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) total))
+                               (nth this (long k)) nil))
+           (-lookup [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) total))
+                                  (nth this (long k)) nf))
+           IAssociative
+           (-assoc [this k v] (cond
+                                (not (integer? k)) (throw (js/Error.
+                                                           "Key must be integer"))
+                                (== (long k) total) (conj this v)
+                                :else (pg-concat-assoc-n handles cums total mm (long k) v)))
+           (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) total)))
+           IVector
+           (-assoc-n [this i v] (pg-concat-assoc-n handles cums total mm i v))
+           ICollection
+           (-conj [this v] (let [h' (chunk/open (first (chunk/pack-all [v])))]
+                             (ConcatBatch. (conj handles h') (conj cums total)
+                                           (inc total) mm)))
+           IEmptyableCollection
+           (-empty [_] [])
+           IStack
+           (-peek [this] (when (pos? total) (nth this (dec total))))
+           (-pop [this] (if (zero? total)
+                          (throw (js/Error. "Can't pop empty vector"))
+                          (let [hl (peek handles)]
+                            (if (== 1 (count hl))
+                              (ConcatBatch. (pop handles) (pop cums) (dec total) mm)
+                              (ConcatBatch. (assoc handles (dec (count handles)) (pop hl))
+                                            cums (dec total) mm)))))
+           ISeqable
+           (-seq [_] (apply concat (map seq handles)))
+           IReduce
+           (-reduce [this f] (reduce f (seq this)))
+           (-reduce [this f init] (reduce f init (seq this)))
+           IEquiv
+           (-equiv [this other] (and (sequential? other)
+                                     (== total (count other))
+                                     (= (vec (seq this)) (vec (seq other)))))
+           IHash
+           (-hash [this] (hash-ordered-coll (seq this)))
+           IMeta
+           (-meta [_] mm)
+           IWithMeta
+           (-with-meta [_ m] (ConcatBatch. handles cums total m))))
     :glj (do (deftype ConcatBatch [handles cums total mm]
             chunk/IFlatHandle
             (-rep [this] (mapv chunk/rep-of this))
@@ -763,6 +855,56 @@
                                      (ecore/equiv (vec (ecore/seq this)) (vec (ecore/seq other)))))
            (hashCode [this] (unchecked-int (ecore/hash-ordered-coll (ecore/seq this))))
            (toString [this] (pr-str (ecore/seq this)))))
+    :cljs (do (deftype BasedValue [base edits tail n bc mm]
+           ICounted
+           (-count [_] n)
+           IIndexed
+           (-nth [this i] (if (and (<= 0 i) (< i n))
+                            (if (< i bc)
+                              (if (contains? edits i) (get edits i) (nth base i))
+                              (nth tail (- i bc)))
+                            (throw (js/Error. (str i)))))
+           (-nth [this i nf] (if (and (<= 0 i) (< i n)) (nth this i) nf))
+           ILookup
+           (-lookup [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
+                               (nth this (long k)) nil))
+           (-lookup [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
+                                  (nth this (long k)) nf))
+           IAssociative
+           (-assoc [this k v] (if (integer? k)
+                                (based-assoc-n base edits tail n bc mm (long k) v)
+                                (throw (js/Error.
+                                        "Key must be integer"))))
+           (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) n)))
+           IVector
+           (-assoc-n [this i v] (based-assoc-n base edits tail n bc mm i v))
+           ICollection
+           (-conj [this v] (based-assoc-n base edits tail n bc mm n v))
+           IEmptyableCollection
+           (-empty [_] [])
+           IStack
+           (-peek [this] (when (pos? n) (nth this (dec n))))
+           (-pop [this] (if (zero? n)
+                          (throw (js/Error. "Can't pop empty vector"))
+                          (let [i (dec n)]
+                            (if (< i bc)
+                              (BasedValue. base (dissoc edits i) tail i bc mm)
+                              (BasedValue. base edits (pop tail) i bc mm)))))
+           ISeqable
+           (-seq [this] (when (pos? n) (map (fn [i] (nth this i)) (range n))))
+           IReduce
+           (-reduce [this f] (reduce f (seq this)))
+           (-reduce [this f init] (reduce f init (seq this)))
+           IEquiv
+           (-equiv [this other] (and (sequential? other)
+                                     (== n (count other))
+                                     (= (vec (seq this)) (vec (seq other)))))
+           IHash
+           (-hash [this] (hash-ordered-coll (seq this)))
+           IMeta
+           (-meta [_] mm)
+           IWithMeta
+           (-with-meta [_ m] (BasedValue. base edits tail n bc m))))
     :glj (do (deftype BasedValue [base edits tail n bc mm]
             ecore/ICounted
             (-count [_] n)
@@ -934,7 +1076,7 @@
 (defn- based-assoc-n [base edits tail n bc mm i v]
   (cond
     (or (< i 0) (> i n))
-    (throw (IndexOutOfBoundsException. (str i)))
+    (throw #?(:cljs (js/Error. (str i)) :default (IndexOutOfBoundsException. (str i))))
     (< i bc)
     (BasedValue. base (assoc edits i v) tail n bc mm)
     :else
@@ -980,7 +1122,15 @@
           (defn- pg-based-of [base]
             (BasedValue. base {} [] (ecore/count base) (ecore/count base) nil))
           (defn- pg-based-assoc [base k v] (ecore/assoc (pg-based-of base) k v))
-          (defn- pg-based-pop [base] (ecore/pop (pg-based-of base)))))
+          (defn- pg-based-pop [base] (ecore/pop (pg-based-of base))))
+    :cljs (do (defn- pg-concat-assoc-n [handles cums total mm i v]
+            (let [j (cb-locate cums i)
+                  h' (assoc (nth handles j) (- i (nth cums j)) v)]
+              (ConcatBatch. (assoc handles j h') cums total mm)))
+          (defn- pg-based-of [base]
+            (BasedValue. base {} [] (count base) (count base) nil))
+          (defn- pg-based-assoc [base k v] (assoc (pg-based-of base) k v))
+          (defn- pg-based-pop [base] (pop (pg-based-of base)))))
 
 (defn open-stream
   "Open a frozen value's chunks (a vector of chunk byte arrays)

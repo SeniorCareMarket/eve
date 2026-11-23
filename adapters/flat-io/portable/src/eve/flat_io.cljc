@@ -200,32 +200,28 @@
 (defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))
 ))
 
-#?(:cljs (do
-(defn u8 [^js/Uint8Array c i] (aget c i))
-(defn u16 [^js/Uint8Array c i] (+ (aget c i) (* 256 (aget c (inc i)))))
-(defn u32 [^js/Uint8Array c i]
+#?(:cljs (defn u8 [^js/Uint8Array c i] (aget c i)))
+#?(:cljs (defn u16 [^js/Uint8Array c i] (+ (aget c i) (* 256 (aget c (inc i))))))
+#?(:cljs (defn u32 [^js/Uint8Array c i]
   ;; arithmetic, not bit ops: a u32 does not fit a CLJS 32-bit bit-op
-  (+ (u16 c i) (* 65536 (u16 c (+ i 2)))))
-(defn i32
+  (+ (u16 c i) (* 65536 (u16 c (+ i 2))))))
+#?(:cljs (defn i32
   "The i32 at i. `|0` (bit-or 0) is the wrap: cljs.core/unchecked-int is
    Math truncation (fix), which leaves a u32 past 2^31 positive — the
    moved ri32's spelling answered 4294967295 for FF FF FF FF (measured on
    Node, U2a ledger); the conformance test pins -1."
-  [^js/Uint8Array c i] (bit-or (u32 c i) 0))
-
-(defn- dv-of
+  [^js/Uint8Array c i] (bit-or (u32 c i) 0)))
+#?(:cljs (defn- dv-of
   "A DataView over the whole of Uint8Array b (its buffer, its offset)."
   [^js/Uint8Array b]
-  (js/DataView. (.-buffer b) (.-byteOffset b) (.-byteLength b)))
-
-(defn i64
+  (js/DataView. (.-buffer b) (.-byteOffset b) (.-byteLength b))))
+#?(:cljs (defn i64
   "The i64 at i as a js/BigInt (exact past 2^53)."
   [c i]
-  (.getBigInt64 (dv-of c) i true))
-(defn f64 [c i] (.getFloat64 (dv-of c) i true))
-(defn f32 [c i] (.getFloat32 (dv-of c) i true))
-
-(defn varint
+  (.getBigInt64 (dv-of c) i true)))
+#?(:cljs (defn f64 [c i] (.getFloat64 (dv-of c) i true)))
+#?(:cljs (defn f32 [c i] (.getFloat32 (dv-of c) i true)))
+#?(:cljs (defn varint
   "[value next-pos] — unsigned LEB128, accumulated arithmetically
    (CLJS bit ops are 32-bit). Chunk offsets stay under 2^32, counts
    under 2^53, so a JS number is exact."
@@ -233,44 +229,29 @@
   (loop [i i mul 1 v 0]
     (let [x (aget c i)]
       (if (< x 128) [(+ v (* (bit-and x 127) mul)) (inc i)]
-          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
-
-(defn varint-v
+          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul))))))))
+#?(:cljs (defn varint-v
   "The unsigned LEB128 value at i (varint's first element, no vector)."
   [^js/Uint8Array c i]
   (loop [i i mul 1 v 0]
     (let [x (aget c i)]
       (if (< x 128) (+ v (* (bit-and x 127) mul))
-          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
-
-(defn varint-next
+          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul))))))))
+#?(:cljs (defn varint-next
   "The position after the unsigned LEB128 at i (varint's second element)."
   [^js/Uint8Array c i]
-  (loop [i i] (if (< (aget c i) 128) (inc i) (recur (inc i)))))
-
-(defn varint-len [v]
-  (loop [v v n 1] (if (< v 128) n (recur (quot v 128) (inc n)))))
-
-(defn- hb [^js/Uint8Array bs i] (aget bs i))
-
-;; i64 math on this host runs in BigInt space: an i64 does not fit a
-;; JS number. The writer's i64 takes either. Written without js*: nbb's
-;; analyzer has no js* (measured: the flat load died "Unable to resolve
-;; symbol: js*"), and every form below means the same in compiled
-;; ClojureScript — the type tag is Object.prototype.toString's.
-;; (js/typeof is not the portable spelling either: nbb resolves it to a
-;; broken call.)
-(defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x)))
-(defn- bi [x] (if (bigint? x) x (js/BigInt x)))
-
-(def ^:private utf8-decoder (js/TextDecoder. "utf-8"))
-
-(defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
-(defn chunk-bytes "The host byte array of chunk c." [c] c)
-(defn chunk-len "The byte length of chunk c." [c] (.-length c))
-(defn utf8 "The string of the n utf-8 bytes at off." [c off n]
-  (.decode utf8-decoder (.subarray c off (+ off n))))
-))
+  (loop [i i] (if (< (aget c i) 128) (inc i) (recur (inc i))))))
+#?(:cljs (defn varint-len [v]
+  (loop [v v n 1] (if (< v 128) n (recur (quot v 128) (inc n))))))
+#?(:cljs (defn- hb [^js/Uint8Array bs i] (aget bs i)))
+#?(:cljs (defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x))))
+#?(:cljs (defn- bi [x] (if (bigint? x) x (js/BigInt x))))
+#?(:cljs (def ^:private utf8-decoder (js/TextDecoder. "utf-8")))
+#?(:cljs (defn chunk "The chunk over host byte array bs: bs itself." [bs] bs))
+#?(:cljs (defn chunk-bytes "The host byte array of chunk c." [c] c))
+#?(:cljs (defn chunk-len "The byte length of chunk c." [c] (.-length c)))
+#?(:cljs (defn utf8 "The string of the n utf-8 bytes at off." [c off n]
+  (.decode utf8-decoder (.subarray c off (+ off n)))))
 
 ;; ---------------------------------------------------------------------------
 ;; in place: compares over the stored bytes, no copy of them
@@ -338,8 +319,8 @@
 
 ;; The buf-* calls are declared here and defined once every Buf
 ;; realization exists: on the JVM their bodies are the IBuf interface
-;; calls, on bb / glojure / jank the IBuf protocol fns, on cljs the Buf
-;; methods. Member-call syntax (.wU8 w …) is not portable: jank's
+;; calls, on bb / glojure / jank the IBuf protocol fns, on cljs the
+;; IBuf protocol fns too (its Buf is a protocol host, below). Member-call syntax (.wU8 w …) is not portable: jank's
 ;; completion objects have no native members, so its analyzer rejects
 ;; it outright, and the protocol hosts dispatch through the fns anyway.
 (declare buf-raw buf-pos buf-seek buf-u8 buf-u16 buf-u32 buf-i64
@@ -502,71 +483,98 @@
 ;; shared writer calls, over a growable Uint8Array + DataView. The
 ;; position field is `p`, as on the JVM, so it cannot collide with the
 ;; pos method.
-#?(:cljs (do
-(deftype Buf [^:mutable b ^:mutable dv ^:mutable p width]
-  Object
-  (grow [_ need]
-    (when (< (.-length b) need)
-      (let [nb (js/Uint8Array. (max (* 2 (.-length b)) need))]
+#?(:cljs (defprotocol IBuf
+           (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+           (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+           (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v])))
+
+;; ClojureScript is a protocol host for the writer, as bb / glojure /
+;; jank are: the Buf text below is the previous native-member text
+;; (an Object spec of grow / raw / pos / u8 / ...) with the methods
+;; renamed to the w-surface and grow inlined at its call sites,
+;; because SCI's deftype has no native-member Object spec — a method
+;; name it does not know is resolved as a protocol of sci.impl.deftype
+;; and dies ("Could not resolve symbol: sci.impl.deftype/varint",
+;; measured on nbb 1.3.204). The byte behavior is the native text's,
+;; unchanged; the buf-* fns dispatch here through the protocol fns.
+#?(:cljs (deftype Buf [^:mutable b ^:mutable dv ^:mutable p width]
+  IBuf
+  (wRaw [_] b)
+  (wPos [_] p)
+  (wSeek [_ np] (set! p np))
+  (wU8 [this v]
+    (when (>= p (.-length b))
+      (let [nb (js/Uint8Array. (* 2 (.-length b)))]
         (.set nb b)
         (set! b nb)
-        (set! dv (js/DataView. (.-buffer nb))))))
-  (raw [_] b)
-  (pos [_] p)
-  (seek [_ np] (set! p np))
-  (u8 [this v]
-    (when (>= p (.-length b)) (.grow this (* 2 (.-length b))))
+        (set! dv (js/DataView. (.-buffer nb)))))
     (aset b p (bit-and v 0xFF))
     (set! p (inc p)))
-  (u16 [this v] (.u8 this v) (.u8 this (bit-shift-right (bit-and v 0xFFFF) 8)))
-  (u32 [this v]
-    (.grow this (+ p 4))
+  (wU16 [this v] (wU8 this v) (wU8 this (bit-shift-right (bit-and v 0xFFFF) 8)))
+  (wU32 [this v]
+    (when (< (.-length b) (+ p 4))
+      (let [nb (js/Uint8Array. (max (* 2 (.-length b)) (+ p 4)))]
+        (.set nb b)
+        (set! b nb)
+        (set! dv (js/DataView. (.-buffer nb)))))
     (.setUint32 dv p (bit-and v 0xFFFFFFFF) true)
     (set! p (+ p 4)))
-  (i64 [this v]
-    (.grow this (+ p 8))
+  (wI64 [this v]
+    (when (< (.-length b) (+ p 8))
+      (let [nb (js/Uint8Array. (max (* 2 (.-length b)) (+ p 8)))]
+        (.set nb b)
+        (set! b nb)
+        (set! dv (js/DataView. (.-buffer nb)))))
     (.setBigInt64 dv p (bi v) true)
     (set! p (+ p 8)))
-  (f64 [this v]
-    (.grow this (+ p 8))
+  (wF64 [this v]
+    (when (< (.-length b) (+ p 8))
+      (let [nb (js/Uint8Array. (max (* 2 (.-length b)) (+ p 8)))]
+        (.set nb b)
+        (set! b nb)
+        (set! dv (js/DataView. (.-buffer nb)))))
     (.setFloat64 dv p v true)
     (set! p (+ p 8)))
-  (varint [this v]
+  (wVarint [this v]
     (loop [v v]
-      (if (< v 128) (.u8 this v)
-          (do (.u8 this (bit-or (bit-and v 127) 128))
+      (if (< v 128) (wU8 this v)
+          (do (wU8 this (bit-or (bit-and v 127) 128))
               (recur (quot v 128))))))
-  (putBytes [this src off n]
-    (.grow this (+ p n))
+  (wBytes [this src off n]
+    (when (< (.-length b) (+ p n))
+      (let [nb (js/Uint8Array. (max (* 2 (.-length b)) (+ p n)))]
+        (.set nb b)
+        (set! b nb)
+        (set! dv (js/DataView. (.-buffer nb)))))
     (.set b (.subarray src off (+ off n)) p)
     (set! p (+ p n)))
-  (off [this v] (if (== width 2) (.u16 this v) (.u32 this v)))
-  (patchU32 [_ at v]
-    (.setUint32 dv at (bit-and v 0xFFFFFFFF) true)))
+  (wOff [this v] (if (== width 2) (wU16 this v) (wU32 this v)))
+  (wPatchU32 [_ at v]
+    (.setUint32 dv at (bit-and v 0xFFFFFFFF) true))))
 
-(defn buf
+#?(:cljs (defn buf
   "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
   [width]
   (let [b (js/Uint8Array. 1024)]
-    (->Buf b (js/DataView. (.-buffer b)) 0 width)))))
+    (->Buf b (js/DataView. (.-buffer b)) 0 width))))
 
 ;; The one portable spelling of the writer calls (declared above): on
-;; the JVM the body is the IBuf interface call, on cljs the Buf method
-;; call, and on the protocol hosts the protocol fn call — the only
+;; the JVM the body is the IBuf interface call, on cljs the IBuf
+;; protocol fn call, as on the other protocol hosts — the only
 ;; dispatch those hosts have (jank's completion objects have no native
 ;; members at all).
-(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :lg (wRaw w) :clj (.wRaw ^IBuf w) :default (.raw w)))
-(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :lg (wPos w) :clj (.wPos ^IBuf w) :default (.pos w)))
-(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :lg (wSeek w p) :clj (.wSeek ^IBuf w p) :default (.seek w p)))
-(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :lg (wU8 w v) :clj (.wU8 ^IBuf w v) :default (.u8 w v)))
-(defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :lg (wU16 w v) :clj (.wU16 ^IBuf w v) :default (.u16 w v)))
-(defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :lg (wU32 w v) :clj (.wU32 ^IBuf w v) :default (.u32 w v)))
-(defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :lg (wI64 w v) :clj (.wI64 ^IBuf w v) :default (.i64 w v)))
-(defn buf-f64 [w v] #?(:jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :lg (wF64 w v) :clj (.wF64 ^IBuf w v) :default (.f64 w v)))
-(defn buf-varint [w v] #?(:jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :lg (wVarint w v) :clj (.wVarint ^IBuf w v) :default (.varint w v)))
-(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :lg (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :default (.putBytes w src off n)))
-(defn buf-off "Append an offset of the writer's width." [w v] #?(:jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :lg (wOff w v) :clj (.wOff ^IBuf w v) :default (.off w v)))
-(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :lg (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :default (.patchU32 w at v)))
+(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :lg (wRaw w) :clj (.wRaw ^IBuf w) :cljs (wRaw w) :default (.raw w)))
+(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :lg (wPos w) :clj (.wPos ^IBuf w) :cljs (wPos w) :default (.pos w)))
+(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :lg (wSeek w p) :clj (.wSeek ^IBuf w p) :cljs (wSeek w p) :default (.seek w p)))
+(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :lg (wU8 w v) :clj (.wU8 ^IBuf w v) :cljs (wU8 w v) :default (.u8 w v)))
+(defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :lg (wU16 w v) :clj (.wU16 ^IBuf w v) :cljs (wU16 w v) :default (.u16 w v)))
+(defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :lg (wU32 w v) :clj (.wU32 ^IBuf w v) :cljs (wU32 w v) :default (.u32 w v)))
+(defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :lg (wI64 w v) :clj (.wI64 ^IBuf w v) :cljs (wI64 w v) :default (.i64 w v)))
+(defn buf-f64 [w v] #?(:jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :lg (wF64 w v) :clj (.wF64 ^IBuf w v) :cljs (wF64 w v) :default (.f64 w v)))
+(defn buf-varint [w v] #?(:jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :lg (wVarint w v) :clj (.wVarint ^IBuf w v) :cljs (wVarint w v) :default (.varint w v)))
+(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :lg (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :cljs (wBytes w src off n) :default (.putBytes w src off n)))
+(defn buf-off "Append an offset of the writer's width." [w v] #?(:jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :lg (wOff w v) :clj (.wOff ^IBuf w v) :cljs (wOff w v) :default (.off w v)))
+(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :lg (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :cljs (wPatchU32 w at v) :default (.patchU32 w at v)))
 
 (defn buf-align
   "Zero bytes up to a multiple of a (chunk.cljc's align!)."

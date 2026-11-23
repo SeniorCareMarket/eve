@@ -7,7 +7,16 @@
   (:refer-clojure :exclude [aget aset byte-array unchecked-byte unsigned-bit-shift-right
                             long class double bytes])
   (:require [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
-                              long class double bytes]]))
+                              long class double bytes]]
+            ;; eve.core is required (unused here) for load order: it is
+            ;; the seat's protocol home, and on nbb its load interns the
+            ;; value protocols (IEquiv, IHash, IComparable,
+            ;; IPrintWithWriter) into the core namespace. eve.numeric —
+            ;; which requires eve.encoding — names those protocols in
+            ;; its host deftype specs, so they must resolve before
+            ;; eve.numeric's forms analyze, on every chain that reaches
+            ;; it (eve.codec's and eve.deftype-proto.alloc's included).
+            [eve.core]))
 
 (defn throw-index-out-of-bounds
   "Throw an index-out-of-bounds error."
