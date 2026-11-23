@@ -178,12 +178,12 @@
           (is (= 255 (aget result (+ off 1))) "G of top-right"))
 
         ;; Bottom-left pixel (0,4) should be blue
-        (let [off (* (* 4 img-w) 4)]
+        (let [off (* 4 img-w 4)]
           (is (= 0 (aget result (+ off 0))) "R of bottom-left")
           (is (= 255 (aget result (+ off 2))) "B of bottom-left"))
 
         ;; Bottom-right pixel (4,4) should be white
-        (let [off (+ (* (* 4 img-w) 4) (* 4 4))]
+        (let [off (+ (* 4 img-w 4) (* 4 4))]
           (is (= 255 (aget result (+ off 0))) "R of bottom-right")
           (is (= 255 (aget result (+ off 1))) "G of bottom-right")
           (is (= 255 (aget result (+ off 2))) "B of bottom-right"))))))
