@@ -22,7 +22,8 @@
 (ns eve.flat.container
   (:require [eve.encoding :as enc]
             [eve.flat.contract :as contract])
-  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays]
+  ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays]
                    [java.io ByteArrayOutputStream]
                    [java.util.zip Deflater Inflater])))
 

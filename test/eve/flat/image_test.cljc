@@ -22,7 +22,8 @@
             [eve.flat.sio :as ssio]
             [eve.flat.image :as img]
             [eve.vec] [eve.set] [eve.list])
-  (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays Random]
+  ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+  (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays Random]
            [java.util.concurrent CountDownLatch]))
 
 ;; ---------------------------------------------------------------------------------------------------------------

@@ -25,7 +25,8 @@
             ; the alias is exercised on the other reader pass; the require loads on both 
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.slab-io :as slab])
   #?(:clj (:import [eve.deftype_proto.alloc JvmSlabCtx]
-                   #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util ArrayList Arrays])))
+                   ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+                   #_{:clj-kondo/ignore [:unused-import]} [java.util ArrayList Arrays])))
 
 ;; ---------------------------------------------------------------------------
 ;; the cursor: direct per-class slab access.

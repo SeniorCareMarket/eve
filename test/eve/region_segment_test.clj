@@ -13,7 +13,8 @@
             [eve.mem :as m]
             [eve.region :as r])
   (:import [java.io File]
-           #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays]))
+           ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+           #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays]))
 
 (defn- tmp-path []
   (let [f (File/createTempFile "eve-seg-test" ".bin")]

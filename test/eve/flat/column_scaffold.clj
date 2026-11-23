@@ -9,7 +9,8 @@
    chunk reader/writer on merge; the tests below the line only touch
    eve.flat.column's own API plus this ctx."
   (:require [eve.codec :as codec])
-  (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays HashMap]))
+  ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+  (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays HashMap]))
 
 ;; ---------------------------------------------------------------------------
 ;; varints (unsigned LEB128, the prototype's)

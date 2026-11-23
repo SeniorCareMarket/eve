@@ -8,7 +8,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [eve.flat.chunk :as chunk])
-  (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays Date]))
+  ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+  (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays Date]))
 
 ;; ---------------------------------------------------------------------------
 ;; helpers

@@ -26,30 +26,30 @@
    array-copy) share the values a slot points at, as a host array's copy
    shares its elements."
   (:refer-clojure :exclude [make-array aget aset alength aclone array-seq byte-array object-array unchecked-byte unchecked-int long volatile! vswap! bytes objects array-chunk])
-  (:require #_{:clj-kondo/ignore [:unused-referred-var]} ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
-  (:require   (:require [eve.host :refer [byte-array object-array unchecked-byte unchecked-int long
-                              volatile! vswap! bytes objects]]
-            [eve.core :as e]
+  (:require ;; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
+   #_{:clj-kondo/ignore [:unused-referred-var]} [eve.host :refer [byte-array object-array unchecked-byte unchecked-int long
+                                                                  volatile! vswap! bytes objects]]
+   [eve.core :as e]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype :as edt]
-            [eve.slab-io :as slab]
-            [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]
-            [eve.deftype-proto.serialize :as ser]
-            [eve.fast-proto :as fp]
-            [eve.encoding :as enc]
-            [eve.platform :as p]
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype :as edt]
+   [eve.slab-io :as slab]
+   [eve.deftype-proto.alloc :as alloc]
+   [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.serialize :as ser]
+   [eve.fast-proto :as fp]
+   [eve.encoding :as enc]
+   [eve.platform :as p]
             ;; a slot holds any eve value: Clojure data stored in one becomes
             ;; eve's map, vector, set or list (their writers register here)
-            [eve.map] [eve.vec] [eve.set] [eve.list]
-            [eve.codec :as codec]
+   [eve.map] [eve.vec] [eve.set] [eve.list]
+   [eve.codec :as codec]
             ;; Load order: host-deftype's expansion ends in a
             ;; top-level eve.type-readers/register! call, which needs
             ;; the registry first in the RUNTIME graph (a macro ns's
             ;; require is macro-side only). Guard:
             ;; eve.deftype-guard-test.
-            [eve.type-readers]
-            [eve.deftype-proto.macros :as pmac]))
+   [eve.type-readers]
+   [eve.deftype-proto.macros :as pmac]))
 
 (def ^:const ValueArray-type-id 0x1F)
 (def ^:const HEADER 8)

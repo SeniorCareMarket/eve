@@ -23,7 +23,8 @@
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser]
             [eve.flat.corpora :as corpora])
-  (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays]))
+  ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+  (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays]))
 
 (def ^:private capacities
   {0 4194304 1 8388608 2 16777216 3 8388608 4 4194304 5 4194304})

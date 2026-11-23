@@ -54,7 +54,8 @@
    ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
    #_{:clj-kondo/ignore [:unused-namespace]}   [eve.vec :as evec]
    #?(:clj [eve.codec :as codec]))
-  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util ArrayList Arrays HashMap])))
+  ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} [java.util ArrayList Arrays HashMap])))
 
 #?(:clj
    (do

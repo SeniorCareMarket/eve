@@ -55,7 +55,8 @@
             [eve.flat.contract :as contract]
             [eve.flat.place :as place])
   #?(:clj (:import [eve.deftype_proto.alloc JvmSlabCtx]
-                   #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util ArrayDeque ArrayList Arrays HashMap])))
+                   ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+                   #_{:clj-kondo/ignore [:unused-import]} [java.util ArrayDeque ArrayList Arrays HashMap])))
 
 ;; ---------------------------------------------------------------------------
 ;; small words over a byte array (little-endian, as the slab writes them)

@@ -37,8 +37,9 @@
       #_{:clj-kondo/ignore [:unused-namespace]}   [eve.process :as proc])
    #?(:clj [eve.retire :as retire])
    #?(:clj [eve.flat :as flat]))
-  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} ; Arrays is used below; the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use [java.util Arrays ArrayDeque]
-           [eve.deftype_proto.alloc JvmSlabCtx])))
+  ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
+  #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays ArrayDeque]
+                   [eve.deftype_proto.alloc JvmSlabCtx])))
 
 ;; ===========================================================================
 ;; Hand-built images (test code, adapted from doc/flat/probes/lib.clj)
