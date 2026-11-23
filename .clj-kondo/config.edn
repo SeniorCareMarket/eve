@@ -56,5 +56,6 @@
                         eve.flat.chunk/defseqhandle hooks.eve-flat-handles/handle
                         eve.flat.chunk/defmaphandle hooks.eve-flat-handles/handle
                         eve.host/field hooks.eve-host-field/field
+                        jolt.ffi/defcfn hooks.jolt-ffi-defcfn/defcfn
                         eve.thread/api-defs hooks.eve-api-defs/thread}}
  :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}
