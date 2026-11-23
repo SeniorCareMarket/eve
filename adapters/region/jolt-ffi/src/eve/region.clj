@@ -464,3 +464,111 @@
 (def read-bytes-op
   "IMemRegion's -read-bytes as a Chez procedure (above)."
   ((scheme/proc "eve-region-op-rb") mem/-read-bytes))
+
+;; jolt: the portable bitmap scan (eve.mem/scan-free) loads each word through a
+;; Clojure fn and IMemRegion/-load-i32, and wrap64 boxes every result — 4.7% of
+;; reset-vec-1k as scan-free plus 2.7% wrap64, most of it from this path (jolt
+;; round 9). These Chez procedures walk a JoltRegion's words with foreign-ref and
+;; CAS with eve-region-cas4, the same bits and the same seq-cst CAS as -load-i32 /
+;; -cas-i32! on Linux x86-64. mem/imr-bitmap-find-free (and alloc-cas! / free! on
+;; Linux x86-64) are wrapped to use them; other hosts and a non-JoltRegion still
+;; run the portable body.
+(scheme/eval-string
+ "(begin
+    (define (eve-bitmap-s32 x)
+      (let ((u (bitwise-and x #xFFFFFFFF)))
+        (if (>= u #x80000000) (- u #x100000000) u)))
+    (define (eve-bitmap-find-free r b size bm-off total-bits start-bit)
+      (if (and (fixnum? b) (fixnum? size) (fixnum? bm-off)
+               (fixnum? total-bits) (fixnum? start-bit)
+               (fx>= size 0) (fx>= bm-off 0) (fx>= total-bits 0) (fx>= start-bit 0))
+          (let* ((avail (fx- size bm-off))
+                 (held (if (fx> avail 0) (fx* 32 (fxdiv avail 4)) 0))
+                 (total (if (fx< total-bits held) total-bits held))
+                 (word-count (fxsrl (fx+ total 31) 5)))
+            (let loop ((word-idx (fxsrl start-bit 5)) (bit-in-word (fxand start-bit 31)))
+              (if (fx>= word-idx word-count)
+                  (begin (keep-live r) -1)
+                  (let* ((off (fx+ bm-off (fx* word-idx 4)))
+                         (w (#3%foreign-ref 'integer-32 b off))
+                         (inverted (fxand (fxxor w -1) #xFFFFFFFF))
+                         (masked (if (fx> bit-in-word 0)
+                                     (fxand inverted (fxsll -1 bit-in-word))
+                                     inverted)))
+                    (if (fxzero? masked)
+                        (loop (fx+ word-idx 1) 0)
+                        (let* ((bit-pos (fxfirst-bit-set masked))
+                               (abs-bit (fx+ (fxsll word-idx 5) bit-pos)))
+                          (begin (keep-live r)
+                                 (if (fx< abs-bit total) abs-bit -1))))))))
+          #f))
+    (define (eve-bitmap-alloc-cas! r b bm-off bit-idx)
+      (if (and (fixnum? b) (fixnum? bm-off) (fixnum? bit-idx) (fx>= bit-idx 0))
+          (let* ((word-off (fx+ bm-off (fx* (fxsrl bit-idx 5) 4)))
+                 (mask (fxsll 1 (fxand bit-idx 31)))
+                 (addr (fx+ b word-off)))
+            (let loop ()
+              (let* ((old (#3%foreign-ref 'integer-32 b word-off))
+                     (old-u (bitwise-and old #xFFFFFFFF)))
+                (if (not (zero? (bitwise-and old-u mask)))
+                    (begin (keep-live r) #f)
+                    (let* ((new-val (eve-bitmap-s32 (bitwise-ior old-u mask)))
+                           (found (eve-region-cas4 addr old new-val)))
+                      (if (= found old)
+                          (begin (keep-live r) #t)
+                          (loop)))))))
+          #f))
+    (define (eve-bitmap-free! r b bm-off bit-idx)
+      (if (and (fixnum? b) (fixnum? bm-off) (fixnum? bit-idx) (fx>= bit-idx 0))
+          (let* ((word-off (fx+ bm-off (fx* (fxsrl bit-idx 5) 4)))
+                 (bit-pos (fxand bit-idx 31))
+                 (clear32 (fxxor (fxsll 1 bit-pos) #xFFFFFFFF))
+                 (addr (fx+ b word-off)))
+            (let loop ()
+              (let* ((cur (#3%foreign-ref 'integer-32 b word-off))
+                     (cur-u (bitwise-and cur #xFFFFFFFF))
+                     (new-val (eve-bitmap-s32 (bitwise-and cur-u clear32)))
+                     (found (eve-region-cas4 addr cur new-val)))
+                (if (= found cur)
+                    (begin (keep-live r)
+                           (not (zero? (bitwise-and (bitwise-arithmetic-shift-right cur-u bit-pos) 1))))
+                    (loop)))))
+          #f))
+    #t)")
+
+(def ^:private bitmap-find-free* (scheme/proc "eve-bitmap-find-free"))
+(def ^:private bitmap-alloc-cas!* (scheme/proc "eve-bitmap-alloc-cas!"))
+(def ^:private bitmap-free!* (scheme/proc "eve-bitmap-free!"))
+
+(let [find-free mem/imr-bitmap-find-free
+      alloc-cas mem/imr-bitmap-alloc-cas!
+      bm-free   mem/imr-bitmap-free!]
+  (alter-var-root #'mem/imr-bitmap-find-free
+                  (fn [_]
+                    (fn [region bm-byte-offset total-bits start-bit]
+                      (if (instance? JoltRegion region)
+                        (let [v (bitmap-find-free* region
+                                                   (.-base ^JoltRegion region)
+                                                   (.-size ^JoltRegion region)
+                                                   bm-byte-offset total-bits start-bit)]
+                          (if (nil? v)
+                            (find-free region bm-byte-offset total-bits start-bit)
+                            v))
+                        (find-free region bm-byte-offset total-bits start-bit)))))
+  (when x86-64-linux?
+    (alter-var-root #'mem/imr-bitmap-alloc-cas!
+                    (fn [_]
+                      (fn [region bm-byte-offset bit-idx]
+                        (if (instance? JoltRegion region)
+                          (bitmap-alloc-cas!* region
+                                              (.-base ^JoltRegion region)
+                                              bm-byte-offset bit-idx)
+                          (alloc-cas region bm-byte-offset bit-idx)))))
+    (alter-var-root #'mem/imr-bitmap-free!
+                    (fn [_]
+                      (fn [region bm-byte-offset bit-idx]
+                        (if (instance? JoltRegion region)
+                          (bitmap-free!* region
+                                         (.-base ^JoltRegion region)
+                                         bm-byte-offset bit-idx)
+                          (bm-free region bm-byte-offset bit-idx)))))))
