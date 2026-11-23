@@ -258,11 +258,11 @@
 ;; looked for by its key under the new subtree over its interval — where the
 ;; same block is found, the subtree is shared.
 
-(def ^:private NODE_ENTRY_OFFSET 20) ;; SortedNode [type:4][prio:4][size:4][left:4][right:4][entry:4]
-(def ^:private ENTRY_K_OFFSET 4)   ;; SortedEntry [type:4][k:4][v:4]
-(def ^:private ENTRY_V_OFFSET 8)
-(def ^:private CMP_OFFSET 8)       ;; EveSortedMap / EveSortedSet [type:4][root:4][cmp:4][mta:4]
-(def ^:private MTA_OFFSET 12)
+(def ^:private node-entry-offset 20) ;; SortedNode [type:4][prio:4][size:4][left:4][right:4][entry:4]
+(def ^:private entry-k-offset 4)   ;; SortedEntry [type:4][k:4][v:4]
+(def ^:private entry-v-offset 8)
+(def ^:private cmp-offset 8)       ;; EveSortedMap / EveSortedSet [type:4][root:4][cmp:4][mta:4]
+(def ^:private mta-offset 12)
 
 (defn- same-block?
   "An offset as the allocator answered it and as a field read it back (sign-
@@ -275,7 +275,7 @@
 (defn- entry-block
   "The entry block of node n, read raw (an entry read as an instance decodes its key and value)."
   [n]
-  (slab/read-i32 (sio-of n) (SortedNode-offset n) NODE_ENTRY_OFFSET))
+  (slab/read-i32 (sio-of n) (SortedNode-offset n) node-entry-offset))
 
 (defn- gone
   "acc, [blocks values], with old node o's block, and its entry's blocks (the
@@ -289,10 +289,10 @@
         me (if m (entry-block m) -1)]
     (if (and (not= -1 me) (same-block? e me))
       [blocks values]
-      (let [k (slab/read-i32 sio e ENTRY_K_OFFSET)
-            v (slab/read-i32 sio e ENTRY_V_OFFSET)
-            mk (if (not= -1 me) (slab/read-i32 (sio-of m) me ENTRY_K_OFFSET) -1)
-            mv (if (not= -1 me) (slab/read-i32 (sio-of m) me ENTRY_V_OFFSET) -1)]
+      (let [k (slab/read-i32 sio e entry-k-offset)
+            v (slab/read-i32 sio e entry-v-offset)
+            mk (if (not= -1 me) (slab/read-i32 (sio-of m) me entry-k-offset) -1)
+            mv (if (not= -1 me) (slab/read-i32 (sio-of m) me entry-v-offset) -1)]
         [(cond-> (conj blocks e) (not= -1 k) (conj k) (not= -1 v) (conj v))
          (cond-> values (not= -1 k) (conj [k mk]) (not= -1 v) (conj [v mv]))]))))
 
@@ -567,7 +567,7 @@
       (let [field (fn [x f] (slab/read-i32 (sio-of x) (hdr-of x) f))
             own (fn [f] (let [b (field old f)]
                           (when-not (or (== -1 b) (and new (same-block? b (field new f)))) b)))
-            blocks (cond-> [hdr] (own CMP_OFFSET) (conj (own CMP_OFFSET)) (own MTA_OFFSET) (conj (own MTA_OFFSET)))]
+            blocks (cond-> [hdr] (own cmp-offset) (conj (own cmp-offset)) (own mta-offset) (conj (own mta-offset)))]
         (diff-at [blocks []] (-root old) (when new (-root new)) (cmp-of (-cmp old)))))))
 
 (defn collect-retire-diff-offsets

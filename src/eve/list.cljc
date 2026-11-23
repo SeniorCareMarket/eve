@@ -31,15 +31,15 @@
 ;;=============================================================================
 
 (def EveList-type-id 0x13)
-(def SabList-type-id EveList-type-id) ;; backward compat
-(def ^:const LIST_CNT_OFFSET 4)
-(def ^:const LIST_HEAD_OFFSET 8)
-(def ^:const LIST_HEADER_SIZE 12)
+(def sab-list-type-id EveList-type-id) ;; backward compat
+(def ^:const list-cnt-offset 4)
+(def ^:const list-head-offset 8)
+(def ^:const list-header-size 12)
 
 ;; Node layout offsets
-(def ^:const NODE_NEXT_OFFSET 0)
-(def ^:const NODE_VLEN_OFFSET 4)
-(def ^:const NODE_VDATA_OFFSET 8)
+(def ^:const node-next-offset 0)
+(def ^:const node-vlen-offset 4)
+(def ^:const node-vdata-offset 8)
 
 ;;=============================================================================
 ;; Platform-specific helpers
@@ -69,24 +69,24 @@
   "Allocate and write a list node. Returns slab offset."
   [sio next-off val-bytes]
   (let [vlen (bytes-length val-bytes)
-        node-off (slab/alloc! sio (+ NODE_VDATA_OFFSET vlen))]
-    (slab/write-i32! sio node-off NODE_NEXT_OFFSET next-off)
-    (slab/write-i32! sio node-off NODE_VLEN_OFFSET vlen)
+        node-off (slab/alloc! sio (+ node-vdata-offset vlen))]
+    (slab/write-i32! sio node-off node-next-offset next-off)
+    (slab/write-i32! sio node-off node-vlen-offset vlen)
     (when (pos? vlen)
-      (slab/write-bytes! sio node-off NODE_VDATA_OFFSET val-bytes))
+      (slab/write-bytes! sio node-off node-vdata-offset val-bytes))
     node-off))
 
 (defn read-node-value
   "Read and deserialize the value from a list node."
   [sio node-off]
-  (let [vlen (slab/read-i32 sio node-off NODE_VLEN_OFFSET)
-        vbs  (slab/read-bytes sio node-off NODE_VDATA_OFFSET vlen)]
+  (let [vlen (slab/read-i32 sio node-off node-vlen-offset)
+        vbs  (slab/read-bytes sio node-off node-vdata-offset vlen)]
     (deserialize-element-bytes vbs sio)))
 
 (defn read-node-next
   "Read the next pointer from a list node."
   [sio node-off]
-  (slab/read-i32 sio node-off NODE_NEXT_OFFSET))
+  (slab/read-i32 sio node-off node-next-offset))
 
 (defn- list-seq
   "A lazy host seq over the chain at off: one node read per step, and no
@@ -109,17 +109,17 @@
 (defn write-list-header!
   "Allocate and write a list header. Returns slab offset."
   [sio cnt head-off]
-  (let [hdr (slab/alloc! sio LIST_HEADER_SIZE)]
-    (slab/write-u8!  sio hdr 0 SabList-type-id)
-    (slab/write-i32! sio hdr LIST_CNT_OFFSET cnt)
-    (slab/write-i32! sio hdr LIST_HEAD_OFFSET head-off)
+  (let [hdr (slab/alloc! sio list-header-size)]
+    (slab/write-u8!  sio hdr 0 sab-list-type-id)
+    (slab/write-i32! sio hdr list-cnt-offset cnt)
+    (slab/write-i32! sio hdr list-head-offset head-off)
     hdr))
 
 (defn read-list-header
   "Read cnt and head-off from header. Returns [cnt head-off]."
   [sio hdr-off]
-  [(slab/read-i32 sio hdr-off LIST_CNT_OFFSET)
-   (slab/read-i32 sio hdr-off LIST_HEAD_OFFSET)])
+  [(slab/read-i32 sio hdr-off list-cnt-offset)
+   (slab/read-i32 sio hdr-off list-head-offset)])
 
 ;;=============================================================================
 ;; EveList deftype — unified via eve/deftype macro
@@ -310,7 +310,7 @@
     (when (instance? EveList eve-list)
       (let [sio (field ^EveList eve-list sio__)
             hdr (field ^EveList eve-list offset__)
-            hd  (when hdr (slab/read-i32 sio hdr LIST_HEAD_OFFSET))]
+            hd  (when hdr (slab/read-i32 sio hdr list-head-offset))]
         (when (and hd (not= hd NIL_OFFSET))
           (free-list-chain! sio hd))
         (when (and hdr (not= hdr NIL_OFFSET))
@@ -335,9 +335,9 @@
     (-sab-retire-diff! [this new-value _slab-env mode]
       (let [sio      (field this sio__)
             hdr      (field this offset__)
-            old-head (slab/read-i32 sio hdr LIST_HEAD_OFFSET)
+            old-head (slab/read-i32 sio hdr list-head-offset)
             new-head (when (instance? EveList new-value)
-                       (slab/read-i32 sio (d/-root-header-off new-value) LIST_HEAD_OFFSET))]
+                       (slab/read-i32 sio (d/-root-header-off new-value) list-head-offset))]
         (if new-head
           (retire-replaced-chain! sio old-head new-head mode)
           (dispose! this))))))

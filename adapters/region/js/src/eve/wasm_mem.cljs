@@ -80,16 +80,16 @@
 ;; Used when doing HAMT lookups - we copy the serialized key bytes here
 ;; so WASM can read them (WASM can only access the shared memory).
 ;; 4KB per worker is enough for most keys (keywords, strings, etc.)
-(def ^:const SCRATCH_SIZE 4096)         ;; Per-worker scratch (4KB)
+(def ^:const scratch-size 4096)         ;; Per-worker scratch (4KB)
 (def ^:const MAX_WORKERS 256)           ;; Max concurrent workers (256 × 4KB = 1MB scratch)
 
 ;; Node types (matching sab_map.cljs)
 (def ^:const NODE_TYPE_BITMAP 1)
 (def ^:const NODE_TYPE_COLLISION 3)
-(def ^:const NODE_TYPE_BITMAP_HASHED 5)  ;; Enhanced with per-key hashes
+(def ^:const node-type-bitmap-hashed 5)  ;; Enhanced with per-key hashes
 
 ;; Header sizes
-(def ^:const BITMAP_HEADER_SIZE 10)     ;; type:u8 pad:u8 data_bm:u32 node_bm:u32
+(def ^:const bitmap-header-size 10)     ;; type:u8 pad:u8 data_bm:u32 node_bm:u32
 (def ^:const COLLISION_HEADER_SIZE 8)   ;; type:u8 count:u8 pad:u16 hash:i32
 
 ;;-----------------------------------------------------------------------------
@@ -382,7 +382,7 @@
 ;; HAMT Batch Iteration
 ;;-----------------------------------------------------------------------------
 
-(def ^:const MAX_COLLECT_ENTRIES 15000)
+(def ^:const max-collect-entries 15000)
 
 (defn hamt-collect-kv
   "Collect all KV entry offsets from a HAMT tree into a flat buffer.
@@ -654,7 +654,7 @@
   [slot-idx scratch-region-start]
   (when-not (and (>= slot-idx 0) (< slot-idx MAX_WORKERS))
     (throw (js/Error. (str "scratch-offset: slot-idx " slot-idx " out of bounds [0, " MAX_WORKERS ")"))))
-  (+ scratch-region-start (* slot-idx SCRATCH_SIZE)))
+  (+ scratch-region-start (* slot-idx scratch-size)))
 
 (defn copy-to-scratch!
   "Copy bytes to worker's scratch area.
@@ -663,6 +663,6 @@
   [slot-idx scratch-region-start ^js bytes]
   (let [off (scratch-offset slot-idx scratch-region-start)
         len (.-length bytes)]
-    (when (<= len SCRATCH_SIZE)
+    (when (<= len scratch-size)
       (.set @mem-u8 bytes off)
       off)))

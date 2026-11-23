@@ -50,14 +50,14 @@
 (defn- other-nth [x i] #?(:bb (ecore/nth x i) :default (nth x i)))
 
 (def EveVector-type-id 0x12)
-(def SabVecRoot-type-id EveVector-type-id) ;; backward compat
+(def sab-vec-root-type-id EveVector-type-id) ;; backward compat
 
-(def ^:const SABVECROOT_CNT_OFFSET 4)
-(def ^:const SABVECROOT_SHIFT_OFFSET 8)
-(def ^:const SABVECROOT_ROOT_OFFSET 12)
-(def ^:const SABVECROOT_TAIL_OFFSET 16)
-(def ^:const SABVECROOT_TAIL_LEN_OFFSET 20)
-(def ^:const SABVECROOT_HEADER_SIZE 24)
+(def ^:const sabvecroot-cnt-offset 4)
+(def ^:const sabvecroot-shift-offset 8)
+(def ^:const sabvecroot-root-offset 12)
+(def ^:const sabvecroot-tail-offset 16)
+(def ^:const sabvecroot-tail-len-offset 20)
+(def ^:const sabvecroot-header-size 24)
 
 ;;=============================================================================
 ;; Platform-specific helpers
@@ -221,21 +221,21 @@
 ;;=============================================================================
 
 (defn write-vec-header! [sio cnt shift root tail tail-len]
-  (let [hdr-off (slab/alloc! sio SABVECROOT_HEADER_SIZE)]
-    (slab/write-u8!  sio hdr-off 0 SabVecRoot-type-id)
-    (slab/write-i32! sio hdr-off SABVECROOT_CNT_OFFSET cnt)
-    (slab/write-i32! sio hdr-off SABVECROOT_SHIFT_OFFSET shift)
-    (slab/write-i32! sio hdr-off SABVECROOT_ROOT_OFFSET root)
-    (slab/write-i32! sio hdr-off SABVECROOT_TAIL_OFFSET tail)
-    (slab/write-i32! sio hdr-off SABVECROOT_TAIL_LEN_OFFSET tail-len)
+  (let [hdr-off (slab/alloc! sio sabvecroot-header-size)]
+    (slab/write-u8!  sio hdr-off 0 sab-vec-root-type-id)
+    (slab/write-i32! sio hdr-off sabvecroot-cnt-offset cnt)
+    (slab/write-i32! sio hdr-off sabvecroot-shift-offset shift)
+    (slab/write-i32! sio hdr-off sabvecroot-root-offset root)
+    (slab/write-i32! sio hdr-off sabvecroot-tail-offset tail)
+    (slab/write-i32! sio hdr-off sabvecroot-tail-len-offset tail-len)
     hdr-off))
 
 (defn read-vec-header [sio header-off]
-  [(slab/read-i32 sio header-off SABVECROOT_CNT_OFFSET)
-   (slab/read-i32 sio header-off SABVECROOT_SHIFT_OFFSET)
-   (slab/read-i32 sio header-off SABVECROOT_ROOT_OFFSET)
-   (slab/read-i32 sio header-off SABVECROOT_TAIL_OFFSET)
-   (slab/read-i32 sio header-off SABVECROOT_TAIL_LEN_OFFSET)])
+  [(slab/read-i32 sio header-off sabvecroot-cnt-offset)
+   (slab/read-i32 sio header-off sabvecroot-shift-offset)
+   (slab/read-i32 sio header-off sabvecroot-root-offset)
+   (slab/read-i32 sio header-off sabvecroot-tail-offset)
+   (slab/read-i32 sio header-off sabvecroot-tail-len-offset)])
 
 ;;=============================================================================
 ;; Constructors (forward declare — actual impls after deftype for CLJ compat)
@@ -351,12 +351,12 @@
   "[cnt shift root tail tail-len toff]: the header at header-off, and the number of
    elements its trie holds."
   [sio header-off]
-  (let [cnt (slab/read-i32 sio header-off SABVECROOT_CNT_OFFSET)]
+  (let [cnt (slab/read-i32 sio header-off sabvecroot-cnt-offset)]
     [cnt
-     (slab/read-i32 sio header-off SABVECROOT_SHIFT_OFFSET)
-     (slab/read-i32 sio header-off SABVECROOT_ROOT_OFFSET)
-     (slab/read-i32 sio header-off SABVECROOT_TAIL_OFFSET)
-     (slab/read-i32 sio header-off SABVECROOT_TAIL_LEN_OFFSET)
+     (slab/read-i32 sio header-off sabvecroot-shift-offset)
+     (slab/read-i32 sio header-off sabvecroot-root-offset)
+     (slab/read-i32 sio header-off sabvecroot-tail-offset)
+     (slab/read-i32 sio header-off sabvecroot-tail-len-offset)
      (tail-offset-calc cnt)]))
 
 (defn- collect-trie-live!
@@ -659,8 +659,8 @@
     (if (and (< tl NODE_SIZE) (not= tail NIL_OFFSET) (alloc/owns? sio hdr) (alloc/owns? sio tail))
       (let [val-off (make-value-block! sio (serialize-element-bytes sio x))]
         (node-set! sio tail tl val-off)
-        (slab/write-i32! sio hdr SABVECROOT_CNT_OFFSET (inc cnt))
-        (slab/write-i32! sio hdr SABVECROOT_TAIL_LEN_OFFSET (inc tl))
+        (slab/write-i32! sio hdr sabvecroot-cnt-offset (inc cnt))
+        (slab/write-i32! sio hdr sabvecroot-tail-len-offset (inc tl))
         (vec-from-header sio hdr))
       (edit sio v #(ecore/conj % x)))))
 
@@ -835,12 +835,12 @@
   (-sab-retire-diff! [this new-value _slab-env mode]
     (let [sio       (field this sio__)
           hdr       (field this offset__)
-          old-root  (slab/read-i32 sio hdr SABVECROOT_ROOT_OFFSET)
-          old-shift (slab/read-i32 sio hdr SABVECROOT_SHIFT_OFFSET)]
+          old-root  (slab/read-i32 sio hdr sabvecroot-root-offset)
+          old-shift (slab/read-i32 sio hdr sabvecroot-shift-offset)]
       (if (eve-vector? new-value)
         ;; Both are EveVector — diff trie paths
         (let [new-hdr      (d/-root-header-off new-value)
-              new-root-off (slab/read-i32 sio new-hdr SABVECROOT_ROOT_OFFSET)]
+              new-root-off (slab/read-i32 sio new-hdr sabvecroot-root-offset)]
           (retire-replaced-trie-path! sio old-root new-root-off old-shift -1 mode))
         ;; Different type — dispose entire old trie
         (dispose! this)))))

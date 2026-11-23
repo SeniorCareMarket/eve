@@ -262,12 +262,12 @@
 ;; 0xF0–0xFF as the first byte of a slab block are a runtime's own block kinds
 ;; (FORMAT-DECISIONS.md §7, §9): process-private, never written to a shared
 ;; domain. eve assigns none (its type ids end at 0xEC, its headers at 0xEF).
-(def ^:const PROCESS_PRIVATE_KIND_MIN 0xF0)
+(def ^:const process-private-kind-min 0xF0)
 
 (defn process-private-kind?
   "True for a block kind (header byte 0) a runtime keeps to its own process."
   [b]
-  (>= (int b) PROCESS_PRIVATE_KIND_MIN))
+  (>= (int b) process-private-kind-min))
 
 ;; [[pred (fn [sio coll] → IEveRoot)] …] — plain collections → slab values
 (defonce builders (atom []))

@@ -52,8 +52,8 @@
 
 ;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
 (def EveHashSet-type-id 0xEE)
-(def ^:const SABSETROOT_CNT_OFFSET 4)
-(def ^:const SABSETROOT_ROOT_OFF_OFFSET 8)
+(def ^:const sabsetroot-cnt-offset 4)
+(def ^:const sabsetroot-root-off-offset 8)
 (def ^:const SET_FLAG_PORTABLE_HASH 0x01)
 
 ;;=============================================================================
@@ -548,13 +548,13 @@
     (slab/write-u8!  sio off 0 EveHashSet-type-id)
     (slab/write-u8!  sio off 1 SET_FLAG_PORTABLE_HASH)
     (slab/write-u16! sio off 2 0)
-    (slab/write-i32! sio off SABSETROOT_CNT_OFFSET cnt)
-    (slab/write-i32! sio off SABSETROOT_ROOT_OFF_OFFSET root-off)
+    (slab/write-i32! sio off sabsetroot-cnt-offset cnt)
+    (slab/write-i32! sio off sabsetroot-root-off-offset root-off)
     off))
 
 (defn read-set-header [sio header-off]
-  [(slab/read-i32 sio header-off SABSETROOT_CNT_OFFSET)
-   (slab/read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)])
+  [(slab/read-i32 sio header-off sabsetroot-cnt-offset)
+   (slab/read-i32 sio header-off sabsetroot-root-off-offset)])
 
 ;;=============================================================================
 ;; HAMT node freeing helpers (via ISlabIO)
@@ -592,7 +592,7 @@
   [hash-set]
   (let [sio (d/-eve-sio hash-set)
         header-off (d/-root-header-off hash-set)
-        root-off (slab/read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)]
+        root-off (slab/read-i32 sio header-off sabsetroot-root-off-offset)]
     (when (not= root-off NIL_OFFSET)
       (free-hamt-node! sio root-off))
     (when (not= header-off NIL_OFFSET)
@@ -909,10 +909,10 @@
   [old-set new-value]
   (let [sio (d/-eve-sio old-set)
         header-off (d/-root-header-off old-set)
-        root-off (slab/read-i32 sio header-off SABSETROOT_ROOT_OFF_OFFSET)
+        root-off (slab/read-i32 sio header-off sabsetroot-root-off-offset)
         result (volatile! (transient []))]
     (if (eve-hash-set? new-value)
-      (let [new-root-off (slab/read-i32 sio (d/-root-header-off new-value) SABSETROOT_ROOT_OFF_OFFSET)]
+      (let [new-root-off (slab/read-i32 sio (d/-root-header-off new-value) sabsetroot-root-off-offset)]
         (collect-hamt-diff-offsets sio root-off new-root-off result))
       ;; Different type — collect entire old tree
       (collect-hamt-offsets sio root-off result))
@@ -929,9 +929,9 @@
   d/ISabRetirable
   (-sab-retire-diff! [this new-value _slab-env _mode]
     (let [sio (field this sio__)
-          old-root (slab/read-i32 sio (field this offset__) SABSETROOT_ROOT_OFF_OFFSET)]
+          old-root (slab/read-i32 sio (field this offset__) sabsetroot-root-off-offset)]
       (if (eve-hash-set? new-value)
-        (let [new-root-off (slab/read-i32 sio (d/-root-header-off new-value) SABSETROOT_ROOT_OFF_OFFSET)]
+        (let [new-root-off (slab/read-i32 sio (d/-root-header-off new-value) sabsetroot-root-off-offset)]
           (retire-tree-diff! sio old-root new-root-off))
         (when (not= old-root NIL_OFFSET)
           (free-hamt-node! sio old-root)))
@@ -990,7 +990,7 @@
   [old-set new-set v]
   (let [sio (d/-eve-sio old-set)
         vh (portable-hash-bytes (serialize-val-bytes sio v))
-        root-of (fn [x] (slab/read-i32 sio (d/-root-header-off x) SABSETROOT_ROOT_OFF_OFFSET))
+        root-of (fn [x] (slab/read-i32 sio (d/-root-header-off x) sabsetroot-root-off-offset))
         ;; the child on vh's path, NIL where vh's slot holds none
         down (fn [off shift]
                (if (and (not= off NIL_OFFSET) (== NODE_TYPE_BITMAP (slab/read-u8 sio off 0)))

@@ -60,15 +60,15 @@
             [eve.int32 :as i32]
             [eve.tally :as tally]))
 
-(def ^:const CACHE_SIZE 48)
+(def ^:const cache-size 48)
 (def ^:const MAGIC 0x31475344) ;; "DGS1"
 (def ^:const FLAG_DIGEST 1)
-(def ^:const FLAG_HASH 2)
+(def ^:const flag-hash 2)
 ;; side-block field offsets
-(def ^:const F_MAGIC 0)
-(def ^:const F_BACKPTR 4)
+(def ^:const f-magic 0)
+(def ^:const f-backptr 4)
 (def ^:const F_FLAGS 8)
-(def ^:const F_HASHWORD 12)
+(def ^:const f-hashword 12)
 (def ^:const F_DIGEST 16)
 
 ;; ---------------------------------------------------------------------------
@@ -90,8 +90,8 @@
        (not (zero? p))
        (not (== p alloc/NIL_OFFSET))
        (alloc/allocated? sio p)
-       (== MAGIC (slab/read-i32 sio p F_MAGIC))
-       (== hdr (slab/read-i32 sio p F_BACKPTR))))
+       (== MAGIC (slab/read-i32 sio p f-magic))
+       (== hdr (slab/read-i32 sio p f-backptr))))
 
 (defn cache-block
   "The validated cache-block offset of the root header at hdr, or nil."
@@ -115,9 +115,9 @@
                                               (cond
                                                 (valid-block? sio hdr cur) cur
                                                 :else
-                                                (let [blk (slab/alloc! sio CACHE_SIZE)]
-                                                  (slab/write-i32! sio blk F_MAGIC MAGIC)
-                                                  (slab/write-i32! sio blk F_BACKPTR hdr)
+                                                (let [blk (slab/alloc! sio cache-size)]
+                                                  (slab/write-i32! sio blk f-magic MAGIC)
+                                                  (slab/write-i32! sio blk f-backptr hdr)
                                                   (slab/write-i32! sio blk F_FLAGS 0)
                                                   (if (== cur (cas-ptr! row cur blk))
                                                     (do (tally/hold-cache! sio hdr blk) blk)
@@ -233,12 +233,12 @@
    full slab) it is exactly (compute)."
   [sio hdr compute]
   (let [blk (cache-block sio hdr)]
-    (if (and blk (latched? sio blk FLAG_HASH))
-      (slab/read-i32 sio blk F_HASHWORD)
+    (if (and blk (latched? sio blk flag-hash))
+      (slab/read-i32 sio blk f-hashword)
       (let [h (compute)]
         (when-let [b (or blk (ensure-block! sio hdr))]
-          (latch! sio b FLAG_HASH
-                  (fn [] (slab/write-i32! sio b F_HASHWORD h))))
+          (latch! sio b flag-hash
+                  (fn [] (slab/write-i32! sio b f-hashword h))))
         h))))
 
 (defn digest-verdict

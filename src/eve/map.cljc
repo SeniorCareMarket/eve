@@ -63,8 +63,8 @@
 ;; compiled CLJS, so `identical?` was false and contains? answered true for
 ;; every key — so the sentinel is one object, identical by construction.
 (def ^:private absent (volatile! :eve.map/absent))
-(def ^:const SABMAPROOT_CNT_OFFSET 4)
-(def ^:const SABMAPROOT_ROOT_OFF_OFFSET 8)
+(def ^:const sabmaproot-cnt-offset 4)
+(def ^:const sabmaproot-root-off-offset 8)
 
 (def ^:const NIL_OFFSET alloc/NIL_OFFSET)
 
@@ -1019,15 +1019,15 @@
     (slab/write-u8! sio off 0 EveHashMap-type-id)
     (slab/write-u8! sio off 1 1) ;; flags
     (slab/write-u16! sio off 2 0)
-    (slab/write-i32! sio off SABMAPROOT_CNT_OFFSET cnt)
-    (slab/write-i32! sio off SABMAPROOT_ROOT_OFF_OFFSET root-off)
+    (slab/write-i32! sio off sabmaproot-cnt-offset cnt)
+    (slab/write-i32! sio off sabmaproot-root-off-offset root-off)
     off))
 
 (defn read-map-header
   "Read cnt and root-off from an EveHashMap header. Returns [cnt root-off]."
   [sio ^long header-off]
-  [(slab/read-i32 sio header-off SABMAPROOT_CNT_OFFSET)
-   (slab/read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)])
+  [(slab/read-i32 sio header-off sabmaproot-cnt-offset)
+   (slab/read-i32 sio header-off sabmaproot-root-off-offset)])
 
 ;;=============================================================================
 ;; EveHashMap deftype — unified via eve/deftype macro
@@ -1311,7 +1311,7 @@
   [old-map new-map kb]
   (let [sio (d/-eve-sio old-map)
         kh (portable-hash-bytes kb)
-        root-of (fn [m] (slab/read-i32 sio (d/-root-header-off m) SABMAPROOT_ROOT_OFF_OFFSET))
+        root-of (fn [m] (slab/read-i32 sio (d/-root-header-off m) sabmaproot-root-off-offset))
         ;; the child on kh's path, NIL where kh's slot holds none
         down (fn [off shift]
                (if (and (not= off NIL_OFFSET) (== NODE_TYPE_BITMAP (slab/read-u8 sio off 0)))
@@ -1487,7 +1487,7 @@
   [eve-map]
   (let [sio (d/-eve-sio eve-map)
         header-off (d/-root-header-off eve-map)
-        root-off (slab/read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
+        root-off (slab/read-i32 sio header-off sabmaproot-root-off-offset)]
     (when (not= root-off NIL_OFFSET)
       (free-hamt-node! sio root-off))
     (when (not= header-off NIL_OFFSET)
@@ -1665,10 +1665,10 @@
   [old-map new-value]
   (let [sio (d/-eve-sio old-map)
         header-off (d/-root-header-off old-map)
-        root-off (slab/read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)]
+        root-off (slab/read-i32 sio header-off sabmaproot-root-off-offset)]
     (if (eve-hash-map? new-value)
       (let [new-header (d/-root-header-off new-value)
-            other-root (slab/read-i32 sio new-header SABMAPROOT_ROOT_OFF_OFFSET)
+            other-root (slab/read-i32 sio new-header sabmaproot-root-off-offset)
             node-offsets (collect-tree-diff-offsets sio root-off other-root)]
         (if (not= header-off NIL_OFFSET)
           (conj node-offsets header-off)
@@ -1697,8 +1697,8 @@
 ;; HAMT Validation (a debugging walk of a map's tree)
 ;;=============================================================================
 
-(def ^:const ^:private HAMT_MAX_DEPTH 32)
-(def ^:const ^:private HAMT_MAX_NODES 1000000)
+(def ^:const ^:private hamt-max-depth 32)
+(def ^:const ^:private hamt-max-nodes 1000000)
 
 (defn- validate-slab-offset
   "Check if a slab-qualified offset looks valid. Returns nil if valid."
@@ -1722,9 +1722,9 @@
     (== slab-off NIL_OFFSET)
     {:valid? true :children [] :visited visited}
 
-    (> depth HAMT_MAX_DEPTH)
+    (> depth hamt-max-depth)
     {:valid? false :children [] :visited visited
-     :errors (conj errors-acc (str "depth " depth " exceeds max " HAMT_MAX_DEPTH
+     :errors (conj errors-acc (str "depth " depth " exceeds max " hamt-max-depth
                                    " at offset " slab-off))}
 
     (contains? @visited slab-off)
@@ -1770,9 +1770,9 @@
         (let [[off depth] (first queue)
               rest-queue (rest queue)]
           (vswap! max-depth max depth)
-          (if (> @node-count HAMT_MAX_NODES)
+          (if (> @node-count hamt-max-nodes)
             {:valid? false
-             :errors [(str "exceeded max nodes " HAMT_MAX_NODES)]
+             :errors [(str "exceeded max nodes " hamt-max-nodes)]
              :node-count @node-count
              :max-depth @max-depth}
             (let [result (validate-hamt-node sio off depth visited [])]
@@ -1794,7 +1794,7 @@
    a diagnostic reads the slab its caller names — under the construction
    law there is no ambient domain for it to borrow."
   [sio header-off]
-  (let [root-off (slab/read-i32 sio header-off SABMAPROOT_ROOT_OFF_OFFSET)
+  (let [root-off (slab/read-i32 sio header-off sabmaproot-root-off-offset)
         result (validate-hamt-tree sio root-off)]
     (assoc result :root-off root-off)))
 
@@ -1807,9 +1807,9 @@
   (-sab-retire-diff! [this new-value _slab-env _mode]
     (let [sio (field this sio__)
           old-hdr (field this offset__)
-          old-root (slab/read-i32 sio old-hdr SABMAPROOT_ROOT_OFF_OFFSET)]
+          old-root (slab/read-i32 sio old-hdr sabmaproot-root-off-offset)]
       (if (eve-hash-map? new-value)
-        (let [new-root (slab/read-i32 sio (d/-root-header-off new-value) SABMAPROOT_ROOT_OFF_OFFSET)]
+        (let [new-root (slab/read-i32 sio (d/-root-header-off new-value) sabmaproot-root-off-offset)]
           (retire-tree-diff! sio old-root new-root))
         (when (not= old-root NIL_OFFSET)
           (free-hamt-node! sio old-root)))

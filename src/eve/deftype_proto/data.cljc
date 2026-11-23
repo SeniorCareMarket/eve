@@ -75,12 +75,12 @@
 (def ^:const NUM_SLAB_CLASSES 6)
 
 ;; Block sizes for each slab class (bytes)
-(def ^:const SLAB_SIZE_0 32)
-(def ^:const SLAB_SIZE_1 64)
-(def ^:const SLAB_SIZE_2 128)
-(def ^:const SLAB_SIZE_3 256)
-(def ^:const SLAB_SIZE_4 512)
-(def ^:const SLAB_SIZE_5 1024)
+(def ^:const slab-size-0 32)
+(def ^:const slab-size-1 64)
+(def ^:const slab-size-2 128)
+(def ^:const slab-size-3 256)
+(def ^:const slab-size-4 512)
+(def ^:const slab-size-5 1024)
 
 ;; Lookup table: class index → block size
 ;; Index 6 = overflow (legacy SAB): block_size=1 so block_idx * 1 = byte_offset
@@ -94,13 +94,13 @@
 
 ;; Max block size handled by slab allocator
 ;; Anything larger goes to the overflow (old-style) allocator
-(def ^:const SLAB_MAX_BLOCK_SIZE 1024)
+(def ^:const slab-max-block-size 1024)
 
 ;; Default max capacity per bitmap slab (bytes of data region).
 ;; Bitmap slabs use i32 header fields; the practical limit is the packed
 ;; slab pointer (block_idx:u24 = 16M blocks).  2 GB is the fallback for
 ;; out-of-range class indices.
-(def ^:const DEFAULT_SLAB_CAPACITY (* 2 1024 1024 1024)) ;; 2GB
+(def ^:const default-slab-capacity (* 2 1024 1024 1024)) ;; 2GB
 
 ;; Per-class max capacities sized for production workloads.
 ;; Bitmap and data offsets are computed for max capacity at init time so the
@@ -115,7 +115,7 @@
 ;; Class 3 (256B): 512MB =    2M blocks  (collision nodes, serialized values)
 ;; Class 4 (512B): 256MB =  512K blocks  (less common)
 ;; Class 5 (1024B):256MB =  256K blocks  (least common)
-(def ^:private SLAB_CLASS_CAPACITIES
+(def ^:private slab-class-capacities
   [(* 1024 1024 1024)      ;; Class 0: 1GB
    (* 1024 1024 1024)      ;; Class 1: 1GB
    (* 1024 1024 1024)      ;; Class 2: 1GB
@@ -128,7 +128,7 @@
 ;; Total initial data: ~224KB (grows lazily to GB/TB-scale max).
 ;; Note: bitmap region is sized for max capacity but sparse-file semantics
 ;; mean untouched bitmap pages cost zero physical memory/disk.
-(def ^:private SLAB_CLASS_INITIAL_CAPACITIES
+(def ^:private slab-class-initial-capacities
   [(* 64 1024)     ;; Class 0 (32B):  64KB = 2K blocks
    (* 64 1024)     ;; Class 1 (64B):  64KB = 1K blocks
    (* 32 1024)     ;; Class 2 (128B): 32KB = 256 blocks
@@ -139,17 +139,17 @@
 (defn default-capacity-for-class
   "Get the default (max) capacity for a slab class index."
   [class-idx]
-  (let [caps SLAB_CLASS_CAPACITIES
+  (let [caps slab-class-capacities
         len  (count caps)]
     (if (and (>= class-idx 0) (< class-idx len))
       (nth caps class-idx)
-      DEFAULT_SLAB_CAPACITY)))
+      default-slab-capacity)))
 
 (defn initial-capacity-for-class
   "Get the initial (small) capacity for a slab class index.
    Files start at this size and grow on demand."
   [class-idx]
-  (let [caps SLAB_CLASS_INITIAL_CAPACITIES
+  (let [caps slab-class-initial-capacities
         len  (count caps)]
     (if (and (>= class-idx 0) (< class-idx len))
       (nth caps class-idx)
@@ -180,14 +180,14 @@
 
 ;; Bitmap is packed: 1 bit per block, 0=free, 1=allocated.
 ;; Aligned to 16 bytes for SIMD v128 loads.
-(def ^:const BITMAP_ALIGNMENT 16)
+(def ^:const bitmap-alignment 16)
 
 (defn bitmap-byte-size
   "Calculate bitmap size in bytes for n blocks, padded to 16-byte alignment."
   [total-blocks]
   (let [raw-bytes (quot (+ total-blocks 7) 8)
-        padded    (* (quot (+ raw-bytes (dec BITMAP_ALIGNMENT)) BITMAP_ALIGNMENT)
-                     BITMAP_ALIGNMENT)]
+        padded    (* (quot (+ raw-bytes (dec bitmap-alignment)) bitmap-alignment)
+                     bitmap-alignment)]
     padded))
 
 ;;=============================================================================
@@ -213,7 +213,7 @@
    data region after it stays 16-aligned)."
   [total-blocks]
   (let [raw (* total-blocks 12)]
-    (* (quot (+ raw (dec BITMAP_ALIGNMENT)) BITMAP_ALIGNMENT) BITMAP_ALIGNMENT)))
+    (* (quot (+ raw (dec bitmap-alignment)) bitmap-alignment) bitmap-alignment)))
 
 (defn desc-column-byte-size
   "One descriptor column's bytes for n blocks: a flat i32 array, 4 bytes a block. An mmap slab carries
@@ -235,9 +235,9 @@
   (+ desc-offset (* total-blocks 4 col) (* idx 4)))
 
 ;; The three columns an eve bitmap class carries, as desc-col-addr's col argument.
-(def ^:const DESC_COL_COUNT 0)
-(def ^:const DESC_COL_FLAGS 1)
-(def ^:const DESC_COL_POINTER 2)
+(def ^:const desc-col-count 0)
+(def ^:const desc-col-flags 1)
+(def ^:const desc-col-pointer 2)
 
 (defn slab-layout
   "Calculate layout for a slab with given block-size and capacity.
@@ -329,12 +329,12 @@
    Returns -1 if the size exceeds SLAB_MAX_BLOCK_SIZE (use overflow allocator)."
   [size-bytes]
   (cond
-    (<= size-bytes SLAB_SIZE_0) 0
-    (<= size-bytes SLAB_SIZE_1) 1
-    (<= size-bytes SLAB_SIZE_2) 2
-    (<= size-bytes SLAB_SIZE_3) 3
-    (<= size-bytes SLAB_SIZE_4) 4
-    (<= size-bytes SLAB_SIZE_5) 5
+    (<= size-bytes slab-size-0) 0
+    (<= size-bytes slab-size-1) 1
+    (<= size-bytes slab-size-2) 2
+    (<= size-bytes slab-size-3) 3
+    (<= size-bytes slab-size-4) 4
+    (<= size-bytes slab-size-5) 5
     :else -1))
 
 ;;=============================================================================
@@ -344,7 +344,7 @@
 ;; This lets the root pointer CAS remain a single atomic i32 operation.
 ;; Max block index: 2^24 - 1 = 16,777,215 (plenty for 1MB slabs)
 
-(def ^:const SLAB_PTR_NIL -1)  ;; sentinel for "no value" / empty
+(def ^:const slab-ptr-nil -1)  ;; sentinel for "no value" / empty
 
 (defn pack-slab-ptr
   "Pack a slab class index and block index into a single i32."
@@ -372,7 +372,7 @@
 
 (def ^:const SIZE_OF_INT32 4)
 
-(def ^:const ROOT_SAB_HEADER_SIZE 64)   ;; cache-line aligned header
+(def ^:const root-sab-header-size 64)   ;; cache-line aligned header
 
 (def ^:const ROOT_MAGIC_OFFSET 0)         ;; u32: 0x524F4F54 ('ROOT')
 (def ^:const ROOT_ATOM_PTR_OFFSET 4)      ;; i32: packed slab ptr (class|block)
@@ -383,7 +383,7 @@
 (def ^:const ROOT_MAGIC 0x524F4F54)       ;; 'ROOT' in ASCII
 
 ;; Worker registry begins at byte 64 (right after header)
-(def ^:const ROOT_WORKER_REGISTRY_START ROOT_SAB_HEADER_SIZE)
+(def ^:const ROOT_WORKER_REGISTRY_START root-sab-header-size)
 
 ;; Worker registry config (same as eve.data)
 (def ^:const MAX_WORKERS 256)
@@ -391,7 +391,7 @@
 (def ^:const WORKER_REGISTRY_SIZE (* MAX_WORKERS WORKER_SLOT_SIZE))
 
 ;; Total root SAB size
-(def ^:const ROOT_SAB_SIZE (+ ROOT_SAB_HEADER_SIZE WORKER_REGISTRY_SIZE))
+(def ^:const ROOT_SAB_SIZE (+ root-sab-header-size WORKER_REGISTRY_SIZE))
 
 ;; Worker status values
 (def ^:const WORKER_STATUS_INACTIVE 0)
@@ -418,12 +418,12 @@
 (def ^:const ROOT_MAGIC_V2 0x524F4F55)       ;; bumped from 0x524F4F54
 
 ;; Atom table header starts right after the worker registry
-(def ^:const ATOM_TABLE_HEADER_START (+ ROOT_SAB_HEADER_SIZE WORKER_REGISTRY_SIZE))
-(def ^:const ATOM_TABLE_HEADER_SIZE 64)
+(def ^:const ATOM_TABLE_HEADER_START (+ root-sab-header-size WORKER_REGISTRY_SIZE))
+(def ^:const atom-table-header-size 64)
 (def ^:const ATOM_TABLE_MAGIC 0x41544F4D)    ;; 'ATOM' in ASCII
 
 ;; Atom slots start after the table header
-(def ^:const ATOM_TABLE_START (+ ATOM_TABLE_HEADER_START ATOM_TABLE_HEADER_SIZE))
+(def ^:const ATOM_TABLE_START (+ ATOM_TABLE_HEADER_START atom-table-header-size))
 (def ^:const ATOM_SLOT_SIZE 8)
 (def ^:const MAX_ATOM_SLOTS 256)
 (def ^:const ATOM_SLOT_PTR_OFFSET 0)         ;; i32: slab-qualified CAS target

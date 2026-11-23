@@ -39,34 +39,34 @@
 ;; The record (enc.vs's offsets)
 ;;-----------------------------------------------------------------------------
 
-(def ^:const MAGIC_VAL 1162756946)   ; 0x454E4352 'ENCR'
-(def ^:const ENC_MAGIC 0)
-(def ^:const ENC_VERSION 4)
-(def ^:const ENC_KEY_STATUS 8)
-(def ^:const ENC_KEY_ALGORITHM 12)
-(def ^:const ENC_GAK_BYTES 16)
-(def ^:const ENC_GAK_FINGERPRINT 48)
-(def ^:const ENC_EEK_RING_HEAD 64)
-(def ^:const ENC_EEK_RING_SIZE 68)
-(def ^:const ENC_EEK_RING_START 72)
-(def ^:const EEK_ENTRY_SIZE 60)
-(def ^:const EEK_EPOCH 0)
-(def ^:const EEK_STATUS 4)
-(def ^:const EEK_READER_COUNT 8)
-(def ^:const EEK_KEY_BYTES 12)
-(def ^:const EEK_IV_BYTES 44)
-(def ^:const EEK_CREATED_TS 56)
-(def ^:const EEK_MAX_ENTRIES 64)
-(def ^:const EEK_FREE 0)
-(def ^:const EEK_ACTIVE 1)
-(def ^:const EEK_DRAINING 2)
-(def ^:const EEK_SHREDDED 3)
+(def ^:const magic-val 1162756946)   ; 0x454E4352 'ENCR'
+(def ^:const enc-magic 0)
+(def ^:const enc-version 4)
+(def ^:const enc-key-status 8)
+(def ^:const enc-key-algorithm 12)
+(def ^:const enc-gak-bytes 16)
+(def ^:const enc-gak-fingerprint 48)
+(def ^:const enc-eek-ring-head 64)
+(def ^:const enc-eek-ring-size 68)
+(def ^:const enc-eek-ring-start 72)
+(def ^:const eek-entry-size 60)
+(def ^:const eek-epoch 0)
+(def ^:const eek-status 4)
+(def ^:const eek-reader-count 8)
+(def ^:const eek-key-bytes 12)
+(def ^:const eek-iv-bytes 44)
+(def ^:const eek-created-ts 56)
+(def ^:const eek-max-entries 64)
+(def ^:const eek-free 0)
+(def ^:const eek-active 1)
+(def ^:const eek-draining 2)
+(def ^:const eek-shredded 3)
 (def ^:const KEY_STATUS_AUTO 1)
 (def ^:const KEY_STATUS_USER 2)
 (def ^:const KEY_STATUS_USER_NO_STORE 3)
-(def ^:const KEY_ALG_AES_256_CTR 1)
+(def ^:const key-alg-aes-256-ctr 1)
 ;; eve's: the domain's keystream salt, past the kernel's ring (72 + 64 × 60)
-(def ^:const ENC_DOMAIN_SALT 3912)
+(def ^:const enc-domain-salt 3912)
 (def ^:const RECORD_BYTES 4096)
 
 (defn- load [r off] (mem/-load-i32 r off))
@@ -109,27 +109,27 @@
   [r gak status]
   (cond
     (not (contains? #{KEY_STATUS_AUTO KEY_STATUS_USER KEY_STATUS_USER_NO_STORE} status)) -1
-    (not= 0 (cas! r ENC_MAGIC 0 MAGIC_VAL)) 0
+    (not= 0 (cas! r enc-magic 0 magic-val)) 0
     :else
-    (do (store! r ENC_VERSION 1)
-        (store! r ENC_KEY_ALGORITHM KEY_ALG_AES_256_CTR)
-        (write-vec! r ENC_GAK_BYTES (if (= status KEY_STATUS_USER_NO_STORE) (vec (repeat 32 0)) (vec gak)))
-        (write-vec! r ENC_GAK_FINGERPRINT (fingerprint gak))
-        (store! r ENC_EEK_RING_HEAD -1)
-        (store! r ENC_EEK_RING_SIZE 0)
-        (dotimes [i EEK_MAX_ENTRIES]
-          (let [e (+ ENC_EEK_RING_START (* i EEK_ENTRY_SIZE))]
-            (store! r (+ e EEK_STATUS) EEK_FREE)
-            (store! r (+ e EEK_READER_COUNT) 0)))
-        (write-vec! r ENC_DOMAIN_SALT (proc/random-bytes 16))
-        (store! r ENC_KEY_STATUS status)
+    (do (store! r enc-version 1)
+        (store! r enc-key-algorithm key-alg-aes-256-ctr)
+        (write-vec! r enc-gak-bytes (if (= status KEY_STATUS_USER_NO_STORE) (vec (repeat 32 0)) (vec gak)))
+        (write-vec! r enc-gak-fingerprint (fingerprint gak))
+        (store! r enc-eek-ring-head -1)
+        (store! r enc-eek-ring-size 0)
+        (dotimes [i eek-max-entries]
+          (let [e (+ enc-eek-ring-start (* i eek-entry-size))]
+            (store! r (+ e eek-status) eek-free)
+            (store! r (+ e eek-reader-count) 0)))
+        (write-vec! r enc-domain-salt (proc/random-bytes 16))
+        (store! r enc-key-status status)
         1)))
 
 (defn status
   "The ring's key status (1/2/3), 0 while a peer is still initialising, -1 when
    there is no record."
   [r]
-  (if (not= MAGIC_VAL (load r ENC_MAGIC)) -1 (load r ENC_KEY_STATUS)))
+  (if (not= magic-val (load r enc-magic)) -1 (load r enc-key-status)))
 
 (defn read-gak
   "The domain's 32-byte GAK, or nil when it is not encrypted. A user ring needs
@@ -139,25 +139,25 @@
   (let [st (status r)]
     (cond
       (<= st 0) nil
-      (= st KEY_STATUS_AUTO) (read-vec r ENC_GAK_BYTES 32)
+      (= st KEY_STATUS_AUTO) (read-vec r enc-gak-bytes 32)
       (nil? user-key)
       (throw (ex-info "eve.keyring: this domain is encrypted under a user key, and none was given"
                       {:type :user-key-required}))
-      (not= (fingerprint user-key) (read-vec r ENC_GAK_FINGERPRINT 16))
+      (not= (fingerprint user-key) (read-vec r enc-gak-fingerprint 16))
       (throw (ex-info "eve.keyring: the key is not this domain's (its fingerprint differs)"
                       {:type :fingerprint-mismatch}))
       :else (vec user-key))))
 
-(defn domain-salt "The domain's 16-byte keystream salt." [r] (read-vec r ENC_DOMAIN_SALT 16))
+(defn domain-salt "The domain's 16-byte keystream salt." [r] (read-vec r enc-domain-salt 16))
 
 ;;-----------------------------------------------------------------------------
 ;; The epoch-key ring (crypto.js allocEpochKey / findEpochKey / eekAddReader /
 ;; eekRemoveReader / drainEpochKeys / eekRingSummary; enc.vs eek_*)
 ;;-----------------------------------------------------------------------------
 
-(defn- eek-entry [idx] (+ ENC_EEK_RING_START (* idx EEK_ENTRY_SIZE)))
+(defn- eek-entry [idx] (+ enc-eek-ring-start (* idx eek-entry-size)))
 
-(defn- eek-cap [r] (min EEK_MAX_ENTRIES (load r ENC_EEK_RING_SIZE)))
+(defn- eek-cap [r] (min eek-max-entries (load r enc-eek-ring-size)))
 
 (defn eek-alloc!
   "Put epoch's key (32 bytes) and iv (12 bytes) in the ring's next entry: its
@@ -165,19 +165,19 @@
    torn key); the head advances by CAS, the size saturates at 64."
   [r epoch key iv ts]
   (let [h (loop []
-            (let [old (load r ENC_EEK_RING_HEAD)
-                  new (mod (inc old) EEK_MAX_ENTRIES)]
-              (if (== old (cas! r ENC_EEK_RING_HEAD old new)) new (recur))))
+            (let [old (load r enc-eek-ring-head)
+                  new (mod (inc old) eek-max-entries)]
+              (if (== old (cas! r enc-eek-ring-head old new)) new (recur))))
         e (eek-entry h)]
-    (store! r (+ e EEK_EPOCH) epoch)
-    (store! r (+ e EEK_READER_COUNT) 0)
-    (write-vec! r (+ e EEK_KEY_BYTES) (vec key))
-    (write-vec! r (+ e EEK_IV_BYTES) (vec iv))
-    (store! r (+ e EEK_CREATED_TS) ts)
-    (store! r (+ e EEK_STATUS) EEK_ACTIVE)
+    (store! r (+ e eek-epoch) epoch)
+    (store! r (+ e eek-reader-count) 0)
+    (write-vec! r (+ e eek-key-bytes) (vec key))
+    (write-vec! r (+ e eek-iv-bytes) (vec iv))
+    (store! r (+ e eek-created-ts) ts)
+    (store! r (+ e eek-status) eek-active)
     (loop []
-      (let [n (load r ENC_EEK_RING_SIZE)]
-        (when (and (< n EEK_MAX_ENTRIES) (not= n (cas! r ENC_EEK_RING_SIZE n (inc n))))
+      (let [n (load r enc-eek-ring-size)]
+        (when (and (< n eek-max-entries) (not= n (cas! r enc-eek-ring-size n (inc n))))
           (recur))))
     h))
 
@@ -186,9 +186,9 @@
   [r epoch]
   (or (first (filter (fn [i]
                        (let [e (eek-entry i)
-                             st (load r (+ e EEK_STATUS))]
-                         (and (== epoch (load r (+ e EEK_EPOCH)))
-                              (or (== st EEK_ACTIVE) (== st EEK_DRAINING)))))
+                             st (load r (+ e eek-status))]
+                         (and (== epoch (load r (+ e eek-epoch)))
+                              (or (== st eek-active) (== st eek-draining)))))
                      (range (eek-cap r))))
       -1))
 
@@ -196,30 +196,30 @@
   "[key iv] of entry idx (32 and 12 bytes)."
   [r idx]
   (let [e (eek-entry idx)]
-    [(read-vec r (+ e EEK_KEY_BYTES) 32) (read-vec r (+ e EEK_IV_BYTES) 12)]))
+    [(read-vec r (+ e eek-key-bytes) 32) (read-vec r (+ e eek-iv-bytes) 12)]))
 
 (defn- eek-shred! [r e]
-  (write-vec! r (+ e EEK_KEY_BYTES) (vec (repeat 32 0)))
-  (write-vec! r (+ e EEK_IV_BYTES) (vec (repeat 12 0)))
-  (store! r (+ e EEK_STATUS) EEK_SHREDDED))
+  (write-vec! r (+ e eek-key-bytes) (vec (repeat 32 0)))
+  (write-vec! r (+ e eek-iv-bytes) (vec (repeat 12 0)))
+  (store! r (+ e eek-status) eek-shredded))
 
 (defn eek-add-reader!
   "Register a reader of entry idx: true, or false when the entry was shredded
    or freed between eek-find and this call (the count is given back)."
   [r idx]
   (let [e (eek-entry idx)]
-    (add! r (+ e EEK_READER_COUNT) 1)
-    (let [st (load r (+ e EEK_STATUS))]
-      (if (or (== st EEK_SHREDDED) (== st EEK_FREE))
-        (do (add! r (+ e EEK_READER_COUNT) -1) false)
+    (add! r (+ e eek-reader-count) 1)
+    (let [st (load r (+ e eek-status))]
+      (if (or (== st eek-shredded) (== st eek-free))
+        (do (add! r (+ e eek-reader-count) -1) false)
         true))))
 
 (defn eek-remove-reader!
   "A reader of entry idx is done: the last reader of a draining entry shreds it."
   [r idx]
   (let [e (eek-entry idx)
-        old (add! r (+ e EEK_READER_COUNT) -1)]
-    (when (and (== old 1) (== EEK_DRAINING (load r (+ e EEK_STATUS))))
+        old (add! r (+ e eek-reader-count) -1)]
+    (when (and (== old 1) (== eek-draining (load r (+ e eek-status))))
       (eek-shred! r e))
     nil))
 
@@ -229,22 +229,22 @@
   [r min-epoch]
   (reduce (fn [n i]
             (let [e (eek-entry i)]
-              (if (and (< (load r (+ e EEK_EPOCH)) min-epoch)
-                       (== EEK_ACTIVE (load r (+ e EEK_STATUS))))
-                (if (zero? (load r (+ e EEK_READER_COUNT)))
+              (if (and (< (load r (+ e eek-epoch)) min-epoch)
+                       (== eek-active (load r (+ e eek-status))))
+                (if (zero? (load r (+ e eek-reader-count)))
                   (do (eek-shred! r e) (inc n))
-                  (do (cas! r (+ e EEK_STATUS) EEK_ACTIVE EEK_DRAINING) n))
+                  (do (cas! r (+ e eek-status) eek-active eek-draining) n))
                 n)))
           0 (range (eek-cap r))))
 
 (defn eek-summary
   "{:head :size :active :draining :shredded :free} of the ring (eekRingSummary)."
   [r]
-  (let [sts (map #(load r (+ (eek-entry %) EEK_STATUS)) (range (eek-cap r)))
+  (let [sts (map #(load r (+ (eek-entry %) eek-status)) (range (eek-cap r)))
         c (fn [x] (count (filter #(== x %) sts)))]
-    {:head (load r ENC_EEK_RING_HEAD) :size (load r ENC_EEK_RING_SIZE)
-     :active (c EEK_ACTIVE) :draining (c EEK_DRAINING) :shredded (c EEK_SHREDDED)
-     :free (- (eek-cap r) (c EEK_ACTIVE) (c EEK_DRAINING) (c EEK_SHREDDED))}))
+    {:head (load r enc-eek-ring-head) :size (load r enc-eek-ring-size)
+     :active (c eek-active) :draining (c eek-draining) :shredded (c eek-shredded)
+     :free (- (eek-cap r) (c eek-active) (c eek-draining) (c eek-shredded))}))
 
 ;;-----------------------------------------------------------------------------
 ;; The keystream

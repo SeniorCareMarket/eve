@@ -61,9 +61,9 @@
 ;; Slab-Qualified Offset Encoding  (shared)
 ;;=============================================================================
 
-(def ^:const CLASS_BITS 3)
-(def ^:const BLOCK_IDX_BITS 29)
-(def ^:const BLOCK_IDX_MASK (dec (bit-shift-left 1 BLOCK_IDX_BITS)))
+(def ^:const class-bits 3)
+(def ^:const block-idx-bits 29)
+(def ^:const block-idx-mask (dec (bit-shift-left 1 block-idx-bits)))
 (def ^:const OVERFLOW_CLASS_IDX 6)
 (def ^:const SENTINEL_CLASS_IDX 7)
 
@@ -73,22 +73,22 @@
 (defn encode-slab-offset
   "Encode a slab class index and block index into a slab-qualified offset."
   [class-idx block-idx]
-  (bit-or (bit-shift-left class-idx BLOCK_IDX_BITS)
-          (bit-and block-idx BLOCK_IDX_MASK)))
+  (bit-or (bit-shift-left class-idx block-idx-bits)
+          (bit-and block-idx block-idx-mask)))
 
 (defn decode-class-idx
   "Extract the slab class index from a slab-qualified offset.
    Treats the offset as an unsigned 32-bit integer (handles sign-extended i32 reads).
    A primitive long on the JVM: every slab address is computed from it (boxed, it was a Long per read)."
   ^long [slab-offset]
-  (unsigned-bit-shift-right (bit-and (long slab-offset) 0xFFFFFFFF) BLOCK_IDX_BITS))
+  (unsigned-bit-shift-right (bit-and (long slab-offset) 0xFFFFFFFF) block-idx-bits))
 
 (defn decode-block-idx
   "Extract the block index from a slab-qualified offset.
    Treats the offset as an unsigned 32-bit integer (handles sign-extended i32 reads).
    A primitive long on the JVM, as decode-class-idx."
   ^long [slab-offset]
-  (bit-and (bit-and (long slab-offset) 0xFFFFFFFF) BLOCK_IDX_MASK))
+  (bit-and (bit-and (long slab-offset) 0xFFFFFFFF) block-idx-mask))
 
 ;;=============================================================================
 ;; ISlabIO Protocol  (shared)
@@ -1453,15 +1453,15 @@
 (defn- node-heap-bytes
   "The heap byte array holding the block at slab-off in ctx's domain, or nil."
   [^JvmSlabCtx ctx ^long slab-off]
-  (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) BLOCK_IDX_BITS)]
+  (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) block-idx-bits)]
     (mem/-heap-bytes (aget ^objects (field ctx regions) (int ci)))))
 
 (defn- node-at
   "The byte offset in its region of field-off in the block at slab-off."
   ^long [^JvmSlabCtx ctx ^long slab-off ^long field-off]
   (let [u  (bit-and slab-off 0xFFFFFFFF)
-        ci (int (unsigned-bit-shift-right u BLOCK_IDX_BITS))
-        bi (bit-and u BLOCK_IDX_MASK)]
+        ci (int (unsigned-bit-shift-right u block-idx-bits))
+        bi (bit-and u block-idx-mask)]
     (+ (aget ^ints (field ctx data-offsets) ci)
        (* bi (aget ^ints (field ctx block-sizes) ci))
        field-off)))
@@ -1498,14 +1498,14 @@
   (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
     (if (nil? ctx)
       (-sio-read-bytes sio slab-off field-off len)
-      (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) BLOCK_IDX_BITS)]
+      (let [ci (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) block-idx-bits)]
         (mem/-read-bytes (aget ^objects (field ^JvmSlabCtx ctx regions) (int ci)) (node-at ctx slab-off field-off) len)))))
 
 (defn- node-region
   "The IMemRegion holding the block at slab-off in ctx's domain."
   [^JvmSlabCtx ctx ^long slab-off]
   (aget ^objects (field ctx regions)
-        (int (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) BLOCK_IDX_BITS))))
+        (int (unsigned-bit-shift-right (bit-and slab-off 0xFFFFFFFF) block-idx-bits))))
 
 (defn node-u8
   "The unsigned byte at slab-off + field-off of a published node."

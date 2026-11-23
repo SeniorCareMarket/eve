@@ -78,23 +78,23 @@
 ;; Root pointer format: alloc/encode-slab-offset [class:3 | block:29]
 ;; ---------------------------------------------------------------------------
 
-(def ^:const ROOT_BYTES d/ROOT_FILE_SIZE_V2) ;; 8320 (V2 multi-atom)
-(def ^:const READER_MAP_BYTES 262144)
+(def ^:const root-bytes d/ROOT_FILE_SIZE_V2) ;; 8320 (V2 multi-atom)
+(def ^:const reader-map-bytes 262144)
 
 ;; Time-throttled retire flush — skip the 256-slot scan when the last scan
 ;; was recent and the queue is small. Only ever delays a free.
 (def ^:const FLUSH_INTERVAL_MS 50)
-(def ^:const FLUSH_QUEUE_THRESHOLD 64)
+(def ^:const flush-queue-threshold 64)
 
 ;; CAS retry backoff — jittered exponential backoff after the third failure.
-(def ^:const BACKOFF_CAP_MS 8)
+(def ^:const backoff-cap-ms 8)
 
-(def ^:const DEFAULT_ATOM_SLOT 1) ;; slot 0 = registry, slot 1 = default atom
-(def ^:const CLAIMED_SENTINEL -2) ;; "claimed but no value" slot marker
+(def ^:const default-atom-slot 1) ;; slot 0 = registry, slot 1 = default atom
+(def ^:const claimed-sentinel -2) ;; "claimed but no value" slot marker
 
 ;; The exclusive hold a joining lock-only participant takes before it has a
 ;; slot (its value in ROOT_HOLD); cleared by a waiter after HEARTBEAT_TIMEOUT_MS.
-(def ^:const HOLD_JOINING (inc d/MAX_WORKERS))
+(def ^:const hold-joining (inc d/MAX_WORKERS))
 
 ;; ---------------------------------------------------------------------------
 ;; The host's process primitives — the clock, a thread's identity, sleep, a
@@ -107,7 +107,7 @@
    immediate; from the fourth, 1..min(2^(n-3), 8) ms."
   [attempt]
   (when (> attempt 3)
-    (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) BACKOFF_CAP_MS)]
+    (let [max-ms (min (bit-shift-left 1 (min (- attempt 3) 3)) backoff-cap-ms)]
       (proc/sleep-ms! (inc (rand-int max-ms))))))
 
 ;; ---------------------------------------------------------------------------
@@ -217,7 +217,7 @@
   "A hold whose holder's heartbeat is HEARTBEAT_TIMEOUT_MS old, or a joining
    hold (no slot yet) that a waiter has watched for that long."
   [root-r hold waited-ms]
-  (if (== hold HOLD_JOINING)
+  (if (== hold hold-joining)
     (> waited-ms d/HEARTBEAT_TIMEOUT_MS)
     (heartbeat-stale? root-r (dec hold))))
 
@@ -455,7 +455,7 @@
    domain with HOLD_JOINING while it claims (it has no slot yet)."
   [root-r]
   (let [lock-only? (not (mem/-atomic-rmw? root-r))]
-    (with-root-write* root-r lock-only? HOLD_JOINING
+    (with-root-write* root-r lock-only? hold-joining
       (fn [] (mmap-claim-slot! root-r)))))
 
 (defn- await-domain-root!
@@ -710,11 +710,11 @@
    the magic is there."
   [base-path {:keys [lustre? create?] :as opts}]
   (when create? (proc/ensure-parent-dir! base-path))
-  (let [root-r (region/open-mmap-region (str base-path ".root") ROOT_BYTES
+  (let [root-r (region/open-mmap-region (str base-path ".root") root-bytes
                                         {:lustre? lustre? :lockable? true})
         _      (when-not create? (await-domain-root! root-r base-path))
         sio    (alloc/mmap-domain-sio! base-path opts)
-        rmap-r (region/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES
+        rmap-r (region/open-mmap-region (str base-path ".rmap") reader-map-bytes
                                         {:lustre? lustre?})]
     (when create? (init-domain-root! root-r))
     (let [journal  (when (:journal? opts)
@@ -756,8 +756,8 @@
    heap root and reader map. One participant, no heartbeat."
   [opts]
   (let [sio    (alloc/heap-domain-sio! opts)
-        root-r (region/make-heap-region ROOT_BYTES)
-        rmap-r (region/make-heap-region READER_MAP_BYTES)]
+        root-r (region/make-heap-region root-bytes)
+        rmap-r (region/make-heap-region reader-map-bytes)]
     (init-domain-root! root-r)
     (let [slot-idx (mmap-claim-slot! root-r)]
       (write-heartbeat! root-r slot-idx)
@@ -883,7 +883,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- live-ptr? [ptr]
-  (and (not= ptr alloc/NIL_OFFSET) (not= ptr CLAIMED_SENTINEL)))
+  (and (not= ptr alloc/NIL_OFFSET) (not= ptr claimed-sentinel)))
 
 (defn- read-root-value
   "The slab-backed value at ptr, read through sio. The caller pins."
@@ -1020,7 +1020,7 @@
   [{:keys [retire-q flush-ts] :as ds}]
   (let [now (proc/now-ms)]
     (when (or (> (- now @flush-ts) FLUSH_INTERVAL_MS)
-              (> (count @retire-q) FLUSH_QUEUE_THRESHOLD))
+              (> (count @retire-q) flush-queue-threshold))
       (reset! flush-ts now)
       (flush-zero-queue! ds))))
 
@@ -1955,7 +1955,7 @@
       (let [ptr-off (d/atom-slot-offset i d/ATOM_SLOT_PTR_OFFSET)
             cur-ptr (mem/-load-i32 root-r ptr-off)]
         (if (or (== cur-ptr alloc/NIL_OFFSET) (zero? cur-ptr))
-          (let [w (mem/-cas-i32! root-r ptr-off cur-ptr CLAIMED_SENTINEL)]
+          (let [w (mem/-cas-i32! root-r ptr-off cur-ptr claimed-sentinel)]
             (if (== w cur-ptr)
               (do (mem/-store-i32! root-r (d/atom-slot-offset i d/ATOM_SLOT_HASH_OFFSET) name-hash)
                   (mem/-store-i32! root-r d/ROOT_SLOT_HINT_OFFSET (inc i))
@@ -2026,7 +2026,7 @@
 ;; pairing is a name.
 ;; ---------------------------------------------------------------------------
 
-(def ^:const META_ATOM_PREFIX
+(def ^:const meta-atom-prefix
   "The reserved prefix of a meta-atom's registry name: the meta-atom of the
    atom registered as n is registered as (str META_ATOM_PREFIX n)."
   "eve.meta/")
@@ -2049,7 +2049,7 @@
    (let [nm (or (registered-name a)
                 (throw (ex-info "eve.atom/meta-atom: the atom has no registered name" {:slot (-atom-slot-idx a)})))]
      (lookup-or-create-mmap-atom! (MmapAtomDomain. (atom-domain-state a) (clojure.core/atom {}))
-                                  (str META_ATOM_PREFIX nm) initial-value))))
+                                  (str meta-atom-prefix nm) initial-value))))
 
 (defn version
   "[domain-epoch root-pointer] of atom a, read epoch first: equal readings name one value of a — a commit to any atom

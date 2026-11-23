@@ -51,14 +51,14 @@
    [eve.type-readers]
    [eve.deftype-proto.macros :as pmac]))
 
-(def ^:const ValueArray-type-id 0x1F)
+(def ^:const value-array-type-id 0x1F)
 (def ^:const HEADER 8)
 
-(def ^:const KIND_NIL 0)
-(def ^:const KIND_INT32 1)
-(def ^:const KIND_POINTER 2)
-(def ^:const KIND_TAG 3)
-(def ^:const KIND_BLOCK 4)
+(def ^:const kind-nil 0)
+(def ^:const kind-int32 1)
+(def ^:const kind-pointer 2)
+(def ^:const kind-tag 3)
+(def ^:const kind-block 4)
 
 (defn- payload-base
   "Where an n-slot array's payloads start (4-aligned, after the kind and tag
@@ -125,9 +125,9 @@
                (slab/write-u8! sio off (+ HEADER n i) tag)
                (slab/write-i32! sio off (+ pb (* 4 i)) payload))]
     (if (nil? v)
-      (put! KIND_NIL 0 0)
+      (put! kind-nil 0 0)
       (if-let [[tag o] (eve-pointer sio v)]
-        (put! KIND_POINTER tag o)
+        (put! kind-pointer tag o)
         (let [bs  (encode sio v)
               len (byte-len bs)]
           (cond
@@ -137,31 +137,31 @@
                  (or (== (byte-at bs 2) ser/FAST_TAG_INT32)
                      (some? (ser/get-type-constructor (byte-at bs 2)))))
             (let [tag (byte-at bs 2)]
-              (put! (if (== tag ser/FAST_TAG_INT32) KIND_INT32 KIND_POINTER) tag (i32-at bs 3)))
+              (put! (if (== tag ser/FAST_TAG_INT32) kind-int32 kind-pointer) tag (i32-at bs 3)))
 
             (and (== len 3) (magic? bs))
-            (put! KIND_TAG (byte-at bs 2) 0)
+            (put! kind-tag (byte-at bs 2) 0)
 
             :else
             (let [blk (slab/alloc! sio (+ 4 len))]
               (slab/write-i32! sio blk 0 len)
               (slab/write-bytes! sio blk 4 bs)
-              (put! KIND_BLOCK 0 blk))))))))
+              (put! kind-block 0 blk))))))))
 
 (defn- read-slot
   "The value in slot i of the n-slot array at off."
   [sio off n i]
   (let [kind (slab/read-u8 sio off (+ HEADER i))]
-    (when-not (== kind KIND_NIL)
+    (when-not (== kind kind-nil)
       (let [payload (slab/read-i32 sio off (+ (payload-base n) (* 4 i)))]
         (cond
-          (== kind KIND_INT32) (long payload)
-          (== kind KIND_BLOCK)
+          (== kind kind-int32) (long payload)
+          (== kind kind-block)
           (let [len (slab/read-i32 sio payload 0)]
             (decode sio (slab/read-bytes sio payload 4 len)))
           :else
           (let [tag (slab/read-u8 sio off (+ HEADER n i))]
-            (if (== kind KIND_TAG)
+            (if (== kind kind-tag)
               (decode sio (enc/bytes-of [d/DIRECT_MAGIC_0 d/DIRECT_MAGIC_1 tag]))
               (if-let [ctor (ser/get-type-constructor tag)]
                 (ctor sio payload)
@@ -213,7 +213,7 @@
                    d/IDirectSerialize (-direct-serialize [_] off)
                    d/ISabStorable
                    (-sab-tag [_] :eve/value-array)
-                   (-sab-encode [_ _] (codec/encode-sab-pointer ValueArray-type-id off))
+                   (-sab-encode [_ _] (codec/encode-sab-pointer value-array-type-id off))
                    (-sab-dispose [_ _] nil)
 
                    clojure.lang.Counted
@@ -253,14 +253,14 @@
   [a b]
   (and (satisfies? IValueArray b) (== (-va-off a) (-va-off b))))
 
-(ser/register-sab-fast-tag! :eve/value-array ValueArray-type-id)
+(ser/register-sab-fast-tag! :eve/value-array value-array-type-id)
 
 (defn- ->value-array [sio off n] (->ValueArray sio off n))
 
 ;; A pointer to an array (a slot, a field, the atom root) reads back as one (a
 ;; named fn: one a top-level form makes is interpreted on clojerl)
 (defn- value-array-from-header [sio off] (->value-array sio off (slab/read-i32 sio off 4)))
-(ser/register-type-constructor! ValueArray-type-id ValueArray-type-id value-array-from-header)
+(ser/register-type-constructor! value-array-type-id value-array-type-id value-array-from-header)
 
 (defn value-array?
   "True for an eve array."
@@ -287,7 +287,7 @@
 (defn- make-array-in [n]
   (let [sio (alloc/current-sio)
         off (slab/alloc! sio (block-size n))]
-    (slab/write-u8! sio off 0 ValueArray-type-id)
+    (slab/write-u8! sio off 0 value-array-type-id)
     (slab/write-i32! sio off 4 n)
      ;; every kind byte nil (a block is handed back as it was left): one
      ;; write of n KIND_NIL (0) bytes

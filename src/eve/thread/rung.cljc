@@ -80,14 +80,14 @@
 ;; Eve atoms: heap, disk, window
 ;; ---------------------------------------------------------------------------
 
-(def ^:private BELL_BYTES "a domain's doorbell region: 1,024 words" 4096)
+(def ^:private bell-bytes "a domain's doorbell region: 1,024 words" 4096)
 
 ;; base path → its doorbell region (one mapping per process)
 (defonce ^:private bells (clojure.core/atom {}))
 
 (defn- bell-region [path]
   (or (get @bells path)
-      (let [r (region/open-mmap-region (str path ".bell") BELL_BYTES)]
+      (let [r (region/open-mmap-region (str path ".bell") bell-bytes)]
         (get (clojure.core/swap! bells (fn [m] (if (contains? m path) m (assoc m path r)))) path))))
 
 (defrecord EveRung [a kind path nm])

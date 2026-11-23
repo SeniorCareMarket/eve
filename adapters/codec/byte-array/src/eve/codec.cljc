@@ -86,11 +86,11 @@
 
 ;; --- OBJ-7: Keyword serialization cache ---
 ;; keyword → bytes, mirroring CLJS kw-ser-cache (a thread-safe host map on
-;; the JVM, enc/new-cache). Emptied when it passes KW_CACHE_MAX.
+;; the JVM, enc/new-cache). Emptied when it passes kw-cache-max.
 
 (def ^:private kw-encode-cache (enc/new-cache))
 
-(def ^:private ^:const KW_CACHE_MAX 4096)
+(def ^:private ^:const kw-cache-max 4096)
 
 ;; --- EVE binary format — manual LE byte helpers (no ByteBuffer alloc) ---
 
@@ -611,7 +611,7 @@
                       (enc/arraycopy ns-utf8 0 b 7 ns-len)
                       (put-i32-le! b (+ 7 ns-len) (long nm-len))
                       (enc/arraycopy nm-utf8 0 b (+ 11 ns-len) nm-len) b))))]
-          (enc/cache-put! kw-encode-cache v result KW_CACHE_MAX)))
+          (enc/cache-put! kw-encode-cache v result kw-cache-max)))
 
     (symbol? v)
     (let [ns-str (namespace v)
