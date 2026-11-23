@@ -190,7 +190,7 @@
             referred from an unsanctioned home"
     (let [root (guard-root)]
       (doseq [f (source-files root "src")
-              :let [{:keys [forms error]} (read-forms f)]
+              :let [{:keys [forms]} (read-forms f)]
               :when forms]
         (let [path (rel-path root f)
               {:keys [nses refers]} (requires-of forms)

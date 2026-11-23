@@ -2350,133 +2350,133 @@
                             :glj [(defmacro defseqhandle [tname & _]
                                     `(defn ~(symbol (str "->" tname)) [& ~'args]
                                        (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
-                            :clj [(defmacro defseqhandle
-                                    "A sequential handle over the node at off. nthf/countf/seqf/repf are
+                            :clj [#_{:clj-kondo/ignore [:unused-binding]} (defmacro defseqhandle
+                                                                            "A sequential handle over the node at off. nthf/countf/seqf/repf are
    fns of (ctx off) (nthf also takes i); flags pick the interfaces."
-                                    [tname fields nthf countf seqf repf & {:keys [vector? stack? list?]}]
-                                    (let [remake (map (fn [f] (if (= f 'mm) 'm f)) fields)
-                                          mfields (mapv (fn [f] (cond (#{'_h '_d} f)
-                                                                      (with-meta f {:unsynchronized-mutable true})
-                                                                      (= f 'ctx) (with-meta f {:tag 'Ctx})
-                                                                      :else f)) fields)
-                                          base-interfaces '[clojure.lang.IHashEq clojure.lang.IObj clojure.lang.Counted
-                                                            clojure.lang.Seqable clojure.lang.IReduce clojure.lang.IReduceInit
-                                                            clojure.lang.Indexed java.lang.Iterable
-                                                            IFlatHandle IHandlePos IFlatDigest]
-                                          interfaces (cond-> base-interfaces
-                                                       vector? (into '[clojure.lang.IPersistentVector clojure.lang.Associative
-                                                                       clojure.lang.ILookup clojure.lang.IPersistentStack
-                                                                       java.util.List])
-                                                       list? (into '[clojure.lang.IPersistentList clojure.lang.IPersistentStack
-                                                                     java.util.List]))]
-                                      `(deftype ~tname ~mfields
-                                         ~@interfaces
-                                         Object
-                                         (equals [this# other#] (node-equiv ~'ctx ~'off other#))
-                                         (hashCode [this#] (.hasheq this#))
-                                         (toString [this#] (pr-str (-rep this#)))
-                                         clojure.lang.IHashEq
-                                         (hasheq [this#] (let [v# ~'_h] (if (some? v#) (long v#) (let [n# (node-hasheq ~'ctx ~'off)] (set! ~'_h n#) n#))))
-                                         clojure.lang.IObj
-                                         (meta [_#] ~'mm)
-                                         (withMeta [_# m] (new ~tname ~@remake))
-                                         IAttachMeta
-                                         (-attach-meta [_# m] (new ~tname ~@remake))
-                                         (-hmeta [_#] ~'mm)
-                                         IFlatHandle
-                                         (-rep [this#] (let [r# (~repf ~'ctx ~'off)]
-                                                         (if (some? ~'mm) (MetaVal. r# (to-rep ~'mm)) r#)))
-                                         (-chunk-bytes [_#] (.-bs ~'ctx))
-                                         IHandlePos
-                                         (-hctx [_#] ~'ctx)
-                                         (-hoff [_#] ~'off)
-                                         IFlatDigest
-                                         (-digest [this#] (let [d# ~'_d] (if (some? d#) (when-not (identical? d# ::none) d#) (let [v# (handle-digest ~'ctx ~'off)] (set! ~'_d (or v# ::none)) v#))))
-                                         clojure.lang.Counted
-                                         (count [_#] (~countf ~'ctx ~'off))
-                                         clojure.lang.Seqable
-                                         (seq [this#] (when (pos? (.count this#)) (~seqf ~'ctx ~'off)))
-                                         clojure.lang.Indexed
-                                         (nth [this# i#] (let [n# (.count this#)]
-                                                           (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#)
-                                                               (throw (IndexOutOfBoundsException. (str i#))))))
-                                         (nth [this# i# nf#] (let [n# (.count this#)]
-                                                               (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#) nf#)))
-                                         clojure.lang.IReduce
-                                         (reduce [this# f#] (reduce f# (seq this#)))
-                                         clojure.lang.IReduceInit
-                                         (reduce [this# f# init#] (reduce f# init# (seq this#)))
-                                         java.lang.Iterable
-                                         (iterator [this#] (clojure.lang.SeqIterator. (or (seq this#) ())))
-                                         ~@(when vector?
-                                             '[clojure.lang.IPersistentVector
-                                               (length [this] (.count this))
-                                               (assocN [this i v] (assocN-flat this i v))
-                                               (cons [this v] (cons-flat this v))
-                                               (pop [this] (pop-flat this))
-                                               (peek [this] (when (pos? (.count this)) (nth this (dec (.count this)))))
-                                               clojure.lang.Associative
-                                               (assoc [this k v] (assocN-flat this (long k) v))
-                                               (containsKey [this k] (and (integer? k) (<= 0 (long k)) (< (long k) (.count this))))
-                                               (entryAt [this k] (when (.containsKey this k) (clojure.lang.MapEntry. k (nth this (long k)))))
-                                               clojure.lang.ILookup
-                                               (valAt [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
-                                                                 (nth this (long k)) nil))
-                                               (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
-                                                                    (nth this (long k)) nf))
-                                               clojure.lang.IPersistentCollection
-                                               (empty [_#] [])
-                                               (equiv [this other] (node-equiv ctx off other))])
-                                         ~@(when (or vector? list?)
-                                             '[java.util.List
+                                                                            [tname fields nthf countf seqf repf & {:keys [vector? stack? list?]}]
+                                                                            (let [remake (map (fn [f] (if (= f 'mm) 'm f)) fields)
+                                                                                  mfields (mapv (fn [f] (cond (#{'_h '_d} f)
+                                                                                                              (with-meta f {:unsynchronized-mutable true})
+                                                                                                              (= f 'ctx) (with-meta f {:tag 'Ctx})
+                                                                                                              :else f)) fields)
+                                                                                  base-interfaces '[clojure.lang.IHashEq clojure.lang.IObj clojure.lang.Counted
+                                                                                                    clojure.lang.Seqable clojure.lang.IReduce clojure.lang.IReduceInit
+                                                                                                    clojure.lang.Indexed java.lang.Iterable
+                                                                                                    IFlatHandle IHandlePos IFlatDigest]
+                                                                                  interfaces (cond-> base-interfaces
+                                                                                               vector? (into '[clojure.lang.IPersistentVector clojure.lang.Associative
+                                                                                                               clojure.lang.ILookup clojure.lang.IPersistentStack
+                                                                                                               java.util.List])
+                                                                                               list? (into '[clojure.lang.IPersistentList clojure.lang.IPersistentStack
+                                                                                                             java.util.List]))]
+                                                                              `(deftype ~tname ~mfields
+                                                                                 ~@interfaces
+                                                                                 Object
+                                                                                 (equals [this# other#] (node-equiv ~'ctx ~'off other#))
+                                                                                 (hashCode [this#] (.hasheq this#))
+                                                                                 (toString [this#] (pr-str (-rep this#)))
+                                                                                 clojure.lang.IHashEq
+                                                                                 (hasheq [this#] (let [v# ~'_h] (if (some? v#) (long v#) (let [n# (node-hasheq ~'ctx ~'off)] (set! ~'_h n#) n#))))
+                                                                                 clojure.lang.IObj
+                                                                                 (meta [_#] ~'mm)
+                                                                                 (withMeta [_# m] (new ~tname ~@remake))
+                                                                                 IAttachMeta
+                                                                                 (-attach-meta [_# m] (new ~tname ~@remake))
+                                                                                 (-hmeta [_#] ~'mm)
+                                                                                 IFlatHandle
+                                                                                 (-rep [this#] (let [r# (~repf ~'ctx ~'off)]
+                                                                                                 (if (some? ~'mm) (MetaVal. r# (to-rep ~'mm)) r#)))
+                                                                                 (-chunk-bytes [_#] (.-bs ~'ctx))
+                                                                                 IHandlePos
+                                                                                 (-hctx [_#] ~'ctx)
+                                                                                 (-hoff [_#] ~'off)
+                                                                                 IFlatDigest
+                                                                                 (-digest [this#] (let [d# ~'_d] (if (some? d#) (when-not (identical? d# ::none) d#) (let [v# (handle-digest ~'ctx ~'off)] (set! ~'_d (or v# ::none)) v#))))
+                                                                                 clojure.lang.Counted
+                                                                                 (count [_#] (~countf ~'ctx ~'off))
+                                                                                 clojure.lang.Seqable
+                                                                                 (seq [this#] (when (pos? (.count this#)) (~seqf ~'ctx ~'off)))
+                                                                                 clojure.lang.Indexed
+                                                                                 (nth [this# i#] (let [n# (.count this#)]
+                                                                                                   (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#)
+                                                                                                       (throw (IndexOutOfBoundsException. (str i#))))))
+                                                                                 (nth [this# i# nf#] (let [n# (.count this#)]
+                                                                                                       (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#) nf#)))
+                                                                                 clojure.lang.IReduce
+                                                                                 (reduce [this# f#] (reduce f# (seq this#)))
+                                                                                 clojure.lang.IReduceInit
+                                                                                 (reduce [this# f# init#] (reduce f# init# (seq this#)))
+                                                                                 java.lang.Iterable
+                                                                                 (iterator [this#] (clojure.lang.SeqIterator. (or (seq this#) ())))
+                                                                                 ~@(when vector?
+                                                                                     '[clojure.lang.IPersistentVector
+                                                                                       (length [this] (.count this))
+                                                                                       (assocN [this i v] (assocN-flat this i v))
+                                                                                       (cons [this v] (cons-flat this v))
+                                                                                       (pop [this] (pop-flat this))
+                                                                                       (peek [this] (when (pos? (.count this)) (nth this (dec (.count this)))))
+                                                                                       clojure.lang.Associative
+                                                                                       (assoc [this k v] (assocN-flat this (long k) v))
+                                                                                       (containsKey [this k] (and (integer? k) (<= 0 (long k)) (< (long k) (.count this))))
+                                                                                       (entryAt [this k] (when (.containsKey this k) (clojure.lang.MapEntry. k (nth this (long k)))))
+                                                                                       clojure.lang.ILookup
+                                                                                       (valAt [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
+                                                                                                         (nth this (long k)) nil))
+                                                                                       (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
+                                                                                                            (nth this (long k)) nf))
+                                                                                       clojure.lang.IPersistentCollection
+                                                                                       (empty [_#] [])
+                                                                                       (equiv [this other] (node-equiv ctx off other))])
+                                                                                 ~@(when (or vector? list?)
+                                                                                     '[java.util.List
              ;; a host List, as APersistentVector/APersistentList are:
              ;; jolt's native sequential equiv accepts a java.util.List
              ;; second operand where it accepts no foreign
              ;; IPersistentVector (measured 2026-11-16, w1b probes), so
              ;; the handles carry the interface on every host of this
              ;; family — (= plain flat) is the same question everywhere.
-                                               (size [this] (.count this))
-                                               (isEmpty [this] (zero? (.count this)))
-                                               (^boolean contains [this o] (boolean (some (fn [e#] (= e# o)) (seq this))))
-                                               (^objects toArray [this] (object-array (seq this)))
-                                               (^objects toArray [this ^objects a] (let [n# (.count this)]
-                                                                                     (if (< (alength a) n#)
-                                                                                       (object-array (seq this))
-                                                                                       (do (dotimes [i# n#] (aset a i# (nth this i#)))
-                                                                                           (when (> (alength a) n#) (aset a n# nil))
-                                                                                           a))))
-                                               (^boolean add [this o] (throw (UnsupportedOperationException.)))
-                                               (^boolean addAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
-                                               (^boolean addAll [this ^int i ^java.util.Collection c] (throw (UnsupportedOperationException.)))
-                                               (^boolean remove [this o] (throw (UnsupportedOperationException.)))
-                                               (^boolean removeAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
-                                               (^boolean retainAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
-                                               (^boolean containsAll [this ^java.util.Collection c] (every? (fn [o#] (.contains this o#)) c))
-                                               (^void clear [this] (throw (UnsupportedOperationException.)))
-                                               (get [this ^int i] (nth this i))
-                                               (set [this ^int i o] (throw (UnsupportedOperationException.)))
-                                               (^void add [this ^int i o] (throw (UnsupportedOperationException.)))
-                                               (remove [this ^int i] (throw (UnsupportedOperationException.)))
-                                               (indexOf [this o] (int (loop [i# 0]
-                                                                        (cond (== i# (.count this)) -1
-                                                                              (= (nth this i#) o) i#
-                                                                              :else (recur (inc i#))))))
-                                               (lastIndexOf [this o] (int (loop [i# (dec (.count this))]
-                                                                            (cond (neg? i#) -1
-                                                                                  (= (nth this i#) o) i#
-                                                                                  :else (recur (dec i#))))))
-                                               (^java.util.ListIterator listIterator [this] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this)))))
-                                               (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this))) i))
-                                               (^java.util.List subList [this ^int s ^int e] (java.util.Collections/unmodifiableList
-                                                                                              (java.util.ArrayList. ^java.util.Collection (map (fn [i#] (nth this i#)) (range s e)))))])
-                                         ~@(when list?
-                                             '[clojure.lang.IPersistentList
-                                               (peek [this] (when (pos? (.count this)) (nth this 0)))
-                                               (pop [this] (pop-flat this))
-                                               clojure.lang.IPersistentCollection
-                                               (cons [this v] (cons-flat this v))
-                                               (empty [_#] ())
-                                               (equiv [this other] (node-equiv ctx off other))]))))])
+                                                                                       (size [this] (.count this))
+                                                                                       (isEmpty [this] (zero? (.count this)))
+                                                                                       (^boolean contains [this o] (boolean (some (fn [e#] (= e# o)) (seq this))))
+                                                                                       (^objects toArray [this] (object-array (seq this)))
+                                                                                       (^objects toArray [this ^objects a] (let [n# (.count this)]
+                                                                                                                             (if (< (alength a) n#)
+                                                                                                                               (object-array (seq this))
+                                                                                                                               (do (dotimes [i# n#] (aset a i# (nth this i#)))
+                                                                                                                                   (when (> (alength a) n#) (aset a n# nil))
+                                                                                                                                   a))))
+                                                                                       (^boolean add [this o] (throw (UnsupportedOperationException.)))
+                                                                                       (^boolean addAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+                                                                                       (^boolean addAll [this ^int i ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+                                                                                       (^boolean remove [this o] (throw (UnsupportedOperationException.)))
+                                                                                       (^boolean removeAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+                                                                                       (^boolean retainAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+                                                                                       (^boolean containsAll [this ^java.util.Collection c] (every? (fn [o#] (.contains this o#)) c))
+                                                                                       (^void clear [this] (throw (UnsupportedOperationException.)))
+                                                                                       (get [this ^int i] (nth this i))
+                                                                                       (set [this ^int i o] (throw (UnsupportedOperationException.)))
+                                                                                       (^void add [this ^int i o] (throw (UnsupportedOperationException.)))
+                                                                                       (remove [this ^int i] (throw (UnsupportedOperationException.)))
+                                                                                       (indexOf [this o] (int (loop [i# 0]
+                                                                                                                (cond (== i# (.count this)) -1
+                                                                                                                      (= (nth this i#) o) i#
+                                                                                                                      :else (recur (inc i#))))))
+                                                                                       (lastIndexOf [this o] (int (loop [i# (dec (.count this))]
+                                                                                                                    (cond (neg? i#) -1
+                                                                                                                          (= (nth this i#) o) i#
+                                                                                                                          :else (recur (dec i#))))))
+                                                                                       (^java.util.ListIterator listIterator [this] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this)))))
+                                                                                       (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this))) i))
+                                                                                       (^java.util.List subList [this ^int s ^int e] (java.util.Collections/unmodifiableList
+                                                                                                                                      (java.util.ArrayList. ^java.util.Collection (map (fn [i#] (nth this i#)) (range s e)))))])
+                                                                                 ~@(when list?
+                                                                                     '[clojure.lang.IPersistentList
+                                                                                       (peek [this] (when (pos? (.count this)) (nth this 0)))
+                                                                                       (pop [this] (pop-flat this))
+                                                                                       clojure.lang.IPersistentCollection
+                                                                                       (cons [this v] (cons-flat this v))
+                                                                                       (empty [_#] ())
+                                                                                       (equiv [this other] (node-equiv ctx off other))]))))])
 
                         #?@(:bb [(defmacro defmaphandle [tname & _]
                                    `(defn ~(symbol (str "->" tname)) [& ~'args]

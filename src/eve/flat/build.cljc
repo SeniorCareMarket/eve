@@ -554,6 +554,7 @@
          :vec (* 4 pos)
          :leaf (* 4 pos)))
 
+     #_{:clj-kondo/ignore [:unused-binding]} ; ck in the retire/children destructuring below is used on the :cljs pass only
      (defn image-tables
        "The image tables of the value at root in a build sio: {:blocks
    [{:offset :size} ...] (root first, then ascending offset),
