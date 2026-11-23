@@ -858,6 +858,7 @@
      ([sio ^bytes wire opts]
       (reopen sio (:root-off (receive-stream! sio wire opts))))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (stream-transfer!, in the #?(:clj ...) section); no cljs caller exists
 (def ^:private default-send-opts
   "The send-side knobs transfer! runs with — set from the STREAM-PLAN
    S2 sweep verdicts (budget + run threshold), recorded in

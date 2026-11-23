@@ -131,6 +131,7 @@
   (is (= [4] (vec (b/from-b64 "B"))) "a lone digit, as the 4-digit group's first byte")
   (is (= (vec (range 256)) (vec (b/from-b64 (b/to-b64 (range 256))))) "every byte value"))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the python3 shell-out below); no cljs caller exists
 (def ^:private kernel-py "import sys, os, base64, hashlib, importlib.util, json
 VS = sys.argv[1]; MODE = sys.argv[2]
 def load(n, p):
@@ -277,6 +278,7 @@ print('%d/%d rows PASS' % (ROWS['n'] - ROWS['fail'], ROWS['n']))
 ;; the members map up with the kernel's own get through eve's adopted pages, then roots it. A map shaped as the read-
 ;; regions spec's state after its first add-member, written by eve: the kernel's lookup finds the value eve wrote
 (def ^:private PK "a696ce5f21e72aa8f082684badf606d5f3676cdaa74d8c72012da599be0a6623")
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (run-the-kernel-gets-what-eve-wrote); no cljs caller exists
 (defn- members-state []
   {:rooms {:private {:members {"m-alice" PK} :messages []}} :keys {:private {}}
    :aegis {:spent {"6f1d2a59e0c4b8a7d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0" true} :ballot-spends {}}})

@@ -208,7 +208,6 @@
            (defn- bi-neg [a] (- a))
            (defn- bi-abs [a] (if (bi< a BI-0) (bi-neg a) a))
            (defn- bi-zero? [a] (bi= a BI-0))
-           (defn- bi-pos? [a] (bi> a BI-0))
            (defn- bi-neg? [a] (bi< a BI-0))
            (defn- bi-cmp [a b] (if (bi< a b) -1 (if (bi> a b) 1 0)))
            (defn- bi-from [x]
@@ -276,7 +275,6 @@
      (defn- bi-str [a] (str a))
      (defn- bi-zero? [a] (zero? a))
      (defn- bi-neg? [a] (neg? a))
-     (defn- bi-pos? [a] (pos? a))
      ;; basilisp's unprimed + - * are checked long ops (an exact token
      ;; past a long threw ArithmeticException: integer overflow); its
      ;; primed ops promote, exactly as on :clj.

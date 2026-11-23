@@ -47,6 +47,7 @@
 ;; framing
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (write!, in the #?(:clj ...) section); no cljs caller exists
 (defn- frame-bytes
   "The chunk bytes carrying one value: the value packed as the sole
    element of a vector (see the ns docstring)."

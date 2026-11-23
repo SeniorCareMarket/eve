@@ -364,6 +364,7 @@
 ;; there is one, -sio-write-i32! through the sio where there is not.
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the :clj fast-path block in copy-run); no cljs caller exists
 (defn- put-i32-arr!
   "The little-endian i32 store of v at byte i of a (the target heap array)."
   [^bytes a ^long i ^long v]

@@ -213,6 +213,7 @@
            base))
        (or base {:kind 20})))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (encode's :clj arm; the :cljs arm throws not-built yet)
 (defn- explicit-plan
   "The plan when the caller names :kind — narrowed takes :base/:width
    from opts or from the values; run-end plans its values column."

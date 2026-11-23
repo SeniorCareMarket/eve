@@ -439,6 +439,7 @@
 ;; page's wire and blob traffic cross no HTTP hop to reach them.
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the JVM media file handler); no cljs caller exists
 (def ^:private page-mime
   {"html" "text/html" "js" "text/javascript" "mjs" "text/javascript"
    "json" "application/json" "edn" "application/edn" "css" "text/css"
