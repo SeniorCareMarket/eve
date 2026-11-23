@@ -27,4 +27,5 @@
 
 ;; this process's module slab readied as eve.alpha loads (a promise of its
 ;; WASM upgrades)
+#_{:clj-kondo/ignore [:unused-private-var]} ; defonce for its load-time side effect: (ps/init!) starts the runtime; the promise itself is observed through eve.promise machinery, never read by name here
 (defonce ^:private init-promise (ps/init!))

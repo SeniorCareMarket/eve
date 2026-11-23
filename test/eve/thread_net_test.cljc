@@ -51,10 +51,6 @@
 
 (defn- fresh [] (str "et3-" (rand-int 1000000000)))
 
-(defn- until [ms f]
-  (let [deadline (+ (proc/now-ms) ms)]
-    (loop [] (or (f) (if (> (proc/now-ms) deadline) nil (do (proc/sleep-ms! 10) (recur)))))))
-
 (defn- close-path! [path] (ea/close-atom-domain! (ea/persistent-atom-domain path)))
 
 ;; ---------------------------------------------------------------------------

@@ -397,9 +397,6 @@
                      (- (mem/-load-i32 r d/SLAB_HDR_TOTAL_BLOCKS)
                         (mem/-load-i32 r d/SLAB_HDR_FREE_COUNT))))))
 
-     (defn- class-of ^long [^long n]
-       (cond (<= n 32) 0 (<= n 64) 1 (<= n 128) 2 (<= n 256) 3 (<= n 512) 4 (<= n 1024) 5 :else 6))
-
      (defn- caught-check
        "The :eve.flat.place/check of the ex-info f throws, or nil when f does not throw."
        [f]

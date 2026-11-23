@@ -42,8 +42,6 @@
 
 (def ^:private atom-name "contract/ds-flagship")
 (def ^:private workers 4)
-(def ^:private per-worker 100)
-
 (defn- base-tx []
   (mapv (fn [i] {:db/id i :name (str "base-" i) :age (+ 20 i)})
         (range 1 11)))

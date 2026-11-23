@@ -96,12 +96,6 @@
    :message (or (ex-message e) (str e))
    :data (ex-data e)})
 
-(defn- data?
-  "May x travel to another heap: EDN that reads back equal?"
-  [x]
-  (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)
-      (and (coll? x) (not (record? x)) (every? data? (if (map? x) (mapcat identity x) x)))))
-
 (defn- ring! [id]
   (let [b (:bell @state)]
     (js/Atomics.add b (bell-word id) 1)

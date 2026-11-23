@@ -291,6 +291,7 @@
    [[237 160 128 237 176 128] [65533 65533]]
    [[225 128 65 66] [65533 65 66]]])
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :cljs pass (the expected-answers lookup in the divergence deftest); the :clj pass reads the JDK answers directly
 (def ^:private utf8-js-divergence
   "Malformed input only: a surrogate code point in three-byte form (ED A0..BF xx). The JDK's decoder replaces the
    three bytes with one U+FFFD; the WHATWG decoder (TextDecoder, every JavaScript host) replaces each byte. Measured

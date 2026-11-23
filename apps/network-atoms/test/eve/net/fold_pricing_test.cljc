@@ -30,7 +30,6 @@
                    :headers {"Authorization" "Bearer k"} :body "{\"atom_id\":\"a1\"}"})
     [ra s p]))
 
-(defn- puts [s] (map second (filter (fn [e] (= "PUT" (first e))) @(:log s))))
 (defn- img-key [v] (sha/sha256-hex (snap/trunk-bytes v)))
 (defn- root-key [ra] (:root-key @(.-state ra)))
 

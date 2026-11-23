@@ -116,27 +116,6 @@
   (gen/one-of [(gen/choose -20 20)
                (gen/elements [:a :b :c :d :e :f :g :h :i :j])]))
 
-(def ^:private gen-set-op
-  "Generator for a single set operation (conj/disj only).
-   contains? is omitted due to a known Eve set lookup bug being fixed separately."
-  (gen/one-of
-   [(gen/fmap (fn [e] [:conj e]) gen-set-elem)
-    (gen/fmap (fn [e] [:disj e]) gen-set-elem)]))
-
-(defn- apply-set-op
-  "Apply a set operation to both an Eve set and reference set.
-   Returns [eve-set ref-set]."
-  [[eve-s ref-s] [op & args]]
-  (case op
-    :conj (let [[e] args]
-            [(conj eve-s e) (conj ref-s e)])
-    :disj (let [[e] args]
-            [(disj eve-s e) (disj ref-s e)])
-    :contains? (let [[e] args]
-                 (is (= (contains? eve-s e) (contains? ref-s e))
-                     (str "contains? mismatch for " e))
-                 [eve-s ref-s])))
-
 ;; ============================================================================
 ;; Map fuzz tests
 ;; ============================================================================

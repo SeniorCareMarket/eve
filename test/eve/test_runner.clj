@@ -189,11 +189,6 @@
 ;; Suite registry (mirrors CLJS side, for :list and :node subprocess dispatch)
 ;;-----------------------------------------------------------------------------
 
-(def ^:private suite-names
-  ["all" "core" "array" "slab" "large-scale" "epoch-gc" "xray" "direct-sab"
-   "obj" "deftype" "sorted-migration" "batch2" "batch3" "batch4" "validation"
-   "dom-proxy"])
-
 (def ^:private all-suites
   "Individual suites run when 'all' is requested via :node.
    Each runs in its own node process for clean allocator state."
