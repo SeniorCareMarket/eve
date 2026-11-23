@@ -69,7 +69,7 @@
                                 ;; subtree.
                                 32)]
                    ;; See Note 2 in file transients.cljs
-                   (if-not (overflow? child (- shift 5) ccnt)
+                   (when-not (overflow? child (- shift 5) ccnt)
                      (push-tail (- shift 5) ccnt root-edit
                                 child
                                 tail-node))))]
@@ -135,7 +135,7 @@
               (aset new-rngs subidx (- (aget new-rngs subidx) 32))
               (aset arr subidx new-child)
               (aset arr 32 new-rngs)
-              (if (nil? new-child)
+              (when (nil? new-child)
                 (aset new-rngs 32 (dec (aget new-rngs 32))))
               (->VectorNode root-edit arr))
 
@@ -146,7 +146,7 @@
               (aset new-rngs subidx (- (aget new-rngs subidx) diff))
               (aset arr subidx new-child)
               (aset arr 32 new-rngs)
-              (if (nil? new-child)
+              (when (nil? new-child)
                 (aset new-rngs 32 (dec (aget new-rngs 32))))
               (->VectorNode root-edit arr))))
 

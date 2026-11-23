@@ -169,7 +169,7 @@
       (array-copy arr 0 new-arr 0 end)
       (->VectorNode nil new-arr))
     (let [reg? (regular? node)
-          rngs (if-not reg? (node-ranges node))
+          rngs (when-not reg? (node-ranges node))
           i    (bit-and (bit-shift-right (dec end) shift) 0x1f)
           i    (if reg?
                  i
@@ -197,7 +197,7 @@
                              (last-range new-child)))]
       (array-copy arr 0 new-arr 0 i)
       (aset new-arr i new-child)
-      (if-not (and reg? regular-child?)
+      (when-not (and reg? regular-child?)
         (let [new-rngs (make-array 33)
               step     (bit-shift-left 1 shift)]
           (if reg?
@@ -221,7 +221,7 @@
       (->VectorNode nil new-arr))
     (let [reg? (regular? node)
           arr  (.-arr node)
-          rngs (if-not reg? (node-ranges node))
+          rngs (when-not reg? (node-ranges node))
           i    (bit-and (bit-shift-right start shift) 0x1f)
           i    (if reg?
                  i
@@ -281,7 +281,7 @@
           (array-copy arr (if (nil? new-child) (inc i) i)
                       new-arr 0
                       new-len)
-          (if-not (nil? new-child)
+          (when-not (nil? new-child)
             (aset new-arr 0 new-child))
           (aset new-arr 32 rngs)
           (->VectorNode (.-edit node) new-arr))
@@ -297,7 +297,7 @@
           (array-copy arr (if (nil? new-child) (inc i) i)
                       new-arr 0
                       new-len)
-          (if-not (nil? new-child)
+          (when-not (nil? new-child)
             (aset new-arr 0 new-child))
           (aset new-arr 32 new-rngs)
           (->VectorNode (.-edit node) new-arr))))))
@@ -737,7 +737,7 @@
                   (recur (inc i) (next xs))))
               (aset new-arr i (->VectorNode nil a))
               (recur (inc i) (next bs)))))
-        (if-not reg?
+        (when-not reg?
           (aset new-arr 32 (regular-ranges 5 p)))
         (vreset! transferred-leaves sbc2)
         (array new-n1 nil))
@@ -762,7 +762,7 @@
                 (aset new-arr1 i (->VectorNode nil a))
                 (aset new-arr2 (- i 32) (->VectorNode nil a)))
               (recur (inc i) (next bs)))))
-        (if-not reg?
+        (when-not reg?
           (aset new-arr2 32 (regular-ranges 5 (- p 1024))))
         (vreset! transferred-leaves (- 1024 sbc1))
         (array new-n1 new-n2)))))
@@ -849,7 +849,7 @@
                     (aset a i gc)
                     (aset r i (+ o gcr))
                     (recur (inc i) (+ o gcr) (next gcs))))
-                (if (and (< i 32) (> (+ (* i 32) (count block)) sbc1))
+                (when (and (< i 32) (> (+ (* i 32) (count block)) sbc1))
                   (let [tbs (- (+ (* i 32) (count block)) sbc1)
                         li  (dec (aget r 32))
                         d   (if (>= tbs 32)
@@ -1043,7 +1043,7 @@
             (loop [idx 0
                    remaining-gc grandchildren
                    elem-sum 0]
-              (if-let [remaining-gc (seq remaining-gc)]
+              (when-let [remaining-gc (seq remaining-gc)]
                 (let [grandchild (first remaining-gc)
                       num-elems-this-grandchild (count-vector-elements-beneath
                                                  grandchild grandchild-shift)
@@ -1165,7 +1165,7 @@
                      arr       (make-array (if reg? 32 33))]
                  (aset arr 0 r1)
                  (aset arr 1 (new-path* s1 tail-node))
-                 (if-not reg?
+                 (when-not reg?
                    (let [rngs (make-array 33)]
                      (aset rngs 32 2)
                      (aset rngs 0 (- (count v1) (alength tail)))

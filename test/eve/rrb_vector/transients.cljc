@@ -18,13 +18,13 @@
   (if (identical? (.-edit node) edit)
     node
     (let [new-arr (aclone (.-arr node))]
-      (if (== 33 (alength new-arr))
+      (when (== 33 (alength new-arr))
         (aset new-arr 32 (aclone (aget new-arr 32))))
       (->VectorNode edit new-arr))))
 
 (defn editable-root [root]
   (let [new-arr (aclone (.-arr root))]
-    (if (== 33 (alength new-arr))
+    (when (== 33 (alength new-arr))
       (aset new-arr 32 (aclone (aget new-arr 32))))
     ;; eve: the edit token is a fresh host object (it never enters eve memory)
     (->VectorNode (token) new-arr)))
@@ -79,7 +79,7 @@
                                   ;; the subtree.
                                   32)]
                      ;; See Note 2
-                     (if-not (overflow? child (- shift 5) ccnt)
+                     (when-not (overflow? child (- shift 5) ccnt)
                        (push-tail! (- shift 5) ccnt root-edit
                                    child
                                    tail-node))))]
@@ -145,7 +145,7 @@
               (let [arr (.-arr ret)]
                 (aset rngs subidx (- (aget rngs subidx) 32))
                 (aset arr  subidx new-child)
-                (if (nil? new-child)
+                (when (nil? new-child)
                   (aset rngs 32 (dec (aget rngs 32))))
                 ret)
 
@@ -155,7 +155,7 @@
                     arr  (.-arr ret)]
                 (aset rngs subidx (- (aget rngs subidx) diff))
                 (aset arr  subidx new-child)
-                (if (nil? new-child)
+                (when (nil? new-child)
                   (aset rngs 32 (dec (aget rngs 32))))
                 ret)))
 

@@ -14,11 +14,11 @@
 (def ^:const elide-debug-printouts? true)
 
 (defmacro assert [& args]
-  (if-not elide-assertions?
+  (when-not elide-assertions?
     `(clojure.core/assert ~@args)))
 
 (defmacro dbg [& args]
-  (if-not elide-debug-printouts?
+  (when-not elide-debug-printouts?
     `(prn ~@args)))
 
 (defmacro dbg- [& _args])

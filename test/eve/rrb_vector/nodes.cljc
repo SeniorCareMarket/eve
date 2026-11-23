@@ -116,7 +116,7 @@
       (let [r?      (regular? parent)
             new-arr (make-array (if r? 32 33))]
         (array-copy arr 1 new-arr 0 31)
-        (if-not r?
+        (when-not r?
           (let [rngs     (node-ranges parent)
                 rng0     (aget rngs 0)
                 new-rngs (make-array 33)
@@ -204,20 +204,20 @@
   (let [reg? (== 32 (alength (.-arr node)))
         len  (if reg? 32 33)
         arr  (make-array len)
-        rngs (if-not reg?
+        rngs (when-not reg?
                (doto (make-array 33)
                  (aset 0 (alength (.-arr node)))
                  (aset 32 1)))
         ret  (->VectorNode nil arr)]
     (loop [arr arr shift shift]
       (if (== shift 5)
-        (do (if-not reg?
+        (do (when-not reg?
               (aset arr 32 rngs))
             (aset arr 0 node))
         (let [a (make-array len)
               e (->VectorNode nil a)]
           (aset arr 0 e)
-          (if-not reg?
+          (when-not reg?
             (aset arr 32 rngs))
           (recur a (- shift 5)))))
     ret))
@@ -228,7 +228,7 @@
         arr      (.-arr node)
         li       (index-of-nil arr)
         new-arr  (make-array (if reg? 32 33))
-        rngs     (if-not (regular? node) (node-ranges node))
+        rngs     (when-not (regular? node) (node-ranges node))
         cret     (if (== shift 5)
                    (->VectorNode nil tail)
                    (fold-tail (aget arr (dec li))
@@ -240,7 +240,7 @@
                                     (- (aget rngs li) (aget rngs (dec li)))
                                     (aget rngs 0))))
                               tail))
-        new-rngs (if-not reg?
+        new-rngs (when-not reg?
                    (if rngs
                      (aclone rngs)
                      (regular-ranges shift cnt)))]
@@ -258,7 +258,7 @@
                 (aset new-rngs (dec li)
                       (+ (aget new-rngs (dec li)) tlen)))
               (aset new-rngs 32 li))))
-      (if-not reg?
+      (when-not reg?
         (aset new-arr 32 new-rngs))
       (if (nil? cret)
         (aset new-arr li (new-path* (- shift 5) (->VectorNode nil tail)))
