@@ -404,7 +404,8 @@
               (sequential? v) (apply list (map to-rep v))
               :else (or (convert-rep v) v))
         m #?(:clj (when (instance? clojure.lang.IObj v) (meta v))
-             :cljs (when (satisfies? IMeta v) (meta v)))]
+             :cljs (when (satisfies? IMeta v) (meta v))
+             :lpy (when (satisfies? basilisp.lang.interfaces/IMeta v) (meta v)))]
     (if m
       (MetaVal. rep (to-rep m))
       rep)))
