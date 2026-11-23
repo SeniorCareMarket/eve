@@ -234,7 +234,8 @@
            (define eve-region-mutex (make-mutex))
            (define (eve-region-guard! r rep) (with-mutex eve-region-mutex (eve-region-guardian r rep)) r)
            (define (eve-region-unreachable) (with-mutex eve-region-mutex (eve-region-guardian)))
-           (define (eve-region-bytes n) (let ((bv (make-immobile-bytevector n))) (bytevector-fill! bv 0) bv))
+           (define (eve-region-bytes n) (let ((bv (make-immobile-bytevector n))) (bytevector-fill! bv 0) (lock-object bv) bv))
+           (define (eve-region-unlock! bv) (unlock-object bv))
            (define eve-region-memset (foreign-procedure \"memset\" (u8* int size_t) uptr))
            (define (eve-region-address bv) (eve-region-memset bv 0 0))
 ;; foreign-ref / foreign-set! at optimize-level 3 (#3%) where the address and offset are fixnums: the
@@ -340,8 +341,13 @@
 
 (def ^:private unreachable (scheme/proc "eve-region-unreachable"))
 
-;; n zeroed bytes in Chez's heap, immobile
+;; n zeroed bytes in Chez's heap, immobile and locked: Chez 10.4.1 as jolt v0.8.28 ships it moves an immobile
+;; bytevector of a few MB in some collections ((collect 0 1 1), which jolt's collector runs near its heap ceiling,
+;; among them: probe/immobile in the eve-perf workspace), and a region's base address must hold for the region's
+;; life. A locked object is never moved; the region's guardian entry unlocks it once the region is unreachable.
 (def ^:private heap-bytes (scheme/proc "eve-region-bytes"))
+
+(def ^:private unlock-bytes! (scheme/proc "eve-region-unlock!"))
 
 ;; a bytevector's data address (a u8* argument is passed as it; memset of 0 bytes answers it)
 (def ^:private bytes-address (scheme/proc "eve-region-address"))
@@ -349,11 +355,14 @@
 (ffi/defcfn jolt-munmap "munmap" [:pointer :size_t] :int)
 
 (defn- unmap-unreachable!
-  "Every mapped region the collector has found unreachable since the last call, unmapped."
+  "Every region the collector has found unreachable since the last call, released: a mapped one unmapped, a heap
+   one's bytevector unlocked (the collector reclaims it then)."
   []
   (loop []
-    (when-let [[p n] (unreachable)]
-      (jolt-munmap p n)
+    (when-let [rep (unreachable)]
+      (if (vector? rep)
+        (let [[p n] rep] (jolt-munmap p n))
+        (unlock-bytes! rep))
       (recur))))
 
 (defn open-mmap-region
@@ -380,12 +389,12 @@
       (guard! (JoltRegion. p size-bytes nil) [p size-bytes]))))
 
 (defn make-heap-region
-  "An IMemRegion over size-bytes of zeroed memory, shared by the process's threads: an immobile bytevector in Chez's
-   heap, reclaimed with the region."
+  "An IMemRegion over size-bytes of zeroed memory, shared by the process's threads: a locked immobile bytevector in
+   Chez's heap, reclaimed with the region."
   [size-bytes]
   (unmap-unreachable!)
   (let [bv (heap-bytes size-bytes)]
-    (JoltRegion. (bytes-address bv) size-bytes bv)))
+    (guard! (JoltRegion. (bytes-address bv) size-bytes bv) bv)))
 
 (defn lustre-region?
   "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
