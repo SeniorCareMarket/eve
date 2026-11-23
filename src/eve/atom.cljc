@@ -825,8 +825,12 @@
    any thread (the GC's, when it collects the read's last view) releases it."
   [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
+    ;; (update m ::views (fnil update (sorted-map)) epoch (fnil inc 0)), spelled out: no fnil closures, no update's
+    ;; apply (a count is never nil)
     (slot-pin! root-r slot-idx
-               (swap! pins update ::views (fnil update (sorted-map)) epoch (fnil inc 0)))))
+               (swap! pins (fn [m]
+                             (let [vs (or (get m ::views) (sorted-map))]
+                               (assoc m ::views (assoc vs epoch (inc (get vs epoch 0))))))))))
 
 (defn- view-unpin! [{:keys [root-r slot-idx pins pin-lock]} epoch]
   (locking pin-lock
@@ -835,7 +839,7 @@
                              (let [vs (get m ::views)
                                    n (dec (get vs epoch 0))
                                    vs (if (pos? n) (assoc vs epoch n) (dissoc vs epoch))]
-                               (if (seq vs) (assoc m ::views vs) (dissoc m ::views))))))))
+                               (if (pos? (count vs)) (assoc m ::views vs) (dissoc m ::views))))))))
 
 (defonce ^:private view-read-hook
   ;; eve.view's registration (it requires this namespace): (fn [raw ctx]
