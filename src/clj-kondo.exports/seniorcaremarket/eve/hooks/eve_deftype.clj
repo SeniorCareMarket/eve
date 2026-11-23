@@ -370,6 +370,17 @@
         offset-node (api/list-node
                      [(api/token-node 'declare)
                       (api/token-node (symbol (str (api/sexpr type-name) "-offset")))])
+        ;; The flat sister type and its header constructor are
+        ;; generated too: (deftype TypeName__Flat ...) and
+        ;; (defn TypeName__from-header [sio header-off] ...)
+        ;; (deftype-proto.macros + sio emission); the flat tests
+        ;; name both.
+        flat-node (api/list-node
+                   [(api/token-node 'declare)
+                    (api/token-node (symbol (str (api/sexpr type-name) "__Flat")))])
+        from-header-node (api/list-node
+                          [(api/token-node 'declare)
+                           (api/token-node (symbol (str (api/sexpr type-name) "__from-header")))])
         opts-node (when opts
                     (let [binds (referenced-names opts (into ['sio__ 'offset__] field-names))]
                       (api/list-node
@@ -378,5 +389,5 @@
                                                  binds))
                         opts])))]
     {:node (api/list-node
-            (into [(api/token-node 'do) deftype-node ctor-node pred-node type-id-node]
+            (into [(api/token-node 'do) deftype-node ctor-node pred-node type-id-node offset-node]
                   (when opts-node [opts-node])))}))

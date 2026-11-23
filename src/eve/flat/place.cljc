@@ -475,7 +475,7 @@
                   (recur (inc p))))))
           ;; PHASE C — the pointer pass: every relocation, resolved from
           ;; the completed plan. Owner byte bases are cached per block.
-          (let [_owner-base (long-array n)
+          (let [owner-base (long-array n)
                 owner-seen (boolean-array n)]
             (dotimes [j nr]
               (let [o (aget rown j) t (aget rtgt j) pos (aget rpos j)

@@ -64,7 +64,8 @@
            eve.stm/sync clojure.core/dosync
            eve.thread/deftask clojure.core/defn
            eve.thread/tfn clojure.core/fn
-           cohost.pool/deftask clojure.core/defn}
+           cohost.pool/deftask clojure.core/defn
+           eve.host/defdelay clojure.core/def}
  :hooks {:analyze-call {eve.alpha/deftype hooks.eve-deftype/deftype
                         eve.deftype/deftype hooks.eve-deftype/deftype
                         eve.deftype-proto.macros/deftype hooks.eve-deftype/deftype
@@ -89,7 +90,9 @@
                                          DateTime DateTime.fromMillisecondsSinceEpoch
                                          MapEntry RangeError RegExp
                                          String.fromCharCodes StringSink
-                                         UnsupportedError uuid]}
+                                         UnsupportedError uuid
+                                         BigInt.parse DateTime.now
+                                         WeakReference bool fallback]}
            ;; Host and dialect namespaces, named the same way as the
            ;; unresolved-symbol exclusions above: .NET's System,
            ;; Environment, DateTimeOffset and Thread, Java's Arrays,
