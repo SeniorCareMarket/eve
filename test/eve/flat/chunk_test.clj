@@ -8,7 +8,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [eve.flat.chunk :as chunk])
-  (:import [java.util Arrays Date UUID]))
+  (:import [java.util Arrays Date]))
 
 ;; ---------------------------------------------------------------------------
 ;; helpers

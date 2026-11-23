@@ -10,7 +10,6 @@
             [eve.flat.chunk :as chunk]
             [eve.flat.io :as io])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream File]
-           [java.nio.file Files]
            [java.util Arrays]))
 
 (defrecord Widget [name size])

@@ -9,7 +9,7 @@
    the JDK adapter's pool. One request a connection (Connection: close), as the socket client speaks."
   (:require [clojure.string :as str])
   (:import [java.net ServerSocket Socket InetSocketAddress]
-           [java.io ByteArrayOutputStream InputStream OutputStream]
+           [java.io ByteArrayOutputStream]
            [java.util Base64]))
 
 (def ^:private reasons {200 "OK" 201 "Created" 204 "No Content" 400 "Bad Request"

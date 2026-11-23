@@ -20,7 +20,6 @@
             [eve.flat.transfer :as t]
             [eve.slab-io :as slab])
   #?(:clj (:import [eve.deftype_proto.alloc JvmSlabCtx]
-                   [java.io ByteArrayOutputStream]
                    [java.util ArrayList Arrays])))
 
 ;; ---------------------------------------------------------------------------

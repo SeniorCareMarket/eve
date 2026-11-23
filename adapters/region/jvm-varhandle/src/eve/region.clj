@@ -29,7 +29,6 @@
    [java.nio ByteBuffer ByteOrder MappedByteBuffer]
    [java.nio.channels FileChannel FileChannel$MapMode]
    [java.nio.file OpenOption Paths StandardOpenOption]
-   [java.util Date UUID]
    [java.util.concurrent ConcurrentHashMap ConcurrentLinkedQueue]
    [java.util.concurrent.locks LockSupport ReentrantLock]))
 

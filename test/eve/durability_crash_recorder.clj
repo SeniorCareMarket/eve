@@ -8,7 +8,7 @@
   Usage: record <variant B|J1|J10> <size counter|kb64> <workdir> <n>"
   (:require [eve.atom :as atom]
             [clojure.java.io :as io])
-  (:import [java.nio.file Files Path CopyOption StandardCopyOption]
+  (:import [java.nio.file Files CopyOption StandardCopyOption]
            [java.io File]))
 
 (defn- opts [variant]

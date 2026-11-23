@@ -6,8 +6,7 @@
    Run: java -cp $(doc/flat/c1-cp.sh) clojure.main -m eve.flat.chunk-bench"
   (:require [cognitect.transit :as transit]
             [eve.codec :as codec])
-  (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
-           [java.util Arrays]))
+  (:import [java.io ByteArrayOutputStream ByteArrayInputStream]))
 
 (load-file "doc/flat/probes/corpora.clj")
 (def messages ((resolve 'flat-probe.corpora/messages) 5000))

@@ -33,7 +33,7 @@
             #?@(:bb [[eve.core :as ecore]]
                 :glj [[eve.core :as ecore]]
                 :jank [[eve.core :as ecore]]))
-  #?(:clj (:import [java.util Arrays HashMap ArrayList])))
+  #?(:clj (:import [java.util HashMap])))
 
 #?(:clj (set! *warn-on-reflection* true))
 

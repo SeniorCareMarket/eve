@@ -201,3 +201,20 @@ Campaign order: small error classes first, mechanical
 warning classes, unused-private-var, lang-aware
 unused-binding, the refer/namespace classes, then the
 unresolved-* modeling classes; Splint and Carve after kondo.
+
+Progress (2026-11-23 ~00:50 ET): commits 08ffc9b (small error
+classes: syntax + ns-mismatch site ignores, static-field call,
+conflicting aliases), 8714216 (private-call closed: 5 defn- →
+defn for the -write-*-coll!/eve-array-from-sab-pointer
+registration surface + cljs.core/pr-writer site ignore),
+a5b3c6f (duplicate-require real fixes + cheshire lib +
+f3fix :relocs site ignore; 3 recount4 dup findings were
+stale-cache phantoms, proven standalone), da601c5
+(redundant-declare: 9 removed, sha-vec + -entries kept with
+site ignores — per-lang declares), 457591e (redundant-do ×21,
+single-logical-operand ×2). Fresh recount5 banked at
+eve-lane-logs/lane3/ (kondo5.edn 170E/1766W/219I at the
+post-batch-2 tree, splint5 2363/572 files, carve5 998 lines).
+Gate spot sets lane3-gate1 + lane3-gate2 all
+baseline-identical. Environment: /root/.m2 had 0-byte stubs
+after a VM cycle; restored from /home/hatch/m2repo (durable).

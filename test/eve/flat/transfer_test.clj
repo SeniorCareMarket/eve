@@ -14,8 +14,7 @@
             [eve.deftype-proto.data :as d]
             [eve.flat.contract :as contract]
             [eve.flat.transfer :as st])
-  (:import [java.io File]
-           [java.nio.file Files Path]
+  (:import [java.nio.file Files]
            [java.util.concurrent TimeUnit]))
 
 ;; ---------------------------------------------------------------------------

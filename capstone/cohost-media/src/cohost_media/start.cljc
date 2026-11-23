@@ -42,7 +42,7 @@
             [cohost-media.member :as member]
             [cohost-media.supervise :as sv])
   #?(:clj (:import [java.net URI URLDecoder]
-                   [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers WebSocket WebSocket$Listener])))
+                   [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers WebSocket WebSocket$Listener])))
 
 ;; ---------------------------------------------------------------------------
 ;; Host leaves: the few places the program touches its own seat directly —

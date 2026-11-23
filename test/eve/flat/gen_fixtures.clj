@@ -8,8 +8,7 @@
    :bytes \"hex\"} — one row per line, the fixture discipline of
    test/eve/fixtures/eve-bytes.edn."
   (:require [eve.flat.chunk-gen :as g]
-            [clojure.java.io :as io])
-  (:import [java.util Arrays]))
+            [clojure.java.io :as io]))
 
 (defn- raw-chunk
   "Hand-assemble a chunk: header + body written by f starting at offset 32."

@@ -17,8 +17,7 @@
             [eve.deftype-proto.data :as d]
             [eve.flat.corpora :as corpora]
             [eve.flat.place :as place]
-            [eve.flat.place-test :as pt])
-  (:import [eve.deftype_proto.alloc JvmSlabCtx]))
+            [eve.flat.place-test :as pt]))
 
 (def ^:private caps
   {0 (* 4 1024 1024) 1 (* 4 1024 1024) 2 (* 8 1024 1024) 3 (* 4 1024 1024) 4 (* 2 1024 1024) 5 (* 2 1024 1024)})

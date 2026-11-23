@@ -31,7 +31,6 @@
             [eve.flat.image :as image]
             [eve.flat.place :as place])
   (:import [java.io File]
-           [java.util Arrays]
            [eve.deftype_proto.alloc JvmSlabCtx]))
 
 ;; ---------------------------------------------------------------------------
