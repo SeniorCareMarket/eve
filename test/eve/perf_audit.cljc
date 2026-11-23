@@ -68,11 +68,11 @@
             (bench-us #(arr/eve-array :int32 v))))
 
   ;; get-typed-view cost (should be ~0)
-  #?(:cljs
-     (let [a (arr/eve-array :float64 (gen-doubles n))]
-       (report "get-typed-view"
-               (bench-us #(tv/get-typed-view a))))
-     :clj nil)
+  #?@(:cljs
+      [(let [a (arr/eve-array :float64 (gen-doubles n))]
+         (report "get-typed-view"
+                 (bench-us #(tv/get-typed-view a))))]
+      :clj [])
 
   ;; Compare: JS Float64Array alloc
   #?(:cljs

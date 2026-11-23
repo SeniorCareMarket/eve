@@ -107,7 +107,7 @@
 (deftest partial-protocol-and-metadata
   (is (thrown? #?(:cljs js/Error :lpy python/Exception :default Throwable)
                (-missing (->Partial 0) 1)))
-  #?(:cljs nil :default (is (= 7 (-value {}))))
+  #?@(:cljs [] :default [(is (= 7 (-value {})))])
   (is (= 42 (-value (->Partial 42))))
   (is (= 42 (-value (->MetaPartial 42 {'eve.portable-surface-test/-value (fn [_] 99)}))))
   (is (= 43 (-value (with-meta {} {'eve.portable-surface-test/-value (fn [_] 43)}))))

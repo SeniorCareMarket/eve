@@ -115,8 +115,8 @@
                             [ok? (:message e) (-> e :data :data)])))
        :with-pool (row (fn [] [@(t/future (where)) (t/with-pool q @(t/future (where))) @(t/future (where))]))
        :laziness (row (fn [] (let [realized (atom 0)
-                                   s (t/pmap collatz-len (counted realized 1))]
-                               (first s)
+                                   s (t/pmap collatz-len (counted realized 1))
+                                   _ (first s)]
                                @realized)))})))
 
 (deftest s1-identity-rows

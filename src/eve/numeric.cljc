@@ -775,7 +775,7 @@
     (ratio? x) (throw (#?(:cljs js/Error. :default ex-info)
                        #?(:cljs "Ratio has no integer value"
                           :default "Ratio has no integer value")
-                       #?(:default {:value x} :cljs nil)))
+                       #?(:cljs nil :default {:value x})))
     (number? x) (wrap-bigint (bi-from x))
     :else (wrap-bigint (bi-from (str x)))))
 
@@ -879,7 +879,7 @@
     :else (throw (#?(:cljs js/Error. :default ex-info)
                   #?(:cljs "numerator requires a ratio or integer"
                      :default "numerator requires a ratio or integer")
-                  #?(:default {:value x} :cljs nil)))))
+                  #?(:cljs nil :default {:value x})))))
 
 (defn denominator
   [x]
@@ -894,7 +894,7 @@
     :else (throw (#?(:cljs js/Error. :default ex-info)
                   #?(:cljs "denominator requires a ratio or integer"
                      :default "denominator requires a ratio or integer")
-                  #?(:default {:value x} :cljs nil)))))
+                  #?(:cljs nil :default {:value x})))))
 
 (defn scale
   "The scale of a decimal (digits to the right of the decimal point; may be
@@ -909,7 +909,7 @@
     :else (throw (#?(:cljs js/Error. :default ex-info)
                   #?(:cljs "scale requires a decimal"
                      :default "scale requires a decimal")
-                  #?(:default {:value x} :cljs nil)))))
+                  #?(:cljs nil :default {:value x})))))
 
 (defn unscaled-value
   "The unscaled integer of a decimal (150 of 1.50M)."
@@ -926,7 +926,7 @@
     :else (throw (#?(:cljs js/Error. :default ex-info)
                   #?(:cljs "unscaled-value requires a decimal"
                      :default "unscaled-value requires a decimal")
-                  #?(:default {:value x} :cljs nil)))))
+                  #?(:cljs nil :default {:value x})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Category and mixed-type arithmetic (Clojure Numbers: FLOATING > DECIMAL >
@@ -1507,7 +1507,7 @@
   (fn [tok] (or (read-number tok)
                 (throw (#?(:cljs js/Error. :default ex-info)
                         (str "Not a number token: " tok)
-                        #?(:default {:token tok} :cljs nil))))))
+                        #?(:cljs nil :default {:token tok}))))))
 
 (defn- read-tagged-N [form]
   (bigint (if (string? form) form (str form))))
@@ -1517,11 +1517,11 @@
     (string? form) (or (read-number form)
                        (throw (#?(:cljs js/Error. :default ex-info)
                                (str "Not a ratio: " form)
-                               #?(:default {:form form} :cljs nil))))
+                               #?(:cljs nil :default {:form form}))))
     (and (sequential? form) (= 2 (count form))) (ratio (first form) (second form))
     :else (throw (#?(:cljs js/Error. :default ex-info)
                   (str "eve/ratio expects \"n/d\" or [n d], got " form)
-                  #?(:default {:form form} :cljs nil)))))
+                  #?(:cljs nil :default {:form form})))))
 
 (defn- read-tagged-M [form]
   (bigdec (if (string? form) form (str form))))

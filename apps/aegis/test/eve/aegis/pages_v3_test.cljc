@@ -111,9 +111,9 @@
         bs (mapv (fn [x] (if (neg? x) (+ x 256) x)) (seq (wire/encode-key v)))]
     (is (= [0xEE 0xDB] (subvec bs 0 2)) "eve-wire")
     ;; (copy-of-range is the byte-array codec's: ClojureScript's eve.encoding has none, its codec slices)
-    #?(:cljs nil
-       :default (is (= [2 255] (mapv #(bit-and % 0xFF) (seq (enc/copy-of-range (enc/bytes-of [1 2 255]) 1 3))))
-                    "copy-of-range over a value bytes-of made"))
+    #?@(:cljs []
+        :default [(is (= [2 255] (mapv #(bit-and % 0xFF) (seq (enc/copy-of-range (enc/bytes-of [1 2 255]) 1 3))))
+                      "copy-of-range over a value bytes-of made")])
     (is (= v (wire/decode nil (enc/bytes-of bs))) "the body decodes, every nested value copied out")))
 
 ;; a /deref's pages are base64 inside a base64 body: eve.net.bytes/from-b64 reads the text's UTF-16 units by index (a

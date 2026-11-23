@@ -22,8 +22,13 @@
 (defn hex-portable "lower-case hex of a byte sequence — the portable reference eve.encoding's bytes->hex plug is held to" [bs]
   (apply str (map (fn [b] (nth HEX2 b)) bs)))
 
+;; The (if e/<plug> ...) tests below are host-plug presence
+;; tests: the plug var is nil on a host without the plug and a
+;; fn on one with it. Kondo models the var from this pass's
+;; definition and calls the test constant; per host it is not,
+;; so the finding is ignored at each condition.
 (defn hex "lower-case hex of a byte sequence (the host's eve.encoding plug when it has one, else hex-portable)" [bs]
-  (if e/bytes->hex (e/bytes->hex bs) (hex-portable bs)))
+  (if #_{:clj-kondo/ignore [:constant-condition]} e/bytes->hex (e/bytes->hex bs) (hex-portable bs)))
 
 ;; character tables keyed by the one-character string (str c): a character is a JVM char, a one-character string on
 ;; ClojureScript and basilisp — (str c) is the same on all, and no host's string method is called
@@ -42,7 +47,7 @@
   (mapv (fn [i] (+ (* 16 (hex-digit (nth s (* 2 i)))) (hex-digit (nth s (inc (* 2 i)))))) (range (quot (count s) 2))))
 
 (defn unhex "the bytes of hex text (even length) (the host's eve.encoding plug when it has one, else unhex-portable)" [s]
-  (if e/hex->bytes (e/hex->bytes s) (unhex-portable s)))
+  (if #_{:clj-kondo/ignore [:constant-condition]} e/hex->bytes (e/hex->bytes s) (unhex-portable s)))
 
 (defn utf8
   "the UTF-8 bytes of a string — by code point, so a host's string type does not matter"
@@ -111,7 +116,7 @@
                    (take-while (fn [i] (< i n)) (iterate (fn [i] (+ i 3)) 0))))))
 
 (defn to-b64 "standard base64 (padded) of a byte sequence (the host's eve.encoding plug when it has one, else to-b64-portable)" [bs]
-  (if e/bytes->b64 (e/bytes->b64 bs) (to-b64-portable bs)))
+  (if #_{:clj-kondo/ignore [:constant-condition]} e/bytes->b64 (e/bytes->b64 bs) (to-b64-portable bs)))
 
 (defn from-b64-portable
   "the bytes of base64 text (characters outside the alphabet — padding, line breaks — are skipped) — the portable
@@ -141,7 +146,7 @@
   "the bytes of base64 text (characters outside the alphabet — padding, line breaks — are skipped; the host's
    eve.encoding plug when it has one, else from-b64-portable)"
   [s]
-  (if e/b64->bytes (e/b64->bytes s) (from-b64-portable s)))
+  (if #_{:clj-kondo/ignore [:constant-condition]} e/b64->bytes (e/b64->bytes s) (from-b64-portable s)))
 
 (defn u32le "the 4 little-endian bytes of a u32" [x] [(mod x 256) (mod (quot x 256) 256) (mod (quot x 65536) 256) (quot (mod x 4294967296) 16777216)])
 
