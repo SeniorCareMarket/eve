@@ -14,12 +14,12 @@
                   (if (= 1 (count bucket))
                     bucket
                     (reduce (fn [out entry]
-                            (if-let [i (first (keep-indexed
-                                              (fn [i old]
-                                                (when (enc/bytes= (nth old 1) (nth entry 1)) i))
-                                              out))]
-                              (assoc out i entry)
-                              (conj out entry)))
+                              (if-let [i (first (keep-indexed
+                                                 (fn [i old]
+                                                   (when (enc/bytes= (nth old 1) (nth entry 1)) i))
+                                                 out))]
+                                (assoc out i entry)
+                                (conj out entry)))
                             [] bucket))))
         (group-by first entries)))
 

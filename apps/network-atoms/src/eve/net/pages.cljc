@@ -381,81 +381,81 @@
    :memo, eve.net.codec/*checked*). A read of the next value costs its changes, not the atom"
   ([root pages] (read-pages root pages nil))
   ([root pages {:keys [prev]}]
-  (let [root (vec root)
-        pk (:known prev)
-        pb (:blocks prev)
-        cache (volatile! {})
+   (let [root (vec root)
+         pk (:known prev)
+         pb (:blocks prev)
+         cache (volatile! {})
         ;; a name of its own, not `pages` again: glojure's let sees a binding inside its own init
-        page-of (fn [k] (or (get @cache k)
-                            (when-let [v (get pages k)]
-                              (let [bs (if (string? v) (b64-page v) (vec v))] (vswap! cache assoc k bs) bs))))
+         page-of (fn [k] (or (get @cache k)
+                             (when-let [v (get pages k)]
+                               (let [bs (if (string? v) (b64-page v) (vec v))] (vswap! cache assoc k bs) bs))))
         ;; a volatile: this read's, in this thread (on the BEAM a process value — an atom's every deref copies it whole)
-        st (volatile! {:blocks {} :known {} :checked 0})
+         st (volatile! {:blocks {} :known {} :checked 0})
         ;; the subtree under k as the earlier read verified it: its entries copied, its images' child bands followed
-        reuse (fn reuse [k]
-                (when-not (contains? (:known @st) k)
-                  (let [img (get pb k)]
-                    (vswap! st (fn [s] (cond-> (assoc-in s [:known k] (get pk k)) img (assoc-in [:blocks k] img))))
-                    (when-let [kind (when img (image-kind img))]
-                      (doseq [o (image-slots img kind)]
-                        (let [cb (sub img o 32)]
-                          (when-not (every? zero? cb) (reuse (b/hex cb)))))))))
-        visit (fn visit [core]
-                (let [cid (sub core 0 16) off (rd48 core 16) band (sub core SHA-OFF 32) k (b/hex band)
-                      bits (bit-and (rd32 core 24) SEQ-ALL)
-                      was (get pk k)]
-                  (if (and was (not (contains? (:known @st) k)) (= cid (vec (:cid was))) (= off (:off was)))
-                    (reuse k)
-                  (when-not (contains? (:known @st) k)
-                    (vswap! st assoc-in [:known k] {:cid cid :off off :bits bits})
-                    (when-not (c/scalar-band? band)
-                      (let [[page local] (block-at page-of cid off)
-                            kind (get KIND-OF-CID (sub page local 16))]
-                        (if (nil? kind)
-                          (let [img (value-image page local)]
-                            (when-not (= band (vec (prim/sha256 img))) (bad "a value block's image is not its band" {:key k}))
-                            (vswap! st (fn [s] (-> s (assoc-in [:blocks k] img) (update :checked inc)))))
-                          (let [hdr (sub page local OWN)
-                                _ (when-not (= VERSION (nth hdr 22)) (bad "a header that is not ExtCID v3" {:key k :version (nth hdr 22)}))
-                                f (rd32 hdr 24)
-                                bs (rd32 page 24)
-                                rest-of (subvec page (+ local OWN) (min (count page) (+ local bs)))
-                                n (body-size rest-of kind (vec-cap bs))
-                                body (subvec rest-of 0 n)
-                                slots (body-slots rest-of kind (vec-cap bs))
-                                img (loop [os slots pos 0 out []]
-                                      (if (empty? os)
-                                        (into out (subvec body pos))
-                                        (let [o (first os)]
-                                          (recur (rest os) (+ o CORE) (-> out (into (subvec body pos o)) (into (sub body (+ o SHA-OFF) 32)))))))
-                                sha (sub hdr SHA-OFF 32)
-                                at (when (flag? f F-ATTESTED) (read-attest hdr f))
-                                d (vec (prim/sha256 (if at (b/join [img (sub hdr ATTEST-OFF 128)]) img)))]
-                            (when-not (= d sha) (bad "a block's digest is not the SHA its header carries" {:key k :kind kind}))
-                            (when-not (or (= band sha) (and (= kind :map-root) (= band (xor32 sha))))
-                              (bad "a block's digest is not the image its parent's slot carries" {:key k}))
-                            (vswap! st (fn [s] (-> s (assoc-in [:blocks k] (if at (with-meta img {::c/attest at}) img))
-                                                  (update :checked inc))))
-                            (doseq [o slots]
-                              (let [s (sub body o CORE)]
-                                (when-not (every? zero? (sub s SHA-OFF 32)) (visit s)))))))))))
-                (sub core SHA-OFF 32))
-        band (visit root)
-        rk (b/hex band)
-        {:keys [blocks known checked]} @st
-        [page local] (block-at page-of (sub root 0 16) (rd48 root 16))
-        hdr (sub page local OWN)
-        f (rd32 hdr 24)
-        memo (or (:memo prev) (c/new-checked))
-        [v rec] (binding [c/*checked* memo] (c/decode-rec band blocks))]
-    {:value v
-     :record rec
-     :memo memo
-     :key rk
-     :stamp (when (and (flag? f F-EXT) (not (flag? f F-ATTESTED)))
-              {:epoch (rd64 hdr ATTEST-OFF) :spec-id (sub hdr SPEC-ID-OFF 32) :evaluator (sub hdr EVALUATOR-OFF 16)
-               :prev (sub hdr PREV-ROOT-OFF 32)})
-     :known known :blocks blocks :checked checked})))
+         reuse (fn reuse [k]
+                 (when-not (contains? (:known @st) k)
+                   (let [img (get pb k)]
+                     (vswap! st (fn [s] (cond-> (assoc-in s [:known k] (get pk k)) img (assoc-in [:blocks k] img))))
+                     (when-let [kind (when img (image-kind img))]
+                       (doseq [o (image-slots img kind)]
+                         (let [cb (sub img o 32)]
+                           (when-not (every? zero? cb) (reuse (b/hex cb)))))))))
+         visit (fn visit [core]
+                 (let [cid (sub core 0 16) off (rd48 core 16) band (sub core SHA-OFF 32) k (b/hex band)
+                       bits (bit-and (rd32 core 24) SEQ-ALL)
+                       was (get pk k)]
+                   (if (and was (not (contains? (:known @st) k)) (= cid (vec (:cid was))) (= off (:off was)))
+                     (reuse k)
+                     (when-not (contains? (:known @st) k)
+                       (vswap! st assoc-in [:known k] {:cid cid :off off :bits bits})
+                       (when-not (c/scalar-band? band)
+                         (let [[page local] (block-at page-of cid off)
+                               kind (get KIND-OF-CID (sub page local 16))]
+                           (if (nil? kind)
+                             (let [img (value-image page local)]
+                               (when-not (= band (vec (prim/sha256 img))) (bad "a value block's image is not its band" {:key k}))
+                               (vswap! st (fn [s] (-> s (assoc-in [:blocks k] img) (update :checked inc)))))
+                             (let [hdr (sub page local OWN)
+                                   _ (when-not (= VERSION (nth hdr 22)) (bad "a header that is not ExtCID v3" {:key k :version (nth hdr 22)}))
+                                   f (rd32 hdr 24)
+                                   bs (rd32 page 24)
+                                   rest-of (subvec page (+ local OWN) (min (count page) (+ local bs)))
+                                   n (body-size rest-of kind (vec-cap bs))
+                                   body (subvec rest-of 0 n)
+                                   slots (body-slots rest-of kind (vec-cap bs))
+                                   img (loop [os slots pos 0 out []]
+                                         (if (empty? os)
+                                           (into out (subvec body pos))
+                                           (let [o (first os)]
+                                             (recur (rest os) (+ o CORE) (-> out (into (subvec body pos o)) (into (sub body (+ o SHA-OFF) 32)))))))
+                                   sha (sub hdr SHA-OFF 32)
+                                   at (when (flag? f F-ATTESTED) (read-attest hdr f))
+                                   d (vec (prim/sha256 (if at (b/join [img (sub hdr ATTEST-OFF 128)]) img)))]
+                               (when-not (= d sha) (bad "a block's digest is not the SHA its header carries" {:key k :kind kind}))
+                               (when-not (or (= band sha) (and (= kind :map-root) (= band (xor32 sha))))
+                                 (bad "a block's digest is not the image its parent's slot carries" {:key k}))
+                               (vswap! st (fn [s] (-> s (assoc-in [:blocks k] (if at (with-meta img {::c/attest at}) img))
+                                                      (update :checked inc))))
+                               (doseq [o slots]
+                                 (let [s (sub body o CORE)]
+                                   (when-not (every? zero? (sub s SHA-OFF 32)) (visit s)))))))))))
+                 (sub core SHA-OFF 32))
+         band (visit root)
+         rk (b/hex band)
+         {:keys [blocks known checked]} @st
+         [page local] (block-at page-of (sub root 0 16) (rd48 root 16))
+         hdr (sub page local OWN)
+         f (rd32 hdr 24)
+         memo (or (:memo prev) (c/new-checked))
+         [v rec] (binding [c/*checked* memo] (c/decode-rec band blocks))]
+     {:value v
+      :record rec
+      :memo memo
+      :key rk
+      :stamp (when (and (flag? f F-EXT) (not (flag? f F-ATTESTED)))
+               {:epoch (rd64 hdr ATTEST-OFF) :spec-id (sub hdr SPEC-ID-OFF 32) :evaluator (sub hdr EVALUATOR-OFF 16)
+                :prev (sub hdr PREV-ROOT-OFF 32)})
+      :known known :blocks blocks :checked checked})))
 
 (defn page-b64 "a page's bytes as the base64 text eve_page_adopt_b64 decodes" [bytes] (b/to-b64 bytes))
 (defn b64-page "the bytes of a page's base64 text (eve_page_b64_chunk's)" [text] (vec (b/from-b64 text)))

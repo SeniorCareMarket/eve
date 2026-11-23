@@ -20,12 +20,12 @@
             ;; its own host deftypes with the presentation missing and
             ;; their factories die (\"No value supplied for key:
             ;; clojure.lang.Atom\" in ds's Conn). First require, :bb only.
-            #?(:bb [eve.host-completion])
-            [eve.numeric :as numeric]
-            [eve.type-readers :as type-readers]
-            #?(:cljs [cljs.reader :as cljs-reader]
-               :lpy [clojure.edn :as host-edn]
-               :default [clojure.edn :as host-edn])))
+   #?(:bb [eve.host-completion])
+   [eve.numeric :as numeric]
+   [eve.type-readers :as type-readers]
+   #?(:cljs [cljs.reader :as cljs-reader]
+      :lpy [clojure.edn :as host-edn]
+      :default [clojure.edn :as host-edn])))
 
 (defn read-string
   "Read one EDN object from the string s. Options are clojure.edn's

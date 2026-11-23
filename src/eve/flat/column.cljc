@@ -299,7 +299,7 @@
              8 (dotimes [i n] (.putFloat bb (int (+ drel (* 4 i)))
                                          (float (or (nth values i) 0.0))))
              9 (dotimes [i n] (.putDouble bb (int (+ drel (* 8 i)))
-                                           (double (or (nth values i) 0.0))))
+                                          (double (or (nth values i) 0.0))))
              (10 11) (dotimes [i n] (.putLong bb (int (+ drel (* 8 i)))
                                               (long (or (nth values i) 0)))))
            seg)

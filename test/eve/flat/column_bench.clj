@@ -151,7 +151,7 @@
     {:host {:scan (per-row h-scan n) :filter (per-row h-filt n)
             :cell (per-row h-cell 200000) :row (/ (per-row h-row 20000) 1000.0)}
      :flat {:scan (per-row s-scan n) :filter (per-row s-filt n)
-              :cell (per-row s-cell 200000) :row (/ (per-row s-row 20000) 1000.0)}}))
+            :cell (per-row s-cell 200000) :row (/ (per-row s-row 20000) 1000.0)}}))
 
 (defn -main [& args]
   (let [opts (loop [args args opts {}]

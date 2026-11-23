@@ -23,7 +23,7 @@
 (deftest empty-vec-roundtrip
   (testing "empty vector"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= [] (vec v)))
         (is (zero? (count v)))))))
@@ -31,7 +31,7 @@
 (deftest single-element-vec
   (testing "vector with one element"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [42])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [42])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= [42] (vec v)))
         (is (= 1 (count v)))
@@ -40,7 +40,7 @@
 (deftest primitive-vec-roundtrip
   (testing "vector with mixed primitives"
     (with-heap-slab
-      (let [            src [1 "hello" :kw true nil]
+      (let [src [1 "hello" :kw true nil]
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= src (vec v)))
@@ -52,7 +52,7 @@
 (deftest vec-nth
   (testing "nth access by index"
     (with-heap-slab
-      (let [            src [:a :b :c :d :e]
+      (let [src [:a :b :c :d :e]
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (doseq [i (range (count src))]
@@ -61,7 +61,7 @@
 (deftest vec-reduce
   (testing "reduce visits all elements in order"
     (with-heap-slab
-      (let [            src [10 20 30 40 50]
+      (let [src [10 20 30 40 50]
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             result (reduce conj [] v)]
@@ -70,7 +70,7 @@
 (deftest large-vec-roundtrip
   (testing "vector with 50 elements"
     (with-heap-slab
-      (let [            src (vec (range 50))
+      (let [src (vec (range 50))
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= src (vec v)))
@@ -79,7 +79,7 @@
 (deftest nested-vec-with-map-elements
   (testing "vector containing maps — exercises value+sio->eve-bytes nested path"
     (with-heap-slab
-      (let [            src [{:a 1} {:b 2} {:c 3}]
+      (let [src [{:a 1} {:b 2} {:c 3}]
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr coll-factory)]
         (is (= src (vec v)))))))
@@ -91,7 +91,7 @@
 (deftest conj-returns-sabvecroot
   (testing "conj returns SabVecRoot, not PersistentVector"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2 3])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2 3])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             v2  (conj v 4)]
         (is (instance? eve.vec.EveVector v2))
@@ -101,7 +101,7 @@
 (deftest conj-past-node-size
   (testing "conj past NODE_SIZE triggers tail push + tree growth"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             v2  (reduce conj v (range 100))]
         (is (instance? eve.vec.EveVector v2))
@@ -112,7 +112,7 @@
 (deftest assocn-returns-sabvecroot
   (testing "assocN returns SabVecRoot"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [10 20 30])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [10 20 30])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             v2  (assoc v 1 99)]
         (is (instance? eve.vec.EveVector v2))
@@ -121,7 +121,7 @@
 (deftest assocn-append
   (testing "assocN at count acts as conj"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             v2  (assoc v 2 3)]
         (is (= [1 2 3] (vec v2)))))))
@@ -129,7 +129,7 @@
 (deftest pop-returns-sabvecroot
   (testing "pop returns SabVecRoot"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2 3])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2 3])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             v2  (pop v)]
         (is (instance? eve.vec.EveVector v2))
@@ -139,7 +139,7 @@
 (deftest pop-to-empty
   (testing "pop to single element then to empty"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [42])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [42])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             v2  (pop v)]
         (is (zero? (count v2)))
@@ -148,7 +148,7 @@
 (deftest conj-pop-roundtrip
   (testing "build with conj, shrink with pop"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             v2  (reduce conj v (range 70))
             v3  (nth (iterate pop v2) 30)]
@@ -162,7 +162,7 @@
 (deftest vec-ifn
   (testing "SabVecRoot implements IFn"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [10 20 30])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [10 20 30])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= 10 (v 0)))
         (is (= 20 (v 1)))
@@ -176,7 +176,7 @@
 (deftest vec-hasheq
   (testing "hash of SabVecRoot equals hash of equivalent Clojure vector"
     (with-heap-slab
-      (let [            src [1 2 3 4 5]
+      (let [src [1 2 3 4 5]
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= (hash src) (hash v)))))))
@@ -184,7 +184,7 @@
 (deftest vec-print-method
   (testing "pr-str prints as vector literal"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2 3])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [1 2 3])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= "[1 2 3]" (pr-str v)))))))
 
@@ -195,7 +195,7 @@
 (deftest vec-reduce-init
   (testing "reduce with init collects all elements in order"
     (with-heap-slab
-      (let [            src [10 20 30 40 50]
+      (let [src [10 20 30 40 50]
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             result (reduce conj [] v)]
@@ -204,7 +204,7 @@
 (deftest vec-reduce-no-init
   (testing "reduce without init sums elements"
     (with-heap-slab
-      (let [            src [1 2 3 4 5]
+      (let [src [1 2 3 4 5]
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= 15 (reduce + v)))))))
@@ -212,7 +212,7 @@
 (deftest vec-reduce-early-termination
   (testing "reduce with reduced stops early"
     (with-heap-slab
-      (let [            src (vec (range 100))
+      (let [src (vec (range 100))
             hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) src)
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)
             result (reduce (fn [acc x] (if (>= acc 10) (reduced acc) (+ acc x)))
@@ -222,7 +222,7 @@
 (deftest vec-reduce-empty
   (testing "reduce on empty vec"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (= 0 (reduce + 0 v)))
         (is (= 0 (reduce + v)))))))
@@ -234,7 +234,7 @@
 (deftest vec-is-java-list
   (testing "SabVecRoot implements java.util.List"
     (with-heap-slab
-      (let [            hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [10 20 30])
+      (let [hdr (eve-vec/jvm-write-vec! sio (partial codec/value+sio->eve-bytes sio) [10 20 30])
             v   (eve-vec/jvm-sabvec-from-offset sio hdr)]
         (is (instance? java.util.List v))
         (is (= 3 (.size ^java.util.List v)))

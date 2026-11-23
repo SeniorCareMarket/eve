@@ -169,7 +169,7 @@
              (let [kk (aget oks i)]
                (when (not (== kk 0))
                  (loop [h (let [p (unchecked-multiply kk -7046029254386353131)]
-                          (bit-and (bit-xor p (unsigned-bit-shift-right p 16)) nmask))]
+                            (bit-and (bit-xor p (unsigned-bit-shift-right p 16)) nmask))]
                    (if (== (aget nks (int h)) 0)
                      (do (aset nks (int h) kk) (aset nvs (int h) (aget ovs i)))
                      (recur (bit-and (inc h) nmask)))))))
@@ -528,22 +528,22 @@
                           (do (idx-put seen k (+ (long hit) 2))
                               (aset deduped 0 (inc (aget deduped 0))))
                           (let [kind (aget fs (int (+ b 1))) p1 (aget fs (int (+ b 2)))
-                            p2 (aget fs (int (+ b 3))) p3 (aget fs (int (+ b 4)))
-                            ci (alloc/decode-class-idx off)
-                            bytes0 (cursor-fetch cur scratch off kind ci)
-                            scan (t/block-scan sio sio bytes0 kind p1 p2 p3 ci off)
-                            size (long (:size scan))
-                            bytes (Arrays/copyOf bytes0 (int size))
-                            ptrs (:ptrs scan)]
-                        (when dw (.put pending (Long. off) dw))
-                        (idx-put seen k 1)
-                        (push-frame! stack f6 off kind p1 p2 p3 1 bytes ptrs)
-                        (loop [i (dec (count ptrs))]
-                          (when (>= i 0)
-                            (let [pr (nth ptrs i)
-                                  tgt (long (nth pr 5))]
-                              (push-frame! stack f6 tgt (long (nth pr 1)) (long (nth pr 2)) (long (nth pr 3)) (long (nth pr 4)) 0 nil nil))
-                            (recur (dec i))))))))))))
+                                p2 (aget fs (int (+ b 3))) p3 (aget fs (int (+ b 4)))
+                                ci (alloc/decode-class-idx off)
+                                bytes0 (cursor-fetch cur scratch off kind ci)
+                                scan (t/block-scan sio sio bytes0 kind p1 p2 p3 ci off)
+                                size (long (:size scan))
+                                bytes (Arrays/copyOf bytes0 (int size))
+                                ptrs (:ptrs scan)]
+                            (when dw (.put pending (Long. off) dw))
+                            (idx-put seen k 1)
+                            (push-frame! stack f6 off kind p1 p2 p3 1 bytes ptrs)
+                            (loop [i (dec (count ptrs))]
+                              (when (>= i 0)
+                                (let [pr (nth ptrs i)
+                                      tgt (long (nth pr 5))]
+                                  (push-frame! stack f6 tgt (long (nth pr 1)) (long (nth pr 2)) (long (nth pr 3)) (long (nth pr 4)) 0 nil nil))
+                                (recur (dec i))))))))))))
         ;; entries per class (runs collapsed), cut into segments by
         ;; budget; segments keep class order, entries keep index order
         (let [n (aget cnt 0)
@@ -882,7 +882,7 @@
                                      (assoc default-send-opts :digests true)))]
        (cond (ea-atom? x)
              (let [sent (ea/read-pinned x (fn [v] (when (satisfies? d/IEveRoot v)
-                                                   (send v))))]
+                                                    (send v))))]
                (if sent
                  (swap! a (fn [_] (receive-value d/*domain-sio* (:bytes sent)
                                                  {:check? true :digest-trust :trusted})))

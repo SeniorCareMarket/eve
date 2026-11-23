@@ -24,9 +24,9 @@
                     :else (.getBytes ^String body "UTF-8"))
         pub (if bytes (HttpRequest$BodyPublishers/ofByteArray bytes) (HttpRequest$BodyPublishers/noBody))]
     (.build ^HttpRequest$Builder
-            (reduce (fn [^HttpRequest$Builder b [k v]] (if (RESTRICTED (str/lower-case (name k))) b (.header b (name k) (str v))))
-                    (.method (HttpRequest/newBuilder (URI/create url)) (or method "GET") pub)
-                    headers))))
+     (reduce (fn [^HttpRequest$Builder b [k v]] (if (RESTRICTED (str/lower-case (name k))) b (.header b (name k) (str v))))
+             (.method (HttpRequest/newBuilder (URI/create url)) (or method "GET") pub)
+             headers))))
 
 (defn- answer [^HttpResponse resp as]
   (let [raw ^bytes (.body resp)]

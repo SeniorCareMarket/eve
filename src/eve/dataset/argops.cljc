@@ -18,7 +18,7 @@
 (defn- bulk-doubles
   "Extract all elements as a double[] — fast path via IBulkAccess,
    fallback via nth."
-   [col]
+  [col]
   (or (d/-as-double-array col)
       (let [n (e/count col)
             out (double-array n)]
@@ -28,7 +28,7 @@
 (defn- bulk-ints
   "Extract all elements as an int[] — fast path via IBulkAccess,
    fallback via nth."
-   [col]
+  [col]
   (or (d/-as-int-array col)
       (let [n (e/count col)
             out (int-array n)]
@@ -214,7 +214,7 @@
    idx-arr is an :int32 EveArray of indices."
   [col idx-arr]
   (let [idx (or (d/-as-int-array idx-arr)
-                      (bulk-ints idx-arr))
+                (bulk-ints idx-arr))
         n   (alength idx)]
     (if-let [da (d/-as-double-array col)]
       (let [out (double-array n)]

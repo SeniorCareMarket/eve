@@ -34,10 +34,10 @@
    (enc/write! writer (str "#" tag " " (pr-str value))))
   ([writer tag value field-order]
    (enc/write! writer
-     (str "#" tag " {"
-          (apply str (interpose ", " (map (fn [k] (str (pr-str k) " " (pr-str (get value k))))
-                                          field-order)))
-          "}"))))
+               (str "#" tag " {"
+                    (apply str (interpose ", " (map (fn [k] (str (pr-str k) " " (pr-str (get value k))))
+                                                    field-order)))
+                    "}"))))
 
 (defn reader-options
   "Eve registrations, then the caller's dynamic and explicit readers."
@@ -51,11 +51,11 @@
        ;; path too, preserving explicit per-call readers and fallback hooks.
        (let [fallback (:default opts)]
          (assoc opts :default
-           (fn [tag value]
-             (if-let [read-fn (get readers tag)]
-               (read-fn value)
-               (if fallback (fallback tag value)
-                 (throw (ex-info "No reader function for tag" {:tag tag})))))))
+                (fn [tag value]
+                  (if-let [read-fn (get readers tag)]
+                    (read-fn value)
+                    (if fallback (fallback tag value)
+                        (throw (ex-info "No reader function for tag" {:tag tag})))))))
        :default opts)))
 
 #?(:bb
@@ -63,12 +63,12 @@
    ;; is public and is honored where changing *data-readers*' root is not.
    (let [previous *default-data-reader-fn*]
      (alter-var-root #'*default-data-reader-fn*
-       (constantly
-         (fn [tag value]
-           (if-let [read-fn (get (registry/data-readers) tag)]
-             (read-fn value)
-             (if previous (previous tag value)
-               (throw (ex-info "No reader function for tag" {:tag tag})))))))))
+                     (constantly
+                      (fn [tag value]
+                        (if-let [read-fn (get (registry/data-readers) tag)]
+                          (read-fn value)
+                          (if previous (previous tag value)
+                              (throw (ex-info "No reader function for tag" {:tag tag})))))))))
 
 (defn register!
   "Install tag -> reader in the host registry (repeat loading replaces it).
@@ -76,7 +76,7 @@
    Updating roots preserves unrelated tags and current thread bindings."
   [type-key tag read-fn print-info]
   (registry/register-type! type-key
-    {:type-key type-key :type-io {:tag tag :read read-fn :print print-info}})
+                           {:type-key type-key :type-io {:tag tag :read read-fn :print print-info}})
   #?(:squint nil
      ;; squint's reader module (squint-cljs/src/squint/edn.js) exports
      ;; only read-string — there is no tag-parser registry to install
@@ -148,15 +148,15 @@
                     (python/setattr (.get sys/modules "basilisp.edn")
                                     (munge (name sym)) f))]
      (install! 'read-string
-       (fn
-         ([s] (native-read-string s (reader-options {})))
-         ([a b] (if (map? a)
-                  (native-read-string b (reader-options a))
-                  (native-read-string a (reader-options b))))))
+               (fn
+                 ([s] (native-read-string s (reader-options {})))
+                 ([a b] (if (map? a)
+                          (native-read-string b (reader-options a))
+                          (native-read-string a (reader-options b))))))
      (install! 'read
-       (fn
-         ([] (native-read *in* (reader-options {})))
-         ([r] (native-read r (reader-options {})))
-         ([a b] (if (map? a)
-                  (native-read b (reader-options a))
-                  (native-read a (reader-options b))))))))
+               (fn
+                 ([] (native-read *in* (reader-options {})))
+                 ([r] (native-read r (reader-options {})))
+                 ([a b] (if (map? a)
+                          (native-read b (reader-options a))
+                          (native-read a (reader-options b))))))))

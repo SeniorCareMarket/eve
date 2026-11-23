@@ -62,38 +62,38 @@
                        shape ;; serialized: vector of ints
                        strides] ;; serialized: vector of ints
 
-             ITensorAccess
-             (-data [_] data)
-             (-shape [_] shape)
-             (-strides [_] strides)
-             (-elem-offset [_] elem-offset)
+  ITensorAccess
+  (-data [_] data)
+  (-shape [_] shape)
+  (-strides [_] strides)
+  (-elem-offset [_] elem-offset)
 
-             clojure.lang.Counted
-             (count [_]
-               (reduce * 1 shape))
+  clojure.lang.Counted
+  (count [_]
+    (reduce * 1 shape))
 
-             clojure.lang.IHashEq
-             (hasheq [this]
-               (hash [shape (vec (take 100 (e/seq this)))]))
+  clojure.lang.IHashEq
+  (hasheq [this]
+    (hash [shape (vec (take 100 (e/seq this)))]))
 
-             clojure.lang.Seqable
-             (seq [this]
-               (let [n (reduce * 1 shape)]
-                 (when (pos? n)
-                   (map (fn [flat-idx] (flat-get this flat-idx)) (range n)))))
+  clojure.lang.Seqable
+  (seq [this]
+    (let [n (reduce * 1 shape)]
+      (when (pos? n)
+        (map (fn [flat-idx] (flat-get this flat-idx)) (range n)))))
 
-             java.lang.Iterable
-             (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+  java.lang.Iterable
+  (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
-             java.lang.Object
-             (equals [this other]
-               (and (instance? NDBuffer other)
-                    (= shape (-shape other))
-                    (every? true? (map = (e/seq this) (e/seq other)))))
-             (hashCode [this] (.hasheq this))
-             (toString [_]
-               (str "#eve/tensor " (pr-str shape)
-                    " " (arr/subtype->type-kw (arr/array-subtype-code data)))))
+  java.lang.Object
+  (equals [this other]
+    (and (instance? NDBuffer other)
+         (= shape (-shape other))
+         (every? true? (map = (e/seq this) (e/seq other)))))
+  (hashCode [this] (.hasheq this))
+  (toString [_]
+    (str "#eve/tensor " (pr-str shape)
+         " " (arr/subtype->type-kw (arr/array-subtype-code data)))))
 
 ;;-----------------------------------------------------------------------------
 ;; Internal helpers
@@ -288,8 +288,8 @@
    (let [sh (-shape t)
          st (-strides t)]
      (->ndbuffer-in t (-elem-offset t) (-data t)
-                   (vec (map #(e/nth sh %) perm))
-                   (vec (map #(e/nth st %) perm))))))
+                    (vec (map #(e/nth sh %) perm))
+                    (vec (map #(e/nth st %) perm))))))
 
 (defn slice-axis
   "Select a single index along an axis, reducing rank by 1.
@@ -304,19 +304,11 @@
                                  (subvec st (inc axis))))]
     (->ndbuffer-in t new-offset (-data t) new-shape new-strides)))
 
-
-
-
-
-
-
 (defn- strided-read
   "Read element at flat iteration index using stride translation.
    Uses direct typed-view access (no nth protocol dispatch)."
   [data-arr shape strides elem-offset flat-iter-idx]
   (e/nth data-arr (flat-idx->multi shape strides elem-offset flat-iter-idx)))
-
-
 
 ;;-----------------------------------------------------------------------------
 ;; Bulk operations

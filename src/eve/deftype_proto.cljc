@@ -62,11 +62,11 @@
     (case type-hint
       :int8    (list 'let ['b__jvm (list 'eve.slab-io/read-u8
                                          'sio__ slab-off-expr field-offset)]
-                 (list 'if (list '> 'b__jvm 127) (list '- 'b__jvm 256) 'b__jvm))
+                     (list 'if (list '> 'b__jvm 127) (list '- 'b__jvm 256) 'b__jvm))
       :uint8   (list 'eve.slab-io/read-u8 'sio__ slab-off-expr field-offset)
       :int16   (list 'let ['v__jvm (list 'eve.slab-io/read-u16
                                          'sio__ slab-off-expr field-offset)]
-                 (list 'if (list '> 'v__jvm 32767) (list '- 'v__jvm 65536) 'v__jvm))
+                     (list 'if (list '> 'v__jvm 32767) (list '- 'v__jvm 65536) 'v__jvm))
       :uint16  (list 'eve.slab-io/read-u16 'sio__ slab-off-expr field-offset)
       :int32   (list 'eve.slab-io/read-i32 'sio__ slab-off-expr field-offset)
       :uint32  (list 'bit-and
@@ -80,12 +80,12 @@
                                           (list 'long (list 'eve.slab-io/read-i32
                                                             'sio__ slab-off-expr field-offset))
                                           0xFFFFFFFF)
-                            'hi__jvm (list 'bit-and
+                           'hi__jvm (list 'bit-and
                                           (list 'long (list 'eve.slab-io/read-i32
                                                             'sio__ slab-off-expr (+ field-offset 4)))
                                           0xFFFFFFFF)]
-                 (list 'Double/longBitsToDouble
-                       (list 'bit-or (list 'bit-shift-left 'hi__jvm 32) 'lo__jvm))))
+                     (list 'Double/longBitsToDouble
+                           (list 'bit-or (list 'bit-shift-left 'hi__jvm 32) 'lo__jvm))))
     :eve-type
     (list 'eve.slab-io/read-i32 'sio__ slab-off-expr field-offset)
     ;; default
@@ -118,11 +118,11 @@
             (list 'Float/floatToRawIntBits (list 'float val-expr)))
       :float64
       (list 'let ['bits__jvm (list 'Double/doubleToRawLongBits (list 'double val-expr))]
-        (list 'do
-          (list 'eve.slab-io/write-i32! 'sio__ slab-off-expr field-offset
-                (list 'unchecked-int (list 'bit-and 'bits__jvm 0xFFFFFFFF)))
-          (list 'eve.slab-io/write-i32! 'sio__ slab-off-expr (+ field-offset 4)
-                (list 'unchecked-int (list 'unsigned-bit-shift-right 'bits__jvm 32))))))
+            (list 'do
+                  (list 'eve.slab-io/write-i32! 'sio__ slab-off-expr field-offset
+                        (list 'unchecked-int (list 'bit-and 'bits__jvm 0xFFFFFFFF)))
+                  (list 'eve.slab-io/write-i32! 'sio__ slab-off-expr (+ field-offset 4)
+                        (list 'unchecked-int (list 'unsigned-bit-shift-right 'bits__jvm 32))))))
     ;; a slab-qualified offset is unsigned 32-bit [class:3 | block:29]: a block of
     ;; class 4 or above is past 2^31, so its bits, not a checked cast (which
     ;; threw once a process's heap spilled into 512-byte blocks); reads mask
@@ -178,16 +178,16 @@
     ;; Recurse
     (seq? form)
     (with-meta (apply list (map #(jvm-rewrite-set!-forms % field-map slab-off-expr) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(jvm-rewrite-set!-forms % field-map slab-off-expr) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(jvm-rewrite-set!-forms k field-map slab-off-expr)
                                 (jvm-rewrite-set!-forms v field-map slab-off-expr)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 (defn jvm-transform-extend-method-body

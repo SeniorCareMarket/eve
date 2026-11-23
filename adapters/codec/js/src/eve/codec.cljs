@@ -155,9 +155,9 @@
    TextDecoder.decode rejects SharedArrayBuffer views."
   [u8-view]
   (.decode fast-decoder
-    (if (instance? js/SharedArrayBuffer (.-buffer u8-view))
-      (js/Uint8Array. u8-view)
-      u8-view)))
+           (if (instance? js/SharedArrayBuffer (.-buffer u8-view))
+             (js/Uint8Array. u8-view)
+             u8-view)))
 
 ;; Keyword serialization cache: keywords are interned in CLJS (identical? :foo :foo),
 ;; so JS Map lookup by reference is O(1). Avoids TextEncoder + allocation per call.
@@ -242,60 +242,60 @@
   ;; Check cache first
   (or (.get keyword-cache elem)
   ;; Cache miss — serialize and cache
-  (let [result
-        (if (namespace elem)
+      (let [result
+            (if (namespace elem)
           ;; Namespaced keyword
-          (let [ns-str (namespace elem)
-                name-str (name elem)
-                ns-enc (.encode fast-encoder ns-str)
-                name-enc (.encode fast-encoder name-str)
-                ns-len (.-length ns-enc)
-                name-len (.-length name-enc)]
-            (if (and (<= ns-len 255) (<= name-len 255))
-              (let [buf (js/Uint8Array. (+ 5 ns-len name-len))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_KEYWORD_NS_SHORT)
-                (aset buf 3 ns-len)
-                (.set buf ns-enc 4)
-                (aset buf (+ 4 ns-len) name-len)
-                (.set buf name-enc (+ 5 ns-len))
-                buf)
-              (let [buf (js/Uint8Array. (+ 11 ns-len name-len))
-                    dv (js/DataView. (.-buffer buf))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_KEYWORD_NS_LONG)
-                (.setUint32 dv 3 ns-len true)
-                (.set buf ns-enc 7)
-                (.setUint32 dv (+ 7 ns-len) name-len true)
-                (.set buf name-enc (+ 11 ns-len))
-                buf)))
+              (let [ns-str (namespace elem)
+                    name-str (name elem)
+                    ns-enc (.encode fast-encoder ns-str)
+                    name-enc (.encode fast-encoder name-str)
+                    ns-len (.-length ns-enc)
+                    name-len (.-length name-enc)]
+                (if (and (<= ns-len 255) (<= name-len 255))
+                  (let [buf (js/Uint8Array. (+ 5 ns-len name-len))]
+                    (aset buf 0 d/DIRECT_MAGIC_0)
+                    (aset buf 1 d/DIRECT_MAGIC_1)
+                    (aset buf 2 FAST_TAG_KEYWORD_NS_SHORT)
+                    (aset buf 3 ns-len)
+                    (.set buf ns-enc 4)
+                    (aset buf (+ 4 ns-len) name-len)
+                    (.set buf name-enc (+ 5 ns-len))
+                    buf)
+                  (let [buf (js/Uint8Array. (+ 11 ns-len name-len))
+                        dv (js/DataView. (.-buffer buf))]
+                    (aset buf 0 d/DIRECT_MAGIC_0)
+                    (aset buf 1 d/DIRECT_MAGIC_1)
+                    (aset buf 2 FAST_TAG_KEYWORD_NS_LONG)
+                    (.setUint32 dv 3 ns-len true)
+                    (.set buf ns-enc 7)
+                    (.setUint32 dv (+ 7 ns-len) name-len true)
+                    (.set buf name-enc (+ 11 ns-len))
+                    buf)))
           ;; Simple keyword
-          (let [s (name elem)
-                encoded (.encode fast-encoder s)
-                len (.-length encoded)]
-            (if (<= len 255)
-              (let [buf (js/Uint8Array. (+ 4 len))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_KEYWORD_SHORT)
-                (aset buf 3 len)
-                (.set buf encoded 4)
-                buf)
-              (let [buf (js/Uint8Array. (+ 7 len))
-                    dv (js/DataView. (.-buffer buf))]
-                (aset buf 0 d/DIRECT_MAGIC_0)
-                (aset buf 1 d/DIRECT_MAGIC_1)
-                (aset buf 2 FAST_TAG_KEYWORD_LONG)
-                (.setUint32 dv 3 len true)
-                (.set buf encoded 7)
-                buf))))]
+              (let [s (name elem)
+                    encoded (.encode fast-encoder s)
+                    len (.-length encoded)]
+                (if (<= len 255)
+                  (let [buf (js/Uint8Array. (+ 4 len))]
+                    (aset buf 0 d/DIRECT_MAGIC_0)
+                    (aset buf 1 d/DIRECT_MAGIC_1)
+                    (aset buf 2 FAST_TAG_KEYWORD_SHORT)
+                    (aset buf 3 len)
+                    (.set buf encoded 4)
+                    buf)
+                  (let [buf (js/Uint8Array. (+ 7 len))
+                        dv (js/DataView. (.-buffer buf))]
+                    (aset buf 0 d/DIRECT_MAGIC_0)
+                    (aset buf 1 d/DIRECT_MAGIC_1)
+                    (aset buf 2 FAST_TAG_KEYWORD_LONG)
+                    (.setUint32 dv 3 len true)
+                    (.set buf encoded 7)
+                    buf))))]
     ;; Cache the result (evict if cache is too large)
-    (when (>= (.-size keyword-cache) KEYWORD_CACHE_MAX)
-      (.clear keyword-cache))
-    (.set keyword-cache elem result)
-    result)))
+        (when (>= (.-size keyword-cache) KEYWORD_CACHE_MAX)
+          (.clear keyword-cache))
+        (.set keyword-cache elem result)
+        result)))
 
 ;;-----------------------------------------------------------------------------
 ;; Characters — a distinct scalar on every host (FORMAT-DECISIONS.md §4)
@@ -513,7 +513,6 @@
       (.setUint32 (js/DataView. (.-buffer buf)) 3 (.-length tw) true)
       (.set buf tw 7)
       buf)))
-
 
 (defn- as-js-bigint
   "A JS BigInt for an eve.numeric bigint, a raw JS BigInt, or an integer."

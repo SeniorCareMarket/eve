@@ -101,7 +101,7 @@
              [:pcm []]
              [:loudness [:pcm]]
              [:publish [:transcode]]]
-        waveform)
+            waveform)
       :audio
       (into [[:meta []]
              [:tags []]
@@ -109,7 +109,7 @@
              [:pcm []]
              [:loudness [:pcm]]
              [:publish [:transcode]]]
-        waveform)
+            waveform)
       :image [[:meta []] [:phash []] [:thumb []]]
       [])))
 

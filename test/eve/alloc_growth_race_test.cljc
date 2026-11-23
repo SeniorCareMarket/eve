@@ -44,9 +44,9 @@
     (let [dir    (.getPath (java.io.File. (System/getProperty "java.io.tmpdir")
                                           (str "alloc-growth-race-test-" (System/nanoTime))))
           domain (atom/persistent-atom-domain
-                   dir
-                   :capacities {0 2048 1 4096 2 8192 3 16384 4 32768 5 65536}
-                   :journal? false)
+                  dir
+                  :capacities {0 2048 1 4096 2 8192 3 16384 4 32768 5 65536}
+                  :journal? false)
           a      (atom/lookup-or-create-mmap-atom! domain "storm/anchor" nil)
           sio    (atom/atom-sio a)
           ctx    (slab/domain-ctx sio)
@@ -59,14 +59,14 @@
           counts   (clojure.core/atom (vec (repeat 6 0)))
           workers  (mapv (fn [k]
                            (Thread.
-                             (fn []
-                               (let [rnd (java.util.Random. (+ 7 k))]
-                                 (dotimes [_ per]
-                                   (let [s (nth sizes (.nextInt rnd (count sizes)))]
-                                     (try
-                                       (slab/alloc! sio s)
-                                       (swap! counts update (class-of s) inc)
-                                       (catch Throwable th (swap! failures conj th)))))))))
+                            (fn []
+                              (let [rnd (java.util.Random. (+ 7 k))]
+                                (dotimes [_ per]
+                                  (let [s (nth sizes (.nextInt rnd (count sizes)))]
+                                    (try
+                                      (slab/alloc! sio s)
+                                      (swap! counts update (class-of s) inc)
+                                      (catch Throwable th (swap! failures conj th)))))))))
                          (range threads))]
       (doseq [w workers] (.start w))
       (doseq [w workers] (.join w))

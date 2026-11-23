@@ -45,14 +45,14 @@
                                        :tasks #{'eve.thread-rungs/nap} :caps #{} :pools #{:g}
                                        :driving {:block :thread :wake :futex :parallel true}
                                        :transports [{:rung :window :domain "/dev/shm/eve/x/d"}]}])
-                       ["r1" "r2"]))
+                           ["r1" "r2"]))
    :pools {:g {:name :g :kind :domain :state :running :members {"r1" {:threads 2 :tids ["4" "5"]}}}}
    :q {:g []}
    :descs (into {} (map (fn [i] [(str "d" i) {:id (str "d" i) :state :done :pool :g :value i :attempts 1
                                               :work {:task 'eve.thread-rungs/nap :args [1 i] :form-hash 12345}
                                               :owner "r1#4" :orid "r1" :otid "4" :submitted 1792456000000
                                               :claimed 1792456000001 :done 1792456000002}])
-                    (range 20)))})
+                        (range 20)))})
 
 (defn netswap-run [endpoint n size]
   (let [n (num-of n)

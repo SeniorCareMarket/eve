@@ -514,10 +514,10 @@
              ;; (method names are matched by name: a macro's syntax
              ;; quote qualifies them — clojure.core/compare, the
              ;; defining ns's invoke — in its expansion)
-             (let [cmps (filter #(= "compare" (name (first %)))
-                                (get by-head 'java.util.Comparator))]
-               (and (= 1 (count cmps))
-                    (= 3 (count (second (first cmps)))))))
+           (let [cmps (filter #(= "compare" (name (first %)))
+                              (get by-head 'java.util.Comparator))]
+             (and (= 1 (count cmps))
+                  (= 3 (count (second (first cmps)))))))
       (let [[_ [this a b] & body] (first (filter #(= "compare" (name (first %)))
                                                  (get by-head 'java.util.Comparator)))
             invokes (get by-head 'clojure.lang.IFn)
@@ -653,10 +653,10 @@
    seat's defrecord cannot take untranslated."
   [specs]
   (boolean
-    (some (fn [s] (let [t (str s)]
-                    (or (str/starts-with? t "clojure.lang.")
-                        (str/starts-with? t "java."))))
-          (filter symbol? specs))))
+   (some (fn [s] (let [t (str s)]
+                   (or (str/starts-with? t "clojure.lang.")
+                       (str/starts-with? t "java."))))
+         (filter symbol? specs))))
 
 (defn- present-defrecord
   "clojure.core/defrecord, presented for SCI: a spec carrying JVM
@@ -689,10 +689,10 @@
     (if ->forms
       (let [parsed (@parse specs)
             user-tostring? (boolean
-                             (some (fn [{:keys [protocol methods]}]
-                                     (and (contains? '#{Object java.lang.Object} protocol)
-                                          (some #(= 'toString (:name %)) methods)))
-                                   parsed))]
+                            (some (fn [{:keys [protocol methods]}]
+                                    (and (contains? '#{Object java.lang.Object} protocol)
+                                         (some #(= 'toString (:name %)) methods)))
+                                  parsed))]
         (apply sci-defrecord form env name fields
                (@->forms (record-object-group
                            ;; a record is not a deftype: the map-mode
@@ -701,16 +701,16 @@
                            ;; and friends) are refused by SCI's
                            ;; defrecord path, so they come back off;
                            ;; the eve.core translations stay.
-                           (vec (remove (fn [impl]
-                                          (contains? '#{clojure.lang.IPersistentMap
-                                                        clojure.lang.ILookup
-                                                        clojure.lang.Associative
-                                                        clojure.lang.IPersistentCollection
-                                                        clojure.lang.Counted
-                                                        clojure.lang.Seqable}
-                                                     (:protocol impl)))
-                                        (@translate (record-count-home parsed) name)))
-                           user-tostring?))))
+                          (vec (remove (fn [impl]
+                                         (contains? '#{clojure.lang.IPersistentMap
+                                                       clojure.lang.ILookup
+                                                       clojure.lang.Associative
+                                                       clojure.lang.IPersistentCollection
+                                                       clojure.lang.Counted
+                                                       clojure.lang.Seqable}
+                                                    (:protocol impl)))
+                                       (@translate (record-count-home parsed) name)))
+                          user-tostring?))))
       (apply sci-defrecord form env name fields specs))))
 
 (alter-var-root #'clojure.core/defrecord (fn [_] present-defrecord))
@@ -1094,11 +1094,11 @@
         rf (eve-method '-rest)]
     ((fn view [s]
        (lazy-seq
-         (cons (f s)
-               (let [r (rf s)]
-                 (cond (nil? r) nil
-                       (host-instance? clojure.lang.ISeq r) r
-                       :else (view r))))))
+        (cons (f s)
+              (let [r (rf s)]
+                (cond (nil? r) nil
+                      (host-instance? clojure.lang.ISeq r) r
+                      :else (view r))))))
      s)))
 
 (defn- presented-seq
@@ -1123,7 +1123,6 @@
 (alter-var-root #'clojure.core/vec
                 (fn [_] (fn [x]
                           (sci-vec (if (eve-typed? x) (presented-seq x) x)))))
-
 
 ;; first/rest/next on the seat's own types go through eve.core's
 ;; -first/-next directly, NOT through presented-seq's host view:
@@ -1653,11 +1652,11 @@
           (let [[sym val] bindings
                 ctr (gensym "__print_length_")
                 body (clojure.walk/postwalk
-                       (fn [f]
-                         (if (and (seq? f) (= 'recur (first f)))
-                           (list* 'recur (concat (rest f) [(list 'inc ctr)]))
-                           f))
-                       body)]
+                      (fn [f]
+                        (if (and (seq? f) (= 'recur (first f)))
+                          (list* 'recur (concat (rest f) [(list 'inc ctr)]))
+                          f))
+                      body)]
             `(loop [~sym ~val ~ctr 0]
                (when (and ~sym
                           (or (nil? *print-length*)

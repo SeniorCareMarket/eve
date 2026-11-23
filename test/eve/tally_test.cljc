@@ -144,10 +144,10 @@
   "[holder box note-block] offsets of the Holder at :h of the atom's map, read under a pin."
   [x]
   (a/read-pinned x (fn [m]
-           (let [h (get m :h) sio (d/-eve-sio h) ho (d/-root-header-off h)]
-             [ho
-              (slab/read-i32 sio ho 4)
-              (slab/read-i32 sio ho 8)]))))
+                     (let [h (get m :h) sio (d/-eve-sio h) ho (d/-root-header-off h)]
+                       [ho
+                        (slab/read-i32 sio ho 4)
+                        (slab/read-i32 sio ho 8)]))))
 
 (defn- read-holder [x] (a/read-pinned x (fn [m] (let [h (get m :h)] [(box-label (the-box h)) (the-note h)]))))
 

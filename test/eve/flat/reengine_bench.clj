@@ -385,7 +385,7 @@
                        c (largest-run control ci cap-blocks)
                        a (largest-run after ci cap-blocks)]
                    [ci {:control c :after a
-                       :frag (when (pos? c) (- 1.0 (/ (double a) (double c))))}])))
+                        :frag (when (pos? c) (- 1.0 (/ (double a) (double c))))}])))
           classes)))
 
 (defn run-s2 [{:keys [runs warmup only] :as o} size-set]

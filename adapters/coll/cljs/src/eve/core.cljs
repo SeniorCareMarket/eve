@@ -58,7 +58,7 @@
 ;; cljs.core's IWatchable). The semantics are eve.atom's trunk
 ;; watch core, as on every host.
 (defprotocol IRef (-set-validator! [ref f]) (-get-validator [ref])
-  (-get-watches [ref]))
+             (-get-watches [ref]))
 
 ;; printing: the writer is IWriter (cljs.core's pr-writer is private)
 (defn pr-writer [x w _opts] (cljs.core/-write w (cljs.core/pr-str x)))

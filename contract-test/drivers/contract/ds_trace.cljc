@@ -10,4 +10,4 @@
       (catch Throwable t
         (println {:threw (str (type t) " " (.getMessage t))})
         (doseq [f (take 30 (.getStackTrace t))] (println {:frame (str f)}))))
-  (System/exit 0)))
+    (System/exit 0)))

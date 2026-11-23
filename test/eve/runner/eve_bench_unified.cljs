@@ -120,35 +120,35 @@
 
     ;; 3. Timeout guard
     (js/setTimeout
-      (fn []
-        (println "\nTIMEOUT: Benchmarks exceeded 600s time limit")
-        (js/process.exit 1))
-      600000)
+     (fn []
+       (println "\nTIMEOUT: Benchmarks exceeded 600s time limit")
+       (js/process.exit 1))
+     600000)
 
     ;; 4. Wait for workers, then dispatch benchmarks to :core
     (on-when (and (contains? @s/peers :core)
                   (contains? @s/peers :future)
                   (some #(.startsWith (name %) "fp-") (keys @s/peers)))
-      {:max-time 30000}
-      (println (str "Workers ready. Peers: " (set (keys @s/peers))))
-      (js/setTimeout
-        (fn []
-          (println (str "All peers: " (set (keys @s/peers))))
-          (let [git-meta  (git-info)
-                timestamp (iso-timestamp)
-                bench-dir (.resolve path (.dirname path (js* "__filename"))
-                                    ".." ".." "bench")]
-            (println (str "Git: " (:branch git-meta) " @ " (:commit git-meta)))
-            (-> @(in :core [] (run-tests-on-worker!))
-                (.then (fn [results]
-                         (println (str "\n-- " (count results) " benchmark results --"))
-                         (persist-all-results! bench-dir results timestamp git-meta mode)
-                         (println "\n-- Benchmarks complete --")
-                         (js/setTimeout #(js/process.exit 0) 500)))
-                (.catch (fn [err]
-                          (println (str "\nFATAL: " (str err)))
-                          (js/process.exit 1))))))
-        8000))))
+             {:max-time 30000}
+             (println (str "Workers ready. Peers: " (set (keys @s/peers))))
+             (js/setTimeout
+              (fn []
+                (println (str "All peers: " (set (keys @s/peers))))
+                (let [git-meta  (git-info)
+                      timestamp (iso-timestamp)
+                      bench-dir (.resolve path (.dirname path (js* "__filename"))
+                                          ".." ".." "bench")]
+                  (println (str "Git: " (:branch git-meta) " @ " (:commit git-meta)))
+                  (-> @(in :core [] (run-tests-on-worker!))
+                      (.then (fn [results]
+                               (println (str "\n-- " (count results) " benchmark results --"))
+                               (persist-all-results! bench-dir results timestamp git-meta mode)
+                               (println "\n-- Benchmarks complete --")
+                               (js/setTimeout #(js/process.exit 0) 500)))
+                      (.catch (fn [err]
+                                (println (str "\nFATAL: " (str err)))
+                                (js/process.exit 1))))))
+              8000))))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point

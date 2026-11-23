@@ -43,31 +43,31 @@
 
   ;; Timeout guard (longer for perf tests)
   (js/setTimeout
-    (fn []
-      (println "\nTIMEOUT: Tests exceeded 240s time limit")
-      (js/process.exit 1))
-    240000)
+   (fn []
+     (println "\nTIMEOUT: Tests exceeded 240s time limit")
+     (js/process.exit 1))
+   240000)
 
   ;; Wait for workers, then dispatch tests to :core
   (on-when (and (contains? @s/peers :core)
                 (contains? @s/peers :future)
                 (some #(.startsWith (name %) "fp-") (keys @s/peers)))
-    {:max-time 30000}
-    (println "Workers ready. Peers:" (set (keys @s/peers)))
-    (js/setTimeout
-      (fn []
-        (println "Dispatching run-perf! to :core...")
-        (let [result-promise (in :core [] (run-tests-on-worker!))]
-          (-> @result-promise
-              (.then (fn [exit-code]
-                       (println "Tests completed with exit code:" exit-code)
-                       (js/process.exit (if (number? exit-code) exit-code 1))))
-              (.catch (fn [err]
-                        (println "\nFATAL:" (str err))
-                        (when (.-stack err)
-                          (println "Stack:" (.-stack err)))
-                        (js/process.exit 1))))))
-      3000)))
+           {:max-time 30000}
+           (println "Workers ready. Peers:" (set (keys @s/peers)))
+           (js/setTimeout
+            (fn []
+              (println "Dispatching run-perf! to :core...")
+              (let [result-promise (in :core [] (run-tests-on-worker!))]
+                (-> @result-promise
+                    (.then (fn [exit-code]
+                             (println "Tests completed with exit code:" exit-code)
+                             (js/process.exit (if (number? exit-code) exit-code 1))))
+                    (.catch (fn [err]
+                              (println "\nFATAL:" (str err))
+                              (when (.-stack err)
+                                (println "Stack:" (.-stack err)))
+                              (js/process.exit 1))))))
+            3000)))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point

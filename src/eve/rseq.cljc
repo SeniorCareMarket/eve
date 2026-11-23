@@ -14,28 +14,28 @@
             [eve.type-readers]))
 
 (eve/host-deftype RSeq [ci i mta]
-  clojure.lang.IMeta
-  (meta [_] mta)
-  clojure.lang.IObj
-  (withMeta [_ m] (RSeq. ci i m))
-  clojure.lang.Sequential
-  clojure.lang.Counted
-  (count [_] (inc i))
-  clojure.lang.IHashEq
-  (hasheq [coll] (e/hash-ordered-coll coll))
-  clojure.lang.Seqable
-  (seq [coll] coll)
-  clojure.lang.IPersistentCollection
-  (cons [coll o] (clojure.core/cons o (e/seq coll)))
-  (empty [_] ())
-  (equiv [coll other] (c/equiv-sequential coll other))
-  clojure.lang.ISeq
-  (first [_] (e/nth ci i))
-  (next [_] (when (pos? i) (RSeq. ci (dec i) nil)))
-  (more [_] (if (pos? i) (RSeq. ci (dec i) nil) ()))
-  IPrintWithWriter
-  (-pr-writer [coll w opts] (c/pr-sequential-writer w e/pr-writer "(" " " ")" opts coll))
-  java.lang.Object
-  (toString [coll] (e/pr-str* coll))
-  (equals [coll other] (c/equiv-sequential coll other))
-  (hashCode [coll] (e/hash-ordered-coll coll)))
+                  clojure.lang.IMeta
+                  (meta [_] mta)
+                  clojure.lang.IObj
+                  (withMeta [_ m] (RSeq. ci i m))
+                  clojure.lang.Sequential
+                  clojure.lang.Counted
+                  (count [_] (inc i))
+                  clojure.lang.IHashEq
+                  (hasheq [coll] (e/hash-ordered-coll coll))
+                  clojure.lang.Seqable
+                  (seq [coll] coll)
+                  clojure.lang.IPersistentCollection
+                  (cons [coll o] (clojure.core/cons o (e/seq coll)))
+                  (empty [_] ())
+                  (equiv [coll other] (c/equiv-sequential coll other))
+                  clojure.lang.ISeq
+                  (first [_] (e/nth ci i))
+                  (next [_] (when (pos? i) (RSeq. ci (dec i) nil)))
+                  (more [_] (if (pos? i) (RSeq. ci (dec i) nil) ()))
+                  IPrintWithWriter
+                  (-pr-writer [coll w opts] (c/pr-sequential-writer w e/pr-writer "(" " " ")" opts coll))
+                  java.lang.Object
+                  (toString [coll] (e/pr-str* coll))
+                  (equals [coll other] (c/equiv-sequential coll other))
+                  (hashCode [coll] (e/hash-ordered-coll coll)))

@@ -136,17 +136,17 @@
       (check-property
        "jvm-map-ops"
        (prop/for-all [ops (gen/vector gen-map-op 1 50)]
-         (with-heap-slab
-           (let [[eve-m ref-m] (reduce apply-map-op
-                                       [(eve-map/empty-hash-map) {}]
-                                       ops)]
-             (and (= (count eve-m) (count ref-m))
-                  (= eve-m ref-m)
-                  (= ref-m eve-m)
-                  (= (hash eve-m) (hash ref-m))
-                  (every? (fn [[k v]]
-                            (= v (get eve-m k)))
-                          ref-m)))))))))
+                     (with-heap-slab
+                       (let [[eve-m ref-m] (reduce apply-map-op
+                                                   [(eve-map/empty-hash-map) {}]
+                                                   ops)]
+                         (and (= (count eve-m) (count ref-m))
+                              (= eve-m ref-m)
+                              (= ref-m eve-m)
+                              (= (hash eve-m) (hash ref-m))
+                              (every? (fn [[k v]]
+                                        (= v (get eve-m k)))
+                                      ref-m)))))))))
 
 (deftest fuzz-jvm-map-seq-test
   (testing "Map seq produces all entries"
@@ -154,10 +154,10 @@
       (check-property
        "jvm-map-seq"
        (prop/for-all [kvs (gen/vector (gen/tuple gen-map-key gen-map-val) 0 30)]
-         (with-heap-slab
-           (let [ref-m (into {} kvs)
-                 eve-m (into (eve-map/empty-hash-map) kvs)]
-             (= (set (seq eve-m)) (set (seq ref-m))))))))))
+                     (with-heap-slab
+                       (let [ref-m (into {} kvs)
+                             eve-m (into (eve-map/empty-hash-map) kvs)]
+                         (= (set (seq eve-m)) (set (seq ref-m))))))))))
 
 (deftest fuzz-jvm-map-assoc-dissoc-roundtrip-test
   (testing "assoc then dissoc returns to original"
@@ -166,13 +166,13 @@
        "jvm-map-assoc-dissoc-roundtrip"
        (prop/for-all [k gen-map-key
                       v gen-map-val]
-         (with-heap-slab
-           (let [m (eve-map/empty-hash-map)
-                 m2 (assoc m k v)
-                 m3 (dissoc m2 k)]
-             (and (= v (get m2 k))
-                  (nil? (get m3 k))
-                  (= 0 (count m3))))))))))
+                     (with-heap-slab
+                       (let [m (eve-map/empty-hash-map)
+                             m2 (assoc m k v)
+                             m3 (dissoc m2 k)]
+                         (and (= v (get m2 k))
+                              (nil? (get m3 k))
+                              (= 0 (count m3))))))))))
 
 ;; ============================================================================
 ;; Vector fuzz tests
@@ -184,17 +184,17 @@
       (check-property
        "jvm-vec-ops"
        (prop/for-all [ops (gen/vector gen-vec-op 1 50)]
-         (with-heap-slab
-           (let [[eve-v ref-v] (reduce apply-vec-op
-                                       [(eve-vec/empty-sab-vec) []]
-                                       ops)]
-             (and (= (count eve-v) (count ref-v))
-                  (= eve-v ref-v)
-                  (= ref-v eve-v)
-                  (= (hash eve-v) (hash ref-v))
-                  (every? (fn [i]
-                            (= (nth eve-v i) (nth ref-v i)))
-                          (range (count ref-v)))))))))))
+                     (with-heap-slab
+                       (let [[eve-v ref-v] (reduce apply-vec-op
+                                                   [(eve-vec/empty-sab-vec) []]
+                                                   ops)]
+                         (and (= (count eve-v) (count ref-v))
+                              (= eve-v ref-v)
+                              (= ref-v eve-v)
+                              (= (hash eve-v) (hash ref-v))
+                              (every? (fn [i]
+                                        (= (nth eve-v i) (nth ref-v i)))
+                                      (range (count ref-v)))))))))))
 
 (deftest fuzz-jvm-vec-conj-seq-test
   (testing "conj sequence matches reference"
@@ -202,11 +202,11 @@
       (check-property
        "jvm-vec-conj-seq"
        (prop/for-all [elems (gen/vector gen-vec-val 0 50)]
-         (with-heap-slab
-           (let [eve-v (into (eve-vec/empty-sab-vec) elems)
-                 ref-v (vec elems)]
-             (and (= (count eve-v) (count ref-v))
-                  (= (vec (seq eve-v)) ref-v)))))))))
+                     (with-heap-slab
+                       (let [eve-v (into (eve-vec/empty-sab-vec) elems)
+                             ref-v (vec elems)]
+                         (and (= (count eve-v) (count ref-v))
+                              (= (vec (seq eve-v)) ref-v)))))))))
 
 (deftest fuzz-jvm-vec-assoc-test
   (testing "Random assocs maintain equivalence"
@@ -217,16 +217,16 @@
                       updates (gen/vector
                                (gen/tuple (gen/choose 0 29) gen-vec-val)
                                1 10)]
-         (with-heap-slab
-           (let [n (count elems)
-                 valid-updates (filter (fn [[i _]] (< i n)) updates)
-                 eve-v (reduce (fn [v [i val']] (assoc v i val'))
-                               (eve-vec/sab-vec elems)
-                               valid-updates)
-                 ref-v (reduce (fn [v [i val']] (assoc v i val'))
-                               (vec elems)
-                               valid-updates)]
-             (= eve-v ref-v))))))))
+                     (with-heap-slab
+                       (let [n (count elems)
+                             valid-updates (filter (fn [[i _]] (< i n)) updates)
+                             eve-v (reduce (fn [v [i val']] (assoc v i val'))
+                                           (eve-vec/sab-vec elems)
+                                           valid-updates)
+                             ref-v (reduce (fn [v [i val']] (assoc v i val'))
+                                           (vec elems)
+                                           valid-updates)]
+                         (= eve-v ref-v))))))))
 
 ;; ============================================================================
 ;; Set fuzz tests
@@ -238,14 +238,14 @@
       (check-property
        "jvm-set-ops"
        (prop/for-all [ops (gen/vector gen-set-op 1 50)]
-         (with-heap-slab
-           (let [[eve-s ref-s] (reduce apply-set-op
-                                       [(eve-set/empty-hash-set) #{}]
-                                       ops)]
-             (and (= (count eve-s) (count ref-s))
-                  (= eve-s ref-s)
-                  (= ref-s eve-s)
-                  (= (hash eve-s) (hash ref-s))))))))))
+                     (with-heap-slab
+                       (let [[eve-s ref-s] (reduce apply-set-op
+                                                   [(eve-set/empty-hash-set) #{}]
+                                                   ops)]
+                         (and (= (count eve-s) (count ref-s))
+                              (= eve-s ref-s)
+                              (= ref-s eve-s)
+                              (= (hash eve-s) (hash ref-s))))))))))
 
 (deftest fuzz-jvm-set-conj-disj-roundtrip-test
   (testing "conj then disj returns to original"
@@ -253,13 +253,13 @@
       (check-property
        "jvm-set-conj-disj-roundtrip"
        (prop/for-all [e gen-set-elem]
-         (with-heap-slab
-           (let [s (eve-set/empty-hash-set)
-                 s2 (conj s e)
-                 s3 (disj s2 e)]
-             (and (contains? s2 e)
-                  (not (contains? s3 e))
-                  (= 0 (count s3))))))))))
+                     (with-heap-slab
+                       (let [s (eve-set/empty-hash-set)
+                             s2 (conj s e)
+                             s3 (disj s2 e)]
+                         (and (contains? s2 e)
+                              (not (contains? s3 e))
+                              (= 0 (count s3))))))))))
 
 (deftest fuzz-jvm-set-idempotent-conj-test
   (testing "conj same element is idempotent"
@@ -267,9 +267,9 @@
       (check-property
        "jvm-set-idempotent-conj"
        (prop/for-all [e gen-set-elem]
-         (with-heap-slab
-           (let [s (conj (eve-set/empty-hash-set) e)
-                 s2 (conj s e)]
-             (and (= 1 (count s))
-                  (= 1 (count s2))
-                  (= s s2)))))))))
+                     (with-heap-slab
+                       (let [s (conj (eve-set/empty-hash-set) e)
+                             s2 (conj s e)]
+                         (and (= 1 (count s))
+                              (= 1 (count s2))
+                              (= s s2)))))))))

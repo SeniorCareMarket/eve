@@ -6,6 +6,6 @@
   (let [ns-sym (symbol ns-name)]
     (try (require ns-sym)
          (println {:suite-ns ns-sym :result (t/run-tests ns-sym)})
-      (catch Throwable e
-        (println {:suite-ns ns-sym :threw (str (type e) " " (.getMessage e))}))))
+         (catch Throwable e
+           (println {:suite-ns ns-sym :threw (str (type e) " " (.getMessage e))}))))
   (System/exit 0))

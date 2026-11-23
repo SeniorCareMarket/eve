@@ -536,17 +536,17 @@
         t0 (when (and journal *flush-timing*) (now-ms))]
     (when journal
       (jf/with-journal-lock (:file journal)
-                            (fn []
-                              (cond
-                                (coll? sweep)
-                                (alloc/sync-touched! (:sio ds) (into sweep (take-unforced! ds)))
-                                sweep
-                                (do (take-unforced! ds) (alloc/sync-sio! (:sio ds))))
-                              (jf/journal-append! (:file journal)
-                                                  (jf/journal-record (:root-r ds)))
+        (fn []
+          (cond
+            (coll? sweep)
+            (alloc/sync-touched! (:sio ds) (into sweep (take-unforced! ds)))
+            sweep
+            (do (take-unforced! ds) (alloc/sync-sio! (:sio ds))))
+          (jf/journal-append! (:file journal)
+                              (jf/journal-record (:root-r ds)))
                               ;; data force: the record bytes and the file size they need
                               ;; are durable; timestamps are not metadata recovery reads.
-                              (jf/journal-force! (:file journal) false))))
+          (jf/journal-force! (:file journal) false))))
     (when journal
       ;; RETENTION FLOOR — FLUSH-ADVANCE (decision 2026-10-27,
       ;; after the sweep reconciliation measured the checkpoint-only
@@ -595,15 +595,15 @@
    path — no timer thread; the count batch remains the backstop)."
   ([ds] (journal-note-commit! ds nil))
   ([ds offsets]
-    (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
-      (when journal
-        (if (<= limit 1)
-          (journal-flush! ds offsets)
-          (let [n (swap! pending inc)]
-            (when (or (>= n limit)
-                      (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
-              (reset! pending 0)
-              (journal-flush! ds true))))))))
+   (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
+     (when journal
+       (if (<= limit 1)
+         (journal-flush! ds offsets)
+         (let [n (swap! pending inc)]
+           (when (or (>= n limit)
+                     (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
+             (reset! pending 0)
+             (journal-flush! ds true))))))))
 
 (defn- domain-live?
   "Any worker slot ACTIVE with a fresh heartbeat: a process holds this
@@ -655,9 +655,9 @@
                                         ;; over the root's corrupted
                                         ;; one (see the docstring).
                                         (not (enc/bytes=
-                                               (mem/-read-bytes root-r d/ATOM_TABLE_START
-                                                                (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
-                                               (:table newest)))))]
+                                              (mem/-read-bytes root-r d/ATOM_TABLE_START
+                                                               (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
+                                              (:table newest)))))]
                   (when install?
                     (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
                     (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
@@ -688,7 +688,7 @@
                (when newest
                  (jf/journal-truncate! h)
                  (jf/journal-write-at! h (jf/journal-record-of
-                                           (:epoch newest) (:table newest)) 0)
+                                          (:epoch newest) (:table newest)) 0)
                  (jf/journal-force! h true)
                  (when (:floor journal)
                    (reset! (:floor journal) (:epoch newest)))))))))
@@ -869,7 +869,6 @@
     (if-let [deliver (deref-deliver)]
       (deliver raw)
       raw)))
-
 
 (defn- refresh-slabs! [{:keys [base-path sio]}]
   (when base-path (alloc/refresh! sio)))
@@ -1070,7 +1069,7 @@
       :else #?(:cljs nil
                :clje nil
                :default (let [v (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
-                                      (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+                                     (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
                           (if v
                             (do (reset! deref-deliver-hook @v) @v)
                             (do (reset! deref-deliver-hook ::none) nil)))))))
@@ -1307,7 +1306,6 @@
    exclusive?]
   (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? false))
 
-
 (defn- swap-attempt-vals!
   [{:keys [root-r sio durable-commits? journal] :as ds}
    ptr-off
@@ -1467,27 +1465,27 @@
    (swap-vals!, reset-vals!)."
   ([ds atom-slot-idx f args] (mmap-swap! ds atom-slot-idx f args false))
   ([ds atom-slot-idx f args want-vals?]
-  (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
-    (loop [attempt 0]
-      (when (>= attempt d/MAX_SWAP_RETRIES)
-        (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
-      (let [[tag result delivery] (with-domain-write ds false
-                                    (fn [exclusive?]
-                                      (let [r (if want-vals?
-                                                (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? true)
-                                                (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?))]
-                                        (when (= :ok (first r))
-                                          (try-flush-retires! ds))
-                                        r)))]
-        (case tag
-          :ok (do (when (and (not= ::none delivery) (watched? ds atom-slot-idx))
-                    (notify-watchers! ds atom-slot-idx
-                                      (nth delivery 0) (nth delivery 1)))
-                  (cond want-vals? [(nth delivery 0) (nth delivery 1)]
-                        (= ::none delivery) result
-                        :else (nth delivery 2)))
-          :retry (do (cas-backoff! attempt)
-                     (recur (inc attempt)))))))))
+   (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
+     (loop [attempt 0]
+       (when (>= attempt d/MAX_SWAP_RETRIES)
+         (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
+       (let [[tag result delivery] (with-domain-write ds false
+                                     (fn [exclusive?]
+                                       (let [r (if want-vals?
+                                                 (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? true)
+                                                 (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?))]
+                                         (when (= :ok (first r))
+                                           (try-flush-retires! ds))
+                                         r)))]
+         (case tag
+           :ok (do (when (and (not= ::none delivery) (watched? ds atom-slot-idx))
+                     (notify-watchers! ds atom-slot-idx
+                                       (nth delivery 0) (nth delivery 1)))
+                   (cond want-vals? [(nth delivery 0) (nth delivery 1)]
+                         (= ::none delivery) result
+                         :else (nth delivery 2)))
+           :retry (do (cas-backoff! attempt)
+                      (recur (inc attempt)))))))))
 
 (defn- mmap-compare-and-set!
   "Set the atom to new-val iff its value equals old-val. One CAS loop: f
@@ -1674,47 +1672,47 @@
 ;; types adapter realizes it (ClojureScript's ISwap/IReset, sci's own IAtom,
 ;; basilisp's duck-typed swap/reset, clojerl's through eve.host).
 (eve/host-deftype MmapAtom [domain-state atom-slot-idx]
-  clojure.lang.IDeref
-  (deref [_] (mmap-deref domain-state atom-slot-idx))
-  clojure.lang.IAtom
-  (swap [_ f] (mmap-swap! domain-state atom-slot-idx f []))
-  (swap [_ f a] (mmap-swap! domain-state atom-slot-idx f [a]))
-  (swap [_ f a b] (mmap-swap! domain-state atom-slot-idx f [a b]))
-  (swap [_ f a b xs] (mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
-  (reset [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) []))
-  (compareAndSet [_ old-val new-val]
-    (mmap-compare-and-set! domain-state atom-slot-idx old-val new-val))
-  clojure.lang.IAtom2
-  (swapVals [_ f] (mmap-swap! domain-state atom-slot-idx f [] true))
-  (swapVals [_ f a] (mmap-swap! domain-state atom-slot-idx f [a] true))
-  (swapVals [_ f a b] (mmap-swap! domain-state atom-slot-idx f [a b] true))
-  (swapVals [_ f a b xs] (mmap-swap! domain-state atom-slot-idx f (concat [a b] xs) true))
-  (resetVals [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) [] true))
+                  clojure.lang.IDeref
+                  (deref [_] (mmap-deref domain-state atom-slot-idx))
+                  clojure.lang.IAtom
+                  (swap [_ f] (mmap-swap! domain-state atom-slot-idx f []))
+                  (swap [_ f a] (mmap-swap! domain-state atom-slot-idx f [a]))
+                  (swap [_ f a b] (mmap-swap! domain-state atom-slot-idx f [a b]))
+                  (swap [_ f a b xs] (mmap-swap! domain-state atom-slot-idx f (concat [a b] xs)))
+                  (reset [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) []))
+                  (compareAndSet [_ old-val new-val]
+                                 (mmap-compare-and-set! domain-state atom-slot-idx old-val new-val))
+                  clojure.lang.IAtom2
+                  (swapVals [_ f] (mmap-swap! domain-state atom-slot-idx f [] true))
+                  (swapVals [_ f a] (mmap-swap! domain-state atom-slot-idx f [a] true))
+                  (swapVals [_ f a b] (mmap-swap! domain-state atom-slot-idx f [a b] true))
+                  (swapVals [_ f a b xs] (mmap-swap! domain-state atom-slot-idx f (concat [a b] xs) true))
+                  (resetVals [_ v] (mmap-swap! domain-state atom-slot-idx (constantly v) [] true))
   ;; the watch/validator surface (spec clause 1): the host's add-watch /
   ;; set-validator! land here; the bodies are the trunk fns above, and
   ;; each host's types adapter realizes IRef the way it realizes
   ;; IDeref/IAtom (basilisp's and glojure's completions map
   ;; clojure.lang.IRef; a seat with no IRef home uses the trunk fns)
-  clojure.lang.IRef
-  (addWatch [this k f] (add-watch* this k f))
-  (removeWatch [this k] (remove-watch* this k))
-  (setValidator [this f] (set-validator* this f))
-  (getValidator [this] (get-validator this))
-  IEveAtom
-  (-domain-state [_] domain-state)
-  (-atom-slot-idx [_] atom-slot-idx)
+                  clojure.lang.IRef
+                  (addWatch [this k f] (add-watch* this k f))
+                  (removeWatch [this k] (remove-watch* this k))
+                  (setValidator [this f] (set-validator* this f))
+                  (getValidator [this] (get-validator this))
+                  IEveAtom
+                  (-domain-state [_] domain-state)
+                  (-atom-slot-idx [_] atom-slot-idx)
   ;; (a printer reaches the instance's fields through it: on a JVM host it
   ;; is the type's print-method, outside the type)
-  IPrintWithWriter
-  (-pr-writer [this writer _opts]
-    (let [i (-atom-slot-idx this)]
-      (ecore/-write writer (str "#eve/shared-atom {:id " i " :idx " i "}"))))
+                  IPrintWithWriter
+                  (-pr-writer [this writer _opts]
+                              (let [i (-atom-slot-idx this)]
+                                (ecore/-write writer (str "#eve/shared-atom {:id " i " :idx " i "}"))))
   ;; str is the print form, stated in the CLJ/JVM API directly (the fake
   ;; deftype derived toString from the printer; host-deftype does not)
-  java.lang.Object
-  (toString [this]
-    (let [i (-atom-slot-idx this)]
-      (str "#eve/shared-atom {:id " i " :idx " i "}"))))
+                  java.lang.Object
+                  (toString [this]
+                            (let [i (-atom-slot-idx this)]
+                              (str "#eve/shared-atom {:id " i " :idx " i "}"))))
 
 (defn- notify-watchers!
   "Fire a slot's watchers with the delivered old/new (spec clauses 2–4:
@@ -1740,42 +1738,42 @@
 (def SharedAtom MmapAtom)
 
 (eve/host-deftype MmapAtomDomain [domain-state registry-cache]
-  clojure.lang.IDeref
-  (deref [_] (mmap-deref domain-state 0))
+                  clojure.lang.IDeref
+                  (deref [_] (mmap-deref domain-state 0))
   ;; the domain's own value (slot 0) is an atom as well
-  clojure.lang.IAtom
-  (swap [_ f] (mmap-swap! domain-state 0 f []))
-  (swap [_ f a] (mmap-swap! domain-state 0 f [a]))
-  (swap [_ f a b] (mmap-swap! domain-state 0 f [a b]))
-  (swap [_ f a b xs] (mmap-swap! domain-state 0 f (concat [a b] xs)))
-  (reset [_ v] (mmap-swap! domain-state 0 (constantly v) []))
-  (compareAndSet [_ old-val new-val]
-    (mmap-compare-and-set! domain-state 0 old-val new-val))
-  clojure.lang.IAtom2
-  (swapVals [_ f] (mmap-swap! domain-state 0 f [] true))
-  (swapVals [_ f a] (mmap-swap! domain-state 0 f [a] true))
-  (swapVals [_ f a b] (mmap-swap! domain-state 0 f [a b] true))
-  (swapVals [_ f a b xs] (mmap-swap! domain-state 0 f (concat [a b] xs) true))
-  (resetVals [_ v] (mmap-swap! domain-state 0 (constantly v) [] true))
+                  clojure.lang.IAtom
+                  (swap [_ f] (mmap-swap! domain-state 0 f []))
+                  (swap [_ f a] (mmap-swap! domain-state 0 f [a]))
+                  (swap [_ f a b] (mmap-swap! domain-state 0 f [a b]))
+                  (swap [_ f a b xs] (mmap-swap! domain-state 0 f (concat [a b] xs)))
+                  (reset [_ v] (mmap-swap! domain-state 0 (constantly v) []))
+                  (compareAndSet [_ old-val new-val]
+                                 (mmap-compare-and-set! domain-state 0 old-val new-val))
+                  clojure.lang.IAtom2
+                  (swapVals [_ f] (mmap-swap! domain-state 0 f [] true))
+                  (swapVals [_ f a] (mmap-swap! domain-state 0 f [a] true))
+                  (swapVals [_ f a b] (mmap-swap! domain-state 0 f [a b] true))
+                  (swapVals [_ f a b xs] (mmap-swap! domain-state 0 f (concat [a b] xs) true))
+                  (resetVals [_ v] (mmap-swap! domain-state 0 (constantly v) [] true))
   ;; the domain is slot 0's atom: the same watch/validator surface
-  clojure.lang.IRef
-  (addWatch [this k f] (add-watch* this k f))
-  (removeWatch [this k] (remove-watch* this k))
-  (setValidator [this f] (set-validator* this f))
-  (getValidator [this] (get-validator this))
+                  clojure.lang.IRef
+                  (addWatch [this k f] (add-watch* this k f))
+                  (removeWatch [this k] (remove-watch* this k))
+                  (setValidator [this f] (set-validator* this f))
+                  (getValidator [this] (get-validator this))
   ;; (:key domain): on babashka, whose deftype takes ILookup only on a map
   ;; type, it is domain-lookup
-  clojure.lang.ILookup
-  (valAt [this k] (.valAt this k nil))
-  (valAt [_ k not-found]
-    (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
-      (MmapAtom. domain-state slot-idx)
-      not-found))
-  IEveAtom
-  (-domain-state [_] domain-state)
-  (-atom-slot-idx [_] 0)
-  IEveAtomDomain
-  (-registry-cache [_] registry-cache))
+                  clojure.lang.ILookup
+                  (valAt [this k] (.valAt this k nil))
+                  (valAt [_ k not-found]
+                         (if-let [slot-idx (get @registry-cache (str (namespace k) "/" (name k)))]
+                           (MmapAtom. domain-state slot-idx)
+                           not-found))
+                  IEveAtom
+                  (-domain-state [_] domain-state)
+                  (-atom-slot-idx [_] 0)
+                  IEveAtomDomain
+                  (-registry-cache [_] registry-cache))
 
 (defn domain-lookup
   "Look up an atom in a domain by keyword."
@@ -1837,17 +1835,17 @@
       (let [_  (proc/ensure-parent-dir! base-path)
             ds (open-mmap-domain! base-path (cond-> {:capacities capacities
                                                      :lustre? lustre?
-                                             :durable? durable?
-                                             :journal? (not (false? durable?))
-                                             :journal-batch journal-batch
-                                             :journal-window-ms journal-window-ms
-                                             :create? (proc/create-exclusive! (str base-path ".root"))}
-                                      coalesc-descriptors
-                                      (assoc :coalesc-descriptors coalesc-descriptors)
-                                      mem-budget
-                                      (assoc :mem-budget mem-budget)
-                                      segment-bytes
-                                      (assoc :segment-bytes segment-bytes)))
+                                                     :durable? durable?
+                                                     :journal? (not (false? durable?))
+                                                     :journal-batch journal-batch
+                                                     :journal-window-ms journal-window-ms
+                                                     :create? (proc/create-exclusive! (str base-path ".root"))}
+                                              coalesc-descriptors
+                                              (assoc :coalesc-descriptors coalesc-descriptors)
+                                              mem-budget
+                                              (assoc :mem-budget mem-budget)
+                                              segment-bytes
+                                              (assoc :segment-bytes segment-bytes)))
             d  (MmapAtomDomain. ds (clojure.core/atom {}))]
         (swap! domain-cache assoc base-path d)
         d)))

@@ -41,28 +41,28 @@
 
   ;; Timeout guard
   (js/setTimeout
-    (fn []
-      (println "\nTIMEOUT: Tests exceeded 120s time limit")
-      (js/process.exit 1))
-    120000)
+   (fn []
+     (println "\nTIMEOUT: Tests exceeded 120s time limit")
+     (js/process.exit 1))
+   120000)
 
   ;; Wait for workers, then dispatch smoke tests to :core
   (on-when (and (contains? @s/peers :core)
                 (contains? @s/peers :future)
                 (some #(.startsWith (name %) "fp-") (keys @s/peers)))
-    {:max-time 30000}
-    (println "Workers ready. Peers:" (set (keys @s/peers)))
-    (js/setTimeout
-      (fn []
-        (-> @(in :core [] (run-tests-on-worker!))
-            (.then (fn [exit-code]
-                     (js/setTimeout
-                       #(js/process.exit (if (number? exit-code) exit-code 1))
-                       500)))
-            (.catch (fn [err]
-                      (println "\nFATAL:" (str err))
-                      (js/process.exit 1)))))
-      3000)))
+           {:max-time 30000}
+           (println "Workers ready. Peers:" (set (keys @s/peers)))
+           (js/setTimeout
+            (fn []
+              (-> @(in :core [] (run-tests-on-worker!))
+                  (.then (fn [exit-code]
+                           (js/setTimeout
+                            #(js/process.exit (if (number? exit-code) exit-code 1))
+                            500)))
+                  (.catch (fn [err]
+                            (println "\nFATAL:" (str err))
+                            (js/process.exit 1)))))
+            3000)))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point

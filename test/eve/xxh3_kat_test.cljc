@@ -36,8 +36,7 @@
 
 (def ^:private kat-vectors
   ;; length -> reference xxh3-128 hexdigest of (content-bytes length)
-{
-   0 "99aa06d3014798d86001c324468d497f"
+  {0 "99aa06d3014798d86001c324468d497f"
    1 "f5950428e527e5ba324714f62fca15ce"
    2 "5e3be73c88c477cc669a7b3c708e113e"
    3 "8e0dd895b5950e835a0c50c062204a6b"
@@ -137,5 +136,4 @@
     (let [hb (hu/xxh3-128-bytes (content-bytes 7))
           f (hu/fold-hash-int hb)]
       (is (= f (hu/fold-hash-int hb)))
-      (is (<= -2147483648 f 2147483647))))
-  )
+      (is (<= -2147483648 f 2147483647)))))

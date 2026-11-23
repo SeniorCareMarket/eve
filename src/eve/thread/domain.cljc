@@ -173,11 +173,11 @@
         attempts (volatile! 0)
         swap-once! (fn [t0]
                      (rung/-swap! (mcell dh)
-                            (fn [v]
-                              (if (and (>= (vswap! attempts inc) 3) (> (- (now) t0) starved-after))
+                                  (fn [v]
+                                    (if (and (>= (vswap! attempts inc) 3) (> (- (now) t0) starved-after))
                                 ;; the same value: this attempt publishes nothing
-                                (do (vreset! out ::starved) v)
-                                (let [[n a] (f (or v {}))] (vreset! out (ed/eve->clj a)) n)))))]
+                                      (do (vreset! out ::starved) v)
+                                      (let [[n a] (f (or v {}))] (vreset! out (ed/eve->clj a)) n)))))]
     (loop [mine nil]
       (await-turn! dh mine)
       (vreset! attempts 0)
@@ -195,7 +195,7 @@
         r (rung/-read (mcell dh) f)
         ms (- (now) t0)]
     (clojure.core/swap! (:st dh) (fn [st] (-> st (update :read-ms (fn [x] (if x (quot (+ (* 4 x) ms) 5) ms)))
-                                                (update :reads (fnil inc 0)))))
+                                              (update :reads (fnil inc 0)))))
     r))
 
 (defn read-meta
@@ -234,11 +234,11 @@
    mailbox read; else a poll (this thread's mailbox, ms). Messages that are not eve.thread's are handled."
   ([dh word seen ms] (idle-wait! dh word seen ms 100))
   ([dh word seen ms most]
-  (let [r (mcell dh)]
-    (if (and (some? seen) (rung/futex? r))
-      (do (rung/wait-bell! r word seen (if (all-ring? dh) (max 1 (min 100 most)) ms))
-          (let [m (h/receive! 0)] (when-not (= m :eve.thread/timeout) (c/handle! m))))
-      (let [m (h/receive! ms)] (when-not (= m :eve.thread/timeout) (c/handle! m)))))))
+   (let [r (mcell dh)]
+     (if (and (some? seen) (rung/futex? r))
+       (do (rung/wait-bell! r word seen (if (all-ring? dh) (max 1 (min 100 most)) ms))
+           (let [m (h/receive! 0)] (when-not (= m :eve.thread/timeout) (c/handle! m))))
+       (let [m (h/receive! ms)] (when-not (= m :eve.thread/timeout) (c/handle! m)))))))
 
 (defn meta-value "The whole meta-atom value (materialized)." [dh] (read-meta dh []))
 
@@ -360,22 +360,22 @@
    (binding [*turn-deadline* (let [{:keys [renewed lease]} @(:st dh)]
                                (if renewed (+ renewed (quot lease 2)) (+ (now) (quot (:ttl dh) 4))))
              *waited* (clojure.core/atom 0)]
-   (let [horizon (* 10 (:ttl dh))
+     (let [horizon (* 10 (:ttl dh))
          ;; a renewal made while another process's turn stands covers that writer's attempt (see Turns)
-         floor (max floor (turn-floor dh))]
-     (let [ttl (swap-forgetting! dh (fn [v fg]
+           floor (max floor (turn-floor dh))]
+       (let [ttl (swap-forgetting! dh (fn [v fg]
                                      ;; (the clock read by each attempt: a swap that waited renews with the time it commits at)
-                                     (let [t (now)
-                                           v (-> (rejoin v dh t) (mt/heartbeat (:rid dh) tids t) (mt/forget fg))
+                                        (let [t (now)
+                                              v (-> (rejoin v dh t) (mt/heartbeat (:rid dh) tids t) (mt/forget fg))
                                            ;; this runtime's lease: at least floor, and the fleet's (its slowest member's)
-                                           v (mt/stretch-ttl v (:rid dh) (max floor (mt/fleet-ttl v)))
-                                           own (get-in v [:runtimes (:rid dh) :ttl])
+                                              v (mt/stretch-ttl v (:rid dh) (max floor (mt/fleet-ttl v)))
+                                              own (get-in v [:runtimes (:rid dh) :ttl])
                                            ;; a held lease lasts at least this runtime's own (its renewals come at that cadence)
-                                           v (reduce (fn [v [lname ttl]] (first (mt/acquire v lname (:rid dh) (max ttl (or own 0)) t)))
-                                                     v held)]
-                                       [v (get-in v [:runtimes (:rid dh) :ttl])])))
-         _ (clojure.core/swap! (:st dh) assoc :renewed (now) :lease (or ttl (:ttl dh)))]
-       (let [sw (if (rung/-read (mcell dh) (fn [v] (mt/sweep-due? v (now) horizon)))
+                                              v (reduce (fn [v [lname ttl]] (first (mt/acquire v lname (:rid dh) (max ttl (or own 0)) t)))
+                                                        v held)]
+                                          [v (get-in v [:runtimes (:rid dh) :ttl])])))
+             _ (clojure.core/swap! (:st dh) assoc :renewed (now) :lease (or ttl (:ttl dh)))]
+         (let [sw (if (rung/-read (mcell dh) (fn [v] (mt/sweep-due? v (now) horizon)))
                     (swap-meta! dh (fn [v]
                                      (let [t (now)
                                            [v adopted] (mt/adopt-expired v t)
@@ -386,10 +386,10 @@
                                            :pools (vec (distinct (keep (fn [id] (get-in v [:descs id :pool])) adopted)))}])))
                     {:adopted [] :components [] :expired [] :forgotten []})]
          ;; re-queued work's pools and failed work's waiters
-         (when (seq (:adopted sw))
-           (ring! dh (concat [(rung/completion-word)] (map rung/descriptor-word (:adopted sw))
-                             (map rung/pool-word (:pools sw)))))
-         (assoc sw :ttl ttl :waited @*waited*)))))))
+           (when (seq (:adopted sw))
+             (ring! dh (concat [(rung/completion-word)] (map rung/descriptor-word (:adopted sw))
+                               (map rung/pool-word (:pools sw)))))
+           (assoc sw :ttl ttl :waited @*waited*)))))))
 
 (defn- threadless-beat!
   "A runtime with no threads of its own beats from its waits, every quarter of its lease — and, as a ticker does, keeps
@@ -550,7 +550,7 @@
   "Whether pool's queue holds an id, the pool's state, and whether thread tid is unmarked — one read, no write."
   [dh nm tid]
   (read-timed dh (fn [v] [(boolean (seq (get-in v [:q nm]))) (ed/eve->clj (get-in v [:pools nm :state]))
-                            (unmarked? v (:rid dh) tid)])))
+                          (unmarked? v (:rid dh) tid)])))
 
 (defn claim!
   "Thread tid of this runtime claims up to k of pool nm's queued descriptors it can run (one swap, made only when the
@@ -563,12 +563,12 @@
             caps (:caps dh)
             can-run? (can-run-fn)]
         (swap-forgetting! dh (fn [v fg]
-                              (let [t (now)
-                                    [v xs] (mt/claim (mt/forget v fg) nm rid tid k caps can-run? t)]
+                               (let [t (now)
+                                     [v xs] (mt/claim (mt/forget v fg) nm rid tid k caps can-run? t)]
                                 ;; a claimer is alive: its thread's lease renewed with the claim (a thread just started may
                                 ;; claim before its ticker's first renewal)
-                                [(if (seq xs) (mt/heartbeat-threads v rid [tid] t) v)
-                                 {:claimed xs :state (mt/pool-state v nm) :unmarked (unmarked? v rid tid)}])))))))
+                                 [(if (seq xs) (mt/heartbeat-threads v rid [tid] t) v)
+                                  {:claimed xs :state (mt/pool-state v nm) :unmarked (unmarked? v rid tid)}])))))))
 
 (defn complete!
   "The owner's outcome for descriptor id claimed with token; a value the meta-atom cannot hold (not data) fails the
@@ -580,10 +580,10 @@
         [ch pool] (if ok2?
                     r
                     (swap-meta! dh (fn [m] (settle m false
-                                         {:class "eve.thread/host-object"
-                                          :message (str "eve.thread: the task's " (if ok? "value" "error data")
-                                                        " cannot be kept in a meta-atom: not data")
-                                          :data nil}))))]
+                                                   {:class "eve.thread/host-object"
+                                                    :message (str "eve.thread: the task's " (if ok? "value" "error data")
+                                                                  " cannot be kept in a meta-atom: not data")
+                                                    :data nil}))))]
     ;; its waiters, a sweep, and the pool's idle threads (work :after it may now be claimable)
     (when ch (ring! dh [(rung/completion-word) (rung/descriptor-word id) (when pool (rung/pool-word pool))]))
     ch))
@@ -694,7 +694,6 @@
 ;; Domain pools
 ;; ---------------------------------------------------------------------------
 
-
 (defn- pool-entry-of [dh nm] (read-meta dh [:pools nm]))
 
 (defn- submit*
@@ -705,9 +704,9 @@
         work (task/data-work f args (boolean (:forms pd)) true)
         t (now)
         [ids why next-home] (swap-forgetting! dh (fn [v fg]
-                                                  (let [[v ids] (mt/submit (mt/forget v fg) nm [work] (:rid dh) (or opts {}) t)]
-                                                    [v [ids (when-not ids (mt/refusal v nm))
-                                                        (get-in v [:pools nm :next-home])]])))]
+                                                   (let [[v ids] (mt/submit (mt/forget v fg) nm [work] (:rid dh) (or opts {}) t)]
+                                                     [v [ids (when-not ids (mt/refusal v nm))
+                                                         (get-in v [:pools nm :next-home])]])))]
     (when-not ids
       (throw (ex-info (str "eve.thread: domain pool " nm " takes no submission: " why)
                       (cond-> {:eve.thread/refused why :pool nm} next-home (assoc :next-home next-home)))))
@@ -856,8 +855,8 @@
   ([dh nm] (pool dh nm {}))
   ([dh nm opts]
    (swap-meta! dh (fn [v] [(mt/register-pool v {:name nm :kind :domain :forms (boolean (:forms opts))
-                                               :retry (or (:retry opts) :never)
-                                               :home (home-of dh)})
+                                                :retry (or (:retry opts) :never)
+                                                :home (home-of dh)})
                            nil]))
    (let [n (or (:threads opts) 0)
          tids (if (pos? n)
@@ -955,7 +954,7 @@
   "Of ids, those settled, as {id descriptor} — one read of the meta-atom (pinned on an eve rung)."
   [dh ids]
   (read-timed dh (fn [v] (into {} (keep (fn [id] (let [x (get-in v [:descs id])]
-                                                    (when (or (nil? x) (d/done? x)) [id (ed/eve->clj x)]))))
+                                                   (when (or (nil? x) (d/done? x)) [id (ed/eve->clj x)]))))
                                ids))))
 
 (defn- collect-sweep
@@ -1063,8 +1062,8 @@
         ws (mapv (fn [[f args]] (task/data-work f args (boolean (:forms pd)) true)) works)
         t (now)
         [ids why] (swap-forgetting! dh (fn [v fg]
-                                        (let [[v ids] (mt/submit (mt/forget v fg) nm ws (:rid dh) {} t)]
-                                          [v [ids (when-not ids (mt/refusal v nm))]])))]
+                                         (let [[v ids] (mt/submit (mt/forget v fg) nm ws (:rid dh) {} t)]
+                                           [v [ids (when-not ids (mt/refusal v nm))]])))]
     (when-not ids
       (throw (ex-info (str "eve.thread: domain pool " nm " takes no submission: " why) {:eve.thread/refused why :pool nm})))
     (ring! dh [(rung/pool-word nm)])
@@ -1148,7 +1147,7 @@
                          (read-meta dh [:components cid]))
                    [ok? r] (h/attempt (fn [] ((get starters (:kind c)) dh c)))]
                (swap-meta! dh (fn [v] [(mt/advance-component v cid owner (if ok? :running :failed)
-                                                            (if ok? {:result r} {:error (h/error-data r)}))
+                                                             (if ok? {:result r} {:error (h/error-data r)}))
                                        nil]))
                (recur (conj mine cid) 1))
              (let [comps (read-meta dh [:components])

@@ -42,16 +42,16 @@
 
 (deftest a-lost-attempt-frees-what-it-allocated
   (let [mode (view/read-end-mode)]
-   (view/set-read-end! :commit)
-   (try
-  (with-redefs-fn {#'eve.atom/try-flush-retires! (fn [_ds] nil)}
-    (fn []
-      (let [quiet (writes! ::quiet false)
-            lost  (writes! ::lost true)]
-        (testing "the same value either way, the contended swap! after a retry"
-          (is (= {:other 1 :k (vec (range 40))} (:value quiet) (:value lost)))
-          (is (= 2 (:attempts lost))))
-        (testing "the lost attempt's blocks are free again"
-          (is (pos? (:used quiet)))
-          (is (= (:used quiet) (:used lost)))))))
-   (finally (view/set-read-end! mode)))))
+    (view/set-read-end! :commit)
+    (try
+      (with-redefs-fn {#'eve.atom/try-flush-retires! (fn [_ds] nil)}
+        (fn []
+          (let [quiet (writes! ::quiet false)
+                lost  (writes! ::lost true)]
+            (testing "the same value either way, the contended swap! after a retry"
+              (is (= {:other 1 :k (vec (range 40))} (:value quiet) (:value lost)))
+              (is (= 2 (:attempts lost))))
+            (testing "the lost attempt's blocks are free again"
+              (is (pos? (:used quiet)))
+              (is (= (:used quiet) (:used lost)))))))
+      (finally (view/set-read-end! mode)))))

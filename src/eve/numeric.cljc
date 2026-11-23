@@ -196,58 +196,57 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:cljs (do
-     (def ^:private BI-0 (js/BigInt 0))
-     (def ^:private BI-1 (js/BigInt 1))
-     (def ^:private BI-10 (js/BigInt 10))
-     (def ^:private BI-32 (js/BigInt 32))
-     (def ^:private BI-MASK32 (js/BigInt 0xffffffff))
-     (def ^:private BI-MOD32 (js/BigInt 4294967296))
-     (def ^:private BI-LONG-MIN (js/BigInt LONG-MIN))
-     (def ^:private BI-LONG-MAX (js/BigInt LONG-MAX))
-     (defn- bi? [x] (and (some? x) (identical? (.-constructor x) js/BigInt)))
-     (defn- bi= [a b] (= a b))
-     (defn- bi< [a b] (< a b))
-     (defn- bi<= [a b] (<= a b))
-     (defn- bi> [a b] (> a b))
-     (defn- bi+ [a b] (+ a b))
-     (defn- bi- [a b] (- a b))
-     (defn- bi* [a b] (* a b))
-     (defn- bi-quot [a b] (/ a b))
-     (defn- bi-rem [a b] (- a (* (/ a b) b)))
-     (defn- bi-neg [a] (- a))
-     (defn- bi-abs [a] (if (bi< a BI-0) (bi-neg a) a))
-     (defn- bi-zero? [a] (bi= a BI-0))
-     (defn- bi-pos? [a] (bi> a BI-0))
-     (defn- bi-neg? [a] (bi< a BI-0))
-     (defn- bi-cmp [a b] (if (bi< a b) -1 (if (bi> a b) 1 0)))
-     (defn- bi-from [x]
-       (cond
-         (bi? x) x
-         (number? x) (js/BigInt (js/Math.trunc x))
-         (string? x) (js/BigInt (if (and (pos? (count x)) (= (first x) \+)) (subs x 1) x))
-         :else (js/BigInt (str x))))
-     (defn- bi-str [a] (.toString a 10))
-     (defn- bi-gcd [a b]
-       (loop [a (bi-abs a) b (bi-abs b)]
-         (if (bi-zero? b) a (recur b (bi-rem a b)))))
-     (defn- bi>= [a b] (>= a b))
-     (defn- bi-in-long? [a] (and (bi<= a BI-LONG-MAX) (bi>= a BI-LONG-MIN)))
-     (defn- bi-long [a] (js/Number a))
-     (defn- bi-pow10 [k]
-       (loop [i 0 p BI-1]
-         (if (< i k) (recur (inc i) (bi* p BI-10)) p)))
-     (defn- bi-limbs32
-       "Big-endian unsigned 32-bit limbs of |n|, or empty for 0."
-       [n]
-       (let [n (bi-abs n)]
-         (if (bi-zero? n)
-           []
-           (loop [n n acc ()]
-             (if (bi-zero? n)
-               (vec acc)
-               (recur (bi-quot n BI-MOD32)
-                      (cons (js/Number (bi-rem n BI-MOD32)) acc)))))))
-     ))
+           (def ^:private BI-0 (js/BigInt 0))
+           (def ^:private BI-1 (js/BigInt 1))
+           (def ^:private BI-10 (js/BigInt 10))
+           (def ^:private BI-32 (js/BigInt 32))
+           (def ^:private BI-MASK32 (js/BigInt 0xffffffff))
+           (def ^:private BI-MOD32 (js/BigInt 4294967296))
+           (def ^:private BI-LONG-MIN (js/BigInt LONG-MIN))
+           (def ^:private BI-LONG-MAX (js/BigInt LONG-MAX))
+           (defn- bi? [x] (and (some? x) (identical? (.-constructor x) js/BigInt)))
+           (defn- bi= [a b] (= a b))
+           (defn- bi< [a b] (< a b))
+           (defn- bi<= [a b] (<= a b))
+           (defn- bi> [a b] (> a b))
+           (defn- bi+ [a b] (+ a b))
+           (defn- bi- [a b] (- a b))
+           (defn- bi* [a b] (* a b))
+           (defn- bi-quot [a b] (/ a b))
+           (defn- bi-rem [a b] (- a (* (/ a b) b)))
+           (defn- bi-neg [a] (- a))
+           (defn- bi-abs [a] (if (bi< a BI-0) (bi-neg a) a))
+           (defn- bi-zero? [a] (bi= a BI-0))
+           (defn- bi-pos? [a] (bi> a BI-0))
+           (defn- bi-neg? [a] (bi< a BI-0))
+           (defn- bi-cmp [a b] (if (bi< a b) -1 (if (bi> a b) 1 0)))
+           (defn- bi-from [x]
+             (cond
+               (bi? x) x
+               (number? x) (js/BigInt (js/Math.trunc x))
+               (string? x) (js/BigInt (if (and (pos? (count x)) (= (first x) \+)) (subs x 1) x))
+               :else (js/BigInt (str x))))
+           (defn- bi-str [a] (.toString a 10))
+           (defn- bi-gcd [a b]
+             (loop [a (bi-abs a) b (bi-abs b)]
+               (if (bi-zero? b) a (recur b (bi-rem a b)))))
+           (defn- bi>= [a b] (>= a b))
+           (defn- bi-in-long? [a] (and (bi<= a BI-LONG-MAX) (bi>= a BI-LONG-MIN)))
+           (defn- bi-long [a] (js/Number a))
+           (defn- bi-pow10 [k]
+             (loop [i 0 p BI-1]
+               (if (< i k) (recur (inc i) (bi* p BI-10)) p)))
+           (defn- bi-limbs32
+             "Big-endian unsigned 32-bit limbs of |n|, or empty for 0."
+             [n]
+             (let [n (bi-abs n)]
+               (if (bi-zero? n)
+                 []
+                 (loop [n n acc ()]
+                   (if (bi-zero? n)
+                     (vec acc)
+                     (recur (bi-quot n BI-MOD32)
+                            (cons (js/Number (bi-rem n BI-MOD32)) acc)))))))))
 
 #?(:cljs nil
    :default
@@ -359,8 +358,7 @@
             (if (bi-zero? v)
               (vec acc)
               (let [q (bi-quot v 4294967296) r (bi-rem v 4294967296)]
-                (recur q (cons #?(:clje r :default (long r)) acc)))))))
-     ))
+                (recur q (cons #?(:clje r :default (long r)) acc)))))))))
 
 (defn- bigint-jhash-from-limbs
   "java.math.BigInteger.hashCode of the signed value whose |n| limbs are mag."
@@ -398,7 +396,6 @@
       (compact-bd-hash (bi-long unscaled) scale)
       (i32 (clojure.core/+ #?(:clje (imul 31 (bigint-jhash unscaled)) :default (long (imul 31 (bigint-jhash unscaled)))) #?(:clje scale :default (long scale)))))))
 
-
 ;; ---------------------------------------------------------------------------
 ;; Predicates for host-native exact types (before our wrappers).
 ;; ---------------------------------------------------------------------------
@@ -432,7 +429,6 @@
 ;; print hook (Eve's deftype translates it); install! covers host primitives.
 ;; ---------------------------------------------------------------------------
 
-
 (declare canonical-unscaled-scale decimal-layout ratio bigint bigdec
          ->exact-int exact-compare hasheq read-bigdec-significand read-number
          divide numerator denominator make-bigdec host-pr-number)
@@ -443,77 +439,75 @@
   [tag payload]
   (str "#" tag " " (pr-str (str payload))))
 
-
 #?(:cljs (do
-     (deftype EveBigInt [n]
-       IEquiv
-       (-equiv [_ other]
-         (cond
-           (instance? EveBigInt other) (bi= n (.-n other))
-           (js-bigint? other) (bi= n other)
-           (and (number? other) (js/Number.isInteger other)
-                (bi= n (js/BigInt other))) true
-           :else false))
-       IHash
-       (-hash [_]
-         (if (bi-in-long? n)
-           (hash (js/Number n))
-           (bigint-jhash n)))
-       IComparable
-       (-compare [_ other]
-         (cond
-           (instance? EveBigInt other) (bi-cmp n (.-n other))
-           (js-bigint? other) (bi-cmp n other)
-           (and (number? other) (js/Number.isInteger other)) (bi-cmp n (js/BigInt other))
-           :else (throw (js/Error. (str "Cannot compare bigint to " (pr-str other))))))
-       IPrintWithWriter
-       (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/N" (bi-str n))))
-       Object
-       (toString [_] (bi-str n)))
+           (deftype EveBigInt [n]
+             IEquiv
+             (-equiv [_ other]
+               (cond
+                 (instance? EveBigInt other) (bi= n (.-n other))
+                 (js-bigint? other) (bi= n other)
+                 (and (number? other) (js/Number.isInteger other)
+                      (bi= n (js/BigInt other))) true
+                 :else false))
+             IHash
+             (-hash [_]
+               (if (bi-in-long? n)
+                 (hash (js/Number n))
+                 (bigint-jhash n)))
+             IComparable
+             (-compare [_ other]
+               (cond
+                 (instance? EveBigInt other) (bi-cmp n (.-n other))
+                 (js-bigint? other) (bi-cmp n other)
+                 (and (number? other) (js/Number.isInteger other)) (bi-cmp n (js/BigInt other))
+                 :else (throw (js/Error. (str "Cannot compare bigint to " (pr-str other))))))
+             IPrintWithWriter
+             (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/N" (bi-str n))))
+             Object
+             (toString [_] (bi-str n)))
 
-     (deftype EveRatio [num den]
-       IEquiv
-       (-equiv [_ other]
-         (and (instance? EveRatio other)
-              (bi= num (.-num other))
-              (bi= den (.-den other))))
-       IHash
-       (-hash [_] (i32 (bit-xor (bigint-jhash num) (bigint-jhash den))))
-       IComparable
-       (-compare [_ other]
-         (if (instance? EveRatio other)
-           (bi-cmp (bi* num (.-den other)) (bi* (.-num other) den))
-           (throw (js/Error. (str "Cannot compare ratio to " (pr-str other))))))
-       IPrintWithWriter
-       (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
-       Object
-       (toString [_] (str (bi-str num) "/" (bi-str den))))
+           (deftype EveRatio [num den]
+             IEquiv
+             (-equiv [_ other]
+               (and (instance? EveRatio other)
+                    (bi= num (.-num other))
+                    (bi= den (.-den other))))
+             IHash
+             (-hash [_] (i32 (bit-xor (bigint-jhash num) (bigint-jhash den))))
+             IComparable
+             (-compare [_ other]
+               (if (instance? EveRatio other)
+                 (bi-cmp (bi* num (.-den other)) (bi* (.-num other) den))
+                 (throw (js/Error. (str "Cannot compare ratio to " (pr-str other))))))
+             IPrintWithWriter
+             (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
+             Object
+             (toString [_] (str (bi-str num) "/" (bi-str den))))
 
-     (deftype EveBigDec [unscaled scale]
-       IEquiv
-       (-equiv [_ other]
-         (if (instance? EveBigDec other)
-           (let [a (canonical-unscaled-scale unscaled scale)
-                 b (canonical-unscaled-scale (.-unscaled other) (.-scale other))]
-             (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
-           false))
-       IHash
-       (-hash [_]
-         (let [[u s] (canonical-unscaled-scale unscaled scale)]
-           (bigdec-jhash u s)))
-       IComparable
-       (-compare [_ other]
-         (if (instance? EveBigDec other)
-           (let [s (max scale (.-scale other))
-                 au (bi* unscaled (bi-pow10 (- s scale)))
-                 bu (bi* (.-unscaled other) (bi-pow10 (- s (.-scale other))))]
-             (bi-cmp au bu))
-           (throw (js/Error. (str "Cannot compare decimal to " (pr-str other))))))
-       IPrintWithWriter
-       (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
-       Object
-       (toString [_] (decimal-layout unscaled scale)))
-     ))
+           (deftype EveBigDec [unscaled scale]
+             IEquiv
+             (-equiv [_ other]
+               (if (instance? EveBigDec other)
+                 (let [a (canonical-unscaled-scale unscaled scale)
+                       b (canonical-unscaled-scale (.-unscaled other) (.-scale other))]
+                   (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
+                 false))
+             IHash
+             (-hash [_]
+               (let [[u s] (canonical-unscaled-scale unscaled scale)]
+                 (bigdec-jhash u s)))
+             IComparable
+             (-compare [_ other]
+               (if (instance? EveBigDec other)
+                 (let [s (max scale (.-scale other))
+                       au (bi* unscaled (bi-pow10 (- s scale)))
+                       bu (bi* (.-unscaled other) (bi-pow10 (- s (.-scale other))))]
+                   (bi-cmp au bu))
+                 (throw (js/Error. (str "Cannot compare decimal to " (pr-str other))))))
+             IPrintWithWriter
+             (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
+             Object
+             (toString [_] (decimal-layout unscaled scale)))))
 
 ;; ---------------------------------------------------------------------------
 ;; EveRatio / EveBigDec — ONE definition per type (trunk consolidation,
@@ -549,84 +543,84 @@
 #?(:jank
    (do
      (host-deftype EveRatio [num den]
-       clojure.lang.IHashEq
-       (hasheq [_] (i32 (bit-xor (bigint-jhash num) (bigint-jhash den))))
-       java.lang.Comparable
-       (compareTo [_ other]
-         (if (instance? EveRatio other)
-           (bi-cmp (bi* num (.-num other)) (bi* (.-num other) den))
-           (throw (ex-info (str "Cannot compare ratio to " (pr-str other)) {:value other}))))
-       IPrintWithWriter
-       (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
-       java.lang.Object
-       (equals [_ other]
-         (and (instance? EveRatio other)
-              (bi= num (.-num other))
-              (bi= den (.-den other))))
-       (toString [_] (str (bi-str num) "/" (bi-str den))))
+                   clojure.lang.IHashEq
+                   (hasheq [_] (i32 (bit-xor (bigint-jhash num) (bigint-jhash den))))
+                   java.lang.Comparable
+                   (compareTo [_ other]
+                              (if (instance? EveRatio other)
+                                (bi-cmp (bi* num (.-num other)) (bi* (.-num other) den))
+                                (throw (ex-info (str "Cannot compare ratio to " (pr-str other)) {:value other}))))
+                   IPrintWithWriter
+                   (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
+                   java.lang.Object
+                   (equals [_ other]
+                           (and (instance? EveRatio other)
+                                (bi= num (.-num other))
+                                (bi= den (.-den other))))
+                   (toString [_] (str (bi-str num) "/" (bi-str den))))
      (host-deftype EveBigDec [unscaled scale]
-       clojure.lang.IHashEq
-       (hasheq [_] (let [[u s] (canonical-unscaled-scale unscaled scale)] (bigdec-jhash u s)))
-       java.lang.Comparable
-       (compareTo [_ other]
-         (if (instance? EveBigDec other)
-           (let [s (max scale (.-scale other))
-                 au (bi* unscaled (bi-pow10 (- s scale)))
-                 bu (bi* (.-unscaled other) (bi-pow10 (- s (.-scale other))))]
-             (bi-cmp au bu))
-           (throw (ex-info (str "Cannot compare decimal to " (pr-str other)) {:value other}))))
-       IPrintWithWriter
-       (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
-       java.lang.Object
-       (equals [_ other]
-         (if (instance? EveBigDec other)
-           (let [a (canonical-unscaled-scale unscaled scale)
-                 b (canonical-unscaled-scale (.-unscaled other) (.-scale other))]
-             (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
-           false))
-       (toString [_] (decimal-layout unscaled scale))))
+                   clojure.lang.IHashEq
+                   (hasheq [_] (let [[u s] (canonical-unscaled-scale unscaled scale)] (bigdec-jhash u s)))
+                   java.lang.Comparable
+                   (compareTo [_ other]
+                              (if (instance? EveBigDec other)
+                                (let [s (max scale (.-scale other))
+                                      au (bi* unscaled (bi-pow10 (- s scale)))
+                                      bu (bi* (.-unscaled other) (bi-pow10 (- s (.-scale other))))]
+                                  (bi-cmp au bu))
+                                (throw (ex-info (str "Cannot compare decimal to " (pr-str other)) {:value other}))))
+                   IPrintWithWriter
+                   (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
+                   java.lang.Object
+                   (equals [_ other]
+                           (if (instance? EveBigDec other)
+                             (let [a (canonical-unscaled-scale unscaled scale)
+                                   b (canonical-unscaled-scale (.-unscaled other) (.-scale other))]
+                               (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
+                             false))
+                   (toString [_] (decimal-layout unscaled scale))))
    :cljs (do)
    :clj (do)
    :lpy (do)
    :default
    (do
      (host-deftype EveRatio [num den]
-       clojure.lang.IHashEq
-       (hasheq [_] (i32 (bit-xor (bigint-jhash num) (bigint-jhash den))))
-       java.lang.Comparable
-       (compareTo [_ other]
-         (if (instance? EveRatio other)
-           (bi-cmp (bi* num (.-num other)) (bi* (.-num other) den))
-           (throw (ex-info (str "Cannot compare ratio to " (pr-str other)) {:value other}))))
-       IPrintWithWriter
-       (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
-       java.lang.Object
-       (equals [_ other]
-         (and (instance? EveRatio other)
-              (bi= num (.-num other))
-              (bi= den (.-den other))))
-       (toString [_] (str (bi-str num) "/" (bi-str den))))
+                   clojure.lang.IHashEq
+                   (hasheq [_] (i32 (bit-xor (bigint-jhash num) (bigint-jhash den))))
+                   java.lang.Comparable
+                   (compareTo [_ other]
+                              (if (instance? EveRatio other)
+                                (bi-cmp (bi* num (.-num other)) (bi* (.-num other) den))
+                                (throw (ex-info (str "Cannot compare ratio to " (pr-str other)) {:value other}))))
+                   IPrintWithWriter
+                   (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/ratio" (str (bi-str num) "/" (bi-str den)))))
+                   java.lang.Object
+                   (equals [_ other]
+                           (and (instance? EveRatio other)
+                                (bi= num (.-num other))
+                                (bi= den (.-den other))))
+                   (toString [_] (str (bi-str num) "/" (bi-str den))))
      (host-deftype EveBigDec [unscaled scale]
-       clojure.lang.IHashEq
-       (hasheq [_] (let [[u s] (canonical-unscaled-scale unscaled scale)] (bigdec-jhash u s)))
-       java.lang.Comparable
-       (compareTo [_ other]
-         (if (instance? EveBigDec other)
-           (let [s (max scale (.-scale other))
-                 au (bi* unscaled (bi-pow10 (- s scale)))
-                 bu (bi* (.-unscaled other) (bi-pow10 (- s (.-scale other))))]
-             (bi-cmp au bu))
-           (throw (ex-info (str "Cannot compare decimal to " (pr-str other)) {:value other}))))
-       IPrintWithWriter
-       (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
-       java.lang.Object
-       (equals [_ other]
-         (if (instance? EveBigDec other)
-           (let [a (canonical-unscaled-scale unscaled scale)
-                 b (canonical-unscaled-scale (.-unscaled other) (.-scale other))]
-             (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
-           false))
-       (toString [_] (decimal-layout unscaled scale)))))
+                   clojure.lang.IHashEq
+                   (hasheq [_] (let [[u s] (canonical-unscaled-scale unscaled scale)] (bigdec-jhash u s)))
+                   java.lang.Comparable
+                   (compareTo [_ other]
+                              (if (instance? EveBigDec other)
+                                (let [s (max scale (.-scale other))
+                                      au (bi* unscaled (bi-pow10 (- s scale)))
+                                      bu (bi* (.-unscaled other) (bi-pow10 (- s (.-scale other))))]
+                                  (bi-cmp au bu))
+                                (throw (ex-info (str "Cannot compare decimal to " (pr-str other)) {:value other}))))
+                   IPrintWithWriter
+                   (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/M" (decimal-layout unscaled scale))))
+                   java.lang.Object
+                   (equals [_ other]
+                           (if (instance? EveBigDec other)
+                             (let [a (canonical-unscaled-scale unscaled scale)
+                                   b (canonical-unscaled-scale (.-unscaled other) (.-scale other))]
+                               (and (bi= (nth a 0) (nth b 0)) (= (nth a 1) (nth b 1))))
+                             false))
+                   (toString [_] (decimal-layout unscaled scale)))))
 
 ;; jank: the bigint value is the host cpp_int (big_integer); Ratio and
 ;; BigDecimal are the Eve types — now defined ONCE in the unified
@@ -689,7 +683,7 @@
    negative scale (Java stripTrailingZeros of 100M is 1E+2)."
   [unscaled scale]
   (if (bi-zero? unscaled)
-    [ (bi-from 0) 0 ]
+    [(bi-from 0) 0]
     (loop [u unscaled s scale]
       (if (and (not (bi-zero? u))
                (bi-zero? (bi-rem u (bi-from 10)))
@@ -763,19 +757,19 @@
     (decimal? x)
     (wrap-bigint #?(:jank (let [u (.-unscaled x) s (.-scale x)]
                             (if (zero? s) u
-                              (if (pos? s)
-                                (let [q (bi-quot u (bi-pow10 s)) r (bi-rem u (bi-pow10 s))]
-                                  (if (bi-zero? r) q
-                                    (throw (ex-info "Nonintegral decimal has no bigint value" {:value x}))))
-                                (bi* u (bi-pow10 (- s))))))
+                                (if (pos? s)
+                                  (let [q (bi-quot u (bi-pow10 s)) r (bi-rem u (bi-pow10 s))]
+                                    (if (bi-zero? r) q
+                                        (throw (ex-info "Nonintegral decimal has no bigint value" {:value x}))))
+                                  (bi* u (bi-pow10 (- s))))))
                     :clj (.toBigIntegerExact ^java.math.BigDecimal x)
                     :cljs (let [u (.-unscaled x) s (.-scale x)]
                             (if (zero? s) u
-                              (if (pos? s)
-                                (let [q (bi-quot u (bi-pow10 s)) r (bi-rem u (bi-pow10 s))]
-                                  (if (bi-zero? r) q
-                                    (throw (js/Error. "Nonintegral decimal has no bigint value"))))
-                                (bi* u (bi-pow10 (- s))))))
+                                (if (pos? s)
+                                  (let [q (bi-quot u (bi-pow10 s)) r (bi-rem u (bi-pow10 s))]
+                                    (if (bi-zero? r) q
+                                        (throw (js/Error. "Nonintegral decimal has no bigint value"))))
+                                  (bi* u (bi-pow10 (- s))))))
                     :lpy (python/int x)
                     :default (bi-from (str x))))
     (ratio? x) (throw (#?(:cljs js/Error. :default ex-info)
@@ -934,7 +928,6 @@
                      :default "unscaled-value requires a decimal")
                   #?(:default {:value x} :cljs nil)))))
 
-
 ;; ---------------------------------------------------------------------------
 ;; Category and mixed-type arithmetic (Clojure Numbers: FLOATING > DECIMAL >
 ;; RATIO > INTEGER).
@@ -966,7 +959,7 @@
                     :clj (double x)
                     :cljs (let [u (.-unscaled x) s (.-scale x)]
                             (if (zero? s) (js/Number u)
-                              (/ (js/Number u) (js/Number (bi-pow10 s)))))
+                                (/ (js/Number u) (js/Number (bi-pow10 s)))))
                     :lpy (double (str x))
                     :default (double (str x)))
     :else #?(:clje (float x) :default (double x))))
@@ -1242,7 +1235,6 @@
     false
     :else (= a b)))
 
-
 ;; ---------------------------------------------------------------------------
 ;; EDN print / read of 123N, 1/3, 1.2300M (and the LispReader integer arms:
 ;; a decimal or radix token past a long becomes a bigint, a trailing M a
@@ -1475,10 +1467,10 @@
                            (= ch \\) (tconj acc ch))
             (= ch \") (recur (inc i) true false (tconj acc ch))
             (= ch \;) (let [j (or (str/index-of s "\n" i) n)]
-                                 (recur j false false (tconj acc (subs s i j))))
+                        (recur j false false (tconj acc (subs s i j))))
             (= ch \\) (recur (+ i 2) false false
-                                      (cond-> (tconj acc ch)
-                                        (< (inc i) n) (tconj (nth s (inc i)))))
+                             (cond-> (tconj acc ch)
+                               (< (inc i) n) (tconj (nth s (inc i)))))
             (and (or (= ch \-) (= ch \+) (digit-val ch 10)
                      (= ch \.))
                  (or (zero? i)
@@ -1575,7 +1567,6 @@
     (if-let [dr (resolve 'eve.deftype.registry/data-readers)]
       (merge local (select-keys (dr) (keys local)))
       local)))
-
 
 (defn read-edn
   "Read EDN s, honoring Clojure number tokens on every host. A single number

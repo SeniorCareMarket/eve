@@ -91,17 +91,6 @@
 ;; Used for copying serialized keys before WASM lookup.
 (defonce ^:const WASM_SCRATCH_SIZE 4096)  ;; 4KB per worker, supports keys up to 4KB
 
-
-
-
-
-
-
-
-
-
-
-
 ;;-----------------------------------------------------------------------------
 ;; Custom Tags for JS Types
 ;;-----------------------------------------------------------------------------
@@ -176,7 +165,6 @@
 
 (defprotocol ISabpType
   (-sabp-type-key [this] "Returns the string key used for registering this SAB-P type."))
-
 
 (def ^:dynamic *persistent?* true)
 

@@ -286,10 +286,10 @@
 ;;-----------------------------------------------------------------------------
 
 (eve/deftype EveArray [^:int32 cnt
-                      ^:cached subtype__
-                      ^:cached elem-shift__
-                      ^:cached atomic?__
-                      ^:cached ^:mutable hash-cache__]
+                       ^:cached subtype__
+                       ^:cached elem-shift__
+                       ^:cached atomic?__
+                       ^:cached ^:mutable hash-cache__]
 
   clojure.lang.Counted
   (count [_] (int cnt))
@@ -391,7 +391,6 @@
 
   d/IEveSio
   (-eve-sio [_] sio__)
-
 
   IEveArray
   (-subtype [_] subtype__)
@@ -799,7 +798,6 @@
     (when (and (some? slab-off) (not= slab-off alloc/NIL_OFFSET))
       (slab/free! (d/-eve-sio arr) slab-off))))
 
-
 ;;=============================================================================
 ;; Offset Collection (for epoch-based retirement in mmap atoms)
 ;;=============================================================================
@@ -830,30 +828,30 @@
 ;; An EveArray stored into an atom is copied into a block of the atom's domain
 ;; (a host whose atom holds an eve root by pointer, IEveRoot, never gets here)
 (ser/register-builder!
-  (fn [v] (instance? EveArray v))
-  (fn [sio arr]
-    (let [subtype (-subtype arr)
-          n (e/count arr)
-          byte-len (* n (subtype->elem-size subtype))
-          blk-off (slab/alloc! sio (+ HEADER_SIZE byte-len))]
-      (slab/write-u8!  sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
-      (slab/write-u8!  sio blk-off 1 subtype)
-      (slab/write-u16! sio blk-off 2 0)
-      (slab/write-i32! sio blk-off 4 n)
-      (when (pos? byte-len)
-        (slab/write-bytes! sio blk-off HEADER_SIZE
-                           (slab/read-bytes (d/-eve-sio arr) (d/-root-header-off arr) HEADER_SIZE byte-len)))
-      (reify d/IEveRoot
-        (-root-header-off [_] blk-off)))))
+ (fn [v] (instance? EveArray v))
+ (fn [sio arr]
+   (let [subtype (-subtype arr)
+         n (e/count arr)
+         byte-len (* n (subtype->elem-size subtype))
+         blk-off (slab/alloc! sio (+ HEADER_SIZE byte-len))]
+     (slab/write-u8!  sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
+     (slab/write-u8!  sio blk-off 1 subtype)
+     (slab/write-u16! sio blk-off 2 0)
+     (slab/write-i32! sio blk-off 4 n)
+     (when (pos? byte-len)
+       (slab/write-bytes! sio blk-off HEADER_SIZE
+                          (slab/read-bytes (d/-eve-sio arr) (d/-root-header-off arr) HEADER_SIZE byte-len)))
+     (reify d/IEveRoot
+       (-root-header-off [_] blk-off)))))
 
 ;; 0x1D: the pointer tag and the header type-id
 (ser/register-type-constructor!
-  ser/EVE_ARRAY_SLAB_TYPE_ID ser/EVE_ARRAY_SLAB_TYPE_ID eve-array-from-offset)
+ ser/EVE_ARRAY_SLAB_TYPE_ID ser/EVE_ARRAY_SLAB_TYPE_ID eve-array-from-offset)
 
 ;; the block holds its elements: freeing it frees the array
 (ser/register-header-disposer!
-  ser/EVE_ARRAY_SLAB_TYPE_ID
-  (fn [sio blk-off] (slab/free! sio blk-off)))
+ ser/EVE_ARRAY_SLAB_TYPE_ID
+ (fn [sio blk-off] (slab/free! sio blk-off)))
 
 ;; A host typed array in an eve value: an eve array block (eve.encoding reads
 ;; the host's array as its subtype and little-endian bytes)
@@ -872,7 +870,7 @@
      off)))
 
 (codec/register-collection-writer! :array
-  (fn [sio subtype a] (write-host-array! sio a subtype)))
+                                   (fn [sio subtype a] (write-host-array! sio a subtype)))
 
 (defn array-values
   "The elements of the 0x1D block at slab-off, a vector."

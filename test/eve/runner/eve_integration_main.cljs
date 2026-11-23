@@ -16,10 +16,10 @@
 
   ;; Timeout guard
   (js/setTimeout
-    (fn []
-      (println "\nTIMEOUT: Tests exceeded 120s time limit")
-      (js/process.exit 1))
-    120000)
+   (fn []
+     (println "\nTIMEOUT: Tests exceeded 120s time limit")
+     (js/process.exit 1))
+   120000)
 
   ;; Install fat kernel (provides worker source for Node.js)
   (let [path (js/require "path")

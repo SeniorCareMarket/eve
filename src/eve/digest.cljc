@@ -52,7 +52,7 @@
    descriptor row, a full slab), and a failure to stamp never fails the
    caller's hash or equality."
   (:require [eve.thread-host :as h]   ;; attempt: the catch-all shared code cannot spell (the host adapter's)
-           [eve.slab-io :as slab]
+            [eve.slab-io :as slab]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.serialize :as ser]
             [eve.codec :as codec]
@@ -110,19 +110,19 @@
   [sio hdr]
   (or (cache-block sio hdr)
       (let [[ok? blk] (h/attempt (fn [] (when-let [row (alloc/desc-of sio hdr)]
-          (loop []
-            (let [cur (ptr-word row)]
-              (cond
-                (valid-block? sio hdr cur) cur
-                :else
-                (let [blk (slab/alloc! sio CACHE_SIZE)]
-                  (slab/write-i32! sio blk F_MAGIC MAGIC)
-                  (slab/write-i32! sio blk F_BACKPTR hdr)
-                  (slab/write-i32! sio blk F_FLAGS 0)
-                  (if (== cur (cas-ptr! row cur blk))
-                    (do (tally/hold-cache! sio hdr blk) blk)
-                    (do (slab/free! sio blk)
-                        (recur))))))))))]
+                                          (loop []
+                                            (let [cur (ptr-word row)]
+                                              (cond
+                                                (valid-block? sio hdr cur) cur
+                                                :else
+                                                (let [blk (slab/alloc! sio CACHE_SIZE)]
+                                                  (slab/write-i32! sio blk F_MAGIC MAGIC)
+                                                  (slab/write-i32! sio blk F_BACKPTR hdr)
+                                                  (slab/write-i32! sio blk F_FLAGS 0)
+                                                  (if (== cur (cas-ptr! row cur blk))
+                                                    (do (tally/hold-cache! sio hdr blk) blk)
+                                                    (do (slab/free! sio blk)
+                                                        (recur))))))))))]
         (when ok? blk))))
 
 ;; ---------------------------------------------------------------------------
@@ -169,13 +169,13 @@
   (let [[ok? words]
         (h/attempt
          (fn []
-          (let [bs (binding [ser/*shared-write* true]
-               (codec/value->eve-bytes v))
+           (let [bs (binding [ser/*shared-write* true]
+                      (codec/value->eve-bytes v))
           ;; eve.crypto's contract is byte vectors in and out; iterate the
           ;; byte array itself (a per-index aget through eve.host cost
           ;; ~50us a call — 2.5 s on a 47 KB encoding, measured)
-          raw (crypto/sha256 (mapv (fn [b] (bit-and b 0xFF)) bs))]
-      (pack-words (mapv (fn [b] (bit-and b 0xFF)) raw)))))]
+                 raw (crypto/sha256 (mapv (fn [b] (bit-and b 0xFF)) bs))]
+             (pack-words (mapv (fn [b] (bit-and b 0xFF)) raw)))))]
     (when ok? words)))
 
 ;; ---------------------------------------------------------------------------

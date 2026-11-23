@@ -28,8 +28,8 @@
    conditional catch class: basilisp rejects (catch Throwable ..))."
   [& body]
   `(try ~@body
-     (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
-       (str :throws " " t#))))
+        (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
+          (str :throws " " t#))))
 
 (def ^:private atom-name "contract/pss")
 (def ^:private workers 3)

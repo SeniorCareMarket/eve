@@ -12,8 +12,8 @@
             [eve.record-context :as record-context]
             [eve.core]
             [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
-                                                 cljs-protocol? rename-syms parse-protocol-impls
-                                                 cljs-translate-protocol]]
+                                                   cljs-protocol? rename-syms parse-protocol-impls
+                                                   cljs-translate-protocol]]
             [eve.deftype-proto.sio :as sio]))
 
 ;; Babashka: a non-map type is a plain deftype over eve.core's protocols
@@ -143,50 +143,50 @@
   ;; host parity: the host interfaces the spec declared are kept for
   ;; clojure.core's interface checks (eve.host-completion/register-declared!),
   ;; though sci's deftype carries only the eve.core translations below
-  (when-let [reg (resolve 'eve.host-completion/register-declared!)]
-    (@reg (str (munge (str *ns*)) "." (name type-name)) (map :protocol parsed-protos)))
-  (let [object? #(contains? '#{Object java.lang.Object} (:protocol %))
-        rewrite (fn [m] (update m :body (fn [body] (map #(rewrite-self-calls % (first (:args m))) body))))
-        objects (mapcat :methods (filter object? parsed-protos))
-        translated (->> (remove object? parsed-protos)
-                        (mapcat (fn [impl]
-                                  (cond
-                                    (contains? sci-native-interfaces (:protocol impl))
-                                    [(update impl :methods sci-swap-arities)]
+   (when-let [reg (resolve 'eve.host-completion/register-declared!)]
+     (@reg (str (munge (str *ns*)) "." (name type-name)) (map :protocol parsed-protos)))
+   (let [object? #(contains? '#{Object java.lang.Object} (:protocol %))
+         rewrite (fn [m] (update m :body (fn [body] (map #(rewrite-self-calls % (first (:args m))) body))))
+         objects (mapcat :methods (filter object? parsed-protos))
+         translated (->> (remove object? parsed-protos)
+                         (mapcat (fn [impl]
+                                   (cond
+                                     (contains? sci-native-interfaces (:protocol impl))
+                                     [(update impl :methods sci-swap-arities)]
 
-                                    (contains? bb-completion-interfaces (:protocol impl))
-                                    (let [{:keys [protocol methods]} (bb-completion-interfaces (:protocol impl))]
-                                      [(assoc impl :protocol protocol
-                                              :methods (mapv #(update % :name (fn [n] (get methods n n)))
-                                                             (:methods impl)))])
+                                     (contains? bb-completion-interfaces (:protocol impl))
+                                     (let [{:keys [protocol methods]} (bb-completion-interfaces (:protocol impl))]
+                                       [(assoc impl :protocol protocol
+                                               :methods (mapv #(update % :name (fn [n] (get methods n n)))
+                                                              (:methods impl)))])
 
-                                    (interface-sym? (:protocol impl))
-                                    (keep (fn [{:keys [protocol] :as t}]
-                                            (when (contains? eve-core-protocols protocol)
-                                              (assoc t :protocol (symbol "eve.core" (name protocol)))))
-                                          (cljs-translate-protocol impl))
+                                     (interface-sym? (:protocol impl))
+                                     (keep (fn [{:keys [protocol] :as t}]
+                                             (when (contains? eve-core-protocols protocol)
+                                               (assoc t :protocol (symbol "eve.core" (name protocol)))))
+                                           (cljs-translate-protocol impl))
                                     ;; a ClojureScript protocol: eve.core's of that name
-                                    (cljs-protocol? (:protocol impl))
-                                    (let [p (strip-cljs-core (:protocol impl))]
-                                      (when (contains? eve-core-protocols p)
-                                        [(assoc impl :protocol (symbol "eve.core" (name p)))]))
-                                    :else [impl])))
-                        (group-by :protocol)
-                        (mapv (fn [[p impls]] {:protocol p :methods (vec (mapcat :methods impls))})))
-        has? (fn [p] (some #(= p (:protocol %)) translated))
-        by-name (group-by :name objects)
-        to-string (or (get by-name 'toString)
-                      [{:name 'toString :args '[_] :body [(str "#eve/" (name type-name))]}])
+                                     (cljs-protocol? (:protocol impl))
+                                     (let [p (strip-cljs-core (:protocol impl))]
+                                       (when (contains? eve-core-protocols p)
+                                         [(assoc impl :protocol (symbol "eve.core" (name p)))]))
+                                     :else [impl])))
+                         (group-by :protocol)
+                         (mapv (fn [[p impls]] {:protocol p :methods (vec (mapcat :methods impls))})))
+         has? (fn [p] (some #(= p (:protocol %)) translated))
+         by-name (group-by :name objects)
+         to-string (or (get by-name 'toString)
+                       [{:name 'toString :args '[_] :body [(str "#eve/" (name type-name))]}])
         ;; equals and hashCode are the type's equiv and hasheq where it has
         ;; them (a JVM-named body's own equals is the JVM's interop)
-        equals (or (when (has? 'eve.core/IEquiv)
-                     [{:name 'equals :args '[this other] :body '[(eve.core/-equiv this other)]}])
-                   (get by-name 'equals))
-        hash-code (or (when (has? 'eve.core/IHash)
-                        [{:name 'hashCode :args '[this] :body '[(eve.core/-hash this)]}])
-                      (get by-name 'hashCode))
-        hash-code (map (fn [m] (update m :body (fn [b] [(list 'unchecked-int (cons 'do b))])))
-                       hash-code)
+         equals (or (when (has? 'eve.core/IEquiv)
+                      [{:name 'equals :args '[this other] :body '[(eve.core/-equiv this other)]}])
+                    (get by-name 'equals))
+         hash-code (or (when (has? 'eve.core/IHash)
+                         [{:name 'hashCode :args '[this] :body '[(eve.core/-hash this)]}])
+                       (get by-name 'hashCode))
+         hash-code (map (fn [m] (update m :body (fn [b] [(list 'unchecked-int (cons 'do b))])))
+                        hash-code)
         ;; A type carrying the full map signature (ILookup +
         ;; Associative + Counted) is a map on the JVM whether or not
         ;; it names IPersistentMap: deftype there answers
@@ -236,50 +236,50 @@
         ;; answered the value, and (instance? clojure.lang.ILookup r) was
         ;; false), so a record keeps its map groups as written, like a
         ;; process-local record-like type does.
-        map-signature? (let [ps (set (map :protocol parsed-protos))
-                             record? (contains? ps 'eve.record/IRecordData)]
-                         (and (contains? ps 'clojure.lang.ILookup)
-                              (contains? ps 'clojure.lang.Associative)
-                              (contains? ps 'clojure.lang.Counted)
-                              (not (and slab? (not record?) (contains? ps 'clojure.lang.IPersistentMap)))
-                              (not-any? ps '#{clojure.lang.IPersistentVector
-                                              clojure.lang.IPersistentSet
-                                              clojure.lang.IPersistentList
-                                              clojure.lang.IList
-                                              clojure.lang.IPersistentStack
-                                              clojure.lang.IPersistentQueue
-                                              clojure.lang.Sequential})))
-        map-kept (when map-signature?
-                   (let [kept (filterv (fn [impl]
-                                         (contains? '#{clojure.lang.ILookup
-                                                       clojure.lang.Associative
-                                                       clojure.lang.IPersistentCollection
-                                                       clojure.lang.IPersistentMap
-                                                       clojure.lang.Counted
-                                                       clojure.lang.Seqable
-                                                       java.lang.Iterable}
-                                                    (:protocol impl)))
-                                       parsed-protos)
+         map-signature? (let [ps (set (map :protocol parsed-protos))
+                              record? (contains? ps 'eve.record/IRecordData)]
+                          (and (contains? ps 'clojure.lang.ILookup)
+                               (contains? ps 'clojure.lang.Associative)
+                               (contains? ps 'clojure.lang.Counted)
+                               (not (and slab? (not record?) (contains? ps 'clojure.lang.IPersistentMap)))
+                               (not-any? ps '#{clojure.lang.IPersistentVector
+                                               clojure.lang.IPersistentSet
+                                               clojure.lang.IPersistentList
+                                               clojure.lang.IList
+                                               clojure.lang.IPersistentStack
+                                               clojure.lang.IPersistentQueue
+                                               clojure.lang.Sequential})))
+         map-kept (when map-signature?
+                    (let [kept (filterv (fn [impl]
+                                          (contains? '#{clojure.lang.ILookup
+                                                        clojure.lang.Associative
+                                                        clojure.lang.IPersistentCollection
+                                                        clojure.lang.IPersistentMap
+                                                        clojure.lang.Counted
+                                                        clojure.lang.Seqable
+                                                        java.lang.Iterable}
+                                                     (:protocol impl)))
+                                        parsed-protos)
                          ;; SCI's map hash and host collection consumers call
                          ;; iterator directly. A JVM map-shaped declaration can
                          ;; omit Iterable, but SciMap cannot: derive it from seq.
-                         kept (if (some #(= 'java.lang.Iterable (:protocol %)) kept)
-                                kept
-                                (conj kept
-                                      {:protocol 'java.lang.Iterable
-                                       :methods [{:name 'iterator :args '[this]
-                                                  :body '[(let [state (atom (seq this))]
-                                                            (reify java.util.Iterator
-                                                              (hasNext [_] (boolean @state))
-                                                              (next [_]
-                                                                (if-let [s @state]
-                                                                  (let [v (first s)]
-                                                                    (swap! state next)
-                                                                    v)
-                                                                  (throw (java.util.NoSuchElementException.))))))]}]}))]
-                     (if (some #(= 'clojure.lang.IPersistentMap (:protocol %)) kept)
-                       kept
-                       (into [{:protocol 'clojure.lang.IPersistentMap :methods []}] kept))))
+                          kept (if (some #(= 'java.lang.Iterable (:protocol %)) kept)
+                                 kept
+                                 (conj kept
+                                       {:protocol 'java.lang.Iterable
+                                        :methods [{:name 'iterator :args '[this]
+                                                   :body '[(let [state (atom (seq this))]
+                                                             (reify java.util.Iterator
+                                                               (hasNext [_] (boolean @state))
+                                                               (next [_]
+                                                                 (if-let [s @state]
+                                                                   (let [v (first s)]
+                                                                     (swap! state next)
+                                                                     v)
+                                                                   (throw (java.util.NoSuchElementException.))))))]}]}))]
+                      (if (some #(= 'clojure.lang.IPersistentMap (:protocol %)) kept)
+                        kept
+                        (into [{:protocol 'clojure.lang.IPersistentMap :methods []}] kept))))
         ;; A type that declares clojure.lang.ILookup WITHOUT the full map
         ;; signature (datascript's Entity: ILookup + Associative + IFn, no
         ;; Counted group — its count rides the Associative group) is not a
@@ -310,37 +310,37 @@
         ;; Entity matches none of the three: a value type, no kind
         ;; head, no set! (its cache mutates through volatiles), no
         ;; deref/atom face.
-        ilookup-kept (let [ps (set (map :protocol parsed-protos))
-                           set!-body? (boolean
+         ilookup-kept (let [ps (set (map :protocol parsed-protos))
+                            set!-body? (boolean
                                         (some #(= 'set! %)
                                               (tree-seq coll? seq
                                                         (mapcat :body
                                                                 (mapcat :methods parsed-protos)))))]
-                       (when (and (not map-signature?)
-                                  (contains? ps 'clojure.lang.ILookup)
-                                  (not set!-body?)
-                                  (not-any? ps '#{clojure.lang.IPersistentVector
-                                                  clojure.lang.IPersistentSet
-                                                  clojure.lang.IPersistentList
-                                                  clojure.lang.IList
-                                                  clojure.lang.IPersistentStack
-                                                  clojure.lang.IPersistentQueue
-                                                  clojure.lang.Sequential
-                                                  clojure.lang.IEditableCollection
-                                                  clojure.lang.ITransientCollection
-                                                  clojure.lang.ITransientAssociative
-                                                  clojure.lang.ITransientVector
-                                                  clojure.lang.ITransientMap
-                                                  clojure.lang.ITransientSet
-                                                  clojure.lang.IDeref
-                                                  clojure.lang.IAtom}))
-                         (filterv #(= 'clojure.lang.ILookup (:protocol %))
-                                  parsed-protos)))]
-    (mapv (fn [impl] (update impl :methods #(mapv rewrite %)))
-          (into (conj translated
-                      {:protocol 'Object :methods (vec (concat to-string equals hash-code))})
-                (concat map-kept
-                        ilookup-kept
+                        (when (and (not map-signature?)
+                                   (contains? ps 'clojure.lang.ILookup)
+                                   (not set!-body?)
+                                   (not-any? ps '#{clojure.lang.IPersistentVector
+                                                   clojure.lang.IPersistentSet
+                                                   clojure.lang.IPersistentList
+                                                   clojure.lang.IList
+                                                   clojure.lang.IPersistentStack
+                                                   clojure.lang.IPersistentQueue
+                                                   clojure.lang.Sequential
+                                                   clojure.lang.IEditableCollection
+                                                   clojure.lang.ITransientCollection
+                                                   clojure.lang.ITransientAssociative
+                                                   clojure.lang.ITransientVector
+                                                   clojure.lang.ITransientMap
+                                                   clojure.lang.ITransientSet
+                                                   clojure.lang.IDeref
+                                                   clojure.lang.IAtom}))
+                          (filterv #(= 'clojure.lang.ILookup (:protocol %))
+                                   parsed-protos)))]
+     (mapv (fn [impl] (update impl :methods #(mapv rewrite %)))
+           (into (conj translated
+                       {:protocol 'Object :methods (vec (concat to-string equals hash-code))})
+                 (concat map-kept
+                         ilookup-kept
                         ;; Every type this adapter defines is an Eve type:
                         ;; mark it with eve.deftype-proto.data/IsEve, as
                         ;; Eve's own collection types mark themselves in
@@ -354,9 +354,9 @@
                         ;; its index sets materialized with their
                         ;; registered comparators lost). A type that
                         ;; already carries the mark keeps its own impl.
-                        (when-not (some #(= "IsEve" (name (:protocol %))) translated)
-                          [{:protocol 'eve.deftype-proto.data/IsEve
-                            :methods [{:name '-eve? :args '[_] :body '[true]}]}])))))))
+                         (when-not (some #(= "IsEve" (name (:protocol %))) translated)
+                           [{:protocol 'eve.deftype-proto.data/IsEve
+                             :methods [{:name '-eve? :args '[_] :body '[true]}]}])))))))
 
 ;; Map entries: an eve-deftype heading clojure.lang.IMapEntry (eve.map-entry's
 ;; MapEntry) is PRESENTED as a clojure.lang.MapEntry on this seat. sci's

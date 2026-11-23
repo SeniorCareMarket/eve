@@ -3,7 +3,7 @@
             [datascript.core :as d] [datascript.db :as db]
             [me.tonsky.persistent-sorted-set :as pss]))
 (defn attempt [label f]
-  (let [fut (future (try {:ok (f)} (catch Throwable t {:threw (str (type t) " " (.getMessage t))})) )
+  (let [fut (future (try {:ok (f)} (catch Throwable t {:threw (str (type t) " " (.getMessage t))})))
         res (deref fut 15000 ::timeout)]
     (println {:case label :res res})
     (future-cancel fut)))
@@ -25,4 +25,4 @@
       (attempt :into-vec-slice #(vals (into [] sl)))
       (attempt :reduce-slice #(reduce (fn [a x] (conj a (.-v x))) [] sl))
       (println {:done true}))
-  (System/exit 0)))
+    (System/exit 0)))

@@ -12,7 +12,7 @@
 (deftest empty-set-roundtrip
   (testing "empty set"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= #{} (set s)))
         (is (zero? (count s)))))))
@@ -20,7 +20,7 @@
 (deftest primitive-set-roundtrip
   (testing "set with primitive elements"
     (with-heap-slab
-      (let [            src #{:a :b :c 1 "hello"}
+      (let [src #{:a :b :c 1 "hello"}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= src (set s)))
@@ -29,7 +29,7 @@
 (deftest set-contains
   (testing "contains? returns correct results"
     (with-heap-slab
-      (let [            src #{:x :y :z}
+      (let [src #{:x :y :z}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (contains? s :x))
@@ -40,7 +40,7 @@
 (deftest set-seq
   (testing "seq returns all elements"
     (with-heap-slab
-      (let [            src #{10 20 30}
+      (let [src #{10 20 30}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= src (set (seq s))))))))
@@ -48,7 +48,7 @@
 (deftest large-set-roundtrip
   (testing "set with 50 elements"
     (with-heap-slab
-      (let [            src (set (map #(keyword (str "e" %)) (range 50)))
+      (let [src (set (map #(keyword (str "e" %)) (range 50)))
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= src (set s)))
@@ -61,7 +61,7 @@
 (deftest portable-hash-flag-set
   (testing "JVM-written sets have SET_FLAG_PORTABLE_HASH flag"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2 3})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2 3})
             flags (alloc/-sio-read-u8 sio hdr 1)]
         (is (not (zero? (bit-and flags eve-set/SET_FLAG_PORTABLE_HASH)))
             "SET_FLAG_PORTABLE_HASH should be set in header byte 1")))))
@@ -71,7 +71,7 @@
 (deftest large-set-contains-all
   (testing "contains? works for 100-element set (exercises hash collisions)"
     (with-heap-slab
-      (let [            src (set (range 100))
+      (let [src (set (range 100))
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= 100 (count s)))
@@ -84,7 +84,7 @@
     ;; Verify that the JVM portable-hash-bytes matches known values
     ;; by hashing serialized integers and checking consistency
     (with-heap-slab
-      (let [            serialize (partial codec/value+sio->eve-bytes sio)]
+      (let [serialize (partial codec/value+sio->eve-bytes sio)]
         (doseq [v [0 1 42 -1 100 999]]
           (let [vb (serialize v)
                 h  (hu/portable-hash-bytes vb)]
@@ -96,7 +96,7 @@
 (deftest set-with-mixed-types-roundtrip
   (testing "set with strings, keywords, and integers"
     (with-heap-slab
-      (let [            src #{:a "hello" 42 :b "world" 99}
+      (let [src #{:a "hello" 42 :b "world" 99}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= src (set s)))
@@ -110,7 +110,7 @@
 (deftest hamt-get-via-contains-and-get
   (testing "EveHashSet.contains and .get use O(log n) HAMT path"
     (with-heap-slab
-      (let [            src (set (range 100))
+      (let [src (set (range 100))
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (doseq [i (range 100)]
@@ -126,7 +126,7 @@
 (deftest conj-returns-eve-hash-set
   (testing "conj returns EveHashSet, not PersistentHashSet"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2 3})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2 3})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (conj s 4)]
         (is (instance? eve.set.EveHashSet s2))
@@ -136,7 +136,7 @@
 (deftest conj-existing-element
   (testing "conj-ing existing element returns same set"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:a :b})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:a :b})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (conj s :a)]
         (is (identical? s s2))))))
@@ -144,7 +144,7 @@
 (deftest disjoin-returns-eve-hash-set
   (testing "disjoin returns EveHashSet, not PersistentHashSet"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:x :y :z})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:x :y :z})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (disj s :y)]
         (is (instance? eve.set.EveHashSet s2))
@@ -154,7 +154,7 @@
 (deftest disjoin-missing-element
   (testing "disjoin on missing element returns same set"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (disj s 999)]
         (is (identical? s s2))))))
@@ -162,7 +162,7 @@
 (deftest conj-disjoin-roundtrip
   (testing "add elements then remove some, verify membership"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (reduce conj s (range 50))
             s3  (reduce disj s2 (range 0 50 2))]  ;; remove evens
@@ -180,7 +180,7 @@
 (deftest set-ifn
   (testing "EveHashSet implements IFn"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:a :b :c})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:a :b :c})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= :a (s :a)))
         (is (= :b (s :b)))
@@ -194,7 +194,7 @@
 (deftest set-hasheq
   (testing "hash of EveHashSet equals hash of equivalent Clojure set"
     (with-heap-slab
-      (let [            src #{:a :b :c}
+      (let [src #{:a :b :c}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= (hash src) (hash s)))))))
@@ -202,7 +202,7 @@
 (deftest set-print-method
   (testing "pr-str prints as set literal"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:x})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{:x})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= "#{:x}" (pr-str s)))))))
 
@@ -213,7 +213,7 @@
 (deftest set-reduce-init
   (testing "reduce with init collects all elements"
     (with-heap-slab
-      (let [            src #{1 2 3 4 5}
+      (let [src #{1 2 3 4 5}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             result (reduce conj #{} s)]
@@ -222,7 +222,7 @@
 (deftest set-reduce-no-init
   (testing "reduce without init sums elements"
     (with-heap-slab
-      (let [            src #{1 2 3 4 5}
+      (let [src #{1 2 3 4 5}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)]
         (is (= 15 (reduce + s)))))))
@@ -230,7 +230,7 @@
 (deftest set-reduce-early-termination
   (testing "reduce with reduced stops early"
     (with-heap-slab
-      (let [            src (set (range 50))
+      (let [src (set (range 50))
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             result (reduce (fn [acc _] (if (>= (count acc) 5) (reduced acc) (conj acc 1)))
@@ -244,7 +244,7 @@
 (deftest set-transient-roundtrip
   (testing "transient -> conj! -> persistent! roundtrip"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2 3})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{1 2 3})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (persistent! (conj! (transient s) 4))]
         (is (instance? eve.set.EveHashSet s2))
@@ -253,7 +253,7 @@
 (deftest set-transient-batch-conj
   (testing "batch conj! builds correct set"
     (with-heap-slab
-      (let [            hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{})
+      (let [hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) #{})
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (persistent! (reduce conj! (transient s) (range 50)))]
         (is (instance? eve.set.EveHashSet s2))
@@ -264,7 +264,7 @@
 (deftest set-transient-disjoin
   (testing "disjoin! removes elements"
     (with-heap-slab
-      (let [            src #{:a :b :c :d}
+      (let [src #{:a :b :c :d}
             hdr (eve-set/jvm-write-set! sio (partial codec/value+sio->eve-bytes sio) src)
             s   (eve-set/jvm-eve-hash-set-from-offset sio hdr)
             s2  (persistent! (-> (transient s) (disj! :b) (disj! :d)))]

@@ -62,7 +62,6 @@
   (hashCode [_] (hash [k v]))
   (toString [_] (pr-str [k v])))
 
-
 (defn map-entry
   "An immutable Eve map entry with Clojure's key/val, indexed and seq semantics.
    Call this (not eve.encoding/map-entry) when the entry must survive an Eve

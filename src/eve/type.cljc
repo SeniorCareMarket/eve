@@ -27,7 +27,7 @@
         aliases (ns-aliases *ns*)
         full-ns (if n (str (or (get-in &env [:ns :requires (symbol n)])
                                (get aliases (symbol n)) n))
-                   (str (or (get-in &env [:ns :name]) (ns-name *ns*))))]
+                    (str (or (get-in &env [:ns :name]) (ns-name *ns*))))]
     (keyword full-ns (name type-name))))
 
 (defmacro instance?

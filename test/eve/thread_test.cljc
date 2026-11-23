@@ -408,7 +408,7 @@
   (is (= 3 @(t/future-call three)) ":io, per task")
   (is (= [1 4 9] (vec (t/pmap sq [1 2 3]))) ":compute, the host's parallelism")
   (is (= [:eve.thread/compute :eve.thread/io] (sort (set (filter #{:eve.thread/io :eve.thread/compute}
-                                                                  (keys (t/registry)))))))
+                                                                 (keys (t/registry)))))))
   (t/shutdown-default-pools!))
 
 ;; ---------------------------------------------------------------------------

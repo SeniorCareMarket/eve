@@ -249,83 +249,83 @@
 ;;=============================================================================
 
 (do
-(defn- vec-conj-impl [sio cnt shift root tail tail-len v]
-  (let [val-bytes (serialize-element-bytes sio v)
-        val-off (make-value-block! sio val-bytes)]
-    (if (< tail-len NODE_SIZE)
-      (let [new-tail (clone-node! sio tail)]
-        (node-set! sio new-tail tail-len val-off)
-        (make-vec-impl sio (inc cnt) shift root new-tail (inc tail-len)))
-      (let [old-tail tail
-            new-tail (alloc-node! sio)
-            _ (node-set! sio new-tail 0 val-off)]
-        (if (> (unsigned-bit-shift-right cnt SHIFT_STEP)
-               (bit-shift-left 1 shift))
-          (let [new-root-off (alloc-node! sio)
-                _ (node-set! sio new-root-off 0 root)
-                new-shift (+ shift SHIFT_STEP)
-                _ (node-set! sio new-root-off 1 (new-path sio shift old-tail))]
-            (make-vec-impl sio (inc cnt) new-shift new-root-off new-tail 1))
-          (let [new-root (if (== root NIL_OFFSET)
-                           (let [nr (alloc-node! sio)]
-                             (node-set! sio nr 0 old-tail)
-                             nr)
-                           (push-tail sio shift root old-tail cnt))]
-            (make-vec-impl sio (inc cnt) shift new-root new-tail 1)))))))
+  (defn- vec-conj-impl [sio cnt shift root tail tail-len v]
+    (let [val-bytes (serialize-element-bytes sio v)
+          val-off (make-value-block! sio val-bytes)]
+      (if (< tail-len NODE_SIZE)
+        (let [new-tail (clone-node! sio tail)]
+          (node-set! sio new-tail tail-len val-off)
+          (make-vec-impl sio (inc cnt) shift root new-tail (inc tail-len)))
+        (let [old-tail tail
+              new-tail (alloc-node! sio)
+              _ (node-set! sio new-tail 0 val-off)]
+          (if (> (unsigned-bit-shift-right cnt SHIFT_STEP)
+                 (bit-shift-left 1 shift))
+            (let [new-root-off (alloc-node! sio)
+                  _ (node-set! sio new-root-off 0 root)
+                  new-shift (+ shift SHIFT_STEP)
+                  _ (node-set! sio new-root-off 1 (new-path sio shift old-tail))]
+              (make-vec-impl sio (inc cnt) new-shift new-root-off new-tail 1))
+            (let [new-root (if (== root NIL_OFFSET)
+                             (let [nr (alloc-node! sio)]
+                               (node-set! sio nr 0 old-tail)
+                               nr)
+                             (push-tail sio shift root old-tail cnt))]
+              (make-vec-impl sio (inc cnt) shift new-root new-tail 1)))))))
 
-(defn- vec-assoc-n-impl [sio cnt shift root tail tail-len n v]
-  (let [val-bytes (serialize-element-bytes sio v)
-        val-off (make-value-block! sio val-bytes)
-        toff (tail-offset-calc cnt)]
-    (if (>= n toff)
-      (let [new-tail (clone-node! sio tail)]
-        (node-set! sio new-tail (- n toff) val-off)
-        (make-vec-impl sio cnt shift root new-tail tail-len))
-      (let [new-root (do-assoc sio shift root n val-off)]
-        (make-vec-impl sio cnt shift new-root tail tail-len)))))
+  (defn- vec-assoc-n-impl [sio cnt shift root tail tail-len n v]
+    (let [val-bytes (serialize-element-bytes sio v)
+          val-off (make-value-block! sio val-bytes)
+          toff (tail-offset-calc cnt)]
+      (if (>= n toff)
+        (let [new-tail (clone-node! sio tail)]
+          (node-set! sio new-tail (- n toff) val-off)
+          (make-vec-impl sio cnt shift root new-tail tail-len))
+        (let [new-root (do-assoc sio shift root n val-off)]
+          (make-vec-impl sio cnt shift new-root tail tail-len)))))
 
-(defn- vec-pop-impl [sio cnt shift root tail tail-len]
-  (cond
-    (== cnt 1)
-    (let [new-tail (alloc-node! sio)]
-      (make-vec-impl sio 0 SHIFT_STEP NIL_OFFSET new-tail 0))
+  (defn- vec-pop-impl [sio cnt shift root tail tail-len]
+    (cond
+      (== cnt 1)
+      (let [new-tail (alloc-node! sio)]
+        (make-vec-impl sio 0 SHIFT_STEP NIL_OFFSET new-tail 0))
 
-    (> tail-len 1)
-    (let [new-tail (alloc-node! sio)]
-      (dotimes [i (dec tail-len)]
-        (node-set! sio new-tail i (node-get sio tail i)))
-      (make-vec-impl sio (dec cnt) shift root new-tail (dec tail-len)))
+      (> tail-len 1)
+      (let [new-tail (alloc-node! sio)]
+        (dotimes [i (dec tail-len)]
+          (node-set! sio new-tail i (node-get sio tail i)))
+        (make-vec-impl sio (dec cnt) shift root new-tail (dec tail-len)))
 
-    :else
-    (let [new-cnt (dec cnt)
-          new-tail-off (loop [node-off root sh shift]
-                         (let [idx (bit-and (unsigned-bit-shift-right (dec new-cnt) sh) MASK)]
-                           (if (zero? sh)
-                             node-off
-                             (recur (node-get sio node-off idx) (- sh SHIFT_STEP)))))
-          new-root (pop-tail sio shift root cnt)
-          new-toff (tail-offset-calc new-cnt)
+      :else
+      (let [new-cnt (dec cnt)
+            new-tail-off (loop [node-off root sh shift]
+                           (let [idx (bit-and (unsigned-bit-shift-right (dec new-cnt) sh) MASK)]
+                             (if (zero? sh)
+                               node-off
+                               (recur (node-get sio node-off idx) (- sh SHIFT_STEP)))))
+            new-root (pop-tail sio shift root cnt)
+            new-toff (tail-offset-calc new-cnt)
           ;; a level goes when the root has one live child — read from the count,
           ;; never from a slot past the live ones (Clojure tests array[1] == null)
-          [new-root new-shift]
-          (cond
-            (== new-root NIL_OFFSET)
-            [NIL_OFFSET SHIFT_STEP]
+            [new-root new-shift]
+            (cond
+              (== new-root NIL_OFFSET)
+              [NIL_OFFSET SHIFT_STEP]
 
-            (and (> shift SHIFT_STEP)
-                 (<= new-toff (bit-shift-left 1 shift)))
-            (let [child (node-get sio new-root 0)]
+              (and (> shift SHIFT_STEP)
+                   (<= new-toff (bit-shift-left 1 shift)))
+              (let [child (node-get sio new-root 0)]
               ;; the root pop-tail just cloned, dropped for its one child: never published, freed now (it was
               ;; left allocated, 2026-10-21 ET)
-              (slab/free! sio new-root)
-              [child (- shift SHIFT_STEP)])
+                (slab/free! sio new-root)
+                [child (- shift SHIFT_STEP)])
 
-            :else
-            [new-root shift])
+              :else
+              [new-root shift])
 
-          new-tl (- new-cnt new-toff)]
-      (make-vec-impl sio new-cnt new-shift new-root new-tail-off new-tl)))) ;; end vec-pop-impl
-)
+            new-tl (- new-cnt new-toff)]
+        (make-vec-impl sio new-cnt new-shift new-root new-tail-off new-tl)))) ;; end vec-pop-impl
+  )
 
 ;;=============================================================================
 ;; Liveness — what a vector's header says is current
@@ -419,7 +419,7 @@
     :walk))
 
 (eve/deftype EveVector
-  [^:int32 cnt ^:int32 shift ^:int32 root ^:int32 tail ^:int32 tail-len]
+             [^:int32 cnt ^:int32 shift ^:int32 root ^:int32 tail ^:int32 tail-len]
 
   clojure.lang.Sequential
 
@@ -566,7 +566,6 @@
   d/IEveSio
   (d/-eve-sio [_] sio__)
 
-
   java.lang.Iterable
   (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
@@ -576,23 +575,23 @@
   (get [this ^int i] (.nth this i))
   (indexOf [this o]
     (int (loop [i 0]
-      (cond
-        (== i cnt) -1
-        (clojure.lang.Util/equiv (.nth this i) o) i
-        :else (recur (inc i))))))
+           (cond
+             (== i cnt) -1
+             (clojure.lang.Util/equiv (.nth this i) o) i
+             :else (recur (inc i))))))
   (lastIndexOf [this o]
     (int (loop [i (dec cnt)]
-      (cond
-        (< i 0) -1
-        (clojure.lang.Util/equiv (.nth this (int i)) o) i
-        :else (recur (dec i))))))
+           (cond
+             (< i 0) -1
+             (clojure.lang.Util/equiv (.nth this (int i)) o) i
+             :else (recur (dec i))))))
   (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
   (^boolean contains [this o] (not= -1 (.indexOf this o)))
   (^boolean containsAll [this ^java.util.Collection c]
     (boolean (every? #(.contains this %) c)))
   (^java.util.List subList [this ^int from ^int to]
     (java.util.Collections/unmodifiableList
-      (java.util.ArrayList. ^java.util.Collection (subvec (vec this) from to))))
+     (java.util.ArrayList. ^java.util.Collection (subvec (vec this) from to))))
   (^java.util.ListIterator listIterator [this] (.listIterator (java.util.ArrayList. this) 0))
   (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.ArrayList. this) i))
   ;; Unsupported mutators (immutable)
@@ -619,8 +618,8 @@
         (and (== cnt (.count ov))
              (loop [i 0]
                (if (== i cnt) true
-                 (if (clojure.lang.Util/equals (.nth this i) (.nth ov i))
-                   (recur (inc i)) false)))))))
+                   (if (clojure.lang.Util/equals (.nth this i) (.nth ov i))
+                     (recur (inc i)) false)))))))
   (hashCode [this] (p/hash-ordered this)))
 
 ;; bb: EveVector is a SciType with no print-method, so printing fell to its
@@ -666,60 +665,59 @@
       (edit sio v #(ecore/conj % x)))))
 
 (do
-     (eve/host-deftype TransientEveVector [^:volatile-mutable v sio]
-       clojure.lang.ITransientVector
-       (assocN [this i x] (set! v (edit sio v #(ecore/assoc % i x))) this)
-       (pop [this] (set! v (edit sio v ecore/pop)) this)
-       clojure.lang.ITransientAssociative
-       (assoc [this k x] (set! v (edit sio v #(ecore/assoc % k x))) this)
-       clojure.lang.ITransientCollection
-       (conj [this x] (set! v (conj!-owned sio v x)) this)
-       (persistent [_] (alloc/stop-logging! sio) v)
-       clojure.lang.Counted
-       (count [_] (ecore/count v))
-       clojure.lang.Indexed
-       (nth [_ i] (ecore/nth v i))
-       (nth [_ i nf] (ecore/nth v i nf))
-       clojure.lang.ILookup
-       (valAt [_ k] (ecore/get v k))
-       (valAt [_ k nf] (ecore/get v k nf)))
+  (eve/host-deftype TransientEveVector [^:volatile-mutable v sio]
+                    clojure.lang.ITransientVector
+                    (assocN [this i x] (set! v (edit sio v #(ecore/assoc % i x))) this)
+                    (pop [this] (set! v (edit sio v ecore/pop)) this)
+                    clojure.lang.ITransientAssociative
+                    (assoc [this k x] (set! v (edit sio v #(ecore/assoc % k x))) this)
+                    clojure.lang.ITransientCollection
+                    (conj [this x] (set! v (conj!-owned sio v x)) this)
+                    (persistent [_] (alloc/stop-logging! sio) v)
+                    clojure.lang.Counted
+                    (count [_] (ecore/count v))
+                    clojure.lang.Indexed
+                    (nth [_ i] (ecore/nth v i))
+                    (nth [_ i nf] (ecore/nth v i nf))
+                    clojure.lang.ILookup
+                    (valAt [_ k] (ecore/get v k))
+                    (valAt [_ k nf] (ecore/get v k nf)))
 
-     (defn ->transient-vec [v]
+  (defn ->transient-vec [v]
        ;; the vector read through a scope of its own over its domain: what its ops allocate is logged there
-       (let [sio (alloc/transient-scope (d/-eve-sio v))]
-         (->TransientEveVector (vec-from-header sio (d/-root-header-off v)) sio))))
+    (let [sio (alloc/transient-scope (d/-eve-sio v))]
+      (->TransientEveVector (vec-from-header sio (d/-root-header-off v)) sio))))
 
 ;;=============================================================================
 ;; Constructor (after deftype so CLJ can resolve EveVector class)
 ;;=============================================================================
 
 (do
-(defn- make-vec-impl
-  "Internal constructor: allocate header, create EveVector."
-  [sio cnt shift root tail tail-len]
-  (let [hdr (write-vec-header! sio cnt shift root tail tail-len)]
-    (EveVector. sio hdr)))
+  (defn- make-vec-impl
+    "Internal constructor: allocate header, create EveVector."
+    [sio cnt shift root tail tail-len]
+    (let [hdr (write-vec-header! sio cnt shift root tail tail-len)]
+      (EveVector. sio hdr)))
 
-(defn vec-from-header
-  "Reconstruct an EveVector from an existing header offset."
-  [sio header-off]
-  (EveVector. sio header-off))
+  (defn vec-from-header
+    "Reconstruct an EveVector from an existing header offset."
+    [sio header-off]
+    (EveVector. sio header-off))
 
-(defn empty-vec
-  "Create an empty Eve vector.
+  (defn empty-vec
+    "Create an empty Eve vector.
    0-arity: uses platform default sio (fresh heap domain on JVM).
    1-arity: explicit sio."
-  ([] (empty-vec (default-sio)))
-  ([sio]
-   (let [tail (alloc-node! sio)]
-     (make-vec-impl sio 0 SHIFT_STEP NIL_OFFSET tail 0))))
+    ([] (empty-vec (default-sio)))
+    ([sio]
+     (let [tail (alloc-node! sio)]
+       (make-vec-impl sio 0 SHIFT_STEP NIL_OFFSET tail 0))))
 
-(defn eve-vec
-  "Create an Eve vector from a collection."
-  ([coll] (eve-vec (default-sio) coll))
-  ([sio coll]
-   (reduce ecore/conj (empty-vec sio) coll)))
-)
+  (defn eve-vec
+    "Create an Eve vector from a collection."
+    ([coll] (eve-vec (default-sio) coll))
+    ([sio coll]
+     (reduce ecore/conj (empty-vec sio) coll))))
 
 ;;=============================================================================
 ;; Disposal
@@ -852,8 +850,8 @@
 ;;=============================================================================
 
 (do
-     (def empty-sab-vec empty-vec)
-     (def sab-vec eve-vec))
+  (def empty-sab-vec empty-vec)
+  (def sab-vec eve-vec))
 
 (defn eve-vector?
   "True for a slab-backed EveVector. On babashka a vector read from eve memory is
@@ -923,15 +921,15 @@
                   (loop [acc acc i 0]
                     (if (< i n) (recur (conj acc (node-get sio node-off i)) (inc i)) acc)))
           trie (reduce
-                 (fn [acc base]
-                   (let [leaf (loop [node-off root sh shift]
-                                (if (zero? sh)
-                                  node-off
-                                  (recur (node-get sio node-off (bit-and (unsigned-bit-shift-right base sh) MASK))
-                                         (- sh SHIFT_STEP))))]
-                     (words acc leaf (min NODE_SIZE (- toff base)))))
-                 []
-                 (range 0 toff NODE_SIZE))]
+                (fn [acc base]
+                  (let [leaf (loop [node-off root sh shift]
+                               (if (zero? sh)
+                                 node-off
+                                 (recur (node-get sio node-off (bit-and (unsigned-bit-shift-right base sh) MASK))
+                                        (- sh SHIFT_STEP))))]
+                    (words acc leaf (min NODE_SIZE (- toff base)))))
+                []
+                (range 0 toff NODE_SIZE))]
       (words trie tail (- cnt toff)))))
 
 (defn build-vec
@@ -996,32 +994,32 @@
         (recur (inc i) (conj! acc (nth-impl sio cnt shift root tail i)))))))
 
 (eve/register-eve-type!
-    {:fast-tag     ser/FAST_TAG_SAB_VEC
-     :type-id      EveVector-type-id
-     :from-header  vec-from-header
-     :host-value   vec->host-value
-     :dispose      dispose!
-     :builder-pred vector?
-     :builder-ctor eve-vec
-     :coll-writer  {:tag :vec :fn -write-vec-coll!}
-     :type         EveVector
-     :print        {:open "[" :close "]"}})
+ {:fast-tag     ser/FAST_TAG_SAB_VEC
+  :type-id      EveVector-type-id
+  :from-header  vec-from-header
+  :host-value   vec->host-value
+  :dispose      dispose!
+  :builder-pred vector?
+  :builder-ctor eve-vec
+  :coll-writer  {:tag :vec :fn -write-vec-coll!}
+  :type         EveVector
+  :print        {:open "[" :close "]"}})
 
 ;; Backward-compat aliases
 (do
-     (defn jvm-write-vec!
-       "Serialize a Clojure vector to slab. Returns header offset.
+  (defn jvm-write-vec!
+    "Serialize a Clojure vector to slab. Returns header offset.
         Backward-compat alias for the registered :vec writer."
-       [sio serialize-val coll]
-       (codec/write-collection! :vec sio coll))
+    [sio serialize-val coll]
+    (codec/write-collection! :vec sio coll))
 
-     (defn jvm-sabvec-from-offset
-       "Reconstruct an EveVector from a header offset.
+  (defn jvm-sabvec-from-offset
+    "Reconstruct an EveVector from a header offset.
         Backward-compat alias. coll-factory arg is ignored (registry-based)."
-       ([sio header-off] (vec-from-header sio header-off))
-       ([sio header-off _coll-factory] (vec-from-header sio header-off)))
+    ([sio header-off] (vec-from-header sio header-off))
+    ([sio header-off _coll-factory] (vec-from-header sio header-off)))
 
-     (def SabVecRoot EveVector))
+  (def SabVecRoot EveVector))
 
 ;; No-op pool stub — pool system removed, kept for backward compat
 (defn reset-pools! [] nil)

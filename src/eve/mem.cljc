@@ -167,7 +167,7 @@
     "r's backing byte array (byte i of the array is r's byte i), or nil."))
 
 (extend-default IHeapBytes
-  (-heap-bytes [_] nil))
+                (-heap-bytes [_] nil))
 
 ;; Plain (non-atomic) loads of a published node's bytes — the mmap tier's
 ;; counterpart to IHeapBytes (cleanup-sweep item 9b, 2026-11-07). A published
@@ -196,7 +196,7 @@
      Published-node bytes only."))
 
 (extend-default IPlainLoad
-  (-plain-load-i32 [r byte-off]
+                (-plain-load-i32 [r byte-off]
     ;; Through -read-bytes, never the region's atomic -load-i32: this
     ;; default serves every region with no plain vehicle of its own,
     ;; and the atomic load requires 4-byte alignment (IMemRegion's
@@ -208,14 +208,14 @@
     ;; -plain-load-u8 below and alloc's -sio-read-i32. A region whose
     ;; plain load is faster than byte composition implements
     ;; IPlainLoad itself (the JVM varhandle region does).
-    (let [b (-read-bytes r byte-off 4)
-          u (bit-or (bit-and (aget ^bytes b 0) 0xFF)
-                    (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8)
-                    (bit-shift-left (bit-and (aget ^bytes b 2) 0xFF) 16)
-                    (bit-shift-left (bit-and (aget ^bytes b 3) 0xFF) 24))]
-      (if (>= u 2147483648) (- u 4294967296) u)))
-  (-plain-load-u8 [r byte-off]
-    (bit-and (aget ^bytes (-read-bytes r byte-off 1) 0) 0xFF)))
+                                 (let [b (-read-bytes r byte-off 4)
+                                       u (bit-or (bit-and (aget ^bytes b 0) 0xFF)
+                                                 (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8)
+                                                 (bit-shift-left (bit-and (aget ^bytes b 2) 0xFF) 16)
+                                                 (bit-shift-left (bit-and (aget ^bytes b 3) 0xFF) 24))]
+                                   (if (>= u 2147483648) (- u 4294967296) u)))
+                (-plain-load-u8 [r byte-off]
+                                (bit-and (aget ^bytes (-read-bytes r byte-off 1) 0) 0xFF)))
 
 ;; Plain (non-atomic) stores into a block being BUILT — IPlainLoad's write
 ;; twin. A builder writes a new block before its pointer is published (the
@@ -234,17 +234,17 @@
      only."))
 
 (extend-default IPlainStore
-  (-plain-store-i32! [r byte-off v]
-    (let [b (byte-array 4)]
-      (aset b 0 (unchecked-byte (bit-and v 0xFF)))
-      (aset b 1 (unchecked-byte (bit-and (bit-shift-right v 8) 0xFF)))
-      (aset b 2 (unchecked-byte (bit-and (bit-shift-right v 16) 0xFF)))
-      (aset b 3 (unchecked-byte (bit-and (bit-shift-right v 24) 0xFF)))
-      (-write-bytes! r byte-off b)))
-  (-plain-store-u8! [r byte-off v]
-    (let [b (byte-array 1)]
-      (aset b 0 (unchecked-byte (bit-and v 0xFF)))
-      (-write-bytes! r byte-off b))))
+                (-plain-store-i32! [r byte-off v]
+                                   (let [b (byte-array 4)]
+                                     (aset b 0 (unchecked-byte (bit-and v 0xFF)))
+                                     (aset b 1 (unchecked-byte (bit-and (bit-shift-right v 8) 0xFF)))
+                                     (aset b 2 (unchecked-byte (bit-and (bit-shift-right v 16) 0xFF)))
+                                     (aset b 3 (unchecked-byte (bit-and (bit-shift-right v 24) 0xFF)))
+                                     (-write-bytes! r byte-off b)))
+                (-plain-store-u8! [r byte-off v]
+                                  (let [b (byte-array 1)]
+                                    (aset b 0 (unchecked-byte (bit-and v 0xFF)))
+                                    (-write-bytes! r byte-off b))))
 
 ;; Bulk i32 fill — initialization of a fresh region before it is published
 ;; (coalesc's descriptor table: two columns of max-desc - 1 entries each).
@@ -319,19 +319,19 @@
        bs)))
 
 (extend-default IFillRegion
-  (-fill-i32! [r byte-off count val]
-    (when (pos? count)
-      (let [span  (min fill-chunk-slots count)
-            chunk (i32-pattern-bytes span val)]
-        (loop [done 0]
-          (let [remain (- count done)]
-            (cond
-              (> remain span) (do (-write-bytes! r (+ byte-off (* 4 done)) chunk)
-                                  (recur (+ done span)))
-              (= remain span) (-write-bytes! r (+ byte-off (* 4 done)) chunk)
-              (pos? remain)   (-write-bytes! r (+ byte-off (* 4 done))
-                                             (i32-pattern-bytes remain val)))))))
-    nil))
+                (-fill-i32! [r byte-off count val]
+                            (when (pos? count)
+                              (let [span  (min fill-chunk-slots count)
+                                    chunk (i32-pattern-bytes span val)]
+                                (loop [done 0]
+                                  (let [remain (- count done)]
+                                    (cond
+                                      (> remain span) (do (-write-bytes! r (+ byte-off (* 4 done)) chunk)
+                                                          (recur (+ done span)))
+                                      (= remain span) (-write-bytes! r (+ byte-off (* 4 done)) chunk)
+                                      (pos? remain)   (-write-bytes! r (+ byte-off (* 4 done))
+                                                                     (i32-pattern-bytes remain val)))))))
+                            nil))
 
 ;; ---------------------------------------------------------------------------
 ;; The regions themselves are the host's: eve.region, an adapter
@@ -398,9 +398,9 @@
             ;; there: one step for a cursor-led allocation, not up to 32
             (let [bit-pos (loop [b bit-in-word]
                             (if (>= b 32) 32
-                              (if (not (zero? (bit-and masked (bit-shift-left 1 b))))
-                                b
-                                (recur (inc b)))))
+                                (if (not (zero? (bit-and masked (bit-shift-left 1 b))))
+                                  b
+                                  (recur (inc b)))))
                   abs-bit (+ (bit-shift-left word-idx 5) bit-pos)]
               (if (< abs-bit total-bits)
                 abs-bit

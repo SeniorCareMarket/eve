@@ -310,36 +310,36 @@
     (on-when (and (contains? @s/peers :core)
                   (contains? @s/peers :future)
                   (some #(.startsWith (name %) "fp-") (keys @s/peers)))
-      {:max-time 30000}
-      (println (str "Workers ready. Peers: " (set (keys @s/peers))))
+             {:max-time 30000}
+             (println (str "Workers ready. Peers: " (set (keys @s/peers))))
       ;; Give all 16 fp workers time to register before starting bench
-      (js/setTimeout
-       (fn []
-         (println (str "All peers: " (set (keys @s/peers))))
-         (let [git-meta  (git-info)
-               timestamp (iso-timestamp)
+             (js/setTimeout
+              (fn []
+                (println (str "All peers: " (set (keys @s/peers))))
+                (let [git-meta  (git-info)
+                      timestamp (iso-timestamp)
                ;; Resolve paths relative to the project root
-               bench-dir (.resolve path (.dirname path js/__filename)
-                                   ".." ".." "bench")
-               source-path (.resolve path (.dirname path js/__filename)
-                                     ".." ".." "test" "cljs_thread"
-                                     "eve_perf_test.cljs")]
-           (println (str "Git: " (:branch git-meta)
-                         " @ " (:commit git-meta)))
-           (-> @(in :core [] (eve.runner.thread-test-runner/run-bench!))
-               (.then (fn [results]
-                        (println (str "\n── " (count results) " benchmark results ──"))
+                      bench-dir (.resolve path (.dirname path js/__filename)
+                                          ".." ".." "bench")
+                      source-path (.resolve path (.dirname path js/__filename)
+                                            ".." ".." "test" "cljs_thread"
+                                            "eve_perf_test.cljs")]
+                  (println (str "Git: " (:branch git-meta)
+                                " @ " (:commit git-meta)))
+                  (-> @(in :core [] (eve.runner.thread-test-runner/run-bench!))
+                      (.then (fn [results]
+                               (println (str "\n── " (count results) " benchmark results ──"))
                         ;; 5. Persist EDN files
-                        (persist-all-results! bench-dir results
-                                              timestamp git-meta mode)
+                               (persist-all-results! bench-dir results
+                                                     timestamp git-meta mode)
                         ;; 6. Annotate source file
-                        (println "\n── Annotating source ──")
-                        (annotate-source! source-path results
-                                          timestamp git-meta mode)
+                               (println "\n── Annotating source ──")
+                               (annotate-source! source-path results
+                                                 timestamp git-meta mode)
                         ;; 7. Done
-                        (println "\n── Benchmarks complete ──")
-                        (js/setTimeout #(js/process.exit 0) 500)))
-               (.catch (fn [err]
-                         (println (str "\nFATAL: " (str err)))
-                         (js/process.exit 1))))))
-       8000))))
+                               (println "\n── Benchmarks complete ──")
+                               (js/setTimeout #(js/process.exit 0) 500)))
+                      (.catch (fn [err]
+                                (println (str "\nFATAL: " (str err)))
+                                (js/process.exit 1))))))
+              8000))))

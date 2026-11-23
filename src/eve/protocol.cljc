@@ -45,7 +45,7 @@
             ~@(when (:extend-via-metadata options)
                 (for [[method-name] methods]
                   `(alter-var-root (var ~protocol-name) assoc-in [:methods ~(keyword (name method-name))]
-                     (metadata-dispatch! ~protocol-name (var ~method-name)
-                       '~(symbol (str (ns-name *ns*)) (name method-name))))))
+                                   (metadata-dispatch! ~protocol-name (var ~method-name)
+                                                       '~(symbol (str (ns-name *ns*)) (name method-name))))))
             ~protocol-name))
      :default (list* 'clojure.core/defprotocol protocol-name declarations)))

@@ -160,7 +160,7 @@
            seg2     (alloc/-sio-read-i32 sio seg1 0)
            field-of (fn [slab-off]
                       (let [[_co fo _po] (coalesc/row-of region6
-                                                          (alloc/decode-block-idx slab-off))]
+                                                         (alloc/decode-block-idx slab-off))]
                         (bit-shift-right
                          (bit-and (mem/-load-i32 region6 fo) coalesc/RUNG_FIELD_MASK)
                          coalesc/RUNG_FIELD_SHIFT)))]

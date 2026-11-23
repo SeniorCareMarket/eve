@@ -74,7 +74,7 @@
 
 (deftest denied-throws-once
   (let [[ra s slept] (setup {:deny (fn [req] (some (fn [[kb _]] (str/includes? (apply str (map char kb)) "secret"))
-                                                      (snap/unframe (b/from-b64 (get req "root_blob")))))})
+                                                   (snap/unframe (b/from-b64 (get req "root_blob")))))})
         e (try (a/swap! ra assoc :secret 1) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e e))]
     (is (= :policy-denied (:type (ex-data e))) "T-4.7")
     (is (= "spec-write-denied" (:reason (ex-data e))))
@@ -142,29 +142,29 @@
 (deftest a-long-past-int32-round-trips
          ;; a top-level long is a snapshot entry's serial form, tag 7 (eve.net.snapshot); its reader in eve.net.atom once
          ;; lacked the tag, so every network write of a timestamp failed where the value was read back (the 0.9 capstone)
-         (let [[ra _ _] (setup)
-               want {:t 1792528000000
-                     :neg -3000000000
-                     :edge 2147483648
-                     :int 2147483647
-                     :nested {:t 1792528000000}}]
-           (is (= want (a/reset! ra want)))
-           (is (= want (a/deref (a/remote-atom cfg (.-platform ra))))
-               "a fresh handle reads every long back")
-           (is (= (assoc want :t 1792528000001) (a/swap! ra update :t inc))
-               "a swap from the read value")))
+  (let [[ra _ _] (setup)
+        want {:t 1792528000000
+              :neg -3000000000
+              :edge 2147483648
+              :int 2147483647
+              :nested {:t 1792528000000}}]
+    (is (= want (a/reset! ra want)))
+    (is (= want (a/deref (a/remote-atom cfg (.-platform ra))))
+        "a fresh handle reads every long back")
+    (is (= (assoc want :t 1792528000001) (a/swap! ra update :t inc))
+        "a swap from the read value")))
 
 (deftest a-swap-answering-its-value-commits-nothing
          ;; eve.thread's starved writer answers the value it was given (then takes a turn): over the network that attempt is a
          ;; read — a CAS of the same value would have to win the race the writer keeps losing
-         (let [[ra s _] (setup)
-               _ (a/reset! ra {:n 1})
-               cas (fn []
-                     (count (filter (fn [e]
-                                      (str/includes? (str (second e))
-                                                     "/cas-root")) @(:log s))))
-               before (cas)]
-           (is (= {:n 1} (a/swap! ra (fn [v] v))))
-           (is (= before (cas)) "no CAS sent")
-           (is (= {:n 2} (a/swap! ra update :n inc)))
-           (is (= (inc before) (cas)) "a real change is CASed")))
+  (let [[ra s _] (setup)
+        _ (a/reset! ra {:n 1})
+        cas (fn []
+              (count (filter (fn [e]
+                               (str/includes? (str (second e))
+                                              "/cas-root")) @(:log s))))
+        before (cas)]
+    (is (= {:n 1} (a/swap! ra (fn [v] v))))
+    (is (= before (cas)) "no CAS sent")
+    (is (= {:n 2} (a/swap! ra update :n inc)))
+    (is (= (inc before) (cas)) "a real change is CASed")))

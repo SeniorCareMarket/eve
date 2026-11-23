@@ -55,7 +55,6 @@
   d/IEveSio
   (d/-eve-sio [_] sio__))
 
-
 (pm/deftype SerRec [^:int32 n note]
   d/IEveRoot
   (d/-root-header-off [_] offset__)

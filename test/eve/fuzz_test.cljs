@@ -158,26 +158,26 @@
     (check-property
      "map-ops"
      (prop/for-all [ops (gen/vector gen-map-op 1 50)]
-       (let [[eve-m ref-m] (reduce apply-map-op
-                                   [(em/empty-hash-map) {}]
-                                   ops)]
-         (and (= (count eve-m) (count ref-m))
-              (= eve-m ref-m)
-              (= ref-m eve-m)
-              (= (hash eve-m) (hash ref-m))
+                   (let [[eve-m ref-m] (reduce apply-map-op
+                                               [(em/empty-hash-map) {}]
+                                               ops)]
+                     (and (= (count eve-m) (count ref-m))
+                          (= eve-m ref-m)
+                          (= ref-m eve-m)
+                          (= (hash eve-m) (hash ref-m))
               ;; verify every key in ref is accessible in eve
-              (every? (fn [[k v]]
-                        (= v (get eve-m k)))
-                      ref-m)))))))
+                          (every? (fn [[k v]]
+                                    (= v (get eve-m k)))
+                                  ref-m)))))))
 
 (deftest fuzz-map-seq-test
   (testing "Map seq produces all entries"
     (check-property
      "map-seq"
      (prop/for-all [kvs (gen/vector (gen/tuple gen-map-key gen-map-val) 0 30)]
-       (let [ref-m (into {} kvs)
-             eve-m (into (em/empty-hash-map) kvs)]
-         (= (set (seq eve-m)) (set (seq ref-m))))))))
+                   (let [ref-m (into {} kvs)
+                         eve-m (into (em/empty-hash-map) kvs)]
+                     (= (set (seq eve-m)) (set (seq ref-m))))))))
 
 (deftest fuzz-map-assoc-dissoc-roundtrip-test
   (testing "assoc then dissoc returns to original"
@@ -185,12 +185,12 @@
      "map-assoc-dissoc-roundtrip"
      (prop/for-all [k gen-map-key
                     v gen-map-val]
-       (let [m (em/empty-hash-map)
-             m2 (assoc m k v)
-             m3 (dissoc m2 k)]
-         (and (= v (get m2 k))
-              (nil? (get m3 k))
-              (= 0 (count m3))))))))
+                   (let [m (em/empty-hash-map)
+                         m2 (assoc m k v)
+                         m3 (dissoc m2 k)]
+                     (and (= v (get m2 k))
+                          (nil? (get m3 k))
+                          (= 0 (count m3))))))))
 
 ;; ============================================================================
 ;; Vector fuzz tests
@@ -203,17 +203,17 @@
                  (check-property
                   "vec-ops"
                   (prop/for-all [ops (gen/vector gen-vec-op 1 50)]
-                    (let [[eve-v ref-v] (reduce apply-vec-op
-                                                [(ev/empty-sab-vec) []]
-                                                ops)]
-                      (and (= (count eve-v) (count ref-v))
-                           (= eve-v ref-v)
-                           (= ref-v eve-v)
-                           (= (hash eve-v) (hash ref-v))
+                                (let [[eve-v ref-v] (reduce apply-vec-op
+                                                            [(ev/empty-sab-vec) []]
+                                                            ops)]
+                                  (and (= (count eve-v) (count ref-v))
+                                       (= eve-v ref-v)
+                                       (= ref-v eve-v)
+                                       (= (hash eve-v) (hash ref-v))
                            ;; verify element-by-element
-                           (every? (fn [i]
-                                     (= (nth eve-v i) (nth ref-v i)))
-                                   (range (count ref-v))))))))
+                                       (every? (fn [i]
+                                                 (= (nth eve-v i) (nth ref-v i)))
+                                               (range (count ref-v))))))))
                :done))))
 
 (deftest fuzz-vec-conj-seq-test
@@ -223,10 +223,10 @@
                  (check-property
                   "vec-conj-seq"
                   (prop/for-all [elems (gen/vector gen-vec-val 0 50)]
-                    (let [eve-v (into (ev/empty-sab-vec) elems)
-                          ref-v (vec elems)]
-                      (and (= (count eve-v) (count ref-v))
-                           (= (vec (seq eve-v)) ref-v))))))
+                                (let [eve-v (into (ev/empty-sab-vec) elems)
+                                      ref-v (vec elems)]
+                                  (and (= (count eve-v) (count ref-v))
+                                       (= (vec (seq eve-v)) ref-v))))))
                :done))))
 
 (deftest fuzz-vec-assoc-test
@@ -239,15 +239,15 @@
                                  updates (gen/vector
                                           (gen/tuple (gen/choose 0 29) gen-vec-val)
                                           1 10)]
-                    (let [n (count elems)
-                          valid-updates (filter (fn [[i _]] (< i n)) updates)
-                          eve-v (reduce (fn [v [i val]] (assoc v i val))
-                                        (ev/sab-vec elems)
-                                        valid-updates)
-                          ref-v (reduce (fn [v [i val]] (assoc v i val))
-                                        (vec elems)
-                                        valid-updates)]
-                      (= eve-v ref-v)))))
+                                (let [n (count elems)
+                                      valid-updates (filter (fn [[i _]] (< i n)) updates)
+                                      eve-v (reduce (fn [v [i val]] (assoc v i val))
+                                                    (ev/sab-vec elems)
+                                                    valid-updates)
+                                      ref-v (reduce (fn [v [i val]] (assoc v i val))
+                                                    (vec elems)
+                                                    valid-updates)]
+                                  (= eve-v ref-v)))))
                :done))))
 
 ;; ============================================================================
@@ -264,30 +264,30 @@
     (check-property
      "set-ops"
      (prop/for-all [elems (gen/vector (gen/choose -50 50) 1 30)]
-       (let [unique-elems (distinct elems)
-             eve-s (reduce conj (es/empty-hash-set) unique-elems)
-             ref-s (reduce conj #{} unique-elems)]
-         (= (count eve-s) (count ref-s)))))))
+                   (let [unique-elems (distinct elems)
+                         eve-s (reduce conj (es/empty-hash-set) unique-elems)
+                         ref-s (reduce conj #{} unique-elems)]
+                     (= (count eve-s) (count ref-s)))))))
 
 (deftest fuzz-set-conj-disj-roundtrip-test
   (testing "conj then disj returns to original"
     (check-property
      "set-conj-disj-roundtrip"
      (prop/for-all [e gen-set-elem]
-       (let [s (es/empty-hash-set)
-             s2 (conj s e)
-             s3 (disj s2 e)]
-         (and (contains? s2 e)
-              (not (contains? s3 e))
-              (= 0 (count s3))))))))
+                   (let [s (es/empty-hash-set)
+                         s2 (conj s e)
+                         s3 (disj s2 e)]
+                     (and (contains? s2 e)
+                          (not (contains? s3 e))
+                          (= 0 (count s3))))))))
 
 (deftest fuzz-set-idempotent-conj-test
   (testing "conj same element is idempotent"
     (check-property
      "set-idempotent-conj"
      (prop/for-all [e gen-set-elem]
-       (let [s (conj (es/empty-hash-set) e)
-             s2 (conj s e)]
-         (and (= 1 (count s))
-              (= 1 (count s2))
-              (= s s2)))))))
+                   (let [s (conj (es/empty-hash-set) e)
+                         s2 (conj s e)]
+                     (and (= 1 (count s))
+                          (= 1 (count s2))
+                          (= s s2)))))))

@@ -88,15 +88,15 @@
         (let [{:keys [jobs deferred]} (submit-dag! dh p e out window)]
           (when (or (seq jobs) (seq deferred))
             (domain/swap-atom! library
-                   (fn [v]
-                     (if (= :new (get-in v [:files p :status]))
-                       (cond-> (-> v
-                                   (assoc-in [:files p :status] :planned)
-                                   (assoc-in [:files p :jobs] jobs)
-                                   (assoc-in [:files p :planned-by] (:rid dh)))
-                         (seq deferred)
-                         (assoc-in [:files p :deferred] deferred))
-                       v)))))))))
+                               (fn [v]
+                                 (if (= :new (get-in v [:files p :status]))
+                                   (cond-> (-> v
+                                               (assoc-in [:files p :status] :planned)
+                                               (assoc-in [:files p :jobs] jobs)
+                                               (assoc-in [:files p :planned-by] (:rid dh)))
+                                     (seq deferred)
+                                     (assoc-in [:files p :deferred] deferred))
+                                   v)))))))))
 
 (defn- job-state
   "Job kind k's state for the file entry e: its descriptor d's while the pools hold it; else :done when the job
@@ -155,7 +155,7 @@
                                                               after))})]
                        (if id (do (vswap! present conj id)
                                   [(assoc ids k id) (assoc submitted k id)])
-                         [ids submitted]))
+                           [ids submitted]))
                      [ids submitted]))
                  [ids submitted]))
              [(:jobs e) {}]
@@ -173,81 +173,81 @@
   (let [coverage (live-caps dh)]
     (doseq [[p e] (:files (domain/read-atom library))
             :when (= :planned (:status e))]
-    (let [ids (:jobs e)
-          ds (descs dh (vals ids))
-          states (into {}
-                       (map (fn [[k id]] [k (job-state e k (get ds id))]) ids))
-          attempts (into {}
-                         (map (fn [[k id]]
-                                [k
-                                 (if-let [d (get ds id)]
-                                   (:attempts d)
-                                   (get-in e [:attempts k]))]) ids))
-          ran-on (into {}
-                       (keep (fn [[k id]]
-                               (when-let [r (:ran-on (get ds id))] [k r])) ids))
-          bad (vec (keep (fn [[k s]]
-                           (when (contains? #{:failed :cancelled :lost} s) k))
-                         states))
-          again (set (filter (fn [k]
-                               (< (inc (get-in e [:failures k] 0)) max-failures))
-                             bad))
-          resubmit (if (seq again) (redo! dh p e again out window) {})
-          escalated (vec (remove again bad))
+      (let [ids (:jobs e)
+            ds (descs dh (vals ids))
+            states (into {}
+                         (map (fn [[k id]] [k (job-state e k (get ds id))]) ids))
+            attempts (into {}
+                           (map (fn [[k id]]
+                                  [k
+                                   (if-let [d (get ds id)]
+                                     (:attempts d)
+                                     (get-in e [:attempts k]))]) ids))
+            ran-on (into {}
+                         (keep (fn [[k id]]
+                                 (when-let [r (:ran-on (get ds id))] [k r])) ids))
+            bad (vec (keep (fn [[k s]]
+                             (when (contains? #{:failed :cancelled :lost} s) k))
+                           states))
+            again (set (filter (fn [k]
+                                 (< (inc (get-in e [:failures k] 0)) max-failures))
+                               bad))
+            resubmit (if (seq again) (redo! dh p e again out window) {})
+            escalated (vec (remove again bad))
           ;; deferred jobs: submit the ones this pass's coverage reaches; escalate the ones whose input was
           ;; escalated (they can never run); the rest stay deferred, their missing caps refreshed
-          deferred (:deferred e)
-          dag (when (seq deferred) (into {} (em/file-jobs (:kind e) (offered-caps dh))))
-          dead-inputs (into (set escalated) (:escalated e))
-          orphan? (fn [k] (boolean (some dead-inputs (get dag k))))
-          deferred-escalated (vec (filter orphan? (keys deferred)))
-          submittable (reduce dissoc deferred deferred-escalated)
-          submitted (if (seq submittable)
-                      (submit-deferred! dh p (assoc e :jobs (merge ids resubmit) :deferred submittable)
-                                        coverage out window)
-                      {})
-          deferred-left (into {}
-                              (keep (fn [[k info]]
-                                      (when-not (or (contains? submitted k) (some #{k} deferred-escalated))
-                                        [k (assoc info :missing
-                                                  (into #{} (remove coverage (:needs info))))])))
-                              deferred)
-          states (into states (map (fn [k] [k :queued])) (keys submitted))
-          escalated (into escalated deferred-escalated)
-          deferred-write (fn [v]
-                           (if (empty? deferred-left)
-                             (update-in v [:files p] dissoc :deferred)
-                             (assoc-in v [:files p :deferred] deferred-left)))
-          all-settled (and (empty? deferred-left)
-                           (every? (fn [[k s]]
-                                     (or (= :done s) (some #{k} escalated))) states))
-          forget (vec (concat (keep ids bad) (when all-settled (vals ids))))]
-      (domain/swap-atom! library
-                         (fn [v]
-                           (cond-> (-> v
-                                       (assoc-in [:files p :job-state] states)
-                                       (assoc-in [:files p :attempts] attempts)
-                                       (update-in [:files p :ran-on]
-                                         merge
-                                         ran-on))
-                             (seq bad)
-                             (update-in [:files p :failures]
-                               (fn [f]
-                                 (reduce (fn [f k] (update f k (fnil inc 0)))
-                                         (or f {}) bad)))
-                             (seq resubmit)
-                             (update-in [:files p :jobs] merge resubmit)
-                             (seq submitted)
-                             (update-in [:files p :jobs] merge submitted)
-                             (contains? e :deferred)
-                             (deferred-write)
-                             (seq escalated)
-                             (assoc-in [:files p :escalated] escalated)
-                             all-settled
-                             (assoc-in [:files p :status]
-                               (if (seq escalated) :error :done)))))
-      (when (seq forget)
-        (pool/forget dh forget))))))
+            deferred (:deferred e)
+            dag (when (seq deferred) (into {} (em/file-jobs (:kind e) (offered-caps dh))))
+            dead-inputs (into (set escalated) (:escalated e))
+            orphan? (fn [k] (boolean (some dead-inputs (get dag k))))
+            deferred-escalated (vec (filter orphan? (keys deferred)))
+            submittable (reduce dissoc deferred deferred-escalated)
+            submitted (if (seq submittable)
+                        (submit-deferred! dh p (assoc e :jobs (merge ids resubmit) :deferred submittable)
+                                          coverage out window)
+                        {})
+            deferred-left (into {}
+                                (keep (fn [[k info]]
+                                        (when-not (or (contains? submitted k) (some #{k} deferred-escalated))
+                                          [k (assoc info :missing
+                                                    (into #{} (remove coverage (:needs info))))])))
+                                deferred)
+            states (into states (map (fn [k] [k :queued])) (keys submitted))
+            escalated (into escalated deferred-escalated)
+            deferred-write (fn [v]
+                             (if (empty? deferred-left)
+                               (update-in v [:files p] dissoc :deferred)
+                               (assoc-in v [:files p :deferred] deferred-left)))
+            all-settled (and (empty? deferred-left)
+                             (every? (fn [[k s]]
+                                       (or (= :done s) (some #{k} escalated))) states))
+            forget (vec (concat (keep ids bad) (when all-settled (vals ids))))]
+        (domain/swap-atom! library
+                           (fn [v]
+                             (cond-> (-> v
+                                         (assoc-in [:files p :job-state] states)
+                                         (assoc-in [:files p :attempts] attempts)
+                                         (update-in [:files p :ran-on]
+                                                    merge
+                                                    ran-on))
+                               (seq bad)
+                               (update-in [:files p :failures]
+                                          (fn [f]
+                                            (reduce (fn [f k] (update f k (fnil inc 0)))
+                                                    (or f {}) bad)))
+                               (seq resubmit)
+                               (update-in [:files p :jobs] merge resubmit)
+                               (seq submitted)
+                               (update-in [:files p :jobs] merge submitted)
+                               (contains? e :deferred)
+                               (deferred-write)
+                               (seq escalated)
+                               (assoc-in [:files p :escalated] escalated)
+                               all-settled
+                               (assoc-in [:files p :status]
+                                         (if (seq escalated) :error :done)))))
+        (when (seq forget)
+          (pool/forget dh forget))))))
 
 (defn- index! [{:keys [dh library index]}]
   (let [files (:files (domain/read-atom library))
@@ -306,10 +306,10 @@
             :when (and (= :running (:state m)) (:joined m) (not (contains? live rid))
                        (> (- now (:started m 0)) (* 2 em/ttl)))]
       (domain/swap-atom! control (fn [v] (if (= :running (get-in v [:members rid :state]))
-                               (-> v
-                                   (assoc-in [:members rid :state] :restart-asked)
-                                   (update :restarts (fnil conj []) {:rid rid :asked-by (:rid dh) :at now}))
-                               v))))))
+                                           (-> v
+                                               (assoc-in [:members rid :state] :restart-asked)
+                                               (update :restarts (fnil conj []) {:rid rid :asked-by (:rid dh) :at now}))
+                                           v))))))
 
 (defn pass!
   "One coordinator pass (the caller is the named coordinator)."

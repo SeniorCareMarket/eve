@@ -299,7 +299,6 @@
 (defn lookup [iface-sym]
   (get jvm->cljs iface-sym))
 
-
 ;;-----------------------------------------------------------------------------
 ;; CLJS → JVM: a type written with ClojureScript's protocol names, on the JVM
 ;;-----------------------------------------------------------------------------

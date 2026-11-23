@@ -94,7 +94,7 @@
 ;; protocol's fns. The semantics are eve.atom's trunk watch core,
 ;; as on every host.
 (defprotocol IRef (-set-validator! [x f]) (-get-validator [x])
-  (-get-watches [x]))
+             (-get-watches [x]))
 (defn pr-writer [x w _opts] (-write w (pr-str x)))
 (defn pr-str* [x] (pr-str x))
 
@@ -215,13 +215,13 @@
    (let [rf (xf (fn ([] []) ([acc] acc) ([acc x] (conj acc x))))]
      (letfn [(go [s buf]
                (lazy-seq
-                 (cond
-                   (seq buf) (cons (first buf) (go s (rest buf)))
-                   s (let [b (rf [] (first s))]
-                       (if (reduced? b)
-                         (seq @b)
-                         (go (next s) b)))
-                   :else (seq (rf [])))))]
+                (cond
+                  (seq buf) (cons (first buf) (go s (rest buf)))
+                  s (let [b (rf [] (first s))]
+                      (if (reduced? b)
+                        (seq @b)
+                        (go (next s) b)))
+                  :else (seq (rf [])))))]
        (go (seq coll) []))))
   ([xf coll & colls]
    (sequence xf (apply map list coll colls))))

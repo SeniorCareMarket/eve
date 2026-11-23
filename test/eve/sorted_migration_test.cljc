@@ -13,8 +13,8 @@
   ;; swap! on an eve atom: eve.host's (clojerl's own reaches its own atoms only)
   (:refer-clojure :exclude [swap!])
   (:require
-            [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.alloc :as alloc]
+   [eve.deftype-proto.data :as d]
    [eve.host :refer [swap!]]
    [eve.core :as e]
    #?(:cljs [cljs.test :refer-macros [deftest testing is use-fixtures]]
@@ -29,16 +29,15 @@
    own (rrb-vector-test's fixture), dropped with the test."
   [f]
   (binding [d/*domain-sio* (alloc/heap-domain-sio!
-                                         {:capacities {0 (* 64 1024 1024)
-                                                       1 (* 16 1024 1024)
-                                                       2 (* 16 1024 1024)
-                                                       3 (* 192 1024 1024)
-                                                       4 (* 16 1024 1024)
-                                                       5 (* 16 1024 1024)}})]
-                (f)))
+                            {:capacities {0 (* 64 1024 1024)
+                                          1 (* 16 1024 1024)
+                                          2 (* 16 1024 1024)
+                                          3 (* 192 1024 1024)
+                                          4 (* 16 1024 1024)
+                                          5 (* 16 1024 1024)}})]
+    (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
-
 
 ;;-----------------------------------------------------------------------------
 ;; Helpers

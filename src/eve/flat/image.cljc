@@ -568,32 +568,32 @@
                      ;; past the first window: re-copy at the true size
                      (d-ensure! st (+ base size))
                      (copy-block-bytes! sio off (aget st 4) base size))
-                 (let [ord (long (aget st 9))]
-                   (d-insert! st off ord)
-                   (aset st 6 (d-grow-ints (aget st 6) (inc ord)))
-                   (aset st 7 (d-grow-ints (aget st 7) (inc ord)))
-                   (aset st 8 (d-grow-ints (aget st 8) (inc ord)))
-                   (aset ^ints (aget st 6) (int ord) (int base))
-                   (aset ^ints (aget st 7) (int ord) (int size))
-                   (aset ^ints (aget st 8) (int ord) (unchecked-int off))
-                   (aset st 9 (inc ord))
-                   (when (<= 0 (long patch-pos))
-                     (put-i32-at! (aget st 4) patch-pos base)
-                     (d-add-reloc! st patch-pos owner ord))
-                   (aset st 5 (+ base (align4 size)))
+                   (let [ord (long (aget st 9))]
+                     (d-insert! st off ord)
+                     (aset st 6 (d-grow-ints (aget st 6) (inc ord)))
+                     (aset st 7 (d-grow-ints (aget st 7) (inc ord)))
+                     (aset st 8 (d-grow-ints (aget st 8) (inc ord)))
+                     (aset ^ints (aget st 6) (int ord) (int base))
+                     (aset ^ints (aget st 7) (int ord) (int size))
+                     (aset ^ints (aget st 8) (int ord) (unchecked-int off))
+                     (aset st 9 (inc ord))
+                     (when (<= 0 (long patch-pos))
+                       (put-i32-at! (aget st 4) patch-pos base)
+                       (d-add-reloc! st patch-pos owner ord))
+                     (aset st 5 (+ base (align4 size)))
                    ;; scan the copied block: patch fields whose targets are
                    ;; already placed; queue the rest as stack entries carrying
                    ;; their patch position
-                   (block-pointers
-                    sio (aget st 4) base off kind
-                    (fn [bpos ck target]
-                      (let [tgt (d-lookup st (long target))
-                            field-pos (+ base (long bpos))]
-                        (if (not= tgt -1)
-                          (do (put-i32-at! (aget st 4) field-pos (aget ^ints (aget st 6) tgt))
-                              (d-add-reloc! st field-pos ord tgt))
-                          (push! ck (long target) field-pos ord)))))
-                   (recur)))))))))
+                     (block-pointers
+                      sio (aget st 4) base off kind
+                      (fn [bpos ck target]
+                        (let [tgt (d-lookup st (long target))
+                              field-pos (+ base (long bpos))]
+                          (if (not= tgt -1)
+                            (do (put-i32-at! (aget st 4) field-pos (aget ^ints (aget st 6) tgt))
+                                (d-add-reloc! st field-pos ord tgt))
+                            (push! ck (long target) field-pos ord)))))
+                     (recur)))))))))
      ;; tables + header
      (let [n (long (aget st 9))
            r (long (aget st 13))
@@ -622,12 +622,12 @@
         ;; carried a 5 from the CLJS source block where the JVM image
         ;; of the same value carried 0, the ONLY differing byte of 512.
         ;; Zero every gap so the image is a function of the value.
-        (dotimes [i n]
-          (let [end (+ (aget boff i) (aget bsz i))
-                nxt (if (< (inc i) n) (aget boff (inc i)) tables-off)]
-            (when (< end nxt)
-              #?(:clj (java.util.Arrays/fill bs (int end) (int nxt) (byte 0))
-                 :cljs (.fill bs 0 end nxt)))))
+         (dotimes [i n]
+           (let [end (+ (aget boff i) (aget bsz i))
+                 nxt (if (< (inc i) n) (aget boff (inc i)) tables-off)]
+             (when (< end nxt)
+               #?(:clj (java.util.Arrays/fill bs (int end) (int nxt) (byte 0))
+                  :cljs (.fill bs 0 end nxt)))))
          ;; the header, by the frozen contract (§2/§9): kind image, the
          ;; layout id in the nsym field, symtab = the block table,
          ;; shapetab = the relocation table, no type table (types

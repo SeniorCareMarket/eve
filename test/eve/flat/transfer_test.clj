@@ -79,7 +79,7 @@
         nb (quot (- (:shapetab h) (:symtab h)) contract/block-entry-size)
         blocks (contract/read-block-table bs (:symtab h) nb)
         class-of (fn [size] (or (first (keep-indexed (fn [ci cs] (when (<= size cs) ci))
-                                                      alloc/CLASS_BLOCK_SIZES))
+                                                     alloc/CLASS_BLOCK_SIZES))
                                 6))]
     {:nblocks nb
      :by-class (frequencies (map (fn [b] (class-of (:size b))) blocks))}))
@@ -225,8 +225,8 @@
     (ea/set-foreign-policy! (:cell ra) :zip)
     (ea/set-foreign-policy! (:cell rb) :zip)
     (stm/dosync
-      (stm/ref-set* ra 1)
-      (stm/ref-set* rb foreign))
+     (stm/ref-set* ra 1)
+     (stm/ref-set* rb foreign))
     (testing "both refs committed"
       (is (= 1 (stm/deref-ref ra)))
       (is (= @(:cell rc) (stm/deref-ref rb))))

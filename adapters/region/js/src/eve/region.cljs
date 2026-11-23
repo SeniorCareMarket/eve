@@ -18,10 +18,10 @@
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
-                     -fill-i32!]]))
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
+                            -fill-i32!]]))
 
 ;; Every region has atomic RMW unless it says otherwise.
 (extend-protocol mem/IHostAtomics
@@ -91,9 +91,9 @@
     ;; Emulate i64 load via two i32 loads (little-endian).
     ;; Sufficient for single-process SAB use (no cross-process atomicity).
     (let [lo (unsigned-bit-shift-right
-               (js/Atomics.load -i32 (byte-off->i32-idx byte-off)) 0)
+              (js/Atomics.load -i32 (byte-off->i32-idx byte-off)) 0)
           hi (unsigned-bit-shift-right
-               (js/Atomics.load -i32 (byte-off->i32-idx (+ byte-off 4))) 0)]
+              (js/Atomics.load -i32 (byte-off->i32-idx (+ byte-off 4))) 0)]
       (+ (* hi 0x100000000) lo)))
   (-store-i64! [_ byte-off val]
     ;; Emulate i64 store via two i32 stores (little-endian). The high word is a division: JS masks a shift count to
@@ -346,8 +346,8 @@
 ;; correct across nodes via the Lustre LDLM.
 
 (deftype LustreMmapRegion [^js buf   ; Node.js Buffer (mmap'd page)
-                            fd        ; file descriptor (kept open for fcntl)
-                            size]     ; byte length
+                           fd        ; file descriptor (kept open for fcntl)
+                           size]     ; byte length
   mem/IMemRegion
   (-byte-length [_] size)
 

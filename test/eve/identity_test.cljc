@@ -17,18 +17,18 @@
 ;; The stock predicates and stock compare are the host's own on babashka, whose Eve values are sci types (the audit's
 ;; §E bb column): there they are not Eve's to answer. Every other row runs on every host.
 #?(:bb nil :default
-(deftest stock-predicates-answer-for-eve-values
-  (let [ev (v/eve-vec [1 2 3]) em (m/hash-map :a 1) es (s/hash-set 1 2) el (l/eve-list [1 2])]
-    (testing "the kind"
-      (is (vector? ev)) (is (map? em)) (is (set? es)) (is (list? el)) (is (seq? el)))
-    (testing "the family"
-      (is (coll? ev)) (is (coll? em)) (is (coll? es)) (is (coll? el))
-      (is (sequential? ev)) (is (sequential? el))
-      (is (associative? em)) (is (associative? ev))
-      (is (counted? ev)) (is (counted? em)) (is (counted? es))
-      (is (reversible? ev)))
-    (testing "and not what it is not"
-      (is (not (map? ev))) (is (not (vector? em))) (is (not (seq? ev))) (is (not (list? ev))) (is (not (set? em)))))))
+   (deftest stock-predicates-answer-for-eve-values
+     (let [ev (v/eve-vec [1 2 3]) em (m/hash-map :a 1) es (s/hash-set 1 2) el (l/eve-list [1 2])]
+       (testing "the kind"
+         (is (vector? ev)) (is (map? em)) (is (set? es)) (is (list? el)) (is (seq? el)))
+       (testing "the family"
+         (is (coll? ev)) (is (coll? em)) (is (coll? es)) (is (coll? el))
+         (is (sequential? ev)) (is (sequential? el))
+         (is (associative? em)) (is (associative? ev))
+         (is (counted? ev)) (is (counted? em)) (is (counted? es))
+         (is (reversible? ev)))
+       (testing "and not what it is not"
+         (is (not (map? ev))) (is (not (vector? em))) (is (not (seq? ev))) (is (not (list? ev))) (is (not (set? em)))))))
 
 (defn- by-ref [x] (+ x 1))
 
@@ -52,15 +52,15 @@
       (is (= 2 (e/get r :k))))))
 
 #?(:bb nil :default
-(edt/deftype Rank [^:int32 n]
-             IComparable
-             (-compare [_ o] (compare n (field o n)))))
+   (edt/deftype Rank [^:int32 n]
+     IComparable
+     (-compare [_ o] (compare n (field o n)))))
 
 #?(:bb nil :default
-(deftest compare-reaches-the-types-own
-  (is (neg? (compare (->Rank 1) (->Rank 2))))
-  (is (zero? (compare (->Rank 2) (->Rank 2))))
-  (is (= [1 2 3] (mapv (fn [r] (field r n)) (sort [(->Rank 3) (->Rank 1) (->Rank 2)]))))))
+   (deftest compare-reaches-the-types-own
+     (is (neg? (compare (->Rank 1) (->Rank 2))))
+     (is (zero? (compare (->Rank 2) (->Rank 2))))
+     (is (= [1 2 3] (mapv (fn [r] (field r n)) (sort [(->Rank 3) (->Rank 1) (->Rank 2)]))))))
 
 ;; A field read written as stock Clojure — (.-f x) on an untyped parameter, as an external .cljc structure writes it
 ;; (the audit's B-RRB class) — reads the Eve object's field on every host (on jank the completion defers it to its

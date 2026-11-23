@@ -319,7 +319,7 @@
           hash
           (recur (inc i)
                  (js/Math.imul (bit-xor hash (aget u8 (+ offset i)))
-                       0x01000193)))))))
+                               0x01000193)))))))
 
 (defn bitmap-index
   "Get child index from bitmap: popcount of bits below target bit."
@@ -559,7 +559,7 @@
   [status-arr capacity-arr count min-capacity start-idx]
   (if cached-exports
     (.find_free_descriptor_simd cached-exports
-                                 status-arr capacity-arr count min-capacity start-idx)
+                                status-arr capacity-arr count min-capacity start-idx)
     -1))
 
 (defn find-free-descriptors-batch-simd
@@ -569,8 +569,8 @@
   [status-arr capacity-arr count min-capacity start-idx max-results out-ptr]
   (if cached-exports
     (.find_free_descriptors_batch_simd cached-exports
-                                        status-arr capacity-arr count min-capacity
-                                        start-idx max-results out-ptr)
+                                       status-arr capacity-arr count min-capacity
+                                       start-idx max-results out-ptr)
     0))
 
 (defn find-retired-descriptors-simd
@@ -580,7 +580,7 @@
   [status-arr count out-ptr max-results]
   (if cached-exports
     (.find_retired_descriptors_simd cached-exports
-                                     status-arr count out-ptr max-results)
+                                    status-arr count out-ptr max-results)
     0))
 
 ;;-----------------------------------------------------------------------------
@@ -602,7 +602,7 @@
   [dst src data-bm node-bm update-idx new-child]
   (if cached-exports
     (do (.build_node_replace_child cached-exports
-                                    dst src data-bm node-bm update-idx new-child)
+                                   dst src data-bm node-bm update-idx new-child)
         true)
     false))
 
@@ -613,8 +613,8 @@
   [dst src data-bm node-bm replace-idx kh kb-ptr kb-len vb-ptr vb-len]
   (if cached-exports
     (do (.build_node_replace_kv cached-exports
-                                 dst src data-bm node-bm replace-idx kh
-                                 kb-ptr kb-len vb-ptr vb-len)
+                                dst src data-bm node-bm replace-idx kh
+                                kb-ptr kb-len vb-ptr vb-len)
         true)
     false))
 
@@ -625,8 +625,8 @@
   [dst src src-data-bm src-node-bm new-data-bm insert-idx kh kb-ptr kb-len vb-ptr vb-len]
   (if cached-exports
     (do (.build_node_add_kv cached-exports
-                             dst src src-data-bm src-node-bm new-data-bm insert-idx kh
-                             kb-ptr kb-len vb-ptr vb-len)
+                            dst src src-data-bm src-node-bm new-data-bm insert-idx kh
+                            kb-ptr kb-len vb-ptr vb-len)
         true)
     false))
 
@@ -637,9 +637,9 @@
   [dst src src-data-bm src-node-bm new-data-bm new-node-bm remove-kv-idx insert-child-idx new-child]
   (if cached-exports
     (do (.build_node_remove_kv_add_child cached-exports
-                                          dst src src-data-bm src-node-bm
-                                          new-data-bm new-node-bm
-                                          remove-kv-idx insert-child-idx new-child)
+                                         dst src src-data-bm src-node-bm
+                                         new-data-bm new-node-bm
+                                         remove-kv-idx insert-child-idx new-child)
         true)
     false))
 

@@ -154,7 +154,6 @@
       (nth caps class-idx)
       (* 64 1024))))
 
-
 ;;=============================================================================
 ;; Slab Header Layout (64 bytes, cache-line aligned)
 ;;=============================================================================
@@ -495,7 +494,7 @@
   (-eve-sio [this]))
 
 (extend-default IEveSio
-  (-eve-sio [_] nil))
+                (-eve-sio [_] nil))
 
 (defprotocol IDirectSerialize
   (-direct-serialize [this]))
@@ -622,20 +621,20 @@
     (let [u (reduce (fn [x uf] (let [y (uf x)] (if (identical? y x) x (reduced y)))) v @unwrap-hook)]
       (if-not (identical? u v)
         (eve->clj u)
-    (let [h (flat-of-fn)
-          f (when h (h v))]
-      (cond
-        (some? f) f
-        (map? v) (into {} (map (fn [[k x]] [(eve->clj k) (eve->clj x)])) v)
-        (set? v) (into #{} (map eve->clj) v)
-        (vector? v) (mapv eve->clj v)
-        (list? v) (apply list (map eve->clj v))
-        (sequential? v) (seq->host v)
-        (eve-slab-value? v)
-        (throw (ex-info "eve->clj: a persistent Eve value of no kind eve->clj knows"
-                        {:type :eve/no-materialization
-                         :value-type (str (type v))}))
-        :else v))))))
+        (let [h (flat-of-fn)
+              f (when h (h v))]
+          (cond
+            (some? f) f
+            (map? v) (into {} (map (fn [[k x]] [(eve->clj k) (eve->clj x)])) v)
+            (set? v) (into #{} (map eve->clj) v)
+            (vector? v) (mapv eve->clj v)
+            (list? v) (apply list (map eve->clj v))
+            (sequential? v) (seq->host v)
+            (eve-slab-value? v)
+            (throw (ex-info "eve->clj: a persistent Eve value of no kind eve->clj knows"
+                            {:type :eve/no-materialization
+                             :value-type (str (type v))}))
+            :else v))))))
 
 (defprotocol IBulkAccess
   "Bulk typed-array access to EveArray data: the host's primitive array of

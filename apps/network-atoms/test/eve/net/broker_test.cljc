@@ -85,7 +85,7 @@
     (testing "an unknown atom is created at old_key, then CASed"
       (is (= [200 {"status" "ok" "epoch" 1}] (post! b "/atoms/a2/cas-root" {"old_key" "x" "new_key" "y"}))))
     (is (= 404 (:status ((:handle b) {:method "POST" :url "https://broker.example/v1/domains/d2/atoms/a1/deref"
-                                    :headers {"Authorization" "Bearer k"} :body "{}"})))
+                                      :headers {"Authorization" "Bearer k"} :body "{}"})))
         "another domain is not found")))
 
 (deftest a-page-reaches-it-cors

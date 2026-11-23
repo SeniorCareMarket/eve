@@ -15,9 +15,9 @@
 
 ;; eve: the host's own vectors (eve.types/vector-types)
 (extend-host-vectors protos/PSliceableVector
-  (-slicev [v start end]
-    (-slicev (-as-rrbt v) start end)))
+                     (-slicev [v start end]
+                              (-slicev (-as-rrbt v) start end)))
 
 (extend-host-vectors protos/PSpliceableVector
-  (-splicev [v1 v2]
-    (-splicev (-as-rrbt v1) v2)))
+                     (-splicev [v1 v2]
+                               (-splicev (-as-rrbt v1) v2)))

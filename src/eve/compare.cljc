@@ -22,8 +22,8 @@
     (if (zero? n)
       (loop [a (seq a) b (seq b)]
         (if (nil? a) 0
-          (let [n (compare (first a) (first b))]
-            (if (zero? n) (recur (next a) (next b)) n))))
+            (let [n (compare (first a) (first b))]
+              (if (zero? n) (recur (next a) (next b)) n))))
       n)))
 
 (defn- named-compare [a b]
@@ -43,19 +43,19 @@
   [a b]
   (let [ra (rank a) rb (rank b)]
     (if (not= ra rb) (clojure.core/compare ra rb)
-      (case ra
-        0 0
-        1 (clojure.core/compare (if a 1 0) (if b 1 0))
-        2 (let [an (not (= a a)) bn (not (= b b))]
-            (cond (and an bn) 0 an 1 bn -1 :else (clojure.core/compare a b)))
-        3 (clojure.core/compare (str a) (str b))
-        4 (named-compare a b)
-        5 (named-compare a b)
-        6 (sequence-compare (uuid-key a) (uuid-key b))
-        7 (clojure.core/compare (enc/date-ms a) (enc/date-ms b))
-        8 (sequence-compare a b)
-        9 (sequence-compare (sort compare (map vec a)) (sort compare (map vec b)))
-        10 (sequence-compare (sort compare a) (sort compare b))
-        11 (compare (-order-key a) (-order-key b))
-        12 (sequence-compare [(str (or (t/type-token a) (type a))) (pr-str a)]
+        (case ra
+          0 0
+          1 (clojure.core/compare (if a 1 0) (if b 1 0))
+          2 (let [an (not (= a a)) bn (not (= b b))]
+              (cond (and an bn) 0 an 1 bn -1 :else (clojure.core/compare a b)))
+          3 (clojure.core/compare (str a) (str b))
+          4 (named-compare a b)
+          5 (named-compare a b)
+          6 (sequence-compare (uuid-key a) (uuid-key b))
+          7 (clojure.core/compare (enc/date-ms a) (enc/date-ms b))
+          8 (sequence-compare a b)
+          9 (sequence-compare (sort compare (map vec a)) (sort compare (map vec b)))
+          10 (sequence-compare (sort compare a) (sort compare b))
+          11 (compare (-order-key a) (-order-key b))
+          12 (sequence-compare [(str (or (t/type-token a) (type a))) (pr-str a)]
                                [(str (or (t/type-token b) (type b))) (pr-str b)])))))

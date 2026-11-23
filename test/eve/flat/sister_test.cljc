@@ -207,64 +207,64 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:clj (do
-(defn- image-census
-  "The block census of image bytes bs (T1's suite's instrument)."
-  [^bytes bs]
-  (let [h (contract/read-header bs 0)
-        nb (quot (- (:shapetab h) (:symtab h)) contract/block-entry-size)
-        blocks (contract/read-block-table bs (:symtab h) nb)
-        size->class (zipmap alloc/CLASS_BLOCK_SIZES (range 6))]
-    {:nblocks nb
-     :by-class (frequencies (map (fn [b] (get size->class (:size b) 6)) blocks))}))
+          (defn- image-census
+            "The block census of image bytes bs (T1's suite's instrument)."
+            [^bytes bs]
+            (let [h (contract/read-header bs 0)
+                  nb (quot (- (:shapetab h) (:symtab h)) contract/block-entry-size)
+                  blocks (contract/read-block-table bs (:symtab h) nb)
+                  size->class (zipmap alloc/CLASS_BLOCK_SIZES (range 6))]
+              {:nblocks nb
+               :by-class (frequencies (map (fn [b] (get size->class (:size b) 6)) blocks))}))
 
-(defn- reach-count
-  "Blocks reachable from atom a's root in its own domain (the tally's
+          (defn- reach-count
+            "Blocks reachable from atom a's root in its own domain (the tally's
    walk — the same measure T1's suite uses)."
-  [a]
-  (let [ptr (mem/-load-i32 (:root-r (ea/-domain-state a))
-                           (d/atom-slot-offset (ea/-atom-slot-idx a)
-                                               d/ATOM_SLOT_PTR_OFFSET))]
-    (count (retire/reach (ea/atom-sio a) ptr))))
+            [a]
+            (let [ptr (mem/-load-i32 (:root-r (ea/-domain-state a))
+                                     (d/atom-slot-offset (ea/-atom-slot-idx a)
+                                                         d/ATOM_SLOT_PTR_OFFSET))]
+              (count (retire/reach (ea/atom-sio a) ptr))))
 
-(defn- widget-in
-  "The boundary test's Widget, built in sio's domain (an instance built
+          (defn- widget-in
+            "The boundary test's Widget, built in sio's domain (an instance built
    anywhere else is foreign to an atom of that domain, and the store
    rule refuses it — as it should)."
-  [sio]
-  (->Widget sio 5 5.5 "five" (->Gadget sio 50 "g5")))
+            [sio]
+            (->Widget sio 5 5.5 "five" (->Gadget sio 50 "g5")))
 
-(deftest boundary-conversion
-  (testing "an instance crosses from atom A to atom B by transfer!"
-    (let [a (e/atom nil)
-          b (e/atom nil)
-          w (widget-in (ea/atom-sio a))]
-      (swap! a (fn [_] w))
-      (st/transfer! b a)
+          (deftest boundary-conversion
+            (testing "an instance crosses from atom A to atom B by transfer!"
+              (let [a (e/atom nil)
+                    b (e/atom nil)
+                    w (widget-in (ea/atom-sio a))]
+                (swap! a (fn [_] w))
+                (st/transfer! b a)
       ;; the value model: outside an atom a deftype is flat — B's deref
       ;; delivers a Widget's flat sister, which answers Widget's protocols
-      (is (instance? Widget__Flat @b) "what arrived in B is not a Widget")
-      (is (= (field-map w) (field-map @b)))
-      (is (= (reach-count a) (reach-count b))
-          "the copy in B is not self-contained: blocks it reads were left behind in A")))
-  (testing "nested in a map, under the :zip foreign policy of a swap!"
-    (let [a (e/atom nil)
-          b (e/atom nil)
-          w (widget-in (ea/atom-sio a))]
-      (swap! a (fn [_] {:w w}))
-      (ea/set-foreign-policy! b :zip)
-      (swap! b (fn [_] (ea/read-pinned a (fn [v] v))))
-      (is (instance? Widget__Flat (:w @b)))
-      (is (= (field-map w) (field-map (:w @b))))))
-  (testing "leaving the domain as a flat: the sister registration is the conversion"
-    (let [desc (sister/descriptor widget-key)]
-      (is (some? desc))
-      (try
-        (sister/deregister! widget-key)
-        (is (thrown? Exception (chunk/pack [(->Widget 9 9.5 "nine" nil)]))
-            "without its sister registration the instance still packed")
-        (finally
-          (sister/register-descriptor! desc)))))
-  (testing "without the generated layout registration, the boundary image is not self-contained"
+                (is (instance? Widget__Flat @b) "what arrived in B is not a Widget")
+                (is (= (field-map w) (field-map @b)))
+                (is (= (reach-count a) (reach-count b))
+                    "the copy in B is not self-contained: blocks it reads were left behind in A")))
+            (testing "nested in a map, under the :zip foreign policy of a swap!"
+              (let [a (e/atom nil)
+                    b (e/atom nil)
+                    w (widget-in (ea/atom-sio a))]
+                (swap! a (fn [_] {:w w}))
+                (ea/set-foreign-policy! b :zip)
+                (swap! b (fn [_] (ea/read-pinned a (fn [v] v))))
+                (is (instance? Widget__Flat (:w @b)))
+                (is (= (field-map w) (field-map (:w @b))))))
+            (testing "leaving the domain as a flat: the sister registration is the conversion"
+              (let [desc (sister/descriptor widget-key)]
+                (is (some? desc))
+                (try
+                  (sister/deregister! widget-key)
+                  (is (thrown? Exception (chunk/pack [(->Widget 9 9.5 "nine" nil)]))
+                      "without its sister registration the instance still packed")
+                  (finally
+                    (sister/register-descriptor! desc)))))
+            (testing "without the generated layout registration, the boundary image is not self-contained"
     ;; Measured at this pin: the value spans 4 blocks (the instance,
     ;; its label block, the nested instance, its note block) and the
     ;; transfer walk's image carries all 4 while the layout is
@@ -274,24 +274,23 @@
     ;; address A's blocks in the shared slab: the copy aliases its
     ;; source. The census of T1's own image is the instrument; this
     ;; arm is the failure S5 excludes.
-    (let [a (e/atom nil)
-          w (widget-in (ea/atom-sio a))
-          id [Widget-type-id (reg/name-hash-of widget-key)]
-          layouts @serialize/deftype-layouts
-          sizes @serialize/deftype-sizes]
-      (swap! a (fn [_] w))
-      (let [with-blocks (:nblocks (image-census (st/detach a)))]
-        (is (= (reach-count a) with-blocks)
-            "test premise: the value's span and its image disagree")
-        (try
-          (swap! serialize/deftype-layouts update (first id) dissoc (second id))
-          (swap! serialize/deftype-sizes update (first id) dissoc (second id))
-          (is (< (:nblocks (image-census (st/detach a))) with-blocks)
-              "the boundary image carried every block with no layout registered")
-          (finally
-            (reset! serialize/deftype-layouts layouts)
-            (reset! serialize/deftype-sizes sizes)))))))
-))
+              (let [a (e/atom nil)
+                    w (widget-in (ea/atom-sio a))
+                    id [Widget-type-id (reg/name-hash-of widget-key)]
+                    layouts @serialize/deftype-layouts
+                    sizes @serialize/deftype-sizes]
+                (swap! a (fn [_] w))
+                (let [with-blocks (:nblocks (image-census (st/detach a)))]
+                  (is (= (reach-count a) with-blocks)
+                      "test premise: the value's span and its image disagree")
+                  (try
+                    (swap! serialize/deftype-layouts update (first id) dissoc (second id))
+                    (swap! serialize/deftype-sizes update (first id) dissoc (second id))
+                    (is (< (:nblocks (image-census (st/detach a))) with-blocks)
+                        "the boundary image carried every block with no layout registered")
+                    (finally
+                      (reset! serialize/deftype-layouts layouts)
+                      (reset! serialize/deftype-sizes sizes)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; H5.6 — cljc-first: the generation and the sister live in .cljc, one
@@ -299,13 +298,13 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:clj
-(deftest cljc-first
-  (testing "the sister, the macro and the shared realization are .cljc sources"
-    (doseq [res ["eve/flat/sister.cljc"
-                 "eve/flat/source.cljc"
-                 "eve/deftype/macros.cljc"
-                 "eve/deftype_proto/sio.cljc"]]
-      (is (some? (io/resource res)) (str res " is not on the classpath as a .cljc"))))
-  (testing "no .clj-only or .cljs-only parallel implementation of the sister exists"
-    (is (nil? (io/resource "eve/flat/sister.clj")))
-    (is (nil? (io/resource "eve/flat/sister.cljs"))))))
+   (deftest cljc-first
+     (testing "the sister, the macro and the shared realization are .cljc sources"
+       (doseq [res ["eve/flat/sister.cljc"
+                    "eve/flat/source.cljc"
+                    "eve/deftype/macros.cljc"
+                    "eve/deftype_proto/sio.cljc"]]
+         (is (some? (io/resource res)) (str res " is not on the classpath as a .cljc"))))
+     (testing "no .clj-only or .cljs-only parallel implementation of the sister exists"
+       (is (nil? (io/resource "eve/flat/sister.clj")))
+       (is (nil? (io/resource "eve/flat/sister.cljs"))))))

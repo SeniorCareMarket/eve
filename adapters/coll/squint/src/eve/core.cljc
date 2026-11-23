@@ -41,8 +41,6 @@
                             unchecked-byte gensym read-string make-array array-seq lazy-cat seq?
                             bit-xor halt-when sequence]))
 
-
-
 (defmacro caching-hash [coll hash-fn hash-key]
   `(let [h# ~hash-key]
      (if-not (nil? h#)
@@ -159,7 +157,7 @@
 (defprotocol ITransientVector (-assoc-n! [o n v]) (-pop! [o]))
 (defprotocol IVector (-assoc-n [o n v]))
 (defprotocol IWatchable (-add-watch [o k f]) (-remove-watch [o k])
-  (-notify-watches [o old new]))
+             (-notify-watches [o old new]))
 (defprotocol IWithMeta (-with-meta [o m]))
 (defprotocol INext (-next [o]))
 (defprotocol IMapEntry (-key [o]) (-val [o]))
@@ -171,7 +169,7 @@
 ;; splits the JVM name here (watches go to IWatchable). The runtime
 ;; face defprotocols the same protocol for real.
 (defprotocol IRef (-set-validator! [o f]) (-get-validator [o])
-  (-get-watches [o]))
+             (-get-watches [o]))
 (defn pr-writer [x w _opts] (-write w (pr-str x)))
 (defn pr-str* [x] (pr-str x))
 

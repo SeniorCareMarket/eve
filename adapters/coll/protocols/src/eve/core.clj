@@ -115,9 +115,9 @@
   (-nth ([c n] (try (clojure.core/nth c n)
                     (catch UnsupportedOperationException _
                       (clojure.core/nth (seq c) n))))
-        ([c n nf] (try (clojure.core/nth c n nf)
-                       (catch UnsupportedOperationException _
-                         (clojure.core/nth (seq c) n nf))))))
+    ([c n nf] (try (clojure.core/nth c n nf)
+                   (catch UnsupportedOperationException _
+                     (clojure.core/nth (seq c) n nf))))))
 (extend-type nil
   ILookup
   (-lookup ([_ _k] nil) ([_ _k nf] nf)))

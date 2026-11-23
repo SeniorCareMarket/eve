@@ -96,7 +96,7 @@
         "imaged again, the value is another key: the codec writes the long in its own form")
     (testing "the next write, from the read's record: only the changed path imaged, the rest keeps its keys"
       (let [w2 (p/write-pages (assoc (:value r) "n" 3) {:record (:record r) :known (:known r) :salt (vec (repeat 32 8))
-                                                         :region 40})
+                                                        :region 40})
             r2 (p/read-pages (:root w2) (merge (page-map w) (page-map w2)))]
         (is (= {"ts" 1793006789451 "n" 3} (:value r2)))
         (is (= (vec K-FLOAT64-TS) (vec (c/rec-band-of (:record r2) "ts"))))

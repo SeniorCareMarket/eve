@@ -19,12 +19,12 @@
    own (rrb-vector-test's fixture), dropped with the test."
   [f]
   (binding [d/*domain-sio* (alloc/heap-domain-sio!
-                              {:capacities {0 (* 64 1024 1024)
-                                            1 (* 16 1024 1024)
-                                            2 (* 16 1024 1024)
-                                            3 (* 192 1024 1024)
-                                            4 (* 16 1024 1024)
-                                            5 (* 16 1024 1024)}})]
+                            {:capacities {0 (* 64 1024 1024)
+                                          1 (* 16 1024 1024)
+                                          2 (* 16 1024 1024)
+                                          3 (* 192 1024 1024)
+                                          4 (* 16 1024 1024)
+                                          5 (* 16 1024 1024)}})]
     (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
@@ -43,47 +43,47 @@
   (move! [_] (set! x (inc x))))
 
 (host-deftype Custom [x]
-  {:tag example/custom
-   :print (fn [v w _] (enc/write! w (str "#example/custom " (pr-str (readers/-type-fields v)))))
-   :read (fn [v] (->Custom (:x v)))}
-  readers/ITypeFields
-  (-type-fields [_] {:x x}))
+              {:tag example/custom
+               :print (fn [v w _] (enc/write! w (str "#example/custom " (pr-str (readers/-type-fields v)))))
+               :read (fn [v] (->Custom (:x v)))}
+              readers/ITypeFields
+              (-type-fields [_] {:x x}))
 
 (host-deftype ProtocolPrint [x]
-  {:tag example/protocol
-   :read (fn [v] (->ProtocolPrint v))}
-  IPrintWithWriter
-  (-pr-writer [this w _]
-    (enc/write! w (str "#example/protocol " (pr-str (:x (readers/-type-fields this))))))
-  readers/ITypeFields
-  (-type-fields [_] {:x x}))
+              {:tag example/protocol
+               :read (fn [v] (->ProtocolPrint v))}
+              IPrintWithWriter
+              (-pr-writer [this w _]
+                          (enc/write! w (str "#example/protocol " (pr-str (:x (readers/-type-fields this))))))
+              readers/ITypeFields
+              (-type-fields [_] {:x x}))
 
 (host-deftype TaggedMap [m]
-  {:tag example/map
-   :read (fn [data] (->TaggedMap data))}
-  clojure.lang.ILookup
-  (valAt [_ k] (get m k))
-  (valAt [_ k nf] (get m k nf))
-  clojure.lang.Associative
-  (containsKey [_ k] (contains? m k))
-  (entryAt [_ k] (find m k))
-  (assoc [_ k v] (assoc m k v))
-  clojure.lang.IPersistentMap
-  (without [_ k] (dissoc m k))
-  (assocEx [_ k v] (assoc m k v))
-  clojure.lang.Counted
-  (count [_] (count m))
-  clojure.lang.IPersistentCollection
-  (cons [_ v] (conj m v))
-  (empty [_] {})
-  (equiv [_ other] (= m other))
-  clojure.lang.Seqable
-  (seq [_] (seq m))
-  readers/ITypeFields
-  (-type-fields [_] m)
-  IPrintWithWriter
-  (-pr-writer [this w _]
-    (enc/write! w (str "#example/map " (pr-str (readers/-type-fields this))))))
+              {:tag example/map
+               :read (fn [data] (->TaggedMap data))}
+              clojure.lang.ILookup
+              (valAt [_ k] (get m k))
+              (valAt [_ k nf] (get m k nf))
+              clojure.lang.Associative
+              (containsKey [_ k] (contains? m k))
+              (entryAt [_ k] (find m k))
+              (assoc [_ k v] (assoc m k v))
+              clojure.lang.IPersistentMap
+              (without [_ k] (dissoc m k))
+              (assocEx [_ k v] (assoc m k v))
+              clojure.lang.Counted
+              (count [_] (count m))
+              clojure.lang.IPersistentCollection
+              (cons [_ v] (conj m v))
+              (empty [_] {})
+              (equiv [_ other] (= m other))
+              clojure.lang.Seqable
+              (seq [_] (seq m))
+              readers/ITypeFields
+              (-type-fields [_] m)
+              IPrintWithWriter
+              (-pr-writer [this w _]
+                          (enc/write! w (str "#example/map " (pr-str (readers/-type-fields this))))))
 
 (deftest default-tagged-print-and-read
   (doseq [v [(->Point 1 "two") (->SharedPoint 1 "two") (->ProjectedPoint 1) (->MovingPoint 1)]]
@@ -121,7 +121,7 @@
     (is (= {:x 2} (readers/-type-fields v)))
     (is (= "#eve.type-io-test/MovingPoint {:x 2}" (pr-str v))))
   (is (= {:x 42} (edn/read-string {:readers {'example/custom identity}}
-                                "#example/custom {:x 42}")))
+                                  "#example/custom {:x 42}")))
   (is (= "#example/custom {:x 42}"
          (pr-str (edn/read-string "#example/custom {:x 42}")))))
 
@@ -134,8 +134,8 @@
 
 (deftest io-contract-is-in-the-existing-type-registry
   (doseq [[type-name mode] [["Point" :field-map] ["SharedPoint" :field-map]
-                           ["ProjectedPoint" :field-map] ["Custom" :custom]
-                           ["ProtocolPrint" :protocol]]]
+                            ["ProjectedPoint" :field-map] ["Custom" :custom]
+                            ["ProtocolPrint" :protocol]]]
     (let [entry (registry/lookup-type (str "eve.type-io-test/" type-name))
           io (:type-io entry)]
       (is (= mode (get-in io [:print :mode])))

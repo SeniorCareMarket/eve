@@ -146,15 +146,15 @@
           (g/packed-chunk
            {:syms [] :shapes []
             :emit (fn [b] ;; pad so the values column's data (5 bytes in) is 4-aligned
-                          (dotimes [_ (mod (- 3 (g/pos b)) 4)] (g/w8 b 0))
-                          (let [o (g/pos b)]
-                            (g/w8 b 0x23) (g/wvarint b 5)
-                            (g/wbytes b (g/col-bytes 23 (let [bb (g/buf)]
-                                                          (g/wvarint bb 2)
-                                                          (g/wbytes bb (g/col-bytes 6 (g/dense-data 4 [7 9])))
-                                                          (g/wu32 bb 3) (g/wu32 bb 2)
-                                                          (g/buf-bytes bb))))
-                            o))}))
+                    (dotimes [_ (mod (- 3 (g/pos b)) 4)] (g/w8 b 0))
+                    (let [o (g/pos b)]
+                      (g/w8 b 0x23) (g/wvarint b 5)
+                      (g/wbytes b (g/col-bytes 23 (let [bb (g/buf)]
+                                                    (g/wvarint bb 2)
+                                                    (g/wbytes bb (g/col-bytes 6 (g/dense-data 4 [7 9])))
+                                                    (g/wu32 bb 3) (g/wu32 bb 2)
+                                                    (g/buf-bytes bb))))
+                      o))}))
      (row "utf8 column last offset past the end" :column-out-of-range
           (g/packed-chunk
            {:syms [] :shapes []

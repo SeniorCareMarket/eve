@@ -40,11 +40,11 @@
                                    (list 'eve.type-readers/-type-fields x)
                                    (mapv (fn [f] (keyword (name f))) fields))))
         body (if printer? body
-               (concat body (when-not (or (:print opts) fields?)
-                              ['eve.type-readers/ITypeFields
-                               (list '-type-fields [x] (cons 'array-map pairs))])
-                       ['IPrintWithWriter
-                             (list '-pr-writer [x w o] (list print-form x w o))]))]
+                 (concat body (when-not (or (:print opts) fields?)
+                                ['eve.type-readers/ITypeFields
+                                 (list '-type-fields [x] (cons 'array-map pairs))])
+                         ['IPrintWithWriter
+                          (list '-pr-writer [x w o] (list print-form x w o))]))]
     {:body body :tag tag :read (:read opts)
      :print-info {:mode (cond (:print opts) :custom printer? :protocol :else :field-map)
                   :protocol 'IPrintWithWriter :method '-pr-writer}}))

@@ -67,96 +67,96 @@
 (declare rrb-chunked-seq)
 
 (eve/host-deftype RRBChunkedSeq [vec node i off meta ^:mutable __hash]
-  Object
-  (toString [coll]
-    (pr-str* coll))
+                  Object
+                  (toString [coll]
+                            (pr-str* coll))
 
-  IPrintWithWriter
-  (-pr-writer [this writer opts]
-    (pr-sequential-writer writer pr-writer "(" " " ")" opts this))
+                  IPrintWithWriter
+                  (-pr-writer [this writer opts]
+                              (pr-sequential-writer writer pr-writer "(" " " ")" opts this))
 
-  IWithMeta
-  (-with-meta [coll m]
-    (rrb-chunked-seq vec node i off m))
+                  IWithMeta
+                  (-with-meta [coll m]
+                              (rrb-chunked-seq vec node i off m))
 
-  IMeta
-  (-meta [coll] meta)
+                  IMeta
+                  (-meta [coll] meta)
 
-  ISeqable
-  (-seq [coll] coll)
+                  ISeqable
+                  (-seq [coll] coll)
 
-  ISequential
-  IEquiv
-  (-equiv [coll other] (equiv-sequential coll other))
+                  ISequential
+                  IEquiv
+                  (-equiv [coll other] (equiv-sequential coll other))
 
-  ASeq
-  ISeq
-  (-first [coll]
-    (aget node off))
+                  ASeq
+                  ISeq
+                  (-first [coll]
+                          (aget node off))
 
-  (-rest [coll]
-    (if (< (inc off) (alength node))
-      (let [s (rrb-chunked-seq vec node i (inc off))]
-        (if (nil? s)
-          ()
-          s))
-      (-chunked-rest coll)))
+                  (-rest [coll]
+                         (if (< (inc off) (alength node))
+                           (let [s (rrb-chunked-seq vec node i (inc off))]
+                             (if (nil? s)
+                               ()
+                               s))
+                           (-chunked-rest coll)))
 
-  INext
-  (-next [coll]
-    (if (< (inc off) (alength node))
-      (let [s (rrb-chunked-seq vec node i (inc off))]
-        (if (nil? s)
-          nil
-          s))
-      (-chunked-next coll)))
+                  INext
+                  (-next [coll]
+                         (if (< (inc off) (alength node))
+                           (let [s (rrb-chunked-seq vec node i (inc off))]
+                             (if (nil? s)
+                               nil
+                               s))
+                           (-chunked-next coll)))
 
-  ICollection
-  (-conj [coll o]
-    (cons o coll))
+                  ICollection
+                  (-conj [coll o]
+                         (cons o coll))
 
-  IEmptyableCollection
-  (-empty [coll]
-    (with-meta () meta))
+                  IEmptyableCollection
+                  (-empty [coll]
+                          (with-meta () meta))
 
-  IChunkedSeq
-  (-chunked-first [coll]
-    (array-chunk node off))
+                  IChunkedSeq
+                  (-chunked-first [coll]
+                                  (array-chunk node off))
 
-  (-chunked-rest [coll]
-    (let [l (alength node)
-          s (when (< (+ i l) (-count vec))
-              (rrb-chunked-seq vec (+ i l) 0))]
-      (if (nil? s)
-        ()
-        s)))
+                  (-chunked-rest [coll]
+                                 (let [l (alength node)
+                                       s (when (< (+ i l) (-count vec))
+                                           (rrb-chunked-seq vec (+ i l) 0))]
+                                   (if (nil? s)
+                                     ()
+                                     s)))
 
-  IChunkedNext
-  (-chunked-next [coll]
-    (let [l (alength node)
-          s (when (< (+ i l) (-count vec))
-              (rrb-chunked-seq vec (+ i l) 0))]
-      (if (nil? s)
-        nil
-        s)))
+                  IChunkedNext
+                  (-chunked-next [coll]
+                                 (let [l (alength node)
+                                       s (when (< (+ i l) (-count vec))
+                                           (rrb-chunked-seq vec (+ i l) 0))]
+                                   (if (nil? s)
+                                     nil
+                                     s)))
 
-  IHash
-  (-hash [coll] (caching-hash coll hash-ordered-coll __hash))
+                  IHash
+                  (-hash [coll] (caching-hash coll hash-ordered-coll __hash))
 
-  IReduce
-  (-reduce [coll f]
-    (ci-reduce (subvec vec (+ i off) (count vec)) f))
+                  IReduce
+                  (-reduce [coll f]
+                           (ci-reduce (subvec vec (+ i off) (count vec)) f))
 
-  (-reduce [coll f start]
-    (ci-reduce (subvec vec (+ i off) (count vec)) f start)))
+                  (-reduce [coll f start]
+                           (ci-reduce (subvec vec (+ i off) (count vec)) f start)))
 
 (defn rrb-chunked-seq
   ([vec i off]
-     (RRBChunkedSeq. vec (-array-for vec i) i off nil nil))
+   (RRBChunkedSeq. vec (-array-for vec i) i off nil nil))
   ([vec node i off]
-     (RRBChunkedSeq. vec node i off nil nil))
+   (RRBChunkedSeq. vec node i off nil nil))
   ([vec node i off meta]
-     (RRBChunkedSeq. vec node i off meta nil)))
+   (RRBChunkedSeq. vec node i off meta nil)))
 
 (defn slice-right [node shift end]
   (if (zero? shift)
@@ -427,10 +427,10 @@
                 (aset 32 2))
               (->Vector (inc cnt) (+ shift 5) new-root new-tail meta nil)))
           (->Vector (inc cnt) shift
-                   (push-tail shift cnt (.-edit root) root tail-node)
-                   new-tail
-                   meta
-                   nil)))))
+                    (push-tail shift cnt (.-edit root) root tail-node)
+                    new-tail
+                    meta
+                    nil)))))
 
   IEmptyableCollection
   ;; eve: the empty vector is an eve vector too (cljs.core's is a host one)
@@ -466,11 +466,11 @@
           (and (> shift 5)
                (nil? (aget (.-arr new-root) 1)))
           (->Vector (dec cnt)
-                   (- shift 5)
-                   (aget (.-arr new-root) 0)
-                   new-tail
-                   meta
-                   nil)
+                    (- shift 5)
+                    (aget (.-arr new-root) 0)
+                    new-tail
+                    meta
+                    nil)
 
           :else
           (->Vector (dec cnt) shift new-root new-tail meta nil)))))
@@ -595,7 +595,7 @@
                                 (array-copy tail 0 new-tail 0 new-len)
                                 new-tail)
                               (-array-for (->Vector new-cnt shift new-root
-                                                   (make-array 0) meta nil)
+                                                    (make-array 0) meta nil)
                                           (dec new-cnt)))
                   new-root  (if tail-cut?
                               new-root
@@ -654,8 +654,8 @@
 ;; eve: a host vector's nodes are in the host's memory, which an eve value
 ;; cannot point into; its elements go into a new vector in eve memory
 (extend-host-vectors AsRRBT
-  (-as-rrbt [this]
-    (into (->Vector 0 5 (empty-node) (make-array 0) (meta this) nil) this)))
+                     (-as-rrbt [this]
+                               (into (->Vector 0 5 (empty-node) (make-array 0) (meta this) nil) this)))
 
 (defn shift-from-to [node from to]
   (cond
@@ -947,9 +947,9 @@
 ;; library.  They are faster.
 
 #_(defn child-nodes [node]
-  (into [] (comp (take-while (complement nil?))
-                 (take 32))
-        (.-arr node)))
+    (into [] (comp (take-while (complement nil?))
+                   (take 32))
+          (.-arr node)))
 
 (defn child-nodes [node]
   (->> (array-seq (.-arr node))
@@ -960,10 +960,10 @@
 ;; grandchildren than necessary.  If there are at least 33, we do not
 ;; care how many there are.
 #_(defn bounded-grandchildren [children]
-  (into [] (comp (map child-nodes)
-                 cat
-                 (take 33))
-        children))
+    (into [] (comp (map child-nodes)
+                   cat
+                   (take 33))
+          children))
 
 (defn bounded-grandchildren [children]
   (->> children
@@ -1054,7 +1054,7 @@
             (aset new-rngs 32 num-granchildren-bounded)
             (aset new-arr 32 new-rngs)
             (let [new-v (->Vector (.-cnt v) (- shift 5)
-                                 new-root (.-tail v) (.-meta v) nil)]
+                                  new-root (.-tail v) (.-meta v) nil)]
               (when (:debug-fn config)
                 ((:debug-fn config) v new-v))
               new-v)))))))
@@ -1207,14 +1207,14 @@
                          (aset 1 (+ ncnt1 ncnt2))
                          (aset 32 2)))
           (->Vector (+ (count v1) (count v2)) (+ s 5) new-root (.-tail v2)
-                   nil nil))
+                    nil nil))
         (loop [r n1
                s s]
           (if (and (> s 5)
                    (nil? (aget (.-arr r) 1)))
             (recur (aget (.-arr r) 0) (- s 5))
             (->Vector (+ (count v1) (count v2)) s r (.-tail v2)
-                     nil nil)))))))
+                      nil nil)))))))
 
 (defn splice-rrbts [v1 v2]
   (let [r1 (splice-rrbts-main v1 v2)
@@ -1222,223 +1222,223 @@
     (fallback-to-slow-splice-if-needed v1 v2 r2)))
 
 (eve/host-deftype Transient [^:volatile-mutable cnt
-                    ^:volatile-mutable shift
-                    ^:volatile-mutable root
-                    ^:volatile-mutable tail
-                    ^:volatile-mutable tidx]
+                             ^:volatile-mutable shift
+                             ^:volatile-mutable root
+                             ^:volatile-mutable tail
+                             ^:volatile-mutable tidx]
 
   ;; The Clojure/Java deftype Transient implements the Java interface
   ;; clojure.lang.ILookup.  The corresponding ClojureScript protocol
   ;; named ILookup is implemented by the deftype Vector in this file.
   ;; TBD: Should ILookup be implemented by type Transient, too?
 
-  clojure.lang.Indexed
-  (nth [this i]
-    (if (and (<= 0 i) (< i cnt))
-      (let [tail-off (-tail-offset this)]
-        (if (<= tail-off i)
-          (aget tail (- i tail-off))
-          (loop [i i node root shift shift]
-            (if (zero? shift)
-              (let [arr (.-arr node)]
-                (aget arr (bit-and (bit-shift-right i shift) 0x1f)))
-              (if (regular? node)
-                (let [arr (.-arr node)
-                      idx (bit-and (bit-shift-right i shift) 0x1f)]
-                  (loop [i     i
-                         node  (aget arr idx)
-                         shift (- shift 5)]
-                    (let [arr (.-arr node)
-                          idx (bit-and (bit-shift-right i shift) 0x1f)]
-                      (if (zero? shift)
-                        (aget arr idx)
-                        (recur i (aget arr idx) (- shift 5))))))
-                (let [arr  (.-arr node)
-                      rngs (node-ranges node)
-                      idx  (loop [j (bit-and (bit-shift-right i shift) 0x1f)]
-                             (if (< i (aget rngs j))
-                               j
-                               (recur (inc j))))
-                      i    (if (zero? idx)
-                             i
-                             (- i (aget rngs (dec idx))))]
-                  (recur i (aget arr idx) (- shift 5))))))))
-      (vector-index-out-of-bounds i cnt)))
+                  clojure.lang.Indexed
+                  (nth [this i]
+                       (if (and (<= 0 i) (< i cnt))
+                         (let [tail-off (-tail-offset this)]
+                           (if (<= tail-off i)
+                             (aget tail (- i tail-off))
+                             (loop [i i node root shift shift]
+                               (if (zero? shift)
+                                 (let [arr (.-arr node)]
+                                   (aget arr (bit-and (bit-shift-right i shift) 0x1f)))
+                                 (if (regular? node)
+                                   (let [arr (.-arr node)
+                                         idx (bit-and (bit-shift-right i shift) 0x1f)]
+                                     (loop [i     i
+                                            node  (aget arr idx)
+                                            shift (- shift 5)]
+                                       (let [arr (.-arr node)
+                                             idx (bit-and (bit-shift-right i shift) 0x1f)]
+                                         (if (zero? shift)
+                                           (aget arr idx)
+                                           (recur i (aget arr idx) (- shift 5))))))
+                                   (let [arr  (.-arr node)
+                                         rngs (node-ranges node)
+                                         idx  (loop [j (bit-and (bit-shift-right i shift) 0x1f)]
+                                                (if (< i (aget rngs j))
+                                                  j
+                                                  (recur (inc j))))
+                                         i    (if (zero? idx)
+                                                i
+                                                (- i (aget rngs (dec idx))))]
+                                     (recur i (aget arr idx) (- shift 5))))))))
+                         (vector-index-out-of-bounds i cnt)))
 
-  (nth [this i not-found]
-    (if (and (>= i 0) (< i cnt))
-      (nth this i)
-      not-found))
+                  (nth [this i not-found]
+                       (if (and (>= i 0) (< i cnt))
+                         (nth this i)
+                         not-found))
 
-  clojure.lang.IFn
-  (invoke [this k]
-    (nth this k))
+                  clojure.lang.IFn
+                  (invoke [this k]
+                          (nth this k))
 
-  (invoke [this k not-found]
-    (nth this k not-found))
+                  (invoke [this k not-found]
+                          (nth this k not-found))
 
-  clojure.lang.ITransientCollection
-  (conj [this o]
+                  clojure.lang.ITransientCollection
+                  (conj [this o]
     ;; eve: ^boolean is ClojureScript's hint (ClojureCLR's call site would
     ;; require the edit token to be a bool)
-    (if (.-edit root)
-      (if (< tidx 32)
-        (do (aset tail tidx o)
-            (set! cnt  (inc cnt))
-            (set! tidx (inc tidx))
-            this)
-        (let [tail-node (->VectorNode (.-edit root) tail)
-              new-tail  (make-array 32)]
-          (aset new-tail 0 o)
-          (set! tail new-tail)
-          (set! tidx 1)
-          (if (overflow? root shift cnt)
-            (if (regular? root)
-              (let [new-arr (make-array 32)]
-                (doto new-arr
-                  (aset 0 root)
-                  (aset 1 (new-path tail (.-edit root) shift tail-node)))
-                (set! root  (->VectorNode (.-edit root) new-arr))
-                (set! shift (+ shift 5))
-                (set! cnt   (inc cnt))
-                this)
-              (let [new-arr  (make-array 33)
-                    new-rngs (make-array 33)
-                    new-root (->VectorNode (.-edit root) new-arr)
-                    root-total-range (aget (node-ranges root) 31)]
-                (doto new-arr
-                  (aset 0  root)
-                  (aset 1  (new-path tail (.-edit root) shift tail-node))
-                  (aset 32 new-rngs))
-                (doto new-rngs
-                  (aset 0  root-total-range)
-                  (aset 1  (+ root-total-range 32))
-                  (aset 32 2))
-                (set! root  new-root)
-                (set! shift (+ shift 5))
-                (set! cnt   (inc cnt))
-                this))
-            (let [new-root (push-tail! shift cnt (.-edit root) root tail-node)]
-              (set! root new-root)
-              (set! cnt  (inc cnt))
-              this))))
-      (throw (ex-info "conj! after persistent!" {}))))
+                        (if (.-edit root)
+                          (if (< tidx 32)
+                            (do (aset tail tidx o)
+                                (set! cnt  (inc cnt))
+                                (set! tidx (inc tidx))
+                                this)
+                            (let [tail-node (->VectorNode (.-edit root) tail)
+                                  new-tail  (make-array 32)]
+                              (aset new-tail 0 o)
+                              (set! tail new-tail)
+                              (set! tidx 1)
+                              (if (overflow? root shift cnt)
+                                (if (regular? root)
+                                  (let [new-arr (make-array 32)]
+                                    (doto new-arr
+                                      (aset 0 root)
+                                      (aset 1 (new-path tail (.-edit root) shift tail-node)))
+                                    (set! root  (->VectorNode (.-edit root) new-arr))
+                                    (set! shift (+ shift 5))
+                                    (set! cnt   (inc cnt))
+                                    this)
+                                  (let [new-arr  (make-array 33)
+                                        new-rngs (make-array 33)
+                                        new-root (->VectorNode (.-edit root) new-arr)
+                                        root-total-range (aget (node-ranges root) 31)]
+                                    (doto new-arr
+                                      (aset 0  root)
+                                      (aset 1  (new-path tail (.-edit root) shift tail-node))
+                                      (aset 32 new-rngs))
+                                    (doto new-rngs
+                                      (aset 0  root-total-range)
+                                      (aset 1  (+ root-total-range 32))
+                                      (aset 32 2))
+                                    (set! root  new-root)
+                                    (set! shift (+ shift 5))
+                                    (set! cnt   (inc cnt))
+                                    this))
+                                (let [new-root (push-tail! shift cnt (.-edit root) root tail-node)]
+                                  (set! root new-root)
+                                  (set! cnt  (inc cnt))
+                                  this))))
+                          (throw (ex-info "conj! after persistent!" {}))))
 
-  (persistent [this]
-    (if (.-edit root)
+                  (persistent [this]
+                              (if (.-edit root)
       ;; eve: the edit token is on the root instance, not in eve memory; the
       ;; transient lets go of it by taking the same node without it (the JVM
       ;; and bb cannot set! another object's field)
-      (do (set! root (->VectorNode nil (.-arr root)))
-          (let [trimmed-tail (make-array tidx)]
-            (array-copy tail 0 trimmed-tail 0 tidx)
-            (->Vector cnt shift root trimmed-tail nil nil)))
-      (throw (ex-info "persistent! called twice" {}))))
+                                (do (set! root (->VectorNode nil (.-arr root)))
+                                    (let [trimmed-tail (make-array tidx)]
+                                      (array-copy tail 0 trimmed-tail 0 tidx)
+                                      (->Vector cnt shift root trimmed-tail nil nil)))
+                                (throw (ex-info "persistent! called twice" {}))))
 
-  clojure.lang.ITransientAssociative
-  (assoc [this key val]
-    (.assocN this key val))
+                  clojure.lang.ITransientAssociative
+                  (assoc [this key val]
+                         (.assocN this key val))
 
-  clojure.lang.ITransientVector
-  (assocN [this i val]
-    (if (.-edit root)
-      (cond
-        (and (<= 0 i) (< i cnt))
-        (let [tail-off (-tail-offset this)]
-          (if (<= tail-off i)
-            (aset tail (- i tail-off) val)
-            (set! root (do-assoc! shift (.-edit root) root i val)))
-          this)
+                  clojure.lang.ITransientVector
+                  (assocN [this i val]
+                          (if (.-edit root)
+                            (cond
+                              (and (<= 0 i) (< i cnt))
+                              (let [tail-off (-tail-offset this)]
+                                (if (<= tail-off i)
+                                  (aset tail (- i tail-off) val)
+                                  (set! root (do-assoc! shift (.-edit root) root i val)))
+                                this)
 
-        (== i cnt) (conj! this val)
+                              (== i cnt) (conj! this val)
 
-        :else (vector-index-out-of-bounds i cnt))
-      (throw (ex-info "assoc! after persistent!" {}))))
+                              :else (vector-index-out-of-bounds i cnt))
+                            (throw (ex-info "assoc! after persistent!" {}))))
 
-  (pop [this]
-    (if (.-edit root)
-      (cond
-        (zero? cnt)
-        (throw (ex-info "Can't pop empty vector" {}))
+                  (pop [this]
+                       (if (.-edit root)
+                         (cond
+                           (zero? cnt)
+                           (throw (ex-info "Can't pop empty vector" {}))
 
-        (== 1 cnt)
-        (do (set! cnt  0)
-            (set! tidx 0)
-            (aset tail 0 nil)
-            this)
+                           (== 1 cnt)
+                           (do (set! cnt  0)
+                               (set! tidx 0)
+                               (aset tail 0 nil)
+                               this)
 
-        (> tidx 1)
-        (do (set! cnt  (dec cnt))
-            (set! tidx (dec tidx))
-            (aset tail tidx nil)
-            this)
+                           (> tidx 1)
+                           (do (set! cnt  (dec cnt))
+                               (set! tidx (dec tidx))
+                               (aset tail tidx nil)
+                               this)
 
-        :else
-        (let [new-tail-base (-array-for this (- cnt 2))
-              new-tail      (editable-tail new-tail-base)
-              new-tidx      (alength new-tail-base)
-              new-root      (pop-tail! shift cnt (.-edit root) root)]
-          (cond
-            (nil? new-root)
-            (do (set! cnt  (dec cnt))
-                (set! root (ensure-editable (.-edit root) (empty-node)))
-                (set! tail new-tail)
-                (set! tidx new-tidx)
-                this)
+                           :else
+                           (let [new-tail-base (-array-for this (- cnt 2))
+                                 new-tail      (editable-tail new-tail-base)
+                                 new-tidx      (alength new-tail-base)
+                                 new-root      (pop-tail! shift cnt (.-edit root) root)]
+                             (cond
+                               (nil? new-root)
+                               (do (set! cnt  (dec cnt))
+                                   (set! root (ensure-editable (.-edit root) (empty-node)))
+                                   (set! tail new-tail)
+                                   (set! tidx new-tidx)
+                                   this)
 
-            (and (> shift 5)
-                 (nil? (aget (.-arr new-root) 1)))
-            (do (set! cnt   (dec cnt))
-                (set! shift (- shift 5))
-                (set! root  (ensure-editable (.-edit root)
-                                             (aget (.-arr new-root) 0)))
-                (set! tail  new-tail)
-                (set! tidx  new-tidx)
-                this)
+                               (and (> shift 5)
+                                    (nil? (aget (.-arr new-root) 1)))
+                               (do (set! cnt   (dec cnt))
+                                   (set! shift (- shift 5))
+                                   (set! root  (ensure-editable (.-edit root)
+                                                                (aget (.-arr new-root) 0)))
+                                   (set! tail  new-tail)
+                                   (set! tidx  new-tidx)
+                                   this)
 
-            :else
-            (do (set! cnt  (dec cnt))
-                (set! root new-root)
-                (set! tail new-tail)
-                (set! tidx new-tidx)
-                this))))
-      (throw (ex-info "count after persistent!" {}))))
+                               :else
+                               (do (set! cnt  (dec cnt))
+                                   (set! root new-root)
+                                   (set! tail new-tail)
+                                   (set! tidx new-tidx)
+                                   this))))
+                         (throw (ex-info "count after persistent!" {}))))
 
-  clojure.lang.Counted
-  (count [this]
-    (if (.-edit root)
-      cnt
-      (throw (ex-info "count after persistent!" {}))))
+                  clojure.lang.Counted
+                  (count [this]
+                         (if (.-edit root)
+                           cnt
+                           (throw (ex-info "count after persistent!" {}))))
 
-  IVecImpl
-  (-tail-offset [this]
-    (- cnt tidx))
+                  IVecImpl
+                  (-tail-offset [this]
+                                (- cnt tidx))
 
-  (-array-for [this i]
-    (if (and (<= 0 i) (< i cnt))
-      (if (>= i (-tail-offset this))
-        tail
-        (loop [i i node root shift shift]
-          (if (zero? shift)
-            (.-arr node)
-            (if (regular? node)
-              (loop [node  (aget (.-arr node)
-                                 (bit-and (bit-shift-right i shift) 0x1f))
-                     shift (- shift 5)]
-                (if (zero? shift)
-                  (.-arr node)
-                  (recur (aget (.-arr node)
-                               (bit-and (bit-shift-right i shift) 0x1f))
-                         (- shift 5))))
-              (let [rngs (node-ranges node)
-                    j    (loop [j (bit-and (bit-shift-right i shift) 0x1f)]
-                           (if (< i (aget rngs j))
-                             j
-                             (recur (inc j))))
-                    i    (if (pos? j)
-                           (- i (aget rngs (dec j)))
-                           i)]
-                (recur i
-                       (aget (.-arr node) j)
-                       (- shift 5)))))))
-      (vector-index-out-of-bounds i cnt))))
+                  (-array-for [this i]
+                              (if (and (<= 0 i) (< i cnt))
+                                (if (>= i (-tail-offset this))
+                                  tail
+                                  (loop [i i node root shift shift]
+                                    (if (zero? shift)
+                                      (.-arr node)
+                                      (if (regular? node)
+                                        (loop [node  (aget (.-arr node)
+                                                           (bit-and (bit-shift-right i shift) 0x1f))
+                                               shift (- shift 5)]
+                                          (if (zero? shift)
+                                            (.-arr node)
+                                            (recur (aget (.-arr node)
+                                                         (bit-and (bit-shift-right i shift) 0x1f))
+                                                   (- shift 5))))
+                                        (let [rngs (node-ranges node)
+                                              j    (loop [j (bit-and (bit-shift-right i shift) 0x1f)]
+                                                     (if (< i (aget rngs j))
+                                                       j
+                                                       (recur (inc j))))
+                                              i    (if (pos? j)
+                                                     (- i (aget rngs (dec j)))
+                                                     i)]
+                                          (recur i
+                                                 (aget (.-arr node) j)
+                                                 (- shift 5)))))))
+                                (vector-index-out-of-bounds i cnt))))

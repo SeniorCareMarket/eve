@@ -18,9 +18,9 @@
 
 (defn run-storm! [dir threads swaps burst]
   (let [domain (atom/persistent-atom-domain
-                 dir
-                 :capacities {0 8192 1 16384 2 32768 3 65536 4 131072 5 262144}
-                 :journal? false)
+                dir
+                :capacities {0 8192 1 16384 2 32768 3 65536 4 131072 5 262144}
+                :journal? false)
         atoms  (mapv (fn [k]
                        (let [a (atom/lookup-or-create-mmap-atom! domain (str "repro/vec-" k) nil)]
                          (when (nil? @a) (swap! a (fn [_] [])))
@@ -30,19 +30,19 @@
         failure (clojure.core/atom nil)
         workers (mapv (fn [k]
                         (Thread.
-                          (fn []
-                            (.await latch)
-                            (loop [i 0]
-                              (when (and (< i swaps) (nil? @failure))
-                                (try
-                                  (swap! (nth atoms k)
-                                         (fn [v]
-                                           (into v (map (fn [j] {:p k :i i :j j
-                                                                 :s (str "value-" k "-" i "-" j)}))
-                                                 (range burst))))
-                                  (catch Throwable th
-                                    (reset! failure th)))
-                                (recur (inc i)))))))
+                         (fn []
+                           (.await latch)
+                           (loop [i 0]
+                             (when (and (< i swaps) (nil? @failure))
+                               (try
+                                 (swap! (nth atoms k)
+                                        (fn [v]
+                                          (into v (map (fn [j] {:p k :i i :j j
+                                                                :s (str "value-" k "-" i "-" j)}))
+                                                (range burst))))
+                                 (catch Throwable th
+                                   (reset! failure th)))
+                               (recur (inc i)))))))
                       (range threads))]
     (doseq [w workers] (.start w))
     (.countDown latch)
@@ -51,9 +51,9 @@
 
 (defn -main [& [dir threads swaps burst]]
   (let [th (run-storm! (or dir "/home/john/j/alloc-growth-race-run/d1")
-                 (parse-long (or threads "8"))
-                 (parse-long (or swaps "2000"))
-                 (parse-long (or burst "8")))]
+                       (parse-long (or threads "8"))
+                       (parse-long (or swaps "2000"))
+                       (parse-long (or burst "8")))]
     (if th
       (do (println "REPRO-FAIL" (str th))
           (doseq [el (take 16 (.getStackTrace th))]

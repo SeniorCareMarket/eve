@@ -80,10 +80,10 @@
 
 (defn- print-result [benchmark params results]
   (let [r {:benchmark benchmark
-            :params    params
-            :results   results
-            :timestamp (str (java.time.Instant/now))
-            :platform  "jvm"}]
+           :params    params
+           :results   results
+           :timestamp (str (java.time.Instant/now))
+           :platform  "jvm"}]
     (println)
     (println (pr-str r))
     (flush)))
@@ -145,10 +145,10 @@
               [["flat"   (fn [i] (str "value-" i))]
                ["nested" (fn [i] {:a {:b {:c i}}})]
                ["rich"   (fn [i] {:id i
-                                   :deep {:a {:b {:c {:d (str "deep-" i)}}}}
-                                   :items (vec (range 40))
-                                   :tags #{:alpha :beta :gamma}
-                                   :payload (apply str (repeat 200 "X"))})]]]
+                                  :deep {:a {:b {:c {:d (str "deep-" i)}}}}
+                                  :items (vec (range 40))
+                                  :tags #{:alpha :beta :gamma}
+                                  :payload (apply str (repeat 200 "X"))})]]]
         (let [b     (tmp-base (str "b3-" label))
               [d a] (create-domain-atom! b {})
               t0    (System/nanoTime)]
@@ -227,7 +227,7 @@
                  {:id i
                   :label (str "item-" i)
                   :payload (apply str (repeat payload-chars
-                                        (str (char (+ 65 (mod i 26))))))
+                                              (str (char (+ 65 (mod i 26))))))
                   :tags #{:a :b :c :d}
                   :nested {:x i :y (* i 2)}}))
         (let [elapsed-ms (nanos->ms (- (System/nanoTime) t0))
@@ -439,7 +439,7 @@
           [d a] (build-atom! b 100)]
       (atom/close-atom-domain! d)
       (let [r (spawn-node-edn! bench-worker "bench-swap-latencies"
-                                b "500" "w")]
+                               b "500" "w")]
         (print-result "B14-swap-latency-node"
                       {:swaps 500 :pre-keys 100}
                       r)

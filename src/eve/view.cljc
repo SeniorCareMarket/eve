@@ -192,188 +192,188 @@
 ;; pinned version in place; everything else consumes the subtree (packed once).
 
 (eve/host-deftype ViewMap [raw cell fl]
-  IView
-  (-raw [_] raw)
-  (-flat [_] (consume raw fl cell))
-  chunk/IFlatHandle
-  (-rep [_] (in cell (fn [] (chunk/to-rep raw))))
-  (-chunk-bytes [_] (chunk/bytes-of (consume raw fl cell)))
-  chunk/IFlatDigest
-  (-digest [_] (chunk/digest-of (consume raw fl cell)))
-  clojure.lang.Counted
-  (count [_] (in cell (fn [] (count raw))))
-  clojure.lang.Seqable
-  (seq [_] (seq (consume raw fl cell)))
-  clojure.lang.IMeta
-  (meta [_] nil)
-  clojure.lang.IObj
-  (withMeta [_ m] (with-meta (consume raw fl cell) m))
-  clojure.lang.ILookup
-  (valAt [_ k] (wrap (in cell (fn [] (get raw k))) cell))
-  (valAt [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
-  clojure.lang.Associative
-  (containsKey [_ k] (in cell (fn [] (contains? raw k))))
-  (assoc [_ k v] (assoc (consume raw fl cell) k v))
-  clojure.lang.IPersistentMap
-  (without [_ k] (dissoc (consume raw fl cell) k))
-  (entryAt [_ k] (when (in cell (fn [] (contains? raw k)))
-                   (clojure.lang.MapEntry/create k (wrap (in cell (fn [] (get raw k))) cell))))
-  (assocEx [_ k v] (if (in cell (fn [] (contains? raw k)))
-                     (throw (ex-info "Key already present" {:key k}))
-                     (assoc (consume raw fl cell) k v)))
-  clojure.lang.IPersistentCollection
-  (cons [_ o] (conj (consume raw fl cell) o))
-  (empty [_] {})
-  (equiv [_ o] (= (consume raw fl cell) (flat o)))
-  clojure.lang.IReduce
-  (reduce [_ f] (reduce f (consume raw fl cell)))
-  clojure.lang.IReduceInit
-  (reduce [_ f init] (reduce f init (consume raw fl cell)))
-  clojure.lang.IKVReduce
-  (kvreduce [_ f init] (reduce-kv f init (consume raw fl cell)))
-  clojure.lang.IHashEq
-  (hasheq [_] (hash (consume raw fl cell)))
-  clojure.lang.IFn
-  (invoke [_ k] (wrap (in cell (fn [] (get raw k))) cell))
-  (invoke [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
-  clojure.lang.MapEquivalence
-  java.lang.Iterable
-  (iterator [_] (clojure.lang.SeqIterator. (seq (consume raw fl cell))))
-  java.util.Map
-  (size [_] (in cell (fn [] (count raw))))
-  (isEmpty [_] (zero? (in cell (fn [] (count raw)))))
-  (containsValue [_ v] (boolean (some #(= v %) (vals (consume raw fl cell)))))
-  (get [_ k] (wrap (in cell (fn [] (get raw k))) cell))
-  (put [_ _ _] (throw (UnsupportedOperationException.)))
-  (remove [_ _] (throw (UnsupportedOperationException.)))
-  (putAll [_ _] (throw (UnsupportedOperationException.)))
-  (clear [_] (throw (UnsupportedOperationException.)))
-  (keySet [_] (set (keys (consume raw fl cell))))
-  (values [_] (vals (consume raw fl cell)))
-  (entrySet [_] (set (seq (consume raw fl cell))))
-  java.lang.Object
-  (toString [_] (pr-str (consume raw fl cell)))
-  (equals [_ o] (= (consume raw fl cell) (flat o)))
-  (hashCode [_] (hash (consume raw fl cell)))
-  IPrintWithWriter
-  (-pr-writer [this w opts] (e/pr-writer (-flat this) w opts)))
+                  IView
+                  (-raw [_] raw)
+                  (-flat [_] (consume raw fl cell))
+                  chunk/IFlatHandle
+                  (-rep [_] (in cell (fn [] (chunk/to-rep raw))))
+                  (-chunk-bytes [_] (chunk/bytes-of (consume raw fl cell)))
+                  chunk/IFlatDigest
+                  (-digest [_] (chunk/digest-of (consume raw fl cell)))
+                  clojure.lang.Counted
+                  (count [_] (in cell (fn [] (count raw))))
+                  clojure.lang.Seqable
+                  (seq [_] (seq (consume raw fl cell)))
+                  clojure.lang.IMeta
+                  (meta [_] nil)
+                  clojure.lang.IObj
+                  (withMeta [_ m] (with-meta (consume raw fl cell) m))
+                  clojure.lang.ILookup
+                  (valAt [_ k] (wrap (in cell (fn [] (get raw k))) cell))
+                  (valAt [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
+                  clojure.lang.Associative
+                  (containsKey [_ k] (in cell (fn [] (contains? raw k))))
+                  (assoc [_ k v] (assoc (consume raw fl cell) k v))
+                  clojure.lang.IPersistentMap
+                  (without [_ k] (dissoc (consume raw fl cell) k))
+                  (entryAt [_ k] (when (in cell (fn [] (contains? raw k)))
+                                   (clojure.lang.MapEntry/create k (wrap (in cell (fn [] (get raw k))) cell))))
+                  (assocEx [_ k v] (if (in cell (fn [] (contains? raw k)))
+                                     (throw (ex-info "Key already present" {:key k}))
+                                     (assoc (consume raw fl cell) k v)))
+                  clojure.lang.IPersistentCollection
+                  (cons [_ o] (conj (consume raw fl cell) o))
+                  (empty [_] {})
+                  (equiv [_ o] (= (consume raw fl cell) (flat o)))
+                  clojure.lang.IReduce
+                  (reduce [_ f] (reduce f (consume raw fl cell)))
+                  clojure.lang.IReduceInit
+                  (reduce [_ f init] (reduce f init (consume raw fl cell)))
+                  clojure.lang.IKVReduce
+                  (kvreduce [_ f init] (reduce-kv f init (consume raw fl cell)))
+                  clojure.lang.IHashEq
+                  (hasheq [_] (hash (consume raw fl cell)))
+                  clojure.lang.IFn
+                  (invoke [_ k] (wrap (in cell (fn [] (get raw k))) cell))
+                  (invoke [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
+                  clojure.lang.MapEquivalence
+                  java.lang.Iterable
+                  (iterator [_] (clojure.lang.SeqIterator. (seq (consume raw fl cell))))
+                  java.util.Map
+                  (size [_] (in cell (fn [] (count raw))))
+                  (isEmpty [_] (zero? (in cell (fn [] (count raw)))))
+                  (containsValue [_ v] (boolean (some #(= v %) (vals (consume raw fl cell)))))
+                  (get [_ k] (wrap (in cell (fn [] (get raw k))) cell))
+                  (put [_ _ _] (throw (UnsupportedOperationException.)))
+                  (remove [_ _] (throw (UnsupportedOperationException.)))
+                  (putAll [_ _] (throw (UnsupportedOperationException.)))
+                  (clear [_] (throw (UnsupportedOperationException.)))
+                  (keySet [_] (set (keys (consume raw fl cell))))
+                  (values [_] (vals (consume raw fl cell)))
+                  (entrySet [_] (set (seq (consume raw fl cell))))
+                  java.lang.Object
+                  (toString [_] (pr-str (consume raw fl cell)))
+                  (equals [_ o] (= (consume raw fl cell) (flat o)))
+                  (hashCode [_] (hash (consume raw fl cell)))
+                  IPrintWithWriter
+                  (-pr-writer [this w opts] (e/pr-writer (-flat this) w opts)))
 
 (eve/host-deftype ViewVec [raw cell fl]
-  IView
-  (-raw [_] raw)
-  (-flat [_] (consume raw fl cell))
-  chunk/IFlatHandle
-  (-rep [_] (in cell (fn [] (chunk/to-rep raw))))
-  (-chunk-bytes [_] (chunk/bytes-of (consume raw fl cell)))
-  chunk/IFlatDigest
-  (-digest [_] (chunk/digest-of (consume raw fl cell)))
-  clojure.lang.Sequential
-  clojure.lang.Counted
-  (count [_] (in cell (fn [] (count raw))))
-  clojure.lang.Seqable
-  (seq [_] (seq (consume raw fl cell)))
-  clojure.lang.IMeta
-  (meta [_] nil)
-  clojure.lang.IObj
-  (withMeta [_ m] (with-meta (consume raw fl cell) m))
-  clojure.lang.ILookup
-  (valAt [_ k] (if (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw)))))
-                 (wrap (in cell (fn [] (nth raw k))) cell) nil))
-  (valAt [_ k nf] (if (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw)))))
-                    (wrap (in cell (fn [] (nth raw k))) cell) nf))
-  clojure.lang.Indexed
-  (nth [_ i] (wrap (in cell (fn [] (nth raw i))) cell))
-  (nth [_ i nf] (if (and (integer? i) (<= 0 i) (< i (in cell (fn [] (count raw)))))
-                  (wrap (in cell (fn [] (nth raw i))) cell) nf))
-  clojure.lang.IPersistentCollection
-  (cons [_ o] (conj (consume raw fl cell) o))
-  (empty [_] [])
-  (equiv [_ o] (= (consume raw fl cell) (flat o)))
-  clojure.lang.IHashEq
-  (hasheq [_] (hash (consume raw fl cell)))
-  clojure.lang.IPersistentStack
-  (peek [_] (peek (consume raw fl cell)))
-  (pop [_] (pop (consume raw fl cell)))
-  clojure.lang.IPersistentVector
-  (assocN [_ i v] (assoc (consume raw fl cell) i v))
-  (length [_] (in cell (fn [] (count raw))))
-  (entryAt [_ i] (when (and (integer? i) (<= 0 i) (< i (in cell (fn [] (count raw)))))
-                   (clojure.lang.MapEntry/create i (wrap (in cell (fn [] (nth raw i))) cell))))
-  clojure.lang.Reversible
-  (rseq [_] (rseq (consume raw fl cell)))
-  clojure.lang.Associative
-  (assoc [_ k v] (assoc (consume raw fl cell) k v))
-  (containsKey [_ k] (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw))))))
-  clojure.lang.IFn
-  (invoke [_ i] (wrap (in cell (fn [] (nth raw i))) cell))
-  clojure.lang.IReduceInit
-  (reduce [_ f init] (reduce f init (consume raw fl cell)))
-  clojure.lang.IReduce
-  (reduce [_ f] (reduce f (consume raw fl cell)))
-  java.lang.Iterable
-  (iterator [_] (clojure.lang.SeqIterator. (seq (consume raw fl cell))))
-  java.lang.Object
-  (toString [_] (pr-str (consume raw fl cell)))
-  (equals [_ o] (= (consume raw fl cell) (flat o)))
-  (hashCode [_] (hash (consume raw fl cell)))
-  IPrintWithWriter
-  (-pr-writer [this w opts] (e/pr-writer (-flat this) w opts)))
+                  IView
+                  (-raw [_] raw)
+                  (-flat [_] (consume raw fl cell))
+                  chunk/IFlatHandle
+                  (-rep [_] (in cell (fn [] (chunk/to-rep raw))))
+                  (-chunk-bytes [_] (chunk/bytes-of (consume raw fl cell)))
+                  chunk/IFlatDigest
+                  (-digest [_] (chunk/digest-of (consume raw fl cell)))
+                  clojure.lang.Sequential
+                  clojure.lang.Counted
+                  (count [_] (in cell (fn [] (count raw))))
+                  clojure.lang.Seqable
+                  (seq [_] (seq (consume raw fl cell)))
+                  clojure.lang.IMeta
+                  (meta [_] nil)
+                  clojure.lang.IObj
+                  (withMeta [_ m] (with-meta (consume raw fl cell) m))
+                  clojure.lang.ILookup
+                  (valAt [_ k] (if (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw)))))
+                                 (wrap (in cell (fn [] (nth raw k))) cell) nil))
+                  (valAt [_ k nf] (if (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw)))))
+                                    (wrap (in cell (fn [] (nth raw k))) cell) nf))
+                  clojure.lang.Indexed
+                  (nth [_ i] (wrap (in cell (fn [] (nth raw i))) cell))
+                  (nth [_ i nf] (if (and (integer? i) (<= 0 i) (< i (in cell (fn [] (count raw)))))
+                                  (wrap (in cell (fn [] (nth raw i))) cell) nf))
+                  clojure.lang.IPersistentCollection
+                  (cons [_ o] (conj (consume raw fl cell) o))
+                  (empty [_] [])
+                  (equiv [_ o] (= (consume raw fl cell) (flat o)))
+                  clojure.lang.IHashEq
+                  (hasheq [_] (hash (consume raw fl cell)))
+                  clojure.lang.IPersistentStack
+                  (peek [_] (peek (consume raw fl cell)))
+                  (pop [_] (pop (consume raw fl cell)))
+                  clojure.lang.IPersistentVector
+                  (assocN [_ i v] (assoc (consume raw fl cell) i v))
+                  (length [_] (in cell (fn [] (count raw))))
+                  (entryAt [_ i] (when (and (integer? i) (<= 0 i) (< i (in cell (fn [] (count raw)))))
+                                   (clojure.lang.MapEntry/create i (wrap (in cell (fn [] (nth raw i))) cell))))
+                  clojure.lang.Reversible
+                  (rseq [_] (rseq (consume raw fl cell)))
+                  clojure.lang.Associative
+                  (assoc [_ k v] (assoc (consume raw fl cell) k v))
+                  (containsKey [_ k] (and (integer? k) (<= 0 k) (< k (in cell (fn [] (count raw))))))
+                  clojure.lang.IFn
+                  (invoke [_ i] (wrap (in cell (fn [] (nth raw i))) cell))
+                  clojure.lang.IReduceInit
+                  (reduce [_ f init] (reduce f init (consume raw fl cell)))
+                  clojure.lang.IReduce
+                  (reduce [_ f] (reduce f (consume raw fl cell)))
+                  java.lang.Iterable
+                  (iterator [_] (clojure.lang.SeqIterator. (seq (consume raw fl cell))))
+                  java.lang.Object
+                  (toString [_] (pr-str (consume raw fl cell)))
+                  (equals [_ o] (= (consume raw fl cell) (flat o)))
+                  (hashCode [_] (hash (consume raw fl cell)))
+                  IPrintWithWriter
+                  (-pr-writer [this w opts] (e/pr-writer (-flat this) w opts)))
 
 (eve/host-deftype ViewSet [raw cell fl]
-  IView
-  (-raw [_] raw)
-  (-flat [_] (consume raw fl cell))
-  chunk/IFlatHandle
-  (-rep [_] (in cell (fn [] (chunk/to-rep raw))))
-  (-chunk-bytes [_] (chunk/bytes-of (consume raw fl cell)))
-  chunk/IFlatDigest
-  (-digest [_] (chunk/digest-of (consume raw fl cell)))
-  clojure.lang.Counted
-  (count [_] (in cell (fn [] (count raw))))
-  clojure.lang.Seqable
-  (seq [_] (seq (consume raw fl cell)))
-  clojure.lang.IMeta
-  (meta [_] nil)
-  clojure.lang.IObj
-  (withMeta [_ m] (with-meta (consume raw fl cell) m))
-  clojure.lang.ILookup
-  (valAt [_ k] (when (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell)))
-  (valAt [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
-  clojure.lang.IPersistentSet
-  (disjoin [_ k] (disj (consume raw fl cell) k))
-  (contains [_ k] (in cell (fn [] (contains? raw k))))
-  (get [_ k] (when (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell)))
-  clojure.lang.IPersistentCollection
-  (cons [_ o] (conj (consume raw fl cell) o))
-  (empty [_] #{})
-  (equiv [_ o] (= (consume raw fl cell) (flat o)))
-  clojure.lang.IReduce
-  (reduce [_ f] (reduce f (consume raw fl cell)))
-  clojure.lang.IReduceInit
-  (reduce [_ f init] (reduce f init (consume raw fl cell)))
-  clojure.lang.IHashEq
-  (hasheq [_] (hash (consume raw fl cell)))
-  clojure.lang.IFn
-  (invoke [_ k] (when (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell)))
-  (invoke [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
-  java.lang.Iterable
-  (iterator [_] (clojure.lang.SeqIterator. (seq (consume raw fl cell))))
-  java.util.Set
-  (size [_] (in cell (fn [] (count raw))))
-  (isEmpty [_] (zero? (in cell (fn [] (count raw)))))
-  (containsAll [_ c] (in cell (fn [] (every? (fn [x] (contains? raw x)) c))))
-  (add [_ _] (throw (UnsupportedOperationException.)))
-  (remove [_ _] (throw (UnsupportedOperationException.)))
-  (addAll [_ _] (throw (UnsupportedOperationException.)))
-  (retainAll [_ _] (throw (UnsupportedOperationException.)))
-  (removeAll [_ _] (throw (UnsupportedOperationException.)))
-  (clear [_] (throw (UnsupportedOperationException.)))
-  java.lang.Object
-  (toString [_] (pr-str (consume raw fl cell)))
-  (equals [_ o] (= (consume raw fl cell) (flat o)))
-  (hashCode [_] (hash (consume raw fl cell)))
-  IPrintWithWriter
-  (-pr-writer [this w opts] (e/pr-writer (-flat this) w opts)))
+                  IView
+                  (-raw [_] raw)
+                  (-flat [_] (consume raw fl cell))
+                  chunk/IFlatHandle
+                  (-rep [_] (in cell (fn [] (chunk/to-rep raw))))
+                  (-chunk-bytes [_] (chunk/bytes-of (consume raw fl cell)))
+                  chunk/IFlatDigest
+                  (-digest [_] (chunk/digest-of (consume raw fl cell)))
+                  clojure.lang.Counted
+                  (count [_] (in cell (fn [] (count raw))))
+                  clojure.lang.Seqable
+                  (seq [_] (seq (consume raw fl cell)))
+                  clojure.lang.IMeta
+                  (meta [_] nil)
+                  clojure.lang.IObj
+                  (withMeta [_ m] (with-meta (consume raw fl cell) m))
+                  clojure.lang.ILookup
+                  (valAt [_ k] (when (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell)))
+                  (valAt [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
+                  clojure.lang.IPersistentSet
+                  (disjoin [_ k] (disj (consume raw fl cell) k))
+                  (contains [_ k] (in cell (fn [] (contains? raw k))))
+                  (get [_ k] (when (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell)))
+                  clojure.lang.IPersistentCollection
+                  (cons [_ o] (conj (consume raw fl cell) o))
+                  (empty [_] #{})
+                  (equiv [_ o] (= (consume raw fl cell) (flat o)))
+                  clojure.lang.IReduce
+                  (reduce [_ f] (reduce f (consume raw fl cell)))
+                  clojure.lang.IReduceInit
+                  (reduce [_ f init] (reduce f init (consume raw fl cell)))
+                  clojure.lang.IHashEq
+                  (hasheq [_] (hash (consume raw fl cell)))
+                  clojure.lang.IFn
+                  (invoke [_ k] (when (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell)))
+                  (invoke [_ k nf] (if (in cell (fn [] (contains? raw k))) (wrap (in cell (fn [] (get raw k))) cell) nf))
+                  java.lang.Iterable
+                  (iterator [_] (clojure.lang.SeqIterator. (seq (consume raw fl cell))))
+                  java.util.Set
+                  (size [_] (in cell (fn [] (count raw))))
+                  (isEmpty [_] (zero? (in cell (fn [] (count raw)))))
+                  (containsAll [_ c] (in cell (fn [] (every? (fn [x] (contains? raw x)) c))))
+                  (add [_ _] (throw (UnsupportedOperationException.)))
+                  (remove [_ _] (throw (UnsupportedOperationException.)))
+                  (addAll [_ _] (throw (UnsupportedOperationException.)))
+                  (retainAll [_ _] (throw (UnsupportedOperationException.)))
+                  (removeAll [_ _] (throw (UnsupportedOperationException.)))
+                  (clear [_] (throw (UnsupportedOperationException.)))
+                  java.lang.Object
+                  (toString [_] (pr-str (consume raw fl cell)))
+                  (equals [_ o] (= (consume raw fl cell) (flat o)))
+                  (hashCode [_] (hash (consume raw fl cell)))
+                  IPrintWithWriter
+                  (-pr-writer [this w opts] (e/pr-writer (-flat this) w opts)))
 
 ;; ---------------------------------------------------------------------------
 ;; wrap: a value read under cell's pin, as what a read answers

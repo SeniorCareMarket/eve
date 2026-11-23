@@ -48,122 +48,122 @@
 ;; ---------------------------------------------------------------------------
 
 (pm/host-deftype TransientShape [^:volatile-mutable cnt ^:volatile-mutable items]
-  clojure.lang.ITransientCollection
-  (conj [this x] (set! items (conj items x)) (set! cnt (inc cnt)) this)
-  (persistent [_] items)
-  clojure.lang.Indexed
-  (nth [_ i] (nth items i))
-  (nth [_ i nf] (if (and (<= 0 i) (< i cnt)) (nth items i) nf))
-  clojure.lang.Counted
-  (count [_] cnt))
+                 clojure.lang.ITransientCollection
+                 (conj [this x] (set! items (conj items x)) (set! cnt (inc cnt)) this)
+                 (persistent [_] items)
+                 clojure.lang.Indexed
+                 (nth [_ i] (nth items i))
+                 (nth [_ i nf] (if (and (<= 0 i) (< i cnt)) (nth items i) nf))
+                 clojure.lang.Counted
+                 (count [_] cnt))
 
 (pm/host-deftype PrintedSeq [items]
-  clojure.lang.Counted
-  (count [_] (count items))
-  clojure.lang.IPersistentCollection
-  (equiv [_ other] (and (instance? PrintedSeq other)
-                        (= items (.-items ^PrintedSeq other))))
-  clojure.lang.ISeq
-  (first [_] (first items))
-  (next [_] (let [r (next items)] (when r (PrintedSeq. r))))
-  (more [_] (or (next items) ()))
-  IPrintWithWriter
-  (-pr-writer [this w _opts] (.write w (str "#ext/seq " (pr-str (.-items this)))))
-  java.lang.Object
-  (toString [_] (str "#ext/seq " (pr-str items)))
-  (hashCode [_] (hash items)))
+                 clojure.lang.Counted
+                 (count [_] (count items))
+                 clojure.lang.IPersistentCollection
+                 (equiv [_ other] (and (instance? PrintedSeq other)
+                                       (= items (.-items ^PrintedSeq other))))
+                 clojure.lang.ISeq
+                 (first [_] (first items))
+                 (next [_] (let [r (next items)] (when r (PrintedSeq. r))))
+                 (more [_] (or (next items) ()))
+                 IPrintWithWriter
+                 (-pr-writer [this w _opts] (.write w (str "#ext/seq " (pr-str (.-items this)))))
+                 java.lang.Object
+                 (toString [_] (str "#ext/seq " (pr-str items)))
+                 (hashCode [_] (hash items)))
 
 (defprotocol IAtomShape
   (-slot [x]))
 
 (pm/host-deftype AtomShape [^:volatile-mutable state slot]
-  {:print (fn [x w _opts] (.write w (str "#ext/atom {:slot " (.-slot ^AtomShape x) "}")))}
-  clojure.lang.IDeref
-  (deref [_] state)
-  IAtomShape
-  (-slot [_] slot))
+                 {:print (fn [x w _opts] (.write w (str "#ext/atom {:slot " (.-slot ^AtomShape x) "}")))}
+                 clojure.lang.IDeref
+                 (deref [_] state)
+                 IAtomShape
+                 (-slot [_] slot))
 
 (defprotocol IObjParts
   (-parts [x]))
 
 (pm/host-deftype ObjShape [m]
-  IObjParts
-  (-parts [_] m)
-  clojure.lang.ILookup
-  (valAt [_ k] (get m k))
-  (valAt [_ k nf] (get m k nf))
-  IPrintWithWriter
-  (-pr-writer [this w _opts] (.write w (str "#ext/obj " (pr-str (.-m this)))))
-  java.lang.Object
-  (toString [_] (str "#ext/obj " (pr-str m)))
-  (equals [_ other] (and (instance? ObjShape other)
-                          (= m (.-m ^ObjShape other))))
-  (hashCode [_] (hash m)))
+                 IObjParts
+                 (-parts [_] m)
+                 clojure.lang.ILookup
+                 (valAt [_ k] (get m k))
+                 (valAt [_ k nf] (get m k nf))
+                 IPrintWithWriter
+                 (-pr-writer [this w _opts] (.write w (str "#ext/obj " (pr-str (.-m this)))))
+                 java.lang.Object
+                 (toString [_] (str "#ext/obj " (pr-str m)))
+                 (equals [_ other] (and (instance? ObjShape other)
+                                        (= m (.-m ^ObjShape other))))
+                 (hashCode [_] (hash m)))
 
 (pm/host-deftype HeapArrayShape [elems]
-  clojure.lang.Counted
-  (count [_] (count elems))
-  clojure.lang.Indexed
-  (nth [_ i] (nth elems i))
-  (nth [_ i nf] (if (and (<= 0 i) (< i (count elems))) (nth elems i) nf))
-  clojure.lang.IPersistentCollection
-  (cons [_ x] (HeapArrayShape. (conj elems x)))
-  (empty [_] (HeapArrayShape. []))
-  (equiv [_ other] (and (instance? HeapArrayShape other)
-                        (= elems (.-elems ^HeapArrayShape other))))
-  IPrintWithWriter
-  (-pr-writer [this w _opts] (.write w (str "#ext/array " (pr-str (.-elems this)))))
-  java.lang.Object
-  (toString [_] (str "#ext/array " (pr-str elems)))
-  (equals [_ other] (and (instance? HeapArrayShape other)
-                          (= elems (.-elems ^HeapArrayShape other))))
-  (hashCode [_] (hash elems)))
+                 clojure.lang.Counted
+                 (count [_] (count elems))
+                 clojure.lang.Indexed
+                 (nth [_ i] (nth elems i))
+                 (nth [_ i nf] (if (and (<= 0 i) (< i (count elems))) (nth elems i) nf))
+                 clojure.lang.IPersistentCollection
+                 (cons [_ x] (HeapArrayShape. (conj elems x)))
+                 (empty [_] (HeapArrayShape. []))
+                 (equiv [_ other] (and (instance? HeapArrayShape other)
+                                       (= elems (.-elems ^HeapArrayShape other))))
+                 IPrintWithWriter
+                 (-pr-writer [this w _opts] (.write w (str "#ext/array " (pr-str (.-elems this)))))
+                 java.lang.Object
+                 (toString [_] (str "#ext/array " (pr-str elems)))
+                 (equals [_ other] (and (instance? HeapArrayShape other)
+                                        (= elems (.-elems ^HeapArrayShape other))))
+                 (hashCode [_] (hash elems)))
 
 (pm/host-deftype ChunkedSeqShape [node off m ^:volatile-mutable hash__]
-  clojure.lang.Seqable
-  (seq [this] this)
-  clojure.lang.IPersistentCollection
-  (cons [_ x] (cons x (seq (ChunkedSeqShape. node off m hash__))))
-  (empty [_] ())
-  (equiv [_ other] (and (instance? ChunkedSeqShape other)
-                        (= (subvec node off)
-                           (subvec (.-node ^ChunkedSeqShape other)
-                                   (.-off ^ChunkedSeqShape other)))))
-  clojure.lang.ISeq
-  (first [_] (nth node off))
-  (next [_] (when (< (inc off) (count node))
-              (ChunkedSeqShape. node (inc off) m hash__)))
-  (more [this] (or (next this) ()))
-  clojure.lang.IChunkedSeq
-  (chunkedFirst [_] (clojure.lang.ArrayChunk. (object-array (subvec node off))))
-  (chunkedNext [this] (seq (rest this)))
-  (chunkedMore [this] (or (seq (rest this)) ()))
-  clojure.lang.Counted
-  (count [_] (- (count node) off))
-  clojure.lang.IMeta
-  (meta [_] m)
-  clojure.lang.IObj
-  (withMeta [_ m2] (ChunkedSeqShape. node off m2 hash__))
-  IPrintWithWriter
-  (-pr-writer [this w _opts] (.write w (str "(" (clojure.string/join " " (seq this)) ")")))
-  java.lang.Object
-  (toString [this] (pr-str this))
-  (equals [_ other] (and (instance? ChunkedSeqShape other)
-                          (= (subvec node off)
-                             (subvec (.-node ^ChunkedSeqShape other)
-                                     (.-off ^ChunkedSeqShape other)))))
-  (hashCode [_] (hash (seq (ChunkedSeqShape. node off m hash__)))))
+                 clojure.lang.Seqable
+                 (seq [this] this)
+                 clojure.lang.IPersistentCollection
+                 (cons [_ x] (cons x (seq (ChunkedSeqShape. node off m hash__))))
+                 (empty [_] ())
+                 (equiv [_ other] (and (instance? ChunkedSeqShape other)
+                                       (= (subvec node off)
+                                          (subvec (.-node ^ChunkedSeqShape other)
+                                                  (.-off ^ChunkedSeqShape other)))))
+                 clojure.lang.ISeq
+                 (first [_] (nth node off))
+                 (next [_] (when (< (inc off) (count node))
+                             (ChunkedSeqShape. node (inc off) m hash__)))
+                 (more [this] (or (next this) ()))
+                 clojure.lang.IChunkedSeq
+                 (chunkedFirst [_] (clojure.lang.ArrayChunk. (object-array (subvec node off))))
+                 (chunkedNext [this] (seq (rest this)))
+                 (chunkedMore [this] (or (seq (rest this)) ()))
+                 clojure.lang.Counted
+                 (count [_] (- (count node) off))
+                 clojure.lang.IMeta
+                 (meta [_] m)
+                 clojure.lang.IObj
+                 (withMeta [_ m2] (ChunkedSeqShape. node off m2 hash__))
+                 IPrintWithWriter
+                 (-pr-writer [this w _opts] (.write w (str "(" (clojure.string/join " " (seq this)) ")")))
+                 java.lang.Object
+                 (toString [this] (pr-str this))
+                 (equals [_ other] (and (instance? ChunkedSeqShape other)
+                                        (= (subvec node off)
+                                           (subvec (.-node ^ChunkedSeqShape other)
+                                                   (.-off ^ChunkedSeqShape other)))))
+                 (hashCode [_] (hash (seq (ChunkedSeqShape. node off m hash__)))))
 
 (defprotocol IReset
   (-reset! [x v]))
 
 (pm/host-deftype RespelledShape [^:volatile-mutable hash__ items]
-  clojure.lang.Counted
-  (count [_] (count items))
-  clojure.lang.IHashEq
-  (hasheq [_] hash__)
-  IReset
-  (-reset! [this v] (set! hash__ v) this))
+                 clojure.lang.Counted
+                 (count [_] (count items))
+                 clojure.lang.IHashEq
+                 (hasheq [_] hash__)
+                 IReset
+                 (-reset! [this v] (set! hash__ v) this))
 
 ;; ---------------------------------------------------------------------------
 ;; tests

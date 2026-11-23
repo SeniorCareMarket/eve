@@ -491,30 +491,30 @@
     :primitive
     (case type-hint
       :int8    (list 'let ['b__jvm (list 'eve.slab-io/read-u8 'sio__ offset-sym field-offset)]
-                 (list 'if (list '> 'b__jvm 127) (list '- 'b__jvm 256) 'b__jvm))
+                     (list 'if (list '> 'b__jvm 127) (list '- 'b__jvm 256) 'b__jvm))
       :uint8   (list 'eve.slab-io/read-u8 'sio__ offset-sym field-offset)
       :int16   (list 'let ['v__jvm (list 'eve.slab-io/read-u16 'sio__ offset-sym field-offset)]
-                 (list 'if (list '> 'v__jvm 32767) (list '- 'v__jvm 65536) 'v__jvm))
+                     (list 'if (list '> 'v__jvm 32767) (list '- 'v__jvm 65536) 'v__jvm))
       :uint16  (list 'eve.slab-io/read-u16 'sio__ offset-sym field-offset)
       ;; an immutable int32 field is written once, before its instance is published: the hot read
       ;; path's plain node read (jvm-heap-grade step 3). A mutable one keeps the atomic read.
       :int32   (list (if (#{:mutable :volatile-mutable} mutability)
                        'eve.slab-io/read-i32
                        'eve.deftype-proto.alloc/node-i32)
-                 'sio__ offset-sym field-offset)
+                     'sio__ offset-sym field-offset)
       :uint32  (list 'bit-and
-                 (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
-                 0xFFFFFFFF)
+                     (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
+                     0xFFFFFFFF)
       :float32 (list 'Float/intBitsToFloat
-                 (list 'int (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset)))
+                     (list 'int (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset)))
       :float64 (list 'let ['lo__jvm (list 'bit-and
-                                      (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
-                                      0xFFFFFFFF)
+                                          (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
+                                          0xFFFFFFFF)
                            'hi__jvm (list 'bit-and
-                                      (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym (+ field-offset 4)))
-                                      0xFFFFFFFF)]
-                 (list 'Double/longBitsToDouble
-                       (list 'bit-or (list 'bit-shift-left 'hi__jvm 32) 'lo__jvm)))
+                                          (list 'long (list 'eve.slab-io/read-i32 'sio__ offset-sym (+ field-offset 4)))
+                                          0xFFFFFFFF)]
+                     (list 'Double/longBitsToDouble
+                           (list 'bit-or (list 'bit-shift-left 'hi__jvm 32) 'lo__jvm)))
       ;; an unrecognized primitive hint reads as stored int32
       (list 'eve.slab-io/read-i32 'sio__ offset-sym field-offset))
     ;; :eve-type, :serialized — stored as int32
@@ -554,11 +554,11 @@
             (list 'Float/floatToRawIntBits (list 'float val-expr)))
       :float64
       (list 'let ['bits__jvm (list 'Double/doubleToRawLongBits (list 'double val-expr))]
-        (list 'do
-          (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
-                (list 'unchecked-int (list 'bit-and 'bits__jvm 0xFFFFFFFF)))
-          (list 'eve.slab-io/write-i32! 'sio__ offset-sym (+ field-offset 4)
-                (list 'unchecked-int (list 'unsigned-bit-shift-right 'bits__jvm 32)))))
+            (list 'do
+                  (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
+                        (list 'unchecked-int (list 'bit-and 'bits__jvm 0xFFFFFFFF)))
+                  (list 'eve.slab-io/write-i32! 'sio__ offset-sym (+ field-offset 4)
+                        (list 'unchecked-int (list 'unsigned-bit-shift-right 'bits__jvm 32)))))
       ;; an unrecognized primitive hint writes as stored int32
       (list 'eve.slab-io/write-i32! 'sio__ offset-sym field-offset
             (list 'int val-expr)))
@@ -643,16 +643,16 @@
 
     (seq? form)
     (with-meta (apply list (map #(flat-rewrite-set!-forms % field-map) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(flat-rewrite-set!-forms % field-map) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(flat-rewrite-set!-forms k field-map)
                                 (flat-rewrite-set!-forms v field-map)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 (defn flat-method-body

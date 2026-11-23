@@ -248,7 +248,7 @@
           (let [v (read-node-value sio__ off)
                 result (f acc v)]
             (if (reduced? result) @result
-              (recur (read-node-next sio__ off) (inc i) result)))))))
+                (recur (read-node-next sio__ off) (inc i) result)))))))
 
   d/IDirectSerialize
   (d/-direct-serialize [this] offset__)
@@ -266,7 +266,6 @@
 
   d/IEveSio
   (d/-eve-sio [_] sio__)
-
 
   clojure.lang.IPersistentList
 
@@ -294,56 +293,55 @@
 ;;=============================================================================
 
 (do
-(defn- free-list-chain!
-  "Free all nodes in a list linked-list chain via ISlabIO."
-  [sio head-off]
-  (loop [node-off head-off]
-    (when (not= node-off NIL_OFFSET)
-      (let [next-off (read-node-next sio node-off)]
-        (slab/free! sio node-off)
-        (recur next-off)))))
+  (defn- free-list-chain!
+    "Free all nodes in a list linked-list chain via ISlabIO."
+    [sio head-off]
+    (loop [node-off head-off]
+      (when (not= node-off NIL_OFFSET)
+        (let [next-off (read-node-next sio node-off)]
+          (slab/free! sio node-off)
+          (recur next-off)))))
 
-(defn dispose!
-  "Dispose an EveList, freeing all nodes and header.
+  (defn dispose!
+    "Dispose an EveList, freeing all nodes and header.
    Call this when the list is no longer needed to reclaim slab memory.
 
    WARNING: After disposal, the list must not be used."
-  [eve-list]
-  (when (instance? EveList eve-list)
-    (let [sio (field ^EveList eve-list sio__)
-          hdr (field ^EveList eve-list offset__)
-          hd  (when hdr (slab/read-i32 sio hdr LIST_HEAD_OFFSET))]
-      (when (and hd (not= hd NIL_OFFSET))
-        (free-list-chain! sio hd))
-      (when (and hdr (not= hdr NIL_OFFSET))
-        (slab/free! sio hdr)))))
+    [eve-list]
+    (when (instance? EveList eve-list)
+      (let [sio (field ^EveList eve-list sio__)
+            hdr (field ^EveList eve-list offset__)
+            hd  (when hdr (slab/read-i32 sio hdr LIST_HEAD_OFFSET))]
+        (when (and hd (not= hd NIL_OFFSET))
+          (free-list-chain! sio hd))
+        (when (and hdr (not= hdr NIL_OFFSET))
+          (slab/free! sio hdr)))))
 
-(defn retire-replaced-chain!
-  "After an atom swap that replaced a list, retire old nodes not shared
+  (defn retire-replaced-chain!
+    "After an atom swap that replaced a list, retire old nodes not shared
    by the new list."
-  ([sio old-head new-head]
-   (retire-replaced-chain! sio old-head new-head :free))
-  ([sio old-head new-head mode]
-   (when (and (not= old-head NIL_OFFSET) (not= old-head new-head))
-     (loop [node-off old-head]
-       (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))
-         (let [next-off (read-node-next sio node-off)]
-           (slab/free! sio node-off)
-           (recur next-off)))))))
+    ([sio old-head new-head]
+     (retire-replaced-chain! sio old-head new-head :free))
+    ([sio old-head new-head mode]
+     (when (and (not= old-head NIL_OFFSET) (not= old-head new-head))
+       (loop [node-off old-head]
+         (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))
+           (let [next-off (read-node-next sio node-off)]
+             (slab/free! sio node-off)
+             (recur next-off)))))))
 
 ;; ISabRetirable
-(extend-type EveList
-  d/ISabRetirable
-  (-sab-retire-diff! [this new-value _slab-env mode]
-    (let [sio      (field this sio__)
-          hdr      (field this offset__)
-          old-head (slab/read-i32 sio hdr LIST_HEAD_OFFSET)
-          new-head (when (instance? EveList new-value)
-                     (slab/read-i32 sio (d/-root-header-off new-value) LIST_HEAD_OFFSET))]
-      (if new-head
-        (retire-replaced-chain! sio old-head new-head mode)
-        (dispose! this)))))
-)
+  (extend-type EveList
+    d/ISabRetirable
+    (-sab-retire-diff! [this new-value _slab-env mode]
+      (let [sio      (field this sio__)
+            hdr      (field this offset__)
+            old-head (slab/read-i32 sio hdr LIST_HEAD_OFFSET)
+            new-head (when (instance? EveList new-value)
+                       (slab/read-i32 sio (d/-root-header-off new-value) LIST_HEAD_OFFSET))]
+        (if new-head
+          (retire-replaced-chain! sio old-head new-head mode)
+          (dispose! this))))))
 
 ;; The retire set of one list replaced by another — portable (never reached
 ;; on bb, where eve-list? is false).
@@ -381,34 +379,33 @@
 ;;=============================================================================
 
 (do
-(defn- make-list
-  "Internal constructor: allocate header, create EveList."
-  [sio cnt head-off]
-  (let [hdr (write-list-header! sio cnt head-off)]
-    (EveList. sio hdr)))
+  (defn- make-list
+    "Internal constructor: allocate header, create EveList."
+    [sio cnt head-off]
+    (let [hdr (write-list-header! sio cnt head-off)]
+      (EveList. sio hdr)))
 
-(defn list-from-header
-  "Reconstruct an EveList from an existing header offset."
-  [sio header-off]
-  (EveList. sio header-off))
+  (defn list-from-header
+    "Reconstruct an EveList from an existing header offset."
+    [sio header-off]
+    (EveList. sio header-off))
 
-(defn empty-list
-  "Create an empty Eve list.
+  (defn empty-list
+    "Create an empty Eve list.
    0-arity: uses platform default sio (fresh heap domain on JVM).
    1-arity: explicit sio."
-  ([] (empty-list (default-sio)))
-  ([sio] (make-list sio 0 NIL_OFFSET)))
+    ([] (empty-list (default-sio)))
+    ([sio] (make-list sio 0 NIL_OFFSET)))
 
-(defn eve-list
-  "Create an Eve list from a collection (reversed, as cons-list)."
-  ([coll] (eve-list (default-sio) coll))
-  ([sio coll]
-   (reduce ecore/conj (empty-list sio) (reverse coll))))
+  (defn eve-list
+    "Create an Eve list from a collection (reversed, as cons-list)."
+    ([coll] (eve-list (default-sio) coll))
+    ([sio coll]
+     (reduce ecore/conj (empty-list sio) (reverse coll))))
 
 ;; Backward-compat aliases
-(def empty-sab-list empty-list)
-(def sab-list eve-list)
-)
+  (def empty-sab-list empty-list)
+  (def sab-list eve-list))
 
 (defn eve-list?
   "True for a slab-backed EveList. On babashka a list read from eve memory is
@@ -452,32 +449,32 @@
                (conj! acc (read-node-value sio off)))))))
 
 (eve/register-eve-type!
-    {:fast-tag     ser/FAST_TAG_SAB_LIST
-     :type-id      EveList-type-id
-     :from-header  list-from-header
-     :host-value   list->host-value
-     :dispose      dispose!
-     :builder-pred seq?
-     :builder-ctor eve-list
-     :coll-writer  {:tag :list :fn -write-list-coll!}
-     :type         EveList
-     :print        {:open "(" :close ")"}})
+ {:fast-tag     ser/FAST_TAG_SAB_LIST
+  :type-id      EveList-type-id
+  :from-header  list-from-header
+  :host-value   list->host-value
+  :dispose      dispose!
+  :builder-pred seq?
+  :builder-ctor eve-list
+  :coll-writer  {:tag :list :fn -write-list-coll!}
+  :type         EveList
+  :print        {:open "(" :close ")"}})
 
 ;; Backward-compat aliases
 (do
-     (defn jvm-write-list!
-       "Serialize a Clojure list/seq to slab. Returns header offset.
+  (defn jvm-write-list!
+    "Serialize a Clojure list/seq to slab. Returns header offset.
         Backward-compat alias for the registered :list writer."
-       [sio serialize-val coll]
-       (codec/write-collection! :list sio coll))
+    [sio serialize-val coll]
+    (codec/write-collection! :list sio coll))
 
-     (defn jvm-sab-list-from-offset
-       "Reconstruct an EveList from a header offset.
+  (defn jvm-sab-list-from-offset
+    "Reconstruct an EveList from a header offset.
         Backward-compat alias. coll-factory arg is ignored (registry-based)."
-       ([sio header-off] (list-from-header sio header-off))
-       ([sio header-off _coll-factory] (list-from-header sio header-off)))
+    ([sio header-off] (list-from-header sio header-off))
+    ([sio header-off _coll-factory] (list-from-header sio header-off)))
 
-     (def SabList EveList))
+  (def SabList EveList))
 
 ;; No-op pool stub — pool system removed, kept for backward compat
 (defn reset-pools! [] nil)

@@ -225,97 +225,97 @@
   (let [kind (long kind) p1 (long p1) p2 (long p2) p3 (long p3)
         ci (long ci) old (long old)]
     (case (int kind)
-    0 (let [t (u8 a 0)]
-        (case (int t)
-          0xED (let [r (i32 a 8)] {:size 12 :ptrs (if (== r -1) [] [[8 1 0 0 0 r]])})
-          0xEE (let [r (i32 a 8)] {:size 12 :ptrs (if (== r -1) [] [[8 2 0 0 0 r]])})
-          0x12 (let [cnt (i32 a 4) sh (i32 a 8) root (i32 a 12)
-                     tl-off (i32 a 16) tl (i32 a 20)
-                     toff (if (< cnt 32) 0 (bit-shift-left (bit-shift-right (dec cnt) 5) 5))]
-                 {:size 24
-                  :ptrs (cond-> []
-                          (and (pos? toff) (not (== root -1))) (conj [12 5 sh 0 toff root])
-                          (not (== tl-off -1)) (conj [16 6 tl 0 0 tl-off]))})
-          0x13 (let [h (i32 a 8)] {:size 12 :ptrs (if (== h -1) [] [[8 4 0 0 0 h]])})
-          0x01 (do (when (and (>= (alength a) 3)
-                              (== (aget a 0) ref-magic-0)
-                              (== (aget a 1) ref-magic-1)
-                              (== (u8 a 2) 0x15))
-                     (refuse! :process-local-reference
-                              "transfer: the value holds a process-local reference (tag 0x15 — a fn, a regex or a host object); it names a handle in this process's reference table and cannot leave the process"
-                              {:block old :at 0}))
-                   {:size (fallback-size sio ci old t) :ptrs []})
-          0x1D (let [n (i32 a 4) es (long (nth esize-by-subtype (u8 a 1)))]
-                 {:size (+ 8 (* n es)) :ptrs []})
-          0x1E {:size (fallback-size sio ci old t) :ptrs []}
-          0x1F (let [n (i32 a 4) pb (align4 (+ 8 (* 2 n)))]
-                 {:size (+ pb (* 4 n))
-                  :ptrs (into []
-                              (keep (fn [i]
-                                      (let [k (u8 a (+ 8 i)) p (+ pb (* 4 i)) r (i32 a p)]
-                                        (cond (== k 2) [p 0 0 0 0 r]
-                                              (== k 4) [p 3 0 0 0 r]
-                                              :else nil))))
-                              (range n))})
+      0 (let [t (u8 a 0)]
+          (case (int t)
+            0xED (let [r (i32 a 8)] {:size 12 :ptrs (if (== r -1) [] [[8 1 0 0 0 r]])})
+            0xEE (let [r (i32 a 8)] {:size 12 :ptrs (if (== r -1) [] [[8 2 0 0 0 r]])})
+            0x12 (let [cnt (i32 a 4) sh (i32 a 8) root (i32 a 12)
+                       tl-off (i32 a 16) tl (i32 a 20)
+                       toff (if (< cnt 32) 0 (bit-shift-left (bit-shift-right (dec cnt) 5) 5))]
+                   {:size 24
+                    :ptrs (cond-> []
+                            (and (pos? toff) (not (== root -1))) (conj [12 5 sh 0 toff root])
+                            (not (== tl-off -1)) (conj [16 6 tl 0 0 tl-off]))})
+            0x13 (let [h (i32 a 8)] {:size 12 :ptrs (if (== h -1) [] [[8 4 0 0 0 h]])})
+            0x01 (do (when (and (>= (alength a) 3)
+                                (== (aget a 0) ref-magic-0)
+                                (== (aget a 1) ref-magic-1)
+                                (== (u8 a 2) 0x15))
+                       (refuse! :process-local-reference
+                                "transfer: the value holds a process-local reference (tag 0x15 — a fn, a regex or a host object); it names a handle in this process's reference table and cannot leave the process"
+                                {:block old :at 0}))
+                     {:size (fallback-size sio ci old t) :ptrs []})
+            0x1D (let [n (i32 a 4) es (long (nth esize-by-subtype (u8 a 1)))]
+                   {:size (+ 8 (* n es)) :ptrs []})
+            0x1E {:size (fallback-size sio ci old t) :ptrs []}
+            0x1F (let [n (i32 a 4) pb (align4 (+ 8 (* 2 n)))]
+                   {:size (+ pb (* 4 n))
+                    :ptrs (into []
+                                (keep (fn [i]
+                                        (let [k (u8 a (+ 8 i)) p (+ pb (* 4 i)) r (i32 a p)]
+                                          (cond (== k 2) [p 0 0 0 0 r]
+                                                (== k 4) [p 3 0 0 0 r]
+                                                :else nil))))
+                                (range n))})
           ;; a frozen chunk (FLAT-IN-ATOM R2/S1): header of a
           ;; kind-7 segment chain carrying packed chunk bytes.
           ;; Closed — the only pointer is the chain itself.
-          0x20 (let [seg (i32 a 8)]
-                 {:size 48
-                  :ptrs (if (== seg -1) [] [[8 7 0 0 0 seg]])})
+            0x20 (let [seg (i32 a 8)]
+                   {:size 48
+                    :ptrs (if (== seg -1) [] [[8 7 0 0 0 seg]])})
           ;; a frozen chunk EXTENT (FLAT-IN-ATOM S1'): ONE block,
           ;; 44-byte header + chunk bytes. Closed — no pointers.
-          0x21 {:size (+ 44 (i32 a 4)) :ptrs []}
+            0x21 {:size (+ 44 (i32 a 4)) :ptrs []}
           ;; an eve-deftype instance, by its registered layout
-          (let [layout (ser/deftype-layout src old t)]
-            (if (vector? layout)
-              {:size (fallback-size sio ci old t)
-               :ptrs (into []
-                           (keep (fn [[foff k]]
-                                   (let [r (i32 a (long foff))]
-                                     (when-not (== r -1)
-                                       [(long foff) (if (= k :ref) 0 3) 0 0 0 r]))))
-                           layout)}
+            (let [layout (ser/deftype-layout src old t)]
+              (if (vector? layout)
+                {:size (fallback-size sio ci old t)
+                 :ptrs (into []
+                             (keep (fn [[foff k]]
+                                     (let [r (i32 a (long foff))]
+                                       (when-not (== r -1)
+                                         [(long foff) (if (= k :ref) 0 3) 0 0 0 r]))))
+                             layout)}
               ;; a type not loaded here: copied as a leaf, as the tally
               ;; holds it — its interior pointers, if any, are not walked
-              {:size (fallback-size sio ci old t) :ptrs []}))))
-    (1 2) (let [t (u8 a 0) map? (== kind 1)]
-            (cond (== t 1) (hamt-bitmap-scan a map? old)
-                  (== t 3) (hamt-collision-scan a map? old)
-                  :else {:size (fallback-size sio ci old t) :ptrs []}))
-    3 (let [len (i32 a 0)]
-        (check-no-reference! a 4 len old)
-        (let [ip (if (== len 7) (inline-ptr a 4) -1)]
-          {:size (+ 4 len) :ptrs (if (== ip -1) [] [[7 0 0 0 0 ip]])}))
-    4 (let [nx (i32 a 0) vlen (i32 a 4)]
-        (check-no-reference! a 8 vlen old)
-        (let [ip (if (== vlen 7) (inline-ptr a 8) -1)]
-          {:size (+ 8 vlen)
-           :ptrs (cond-> []
-                   (not (== nx -1)) (conj [0 4 0 0 0 nx])
-                   (not (== ip -1)) (conj [11 0 0 0 0 ip]))}))
-    5 (let [n (trie-live p3 p2 p1) w (bit-shift-left 1 p1)]
-        {:size 128
+                {:size (fallback-size sio ci old t) :ptrs []}))))
+      (1 2) (let [t (u8 a 0) map? (== kind 1)]
+              (cond (== t 1) (hamt-bitmap-scan a map? old)
+                    (== t 3) (hamt-collision-scan a map? old)
+                    :else {:size (fallback-size sio ci old t) :ptrs []}))
+      3 (let [len (i32 a 0)]
+          (check-no-reference! a 4 len old)
+          (let [ip (if (== len 7) (inline-ptr a 4) -1)]
+            {:size (+ 4 len) :ptrs (if (== ip -1) [] [[7 0 0 0 0 ip]])}))
+      4 (let [nx (i32 a 0) vlen (i32 a 4)]
+          (check-no-reference! a 8 vlen old)
+          (let [ip (if (== vlen 7) (inline-ptr a 8) -1)]
+            {:size (+ 8 vlen)
+             :ptrs (cond-> []
+                     (not (== nx -1)) (conj [0 4 0 0 0 nx])
+                     (not (== ip -1)) (conj [11 0 0 0 0 ip]))}))
+      5 (let [n (trie-live p3 p2 p1) w (bit-shift-left 1 p1)]
+          {:size 128
+           :ptrs (into []
+                       (keep (fn [i]
+                               (let [p (* 4 i) c (i32 a p)]
+                                 (when-not (== c -1)
+                                   (if (zero? p1)
+                                     [p 3 0 0 0 c]
+                                     [p 5 (- p1 5) (+ p2 (* i w)) p3 c])))))
+                       (range n))})
+      6 {:size 128
          :ptrs (into []
                      (keep (fn [i]
                              (let [p (* 4 i) c (i32 a p)]
-                               (when-not (== c -1)
-                                 (if (zero? p1)
-                                   [p 3 0 0 0 c]
-                                   [p 5 (- p1 5) (+ p2 (* i w)) p3 c])))))
-                     (range n))})
-    6 {:size 128
-       :ptrs (into []
-                   (keep (fn [i]
-                           (let [p (* 4 i) c (i32 a p)]
-                             (when-not (== c -1) [p 3 0 0 0 c]))))
-                   (range p1))}
+                               (when-not (== c -1) [p 3 0 0 0 c]))))
+                     (range p1))}
     ;; a frozen chunk's payload segment (FLAT-IN-ATOM S1): the
     ;; kind-4 chain shape — [next][len][payload bytes]. Payload
     ;; is never pointer-interpreted (the value is closed, R1).
-    7 (let [nx (i32 a 0) vlen (i32 a 4)]
-        {:size (+ 8 vlen)
-         :ptrs (if (== nx -1) [] [[0 7 0 0 0 nx]])}))))
+      7 (let [nx (i32 a 0) vlen (i32 a 4)]
+          {:size (+ 8 vlen)
+           :ptrs (if (== nx -1) [] [[0 7 0 0 0 nx]])}))))
 
 ;; ---------------------------------------------------------------------------
 ;; fetch + walk

@@ -129,7 +129,7 @@
       (let [v (gensym "v") w (gensym "w")]
         `(defmethod print-method ~type-name [~v ~w]
            ((var clojure.core/print-sequential) ~(:open spec) (var clojure.core/pr-on) " "
-            ~(:close spec) (seq ~v) ~w))))))
+                                                ~(:close spec) (seq ~v) ~w))))))
 
 (defn vector-types
   "The host's own vector types, which a protocol extended to the host's

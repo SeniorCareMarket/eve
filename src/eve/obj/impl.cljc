@@ -10,7 +10,7 @@
                      unsigned-bit-shift-right long bytes]]
    [eve.core :as e]
    [eve.deftype :as edt]
-            [eve.deftype-proto.macros :as eve]
+   [eve.deftype-proto.macros :as eve]
    ;; Load order: host-deftype's expansion ends in a top-level
    ;; eve.type-readers/register! call, which needs the registry first
    ;; in the RUNTIME graph (a macro ns's require is macro-side only).
@@ -103,13 +103,13 @@
 
 (defn- obj-type-kw->code [kw]
   (case kw :int8 0 :uint8 1 :int16 2 :uint16 3 :int32 4 :uint32 5
-            :float32 6 :float64 7 :obj 8 :array 9
-            (throw (enc/illegal-argument
-                    (str "Unknown Obj field type: " kw)))))
+        :float32 6 :float64 7 :obj 8 :array 9
+        (throw (enc/illegal-argument
+                (str "Unknown Obj field type: " kw)))))
 
 (defn- obj-code->type-kw [code]
   (case (int code) 0 :int8 1 :uint8 2 :int16 3 :uint16 4 :int32 5 :uint32
-                   6 :float32 7 :float64 8 :obj 9 :array))
+        6 :float32 7 :float64 8 :obj 9 :array))
 
 ;;=============================================================================
 ;; The object block (0x1E), on every host through ISlabIO
@@ -191,53 +191,53 @@
 (declare obj= obj-hash)
 
 (eve/host-deftype Obj [schema sio slab-off data-off mta]
-  {:print (fn [this w _opts]
-            (e/-write w (str "#eve/obj " (e/pr-str* (into {} (e/seq this))))))}
-  clojure.lang.IMeta
-  (meta [_] mta)
+                  {:print (fn [this w _opts]
+                            (e/-write w (str "#eve/obj " (e/pr-str* (into {} (e/seq this))))))}
+                  clojure.lang.IMeta
+                  (meta [_] mta)
 
-  clojure.lang.IObj
-  (withMeta [_ m] (Obj. schema sio slab-off data-off m))
+                  clojure.lang.IObj
+                  (withMeta [_ m] (Obj. schema sio slab-off data-off m))
 
-  clojure.lang.Counted
-  (count [_] (count (:field-keys schema)))
+                  clojure.lang.Counted
+                  (count [_] (count (:field-keys schema)))
 
-  clojure.lang.ILookup
-  (valAt [this k] (field-value this k nil))
-  (valAt [this k not-found] (field-value this k not-found))
+                  clojure.lang.ILookup
+                  (valAt [this k] (field-value this k nil))
+                  (valAt [this k not-found] (field-value this k not-found))
 
-  clojure.lang.IFn
-  (invoke [this k] (field-value this k nil))
-  (invoke [this k not-found] (field-value this k not-found))
+                  clojure.lang.IFn
+                  (invoke [this k] (field-value this k nil))
+                  (invoke [this k not-found] (field-value this k not-found))
 
-  clojure.lang.Seqable
-  (seq [this]
-    (map (fn [k] (enc/map-entry k (field-value this k nil))) (:field-keys schema)))
+                  clojure.lang.Seqable
+                  (seq [this]
+                       (map (fn [k] (enc/map-entry k (field-value this k nil))) (:field-keys schema)))
 
-  clojure.lang.IHashEq
-  (hasheq [this] (obj-hash this))
+                  clojure.lang.IHashEq
+                  (hasheq [this] (obj-hash this))
 
   ;; cons and empty too: basilisp's types refuse a partial interface
-  clojure.lang.IPersistentCollection
-  (cons [_ _] (enc/throw-unsupported))
-  (empty [_] nil)
-  (equiv [this other] (obj= this other))
+                  clojure.lang.IPersistentCollection
+                  (cons [_ _] (enc/throw-unsupported))
+                  (empty [_] nil)
+                  (equiv [this other] (obj= this other))
 
-  IEveObj
-  (-obj-parts [_] [schema sio slab-off data-off])
+                  IEveObj
+                  (-obj-parts [_] [schema sio slab-off data-off])
 
   ;; its block, in its domain: an atom's value built in that domain (inside
   ;; swap!) holds the object by pointer
-  d/IEveRoot
-  (-root-header-off [_] slab-off)
+                  d/IEveRoot
+                  (-root-header-off [_] slab-off)
 
-  d/IEveSio
-  (-eve-sio [_] sio)
+                  d/IEveSio
+                  (-eve-sio [_] sio)
 
-  java.lang.Object
-  (toString [this] (str "#eve/obj " (e/pr-str* (into {} (e/seq this)))))
-  (equals [this other] (obj= this other))
-  (hashCode [this] (obj-hash this)))
+                  java.lang.Object
+                  (toString [this] (str "#eve/obj " (e/pr-str* (into {} (e/seq this)))))
+                  (equals [this other] (obj= this other))
+                  (hashCode [this] (obj-hash this)))
 
 (defn- obj-hash [o]
   (reduce (fn [h k] (unchecked-int (+ (* 31 h) (hash [k (field-value o k nil)]))))
@@ -324,55 +324,55 @@
     (str "#eve/obj-array [schema=" (e/pr-str* (:field-map schema)) " length=" length "]")))
 
 (eve/host-deftype ObjArrayRow [parent idx]
-  {:print (fn [this w _opts]
-            (e/-write w (str "#eve/obj-array-row " (e/pr-str* (into {} (e/seq this))))))}
-  clojure.lang.ILookup
-  (valAt [_ k] (row-value parent idx k nil))
-  (valAt [_ k not-found] (row-value parent idx k not-found))
+                  {:print (fn [this w _opts]
+                            (e/-write w (str "#eve/obj-array-row " (e/pr-str* (into {} (e/seq this))))))}
+                  clojure.lang.ILookup
+                  (valAt [_ k] (row-value parent idx k nil))
+                  (valAt [_ k not-found] (row-value parent idx k not-found))
 
-  clojure.lang.IFn
-  (invoke [_ k] (row-value parent idx k nil))
-  (invoke [_ k not-found] (row-value parent idx k not-found))
+                  clojure.lang.IFn
+                  (invoke [_ k] (row-value parent idx k nil))
+                  (invoke [_ k not-found] (row-value parent idx k not-found))
 
-  clojure.lang.Seqable
-  (seq [_]
-    (map (fn [k] (enc/map-entry k (row-value parent idx k nil)))
-         (:field-keys (first (-obj-array-parts parent)))))
+                  clojure.lang.Seqable
+                  (seq [_]
+                       (map (fn [k] (enc/map-entry k (row-value parent idx k nil)))
+                            (:field-keys (first (-obj-array-parts parent)))))
 
-  java.lang.Object
-  (toString [this] (str "#eve/obj-array-row " (e/pr-str* (into {} (e/seq this))))))
+                  java.lang.Object
+                  (toString [this] (str "#eve/obj-array-row " (e/pr-str* (into {} (e/seq this))))))
 
 (eve/host-deftype ObjArray [schema length columns mta]
-  {:print (fn [this w _opts] (e/-write w (obj-array-str this)))}
-  clojure.lang.IMeta
-  (meta [_] mta)
+                  {:print (fn [this w _opts] (e/-write w (obj-array-str this)))}
+                  clojure.lang.IMeta
+                  (meta [_] mta)
 
-  clojure.lang.IObj
-  (withMeta [_ m] (ObjArray. schema length columns m))
+                  clojure.lang.IObj
+                  (withMeta [_ m] (ObjArray. schema length columns m))
 
-  clojure.lang.Counted
-  (count [_] length)
+                  clojure.lang.Counted
+                  (count [_] length)
 
-  clojure.lang.Indexed
-  (nth [this i]
-    (if (and (>= i 0) (< i length))
-      (ObjArrayRow. this i)
-      (throw (enc/index-out-of-bounds (str "Index out of bounds: " i)))))
-  (nth [this i not-found]
-    (if (and (>= i 0) (< i length)) (ObjArrayRow. this i) not-found))
+                  clojure.lang.Indexed
+                  (nth [this i]
+                       (if (and (>= i 0) (< i length))
+                         (ObjArrayRow. this i)
+                         (throw (enc/index-out-of-bounds (str "Index out of bounds: " i)))))
+                  (nth [this i not-found]
+                       (if (and (>= i 0) (< i length)) (ObjArrayRow. this i) not-found))
 
-  clojure.lang.IFn
-  (invoke [this i] (e/nth this i))
-  (invoke [this i not-found] (e/nth this i not-found))
+                  clojure.lang.IFn
+                  (invoke [this i] (e/nth this i))
+                  (invoke [this i not-found] (e/nth this i not-found))
 
-  clojure.lang.Seqable
-  (seq [this] (when (pos? length) (map (fn [i] (ObjArrayRow. this i)) (range length))))
+                  clojure.lang.Seqable
+                  (seq [this] (when (pos? length) (map (fn [i] (ObjArrayRow. this i)) (range length))))
 
-  IEveObjArray
-  (-obj-array-parts [_] [schema length columns])
+                  IEveObjArray
+                  (-obj-array-parts [_] [schema length columns])
 
-  java.lang.Object
-  (toString [this] (obj-array-str this)))
+                  java.lang.Object
+                  (toString [this] (obj-array-str this)))
 
 ;;=============================================================================
 ;; Object Array - Constructor

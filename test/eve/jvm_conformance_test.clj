@@ -905,7 +905,7 @@
         (is (= 4 (count s2)))))
 
     (testing "list persistence"
-      (let [            l1 (write-list sio '(1 2 3))
+      (let [l1 (write-list sio '(1 2 3))
             l2 (conj l1 0)]
         (is (= 3 (count l1)))
         (is (= 4 (count l2)))))))

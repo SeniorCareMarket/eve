@@ -190,11 +190,11 @@
 (defn remote? [e] (satisfies? IRemoteEntry e))
 
 (eve/host-deftype RemoteEntry [read-fn await-fn cancel-fn]
-  clojure.lang.IDeref
-  (deref [_] (read-fn))
-  IRemoteEntry
-  (-await-remote [_ ms] (await-fn ms))
-  (-cancel-remote! [_] (cancel-fn)))
+                  clojure.lang.IDeref
+                  (deref [_] (read-fn))
+                  IRemoteEntry
+                  (-await-remote [_ ms] (await-fn ms))
+                  (-cancel-remote! [_] (cancel-fn)))
 
 (defn remote-entry
   "A remote entry over its cell's three means: (read) the descriptor, (wait ms) as -await-remote, (cancel)."
@@ -539,19 +539,19 @@
            e
            (if-let [q (first (filter (fn [e] (let [dd @e] (and (= :queued (:state dd)) (may-help? dd false)))) es))]
              (do (claim-and-run! q) (recur))
-           (let [reg (vec (filter (fn [e] (register-waiter! e me)) es))]
-             (if (< (count reg) (count es))
+             (let [reg (vec (filter (fn [e] (register-waiter! e me)) es))]
+               (if (< (count reg) (count es))
                ;; one finished while registering: undo the rest, consuming the wakes already on their way
-               (do (doseq [e reg] (when-not (deregister-waiter! e me) (wait-wake! (:id @e) nil))) (recur))
-               (let [ids (mapv (fn [e] (:id @e)) reg)
-                     woken-one (fn [] (loop [xs ids] (when (seq xs) (if (take-woken! (first xs)) (first xs) (recur (rest xs))))))
-                     hit (loop []
-                           (or (woken-one)
-                               (let [m (h/receive! -1)] (handle! m) (recur))))]
-                 (doseq [e reg]
-                   (when-not (= hit (:id @e))
-                     (when-not (deregister-waiter! e me) (wait-wake! (:id @e) nil))))
-                 (recur)))))))))))
+                 (do (doseq [e reg] (when-not (deregister-waiter! e me) (wait-wake! (:id @e) nil))) (recur))
+                 (let [ids (mapv (fn [e] (:id @e)) reg)
+                       woken-one (fn [] (loop [xs ids] (when (seq xs) (if (take-woken! (first xs)) (first xs) (recur (rest xs))))))
+                       hit (loop []
+                             (or (woken-one)
+                                 (let [m (h/receive! -1)] (handle! m) (recur))))]
+                   (doseq [e reg]
+                     (when-not (= hit (:id @e))
+                       (when-not (deregister-waiter! e me) (wait-wake! (:id @e) nil))))
+                   (recur)))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Adoption: the descriptors a dead thread owned
@@ -609,14 +609,14 @@
    pool
    (fn []
      (with-pool*
-      pool
-      (fn []
-        (loop []
-          (if (stop-requested?)
-            (loop [] (let [m (h/receive! 0)] (when-not (= m :eve.thread/timeout) (handle! m) (recur))))
-            (let [m (h/receive! -1)]
-              (if (= m :eve.thread/stop)
-                (swap! (st) assoc :stop true)
-                (handle! m))
-              (recur))))
-        :stopped)))))
+       pool
+       (fn []
+         (loop []
+           (if (stop-requested?)
+             (loop [] (let [m (h/receive! 0)] (when-not (= m :eve.thread/timeout) (handle! m) (recur))))
+             (let [m (h/receive! -1)]
+               (if (= m :eve.thread/stop)
+                 (swap! (st) assoc :stop true)
+                 (handle! m))
+               (recur))))
+         :stopped)))))

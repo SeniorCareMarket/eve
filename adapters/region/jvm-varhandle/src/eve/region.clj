@@ -19,10 +19,10 @@
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
-                     -sync! -sync-range!]])
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
+                            -sync! -sync-range!]])
   (:import
    [java.io RandomAccessFile]
    [java.lang.invoke MethodHandle MethodHandles MethodType VarHandle VarHandle$AccessMode]
@@ -735,9 +735,9 @@
                           -1)]
        (with-open [^FileChannel fc
                    (FileChannel/open path
-                     (into-array OpenOption
-                       [StandardOpenOption/READ
-                        StandardOpenOption/WRITE]))]
+                                     (into-array OpenOption
+                                                 [StandardOpenOption/READ
+                                                  StandardOpenOption/WRITE]))]
          (JvmByteBufferRegion. (map-segments fc size shift old-segments old-shift)
                                size
                                (int shift)))))))
@@ -794,11 +794,11 @@
 ;; sun.misc.Unsafe); the segment mappings are shared with open-mmap-region.
 
 (deftype LustreJvmMmapRegion
-  [^objects segments
-   ^long size
-   ^int shift
-   ^FileChannel lock-channel
-   ^ReentrantLock thread-lock]
+         [^objects segments
+          ^long size
+          ^int shift
+          ^FileChannel lock-channel
+          ^ReentrantLock thread-lock]
 
   mem/IMemRegion
   (-byte-length [_] size)
@@ -1031,9 +1031,9 @@
         ;; Map in segment windows for atomic access and scoped
         ;; force(index, length).
         ^FileChannel map-ch (FileChannel/open path
-                              (into-array OpenOption
-                                [StandardOpenOption/READ
-                                 StandardOpenOption/WRITE]))
+                                              (into-array OpenOption
+                                                          [StandardOpenOption/READ
+                                                           StandardOpenOption/WRITE]))
         reuse (:reuse-from opts)
         old-segments (when (instance? LustreJvmMmapRegion reuse)
                        (.segments ^LustreJvmMmapRegion reuse))
@@ -1044,9 +1044,9 @@
         ;; Separate FileChannel kept open for fcntl locking —
         ;; MUST NOT be closed until the region is disposed.
         lock-ch (FileChannel/open path
-                  (into-array OpenOption
-                    [StandardOpenOption/READ
-                     StandardOpenOption/WRITE]))]
+                                  (into-array OpenOption
+                                              [StandardOpenOption/READ
+                                               StandardOpenOption/WRITE]))]
     (LustreJvmMmapRegion. segments size (int shift) lock-ch (ReentrantLock.))))
 
 (defn lustre-region?

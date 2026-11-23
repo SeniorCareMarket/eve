@@ -110,7 +110,6 @@
         ;; Default to int32
         (list '.setInt32 'slab-dv__ abs-offset val-expr true)))))
 
-
 ;;-----------------------------------------------------------------------------
 ;; Field reads and writes through the module slab's DataView
 ;;-----------------------------------------------------------------------------
@@ -243,16 +242,16 @@
     ;; Recurse into collections
     (seq? form)
     (with-meta (apply list (map #(cljs-rewrite-set!-forms % field-map offset-expr) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(cljs-rewrite-set!-forms % field-map offset-expr) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(cljs-rewrite-set!-forms k field-map offset-expr)
                                 (cljs-rewrite-set!-forms v field-map offset-expr)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 (defn- cljs-transform-method-body
@@ -436,8 +435,8 @@
        (~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)
        ;; The instance: its cached and host-local fields, and its block's offset
        (cljs.core/deftype ~type-name [~@inst-syms ~off-sym]
-                  ~@boilerplate
-                  ~@transformed-protos)
+         ~@boilerplate
+         ~@transformed-protos)
 
        ;; (T__new field ... offset) builds an instance: the deftype's own
        ;; factory, kept before ->T becomes the constructor below (sci
@@ -591,7 +590,7 @@
                                   (if (contains? #{'Object 'js/Object} protocol)
                                     (update g :methods
                                             (fn [ms] (vec (remove (fn [m] (and (= 'toString (:name m))
-                                                                              (= '[(pr-str this)] (vec (:body m)))))
+                                                                               (= '[(pr-str this)] (vec (:body m)))))
                                                                   ms))))
                                     g)))
                            (remove (fn [{:keys [protocol methods]}]
@@ -770,8 +769,8 @@
                             (filter :cached? fields))]
     `(do
        (cljs.core/deftype ~type-name [~'sio__ ~'offset__ ~@cached-fields]
-                  ~@boilerplate
-                  ~@translated)
+         ~@boilerplate
+         ~@translated)
 
        ~@(when emit-type-id-def?
            [`(~'def ~(symbol (str (name type-name) "-type-id")) ~type-id)])
@@ -793,26 +792,26 @@
     (if (= :map spec)
       (let [k (gensym "k") v (gensym "v")]
         `(~'extend-type ~type-name ~'IPrintWithWriter
-          (~'-pr-writer [~x ~w ~'_]
-           (~'-write ~w "{")
-           (loop [~s (seq ~x) ~first? true]
-             (when ~s
-               (let [[~k ~v] (first ~s)]
-                 (when-not ~first? (~'-write ~w ", "))
-                 (~'-write ~w (pr-str ~k))
-                 (~'-write ~w " ")
-                 (~'-write ~w (pr-str ~v))
-                 (recur (next ~s) false))))
-           (~'-write ~w "}"))))
+                        (~'-pr-writer [~x ~w ~'_]
+                                      (~'-write ~w "{")
+                                      (loop [~s (seq ~x) ~first? true]
+                                        (when ~s
+                                          (let [[~k ~v] (first ~s)]
+                                            (when-not ~first? (~'-write ~w ", "))
+                                            (~'-write ~w (pr-str ~k))
+                                            (~'-write ~w " ")
+                                            (~'-write ~w (pr-str ~v))
+                                            (recur (next ~s) false))))
+                                      (~'-write ~w "}"))))
       `(~'extend-type ~type-name ~'IPrintWithWriter
-        (~'-pr-writer [~x ~w ~'_]
-         (~'-write ~w ~(:open spec))
-         (loop [~s (seq ~x) ~first? true]
-           (when ~s
-             (when-not ~first? (~'-write ~w " "))
-             (~'-write ~w (pr-str (first ~s)))
-             (recur (next ~s) false)))
-         (~'-write ~w ~(:close spec)))))))
+                      (~'-pr-writer [~x ~w ~'_]
+                                    (~'-write ~w ~(:open spec))
+                                    (loop [~s (seq ~x) ~first? true]
+                                      (when ~s
+                                        (when-not ~first? (~'-write ~w " "))
+                                        (~'-write ~w (pr-str (first ~s)))
+                                        (recur (next ~s) false)))
+                                    (~'-write ~w ~(:close spec)))))))
 
 (defn vector-types
   "ClojureScript's own vector types: its persistent vector and its subvec."

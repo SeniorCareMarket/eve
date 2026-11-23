@@ -2,8 +2,7 @@
   "The media facility behind cohost-media.tasks' publish and the Go member's init: the media server
    (range-checked serving of the outputs, the page, and the gateway's routes proxied) and the watched
    folder's watcher. The implementation is the runtime's own — glojure's, in cohost-media.media-impl
-   (the eveglj/media Go package) — resolved lazily: only a runtime that carries it ever loads it."
-  )
+   (the eveglj/media Go package) — resolved lazily: only a runtime that carries it ever loads it.")
 
 (defn- impl-fn
   "The runtime's media implementation var, when this runtime carries it."

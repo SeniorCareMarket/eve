@@ -14,7 +14,7 @@
   "Read a canonical UUID (case-insensitive); reject malformed input everywhere."
   [s]
   (when-not (and (string? s)
-                (re-matches #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" s))
+                 (re-matches #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" s))
     (throw (ex-info "Invalid UUID" {:value s})))
   (edn/read-string (str "#uuid \"" (str/lower-case s) "\"")))
 
@@ -73,7 +73,7 @@
   []
   (let [b (vec (process/random-bytes 16))
         b (assoc b 6 (+ 64 (mod (nth b 6) 16))
-                   8 (+ 128 (mod (nth b 8) 64)))
+                 8 (+ 128 (mod (nth b 8) 64)))
         words (fn [off]
                 (reduce (fn [w x] (u64/add (u64/mul w [0 256]) [0 x]))
                         [0 0] (subvec b off (+ off 8))))]

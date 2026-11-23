@@ -96,18 +96,18 @@
   ([st] (mem-rows st :atoms))
   ([st k]
    (let [ls (lease-ops st :leases)]
-    (reify IAtomRows
-     (-row [_ aid] (get-in @st [k aid]))
-     (-create! [_ aid initial-key]
-       (swap-out! st (fn [s] (if-let [row (get-in s [k aid])]
-                               [s row]
-                               (let [row {:root_key initial-key :epoch 0}] [(assoc-in s [k aid] row) row])))))
-     (-cas! [_ aid old-key fields]
-       (swap-out! st (fn [s] (let [[rows out] (row-step (get s k) aid old-key fields)] [(assoc s k rows) out]))))
-     (-lease! [_ aid epoch expires-at] ((:lease! ls) aid epoch expires-at))
-     (-release! [_ lid] ((:release! ls) lid))
-     (-renew! [_ lid now expires-at] ((:renew! ls) lid now expires-at))
-     (-lease-floor [_ now] ((:floor ls) now))))))
+     (reify IAtomRows
+       (-row [_ aid] (get-in @st [k aid]))
+       (-create! [_ aid initial-key]
+         (swap-out! st (fn [s] (if-let [row (get-in s [k aid])]
+                                 [s row]
+                                 (let [row {:root_key initial-key :epoch 0}] [(assoc-in s [k aid] row) row])))))
+       (-cas! [_ aid old-key fields]
+         (swap-out! st (fn [s] (let [[rows out] (row-step (get s k) aid old-key fields)] [(assoc s k rows) out]))))
+       (-lease! [_ aid epoch expires-at] ((:lease! ls) aid epoch expires-at))
+       (-release! [_ lid] ((:release! ls) lid))
+       (-renew! [_ lid now expires-at] ((:renew! ls) lid now expires-at))
+       (-lease-floor [_ now] ((:floor ls) now))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Leases and retired keys
@@ -177,7 +177,7 @@
 (defn- conflict [b row]
   (swap! (:state b) update :conflicts inc)
   (answer 409 (put-row {"status" "conflict" "current_key" (:root_key row) "current_epoch" (:epoch row)}
-                      row (remove #{:root_count} ROOT-FIELDS))))
+                       row (remove #{:root_count} ROOT-FIELDS))))
 
 (defn- cas-route
   "production's order: an unknown atom made at old_key, the compare (409), :validate (403), then the atomic -cas!"

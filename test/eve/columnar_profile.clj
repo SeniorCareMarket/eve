@@ -55,13 +55,13 @@
       (println)
       (println "--- Level 1: Raw double[] (theoretical floor) ---")
       (bench "sum: raw double[] areduce"
-        (fn []
-          (let [^doubles a raw-data
-                n (alength a)]
-            (loop [i 0 acc 0.0]
-              (if (< i n)
-                (recur (inc i) (+ acc (aget a i)))
-                acc)))))
+             (fn []
+               (let [^doubles a raw-data
+                     n (alength a)]
+                 (loop [i 0 acc 0.0]
+                   (if (< i n)
+                     (recur (inc i) (+ acc (aget a i)))
+                     acc)))))
 
       ;; ---------------------------------------------------------------
       ;; LEVEL 2: JvmHeapEveArray via nth (what func/sum actually does)
@@ -70,15 +70,15 @@
       (println "--- Level 2: JvmHeapEveArray via nth (current func/sum path) ---")
       (let [heap-arr (arr/eve-array :float64 data-vec)]
         (bench "sum: heap-eve-array .nth loop"
-          (fn []
-            (let [n (count heap-arr)]
-              (loop [i 0 acc 0.0]
-                (if (< i n)
-                  (recur (inc i) (+ acc (double (nth heap-arr i))))
-                  acc)))))
+               (fn []
+                 (let [n (count heap-arr)]
+                   (loop [i 0 acc 0.0]
+                     (if (< i n)
+                       (recur (inc i) (+ acc (double (nth heap-arr i))))
+                       acc)))))
 
         (bench "func/sum over heap-eve-array"
-          (fn [] (func/sum heap-arr)))
+               (fn [] (func/sum heap-arr)))
 
         ;; ---------------------------------------------------------------
         ;; LEVEL 2b: JvmHeapEveArray — bypass nth, use backing array
@@ -88,12 +88,12 @@
         (when (satisfies? d/IBackingArray heap-arr)
           (let [^doubles backing (d/-backing-array heap-arr)]
             (bench "sum: direct backing double[] areduce"
-              (fn []
-                (let [n (alength backing)]
-                  (loop [i 0 acc 0.0]
-                    (if (< i n)
-                      (recur (inc i) (+ acc (aget backing i)))
-                      acc))))))))
+                   (fn []
+                     (let [n (alength backing)]
+                       (loop [i 0 acc 0.0]
+                         (if (< i n)
+                           (recur (inc i) (+ acc (aget backing i)))
+                           acc))))))))
 
       ;; ---------------------------------------------------------------
       ;; LEVEL 3: JvmEveArray (slab-backed) — what mmap atom uses
@@ -108,15 +108,15 @@
         (let [slab-arr (:col @a)]
           (println (str "  slab-arr type: " (type slab-arr)))
           (bench "sum: slab-eve-array .nth loop"
-            (fn []
-              (let [n (count slab-arr)]
-                (loop [i 0 acc 0.0]
-                  (if (< i n)
-                    (recur (inc i) (+ acc (double (nth slab-arr i))))
-                    acc)))))
+                 (fn []
+                   (let [n (count slab-arr)]
+                     (loop [i 0 acc 0.0]
+                       (if (< i n)
+                         (recur (inc i) (+ acc (double (nth slab-arr i))))
+                         acc)))))
 
           (bench "func/sum over slab-eve-array"
-            (fn [] (func/sum slab-arr))))
+                 (fn [] (func/sum slab-arr))))
 
         ;; Clean up
         (eve-atom/close! a))
@@ -127,7 +127,7 @@
       (println)
       (println "--- Level 4: Stock Clojure vector (benchmark comparison) ---")
       (bench "sum: (reduce + 0.0 clj-vec)"
-        (fn [] (reduce + 0.0 data-vec)))
+             (fn [] (reduce + 0.0 data-vec)))
 
       ;; ---------------------------------------------------------------
       ;; LEVEL 5: Argops — argsort comparison
@@ -138,9 +138,9 @@
             sort-data (vec (repeatedly n-sort #(int (* (Math/random) 100000))))
             sort-arr (arr/eve-array :int32 sort-data)]
         (bench "argsort: eve-array :int32 10K"
-          (fn [] (argops/argsort sort-arr :asc)))
+               (fn [] (argops/argsort sort-arr :asc)))
         (bench "argsort: clj vector 10K"
-          (fn [] (vec (sort sort-data)))))
+               (fn [] (vec (sort sort-data)))))
 
       ;; ---------------------------------------------------------------
       ;; LEVEL 6: Element-wise mul — func/mul path
@@ -150,18 +150,18 @@
       (let [a1 (arr/eve-array :float64 data-vec)
             a2 (arr/eve-array :float64 data-vec)]
         (bench "func/mul: two heap-eve-arrays"
-          (fn [] (func/mul a1 a2)))
+               (fn [] (func/mul a1 a2)))
         (bench "raw: double[] element-wise mul"
-          (fn []
-            (let [^doubles x raw-data
-                  ^doubles y raw-data
-                  n (alength x)
-                  ^doubles out (double-array n)]
-              (dotimes [i n]
-                (aset out i (* (aget x i) (aget y i))))
-              out)))
+               (fn []
+                 (let [^doubles x raw-data
+                       ^doubles y raw-data
+                       n (alength x)
+                       ^doubles out (double-array n)]
+                   (dotimes [i n]
+                     (aset out i (* (aget x i) (aget y i))))
+                   out)))
         (bench "stock: mapv * two vecs"
-          (fn [] (mapv * data-vec data-vec))))
+               (fn [] (mapv * data-vec data-vec))))
 
       (println)
       (println "================================================================")

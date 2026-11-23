@@ -239,12 +239,12 @@
   (let [pool (Executors/newFixedThreadPool par-count)
         futures (mapv (fn [suite]
                         [suite (.submit pool ^Callable
-                                 (fn []
-                                   (println (str "  [" suite "] starting..."))
-                                   (let [exit (run-one-fn suite)]
-                                     (println (str "  [" suite "] "
-                                                   (if (zero? exit) "passed" (str "FAILED (exit " exit ")"))))
-                                     exit)))])
+                                        (fn []
+                                          (println (str "  [" suite "] starting..."))
+                                          (let [exit (run-one-fn suite)]
+                                            (println (str "  [" suite "] "
+                                                          (if (zero? exit) "passed" (str "FAILED (exit " exit ")"))))
+                                            exit)))])
                       suites)]
     (try
       (let [results (mapv (fn [[suite ^Future fut]]
@@ -375,7 +375,7 @@
   [args]
   (let [platforms  #{"node" "browser" "playwright"}
         flags      #{"skip-compile" "compile-only" "list" "all-opts" "all-platforms" "all"
-                      "discover" "dry-run" "watch" "retry"}
+                     "discover" "dry-run" "watch" "retry"}
         opt-levels #{"none" "basic" "advanced"}
         ;; Args that consume the next value
         value-args #{"par" "tier" "ns" "output" "timeout" "exclude" "dir" "test"}]
@@ -393,7 +393,7 @@
               (let [v (first more)]
                 (case k
                   "par"     (let [n (when v (try (Integer/parseInt v)
-                                                  (catch NumberFormatException _ nil)))]
+                                                 (catch NumberFormatException _ nil)))]
                               (if n
                                 (recur (rest more) (assoc acc :par n))
                                 (recur more (assoc acc :par 2))))
@@ -401,8 +401,8 @@
                   "ns"      (recur (rest more) (assoc acc :ns-filter v))
                   "output"  (recur (rest more) (assoc acc :output v))
                   "timeout" (recur (rest more) (assoc acc :timeout
-                                                 (when v (try (Integer/parseInt v)
-                                                              (catch NumberFormatException _ nil)))))
+                                                      (when v (try (Integer/parseInt v)
+                                                                   (catch NumberFormatException _ nil)))))
                   "exclude" (recur (rest more) (assoc acc :exclude v))
                   "dir"     (recur (rest more) (assoc acc :dir v))
                   "test"    (recur (rest more) (assoc acc :test-filter v))))
@@ -432,11 +432,11 @@
                       :playwright :browser
                       nil)
         tests (conv/scan-test-dir "test"
-                :tier-filter tier
-                :ns-regexp ns-filter
-                :dir-filter dir
-                :exclude-re exclude
-                :platform-filter platform-kw)
+                                  :tier-filter tier
+                                  :ns-regexp ns-filter
+                                  :dir-filter dir
+                                  :exclude-re exclude
+                                  :platform-filter platform-kw)
         dominant (conv/dominant-tier tests)]
     {:tests tests
      :tier  (or tier dominant)}))
@@ -475,9 +475,9 @@
   (println "Generating test runner...")
   (let [runner-ns 'cljs-thread.test.generated-runner
         runner-path (gen/write-runner! tests
-                      {:runner-ns   runner-ns
-                       :tier        tier
-                       :timeout-ms  (or timeout (conv/tier-default-timeout tier))})]
+                                       {:runner-ns   runner-ns
+                                        :tier        tier
+                                        :timeout-ms  (or timeout (conv/tier-default-timeout tier))})]
     (println (str "  Generated runner: " runner-path))
     (println (str "  Output: " gen-test-output))
     (println)
@@ -507,13 +507,13 @@
 
         ;; Discover tests
         plan (discover-and-plan!
-               {:tier      tier
-                :ns-filter (or (when retry?
-                                 (failures/failed-ns-filter retry-data))
-                               ns-filter)
-                :dir       dir
-                :exclude   exclude
-                :platform  platform})]
+              {:tier      tier
+               :ns-filter (or (when retry?
+                                (failures/failed-ns-filter retry-data))
+                              ns-filter)
+               :dir       dir
+               :exclude   exclude
+               :platform  platform})]
 
     (cond
       ;; No tests found
@@ -537,8 +537,8 @@
               (println (str "\n--- Initial run: " (if (zero? exit) "PASSED" "FAILED") " ---")))
             ;; Enter watch loop
             (watch/watch-and-run!
-              {:compile-fn (fn [] (generate-and-compile! plan parsed))
-               :run-fn     (fn [] (env/launch-env platform {:output-js output-js :suite "all"}))}))
+             {:compile-fn (fn [] (generate-and-compile! plan parsed))
+              :run-fn     (fn [] (env/launch-env platform {:output-js output-js :suite "all"}))}))
           0)
 
       ;; Normal run
@@ -582,11 +582,11 @@
   (let [pool (Executors/newFixedThreadPool (count platforms))
         futures (mapv (fn [plat]
                         [plat (.submit pool ^Callable
-                                (fn []
-                                  (let [exit (run-platform! plat suites par)]
-                                    (println (str "  [" (get platform-labels plat)
-                                                  "] Finished — exit " exit))
-                                    exit)))])
+                                       (fn []
+                                         (let [exit (run-platform! plat suites par)]
+                                           (println (str "  [" (get platform-labels plat)
+                                                         "] Finished — exit " exit))
+                                           exit)))])
                       platforms)]
     (try
       (let [results (mapv (fn [[plat ^Future fut]]
@@ -698,7 +698,7 @@
               (let [exit (if multi-platforms?
                            ;; Multi-platform: always run node + playwright in parallel
                            (run-platforms-parallel! platforms effective-suites par
-                                                   (get opt-level-labels opt))
+                                                    (get opt-level-labels opt))
                            ;; Single platform
                            (run-platform! (first platforms) effective-suites par))]
                 (when-not (zero? exit)

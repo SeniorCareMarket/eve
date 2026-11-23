@@ -76,22 +76,22 @@
    release it."
   [^FileChannel fc f]
   (locking fc
-           (if (and (not @lock-close-ok?) (get @journal-paths fc))
-             (let [^FileChannel c (FileChannel/open (Paths/get (get @journal-paths
-                                                                    fc)
-                                                               (into-array String
-                                                                           []))
-                                                    (into-array OpenOption
-                                                                [StandardOpenOption/READ
-                                                                 StandardOpenOption/WRITE]))]
-               (try
-                 (.lock c)
-                 (f)
-                 (finally (.close c))))
-             (let [fl (.lock fc)]
-               (try
-                 (f)
-                 (finally (if @lock-close-ok? (.close fl) (.release fl))))))))
+    (if (and (not @lock-close-ok?) (get @journal-paths fc))
+      (let [^FileChannel c (FileChannel/open (Paths/get (get @journal-paths
+                                                             fc)
+                                                        (into-array String
+                                                                    []))
+                                             (into-array OpenOption
+                                                         [StandardOpenOption/READ
+                                                          StandardOpenOption/WRITE]))]
+        (try
+          (.lock c)
+          (f)
+          (finally (.close c))))
+      (let [fl (.lock fc)]
+        (try
+          (f)
+          (finally (if @lock-close-ok? (.close fl) (.release fl))))))))
 
 (defn journal-record-of
   "The commit record for an explicit EPOCH and TABLE (byte array), as

@@ -245,10 +245,10 @@
                       (not= idx (:id v))
                       (not= prefix (:writer v))
                       (not= (str prefix "-" idx "-deep")
-                             (get-in v [:deep :a :b :c :d]))
+                            (get-in v [:deep :a :b :c :d]))
                       (not= 40 (count (:items v)))
                       (not= [idx (* idx 2) (* idx 3)]
-                             (into [] (first (:matrix v))))
+                            (into [] (first (:matrix v))))
                       (not= #{:alpha :beta :gamma :delta} (into #{} (:tags v)))
                       (not= '(:created :validated :committed) (into '() (reverse (:history v)))))
               (vswap! errors inc)

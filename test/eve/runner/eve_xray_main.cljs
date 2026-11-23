@@ -56,155 +56,155 @@
 (defn- run-tests! []
   ;; Use a modest SAB so problems surface faster
   (def the-atom (a/atom-domain {}
-                                :sab-size (* 4 1024 1024)
-                                :max-blocks 4096))
+                               :sab-size (* 4 1024 1024)
+                               :max-blocks 4096))
   (reset! the-env (.-s-atom-env the-atom))
   ;; Register overflow callbacks for allocations > 1024 bytes
   (let [env @the-env]
     (ps/register-overflow-fns!
-      (fn [size-bytes] (sab/alloc env size-bytes))
-      (fn [desc-idx] (sab/free env desc-idx))
-      :sab (:sab env)))
+     (fn [size-bytes] (sab/alloc env size-bytes))
+     (fn [desc-idx] (sab/free env desc-idx))
+     :sab (:sab env)))
 
   (try
     ;; ─── Phase 1: Basic AtomDomain operations ───────────────────────────
 
     (step! "Fresh empty atom"
-      (fn []
-        (let [v @the-atom]
-          (println (str "    deref => " (pr-str v) " (type: " (type v) ")")))))
+           (fn []
+             (let [v @the-atom]
+               (println (str "    deref => " (pr-str v) " (type: " (type v) ")")))))
 
     (step! "swap! assoc :a 1"
-      (fn []
-        (let [result (swap! the-atom assoc :a 1)]
-          (println (str "    swap! returned: " (pr-str result)))
-          (let [v @the-atom]
-            (println (str "    deref after => " (pr-str v) " keys=" (count v)))))))
+           (fn []
+             (let [result (swap! the-atom assoc :a 1)]
+               (println (str "    swap! returned: " (pr-str result)))
+               (let [v @the-atom]
+                 (println (str "    deref after => " (pr-str v) " keys=" (count v)))))))
 
     (step! "swap! assoc :b 2"
-      (fn []
-        (swap! the-atom assoc :b 2)
-        (let [v @the-atom]
-          (println (str "    deref => " (pr-str v) " keys=" (count v))))))
+           (fn []
+             (swap! the-atom assoc :b 2)
+             (let [v @the-atom]
+               (println (str "    deref => " (pr-str v) " keys=" (count v))))))
 
     (step! "swap! assoc :c 3"
-      (fn []
-        (swap! the-atom assoc :c 3)
-        (let [v @the-atom]
-          (println (str "    deref => " (pr-str v) " keys=" (count v))))))
+           (fn []
+             (swap! the-atom assoc :c 3)
+             (let [v @the-atom]
+               (println (str "    deref => " (pr-str v) " keys=" (count v))))))
 
     (step! "swap! dissoc :a"
-      (fn [] (swap! the-atom dissoc :a)))
+           (fn [] (swap! the-atom dissoc :a)))
 
     (step! "swap! assoc 10 keys"
-      (fn [] (swap! the-atom merge
-                    (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 10))))))
+           (fn [] (swap! the-atom merge
+                         (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 10))))))
 
     (step! "swap! dissoc 5 keys"
-      (fn [] (swap! the-atom
-                    (fn [m] (reduce dissoc m [:k0 :k1 :k2 :k3 :k4])))))
+           (fn [] (swap! the-atom
+                         (fn [m] (reduce dissoc m [:k0 :k1 :k2 :k3 :k4])))))
 
     (step! "swap! grow to 50 keys"
-      (fn [] (swap! the-atom merge
-                    (into {} (map (fn [i] [(keyword (str "g" i)) (* i i)]) (range 50))))))
+           (fn [] (swap! the-atom merge
+                         (into {} (map (fn [i] [(keyword (str "g" i)) (* i i)]) (range 50))))))
 
     (step! "swap! replace all 50 keys (new values)"
-      (fn [] (swap! the-atom
-                    (fn [m] (reduce (fn [m i] (assoc m (keyword (str "g" i)) (- i)))
-                                    m (range 50))))))
+           (fn [] (swap! the-atom
+                         (fn [m] (reduce (fn [m i] (assoc m (keyword (str "g" i)) (- i)))
+                                         m (range 50))))))
 
     ;; ─── Phase 2: Embedded atoms ────────────────────────────────────────
 
     (step! "Create embedded atom e1 = {:x 1}"
-      (fn [] (def e1 (binding [d/*parent-atom* the-atom]
-                       (a/atom {:x 1})))))
+           (fn [] (def e1 (binding [d/*parent-atom* the-atom]
+                            (a/atom {:x 1})))))
 
     (step! "swap! e1 assoc :y 2"
-      (fn [] (swap! e1 assoc :y 2)))
+           (fn [] (swap! e1 assoc :y 2)))
 
     (step! "swap! e1 assoc :z 3"
-      (fn [] (swap! e1 assoc :z 3)))
+           (fn [] (swap! e1 assoc :z 3)))
 
     (step! "Create embedded atom e2 = {:counter 0}"
-      (fn [] (def e2 (binding [d/*parent-atom* the-atom]
-                       (a/atom {:counter 0})))))
+           (fn [] (def e2 (binding [d/*parent-atom* the-atom]
+                            (a/atom {:counter 0})))))
 
     (step! "swap! e2 update :counter inc (x10)"
-      (fn []
-        (dotimes [_ 10]
-          (swap! e2 update :counter inc))))
+           (fn []
+             (dotimes [_ 10]
+               (swap! e2 update :counter inc))))
 
     (step! "Create 5 more embedded atoms"
-      (fn []
-        (def extra-atoms
-          (vec (for [i (range 5)]
-                 (binding [d/*parent-atom* the-atom]
-                   (a/atom {:id i :data (str "atom-" i)})))))))
+           (fn []
+             (def extra-atoms
+               (vec (for [i (range 5)]
+                      (binding [d/*parent-atom* the-atom]
+                        (a/atom {:id i :data (str "atom-" i)})))))))
 
     (step! "swap! each of 5 atoms once"
-      (fn []
-        (doseq [[i ea] (map-indexed vector extra-atoms)]
-          (swap! ea assoc :updated true :idx i))))
+           (fn []
+             (doseq [[i ea] (map-indexed vector extra-atoms)]
+               (swap! ea assoc :updated true :idx i))))
 
     ;; ─── Phase 3: Rapid swap cycles (alloc + free churn) ────────────────
 
     (step! "Rapid 100 swaps on e1 (counter increment)"
-      (fn []
-        (swap! e1 assoc :counter 0)
-        (dotimes [_ 100]
-          (swap! e1 update :counter inc))))
+           (fn []
+             (swap! e1 assoc :counter 0)
+             (dotimes [_ 100]
+               (swap! e1 update :counter inc))))
 
     (step! "Rapid 100 swaps on parent atom (key rotation)"
-      (fn []
-        (dotimes [i 100]
-          (swap! the-atom assoc (keyword (str "rot" (mod i 20))) i))))
+           (fn []
+             (dotimes [i 100]
+               (swap! the-atom assoc (keyword (str "rot" (mod i 20))) i))))
 
     ;; ─── Phase 4: Large map growth ──────────────────────────────────────
 
     (step! "Grow e1 to 200-key map"
-      (fn []
-        (swap! e1 merge
-               (into {} (map (fn [i] [(keyword (str "k" i)) {:val i}])
-                             (range 200))))))
+           (fn []
+             (swap! e1 merge
+                    (into {} (map (fn [i] [(keyword (str "k" i)) {:val i}])
+                                  (range 200))))))
 
     (step! "Replace all 200 keys in e1"
-      (fn []
-        (swap! e1
-               (fn [m] (reduce (fn [m i] (assoc m (keyword (str "k" i)) {:val (- i)}))
-                                m (range 200))))))
+           (fn []
+             (swap! e1
+                    (fn [m] (reduce (fn [m i] (assoc m (keyword (str "k" i)) {:val (- i)}))
+                                    m (range 200))))))
 
     (step! "Shrink e1 back to 10 keys"
-      (fn []
-        (swap! e1
-               (fn [m] (reduce dissoc m
-                                (map (fn [i] (keyword (str "k" i)))
-                                     (range 10 200)))))))
+           (fn []
+             (swap! e1
+                    (fn [m] (reduce dissoc m
+                                    (map (fn [i] (keyword (str "k" i)))
+                                         (range 10 200)))))))
 
     ;; ─── Phase 5: Stress — many atoms, many swaps ───────────────────────
 
     (step! "Create 20 embedded atoms with 50-key maps"
-      (fn []
-        (def stress-atoms
-          (vec (for [i (range 20)]
-                 (binding [d/*parent-atom* the-atom]
-                   (a/atom (into {} (map (fn [j] [(keyword (str "s" j)) (* i j)])
-                                         (range 50))))))))))
+           (fn []
+             (def stress-atoms
+               (vec (for [i (range 20)]
+                      (binding [d/*parent-atom* the-atom]
+                        (a/atom (into {} (map (fn [j] [(keyword (str "s" j)) (* i j)])
+                                              (range 50))))))))))
 
     (step! "Swap each of 20 atoms 10 times"
-      (fn []
-        (doseq [[i sa] (map-indexed vector stress-atoms)]
-          (dotimes [j 10]
-            (swap! sa assoc (keyword (str "s" (mod j 50))) (* i j 100))))))
+           (fn []
+             (doseq [[i sa] (map-indexed vector stress-atoms)]
+               (dotimes [j 10]
+                 (swap! sa assoc (keyword (str "s" (mod j 50))) (* i j 100))))))
 
     (step! "Final state verification"
-      (fn []
+           (fn []
         ;; Deref everything to confirm it's readable
-        (let [parent-val @the-atom
-              e1-val @e1
-              e2-val @e2]
-          (println (str "    Parent keys: " (count parent-val)))
-          (println (str "    e1 keys: " (count e1-val)))
-          (println (str "    e2 counter: " (:counter e2-val))))))
+             (let [parent-val @the-atom
+                   e1-val @e1
+                   e2-val @e2]
+               (println (str "    Parent keys: " (count parent-val)))
+               (println (str "    e1 keys: " (count e1-val)))
+               (println (str "    e2 counter: " (:counter e2-val))))))
 
     ;; ─── Summary ────────────────────────────────────────────────────────
 

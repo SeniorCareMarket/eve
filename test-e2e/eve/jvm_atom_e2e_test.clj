@@ -7,7 +7,7 @@
 
 (def ^:private base    (str "/tmp/eve-p7-jvm-e2e-" (System/currentTimeMillis)))
 (def ^:private worker  (str (System/getProperty "user.dir")
-                             "/target/eve-test/mmap-worker.js"))
+                            "/target/eve-test/mmap-worker.js"))
 
 (defn- spawn-node! [& args]
   (let [pb   (doto (ProcessBuilder. ^java.util.List (into ["node"] args))
@@ -269,9 +269,9 @@
       (atom/close-atom-domain! d)
       ;; Launch 3 Node workers concurrently, each doing 5 increments
       (let [futs (doall
-                   (for [_ (range 3)]
-                     (future
-                       (spawn-node! worker "join-concurrent-swap" b "5"))))]
+                  (for [_ (range 3)]
+                    (future
+                      (spawn-node! worker "join-concurrent-swap" b "5"))))]
         ;; JVM does 5 increments concurrently
         (let [[d2 j] (join-domain-atom! b)]
           (dotimes [_ 5] (swap! j update :count inc))
@@ -340,9 +340,9 @@
       ;; ── Phase 2: 6 Node workers write concurrently ────────────────
       (let [node-futs
             (doall
-              (for [n (range node-workers)]
-                (future
-                  (node-bulk-assoc! b 0 node-keys-each (str "n" n)))))]
+             (for [n (range node-workers)]
+               (future
+                 (node-bulk-assoc! b 0 node-keys-each (str "n" n)))))]
         (doseq [f node-futs]
           (let [r @f]
             (is (zero? (:exit r))
@@ -424,10 +424,10 @@
         ;; Launch Node workers first (they join the atom)
         (let [node-futs
               (doall
-                (for [n (range node-workers)]
-                  (future
-                    (node-bulk-assoc-nested!
-                      b 0 node-keys-each (str "n" n)))))
+               (for [n (range node-workers)]
+                 (future
+                   (node-bulk-assoc-nested!
+                    b 0 node-keys-each (str "n" n)))))
               ;; JVM writes its keys concurrently with Node workers
               jvm-fut
               (future
@@ -530,19 +530,19 @@
       (let [[d a] (create-domain-atom! b {:_seed true :counter 0})]
         (let [node-futs
               (doall
-                (for [n (range node-workers)]
-                  (future
-                    (node-bulk-rich-grow! b 0 node-rounds (str "n" n)))))
+               (for [n (range node-workers)]
+                 (future
+                   (node-bulk-rich-grow! b 0 node-rounds (str "n" n)))))
               jvm-futs
               (doall
-                (for [t (range jvm-threads)]
-                  (future
-                    (let [thread-id (str "jvm" t)]
-                      (dotimes [r jvm-rounds]
-                        (let [k (keyword (str thread-id "-" r))
-                              v (make-rich-val thread-id r)]
-                          (swap! a (fn [m]
-                                     (-> m (assoc k v) (update :counter inc))))))))))]
+               (for [t (range jvm-threads)]
+                 (future
+                   (let [thread-id (str "jvm" t)]
+                     (dotimes [r jvm-rounds]
+                       (let [k (keyword (str thread-id "-" r))
+                             v (make-rich-val thread-id r)]
+                         (swap! a (fn [m]
+                                    (-> m (assoc k v) (update :counter inc))))))))))]
           ;; Wait for JVM threads
           (doseq [f jvm-futs] @f)
           ;; Wait for Node workers

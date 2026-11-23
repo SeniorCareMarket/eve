@@ -210,8 +210,8 @@
           (= cid TRUE-CID) true
           (= cid FALSE-CID) false
           (= cid INT32-CID) (let [lo (+ (nth bd 16) (* 256 (nth bd 17)) (* 65536 (nth bd 18)))   ;; signed, read in int32
-                                     top (nth bd 19)]
-                                 (+ lo (* 16777216 (if (< top 128) top (- top 256)))))
+                                  top (nth bd 19)]
+                              (+ lo (* 16777216 (if (< top 128) top (- top 256)))))
           (= cid DOUBLE-CID) (bytes-f64 (subvec bd 16 24))
           (= cid LONG-CID) (bytes-i64 (subvec bd 24 32))
           :else ::none)))
@@ -481,7 +481,6 @@
 
 (defn- entry [kb vband] {:kb kb :h (key-hash kb) :vband vband})
 
-
 (defn- vec-node [bands acc] (put-block acc (b/join (concat [[T-VEC] (zeros 8)] (map slot bands)))))
 
 (defn- vec-rec
@@ -560,9 +559,6 @@
   "When bound (a host atom), the value each collection block decoded to, by its key — the next decode of an atom's value
    shares every unchanged subtree (and its cached hash) with the last."
   nil)
-
-
-
 
 (defn- remember! [a k v]
   (swap! a (fn [m] (assoc (if (> (count m) MEMO-MAX) {} m) k v)))

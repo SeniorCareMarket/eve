@@ -8,32 +8,32 @@
             [eve.host-completion]))
 
 (host-deftype LocalRec [m]
-  clojure.lang.ILookup
-  (valAt [_ k] (get m k))
-  (valAt [_ k nf] (get m k nf))
-  clojure.lang.Associative
-  (containsKey [_ k] (contains? m k))
-  (entryAt [_ k] (when (contains? m k) (clojure.lang.MapEntry/create k (get m k))))
-  (assoc [_ k v] (LocalRec. (assoc m k v)))
-  clojure.lang.Counted
-  (count [_] (count m))
-  clojure.lang.IPersistentCollection
-  (cons [this o]
-    (if (map-entry? o)
-      (assoc this (key o) (val o))
-      (reduce (fn [acc e] (assoc acc (key e) (val e))) this o)))
-  (empty [_] (LocalRec. {}))
-  (equiv [_ o] (= (seq m) (seq o)))
-  clojure.lang.IPersistentMap
-  (without [_ k] (LocalRec. (dissoc m k)))
-  clojure.lang.Seqable
-  (seq [_] (seq m))
-  java.lang.Iterable
-  (iterator [_]
-    (let [s (atom (seq m))]
-      (reify java.util.Iterator
-        (hasNext [_] (boolean @s))
-        (next [_] (let [e (first @s)] (swap! s next) e))))))
+              clojure.lang.ILookup
+              (valAt [_ k] (get m k))
+              (valAt [_ k nf] (get m k nf))
+              clojure.lang.Associative
+              (containsKey [_ k] (contains? m k))
+              (entryAt [_ k] (when (contains? m k) (clojure.lang.MapEntry/create k (get m k))))
+              (assoc [_ k v] (LocalRec. (assoc m k v)))
+              clojure.lang.Counted
+              (count [_] (count m))
+              clojure.lang.IPersistentCollection
+              (cons [this o]
+                    (if (map-entry? o)
+                      (assoc this (key o) (val o))
+                      (reduce (fn [acc e] (assoc acc (key e) (val e))) this o)))
+              (empty [_] (LocalRec. {}))
+              (equiv [_ o] (= (seq m) (seq o)))
+              clojure.lang.IPersistentMap
+              (without [_ k] (LocalRec. (dissoc m k)))
+              clojure.lang.Seqable
+              (seq [_] (seq m))
+              java.lang.Iterable
+              (iterator [_]
+                        (let [s (atom (seq m))]
+                          (reify java.util.Iterator
+                            (hasNext [_] (boolean @s))
+                            (next [_] (let [e (first @s)] (swap! s next) e))))))
 
 (deftest sci-map-keeps-ipersistentmap-methods-and-iterable
   (let [r (LocalRec. {:a 1 :b 2})
@@ -72,8 +72,8 @@
             "plain user/library namespaces still present")))))
 
 (host-deftype LocalSeq [xs]
-  clojure.lang.Seqable
-  (seq [_] (seq xs)))
+              clojure.lang.Seqable
+              (seq [_] (seq xs)))
 
 (deftest vec-consumes-eve-seqables
   (is (= [1 2 3] (vec (LocalSeq. [1 2 3]))))
@@ -87,17 +87,17 @@
 ;; Map-shaped JVM declarations do not have to spell out Iterable. In SCI
 ;; map mode the adapter must supply it for native hash/set consumers.
 (host-deftype MapWithoutIterator [m]
-  clojure.lang.ILookup
-  (valAt [_ k] (get m k))
-  (valAt [_ k nf] (get m k nf))
-  clojure.lang.Associative
-  (containsKey [_ k] (contains? m k))
-  (entryAt [_ k] (find m k))
-  (assoc [_ k v] (MapWithoutIterator. (assoc m k v)))
-  clojure.lang.Counted
-  (count [_] (count m))
-  clojure.lang.Seqable
-  (seq [_] (seq m)))
+              clojure.lang.ILookup
+              (valAt [_ k] (get m k))
+              (valAt [_ k nf] (get m k nf))
+              clojure.lang.Associative
+              (containsKey [_ k] (contains? m k))
+              (entryAt [_ k] (find m k))
+              (assoc [_ k v] (MapWithoutIterator. (assoc m k v)))
+              clojure.lang.Counted
+              (count [_] (count m))
+              clojure.lang.Seqable
+              (seq [_] (seq m)))
 
 (deftest map-without-explicit-iterator-can-be-hashed
   (when (System/getProperty "babashka.version")
@@ -107,9 +107,9 @@
       (is (= #{[:a 1] [:b 2]} (set x))))))
 
 (host-deftype LookupOnly [m]
-  clojure.lang.ILookup
-  (valAt [_ k] (get m k))
-  (valAt [_ k nf] (get m k nf)))
+              clojure.lang.ILookup
+              (valAt [_ k] (get m k))
+              (valAt [_ k nf] (get m k nf)))
 
 (deftest juxt-normalizes-keyword-constituents
   (let [x (LookupOnly. {:a 1 :b false})]

@@ -42,8 +42,8 @@
    ds-flagship / contend.cljc convention)."
   [& body]
   `(try ~@body
-     (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
-       (str :throws " " t#))))
+        (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
+          (str :throws " " t#))))
 
 (def ^:private atom-name "contract/ds-flagship")
 (def ^:private window-ms 60000)

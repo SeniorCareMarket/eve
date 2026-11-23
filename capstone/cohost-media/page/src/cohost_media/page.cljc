@@ -22,11 +22,11 @@
   ;; reagami), so they are required under :cljs and the clj side
   ;; requires none
   #?@(:cljs [(:require [clojure.string :as str]
-                        [cohost.pool :as pool]
-                        [cohost.thread-host :as h]
-                        [cohost-media.core :as em]
-                        [cohost-media.tasks :as tasks]
-                        [reagami.core :as reagami])]))
+                       [cohost.pool :as pool]
+                       [cohost.thread-host :as h]
+                       [cohost-media.core :as em]
+                       [cohost-media.tasks :as tasks]
+                       [reagami.core :as reagami])]))
 
 (defn- now [] (js/Date.now))
 
@@ -389,7 +389,7 @@
                             (when (seq caps) (str "\n\noffers " (str/join " " (map #(str ":" %) caps))))
                             (when (seq done)
                               (str "\n\nhas run: " (str/join ", " (map (fn [[k n]] (str (name k) " ×" n))
-                                                                        (sort-by (comp name key) done))))))}
+                                                                       (sort-by (comp name key) done))))))}
      [:div.head (badge rid) [:small runtime]
       [:small.st {:class (when (#{:gave-up :exited} (:state m)) "err")} (state-label m)]]
      [:div.role (when coordinator? [:b "coordinator · "]) (get parts host)]

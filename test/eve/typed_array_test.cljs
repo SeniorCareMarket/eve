@@ -10,11 +10,11 @@
   (testing "Uint8ClampedArray stored in atom comes out as Uint8ClampedArray"
     (let [a (e/atom ::typed-array-basic {})
           result (swap! a (fn [_]
-                           (let [arr (js/Uint8ClampedArray. #js [220 235 255 255 100 150 200 255])
-                                 stored {:pixels arr}]
-                             (is (instance? js/Uint8ClampedArray (:pixels stored))
-                                 "Before storage: should be Uint8ClampedArray")
-                             stored)))]
+                            (let [arr (js/Uint8ClampedArray. #js [220 235 255 255 100 150 200 255])
+                                  stored {:pixels arr}]
+                              (is (instance? js/Uint8ClampedArray (:pixels stored))
+                                  "Before storage: should be Uint8ClampedArray")
+                              stored)))]
       ;; Now read it back
       (let [retrieved (:pixels @a)]
         (is (instance? js/Uint8ClampedArray retrieved)

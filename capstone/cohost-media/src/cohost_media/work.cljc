@@ -34,9 +34,9 @@
         ids (vec (sort (keys hashes)))
         pairs (vec (for [i (range (count ids)) j (range (inc i) (count ids))] [(nth ids i) (nth ids j)]))
         edges (pool/fold (fn ([] []) ([a b] (into a b)))
-                       (fn [acc [a b]] (if (<= (ph/distance (get hashes a) (get hashes b)) ph/threshold)
-                                         (conj acc [a b]) acc))
-                       pairs)
+                         (fn [acc [a b]] (if (<= (ph/distance (get hashes a) (get hashes b)) ph/threshold)
+                                           (conj acc [a b]) acc))
+                         pairs)
         groups (ph/groups-from-edges ids edges)]
     (domain/swap-atom! (st/index) (fn [v] (assoc v :duplicates groups :hashed (count ids) :grouped-generation generation)))
     {:groups groups :hashed (count ids)}))

@@ -39,26 +39,26 @@
     (if (= r :eve.thread.cell/timeout) v (outcome r))))
 
 (eve/host-deftype Future [e]
-  clojure.lang.IDeref
-  (deref [_] (outcome (c/await! e -1)))
-  clojure.lang.IPending
-  (isRealized [_] (d/done? @e))
-  IFuture
-  (-entry [_] e)
-  (-deref-within [_ ms v] (within e ms v))
-  (-cancel! [_] (c/cancel! e))
-  (-deliver! [_ v] false))
+                  clojure.lang.IDeref
+                  (deref [_] (outcome (c/await! e -1)))
+                  clojure.lang.IPending
+                  (isRealized [_] (d/done? @e))
+                  IFuture
+                  (-entry [_] e)
+                  (-deref-within [_ ms v] (within e ms v))
+                  (-cancel! [_] (c/cancel! e))
+                  (-deliver! [_ v] false))
 
 (eve/host-deftype Promise [e token]
-  clojure.lang.IDeref
-  (deref [_] (outcome (c/await! e -1)))
-  clojure.lang.IPending
-  (isRealized [_] (d/done? @e))
-  IFuture
-  (-entry [_] e)
-  (-deref-within [_ ms v] (within e ms v))
-  (-cancel! [_] false)
-  (-deliver! [_ v] (some? (c/settle! e token true v))))
+                  clojure.lang.IDeref
+                  (deref [_] (outcome (c/await! e -1)))
+                  clojure.lang.IPending
+                  (isRealized [_] (d/done? @e))
+                  IFuture
+                  (-entry [_] e)
+                  (-deref-within [_ ms v] (within e ms v))
+                  (-cancel! [_] false)
+                  (-deliver! [_ v] (some? (c/settle! e token true v))))
 
 (defn future-of [e] (->Future e))
 

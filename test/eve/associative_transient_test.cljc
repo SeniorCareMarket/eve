@@ -11,21 +11,21 @@
 
 ;; DataScript DB analogue: one type has both persistent and transient behavior.
 (host-deftype DualCollection [m]
-  clojure.lang.Counted
-  clojure.lang.Seqable
-  (seq [_] (seq m))
-  clojure.lang.ILookup
-  (valAt [_ k] (get m k)) (valAt [_ k nf] (get m k nf))
-  clojure.lang.Associative
-  (assoc [_ k v] (->DualCollection (assoc m k v)))
-  (containsKey [_ k] (contains? m k)) (entryAt [_ k] (find m k))
-  clojure.lang.IPersistentCollection
-  (count [_] (count m)) (cons [_ entry] (->DualCollection (conj m entry)))
-  (empty [_] (->DualCollection {})) (equiv [_ other] (= m (.-m other)))
-  clojure.lang.IEditableCollection
-  (asTransient [this] this)
-  clojure.lang.ITransientCollection
-  (conj [_ entry] (->DualCollection (conj m entry))) (persistent [this] this))
+              clojure.lang.Counted
+              clojure.lang.Seqable
+              (seq [_] (seq m))
+              clojure.lang.ILookup
+              (valAt [_ k] (get m k)) (valAt [_ k nf] (get m k nf))
+              clojure.lang.Associative
+              (assoc [_ k v] (->DualCollection (assoc m k v)))
+              (containsKey [_ k] (contains? m k)) (entryAt [_ k] (find m k))
+              clojure.lang.IPersistentCollection
+              (count [_] (count m)) (cons [_ entry] (->DualCollection (conj m entry)))
+              (empty [_] (->DualCollection {})) (equiv [_ other] (= m (.-m other)))
+              clojure.lang.IEditableCollection
+              (asTransient [this] this)
+              clojure.lang.ITransientCollection
+              (conj [_ entry] (->DualCollection (conj m entry))) (persistent [this] this))
 (deftest mixed-persistent-transient
   (let [d (->DualCollection {:a 1}) d2 (ec/assoc d :b 2)]
     (is (= 1 (ec/get d :a))) (is (= :missing (ec/get d :absent :missing)))
@@ -78,8 +78,8 @@
   ;; on the process-heap fallback the construction law abolished, so on
   ;; ClojureScript the test body would throw :no-domain-context.
   (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
-                                                                        2 (* 8 1024 1024) 3 (* 8 1024 1024)
-                                                                        4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
+                                                                 2 (* 8 1024 1024) 3 (* 8 1024 1024)
+                                                                 4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
     (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)

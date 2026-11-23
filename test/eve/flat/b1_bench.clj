@@ -142,7 +142,7 @@
                            s (if direct-rep
                                (let [r (direct-rep)]
                                  (assoc s :build (min (:build s) (:build r))
-                                          :place (min (:place s) (:place r))))
+                                        :place (min (:place s) (:place r))))
                                s)]
                        (recur (inc i) s))))
         today-ms (:today measured)

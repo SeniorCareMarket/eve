@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [atom])
   (:require
    [eve.host :refer [field]]
-            [eve.array :as arr]
+   [eve.array :as arr]
    [eve.core :as ec]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
@@ -157,17 +157,17 @@
                   (/ (:mean-ms stock-result) (:mean-ms eve-result))
                   ##Inf)]
     (swap! results conj
-      {:category category
-       :n n
-       :mode mode
-       :platform platform
-       :eve-ms (:mean-ms eve-result)
-       :stock-ms (:mean-ms stock-result)
-       :speedup speedup
-       :eve-min (:min-ms eve-result)
-       :eve-max (:max-ms eve-result)
-       :stock-min (:min-ms stock-result)
-       :stock-max (:max-ms stock-result)})
+           {:category category
+            :n n
+            :mode mode
+            :platform platform
+            :eve-ms (:mean-ms eve-result)
+            :stock-ms (:mean-ms stock-result)
+            :speedup speedup
+            :eve-min (:min-ms eve-result)
+            :eve-max (:max-ms eve-result)
+            :stock-min (:min-ms stock-result)
+            :stock-max (:max-ms stock-result)})
     ;; Print as we go
     (println (str "  " category " [" (name mode) "] (n=" n ")"))
     (println (str "    Eve:   " (fmt1 (:mean-ms eve-result)) "ms"
@@ -176,7 +176,7 @@
                   "  [" (:min-ms stock-result) "-" (:max-ms stock-result) "]"))
     (println (str "    Eve/Stock: " (fmt2 (double speedup)) "x"))
     (println (str "    Result: " (if ok? "match" (str "MISMATCH eve=" (pr-str (:value eve-result))
-                                                     " stock=" (pr-str (:value stock-result))))))
+                                                      " stock=" (pr-str (:value stock-result))))))
     (println)))
 
 ;;=============================================================================
@@ -190,21 +190,21 @@
         costs  (random-doubles n 2000.0)
         stock-a (clojure.core/atom {:price prices :qty qtys :cost costs})]
     (record! "Column Arithmetic" n mode
-      (with-eve-atom mode (str "col-arith-" n)
-        (fn [] {:price (arr/eve-array :float64 prices)
-                :qty   (arr/eve-array :float64 qtys)
-                :cost  (arr/eve-array :float64 costs)})
-        (fn [eve-a]
-          (with-value eve-a (bench
-            #(swap! eve-a (fn [s]
-               (let [revenue (func/mul (:price s) (:qty s))
-                     margin  (func/sub revenue (:cost s))]
-                 (assoc s :result (func/sum margin)))))))))
-      (with-value stock-a (bench
-        #(swap! stock-a (fn [s]
-           (let [p (:price s) q (:qty s) c (:cost s)
-                 margin (mapv (fn [pi qi ci] (- (* pi qi) ci)) p q c)]
-             (assoc s :result (reduce + 0.0 margin))))))))))
+             (with-eve-atom mode (str "col-arith-" n)
+               (fn [] {:price (arr/eve-array :float64 prices)
+                       :qty   (arr/eve-array :float64 qtys)
+                       :cost  (arr/eve-array :float64 costs)})
+               (fn [eve-a]
+                 (with-value eve-a (bench
+                                    #(swap! eve-a (fn [s]
+                                                    (let [revenue (func/mul (:price s) (:qty s))
+                                                          margin  (func/sub revenue (:cost s))]
+                                                      (assoc s :result (func/sum margin)))))))))
+             (with-value stock-a (bench
+                                  #(swap! stock-a (fn [s]
+                                                    (let [p (:price s) q (:qty s) c (:cost s)
+                                                          margin (mapv (fn [pi qi ci] (- (* pi qi) ci)) p q c)]
+                                                      (assoc s :result (reduce + 0.0 margin))))))))))
 
 ;;=============================================================================
 ;; 2. FILTER + AGGREGATE — filter rows, then compute multiple stats
@@ -216,28 +216,28 @@
         gt50   (fn [x] (> x 50.0))
         stock-a (clojure.core/atom {:price prices})]
     (record! "Filter + Aggregate" n mode
-      (with-eve-atom mode (str "filt-agg-" n)
-        (fn [] {:price (arr/eve-array :float64 prices)})
-        (fn [eve-a]
-          (with-value eve-a (bench
-            #(swap! eve-a (fn [s]
-               (let [c    (:price s)
-                     idx  (argops/argfilter c gt50)
-                     filt (argops/take-indices c idx)]
-                 (assoc s :result
-                   {:sum  (func/sum filt)
-                    :mean (func/mean filt)
-                    :min  (func/min-val filt)
-                    :max  (func/max-val filt)}))))))))
-      (with-value stock-a (bench
-        #(swap! stock-a (fn [s]
-           (let [c    (:price s)
-                 filt (filterv gt50 c)]
-             (assoc s :result
-               {:sum  (reduce + 0.0 filt)
-                :mean (/ (reduce + 0.0 filt) (count filt))
-                :min  (reduce min filt)
-                :max  (reduce max filt)})))))))))
+             (with-eve-atom mode (str "filt-agg-" n)
+               (fn [] {:price (arr/eve-array :float64 prices)})
+               (fn [eve-a]
+                 (with-value eve-a (bench
+                                    #(swap! eve-a (fn [s]
+                                                    (let [c    (:price s)
+                                                          idx  (argops/argfilter c gt50)
+                                                          filt (argops/take-indices c idx)]
+                                                      (assoc s :result
+                                                             {:sum  (func/sum filt)
+                                                              :mean (func/mean filt)
+                                                              :min  (func/min-val filt)
+                                                              :max  (func/max-val filt)}))))))))
+             (with-value stock-a (bench
+                                  #(swap! stock-a (fn [s]
+                                                    (let [c    (:price s)
+                                                          filt (filterv gt50 c)]
+                                                      (assoc s :result
+                                                             {:sum  (reduce + 0.0 filt)
+                                                              :mean (/ (reduce + 0.0 filt) (count filt))
+                                                              :min  (reduce min filt)
+                                                              :max  (reduce max filt)})))))))))
 
 ;;=============================================================================
 ;; 3. SORT + TOP-N — argsort, take top 100, aggregate
@@ -248,22 +248,22 @@
   (let [prices (random-doubles n 1000.0)
         stock-a (clojure.core/atom {:price prices})]
     (record! "Sort + Top-N" n mode
-      (with-eve-atom mode (str "sort-topn-" n)
-        (fn [] {:price (arr/eve-array :float64 prices)})
-        (fn [eve-a]
-          (with-value eve-a (bench
-            #(swap! eve-a (fn [s]
-               (let [c   (:price s)
-                     idx (argops/argsort c :desc)
-                     top (argops/take-indices idx (arr/eve-array :int32 (vec (range (min 100 (ec/count idx))))))
-                     top-vals (argops/take-indices c top)]
-                 (assoc s :result (func/mean top-vals)))))))))
-      (with-value stock-a (bench
-        #(swap! stock-a (fn [s]
-           (let [c (:price s)
-                 sorted (vec (sort (fn [a b] (compare b a)) c))
-                 top (subvec sorted 0 (min 100 (count sorted)))]
-             (assoc s :result (/ (reduce + 0.0 top) (count top)))))))))))
+             (with-eve-atom mode (str "sort-topn-" n)
+               (fn [] {:price (arr/eve-array :float64 prices)})
+               (fn [eve-a]
+                 (with-value eve-a (bench
+                                    #(swap! eve-a (fn [s]
+                                                    (let [c   (:price s)
+                                                          idx (argops/argsort c :desc)
+                                                          top (argops/take-indices idx (arr/eve-array :int32 (vec (range (min 100 (ec/count idx))))))
+                                                          top-vals (argops/take-indices c top)]
+                                                      (assoc s :result (func/mean top-vals)))))))))
+             (with-value stock-a (bench
+                                  #(swap! stock-a (fn [s]
+                                                    (let [c (:price s)
+                                                          sorted (vec (sort (fn [a b] (compare b a)) c))
+                                                          top (subvec sorted 0 (min 100 (count sorted)))]
+                                                      (assoc s :result (/ (reduce + 0.0 top) (count top)))))))))))
 
 ;;=============================================================================
 ;; 4. DATASET PIPELINE — multi-column realistic analytics
@@ -279,43 +279,43 @@
         gt500  (fn [x] (> x 500.0))
         stock-a (clojure.core/atom {:price prices :qty qtys :cat cats :id ids})]
     (record! "Dataset Pipeline" n mode
-      (with-eve-atom mode (str "ds-pipe-" n)
-        (fn [] {:price (arr/eve-array :float64 prices)
-                :qty   (arr/eve-array :float64 qtys)
-                :cat   (arr/eve-array :int32 cats)
-                :id    (arr/eve-array :int32 ids)})
-        (fn [eve-a]
-          (with-value eve-a (bench
-            #(swap! eve-a (fn [s]
-               (let [ds1  (ds/dataset {:price (:price s) :qty (:qty s)
-                                       :cat (:cat s) :id (:id s)})
-                     rev  (func/mul (:price s) (:qty s))
-                     ds2  (ds/add-column ds1 :revenue rev)
-                     ds3  (ds/filter-rows ds2 :revenue gt500)
-                     ds4  (ds/sort-by-column ds3 :revenue :desc)
-                     take-n (min 200 (ds/row-count ds4))
-                     ds5  (ds/head ds4 take-n)]
-                 (assoc s :result
-                   {:rev-sum    (func/sum (ds/column ds5 :revenue))
-                    :price-mean (func/mean (ds/column ds5 :price))}))))))))
-      (with-value stock-a (bench
-        #(swap! stock-a (fn [s]
-           (let [p (:price s) q (:qty s)
-                 rev (mapv * p q)
-                 keep-idx (vec (keep-indexed (fn [i v] (when (gt500 v) i)) rev))
-                 filt-p   (mapv (fn [i] (nth p i)) keep-idx)
-                 filt-rev (mapv (fn [i] (nth rev i)) keep-idx)
-                 sort-idx (vec (map first
-                               (sort-by (fn [[_ v]] (- v))
-                                 (map-indexed vector filt-rev))))
-                 sorted-p   (mapv (fn [i] (nth filt-p i)) sort-idx)
-                 sorted-rev (mapv (fn [i] (nth filt-rev i)) sort-idx)
-                 take-n (min 200 (count sorted-rev))
-                 top-rev (subvec sorted-rev 0 take-n)
-                 top-p   (subvec sorted-p 0 take-n)]
-             (assoc s :result
-               {:rev-sum    (reduce + 0.0 top-rev)
-                :price-mean (/ (reduce + 0.0 top-p) (count top-p))})))))))))
+             (with-eve-atom mode (str "ds-pipe-" n)
+               (fn [] {:price (arr/eve-array :float64 prices)
+                       :qty   (arr/eve-array :float64 qtys)
+                       :cat   (arr/eve-array :int32 cats)
+                       :id    (arr/eve-array :int32 ids)})
+               (fn [eve-a]
+                 (with-value eve-a (bench
+                                    #(swap! eve-a (fn [s]
+                                                    (let [ds1  (ds/dataset {:price (:price s) :qty (:qty s)
+                                                                            :cat (:cat s) :id (:id s)})
+                                                          rev  (func/mul (:price s) (:qty s))
+                                                          ds2  (ds/add-column ds1 :revenue rev)
+                                                          ds3  (ds/filter-rows ds2 :revenue gt500)
+                                                          ds4  (ds/sort-by-column ds3 :revenue :desc)
+                                                          take-n (min 200 (ds/row-count ds4))
+                                                          ds5  (ds/head ds4 take-n)]
+                                                      (assoc s :result
+                                                             {:rev-sum    (func/sum (ds/column ds5 :revenue))
+                                                              :price-mean (func/mean (ds/column ds5 :price))}))))))))
+             (with-value stock-a (bench
+                                  #(swap! stock-a (fn [s]
+                                                    (let [p (:price s) q (:qty s)
+                                                          rev (mapv * p q)
+                                                          keep-idx (vec (keep-indexed (fn [i v] (when (gt500 v) i)) rev))
+                                                          filt-p   (mapv (fn [i] (nth p i)) keep-idx)
+                                                          filt-rev (mapv (fn [i] (nth rev i)) keep-idx)
+                                                          sort-idx (vec (map first
+                                                                             (sort-by (fn [[_ v]] (- v))
+                                                                                      (map-indexed vector filt-rev))))
+                                                          sorted-p   (mapv (fn [i] (nth filt-p i)) sort-idx)
+                                                          sorted-rev (mapv (fn [i] (nth filt-rev i)) sort-idx)
+                                                          take-n (min 200 (count sorted-rev))
+                                                          top-rev (subvec sorted-rev 0 take-n)
+                                                          top-p   (subvec sorted-p 0 take-n)]
+                                                      (assoc s :result
+                                                             {:rev-sum    (reduce + 0.0 top-rev)
+                                                              :price-mean (/ (reduce + 0.0 top-p) (count top-p))})))))))))
 
 ;;=============================================================================
 ;; 5. TENSOR TRANSFORM — emap → transpose → flatten → reduce
@@ -333,24 +333,24 @@
         double-fn (fn [x] (* x 2.0))
         stock-a (clojure.core/atom {:t (vec (map vec (partition side data)))})]
     (record! "Tensor Pipeline" total mode
-      (with-eve-atom mode (str "tensor-" total)
-        (fn [] {:data (arr/eve-array :float64 data) :side side})
-        (fn [eve-a]
-          (with-value eve-a (bench
-            #(swap! eve-a (fn [s]
-               (let [t  (tensor/from-array (:data s) [(:side s) (:side s)])
-                     t2 (tensor/emap double-fn t)
-                     t3 (tensor/transpose t2)
-                     flat (tensor/to-array t3)]
-                 (assoc s :result (tensor/ereduce + 0.0
-                                    (tensor/from-array flat [(ec/count flat)]))))))))))
-      (with-value stock-a (bench
-        #(swap! stock-a (fn [s]
-           (let [t  (:t s)
-                 t2 (mapv (fn [row] (mapv double-fn row)) t)
-                 t3 (apply mapv vector t2)
-                 flat (vec (apply concat t3))]
-             (assoc s :result (reduce + 0.0 flat))))))))))
+             (with-eve-atom mode (str "tensor-" total)
+               (fn [] {:data (arr/eve-array :float64 data) :side side})
+               (fn [eve-a]
+                 (with-value eve-a (bench
+                                    #(swap! eve-a (fn [s]
+                                                    (let [t  (tensor/from-array (:data s) [(:side s) (:side s)])
+                                                          t2 (tensor/emap double-fn t)
+                                                          t3 (tensor/transpose t2)
+                                                          flat (tensor/to-array t3)]
+                                                      (assoc s :result (tensor/ereduce + 0.0
+                                                                                       (tensor/from-array flat [(ec/count flat)]))))))))))
+             (with-value stock-a (bench
+                                  #(swap! stock-a (fn [s]
+                                                    (let [t  (:t s)
+                                                          t2 (mapv (fn [row] (mapv double-fn row)) t)
+                                                          t3 (apply mapv vector t2)
+                                                          flat (vec (apply concat t3))]
+                                                      (assoc s :result (reduce + 0.0 flat))))))))))
 
 ;;=============================================================================
 ;; Summary table
@@ -359,12 +359,12 @@
 (defn- pad-right [s n]
   (let [s (str s)]
     (if (>= (count s) n) s
-      (str s (apply str (repeat (- n (count s)) " "))))))
+        (str s (apply str (repeat (- n (count s)) " "))))))
 
 (defn- pad-left [s n]
   (let [s (str s)]
     (if (>= (count s) n) s
-      (str (apply str (repeat (- n (count s)) " ")) s))))
+        (str (apply str (repeat (- n (count s)) " ")) s))))
 
 (defn- format-n [n]
   (cond
@@ -392,10 +392,10 @@
     (println sep)
     (doseq [{:keys [category n eve-ms stock-ms speedup]} rs]
       (println (str "| " (pad-right category 22)
-                   " | " (pad-left (format-n n) 5)
-                   " | " (pad-left (fmt1 eve-ms) 10)
-                   " | " (pad-left (fmt1 stock-ms) 10)
-                   " | " (pad-left (str (fmt2 speedup) "x") 8) " |")))
+                    " | " (pad-left (format-n n) 5)
+                    " | " (pad-left (fmt1 eve-ms) 10)
+                    " | " (pad-left (fmt1 stock-ms) 10)
+                    " | " (pad-left (str (fmt2 speedup) "x") 8) " |")))
     (println)))
 
 ;;=============================================================================

@@ -116,7 +116,7 @@
         e2 (codec/encode v)]
     (is (= e1 e2) "the same value images to the same blocks (deterministic)")
     (is (= v (codec/decode (:root e1) (:set-root? e1)
-                            (fn [k] (get (:blocks e1) k))))
+                           (fn [k] (get (:blocks e1) k))))
         "and decodes back to the same value")
     (area! "codec")))
 

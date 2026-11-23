@@ -54,10 +54,10 @@
 
   ;; Timeout guard
   (js/setTimeout
-    (fn []
-      (println "\nTIMEOUT: Tests exceeded 180s time limit")
-      (js/process.exit 1))
-    180000)
+   (fn []
+     (println "\nTIMEOUT: Tests exceeded 180s time limit")
+     (js/process.exit 1))
+   180000)
 
   ;; init! is idempotent — auto-detects fat-kernel source from __filename.
   ;; Pass main function to be dispatched to :core when pools are ready.

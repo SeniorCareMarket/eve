@@ -115,7 +115,7 @@
 
 (defspec chunk-roundtrip 200
   (prop/for-all [v gen-value]
-    (value= v (chunk/unpack (chunk/pack v)))))
+                (value= v (chunk/unpack (chunk/pack v)))))
 
 ;; ---------------------------------------------------------------------------
 ;; C1.3 — fill policy

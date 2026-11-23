@@ -27,12 +27,12 @@
    own (rrb-vector-test's fixture), dropped with the test."
   [f]
   (binding [d/*domain-sio* (alloc/heap-domain-sio!
-                              {:capacities {0 (* 64 1024 1024)
-                                            1 (* 16 1024 1024)
-                                            2 (* 16 1024 1024)
-                                            3 (* 192 1024 1024)
-                                            4 (* 16 1024 1024)
-                                            5 (* 16 1024 1024)}})]
+                            {:capacities {0 (* 64 1024 1024)
+                                          1 (* 16 1024 1024)
+                                          2 (* 16 1024 1024)
+                                          3 (* 192 1024 1024)
+                                          4 (* 16 1024 1024)
+                                          5 (* 16 1024 1024)}})]
     (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
@@ -161,8 +161,8 @@
              #(e/with-meta (->Point 1 2) {:f inc})
              #(map->Point {:x 1 :f inc})]]
     (let [message (try (f) nil
-                      (catch #?(:cljs :default :lpy python/Exception :default Exception) error
-                        (ex-message error)))]
+                       (catch #?(:cljs :default :lpy python/Exception :default Exception) error
+                         (ex-message error)))]
       (is (and message (str/includes? message "functions can't be stored in Eve memory; pass them as call arguments"))))))
 
 (edt/deftype Gem [^:int32 x])
@@ -197,20 +197,20 @@
 (deftest hidden-payloads-are-reclaimed-after-last-root
   (in-read-end-c
    (fn []
-  (let [dom (a/atom-domain nil)
-        x (a/lookup-or-create-mmap-atom! dom "record/reclaim" nil)
-        y (a/lookup-or-create-mmap-atom! dom "record/share" nil)
-        sio (:sio (a/-domain-state x))]
-    (swap! x (fn [_] (e/with-meta (e/assoc (->Point [1 2] {:k [3 4]}) :extra {:v [5 6]}) {:m [7 8]})))
-    (let [before (a/read-pinned x (fn [p] (set (retire/reach sio (d/-root-header-off p)))))
-          _ (a/read-pinned x (fn [p] (swap! y (constantly p)) nil))]
-      (swap! x (constantly nil))
-      (#'a/flush-zero-queue! (a/-domain-state x))
-      (is (every? #(alloc/allocated? sio %) before))
-      (is (= {:v [5 6]} (field @y :extra)))
-      (swap! y (constantly nil))
-      (#'a/flush-zero-queue! (a/-domain-state y))
-      (is (not-any? #(alloc/allocated? sio %) before)))))))
+     (let [dom (a/atom-domain nil)
+           x (a/lookup-or-create-mmap-atom! dom "record/reclaim" nil)
+           y (a/lookup-or-create-mmap-atom! dom "record/share" nil)
+           sio (:sio (a/-domain-state x))]
+       (swap! x (fn [_] (e/with-meta (e/assoc (->Point [1 2] {:k [3 4]}) :extra {:v [5 6]}) {:m [7 8]})))
+       (let [before (a/read-pinned x (fn [p] (set (retire/reach sio (d/-root-header-off p)))))
+             _ (a/read-pinned x (fn [p] (swap! y (constantly p)) nil))]
+         (swap! x (constantly nil))
+         (#'a/flush-zero-queue! (a/-domain-state x))
+         (is (every? #(alloc/allocated? sio %) before))
+         (is (= {:v [5 6]} (field @y :extra)))
+         (swap! y (constantly nil))
+         (#'a/flush-zero-queue! (a/-domain-state y))
+         (is (not-any? #(alloc/allocated? sio %) before)))))))
 
 (deftest readers-keep-extension-fields
   (let [original (e/assoc (->Point 11 12) :extension 13)
@@ -219,5 +219,4 @@
     (is (= original copy))
     (is (= 13 (field copy :extension)))
     (is (not (str/includes? text "record-extmap__")))
-    (is (not (str/includes? text "record-meta__"))))
-)
+    (is (not (str/includes? text "record-meta__")))))

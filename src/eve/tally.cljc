@@ -730,31 +730,31 @@
               prefix (subvec entries 0 k)
               suffix (subvec entries k)
               parked (volatile! 0)
-          park! (fn [o k] (vswap! parked inc) (swap! q conj {:off o :kind k :epoch (ep-fn)}))
-          stay (volatile! [])
-          n (reduce
-             (fn [n {:keys [off kind epoch] :as e}]
-               (let [row (alloc/desc-of sio off)
-                     t (if row (flags row) 0)
-                     c (if row (cnt row) CDEAD)]
-                 (cond
-                   (or (zero? (bit-and t F_QUEUED)) (== c CDEAD)) n
-                   (not (zero? c))
-                   (do (clear-flags! row (bit-or F_QUEUED F_TAKEN))
-                       (when (and (zero? (cnt row)) (not (set-flag! row F_QUEUED)))
-                         (park! off kind))
-                       n)
-                   (not (zero? (bit-and t F_TAKEN)))
-                   (do (clear-flags! row F_TAKEN) (park! off kind) n)
-                   (not (or (nil? safe) (< epoch safe)))
-                   (do (vswap! stay conj e) n)
+              park! (fn [o k] (vswap! parked inc) (swap! q conj {:off o :kind k :epoch (ep-fn)}))
+              stay (volatile! [])
+              n (reduce
+                 (fn [n {:keys [off kind epoch] :as e}]
+                   (let [row (alloc/desc-of sio off)
+                         t (if row (flags row) 0)
+                         c (if row (cnt row) CDEAD)]
+                     (cond
+                       (or (zero? (bit-and t F_QUEUED)) (== c CDEAD)) n
+                       (not (zero? c))
+                       (do (clear-flags! row (bit-or F_QUEUED F_TAKEN))
+                           (when (and (zero? (cnt row)) (not (set-flag! row F_QUEUED)))
+                             (park! off kind))
+                           n)
+                       (not (zero? (bit-and t F_TAKEN)))
+                       (do (clear-flags! row F_TAKEN) (park! off kind) n)
+                       (not (or (nil? safe) (< epoch safe)))
+                       (do (vswap! stay conj e) n)
                    ;; THE STILL-ZERO CHECK, one CAS: 0 -> CDEAD claims it (a hold racing in is refused)
-                   (not (zero? (ccas row 0 CDEAD)))
-                   (do (vswap! stay conj e) n)
-                   :else
-                   (do (clear-flags! row (bit-or F_QUEUED F_PUB))
-                       (+ n (free-claimed! sio off kind row t park!))))))
-             0 prefix)]
+                       (not (zero? (ccas row 0 CDEAD)))
+                       (do (vswap! stay conj e) n)
+                       :else
+                       (do (clear-flags! row (bit-or F_QUEUED F_PUB))
+                           (+ n (free-claimed! sio off kind row t park!))))))
+                 0 prefix)]
           ;; restore in epoch order: stays, then the unexamined
           ;; suffix, then whatever this scan (park!) or a concurrent
           ;; conj put on q since the drain — all stamped at the

@@ -64,11 +64,11 @@
        []
        (into {}
              (concat
-               (map (fn [c] [(cls c) (wh "array" (fn [x] (vec x)))]) seq-classes)
-               [[(cls "eve.flat.freeze.FrozenValue")
-                 (wh (fn [x] (if (sequential? (freeze/deliver-flat x)) "array" "map"))
-                     (fn [x] (let [h (freeze/deliver-flat x)]
-                               (if (sequential? h) (vec h) (into {} h)))))]])))
+              (map (fn [c] [(cls c) (wh "array" (fn [x] (vec x)))]) seq-classes)
+              [[(cls "eve.flat.freeze.FrozenValue")
+                (wh (fn [x] (if (sequential? (freeze/deliver-flat x)) "array" "map"))
+                    (fn [x] (let [h (freeze/deliver-flat x)]
+                              (if (sequential? h) (vec h) (into {} h)))))]])))
 
      (defn- seq-bytes
        "The framed stream bytes of a sequential flat value:
@@ -92,14 +92,14 @@
        []
        (into {}
              (concat
-               (map (fn [c] [(cls c) (wh "eve/flatseq" (fn [x] (seq-bytes x)))])
-                    seq-classes)
-               [[(cls "eve.flat.freeze.FrozenValue")
-                 (wh (fn [x] (if (sequential? (freeze/deliver-flat x))
-                               "eve/flatseq" "map"))
-                     (fn [x] (if (sequential? (freeze/deliver-flat x))
-                               (seq-bytes x)
-                               (into {} (freeze/deliver-flat x)))))]])))
+              (map (fn [c] [(cls c) (wh "eve/flatseq" (fn [x] (seq-bytes x)))])
+                   seq-classes)
+              [[(cls "eve.flat.freeze.FrozenValue")
+                (wh (fn [x] (if (sequential? (freeze/deliver-flat x))
+                              "eve/flatseq" "map"))
+                    (fn [x] (if (sequential? (freeze/deliver-flat x))
+                              (seq-bytes x)
+                              (into {} (freeze/deliver-flat x)))))]])))
 
      (defn flat-read-handlers
        "Tag -> ReadHandler reopening the flat forms written

@@ -34,167 +34,165 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:clj (do
-(defn u8 ^long [^bytes c ^long i] (bit-and (long (aget c (int i))) 0xFF))
-(defn u16 ^long [^bytes c ^long i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
-(defn u32 ^long [^bytes c ^long i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
-(defn i32 ^long [^bytes c ^long i] (long (unchecked-int (u32 c i))))
-(defn i64 ^long [^bytes c ^long i] (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32)))
-(defn f64 ^double [^bytes c ^long i] #?(:jank (enc/long-bits->double (i64 c i)) :default (Double/longBitsToDouble (i64 c i))))
-(defn f32 ^double [^bytes c ^long i] #?(:jank (enc/int-bits->float (unchecked-int (u32 c i))) :default (Float/intBitsToFloat (unchecked-int (u32 c i)))))
+          (defn u8 ^long [^bytes c ^long i] (bit-and (long (aget c (int i))) 0xFF))
+          (defn u16 ^long [^bytes c ^long i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
+          (defn u32 ^long [^bytes c ^long i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
+          (defn i32 ^long [^bytes c ^long i] (long (unchecked-int (u32 c i))))
+          (defn i64 ^long [^bytes c ^long i] (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32)))
+          (defn f64 ^double [^bytes c ^long i] #?(:jank (enc/long-bits->double (i64 c i)) :default (Double/longBitsToDouble (i64 c i))))
+          (defn f32 ^double [^bytes c ^long i] #?(:jank (enc/int-bits->float (unchecked-int (u32 c i))) :default (Float/intBitsToFloat (unchecked-int (u32 c i)))))
 
-(defn varint
-  "[value next-pos] — unsigned LEB128."
-  [^bytes c ^long i]
-  (loop [i i sh 0 v 0]
-    (let [x (u8 c i)]
-      (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
-          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+          (defn varint
+            "[value next-pos] — unsigned LEB128."
+            [^bytes c ^long i]
+            (loop [i i sh 0 v 0]
+              (let [x (u8 c i)]
+                (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
+                    (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
 
-(defn varint-v
-  "The unsigned LEB128 value at i (varint's first element, no vector)."
-  ^long [^bytes c ^long i]
-  (loop [i i sh 0 v 0]
-    (let [x (u8 c i)]
-      (if (< x 128) (bit-or v (bit-shift-left x sh))
-          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+          (defn varint-v
+            "The unsigned LEB128 value at i (varint's first element, no vector)."
+            ^long [^bytes c ^long i]
+            (loop [i i sh 0 v 0]
+              (let [x (u8 c i)]
+                (if (< x 128) (bit-or v (bit-shift-left x sh))
+                    (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
 
-(defn varint-next
-  "The position after the unsigned LEB128 at i (varint's second element)."
-  ^long [^bytes c ^long i]
-  (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
+          (defn varint-next
+            "The position after the unsigned LEB128 at i (varint's second element)."
+            ^long [^bytes c ^long i]
+            (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
 
-(defn varint-len ^long [^long v]
-  (loop [v v n 1] (if (< v 128) n (recur (unsigned-bit-shift-right v 7) (inc n)))))
+          (defn varint-len ^long [^long v]
+            (loop [v v n 1] (if (< v 128) n (recur (unsigned-bit-shift-right v 7) (inc n)))))
 
-(defn- hb
-  "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
-  ^long [^bytes bs ^long i]
-  (bit-and (long (aget bs (int i))) 0xFF))
+          (defn- hb
+            "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
+            ^long [^bytes bs ^long i]
+            (bit-and (long (aget bs (int i))) 0xFF))
 
-(defn- ba-copy-of
-  "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating
+          (defn- ba-copy-of
+            "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating
    shrink) spelled with the portable eve.encoding surface, so the
    writer's buffer growth reads the same on hosts with no
    java.util.Arrays (jank, ClojureCLR)."
-  ^bytes [^bytes b ^long n]
-  (let [nb (byte-array (int n))]
-    (enc/arraycopy b 0 nb 0 (int (min (alength b) n)))
-    nb))
+            ^bytes [^bytes b ^long n]
+            (let [nb (byte-array (int n))]
+              (enc/arraycopy b 0 nb 0 (int (min (alength b) n)))
+              nb))
 
-(defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
-(defn chunk-bytes "The host byte array of chunk c." ^bytes [c] c)
-(defn chunk-len "The byte length of chunk c." ^long [^bytes c] (alength c))
-(defn utf8 "The string of the n utf-8 bytes at off." [^bytes c off n] (enc/utf8-string c off n))
-))
+          (defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
+          (defn chunk-bytes "The host byte array of chunk c." ^bytes [c] c)
+          (defn chunk-len "The byte length of chunk c." ^long [^bytes c] (alength c))
+          (defn utf8 "The string of the n utf-8 bytes at off." [^bytes c off n] (enc/utf8-string c off n))))
 
 #?(:lpy (do
 ;; basilisp: the :clj arm's reads over its byte array (array('b'), signed, as
 ;; the JVM's), with Python's unbounded ints sign-converted where the JVM
 ;; wraps, and the float widths through eve.encoding (no Float/Double here)
-(defn u8 [c i] (bit-and (aget c i) 0xFF))
-(defn u16 [c i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
-(defn u32 [c i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
-(defn i32 [c i] (let [v (u32 c i)] (if (>= v 0x80000000) (- v 0x100000000) v)))
-(defn i64 [c i]
-  (let [v (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32))]
-    (if (>= v 0x8000000000000000) (- v 0x10000000000000000) v)))
-(defn f64 [c i] (enc/long-bits->double (i64 c i)))
-(defn f32 [c i] (enc/int-bits->float (u32 c i)))
+          (defn u8 [c i] (bit-and (aget c i) 0xFF))
+          (defn u16 [c i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
+          (defn u32 [c i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
+          (defn i32 [c i] (let [v (u32 c i)] (if (>= v 0x80000000) (- v 0x100000000) v)))
+          (defn i64 [c i]
+            (let [v (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32))]
+              (if (>= v 0x8000000000000000) (- v 0x10000000000000000) v)))
+          (defn f64 [c i] (enc/long-bits->double (i64 c i)))
+          (defn f32 [c i] (enc/int-bits->float (u32 c i)))
 
-(defn varint
-  "[value next-pos] — unsigned LEB128."
-  [c i]
-  (loop [i i sh 0 v 0]
-    (let [x (u8 c i)]
-      (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
-          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+          (defn varint
+            "[value next-pos] — unsigned LEB128."
+            [c i]
+            (loop [i i sh 0 v 0]
+              (let [x (u8 c i)]
+                (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
+                    (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
 
-(defn varint-v
-  "The unsigned LEB128 value at i (varint's first element, no vector)."
-  [c i]
-  (loop [i i sh 0 v 0]
-    (let [x (u8 c i)]
-      (if (< x 128) (bit-or v (bit-shift-left x sh))
-          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+          (defn varint-v
+            "The unsigned LEB128 value at i (varint's first element, no vector)."
+            [c i]
+            (loop [i i sh 0 v 0]
+              (let [x (u8 c i)]
+                (if (< x 128) (bit-or v (bit-shift-left x sh))
+                    (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
 
-(defn varint-next
-  "The position after the unsigned LEB128 at i (varint's second element)."
-  [c i]
-  (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
+          (defn varint-next
+            "The position after the unsigned LEB128 at i (varint's second element)."
+            [c i]
+            (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
 
-(defn varint-len [v]
-  (loop [v v n 1] (if (< v 128) n (recur (bit-shift-right v 7) (inc n)))))
+          (defn varint-len [v]
+            (loop [v v n 1] (if (< v 128) n (recur (bit-shift-right v 7) (inc n)))))
 
-(defn- hb
-  "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
-  [bs i]
-  (bit-and (aget bs i) 0xFF))
+          (defn- hb
+            "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
+            [bs i]
+            (bit-and (aget bs i) 0xFF))
 
-(defn- ba-copy-of
-  "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating shrink)."
-  [b n]
-  (let [nb (byte-array n)]
-    (enc/arraycopy b 0 nb 0 (min (alength b) n))
-    nb))
+          (defn- ba-copy-of
+            "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating shrink)."
+            [b n]
+            (let [nb (byte-array n)]
+              (enc/arraycopy b 0 nb 0 (min (alength b) n))
+              nb))
 
-(defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
-(defn chunk-bytes "The host byte array of chunk c." [c] c)
-(defn chunk-len "The byte length of chunk c." [c] (alength c))
-(defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))
-))
+          (defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
+          (defn chunk-bytes "The host byte array of chunk c." [c] c)
+          (defn chunk-len "The byte length of chunk c." [c] (alength c))
+          (defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))))
 
 #?(:cljs (do
-(defn u8 [^js/Uint8Array c i] (aget c i))
-(defn u16 [^js/Uint8Array c i] (+ (aget c i) (* 256 (aget c (inc i)))))
-(defn u32 [^js/Uint8Array c i]
+           (defn u8 [^js/Uint8Array c i] (aget c i))
+           (defn u16 [^js/Uint8Array c i] (+ (aget c i) (* 256 (aget c (inc i)))))
+           (defn u32 [^js/Uint8Array c i]
   ;; arithmetic, not bit ops: a u32 does not fit a CLJS 32-bit bit-op
-  (+ (u16 c i) (* 65536 (u16 c (+ i 2)))))
-(defn i32
-  "The i32 at i. `|0` (bit-or 0) is the wrap: cljs.core/unchecked-int is
+             (+ (u16 c i) (* 65536 (u16 c (+ i 2)))))
+           (defn i32
+             "The i32 at i. `|0` (bit-or 0) is the wrap: cljs.core/unchecked-int is
    Math truncation (fix), which leaves a u32 past 2^31 positive — the
    moved ri32's spelling answered 4294967295 for FF FF FF FF (measured on
    Node, U2a ledger); the conformance test pins -1."
-  [^js/Uint8Array c i] (bit-or (u32 c i) 0))
+             [^js/Uint8Array c i] (bit-or (u32 c i) 0))
 
-(defn- dv-of
-  "A DataView over the whole of Uint8Array b (its buffer, its offset)."
-  [^js/Uint8Array b]
-  (js/DataView. (.-buffer b) (.-byteOffset b) (.-byteLength b)))
+           (defn- dv-of
+             "A DataView over the whole of Uint8Array b (its buffer, its offset)."
+             [^js/Uint8Array b]
+             (js/DataView. (.-buffer b) (.-byteOffset b) (.-byteLength b)))
 
-(defn i64
-  "The i64 at i as a js/BigInt (exact past 2^53)."
-  [c i]
-  (.getBigInt64 (dv-of c) i true))
-(defn f64 [c i] (.getFloat64 (dv-of c) i true))
-(defn f32 [c i] (.getFloat32 (dv-of c) i true))
+           (defn i64
+             "The i64 at i as a js/BigInt (exact past 2^53)."
+             [c i]
+             (.getBigInt64 (dv-of c) i true))
+           (defn f64 [c i] (.getFloat64 (dv-of c) i true))
+           (defn f32 [c i] (.getFloat32 (dv-of c) i true))
 
-(defn varint
-  "[value next-pos] — unsigned LEB128, accumulated arithmetically
+           (defn varint
+             "[value next-pos] — unsigned LEB128, accumulated arithmetically
    (CLJS bit ops are 32-bit). Chunk offsets stay under 2^32, counts
    under 2^53, so a JS number is exact."
-  [^js/Uint8Array c i]
-  (loop [i i mul 1 v 0]
-    (let [x (aget c i)]
-      (if (< x 128) [(+ v (* (bit-and x 127) mul)) (inc i)]
-          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
+             [^js/Uint8Array c i]
+             (loop [i i mul 1 v 0]
+               (let [x (aget c i)]
+                 (if (< x 128) [(+ v (* (bit-and x 127) mul)) (inc i)]
+                     (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
 
-(defn varint-v
-  "The unsigned LEB128 value at i (varint's first element, no vector)."
-  [^js/Uint8Array c i]
-  (loop [i i mul 1 v 0]
-    (let [x (aget c i)]
-      (if (< x 128) (+ v (* (bit-and x 127) mul))
-          (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
+           (defn varint-v
+             "The unsigned LEB128 value at i (varint's first element, no vector)."
+             [^js/Uint8Array c i]
+             (loop [i i mul 1 v 0]
+               (let [x (aget c i)]
+                 (if (< x 128) (+ v (* (bit-and x 127) mul))
+                     (recur (inc i) (* mul 128) (+ v (* (bit-and x 127) mul)))))))
 
-(defn varint-next
-  "The position after the unsigned LEB128 at i (varint's second element)."
-  [^js/Uint8Array c i]
-  (loop [i i] (if (< (aget c i) 128) (inc i) (recur (inc i)))))
+           (defn varint-next
+             "The position after the unsigned LEB128 at i (varint's second element)."
+             [^js/Uint8Array c i]
+             (loop [i i] (if (< (aget c i) 128) (inc i) (recur (inc i)))))
 
-(defn varint-len [v]
-  (loop [v v n 1] (if (< v 128) n (recur (quot v 128) (inc n)))))
+           (defn varint-len [v]
+             (loop [v v n 1] (if (< v 128) n (recur (quot v 128) (inc n)))))
 
-(defn- hb [^js/Uint8Array bs i] (aget bs i))
+           (defn- hb [^js/Uint8Array bs i] (aget bs i))
 
 ;; i64 math on this host runs in BigInt space: an i64 does not fit a
 ;; JS number. The writer's i64 takes either. Written without js*: nbb's
@@ -203,17 +201,16 @@
 ;; ClojureScript — the type tag is Object.prototype.toString's.
 ;; (js/typeof is not the portable spelling either: nbb resolves it to a
 ;; broken call.)
-(defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x)))
-(defn- bi [x] (if (bigint? x) x (js/BigInt x)))
+           (defn- bigint? [x] (= "[object BigInt]" (.call (.-toString (.-prototype js/Object)) x)))
+           (defn- bi [x] (if (bigint? x) x (js/BigInt x)))
 
-(def ^:private utf8-decoder (js/TextDecoder. "utf-8"))
+           (def ^:private utf8-decoder (js/TextDecoder. "utf-8"))
 
-(defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
-(defn chunk-bytes "The host byte array of chunk c." [c] c)
-(defn chunk-len "The byte length of chunk c." [c] (.-length c))
-(defn utf8 "The string of the n utf-8 bytes at off." [c off n]
-  (.decode utf8-decoder (.subarray c off (+ off n))))
-))
+           (defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
+           (defn chunk-bytes "The host byte array of chunk c." [c] c)
+           (defn chunk-len "The byte length of chunk c." [c] (.-length c))
+           (defn utf8 "The string of the n utf-8 bytes at off." [c off n]
+             (.decode utf8-decoder (.subarray c off (+ off n))))))
 
 ;; ---------------------------------------------------------------------------
 ;; in place: compares over the stored bytes, no copy of them
@@ -297,31 +294,31 @@
 ;; chunk.cljc they were raw, u8, …): on the protocol hosts a protocol
 ;; method is a var of this namespace, and u8 / u16 / u32 / i64 / f64 /
 ;; varint are this namespace's reads.
-#?@(:jank [(defprotocol IBuf
-             (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
-             (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
-             (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
-    :bb [(defprotocol IBuf
-           (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
-           (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
-           (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
-    :glj [(defprotocol IBuf
-            (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
-            (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
-            (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
-    :clj [(definterface IBuf
-            (^bytes wRaw [])
-            (^long wPos [])
-            (wSeek [^long p])
-            (wU8 [^long v])
-            (wU16 [^long v])
-            (wU32 [^long v])
-            (wI64 [^long v])
-            (wF64 [^double v])
-            (wVarint [^long v])
-            (wBytes [^bytes src ^long off ^long n])
-            (wOff [^long v])
-            (wPatchU32 [^long at ^long v]))])
+          #?@(:jank [(defprotocol IBuf
+                       (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+                       (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+                       (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
+              :bb [(defprotocol IBuf
+                     (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+                     (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+                     (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
+              :glj [(defprotocol IBuf
+                      (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+                      (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+                      (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
+              :clj [(definterface IBuf
+                      (^bytes wRaw [])
+                      (^long wPos [])
+                      (wSeek [^long p])
+                      (wU8 [^long v])
+                      (wU16 [^long v])
+                      (wU32 [^long v])
+                      (wI64 [^long v])
+                      (wF64 [^double v])
+                      (wVarint [^long v])
+                      (wBytes [^bytes src ^long off ^long n])
+                      (wOff [^long v])
+                      (wPatchU32 [^long at ^long v]))])
 
 ;; glojure's Buf: its deftype compiles set! of a mutable field to
 ;; vreset! on the field's VALUE, but the constructor stores raw
@@ -330,123 +327,122 @@
 ;; mutable fields hold volatiles from construction and every method
 ;; works through them; the method surface and byte layout are the
 ;; shared text's, unchanged.
-#?(:glj (do
-(deftype Buf [b p ^long width]
-  IBuf
-  (wRaw [_] @b)
-  (wPos [_] @p)
-  (wSeek [_ np] (vreset! p np))
-  (wU8 [_ v] (when (>= @p (alength @b)) (vreset! b (ba-copy-of @b (* 2 (alength @b)))))
-    (aset @b (int @p) (unchecked-byte v)) (vreset! p (inc @p)))
-  (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
-  (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
-  (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
-  (wF64 [this v] (buf-i64 this #?(:jank (enc/double->long-bits v) :default (Double/doubleToRawLongBits v))))
-  (wVarint [this v]
-    (loop [v v]
-      (if (< v 128) (buf-u8 this v)
-          (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
-  (wBytes [_ src off n]
-    (when (> (+ @p n) (alength @b)) (vreset! b (ba-copy-of @b (max (+ @p n) (* 2 (alength @b))))))
-    (enc/arraycopy src off @b @p n) (vreset! p (+ @p n)))
-  (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
-  (wPatchU32 [_ at v]
-    (aset @b (int at) (unchecked-byte v))
-    (aset @b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8)))
-    (aset @b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16)))
-    (aset @b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24)))))
+          #?(:glj (do
+                    (deftype Buf [b p ^long width]
+                      IBuf
+                      (wRaw [_] @b)
+                      (wPos [_] @p)
+                      (wSeek [_ np] (vreset! p np))
+                      (wU8 [_ v] (when (>= @p (alength @b)) (vreset! b (ba-copy-of @b (* 2 (alength @b)))))
+                        (aset @b (int @p) (unchecked-byte v)) (vreset! p (inc @p)))
+                      (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
+                      (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
+                      (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
+                      (wF64 [this v] (buf-i64 this #?(:jank (enc/double->long-bits v) :default (Double/doubleToRawLongBits v))))
+                      (wVarint [this v]
+                        (loop [v v]
+                          (if (< v 128) (buf-u8 this v)
+                              (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
+                      (wBytes [_ src off n]
+                        (when (> (+ @p n) (alength @b)) (vreset! b (ba-copy-of @b (max (+ @p n) (* 2 (alength @b))))))
+                        (enc/arraycopy src off @b @p n) (vreset! p (+ @p n)))
+                      (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
+                      (wPatchU32 [_ at v]
+                        (aset @b (int at) (unchecked-byte v))
+                        (aset @b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8)))
+                        (aset @b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16)))
+                        (aset @b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24)))))
 
-(defn buf
-  "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
-  [width]
-  (Buf. (volatile! (byte-array 256)) (volatile! 0) width)))
+                    (defn buf
+                      "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
+                      [width]
+                      (Buf. (volatile! (byte-array 256)) (volatile! 0) width)))
 ;; bb: aset on a byte array costs 13–16 µs a byte under SCI, aset-byte 47 ns (flat lanes U2b, measured bb 1.12.218);
 ;; the JVM keeps its hinted aset, a primitive store
-:default (do
-(deftype Buf [^:unsynchronized-mutable ^bytes b
-              ^:unsynchronized-mutable ^long p
-              ^long width]
-  IBuf
-  (wRaw [_] b)
-  (wPos [_] p)
-  (wSeek [_ np] (set! p np))
-  (wU8 [_ v] (when (>= p (alength b)) (set! b (ba-copy-of b (* 2 (alength b)))))
-    #?(:bb (aset-byte b (int p) (unchecked-byte v)) :default (aset b (int p) (unchecked-byte v))) (set! p (inc p)))
-  (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
-  (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
-  (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
-  (wF64 [this v] (buf-i64 this #?(:jank (enc/double->long-bits v) :default (Double/doubleToRawLongBits v))))
-  (wVarint [this v]
-    (loop [v v]
-      (if (< v 128) (buf-u8 this v)
-          (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
-  (wBytes [_ src off n]
-    (when (> (+ p n) (alength b)) (set! b (ba-copy-of b (max (+ p n) (* 2 (alength b))))))
-    (enc/arraycopy src off b p n) (set! p (+ p n)))
-  (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
-  (wPatchU32 [_ at v]
-    #?(:bb (aset-byte b (int at) (unchecked-byte v)) :default (aset b (int at) (unchecked-byte v)))
-    #?(:bb (aset-byte b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))) :default (aset b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))))
-    #?(:bb (aset-byte b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))) :default (aset b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))))
-    #?(:bb (aset-byte b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))) :default (aset b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))))))
+             :default (do
+                        (deftype Buf [^:unsynchronized-mutable ^bytes b
+                                      ^:unsynchronized-mutable ^long p
+                                      ^long width]
+                          IBuf
+                          (wRaw [_] b)
+                          (wPos [_] p)
+                          (wSeek [_ np] (set! p np))
+                          (wU8 [_ v] (when (>= p (alength b)) (set! b (ba-copy-of b (* 2 (alength b)))))
+                            #?(:bb (aset-byte b (int p) (unchecked-byte v)) :default (aset b (int p) (unchecked-byte v))) (set! p (inc p)))
+                          (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
+                          (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
+                          (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
+                          (wF64 [this v] (buf-i64 this #?(:jank (enc/double->long-bits v) :default (Double/doubleToRawLongBits v))))
+                          (wVarint [this v]
+                            (loop [v v]
+                              (if (< v 128) (buf-u8 this v)
+                                  (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
+                          (wBytes [_ src off n]
+                            (when (> (+ p n) (alength b)) (set! b (ba-copy-of b (max (+ p n) (* 2 (alength b))))))
+                            (enc/arraycopy src off b p n) (set! p (+ p n)))
+                          (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
+                          (wPatchU32 [_ at v]
+                            #?(:bb (aset-byte b (int at) (unchecked-byte v)) :default (aset b (int at) (unchecked-byte v)))
+                            #?(:bb (aset-byte b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))) :default (aset b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))))
+                            #?(:bb (aset-byte b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))) :default (aset b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))))
+                            #?(:bb (aset-byte b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))) :default (aset b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))))))
 
-(defn buf
-  "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
-  [width]
-  (Buf. (byte-array 256) 0 width))))
-))
+                        (defn buf
+                          "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
+                          [width]
+                          (Buf. (byte-array 256) 0 width))))))
 
 ;; The writer's buffer on ClojureScript: the same method surface the
 ;; shared writer calls, over a growable Uint8Array + DataView. The
 ;; position field is `p`, as on the JVM, so it cannot collide with the
 ;; pos method.
 #?(:cljs (do
-(deftype Buf [^:mutable b ^:mutable dv ^:mutable p width]
-  Object
-  (grow [_ need]
-    (when (< (.-length b) need)
-      (let [nb (js/Uint8Array. (max (* 2 (.-length b)) need))]
-        (.set nb b)
-        (set! b nb)
-        (set! dv (js/DataView. (.-buffer nb))))))
-  (raw [_] b)
-  (pos [_] p)
-  (seek [_ np] (set! p np))
-  (u8 [this v]
-    (when (>= p (.-length b)) (.grow this (* 2 (.-length b))))
-    (aset b p (bit-and v 0xFF))
-    (set! p (inc p)))
-  (u16 [this v] (.u8 this v) (.u8 this (bit-shift-right (bit-and v 0xFFFF) 8)))
-  (u32 [this v]
-    (.grow this (+ p 4))
-    (.setUint32 dv p (bit-and v 0xFFFFFFFF) true)
-    (set! p (+ p 4)))
-  (i64 [this v]
-    (.grow this (+ p 8))
-    (.setBigInt64 dv p (bi v) true)
-    (set! p (+ p 8)))
-  (f64 [this v]
-    (.grow this (+ p 8))
-    (.setFloat64 dv p v true)
-    (set! p (+ p 8)))
-  (varint [this v]
-    (loop [v v]
-      (if (< v 128) (.u8 this v)
-          (do (.u8 this (bit-or (bit-and v 127) 128))
-              (recur (quot v 128))))))
-  (putBytes [this src off n]
-    (.grow this (+ p n))
-    (.set b (.subarray src off (+ off n)) p)
-    (set! p (+ p n)))
-  (off [this v] (if (== width 2) (.u16 this v) (.u32 this v)))
-  (patchU32 [_ at v]
-    (.setUint32 dv at (bit-and v 0xFFFFFFFF) true)))
+           (deftype Buf [^:mutable b ^:mutable dv ^:mutable p width]
+             Object
+             (grow [_ need]
+               (when (< (.-length b) need)
+                 (let [nb (js/Uint8Array. (max (* 2 (.-length b)) need))]
+                   (.set nb b)
+                   (set! b nb)
+                   (set! dv (js/DataView. (.-buffer nb))))))
+             (raw [_] b)
+             (pos [_] p)
+             (seek [_ np] (set! p np))
+             (u8 [this v]
+               (when (>= p (.-length b)) (.grow this (* 2 (.-length b))))
+               (aset b p (bit-and v 0xFF))
+               (set! p (inc p)))
+             (u16 [this v] (.u8 this v) (.u8 this (bit-shift-right (bit-and v 0xFFFF) 8)))
+             (u32 [this v]
+               (.grow this (+ p 4))
+               (.setUint32 dv p (bit-and v 0xFFFFFFFF) true)
+               (set! p (+ p 4)))
+             (i64 [this v]
+               (.grow this (+ p 8))
+               (.setBigInt64 dv p (bi v) true)
+               (set! p (+ p 8)))
+             (f64 [this v]
+               (.grow this (+ p 8))
+               (.setFloat64 dv p v true)
+               (set! p (+ p 8)))
+             (varint [this v]
+               (loop [v v]
+                 (if (< v 128) (.u8 this v)
+                     (do (.u8 this (bit-or (bit-and v 127) 128))
+                         (recur (quot v 128))))))
+             (putBytes [this src off n]
+               (.grow this (+ p n))
+               (.set b (.subarray src off (+ off n)) p)
+               (set! p (+ p n)))
+             (off [this v] (if (== width 2) (.u16 this v) (.u32 this v)))
+             (patchU32 [_ at v]
+               (.setUint32 dv at (bit-and v 0xFFFFFFFF) true)))
 
-(defn buf
-  "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
-  [width]
-  (let [b (js/Uint8Array. 1024)]
-    (->Buf b (js/DataView. (.-buffer b)) 0 width)))))
+           (defn buf
+             "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
+             [width]
+             (let [b (js/Uint8Array. 1024)]
+               (->Buf b (js/DataView. (.-buffer b)) 0 width)))))
 
 ;; The one portable spelling of the writer calls (declared above): on
 ;; the JVM the body is the IBuf interface call, on cljs the Buf method
@@ -486,7 +482,7 @@
   "The element byte size of dense column kind k (FORMAT-V1 §5)."
   ^long [k]
   (case (int k) (1 2 3) 1 (4 5) 2 (6 7 8) 4 (9 10 11) 8
-    (throw (ex-info "eve.flat-io: not a dense column kind" {:type ::not-dense :kind k}))))
+        (throw (ex-info "eve.flat-io: not a dense column kind" {:type ::not-dense :kind k}))))
 
 (defn- elem-at
   "Element i of the dense column of kind k whose data starts at data-off."

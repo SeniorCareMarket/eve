@@ -157,7 +157,7 @@
         (cond
           (nil? mkdir-err)
           (do (try (.writeFileSync fs owner-path
-                      (str (.-pid js/process) " " token))
+                                   (str (.-pid js/process) " " token))
                    (catch :default e
                      (try (.rmdirSync fs dir) (catch :default _ nil))
                      (throw e)))

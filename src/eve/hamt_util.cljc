@@ -38,14 +38,14 @@
 
 (defn- ubyte
   "Read unsigned byte from buf at index i."
-   [^bytes buf ^long i]
+  [^bytes buf ^long i]
   (bit-and (aget buf i) 0xFF))
 
 (defn portable-hash-bytes
   "Murmur3_x86_32 hash (seed=0) of byte array.
    Returns int32, identical on every host. Primitive-hinted (2026-11-05, jvm-heap-grade
    step 3): boxed, this was ~175-215 ns over 6 key bytes on the JVM."
-   [^bytes buf]
+  [^bytes buf]
   (let [len     (alength buf)
         nblocks (i32/ushr len 2)]
     (loop [i 0, h 0]

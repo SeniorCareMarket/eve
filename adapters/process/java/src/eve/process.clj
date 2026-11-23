@@ -21,13 +21,13 @@
   "Call f every period-ms until stop-timer!. Returns the host's handle."
   [period-ms f]
   (let [t (Thread. ^Runnable
-                  (fn []
-                    (loop []
-                      (when (try (Thread/sleep (long period-ms))
-                                 true
-                                 (catch InterruptedException _ false))
-                        (f)
-                        (recur)))))]
+           (fn []
+             (loop []
+               (when (try (Thread/sleep (long period-ms))
+                          true
+                          (catch InterruptedException _ false))
+                 (f)
+                 (recur)))))]
     (.setDaemon t true)
     (.setName t "eve-heartbeat")
     (.start t)

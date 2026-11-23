@@ -24,9 +24,9 @@
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
   (:import
    [java.io RandomAccessFile]
    [java.nio ByteBuffer ByteOrder MappedByteBuffer]
@@ -372,7 +372,7 @@
           ;; .release is not reachable from bb; close releases (measured).
           (try (f) (finally (.close fl))))
         (let [^FileChannel c (FileChannel/open path (into-array OpenOption [StandardOpenOption/READ
-                                                                             StandardOpenOption/WRITE]))]
+                                                                            StandardOpenOption/WRITE]))]
           (try (.lock c (long byte-off) 4 false) (f) (finally (.close c))))))))
 
 ;; ------------------------------------------------------------------
@@ -498,8 +498,8 @@
 (defn- native-notify [api seg off n]
   (if SYS-futex
     (int ((:syscall api) SYS-futex
-          ((:segment api) (+ ((:address api) seg) (long off)) 4)
-          1 (int n) (:null api) (:null api) 0))
+                         ((:segment api) (+ ((:address api) seg) (long off)) 4)
+                         1 (int n) (:null api) (:null api) 0))
     0))
 
 (defn- native-sync [api seg off len]
@@ -647,7 +647,7 @@
                                    size " bytes")
                               {:byte-off byte-off :len len :size size})))
             ((:read-array api) ((:segment api) (+ ((:address api) seg) byte-off) len)
-             :byte (int len))))))
+                               :byte (int len))))))
 
   (-write-bytes! [_ byte-off src]
     (let [byte-off (long byte-off)
@@ -659,7 +659,7 @@
                                size " bytes")
                           {:byte-off byte-off :len n :size size})))
         ((:write-array api) ((:segment api) (+ ((:address api) seg) byte-off) n)
-         :byte src)))
+                            :byte src)))
     nil)
 
   mem/ISyncableRegion
@@ -692,7 +692,6 @@
     (binding [*out* *err*]
       (println (str "eve.region: bb native CAS unavailable (" (:reason probe)
                     ") — regions are lock-only (BbMmapRegion, file-lock hold protocol)")))))
-
 
 (defn- open-mmap-region-niolock
   "Open (or create) a file-backed shared memory region at path-str,

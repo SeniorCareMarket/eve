@@ -48,9 +48,9 @@
         blobs (atom {})
         store (store-handler blobs store-secret)
         g (net/gateway domain {:endpoint (str origin "/gw") :domain-id domain-id :api-key api-key
-                              :presign (net/hmac-presigner {:url store-url :secret store-secret :now-ms pool/now-ms})
-                              :platform {:request store}
-                              :deny net/hello-over-disk-only})
+                               :presign (net/hmac-presigner {:url store-url :secret store-secret :now-ms pool/now-ms})
+                               :platform {:request store}
+                               :deny net/hello-over-disk-only})
         handler (fn [req]
                   (cond (str/includes? (:url req) "/blobs/") (store req)
                         (str/includes? (:url req) "/v1/domains/") ((:handle g) req)

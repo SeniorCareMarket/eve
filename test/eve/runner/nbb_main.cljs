@@ -29,7 +29,7 @@
             [eve.read-region-test]
             [eve.domain-open-test]
             [eve.record-test]
-   [eve.deftype.type-id-test]
+            [eve.deftype.type-id-test]
             [eve.type-io-test]
             [eve.rrb-vector-test]
             [eve.thread-host :as thread-host]

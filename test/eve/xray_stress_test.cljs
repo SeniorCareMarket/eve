@@ -62,51 +62,51 @@
 (defn- run-rapid-key-rotation [the-atom]
   (dotimes [i 200]
     (step! (str "rot-assoc-" i)
-      (fn [] (swap! the-atom assoc (keyword (str "rot" (mod i 20))) i)))))
+           (fn [] (swap! the-atom assoc (keyword (str "rot" (mod i 20))) i)))))
 
 (defn- run-growth-shrink-cycles [the-atom]
   (dotimes [round 5]
     (step! (str "grow-" round)
-      (fn [] (swap! the-atom merge
-                    (into {} (map (fn [i] [(keyword (str "gs" round "-" i)) (* round i)])
-                                  (range 40))))))
+           (fn [] (swap! the-atom merge
+                         (into {} (map (fn [i] [(keyword (str "gs" round "-" i)) (* round i)])
+                                       (range 40))))))
     (step! (str "shrink-" round)
-      (fn [] (swap! the-atom
-                    (fn [m] (reduce dissoc m
-                                    (map (fn [i] (keyword (str "gs" round "-" i)))
-                                         (range 40)))))))))
+           (fn [] (swap! the-atom
+                         (fn [m] (reduce dissoc m
+                                         (map (fn [i] (keyword (str "gs" round "-" i)))
+                                              (range 40)))))))))
 
 (defn- run-large-value-churn [the-atom]
   ;; Small values
   (dotimes [i 50]
     (step! (str "small-" i)
-      (fn [] (swap! the-atom assoc (keyword (str "sm" i)) i))))
+           (fn [] (swap! the-atom assoc (keyword (str "sm" i)) i))))
   ;; Medium values (strings)
   (dotimes [i 30]
     (step! (str "medium-" i)
-      (fn [] (swap! the-atom assoc (keyword (str "med" i))
-                    (apply str (repeat 50 (str "val-" i)))))))
+           (fn [] (swap! the-atom assoc (keyword (str "med" i))
+                         (apply str (repeat 50 (str "val-" i)))))))
   ;; Large values (nested maps)
   (dotimes [i 10]
     (step! (str "large-" i)
-      (fn [] (swap! the-atom assoc (keyword (str "lg" i))
-                    (into {} (map (fn [j] [(keyword (str "n" j)) (* i j)]) (range 20)))))))
+           (fn [] (swap! the-atom assoc (keyword (str "lg" i))
+                         (into {} (map (fn [j] [(keyword (str "n" j)) (* i j)]) (range 20)))))))
   ;; Clean up all
   (step! "large-cleanup"
-    (fn [] (swap! the-atom
-                  (fn [m]
-                    (reduce dissoc m
-                            (concat
-                              (map #(keyword (str "sm" %)) (range 50))
-                              (map #(keyword (str "med" %)) (range 30))
-                              (map #(keyword (str "lg" %)) (range 10)))))))))
+         (fn [] (swap! the-atom
+                       (fn [m]
+                         (reduce dissoc m
+                                 (concat
+                                  (map #(keyword (str "sm" %)) (range 50))
+                                  (map #(keyword (str "med" %)) (range 30))
+                                  (map #(keyword (str "lg" %)) (range 10)))))))))
 
 (defn- run-dissoc-heavy [the-atom]
   (dotimes [round 3]
     (step! (str "dissoc-add-" round)
-      (fn [] (swap! the-atom merge
-                    (into {} (map (fn [i] [(keyword (str "dh" round "-" i)) i])
-                                  (range 100))))))
+           (fn [] (swap! the-atom merge
+                         (into {} (map (fn [i] [(keyword (str "dh" round "-" i)) i])
+                                       (range 100))))))
     (dotimes [i 100]
       (swap! the-atom dissoc (keyword (str "dh" round "-" i)))
       (when (zero? (mod i 10))
@@ -116,19 +116,19 @@
   (dotimes [i 50]
     (if (even? i)
       (step! (str "reset-" i)
-        (fn [] (reset! the-atom {:cycle i :type :reset})))
+             (fn [] (reset! the-atom {:cycle i :type :reset})))
       (step! (str "swap-after-reset-" i)
-        (fn [] (swap! the-atom assoc :cycle i :type :swap))))))
+             (fn [] (swap! the-atom assoc :cycle i :type :swap))))))
 
 (defn- run-deep-tree [the-atom]
   ;; Build up many keys one at a time, validating after each batch
   (dotimes [i 100]
     (step! (str "deep-assoc-" i)
-      (fn [] (swap! the-atom assoc (keyword (str "deep" i)) {:v i :s (str "val-" i)}))))
+           (fn [] (swap! the-atom assoc (keyword (str "deep" i)) {:v i :s (str "val-" i)}))))
   ;; Remove them one at a time
   (dotimes [i 100]
     (step! (str "deep-dissoc-" i)
-      (fn [] (swap! the-atom dissoc (keyword (str "deep" i)))))))
+           (fn [] (swap! the-atom dissoc (keyword (str "deep" i)))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Main test
@@ -146,8 +146,8 @@
     ;; registers type encoders that change HAMT allocation routing, causing
     ;; DataView bounds errors. Separate build avoids this.
     (let [the-atom (a/atom-domain {}
-                                    :sab-size (* 8 1024 1024)
-                                    :max-blocks 8192)]
+                                  :sab-size (* 8 1024 1024)
+                                  :max-blocks 8192)]
       (reset! the-env (.-s-atom-env the-atom))
       ;; Initial check on empty atom
       (is (check! "INIT-empty") "Initial state should be valid")

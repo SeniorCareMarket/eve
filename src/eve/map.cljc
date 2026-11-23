@@ -121,7 +121,7 @@
 
 (defn- bytes-length
   "Get byte array length."
-   [^bytes ba]
+  [^bytes ba]
   (alength ba))
 
 ;;=============================================================================
@@ -130,12 +130,12 @@
 
 (defn- hashes-start-off
   "Byte offset within node where hash array starts (after children)."
-   ^long [^long node-bm]
+  ^long [^long node-bm]
   (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm))))
 
 (defn- kv-data-start-off
   "Byte offset within node where KV data starts."
-   ^long [^long data-bm ^long node-bm]
+  ^long [^long data-bm ^long node-bm]
   (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm)) (* 4 (popcount32 data-bm))))
 
 ;;=============================================================================
@@ -144,7 +144,7 @@
 
 (defn- skip-kv-at
   "Skip a KV pair at pos within node, returning offset after it."
-   [sio ^long node-off ^long pos]
+  [sio ^long node-off ^long pos]
   (let [key-len (alloc/node-i32 sio node-off pos)
         val-off (+ pos 4 key-len)
         val-len (alloc/node-i32 sio node-off val-off)]
@@ -154,7 +154,7 @@
 ;; and boxed per lookup; jvm-heap-grade step 3).
 (defn- kv-pos
   "The offset of the di-th KV pair in the node at node-off, its KV data starting at kvs."
-   [sio ^long node-off ^long kvs ^long di]
+  [sio ^long node-off ^long kvs ^long di]
   (let [a (alloc/node-heap-array sio node-off)]
     (if (nil? a)
       (loop [i 0 p kvs]
@@ -169,7 +169,7 @@
 
 (defn- calc-kv-size
   "Calculate total bytes for a KV pair."
-   [kb vb]
+  [kb vb]
   (+ 4 (bytes-length kb) 4 (bytes-length vb)))
 
 (defn- key-bytes-match?
@@ -215,7 +215,7 @@
 
 (defn- node-kv-total-size
   "Read the cached kv-total-size from header. If 0, compute by scanning."
-   [sio ^long node-off ^long data-bm ^long node-bm]
+  [sio ^long node-off ^long data-bm ^long node-bm]
   (let [cached (slab/read-u16 sio node-off 2)]
     (if (pos? cached)
       cached
@@ -228,7 +228,7 @@
 
 (defn- node-byte-size
   "Compute total byte size of a bitmap node."
-   [sio ^long node-off ^long data-bm ^long node-bm]
+  [sio ^long node-off ^long data-bm ^long node-bm]
   (+ NODE_HEADER_SIZE
      (* 4 (popcount32 node-bm))
      (* 4 (popcount32 data-bm))
@@ -487,8 +487,8 @@
    packed because a fn taking primitives supports at most 4 args; a
    missing shift0 is 0 (hamt-get passes key-bytes+hash's [kb kh])."
   [sio ^long root-off kbkh not-found]
-    (let [kb (nth kbkh 0)
-          kh (long (nth kbkh 1))]
+  (let [kb (nth kbkh 0)
+        kh (long (nth kbkh 1))]
     (loop [off root-off shift (long (nth kbkh 2 0))]
       (if (== off NIL_OFFSET)
         not-found
@@ -501,7 +501,7 @@
                 (cond
                   (has-bit? nbm bit)
                   (recur (alloc/node-i32 sio off
-                                        (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                                         (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
                          (+ shift SHIFT_STEP))
 
                   (has-bit? dbm bit)
@@ -565,66 +565,66 @@
   [sio ^long root-off kbkh not-found]
   (let [kb (nth kbkh 0)
         kh (long (nth kbkh 1))]
-  (loop [off root-off shift (long (nth kbkh 2 0))]
-    (if (== off NIL_OFFSET)
-      not-found
-      (let [view (alloc/node-view sio off)]
-        (if (nil? view)
-          (hamt-get-words sio off [kb kh shift] not-found)
-          (let [arr (nth view 0)
-                rgn (nth view 1)
-                base (long (nth view 2))
-                nt (alloc/parts-u8 arr rgn base 0)]
-            (case (int nt)
+    (loop [off root-off shift (long (nth kbkh 2 0))]
+      (if (== off NIL_OFFSET)
+        not-found
+        (let [view (alloc/node-view sio off)]
+          (if (nil? view)
+            (hamt-get-words sio off [kb kh shift] not-found)
+            (let [arr (nth view 0)
+                  rgn (nth view 1)
+                  base (long (nth view 2))
+                  nt (alloc/parts-u8 arr rgn base 0)]
+              (case (int nt)
               ;; Bitmap node
-              1 (let [dbm (alloc/parts-i32 arr rgn base 4)
-                      nbm (alloc/parts-i32 arr rgn base 8)
-                      bit (node-bit dbm nbm kh shift)]
-                  (cond
-                    (has-bit? nbm bit)
-                    (recur (alloc/parts-i32 arr rgn base
-                                          (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
-                           (+ shift SHIFT_STEP))
+                1 (let [dbm (alloc/parts-i32 arr rgn base 4)
+                        nbm (alloc/parts-i32 arr rgn base 8)
+                        bit (node-bit dbm nbm kh shift)]
+                    (cond
+                      (has-bit? nbm bit)
+                      (recur (alloc/parts-i32 arr rgn base
+                                              (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                             (+ shift SHIFT_STEP))
 
-                    (has-bit? dbm bit)
-                    (let [di (get-index dbm bit)
-                          hs (hashes-start-off nbm)
-                          sh (alloc/parts-i32 arr rgn base (+ hs (* di 4)))]
-                      (if (not (== sh kh))
-                        not-found
-                        (let [kvs (kv-data-start-off dbm nbm)
-                              pos (- (kv-pos-parts arr rgn (+ base kvs) di) base)
-                              kl (alloc/parts-i32 arr rgn base pos)]
-                          (if (and (== kl (bytes-length kb))
-                                   (alloc/parts-bytes-equal? arr rgn (+ base pos 4) kb))
-                            (let [vo (+ pos 4 kl)
-                                  vl (alloc/parts-i32 arr rgn base vo)
-                                  vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
-                              (deserialize-value-bytes vb sio))
-                            not-found))))
-
-                    :else not-found))
-
-              ;; Collision node
-              3 (let [ch (alloc/parts-i32 arr rgn base 4)]
-                  (if (not (== ch kh))
-                    not-found
-                    (let [cc (alloc/parts-u8 arr rgn base 1)]
-                      (loop [i 0 pos COLLISION_HEADER_SIZE]
-                        (if (>= i cc)
+                      (has-bit? dbm bit)
+                      (let [di (get-index dbm bit)
+                            hs (hashes-start-off nbm)
+                            sh (alloc/parts-i32 arr rgn base (+ hs (* di 4)))]
+                        (if (not (== sh kh))
                           not-found
-                          (let [kl (alloc/parts-i32 arr rgn base pos)]
+                          (let [kvs (kv-data-start-off dbm nbm)
+                                pos (- (kv-pos-parts arr rgn (+ base kvs) di) base)
+                                kl (alloc/parts-i32 arr rgn base pos)]
                             (if (and (== kl (bytes-length kb))
                                      (alloc/parts-bytes-equal? arr rgn (+ base pos 4) kb))
                               (let [vo (+ pos 4 kl)
                                     vl (alloc/parts-i32 arr rgn base vo)
                                     vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
                                 (deserialize-value-bytes vb sio))
-                              (let [vo (+ pos 4 kl)]
-                                (recur (inc i) (+ vo 4 (alloc/parts-i32 arr rgn base vo)))))))))))
+                              not-found))))
+
+                      :else not-found))
+
+              ;; Collision node
+                3 (let [ch (alloc/parts-i32 arr rgn base 4)]
+                    (if (not (== ch kh))
+                      not-found
+                      (let [cc (alloc/parts-u8 arr rgn base 1)]
+                        (loop [i 0 pos COLLISION_HEADER_SIZE]
+                          (if (>= i cc)
+                            not-found
+                            (let [kl (alloc/parts-i32 arr rgn base pos)]
+                              (if (and (== kl (bytes-length kb))
+                                       (alloc/parts-bytes-equal? arr rgn (+ base pos 4) kb))
+                                (let [vo (+ pos 4 kl)
+                                      vl (alloc/parts-i32 arr rgn base vo)
+                                      vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
+                                  (deserialize-value-bytes vb sio))
+                                (let [vo (+ pos 4 kl)]
+                                  (recur (inc i) (+ vo 4 (alloc/parts-i32 arr rgn base vo)))))))))))
 
               ;; Unknown
-              not-found))))))))
+                not-found))))))))
 
 (defn- hamt-get
   "Find key k in HAMT rooted at root-off. Returns value or not-found.
@@ -679,7 +679,7 @@
               (cond
                 (has-bit? nbm bit)
                 (recur (alloc/node-i32 sio off
-                                      (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                                       (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
                        (+ shift SHIFT_STEP))
 
                 (has-bit? dbm bit)
@@ -1034,7 +1034,7 @@
 
 (defn write-map-header!
   "Allocate and write a 12-byte EveHashMap header. Returns slab offset."
-   [sio ^long cnt ^long root-off]
+  [sio ^long cnt ^long root-off]
   (let [off (slab/alloc! sio 12)]
     (slab/write-u8! sio off 0 EveHashMap-type-id)
     (slab/write-u8! sio off 1 1) ;; flags
@@ -1197,8 +1197,6 @@
   (invoke [this k] (hamt-get sio__ root-off k nil))
   (invoke [this k nf] (hamt-get sio__ root-off k nf))
 
-  
-
   d/IDirectSerialize
   (-direct-serialize [this] offset__)
 
@@ -1227,7 +1225,7 @@
 
   java.lang.Iterable
   (iterator [this]
-            (clojure.lang.SeqIterator. (.seq this)))
+    (clojure.lang.SeqIterator. (.seq this)))
 
   java.util.Map
   (size [_] (int cnt))
@@ -1249,9 +1247,9 @@
   java.lang.Object
   (toString [this] (pr-str this))
   (equals [this other]
-          (clojure.lang.APersistentMap/mapEquals this other))
+    (clojure.lang.APersistentMap/mapEquals this other))
   (hashCode [this]
-            (enc/map-hash-code this))) ;; end eve/deftype
+    (enc/map-hash-code this))) ;; end eve/deftype
 
 ;;=============================================================================
 ;; Constructors
@@ -1266,54 +1264,54 @@
   (and (satisfies? d/ISabpType x) (= EveHashMap-type-key (d/-sabp-type-key x))))
 
 (do
-(defn- make-hash-map
-  "Internal constructor: allocate header, create EveHashMap."
-  [sio ^long cnt ^long root-off]
-  (let [hdr (write-map-header! sio cnt root-off)]
-    (EveHashMap. sio hdr)))
+  (defn- make-hash-map
+    "Internal constructor: allocate header, create EveHashMap."
+    [sio ^long cnt ^long root-off]
+    (let [hdr (write-map-header! sio cnt root-off)]
+      (EveHashMap. sio hdr)))
 
-(defn hash-map-from-header
-  "Reconstruct an EveHashMap from an existing header offset."
-  ([sio ^long header-off]
-   (EveHashMap. sio header-off)))
+  (defn hash-map-from-header
+    "Reconstruct an EveHashMap from an existing header offset."
+    ([sio ^long header-off]
+     (EveHashMap. sio header-off)))
 
-(defn empty-hash-map
-  "Create an empty Eve hash map.
+  (defn empty-hash-map
+    "Create an empty Eve hash map.
    0-arity: uses platform default sio (fresh heap domain on JVM).
    1-arity: explicit sio."
-  ([] (empty-hash-map (default-sio)))
-  ([sio] (make-hash-map sio 0 NIL_OFFSET)))
+    ([] (empty-hash-map (default-sio)))
+    ([sio] (make-hash-map sio 0 NIL_OFFSET)))
 
-(declare build-batch-map batch-map-entry)
+  (declare build-batch-map batch-map-entry)
 
-(defn hash-map
-  "Create an Eve hash map from key-value pairs.
+  (defn hash-map
+    "Create an Eve hash map from key-value pairs.
    If first arg satisfies ISlabIO, uses it as sio and rest as kvs.
    Otherwise uses platform default sio and all args as kvs.
    (hash-map) → empty map
    (hash-map k v ...) → map with pairs
    (hash-map sio k v ...) → map with pairs using explicit sio"
-  [& args]
-  (let [;; the explicit sio first: (default-sio) throws outside a swap!/domain
+    [& args]
+    (let [;; the explicit sio first: (default-sio) throws outside a swap!/domain
         ;; context, so it is only asked for when no sio was given
-        [sio kvs] (if (and (seq args) (satisfies? alloc/ISlabIO (first args)))
-                    [(first args) (rest args)]
-                    [(default-sio) args])]
+          [sio kvs] (if (and (seq args) (satisfies? alloc/ISlabIO (first args)))
+                      [(first args) (rest args)]
+                      [(default-sio) args])]
     ;; one batch build, as a transient over the empty map does: reducing assoc kept
     ;; every intermediate version allocated (reclaim-test a-constructor-keeps-only-its-tree)
-    (if (seq kvs)
-      (build-batch-map sio (mapv (fn [[k v]] (batch-map-entry sio k v)) (partition 2 kvs)))
-      (empty-hash-map sio))))
+      (if (seq kvs)
+        (build-batch-map sio (mapv (fn [[k v]] (batch-map-entry sio k v)) (partition 2 kvs)))
+        (empty-hash-map sio))))
 
-(defn into-hash-map
-  "Create an Eve hash map from a collection of [k v] entries.
+  (defn into-hash-map
+    "Create an Eve hash map from a collection of [k v] entries.
    1-arity: uses platform default sio (fresh heap domain on JVM).
    2-arity: explicit sio."
-  ([coll] (into-hash-map (default-sio) coll))
-  ([sio coll]
-   (reduce (fn [m [k v]] (ecore/assoc m k v))
-           (empty-hash-map sio)
-           coll))))
+    ([coll] (into-hash-map (default-sio) coll))
+    ([sio coll]
+     (reduce (fn [m [k v]] (ecore/assoc m k v))
+             (empty-hash-map sio)
+             coll))))
 
 ;;=============================================================================
 ;; Transients: empty-source builds batch canonical encoded entries and write
@@ -1370,7 +1368,6 @@
   (let [kb (serialize-key-bytes k)]
     (fn [m m'] (collect-key-path-diff-offsets m m' kb))))
 
-
 (defn- build-batch-map [sio entries]
   (let [entries (batch/unique-entries entries)
         root (if (empty? entries) NIL_OFFSET
@@ -1379,7 +1376,7 @@
                   (fn [db nb data children]
                     (let [kv-size (reduce (fn [n [_ kb vb]] (+ n (calc-kv-size kb vb))) 0 data)
                           off (slab/alloc! sio (+ NODE_HEADER_SIZE (* 4 (count children))
-                                                 (* 4 (count data)) kv-size))]
+                                                  (* 4 (count data)) kv-size))]
                       (slab/write-u8! sio off 0 NODE_TYPE_BITMAP)
                       (slab/write-u8! sio off 1 0)
                       (slab/write-u16! sio off 2 (kv-total-cache kv-size))
@@ -1400,56 +1397,56 @@
     [kh kb (serialize-val-bytes sio v)]))
 
 (do
-     (eve/host-deftype TransientEveHashMap [^:volatile-mutable m sio ^:volatile-mutable pending]
-       clojure.lang.ITransientMap
-       (assoc [this k v]
-         (if pending
-           (set! pending (conj! pending (batch-map-entry sio k v)))
-           (set! m (edit sio m #(assoc % k v) (key-walk k))))
-         this)
-       (without [this k]
-         (when pending
-           (set! m (build-batch-map sio (persistent! pending)))
-           (set! pending nil))
-         (set! m (edit sio m #(dissoc % k) (key-walk k)))
-         this)
-       (persistent [_]
-         (when pending
-           (set! m (build-batch-map sio (persistent! pending)))
-           (set! pending nil))
-         (alloc/stop-logging! sio) m)
-       (conj [this x]
-         (if (or (map-entry? x) (and (vector? x) (= 2 (count x))))
-           (if pending
-             (set! pending (conj! pending (batch-map-entry sio (nth x 0) (nth x 1))))
-             (set! m (edit sio m #(assoc % (nth x 0) (nth x 1)) (key-walk (nth x 0)))))
-           (do
-             (when pending
-               (set! m (build-batch-map sio (persistent! pending)))
-               (set! pending nil))
-             (set! m (edit sio m #(conj % x)))))
-         this)
-       clojure.lang.Counted
-       (count [_]
-         (when pending
-           (set! m (build-batch-map sio (persistent! pending)))
-           (set! pending nil))
-         (count m))
-       clojure.lang.ILookup
-       (valAt [_ k]
-         (when pending
-           (set! m (build-batch-map sio (persistent! pending)))
-           (set! pending nil))
-         (get m k))
-       (valAt [_ k nf]
-         (when pending
-           (set! m (build-batch-map sio (persistent! pending)))
-           (set! pending nil))
-         (get m k nf)))
-     (defn ->transient-map [m]
-       (let [sio (alloc/transient-scope (d/-eve-sio m))]
-         (->TransientEveHashMap (hash-map-from-header sio (d/-root-header-off m)) sio
-                                (when (zero? (count m)) (transient []))))))
+  (eve/host-deftype TransientEveHashMap [^:volatile-mutable m sio ^:volatile-mutable pending]
+                    clojure.lang.ITransientMap
+                    (assoc [this k v]
+                           (if pending
+                             (set! pending (conj! pending (batch-map-entry sio k v)))
+                             (set! m (edit sio m #(assoc % k v) (key-walk k))))
+                           this)
+                    (without [this k]
+                             (when pending
+                               (set! m (build-batch-map sio (persistent! pending)))
+                               (set! pending nil))
+                             (set! m (edit sio m #(dissoc % k) (key-walk k)))
+                             this)
+                    (persistent [_]
+                                (when pending
+                                  (set! m (build-batch-map sio (persistent! pending)))
+                                  (set! pending nil))
+                                (alloc/stop-logging! sio) m)
+                    (conj [this x]
+                          (if (or (map-entry? x) (and (vector? x) (= 2 (count x))))
+                            (if pending
+                              (set! pending (conj! pending (batch-map-entry sio (nth x 0) (nth x 1))))
+                              (set! m (edit sio m #(assoc % (nth x 0) (nth x 1)) (key-walk (nth x 0)))))
+                            (do
+                              (when pending
+                                (set! m (build-batch-map sio (persistent! pending)))
+                                (set! pending nil))
+                              (set! m (edit sio m #(conj % x)))))
+                          this)
+                    clojure.lang.Counted
+                    (count [_]
+                           (when pending
+                             (set! m (build-batch-map sio (persistent! pending)))
+                             (set! pending nil))
+                           (count m))
+                    clojure.lang.ILookup
+                    (valAt [_ k]
+                           (when pending
+                             (set! m (build-batch-map sio (persistent! pending)))
+                             (set! pending nil))
+                           (get m k))
+                    (valAt [_ k nf]
+                           (when pending
+                             (set! m (build-batch-map sio (persistent! pending)))
+                             (set! pending nil))
+                           (get m k nf)))
+  (defn ->transient-map [m]
+    (let [sio (alloc/transient-scope (d/-eve-sio m))]
+      (->TransientEveHashMap (hash-map-from-header sio (d/-root-header-off m)) sio
+                             (when (zero? (count m)) (transient []))))))
 
 ;;=============================================================================
 ;; Debug no-ops (API compat) and the direct map encoder
@@ -1866,33 +1863,33 @@
 
 ;; Type constructor + disposer + builder + collection writer registrations
 (eve/register-eve-type!
-    {:fast-tag    ser/FAST_TAG_SAB_MAP
-     :type-id     EveHashMap-type-id
-     :from-header hash-map-from-header
-     :dispose     dispose!
-     :builder-pred map?
-     :builder-ctor into-hash-map
-     :coll-writer {:tag :map :fn -write-map-coll!}
-     :type        EveHashMap
-     :print       :map})
+ {:fast-tag    ser/FAST_TAG_SAB_MAP
+  :type-id     EveHashMap-type-id
+  :from-header hash-map-from-header
+  :dispose     dispose!
+  :builder-pred map?
+  :builder-ctor into-hash-map
+  :coll-writer {:tag :map :fn -write-map-coll!}
+  :type        EveHashMap
+  :print       :map})
 
 ;; Backward-compat aliases
 (do
-     (defn jvm-write-map!
-       "Serialize a Clojure map to slab. Returns header offset.
+  (defn jvm-write-map!
+    "Serialize a Clojure map to slab. Returns header offset.
         Backward-compat alias for the registered :map writer.
         sio is explicit."
-       ([sio m]
-        (codec/write-collection! :map sio m))
-       ([sio _serialize-val m]
-        (codec/write-collection! :map sio m)))
+    ([sio m]
+     (codec/write-collection! :map sio m))
+    ([sio _serialize-val m]
+     (codec/write-collection! :map sio m)))
 
-     (defn jvm-eve-hash-map-from-offset
-       "Reconstruct an EveHashMap from a header offset.
+  (defn jvm-eve-hash-map-from-offset
+    "Reconstruct an EveHashMap from a header offset.
         Backward-compat alias. coll-factory arg is ignored (registry-based).
         sio is explicit."
-       ([sio header-off]
-        (hash-map-from-header sio header-off))
-       ([sio header-off _coll-factory]
-        (hash-map-from-header sio header-off))))
+    ([sio header-off]
+     (hash-map-from-header sio header-off))
+    ([sio header-off _coll-factory]
+     (hash-map-from-header sio header-off))))
 

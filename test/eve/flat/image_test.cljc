@@ -271,8 +271,8 @@
             blocks (img/image-blocks im)]
         (is (= (count (retire/reach sio root)) (count blocks)))
         (is (= 10 (count (filter (fn [r] (= (d/-root-header-off shared)
-                                             (:src-off (nth blocks (:target r)))))
-                                  (img/image-relocations im))))
+                                            (:src-off (nth blocks (:target r)))))
+                                 (img/image-relocations im))))
             "ten edges land on the one copied block")))))
 
 ;; ---------------------------------------------------------------------------------------------------------------
@@ -300,8 +300,8 @@
              (Thread/sleep 50) ;; swaps are in flight while the pin is held
              (let [im (img/detach-image v)]
                (is (= expected (d/eve->clj (img/image-value (img/open-image (img/image-bytes im))))))
-                   "the detached image is the pinned value, whole")
-               (is (= (:n expected) 0) "the pinned value predates the swaps"))))
+               "the detached image is the pinned value, whole")
+             (is (= (:n expected) 0) "the pinned value predates the swaps"))))
       (finally (reset! stop true) (.join swapper 5000)))
     (is (pos? (:n @a)) "the other thread really swapped during the detach")))
 

@@ -17,9 +17,9 @@
    ClojureScript's module slab grows on demand."
   [f]
   (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
-                                                                    2 (* 8 1024 1024) 3 (* 8 1024 1024)
-                                                                    4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
-       (f)))
+                                                                 2 (* 8 1024 1024) 3 (* 8 1024 1024)
+                                                                 4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
+    (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
 

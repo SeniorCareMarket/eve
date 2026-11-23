@@ -25,8 +25,8 @@
 
 (defn- spawn [action & args]
   (let [^js result (.spawnSync ^js cp "node"
-                      (apply array worker-script action args)
-                      #js {:encoding "utf8" :timeout 15000})]
+                               (apply array worker-script action args)
+                               #js {:encoding "utf8" :timeout 15000})]
     {:exit   (.-status result)
      :stdout (.-stdout result)
      :stderr (.-stderr result)}))

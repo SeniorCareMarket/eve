@@ -211,26 +211,26 @@
       (set! initialized? true)
       (let [slab-promises
             (into-array
-              (for [i (range d/NUM_SLAB_CLASSES)]
-                (let [cap (get capacities i (d/default-capacity-for-class i))]
-                  (init-slab! i :capacity cap :growable? growable?))))]
+             (for [i (range d/NUM_SLAB_CLASSES)]
+               (let [cap (get capacities i (d/default-capacity-for-class i))]
+                 (init-slab! i :capacity cap :growable? growable?))))]
         (init-root-sab!)
         ;; Initialize SAB-backed class 6 coalesc for overflow (>1024 byte) allocations
         (init-sab-coalesc! :growable? growable?)
         ;; Register typed array resolver for deserializer
         (codec/set-typed-array-resolver!
-          (fn [slab-offset]
-            (let [class-idx (decode-class-idx slab-offset)
-                  block-idx (decode-block-idx slab-offset)
-                  inst      (wasm/get-slab-instance class-idx)
-                  sab       (when inst (.-buffer ^js (:u8 inst)))]
-              (when sab
-                (let [block-size (d/slab-size class-idx)
-                      data-off   (aget slab-data-offsets class-idx)
-                      base       (+ data-off (* block-idx block-size))
+         (fn [slab-offset]
+           (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 inst      (wasm/get-slab-instance class-idx)
+                 sab       (when inst (.-buffer ^js (:u8 inst)))]
+             (when sab
+               (let [block-size (d/slab-size class-idx)
+                     data-off   (aget slab-data-offsets class-idx)
+                     base       (+ data-off (* block-idx block-size))
                       ;; Apply same 16-byte alignment as typed-array encoder
-                      aligned    (bit-and (+ base 15) (bit-not 15))]
-                  {:sab sab :base aligned})))))
+                     aligned    (bit-and (+ base 15) (bit-not 15))]
+                 {:sab sab :base aligned})))))
         (js/Promise.all slab-promises)))))
 
 (defn- ensure-init!
@@ -1200,7 +1200,7 @@
       (let [new-blocks (* 2 hdr-total)
             added      (- new-blocks hdr-total)
             witness    (mem/-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
-                         hdr-total new-blocks)]
+                                      hdr-total new-blocks)]
         (if (== witness hdr-total)
           ;; We won — extend both files and re-map
           (do (remap-mmap-slab! class-idx new-blocks)
@@ -1365,7 +1365,7 @@
   []
   (when (and mmap-coalesc-region mmap-coalesc-path)
     (let [result (coalesc/grow-coalesc-region!
-                   mmap-coalesc-region mmap-coalesc-max-data-size)]
+                  mmap-coalesc-region mmap-coalesc-max-data-size)]
       (when result
         (let [data-offset (aset slab-data-offsets OVERFLOW_CLASS_IDX
                                 (aget slab-data-offsets OVERFLOW_CLASS_IDX))
@@ -1386,8 +1386,8 @@
       (when (and sab (.-growable sab))
         (let [data-offset (aget slab-data-offsets OVERFLOW_CLASS_IDX)
               result      (coalesc/grow-coalesc-region!
-                            mmap-coalesc-region (- (.-maxByteLength sab) data-offset)
-                            (fn [new-size] (ensure-sab-length! sab (+ data-offset new-size))))]
+                           mmap-coalesc-region (- (.-maxByteLength sab) data-offset)
+                           (fn [new-size] (ensure-sab-length! sab (+ data-offset new-size))))]
           (when result
             (set! mmap-coalesc-cached-data-size result)
             true))))))
@@ -1421,9 +1421,9 @@
    (grow-sab-coalesc!); else it is max-data-size from the start (the OS commits
    physical pages on first touch)."
   [& {:keys [max-data-size max-desc growable?]
-       :or   {max-data-size (* 1024 1024 1024) ;; 1GB
-              max-desc      coalesc/MAX_DESCRIPTORS
-              growable?     (wasm/grow-slabs?)}}]
+      :or   {max-data-size (* 1024 1024 1024) ;; 1GB
+             max-desc      coalesc/MAX_DESCRIPTORS
+             growable?     (wasm/grow-slabs?)}}]
   (let [grow?       (and growable? (wasm/growable-sabs?))
         data-size   (if grow? (min coalesc/INITIAL_DATA_SIZE max-data-size) max-data-size)
         layout      (coalesc/coalesc-layout data-size max-desc)
@@ -1541,9 +1541,9 @@
 ;;-----------------------------------------------------------------------------
 
 (codec/set-typed-array-encoder!
-  (fn [elem]
-    (let [subtype (codec/typed-array-subtype elem)]
-      (if (and subtype (<= subtype 0x0B))
+ (fn [elem]
+   (let [subtype (codec/typed-array-subtype elem)]
+     (if (and subtype (<= subtype 0x0B))
         ;; All typed arrays → allocate SAB block, return TYPED_ARRAY pointer.
         ;; This preserves the typed array identity on deref (vs converting to EveArray).
         ;;
@@ -1552,49 +1552,49 @@
         ;; Data starts at offset+16 for 16-byte alignment (enables SIMD).
         ;; We over-allocate by up to 15 bytes to ensure the header starts at
         ;; a 16-byte aligned position within the allocated block.
-        (let [byte-view (js/Uint8Array. (.-buffer elem) (.-byteOffset elem) (.-byteLength elem))
-              byte-len (.-byteLength elem)
+       (let [byte-view (js/Uint8Array. (.-buffer elem) (.-byteOffset elem) (.-byteLength elem))
+             byte-len (.-byteLength elem)
               ;; a typed array's block is read through views of the slab (eve.typed-view): never ciphertext
-              _ (when (some? domain-ks)
-                  (throw (js/Error. "eve: an encrypted domain holds no typed array (its views would read ciphertext)")))
-              header-size 16
+             _ (when (some? domain-ks)
+                 (throw (js/Error. "eve: an encrypted domain holds no typed array (its views would read ciphertext)")))
+             header-size 16
               ;; Over-allocate by 15 to guarantee 16-byte alignment headroom:
               ;; worst case raw_offset % 16 == 1 → shift 15 bytes to align.
-              alloc-size (+ header-size byte-len 15)
+             alloc-size (+ header-size byte-len 15)
               ;; Allocate from the module slab once it has its slabs (a swap
               ;; running, or the slabs initialised); else the inline blob
-              has-slab? (or (some? d/*parent-atom*) (some? (wasm/get-slab-instance 0)))
-              alloc-result (when has-slab?
-                             (let [r (alloc alloc-size)]
-                               (when-not (:error r) r)))]
-          (if alloc-result
+             has-slab? (or (some? d/*parent-atom*) (some? (wasm/get-slab-instance 0)))
+             alloc-result (when has-slab?
+                            (let [r (alloc alloc-size)]
+                              (when-not (:error r) r)))]
+         (if alloc-result
             ;; Slab-backed: write block at aligned position, return 7-byte pointer
-            (let [slab-off (:offset alloc-result)
-                  base (resolve-dv! slab-off)
-                  dv resolved-dv
+           (let [slab-off (:offset alloc-result)
+                 base (resolve-dv! slab-off)
+                 dv resolved-dv
                   ;; Align header to 16-byte boundary
-                  aligned-offset (bit-and (+ base 15) (bit-not 15))
-                  class-idx (decode-class-idx slab-off)
-                  inst (wasm/get-slab-instance class-idx)
-                  u8 (:u8 inst)]
+                 aligned-offset (bit-and (+ base 15) (bit-not 15))
+                 class-idx (decode-class-idx slab-off)
+                 inst (wasm/get-slab-instance class-idx)
+                 u8 (:u8 inst)]
               ;; Write header: [subtype:u8][reserved:7][byte-len:u32LE][reserved:4]
-              (.setUint8 dv aligned-offset subtype)
+             (.setUint8 dv aligned-offset subtype)
               ;; reserved bytes 1-7 are implicitly zero from allocation
-              (.setUint32 dv (+ aligned-offset 8) byte-len true)
+             (.setUint32 dv (+ aligned-offset 8) byte-len true)
               ;; reserved bytes 12-15 are implicitly zero
               ;; Write data at offset+16
-              (.set u8 byte-view (+ aligned-offset 16))
+             (.set u8 byte-view (+ aligned-offset 16))
               ;; Return 7-byte pointer with slab-qualified offset
-              (codec/encode-sab-pointer ser/FAST_TAG_TYPED_ARRAY slab-off))
+             (codec/encode-sab-pointer ser/FAST_TAG_TYPED_ARRAY slab-off))
             ;; Fallback for pre-init: inline blob (old 8-byte format for compatibility)
-            (let [buf (js/Uint8Array. (+ 8 byte-len))
-                  dv (js/DataView. (.-buffer buf))]
-              (cljs.core/aset buf 0 d/DIRECT_MAGIC_0)
-              (cljs.core/aset buf 1 d/DIRECT_MAGIC_1)
-              (cljs.core/aset buf 2 ser/FAST_TAG_TYPED_ARRAY)
-              (cljs.core/aset buf 3 subtype)
-              (.setUint32 dv 4 byte-len true)
-              (.set buf byte-view 8)
-              buf)))
+           (let [buf (js/Uint8Array. (+ 8 byte-len))
+                 dv (js/DataView. (.-buffer buf))]
+             (cljs.core/aset buf 0 d/DIRECT_MAGIC_0)
+             (cljs.core/aset buf 1 d/DIRECT_MAGIC_1)
+             (cljs.core/aset buf 2 ser/FAST_TAG_TYPED_ARRAY)
+             (cljs.core/aset buf 3 subtype)
+             (.setUint32 dv 4 byte-len true)
+             (.set buf byte-view 8)
+             buf)))
         ;; Unsupported type
-        (js/Uint8Array. 0)))))
+       (js/Uint8Array. 0)))))

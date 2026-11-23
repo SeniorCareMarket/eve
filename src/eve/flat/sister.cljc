@@ -224,12 +224,12 @@
   ;; packs (record->typed-rep, own-type-instance?), and it built a set of the field keywords each time
   (let [ks (into #{} (map :keyword) (:fields desc))
         desc (assoc desc :record? (and (contains? ks :record-extmap__) (contains? ks :record-meta__)))]
-  (swap! descriptors assoc (:type-key desc) desc)
-  @converter-registered
-  (when-let [factory (:factory desc)]
-    (when-let [register! (chunk-var 'register-type!)]
-      (register! (:type-key desc) (:fingerprint desc) factory)))
-  desc))
+    (swap! descriptors assoc (:type-key desc) desc)
+    @converter-registered
+    (when-let [factory (:factory desc)]
+      (when-let [register! (chunk-var 'register-type!)]
+        (register! (:type-key desc) (:fingerprint desc) factory)))
+    desc))
 
 (defn register-sister!
   "What eve-deftype's expansion calls for every type it defines:
@@ -401,18 +401,18 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- typed-rep-of
-     "The chunk writer's typed rep for type key at fingerprint over field
+  "The chunk writer's typed rep for type key at fingerprint over field
       values (an array-map of keyword → plain value or handle): each
       value converted by the writer's own to-rep. Nil when the chunk
       is not loadable on this host."
-     [type-key fingerprint values]
-     (let [->TypedVal (chunk-var '->TypedVal)
-           to-rep (chunk-var 'to-rep)]
-       (when (and ->TypedVal to-rep)
-         (->TypedVal type-key fingerprint
-                     (into (array-map)
-                           (map (fn [[k v]] [k (to-rep v)]))
-                           values)))))
+  [type-key fingerprint values]
+  (let [->TypedVal (chunk-var '->TypedVal)
+        to-rep (chunk-var 'to-rep)]
+    (when (and ->TypedVal to-rep)
+      (->TypedVal type-key fingerprint
+                  (into (array-map)
+                        (map (fn [[k v]] [k (to-rep v)]))
+                        values)))))
 
 ;; The converters below are consulted by the chunk writer for EVERY value it
 ;; packs (to-rep: the nominal converters before its plain branches, the
@@ -446,51 +446,51 @@
   (reset! flat-rep-hook f))
 
 (defn instance->typed-rep
-     "A slab-backed eve-deftype instance, or a generated sister, as the
+  "A slab-backed eve-deftype instance, or a generated sister, as the
       chunk writer's typed rep — by the type's generated sister
       registration. Nil when the value is neither, or its type has no
       sister registered (the writer then treats it as it does today)."
-     [v]
-     (when-not (plain-value? v)
-      (or (when-let [h @flat-rep-hook] (h v))
-         (cond
+  [v]
+  (when-not (plain-value? v)
+    (or (when-let [h @flat-rep-hook] (h v))
+        (cond
        ;; an eve value array (e/make-array) packs as the vector of its
        ;; slots: it is content, not a reference (EVE-FIX-PLAN X3)
-       (and (satisfies? d/ISabpType v)
-            (= "eve/ValueArray" (d/-sabp-type-key v)))
-       (when-let [to-rep (chunk-var 'to-rep)]
-         (to-rep (vec (seq v))))
+          (and (satisfies? d/ISabpType v)
+               (= "eve/ValueArray" (d/-sabp-type-key v)))
+          (when-let [to-rep (chunk-var 'to-rep)]
+            (to-rep (vec (seq v))))
 
-       (satisfies? source/ISister v)
-       (let [tkey (source/-sister-type-key v)]
-         (when-let [desc (descriptor tkey)]
-           (typed-rep-of tkey (:fingerprint desc)
-                         (source/-field-map (source/-sister-source v)))))
+          (satisfies? source/ISister v)
+          (let [tkey (source/-sister-type-key v)]
+            (when-let [desc (descriptor tkey)]
+              (typed-rep-of tkey (:fingerprint desc)
+                            (source/-field-map (source/-sister-source v)))))
 
-       (and (satisfies? d/ISabpType v)
-            (satisfies? d/IEveSio v)
-            (satisfies? d/IEveRoot v))
-       (let [tkey (d/-sabp-type-key v)]
-         (when-let [desc (descriptor tkey)]
-           (typed-rep-of tkey (:fingerprint desc)
-                         (field-values desc v))))
+          (and (satisfies? d/ISabpType v)
+               (satisfies? d/IEveSio v)
+               (satisfies? d/IEveRoot v))
+          (let [tkey (d/-sabp-type-key v)]
+            (when-let [desc (descriptor tkey)]
+              (typed-rep-of tkey (:fingerprint desc)
+                            (field-values desc v))))
 
-       :else nil))))
+          :else nil))))
 
 (defn- record-descriptor?
-     "A descriptor for an eve.record type: defrecord's expansion adds
+  "A descriptor for an eve.record type: defrecord's expansion adds
       the two hidden fields record-extmap__ / record-meta__ to every
       record type's slab fields, and they ride the descriptor. The
       collection types' descriptors never carry them."
-     [desc]
-     (if (contains? desc :record?)
-       (:record? desc)                                 ;; register-descriptor!'s answer
-       (let [ks (into #{} (map :keyword) (:fields desc))]
-         (and (contains? ks :record-extmap__)
-              (contains? ks :record-meta__)))))
+  [desc]
+  (if (contains? desc :record?)
+    (:record? desc)                                 ;; register-descriptor!'s answer
+    (let [ks (into #{} (map :keyword) (:fields desc))]
+      (and (contains? ks :record-extmap__)
+           (contains? ks :record-meta__)))))
 
 (defn record->typed-rep
-     "A slab-backed eve.record instance as the chunk writer's typed
+  "A slab-backed eve.record instance as the chunk writer's typed
       rep — the same rep instance->typed-rep builds, claimed through
       the writer's NOMINAL converter instead: a record is map-shaped,
       so the writer's plain map branch packs its content and loses
@@ -498,16 +498,16 @@
       Registered as a nominal converter, this claims the record for
       its sister first. Nil for every non-record value, so maps,
       vectors, sets and the collection types pack as they do today."
-     [v]
-     (when (and (not (plain-value? v))
-                (satisfies? d/ISabpType v)
-                (satisfies? d/IEveSio v)
-                (satisfies? d/IEveRoot v))
-       (let [tkey (d/-sabp-type-key v)]
-         (when-let [desc (descriptor tkey)]
-           (when (record-descriptor? desc)
-             (typed-rep-of tkey (:fingerprint desc)
-                           (field-values desc v)))))))
+  [v]
+  (when (and (not (plain-value? v))
+             (satisfies? d/ISabpType v)
+             (satisfies? d/IEveSio v)
+             (satisfies? d/IEveRoot v))
+    (let [tkey (d/-sabp-type-key v)]
+      (when-let [desc (descriptor tkey)]
+        (when (record-descriptor? desc)
+          (typed-rep-of tkey (:fingerprint desc)
+                        (field-values desc v)))))))
 
 ;; ---------------------------------------------------------------------
 ;; Own-type identity for user eve-deftypes (Nov 15 2026, design call
@@ -524,50 +524,50 @@
 ;; ---------------------------------------------------------------------
 
 (defn own-type-instance?
-     "v is a slab instance of a registered user eve-deftype (not a
+  "v is a slab instance of a registered user eve-deftype (not a
       record, not a map entry): its registry entry's :host-type is v's
       own class and its sister descriptor was generated by eve-deftype."
-     [v]
-     (and (some? v)
-          (not (plain-value? v))
-          (not (map-entry? v))
-          (satisfies? d/ISabpType v)
-          (satisfies? d/IEveSio v)
-          (satisfies? d/IEveRoot v)
-          (let [tkey (d/-sabp-type-key v)
-                desc (descriptor tkey)]
-            (and desc
-                 (= :eve-deftype (:generated-by desc))
-                 (not (record-descriptor? desc))
-                 (= (type v) (:host-type (registry/lookup-type tkey)))))))
-
-(def ^:dynamic *own-type-seen*
-     "Bound by eve.flat.freeze's delivery to a volatile: the writer sets
-      it when it claims an own-type instance, so a delivery that packed
-      one nested in a collection can deliver it as its own class."
-     nil)
-
-(defn own-type->typed-rep
-     "A slab own-type instance (own-type-instance?) as the chunk
-      writer's typed rep, claimed through the NOMINAL converter so a
-      collection-shaped deftype keeps its type key. Nil otherwise."
-     [v]
-     (when (own-type-instance? v)
-       (when-let [seen *own-type-seen*] (vreset! seen true))
+  [v]
+  (and (some? v)
+       (not (plain-value? v))
+       (not (map-entry? v))
+       (satisfies? d/ISabpType v)
+       (satisfies? d/IEveSio v)
+       (satisfies? d/IEveRoot v)
        (let [tkey (d/-sabp-type-key v)
              desc (descriptor tkey)]
-         (typed-rep-of tkey (:fingerprint desc) (field-values desc v)))))
+         (and desc
+              (= :eve-deftype (:generated-by desc))
+              (not (record-descriptor? desc))
+              (= (type v) (:host-type (registry/lookup-type tkey)))))))
+
+(def ^:dynamic *own-type-seen*
+  "Bound by eve.flat.freeze's delivery to a volatile: the writer sets
+      it when it claims an own-type instance, so a delivery that packed
+      one nested in a collection can deliver it as its own class."
+  nil)
+
+(defn own-type->typed-rep
+  "A slab own-type instance (own-type-instance?) as the chunk
+      writer's typed rep, claimed through the NOMINAL converter so a
+      collection-shaped deftype keeps its type key. Nil otherwise."
+  [v]
+  (when (own-type-instance? v)
+    (when-let [seen *own-type-seen*] (vreset! seen true))
+    (let [tkey (d/-sabp-type-key v)
+          desc (descriptor tkey)]
+      (typed-rep-of tkey (:fingerprint desc) (field-values desc v)))))
 
 (defonce ^:private converter-registered
-     (delay (when-let [register! (chunk-var 'register-rep-converter!)]
-              (register! instance->typed-rep)
-              (when-let [register-nominal! (chunk-var 'register-nominal-rep-converter!)]
-                (register-nominal! record->typed-rep)
-                (register-nominal! own-type->typed-rep))
-              true)))
+  (delay (when-let [register! (chunk-var 'register-rep-converter!)]
+           (register! instance->typed-rep)
+           (when-let [register-nominal! (chunk-var 'register-nominal-rep-converter!)]
+             (register-nominal! record->typed-rep)
+             (register-nominal! own-type->typed-rep))
+           true)))
 
 (defn construct-flat
-     "Build type-key's flat sister from its slab-field values, in
+  "Build type-key's flat sister from its slab-field values, in
       declaration order — the construction path when no Eve domain
       is bound. Instantiating an eve-deftype outside a transaction
       produces the type's flat variant (John, Nov 14 2026 — the
@@ -576,28 +576,28 @@
       type's flat surface; swapped into an atom it embeds by
       reference at its position. Throws when the type has no
       sister registered."
-     [type-key field-vals]
-     (if-let [desc (descriptor type-key)]
-       (let [pack-rep (chunk-var 'pack-rep)
-             open (chunk-var 'open)]
-         (if (and pack-rep open)
-           (let [values (into (array-map)
-                              (map (fn [f v] [(:keyword f) v])
-                                   (:fields desc) field-vals))
-                 rep (typed-rep-of type-key (:fingerprint desc) values)]
-             #?(:cljs (try (open (pack-rep rep))
-                           (catch :default e
+  [type-key field-vals]
+  (if-let [desc (descriptor type-key)]
+    (let [pack-rep (chunk-var 'pack-rep)
+          open (chunk-var 'open)]
+      (if (and pack-rep open)
+        (let [values (into (array-map)
+                           (map (fn [f v] [(:keyword f) v])
+                                (:fields desc) field-vals))
+              rep (typed-rep-of type-key (:fingerprint desc) values)]
+          #?(:cljs (try (open (pack-rep rep))
+                        (catch :default e
                              ;; no type table in this host's chunk
                              ;; writer (v1): a typed rep is refused
                              ;; as unwritable, and the type's flat
                              ;; form here is its field map — the
                              ;; posture the writer's own scan
                              ;; docstring names for this host.
-                             (if (= :eve.flat.chunk/unwritable (:type (ex-data e)))
-                               (open (pack-rep ((chunk-var 'to-rep) values)))
-                               (throw e))))
-                :default (open (pack-rep rep))))
-           (throw (ex-info "construct-flat: the flat path is unavailable on this host"
-                           {:eve.flat/error :no-flat-path :type-key type-key}))))
-       (throw (ex-info "construct-flat: the type has no flat sister registered"
-                       {:eve.flat/error :no-sister :type-key type-key}))))
+                          (if (= :eve.flat.chunk/unwritable (:type (ex-data e)))
+                            (open (pack-rep ((chunk-var 'to-rep) values)))
+                            (throw e))))
+             :default (open (pack-rep rep))))
+        (throw (ex-info "construct-flat: the flat path is unavailable on this host"
+                        {:eve.flat/error :no-flat-path :type-key type-key}))))
+    (throw (ex-info "construct-flat: the type has no flat sister registered"
+                    {:eve.flat/error :no-sister :type-key type-key}))))

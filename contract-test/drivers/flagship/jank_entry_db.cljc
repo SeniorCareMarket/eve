@@ -17,4 +17,4 @@
                              :e5-name (:name e5)
                              :e5-age (:age e5)})
     (println :jank-entry-db-ok (and (= 20 n) (= "base-5" (:name e5))
-                                     (= 25 (:age e5))))))
+                                    (= 25 (:age e5))))))

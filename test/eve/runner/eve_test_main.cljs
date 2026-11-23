@@ -100,7 +100,6 @@
    [eve.net.ed25519-test :as net-ed25519-test]
    [eve.net.bytes-codec-test :as net-bytes-codec-test]))
 
-
 ;; Isolated namespace support
 (def ^:private isolated-nss
   #{'eve.map-test
@@ -155,30 +154,30 @@
 
 (defn- run-slab! []
   (t/run-tests
-    'eve.map-test
-    'eve.vec-test
-    'eve.vec-retire-test
-    'eve.reclaim-test
-    'eve.tally-test
-    'eve.read-region-test
-    'eve.list-test
-    'eve.set-test))
+   'eve.map-test
+   'eve.vec-test
+   'eve.vec-retire-test
+   'eve.reclaim-test
+   'eve.tally-test
+   'eve.read-region-test
+   'eve.list-test
+   'eve.set-test))
 
 (defn- run-slab-grow!
   "The slab suites and batch2's growth tests over slabs that start small and grow (ps/init! :growable? true, a
    browser's default; Node's slabs hold their capacity from the start)."
   []
   (t/run-tests
-    'eve.batch2-validation-test
-    'eve.map-test
-    'eve.vec-test
-    'eve.vec-retire-test
-    'eve.reclaim-test
-    'eve.tally-test
-    'eve.read-region-test
-    'eve.list-test
-    'eve.set-test
-    'eve.large-scale-test))
+   'eve.batch2-validation-test
+   'eve.map-test
+   'eve.vec-test
+   'eve.vec-retire-test
+   'eve.reclaim-test
+   'eve.tally-test
+   'eve.read-region-test
+   'eve.list-test
+   'eve.set-test
+   'eve.large-scale-test))
 
 (defn- run-large-scale! []
   (t/run-tests 'eve.large-scale-test))
@@ -203,16 +202,16 @@
 
 (defn- run-deftype! []
   (t/run-tests
-    'eve.deftype-test
-    'eve.type-io-test
-    'eve.record-test
-    'eve.deftype.type-id-test))
+   'eve.deftype-test
+   'eve.type-io-test
+   'eve.record-test
+   'eve.deftype.type-id-test))
 
 (defn- run-validation! []
   (t/run-tests
-    'eve.batch2-validation-test
-    'eve.batch3-validation-test
-    'eve.batch4-validation-test))
+   'eve.batch2-validation-test
+   'eve.batch3-validation-test
+   'eve.batch4-validation-test))
 
 (defn- run-typed-array! []
   (t/run-tests 'eve.typed-array-test))
@@ -352,49 +351,49 @@
 
 (defn- run-all! []
   (t/run-tests
-    'eve.deftype-test
-    'eve.type-io-test
-    'eve.array-test
-    'eve.map-test
-    'eve.vec-test
-    'eve.vec-retire-test
-    'eve.reclaim-test
-    'eve.tally-test
-    'eve.read-region-test
-    'eve.list-test
-    'eve.set-test
-    'eve.large-scale-test
-    'eve.epoch-gc-test
-    'eve.obj-test
-    'eve.batch2-validation-test
-    'eve.batch3-validation-test
-    'eve.batch4-validation-test
-    'eve.sorted-migration-test
-    'eve.record-test
-    'eve.portable-surface-test
-    'eve.deftype.type-id-test
-    'eve.typed-array-test
-    'eve.dataset-test
-    'eve.array-hosts-test
-    'eve.tensor-test
-    'eve.eve-bytes-fixture-test
-    'eve.char-key-test
-    'eve.hamt-util-test
-    'eve.coalesc-align-test
-    'eve.numeric-tags-test
-    'eve.numeric-test
-    'eve.overflow-test
-    'eve.collection-hash-test
-    'eve.reference-tag-test
-    'eve.big-value-test
-    'eve.sorted-coll-test
-    'eve.keyring-test
-    'eve.int-key-nested-value-test
-    'eve.value-buffer-test
-    'eve.thread-host-test
-    'eve.thread-test
-    'eve.thread-meta-test
-    'eve.thread-fold-test))
+   'eve.deftype-test
+   'eve.type-io-test
+   'eve.array-test
+   'eve.map-test
+   'eve.vec-test
+   'eve.vec-retire-test
+   'eve.reclaim-test
+   'eve.tally-test
+   'eve.read-region-test
+   'eve.list-test
+   'eve.set-test
+   'eve.large-scale-test
+   'eve.epoch-gc-test
+   'eve.obj-test
+   'eve.batch2-validation-test
+   'eve.batch3-validation-test
+   'eve.batch4-validation-test
+   'eve.sorted-migration-test
+   'eve.record-test
+   'eve.portable-surface-test
+   'eve.deftype.type-id-test
+   'eve.typed-array-test
+   'eve.dataset-test
+   'eve.array-hosts-test
+   'eve.tensor-test
+   'eve.eve-bytes-fixture-test
+   'eve.char-key-test
+   'eve.hamt-util-test
+   'eve.coalesc-align-test
+   'eve.numeric-tags-test
+   'eve.numeric-test
+   'eve.overflow-test
+   'eve.collection-hash-test
+   'eve.reference-tag-test
+   'eve.big-value-test
+   'eve.sorted-coll-test
+   'eve.keyring-test
+   'eve.int-key-nested-value-test
+   'eve.value-buffer-test
+   'eve.thread-host-test
+   'eve.thread-test
+   'eve.thread-meta-test
+   'eve.thread-fold-test))
 
 ;; Suite registry
 (def ^:private suite-runners

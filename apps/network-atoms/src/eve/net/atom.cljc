@@ -58,15 +58,15 @@
 (declare deref swap! reset! compare-and-set!)
 
 (eve/host-deftype NetAtom [cfg platform state]
-  clojure.lang.IDeref
-  (deref [this] (deref this))
-  clojure.lang.IAtom
-  (swap [this f] (swap! this (fn [v] (f v))))
-  (swap [this f a] (swap! this (fn [v] (f v a))))
-  (swap [this f a b] (swap! this (fn [v] (f v a b))))
-  (swap [this f a b more] (swap! this (fn [v] (apply f v a b more))))
-  (compareAndSet [this old new] (compare-and-set! this old new))
-  (reset [this new] (reset! this new)))
+                  clojure.lang.IDeref
+                  (deref [this] (deref this))
+                  clojure.lang.IAtom
+                  (swap [this f] (swap! this (fn [v] (f v))))
+                  (swap [this f a] (swap! this (fn [v] (f v a))))
+                  (swap [this f a b] (swap! this (fn [v] (f v a b))))
+                  (swap [this f a b more] (swap! this (fn [v] (apply f v a b more))))
+                  (compareAndSet [this old new] (compare-and-set! this old new))
+                  (reset [this new] (reset! this new)))
 
 (defn remote-atom
   "a handle on the network atom cfg names, its effects run over the host's platform (eve.net.platform: its http and
@@ -244,9 +244,9 @@
         held-by-kb (into {} (map (fn [[k e]] [(:kb e) k]) held))
         parsed (mapv (fn [[kb vb]] {:kb kb :vb vb :k (snap/trunk-value kb)}) raw)
         changed (filterv (fn [{:keys [kb vb]}]
-                            (let [hk (held-by-kb kb) h (and hk (get held hk))]
-                              (not (and h (= vb (:vb h))))))
-                          parsed)
+                           (let [hk (held-by-kb kb) h (and hk (get held hk))]
+                             (not (and h (= vb (:vb h))))))
+                         parsed)
         now-kbs (set (map :kb parsed))
         removed (filterv (fn [[_ e]] (not (contains? now-kbs (:kb e)))) held)
         ref-keys (keep (fn [{:keys [vb]}] (let [x (snap/unserialize vb)] (when (snap/ref? x) (second x)))) changed)]

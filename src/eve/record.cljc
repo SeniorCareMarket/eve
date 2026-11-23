@@ -109,9 +109,9 @@
         (throw (ex-info "functions can't be stored in Eve memory; pass them as call arguments"
                         {:eve.record/error :function :path path})))
       (try
-      (binding [ser/*shared-write* true] (codec/encode-key x))
-      (catch #?(:cljs :default :lpy python/Exception :default Exception) _
-        (fail! path "private REF/host value is forbidden")))))
+        (binding [ser/*shared-write* true] (codec/encode-key x))
+        (catch #?(:cljs :default :lpy python/Exception :default Exception) _
+          (fail! path "private REF/host value is forbidden")))))
   x)
 
 (defn normalize
@@ -229,15 +229,15 @@
    per-type entry (e1b API). The reader preserves extension fields. No new registry."
   [type-key host-type keys reader]
   (registry/register-type! type-key
-    {:type-key type-key :host-type host-type :record/portable? true :record/keys keys})
+                           {:type-key type-key :host-type host-type :record/portable? true :record/keys keys})
   ;; Decode the fixed header's cached fields as slab views. In particular bb's
   ;; ordinary collection reader otherwise materializes whole host vectors.
   (let [id (registry/type-id-of type-key)
         name-hash (registry/name-hash-of type-key)
         factory (get-in @ser/deftype-constructors [id name-hash])]
     (ser/register-deftype-constructor! id name-hash
-      (fn [sio off]
-        (binding [context/*slab-values* true] (factory sio off)))))
+                                       (fn [sio off]
+                                         (binding [context/*slab-values* true] (factory sio off)))))
   (readers/register! type-key (symbol type-key) reader
                      {:mode :protocol :protocol 'IPrintWithWriter :method '-pr-writer}))
 
@@ -339,12 +339,12 @@
          (assert-portable! ~sio ~m [:constructor])
          (binding [d/*domain-sio* ~sio ser/*shared-write* true]
            (~raw ~sio
-             ~@(map (fn [key] `(normalize ~sio (e/get ~m ~key) [~key])) ks)
-             (normalize ~sio (reduce (fn [extras# kv#]
-                                      (if (contains? ~(set ks) (key kv#)) extras#
-                                        (e/assoc extras# (key kv#) (val kv#))))
-                                    (em/empty-hash-map ~sio) (e/seq ~m)) [:extmap])
-             (normalize ~sio (e/meta ~m) [:meta]))))
+                 ~@(map (fn [key] `(normalize ~sio (e/get ~m ~key) [~key])) ks)
+                 (normalize ~sio (reduce (fn [extras# kv#]
+                                           (if (contains? ~(set ks) (key kv#)) extras#
+                                               (e/assoc extras# (key kv#) (val kv#))))
+                                         (em/empty-hash-map ~sio) (e/seq ~m)) [:extmap])
+                 (normalize ~sio (e/meta ~m) [:meta]))))
        (defn ~mapctor [~m] (~mapctor-in (alloc/current-sio) ~m))
        (install-record-io! ~tk ~type-name ~ks ~mapctor)
        ~type-name)))

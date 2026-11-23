@@ -22,9 +22,9 @@
         threads  (parse-long (or threads "16"))
         max-a    (parse-long (or max-allocs "4000000"))
         domain   (atom/persistent-atom-domain
-                   dir
-                   :capacities {0 2048 1 4096 2 8192 3 16384 4 32768 5 65536}
-                   :journal? false)
+                  dir
+                  :capacities {0 2048 1 4096 2 8192 3 16384 4 32768 5 65536}
+                  :journal? false)
         a        (atom/lookup-or-create-mmap-atom! domain "storm/anchor" nil)
         sio      (atom/atom-sio a)
         per      (quot max-a threads)
@@ -33,17 +33,17 @@
         done     (clojure.core/atom 0)
         workers  (mapv (fn [k]
                          (Thread.
-                           (fn []
-                             (.await latch)
-                             (let [rnd (java.util.Random. (+ 1234 k))]
-                               (loop [i 0]
-                                 (if (and (< i per) (nil? @failure))
-                                   (do (try
-                                         (slab/alloc! sio (nth sizes (.nextInt rnd (count sizes))))
-                                         (catch Throwable th
-                                           (reset! failure th)))
-                                       (recur (inc i)))
-                                   (swap! done inc)))))))
+                          (fn []
+                            (.await latch)
+                            (let [rnd (java.util.Random. (+ 1234 k))]
+                              (loop [i 0]
+                                (if (and (< i per) (nil? @failure))
+                                  (do (try
+                                        (slab/alloc! sio (nth sizes (.nextInt rnd (count sizes))))
+                                        (catch Throwable th
+                                          (reset! failure th)))
+                                      (recur (inc i)))
+                                  (swap! done inc)))))))
                        (range threads))]
     (doseq [w workers] (.start w))
     (.countDown latch)

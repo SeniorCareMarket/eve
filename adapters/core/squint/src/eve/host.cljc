@@ -48,11 +48,10 @@
             ;; whose graphs reach an ILookup-naming deftype (eve.atom and
             ;; kin), so the stubs register before any deftype form in those
             ;; graphs evaluates. eve.core requires nothing: no cycle.
-            [eve.core :refer [ILookup IEquiv IHash IPrintWithWriter]]
-            ["squint-cljs/core.js" :as core]
-            [eve.host-prim :as prim]
-            [eve.host-completion]))
-
+   [eve.core :refer [ILookup IEquiv IHash IPrintWithWriter]]
+   ["squint-cljs/core.js" :as core]
+   [eve.host-prim :as prim]
+   [eve.host-completion]))
 
 ;; === macros (the names that take forms rather than values) ===
 

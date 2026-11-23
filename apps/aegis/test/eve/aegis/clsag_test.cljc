@@ -65,7 +65,7 @@
       (println (str "clsag verify ring " n ": " (- t1 t0) " ms (through eve.crypto's ed25519-mul-add rows)")))))
 
 (deftest base-literal
-         (is (= clsag/BASE (vec (clsag/base-computed)))
-             "the base point's literal encoding is [1]B")
-         (is (= clsag/IDENTITY (vec (ed/pack [ed/gf0 ed/gf1 ed/gf1 ed/gf0])))
-             "the identity's literal encoding is its packing"))
+  (is (= clsag/BASE (vec (clsag/base-computed)))
+      "the base point's literal encoding is [1]B")
+  (is (= clsag/IDENTITY (vec (ed/pack [ed/gf0 ed/gf1 ed/gf1 ed/gf0])))
+      "the identity's literal encoding is its packing"))

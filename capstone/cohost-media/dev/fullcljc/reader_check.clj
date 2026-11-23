@@ -69,7 +69,7 @@
    ;; now requires only clojure/cohost/app namespaces; the sets below
    ;; are the enforcement
    "coordinator" {:clj  '#{cohost.pool cohost-media.core cohost-media.domain}
-                 :cljs '#{cohost.pool cohost-media.core cohost-media.domain}}
+                  :cljs '#{cohost.pool cohost-media.core cohost-media.domain}}
    "domain"     {:clj  '#{cohost.pool cohost-media.core}
                  :cljs '#{cohost.pool cohost-media.core}}
    "tasks"      {:clj  '#{clojure.string cohost.pool cohost.region

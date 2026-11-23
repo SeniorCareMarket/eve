@@ -36,24 +36,24 @@
           (let [scimap (Class/forName "babashka.impl.SciMap")
                 previous (.getMethod multifn scimap)]
             (.addMethod multifn scimap
-              (fn [& args]
-                (let [value (first args)
-                      logical-type (type value)
-                      own (when (not= logical-type scimap)
-                            (.getMethod multifn logical-type))
-                      f (or (extension value method) own previous
-                            (.getMethod multifn Object))]
-                  (if f (apply f args)
-                    (throw (ex-info "No implementation of protocol method"
-                                    {:method method :type logical-type}))))))
+                        (fn [& args]
+                          (let [value (first args)
+                                logical-type (type value)
+                                own (when (not= logical-type scimap)
+                                      (.getMethod multifn logical-type))
+                                f (or (extension value method) own previous
+                                      (.getMethod multifn Object))]
+                            (if f (apply f args)
+                                (throw (ex-info "No implementation of protocol method"
+                                                {:method method :type logical-type}))))))
             (alter-meta! v assoc :eve/logical-dispatch true)))))
     nil))
 
 (defn- groups [specs]
   (loop [xs specs out []]
     (if (empty? xs) out
-      (let [p (first xs) [methods more] (split-with seq? (rest xs))]
-        (recur more (conj out [p methods]))))))
+        (let [p (first xs) [methods more] (split-with seq? (rest xs))]
+          (recur more (conj out [p methods]))))))
 
 (defn- method-symbol [p method]
   (let [pvar (resolve p)
@@ -65,8 +65,8 @@
     (let [names (mapv #(method-symbol p (first %)) methods)
           protocol (symbol (str (ns-name (:ns (meta (resolve p))))) (name p))]
       `(register-extension! ~type '~protocol
-         ~(into {} (map (fn [name method] [(list 'quote name) (cons 'fn (rest method))]) names methods))
-         ~(into {} (map (fn [name] [(list 'quote name) (list 'var name)]) names))))))
+                            ~(into {} (map (fn [name method] [(list 'quote name) (cons 'fn (rest method))]) names methods))
+                            ~(into {} (map (fn [name] [(list 'quote name) (list 'var name)]) names))))))
 
 (defn install!
   "Called by the bb producer after a type is emitted. Wrappers live on vars,
@@ -75,9 +75,9 @@
   (when-not (:eve/logical-dispatch (meta #'clojure.core/extend-type))
     (let [original @#'clojure.core/extend-type]
       (alter-var-root #'clojure.core/extend-type
-        (fn [_] (fn [form env type & specs]
-                  `(if (registered-key ~type)
-                     (do ~@(extension-forms type specs) nil)
-                     ~(apply original form env type specs)))))
+                      (fn [_] (fn [form env type & specs]
+                                `(if (registered-key ~type)
+                                   (do ~@(extension-forms type specs) nil)
+                                   ~(apply original form env type specs)))))
       (alter-meta! #'clojure.core/extend-type assoc :eve/logical-dispatch true)))
   nil)

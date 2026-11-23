@@ -19,7 +19,7 @@
      bytes       eve.flat.chunk/bytes         (lane C1)"
   (:refer-clojure :exclude [open bytes])
   #?@(:cljs [(:require [eve.flat.image :as flat-image]
-                        [eve.flat.chunk :as flat-chunk]
+                       [eve.flat.chunk :as flat-chunk]
                         ;; the freeze lane loads with the facade on the
                         ;; static host: its load registers the atom
                         ;; deref-delivery hook and the sister freeze/thaw
@@ -27,7 +27,7 @@
                         ;; pulled in by the first explicit require of
                         ;; eve.flat.freeze — a cljs build has no such
                         ;; moment, so the facade is it.
-                        [eve.flat.freeze])]
+                       [eve.flat.freeze])]
       :clje [(:require [eve.flat.freeze])]))
 
 #?(:cljs

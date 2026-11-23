@@ -136,16 +136,16 @@
 
     (seq? form)
     (with-meta (apply list (map #(jvm-rewrite-set!-forms % field-map slab-off-expr) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(jvm-rewrite-set!-forms % field-map slab-off-expr) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(jvm-rewrite-set!-forms k field-map slab-off-expr)
                                 (jvm-rewrite-set!-forms v field-map slab-off-expr)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 (defn- jvm-transform-method-body
@@ -298,7 +298,7 @@
        ;; name hash picks it among types that share the type-id. A named
        ;; fn: one a top-level form makes is interpreted on clojerl.
        (~'defn ~(symbol (str (name type-name) "__from-header")) [sio# header-off#]
-        (~load-name sio# header-off#))
+               (~load-name sio# header-off#))
        (eve.deftype-proto.serialize/register-deftype-constructor!
         ~type-id ~name-hash ~(symbol (str (name type-name) "__from-header")))
 
@@ -369,7 +369,7 @@
                            impls))
         obj-have (into #{}
                        (comp (filter (fn [g] (contains? #{'Object 'java.lang.Object}
-                                                          (:protocol g))))
+                                                        (:protocol g))))
                              (mapcat :methods)
                              (map :name))
                        impls)

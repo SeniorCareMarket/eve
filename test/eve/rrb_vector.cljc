@@ -60,18 +60,18 @@
   "Concatenates the given vectors in logarithmic time."
   ([]
      ;; eve: an empty vector in eve memory
-     (gen-vector-method))
+   (gen-vector-method))
   ([v1]
-     v1)
+   v1)
   ([v1 v2]
-     (-splicev v1 v2))
+   (-splicev v1 v2))
   ([v1 v2 v3]
-     (-splicev (-splicev v1 v2) v3))
+   (-splicev (-splicev v1 v2) v3))
   ([v1 v2 v3 v4]
-     (-splicev (-splicev v1 v2) (-splicev v3 v4)))
+   (-splicev (-splicev v1 v2) (-splicev v3 v4)))
   ([v1 v2 v3 v4 & vn]
-     (-splicev (-splicev (-splicev v1 v2) (-splicev v3 v4))
-               (apply catvec vn))))
+   (-splicev (-splicev (-splicev v1 v2) (-splicev v3 v4))
+             (apply catvec vn))))
 
 (defn subvec
   "Returns a new vector containing the elements of the given vector v
@@ -81,26 +81,25 @@
   any elements of the original vector lying outside the given index
   range."
   ([v start]
-     (-slicev v start (count v)))
+   (-slicev v start (count v)))
   ([v start end]
-     (-slicev v start end)))
+   (-slicev v start end)))
 
 (defn vector
   "Creates a new vector containing the args."
   ([]
-     (gen-vector-method))
+   (gen-vector-method))
   ([x1]
-     (gen-vector-method x1))
+   (gen-vector-method x1))
   ([x1 x2]
-     (gen-vector-method x1 x2))
+   (gen-vector-method x1 x2))
   ([x1 x2 x3]
-     (gen-vector-method x1 x2 x3))
+   (gen-vector-method x1 x2 x3))
   ([x1 x2 x3 x4]
-     (gen-vector-method x1 x2 x3 x4))
+   (gen-vector-method x1 x2 x3 x4))
   ([x1 x2 x3 x4 & xn]
-     (into (vector x1 x2 x3 x4) xn)
-     #_
-     (loop [v  (vector x1 x2 x3 x4)
+   (into (vector x1 x2 x3 x4) xn)
+   #_(loop [v  (vector x1 x2 x3 x4)
             xn xn]
        (if xn
          (recur (-conj ^not-native v (first xn))

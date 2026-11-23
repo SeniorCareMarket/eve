@@ -30,9 +30,9 @@
         swaps   (parse-long swaps)
         burst   (parse-long burst)
         domain  (atom/persistent-atom-domain
-                  dir
-                  :capacities {0 8192 1 16384 2 32768 3 65536 4 131072 5 262144}
-                  :journal? false)
+                 dir
+                 :capacities {0 8192 1 16384 2 32768 3 65536 4 131072 5 262144}
+                 :journal? false)
         oks     (doall (map #(audit-atom domain % procs swaps burst) (range threads)))]
     (if (every? true? oks)
       (do (println "AUDIT-PASS" :atoms threads :elements-each (* procs swaps burst)) (System/exit 0))

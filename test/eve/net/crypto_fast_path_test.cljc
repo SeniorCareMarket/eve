@@ -49,9 +49,9 @@
     (is (nil? (p/ed25519-scalarmult (nth scalars 0) (vec (repeat 32 255)))) "not a point: nil, portable too")
     (is (nil? (c/ed25519-mul-add (nth scalars 0) (nth pks 0) (nth scalars 1) [1 2 3])) "a short encoding: nil")
     (let [t0 (process/now-ms)] (dotimes [_ 5] (c/ed25519-mul-add (nth scalars 0) (nth pks 0) (nth scalars 1) (nth pks 1)))
-      (println (str "ed25519-mul-add: adapter " (/ (- (process/now-ms) t0) 5.0) " ms")))
+         (println (str "ed25519-mul-add: adapter " (/ (- (process/now-ms) t0) 5.0) " ms")))
     (let [t0 (process/now-ms)] (p/ed25519-mul-add (nth scalars 0) (nth pks 0) (nth scalars 1) (nth pks 1))
-      (println (str "ed25519-mul-add: portable " (- (process/now-ms) t0) " ms")))))
+         (println (str "ed25519-mul-add: portable " (- (process/now-ms) t0) " ms")))))
 
 ;; RFC 7748 §5.2 and §6.1 (vectors copied from the RFC's text, rfc-editor.org/rfc/rfc7748.txt)
 (def ^:private X25519-VECTORS

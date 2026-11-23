@@ -26,16 +26,15 @@
    own (rrb-vector-test's fixture), dropped with the test."
   [f]
   (binding [d/*domain-sio* (alloc/heap-domain-sio!
-                                         {:capacities {0 (* 64 1024 1024)
-                                                       1 (* 16 1024 1024)
-                                                       2 (* 16 1024 1024)
-                                                       3 (* 192 1024 1024)
-                                                       4 (* 16 1024 1024)
-                                                       5 (* 16 1024 1024)}})]
-                (f)))
+                            {:capacities {0 (* 64 1024 1024)
+                                          1 (* 16 1024 1024)
+                                          2 (* 16 1024 1024)
+                                          3 (* 192 1024 1024)
+                                          4 (* 16 1024 1024)
+                                          5 (* 16 1024 1024)}})]
+    (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
-
 
 ;; Ruling (John, 2026-11-05, the hash facade): eve's hash is authoritative inside
 ;; eve. A host value is re-homed on entry, never wrapped, so an eve map's hash is
@@ -158,8 +157,8 @@
              ;; header the caller named — not the header offset itself.
              (is (pos? (:root-off res))))
      :default (binding [d/*domain-sio* (alloc/heap-domain-sio! {:capacities {0 (* 32 1024 1024) 1 (* 16 1024 1024)
-                                                                              2 (* 8 1024 1024) 3 (* 8 1024 1024)
-                                                                              4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
+                                                                             2 (* 8 1024 1024) 3 (* 8 1024 1024)
+                                                                             4 (* 8 1024 1024) 5 (* 8 1024 1024)}})]
                 (let [mm (m/hash-map :a 1 :b 2 :c 3)
                       sio (d/-eve-sio mm)
                       res (m/validate-from-header-offset sio (d/-root-header-off mm))]

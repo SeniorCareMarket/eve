@@ -142,7 +142,7 @@
       (let [bs (try (wire/encode msg)
                     (catch :default _
                       (throw (ex-info "eve.thread-host: a message to another heap must be data (eve.wire: one flat chunk): a host object is refused"
-                      {:eve.thread/refused :host-object}))))]
+                                      {:eve.thread/refused :host-object}))))]
         (when-let [p (or (get ports addr) (do (drain-ports!) (get (:ports @state) addr)))]
           (.postMessage p bs)
           (ring! addr)))))

@@ -128,25 +128,25 @@
       (put! KIND_NIL 0 0)
       (if-let [[tag o] (eve-pointer sio v)]
         (put! KIND_POINTER tag o)
-      (let [bs  (encode sio v)
-            len (byte-len bs)]
-        (cond
+        (let [bs  (encode sio v)
+              len (byte-len bs)]
+          (cond
           ;; [EE DB tag i32]: an int32, or a pointer — a tag the registry
           ;; builds a value for (a short keyword or string is 7 bytes too)
-          (and (== len 7) (magic? bs)
-               (or (== (byte-at bs 2) ser/FAST_TAG_INT32)
-                   (some? (ser/get-type-constructor (byte-at bs 2)))))
-          (let [tag (byte-at bs 2)]
-            (put! (if (== tag ser/FAST_TAG_INT32) KIND_INT32 KIND_POINTER) tag (i32-at bs 3)))
+            (and (== len 7) (magic? bs)
+                 (or (== (byte-at bs 2) ser/FAST_TAG_INT32)
+                     (some? (ser/get-type-constructor (byte-at bs 2)))))
+            (let [tag (byte-at bs 2)]
+              (put! (if (== tag ser/FAST_TAG_INT32) KIND_INT32 KIND_POINTER) tag (i32-at bs 3)))
 
-          (and (== len 3) (magic? bs))
-          (put! KIND_TAG (byte-at bs 2) 0)
+            (and (== len 3) (magic? bs))
+            (put! KIND_TAG (byte-at bs 2) 0)
 
-          :else
-          (let [blk (slab/alloc! sio (+ 4 len))]
-            (slab/write-i32! sio blk 0 len)
-            (slab/write-bytes! sio blk 4 bs)
-            (put! KIND_BLOCK 0 blk))))))))
+            :else
+            (let [blk (slab/alloc! sio (+ 4 len))]
+              (slab/write-i32! sio blk 0 len)
+              (slab/write-bytes! sio blk 4 bs)
+              (put! KIND_BLOCK 0 blk))))))))
 
 (defn- read-slot
   "The value in slot i of the n-slot array at off."
@@ -209,48 +209,48 @@
 (declare va=)
 
 (pmac/host-deftype ValueArray [sio off n]
-  IValueArray
-  (-va-sio [_] sio) (-va-off [_] off) (-va-count [_] n)
-  d/IEveRoot (-root-header-off [_] off)
-  d/IEveSio (-eve-sio [_] sio)
-  d/ISabpType (-sabp-type-key [_] "eve/ValueArray")
-  d/IDirectSerialize (-direct-serialize [_] off)
-  d/ISabStorable
-  (-sab-tag [_] :eve/value-array)
-  (-sab-encode [_ _] (codec/encode-sab-pointer ValueArray-type-id off))
-  (-sab-dispose [_ _] nil)
+                   IValueArray
+                   (-va-sio [_] sio) (-va-off [_] off) (-va-count [_] n)
+                   d/IEveRoot (-root-header-off [_] off)
+                   d/IEveSio (-eve-sio [_] sio)
+                   d/ISabpType (-sabp-type-key [_] "eve/ValueArray")
+                   d/IDirectSerialize (-direct-serialize [_] off)
+                   d/ISabStorable
+                   (-sab-tag [_] :eve/value-array)
+                   (-sab-encode [_ _] (codec/encode-sab-pointer ValueArray-type-id off))
+                   (-sab-dispose [_ _] nil)
 
-  clojure.lang.Counted
-  (count [_] n)
+                   clojure.lang.Counted
+                   (count [_] n)
 
-  clojure.lang.Indexed
-  (nth [_ i] (if (and (<= 0 i) (< i n))
-               (read-slot sio off n i)
-               (throw (enc/index-out-of-bounds (str "No item " i " in eve array of " n)))))
-  (nth [_ i nf] (if (and (<= 0 i) (< i n)) (read-slot sio off n i) nf))
+                   clojure.lang.Indexed
+                   (nth [_ i] (if (and (<= 0 i) (< i n))
+                                (read-slot sio off n i)
+                                (throw (enc/index-out-of-bounds (str "No item " i " in eve array of " n)))))
+                   (nth [_ i nf] (if (and (<= 0 i) (< i n)) (read-slot sio off n i) nf))
 
-  clojure.lang.Seqable
-  (seq [_] (va-seq sio off n 0))
+                   clojure.lang.Seqable
+                   (seq [_] (va-seq sio off n 0))
 
-  java.lang.Iterable
-  (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+                   java.lang.Iterable
+                   (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
   ;; cons and empty too: basilisp's types refuse a partial interface
-  clojure.lang.IPersistentCollection
-  (cons [_ _] (enc/throw-unsupported))
-  (empty [_] nil)
-  (equiv [this other] (va= this other))
+                   clojure.lang.IPersistentCollection
+                   (cons [_ _] (enc/throw-unsupported))
+                   (empty [_] nil)
+                   (equiv [this other] (va= this other))
 
-  clojure.lang.IHashEq
-  (hasheq [_] (hash off))
+                   clojure.lang.IHashEq
+                   (hasheq [_] (hash off))
 
-  IPrintWithWriter
-  (-pr-writer [this w _] (e/-write w (str "#eve/array " (vec (va-seq (-va-sio this) (-va-off this) (-va-count this) 0)))))
+                   IPrintWithWriter
+                   (-pr-writer [this w _] (e/-write w (str "#eve/array " (vec (va-seq (-va-sio this) (-va-off this) (-va-count this) 0)))))
 
-  java.lang.Object
-  (equals [this other] (va= this other))
-  (hashCode [_] (hash off))
-  (toString [this] (str "#eve/array " (vec (va-seq (-va-sio this) (-va-off this) (-va-count this) 0)))))
+                   java.lang.Object
+                   (equals [this other] (va= this other))
+                   (hashCode [_] (hash off))
+                   (toString [this] (str "#eve/array " (vec (va-seq (-va-sio this) (-va-off this) (-va-count this) 0)))))
 
 (defn- va=
   "The same eve array: the same block."
@@ -290,14 +290,14 @@
 
 (defn- make-array-in [n]
   (let [sio (alloc/current-sio)
-         off (slab/alloc! sio (block-size n))]
-     (slab/write-u8! sio off 0 ValueArray-type-id)
-     (slab/write-i32! sio off 4 n)
+        off (slab/alloc! sio (block-size n))]
+    (slab/write-u8! sio off 0 ValueArray-type-id)
+    (slab/write-i32! sio off 4 n)
      ;; every kind byte nil (a block is handed back as it was left): one
      ;; write of n KIND_NIL (0) bytes
-     (when (pos? n)
-       (slab/write-bytes! sio off HEADER (enc/make-bytes n)))
-     (->value-array sio off n)))
+    (when (pos? n)
+      (slab/write-bytes! sio off HEADER (enc/make-bytes n)))
+    (->value-array sio off n)))
 
 (defn aget
   "The value at index i: an eve array's slot, a delivered (flat) eve array's

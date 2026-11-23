@@ -18,9 +18,9 @@
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]
    [clojure.string :as str]
    [jolt.ffi :as ffi]
    [jolt.scheme :as scheme]))
@@ -126,17 +126,17 @@
       (if (cas old v addr) old (recur)))))
 
 (def ^:private load4 (load-or-plain 4 (if (= :macos os) (fn [a] (mac-add4 0 a)) (fn [a] (jolt-load4 a SEQ-CST)))
-                                      (fn [a] (ffi/read a :int32 0))))
+                                    (fn [a] (ffi/read a :int32 0))))
 (def ^:private store4 (store-or-plain 4 (if (= :macos os) (fn [a v] (mac-xchg mac-cas4 mac-add4 a v) nil) (fn [a v] (jolt-store4 a v SEQ-CST)))
-                                        (fn [a v] (ffi/write a :int32 v 0) nil)))
+                                      (fn [a v] (ffi/write a :int32 v 0) nil)))
 (def ^:private add4 (if (= :macos os)
                       (fn [a d] (unchecked-int (- (mac-add4 d a) d)))
                       (fn [a d] (jolt-add4 a d SEQ-CST))))
 (def ^:private xchg4 (if (= :macos os) (fn [a v] (mac-xchg mac-cas4 mac-add4 a v)) (fn [a v] (jolt-xchg4 a v SEQ-CST))))
 (def ^:private load8 (load-or-plain 8 (if (= :macos os) (fn [a] (mac-add8 0 a)) (fn [a] (jolt-load8 a SEQ-CST)))
-                                      (fn [a] (ffi/read a :int64 0))))
+                                    (fn [a] (ffi/read a :int64 0))))
 (def ^:private store8 (store-or-plain 8 (if (= :macos os) (fn [a v] (mac-xchg mac-cas8 mac-add8 a v) nil) (fn [a v] (jolt-store8 a v SEQ-CST)))
-                                        (fn [a v] (ffi/write a :int64 v 0) nil)))
+                                      (fn [a v] (ffi/write a :int64 v 0) nil)))
 (def ^:private add8 (if (= :macos os)
                       (fn [a d] (unchecked-long (- (mac-add8 d a) d)))
                       (fn [a d] (jolt-add8 a d SEQ-CST))))
@@ -250,22 +250,22 @@
    truncated."
   ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
   ([path-str size-bytes opts]
-    (when (:lustre? opts)
-      (throw (UnsupportedOperationException. "eve on jolt: no lustre regions")))
+   (when (:lustre? opts)
+     (throw (UnsupportedOperationException. "eve on jolt: no lustre regions")))
     ;; open(2) resolves a relative path against the process's cwd, which jolt's launcher moved to jolt's own root;
     ;; java.io.File resolves it against the user's (JOLT_PWD)
-    (let [[fd e1] (jolt-open (.getAbsolutePath (java.io.File. ^String path-str)) (bit-or 2 O-CREAT) 420)  ; O_RDWR | O_CREAT
-          _ (when (neg? fd)
-              (throw (ex-info (str "open " path-str ": errno " e1)
-                              {:path path-str})))
-          _ (when (< (.length (java.io.File. ^String path-str)) size-bytes)
-              (jolt-ftruncate fd size-bytes))
-          [p e2] (jolt-mmap ffi/null size-bytes 3 1 fd 0)]  ; PROT_READ|WRITE, MAP_SHARED
-      (jolt-close fd)
-      (when (or (nil? p) (= p 18446744073709551615))  ; MAP_FAILED
-        (throw (ex-info (str "mmap " path-str ": errno " e2) {:path path-str})))
-      (unmap-unreachable!)
-      (guard! (JoltRegion. p size-bytes nil) [p size-bytes]))))
+   (let [[fd e1] (jolt-open (.getAbsolutePath (java.io.File. ^String path-str)) (bit-or 2 O-CREAT) 420)  ; O_RDWR | O_CREAT
+         _ (when (neg? fd)
+             (throw (ex-info (str "open " path-str ": errno " e1)
+                             {:path path-str})))
+         _ (when (< (.length (java.io.File. ^String path-str)) size-bytes)
+             (jolt-ftruncate fd size-bytes))
+         [p e2] (jolt-mmap ffi/null size-bytes 3 1 fd 0)]  ; PROT_READ|WRITE, MAP_SHARED
+     (jolt-close fd)
+     (when (or (nil? p) (= p 18446744073709551615))  ; MAP_FAILED
+       (throw (ex-info (str "mmap " path-str ": errno " e2) {:path path-str})))
+     (unmap-unreachable!)
+     (guard! (JoltRegion. p size-bytes nil) [p size-bytes]))))
 
 (defn make-heap-region
   "An IMemRegion over size-bytes of zeroed memory, shared by the process's threads: an immobile bytevector in Chez's

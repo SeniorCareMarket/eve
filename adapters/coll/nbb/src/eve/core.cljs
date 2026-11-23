@@ -64,7 +64,7 @@
 ;; sections onto it through the proto map's split (the watch
 ;; methods land on IWatchable).
 (defprotocol IRef (-set-validator! [ref f]) (-get-validator [ref])
-  (-get-watches [ref]))
+             (-get-watches [ref]))
 (defn pr-writer [x w _opts] (-write w (pr-str x)))
 (defn pr-str* [x] (pr-str x))
 (defmacro caching-hash [coll hash-fn hash-key]

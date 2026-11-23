@@ -32,12 +32,12 @@
   (-set-vn! [b n]))
 
 (eve/host-deftype ValueBuffer [^:volatile-mutable a ^:volatile-mutable n owner]
-  IValueBuffer
-  (-varr [_] a)
-  (-vn [_] n)
-  (-vowner [_] owner)
-  (-set-varr! [_ x] (set! a x))
-  (-set-vn! [_ x] (set! n x)))
+                  IValueBuffer
+                  (-varr [_] a)
+                  (-vn [_] n)
+                  (-vowner [_] owner)
+                  (-set-varr! [_ x] (set! a x))
+                  (-set-vn! [_ x] (set! n x)))
 
 (defn buffer
   "An empty buffer with room for capacity values (at least 1), owned by this

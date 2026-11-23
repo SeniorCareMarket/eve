@@ -464,7 +464,6 @@
     10 (eve.flat_io.LE/i64 b (+ off (* 8 i)))
     11 (eve.flat_io.LE/i64 b (+ off (* 8 i)))))
 
-
 (defn- tuple-vec
   "The tuple's elements as a persistent vector — what a write answers."
   ^IPersistentVector [^bytes b ^long off ^long n ^long kind]

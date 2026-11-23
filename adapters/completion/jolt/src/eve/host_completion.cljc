@@ -11,18 +11,18 @@
    Clojure's.)")
 
 (alter-var-root #'clojure.core/swap!
-  (fn [core]
-    (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swap a f)))
-      ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swap a f x)))
-      ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swap a f x y)))
-      ([a f x y & more]
-       (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swap a f x y more))))))
+                (fn [core]
+                  (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swap a f)))
+                    ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swap a f x)))
+                    ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swap a f x y)))
+                    ([a f x y & more]
+                     (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swap a f x y more))))))
 
 (alter-var-root #'clojure.core/reset!
-  (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.reset a v)))))
+                (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.reset a v)))))
 
 (alter-var-root #'clojure.core/compare-and-set!
-  (fn [core] (fn [a o n] (if (instance? clojure.lang.Atom a) (core a o n) (.compareAndSet a o n)))))
+                (fn [core] (fn [a o n] (if (instance? clojure.lang.Atom a) (core a o n) (.compareAndSet a o n)))))
 
 ;; swap-vals!/reset-vals! (IAtom2) and the watch surface (IRef) cast the same
 ;; way (measured, jolt v0.8.23: swap-vals! "cannot be cast to class
@@ -30,21 +30,21 @@
 ;; atom): for an atom that is not jolt's, they call its own methods, as
 ;; Clojure's do.
 (alter-var-root #'clojure.core/swap-vals!
-  (fn [core]
-    (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swapVals a f)))
-      ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swapVals a f x)))
-      ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swapVals a f x y)))
-      ([a f x y & more]
-       (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swapVals a f x y more))))))
+                (fn [core]
+                  (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swapVals a f)))
+                    ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swapVals a f x)))
+                    ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swapVals a f x y)))
+                    ([a f x y & more]
+                     (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swapVals a f x y more))))))
 
 (alter-var-root #'clojure.core/reset-vals!
-  (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.resetVals a v)))))
+                (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.resetVals a v)))))
 
 (alter-var-root #'clojure.core/add-watch
-  (fn [core] (fn [r k f] (if (instance? clojure.lang.Atom r) (core r k f) (do (.addWatch r k f) r)))))
+                (fn [core] (fn [r k f] (if (instance? clojure.lang.Atom r) (core r k f) (do (.addWatch r k f) r)))))
 
 (alter-var-root #'clojure.core/remove-watch
-  (fn [core] (fn [r k] (if (instance? clojure.lang.Atom r) (core r k) (do (.removeWatch r k) r)))))
+                (fn [core] (fn [r k] (if (instance? clojure.lang.Atom r) (core r k) (do (.removeWatch r k) r)))))
 
 ;; into takes the transient path for jolt's own collections only and folds
 ;; any other with persistent conj (host/chez/seq.ss jolt-into), though an eve
@@ -52,20 +52,20 @@
 ;; element. Clojure's goes through any IEditableCollection's transient: so
 ;; does this one for a type's (deftype's) — jolt's own are jolt's business.
 (alter-var-root #'clojure.core/into
-  (fn [core]
-    (fn ([] []) ([to] to)
-      ([to from]
-       (if (and (instance? clojure.lang.IType to) (instance? clojure.lang.IEditableCollection to))
-         (let [r (clojure.core/persistent!
-                  (clojure.core/reduce clojure.core/conj! (clojure.core/transient to) from))]
-           (if-let [m (clojure.core/meta to)] (clojure.core/with-meta r m) r))
-         (core to from)))
-      ([to xform from]
-       (if (and (instance? clojure.lang.IType to) (instance? clojure.lang.IEditableCollection to))
-         (let [r (clojure.core/persistent!
-                  (clojure.core/transduce xform clojure.core/conj! (clojure.core/transient to) from))]
-           (if-let [m (clojure.core/meta to)] (clojure.core/with-meta r m) r))
-         (core to xform from))))))
+                (fn [core]
+                  (fn ([] []) ([to] to)
+                    ([to from]
+                     (if (and (instance? clojure.lang.IType to) (instance? clojure.lang.IEditableCollection to))
+                       (let [r (clojure.core/persistent!
+                                (clojure.core/reduce clojure.core/conj! (clojure.core/transient to) from))]
+                         (if-let [m (clojure.core/meta to)] (clojure.core/with-meta r m) r))
+                       (core to from)))
+                    ([to xform from]
+                     (if (and (instance? clojure.lang.IType to) (instance? clojure.lang.IEditableCollection to))
+                       (let [r (clojure.core/persistent!
+                                (clojure.core/transduce xform clojure.core/conj! (clojure.core/transient to) from))]
+                         (if-let [m (clojure.core/meta to)] (clojure.core/with-meta r m) r))
+                       (core to xform from))))))
 
 ;; jolt's chunk-first of a type's chunked seq is its first element and its
 ;; chunk-rest a lazy (rest s), which the seq's own rest calls back (unbounded
@@ -73,19 +73,19 @@
 ;; a type's (jolt's own chunked seqs, which its core walks, have no such
 ;; methods to call — measured: PersistentVector$ChunkedSeq).
 (alter-var-root #'clojure.core/chunk-first
-  (fn [core] (fn [s] (if (and (instance? clojure.lang.IType s) (instance? clojure.lang.IChunkedSeq s)) (.chunkedFirst s) (core s)))))
+                (fn [core] (fn [s] (if (and (instance? clojure.lang.IType s) (instance? clojure.lang.IChunkedSeq s)) (.chunkedFirst s) (core s)))))
 (alter-var-root #'clojure.core/chunk-rest
-  (fn [core] (fn [s] (if (and (instance? clojure.lang.IType s) (instance? clojure.lang.IChunkedSeq s)) (.chunkedMore s) (core s)))))
+                (fn [core] (fn [s] (if (and (instance? clojure.lang.IType s) (instance? clojure.lang.IChunkedSeq s)) (.chunkedMore s) (core s)))))
 (alter-var-root #'clojure.core/chunk-next
-  (fn [core] (fn [s] (if (and (instance? clojure.lang.IType s) (instance? clojure.lang.IChunkedSeq s)) (.chunkedNext s) (core s)))))
+                (fn [core] (fn [s] (if (and (instance? clojure.lang.IType s) (instance? clojure.lang.IChunkedSeq s)) (.chunkedNext s) (core s)))))
 
 ;; jolt's replace has no transducer arity — (replace smap) throws "Wrong number
 ;; of args (1)" (measured, jolt f79e64d8) — where Clojure's
 ;; (replace smap) is (map #(if-let [e (find smap %)] (val e) %)).
 (alter-var-root #'clojure.core/replace
-  (fn [core]
-    (fn ([smap] (clojure.core/map (fn [x] (if-let [e (clojure.core/find smap x)] (clojure.core/val e) x))))
-      ([smap coll] (core smap coll)))))
+                (fn [core]
+                  (fn ([smap] (clojure.core/map (fn [x] (if-let [e (clojure.core/find smap x)] (clojure.core/val e) x))))
+                    ([smap coll] (core smap coll)))))
 
 ;; A library written for the JVM names a primitive in a type tag by the
 ;; class of clojure.core's cast fn — (assoc meta :tag clojure.core$long)
@@ -102,7 +102,7 @@
   (let [cname (clojure.core/symbol (clojure.core/str "clojure.core$" (clojure.core/name f)))]
     (when-not (clojure.core/find-var (clojure.core/symbol "clojure.core" (clojure.core/str cname)))
       (clojure.core/intern 'clojure.core cname
-        (clojure.core/class @(clojure.core/find-var (clojure.core/symbol "clojure.core" (clojure.core/name f))))))))
+                           (clojure.core/class @(clojure.core/find-var (clojure.core/symbol "clojure.core" (clojure.core/name f))))))))
 
 ;; A JVM library's portability macro can emit the JVM's raw deftype*
 ;; special form — a qualified name, a class name, fields, :implements
@@ -176,8 +176,8 @@
                        (try
                          (let [s      (str iface)
                                dotted (fn [t] (let [i (.lastIndexOf t ".")]
-                                                  (when (pos? i)
-                                                    (symbol (subs t 0 i) (subs t (inc i))))))
+                                                (when (pos? i)
+                                                  (symbol (subs t 0 i) (subs t (inc i))))))
                                v      (or (resolve iface)
                                           (when-let [d (dotted s)] (resolve d))
                                           (when-let [d (dotted (.replace s "_" "-"))] (resolve d)))]
@@ -247,10 +247,10 @@
 (alter-meta! #'clojure.core/inc assoc :inline (fn* [x] (list 'eve.host-completion/checked-inc x)))
 (alter-meta! #'clojure.core/dec assoc :inline (fn* [x] (list 'eve.host-completion/checked-dec x)))
 (alter-var-root #'clojure.core/+
-  (fn [_] (fn ([] 0) ([x] x) ([x y] (checked-add x y)) ([x y & more] (reduce checked-add (checked-add x y) more)))))
+                (fn [_] (fn ([] 0) ([x] x) ([x y] (checked-add x y)) ([x y & more] (reduce checked-add (checked-add x y) more)))))
 (alter-var-root #'clojure.core/-
-  (fn [_] (fn ([x] (checked-negate x)) ([x y] (checked-sub x y)) ([x y & more] (reduce checked-sub (checked-sub x y) more)))))
+                (fn [_] (fn ([x] (checked-negate x)) ([x y] (checked-sub x y)) ([x y & more] (reduce checked-sub (checked-sub x y) more)))))
 (alter-var-root #'clojure.core/*
-  (fn [_] (fn ([] 1) ([x] x) ([x y] (checked-mul x y)) ([x y & more] (reduce checked-mul (checked-mul x y) more)))))
+                (fn [_] (fn ([] 1) ([x] x) ([x y] (checked-mul x y)) ([x y & more] (reduce checked-mul (checked-mul x y) more)))))
 (alter-var-root #'clojure.core/inc (fn [_] checked-inc))
 (alter-var-root #'clojure.core/dec (fn [_] checked-dec))

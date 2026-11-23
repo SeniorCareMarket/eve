@@ -440,35 +440,35 @@
 
 #?(:clj
    (do
-   (defn- out-file-resp
-     "The run's output files as a browser-seat handler response: the file under
+     (defn- out-file-resp
+       "The run's output files as a browser-seat handler response: the file under
       out-dir the request path names (the media outputs: /media/thumbs/<id>.jpg
       and friends), as base64 bytes (:body-as :b64 — the seat puts them on the
       wire as bytes), with the Range support the page's media elements use —
       the old page server's file answer, as a handler value instead of a
       socket's. nil when the path names no output file (the seat's 404)."
-     [out-dir req]
-     (let [path (URLDecoder/decode (subs (:uri req) 1) "UTF-8")
+       [out-dir req]
+       (let [path (URLDecoder/decode (subs (:uri req) 1) "UTF-8")
            ;; the page names its outputs under /media/ (the media server's
            ;; prefix); the files themselves live at the top of out-dir
-           rel (if (str/starts-with? path "media/") (subs path 6) path)
-           f (fs/file out-dir rel)]
-       (when (and (not (str/includes? rel "..")) (fs/exists? f) (not (fs/directory? f)))
-         (let [total (fs/size f)
-               ctype (get page-mime (fs/extension f) "application/octet-stream")
-               range-h (get (:headers req) "range")
-               [a b] (when range-h
-                       (let [[_ a b] (re-find #"bytes=(\d*)-(\d*)" range-h)]
-                         [(when (seq a) (parse-long a)) (when (seq b) (parse-long b))]))
-               start (or a 0)
-               end (min (or b (dec total)) (dec total))
-               bs (java.util.Arrays/copyOfRange (fs/read-all-bytes f) start (inc end))]
-           {:status (if range-h 206 200)
-            :headers (cond-> {"Content-Type" ctype
-                              "Accept-Ranges" "bytes"}
-                       range-h (assoc "Content-Range" (str "bytes " start "-" end "/" total)))
-            :body (.encodeToString (java.util.Base64/getEncoder) bs)
-            :body-as :b64}))))))
+             rel (if (str/starts-with? path "media/") (subs path 6) path)
+             f (fs/file out-dir rel)]
+         (when (and (not (str/includes? rel "..")) (fs/exists? f) (not (fs/directory? f)))
+           (let [total (fs/size f)
+                 ctype (get page-mime (fs/extension f) "application/octet-stream")
+                 range-h (get (:headers req) "range")
+                 [a b] (when range-h
+                         (let [[_ a b] (re-find #"bytes=(\d*)-(\d*)" range-h)]
+                           [(when (seq a) (parse-long a)) (when (seq b) (parse-long b))]))
+                 start (or a 0)
+                 end (min (or b (dec total)) (dec total))
+                 bs (java.util.Arrays/copyOfRange (fs/read-all-bytes f) start (inc end))]
+             {:status (if range-h 206 200)
+              :headers (cond-> {"Content-Type" ctype
+                                "Accept-Ranges" "bytes"}
+                         range-h (assoc "Content-Range" (str "bytes " start "-" end "/" total)))
+              :body (.encodeToString (java.util.Base64/getEncoder) bs)
+              :body-as :b64}))))))
 
 (defn- seat-handler
   "The browser seat's :handler for this run: gateway/seat-handler over the
@@ -666,7 +666,7 @@
               (do (log "kill -9" rid "pid" pid "mid-transcode of" id (get-in d [:work :args 0 :id]))
                   (kill-9! pid)
                   (clojure.core/swap! state assoc :killed {:rid rid :pid pid :descriptor id :file (get-in d [:work :args 0 :id])
-                                              :at (now)}))
+                                                           :at (now)}))
               (do (log "kill step: the transcode runs on" rid "in the boot process — no pid to kill; skipped")
                   (clojure.core/swap! state assoc :kill-skipped {:rid rid :reason :in-process})))))))))
 
@@ -951,103 +951,101 @@
                "</iframe></body></html>"))
     (fs/exists? js)))
 
-
 #?(:clj
    (do
-   (def ^:private http-client (delay (HttpClient/newHttpClient)))
+     (def ^:private http-client (delay (HttpClient/newHttpClient)))
 
-   (defn- http-get-string
-     "GET url's body as a string (the CDP driver's /json/list). The request carries a timeout: a peer
+     (defn- http-get-string
+       "GET url's body as a string (the CDP driver's /json/list). The request carries a timeout: a peer
       that accepts and never answers (a wedged browser, a mediating sandbox) must fail this call, not
       park the run's main thread past every outer budget — the old launcher's client failed such a
       fetch fast, where java.net.http's send waits forever."
-     [url]
-     (let [req (.build (-> (HttpRequest/newBuilder (URI/create url))
-                           (.timeout (java.time.Duration/ofSeconds 15))))]
-       (String. ^bytes (.body (.send ^HttpClient @http-client req (HttpResponse$BodyHandlers/ofByteArray))) "UTF-8")))
+       [url]
+       (let [req (.build (-> (HttpRequest/newBuilder (URI/create url))
+                             (.timeout (java.time.Duration/ofSeconds 15))))]
+         (String. ^bytes (.body (.send ^HttpClient @http-client req (HttpResponse$BodyHandlers/ofByteArray))) "UTF-8")))
 
-   (defn- cdp-screenshot!
-     "A screenshot of url into shot, taken once the page's table holds n rows (or after timeout-ms): headless Chromium
+     (defn- cdp-screenshot!
+       "A screenshot of url into shot, taken once the page's table holds n rows (or after timeout-ms): headless Chromium
       driven over the DevTools protocol. (A fixed --virtual-time-budget raced the page: its workers read the library over
       the network rung while virtual time ran on, and the shot caught an empty table.) Answers the rows it saw."
-     [url shot n timeout-ms]
-     (let [dir (str (fs/create-temp-dir {:prefix "cohost-media-shot-"}))
+       [url shot n timeout-ms]
+       (let [dir (str (fs/create-temp-dir {:prefix "cohost-media-shot-"}))
            ;; --no-sandbox only where Chrome refuses to run without it (root);
            ;; anywhere else Chrome itself flags the flag as unsupported
-           flags (cond-> ["--headless=new" "--disable-gpu"
-                          "--no-proxy-server" "--hide-scrollbars"
-                          (str "--user-data-dir=" dir) "--window-size=1400,1100"
-                          "--remote-debugging-port=0" "about:blank"]
-                   (= "root" (System/getProperty "user.name"))
-                   (into ["--no-sandbox"]))
-           proc (apply p/process {:out :string :err :string} (:chrome tools) flags)
-           port-file (str (fs/path dir "DevToolsActivePort"))]
-       (try
-         (let [port (loop [i 0]
-                      (cond
-                        (and (fs/exists? port-file)
-                             (seq (str/trim (slurp port-file))))
-                        (first (str/split-lines (slurp port-file))) (< i 200)
-                        (do
-                          (pool/sleep-ms! 100)
-                          (recur (inc i)))
-                        :else
-                        (throw (ex-info "Chromium opened no DevTools port" {}))))
-               targets (json/read-str (http-get-string (str "http://127.0.0.1:" port "/json/list"))
-                                      :key-fn keyword)
-               ws-url (:webSocketDebuggerUrl (first (filter (fn [t]
-                                                              (= "page" (:type t)))
-                                                            targets)))
-               pending (atom {})
-               ids (atom 0)
-               ;; (a large reply — the screenshot — arrives in parts: a message is whole at its last part)
-               part (StringBuilder.)
-               listener (reify WebSocket$Listener
-                          (onOpen [_ ws] (.request ws 1) nil)
-                          (onText [_ ws data last?]
-                            (.append part (str data))
-                            (when last?
-                              (let [m (json/read-str (str part) :key-fn keyword)]
-                                (.setLength part 0)
-                                (when-let [pr (get @pending (:id m))]
-                                  (deliver pr m))))
-                            (.request ws 1)
-                            nil)
-                          (onError [_ _ws _err] nil))
-               ^WebSocket sock (.join (.buildAsync (.newWebSocketBuilder ^HttpClient @http-client)
-                                                   (URI/create ws-url) listener))
-               call (fn [method params]
-                      (let [id (clojure.core/swap! ids inc)
-                            pr (promise)]
-                        (clojure.core/swap! pending assoc id pr)
-                        (.sendText sock (json/write-str {:id id
-                                                         :method method
-                                                         :params params}) true)
-                        (let [r (deref pr 30000 nil)]
-                          (clojure.core/swap! pending dissoc id)
-                          (:result r))))
-               rows (fn []
-                      (or (get-in (call "Runtime.evaluate"
-                                        {:expression "document.querySelectorAll('tbody tr').length"
-                                         :returnByValue true}) [:result :value]) 0))
-               _ (call "Page.navigate" {:url url})
-               t0 (now)
-               seen (loop []
-                      (let [r (rows)]
-                        (if (or (>= r n) (> (- (now) t0) timeout-ms))
-                          r
+             flags (cond-> ["--headless=new" "--disable-gpu"
+                            "--no-proxy-server" "--hide-scrollbars"
+                            (str "--user-data-dir=" dir) "--window-size=1400,1100"
+                            "--remote-debugging-port=0" "about:blank"]
+                     (= "root" (System/getProperty "user.name"))
+                     (into ["--no-sandbox"]))
+             proc (apply p/process {:out :string :err :string} (:chrome tools) flags)
+             port-file (str (fs/path dir "DevToolsActivePort"))]
+         (try
+           (let [port (loop [i 0]
+                        (cond
+                          (and (fs/exists? port-file)
+                               (seq (str/trim (slurp port-file))))
+                          (first (str/split-lines (slurp port-file))) (< i 200)
                           (do
-                            (pool/sleep-ms! 500)
-                            (recur)))))]
+                            (pool/sleep-ms! 100)
+                            (recur (inc i)))
+                          :else
+                          (throw (ex-info "Chromium opened no DevTools port" {}))))
+                 targets (json/read-str (http-get-string (str "http://127.0.0.1:" port "/json/list"))
+                                        :key-fn keyword)
+                 ws-url (:webSocketDebuggerUrl (first (filter (fn [t]
+                                                                (= "page" (:type t)))
+                                                              targets)))
+                 pending (atom {})
+                 ids (atom 0)
+               ;; (a large reply — the screenshot — arrives in parts: a message is whole at its last part)
+                 part (StringBuilder.)
+                 listener (reify WebSocket$Listener
+                            (onOpen [_ ws] (.request ws 1) nil)
+                            (onText [_ ws data last?]
+                              (.append part (str data))
+                              (when last?
+                                (let [m (json/read-str (str part) :key-fn keyword)]
+                                  (.setLength part 0)
+                                  (when-let [pr (get @pending (:id m))]
+                                    (deliver pr m))))
+                              (.request ws 1)
+                              nil)
+                            (onError [_ _ws _err] nil))
+                 ^WebSocket sock (.join (.buildAsync (.newWebSocketBuilder ^HttpClient @http-client)
+                                                     (URI/create ws-url) listener))
+                 call (fn [method params]
+                        (let [id (clojure.core/swap! ids inc)
+                              pr (promise)]
+                          (clojure.core/swap! pending assoc id pr)
+                          (.sendText sock (json/write-str {:id id
+                                                           :method method
+                                                           :params params}) true)
+                          (let [r (deref pr 30000 nil)]
+                            (clojure.core/swap! pending dissoc id)
+                            (:result r))))
+                 rows (fn []
+                        (or (get-in (call "Runtime.evaluate"
+                                          {:expression "document.querySelectorAll('tbody tr').length"
+                                           :returnByValue true}) [:result :value]) 0))
+                 _ (call "Page.navigate" {:url url})
+                 t0 (now)
+                 seen (loop []
+                        (let [r (rows)]
+                          (if (or (>= r n) (> (- (now) t0) timeout-ms))
+                            r
+                            (do
+                              (pool/sleep-ms! 500)
+                              (recur)))))]
            ;; (the thumbnails load after their rows)
-           (pool/sleep-ms! 1500)
-           (when-let [png (:data (call "Page.captureScreenshot" {:format "png"}))]
-             (fs/write-bytes shot
-                             (.decode (java.util.Base64/getDecoder) ^String png)))
-           (.sendClose sock WebSocket/NORMAL_CLOSURE "done")
-           seen)
-         (finally (p/destroy-tree proc)))))
-     ))
+             (pool/sleep-ms! 1500)
+             (when-let [png (:data (call "Page.captureScreenshot" {:format "png"}))]
+               (fs/write-bytes shot
+                               (.decode (java.util.Base64/getDecoder) ^String png)))
+             (.sendClose sock WebSocket/NORMAL_CLOSURE "done")
+             seen)
+           (finally (p/destroy-tree proc)))))))
 
 (defn browser-check!
   "Wait (up to timeout-ms) for the page's check (the app page in the browser seat's shell iframe, whose URL

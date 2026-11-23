@@ -200,7 +200,7 @@
         ;; (eve.deftype-proto.emission, plan §4 M3); the field list it
         ;; projects is this registry's.
         sister-fields (emission/sister-fields
-                        (filterv #(not= :cached (:type-class %)) fields))
+                       (filterv #(not= :cached (:type-class %)) fields))
         ;; the flat sister class (plan §4, slice M2): the ctx the
         ;; shared generator consumes — eve.types/flat-type, the same
         ;; realization eve-deftype's expansion resolves — assembled
@@ -222,17 +222,17 @@
         field-oriented? (sister-eligible? sister-protos written-fields)
         flat-forms (when field-oriented?
                      (emission/flat-forms
-                       {:env &env :type-name type-name
-                        :inst-fields cached-fields
-                        :live-fields written-fields
-                        :slab-fields written-fields
-                        :field-map (into {} (map (fn [f] [(:name f) f]) written-fields))
-                        :parsed-protos sister-protos
-                        :type-key type-key
-                        :provides? (fn [protos & ps]
-                                     (some #(v/user-provides-protocol? protos %) ps))
-                        :flat-name flat-name
-                        :sister-name sister-name}))
+                      {:env &env :type-name type-name
+                       :inst-fields cached-fields
+                       :live-fields written-fields
+                       :slab-fields written-fields
+                       :field-map (into {} (map (fn [f] [(:name f) f]) written-fields))
+                       :parsed-protos sister-protos
+                       :type-key type-key
+                       :provides? (fn [protos & ps]
+                                    (some #(v/user-provides-protocol? protos %) ps))
+                       :flat-name flat-name
+                       :sister-name sister-name}))
         ;; ^:cached derivations (plan §3(b)(i)): {field-keyword
         ;; fn-symbol} — the descriptor's record of how a sister's
         ;; factory rebuilds the cached values from the packed
@@ -316,39 +316,39 @@
                     (list 'eve.deftype-proto.serialize/register-deftype-constructor!
                           type-id name-hash from-header-name)])]
     (apply list 'do
-      (concat
-       (when field-oriented? [(list 'declare ctor-name)])
-       [(t/slab-type {:env &env :type-name type-name :fields fields :parsed-protos parsed-protos
-                      :type-id type-id :total-size total-size
-                      :emit-type-id-def? emit-type-id-def? :type-key type-key})
-        (dt-reg/registration-form &env type-name
-          {:type-id type-id :name-hash name-hash :type-tag type-tag
-           :total-size total-size :type-key type-key :storage :slab :fields fields
-           :record/portable? true})
+           (concat
+            (when field-oriented? [(list 'declare ctor-name)])
+            [(t/slab-type {:env &env :type-name type-name :fields fields :parsed-protos parsed-protos
+                           :type-id type-id :total-size total-size
+                           :emit-type-id-def? emit-type-id-def? :type-key type-key})
+             (dt-reg/registration-form &env type-name
+                                       {:type-id type-id :name-hash name-hash :type-tag type-tag
+                                        :total-size total-size :type-key type-key :storage :slab :fields fields
+                                        :record/portable? true})
         ;; the generated predicate: both forms answer to the type's
         ;; name (the shared pred-form, plan §2.3 + §4 M3)
-        (emission/pred-form type-name type-key "eve.deftype-proto.macros/deftype")]
+             (emission/pred-form type-name type-key "eve.deftype-proto.macros/deftype")]
        ;; the sister's generation, where the host realizes one and
        ;; the body is sister-eligible (plan §4, M2) — before the
        ;; registration, whose factory is the generated Type__sister
-       (when flat-forms [flat-forms])
-       [;; the flat sister's registration: the descriptor, its
+            (when flat-forms [flat-forms])
+            [;; the flat sister's registration: the descriptor, its
         ;; generated factory (nil on a host that realizes no sister
         ;; class, or for a body that is not sister-eligible — the
         ;; layout-only posture: packed values read as generic
         ;; records by their layout)
-        (emission/register-sister-form type-key sister-fields
-              (when flat-forms sister-name)
-              {:generated-by :proto-deftype
-               :cached-derivations cached-derivations})]
+             (emission/register-sister-form type-key sister-fields
+                                            (when flat-forms sister-name)
+                                            {:generated-by :proto-deftype
+                                             :cached-derivations cached-derivations})]
        ;; the generated freeze/thaw method pairs (eve.flat.sister/
        ;; IFreezeThaw), built by the shared proto-layer emission
        ;; (plan §4, M3) — the pair total on the persistent kind, and
        ;; the sister kind's own pair when a sister was realized
-       (emission/freeze-thaw-forms type-name (when flat-forms flat-name))
+            (emission/freeze-thaw-forms type-name (when flat-forms flat-name))
        ;; the construction + header wiring (plan §4, M4): the
        ;; value constructor and the from-header registration
-       m4-forms))))
+            m4-forms))))
 
 ;;=============================================================================
 ;; Registration Macro
@@ -391,14 +391,14 @@
     `(do
        ;; Type constructor: (fn [sio header-off]), what this host reads
        (~'defn ~(named "from-header") [sio# header-off#]
-        (~(t/reader-of from-header host-value) sio# header-off#))
+               (~(t/reader-of from-header host-value) sio# header-off#))
        (eve.deftype-proto.serialize/register-type-constructor!
         ~fast-tag ~type-id ~(named "from-header"))
 
        ;; Header disposer: frees every block the root value owns
        ~@(when dispose
            [`(~'defn ~(named "dispose") [sio# header-off#]
-              (~dispose (~from-header sio# header-off#)))
+                     (~dispose (~from-header sio# header-off#)))
             `(eve.deftype-proto.serialize/register-header-disposer! ~type-id ~(named "dispose"))])
 
        ;; Builder for auto-conversion of plain collections

@@ -55,7 +55,7 @@
                     :default (bit-and (aget ba i) 0xFF)))
 
 (defn- put-u8! [ba i v] #?(:clj (aset ^bytes ba (int i) (unchecked-byte (bit-and (long v) 0xFF)))
-                          :default (aset ba i (unchecked-byte (bit-and v 0xFF)))))
+                           :default (aset ba i (unchecked-byte (bit-and v 0xFF)))))
 
 (defn- get-u16 [ba i]
   (+ (u8 ba i) (* 256 (u8 ba (+ i 1)))))

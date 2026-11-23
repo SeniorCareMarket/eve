@@ -137,7 +137,7 @@
           (loop [off 0]
             (when (< off total)
               (let [[n errno] (jf-pwrite fd (+ buf off) (- total off)
-                                          (+ pos off))]
+                                         (+ pos off))]
                 (cond (neg? n)
                       (throw (ex-info (str "eve.journal-file: pwrite errno "
                                            errno) {:errno errno}))

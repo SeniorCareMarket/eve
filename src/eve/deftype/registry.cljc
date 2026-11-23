@@ -94,22 +94,22 @@
    earlier one (layout, fields)."
   [type-name spec]
   (swap! registry
-    (fn [types]
-      (let [io (:type-io spec)
-            types (if io
-                    (reduce-kv
-                      (fn [m k entry]
-                        (assoc m k
-                          (if (= (:tag io) (get-in entry [:type-io :tag]))
-                            (assoc-in entry [:type-io :reader-active?] false)
-                            entry)))
-                      {} types)
-                    types)
-            spec (if io (assoc-in spec [:type-io :reader-active?] true) spec)
-            types (update types type-name merge spec)]
-        (if-let [type-key (:type-key spec)]
-          (update types type-key merge spec)
-          types)))))
+         (fn [types]
+           (let [io (:type-io spec)
+                 types (if io
+                         (reduce-kv
+                          (fn [m k entry]
+                            (assoc m k
+                                   (if (= (:tag io) (get-in entry [:type-io :tag]))
+                                     (assoc-in entry [:type-io :reader-active?] false)
+                                     entry)))
+                          {} types)
+                         types)
+                 spec (if io (assoc-in spec [:type-io :reader-active?] true) spec)
+                 types (update types type-name merge spec)]
+             (if-let [type-key (:type-key spec)]
+               (update types type-key merge spec)
+               types)))))
 
 (defn data-readers
   "Derive active readers from the canonical per-type runtime entries."

@@ -173,7 +173,7 @@
     (put! addr (try (wire/encode msg)
                     (catch :default _
                       (throw (ex-info "eve.thread-host: a message to another heap must be data (eve.wire: one flat chunk): a host object is refused"
-                        {:eve.thread/refused :host-object}))))))
+                                      {:eve.thread/refused :host-object}))))))
   nil)
 
 (defn receive!
@@ -255,7 +255,7 @@
           (fn [e]
             ;; the backstop: an error the worker did not report, to its starter
             (when
-              (zero? (js/Atomics.compareExchange ctl (reported-word id) 0 1))
+             (zero? (js/Atomics.compareExchange ctl (reported-word id) 0 1))
               (send! starter
                      {:eve.thread/exit id
                       :reason {:class "error"

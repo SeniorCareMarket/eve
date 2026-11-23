@@ -8,8 +8,8 @@
   ;; swap! on an eve atom: eve.host's (clojerl's own reaches its own atoms only)
   (:refer-clojure :exclude [swap!])
   (:require
-            [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.alloc :as alloc]
+   [eve.deftype-proto.data :as d]
    [eve.host :refer [swap!]]
    [eve.deftype :as edt]
    #?(:cljs [cljs.test :refer-macros [deftest testing is use-fixtures]]
@@ -24,27 +24,26 @@
    own (rrb-vector-test's fixture), dropped with the test."
   [f]
   (binding [d/*domain-sio* (alloc/heap-domain-sio!
-                                         {:capacities {0 (* 64 1024 1024)
-                                                       1 (* 16 1024 1024)
-                                                       2 (* 16 1024 1024)
-                                                       3 (* 192 1024 1024)
-                                                       4 (* 16 1024 1024)
-                                                       5 (* 16 1024 1024)}})]
-                (f)))
+                            {:capacities {0 (* 64 1024 1024)
+                                          1 (* 16 1024 1024)
+                                          2 (* 16 1024 1024)
+                                          3 (* 192 1024 1024)
+                                          4 (* 16 1024 1024)
+                                          5 (* 16 1024 1024)}})]
+    (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
-
 
 (defprotocol IFruit
   (fruit [this]))
 
 (edt/deftype Apple [^:int32 n label]
-             IFruit
-             (fruit [_] [:apple n label]))
+  IFruit
+  (fruit [_] [:apple n label]))
 
 (edt/deftype Peach [^:int32 n label]
-             IFruit
-             (fruit [_] [:peach n label]))
+  IFruit
+  (fruit [_] [:peach n label]))
 
 (deftest the-same-ids-on-every-host
   (testing "the type-id byte: 0x40 + (eve's hash of \"eve.deftype.type-id-test/Apple\") mod 173"

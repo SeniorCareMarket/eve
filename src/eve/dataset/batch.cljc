@@ -121,8 +121,8 @@
       :instant
       {:dtype dtype
        :values (mapv (fn [v] (when (some? v)
-                                #?(:clj (.toEpochMilli ^Instant v)
-                                   :cljs (.getTime v))))
+                               #?(:clj (.toEpochMilli ^Instant v)
+                                  :cljs (.getTime v))))
                      values)
        :field-opts {:kind 10}}
 

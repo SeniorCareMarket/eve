@@ -88,8 +88,8 @@
   ([d owner now] (claim d owner (inc (:attempts d)) now))
   ([d owner token now]
   ;; (every future makes this move and complete's: assoc'd directly — the state tested here is the table's row)
-  (when (= :queued (:state d))
-    (assoc d :state :running :owner owner :claim token :attempts (inc (:attempts d)) :claimed now :ran-on owner))))
+   (when (= :queued (:state d))
+     (assoc d :state :running :owner owner :claim token :attempts (inc (:attempts d)) :claimed now :ran-on owner))))
 
 (defn block
   "The owner's task waits on blocked-on (an id): :running → :blocked. Unchanged when d is not running."

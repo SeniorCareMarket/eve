@@ -21,7 +21,7 @@
                             dissoc! disj! aclone bytes deftype])
   (:require
    [eve.deftype :as edt]
-            [eve.deftype-proto.macros :as eve]
+   [eve.deftype-proto.macros :as eve]
    ;; load order: the deftype expansions' top-level register-sister!
    ;; calls need eve.flat.sister first in the RUNTIME graph (a macro
    ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.
@@ -76,17 +76,17 @@
   (-ev [_] nil))
 
 (edt/deftype SortedEntry [k v]
-             ISortedEntry
-             (-ek [_] k)
-             (-ev [_] v))
+  ISortedEntry
+  (-ek [_] k)
+  (-ev [_] v))
 
 (edt/deftype SortedNode [^:int32 prio ^:int32 size ^:SortedNode left ^:SortedNode right ^:SortedEntry entry]
-             ISortedNode
-             (-prio [_] prio)
-             (-size [_] size)
-             (-sl [_] left)
-             (-sr [_] right)
-             (-entry [_] entry))
+  ISortedNode
+  (-prio [_] prio)
+  (-size [_] size)
+  (-sl [_] left)
+  (-sr [_] right)
+  (-entry [_] entry))
 
 (defn- -sk [n] (-ek (-entry n)))
 (defn- -sv [n] (-ev (-entry n)))
@@ -387,163 +387,162 @@
 ;;-----------------------------------------------------------------------------
 
 (edt/deftype EveSortedMap [^:SortedNode root cmp mta]
-             ISortedColl
-             (-root [_] root)
-             (-cmp [_] cmp)
-             (-map? [_] true)
+  ISortedColl
+  (-root [_] root)
+  (-cmp [_] cmp)
+  (-map? [_] true)
 
-             clojure.lang.IMeta
-             (meta [_] mta)
+  clojure.lang.IMeta
+  (meta [_] mta)
 
-             clojure.lang.IObj
-             (withMeta [_ m] (->EveSortedMap root cmp m))
+  clojure.lang.IObj
+  (withMeta [_ m] (->EveSortedMap root cmp m))
 
-             clojure.lang.Counted
-             (count [_] (-size root))
+  clojure.lang.Counted
+  (count [_] (-size root))
 
-             clojure.lang.ILookup
-             (valAt [this k] (lookup this k nil))
-             (valAt [this k not-found] (lookup this k not-found))
+  clojure.lang.ILookup
+  (valAt [this k] (lookup this k nil))
+  (valAt [this k not-found] (lookup this k not-found))
 
-             clojure.lang.Associative
-             (containsKey [_ k] (some? (find-node root (cmp-of cmp) k)))
-             (entryAt [_ k] (when-let [n (find-node root (cmp-of cmp) k)] (enc/map-entry (-sk n) (-sv n))))
-             (assoc [_ k v] (->EveSortedMap (tree-assoc root (cmp-of cmp) k v) cmp mta))
+  clojure.lang.Associative
+  (containsKey [_ k] (some? (find-node root (cmp-of cmp) k)))
+  (entryAt [_ k] (when-let [n (find-node root (cmp-of cmp) k)] (enc/map-entry (-sk n) (-sv n))))
+  (assoc [_ k v] (->EveSortedMap (tree-assoc root (cmp-of cmp) k v) cmp mta))
 
-             clojure.lang.IPersistentMap
-             (without [_ k] (->EveSortedMap (tree-dissoc root (cmp-of cmp) k) cmp mta))
-             (assocEx [_ k v] (->EveSortedMap (tree-assoc root (cmp-of cmp) k v) cmp mta))
+  clojure.lang.IPersistentMap
+  (without [_ k] (->EveSortedMap (tree-dissoc root (cmp-of cmp) k) cmp mta))
+  (assocEx [_ k v] (->EveSortedMap (tree-assoc root (cmp-of cmp) k v) cmp mta))
 
-             clojure.lang.IPersistentCollection
-             (cons [this o]
-                   (cond
-                     (map? o) (reduce (fn [m en] (e/assoc m (key en) (val en))) this (e/seq o))
-                     (or (vector? o) (eve.vec/eve-vector? o)) (e/assoc this (e/nth o 0) (e/nth o 1))
-                     :else (e/assoc this (key o) (val o))))
-             (empty [_] (->EveSortedMap nil cmp mta))
-             (equiv [this other] (map-equiv this other))
+  clojure.lang.IPersistentCollection
+  (cons [this o]
+    (cond
+      (map? o) (reduce (fn [m en] (e/assoc m (key en) (val en))) this (e/seq o))
+      (or (vector? o) (eve.vec/eve-vector? o)) (e/assoc this (e/nth o 0) (e/nth o 1))
+      :else (e/assoc this (key o) (val o))))
+  (empty [_] (->EveSortedMap nil cmp mta))
+  (equiv [this other] (map-equiv this other))
 
-             clojure.lang.Seqable
-             (seq [this] (entries this (nodes root true)))
+  clojure.lang.Seqable
+  (seq [this] (entries this (nodes root true)))
 
-             clojure.lang.Reversible
-             (rseq [this] (entries this (nodes root false)))
+  clojure.lang.Reversible
+  (rseq [this] (entries this (nodes root false)))
 
-             clojure.lang.IFn
-             (invoke [this k] (lookup this k nil))
-             (invoke [this k not-found] (lookup this k not-found))
+  clojure.lang.IFn
+  (invoke [this k] (lookup this k nil))
+  (invoke [this k not-found] (lookup this k not-found))
 
-             clojure.lang.IHashEq
-             (hasheq [this] (p/hash-unordered (or (entries this (nodes root true)) ())))
+  clojure.lang.IHashEq
+  (hasheq [this] (p/hash-unordered (or (entries this (nodes root true)) ())))
 
-             clojure.lang.IEditableCollection
-             (asTransient [_] (->TransientSortedMap root cmp true (alloc/scope-sio (alloc/current-sio))))
+  clojure.lang.IEditableCollection
+  (asTransient [_] (->TransientSortedMap root cmp true (alloc/scope-sio (alloc/current-sio))))
 
-             d/IRetireDiff
-             (-retire-diff [this new] (retire-diff this new))
+  d/IRetireDiff
+  (-retire-diff [this new] (retire-diff this new))
 
   ;; the JVM's (each host's vocab drops what it has no interface for): a
   ;; Clojure map is = to it only through java.util.Map and MapEquivalence
-             clojure.lang.MapEquivalence
+  clojure.lang.MapEquivalence
 
-             java.lang.Iterable
-             (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+  java.lang.Iterable
+  (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
-             java.util.Map
-             (size [_] (int (-size root)))
-             (isEmpty [_] (zero? (-size root)))
-             (get [this k] (lookup this k nil))
-             (containsValue [this v] (boolean (some #(= v (val %)) (e/seq this))))
-             (keySet [this] (set (keys this)))
-             (values [this] (vals this))
-             (entrySet [this] (set (e/seq this)))
-             (put [_ _ _] (enc/throw-unsupported))
-             (remove [_ _] (enc/throw-unsupported))
-             (putAll [_ _] (enc/throw-unsupported))
-             (clear [_] (enc/throw-unsupported))
+  java.util.Map
+  (size [_] (int (-size root)))
+  (isEmpty [_] (zero? (-size root)))
+  (get [this k] (lookup this k nil))
+  (containsValue [this v] (boolean (some #(= v (val %)) (e/seq this))))
+  (keySet [this] (set (keys this)))
+  (values [this] (vals this))
+  (entrySet [this] (set (e/seq this)))
+  (put [_ _ _] (enc/throw-unsupported))
+  (remove [_ _] (enc/throw-unsupported))
+  (putAll [_ _] (enc/throw-unsupported))
+  (clear [_] (enc/throw-unsupported))
 
   ;; what a deref of an atom holding it answers: a Clojure sorted map
 
-             IPrintWithWriter
-             (-pr-writer [this w _] (e/-write w (print-sorted this)))
+  IPrintWithWriter
+  (-pr-writer [this w _] (e/-write w (print-sorted this)))
 
-             java.lang.Object
-             (toString [this] (print-sorted this))
-             (equals [this other] (map-equiv this other))
-             (hashCode [this] (p/hash-unordered (or (entries this (nodes root true)) ()))))
+  java.lang.Object
+  (toString [this] (print-sorted this))
+  (equals [this other] (map-equiv this other))
+  (hashCode [this] (p/hash-unordered (or (entries this (nodes root true)) ()))))
 
 (edt/deftype EveSortedSet [^:SortedNode root cmp mta]
-             ISortedColl
-             (-root [_] root)
-             (-cmp [_] cmp)
-             (-map? [_] false)
+  ISortedColl
+  (-root [_] root)
+  (-cmp [_] cmp)
+  (-map? [_] false)
 
-             clojure.lang.IMeta
-             (meta [_] mta)
+  clojure.lang.IMeta
+  (meta [_] mta)
 
-             clojure.lang.IObj
-             (withMeta [_ m] (->EveSortedSet root cmp m))
+  clojure.lang.IObj
+  (withMeta [_ m] (->EveSortedSet root cmp m))
 
-             clojure.lang.Counted
-             (count [_] (-size root))
+  clojure.lang.Counted
+  (count [_] (-size root))
 
-             clojure.lang.IPersistentCollection
-             (cons [_ x] (->EveSortedSet (tree-conj root (cmp-of cmp) x) cmp mta))
-             (empty [_] (->EveSortedSet nil cmp mta))
-             (equiv [this other] (set-equiv this other))
+  clojure.lang.IPersistentCollection
+  (cons [_ x] (->EveSortedSet (tree-conj root (cmp-of cmp) x) cmp mta))
+  (empty [_] (->EveSortedSet nil cmp mta))
+  (equiv [this other] (set-equiv this other))
 
-             clojure.lang.Seqable
-             (seq [this] (entries this (nodes root true)))
+  clojure.lang.Seqable
+  (seq [this] (entries this (nodes root true)))
 
-             clojure.lang.Reversible
-             (rseq [this] (entries this (nodes root false)))
+  clojure.lang.Reversible
+  (rseq [this] (entries this (nodes root false)))
 
-             clojure.lang.ILookup
-             (valAt [this x] (lookup this x nil))
-             (valAt [this x not-found] (lookup this x not-found))
+  clojure.lang.ILookup
+  (valAt [this x] (lookup this x nil))
+  (valAt [this x not-found] (lookup this x not-found))
 
-             clojure.lang.IFn
-             (invoke [this x] (lookup this x nil))
-             (invoke [this x not-found] (lookup this x not-found))
+  clojure.lang.IFn
+  (invoke [this x] (lookup this x nil))
+  (invoke [this x not-found] (lookup this x not-found))
 
-             clojure.lang.IPersistentSet
-             (disjoin [_ x] (->EveSortedSet (tree-dissoc root (cmp-of cmp) x) cmp mta))
-             (contains [_ x] (some? (find-node root (cmp-of cmp) x)))
-             (get [this x] (lookup this x nil))
+  clojure.lang.IPersistentSet
+  (disjoin [_ x] (->EveSortedSet (tree-dissoc root (cmp-of cmp) x) cmp mta))
+  (contains [_ x] (some? (find-node root (cmp-of cmp) x)))
+  (get [this x] (lookup this x nil))
 
-             clojure.lang.IHashEq
-             (hasheq [this] (p/hash-unordered (or (entries this (nodes root true)) ())))
+  clojure.lang.IHashEq
+  (hasheq [this] (p/hash-unordered (or (entries this (nodes root true)) ())))
 
-             clojure.lang.IEditableCollection
-             (asTransient [_] (->TransientSortedSet root cmp true (alloc/scope-sio (alloc/current-sio))))
+  clojure.lang.IEditableCollection
+  (asTransient [_] (->TransientSortedSet root cmp true (alloc/scope-sio (alloc/current-sio))))
 
-             d/IRetireDiff
-             (-retire-diff [this new] (retire-diff this new))
+  d/IRetireDiff
+  (-retire-diff [this new] (retire-diff this new))
 
   ;; the JVM's: a Clojure set is = to it only through java.util.Set
-             java.lang.Iterable
-             (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
+  java.lang.Iterable
+  (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
 
-             java.util.Set
-             (size [_] (int (-size root)))
-             (isEmpty [_] (zero? (-size root)))
-             (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
-             (containsAll [this c] (boolean (every? #(some? (find-node root (cmp-of cmp) %)) c)))
-             (add [_ _] (enc/throw-unsupported))
-             (remove [_ _] (enc/throw-unsupported))
-             (addAll [_ _] (enc/throw-unsupported))
-             (retainAll [_ _] (enc/throw-unsupported))
-             (removeAll [_ _] (enc/throw-unsupported))
-             (clear [_] (enc/throw-unsupported))
+  java.util.Set
+  (size [_] (int (-size root)))
+  (isEmpty [_] (zero? (-size root)))
+  (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
+  (containsAll [this c] (boolean (every? #(some? (find-node root (cmp-of cmp) %)) c)))
+  (add [_ _] (enc/throw-unsupported))
+  (remove [_ _] (enc/throw-unsupported))
+  (addAll [_ _] (enc/throw-unsupported))
+  (retainAll [_ _] (enc/throw-unsupported))
+  (removeAll [_ _] (enc/throw-unsupported))
+  (clear [_] (enc/throw-unsupported))
 
+  IPrintWithWriter
+  (-pr-writer [this w _] (e/-write w (print-sorted this)))
 
-             IPrintWithWriter
-             (-pr-writer [this w _] (e/-write w (print-sorted this)))
-
-             java.lang.Object
-             (toString [this] (print-sorted this))
-             (equals [this other] (set-equiv this other))
-             (hashCode [this] (p/hash-unordered (or (entries this (nodes root true)) ()))))
+  java.lang.Object
+  (toString [this] (print-sorted this))
+  (equals [this other] (set-equiv this other))
+  (hashCode [this] (p/hash-unordered (or (entries this (nodes root true)) ()))))
 
 ;;-----------------------------------------------------------------------------
 ;; What a collection holds that another does not: the walk above, from the
@@ -605,54 +604,54 @@
     sc))
 
 (eve/host-deftype TransientSortedMap [^:volatile-mutable root cmp ^:volatile-mutable live? sio]
-  ISortedTransient
-  (-tdissoc! [this k] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) k))) this)
-  (-tdisj! [_ _] (throw (ex-info "disj! of a transient sorted map" {})))
+                  ISortedTransient
+                  (-tdissoc! [this k] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) k))) this)
+                  (-tdisj! [_ _] (throw (ex-info "disj! of a transient sorted map" {})))
 
-  clojure.lang.Counted
-  (count [_] (live! live?) (-size root))
+                  clojure.lang.Counted
+                  (count [_] (live! live?) (-size root))
 
-  clojure.lang.ILookup
-  (valAt [_ k]
-    (live! live?)
-    (if-let [n (find-node root (cmp-of cmp) k)] (-sv n) nil))
-  (valAt [_ k not-found]
-    (live! live?)
-    (if-let [n (find-node root (cmp-of cmp) k)] (-sv n) not-found))
+                  clojure.lang.ILookup
+                  (valAt [_ k]
+                         (live! live?)
+                         (if-let [n (find-node root (cmp-of cmp) k)] (-sv n) nil))
+                  (valAt [_ k not-found]
+                         (live! live?)
+                         (if-let [n (find-node root (cmp-of cmp) k)] (-sv n) not-found))
 
-  clojure.lang.ITransientMap
-  (assoc [this k v] (live! live?) (set! root (edit sio cmp root #(tree-assoc % (cmp-of cmp) k v))) this)
-  (without [this k] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) k))) this)
-  (conj [this o]
-    (live! live?)
-    (let [c (cmp-of cmp)
-          kvs (cond (map? o) (map (fn [en] [(key en) (val en)]) (e/seq o))
-                    (or (vector? o) (eve.vec/eve-vector? o)) [[(e/nth o 0) (e/nth o 1)]]
-                    :else [[(key o) (val o)]])]
-      (set! root (reduce (fn [r [k v]] (edit sio cmp r #(tree-assoc % c k v))) root kvs)))
-    this)
-  (persistent [_] (live! live?) (set! live? false) (end! sio ->EveSortedMap root cmp)))
+                  clojure.lang.ITransientMap
+                  (assoc [this k v] (live! live?) (set! root (edit sio cmp root #(tree-assoc % (cmp-of cmp) k v))) this)
+                  (without [this k] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) k))) this)
+                  (conj [this o]
+                        (live! live?)
+                        (let [c (cmp-of cmp)
+                              kvs (cond (map? o) (map (fn [en] [(key en) (val en)]) (e/seq o))
+                                        (or (vector? o) (eve.vec/eve-vector? o)) [[(e/nth o 0) (e/nth o 1)]]
+                                        :else [[(key o) (val o)]])]
+                          (set! root (reduce (fn [r [k v]] (edit sio cmp r #(tree-assoc % c k v))) root kvs)))
+                        this)
+                  (persistent [_] (live! live?) (set! live? false) (end! sio ->EveSortedMap root cmp)))
 
 (eve/host-deftype TransientSortedSet [^:volatile-mutable root cmp ^:volatile-mutable live? sio]
-  ISortedTransient
-  (-tdissoc! [_ _] (throw (ex-info "dissoc! of a transient sorted set" {})))
-  (-tdisj! [this x] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) x))) this)
+                  ISortedTransient
+                  (-tdissoc! [_ _] (throw (ex-info "dissoc! of a transient sorted set" {})))
+                  (-tdisj! [this x] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) x))) this)
 
-  clojure.lang.Counted
-  (count [_] (live! live?) (-size root))
+                  clojure.lang.Counted
+                  (count [_] (live! live?) (-size root))
 
-  clojure.lang.ILookup
-  (valAt [_ x]
-    (live! live?)
-    (if-let [n (find-node root (cmp-of cmp) x)] (-sk n) nil))
-  (valAt [_ x not-found]
-    (live! live?)
-    (if-let [n (find-node root (cmp-of cmp) x)] (-sk n) not-found))
+                  clojure.lang.ILookup
+                  (valAt [_ x]
+                         (live! live?)
+                         (if-let [n (find-node root (cmp-of cmp) x)] (-sk n) nil))
+                  (valAt [_ x not-found]
+                         (live! live?)
+                         (if-let [n (find-node root (cmp-of cmp) x)] (-sk n) not-found))
 
-  clojure.lang.ITransientSet
-  (conj [this x] (live! live?) (set! root (edit sio cmp root #(tree-conj % (cmp-of cmp) x))) this)
-  (disjoin [this x] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) x))) this)
-  (persistent [_] (live! live?) (set! live? false) (end! sio ->EveSortedSet root cmp)))
+                  clojure.lang.ITransientSet
+                  (conj [this x] (live! live?) (set! root (edit sio cmp root #(tree-conj % (cmp-of cmp) x))) this)
+                  (disjoin [this x] (live! live?) (set! root (edit sio cmp root #(tree-dissoc % (cmp-of cmp) x))) this)
+                  (persistent [_] (live! live?) (set! live? false) (end! sio ->EveSortedSet root cmp)))
 
 ;;-----------------------------------------------------------------------------
 ;; Public API

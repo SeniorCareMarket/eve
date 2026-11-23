@@ -25,9 +25,9 @@
 (defprotocol ICell (-hd [c]) (-tl [c]))
 
 (edt/deftype RetireCell [head ^:RetireCell tail]
-             ICell
-             (-hd [_] head)
-             (-tl [_] tail))
+  ICell
+  (-hd [_] head)
+  (-tl [_] tail))
 
 (defn- items [c] (loop [c c out []] (if (nil? c) out (recur (-tl c) (conj out (-hd c))))))
 
@@ -35,10 +35,10 @@
 (defprotocol INode (-k [n]) (-l [n]) (-r [n]))
 
 (edt/deftype RetireNode [k ^:RetireNode left ^:RetireNode right]
-             INode
-             (-k [_] k)
-             (-l [_] left)
-             (-r [_] right))
+  INode
+  (-k [_] k)
+  (-l [_] left)
+  (-r [_] right))
 
 (defn- bst-insert [t x]
   (cond (nil? t) (->RetireNode x nil nil)

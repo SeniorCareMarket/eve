@@ -27,16 +27,15 @@
    own (rrb-vector-test's fixture), dropped with the test."
   [f]
   (binding [d/*domain-sio* (alloc/heap-domain-sio!
-                                         {:capacities {0 (* 64 1024 1024)
-                                                       1 (* 16 1024 1024)
-                                                       2 (* 16 1024 1024)
-                                                       3 (* 192 1024 1024)
-                                                       4 (* 16 1024 1024)
-                                                       5 (* 16 1024 1024)}})]
-                (f)))
+                            {:capacities {0 (* 64 1024 1024)
+                                          1 (* 16 1024 1024)
+                                          2 (* 16 1024 1024)
+                                          3 (* 192 1024 1024)
+                                          4 (* 16 1024 1024)
+                                          5 (* 16 1024 1024)}})]
+    (f)))
 
 (use-fixtures :each in-a-domain-of-its-own)
-
 
 (def host #?(:cljs :cljs :bb :bb :clj :clj :cljr :cljr :lpy :lpy :clje :clje :jank :jank))
 

@@ -22,10 +22,10 @@
    as the DataScript port carries it, including its F-NBB-MACROS
    delta (no Object equiv group on this seat; IEquiv carries it)."
   (:require
-    [clojure.string :as str])
+   [clojure.string :as str])
   #?(:cljs
      (:require-macros
-       [extend-clj.core])))
+      [extend-clj.core])))
 
 (defprotocol IAtom3
   (deref-impl [this])
@@ -100,9 +100,9 @@
             (cljs.core/-lookup [this# k# not-found#]
               (case k#
                 ~@(mapcat identity
-                    (for [field fields]
-                      [(keyword (str field))
-                       field]))
+                          (for [field fields]
+                            [(keyword (str field))
+                             field]))
                 not-found#))
 
             IAtom3

@@ -327,7 +327,7 @@
   ;; the JVM's value (2026-10-19): a map and a set in the form print in one order on every host
   (is (= -2073570738
          (task/form-hash '([origin i ms] (proc/sleep-ms! ms)
-                           {:origin origin :i i :ran (:rid (:dh dom/*running*)) :s #{:b :a "x" 3}}))))
+                                         {:origin origin :i i :ran (:rid (:dh dom/*running*)) :s #{:b :a "x" 3}}))))
   ;; a reader's own expansions: @h is (<the host's core>/deref h), #(...) a fn* whose params each reader names its way
   (is (= (task/form-hash '([h k] (deref h) (fn* [a b] (+ a b))))
          (task/form-hash '([h k] @h #(+ %1 %2)))

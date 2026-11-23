@@ -115,7 +115,7 @@
     (dotimes [i 3]
       (fresh-env)
       (let [m (into (sm/hash-map) {:alpha 1 :beta 2 :gamma 3 :delta 4 :epsilon 5
-                                 :zeta 6 :eta 7 :theta 8 :iota 9 :kappa 10})]
+                                   :zeta 6 :eta 7 :theta 8 :iota 9 :kappa 10})]
         (is (= 10 (count m))
             (str "Iteration " i ": should build 10-entry map without OOM"))
         (is (= 1 (get m :alpha))

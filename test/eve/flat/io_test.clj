@@ -154,9 +154,9 @@
                           "  (prn (mapv eve.flat.chunk/unpack vs))"
                           "  (.close r))")
               pb (ProcessBuilder.
-                   (into-array String
-                               ["java" "-cp" (System/getProperty "java.class.path")
-                                "clojure.main" "-e" script]))
+                  (into-array String
+                              ["java" "-cp" (System/getProperty "java.class.path")
+                               "clojure.main" "-e" script]))
               _ (.redirectErrorStream pb true)
               p (.start pb)
               out (String. (.readAllBytes (.getInputStream p)) "UTF-8")

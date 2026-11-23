@@ -51,12 +51,12 @@
     nil))
 
 (deftype FlatSio [^{:unsynchronized-mutable true #?@(:clj [:tag bytes])} b   ;; the byte array (a builder's grows by replacement)
-                    ^{:unsynchronized-mutable true} c   ;; the chunk over b (fio/chunk b): what the reads take
-                    ^{:unsynchronized-mutable true} t   ;; the tail: one past the last written byte
-                    ^{:unsynchronized-mutable true} na  ;; blocks allocated (builder) / recorded (view)
-                    ^{:unsynchronized-mutable true #?@(:clj [:tag ints])} offs ;; ^ints ascending block offsets, or nil
-                    ^{:unsynchronized-mutable true #?@(:clj [:tag ints])} szs  ;; ^ints the size of the block at offs[i]
-                    frozen?]
+                  ^{:unsynchronized-mutable true} c   ;; the chunk over b (fio/chunk b): what the reads take
+                  ^{:unsynchronized-mutable true} t   ;; the tail: one past the last written byte
+                  ^{:unsynchronized-mutable true} na  ;; blocks allocated (builder) / recorded (view)
+                  ^{:unsynchronized-mutable true #?@(:clj [:tag ints])} offs ;; ^ints ascending block offsets, or nil
+                  ^{:unsynchronized-mutable true #?@(:clj [:tag ints])} szs  ;; ^ints the size of the block at offs[i]
+                  frozen?]
   IFlatSioState
   (-sio-bytes [_] b)
   (-sio-tail [_] t)

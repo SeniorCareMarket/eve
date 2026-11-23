@@ -213,11 +213,11 @@
 ;; JvmSlabCtx — a slab domain over IMemRegions (every host)
 ;;=============================================================================
 
-   (do
+(do
      ;; The slab context over a set of IMemRegions — every host's (its regions
      ;; are each host's adapter's; this code is not). A domain is one of these.
 
-     (declare ctx-alloc! ctx-free! ctx-alloc-run!)
+  (declare ctx-alloc! ctx-free! ctx-alloc-run!)
 
      ;; Every ISlabIO operation takes an explicit sio (JvmSlabCtx). Constructors
      ;; called without one allocate in current-sio: the running swap!'s domain
@@ -230,83 +230,83 @@
      ;; nodes a path-copy replaces are found by the retire-time structural
      ;; diff (eve.atom), on every host alike.
 
-     (deftype JvmSlabCtx
-       [^objects regions         ;; IMemRegion[6+] — one per slab class (data files)
-        ^objects bitmap-regions  ;; IMemRegion[6+] — one per slab class (bitmap files)
-        ^ints    data-offsets    ;; byte offset of data region per class
-        ^ints    bitmap-offsets  ;; byte offset of bitmap per class (0 for split files)
-        ^ints    total-blocks    ;; total blocks per class
-        ^ints    block-sizes     ;; block size per class [32 64 128 256 512 1024]
-        ^objects file-paths      ;; String[6+] — data file paths for lazy growth
-        ^objects bitmap-paths    ;; String[6+] — bitmap file paths for lazy growth
-        ^ints    max-blocks      ;; max blocks per class (growth cap)
-        ^objects desc-regions    ;; IMemRegion[6+] — each bitmap class's descriptor COUNT column (data.cljc: the slab's
+  (deftype JvmSlabCtx
+           [^objects regions         ;; IMemRegion[6+] — one per slab class (data files)
+            ^objects bitmap-regions  ;; IMemRegion[6+] — one per slab class (bitmap files)
+            ^ints    data-offsets    ;; byte offset of data region per class
+            ^ints    bitmap-offsets  ;; byte offset of bitmap per class (0 for split files)
+            ^ints    total-blocks    ;; total blocks per class
+            ^ints    block-sizes     ;; block size per class [32 64 128 256 512 1024]
+            ^objects file-paths      ;; String[6+] — data file paths for lazy growth
+            ^objects bitmap-paths    ;; String[6+] — bitmap file paths for lazy growth
+            ^ints    max-blocks      ;; max blocks per class (growth cap)
+            ^objects desc-regions    ;; IMemRegion[6+] — each bitmap class's descriptor COUNT column (data.cljc: the slab's
                                  ;; own region for a heap / SAB slab, its .slabN.desc-count file for an mmap one; nil for class 6)
-        ^objects desc-flags-regions ;; IMemRegion[6+] — each bitmap class's descriptor FLAGS column (the slab's own
+            ^objects desc-flags-regions ;; IMemRegion[6+] — each bitmap class's descriptor FLAGS column (the slab's own
                                  ;; region for a heap / SAB slab — the column sits right after the COUNT column —
                                  ;; its .slabN.desc-flags file for an mmap one; nil for class 6)
-        ^objects desc-pointer-regions ;; IMemRegion[6+] — each bitmap class's descriptor POINTER column (the
+            ^objects desc-pointer-regions ;; IMemRegion[6+] — each bitmap class's descriptor POINTER column (the
                                  ;; digest-cache side-block pointer, coalesc/DESC_DIGEST_PTR; the slab's own
                                  ;; region for a heap / SAB slab — the column sits right after the FLAGS
                                  ;; column — its .slabN.desc-pointer file for an mmap one; nil for class 6)
-        ^ints    desc-offsets    ;; byte offset of the COUNT column in desc-regions' region (block i's count entry
+            ^ints    desc-offsets    ;; byte offset of the COUNT column in desc-regions' region (block i's count entry
                                  ;; at + i * 4; its flags entry at the same offset in desc-flags-regions, + 4 * total
                                  ;; instead when the two regions are one — a heap / SAB slab; its pointer entry
                                  ;; likewise in desc-pointer-regions, + 8 * total when the regions are one)
-        ^long    mem-budget      ;; the domain's byte budget (creation parameter :mem-budget); 0 = no budget.
+            ^long    mem-budget      ;; the domain's byte budget (creation parameter :mem-budget); 0 = no budget.
                                  ;; Growth that would push the domain's total region bytes past it is
                                  ;; refused, and the allocation names the budget — never the JVM's OOM.
-        ^long    segment-bytes]  ;; the domain's region mapping window (creation parameter
+            ^long    segment-bytes]  ;; the domain's region mapping window (creation parameter
                                  ;; :segment-bytes); 0 = the region adapter's default.  Presentation,
                                  ;; not format: growth/refresh reopens carry it and reuse each
                                  ;; file's old region's unchanged windows (the delta maps).
 
-       ISlabIO
+    ISlabIO
 
-       (-sio-read-u8 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
+    (-sio-read-u8 [_ slab-offset field-off]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
            ;; a plain load (eve.mem/IPlainLoad): no allocation where the region has a plain vehicle
-           (mem/-plain-load-u8 region (+ base (long field-off)))))
+        (mem/-plain-load-u8 region (+ base (long field-off)))))
 
-       (-sio-write-u8! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-plain-store-u8! region (+ base (long field-off)) val)))
+    (-sio-write-u8! [_ slab-offset field-off val]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
+        (mem/-plain-store-u8! region (+ base (long field-off)) val)))
 
-       (-sio-read-u16 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)
-               b         (mem/-read-bytes region (+ base field-off) 2)]
+    (-sio-read-u16 [_ slab-offset field-off]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)
+            b         (mem/-read-bytes region (+ base field-off) 2)]
            ;; Little-endian u16
-           (bit-or (bit-and (aget ^bytes b 0) 0xFF)
-                   (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8))))
+        (bit-or (bit-and (aget ^bytes b 0) 0xFF)
+                (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8))))
 
-       (-sio-write-u16! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-write-bytes! region (+ base field-off)
-                              (enc/bytes-of [(bit-and val 0xFF)
-                                             (bit-and (unsigned-bit-shift-right val 8) 0xFF)]))))
+    (-sio-write-u16! [_ slab-offset field-off val]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
+        (mem/-write-bytes! region (+ base field-off)
+                           (enc/bytes-of [(bit-and val 0xFF)
+                                          (bit-and (unsigned-bit-shift-right val 8) 0xFF)]))))
 
-       (-sio-read-i32 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
+    (-sio-read-i32 [_ slab-offset field-off]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
            ;; Little-endian i32 through the PLAIN byte path (the u16
            ;; pair's shape), never the region's atomic -load-i32: slab
            ;; payload words are packed at arbitrary offsets (HAMT node
@@ -319,78 +319,78 @@
            ;; read is the correct semantics. Real atomic words (root
            ;; fields, doorbells, CAS) go through mem/ directly, aligned.
            ;; IPlainLoad's i32: plain, any alignment, little-endian -- the same bytes
-           (mem/-plain-load-i32 region (+ base (long field-off)))))
+        (mem/-plain-load-i32 region (+ base (long field-off)))))
 
-       (-sio-write-i32! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
+    (-sio-write-i32! [_ slab-offset field-off val]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
            ;; Plain bytes, as -sio-write-u16!: see -sio-read-i32 --
            ;; payload words are packed, never atomic fields. The byte
            ;; layout is unchanged, so seals stay byte-identical.
-           (mem/-plain-store-i32! region (+ base (long field-off)) val)))
+        (mem/-plain-store-i32! region (+ base (long field-off)) val)))
 
-       (-sio-cas-i32! [_ slab-offset field-off expected desired]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-cas-i32! region (+ base field-off) expected desired)))
+    (-sio-cas-i32! [_ slab-offset field-off expected desired]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
+        (mem/-cas-i32! region (+ base field-off) expected desired)))
 
-       (-sio-read-bytes [_ slab-offset field-off len]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-read-bytes region (+ base field-off) len)))
+    (-sio-read-bytes [_ slab-offset field-off len]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
+        (mem/-read-bytes region (+ base field-off) len)))
 
-       (-sio-write-bytes! [_ slab-offset field-off src]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-write-bytes! region (+ base field-off) src)))
+    (-sio-write-bytes! [_ slab-offset field-off src]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))
+            region    (aget regions class-idx)]
+        (mem/-write-bytes! region (+ base field-off) src)))
 
-       (-sio-alloc! [ctx size-bytes] (ctx-alloc! ctx size-bytes))
+    (-sio-alloc! [ctx size-bytes] (ctx-alloc! ctx size-bytes))
 
-       (-sio-copy-block! [_ dst-slab-offset dst-field-off src-slab-offset src-field-off len]
-         (let [src-ci  (decode-class-idx src-slab-offset)
-               src-bi  (decode-block-idx src-slab-offset)
-               src-base (+ (aget data-offsets src-ci) (* src-bi (aget block-sizes src-ci)))
-               src-rgn  (aget regions src-ci)
-               dst-ci  (decode-class-idx dst-slab-offset)
-               dst-bi  (decode-block-idx dst-slab-offset)
-               dst-base (+ (aget data-offsets dst-ci) (* dst-bi (aget block-sizes dst-ci)))
-               dst-rgn  (aget regions dst-ci)]
-           (mem/copy-region! src-rgn (+ src-base (long src-field-off))
-                             dst-rgn (+ dst-base (long dst-field-off))
-                             len)))
+    (-sio-copy-block! [_ dst-slab-offset dst-field-off src-slab-offset src-field-off len]
+      (let [src-ci  (decode-class-idx src-slab-offset)
+            src-bi  (decode-block-idx src-slab-offset)
+            src-base (+ (aget data-offsets src-ci) (* src-bi (aget block-sizes src-ci)))
+            src-rgn  (aget regions src-ci)
+            dst-ci  (decode-class-idx dst-slab-offset)
+            dst-bi  (decode-block-idx dst-slab-offset)
+            dst-base (+ (aget data-offsets dst-ci) (* dst-bi (aget block-sizes dst-ci)))
+            dst-rgn  (aget regions dst-ci)]
+        (mem/copy-region! src-rgn (+ src-base (long src-field-off))
+                          dst-rgn (+ dst-base (long dst-field-off))
+                          len)))
 
-       (-sio-free! [ctx slab-offset] (ctx-free! ctx slab-offset))
+    (-sio-free! [ctx slab-offset] (ctx-free! ctx slab-offset))
 
-       ISlabRunAlloc
-       (-sio-alloc-run! [ctx class-idx n] (ctx-alloc-run! ctx class-idx n))
+    ISlabRunAlloc
+    (-sio-alloc-run! [ctx class-idx n] (ctx-alloc-run! ctx class-idx n))
 
-       ISlabRegion
-       (-sio-mem-region [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))]
-           [(aget regions class-idx) (+ base field-off)])))
+    ISlabRegion
+    (-sio-mem-region [_ slab-offset field-off]
+      (let [class-idx (decode-class-idx slab-offset)
+            block-idx (decode-block-idx slab-offset)
+            base      (+ (aget data-offsets class-idx)
+                         (* block-idx (aget block-sizes class-idx)))]
+        [(aget regions class-idx) (+ base field-off)])))
 
      ;; The allocator: JvmSlabCtx's -sio-alloc! / -sio-free!, and what a host's
      ;; slab-io calls for a domain directly (eve.slab-io alloc! / free!). Its
      ;; header words and bitmaps are read and written through eve.slab-io's
      ;; region names.
 
-     (defn- ctx-domain-bytes
-       "The domain's total region bytes: every distinct region the ctx holds,
+  (defn- ctx-domain-bytes
+    "The domain's total region bytes: every distinct region the ctx holds,
         counted once (a heap class's data, bitmap and descriptor columns are
         one region; an mmap class's are separate files). Computed only at
         growth time, where doubling makes the walk's cost noise. The
@@ -399,176 +399,176 @@
         the basilisp load of this file; the walk is over <=35 regions and
         runs only at growth time, where its cost is noise by the same
         argument as the walk itself)."
-       [^JvmSlabCtx ctx]
-       (let [count-region (fn [[seen total] r]
-                            (if (some #(identical? % r) seen)
-                              [seen total]
-                              [(conj seen r)
-                               (+ total (long (mem/-byte-length r)))]))
-             count-array  (fn [acc ^objects rs]
-                            (reduce (fn [acc i]
-                                      (if-let [r (aget rs i)]
-                                        (count-region acc r)
-                                        acc))
-                                    acc (range (alength rs))))]
-         (second (reduce count-array [[] 0]
-                         [(field ctx regions)
-                          (field ctx bitmap-regions)
-                          (field ctx desc-regions)
-                          (field ctx desc-flags-regions)
-                          (field ctx desc-pointer-regions)]))))
+    [^JvmSlabCtx ctx]
+    (let [count-region (fn [[seen total] r]
+                         (if (some #(identical? % r) seen)
+                           [seen total]
+                           [(conj seen r)
+                            (+ total (long (mem/-byte-length r)))]))
+          count-array  (fn [acc ^objects rs]
+                         (reduce (fn [acc i]
+                                   (if-let [r (aget rs i)]
+                                     (count-region acc r)
+                                     acc))
+                                 acc (range (alength rs))))]
+      (second (reduce count-array [[] 0]
+                      [(field ctx regions)
+                       (field ctx bitmap-regions)
+                       (field ctx desc-regions)
+                       (field ctx desc-flags-regions)
+                       (field ctx desc-pointer-regions)]))))
 
-     (defn- budget-allows?
-       "True when growing the domain by add-bytes stays within its :mem-budget
+  (defn- budget-allows?
+    "True when growing the domain by add-bytes stays within its :mem-budget
         (or it has none). The budget caps the domain's total region bytes:
         growth past it is refused at the growth points, so a budgeted domain
         spills to its caller's named error instead of growing into the host's
         hard limit (a JVM OOM, a workerd kill)."
-       [^JvmSlabCtx ctx add-bytes]
-       (let [budget (long (field ctx mem-budget))]
-         (or (not (pos? budget))
-             (<= (+ (ctx-domain-bytes ctx) (long add-bytes)) budget))))
+    [^JvmSlabCtx ctx add-bytes]
+    (let [budget (long (field ctx mem-budget))]
+      (or (not (pos? budget))
+          (<= (+ (ctx-domain-bytes ctx) (long add-bytes)) budget))))
 
-     (defn- grow-coalesc-once!
-       "One growth step of ctx's class-6 (coalescing) region: double its data
+  (defn- grow-coalesc-once!
+    "One growth step of ctx's class-6 (coalescing) region: double its data
         size (coalesc/grow-coalesc-region!), then make the ctx's region
         physically that big — an mmap region re-opened at the new size, a heap
         region replaced by a larger copy. Under the regions lock; true when
         the region grew, false when it is at its max or absent."
-       [^JvmSlabCtx ctx]
-       (locking (field ctx regions)
-         (let [^objects regions (field ctx regions)
-               region           (aget regions OVERFLOW_CLASS_IDX)]
-           (when region
-             (let [budget   (long (field ctx mem-budget))
+    [^JvmSlabCtx ctx]
+    (locking (field ctx regions)
+      (let [^objects regions (field ctx regions)
+            region           (aget regions OVERFLOW_CLASS_IDX)]
+        (when region
+          (let [budget   (long (field ctx mem-budget))
                    ;; under a :mem-budget, class 6 may grow only into the
                    ;; budget the rest of the domain leaves it (the region's
                    ;; total bytes are data-off + data-size); grow-coalesc-
                    ;; region! returns nil at its max, so a capped max is a
                    ;; refused growth, never a partial one
-                   max-data (if (pos? budget)
-                              (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
-                                    others   (- (ctx-domain-bytes ctx) (long (mem/-byte-length region)))]
-                                (min coalesc/DEFAULT_DATA_SIZE
-                                     (max 0 (- budget others data-off))))
-                              coalesc/DEFAULT_DATA_SIZE)
-                   result (coalesc/grow-coalesc-region! region max-data)]
-               (when result
-                 (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
-                       fpath    (aget ^objects (field ctx file-paths) OVERFLOW_CLASS_IDX)
-                       new-r    (if fpath
-                                  (region/open-mmap-region fpath (+ data-off result)
-                                                           (cond-> (region-opts region)
-                                                             (pos? (long (field ctx segment-bytes)))
-                                                             (assoc :segment-bytes (long (field ctx segment-bytes)))
-                                                             region
-                                                             (assoc :reuse-from region)))
+                max-data (if (pos? budget)
+                           (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
+                                 others   (- (ctx-domain-bytes ctx) (long (mem/-byte-length region)))]
+                             (min coalesc/DEFAULT_DATA_SIZE
+                                  (max 0 (- budget others data-off))))
+                           coalesc/DEFAULT_DATA_SIZE)
+                result (coalesc/grow-coalesc-region! region max-data)]
+            (when result
+              (let [data-off (long (aget ^ints (field ctx data-offsets) OVERFLOW_CLASS_IDX))
+                    fpath    (aget ^objects (field ctx file-paths) OVERFLOW_CLASS_IDX)
+                    new-r    (if fpath
+                               (region/open-mmap-region fpath (+ data-off result)
+                                                        (cond-> (region-opts region)
+                                                          (pos? (long (field ctx segment-bytes)))
+                                                          (assoc :segment-bytes (long (field ctx segment-bytes)))
+                                                          region
+                                                          (assoc :reuse-from region)))
                                   ;; Heap-backed: create larger region and copy
-                                  (let [old-r   (aget regions OVERFLOW_CLASS_IDX)
-                                        old-sz  (mem/-byte-length old-r)
-                                        new-sz  (+ data-off result)
-                                        new-rgn (region/make-heap-region new-sz)]
-                                    (mem/copy-region! old-r 0 new-rgn 0 old-sz)
-                                    new-rgn))]
-                   (aset regions OVERFLOW_CLASS_IDX new-r)
-                   (slab/regions-changed! ctx)
-                   true)))))))
+                               (let [old-r   (aget regions OVERFLOW_CLASS_IDX)
+                                     old-sz  (mem/-byte-length old-r)
+                                     new-sz  (+ data-off result)
+                                     new-rgn (region/make-heap-region new-sz)]
+                                 (mem/copy-region! old-r 0 new-rgn 0 old-sz)
+                                 new-rgn))]
+                (aset regions OVERFLOW_CLASS_IDX new-r)
+                (slab/regions-changed! ctx)
+                true)))))))
 
-     (defn- coalesc-alloc-growing!
-       "A class-6 block of size-bytes in ctx, growing the region until the
+  (defn- coalesc-alloc-growing!
+    "A class-6 block of size-bytes in ctx, growing the region until the
         block fits (20 growth steps at most): its slab-qualified offset.
         The one class-6 allocation discipline: direct large blocks and
         bitmap-class spills alike come through here, so no path reaches
         class 6 without the growth the region supports."
-       [^JvmSlabCtx ctx size-bytes]
-       (let [^objects regions (field ctx regions)]
-         (if (aget regions OVERFLOW_CLASS_IDX)
-           (or (when-let [byte-off (coalesc/try-coalesc-alloc!
-                                    (aget regions OVERFLOW_CLASS_IDX) size-bytes)]
-                 (encode-slab-offset OVERFLOW_CLASS_IDX byte-off))
-               (loop [attempts 0]
+    [^JvmSlabCtx ctx size-bytes]
+    (let [^objects regions (field ctx regions)]
+      (if (aget regions OVERFLOW_CLASS_IDX)
+        (or (when-let [byte-off (coalesc/try-coalesc-alloc!
+                                 (aget regions OVERFLOW_CLASS_IDX) size-bytes)]
+              (encode-slab-offset OVERFLOW_CLASS_IDX byte-off))
+            (loop [attempts 0]
                  ;; descriptor exhaustion is not a space failure:
                  ;; growing the data region cannot mint descriptors
                  ;; (and itself consumes one) — stop and throw the
                  ;; named error instead of doubling toward it.
-                 (if (coalesc/descriptors-exhausted? (aget regions OVERFLOW_CLASS_IDX))
-                   (coalesc/coalesc-alloc! (aget regions OVERFLOW_CLASS_IDX) size-bytes)
-                   (let [grew? (grow-coalesc-once! ctx)]
-                     (if-let [byte-off (coalesc/try-coalesc-alloc!
-                                        (aget regions OVERFLOW_CLASS_IDX) size-bytes)]
-                       (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)
-                       (if (and grew? (< attempts 20))
-                         (recur (inc attempts))
+              (if (coalesc/descriptors-exhausted? (aget regions OVERFLOW_CLASS_IDX))
+                (coalesc/coalesc-alloc! (aget regions OVERFLOW_CLASS_IDX) size-bytes)
+                (let [grew? (grow-coalesc-once! ctx)]
+                  (if-let [byte-off (coalesc/try-coalesc-alloc!
+                                     (aget regions OVERFLOW_CLASS_IDX) size-bytes)]
+                    (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)
+                    (if (and grew? (< attempts 20))
+                      (recur (inc attempts))
                          ;; when the domain's :mem-budget is what refused
                          ;; the growth, the error names it — a budgeted
                          ;; domain's ceiling is the caller's parameter,
                          ;; never the host's hard out-of-memory
-                         (let [budget (long (field ctx mem-budget))]
-                           (throw (if (and (pos? budget)
-                                           (not (budget-allows? ctx size-bytes)))
-                                    (ex-info (str "coalesc-alloc!: domain :mem-budget of " budget
-                                                  " bytes reached (domain holds " (ctx-domain-bytes ctx) " bytes)")
-                                             {:mem-budget budget :size size-bytes})
-                                    (ex-info "coalesc-alloc!: out of memory after growth"
-                                             {:size size-bytes}))))))))))
-           (throw (ex-info "JvmSlabCtx: no .slab6 region for overflow alloc"
-                           {:size-bytes size-bytes})))))
+                      (let [budget (long (field ctx mem-budget))]
+                        (throw (if (and (pos? budget)
+                                        (not (budget-allows? ctx size-bytes)))
+                                 (ex-info (str "coalesc-alloc!: domain :mem-budget of " budget
+                                               " bytes reached (domain holds " (ctx-domain-bytes ctx) " bytes)")
+                                          {:mem-budget budget :size size-bytes})
+                                 (ex-info "coalesc-alloc!: out of memory after growth"
+                                          {:size size-bytes}))))))))))
+        (throw (ex-info "JvmSlabCtx: no .slab6 region for overflow alloc"
+                        {:size-bytes size-bytes})))))
 
-     (defn- coalesc-rung-alloc-growing!
-       "A rung block of rung-idx in ctx, growing the region until the
+  (defn- coalesc-rung-alloc-growing!
+    "A rung block of rung-idx in ctx, growing the region until the
         block fits (20 growth steps at most): its slab-qualified
         offset. Mirrors coalesc-alloc-growing!'s discipline."
-       [^JvmSlabCtx ctx rung-idx]
-       (let [^objects regions (field ctx regions)
-             size-bytes       (coalesc/rung-size rung-idx)]
-         (if (aget regions OVERFLOW_CLASS_IDX)
-           (or (when-let [byte-off (coalesc/try-coalesc-alloc-rung!
-                                    (aget regions OVERFLOW_CLASS_IDX) rung-idx)]
-                 (encode-slab-offset OVERFLOW_CLASS_IDX byte-off))
-               (loop [attempts 0]
-                 (if (coalesc/descriptors-exhausted? (aget regions OVERFLOW_CLASS_IDX))
-                   (encode-slab-offset OVERFLOW_CLASS_IDX
-                                       (coalesc/coalesc-alloc-rung!
-                                        (aget regions OVERFLOW_CLASS_IDX) rung-idx))
-                   (let [grew? (grow-coalesc-once! ctx)]
-                     (if-let [byte-off (coalesc/try-coalesc-alloc-rung!
-                                        (aget regions OVERFLOW_CLASS_IDX) rung-idx)]
-                       (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)
-                       (if (and grew? (< attempts 20))
-                         (recur (inc attempts))
-                         (throw (ex-info "alloc-flat-block!: out of memory after growth"
-                                         {:size size-bytes}))))))))
-           (throw (ex-info "JvmSlabCtx: no .slab6 region for overflow alloc"
-                           {:size-bytes size-bytes})))))
+    [^JvmSlabCtx ctx rung-idx]
+    (let [^objects regions (field ctx regions)
+          size-bytes       (coalesc/rung-size rung-idx)]
+      (if (aget regions OVERFLOW_CLASS_IDX)
+        (or (when-let [byte-off (coalesc/try-coalesc-alloc-rung!
+                                 (aget regions OVERFLOW_CLASS_IDX) rung-idx)]
+              (encode-slab-offset OVERFLOW_CLASS_IDX byte-off))
+            (loop [attempts 0]
+              (if (coalesc/descriptors-exhausted? (aget regions OVERFLOW_CLASS_IDX))
+                (encode-slab-offset OVERFLOW_CLASS_IDX
+                                    (coalesc/coalesc-alloc-rung!
+                                     (aget regions OVERFLOW_CLASS_IDX) rung-idx))
+                (let [grew? (grow-coalesc-once! ctx)]
+                  (if-let [byte-off (coalesc/try-coalesc-alloc-rung!
+                                     (aget regions OVERFLOW_CLASS_IDX) rung-idx)]
+                    (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)
+                    (if (and grew? (< attempts 20))
+                      (recur (inc attempts))
+                      (throw (ex-info "alloc-flat-block!: out of memory after growth"
+                                      {:size size-bytes}))))))))
+        (throw (ex-info "JvmSlabCtx: no .slab6 region for overflow alloc"
+                        {:size-bytes size-bytes})))))
 
-     (defn ctx-alloc-flat-block!
-       "A flat block of size-bytes in ctx's slabs through the flat
+  (defn ctx-alloc-flat-block!
+    "A flat block of size-bytes in ctx's slabs through the flat
         door (IFlatDoor): its slab-qualified offset. At most 65536
         and at least 1048576 take the ordinary path (ctx-alloc!); a
         whole-chunk size (2..15 chunks) takes its rung; any other
         size above 65536 is a single non-decomposed flat block —
         refused (the kernel's -3): the caller decomposes (whole
         chunks on rungs, the tail in the variable class)."
-       [^JvmSlabCtx ctx size-bytes]
-       (cond
-         (<= size-bytes 65536)   (ctx-alloc! ctx size-bytes)
-         (>= size-bytes 1048576) (ctx-alloc! ctx size-bytes)
-         :else
-         (let [rung-idx (coalesc/rung-idx-for-size size-bytes)]
-           (if (== rung-idx -1)
-             (throw (ex-info (str "alloc-flat-block!: flat block of " size-bytes
-                                  " bytes is not chunk-aligned — refused "
-                                  "(decompose it: whole chunks on rungs, tail in the variable class)")
-                             {:size size-bytes :refusal -3}))
-             (coalesc-rung-alloc-growing! ctx rung-idx)))))
+    [^JvmSlabCtx ctx size-bytes]
+    (cond
+      (<= size-bytes 65536)   (ctx-alloc! ctx size-bytes)
+      (>= size-bytes 1048576) (ctx-alloc! ctx size-bytes)
+      :else
+      (let [rung-idx (coalesc/rung-idx-for-size size-bytes)]
+        (if (== rung-idx -1)
+          (throw (ex-info (str "alloc-flat-block!: flat block of " size-bytes
+                               " bytes is not chunk-aligned — refused "
+                               "(decompose it: whole chunks on rungs, tail in the variable class)")
+                          {:size size-bytes :refusal -3}))
+          (coalesc-rung-alloc-growing! ctx rung-idx)))))
 
-     (extend-type JvmSlabCtx
-       IFlatDoor
-       (-sio-alloc-flat-block! [ctx size-bytes]
-         (ctx-alloc-flat-block! ctx size-bytes)))
+  (extend-type JvmSlabCtx
+    IFlatDoor
+    (-sio-alloc-flat-block! [ctx size-bytes]
+      (ctx-alloc-flat-block! ctx size-bytes)))
 
-     (defn- grow-heap-class!
-       "Grow heap bitmap class ci of ctx by replacement: a new heap region at
+  (defn- grow-heap-class!
+    "Grow heap bitmap class ci of ctx by replacement: a new heap region at
         double the blocks (max-blocks caps it when positive), header, bitmap,
         descriptor columns and data copied at the new layout's offsets —
         block i stays block i, so no live reference moves. The class-6 heap
@@ -576,88 +576,88 @@
         A doubling past d/MAX_HEAP_CLASS_BYTES is refused (false: the caller
         spills to the next class), never an int overflow in make-heap-region.
         Under the caller's regions lock; true when grown."
-       [^JvmSlabCtx ctx ci]
-       (let [^objects regions (field ctx regions)
-             old-r              (aget regions ci)
-             blk-size           (long (aget ^ints (field ctx block-sizes) ci))
-             old-total          (long (aget ^ints (field ctx total-blocks) ci))
-             max-blks           (long (aget ^ints (field ctx max-blocks) ci))
-             new-total          (d/heap-class-growth-total blk-size old-total max-blks)
-             layout             (when new-total
-                                  (d/slab-layout blk-size (* (long new-total) blk-size)))]
-         (when (and old-r new-total
+    [^JvmSlabCtx ctx ci]
+    (let [^objects regions (field ctx regions)
+          old-r              (aget regions ci)
+          blk-size           (long (aget ^ints (field ctx block-sizes) ci))
+          old-total          (long (aget ^ints (field ctx total-blocks) ci))
+          max-blks           (long (aget ^ints (field ctx max-blocks) ci))
+          new-total          (d/heap-class-growth-total blk-size old-total max-blks)
+          layout             (when new-total
+                               (d/slab-layout blk-size (* (long new-total) blk-size)))]
+      (when (and old-r new-total
                     ;; a :mem-budget refuses the growth whose replacement
                     ;; region would push the domain past it
-                    (budget-allows? ctx (- (long (:total-bytes layout))
-                                           (long (mem/-byte-length old-r)))))
-           (let [new-r      (region/make-heap-region (:total-bytes layout))
-                 old-bm-off (long (aget ^ints (field ctx bitmap-offsets) ci))
-                 old-desc   (long (aget ^ints (field ctx desc-offsets) ci))
-                 old-data   (long (aget ^ints (field ctx data-offsets) ci))
-                 new-bm-off (long (:bitmap-offset layout))
-                 new-desc   (long (:desc-offset layout))
-                 new-data   (long (:data-offset layout))]
+                 (budget-allows? ctx (- (long (:total-bytes layout))
+                                        (long (mem/-byte-length old-r)))))
+        (let [new-r      (region/make-heap-region (:total-bytes layout))
+              old-bm-off (long (aget ^ints (field ctx bitmap-offsets) ci))
+              old-desc   (long (aget ^ints (field ctx desc-offsets) ci))
+              old-data   (long (aget ^ints (field ctx data-offsets) ci))
+              new-bm-off (long (:bitmap-offset layout))
+              new-desc   (long (:desc-offset layout))
+              new-data   (long (:data-offset layout))]
              ;; header: the old header's words, at the new layout's geometry
-             (mem/-store-i32! new-r d/SLAB_HDR_MAGIC
-                              (mem/-load-i32 old-r d/SLAB_HDR_MAGIC))
-             (mem/-store-i32! new-r d/SLAB_HDR_BLOCK_SIZE (int blk-size))
-             (mem/-store-i32! new-r d/SLAB_HDR_TOTAL_BLOCKS (int new-total))
-             (mem/-store-i32! new-r d/SLAB_HDR_FREE_COUNT
-                              (int (+ (mem/-load-i32 old-r d/SLAB_HDR_FREE_COUNT)
-                                      (- new-total old-total))))
-             (mem/-store-i32! new-r d/SLAB_HDR_ALLOC_CURSOR
-                              (mem/-load-i32 old-r d/SLAB_HDR_ALLOC_CURSOR))
-             (mem/-store-i32! new-r d/SLAB_HDR_CLASS_IDX (int ci))
-             (mem/-store-i32! new-r d/SLAB_HDR_BITMAP_OFFSET (int new-bm-off))
-             (mem/-store-i32! new-r d/SLAB_HDR_DATA_OFFSET (int new-data))
+          (mem/-store-i32! new-r d/SLAB_HDR_MAGIC
+                           (mem/-load-i32 old-r d/SLAB_HDR_MAGIC))
+          (mem/-store-i32! new-r d/SLAB_HDR_BLOCK_SIZE (int blk-size))
+          (mem/-store-i32! new-r d/SLAB_HDR_TOTAL_BLOCKS (int new-total))
+          (mem/-store-i32! new-r d/SLAB_HDR_FREE_COUNT
+                           (int (+ (mem/-load-i32 old-r d/SLAB_HDR_FREE_COUNT)
+                                   (- new-total old-total))))
+          (mem/-store-i32! new-r d/SLAB_HDR_ALLOC_CURSOR
+                           (mem/-load-i32 old-r d/SLAB_HDR_ALLOC_CURSOR))
+          (mem/-store-i32! new-r d/SLAB_HDR_CLASS_IDX (int ci))
+          (mem/-store-i32! new-r d/SLAB_HDR_BITMAP_OFFSET (int new-bm-off))
+          (mem/-store-i32! new-r d/SLAB_HDR_DATA_OFFSET (int new-data))
              ;; bitmap: the old bitmap's bytes; past them the new region is
              ;; zero-filled, and zero is a free bit
-             (mem/copy-region! old-r old-bm-off new-r new-bm-off
-                               (d/bitmap-byte-size old-total))
+          (mem/copy-region! old-r old-bm-off new-r new-bm-off
+                            (d/bitmap-byte-size old-total))
              ;; descriptor columns COUNT, FLAGS, POINTER: column c sits at
              ;; desc + c * 4 * total in each layout
-             (dotimes [c 3]
-               (mem/copy-region! old-r (+ old-desc (* c 4 old-total))
-                                 new-r (+ new-desc (* c 4 new-total))
-                                 (* 4 old-total)))
+          (dotimes [c 3]
+            (mem/copy-region! old-r (+ old-desc (* c 4 old-total))
+                              new-r (+ new-desc (* c 4 new-total))
+                              (* 4 old-total)))
              ;; data: block i at data + i * blk-size in each layout
-             (mem/copy-region! old-r old-data new-r new-data (* old-total blk-size))
-             (aset regions ci new-r)
-             (aset ^objects (field ctx bitmap-regions) ci new-r)
-             (aset ^objects (field ctx desc-regions) ci new-r)
-             (aset ^objects (field ctx desc-flags-regions) ci new-r)
-             (aset ^objects (field ctx desc-pointer-regions) ci new-r)
-             (aset ^ints (field ctx data-offsets) ci (int new-data))
-             (aset ^ints (field ctx bitmap-offsets) ci (int new-bm-off))
-             (aset ^ints (field ctx desc-offsets) ci (int new-desc))
-             (aset ^ints (field ctx total-blocks) ci (int new-total))
-             (slab/regions-changed! ctx)
-             true))))
+          (mem/copy-region! old-r old-data new-r new-data (* old-total blk-size))
+          (aset regions ci new-r)
+          (aset ^objects (field ctx bitmap-regions) ci new-r)
+          (aset ^objects (field ctx desc-regions) ci new-r)
+          (aset ^objects (field ctx desc-flags-regions) ci new-r)
+          (aset ^objects (field ctx desc-pointer-regions) ci new-r)
+          (aset ^ints (field ctx data-offsets) ci (int new-data))
+          (aset ^ints (field ctx bitmap-offsets) ci (int new-bm-off))
+          (aset ^ints (field ctx desc-offsets) ci (int new-desc))
+          (aset ^ints (field ctx total-blocks) ci (int new-total))
+          (slab/regions-changed! ctx)
+          true))))
 
-     (defn ctx-alloc!
-       "A block of at least size-bytes in ctx's slabs: its slab-qualified
+  (defn ctx-alloc!
+    "A block of at least size-bytes in ctx's slabs: its slab-qualified
         offset. Classes 0-5 are bitmap slabs that grow (a file-backed class
         by extension, a heap class by replacement), then spill to the next
         class; larger blocks, and a spill past class 5, go to the coalescing
         class 6, which grows the same way."
-       [^JvmSlabCtx ctx size-bytes]
-       (let [^objects regions        (field ctx regions)
-             ^objects bitmap-regions (field ctx bitmap-regions)
-             ^ints    data-offsets   (field ctx data-offsets)
-             ^ints    bitmap-offsets (field ctx bitmap-offsets)
-             ^ints    total-blocks   (field ctx total-blocks)
-             ^ints    block-sizes    (field ctx block-sizes)
-             ^objects file-paths     (field ctx file-paths)
-             ^objects bitmap-paths   (field ctx bitmap-paths)
-             ^objects desc-regions   (field ctx desc-regions)
-             ^objects desc-flags-regions (field ctx desc-flags-regions)
-             ^objects desc-pointer-regions (field ctx desc-pointer-regions)
-             class-idx (d/size->class-idx size-bytes)]
-         (if (== class-idx -1)
+    [^JvmSlabCtx ctx size-bytes]
+    (let [^objects regions        (field ctx regions)
+          ^objects bitmap-regions (field ctx bitmap-regions)
+          ^ints    data-offsets   (field ctx data-offsets)
+          ^ints    bitmap-offsets (field ctx bitmap-offsets)
+          ^ints    total-blocks   (field ctx total-blocks)
+          ^ints    block-sizes    (field ctx block-sizes)
+          ^objects file-paths     (field ctx file-paths)
+          ^objects bitmap-paths   (field ctx bitmap-paths)
+          ^objects desc-regions   (field ctx desc-regions)
+          ^objects desc-flags-regions (field ctx desc-flags-regions)
+          ^objects desc-pointer-regions (field ctx desc-pointer-regions)
+          class-idx (d/size->class-idx size-bytes)]
+      (if (== class-idx -1)
            ;; Coalescing allocator (class 6) with lazy growth
-           (coalesc-alloc-growing! ctx size-bytes)
+        (coalesc-alloc-growing! ctx size-bytes)
            ;; Bitmap slab allocator (class 0-5) with lazy growth
-           (letfn [(try-alloc [ci]
+        (letfn [(try-alloc [ci]
                      ;; A heap class (no file) grows by replacement (grow!
                      ;; below), not by this scan: once its free count
                      ;; says it is full, every allocation that spills from it
@@ -666,9 +666,9 @@
                      ;; basilisp (minutes over a large build). Skip it. A
                      ;; file-backed class keeps the scan: another process may
                      ;; have freed into it, and growing follows.
-                     (when-not (and (nil? (aget file-paths ci))
-                                    (<= (slab/region-load-i32 (aget regions ci) d/SLAB_HDR_FREE_COUNT) 0))
-                     (let [;; Snapshot order: a remap (grow!/refresh!) publishes the
+                  (when-not (and (nil? (aget file-paths ci))
+                                 (<= (slab/region-load-i32 (aget regions ci) d/SLAB_HDR_FREE_COUNT) 0))
+                    (let [;; Snapshot order: a remap (grow!/refresh!) publishes the
                             ;; new region BEFORE the new total, and totals only grow —
                             ;; so read total first, then the region, then total again.
                             ;; Equal totals certify the pair; a changed total means a
@@ -677,79 +677,79 @@
                             ;; order — region first, total third, unchecked — could
                             ;; pair the OLD bitmap with the NEW total and scan past
                             ;; its buffer: IndexOutOfBounds in imr-bitmap-find-free.)
-                       total0 (aget total-blocks ci)
-                       bm-rgn0 (aget bitmap-regions ci)
-                       bm-off0 (aget bitmap-offsets ci)
-                       [bm-rgn bm-off total]
-                       (if (= total0 (aget total-blocks ci))
-                         [bm-rgn0 bm-off0 total0]
-                         (locking regions
-                           [(aget bitmap-regions ci)
-                            (aget bitmap-offsets ci)
-                            (aget total-blocks ci)]))
+                          total0 (aget total-blocks ci)
+                          bm-rgn0 (aget bitmap-regions ci)
+                          bm-off0 (aget bitmap-offsets ci)
+                          [bm-rgn bm-off total]
+                          (if (= total0 (aget total-blocks ci))
+                            [bm-rgn0 bm-off0 total0]
+                            (locking regions
+                              [(aget bitmap-regions ci)
+                               (aget bitmap-offsets ci)
+                               (aget total-blocks ci)]))
                        ;; Lustre bitmap regions: bulk-read to avoid per-word fcntl lock
-                       lustre? (region/lustre-region? bm-rgn)
-                       cursor (slab/region-load-i32 (aget regions ci) d/SLAB_HDR_ALLOC_CURSOR)]
-                       (loop [start-bit (mod cursor total) wrapped? false]
-                         (let [candidate (if lustre?
-                                           (mem/imr-bitmap-find-free-bulk bm-rgn bm-off total start-bit)
-                                           (slab/bitmap-find-free bm-rgn bm-off total start-bit))]
-                           (cond
-                             (not= candidate -1)
-                             (if (slab/bitmap-alloc-cas! bm-rgn bm-off candidate)
-                               (let [slab-off (encode-slab-offset ci candidate)]
-                                 (slab/region-store-i32! (aget regions ci) d/SLAB_HDR_ALLOC_CURSOR
-                                                         (mod (inc candidate) total))
-                                 (slab/region-sub-i32! (aget regions ci) d/SLAB_HDR_FREE_COUNT 1)
-                                 slab-off)
-                               (recur (inc candidate) wrapped?))
+                          lustre? (region/lustre-region? bm-rgn)
+                          cursor (slab/region-load-i32 (aget regions ci) d/SLAB_HDR_ALLOC_CURSOR)]
+                      (loop [start-bit (mod cursor total) wrapped? false]
+                        (let [candidate (if lustre?
+                                          (mem/imr-bitmap-find-free-bulk bm-rgn bm-off total start-bit)
+                                          (slab/bitmap-find-free bm-rgn bm-off total start-bit))]
+                          (cond
+                            (not= candidate -1)
+                            (if (slab/bitmap-alloc-cas! bm-rgn bm-off candidate)
+                              (let [slab-off (encode-slab-offset ci candidate)]
+                                (slab/region-store-i32! (aget regions ci) d/SLAB_HDR_ALLOC_CURSOR
+                                                        (mod (inc candidate) total))
+                                (slab/region-sub-i32! (aget regions ci) d/SLAB_HDR_FREE_COUNT 1)
+                                slab-off)
+                              (recur (inc candidate) wrapped?))
 
-                             (and (not wrapped?) (pos? start-bit))
-                             (recur 0 true)
+                            (and (not wrapped?) (pos? start-bit))
+                            (recur 0 true)
 
-                             :else nil))))))
-                   (remap-jvm! [ci n-blocks]
-                     (let [blk-size   (long (aget block-sizes ci))
-                           path       (aget file-paths ci)
-                           bm-path    (aget bitmap-paths ci)
-                           data-bytes (+ (long d/SLAB_HEADER_SIZE) (* n-blocks blk-size))
-                           bm-bytes   (d/bitmap-byte-size n-blocks)
+                            :else nil))))))
+                (remap-jvm! [ci n-blocks]
+                  (let [blk-size   (long (aget block-sizes ci))
+                        path       (aget file-paths ci)
+                        bm-path    (aget bitmap-paths ci)
+                        data-bytes (+ (long d/SLAB_HEADER_SIZE) (* n-blocks blk-size))
+                        bm-bytes   (d/bitmap-byte-size n-blocks)
                            ;; re-map the way the class was opened (Lustre or
                            ;; not), at the domain's segment window, each
                            ;; file reusing its own old region's unchanged
                            ;; windows — a growth re-map maps only the delta
-                           seg        (long (field ctx segment-bytes))
-                           opts       (cond-> (region-opts (aget regions ci))
-                                        (pos? seg) (assoc :segment-bytes seg))
-                           new-region (region/open-mmap-region path data-bytes (assoc opts :reuse-from (aget regions ci)))
-                           new-bm     (region/open-mmap-region bm-path bm-bytes (assoc opts :reuse-from (aget bitmap-regions ci)))
+                        seg        (long (field ctx segment-bytes))
+                        opts       (cond-> (region-opts (aget regions ci))
+                                     (pos? seg) (assoc :segment-bytes seg))
+                        new-region (region/open-mmap-region path data-bytes (assoc opts :reuse-from (aget regions ci)))
+                        new-bm     (region/open-mmap-region bm-path bm-bytes (assoc opts :reuse-from (aget bitmap-regions ci)))
                            ;; the descriptor columns grow with their class: each column its own file,
                            ;; re-mapped bigger — an entry never moves, so no migration and no window
                            ;; where a reader sees a half-moved table
-                           new-desc   (region/open-mmap-region (str path ".desc-count") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-regions ci)))
-                           new-desc-f (region/open-mmap-region (str path ".desc-flags") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-flags-regions ci)))
-                           new-desc-p (region/open-mmap-region (str path ".desc-pointer") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
-                       (aset regions ci new-region)
-                       (aset bitmap-regions ci new-bm)
-                       (aset desc-regions ci new-desc)
-                       (aset desc-flags-regions ci new-desc-f)
-                       (aset desc-pointer-regions ci new-desc-p)
-                       (aset total-blocks ci (int n-blocks))
-                       (slab/regions-changed! ctx)))
-                   (grow! [ci]
-                     (locking regions ;; serialize growth across JVM threads
-                       (if (nil? (aget file-paths ci))
+                        new-desc   (region/open-mmap-region (str path ".desc-count") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-regions ci)))
+                        new-desc-f (region/open-mmap-region (str path ".desc-flags") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-flags-regions ci)))
+                        new-desc-p (region/open-mmap-region (str path ".desc-pointer") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
+                    (aset regions ci new-region)
+                    (aset bitmap-regions ci new-bm)
+                    (aset desc-regions ci new-desc)
+                    (aset desc-flags-regions ci new-desc-f)
+                    (aset desc-pointer-regions ci new-desc-p)
+                    (aset total-blocks ci (int n-blocks))
+                    (slab/regions-changed! ctx)))
+                (grow! [ci]
+                  (locking regions ;; serialize growth across JVM threads
+                    (if (nil? (aget file-paths ci))
                          ;; Heap class (no file): grow by replacement
-                         (grow-heap-class! ctx ci)
-                         (when-let [path (aget file-paths ci)]
-                         (let [cached    (long (aget total-blocks ci))
+                      (grow-heap-class! ctx ci)
+                      (when-let [path (aget file-paths ci)]
+                        (let [cached    (long (aget total-blocks ci))
                                ;; Peek header to detect external growth
-                               peek-r    (region/open-mmap-region path 64 (region-opts (aget regions ci)))
-                               hdr-total (long (slab/region-load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                           (cond
-                             (> hdr-total cached)
+                              peek-r    (region/open-mmap-region path 64 (region-opts (aget regions ci)))
+                              hdr-total (long (slab/region-load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                          (cond
+                            (> hdr-total cached)
                              ;; Another process/thread grew — re-map at header size
-                             (do (remap-jvm! ci hdr-total) true)
+                            (do (remap-jvm! ci hdr-total) true)
 
                              ;; Revalidate before leading: a positive header
                              ;; free-count at CURRENT geometry means the nil
@@ -758,50 +758,50 @@
                              ;; doubling again would run the class away
                              ;; geometrically. Report growth; the retry scans
                              ;; the current regions and allocates.
-                             (pos? (slab/region-load-i32 peek-r d/SLAB_HDR_FREE_COUNT))
-                             true
+                            (pos? (slab/region-load-i32 peek-r d/SLAB_HDR_FREE_COUNT))
+                            true
 
-                             :else
+                            :else
                              ;; Try to be growth leader via CAS on total_blocks
-                             (let [new-total (* 2 hdr-total)
-                                   added     (- new-total hdr-total)
+                            (let [new-total (* 2 hdr-total)
+                                  added     (- new-total hdr-total)
                                    ;; a :mem-budget refuses BEFORE the CAS can
                                    ;; publish a doubled size it leaves no room
                                    ;; for (witness -2): data, bitmap and the
                                    ;; three descriptor files all grow by it
-                                   delta     (+ (* added (long (aget block-sizes ci)))
-                                                (- (d/bitmap-byte-size new-total) (d/bitmap-byte-size hdr-total))
-                                                (* 3 (- (d/desc-column-byte-size new-total) (d/desc-column-byte-size hdr-total))))
-                                   witness   (int (if (budget-allows? ctx delta)
-                                                    (slab/region-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
-                                                                          (int hdr-total) (int new-total))
-                                                    -2))]
-                               (cond
-                                 (== witness -2) false
-                                 (== witness (int hdr-total))
+                                  delta     (+ (* added (long (aget block-sizes ci)))
+                                               (- (d/bitmap-byte-size new-total) (d/bitmap-byte-size hdr-total))
+                                               (* 3 (- (d/desc-column-byte-size new-total) (d/desc-column-byte-size hdr-total))))
+                                  witness   (int (if (budget-allows? ctx delta)
+                                                   (slab/region-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
+                                                                         (int hdr-total) (int new-total))
+                                                   -2))]
+                              (cond
+                                (== witness -2) false
+                                (== witness (int hdr-total))
                                  ;; Won CAS — extend both files
-                                 (do (remap-jvm! ci new-total)
-                                     (slab/region-add-i32! (aget regions ci) d/SLAB_HDR_FREE_COUNT (int added))
-                                     true)
-                                 :else
+                                (do (remap-jvm! ci new-total)
+                                    (slab/region-add-i32! (aget regions ci) d/SLAB_HDR_FREE_COUNT (int added))
+                                    true)
+                                :else
                                  ;; Lost CAS — re-map at winner's size
-                                 (do (remap-jvm! ci (long witness))
-                                     true)))))))))]
-             (loop [ci class-idx, attempts 0]
-               (or (try-alloc ci)
-                   (if (and (< attempts 20) (grow! ci))
-                     (recur ci (inc attempts))
+                                (do (remap-jvm! ci (long witness))
+                                    true)))))))))]
+          (loop [ci class-idx, attempts 0]
+            (or (try-alloc ci)
+                (if (and (< attempts 20) (grow! ci))
+                  (recur ci (inc attempts))
                      ;; Growth exhausted — spill to next larger class
-                     (if (< ci 5)
-                       (recur (inc ci) 0)
+                  (if (< ci 5)
+                    (recur (inc ci) 0)
                        ;; All bitmap classes full — spill to coalesc, through
                        ;; the same growth discipline as a direct class-6 alloc
-                       (let [region (aget regions OVERFLOW_CLASS_IDX)]
-                         (if region
-                           (coalesc-alloc-growing! ctx size-bytes)
-                           (throw
-                             (ex-info "JvmSlabCtx: all slab classes full"
-                                      {:class-idx ci}))))))))))))
+                    (let [region (aget regions OVERFLOW_CLASS_IDX)]
+                      (if region
+                        (coalesc-alloc-growing! ctx size-bytes)
+                        (throw
+                         (ex-info "JvmSlabCtx: all slab classes full"
+                                  {:class-idx ci}))))))))))))
 
      ;; --------------------------------------------------------------------
      ;; The run claim (flat lane Z2): n consecutive blocks of one class
@@ -817,117 +817,117 @@
      ;; (the research probe's claim started at the cursor's next word and
      ;; threw when the run was not free: up to 31 blocks lost a claim).
 
-     (defn- claim-mask!
-       "CAS the bitmap word at byte offset woff of bm-rgn so every bit of
+  (defn- claim-mask!
+    "CAS the bitmap word at byte offset woff of bm-rgn so every bit of
         mask is set, the word's other bits untouched: true when the mask's
         bits are ours. False when any of them was set already — the caller
         releases what it claimed and searches again."
-       [bm-rgn woff mask]
-       (loop []
-         (let [cur (mem/-load-i32 bm-rgn woff)]
-           (cond
-             (not (zero? (bit-and cur mask))) false
-             (== cur (mem/-cas-i32! bm-rgn woff cur (unchecked-int (bit-or cur mask)))) true
-             :else (recur)))))
+    [bm-rgn woff mask]
+    (loop []
+      (let [cur (mem/-load-i32 bm-rgn woff)]
+        (cond
+          (not (zero? (bit-and cur mask))) false
+          (== cur (mem/-cas-i32! bm-rgn woff cur (unchecked-int (bit-or cur mask)))) true
+          :else (recur)))))
 
-     (defn- release-mask!
-       "Clear exactly mask's bits of the bitmap word at woff (the undo of a
+  (defn- release-mask!
+    "Clear exactly mask's bits of the bitmap word at woff (the undo of a
         partial claim-mask!: the bits were set by this claim, and no other
         holder can have freed what was never handed out)."
-       [bm-rgn woff mask]
-       (loop []
-         (let [cur (mem/-load-i32 bm-rgn woff)]
-           (when-not (== cur (mem/-cas-i32! bm-rgn woff cur (unchecked-int (bit-and cur (bit-not mask)))))
-             (recur)))))
+    [bm-rgn woff mask]
+    (loop []
+      (let [cur (mem/-load-i32 bm-rgn woff)]
+        (when-not (== cur (mem/-cas-i32! bm-rgn woff cur (unchecked-int (bit-and cur (bit-not mask)))))
+          (recur)))))
 
-     (defn- run-mask
-       "The bits of the run [s, e) inside the bitmap word starting at wstart,
+  (defn- run-mask
+    "The bits of the run [s, e) inside the bitmap word starting at wstart,
         as an int mask (0 when the word holds none of the run)."
-       [^long s ^long e ^long wstart]
-       (let [lo (max s wstart)
-             hi (min e (+ wstart 32))]
-         (if (>= lo hi)
-           0
-           (let [bits (- hi lo)
-                 m    (if (== bits 32) -1 (dec (bit-shift-left 1 bits)))]
-             (unchecked-int (bit-shift-left m (- lo wstart)))))))
+    [^long s ^long e ^long wstart]
+    (let [lo (max s wstart)
+          hi (min e (+ wstart 32))]
+      (if (>= lo hi)
+        0
+        (let [bits (- hi lo)
+              m    (if (== bits 32) -1 (dec (bit-shift-left 1 bits)))]
+          (unchecked-int (bit-shift-left m (- lo wstart)))))))
 
-     (defn- claim-run-at!
-       "Claim the run [s, s+n) in the bitmap at bm-off of bm-rgn, one CAS per
+  (defn- claim-run-at!
+    "Claim the run [s, s+n) in the bitmap at bm-off of bm-rgn, one CAS per
         word. True when claimed; on a lost word, the words already claimed
         are released and false is answered — no partial claim survives."
-       [bm-rgn ^long bm-off ^long s ^long n]
-       (let [e  (+ s n)
-             w0 (unsigned-bit-shift-right s 5)
-             w1 (unsigned-bit-shift-right (dec e) 5)]
-         (loop [wi w0 claimed []]
-           (if (> wi w1)
-             true
-             (let [mask (run-mask s e (* wi 32))]
-               (if (claim-mask! bm-rgn (+ bm-off (* 4 wi)) mask)
-                 (recur (inc wi) (conj claimed wi))
-                 (do (doseq [cw claimed]
-                       (release-mask! bm-rgn (+ bm-off (* 4 cw)) (run-mask s e (* cw 32))))
-                     false)))))))
+    [bm-rgn ^long bm-off ^long s ^long n]
+    (let [e  (+ s n)
+          w0 (unsigned-bit-shift-right s 5)
+          w1 (unsigned-bit-shift-right (dec e) 5)]
+      (loop [wi w0 claimed []]
+        (if (> wi w1)
+          true
+          (let [mask (run-mask s e (* wi 32))]
+            (if (claim-mask! bm-rgn (+ bm-off (* 4 wi)) mask)
+              (recur (inc wi) (conj claimed wi))
+              (do (doseq [cw claimed]
+                    (release-mask! bm-rgn (+ bm-off (* 4 cw)) (run-mask s e (* cw 32))))
+                  false)))))))
 
-     (defn- find-run
-       "The start of the first run of n clear bits in the total-bit bitmap at
+  (defn- find-run
+    "The start of the first run of n clear bits in the total-bit bitmap at
         bm-off of bm-rgn, searching from bit `from` and wrapping once; -1
         when there is none. Bits below the search's start in its first word
         and bits at or past total read as set, so a run never straddles the
         class's end and never starts before `from` in the first pass."
-       [bm-rgn bm-off total n from]
-       (let [bm-off     (long bm-off)
-             total      (long total)
-             n          (long n)
-             from       (long from)
-             nwords     (unsigned-bit-shift-right (+ total 31) 5)
-             start-word (unsigned-bit-shift-right from 5)]
-         (loop [k 0 run-start -1 run-len 0]
-           (if (>= k nwords)
-             -1
-             (let [wi     (mod (+ start-word k) nwords)
-                   wstart (* wi 32)
-                   lo     (if (zero? k) from wstart)
-                   hi     (min total (+ wstart 32))
+    [bm-rgn bm-off total n from]
+    (let [bm-off     (long bm-off)
+          total      (long total)
+          n          (long n)
+          from       (long from)
+          nwords     (unsigned-bit-shift-right (+ total 31) 5)
+          start-word (unsigned-bit-shift-right from 5)]
+      (loop [k 0 run-start -1 run-len 0]
+        (if (>= k nwords)
+          -1
+          (let [wi     (mod (+ start-word k) nwords)
+                wstart (* wi 32)
+                lo     (if (zero? k) from wstart)
+                hi     (min total (+ wstart 32))
                    ;; the wrapped segment starts at word 0: a run in progress
                    ;; at the class's last bit does not continue at bit 0 —
                    ;; a run is [s, s+n) inside the class, never around its end
-                   run-start (if (and (pos? k) (zero? wi)) -1 run-start)
-                   run-len   (if (and (pos? k) (zero? wi)) 0 run-len)
-                   word   (bit-and (long (mem/-load-i32 bm-rgn (+ bm-off (* 4 wi)))) 0xFFFFFFFF)
-                   eff    (long (bit-or word
-                                        (if (> lo wstart) (dec (bit-shift-left 1 (- lo wstart))) 0)
-                                        (if (< hi (+ wstart 32))
-                                          (bit-and (bit-shift-left -1 (- hi wstart)) 0xFFFFFFFF)
-                                          0)))]
-               (cond
+                run-start (if (and (pos? k) (zero? wi)) -1 run-start)
+                run-len   (if (and (pos? k) (zero? wi)) 0 run-len)
+                word   (bit-and (long (mem/-load-i32 bm-rgn (+ bm-off (* 4 wi)))) 0xFFFFFFFF)
+                eff    (long (bit-or word
+                                     (if (> lo wstart) (dec (bit-shift-left 1 (- lo wstart))) 0)
+                                     (if (< hi (+ wstart 32))
+                                       (bit-and (bit-shift-left -1 (- hi wstart)) 0xFFFFFFFF)
+                                       0)))]
+            (cond
                  ;; the whole window clear: the run grows by it
-                 (zero? eff)
-                 (let [rs (if (neg? run-start) lo run-start)
-                       rl (+ run-len (- hi lo))]
-                   (if (>= rl n) rs (recur (inc k) rs rl)))
+              (zero? eff)
+              (let [rs (if (neg? run-start) lo run-start)
+                    rl (+ run-len (- hi lo))]
+                (if (>= rl n) rs (recur (inc k) rs rl)))
 
                  ;; the whole window set: any run is broken
-                 (== eff 0xFFFFFFFF)
-                 (recur (inc k) -1 0)
+              (== eff 0xFFFFFFFF)
+              (recur (inc k) -1 0)
 
-                 :else
+              :else
                  ;; walk the window's bits
-                 (let [[rs rl found]
-                       (loop [b lo rs run-start rl run-len]
-                         (cond
-                           (>= rl n) [rs rl true]
-                           (>= b hi) [rs rl false]
-                           (zero? (bit-and eff (bit-shift-left 1 (- b wstart))))
-                           (if (neg? rs)
-                             (recur (inc b) b 1)
-                             (recur (inc b) rs (inc rl)))
-                           :else (recur (inc b) -1 0)))]
-                   (if found rs (recur (inc k) rs rl)))))))))
+              (let [[rs rl found]
+                    (loop [b lo rs run-start rl run-len]
+                      (cond
+                        (>= rl n) [rs rl true]
+                        (>= b hi) [rs rl false]
+                        (zero? (bit-and eff (bit-shift-left 1 (- b wstart))))
+                        (if (neg? rs)
+                          (recur (inc b) b 1)
+                          (recur (inc b) rs (inc rl)))
+                        :else (recur (inc b) -1 0)))]
+                (if found rs (recur (inc k) rs rl)))))))))
 
-     (defn ctx-alloc-run!
-       "n consecutive blocks of bitmap class ci (0–5) of ctx, claimed as one
+  (defn ctx-alloc-run!
+    "n consecutive blocks of bitmap class ci (0–5) of ctx, claimed as one
         run: the slab-qualified offset of the first block, or nil when the
         class holds no run of n and none can be grown — a fragmented class
         (free blocks, no run) answers nil and claims nothing, and no claim
@@ -940,333 +940,333 @@
         try-alloc certifies its own: total read on both sides of the
         region read, a torn pair re-read under the regions lock, so a
         concurrent remap can never pair an old bitmap with a new total."
-       [^JvmSlabCtx ctx ci n]
-       (when (or (< ci 0) (>= ci OVERFLOW_CLASS_IDX))
-         (throw (ex-info "alloc-run!: a run is claimed in a bitmap class (0-5)"
-                         {:class-idx ci :n n})))
-       (when (< n 1)
-         (throw (ex-info "alloc-run!: n must be positive" {:n n})))
-       (let [^objects regions        (field ctx regions)
-             ^objects bitmap-regions (field ctx bitmap-regions)
-             ^ints    bitmap-offsets (field ctx bitmap-offsets)
-             ^ints    total-blocks   (field ctx total-blocks)
-             ^objects file-paths     (field ctx file-paths)]
-         (loop [grow-attempts 0 claim-retries 0]
-           (let [total0  (aget total-blocks ci)
-                 bm-rgn0 (aget bitmap-regions ci)
-                 bm-off0 (aget bitmap-offsets ci)
-                 [bm-rgn bm-off total]
-                 (if (= total0 (aget total-blocks ci))
-                   [bm-rgn0 bm-off0 total0]
-                   (locking regions
-                     [(aget bitmap-regions ci)
-                      (aget bitmap-offsets ci)
-                      (aget total-blocks ci)]))
-                 hdr-rgn (aget regions ci)
-                 free    (slab/region-load-i32 hdr-rgn d/SLAB_HDR_FREE_COUNT)
-                 cursor  (slab/region-load-i32 hdr-rgn d/SLAB_HDR_ALLOC_CURSOR)
-                 start   (find-run bm-rgn bm-off total n (mod cursor total))]
-             (cond
-               (not (neg? start))
-               (if (claim-run-at! bm-rgn bm-off start n)
-                 (do (slab/region-sub-i32! hdr-rgn d/SLAB_HDR_FREE_COUNT (int n))
-                     (slab/region-store-i32! hdr-rgn d/SLAB_HDR_ALLOC_CURSOR
-                                             (int (mod (+ start n) total)))
-                     (encode-slab-offset ci start))
+    [^JvmSlabCtx ctx ci n]
+    (when (or (< ci 0) (>= ci OVERFLOW_CLASS_IDX))
+      (throw (ex-info "alloc-run!: a run is claimed in a bitmap class (0-5)"
+                      {:class-idx ci :n n})))
+    (when (< n 1)
+      (throw (ex-info "alloc-run!: n must be positive" {:n n})))
+    (let [^objects regions        (field ctx regions)
+          ^objects bitmap-regions (field ctx bitmap-regions)
+          ^ints    bitmap-offsets (field ctx bitmap-offsets)
+          ^ints    total-blocks   (field ctx total-blocks)
+          ^objects file-paths     (field ctx file-paths)]
+      (loop [grow-attempts 0 claim-retries 0]
+        (let [total0  (aget total-blocks ci)
+              bm-rgn0 (aget bitmap-regions ci)
+              bm-off0 (aget bitmap-offsets ci)
+              [bm-rgn bm-off total]
+              (if (= total0 (aget total-blocks ci))
+                [bm-rgn0 bm-off0 total0]
+                (locking regions
+                  [(aget bitmap-regions ci)
+                   (aget bitmap-offsets ci)
+                   (aget total-blocks ci)]))
+              hdr-rgn (aget regions ci)
+              free    (slab/region-load-i32 hdr-rgn d/SLAB_HDR_FREE_COUNT)
+              cursor  (slab/region-load-i32 hdr-rgn d/SLAB_HDR_ALLOC_CURSOR)
+              start   (find-run bm-rgn bm-off total n (mod cursor total))]
+          (cond
+            (not (neg? start))
+            (if (claim-run-at! bm-rgn bm-off start n)
+              (do (slab/region-sub-i32! hdr-rgn d/SLAB_HDR_FREE_COUNT (int n))
+                  (slab/region-store-i32! hdr-rgn d/SLAB_HDR_ALLOC_CURSOR
+                                          (int (mod (+ start n) total)))
+                  (encode-slab-offset ci start))
                  ;; a word of the run was taken under us and the partial
                  ;; claim released: search again on a fresh snapshot
-                 (if (< claim-retries 10000)
-                   (recur grow-attempts (inc claim-retries))
-                   nil))
+              (if (< claim-retries 10000)
+                (recur grow-attempts (inc claim-retries))
+                nil))
 
                ;; no run in the class as it stands
-               (>= free n)
-               nil ;; fragmented: free blocks, no run — claims nothing
+            (>= free n)
+            nil ;; fragmented: free blocks, no run — claims nothing
 
-               (< grow-attempts 20)
-               (if (and (nil? (aget file-paths ci))
-                        (locking regions (grow-heap-class! ctx ci)))
-                 (recur (inc grow-attempts) claim-retries)
-                 nil)
+            (< grow-attempts 20)
+            (if (and (nil? (aget file-paths ci))
+                     (locking regions (grow-heap-class! ctx ci)))
+              (recur (inc grow-attempts) claim-retries)
+              nil)
 
-               :else nil)))))
+            :else nil)))))
 
-     (defn- desc-handle
-       "The tally handle of block block-idx of bitmap class ci in ctx: [[count-region count-off]
+  (defn- desc-handle
+    "The tally handle of block block-idx of bitmap class ci in ctx: [[count-region count-off]
         [flags-region flags-off] [pointer-region pointer-off]] — the addresses of the block's COUNT,
         FLAGS and POINTER column entries — or nil when the class carries no columns."
-       [^JvmSlabCtx ctx ^long ci ^long block-idx]
-       (let [dr (aget ^objects (field ctx desc-regions) ci)]
-         (when dr
-           (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
-                 pr   (aget ^objects (field ctx desc-pointer-regions) ci)
-                 off  (aget ^ints (field ctx desc-offsets) ci)
+    [^JvmSlabCtx ctx ^long ci ^long block-idx]
+    (let [dr (aget ^objects (field ctx desc-regions) ci)]
+      (when dr
+        (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
+              pr   (aget ^objects (field ctx desc-pointer-regions) ci)
+              off  (aget ^ints (field ctx desc-offsets) ci)
                  ;; a heap / SAB slab carries all three columns in its own region (FLAGS right after
                  ;; COUNT, POINTER right after FLAGS); an mmap class's flags and pointer regions are
                  ;; their own files, their columns at offset 0 there
-                 foff (if (identical? fr dr)
-                        (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
-                        off)
-                 poff (if (identical? pr dr)
-                        (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
-                        off)]
-             [[dr (+ off (* 4 block-idx))]
-              [fr (+ foff (* 4 block-idx))]
-              [pr (+ poff (* 4 block-idx))]]))))
+              foff (if (identical? fr dr)
+                     (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
+                     off)
+              poff (if (identical? pr dr)
+                     (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
+                     off)]
+          [[dr (+ off (* 4 block-idx))]
+           [fr (+ foff (* 4 block-idx))]
+           [pr (+ poff (* 4 block-idx))]]))))
 
-     (defn ctx-free!
-       "The block at slab-offset in ctx's slabs freed: true, or false when it
+  (defn ctx-free!
+    "The block at slab-offset in ctx's slabs freed: true, or false when it
         was free already (a double free)."
-       [^JvmSlabCtx ctx slab-offset]
-       (let [^objects regions (field ctx regions)
-             class-idx        (decode-class-idx slab-offset)]
-         (if (== class-idx OVERFLOW_CLASS_IDX)
+    [^JvmSlabCtx ctx slab-offset]
+    (let [^objects regions (field ctx regions)
+          class-idx        (decode-class-idx slab-offset)]
+      (if (== class-idx OVERFLOW_CLASS_IDX)
            ;; Coalescing free (class 6)
-           (let [byte-off (decode-block-idx slab-offset)
-                 region   (aget regions OVERFLOW_CLASS_IDX)]
-             (if region
-               (coalesc/coalesc-free! region byte-off)
-               false))
+        (let [byte-off (decode-block-idx slab-offset)
+              region   (aget regions OVERFLOW_CLASS_IDX)]
+          (if region
+            (coalesc/coalesc-free! region byte-off)
+            false))
            ;; Bitmap free (class 0-5)
-           (let [block-idx (decode-block-idx slab-offset)
-                 bm-rgn    (aget ^objects (field ctx bitmap-regions) class-idx)
-                 bm-off    (aget ^ints (field ctx bitmap-offsets) class-idx)
+        (let [block-idx (decode-block-idx slab-offset)
+              bm-rgn    (aget ^objects (field ctx bitmap-regions) class-idx)
+              bm-off    (aget ^ints (field ctx bitmap-offsets) class-idx)
                  ;; the block's descriptor is reset BEFORE its bit clears (after it another thread may claim the
                  ;; block): its count 0, its flags clear and its digest pointer 0 — the block's own
                  ;; columns, nothing else
-                 _         (when-let [[[cr co] [fr fo] [pr po]] (desc-handle ctx class-idx block-idx)]
-                             (slab/region-store-i32! cr co 0)
-                             (slab/region-store-i32! fr fo 0)
-                             (slab/region-store-i32! pr po 0))
-                 freed?    (slab/bitmap-free! bm-rgn bm-off block-idx)]
-             (when freed?
-               (slab/region-add-i32! (aget regions class-idx) d/SLAB_HDR_FREE_COUNT 1))
-             freed?))))
+              _         (when-let [[[cr co] [fr fo] [pr po]] (desc-handle ctx class-idx block-idx)]
+                          (slab/region-store-i32! cr co 0)
+                          (slab/region-store-i32! fr fo 0)
+                          (slab/region-store-i32! pr po 0))
+              freed?    (slab/bitmap-free! bm-rgn bm-off block-idx)]
+          (when freed?
+            (slab/region-add-i32! (aget regions class-idx) d/SLAB_HDR_FREE_COUNT 1))
+          freed?))))
 
-     (defn ctx-desc-of
-       "The tally handle of the block at slab-offset in ctx (data.cljc, Descriptor Column Layout):
+  (defn ctx-desc-of
+    "The tally handle of the block at slab-offset in ctx (data.cljc, Descriptor Column Layout):
         [[count-region count-off] [flags-region flags-off] [pointer-region pointer-off]], or nil
         (a class with no columns, or a class-6 offset no allocated block starts at). A bitmap
         class's descriptor i is block i's for the slab's life; a class-6 block's handle is its
         coalescing descriptor's."
-       [^JvmSlabCtx ctx slab-offset]
-       (let [ci (decode-class-idx slab-offset)]
-         (cond
-           (< ci OVERFLOW_CLASS_IDX)
-           (desc-handle ctx ci (decode-block-idx slab-offset))
+    [^JvmSlabCtx ctx slab-offset]
+    (let [ci (decode-class-idx slab-offset)]
+      (cond
+        (< ci OVERFLOW_CLASS_IDX)
+        (desc-handle ctx ci (decode-block-idx slab-offset))
 
-           (== ci OVERFLOW_CLASS_IDX)
-           (when-let [r (aget ^objects (field ctx regions) OVERFLOW_CLASS_IDX)]
-             (when-let [[co fo po] (coalesc/row-of r (decode-block-idx slab-offset))]
-               [[r co] [r fo] [r po]]))
+        (== ci OVERFLOW_CLASS_IDX)
+        (when-let [r (aget ^objects (field ctx regions) OVERFLOW_CLASS_IDX)]
+          (when-let [[co fo po] (coalesc/row-of r (decode-block-idx slab-offset))]
+            [[r co] [r fo] [r po]]))
 
-           :else nil)))
+        :else nil)))
 
-     (defn ctx-allocated?
-       "True when the block at slab-offset in ctx is allocated: its bitmap bit set (classes 0-5), or an ALLOCATED
+  (defn ctx-allocated?
+    "True when the block at slab-offset in ctx is allocated: its bitmap bit set (classes 0-5), or an ALLOCATED
         coalescing descriptor starting there (class 6)."
-       [^JvmSlabCtx ctx slab-offset]
-       (let [ci (decode-class-idx slab-offset)]
-         (cond
-           (< ci OVERFLOW_CLASS_IDX)
-           (let [bi (decode-block-idx slab-offset)]
-             (and (< bi (aget ^ints (field ctx total-blocks) ci))
-                  (let [w (slab/region-load-i32 (aget ^objects (field ctx bitmap-regions) ci)
-                                                (+ (aget ^ints (field ctx bitmap-offsets) ci)
-                                                   (* 4 (unsigned-bit-shift-right bi 5))))]
-                    (not (zero? (bit-and w (bit-shift-left 1 (bit-and bi 31))))))))
+    [^JvmSlabCtx ctx slab-offset]
+    (let [ci (decode-class-idx slab-offset)]
+      (cond
+        (< ci OVERFLOW_CLASS_IDX)
+        (let [bi (decode-block-idx slab-offset)]
+          (and (< bi (aget ^ints (field ctx total-blocks) ci))
+               (let [w (slab/region-load-i32 (aget ^objects (field ctx bitmap-regions) ci)
+                                             (+ (aget ^ints (field ctx bitmap-offsets) ci)
+                                                (* 4 (unsigned-bit-shift-right bi 5))))]
+                 (not (zero? (bit-and w (bit-shift-left 1 (bit-and bi 31))))))))
 
-           (== ci OVERFLOW_CLASS_IDX)
-           (some? (ctx-desc-of ctx slab-offset))
+        (== ci OVERFLOW_CLASS_IDX)
+        (some? (ctx-desc-of ctx slab-offset))
 
-           :else false)))
+        :else false)))
 
-     (defn make-jvm-slab-ctx
-       "Build a JvmSlabCtx from vectors of data regions and bitmap regions.
+  (defn make-jvm-slab-ctx
+    "Build a JvmSlabCtx from vectors of data regions and bitmap regions.
         Indices 0-5: bitmap slab classes. Index 6 (optional): coalescing overflow.
         Reads slab headers to populate data-offset, bitmap-offset, total-blocks caches.
         Optional paths-vec, bm-paths-vec, and max-caps-vec enable lazy slab growth."
-       ([regions-vec bm-regions-vec]
-        (make-jvm-slab-ctx regions-vec bm-regions-vec nil nil nil nil))
-       ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec]
-        (make-jvm-slab-ctx regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec nil))
-       ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec]
-        (make-jvm-slab-ctx regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec 0))
-       ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec mem-budget]
-        (make-jvm-slab-ctx regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec mem-budget 0))
-       ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec mem-budget segment-bytes]
-        (let [n           (count regions-vec)
-              data-offs   (int-array n)
-              bm-offs     (int-array n)
-              tot-blocks  (int-array n)
-              blk-sizes   (int-array n)
-              fpaths      (object-array n)
-              bm-fpaths   (object-array n)
-              max-blks    (int-array n)
-              desc-offs   (int-array n)
-              desc-rgns   (object-array n)
-              desc-flags-rgns (object-array n)
-              desc-pointer-rgns (object-array n)]
-          (dotimes [i n]
-            (let [region (nth regions-vec i)]
-              (when region
-                (aset data-offs  i (int (mem/-load-i32 region d/SLAB_HDR_DATA_OFFSET)))
-                (aset bm-offs    i (int (mem/-load-i32 region d/SLAB_HDR_BITMAP_OFFSET)))
-                (aset tot-blocks i (int (mem/-load-i32 region d/SLAB_HDR_TOTAL_BLOCKS)))
-                (aset blk-sizes  i (int (mem/-load-i32 region d/SLAB_HDR_BLOCK_SIZE)))))
-            (when paths-vec
-              (aset fpaths i (nth paths-vec i nil)))
-            (when bm-paths-vec
-              (aset bm-fpaths i (nth bm-paths-vec i nil)))
-            (when max-caps-vec
-              (aset max-blks i (int (nth max-caps-vec i 0))))
+    ([regions-vec bm-regions-vec]
+     (make-jvm-slab-ctx regions-vec bm-regions-vec nil nil nil nil))
+    ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec]
+     (make-jvm-slab-ctx regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec nil))
+    ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec]
+     (make-jvm-slab-ctx regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec 0))
+    ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec mem-budget]
+     (make-jvm-slab-ctx regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec mem-budget 0))
+    ([regions-vec bm-regions-vec paths-vec bm-paths-vec max-caps-vec desc-regions-vec mem-budget segment-bytes]
+     (let [n           (count regions-vec)
+           data-offs   (int-array n)
+           bm-offs     (int-array n)
+           tot-blocks  (int-array n)
+           blk-sizes   (int-array n)
+           fpaths      (object-array n)
+           bm-fpaths   (object-array n)
+           max-blks    (int-array n)
+           desc-offs   (int-array n)
+           desc-rgns   (object-array n)
+           desc-flags-rgns (object-array n)
+           desc-pointer-rgns (object-array n)]
+       (dotimes [i n]
+         (let [region (nth regions-vec i)]
+           (when region
+             (aset data-offs  i (int (mem/-load-i32 region d/SLAB_HDR_DATA_OFFSET)))
+             (aset bm-offs    i (int (mem/-load-i32 region d/SLAB_HDR_BITMAP_OFFSET)))
+             (aset tot-blocks i (int (mem/-load-i32 region d/SLAB_HDR_TOTAL_BLOCKS)))
+             (aset blk-sizes  i (int (mem/-load-i32 region d/SLAB_HDR_BLOCK_SIZE)))))
+         (when paths-vec
+           (aset fpaths i (nth paths-vec i nil)))
+         (when bm-paths-vec
+           (aset bm-fpaths i (nth bm-paths-vec i nil)))
+         (when max-caps-vec
+           (aset max-blks i (int (nth max-caps-vec i 0))))
             ;; a bitmap class's descriptor columns: its .desc-count / .desc-flags / .desc-pointer
             ;; files' regions (mmap: desc-regions-vec, [count flags pointer] triples), else the ones
             ;; the slab's own region carries right after its bitmap (heap / SAB, data.cljc
             ;; slab-layout); class 6 has its own
-            (when (< i OVERFLOW_CLASS_IDX)
-              (if desc-regions-vec
-                (when-let [[dr fr pr] (nth desc-regions-vec i nil)]
-                  (aset desc-rgns i dr)
-                  (aset desc-flags-rgns i fr)
-                  (aset desc-pointer-rgns i pr)
-                  (aset desc-offs i (int 0)))
-                (when-let [region (nth regions-vec i)]
-                  (aset desc-rgns i region)
-                  (aset desc-flags-rgns i region)
-                  (aset desc-pointer-rgns i region)
-                  (aset desc-offs i (int (d/slab-desc-offset (aget bm-offs i) (aget tot-blocks i))))))))
-          (slab/domain
-            (JvmSlabCtx.
-              (into-array regions-vec)
-              (into-array bm-regions-vec)
-              data-offs bm-offs tot-blocks blk-sizes fpaths bm-fpaths max-blks
-              desc-rgns desc-flags-rgns desc-pointer-rgns desc-offs
-              (long mem-budget) (long segment-bytes))))))
+         (when (< i OVERFLOW_CLASS_IDX)
+           (if desc-regions-vec
+             (when-let [[dr fr pr] (nth desc-regions-vec i nil)]
+               (aset desc-rgns i dr)
+               (aset desc-flags-rgns i fr)
+               (aset desc-pointer-rgns i pr)
+               (aset desc-offs i (int 0)))
+             (when-let [region (nth regions-vec i)]
+               (aset desc-rgns i region)
+               (aset desc-flags-rgns i region)
+               (aset desc-pointer-rgns i region)
+               (aset desc-offs i (int (d/slab-desc-offset (aget bm-offs i) (aget tot-blocks i))))))))
+       (slab/domain
+        (JvmSlabCtx.
+         (into-array regions-vec)
+         (into-array bm-regions-vec)
+         data-offs bm-offs tot-blocks blk-sizes fpaths bm-fpaths max-blks
+         desc-rgns desc-flags-rgns desc-pointer-rgns desc-offs
+         (long mem-budget) (long segment-bytes))))))
 
-     (defn refresh-jvm-slab-regions!
-       "Re-map any JVM slab regions whose header total_blocks exceeds the
+  (defn refresh-jvm-slab-regions!
+    "Re-map any JVM slab regions whose header total_blocks exceeds the
         cached value (i.e. another process grew them). Thread-safe.
         Fast path: if no slab class grew, skip the lock entirely.
         Takes an explicit sio."
-       ([sio]
-       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)
-             ^objects regions      (field ctx regions)
-             ^ints total-blocks    (field ctx total-blocks)
-             ^objects file-paths   (field ctx file-paths)
-             ^ints data-offsets    (field ctx data-offsets)
+    ([sio]
+     (let [^JvmSlabCtx ctx (slab/domain-ctx sio)
+           ^objects regions      (field ctx regions)
+           ^ints total-blocks    (field ctx total-blocks)
+           ^objects file-paths   (field ctx file-paths)
+           ^ints data-offsets    (field ctx data-offsets)
              ;; Fast path: lockless scan for growth in classes 0-5
-             any-grew?
-             (loop [ci 0]
-               (cond
-                 (>= ci (int d/NUM_SLAB_CLASSES)) false
-                 (nil? (aget file-paths ci)) (recur (inc ci))
-                 :else
-                 (let [cached    (long (aget total-blocks ci))
-                       cur-r     (aget regions ci)
-                       hdr-total (long (slab/region-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                   (if (> hdr-total cached)
-                     true
-                     (recur (inc ci))))))
+           any-grew?
+           (loop [ci 0]
+             (cond
+               (>= ci (int d/NUM_SLAB_CLASSES)) false
+               (nil? (aget file-paths ci)) (recur (inc ci))
+               :else
+               (let [cached    (long (aget total-blocks ci))
+                     cur-r     (aget regions ci)
+                     hdr-total (long (slab/region-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                 (if (> hdr-total cached)
+                   true
+                   (recur (inc ci))))))
              ;; Check coalesc (class 6) growth without lock
-             coalesc-grew?
-             (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
-               (let [cur-region (aget regions OVERFLOW_CLASS_IDX)]
-                 (if (nil? cur-region)
-                   true ;; never opened — must check
-                   (let [data-off    (long (aget data-offsets OVERFLOW_CLASS_IDX))
-                         hdr-data-sz (long (slab/region-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
-                         cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
-                     (> hdr-data-sz cur-size)))))]
-         (when (or any-grew? coalesc-grew?)
+           coalesc-grew?
+           (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+             (let [cur-region (aget regions OVERFLOW_CLASS_IDX)]
+               (if (nil? cur-region)
+                 true ;; never opened — must check
+                 (let [data-off    (long (aget data-offsets OVERFLOW_CLASS_IDX))
+                       hdr-data-sz (long (slab/region-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                       cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                   (> hdr-data-sz cur-size)))))]
+       (when (or any-grew? coalesc-grew?)
            ;; re-map every class the way it was opened (Lustre or not),
            ;; at the domain's segment window; each file's re-map reuses
            ;; its own old region's unchanged windows (only the delta maps)
-           (let [seg  (long (field ctx segment-bytes))
-                 opts (cond-> (region-opts (first (filter some? regions)))
-                        (pos? seg) (assoc :segment-bytes seg))
-                 ^objects bitmap-regions (field ctx bitmap-regions)
-                 ^ints block-sizes       (field ctx block-sizes)
-                 ^objects bitmap-paths   (field ctx bitmap-paths)
-                 ^objects desc-regions   (field ctx desc-regions)
-                 ^objects desc-flags-regions (field ctx desc-flags-regions)
-                 ^objects desc-pointer-regions (field ctx desc-pointer-regions)]
-             (do
-               (locking regions
-                 (when any-grew?
-                   (dotimes [ci d/NUM_SLAB_CLASSES]
-                     (when-let [path (aget file-paths ci)]
-                       (let [cached    (long (aget total-blocks ci))
-                             cur-r     (aget regions ci)
-                             hdr-total (long (slab/region-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
-                         (when (> hdr-total cached)
-                           (let [blk-size   (long (aget block-sizes ci))
-                                 data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
-                                 bm-bytes   (d/bitmap-byte-size hdr-total)
-                                 new-region (region/open-mmap-region path data-bytes (assoc opts :reuse-from cur-r))
-                                 new-bm     (region/open-mmap-region (aget bitmap-paths ci) bm-bytes (assoc opts :reuse-from (aget bitmap-regions ci)))
-                                 new-desc   (region/open-mmap-region (str path ".desc-count")
-                                                                     (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-regions ci)))
-                                 new-desc-f (region/open-mmap-region (str path ".desc-flags")
-                                                                     (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-flags-regions ci)))
-                                 new-desc-p (region/open-mmap-region (str path ".desc-pointer")
-                                                                     (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
-                             (aset regions ci new-region)
-                             (aset bitmap-regions ci new-bm)
-                             (aset desc-regions ci new-desc)
-                             (aset desc-flags-regions ci new-desc-f)
-                             (aset desc-pointer-regions ci new-desc-p)
-                             (aset total-blocks ci (int hdr-total))
-                             (slab/regions-changed! ctx)))))))
-                 (when coalesc-grew?
-                   (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
-                     (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
-                           data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
-                       (if (nil? cur-region)
-                         (let [peek-r      (region/open-mmap-region path 64 opts)
-                               hdr-data-sz (long (slab/region-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
-                           (when (pos? hdr-data-sz)
-                             (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) opts)]
-                               (aset regions OVERFLOW_CLASS_IDX new-r)
-                               (slab/regions-changed! ctx))))
-                         (let [hdr-data-sz (long (slab/region-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
-                               cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
-                           (when (> hdr-data-sz cur-size)
-                             (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) (assoc opts :reuse-from cur-region))]
-                               (aset regions OVERFLOW_CLASS_IDX new-r)
-                               (slab/regions-changed! ctx)))))))))))))))
+         (let [seg  (long (field ctx segment-bytes))
+               opts (cond-> (region-opts (first (filter some? regions)))
+                      (pos? seg) (assoc :segment-bytes seg))
+               ^objects bitmap-regions (field ctx bitmap-regions)
+               ^ints block-sizes       (field ctx block-sizes)
+               ^objects bitmap-paths   (field ctx bitmap-paths)
+               ^objects desc-regions   (field ctx desc-regions)
+               ^objects desc-flags-regions (field ctx desc-flags-regions)
+               ^objects desc-pointer-regions (field ctx desc-pointer-regions)]
+           (do
+             (locking regions
+               (when any-grew?
+                 (dotimes [ci d/NUM_SLAB_CLASSES]
+                   (when-let [path (aget file-paths ci)]
+                     (let [cached    (long (aget total-blocks ci))
+                           cur-r     (aget regions ci)
+                           hdr-total (long (slab/region-load-i32 cur-r d/SLAB_HDR_TOTAL_BLOCKS))]
+                       (when (> hdr-total cached)
+                         (let [blk-size   (long (aget block-sizes ci))
+                               data-bytes (+ (long d/SLAB_HEADER_SIZE) (* hdr-total blk-size))
+                               bm-bytes   (d/bitmap-byte-size hdr-total)
+                               new-region (region/open-mmap-region path data-bytes (assoc opts :reuse-from cur-r))
+                               new-bm     (region/open-mmap-region (aget bitmap-paths ci) bm-bytes (assoc opts :reuse-from (aget bitmap-regions ci)))
+                               new-desc   (region/open-mmap-region (str path ".desc-count")
+                                                                   (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-regions ci)))
+                               new-desc-f (region/open-mmap-region (str path ".desc-flags")
+                                                                   (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-flags-regions ci)))
+                               new-desc-p (region/open-mmap-region (str path ".desc-pointer")
+                                                                   (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
+                           (aset regions ci new-region)
+                           (aset bitmap-regions ci new-bm)
+                           (aset desc-regions ci new-desc)
+                           (aset desc-flags-regions ci new-desc-f)
+                           (aset desc-pointer-regions ci new-desc-p)
+                           (aset total-blocks ci (int hdr-total))
+                           (slab/regions-changed! ctx)))))))
+               (when coalesc-grew?
+                 (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+                   (let [cur-region (aget regions OVERFLOW_CLASS_IDX)
+                         data-off   (long (aget data-offsets OVERFLOW_CLASS_IDX))]
+                     (if (nil? cur-region)
+                       (let [peek-r      (region/open-mmap-region path 64 opts)
+                             hdr-data-sz (long (slab/region-load-i64 peek-r coalesc/COALESC_HDR_DATA_SIZE))]
+                         (when (pos? hdr-data-sz)
+                           (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) opts)]
+                             (aset regions OVERFLOW_CLASS_IDX new-r)
+                             (slab/regions-changed! ctx))))
+                       (let [hdr-data-sz (long (slab/region-load-i64 cur-region coalesc/COALESC_HDR_DATA_SIZE))
+                             cur-size    (- (long (mem/-byte-length cur-region)) data-off)]
+                         (when (> hdr-data-sz cur-size)
+                           (let [new-r (region/open-mmap-region path (+ data-off hdr-data-sz) (assoc opts :reuse-from cur-region))]
+                             (aset regions OVERFLOW_CLASS_IDX new-r)
+                             (slab/regions-changed! ctx)))))))))))))))
 
-     (defn sync-jvm-slab-regions!
-       "Force every region the JVM slab ctx holds — the slab data regions,
+  (defn sync-jvm-slab-regions!
+    "Force every region the JVM slab ctx holds — the slab data regions,
         the allocator bitmap regions and the descriptor-table regions — to
         durable storage (eve.mem/sync-region!: a region that cannot force,
         a heap region, answers nil). The durability spike's commit ordering
         calls this before a root pointer is published; eve.atom/sync!
         calls it for the whole domain."
-       [sio]
-       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
-         (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)]
-                 :when arr
-                 r arr
-                 :when r]
-           (mem/sync-region! r))))
+    [sio]
+    (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
+      (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)]
+              :when arr
+              r arr
+              :when r]
+        (mem/sync-region! r))))
 
-     (defn sync-jvm-touched-classes!
-       "Force, per slab class in classes, that class's data region, bitmap
+  (defn sync-jvm-touched-classes!
+    "Force, per slab class in classes, that class's data region, bitmap
         region and three descriptor-column regions — the regions a commit
         in those classes wrote — instead of every region the ctx holds.
         (Broader in one way than sync-jvm-slab-regions!: on an mmap domain
         the flags/pointer column regions are their own files and ARE
         forced here; the whole-slab form never forced them.)"
-       [sio classes]
-       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
-         (doseq [ci classes
-                 ^objects arr [(field ctx regions) (field ctx bitmap-regions)
-                               (field ctx desc-regions) (field ctx desc-flags-regions)
-                               (field ctx desc-pointer-regions)]
-                 :when (and arr (< ci (alength arr)))]
-           (when-let [r (aget arr ci)]
-             (mem/sync-region! r)))))
+    [sio classes]
+    (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
+      (doseq [ci classes
+              ^objects arr [(field ctx regions) (field ctx bitmap-regions)
+                            (field ctx desc-regions) (field ctx desc-flags-regions)
+                            (field ctx desc-pointer-regions)]
+              :when (and arr (< ci (alength arr)))]
+        (when-let [r (aget arr ci)]
+          (mem/sync-region! r)))))
 
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)
@@ -1280,80 +1280,77 @@
      ;; heap memory is committed immediately, not lazily via virtual pages.  Pass
      ;; :capacities {class-idx capacity-bytes} to override.
 
-     (defn init-jvm-heap-slab!
-       "Create a single in-memory slab for class-idx using a heap region.
+  (defn init-jvm-heap-slab!
+    "Create a single in-memory slab for class-idx using a heap region.
         Writes the slab header and returns the initialized region."
-       [class-idx & {:keys [capacity]}]
-       (let [capacity   (long (or capacity (* 1 1024 1024)))   ; default 1 MB
-             block-size (d/slab-size class-idx)
-             layout     (d/slab-layout block-size capacity)
-             {:keys [total-bytes bitmap-offset bitmap-size data-offset total-blocks]} layout
-             region     (region/make-heap-region total-bytes)]
-         (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
-         (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
-         (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS total-blocks)
-         (mem/-store-i32! region d/SLAB_HDR_FREE_COUNT total-blocks)
-         (mem/-store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)
-         (mem/-store-i32! region d/SLAB_HDR_CLASS_IDX class-idx)
-         (mem/-store-i32! region d/SLAB_HDR_BITMAP_OFFSET bitmap-offset)
-         (mem/-store-i32! region d/SLAB_HDR_DATA_OFFSET data-offset)
+    [class-idx & {:keys [capacity]}]
+    (let [capacity   (long (or capacity (* 1 1024 1024)))   ; default 1 MB
+          block-size (d/slab-size class-idx)
+          layout     (d/slab-layout block-size capacity)
+          {:keys [total-bytes bitmap-offset bitmap-size data-offset total-blocks]} layout
+          region     (region/make-heap-region total-bytes)]
+      (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
+      (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
+      (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS total-blocks)
+      (mem/-store-i32! region d/SLAB_HDR_FREE_COUNT total-blocks)
+      (mem/-store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)
+      (mem/-store-i32! region d/SLAB_HDR_CLASS_IDX class-idx)
+      (mem/-store-i32! region d/SLAB_HDR_BITMAP_OFFSET bitmap-offset)
+      (mem/-store-i32! region d/SLAB_HDR_DATA_OFFSET data-offset)
          ;; byte-array is zero-initialized by the JVM, so the bitmap (0 = free)
          ;; is already correct — no explicit zeroing needed.
-         region))
+      region))
 
-     (defn make-jvm-heap-slab-ctx
-       "Create a JvmSlabCtx from fresh in-memory heap slabs (no mmap files).
+  (defn make-jvm-heap-slab-ctx
+    "Create a JvmSlabCtx from fresh in-memory heap slabs (no mmap files).
         Used for non-persistent JVM atom domains.
 
         Options map (optional):
           :capacities — {class-idx capacity-bytes}, defaults to 1 MB each"
-       ([] (make-jvm-heap-slab-ctx {}))
-       ([{:keys [capacities coalesc-descriptors mem-budget]
-          :or {capacities {} coalesc-descriptors coalesc/MAX_DESCRIPTORS}}]
-        (let [regions (mapv (fn [i]
-                              (let [cap (get capacities i (* 1 1024 1024))]
-                                (init-jvm-heap-slab! i :capacity cap)))
-                            (range d/NUM_SLAB_CLASSES))
+    ([] (make-jvm-heap-slab-ctx {}))
+    ([{:keys [capacities coalesc-descriptors mem-budget]
+       :or {capacities {} coalesc-descriptors coalesc/MAX_DESCRIPTORS}}]
+     (let [regions (mapv (fn [i]
+                           (let [cap (get capacities i (* 1 1024 1024))]
+                             (init-jvm-heap-slab! i :capacity cap)))
+                         (range d/NUM_SLAB_CLASSES))
               ;; class 6: the coalescing allocator for blocks over 1024 bytes;
               ;; its descriptor table is sized by the domain's
               ;; :coalesc-descriptors creation parameter
-              coalesc-init (* 64 1024)
-              layout       (coalesc/coalesc-layout coalesc-init coalesc-descriptors)
-              coalesc-r    (region/make-heap-region (:total-bytes layout))]
-          (coalesc/init-coalesc-region! coalesc-r coalesc-init coalesc-descriptors)
+           coalesc-init (* 64 1024)
+           layout       (coalesc/coalesc-layout coalesc-init coalesc-descriptors)
+           coalesc-r    (region/make-heap-region (:total-bytes layout))]
+       (coalesc/init-coalesc-region! coalesc-r coalesc-init coalesc-descriptors)
           ;; Heap slabs: bitmap is embedded in same region (no separate file);
           ;; class 6 has none
-          (make-jvm-slab-ctx (conj regions coalesc-r) (conj regions nil)
-                             nil nil nil nil (long (or mem-budget 0))))))
+       (make-jvm-slab-ctx (conj regions coalesc-r) (conj regions nil)
+                          nil nil nil nil (long (or mem-budget 0))))))
 
-     (defn jvm-read-header-type-byte
-       "Read the type-id byte at offset 0 of the slab block at slab-qualified offset.
+  (defn jvm-read-header-type-byte
+    "Read the type-id byte at offset 0 of the slab block at slab-qualified offset.
         Takes an explicit sio."
-       ([sio slab-off]
-        (slab/read-u8 sio slab-off 0)))
+    ([sio slab-off]
+     (slab/read-u8 sio slab-off 0)))
 
-     (defn jvm-alloc-scalar-block!
-       "Allocate a slab block for a primitive scalar atom root value (JVM).
+  (defn jvm-alloc-scalar-block!
+    "Allocate a slab block for a primitive scalar atom root value (JVM).
         Returns slab-qualified offset. Takes an explicit sio."
-       ([sio v]
-        (let [ev-bytes (codec/encode-value sio v)
-              n        (inc (alength ^bytes ev-bytes))
-              blk-off  (slab/alloc! sio n)]
-          (slab/write-u8! sio blk-off 0 ser/SCALAR_BLOCK_TYPE_ID)
-          (slab/write-bytes! sio blk-off 1 ev-bytes)
-          blk-off)))
+    ([sio v]
+     (let [ev-bytes (codec/encode-value sio v)
+           n        (inc (alength ^bytes ev-bytes))
+           blk-off  (slab/alloc! sio n)]
+       (slab/write-u8! sio blk-off 0 ser/SCALAR_BLOCK_TYPE_ID)
+       (slab/write-bytes! sio blk-off 1 ev-bytes)
+       blk-off)))
 
-     (defn jvm-read-scalar-block
-       "Read the primitive value from a scalar value block (JVM).
+  (defn jvm-read-scalar-block
+    "Read the primitive value from a scalar value block (JVM).
         Takes an explicit sio."
-       ([sio slab-off]
-        (let [class-idx (decode-class-idx slab-off)
-              blk-size  (d/slab-size class-idx)
-              ev-bytes  (slab/read-bytes sio slab-off 1 (dec blk-size))]
-          (codec/decode sio ev-bytes)))))
-
-
-
+    ([sio slab-off]
+     (let [class-idx (decode-class-idx slab-off)
+           blk-size  (d/slab-size class-idx)
+           ev-bytes  (slab/read-bytes sio slab-off 1 (dec blk-size))]
+       (codec/decode sio ev-bytes)))))
 
 ;; ---------------------------------------------------------------------------
 ;; LoggingSlabIO — one swap attempt's allocation log (portable)
@@ -1459,7 +1456,7 @@
 
 (defn- node-at
   "The byte offset in its region of field-off in the block at slab-off."
-   ^long [^JvmSlabCtx ctx ^long slab-off ^long field-off]
+  ^long [^JvmSlabCtx ctx ^long slab-off ^long field-off]
   (let [u  (bit-and slab-off 0xFFFFFFFF)
         ci (int (unsigned-bit-shift-right u BLOCK_IDX_BITS))
         bi (bit-and u BLOCK_IDX_MASK)]
@@ -1469,7 +1466,7 @@
 
 (defn bytes-i32
   "The little-endian i32 at byte i of byte array a (plain loads)."
-   ^long [^bytes a ^long i]
+  ^long [^bytes a ^long i]
   (let [a a
         i (int i)]
     (long (unchecked-int
@@ -1488,7 +1485,7 @@
 
 (defn node-base
   "The byte offset in node-heap-array's array of the block at slab-off (call only where node-heap-array answered one)."
-   [sio ^long slab-off]
+  [sio ^long slab-off]
   (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))]
     (node-at ctx slab-off 0)))
 
@@ -1510,7 +1507,7 @@
 
 (defn node-u8
   "The unsigned byte at slab-off + field-off of a published node."
-   ^long [sio ^long slab-off ^long field-off]
+  ^long [sio ^long slab-off ^long field-off]
   (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
         arr (when ctx (node-heap-bytes ctx slab-off))]
     (if (nil? arr)
@@ -1527,7 +1524,7 @@
 
 (defn node-i32
   "The little-endian i32 at slab-off + field-off (any alignment) of a published node."
-   ^long [sio ^long slab-off ^long field-off]
+  ^long [sio ^long slab-off ^long field-off]
   (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
         arr (when ctx (node-heap-bytes ctx slab-off))]
     (if (nil? arr)
@@ -1561,7 +1558,6 @@
           (cond (== j n) true
                 (== (aget a (int (+ i0 j))) (aget b (int j))) (recur (inc j))
                 :else false))))))
-
 
 ;; ---------------------------------------------------------------------------
 ;; A published node, resolved once: [arr region base] — arr the region's
@@ -1918,68 +1914,68 @@
     (refresh-jvm-slab-regions! (domain-root sio))))
 
 (defn- jvm-mmap-domain-sio! [base-path {:keys [create? capacities lustre? coalesc-descriptors mem-budget segment-bytes] :or {capacities {} coalesc-descriptors coalesc/DEFAULT_MMAP_DESCRIPTORS}}]
-     (let [opts       (cond-> nil
-                        lustre?       (assoc :lustre? true)
-                        segment-bytes (assoc :segment-bytes (long segment-bytes)))
-           slab-paths (mapv #(str base-path ".slab" %) (range d/NUM_SLAB_CLASSES))
-           bm-paths   (mapv #(str base-path ".slab" % ".bm") (range d/NUM_SLAB_CLASSES))
-           per-class
-           (mapv (fn [i]
-                   (if create?
-                     (let [block-size  (d/slab-size i)
-                           init-cap    (get capacities i (d/initial-capacity-for-class i))
-                           layout      (d/mmap-slab-layout block-size init-cap)
-                           init-blocks (:total-blocks layout)
-                           region      (region/open-mmap-region (nth slab-paths i) (:data-bytes layout) opts)
-                           bm-region   (region/open-mmap-region (nth bm-paths i) (:bitmap-bytes layout) opts)
-                           desc-count-region (region/open-mmap-region (str (nth slab-paths i) ".desc-count") (:desc-column-bytes layout) opts)
-                           desc-flags-region (region/open-mmap-region (str (nth slab-paths i) ".desc-flags") (:desc-column-bytes layout) opts)
-                           desc-pointer-region (region/open-mmap-region (str (nth slab-paths i) ".desc-pointer") (:desc-column-bytes layout) opts)]
-                       (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
-                       (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
-                       (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS init-blocks)
-                       (mem/-store-i32! region d/SLAB_HDR_FREE_COUNT init-blocks)
-                       (mem/-store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)
-                       (mem/-store-i32! region d/SLAB_HDR_CLASS_IDX i)
-                       (mem/-store-i32! region d/SLAB_HDR_BITMAP_OFFSET 0)
-                       (mem/-store-i32! region d/SLAB_HDR_DATA_OFFSET d/SLAB_HEADER_SIZE)
-                       {:region region :bm-region bm-region
-                        :desc-regions [desc-count-region desc-flags-region desc-pointer-region]})
-                     (let [peek-r     (region/open-mmap-region (nth slab-paths i) 64 opts)
-                           total      (mem/-load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS)
-                           bs         (d/slab-size i)
-                           data-bytes (+ d/SLAB_HEADER_SIZE (* total bs))
-                           bm-bytes   (d/bitmap-byte-size total)]
-                       {:region      (region/open-mmap-region (nth slab-paths i) data-bytes opts)
-                        :bm-region   (region/open-mmap-region (nth bm-paths i) bm-bytes opts)
+  (let [opts       (cond-> nil
+                     lustre?       (assoc :lustre? true)
+                     segment-bytes (assoc :segment-bytes (long segment-bytes)))
+        slab-paths (mapv #(str base-path ".slab" %) (range d/NUM_SLAB_CLASSES))
+        bm-paths   (mapv #(str base-path ".slab" % ".bm") (range d/NUM_SLAB_CLASSES))
+        per-class
+        (mapv (fn [i]
+                (if create?
+                  (let [block-size  (d/slab-size i)
+                        init-cap    (get capacities i (d/initial-capacity-for-class i))
+                        layout      (d/mmap-slab-layout block-size init-cap)
+                        init-blocks (:total-blocks layout)
+                        region      (region/open-mmap-region (nth slab-paths i) (:data-bytes layout) opts)
+                        bm-region   (region/open-mmap-region (nth bm-paths i) (:bitmap-bytes layout) opts)
+                        desc-count-region (region/open-mmap-region (str (nth slab-paths i) ".desc-count") (:desc-column-bytes layout) opts)
+                        desc-flags-region (region/open-mmap-region (str (nth slab-paths i) ".desc-flags") (:desc-column-bytes layout) opts)
+                        desc-pointer-region (region/open-mmap-region (str (nth slab-paths i) ".desc-pointer") (:desc-column-bytes layout) opts)]
+                    (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
+                    (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
+                    (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS init-blocks)
+                    (mem/-store-i32! region d/SLAB_HDR_FREE_COUNT init-blocks)
+                    (mem/-store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)
+                    (mem/-store-i32! region d/SLAB_HDR_CLASS_IDX i)
+                    (mem/-store-i32! region d/SLAB_HDR_BITMAP_OFFSET 0)
+                    (mem/-store-i32! region d/SLAB_HDR_DATA_OFFSET d/SLAB_HEADER_SIZE)
+                    {:region region :bm-region bm-region
+                     :desc-regions [desc-count-region desc-flags-region desc-pointer-region]})
+                  (let [peek-r     (region/open-mmap-region (nth slab-paths i) 64 opts)
+                        total      (mem/-load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS)
+                        bs         (d/slab-size i)
+                        data-bytes (+ d/SLAB_HEADER_SIZE (* total bs))
+                        bm-bytes   (d/bitmap-byte-size total)]
+                    {:region      (region/open-mmap-region (nth slab-paths i) data-bytes opts)
+                     :bm-region   (region/open-mmap-region (nth bm-paths i) bm-bytes opts)
                         ;; a domain written before descriptor columns: open-mmap-region creates its files —
                         ;; virgin (all-zero) columns, every count 0, as a pre-descriptor block's count is
-                        :desc-regions [(region/open-mmap-region (str (nth slab-paths i) ".desc-count")
-                                                                (d/desc-column-byte-size total) opts)
-                                       (region/open-mmap-region (str (nth slab-paths i) ".desc-flags")
-                                                                (d/desc-column-byte-size total) opts)
-                                       (region/open-mmap-region (str (nth slab-paths i) ".desc-pointer")
-                                                                (d/desc-column-byte-size total) opts)]}) ))
-                 (range d/NUM_SLAB_CLASSES))
-           coalesc-path (str base-path ".slab6")
-           coalesc-r
-           (if create?
-             (let [layout (coalesc/coalesc-layout coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
-                   r      (region/open-mmap-region coalesc-path (:total-bytes layout) opts)]
-               (coalesc/init-coalesc-region! r coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
-               r)
-             (let [peek     (region/open-mmap-region coalesc-path 64 opts)
-                   data-off (mem/-load-i32 peek d/SLAB_HDR_DATA_OFFSET)
-                   cur-sz   (mem/-load-i64 peek coalesc/COALESC_HDR_DATA_SIZE)]
-               (region/open-mmap-region coalesc-path (+ data-off cur-sz) opts)))]
-       (make-jvm-slab-ctx (conj (mapv :region per-class) coalesc-r)
-                          (conj (mapv :bm-region per-class) nil)
-                          (conj slab-paths coalesc-path)
-                          (conj bm-paths nil)
-                          nil
-                          (conj (mapv :desc-regions per-class) nil)
-                          (long (or mem-budget 0))
-                          (long (or segment-bytes 0)))))
+                     :desc-regions [(region/open-mmap-region (str (nth slab-paths i) ".desc-count")
+                                                             (d/desc-column-byte-size total) opts)
+                                    (region/open-mmap-region (str (nth slab-paths i) ".desc-flags")
+                                                             (d/desc-column-byte-size total) opts)
+                                    (region/open-mmap-region (str (nth slab-paths i) ".desc-pointer")
+                                                             (d/desc-column-byte-size total) opts)]})))
+              (range d/NUM_SLAB_CLASSES))
+        coalesc-path (str base-path ".slab6")
+        coalesc-r
+        (if create?
+          (let [layout (coalesc/coalesc-layout coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
+                r      (region/open-mmap-region coalesc-path (:total-bytes layout) opts)]
+            (coalesc/init-coalesc-region! r coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
+            r)
+          (let [peek     (region/open-mmap-region coalesc-path 64 opts)
+                data-off (mem/-load-i32 peek d/SLAB_HDR_DATA_OFFSET)
+                cur-sz   (mem/-load-i64 peek coalesc/COALESC_HDR_DATA_SIZE)]
+            (region/open-mmap-region coalesc-path (+ data-off cur-sz) opts)))]
+    (make-jvm-slab-ctx (conj (mapv :region per-class) coalesc-r)
+                       (conj (mapv :bm-region per-class) nil)
+                       (conj slab-paths coalesc-path)
+                       (conj bm-paths nil)
+                       nil
+                       (conj (mapv :desc-regions per-class) nil)
+                       (long (or mem-budget 0))
+                       (long (or segment-bytes 0)))))
 
 (defn keystream-domain-sio
   "Domain sio's blocks under keystream ks ({:int (fn [o f w]) → the w keystream
