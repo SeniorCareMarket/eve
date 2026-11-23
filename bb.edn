@@ -296,5 +296,7 @@
              :task (shell "cljfmt check src adapters apps test contract-test/drivers test-e2e net-local capstone")}
   fmt {:doc "apply the fleet formatting"
        :task (shell "cljfmt fix src adapters apps test contract-test/drivers test-e2e net-local capstone")}
+  lint-docs {:doc "dprint check over docs/config (config: dprint.json)"
+             :task (shell "dprint check")}
   lint {:doc "the whole gate"
-        :depends [lint-kondo lint-splint lint-depend carve-report fmt-check]}}}
+        :depends [lint-kondo lint-splint lint-depend carve-report fmt-check lint-docs]}}}

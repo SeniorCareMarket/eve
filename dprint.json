@@ -1,0 +1,10 @@
+{
+  "markdown": {
+  },
+  "includes": [
+    "**/*.md"
+  ],
+  "plugins": [
+    "npm:@dprint/markdown@0.29.0"
+  ]
+}
