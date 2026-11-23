@@ -2547,7 +2547,7 @@
              (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
                                   (nth this (long k)) nf))
              clojure.lang.IPersistentCollection
-             (empty [_#] [])
+             (empty [_] [])
              (equiv [this other] (node-equiv ctx off other))])
        ~@(when (or vector? list?)
            '[java.util.List
@@ -2559,13 +2559,13 @@
              ;; family — (= plain flat) is the same question everywhere.
              (size [this] (.count this))
              (isEmpty [this] (zero? (.count this)))
-             (^boolean contains [this o] (boolean (some (fn [e#] (= e# o)) (seq this))))
+             (^boolean contains [this o] (boolean (some (fn [e] (= e o)) (seq this))))
              (^objects toArray [this] (object-array (seq this)))
-             (^objects toArray [this ^objects a] (let [n# (.count this)]
-                                 (if (< (alength a) n#)
+             (^objects toArray [this ^objects a] (let [n (.count this)]
+                                 (if (< (alength a) n)
                                    (object-array (seq this))
-                                   (do (dotimes [i# n#] (aset a i# (nth this i#)))
-                                       (when (> (alength a) n#) (aset a n# nil))
+                                   (do (dotimes [i n] (aset a i (nth this i)))
+                                       (when (> (alength a) n) (aset a n nil))
                                        a))))
              (^boolean add [this o] (throw (UnsupportedOperationException.)))
              (^boolean addAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
@@ -2573,31 +2573,31 @@
              (^boolean remove [this o] (throw (UnsupportedOperationException.)))
              (^boolean removeAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
              (^boolean retainAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
-             (^boolean containsAll [this ^java.util.Collection c] (every? (fn [o#] (.contains this o#)) c))
+             (^boolean containsAll [this ^java.util.Collection c] (every? (fn [o] (.contains this o)) c))
              (^void clear [this] (throw (UnsupportedOperationException.)))
              (get [this ^int i] (nth this i))
              (set [this ^int i o] (throw (UnsupportedOperationException.)))
              (^void add [this ^int i o] (throw (UnsupportedOperationException.)))
              (remove [this ^int i] (throw (UnsupportedOperationException.)))
-             (indexOf [this o] (int (loop [i# 0]
-                                 (cond (== i# (.count this)) -1
-                                       (= (nth this i#) o) i#
-                                       :else (recur (inc i#))))))
-             (lastIndexOf [this o] (int (loop [i# (dec (.count this))]
-                                     (cond (neg? i#) -1
-                                           (= (nth this i#) o) i#
-                                           :else (recur (dec i#))))))
+             (indexOf [this o] (int (loop [i 0]
+                                 (cond (== i (.count this)) -1
+                                       (= (nth this i) o) i
+                                       :else (recur (inc i))))))
+             (lastIndexOf [this o] (int (loop [i (dec (.count this))]
+                                     (cond (neg? i) -1
+                                           (= (nth this i) o) i
+                                           :else (recur (dec i))))))
              (^java.util.ListIterator listIterator [this] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this)))))
              (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this))) i))
              (^java.util.List subList [this ^int s ^int e] (java.util.Collections/unmodifiableList
-                                  (java.util.ArrayList. ^java.util.Collection (map (fn [i#] (nth this i#)) (range s e)))))])
+                                  (java.util.ArrayList. ^java.util.Collection (map (fn [i] (nth this i)) (range s e)))))])
        ~@(when list?
            '[clojure.lang.IPersistentList
              (peek [this] (when (pos? (.count this)) (nth this 0)))
              (pop [this] (pop-flat this))
              clojure.lang.IPersistentCollection
              (cons [this v] (cons-flat this v))
-             (empty [_#] ())
+             (empty [_] ())
              (equiv [this other] (node-equiv ctx off other))]))))])
 
 #?@(:bb [(defmacro defmaphandle [tname & _]
@@ -2684,11 +2684,11 @@
        (-dissoc-entry [this# k#] (~dissocf this# k#))
        ~@(when record?
            '[eve.flat.chunk.IRecordInfo
-             (-tkey [_#] tkey)
-             (-fp [_#] fp)])
+             (-tkey [_] tkey)
+             (-fp [_] fp)])
        ~@(when row?
            '[eve.flat.chunk.IRowHandle
-             (-row-index [_#] row)])
+             (-row-index [_] row)])
        clojure.lang.IPersistentMap
        (assoc [this# k# v#] (-assoc-entry this# k# v#))
        (assocEx [this# k# v#] (if (.containsKey this# k#)
