@@ -173,13 +173,13 @@
 ;; Keyword serialization cache: keywords are interned in CLJS (identical? :foo :foo),
 ;; so JS Map lookup by reference is O(1). Avoids TextEncoder + allocation per call.
 (def ^:private keyword-cache (js/Map.))
-(def ^:const ^:private KEYWORD_CACHE_MAX 2048)
+(def ^:const ^:private keyword-cache-max 2048)
 
 ;; Keyword deserialization cache: avoids repeated TextDecoder + keyword() during
 ;; iteration. Keyed by SAB data offset (stable for immutable HAMT nodes).
 ;; On cache hit, returns the keyword directly — no TextDecoder, no allocation.
 (def ^:private kw-deser-cache (js/Map.))
-(def ^:const ^:private KW_DESER_CACHE_MAX 16384)
+(def ^:const ^:private kw-deser-cache-max 16384)
 
 ;; Reusable scratch buffers for fixed-size numeric types.
 ;; Two buffers allow key and value to be serialized simultaneously.
@@ -303,7 +303,7 @@
                     (.set buf encoded 7)
                     buf))))]
     ;; Cache the result (evict if cache is too large)
-        (when (>= (.-size keyword-cache) KEYWORD_CACHE_MAX)
+        (when (>= (.-size keyword-cache) keyword-cache-max)
           (.clear keyword-cache))
         (.set keyword-cache elem result)
         result)))
@@ -1218,7 +1218,7 @@
               (let [str-len (.getUint8 dv (+ off 3))
                     u8 (:data-view s-atom-env)
                     kw (keyword (decode-text (.subarray u8 (+ off 4) (+ off 4 str-len))))]
-                (when (>= (.-size kw-deser-cache) KW_DESER_CACHE_MAX) (.clear kw-deser-cache))
+                (when (>= (.-size kw-deser-cache) kw-deser-cache-max) (.clear kw-deser-cache))
                 (.set kw-deser-cache off kw)
                 kw))
 
@@ -1227,7 +1227,7 @@
               (let [str-len (.getUint32 dv (+ off 3) true)
                     u8 (:data-view s-atom-env)
                     kw (keyword (decode-text (.subarray u8 (+ off 7) (+ off 7 str-len))))]
-                (when (>= (.-size kw-deser-cache) KW_DESER_CACHE_MAX) (.clear kw-deser-cache))
+                (when (>= (.-size kw-deser-cache) kw-deser-cache-max) (.clear kw-deser-cache))
                 (.set kw-deser-cache off kw)
                 kw))
 
@@ -1239,7 +1239,7 @@
                     name-len (.getUint8 dv (+ off 4 ns-len))
                     name-str (decode-text (.subarray u8 (+ off 5 ns-len) (+ off 5 ns-len name-len)))
                     kw (keyword ns-str name-str)]
-                (when (>= (.-size kw-deser-cache) KW_DESER_CACHE_MAX) (.clear kw-deser-cache))
+                (when (>= (.-size kw-deser-cache) kw-deser-cache-max) (.clear kw-deser-cache))
                 (.set kw-deser-cache off kw)
                 kw))
 
@@ -1251,7 +1251,7 @@
                     name-len (.getUint32 dv (+ off 7 ns-len) true)
                     name-str (decode-text (.subarray u8 (+ off 11 ns-len) (+ off 11 ns-len name-len)))
                     kw (keyword ns-str name-str)]
-                (when (>= (.-size kw-deser-cache) KW_DESER_CACHE_MAX) (.clear kw-deser-cache))
+                (when (>= (.-size kw-deser-cache) kw-deser-cache-max) (.clear kw-deser-cache))
                 (.set kw-deser-cache off kw)
                 kw))
 

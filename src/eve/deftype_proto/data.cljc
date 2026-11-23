@@ -388,15 +388,15 @@
 ;; Worker registry config (same as eve.data)
 (def ^:const MAX_WORKERS 256)
 (def ^:const WORKER_SLOT_SIZE 24)
-(def ^:const WORKER_REGISTRY_SIZE (* MAX_WORKERS WORKER_SLOT_SIZE))
+(def ^:const worker-registry-size (* MAX_WORKERS WORKER_SLOT_SIZE))
 
 ;; Total root SAB size
-(def ^:const ROOT_SAB_SIZE (+ root-sab-header-size WORKER_REGISTRY_SIZE))
+(def ^:const ROOT_SAB_SIZE (+ root-sab-header-size worker-registry-size))
 
 ;; Worker status values
 (def ^:const WORKER_STATUS_INACTIVE 0)
 (def ^:const WORKER_STATUS_ACTIVE 1)
-(def ^:const WORKER_STATUS_STALE 2)
+(def ^:const worker-status-stale 2)
 
 ;; Worker slot layout (24 bytes per worker)
 (def ^:const OFFSET_WS_STATUS 0)
@@ -404,7 +404,7 @@
 (def ^:const OFFSET_WS_HEARTBEAT_LO 8)
 (def ^:const OFFSET_WS_HEARTBEAT_HI 12)
 (def ^:const OFFSET_WS_WORKER_ID 16)
-(def ^:const OFFSET_WS_RESERVED 20)
+(def ^:const offset-ws-reserved 20)
 
 (def ^:const HEARTBEAT_TIMEOUT_MS 30000)
 
@@ -418,7 +418,7 @@
 (def ^:const ROOT_MAGIC_V2 0x524F4F55)       ;; bumped from 0x524F4F54
 
 ;; Atom table header starts right after the worker registry
-(def ^:const ATOM_TABLE_HEADER_START (+ root-sab-header-size WORKER_REGISTRY_SIZE))
+(def ^:const ATOM_TABLE_HEADER_START (+ root-sab-header-size worker-registry-size))
 (def ^:const atom-table-header-size 64)
 (def ^:const ATOM_TABLE_MAGIC 0x41544F4D)    ;; 'ATOM' in ASCII
 
@@ -673,49 +673,49 @@
 ;; HAMT Node Constants (same as eve.data)
 ;;=============================================================================
 
-(def ^:const HAMT_BITMAP_NODE_TYPE 3)
-(def ^:const HAMT_COLLISION_NODE_TYPE 4)
-(def ^:const HAMT_BITMAP_NODE_COLUMNAR_TYPE 6)
-(def ^:const HAMT_BITMAP_NODE_HEADER_SIZE 10)
-(def ^:const HAMT_COLLISION_NODE_HEADER_SIZE 8)
+(def ^:const hamt-bitmap-node-type 3)
+(def ^:const hamt-collision-node-type 4)
+(def ^:const hamt-bitmap-node-columnar-type 6)
+(def ^:const hamt-bitmap-node-header-size 10)
+(def ^:const hamt-collision-node-header-size 8)
 
 ;;=============================================================================
 ;; Serialization Tags (same as eve.data)
 ;;=============================================================================
 
-(def ^:const TAG_JS_ARRAY "js/Array")
-(def ^:const TAG_UINT8_ARRAY "js/Uint8Array")
-(def ^:const TAG_INT8_ARRAY "js/Int8Array")
-(def ^:const TAG_UINT8_CLAMPED_ARRAY "js/Uint8ClampedArray")
-(def ^:const TAG_INT16_ARRAY "js/Int16Array")
-(def ^:const TAG_UINT16_ARRAY "js/Uint16Array")
-(def ^:const TAG_INT32_ARRAY "js/Int32Array")
-(def ^:const TAG_UINT32_ARRAY "js/Uint32Array")
-(def ^:const TAG_FLOAT32_ARRAY "js/Float32Array")
-(def ^:const TAG_FLOAT64_ARRAY "js/Float64Array")
-(def ^:const TAG_BIGINT64_ARRAY "js/BigInt64Array")
-(def ^:const TAG_BIGUINT64_ARRAY "js/BigUint64Array")
-(def ^:const TAG_REGEX "regex")
-(def ^:const TAG_URI "uri")
-(def ^:const TAG_CHAR "char")
-(def ^:const TAG_BIGINT "bigint")
-(def ^:const TAG_RECORD "record")
+(def ^:const tag-js-array "js/Array")
+(def ^:const tag-uint8-array "js/Uint8Array")
+(def ^:const tag-int8-array "js/Int8Array")
+(def ^:const tag-uint8-clamped-array "js/Uint8ClampedArray")
+(def ^:const tag-int16-array "js/Int16Array")
+(def ^:const tag-uint16-array "js/Uint16Array")
+(def ^:const tag-int32-array "js/Int32Array")
+(def ^:const tag-uint32-array "js/Uint32Array")
+(def ^:const tag-float32-array "js/Float32Array")
+(def ^:const tag-float64-array "js/Float64Array")
+(def ^:const tag-bigint64-array "js/BigInt64Array")
+(def ^:const tag-biguint64-array "js/BigUint64Array")
+(def ^:const tag-regex "regex")
+(def ^:const tag-uri "uri")
+(def ^:const tag-char "char")
+(def ^:const tag-bigint "bigint")
+(def ^:const tag-record "record")
 
-(def ^:const TAG_SABP_LINKED_LIST_STATE "eve/SabpListStateV1")
-(def ^:const TAG_SABP_CHUNKED_LIST_STATE "eve/SabpChunkedListV1")
-(def ^:const TAG_SABP_CHUNKED_VEC_STATE "eve/SabpChunkedVecV1")
-(def ^:const TAG_SABP_MAP_STATE "eve/SabpMapStateV1")
-(def ^:const TAG_SABP_SET_STATE "eve/SabpSetStateV1")
+(def ^:const tag-sabp-linked-list-state "eve/SabpListStateV1")
+(def ^:const tag-sabp-chunked-list-state "eve/SabpChunkedListV1")
+(def ^:const tag-sabp-chunked-vec-state "eve/SabpChunkedVecV1")
+(def ^:const tag-sabp-map-state "eve/SabpMapStateV1")
+(def ^:const tag-sabp-set-state "eve/SabpSetStateV1")
 
 (def ^:const DIRECT_MAGIC_0 0xEE)
 (def ^:const DIRECT_MAGIC_1 0xDB)
-(def ^:const DIRECT_MARKER_MAP 0xED)
+(def ^:const direct-marker-map 0xED)
 ;; Linked list constants
-(def ^:const OFFSET_LL_NODE_VALUE 0)
-(def ^:const LL_NODE_NEXT_OFFSET_SIZE_BYTES SIZE_OF_INT32)
+(def ^:const offset-ll-node-value 0)
+(def ^:const ll-node-next-offset-size-bytes SIZE_OF_INT32)
 
 ;; Chunked list
-(def ^:const CHUNKED_LIST_CHUNK_SIZE 32)
+(def ^:const chunked-list-chunk-size 32)
 
 ;; Max swap retries for CAS loops
 (def ^:const MAX_SWAP_RETRIES 1000)

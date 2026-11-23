@@ -84,7 +84,7 @@
 ;; Status values
 (def ^:const STATUS_FREE 0)
 (def ^:const STATUS_ALLOCATED 1)
-(def ^:const STATUS_ZEROED_UNUSED -1)
+(def ^:const status-zeroed-unused -1)
 
 ;; Lock: bit 0 of LOCK_OWNER (bits 1-8 are the count's flags, which a lock never touches)
 (def ^:const lock-unlocked 0)
@@ -244,7 +244,7 @@
 
       :else
       (let [status (desc-load region dt-off max-desc i desc-status)]
-        (if (== status STATUS_ZEROED_UNUSED)
+        (if (== status status-zeroed-unused)
           i
           (recur (inc i) wrapped?))))))
 
@@ -303,7 +303,7 @@
     (let [n (dec max-desc)]
       (when (pos? n)
         (eve.mem/fill-i32! region (desc-byte-off desc-table-offset max-desc 1 desc-status)
-                           n STATUS_ZEROED_UNUSED)
+                           n status-zeroed-unused)
         (eve.mem/fill-i32! region (desc-byte-off desc-table-offset max-desc 1 desc-lock-owner)
                            n lock-unlocked)))
 
@@ -342,7 +342,7 @@
              (when (not= slot -1)
                (when (try-lock! region dt-off max-desc slot)
                  (let [ss (desc-load region dt-off max-desc slot desc-status)]
-                   (if (== ss STATUS_ZEROED_UNUSED)
+                   (if (== ss status-zeroed-unused)
                      (do
                        (desc-store! region dt-off max-desc slot desc-data-offset cur-data-size)
                        (desc-store! region dt-off max-desc slot desc-data-length 0)
@@ -435,7 +435,7 @@
                           (when (try-lock! region dt-off max-desc split-slot)
                             ;; Verify still ZEROED (TOCTOU)
                             (let [ss (desc-load region dt-off max-desc split-slot desc-status)]
-                              (if (== ss STATUS_ZEROED_UNUSED)
+                              (if (== ss status-zeroed-unused)
                                 (do
                                   ;; Write split descriptor
                                   (desc-store! region dt-off max-desc split-slot desc-data-offset
@@ -570,7 +570,7 @@
                                      (try-lock! region dt-off max-desc split-slot))]
               (if (and split-locked?
                        (== (desc-load region dt-off max-desc split-slot desc-status)
-                           STATUS_ZEROED_UNUSED))
+                           status-zeroed-unused))
                 (do
                   (desc-store! region dt-off max-desc split-slot desc-data-offset
                                (+ data-off size))
@@ -647,7 +647,7 @@
     (if (>= i max-desc)
       -1
       (let [status (desc-load region dt-off max-desc i desc-status)]
-        (if (and (not= status STATUS_ZEROED_UNUSED)
+        (if (and (not= status status-zeroed-unused)
                  (== (desc-load region dt-off max-desc i desc-data-offset) target-data-off))
           i
           (recur (inc i)))))))
@@ -706,7 +706,7 @@
                     (let [new-cap (+ lcap our-cap)]
                       (desc-store! region dt-off max-desc left-idx desc-block-capacity new-cap)
                       ;; Mark ourselves as ZEROED_UNUSED (reclaim descriptor)
-                      (desc-store! region dt-off max-desc idx desc-status STATUS_ZEROED_UNUSED)
+                      (desc-store! region dt-off max-desc idx desc-status status-zeroed-unused)
                       (desc-store! region dt-off max-desc idx desc-lock-owner lock-unlocked)
                       ;; Survivor is left (keep left locked for right merge)
                       [left-idx loff new-cap true])
@@ -738,7 +738,7 @@
                                                (desc-store! region dt-off max-desc survivor desc-block-capacity
                                                             (+ surv-cap rcap))
                 ;; Mark right as ZEROED_UNUSED
-                                               (desc-store! region dt-off max-desc right-idx desc-status STATUS_ZEROED_UNUSED)
+                                               (desc-store! region dt-off max-desc right-idx desc-status status-zeroed-unused)
                                                (unlock! region dt-off max-desc right-idx))
               ;; Right not valid anymore
                                              (unlock! region dt-off max-desc right-idx)))) (unlock! region dt-off max-desc survivor))))

@@ -72,8 +72,8 @@
 ;; Constants
 ;;-----------------------------------------------------------------------------
 
-(def ^:const PAGE_SIZE 65536)           ;; WASM page size (64KB)
-(def ^:const MAX_PAGES 16384)           ;; Max 1GB
+(def ^:const page-size 65536)           ;; WASM page size (64KB)
+(def ^:const max-pages 16384)           ;; Max 1GB
 
 ;; SCRATCH SPACE:
 ;; Each worker gets a scratch area for WASM operations.
@@ -85,12 +85,12 @@
 
 ;; Node types (matching sab_map.cljs)
 (def ^:const NODE_TYPE_BITMAP 1)
-(def ^:const NODE_TYPE_COLLISION 3)
+(def ^:const node-type-collision 3)
 (def ^:const node-type-bitmap-hashed 5)  ;; Enhanced with per-key hashes
 
 ;; Header sizes
 (def ^:const bitmap-header-size 10)     ;; type:u8 pad:u8 data_bm:u32 node_bm:u32
-(def ^:const COLLISION_HEADER_SIZE 8)   ;; type:u8 count:u8 pad:u16 hash:i32
+(def ^:const collision-header-size 8)   ;; type:u8 count:u8 pad:u16 hash:i32
 
 ;;-----------------------------------------------------------------------------
 ;; Pre-compiled WASM Binary
@@ -117,10 +117,10 @@
    Returns: WebAssembly.Memory (shared)"
   [size-mb]
   (let [bytes (* size-mb 1024 1024)
-        pages (js/Math.ceil (/ bytes PAGE_SIZE))]
+        pages (js/Math.ceil (/ bytes page-size))]
     (js/WebAssembly.Memory.
      #js {:initial pages
-          :maximum MAX_PAGES
+          :maximum max-pages
           :shared true})))
 
 (defn get-memory

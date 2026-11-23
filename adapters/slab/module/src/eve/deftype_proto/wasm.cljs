@@ -124,7 +124,7 @@
 ;; Constants
 ;;=============================================================================
 
-(def ^:const PAGE_SIZE 65536)     ;; WASM page size (64KB)
+(def ^:const page-size 65536)     ;; WASM page size (64KB)
 (def ^:const MAX_PAGES 16384)     ;; Max 1GB per slab
 
 ;;=============================================================================
@@ -489,9 +489,9 @@
    and a kernel's slabs at their full capacities are ~5 GB."
   ([total-bytes] (create-slab-memory total-bytes total-bytes))
   ([total-bytes initial-bytes]
-   (let [pages (js/Math.ceil (/ total-bytes PAGE_SIZE))
+   (let [pages (js/Math.ceil (/ total-bytes page-size))
          actual-pages (max pages 1)
-         actual-bytes (* actual-pages PAGE_SIZE)]
+         actual-bytes (* actual-pages page-size)]
      (cond
        (and @wasm-compiled-module (<= actual-pages MAX_PAGES))
        ;; WASM path: need WebAssembly.Memory for module instantiation

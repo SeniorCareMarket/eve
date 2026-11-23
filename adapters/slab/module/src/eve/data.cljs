@@ -13,7 +13,7 @@
 (defonce ^:const STATUS_EMBEDDED_ATOM_HEADER 3)
 (defonce ^:const STATUS_ORPHANED 4)
 (defonce ^:const STATUS_RETIRED 5) ;; Block retired at an epoch, awaiting GC when no readers
-(defonce ^:const STATUS_ZEROED_UNUSED -1)
+(defonce ^:const status-zeroed-unused -1)
 (defonce ^:const ROOT_POINTER_NIL_SENTINEL -1) ; Used for "no block" or "nil value"
 
 ;;-----------------------------------------------------------------------------
@@ -39,7 +39,7 @@
 ;; Worker Registry Configuration
 (defonce ^:const MAX_WORKERS 256) ;; Max concurrent workers
 (defonce ^:const WORKER_SLOT_SIZE 24) ;; Bytes per worker slot
-(defonce ^:const WORKER_REGISTRY_SIZE (* MAX_WORKERS WORKER_SLOT_SIZE)) ;; 6KB total
+(defonce ^:const worker-registry-size (* MAX_WORKERS WORKER_SLOT_SIZE)) ;; 6KB total
 
 ;; Worker Slot Layout (24 bytes per worker)
 ;; Each slot tracks a worker's status, current read epoch, and heartbeat
@@ -48,19 +48,19 @@
 (defonce ^:const OFFSET_WS_HEARTBEAT_LO 8)    ;; i32: timestamp lower 32 bits
 (defonce ^:const OFFSET_WS_HEARTBEAT_HI 12)   ;; i32: timestamp upper 32 bits
 (defonce ^:const OFFSET_WS_WORKER_ID 16)      ;; i32: worker's unique ID
-(defonce ^:const OFFSET_WS_RESERVED 20)       ;; i32: reserved for future use
+(defonce ^:const offset-ws-reserved 20)       ;; i32: reserved for future use
 
 ;; Worker Status Values
 (defonce ^:const WORKER_STATUS_INACTIVE 0)
 (defonce ^:const WORKER_STATUS_ACTIVE 1)
-(defonce ^:const WORKER_STATUS_STALE 2)
+(defonce ^:const worker-status-stale 2)
 
 ;; Heartbeat timeout - workers not heard from in this time are considered stale
 (defonce ^:const HEARTBEAT_TIMEOUT_MS 30000) ;; 30 seconds
 
 ;; Block descriptors start after the worker registry
 (defonce ^:const OFFSET_BLOCK_DESCRIPTORS_ARRAY_START
-  (+ OFFSET_WORKER_REGISTRY_START WORKER_REGISTRY_SIZE))
+  (+ OFFSET_WORKER_REGISTRY_START worker-registry-size))
 
 ;; Block Descriptor Columns (the column layout — one layout in eve and vs alike):
 ;; the descriptor table is a set of per-field dense columns, descriptor i's entry in
@@ -94,47 +94,47 @@
 ;;-----------------------------------------------------------------------------
 ;; Custom Tags for JS Types
 ;;-----------------------------------------------------------------------------
-(def ^:const TAG_JS_ARRAY "js/Array")
-(def ^:const TAG_UINT8_ARRAY "js/Uint8Array")
-(def ^:const TAG_INT8_ARRAY "js/Int8Array")
-(def ^:const TAG_UINT8_CLAMPED_ARRAY "js/Uint8ClampedArray")
-(def ^:const TAG_INT16_ARRAY "js/Int16Array")
-(def ^:const TAG_UINT16_ARRAY "js/Uint16Array")
-(def ^:const TAG_INT32_ARRAY "js/Int32Array")
-(def ^:const TAG_UINT32_ARRAY "js/Uint32Array")
-(def ^:const TAG_FLOAT32_ARRAY "js/Float32Array")
-(def ^:const TAG_FLOAT64_ARRAY "js/Float64Array")
-(def ^:const TAG_BIGINT64_ARRAY "js/BigInt64Array")
-(def ^:const TAG_BIGUINT64_ARRAY "js/BigUint64Array")
+(def ^:const tag-js-array "js/Array")
+(def ^:const tag-uint8-array "js/Uint8Array")
+(def ^:const tag-int8-array "js/Int8Array")
+(def ^:const tag-uint8-clamped-array "js/Uint8ClampedArray")
+(def ^:const tag-int16-array "js/Int16Array")
+(def ^:const tag-uint16-array "js/Uint16Array")
+(def ^:const tag-int32-array "js/Int32Array")
+(def ^:const tag-uint32-array "js/Uint32Array")
+(def ^:const tag-float32-array "js/Float32Array")
+(def ^:const tag-float64-array "js/Float64Array")
+(def ^:const tag-bigint64-array "js/BigInt64Array")
+(def ^:const tag-biguint64-array "js/BigUint64Array")
 ;; Tags for other types handled as structs
-(def ^:const TAG_REGEX "regex")
-(def ^:const TAG_URI "uri")
-(def ^:const TAG_CHAR "char")
-(def ^:const TAG_BIGINT "bigint")
-(def ^:const TAG_RECORD "record")
+(def ^:const tag-regex "regex")
+(def ^:const tag-uri "uri")
+(def ^:const tag-char "char")
+(def ^:const tag-bigint "bigint")
+(def ^:const tag-record "record")
 
-(def ^:const TAG_SABP_LINKED_LIST_STATE "eve/SabpListStateV1")
-(def ^:const TAG_SABP_CHUNKED_LIST_STATE "eve/SabpChunkedListV1")
-(def ^:const TAG_SABP_CHUNKED_VEC_STATE "eve/SabpChunkedVecV1")
-(def ^:const TAG_SABP_MAP_STATE "eve/SabpMapStateV1")
-(def ^:const TAG_SABP_SET_STATE "eve/SabpSetStateV1")
+(def ^:const tag-sabp-linked-list-state "eve/SabpListStateV1")
+(def ^:const tag-sabp-chunked-list-state "eve/SabpChunkedListV1")
+(def ^:const tag-sabp-chunked-vec-state "eve/SabpChunkedVecV1")
+(def ^:const tag-sabp-map-state "eve/SabpMapStateV1")
+(def ^:const tag-sabp-set-state "eve/SabpSetStateV1")
 
 ;; --- Constants for SAB Chunked List ---
-(def ^:const CHUNKED_LIST_CHUNK_SIZE 32)
+(def ^:const chunked-list-chunk-size 32)
 ;; Chunk layout: [num_elements:u32][elem_0_len:u32][elem_0_bytes...][elem_1_len:u32][elem_1_bytes...]...
 ;; Directory layout: [num_chunks:u32][chunk_0_offset:i32][chunk_1_offset:i32]...
 
 ;; --- Constants for SAB HAMT Map Nodes ---
-(def ^:const HAMT_BITMAP_NODE_TYPE 3)
-(def ^:const HAMT_COLLISION_NODE_TYPE 4)
-(def ^:const HAMT_BITMAP_NODE_COLUMNAR_TYPE 6) ;; columnar K/V separation variant
-(def ^:const HAMT_BITMAP_NODE_HEADER_SIZE 10) ;; type:u8 pad:u8 data_bitmap:u32 node_bitmap:u32
-(def ^:const HAMT_COLLISION_NODE_HEADER_SIZE 8) ;; type:u8 count:u8 pad:u16 hash:i32
+(def ^:const hamt-bitmap-node-type 3)
+(def ^:const hamt-collision-node-type 4)
+(def ^:const hamt-bitmap-node-columnar-type 6) ;; columnar K/V separation variant
+(def ^:const hamt-bitmap-node-header-size 10) ;; type:u8 pad:u8 data_bitmap:u32 node_bitmap:u32
+(def ^:const hamt-collision-node-header-size 8) ;; type:u8 count:u8 pad:u16 hash:i32
 
 ;; Direct serialization markers (inside the magic prefix envelope)
 (def ^:const DIRECT_MAGIC_0 0xEE)
 (def ^:const DIRECT_MAGIC_1 0xDB)
-(def ^:const DIRECT_MARKER_MAP 0xED)
+(def ^:const direct-marker-map 0xED)
 (defprotocol IDirectSerialize
   (-direct-serialize [this]))
 
@@ -160,8 +160,8 @@
      new-value may be nil or a different type, in which case dispose the entire old tree."))
 
 ;; --- Constants for SAB Linked List Nodes ---
-(def ^:const OFFSET_LL_NODE_VALUE 0)
-(def ^:const LL_NODE_NEXT_OFFSET_SIZE_BYTES SIZE_OF_INT32)
+(def ^:const offset-ll-node-value 0)
+(def ^:const ll-node-next-offset-size-bytes SIZE_OF_INT32)
 
 (defprotocol ISabpType
   (-sabp-type-key [this] "Returns the string key used for registering this SAB-P type."))

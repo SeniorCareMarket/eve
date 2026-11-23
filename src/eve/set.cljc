@@ -40,15 +40,15 @@
 ;; Shared Constants
 ;;=============================================================================
 
-(def ^:const SHIFT_STEP 5)
+(def ^:const shift-step 5)
 (def ^:const MASK 0x1f)
 
 (def ^:const NODE_TYPE_BITMAP 1)
-(def ^:const NODE_TYPE_COLLISION 2) ;; Sets use 2, maps use 3
+(def ^:const node-type-collision 2) ;; Sets use 2, maps use 3
 
 ;; Node header: type:u8 + flags:u8 + pad:u16 + data_bitmap:u32 + node_bitmap:u32 = 12
-(def ^:const NODE_HEADER_SIZE 12)
-(def ^:const COLLISION_HEADER_SIZE 12)
+(def ^:const node-header-size 12)
+(def ^:const collision-header-size 12)
 
 ;; EveHashSet header: type-id:u8 + flags:u8 + pad:u16 + count:i32 + root-off:i32 = 12
 (def EveHashSet-type-id 0xEE)
@@ -90,7 +90,7 @@
 (defn- values-start-off
   "Byte offset where inline values begin."
   [node-bm]
-  (+ NODE_HEADER_SIZE (* 4 (popcount32 node-bm))))
+  (+ node-header-size (* 4 (popcount32 node-bm))))
 
 (defn- read-value-at
   "Read a value [len:u32][bytes...] at pos within node. Returns [vb next-pos]."
@@ -127,51 +127,51 @@
 
 (defn- make-single-value-node! [sio data-bm vb]
   (let [vlen (bytes-length vb)
-        nsize (+ NODE_HEADER_SIZE 4 vlen)
+        nsize (+ node-header-size 4 vlen)
         node-off (slab/alloc! sio nsize)]
     (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
     (slab/write-u8!  sio node-off 1 0)
     (slab/write-u16! sio node-off 2 0)
     (slab/write-i32! sio node-off 4 data-bm)
     (slab/write-i32! sio node-off 8 0)
-    (write-value! sio node-off NODE_HEADER_SIZE vb)
+    (write-value! sio node-off node-header-size vb)
     node-off))
 
 (defn- make-single-child-node! [sio node-bm child-off]
-  (let [node-off (slab/alloc! sio (+ NODE_HEADER_SIZE 4))]
+  (let [node-off (slab/alloc! sio (+ node-header-size 4))]
     (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
     (slab/write-u8!  sio node-off 1 0)
     (slab/write-u16! sio node-off 2 0)
     (slab/write-i32! sio node-off 4 0)
     (slab/write-i32! sio node-off 8 node-bm)
-    (slab/write-i32! sio node-off NODE_HEADER_SIZE child-off)
+    (slab/write-i32! sio node-off node-header-size child-off)
     node-off))
 
 (defn- make-child-and-value-node! [sio data-bm node-bm child-off vb]
   (let [vlen (bytes-length vb)
-        nsize (+ NODE_HEADER_SIZE 4 4 vlen)
+        nsize (+ node-header-size 4 4 vlen)
         node-off (slab/alloc! sio nsize)]
     (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
     (slab/write-u8!  sio node-off 1 0)
     (slab/write-u16! sio node-off 2 0)
     (slab/write-i32! sio node-off 4 data-bm)
     (slab/write-i32! sio node-off 8 node-bm)
-    (slab/write-i32! sio node-off NODE_HEADER_SIZE child-off)
-    (write-value! sio node-off (+ NODE_HEADER_SIZE 4) vb)
+    (slab/write-i32! sio node-off node-header-size child-off)
+    (write-value! sio node-off (+ node-header-size 4) vb)
     node-off))
 
 (defn- make-collision-node! [sio vh entries]
   (let [cnt (count entries)
         vals-size (reduce (fn [acc [vb]] (+ acc 4 (bytes-length vb))) 0 entries)
-        node-off (slab/alloc! sio (+ COLLISION_HEADER_SIZE vals-size))]
-    (slab/write-u8!  sio node-off 0 NODE_TYPE_COLLISION)
+        node-off (slab/alloc! sio (+ collision-header-size vals-size))]
+    (slab/write-u8!  sio node-off 0 node-type-collision)
     (slab/write-u8!  sio node-off 1 cnt)
     (slab/write-u16! sio node-off 2 0)
     (slab/write-i32! sio node-off 4 vh)
     (slab/write-i32! sio node-off 8 0)
     (reduce (fn [pos [vb]]
               (write-value! sio node-off pos vb))
-            COLLISION_HEADER_SIZE entries)
+            collision-header-size entries)
     node-off))
 
 ;;=============================================================================
@@ -187,7 +187,7 @@
         (recur (inc i) (skip-value-at sio node-off pos))))))
 
 (defn- node-byte-size [sio node-off data-bm node-bm]
-  (+ NODE_HEADER_SIZE
+  (+ node-header-size
      (* 4 (popcount32 node-bm))
      (node-values-size sio node-off data-bm node-bm)))
 
@@ -195,7 +195,7 @@
   (let [nsize (node-byte-size sio src-off data-bm node-bm)
         dst-off (slab/alloc! sio nsize)]
     (slab/copy-block! sio dst-off 0 src-off 0 nsize)
-    (slab/write-i32! sio dst-off (+ NODE_HEADER_SIZE (* child-idx 4)) new-child-off)
+    (slab/write-i32! sio dst-off (+ node-header-size (* child-idx 4)) new-child-off)
     dst-off))
 
 ;;=============================================================================
@@ -214,8 +214,8 @@
               (condp has-bit? bit
                 nbm
                 (recur
-                 (slab/read-i32 sio off (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
-                 (+ shift SHIFT_STEP))
+                 (slab/read-i32 sio off (+ node-header-size (* (get-index nbm bit) 4)))
+                 (+ shift shift-step))
                 dbm
                 (let [di (get-index dbm bit)
                       vs (values-start-off nbm)
@@ -226,7 +226,7 @@
               (if (not= ch vh)
                 false
                 (let [cc (slab/read-u8 sio off 1)]
-                  (loop [i 0 pos COLLISION_HEADER_SIZE]
+                  (loop [i 0 pos collision-header-size]
                     (if (>= i cc)
                       false
                       (if (value-matches? sio off pos vb)
@@ -249,8 +249,8 @@
             (condp has-bit? bit
               node-bm
               (let [child-idx (get-index node-bm bit)
-                    child-off (slab/read-i32 sio root-off (+ NODE_HEADER_SIZE (* child-idx 4)))
-                    [new-child added?] (hamt-conj sio child-off vh vb (+ shift SHIFT_STEP))]
+                    child-off (slab/read-i32 sio root-off (+ node-header-size (* child-idx 4)))
+                    [new-child added?] (hamt-conj sio child-off vh vb (+ shift shift-step))]
                 (if (== new-child child-off)
                   [root-off false]
                   [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child)
@@ -280,7 +280,7 @@
                                            (let [[ev np] (read-value-at sio root-off p)]
                                              (recur (inc i) np (if (== i di) acc (conj acc ev)))))))
                             vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
-                            nsize (+ NODE_HEADER_SIZE (* 4 new-cc) vals-size)
+                            nsize (+ node-header-size (* 4 new-cc) vals-size)
                             dst-off (slab/alloc! sio nsize)]
                         (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
                         (slab/write-u8! sio dst-off 1 0)
@@ -291,21 +291,21 @@
                           (when (< di2 new-cc)
                             (if (== di2 new-child-idx)
                               (do
-                                (slab/write-i32! sio dst-off (+ NODE_HEADER_SIZE (* di2 4)) coll)
+                                (slab/write-i32! sio dst-off (+ node-header-size (* di2 4)) coll)
                                 (recur si (inc di2)))
                               (do
                                 (slab/write-i32!
                                  sio
                                  dst-off
-                                 (+ NODE_HEADER_SIZE (* di2 4))
-                                 (slab/read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
+                                 (+ node-header-size (* di2 4))
+                                 (slab/read-i32 sio root-off (+ node-header-size (* si 4))))
                                 (recur (inc si) (inc di2))))))
                         (reduce
                          (fn [p ev] (write-value! sio dst-off p ev))
                          (values-start-off new-node-bm)
                          val-list)
                         [dst-off true])
-                      (let [sub-shift (+ shift SHIFT_STEP)
+                      (let [sub-shift (+ shift shift-step)
                             existing-vh (portable-hash-bytes existing-vb)
                             _existing-bit (bitpos existing-vh sub-shift)
                             _new-bit (bitpos vh sub-shift)
@@ -326,7 +326,7 @@
                                            (let [[ev np] (read-value-at sio root-off p)]
                                              (recur (inc i) np (if (== i di) acc (conj acc ev)))))))
                             vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
-                            nsize (+ NODE_HEADER_SIZE (* 4 new-cc) vals-size)
+                            nsize (+ node-header-size (* 4 new-cc) vals-size)
                             dst-off (slab/alloc! sio nsize)]
                         (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
                         (slab/write-u8! sio dst-off 1 0)
@@ -340,15 +340,15 @@
                                 (slab/write-i32!
                                  sio
                                  dst-off
-                                 (+ NODE_HEADER_SIZE (* di2 4))
+                                 (+ node-header-size (* di2 4))
                                  final-sub)
                                 (recur si (inc di2)))
                               (do
                                 (slab/write-i32!
                                  sio
                                  dst-off
-                                 (+ NODE_HEADER_SIZE (* di2 4))
-                                 (slab/read-i32 sio root-off (+ NODE_HEADER_SIZE (* si 4))))
+                                 (+ node-header-size (* di2 4))
+                                 (slab/read-i32 sio root-off (+ node-header-size (* si 4))))
                                 (recur (inc si) (inc di2))))))
                         (reduce
                          (fn [p ev] (write-value! sio dst-off p ev))
@@ -368,7 +368,7 @@
                                      (recur (inc i) np (conj acc ev))))))
                     new-val-list (vec (concat (subvec val-list 0 di) [vb] (subvec val-list di)))
                     vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 new-val-list)
-                    nsize (+ NODE_HEADER_SIZE (* 4 cc) vals-size)
+                    nsize (+ node-header-size (* 4 cc) vals-size)
                     dst-off (slab/alloc! sio nsize)]
                 (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
                 (slab/write-u8! sio dst-off 1 0)
@@ -376,7 +376,7 @@
                 (slab/write-i32! sio dst-off 4 new-data-bm)
                 (slab/write-i32! sio dst-off 8 node-bm)
                 (when (pos? cc)
-                  (slab/copy-block! sio dst-off NODE_HEADER_SIZE root-off NODE_HEADER_SIZE (* 4 cc)))
+                  (slab/copy-block! sio dst-off node-header-size root-off node-header-size (* 4 cc)))
                 (reduce
                  (fn [p ev] (write-value! sio dst-off p ev))
                  (values-start-off node-bm)
@@ -386,7 +386,7 @@
         2 (let [node-hash (slab/read-i32 sio root-off 4)
                 cc (slab/read-u8 sio root-off 1)]
             (if (== vh node-hash)
-              (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+              (let [entries (loop [i 0 pos collision-header-size acc []]
                               (if (>= i cc) acc
                                   (let [[ev np] (read-value-at sio root-off pos)]
                                     (recur (inc i) np (conj acc ev)))))]
@@ -394,7 +394,7 @@
                   [root-off false]
                   [(make-collision-node! sio vh (mapv (fn [ev] [ev]) (conj entries vb))) true]))
               (if (>= shift 30)
-                (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+                (let [entries (loop [i 0 pos collision-header-size acc []]
                                 (if (>= i cc) acc
                                     (let [[ev np] (read-value-at sio root-off pos)]
                                       (recur (inc i) np (conj acc ev)))))]
@@ -402,7 +402,7 @@
                 (let [bit1 (bitpos node-hash shift)
                       bit2 (bitpos vh shift)]
                   (if (== bit1 bit2)
-                    (let [[new-child _] (hamt-conj sio root-off vh vb (+ shift SHIFT_STEP))]
+                    (let [[new-child _] (hamt-conj sio root-off vh vb (+ shift shift-step))]
                       [(make-single-child-node! sio bit1 new-child) true])
                     [(make-child-and-value-node! sio bit2 bit1 root-off vb) true])))))
 
@@ -423,8 +423,8 @@
             (condp has-bit? bit
               node-bm
               (let [child-idx (get-index node-bm bit)
-                    child-off (slab/read-i32 sio root-off (+ NODE_HEADER_SIZE (* child-idx 4)))
-                    [new-child removed?] (hamt-disj sio child-off vh vb (+ shift SHIFT_STEP))]
+                    child-off (slab/read-i32 sio root-off (+ node-header-size (* child-idx 4)))
+                    [new-child removed?] (hamt-disj sio child-off vh vb (+ shift shift-step))]
                 (if-not removed?
                   [root-off false]
                   (if (== new-child NIL_OFFSET)
@@ -451,7 +451,7 @@
                                            (let [[ev np] (read-value-at sio root-off p)]
                                              (recur (inc i) np (if (== i di) acc (conj acc ev)))))))
                             vals-size (reduce (fn [a ev] (+ a 4 (bytes-length ev))) 0 val-list)
-                            nsize (+ NODE_HEADER_SIZE (* 4 cc) vals-size)
+                            nsize (+ node-header-size (* 4 cc) vals-size)
                             dst-off (slab/alloc! sio nsize)]
                         (slab/write-u8! sio dst-off 0 NODE_TYPE_BITMAP)
                         (slab/write-u8! sio dst-off 1 0)
@@ -462,9 +462,9 @@
                           (slab/copy-block!
                            sio
                            dst-off
-                           NODE_HEADER_SIZE
+                           node-header-size
                            root-off
-                           NODE_HEADER_SIZE
+                           node-header-size
                            (* 4 cc)))
                         (reduce
                          (fn [p ev] (write-value! sio dst-off p ev))
@@ -478,7 +478,7 @@
                 cc (slab/read-u8 sio root-off 1)]
             (if (not= vh node-hash)
               [root-off false]
-              (let [entries (loop [i 0 pos COLLISION_HEADER_SIZE acc []]
+              (let [entries (loop [i 0 pos collision-header-size acc []]
                               (if (>= i cc) acc
                                   (let [[ev np] (read-value-at sio root-off pos)]
                                     (recur (inc i) np (conj acc ev)))))]
@@ -518,11 +518,11 @@
               (loop [i 0 acc acc]
                 (if (or (>= i cc) (reduced? acc))
                   acc
-                  (let [child-off (slab/read-i32 sio root-off (+ NODE_HEADER_SIZE (* i 4)))]
+                  (let [child-off (slab/read-i32 sio root-off (+ node-header-size (* i 4)))]
                     (recur (inc i) (hamt-val-reduce sio child-off f acc)))))))
 
         2 (let [cc (slab/read-u8 sio root-off 1)]
-            (loop [i 0 pos COLLISION_HEADER_SIZE acc init]
+            (loop [i 0 pos collision-header-size acc init]
               (if (or (>= i cc) (reduced? acc))
                 acc
                 (let [vlen (slab/read-i32 sio root-off pos)
@@ -572,7 +572,7 @@
         1 (let [node-bm (slab/read-i32 sio slab-off 8)
                 child-count (popcount32 node-bm)]
             (dotimes [i child-count]
-              (let [child-off (slab/read-i32 sio slab-off (+ NODE_HEADER_SIZE (* i 4)))]
+              (let [child-off (slab/read-i32 sio slab-off (+ node-header-size (* i 4)))]
                 (free-hamt-node! sio child-off)))
             (slab/free! sio slab-off))
         ;; Collision node — no children
@@ -622,9 +622,9 @@
                          (not (zero? (bit-and new-node-bm old-bit))))
                 (let [old-child-idx (popcount32 (bit-and old-node-bm (dec old-bit)))
                       new-child-idx (popcount32 (bit-and new-node-bm (dec old-bit)))
-                      old-child (slab/read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-child-idx 4)))
-                      new-child (slab/read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-child-idx 4)))]
-                  (recur old-child new-child (+ sh SHIFT_STEP)))))))))))
+                      old-child (slab/read-i32 sio old-off (+ node-header-size (* old-child-idx 4)))
+                      new-child (slab/read-i32 sio new-off (+ node-header-size (* new-child-idx 4)))]
+                  (recur old-child new-child (+ sh shift-step)))))))))))
 
 (defn retire-tree-diff!
   "Full tree diff: walk old and new HAMT trees in parallel, freeing all
@@ -644,10 +644,10 @@
                              old-idx 0]
                         (when-not (zero? remaining)
                           (let [bit (bit-and remaining (- remaining))
-                                old-child (slab/read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
+                                old-child (slab/read-i32 sio old-off (+ node-header-size (* old-idx 4)))
                                 new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
                                             (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
-                                              (slab/read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
+                                              (slab/read-i32 sio new-off (+ node-header-size (* new-idx 4))))
                                             NIL_OFFSET)]
                             (walk old-child new-child)
                             (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
@@ -874,7 +874,7 @@
         (let [node-bm (slab/read-i32 sio slab-off 8)
               child-count (popcount32 node-bm)]
           (dotimes [i child-count]
-            (let [child-off (slab/read-i32 sio slab-off (+ NODE_HEADER_SIZE (* i 4)))]
+            (let [child-off (slab/read-i32 sio slab-off (+ node-header-size (* i 4)))]
               (collect-hamt-offsets sio child-off result))))))))
 
 (defn- collect-hamt-diff-offsets
@@ -894,10 +894,10 @@
                              old-idx 0]
                         (when-not (zero? remaining)
                           (let [bit (bit-and remaining (- remaining))
-                                old-child (slab/read-i32 sio old-off (+ NODE_HEADER_SIZE (* old-idx 4)))
+                                old-child (slab/read-i32 sio old-off (+ node-header-size (* old-idx 4)))
                                 new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
                                             (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
-                                              (slab/read-i32 sio new-off (+ NODE_HEADER_SIZE (* new-idx 4))))
+                                              (slab/read-i32 sio new-off (+ node-header-size (* new-idx 4))))
                                             NIL_OFFSET)]
                             (walk old-child new-child)
                             (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
@@ -998,13 +998,13 @@
                        nbm (slab/read-i32 sio off 8)
                        bit (node-bit dbm nbm vh shift)]
                    (if (has-bit? nbm bit)
-                     (slab/read-i32 sio off (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                     (slab/read-i32 sio off (+ node-header-size (* (get-index nbm bit) 4)))
                      NIL_OFFSET))
                  NIL_OFFSET))]
     (loop [o (root-of old-set) n (root-of new-set) shift 0 out [(d/-root-header-off old-set)]]
       (if (or (== o NIL_OFFSET) (== o n))
         out
-        (recur (down o shift) (down n shift) (+ shift SHIFT_STEP) (conj out o))))))
+        (recur (down o shift) (down n shift) (+ shift shift-step) (conj out o))))))
 
 (defn- edit
   "(f s), s read through sio (a transient's allocation log), and the blocks of
@@ -1025,7 +1025,7 @@
                  (batch/build
                   entries 0
                   (fn [db nb data children]
-                    (let [size (+ NODE_HEADER_SIZE (* 4 (count children))
+                    (let [size (+ node-header-size (* 4 (count children))
                                   (reduce (fn [n [_ vb]] (+ n 4 (bytes-length vb))) 0 data))
                           off (slab/alloc! sio size)]
                       (slab/write-u8! sio off 0 NODE_TYPE_BITMAP)
@@ -1034,7 +1034,7 @@
                       (slab/write-i32! sio off 4 db)
                       (slab/write-i32! sio off 8 nb)
                       (doseq [[i child] (map-indexed vector children)]
-                        (slab/write-i32! sio off (+ NODE_HEADER_SIZE (* i 4)) child))
+                        (slab/write-i32! sio off (+ node-header-size (* i 4)) child))
                       (reduce (fn [p [_ vb]] (write-value! sio off p vb))
                               (values-start-off nb) data)
                       off))
