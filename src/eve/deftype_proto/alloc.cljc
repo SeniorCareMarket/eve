@@ -1041,9 +1041,11 @@
                :else nil)))))
 
      (defn- desc-handle
-       "The tally handle of block block-idx of bitmap class ci in ctx: [[count-region count-off]
-        [flags-region flags-off] [pointer-region pointer-off]] — the addresses of the block's COUNT,
-        FLAGS and POINTER column entries — or nil when the class carries no columns."
+       "The tally row of block block-idx of bitmap class ci in ctx, flat: [count-region count-off
+        flags-region flags-off pointer-region pointer-off] — the addresses of the block's COUNT,
+        FLAGS and POINTER column entries — or nil when the class carries no columns. One vector
+        per call, no nested pairs: the tally asks on every hold, drop and free (jolt round 6, the
+        nested pairs were 16% of reset-vec's self time); desc-of nests it for its callers."
        [^JvmSlabCtx ctx ^long ci ^long block-idx]
        (let [dr (aget ^objects (field ctx desc-regions) ci)]
          (when dr
@@ -1059,9 +1061,9 @@
                  poff (if (identical? pr dr)
                         (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
                         off)]
-             [[dr (+ off (* 4 block-idx))]
-              [fr (+ foff (* 4 block-idx))]
-              [pr (+ poff (* 4 block-idx))]]))))
+             [dr (+ off (* 4 block-idx))
+              fr (+ foff (* 4 block-idx))
+              pr (+ poff (* 4 block-idx))]))))
 
      (defn ctx-free!
        "The block at slab-offset in ctx's slabs freed: true, or false when it
@@ -1083,7 +1085,7 @@
                  ;; the block's descriptor is reset BEFORE its bit clears (after it another thread may claim the
                  ;; block): its count 0, its flags clear and its digest pointer 0 — the block's own
                  ;; columns, nothing else
-                 _         (when-let [[[cr co] [fr fo] [pr po]] (desc-handle ctx class-idx block-idx)]
+                 _         (when-let [[cr co fr fo pr po] (desc-handle ctx class-idx block-idx)]
                              (slab/region-store-i32! cr co 0)
                              (slab/region-store-i32! fr fo 0)
                              (slab/region-store-i32! pr po 0))
@@ -1092,12 +1094,9 @@
                (slab/region-add-i32! (aget regions class-idx) d/SLAB_HDR_FREE_COUNT 1))
              freed?))))
 
-     (defn ctx-desc-of
-       "The tally handle of the block at slab-offset in ctx (data.cljc, Descriptor Column Layout):
-        [[count-region count-off] [flags-region flags-off] [pointer-region pointer-off]], or nil
-        (a class with no columns, or a class-6 offset no allocated block starts at). A bitmap
-        class's descriptor i is block i's for the slab's life; a class-6 block's handle is its
-        coalescing descriptor's."
+     (defn ctx-desc-row
+       "The tally row of the block at slab-offset in ctx, flat: [count-region count-off flags-region
+        flags-off pointer-region pointer-off] (ctx-desc-of's three pairs in one vector), or nil."
        [^JvmSlabCtx ctx slab-offset]
        (let [ci (decode-class-idx slab-offset)]
          (cond
@@ -1107,9 +1106,19 @@
            (== ci OVERFLOW_CLASS_IDX)
            (when-let [r (aget ^objects (field ctx regions) OVERFLOW_CLASS_IDX)]
              (when-let [[co fo po] (coalesc/row-of r (decode-block-idx slab-offset))]
-               [[r co] [r fo] [r po]]))
+               [r co r fo r po]))
 
            :else nil)))
+
+     (defn ctx-desc-of
+       "The tally handle of the block at slab-offset in ctx (data.cljc, Descriptor Column Layout):
+        [[count-region count-off] [flags-region flags-off] [pointer-region pointer-off]], or nil
+        (a class with no columns, or a class-6 offset no allocated block starts at). A bitmap
+        class's descriptor i is block i's for the slab's life; a class-6 block's handle is its
+        coalescing descriptor's."
+       [^JvmSlabCtx ctx slab-offset]
+       (when-let [[cr co fr fo pr po] (ctx-desc-row ctx slab-offset)]
+         [[cr co] [fr fo] [pr po]]))
 
      (defn ctx-allocated?
        "True when the block at slab-offset in ctx is allocated: its bitmap bit set (classes 0-5), or an ALLOCATED
@@ -1854,6 +1863,20 @@
     (if (instance? JvmSlabCtx ctx)
       (ctx-desc-of ctx slab-offset)
       (when-let [f (host-op :desc-of)] (f ctx slab-offset)))))
+
+(defn desc-row
+  "desc-of flat, the tally's row: [count-region count-off flags-region flags-off pointer-region
+   pointer-off], or nil — one vector per call, no nested pairs. A host slab's :desc-row answers
+   where it registers one, else its :desc-of flattened."
+  [sio slab-offset]
+  (let [ctx (slab/domain-ctx (domain-root sio))]
+    (if (instance? JvmSlabCtx ctx)
+      (ctx-desc-row ctx slab-offset)
+      (if-let [f (host-op :desc-row)]
+        (f ctx slab-offset)
+        (when-let [f (host-op :desc-of)]
+          (when-let [[[cr co] [fr fo] [pr po]] (f ctx slab-offset)]
+            [cr co fr fo pr po]))))))
 
 (defn allocated?
   "True when the block at slab-offset in sio's domain is allocated (not free, never handed out)."
