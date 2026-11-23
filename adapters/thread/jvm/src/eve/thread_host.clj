@@ -91,11 +91,9 @@
 (defn receive!
   "The calling thread's next message; :eve.thread/timeout after ms milliseconds (ms < 0: wait for ever; 0: poll)."
   [ms]
-  (let [^java.util.concurrent.LinkedBlockingQueue q (.get ^java.util.Map boxes (self))]
-    (let [m (cond (neg? ms) (.take q)
-                  (zero? ms) (or (.poll q) :eve.thread/timeout)
-                  :else (or (.poll q (long ms) java.util.concurrent.TimeUnit/MILLISECONDS) :eve.thread/timeout))]
-      (if (bytes? m) (wire-decode m) m))))
+  (let [^java.util.concurrent.LinkedBlockingQueue q   (.get ^java.util.Map boxes (self)) m   (cond (neg? ms) (.take q)
+                                                                                                   (zero? ms) (or (.poll q) :eve.thread/timeout)
+                                                                                                   :else (or (.poll q (long ms) java.util.concurrent.TimeUnit/MILLISECONDS) :eve.thread/timeout))] (if (bytes? m) (wire-decode m) m)))
 
 (defn stop-threads!
   "Ask each thread to end: the message :eve.thread/stop (a request its loop honours, never a kill)."

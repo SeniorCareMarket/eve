@@ -86,24 +86,15 @@
 
 (deftest obj-atomic-add-test
   (testing "Atomic add"
-    (let [o (obj/obj {:counter :int32} {:counter 100})]
-      (let [old (obj/add! o :counter 5)]
-        (is (= 100 old))
-        (is (= 105 (obj/get o :counter)))))))
+    (let [o   (obj/obj {:counter :int32} {:counter 100}) old   (obj/add! o :counter 5)] (is (= 100 old)) (is (= 105 (obj/get o :counter))))))
 
 (deftest obj-atomic-sub-test
   (testing "Atomic subtract"
-    (let [o (obj/obj {:counter :int32} {:counter 100})]
-      (let [old (obj/sub! o :counter 30)]
-        (is (= 100 old))
-        (is (= 70 (obj/get o :counter)))))))
+    (let [o   (obj/obj {:counter :int32} {:counter 100}) old   (obj/sub! o :counter 30)] (is (= 100 old)) (is (= 70 (obj/get o :counter))))))
 
 (deftest obj-exchange-test
   (testing "Atomic exchange"
-    (let [o (obj/obj {:val :int32} {:val 42})]
-      (let [old (obj/exchange! o :val 99)]
-        (is (= 42 old))
-        (is (= 99 (obj/get o :val)))))))
+    (let [o   (obj/obj {:val :int32} {:val 42}) old   (obj/exchange! o :val 99)] (is (= 42 old)) (is (= 99 (obj/get o :val))))))
 
 (deftest obj-seq-test
   (testing "Object as sequence"
@@ -202,14 +193,8 @@
 
 (deftest column-access-test
   (testing "Get raw column array"
-    (let [arr (obj/obj-array 100 {:key :int32 :val :int32})]
-      (let [key-col (obj/column arr :key)
-            val-col (obj/column arr :val)]
-        (is (= 100 (count key-col)))
-        (is (= 100 (count val-col)))
-        ;; Direct array access
-        (arr/aset! key-col 0 42)
-        (is (= 42 (obj/get-in arr [0 :key])))))))
+    (let [arr   (obj/obj-array 100 {:key :int32 :val :int32}) key-col   (obj/column arr :key)
+          val-col   (obj/column arr :val)] (is (= 100 (count key-col))) (is (= 100 (count val-col))) (arr/aset! key-col 0 42) (is (= 42 (obj/get-in arr [0 :key]))))))
 
 (deftest column-reduce-test
   (testing "Reduce over column"

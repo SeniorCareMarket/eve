@@ -527,22 +527,20 @@
      (loop []
        (let [e #?(:clj (when-not (.isEmpty stack) (.pop stack)) :cljs (.pop stack))]
          (when e
-           (let [[kind off patch-pos owner] e
-                 off (long off)]
-             (let [placed (d-lookup st off)]
-               (if (not= placed -1)
+           (let [[kind off patch-pos owner]   e
+                 off   (long off) placed   (d-lookup st off)] (if (not= placed -1)
                  ;; already placed (an earlier edge reached it first): this
                  ;; edge's field is patched now and its relocation recorded —
                  ;; a shared block is copied once but patched per edge
-                 (do (when (<= 0 (long patch-pos))
-                       (put-i32-at! (aget st 4) (long patch-pos) (aget ^ints (aget st 6) placed))
-                       (d-add-reloc! st (long patch-pos) (long owner) placed))
-                     (recur))
-                 (let [known (ssio/block-size sio off)
-                       est0 (if (pos? known)
-                              known
-                              (let [ci (alloc/decode-class-idx off)]
-                                (if (< ci 6) (nth slab-class-sizes ci) 65536)))
+                                                                (do (when (<= 0 (long patch-pos))
+                                                                      (put-i32-at! (aget st 4) (long patch-pos) (aget ^ints (aget st 6) placed))
+                                                                      (d-add-reloc! st (long patch-pos) (long owner) placed))
+                                                                    (recur))
+                                                                (let [known (ssio/block-size sio off)
+                                                                      est0 (if (pos? known)
+                                                                             known
+                                                                             (let [ci (alloc/decode-class-idx off)]
+                                                                               (if (< ci 6) (nth slab-class-sizes ci) 65536)))
                        ;; The copy window doubles until the bounded size
                        ;; scan fits inside it. A heap-domain block's class
                        ;; size says nothing about its content size, and
@@ -550,50 +548,50 @@
                        ;; garbage past the copy (measured at the Z1 pin,
                        ;; 2026-11-12: wild sizes, a 68 MB arraycopy, a
                        ;; scan running off the image buffer).
-                       size (loop [est est0]
-                              (d-ensure! st (+ (long (aget st 5)) est))
-                              (copy-block-bytes! sio off (aget st 4) (long (aget st 5)) est)
-                              (let [sz (content-size-in sio (aget st 4) (long (aget st 5)) off kind est)]
-                                (cond (not= sz SHORT) sz
-                                      (< est 16777216) (recur (* 2 est))
-                                      :else -1)))
-                       base (long (aget st 5))]
-                   (when (neg? size)
-                     (throw (ex-info (str "eve.flat: no size for the block at " off
-                                          " (kind " kind ") — unregistered deftype, or a kind "
-                                          "this reader does not size")
-                                     {:type ::unsized-block :off off :kind kind})))
-                   (when (> size est0)
+                                                                      size (loop [est est0]
+                                                                             (d-ensure! st (+ (long (aget st 5)) est))
+                                                                             (copy-block-bytes! sio off (aget st 4) (long (aget st 5)) est)
+                                                                             (let [sz (content-size-in sio (aget st 4) (long (aget st 5)) off kind est)]
+                                                                               (cond (not= sz SHORT) sz
+                                                                                     (< est 16777216) (recur (* 2 est))
+                                                                                     :else -1)))
+                                                                      base (long (aget st 5))]
+                                                                  (when (neg? size)
+                                                                    (throw (ex-info (str "eve.flat: no size for the block at " off
+                                                                                         " (kind " kind ") — unregistered deftype, or a kind "
+                                                                                         "this reader does not size")
+                                                                                    {:type ::unsized-block :off off :kind kind})))
+                                                                  (when (> size est0)
                      ;; a header-derived size (exact, not scan-derived)
                      ;; past the first window: re-copy at the true size
-                     (d-ensure! st (+ base size))
-                     (copy-block-bytes! sio off (aget st 4) base size))
-                   (let [ord (long (aget st 9))]
-                     (d-insert! st off ord)
-                     (aset st 6 (d-grow-ints (aget st 6) (inc ord)))
-                     (aset st 7 (d-grow-ints (aget st 7) (inc ord)))
-                     (aset st 8 (d-grow-ints (aget st 8) (inc ord)))
-                     (aset ^ints (aget st 6) (int ord) (int base))
-                     (aset ^ints (aget st 7) (int ord) (int size))
-                     (aset ^ints (aget st 8) (int ord) (unchecked-int off))
-                     (aset st 9 (inc ord))
-                     (when (<= 0 (long patch-pos))
-                       (put-i32-at! (aget st 4) patch-pos base)
-                       (d-add-reloc! st patch-pos owner ord))
-                     (aset st 5 (+ base (align4 size)))
+                                                                    (d-ensure! st (+ base size))
+                                                                    (copy-block-bytes! sio off (aget st 4) base size))
+                                                                  (let [ord (long (aget st 9))]
+                                                                    (d-insert! st off ord)
+                                                                    (aset st 6 (d-grow-ints (aget st 6) (inc ord)))
+                                                                    (aset st 7 (d-grow-ints (aget st 7) (inc ord)))
+                                                                    (aset st 8 (d-grow-ints (aget st 8) (inc ord)))
+                                                                    (aset ^ints (aget st 6) (int ord) (int base))
+                                                                    (aset ^ints (aget st 7) (int ord) (int size))
+                                                                    (aset ^ints (aget st 8) (int ord) (unchecked-int off))
+                                                                    (aset st 9 (inc ord))
+                                                                    (when (<= 0 (long patch-pos))
+                                                                      (put-i32-at! (aget st 4) patch-pos base)
+                                                                      (d-add-reloc! st patch-pos owner ord))
+                                                                    (aset st 5 (+ base (align4 size)))
                    ;; scan the copied block: patch fields whose targets are
                    ;; already placed; queue the rest as stack entries carrying
                    ;; their patch position
-                     (block-pointers
-                      sio (aget st 4) base off kind
-                      (fn [bpos ck target]
-                        (let [tgt (d-lookup st (long target))
-                              field-pos (+ base (long bpos))]
-                          (if (not= tgt -1)
-                            (do (put-i32-at! (aget st 4) field-pos (aget ^ints (aget st 6) tgt))
-                                (d-add-reloc! st field-pos ord tgt))
-                            (push! ck (long target) field-pos ord)))))
-                     (recur)))))))))
+                                                                    (block-pointers
+                                                                     sio (aget st 4) base off kind
+                                                                     (fn [bpos ck target]
+                                                                       (let [tgt (d-lookup st (long target))
+                                                                             field-pos (+ base (long bpos))]
+                                                                         (if (not= tgt -1)
+                                                                           (do (put-i32-at! (aget st 4) field-pos (aget ^ints (aget st 6) tgt))
+                                                                               (d-add-reloc! st field-pos ord tgt))
+                                                                           (push! ck (long target) field-pos ord)))))
+                                                                    (recur))))))))
      ;; tables + header
      (let [n (long (aget st 9))
            r (long (aget st 13))

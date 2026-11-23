@@ -904,36 +904,25 @@
                       [NIL_OFFSET true]
                       ;; Rebuild without this entry
                       ;; Read all children, hashes, kvs except removed
-                      (let [old-dc (popcount32 data-bm)
-                            children (mapv #(slab/read-i32 sio root-off (+ NODE_HEADER_SIZE (* % 4))) (range cc))
-                            h-off (hashes-start-off node-bm)
-                            hashes (vec (keep-indexed
-                                         (fn [i _] (when (not= i data-idx)
-                                                     (slab/read-i32 sio root-off (+ h-off (* i 4)))))
-                                         (range old-dc)))
-                            kvs-list (let [kv-off (kv-data-start-off data-bm node-bm)]
-                                       (loop [i 0 pos kv-off acc []]
-                                         (if (>= i old-dc) acc
-                                             (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
-                                               (recur (inc i) np
-                                                      (if (== i data-idx) acc (conj acc [ek ev])))))))]
-                        ;; Write new node
-                        (let [kvs-size (reduce (fn [a [kb vb]] (+ a (calc-kv-size kb vb))) 0 kvs-list)
-                              nsize (+ NODE_HEADER_SIZE (* 4 cc) (* 4 dc) kvs-size)
-                              new-off (slab/alloc! sio nsize)]
-                          (slab/write-u8! sio new-off 0 NODE_TYPE_BITMAP)
-                          (slab/write-u8! sio new-off 1 0)
-                          (slab/write-u16! sio new-off 2 (kv-total-cache kvs-size))
-                          (slab/write-i32! sio new-off 4 new-data-bm)
-                          (slab/write-i32! sio new-off 8 node-bm)
-                          (dotimes [i cc]
-                            (slab/write-i32! sio new-off (+ NODE_HEADER_SIZE (* i 4)) (nth children i)))
-                          (let [new-h-off (hashes-start-off node-bm)]
-                            (dotimes [i dc]
-                              (slab/write-i32! sio new-off (+ new-h-off (* i 4)) (nth hashes i))))
-                          (reduce (fn [p [ek ev]] (write-kv! sio new-off p ek ev))
-                                  (kv-data-start-off new-data-bm node-bm) kvs-list)
-                          [new-off true]))))
+                      (let [old-dc   (popcount32 data-bm)
+                            children   (mapv #(slab/read-i32 sio root-off (+ NODE_HEADER_SIZE (* % 4))) (range cc))
+                            h-off   (hashes-start-off node-bm)
+                            hashes   (vec (keep-indexed
+                                           (fn [i _] (when (not= i data-idx)
+                                                       (slab/read-i32 sio root-off (+ h-off (* i 4)))))
+                                           (range old-dc)))
+                            kvs-list   (let [kv-off (kv-data-start-off data-bm node-bm)]
+                                         (loop [i 0 pos kv-off acc []]
+                                           (if (>= i old-dc) acc
+                                               (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
+                                                 (recur (inc i) np
+                                                        (if (== i data-idx) acc (conj acc [ek ev]))))))) kvs-size   (reduce (fn [a [kb vb]] (+ a (calc-kv-size kb vb))) 0 kvs-list)
+                            nsize   (+ NODE_HEADER_SIZE (* 4 cc) (* 4 dc) kvs-size)
+                            new-off   (slab/alloc! sio nsize)] (slab/write-u8! sio new-off 0 NODE_TYPE_BITMAP) (slab/write-u8! sio new-off 1 0) (slab/write-u16! sio new-off 2 (kv-total-cache kvs-size)) (slab/write-i32! sio new-off 4 new-data-bm) (slab/write-i32! sio new-off 8 node-bm) (dotimes [i cc]
+                                                                                                                                                                                                                                                                                                (slab/write-i32! sio new-off (+ NODE_HEADER_SIZE (* i 4)) (nth children i))) (let [new-h-off (hashes-start-off node-bm)]
+                                                                                                                                                                                                                                                                                                                                                                               (dotimes [i dc]
+                                                                                                                                                                                                                                                                                                                                                                                 (slab/write-i32! sio new-off (+ new-h-off (* i 4)) (nth hashes i)))) (reduce (fn [p [ek ev]] (write-kv! sio new-off p ek ev))
+                                                                                                                                                                                                                                                                                                                                                                                                                                                              (kv-data-start-off new-data-bm node-bm) kvs-list) [new-off true])))
                   ;; Key doesn't match
                   [root-off false]))
 

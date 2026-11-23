@@ -360,36 +360,31 @@
    (binding [*turn-deadline* (let [{:keys [renewed lease]} @(:st dh)]
                                (if renewed (+ renewed (quot lease 2)) (+ (now) (quot (:ttl dh) 4))))
              *waited* (clojure.core/atom 0)]
-     (let [horizon (* 10 (:ttl dh))
-         ;; a renewal made while another process's turn stands covers that writer's attempt (see Turns)
-           floor (max floor (turn-floor dh))]
-       (let [ttl (swap-forgetting! dh (fn [v fg]
+     (let [horizon   (* 10 (:ttl dh))
+           ;; a renewal made while another process's turn stands covers that writer's attempt (see Turns)
+           floor   (max floor (turn-floor dh)) ttl     (swap-forgetting! dh (fn [v fg]
                                      ;; (the clock read by each attempt: a swap that waited renews with the time it commits at)
-                                        (let [t (now)
-                                              v (-> (rejoin v dh t) (mt/heartbeat (:rid dh) tids t) (mt/forget fg))
+                                                                              (let [t (now)
+                                                                                    v (-> (rejoin v dh t) (mt/heartbeat (:rid dh) tids t) (mt/forget fg))
                                            ;; this runtime's lease: at least floor, and the fleet's (its slowest member's)
-                                              v (mt/stretch-ttl v (:rid dh) (max floor (mt/fleet-ttl v)))
-                                              own (get-in v [:runtimes (:rid dh) :ttl])
+                                                                                    v (mt/stretch-ttl v (:rid dh) (max floor (mt/fleet-ttl v)))
+                                                                                    own (get-in v [:runtimes (:rid dh) :ttl])
                                            ;; a held lease lasts at least this runtime's own (its renewals come at that cadence)
-                                              v (reduce (fn [v [lname ttl]] (first (mt/acquire v lname (:rid dh) (max ttl (or own 0)) t)))
-                                                        v held)]
-                                          [v (get-in v [:runtimes (:rid dh) :ttl])])))
-             _ (clojure.core/swap! (:st dh) assoc :renewed (now) :lease (or ttl (:ttl dh)))]
-         (let [sw (if (rung/-read (mcell dh) (fn [v] (mt/sweep-due? v (now) horizon)))
-                    (swap-meta! dh (fn [v]
-                                     (let [t (now)
-                                           [v adopted] (mt/adopt-expired v t)
-                                           [v comps] (mt/adopt-components v t)
-                                           [v gone] (mt/expire-runtimes v t)
-                                           [v orphans] (mt/forget-orphans v t horizon)]
-                                       [v {:adopted adopted :components comps :expired gone :forgotten orphans
-                                           :pools (vec (distinct (keep (fn [id] (get-in v [:descs id :pool])) adopted)))}])))
-                    {:adopted [] :components [] :expired [] :forgotten []})]
-         ;; re-queued work's pools and failed work's waiters
-           (when (seq (:adopted sw))
-             (ring! dh (concat [(rung/completion-word)] (map rung/descriptor-word (:adopted sw))
-                               (map rung/pool-word (:pools sw)))))
-           (assoc sw :ttl ttl :waited @*waited*)))))))
+                                                                                    v (reduce (fn [v [lname ttl]] (first (mt/acquire v lname (:rid dh) (max ttl (or own 0)) t)))
+                                                                                              v held)]
+                                                                                [v (get-in v [:runtimes (:rid dh) :ttl])])))
+           _     (clojure.core/swap! (:st dh) assoc :renewed (now) :lease (or ttl (:ttl dh)))   sw     (if (rung/-read (mcell dh) (fn [v] (mt/sweep-due? v (now) horizon)))
+                                                                                                         (swap-meta! dh (fn [v]
+                                                                                                                          (let [t (now)
+                                                                                                                                [v adopted] (mt/adopt-expired v t)
+                                                                                                                                [v comps] (mt/adopt-components v t)
+                                                                                                                                [v gone] (mt/expire-runtimes v t)
+                                                                                                                                [v orphans] (mt/forget-orphans v t horizon)]
+                                                                                                                            [v {:adopted adopted :components comps :expired gone :forgotten orphans
+                                                                                                                                :pools (vec (distinct (keep (fn [id] (get-in v [:descs id :pool])) adopted)))}])))
+                                                                                                         {:adopted [] :components [] :expired [] :forgotten []})] (when (seq (:adopted sw))
+                                                                                                                                                                    (ring! dh (concat [(rung/completion-word)] (map rung/descriptor-word (:adopted sw))
+                                                                                                                                                                                      (map rung/pool-word (:pools sw))))) (assoc sw :ttl ttl :waited @*waited*)))))
 
 (defn- threadless-beat!
   "A runtime with no threads of its own beats from its waits, every quarter of its lease — and, as a ticker does, keeps
@@ -482,18 +477,14 @@
     (clojure.core/swap! (:st dh) assoc :ticker a)
     ;; the lease renewed from here while the ticker starts, at the ticker's own cadence (ttl/4): else another runtime's
     ;; sweep takes this one out — and no oftener: these renewals and the ticker's first one write the same meta-atom
-    (let [last (clojure.core/atom (now))
-          every (max 100 (quot (:ttl dh) 4))]
-      ;; a first beat that never came: this runtime leaves (its ticker stopped) before attach! throws — no handle reaches
-      ;; a ticker attach! did not answer, and it would beat for the life of the process
-      (let [[ok? r] (h/attempt (fn []
-                                 (await-reply! :ticker-up 120000 a
-                                               (fn [] (when (>= (- (now) @last) every)
-                                                        (clojure.core/reset! last (now))
-                                                        (let [t (now)] (swap-meta! dh (fn [v] [(mt/heartbeat v (:rid dh) [] t) nil]))))))))]
-        (when-not ok?
-          (h/attempt (fn [] (detach! dh)))
-          (throw r))))
+    (let [last   (clojure.core/atom (now))
+          every   (max 100 (quot (:ttl dh) 4)) [ok? r]   (h/attempt (fn []
+                                                                      (await-reply! :ticker-up 120000 a
+                                                                                    (fn [] (when (>= (- (now) @last) every)
+                                                                                             (clojure.core/reset! last (now))
+                                                                                             (let [t (now)] (swap-meta! dh (fn [v] [(mt/heartbeat v (:rid dh) [] t) nil]))))))))] (when-not ok?
+                                                                                                                                                                                    (h/attempt (fn [] (detach! dh)))
+                                                                                                                                                                                    (throw r)))
     a))
 
 (defn- ask-ticker!
@@ -753,11 +744,7 @@
       (ring! dh [(rung/pool-word nm)])
       nil))
   (-shutdown-now! [p]
-    (let [dh (:dh p) nm (:name p) t (now)]
-      (let [ids (swap-meta! dh (fn [v] (mt/shutdown-pool-now v nm t)))]
-        (ring! dh (concat [(rung/completion-word) (rung/pool-word nm)] (map rung/descriptor-word ids)))
-        (stop-local-pumps! dh nm)
-        ids)))
+    (let [dh   (:dh p)   nm   (:name p)   t   (now) ids   (swap-meta! dh (fn [v] (mt/shutdown-pool-now v nm t)))] (ring! dh (concat [(rung/completion-word) (rung/pool-word nm)] (map rung/descriptor-word ids))) (stop-local-pumps! dh nm) ids))
   (-await-termination [p ms]
     (let [dh (:dh p) nm (:name p)]
       (wait-until ms (fn [] (rung/-read (mcell dh) (fn [v] (terminated-in? v nm)))) (poll-cap dh))))

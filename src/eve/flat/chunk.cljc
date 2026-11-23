@@ -1131,12 +1131,7 @@
     (dotimes [_ (inc n)] (fio/buf-off w 0))
     (let [entries (fio/buf-pos w)]
       (dotimes [i n]
-        (let [at (+ start (* i width))]
-          ;; patch offset i (relative to entries) at its slot
-          (let [saved (fio/buf-pos w)]
-            (fio/buf-seek w at)
-            (fio/buf-off w (- saved entries))
-            (fio/buf-seek w saved)))
+        (let [at   (+ start (* i width)) saved   (fio/buf-pos w)] (fio/buf-seek w at) (fio/buf-off w (- saved entries)) (fio/buf-seek w saved))
         (let [body (scalar-body (nth syms i))] (fio/buf-bytes w body 0 (byte-len body))))
       (let [saved (fio/buf-pos w)]
         (fio/buf-seek w (+ start (* n width)))

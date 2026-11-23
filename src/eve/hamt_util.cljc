@@ -517,18 +517,16 @@
     [(- u32-range 1 hi) (- u32-range lo)]))
 
 (defn- xxh3-len-17to128 [buf len]
-  (let [[lo hi] (reduce (fn [[lo hi] [off1 off2 sec]]
-                          (mix32b lo hi buf off1 off2 sec))
-                        [(mul64 [0 len] prime64-1) [0 0]]
-                        (cond-> []
-                          (> len 96) (conj [48 (- len 64) 96])
-                          (> len 64) (conj [32 (- len 48) 64])
-                          (> len 32) (conj [16 (- len 32) 32])
-                          true (conj [0 (- len 16) 0])))]
-    (let [h-lo (add64 lo hi)
-          h-hi (add64 (add64 (mul64 lo prime64-1) (mul64 hi prime64-4))
-                      (mul64 [0 len] prime64-2))]
-      [(neg64 (xxh3-avalanche h-hi)) (xxh3-avalanche h-lo)])))
+  (let [[lo hi]   (reduce (fn [[lo hi] [off1 off2 sec]]
+                            (mix32b lo hi buf off1 off2 sec))
+                          [(mul64 [0 len] prime64-1) [0 0]]
+                          (cond-> []
+                            (> len 96) (conj [48 (- len 64) 96])
+                            (> len 64) (conj [32 (- len 48) 64])
+                            (> len 32) (conj [16 (- len 32) 32])
+                            true (conj [0 (- len 16) 0]))) h-lo   (add64 lo hi)
+        h-hi   (add64 (add64 (mul64 lo prime64-1) (mul64 hi prime64-4))
+                      (mul64 [0 len] prime64-2))] [(neg64 (xxh3-avalanche h-hi)) (xxh3-avalanche h-lo)]))
 
 (defn- xxh3-len-129to240 [buf len]
   (let [[lo hi] (loop [i 32

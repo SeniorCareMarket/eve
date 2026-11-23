@@ -736,108 +736,82 @@
 
 (deftest jvm-list-conj-test
   (with-heap-slab
-    (let []
-      (testing "conj adds to front"
-        (let [l (conj (write-list sio '()) 42)]
-          (is (= 1 (count l)))
-          (is (= 42 (first l)))))
-
-      (testing "conj multiple - stack order"
-        (let [l (-> (write-list sio '()) (conj 1) (conj 2) (conj 3))]
-          (is (= 3 (count l)))
-          (is (= 3 (first l)))
-          (is (= 2 (first (rest l)))))))))
+    (testing "conj adds to front"
+      (let [l (conj (write-list sio '()) 42)]
+        (is (= 1 (count l)))
+        (is (= 42 (first l))))) (testing "conj multiple - stack order"
+                                  (let [l (-> (write-list sio '()) (conj 1) (conj 2) (conj 3))]
+                                    (is (= 3 (count l)))
+                                    (is (= 3 (first l)))
+                                    (is (= 2 (first (rest l))))))))
 
 (deftest jvm-list-peek-test
   (with-heap-slab
-    (let []
-      (testing "peek returns first"
-        (is (= 1 (peek (write-list sio '(1 2 3))))))
-
-      (testing "peek empty list"
-        (is (nil? (peek (write-list sio '()))))))))
+    (testing "peek returns first"
+      (is (= 1 (peek (write-list sio '(1 2 3)))))) (testing "peek empty list"
+                                                     (is (nil? (peek (write-list sio '())))))))
 
 (deftest jvm-list-pop-test
   (with-heap-slab
-    (let []
-      (testing "pop removes first"
-        (let [l (pop (write-list sio '(1 2 3)))]
-          (is (= 2 (count l)))
-          (is (= 2 (first l))))))))
+    (testing "pop removes first"
+      (let [l (pop (write-list sio '(1 2 3)))]
+        (is (= 2 (count l)))
+        (is (= 2 (first l)))))))
 
 (deftest jvm-list-count-test
   (with-heap-slab
-    (let []
-      (testing "count"
-        (is (= 0 (count (write-list sio '()))))
-        (is (= 1 (count (write-list sio '(42)))))
-        (is (= 3 (count (write-list sio '(1 2 3)))))))))
+    (testing "count"
+      (is (= 0 (count (write-list sio '()))))
+      (is (= 1 (count (write-list sio '(42)))))
+      (is (= 3 (count (write-list sio '(1 2 3))))))))
 
 (deftest jvm-list-seq-test
   (with-heap-slab
-    (let []
-      (testing "seq of empty list"
-        (is (nil? (seq (write-list sio '())))))
-
-      (testing "seq preserves order"
-        (let [l (write-list sio '(10 20 30))
-              result (vec (seq l))]
-          (is (= [10 20 30] result)))))))
+    (testing "seq of empty list"
+      (is (nil? (seq (write-list sio '()))))) (testing "seq preserves order"
+                                                (let [l (write-list sio '(10 20 30))
+                                                      result (vec (seq l))]
+                                                  (is (= [10 20 30] result))))))
 
 (deftest jvm-list-empty-test
   (with-heap-slab
-    (let []
-      (testing "empty returns empty list"
-        (let [l (write-list sio '(1 2 3))
-              e (empty l)]
-          (is (= 0 (count e))))))))
+    (testing "empty returns empty list"
+      (let [l (write-list sio '(1 2 3))
+            e (empty l)]
+        (is (= 0 (count e)))))))
 
 (deftest jvm-list-reduce-test
   (with-heap-slab
-    (let []
-      (testing "reduce"
-        (let [l (write-list sio '(1 2 3 4 5))]
-          (is (= 15 (reduce + l)))))
-
-      (testing "reduce with init"
-        (let [l (write-list sio '(1 2 3))]
-          (is (= 106 (reduce + 100 l))))))))
+    (testing "reduce"
+      (let [l (write-list sio '(1 2 3 4 5))]
+        (is (= 15 (reduce + l))))) (testing "reduce with init"
+                                     (let [l (write-list sio '(1 2 3))]
+                                       (is (= 106 (reduce + 100 l)))))))
 
 (deftest jvm-list-equality-test
   (with-heap-slab
-    (let []
-      (testing "equal eve lists"
-        (is (= (write-list sio '(1 2 3)) (write-list sio '(1 2 3)))))
-
-      (testing "unequal eve lists"
-        (is (not= (write-list sio '(1 2 3)) (write-list sio '(1 2 4)))))
-
-      (testing "eve list equals native list"
-        (is (= (write-list sio '(1 2 3)) '(1 2 3)))
-        (is (= '(1 2 3) (write-list sio '(1 2 3))))))))
+    (testing "equal eve lists"
+      (is (= (write-list sio '(1 2 3)) (write-list sio '(1 2 3))))) (testing "unequal eve lists"
+                                                                      (is (not= (write-list sio '(1 2 3)) (write-list sio '(1 2 4))))) (testing "eve list equals native list"
+                                                                                                                                         (is (= (write-list sio '(1 2 3)) '(1 2 3)))
+                                                                                                                                         (is (= '(1 2 3) (write-list sio '(1 2 3)))))))
 
 (deftest jvm-list-key-types-test
   (with-heap-slab
-    (let []
-      (testing "string values"
-        (let [l (write-list sio '("hello" "world"))]
-          (is (= "hello" (first l)))))
-
-      (testing "keyword values"
-        (let [l (write-list sio '(:a :b :c))]
-          (is (= :a (first l)))))
-
-      (testing "mixed types"
-        (let [l (write-list sio '(42 "hello" :key true nil))]
-          (is (= 42 (first l))))))))
+    (testing "string values"
+      (let [l (write-list sio '("hello" "world"))]
+        (is (= "hello" (first l))))) (testing "keyword values"
+                                       (let [l (write-list sio '(:a :b :c))]
+                                         (is (= :a (first l))))) (testing "mixed types"
+                                                                   (let [l (write-list sio '(42 "hello" :key true nil))]
+                                                                     (is (= 42 (first l)))))))
 
 (deftest jvm-list-large-test
   (with-heap-slab
-    (let []
-      (testing "1000-element list"
-        (let [l (write-list sio (apply list (range 1000)))]
-          (is (= 1000 (count l)))
-          (is (= 0 (first l))))))))
+    (testing "1000-element list"
+      (let [l (write-list sio (apply list (range 1000)))]
+        (is (= 1000 (count l)))
+        (is (= 0 (first l)))))))
 
 ;; ============================================================================
 ;; CROSS-TYPE CONFORMANCE

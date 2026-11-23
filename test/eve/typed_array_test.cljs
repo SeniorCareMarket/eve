@@ -8,61 +8,41 @@
 
 (deftest typed-array-basic-test
   (testing "Uint8ClampedArray stored in atom comes out as Uint8ClampedArray"
-    (let [a (e/atom ::typed-array-basic {})
-          _result (swap! a (fn [_]
-                             (let [arr (js/Uint8ClampedArray. #js [220 235 255 255 100 150 200 255])
-                                   stored {:pixels arr}]
-                               (is (instance? js/Uint8ClampedArray (:pixels stored))
-                                   "Before storage: should be Uint8ClampedArray")
-                               stored)))]
-      ;; Now read it back
-      (let [retrieved (:pixels @a)]
-        (is (instance? js/Uint8ClampedArray retrieved)
-            "Retrieved value should be Uint8ClampedArray")
-        (is (= 8 (.-length retrieved))
-            "Length should be preserved")
-        (is (= 220 (aget retrieved 0))
-            "First byte should be 220")
-        (is (= 255 (aget retrieved 3))
-            "Alpha should be 255")))))
+    (let [a   (e/atom ::typed-array-basic {})
+          _result   (swap! a (fn [_]
+                               (let [arr (js/Uint8ClampedArray. #js [220 235 255 255 100 150 200 255])
+                                     stored {:pixels arr}]
+                                 (is (instance? js/Uint8ClampedArray (:pixels stored))
+                                     "Before storage: should be Uint8ClampedArray")
+                                 stored))) retrieved   (:pixels @a)] (is (instance? js/Uint8ClampedArray retrieved)
+                                                                         "Retrieved value should be Uint8ClampedArray") (is (= 8 (.-length retrieved))
+                                                                                                                            "Length should be preserved") (is (= 220 (aget retrieved 0))
+                                                                                                                                                              "First byte should be 220") (is (= 255 (aget retrieved 3))
+                                                                                                                                                                                              "Alpha should be 255"))))
 
 (deftest typed-array-int32-test
   (testing "Int32Array stored in atom comes out as Int32Array"
-    (let [a (e/atom ::typed-array-int32 {})
-          _ (swap! a (fn [_]
-                       (let [arr (js/Int32Array. #js [-100 0 100 1000])]
-                         {:data arr})))]
-      (let [retrieved (:data @a)]
-        (is (instance? js/Int32Array retrieved))
-        (is (= 4 (.-length retrieved)))
-        (is (= -100 (aget retrieved 0)))
-        (is (= 1000 (aget retrieved 3)))))))
+    (let [a   (e/atom ::typed-array-int32 {})
+          _   (swap! a (fn [_]
+                         (let [arr (js/Int32Array. #js [-100 0 100 1000])]
+                           {:data arr}))) retrieved   (:data @a)] (is (instance? js/Int32Array retrieved)) (is (= 4 (.-length retrieved))) (is (= -100 (aget retrieved 0))) (is (= 1000 (aget retrieved 3))))))
 
 (deftest typed-array-float64-test
   (testing "Float64Array stored in atom comes out as Float64Array"
-    (let [a (e/atom ::typed-array-float64 {})
-          _ (swap! a (fn [_]
-                       (let [arr (js/Float64Array. #js [1.5 2.5 3.14159])]
-                         {:floats arr})))]
-      (let [retrieved (:floats @a)]
-        (is (instance? js/Float64Array retrieved))
-        (is (= 3 (.-length retrieved)))
-        (is (= 1.5 (aget retrieved 0)))))))
+    (let [a   (e/atom ::typed-array-float64 {})
+          _   (swap! a (fn [_]
+                         (let [arr (js/Float64Array. #js [1.5 2.5 3.14159])]
+                           {:floats arr}))) retrieved   (:floats @a)] (is (instance? js/Float64Array retrieved)) (is (= 3 (.-length retrieved))) (is (= 1.5 (aget retrieved 0))))))
 
 (deftest typed-array-multiple-test
   (testing "Multiple typed arrays in same atom"
-    (let [a (e/atom ::typed-array-multiple {})
-          _ (swap! a (fn [_]
-                       (let [arr1 (js/Uint8Array. #js [1 2 3])
-                             arr2 (js/Uint8Array. #js [4 5 6])]
-                         {:tile0 arr1 :tile1 arr2})))]
-      (let [state @a
-            t0 (:tile0 state)
-            t1 (:tile1 state)]
-        (is (instance? js/Uint8Array t0))
-        (is (instance? js/Uint8Array t1))
-        (is (= 1 (aget t0 0)))
-        (is (= 4 (aget t1 0)))))))
+    (let [a   (e/atom ::typed-array-multiple {})
+          _   (swap! a (fn [_]
+                         (let [arr1 (js/Uint8Array. #js [1 2 3])
+                               arr2 (js/Uint8Array. #js [4 5 6])]
+                           {:tile0 arr1 :tile1 arr2}))) state   @a
+          t0   (:tile0 state)
+          t1   (:tile1 state)] (is (instance? js/Uint8Array t0)) (is (instance? js/Uint8Array t1)) (is (= 1 (aget t0 0))) (is (= 4 (aget t1 0))))))
 
 (deftest typed-array-swap-test
   (testing "swap! assoc-in with typed array"
@@ -101,32 +81,19 @@
 
 (deftest typed-array-subarray-test
   (testing ".subarray works on retrieved typed array"
-    (let [a (e/atom ::typed-array-subarray {})
-          _ (swap! a (fn [_]
-                       (let [arr (js/Uint8ClampedArray. #js [1 2 3 4 5 6 7 8])]
-                         {:data arr})))]
-      (let [retrieved (:data @a)
-            sub (.subarray retrieved 2 6)]
-        (is (instance? js/Uint8ClampedArray sub))
-        (is (= 4 (.-length sub)))
-        (is (= 3 (aget sub 0)))
-        (is (= 6 (aget sub 3)))))))
+    (let [a   (e/atom ::typed-array-subarray {})
+          _   (swap! a (fn [_]
+                         (let [arr (js/Uint8ClampedArray. #js [1 2 3 4 5 6 7 8])]
+                           {:data arr}))) retrieved   (:data @a)
+          sub   (.subarray retrieved 2 6)] (is (instance? js/Uint8ClampedArray sub)) (is (= 4 (.-length sub))) (is (= 3 (aget sub 0))) (is (= 6 (aget sub 3))))))
 
 (deftest typed-array-set-test
   (testing ".set works with retrieved typed array"
-    (let [a (e/atom ::typed-array-set {})
-          _ (swap! a (fn [_]
-                       (let [src (js/Uint8ClampedArray. #js [100 101 102 103])]
-                         {:src src})))]
-      (let [retrieved (:src @a)
-            dest (js/Uint8ClampedArray. 8)]
-        (.set dest retrieved 2)
-        (is (= 0 (aget dest 0)))
-        (is (= 0 (aget dest 1)))
-        (is (= 100 (aget dest 2)))
-        (is (= 101 (aget dest 3)))
-        (is (= 102 (aget dest 4)))
-        (is (= 103 (aget dest 5)))))))
+    (let [a   (e/atom ::typed-array-set {})
+          _   (swap! a (fn [_]
+                         (let [src (js/Uint8ClampedArray. #js [100 101 102 103])]
+                           {:src src}))) retrieved   (:src @a)
+          dest   (js/Uint8ClampedArray. 8)] (.set dest retrieved 2) (is (= 0 (aget dest 0))) (is (= 0 (aget dest 1))) (is (= 100 (aget dest 2))) (is (= 101 (aget dest 3))) (is (= 102 (aget dest 4))) (is (= 103 (aget dest 5))))))
 
 (deftest composite-workflow-test
   (testing "raytracer-like workflow: build tiles then composite"

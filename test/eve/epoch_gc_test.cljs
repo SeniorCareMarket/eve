@@ -130,35 +130,23 @@
           slot1 (atom/register-worker! s-atom-env worker1-id)
           slot2 (atom/register-worker! s-atom-env worker2-id)]
       ;; Initially, no one is reading
-      (let [_min-before (atom/get-min-active-epoch s-atom-env)]
-        ;; min-before could be nil if no workers reading
-
-        ;; Worker 1 starts reading
-        (let [epoch1 (atom/begin-read! s-atom-env slot1)]
-          ;; Now min should be epoch1
-          (let [min-during-read1 (atom/get-min-active-epoch s-atom-env)]
-            (is (= min-during-read1 epoch1)
-                "Min epoch should be worker1's epoch"))
-
-          ;; Increment global epoch
-          (atom/increment-epoch! s-atom-env)
-
-          ;; Worker 2 starts reading (at new epoch)
-          (let [epoch2 (atom/begin-read! s-atom-env slot2)]
-            (is (> epoch2 epoch1) "Worker2's epoch should be newer")
+      (let [_min-before   (atom/get-min-active-epoch s-atom-env) epoch1   (atom/begin-read! s-atom-env slot1)] (let [min-during-read1 (atom/get-min-active-epoch s-atom-env)]
+                                                                                                                 (is (= min-during-read1 epoch1)
+                                                                                                                     "Min epoch should be worker1's epoch")) (atom/increment-epoch! s-atom-env) (let [epoch2 (atom/begin-read! s-atom-env slot2)]
+                                                                                                                                                                                                  (is (> epoch2 epoch1) "Worker2's epoch should be newer")
             ;; Min should still be epoch1 (older reader)
-            (let [min-both-reading (atom/get-min-active-epoch s-atom-env)]
-              (is (= min-both-reading epoch1)
-                  "Min epoch should still be worker1's older epoch"))
+                                                                                                                                                                                                  (let [min-both-reading (atom/get-min-active-epoch s-atom-env)]
+                                                                                                                                                                                                    (is (= min-both-reading epoch1)
+                                                                                                                                                                                                        "Min epoch should still be worker1's older epoch"))
 
             ;; Worker 1 ends reading
-            (atom/end-read-epoch! s-atom-env slot1)
+                                                                                                                                                                                                  (atom/end-read-epoch! s-atom-env slot1)
             ;; Now min should be epoch2
-            (let [min-after-w1-done (atom/get-min-active-epoch s-atom-env)]
-              (is (= min-after-w1-done epoch2)
-                  "Min epoch should now be worker2's epoch"))
+                                                                                                                                                                                                  (let [min-after-w1-done (atom/get-min-active-epoch s-atom-env)]
+                                                                                                                                                                                                    (is (= min-after-w1-done epoch2)
+                                                                                                                                                                                                        "Min epoch should now be worker2's epoch"))
 
-            (atom/end-read-epoch! s-atom-env slot2))))
+                                                                                                                                                                                                  (atom/end-read-epoch! s-atom-env slot2)))
 
       (atom/unregister-worker! s-atom-env slot1)
       (atom/unregister-worker! s-atom-env slot2))))
@@ -173,14 +161,8 @@
           ;; Allocate a block
           alloc-result (sab/alloc s-atom-env 64)]
       (is (not (:error alloc-result)) "Allocation should succeed")
-      (let [desc-idx (:descriptor-idx alloc-result)
-            _epoch-before (atom/get-current-epoch s-atom-env)]
-        ;; Retire the block
-        (let [retired? (atom/retire-block! s-atom-env desc-idx)]
-          (is retired? "Should successfully retire the block"))
-        ;; Block should now be in RETIRED status
-        ;; (Testing internal state - optional)
-        ))))
+      (let [desc-idx   (:descriptor-idx alloc-result)
+            _epoch-before   (atom/get-current-epoch s-atom-env) retired?   (atom/retire-block! s-atom-env desc-idx)] (is retired? "Should successfully retire the block")))))
 
 (deftest try-free-retired-no-readers-test
   (testing "Free retired block when no readers"
@@ -204,24 +186,10 @@
       ;; Allocate a block
       (let [alloc-result (sab/alloc s-atom-env 64)]
         (is (not (:error alloc-result)))
-        (let [desc-idx (:descriptor-idx alloc-result)]
-          ;; Start a read at current epoch
-          (let [_read-epoch (atom/begin-read! s-atom-env slot-idx)]
-            ;; Retire the block at this epoch
-            (atom/retire-block! s-atom-env desc-idx)
-            ;; Try to free - should fail because reader is still active
-            (let [result (atom/try-free-retired! s-atom-env desc-idx)]
-              (is (= result :has-readers)
-                  "Should not free block while reader at same epoch"))
-            ;; End the read
-            (atom/end-read-epoch! s-atom-env slot-idx)
-            ;; Advance epoch past the retirement epoch — the GC won't free
-            ;; blocks retired at the current epoch (a new reader could start
-            ;; at any moment and expect to see them).
-            (atom/increment-epoch! s-atom-env)
-            ;; Now it should be freeable
-            (let [result2 (atom/try-free-retired! s-atom-env desc-idx)]
-              (is (= result2 :freed) "Should free after reader ends")))))
+        (let [desc-idx   (:descriptor-idx alloc-result) _read-epoch   (atom/begin-read! s-atom-env slot-idx)] (atom/retire-block! s-atom-env desc-idx) (let [result (atom/try-free-retired! s-atom-env desc-idx)]
+                                                                                                                                                         (is (= result :has-readers)
+                                                                                                                                                             "Should not free block while reader at same epoch")) (atom/end-read-epoch! s-atom-env slot-idx) (atom/increment-epoch! s-atom-env) (let [result2 (atom/try-free-retired! s-atom-env desc-idx)]
+                                                                                                                                                                                                                                                                                                  (is (= result2 :freed) "Should free after reader ends"))))
       (atom/unregister-worker! s-atom-env slot-idx))))
 
 (deftest sweep-retired-blocks-test
@@ -246,12 +214,7 @@
 
 (deftest mark-stale-workers-test
   (testing "Stale workers are detected"
-    (let [s-atom-env (get-test-env)]
-      ;; This test is tricky because we can't easily make a worker stale
-      ;; (would require waiting 30s). Just verify the function runs.
-      (let [stale-count (atom/mark-stale-workers! s-atom-env)]
-        (is (integer? stale-count) "Should return a count")
-        (is (>= stale-count 0) "Count should be non-negative")))))
+    (let [s-atom-env   (get-test-env) stale-count   (atom/mark-stale-workers! s-atom-env)] (is (integer? stale-count) "Should return a count") (is (>= stale-count 0) "Count should be non-negative"))))
 
 ;;-----------------------------------------------------------------------------
 ;; Integration Tests

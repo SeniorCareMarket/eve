@@ -55,12 +55,10 @@
 (defn ensure-parent-dir!
   "Create the directory a domain's files live in (the default domain's ./eve/)."
   [base-path]
-  (let [root-file (str base-path ".root")]
-    (let [path (js/require "path")
-          fs (js/require "fs")
-          dir (.dirname path root-file)]
-      (when-not (.existsSync fs dir)
-        (.mkdirSync fs dir #js {:recursive true})))))
+  (let [root-file   (str base-path ".root") path   (js/require "path")
+        fs   (js/require "fs")
+        dir   (.dirname path root-file)] (when-not (.existsSync fs dir)
+                                           (.mkdirSync fs dir #js {:recursive true}))))
 
 (defn identity-hash
   "An object's identity hash: equal for one object, whatever its own equality

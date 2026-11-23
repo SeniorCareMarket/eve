@@ -1079,9 +1079,7 @@
     (sm/reset-pools!)
     (sm/enable-pool-track!)
     (try
-      (let [input {:t0 0 :t1 1 :t2 2 :t3 3 :t4 4 :t5 5 :t6 6 :t7 7 :t8 8}]
-        (let [hamt (sm/into-hash-map input)]
-          (is (= 9 (count hamt)) "should have 9 keys")))
+      (let [input   {:t0 0 :t1 1 :t2 2 :t3 3 :t4 4 :t5 5 :t6 6 :t7 7 :t8 8} hamt   (sm/into-hash-map input)] (is (= 9 (count hamt)) "should have 9 keys"))
       (finally
         (sm/disable-pool-track!)))))
 

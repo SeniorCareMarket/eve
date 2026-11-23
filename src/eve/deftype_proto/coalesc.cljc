@@ -683,82 +683,72 @@
   ;; guard keeps the invariant local to the merge itself.)
   (if (pos? (desc-rung-field region dt-off max-desc idx))
     (unlock! region dt-off max-desc idx)
-    (let [our-off (desc-load region dt-off max-desc idx DESC_DATA_OFFSET)
-          our-cap (desc-load region dt-off max-desc idx DESC_BLOCK_CAPACITY)
-          _our-end (+ our-off our-cap)]
+    (let [our-off   (desc-load region dt-off max-desc idx DESC_DATA_OFFSET)
+          our-cap   (desc-load region dt-off max-desc idx DESC_BLOCK_CAPACITY)
+          _our-end   (+ our-off our-cap) left-idx
+          (loop [j 0]
+            (if (>= j max-desc)
+              -1
+              (let [status (desc-load region dt-off max-desc j DESC_STATUS)]
+                (if (and (== status STATUS_FREE)
+                         (not= j idx)
+                         (zero? (desc-rung-field region dt-off max-desc j))
+                         (let [loff (desc-load region dt-off max-desc j DESC_DATA_OFFSET)
+                               lcap (desc-load region dt-off max-desc j DESC_BLOCK_CAPACITY)]
+                           (== (+ loff lcap) our-off)))
+                  j
+                  (recur (inc j))))))
 
-    ;; Phase 1: Left coalesce — find FREE block ending at our-off
-      (let [left-idx
-            (loop [j 0]
-              (if (>= j max-desc)
-                -1
-                (let [status (desc-load region dt-off max-desc j DESC_STATUS)]
-                  (if (and (== status STATUS_FREE)
-                           (not= j idx)
-                           (zero? (desc-rung-field region dt-off max-desc j))
-                           (let [loff (desc-load region dt-off max-desc j DESC_DATA_OFFSET)
-                                 lcap (desc-load region dt-off max-desc j DESC_BLOCK_CAPACITY)]
-                             (== (+ loff lcap) our-off)))
-                    j
-                    (recur (inc j))))))
-
-          ;; If left found, try to lock and merge
-            [survivor surv-off surv-cap _left-locked?]
-            (if (and (not= left-idx -1) (spin-lock! region dt-off max-desc left-idx 200))
+              ;; If left found, try to lock and merge
+          [survivor surv-off surv-cap _left-locked?]
+          (if (and (not= left-idx -1) (spin-lock! region dt-off max-desc left-idx 200))
             ;; Verify still FREE (TOCTOU)
-              (let [ls (desc-load region dt-off max-desc left-idx DESC_STATUS)]
-                (if (and (== ls STATUS_FREE)
-                         (zero? (desc-rung-field region dt-off max-desc left-idx)))
-                  (let [loff (desc-load region dt-off max-desc left-idx DESC_DATA_OFFSET)
-                        lcap (desc-load region dt-off max-desc left-idx DESC_BLOCK_CAPACITY)]
-                    (if (== (+ loff lcap) our-off)
+            (let [ls (desc-load region dt-off max-desc left-idx DESC_STATUS)]
+              (if (and (== ls STATUS_FREE)
+                       (zero? (desc-rung-field region dt-off max-desc left-idx)))
+                (let [loff (desc-load region dt-off max-desc left-idx DESC_DATA_OFFSET)
+                      lcap (desc-load region dt-off max-desc left-idx DESC_BLOCK_CAPACITY)]
+                  (if (== (+ loff lcap) our-off)
                     ;; Merge: left absorbs us
-                      (let [new-cap (+ lcap our-cap)]
-                        (desc-store! region dt-off max-desc left-idx DESC_BLOCK_CAPACITY new-cap)
+                    (let [new-cap (+ lcap our-cap)]
+                      (desc-store! region dt-off max-desc left-idx DESC_BLOCK_CAPACITY new-cap)
                       ;; Mark ourselves as ZEROED_UNUSED (reclaim descriptor)
-                        (desc-store! region dt-off max-desc idx DESC_STATUS STATUS_ZEROED_UNUSED)
-                        (desc-store! region dt-off max-desc idx DESC_LOCK_OWNER LOCK_UNLOCKED)
+                      (desc-store! region dt-off max-desc idx DESC_STATUS STATUS_ZEROED_UNUSED)
+                      (desc-store! region dt-off max-desc idx DESC_LOCK_OWNER LOCK_UNLOCKED)
                       ;; Survivor is left (keep left locked for right merge)
-                        [left-idx loff new-cap true])
+                      [left-idx loff new-cap true])
                     ;; Offsets don't match anymore — release left
-                      (do (unlock! region dt-off max-desc left-idx)
-                          [idx our-off our-cap false])))
+                    (do (unlock! region dt-off max-desc left-idx)
+                        [idx our-off our-cap false])))
                 ;; Left no longer FREE — release
-                  (do (unlock! region dt-off max-desc left-idx)
-                      [idx our-off our-cap false])))
+                (do (unlock! region dt-off max-desc left-idx)
+                    [idx our-off our-cap false])))
             ;; Left not found or lock failed
-              [idx our-off our-cap false])]
-
-      ;; Phase 2: Right coalesce — find FREE block starting at survivor end
-        (let [surv-end (+ surv-off surv-cap)
-              right-idx
-              (loop [j 0]
-                (if (>= j max-desc)
-                  -1
-                  (let [status (desc-load region dt-off max-desc j DESC_STATUS)]
-                    (if (and (== status STATUS_FREE)
-                             (not= j survivor)
-                             (zero? (desc-rung-field region dt-off max-desc j))
-                             (== (desc-load region dt-off max-desc j DESC_DATA_OFFSET) surv-end))
-                      j
-                      (recur (inc j))))))]
-          (when (and (not= right-idx -1) (spin-lock! region dt-off max-desc right-idx 200))
-            (let [rs (desc-load region dt-off max-desc right-idx DESC_STATUS)]
-              (if (and (== rs STATUS_FREE)
-                       (zero? (desc-rung-field region dt-off max-desc right-idx))
-                       (== (desc-load region dt-off max-desc right-idx DESC_DATA_OFFSET) surv-end))
-                (let [rcap (desc-load region dt-off max-desc right-idx DESC_BLOCK_CAPACITY)]
+            [idx our-off our-cap false])   surv-end     (+ surv-off surv-cap)
+          right-idx
+          (loop [j 0]
+            (if (>= j max-desc)
+              -1
+              (let [status (desc-load region dt-off max-desc j DESC_STATUS)]
+                (if (and (== status STATUS_FREE)
+                         (not= j survivor)
+                         (zero? (desc-rung-field region dt-off max-desc j))
+                         (== (desc-load region dt-off max-desc j DESC_DATA_OFFSET) surv-end))
+                  j
+                  (recur (inc j))))))] (when (and (not= right-idx -1) (spin-lock! region dt-off max-desc right-idx 200))
+                                         (let [rs (desc-load region dt-off max-desc right-idx DESC_STATUS)]
+                                           (if (and (== rs STATUS_FREE)
+                                                    (zero? (desc-rung-field region dt-off max-desc right-idx))
+                                                    (== (desc-load region dt-off max-desc right-idx DESC_DATA_OFFSET) surv-end))
+                                             (let [rcap (desc-load region dt-off max-desc right-idx DESC_BLOCK_CAPACITY)]
                 ;; Merge: survivor absorbs right
-                  (desc-store! region dt-off max-desc survivor DESC_BLOCK_CAPACITY
-                               (+ surv-cap rcap))
+                                               (desc-store! region dt-off max-desc survivor DESC_BLOCK_CAPACITY
+                                                            (+ surv-cap rcap))
                 ;; Mark right as ZEROED_UNUSED
-                  (desc-store! region dt-off max-desc right-idx DESC_STATUS STATUS_ZEROED_UNUSED)
-                  (unlock! region dt-off max-desc right-idx))
+                                               (desc-store! region dt-off max-desc right-idx DESC_STATUS STATUS_ZEROED_UNUSED)
+                                               (unlock! region dt-off max-desc right-idx))
               ;; Right not valid anymore
-                (unlock! region dt-off max-desc right-idx))))
-
-        ;; Release survivor lock
-          (unlock! region dt-off max-desc survivor))))))
+                                             (unlock! region dt-off max-desc right-idx)))) (unlock! region dt-off max-desc survivor))))
 
 (defn coalesc-free!
   "Free a block identified by its data-region-relative byte offset.

@@ -912,15 +912,12 @@
   "The element value-block offsets of EveVector v, in order (a heap
    vector of i32s): the block-level view of v."
   [v]
-  (let [sio (d/-eve-sio v)
-        [cnt shift root tail _tail-len] (read-vec-header sio (d/-root-header-off v))
-        toff (tail-offset-calc cnt)]
-    ;; one trie descent per leaf node, then its words in order (not a
-    ;; root-to-leaf descent per element)
-    (let [words (fn [acc node-off n]
-                  (loop [acc acc i 0]
-                    (if (< i n) (recur (conj acc (node-get sio node-off i)) (inc i)) acc)))
-          trie (reduce
+  (let [sio   (d/-eve-sio v)
+        [cnt shift root tail _tail-len]   (read-vec-header sio (d/-root-header-off v))
+        toff   (tail-offset-calc cnt) words   (fn [acc node-off n]
+                                                (loop [acc acc i 0]
+                                                  (if (< i n) (recur (conj acc (node-get sio node-off i)) (inc i)) acc)))
+        trie   (reduce
                 (fn [acc base]
                   (let [leaf (loop [node-off root sh shift]
                                (if (zero? sh)
@@ -929,8 +926,7 @@
                                         (- sh SHIFT_STEP))))]
                     (words acc leaf (min NODE_SIZE (- toff base)))))
                 []
-                (range 0 toff NODE_SIZE))]
-      (words trie tail (- cnt toff)))))
+                (range 0 toff NODE_SIZE))] (words trie tail (- cnt toff))))
 
 (defn build-vec
   "An EveVector whose elements are the EXISTING value blocks
