@@ -13,7 +13,8 @@
 
 (eve/deftype CasCounter [^:volatile-mutable ^:int32 value]
   ICasCounter
-  (cas-value! [_this expected new] (cas! value expected new))
+  ;; cas! is eve/deftype's field compare-and-swap form: the macro rewrites it to the field's -sio-cas-i32! call (see the ns docstring); kondo has no model for it
+  (cas-value! [_this expected new] #_{:clj-kondo/ignore [:unresolved-symbol]} (cas! value expected new))
   (value-of [_this] value))
 
 (deftest jvm-deftype-cas!

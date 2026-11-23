@@ -369,44 +369,45 @@
   "The first audio stream of in decoded to f32le, stereo, 48 kHz into the file dest: {:frames n :bytes b}, or nil
    when in has no audio."
   [in dest]
-  (with-open [a (ffi/confined-arena)]
-    (let [ic (open-input a in)
-          d (open-decoder a ic MEDIA-AUDIO)]
-      (try
-        (when d
-          (let [fd (c-open (str dest ".tmp-" (c-getpid)) O-WRONLY-CREAT-TRUNC 420)
-                _ (when (neg? fd) (throw (ex-info "cohost-media.av: cannot write the window file" {:dest dest})))
-                pkt (av-packet-alloc)
-                f (new-frame)
-                swr (atom nil)
-                total (atom 0)
-                write! (fn [[planes n]]
-                         (when (pos? n)
-                           (let [bytes (* n 2 4)]
-                             (c-write fd (rd planes :pointer 0) bytes)
-                             (swap! total + bytes)))
-                         (free-planes! planes))
-                on-frame (fn [fr]
-                           (when-not @swr (reset! swr (resampler a (:ctx d) fr FMT-FLT)))
-                           (write! (convert! a @swr fr FMT-FLT)))]
-            (check-fresh-packet! pkt)
-            (loop []
-              (when (>= (av-read-frame ic pkt) 0)
-                (when (= (:index d) (rd pkt :int P-STREAM)) (decode! d pkt f on-frame))
-                (av-packet-unref pkt)
-                (recur)))
-            (decode! d nil f on-frame)
-            (when @swr
-              (write! (convert! a @swr nil FMT-FLT))
-              (let [c (ffi/alloc a :pointer)] (wr! c :pointer 0 @swr) (swr-free c)))
-            (c-close fd)
-            (c-rename (str dest ".tmp-" (c-getpid)) dest)
-            (free-frame! a f)
-            (free-packet! a pkt)
-            {:bytes @total}))
-        (finally
-          (when d (let [c (ffi/alloc a :pointer)] (wr! c :pointer 0 (:ctx d)) (avcodec-free-context c)))
-          (let [c (ffi/alloc a :pointer)] (wr! c :pointer 0 ic) (avformat-close-input c)))))))
+  ;; with-open is clojure.core's CLJ face (the :cljs pass has no seat for this jolt-only fn); the ignore below covers the macro name and its binding
+  #_{:clj-kondo/ignore [:unresolved-symbol]} (with-open [a (ffi/confined-arena)]
+                                               (let [ic (open-input a in)
+                                                     d (open-decoder a ic MEDIA-AUDIO)]
+                                                 (try
+                                                   (when d
+                                                     (let [fd (c-open (str dest ".tmp-" (c-getpid)) O-WRONLY-CREAT-TRUNC 420)
+                                                           _ (when (neg? fd) (throw (ex-info "cohost-media.av: cannot write the window file" {:dest dest})))
+                                                           pkt (av-packet-alloc)
+                                                           f (new-frame)
+                                                           swr (atom nil)
+                                                           total (atom 0)
+                                                           write! (fn [[planes n]]
+                                                                    (when (pos? n)
+                                                                      (let [bytes (* n 2 4)]
+                                                                        (c-write fd (rd planes :pointer 0) bytes)
+                                                                        (swap! total + bytes)))
+                                                                    (free-planes! planes))
+                                                           on-frame (fn [fr]
+                                                                      (when-not @swr (reset! swr (resampler a (:ctx d) fr FMT-FLT)))
+                                                                      (write! (convert! a @swr fr FMT-FLT)))]
+                                                       (check-fresh-packet! pkt)
+                                                       (loop []
+                                                         (when (>= (av-read-frame ic pkt) 0)
+                                                           (when (= (:index d) (rd pkt :int P-STREAM)) (decode! d pkt f on-frame))
+                                                           (av-packet-unref pkt)
+                                                           (recur)))
+                                                       (decode! d nil f on-frame)
+                                                       (when @swr
+                                                         (write! (convert! a @swr nil FMT-FLT))
+                                                         (let [c (ffi/alloc a :pointer)] (wr! c :pointer 0 @swr) (swr-free c)))
+                                                       (c-close fd)
+                                                       (c-rename (str dest ".tmp-" (c-getpid)) dest)
+                                                       (free-frame! a f)
+                                                       (free-packet! a pkt)
+                                                       {:bytes @total}))
+                                                   (finally
+                                                     (when d (let [c (ffi/alloc a :pointer)] (wr! c :pointer 0 (:ctx d)) (avcodec-free-context c)))
+                                                     (let [c (ffi/alloc a :pointer)] (wr! c :pointer 0 ic) (avformat-close-input c)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The transcoder

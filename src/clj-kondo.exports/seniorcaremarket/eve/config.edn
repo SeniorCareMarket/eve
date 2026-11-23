@@ -52,5 +52,11 @@
                         eve.deftype/extend-host-vectors hooks.extend-default/extend-host-vectors
                         eve.deftype-proto.macros/register-eve-type! hooks.register-eve-type/register-eve-type
                         eve.thread/api-defs hooks.eve-api-defs/thread
-                        eve.thread/defconveyed hooks.eve-api-defs/defconveyed}}
+                        eve.thread/defconveyed hooks.eve-api-defs/defconveyed
+                        eve.jvm-vec-test/with-heap-slab hooks.with-heap-slab/with-heap-slab
+                        eve.jvm-list-test/with-heap-slab hooks.with-heap-slab/with-heap-slab
+                        eve.jvm-map-test/with-heap-slab hooks.with-heap-slab/with-heap-slab
+                        eve.jvm-set-test/with-heap-slab hooks.with-heap-slab/with-heap-slab
+                        eve.jvm-conformance-test/with-heap-slab hooks.with-heap-slab/with-heap-slab
+                        eve.jvm-fuzz-test/with-heap-slab hooks.with-heap-slab/with-heap-slab}}
  :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}
