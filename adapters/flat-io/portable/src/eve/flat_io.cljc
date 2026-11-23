@@ -21,7 +21,8 @@
    may carry more (a DataView, a VS leaf). All offsets are absolute from the
    chunk's start; all multi-byte reads little-endian (FORMAT-V1 §2)."
   (:refer-clojure :exclude [chunk])
-  (:require [eve.encoding :as enc]))
+  (:require [eve.encoding :as enc])
+  #?(:lpy (:import array)))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -435,7 +436,7 @@
     ;; array('b') slice (eve.encoding's copy-of-range docstring), so
     ;; a bytearray source is re-read as signed bytes first.
     (enc/arraycopy (if (python/isinstance src python/bytearray)
-                     (python/array.array "b" src)
+                     (array/array "b" src)
                      src)
                    off @b @p n) (vreset! p (+ @p n)))
   (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
