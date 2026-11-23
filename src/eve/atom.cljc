@@ -545,9 +545,10 @@
          ;; its epoch pinned for hundreds of thousands of commits: the zero queue grows without bound and nothing is
          ;; freed (probe jseam.allocprobe: 120k -> 320k entries; one full collection releases it).
          (define eve-pt-collect-q 65536)
+         ;; (eve.gc's locked pop: the guardian's queue is not safe for two threads at once)
          (define (eve-pt-sweep-views!)
-           (when (top-level-bound? 'eve-gc-guardian)
-             (let ((g (top-level-value 'eve-gc-guardian)))
+           (when (top-level-bound? 'eve-gc-pop)
+             (let ((g (top-level-value 'eve-gc-pop)))
                (let loop () (let ((r (g))) (when r (r) (loop)))))))
          ;; qn: the queue's length; e: this process's published pin. Collects generations 0..g (all threads paused,
          ;; collect-rendezvous under a one-off handler; each survivor moves up one generation only — min target 1 —
