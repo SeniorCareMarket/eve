@@ -15,18 +15,19 @@
    its rules-from-string, its serialize thaw): an Eve surface, never a
    host reader chosen per platform."
   (:refer-clojure :exclude [read-string read])
-  (:require ;; bb/SCI: the host-type presentation must be installed before
+  ;; host-edn, not edn: this file IS eve.edn — the alias names the HOST's edn
+  #_{:splint/disable [naming/conventional-aliases]} (:require ;; bb/SCI: the host-type presentation must be installed before
             ;; anything else in this graph loads — a consumer whose first
             ;; Eve require is eve.edn (eve.db.ds.core) otherwise reaches
             ;; its own host deftypes with the presentation missing and
             ;; their factories die (\"No value supplied for key:
             ;; clojure.lang.Atom\" in ds's Conn). First require, :bb only.
-   #?(:bb [eve.host-completion])
-   [eve.numeric :as numeric]
-   [eve.type-readers :as type-readers]
-   #?(:cljs [cljs.reader :as cljs-reader]
-      :lpy [clojure.edn :as host-edn]
-      :default [clojure.edn :as host-edn])))
+                                                     #?(:bb [eve.host-completion])
+                                                     [eve.numeric :as numeric]
+                                                     [eve.type-readers :as type-readers]
+                                                     #?(:cljs [cljs.reader :as cljs-reader]
+                                                        :lpy [clojure.edn :as host-edn]
+                                                        :default [clojure.edn :as host-edn])))
 
 (defn read-string
   "Read one EDN object from the string s. Options are clojure.edn's

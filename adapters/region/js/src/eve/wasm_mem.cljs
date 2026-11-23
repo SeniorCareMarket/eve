@@ -656,13 +656,13 @@
     (throw (js/Error. (str "scratch-offset: slot-idx " slot-idx " out of bounds [0, " max-workers ")"))))
   (+ scratch-region-start (* slot-idx scratch-size)))
 
-(defn copy-to-scratch!
-  "Copy bytes to worker's scratch area.
+#_{:splint/disable [naming/conversion-functions]} (defn copy-to-scratch!
+                                                    "Copy bytes to worker's scratch area.
    Returns the scratch offset where data was written.
    IMPORTANT: slot-idx must be 0 to (MAX_WORKERS-1), NOT the random worker-id!"
-  [slot-idx scratch-region-start ^js bytes]
-  (let [off (scratch-offset slot-idx scratch-region-start)
-        len (.-length bytes)]
-    (when (<= len scratch-size)
-      (.set @mem-u8 bytes off)
-      off)))
+                                                    [slot-idx scratch-region-start ^js bytes]
+                                                    (let [off (scratch-offset slot-idx scratch-region-start)
+                                                          len (.-length bytes)]
+                                                      (when (<= len scratch-size)
+                                                        (.set @mem-u8 bytes off)
+                                                        off)))

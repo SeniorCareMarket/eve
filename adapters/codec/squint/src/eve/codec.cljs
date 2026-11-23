@@ -36,7 +36,7 @@
                      fast-tag-symbol-short fast-tag-true fast-tag-typed-array fast-tag-uuid
                      typed-array-bigint64 typed-array-biguint64 typed-array-float32 typed-array-float64
                      typed-array-int16 typed-array-int32 typed-array-int8 typed-array-uint16
-                     typed-array-uint32 typed-array-uint8 typed-array-uint8-clamped convert-to-eve
+                     typed-array-uint32 typed-array-uint8 typed-array-uint8-clamped convert->eve
                      get-type-constructor sab-tag->fast-tag*]] [clojure.string]))
 
 ;;-----------------------------------------------------------------------------
@@ -150,7 +150,7 @@
   [elem]
   (when-let [tag-str (.get record-tag-by-ctor (type elem))]
     (let [tagged-map (assoc (reduce-kv assoc {} elem) :eve/record-tag tag-str)
-          sab-m (convert-to-eve nil tagged-map)]
+          sab-m (convert->eve nil tagged-map)]
       (when sab-m
         (let [bytes (encode-fresh-pointer sab-m)] (aset bytes 2 fast-tag-record) bytes)))))
 
@@ -700,7 +700,7 @@
 
           ;; Other CLJS collections (sets, vecs, lists) — auto-convert via builder
           :else
-          (if-let [sab-inst (convert-to-eve nil elem)]
+          (if-let [sab-inst (convert->eve nil elem)]
             (encode-fresh-pointer sab-inst)
             ;; no eve bytes: by reference, in this process only (§9)
             (serialize-reference elem))))))
@@ -823,7 +823,7 @@
 
           ;; Other CLJS collections (sets, vecs, lists) — auto-convert via builder
           :else
-          (if-let [sab-inst (convert-to-eve nil elem)]
+          (if-let [sab-inst (convert->eve nil elem)]
             (encode-fresh-pointer sab-inst)
             ;; no eve bytes: by reference, in this process only (§9)
             (serialize-reference elem))))))

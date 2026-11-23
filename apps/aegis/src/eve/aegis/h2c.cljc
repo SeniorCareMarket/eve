@@ -61,15 +61,15 @@
 
 (defn- limbs16 "16 limbs of a bignum below p" [v] (into (vec v) (repeat (- 16 (count v)) 0)))
 
-(defn os2ip-mod-p "the field element of big-endian bytes, reduced mod p" [bs]
-  (ell2/be->fe (crypto/modmul (vec bs) [1] P-BE)))
+#_{:splint/disable [naming/predicate]} (defn os2ip-mod-p "the field element of big-endian bytes, reduced mod p" [bs]
+                                         (ell2/be->fe (crypto/modmul (vec bs) [1] P-BE)))
 
 (defn os2ip-mod-p-limbs "the same over eve.net.bignum's limbs (h2c_test's reference)" [bs]
   (limbs16 (bn/mod-limbs (bn/from-bytes-be bs) P-LIMBS)))
 
-(defn hash-to-field "count elements of GF(p) (§5.2: L = 48)" [msg dst count]
-  (let [u (expand-message-xmd msg dst (* 48 count))]
-    (mapv (fn [i] (os2ip-mod-p (subvec u (* 48 i) (* 48 (inc i))))) (range count))))
+#_{:splint/disable [naming/conversion-functions]} (defn hash-to-field "count elements of GF(p) (§5.2: L = 48)" [msg dst count]
+                                                    (let [u (expand-message-xmd msg dst (* 48 count))]
+                                                      (mapv (fn [i] (os2ip-mod-p (subvec u (* 48 i) (* 48 (inc i))))) (range count))))
 
 (defn- fpow-bits "a^e for e the little-endian bytes of the exponent" [a e]
   (loop [i (dec (* 8 (count e))) acc ed/gf1]
@@ -87,26 +87,26 @@
 (defn c1-ed-computed "c1 (edwards) = sqrt(−486664) with sgn0 = 0" []
   (let [r (sqrt-ed (ell2/fneg (ell2/fe-of-int 486664)))] (if (= 1 (ell2/sgn0 r)) (ell2/fneg r) r)))
 
-(defn map-to-curve "Q = map_to_curve(u), a point [X Y Z T]" [u] (ell2/map-to-curve crypto/modpow u))
+#_{:splint/disable [naming/conversion-functions]} (defn map-to-curve "Q = map_to_curve(u), a point [X Y Z T]" [u] (ell2/map-to-curve crypto/modpow u))
 
 (defn point->affine "[x y] (limbs) of a point" [p] (ell2/point->affine crypto/modpow p))
 
 (defn clear-cofactor "8·P: three doublings" [p] (ell2/clear-cofactor p))
 
-(defn hash-to-curve "the suite's hash_to_curve: clear_cofactor(Q0 + Q1)" [msg dst]
-  (let [[u0 u1] (hash-to-field msg dst 2)]
-    (clear-cofactor (ed/padd (map-to-curve u0) (map-to-curve u1)))))
+#_{:splint/disable [naming/conversion-functions]} (defn hash-to-curve "the suite's hash_to_curve: clear_cofactor(Q0 + Q1)" [msg dst]
+                                                    (let [[u0 u1] (hash-to-field msg dst 2)]
+                                                      (clear-cofactor (ed/padd (map-to-curve u0) (map-to-curve u1)))))
 
-(defn hash-to-point
-  "the 32-byte encoding of (hash-to-curve msg dst) — eve.net.ed25519/pack's bytes (y, x's parity in bit 255):
+#_{:splint/disable [naming/conversion-functions]} (defn hash-to-point
+                                                    "the 32-byte encoding of (hash-to-curve msg dst) — eve.net.ed25519/pack's bytes (y, x's parity in bit 255):
    hash_to_field's two elements as 32 little-endian bytes each, then the crypto feature's ed25519-map-to-point row (the
    maps, the sum, the cofactor and the encoding in the host's own code where its adapter has it: ed25519.wasm on
    ValueScript, where the limb map was ~80 ms a hash and filled the slab of a program that signed dozens of times —
    measured on ValueScript)"
-  [msg dst]
-  (let [u (expand-message-xmd msg dst 96)
-        le (fn [i] (vec (rseq (vec (crypto/modmul (subvec u (* 48 i) (* 48 (inc i))) [1] P-BE)))))]
-    (vec (crypto/ed25519-map-to-point (le 0) (le 1)))))
+                                                    [msg dst]
+                                                    (let [u (expand-message-xmd msg dst 96)
+                                                          le (fn [i] (vec (rseq (vec (crypto/modmul (subvec u (* 48 i) (* 48 (inc i))) [1] P-BE)))))]
+                                                      (vec (crypto/ed25519-map-to-point (le 0) (le 1)))))
 
 (defn fe-hex "the big-endian hex of a field element (as RFC 9380's vectors print one)" [a]
   (b/hex (vec (rseq (ed/pack25519 a)))))

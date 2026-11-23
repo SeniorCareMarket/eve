@@ -9,7 +9,7 @@
    lives in those files, including across a close and reopen."
   (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
    #_{:clj-kondo/ignore [:unused-namespace :unused-referred-var]}   [clojure.test :refer [deftest is testing]]
-   #?(:clj [clojure.set :as cset])
+   #?(:clj [clojure.set :as set])
    #?(:clj [eve.atom :as ea])
    #?(:clj [eve.deftype-proto.alloc :as alloc])
    #?(:clj [eve.deftype-proto.data :as d])
@@ -97,7 +97,7 @@
                set-b (set claimed-b)]
            (is (= (count claimed-a) (count set-a)) "worker A was handed no block twice")
            (is (= (count claimed-b) (count set-b)) "worker B was handed no block twice")
-           (is (empty? (cset/intersection set-a set-b))
+           (is (empty? (set/intersection set-a set-b))
                "no block was handed to both processes")
       ;; free counts exact against a fresh open of the same files, and
       ;; freeing the claimed set once each restores every class exactly

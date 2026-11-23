@@ -942,7 +942,7 @@
                     (or (list? v) (seq? v)) (ser/get-coll-writer :list)
                     :else nil)]
     (direct sio nil v)
-    (when-not (scalar-leaf? v) (some-> (ser/convert-to-eve sio v) d/-root-header-off))))
+    (when-not (scalar-leaf? v) (some-> (ser/convert->eve sio v) d/-root-header-off))))
 
 (defn- write-typed-root!
   "A host typed array (or an IBackingArray value, its backing array) a swap!

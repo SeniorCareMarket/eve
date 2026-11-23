@@ -132,8 +132,8 @@
 (def ^:const hamt-collision-node-header-size 8) ;; type:u8 count:u8 pad:u16 hash:i32
 
 ;; Direct serialization markers (inside the magic prefix envelope)
-(def ^:const DIRECT_MAGIC_0 0xEE)
-(def ^:const DIRECT_MAGIC_1 0xDB)
+(def ^:const direct-magic-0 0xEE)
+(def ^:const direct-magic-1 0xDB)
 (def ^:const direct-marker-map 0xED)
 (defprotocol IDirectSerialize
   (-direct-serialize [this]))

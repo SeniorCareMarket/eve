@@ -443,7 +443,7 @@
   [pred builder]
   (swap! builders conj [pred builder]))
 
-(defn convert-to-eve
+(defn convert->eve
   "Convert a plain value to its slab-backed Eve type through the registered
    builders, allocating in sio. Returns the instance, or nil when no builder
    matches (scalars)."

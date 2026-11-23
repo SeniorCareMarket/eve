@@ -326,8 +326,9 @@
 ;;=============================================================================
 
 (defn- sqrt-int [n]
+  ;; per-seat host Math spelling, mirroring the js/Math arm: the bench measures host pipelines
   (int #?(:cljs (js/Math.sqrt n)
-          :clj  (Math/sqrt (double n)))))
+          :clj  #_{:splint/disable [style/prefer-clj-math]} (Math/sqrt (double n)))))
 
 (defn- bench-tensor-pipeline! [n mode]
   (let [side  (sqrt-int n)

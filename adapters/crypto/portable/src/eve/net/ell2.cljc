@@ -106,17 +106,17 @@
 (defn point->affine "[x y] (limbs) of a point" [modpow [x y z _]]
   (let [zi (finv modpow z)] [(ed/fmul x zi) (ed/fmul y zi)]))
 
-(defn map-to-curve "Q = map_to_curve(u), a point [X Y Z T]" [modpow u]
-  (affine->point modpow (map-to-curve-elligator2-edwards25519 modpow u)))
+#_{:splint/disable [naming/conversion-functions]} (defn map-to-curve "Q = map_to_curve(u), a point [X Y Z T]" [modpow u]
+                                                    (affine->point modpow (map-to-curve-elligator2-edwards25519 modpow u)))
 
 (defn clear-cofactor "8·P: three doublings" [p] (let [p2 (ed/padd p p) p4 (ed/padd p2 p2)] (ed/padd p4 p4)))
 
-(defn map-to-point
-  "the 32-byte encoding (eve.net.ed25519/pack's bytes: y, x's parity in bit 255) of
+#_{:splint/disable [naming/conversion-functions]} (defn map-to-point
+                                                    "the 32-byte encoding (eve.net.ed25519/pack's bytes: y, x's parity in bit 255) of
    clear_cofactor(map_to_curve(u0) + map_to_curve(u1)), u0 and u1 32 little-endian bytes (bit 255 dropped)"
-  [u0 u1 modpow]
-  (let [q (clear-cofactor (ed/padd (map-to-curve modpow (ed/unpack25519 (vec u0)))
-                                   (map-to-curve modpow (ed/unpack25519 (vec u1)))))
-        [x y] (point->affine modpow q)
-        r (ed/pack25519 y)]
-    (assoc r 31 (+ (nth r 31) (* 128 (ed/parity x))))))
+                                                    [u0 u1 modpow]
+                                                    (let [q (clear-cofactor (ed/padd (map-to-curve modpow (ed/unpack25519 (vec u0)))
+                                                                                     (map-to-curve modpow (ed/unpack25519 (vec u1)))))
+                                                          [x y] (point->affine modpow q)
+                                                          r (ed/pack25519 y)]
+                                                      (assoc r 31 (+ (nth r 31) (* 128 (ed/parity x))))))

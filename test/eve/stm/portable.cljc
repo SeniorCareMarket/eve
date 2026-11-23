@@ -24,12 +24,12 @@
 ;; header comment above) — the name is a harness-visible identity,
 ;; so :namespace-name-mismatch is ignored at this one site.
 #_{:clj-kondo/ignore [:namespace-name-mismatch]}
-(ns stm-portable
-  "The portable check suite as a namespace: dialect hosts load-file
+#_{:splint/disable [naming/single-segment-namespace]} (ns stm-portable
+                                                        "The portable check suite as a namespace: dialect hosts load-file
    this file and call stm-portable/run (or -main); the CLJS seats go
    through a seat main that performs the slab init ritual first
    (hosts/nbb/stm_nbb_main.cljc)."
-  (:require [eve.stm :as stm]))
+                                                        (:require [eve.stm :as stm]))
 
 (def checks (atom 0))
 (def failures (atom []))

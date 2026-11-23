@@ -125,7 +125,7 @@
 ;;=============================================================================
 
 (def ^:const page-size 65536)     ;; WASM page size (64KB)
-(def ^:const MAX_PAGES 16384)     ;; Max 1GB per slab
+(def ^:const max-pages 16384)     ;; Max 1GB per slab
 
 ;;=============================================================================
 ;; WAT Source (inline, compiled at runtime)
@@ -493,9 +493,9 @@
          actual-pages (max pages 1)
          actual-bytes (* actual-pages page-size)]
      (cond
-       (and @wasm-compiled-module (<= actual-pages MAX_PAGES))
+       (and @wasm-compiled-module (<= actual-pages max-pages))
        ;; WASM path: need WebAssembly.Memory for module instantiation
-       (let [max-pages (min MAX_PAGES (* actual-pages 4))]
+       (let [max-pages (min max-pages (* actual-pages 4))]
          (js/WebAssembly.Memory.
           #js {:initial actual-pages
                :maximum max-pages

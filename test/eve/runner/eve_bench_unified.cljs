@@ -39,7 +39,7 @@
     (str/trim (str (.execSync cp cmd #js {:encoding "utf8"})))
     (catch :default _ "")))
 
-(defn- mkdir-p [dir]
+(defn- mkdir? [dir]
   (.mkdirSync fs dir #js {:recursive true}))
 
 (defn- write-file [filepath content]
@@ -81,7 +81,7 @@
                             :node-version  js/process.version}
                            git-meta
                            result)]
-    (mkdir-p test-dir)
+    (mkdir? test-dir)
     (write-file filepath (pr-str full-result))
     (println (str "  -> " filepath))))
 

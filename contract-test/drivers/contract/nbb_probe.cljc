@@ -1,7 +1,7 @@
-(ns nbb-probe
-  (:require [eve.process-slab :as ps]
-            [eve.core :as e]
-            [me.tonsky.persistent-sorted-set :as pss]))
+#_{:splint/disable [naming/single-segment-namespace]} (ns nbb-probe
+                                                        (:require [eve.process-slab :as ps]
+                                                                  [eve.core :as e]
+                                                                  [me.tonsky.persistent-sorted-set :as pss]))
 
 (defn run [_]
   (let [s (reduce (fn [s x] (e/conj s x)) (pss/sorted-set) (range 20))]

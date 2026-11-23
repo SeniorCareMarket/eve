@@ -6,13 +6,13 @@
 ;;     contend      <base> <writer> <n>    n × swap! coop.scenario/contend-op; prints {:ops :ms}
 ;;     mix-contend  <base> <writer> <n>    n × swap! coop.mix/mix-op (the capstone); prints {:ops :ms}
 ;;     mix-snapshot <base>                 prints coop.mix/snapshot of the value
-(ns nbb-worker
-  (:require [eve.atom :as atom]
-            [eve.region :as region]
+#_{:splint/disable [naming/single-segment-namespace]} (ns nbb-worker
+                                                        (:require [eve.atom :as atom]
+                                                                  [eve.region :as region]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]
-            [coop.scenario :as sc]
-            [coop.mix :as mix]))
+                                                                  #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]
+                                                                  [coop.scenario :as sc]
+                                                                  [coop.mix :as mix]))
 
 ;; the addon by its path, as eve's Node worker loads it: this script is outside eve/, where node-gyp-build's own
 ;; lookup (from the script's directory) does not reach

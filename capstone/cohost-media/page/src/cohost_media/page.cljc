@@ -118,15 +118,15 @@
 ;; The view's reader (a worker)
 ;; ===========================================================================
 
-(defn- send-to-page!
-  "msg into the page's mailbox, waiting while it is full (the page drains it every 100 ms)."
-  [reply msg]
-  (loop [n 0]
-    (let [[ok? e] (h/attempt (fn [] (h/send! reply msg)))]
-      (when-not ok?
-        (if (and (< n 600) (re-find #"mailbox is full" (str (ex-message e))))
-          (do (pool/sleep-ms! 50) (recur (inc n)))
-          (throw e))))))
+#_{:splint/disable [naming/conversion-functions]} (defn- send-to-page!
+                                                    "msg into the page's mailbox, waiting while it is full (the page drains it every 100 ms)."
+                                                    [reply msg]
+                                                    (loop [n 0]
+                                                      (let [[ok? e] (h/attempt (fn [] (h/send! reply msg)))]
+                                                        (when-not ok?
+                                                          (if (and (< n 600) (re-find #"mailbox is full" (str (ex-message e))))
+                                                            (do (pool/sleep-ms! 50) (recur (inc n)))
+                                                            (throw e))))))
 
 (defn- control-view
   "What the page shows of the control atom: each process's host and run (never its command or environment), the

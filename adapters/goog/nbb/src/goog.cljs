@@ -1,5 +1,5 @@
-(ns goog
-  "Google Closure's base `goog` namespace, for nbb (ClojureScript on SCI):
+#_{:splint/disable [naming/single-segment-namespace]} (ns goog
+                                                        "Google Closure's base `goog` namespace, for nbb (ClojureScript on SCI):
    nbb carries no Closure library, and ClojureScript code names this
    namespace without requiring it (the compiler treats `goog` as the
    ambient Closure base) — DataScript's datascript.db writes

@@ -79,7 +79,7 @@
 
 (deftest view-refuses-every-mutator
   (let [bs (ssio/builder-sio)
-        m (ser/convert-to-eve bs {:a [1 2 3] :b #{:x :y}})
+        m (ser/convert->eve bs {:a [1 2 3] :b #{:x :y}})
         len (ssio/builder-length bs)
         view (ssio/view-sio (Arrays/copyOf (ssio/builder-bytes bs) (int len)) len)
         off 32]
@@ -242,7 +242,7 @@
         vals (gen/sample g 30)]
     (doseq [v vals]
       (let [sio (heap-sio)
-            ev (binding [d/*domain-sio* sio] (ser/convert-to-eve sio v))
+            ev (binding [d/*domain-sio* sio] (ser/convert->eve sio v))
             root (d/-root-header-off ev)
             im (img/detach-image sio root)
             blocks (img/image-blocks im)
@@ -263,10 +263,10 @@
               "every relocation's field position holds its target's image offset"))))
     (testing "a block reached ten times is copied once (sharing kept)"
       (let [sio (heap-sio)
-            shared (binding [d/*domain-sio* sio] (ser/convert-to-eve sio (vec (range 100))))
+            shared (binding [d/*domain-sio* sio] (ser/convert->eve sio (vec (range 100))))
             m (binding [d/*domain-sio* sio]
                 (reduce (fn [acc i] (assoc acc (keyword (str "k" i)) shared))
-                        (ser/convert-to-eve sio {}) (range 10)))
+                        (ser/convert->eve sio {}) (range 10)))
             root (d/-root-header-off m)
             im (img/detach-image sio root)
             blocks (img/image-blocks im)]
@@ -328,7 +328,7 @@
         bad (atom [])]
     (doseq [v vals]
       (let [bs (ssio/builder-sio)
-            e0 (ser/convert-to-eve bs v)
+            e0 (ser/convert->eve bs v)
             [plains snaps]
             (loop [i 0 p v e e0 plains [v] snaps [[(d/-root-header-off e0) (ssio/builder-length bs)]]]
               (if (== i n-steps)
@@ -355,7 +355,7 @@
 
 (deftest detach-compacts
   (let [bs (ssio/builder-sio)
-        m0 (ser/convert-to-eve bs (zipmap (range 200) (range 200)))
+        m0 (ser/convert->eve bs (zipmap (range 200) (range 200)))
         m (reduce (fn [acc i] (assoc acc i (str "new-" i))) m0 (range 100))
         root (d/-root-header-off m)
         tail (ssio/builder-length bs)

@@ -41,7 +41,7 @@
             off (codec/write-collection! tag sio v)
             ctor (ser/get-header-constructor (ser/read-header-tag sio off))]
         (ctor sio off))
-      (ser/convert-to-eve sio v))))
+      (ser/convert->eve sio v))))
 
 (def ^:private hand-values
   [{}
@@ -217,7 +217,7 @@
           "the reference names the same fn in this process")))
   (testing "an Eve value of another domain: materialized and rebuilt, recorded"
     (let [sio (heap-sio)
-          inner (ser/convert-to-eve sio [1 2 3])
+          inner (ser/convert->eve sio [1 2 3])
           v {:inner inner :n 3}
           b (build/build! v)]
       (is (some (fn [x] (= :eve-value (:reason x))) (:fallbacks b)))
