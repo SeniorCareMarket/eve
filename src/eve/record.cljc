@@ -333,10 +333,12 @@
        ;; (ns$__GT_T), the later overwriting the earlier on disk, so the
        ;; slab factory captured above (raw) would load as THIS 13-arity
        ;; public fn ("Wrong number of args (16) passed to ->T").
-       (defn ~(vary-meta ctor assoc :arglists (list 'quote (list fs)))
-         ~(symbol (str type-name "__public-ctor"))
-         [~@fs]
-         (~ctor-in (alloc/current-sio) ~@fs))
+       ;; not defn (splint's def-fn suggestion): defn takes one name — the
+       ;; unquoted __public-ctor symbol is the fn's internal name, and a
+       ;; second name form is not a defn shape (SCI's defn expansion
+       ;; rejects it: "Don't know how to create ISeq from: Symbol")
+       #_{:splint/disable [lint/def-fn]} (def ~(vary-meta ctor assoc :arglists (list 'quote (list fs)))
+                                           (fn ~(symbol (str type-name "__public-ctor")) [~@fs] (~ctor-in (alloc/current-sio) ~@fs)))
        (defn ~mapctor-in [~sio ~m]
          (assert-portable! ~sio ~m [:constructor])
          (binding [d/*domain-sio* ~sio ser/*shared-write* true]

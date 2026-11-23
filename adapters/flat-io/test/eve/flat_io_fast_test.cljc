@@ -574,7 +574,8 @@
   (is (= (pr-str want) (pr-str t)) "print")
   (is (= (str want) (str t)) "str")
   (is (= (seq want) (seq t)))
-  (is (= want (into [] t)) "into []")
+  ;; into, not vec: this line exists to exercise into on the tuple type
+  #_{:splint/disable [lint/into-literal]} (is (= want (into [] t)) "into []")
   (is (= want (vec t)))
   (is (= (reduce conj [] want) (reduce conj [] t)) "reduce with init")
   (when (seq want) (is (= (reduce (fn [a x] (if (vector? a) (conj a x) [a x])) want)
