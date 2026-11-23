@@ -1040,6 +1040,28 @@
 
                :else nil)))))
 
+     ;; jolt: desc-handle's reads in one Chez procedure — the class's three column regions, its COUNT offset and
+     ;; total blocks straight from the context's field vector (desc-regions 9, desc-flags-regions 10,
+     ;; desc-pointer-regions 11, total-blocks 4, desc-offsets 12 of a spilled record's) and the arithmetic in
+     ;; Chez, where the :default body is five field reads, five agets and the arithmetic, each a dispatched call
+     ;; with a wrap64. The row itself is built by a fixed-arity fn's vector literal. The same row.
+     #?(:jolt
+        (do
+          (scheme/eval-string
+           "(define (eve-desc-handle mk)
+              (define (ref a i) (let ((v (jolt-array-vec a))) (if (fxvector? v) (fxvector-ref v i) (vector-ref v i))))
+              (lambda (ctx ci bi)
+                (let* ((v (jrec*-vals ctx)) (dr (ref (vector-ref v 9) ci)))
+                  (if (or (not dr) (eq? dr jolt-nil))
+                      jolt-nil
+                      (let* ((fr (ref (vector-ref v 10) ci)) (pr (ref (vector-ref v 11) ci))
+                             (off (ref (vector-ref v 12) ci)) (b4 (* 4 bi))
+                             (foff (if (eq? fr dr) (+ off (* 4 (ref (vector-ref v 4) ci))) off))
+                             (poff (if (eq? pr dr) (+ off (* 8 (ref (vector-ref v 4) ci))) off)))
+                        (mk dr (+ off b4) fr (+ foff b4) pr (+ poff b4)))))))")
+          (def ^:private desc-handle*
+            ((scheme/proc "eve-desc-handle") (fn [dr co fr fo pr po] [dr co fr fo pr po])))))
+
      (defn- desc-handle
        "The tally row of block block-idx of bitmap class ci in ctx, flat: [count-region count-off
         flags-region flags-off pointer-region pointer-off] — the addresses of the block's COUNT,
@@ -1047,23 +1069,25 @@
         per call, no nested pairs: the tally asks on every hold, drop and free (jolt round 6, the
         nested pairs were 16% of reset-vec's self time); desc-of nests it for its callers."
        [^JvmSlabCtx ctx ^long ci ^long block-idx]
-       (let [dr (aget ^objects (field ctx desc-regions) ci)]
-         (when dr
-           (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
-                 pr   (aget ^objects (field ctx desc-pointer-regions) ci)
-                 off  (aget ^ints (field ctx desc-offsets) ci)
-                 ;; a heap / SAB slab carries all three columns in its own region (FLAGS right after
-                 ;; COUNT, POINTER right after FLAGS); an mmap class's flags and pointer regions are
-                 ;; their own files, their columns at offset 0 there
-                 foff (if (identical? fr dr)
-                        (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
-                        off)
-                 poff (if (identical? pr dr)
-                        (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
-                        off)]
-             [dr (+ off (* 4 block-idx))
-              fr (+ foff (* 4 block-idx))
-              pr (+ poff (* 4 block-idx))]))))
+       #?(:jolt (desc-handle* ctx ci block-idx)
+          :default
+          (let [dr (aget ^objects (field ctx desc-regions) ci)]
+            (when dr
+              (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
+                    pr   (aget ^objects (field ctx desc-pointer-regions) ci)
+                    off  (aget ^ints (field ctx desc-offsets) ci)
+                    ;; a heap / SAB slab carries all three columns in its own region (FLAGS right after
+                    ;; COUNT, POINTER right after FLAGS); an mmap class's flags and pointer regions are
+                    ;; their own files, their columns at offset 0 there
+                    foff (if (identical? fr dr)
+                           (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
+                           off)
+                    poff (if (identical? pr dr)
+                           (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
+                           off)]
+                [dr (+ off (* 4 block-idx))
+                 fr (+ foff (* 4 block-idx))
+                 pr (+ poff (* 4 block-idx))])))))
 
      (defn ctx-free!
        "The block at slab-offset in ctx's slabs freed: true, or false when it
