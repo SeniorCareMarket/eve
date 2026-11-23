@@ -14,12 +14,16 @@
       (is (= s (str u)))
       (is (= u (apply uuid/from-longs (uuid/to-words u))))
       (is (= u (uuid/from-longs (uuid/most-significant-bits u) (uuid/least-significant-bits u))))))
-  (is (= "ffffffff-ffff-ffff-8000-000000000000" (str (uuid/from-longs -1 "-9223372036854775808"))))
-  (is (= "7fffffff-ffff-ffff-0000-000000000001" (str (uuid/from-longs "9223372036854775807" 1))))
-  (is (= "ffffffff-ffff-ffff-ffff-ffffffffffff" (str (uuid/from-string "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"))))
+  (is (= "ffffffff-ffff-ffff-8000-000000000000" (str (uuid/from-longs -1 "-9223372036854775808")) (str (uuid/from-longs "-01" "-09223372036854775808"))))
+  (is (= "7fffffff-ffff-ffff-0000-000000000001" (str (uuid/from-longs "9223372036854775807" 1)) (str (uuid/from-longs "0009223372036854775807" "01"))))
+  (doseq [[want got] [["ffffffff-ffff-ffff-ffff-ffffffffffff" (uuid/from-string "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")]
+                      ["00000000-0000-0000-0000-000000000000" (uuid/from-longs "000" "0")]
+                      ["00000000-0000-0000-0000-000000000000" (uuid/from-longs "-0" "-000")]
+                      ["00000000-0000-0007-ffff-ffffffffffff" (uuid/from-longs "0007" "-0001")]]]
+    (is (= want (str got))))
   (doseq [s ["garbage" "0-0-0-0-0" "ffffffff-ffff-ffff-ffff-ffffffffffff junk"]]
     (is (try (uuid/from-string s) false (catch #?(:cljs :default :clje _ :jank jank.runtime.object_ref :default Exception) _ true))))
-  (doseq [s ["9223372036854775808" "-9223372036854775809"]]
+  (doseq [s ["9223372036854775808" "-9223372036854775809" "0009223372036854775808"]]
     (is (try (uuid/from-longs s 0) false (catch #?(:cljs :default :clje _ :jank jank.runtime.object_ref :default Exception) _ true)))))
 (deftest squuid-contract
   (doseq [ms [0 999 1000 1700000000123 2147483648000 4294967295999 4294967296000]]
