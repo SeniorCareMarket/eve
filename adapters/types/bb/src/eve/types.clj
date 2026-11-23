@@ -68,7 +68,7 @@
      IHash IMeta IWithMeta IFn IReduce IKVReduce IAssociative IMap ISet IStack
      IVector ISeq INext ISequential ASeq IReversible IComparable
      IEditableCollection ITransientCollection ITransientAssociative ITransientMap
-     ITransientVector ITransientSet IChunkedSeq IChunkedNext IMapEntry IDeref
+     ITransientVector ITransientSet IChunkedSeq IChunkedNext IChunk IMapEntry IDeref
      IPrintWithWriter})
 
 (def ^:private self-call->eve-core
@@ -433,25 +433,20 @@
       (sweep-backings!))
     x))
 
-(def ^:private map-mode-record-types
-  "The qualified names of the eve.record records kept in SciMap mode (recorded
-   at :define, read at :build, both at macroexpansion)."
+(def ^:private map-mode-types
+  "The qualified names of the types bb-translate-protos keeps in SciMap
+   mode (recorded at :define, read at :build, both at macroexpansion).
+   A SciMap instance's only type identity on this seat is the stamp
+   the :build step applies: eve.record records have always needed it,
+   and a plain eve.deftype with the map signature (datascript's
+   Datom: ILookup + Associative + Counted, no IPersistentMap) needs
+   it identically — unstamped, (type x) answers babashka.impl.SciMap,
+   the flat layer's own-type claim (sister/own-type-instance?, whose
+   test is (type v) against the registry's :host-type) cannot see
+   the instance, and eve->clj falls into its generic map branch and
+   destructures the instance's slot seq (measured: a fresh Datom
+   threw \"nth not supported on this type: Long\" in eve->clj)."
   (atom #{}))
-
-(defn- record-map-mode?
-  "True for an eve.record record's impls: the full map signature, marked by
-   eve.record/IRecordData, and no host collection-kind head. The same
-   condition as the record carve-out of map-signature? in bb-translate-protos."
-  [impls]
-  (let [ps (set (map :protocol impls))]
-    (and (contains? ps 'eve.record/IRecordData)
-         (contains? ps 'clojure.lang.ILookup)
-         (contains? ps 'clojure.lang.Associative)
-         (contains? ps 'clojure.lang.Counted)
-         (not-any? ps '#{clojure.lang.IPersistentVector clojure.lang.IPersistentSet
-                         clojure.lang.IPersistentList clojure.lang.IList
-                         clojure.lang.IPersistentStack clojure.lang.IPersistentQueue
-                         clojure.lang.Sequential}))))
 
 (defn- define [type-name fields forms]
   [`(clojure.core/deftype ~type-name ~fields ~@forms)])
@@ -466,9 +461,12 @@
    :define (fn [type-name fields impls _forms _print]
              (when (some #(= 'clojure.lang.IMapEntry (:protocol %)) impls)
                (swap! map-entry-types conj (qualified-type type-name)))
-             (when (record-map-mode? impls)
-               (swap! map-mode-record-types conj (qualified-type type-name)))
              (let [bb-impls (bb-translate-protos impls type-name {:slab? true})]
+               ;; a map-mode translation carries the IPersistentMap
+               ;; marker group; the type's instances are SciMaps and
+               ;; :build stamps them (see map-mode-types)
+               (when (some #(= 'clojure.lang.IPersistentMap (:protocol %)) bb-impls)
+                 (swap! map-mode-types conj (qualified-type type-name)))
                (concat [`(clojure.core/deftype ~type-name ~fields ~@(impls->forms bb-impls))]
                        (when (some #(= 'eve.core/IPrintWithWriter (:protocol %)) bb-impls)
                          [(sio/print-method-form type-name 'eve.core/-pr-writer)]))))
@@ -479,9 +477,9 @@
             (cond
               (contains? @map-entry-types (qualified-type type-name))
               (list 'eve.types/present-map-entry (list* new-name args))
-              ;; a record in map mode carries its type as a stamp on every
+              ;; a type in map mode carries its type as a stamp on every
               ;; instance (see map-signature? in bb-translate-protos)
-              (contains? @map-mode-record-types (qualified-type type-name))
+              (contains? @map-mode-types (qualified-type type-name))
               (list 'eve.host-completion/stamp-map-mode-type (list* new-name args) type-name)
               :else (list* new-name args)))
    :factory-via-var? true

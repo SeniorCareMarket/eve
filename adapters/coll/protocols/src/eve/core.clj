@@ -62,6 +62,7 @@
 (defprotocol ITransientSet (-disjoin! [tcoll v]))
 (defprotocol IChunkedSeq (-chunked-first [coll]) (-chunked-rest [coll]))
 (defprotocol IChunkedNext (-chunked-next [coll]))
+(defprotocol IChunk (-drop-first [coll]))
 (defprotocol IMapEntry (-key [coll]) (-val [coll]))
 (defprotocol IDeref (-deref [o]))
 (defprotocol ISwap (-swap! [o f] [o f a] [o f a b] [o f a b xs]))

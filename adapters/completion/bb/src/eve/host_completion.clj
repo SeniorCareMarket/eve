@@ -71,6 +71,51 @@
                      :running running
                      :required min-babashka-version}))))
 
+(defn- spec-count-home
+  "A spec's count methods, re-homed for translation: on the JVM
+   count is an IPersistentCollection method (and a vanilla
+   Associative face can carry it too — datascript's Entity homes
+   its count there), but the seat's translation table homes it
+   under clojure.lang.Counted (its ICounted entry), and a count
+   left under either group is dropped by the split. Returns
+   parsed impls with any such count methods moved to a Counted
+   group. Shared by the defrecord and deftype presenters."
+  [parsed]
+  (let [count-source? (fn [p] (contains? '#{clojure.lang.IPersistentCollection
+                                            clojure.lang.Associative} p))
+        counts (vec (mapcat (fn [{:keys [protocol methods]}]
+                              (if (count-source? protocol)
+                                (filter #(= 'count (:name %)) methods)
+                                []))
+                            parsed))]
+    (if (empty? counts)
+      parsed
+      (let [moved (mapv (fn [{:keys [protocol methods] :as impl}]
+                          (if (count-source? protocol)
+                            (assoc impl :methods
+                                   (vec (remove #(= 'count (:name %)) methods)))
+                            impl))
+                        parsed)]
+        (if (some #(= 'clojure.lang.Counted (:protocol %)) moved)
+          (mapv (fn [impl]
+                  (if (= 'clojure.lang.Counted (:protocol impl))
+                    (update impl :methods into counts)
+                    impl))
+                moved)
+          (conj moved {:protocol 'clojure.lang.Counted :methods counts}))))))
+
+(defn- jvm-group-spec?
+  "True when a defrecord/deftype spec sequence names a JVM interface
+   group (a clojure.lang.* or java.* head symbol) — the specs this
+   seat's defrecord cannot take untranslated."
+  [specs]
+  (boolean
+    (some (fn [s] (let [t (str s)]
+                    (or (str/starts-with? t "clojure.lang.")
+                        (str/starts-with? t "java."))))
+          (filter symbol? specs))))
+
+
 (defonce ^:private sci-deftype
   @#'clojure.core/deftype)
 
@@ -90,17 +135,53 @@
           (symbol? (first xs))  (recur (next xs) (conj acc (first xs)))
           :else                 (recur (next xs) acc))))
 
+(def ^:private deftype-translate-heads
+  "JVM interface heads SCI's deftype refuses outside the map
+   disposition (measured census, bb 1.13.226: each answers \"only
+   support protocol implementations\" or \"Protocol not found\" as a
+   spec head). A vanilla library deftype naming one — a sorted
+   set's chunk and iterator types are the measured case
+   (clojure.lang.IChunk heading the first refusal, at the type's
+   deftype form) — cannot load on this seat at all, though the
+   same declaration is an ordinary citizen on the JVM. The seat's
+   answer is the defrecord presenter's, one form earlier: the
+   spec is translated onto eve.core's protocols by eve.types'
+   translation (bb-translate-protos, over the vocab parse), and
+   the translated spec goes to SCI's deftype. Two dispositions
+   are not this branch's: the piecemeal-map presentation above
+   (a spec it claims — ILookup/Associative with no
+   IPersistentMap — keeps it, map mode and all), and a spec
+   already carrying IPersistentMap (Eve's own translated
+   emissions carry the kept map groups beside it; they pass
+   through as written)."
+  '#{clojure.lang.IChunk clojure.lang.IChunkedSeq clojure.lang.ISeq
+     clojure.lang.Indexed clojure.lang.Counted clojure.lang.IReduce
+     clojure.lang.IReduceInit clojure.lang.IPersistentCollection
+     clojure.lang.Seqable clojure.lang.Sequential
+     clojure.lang.Reversible clojure.lang.IHashEq clojure.lang.IObj
+     clojure.lang.IMeta clojure.lang.IFn clojure.lang.IKeywordLookup
+     clojure.lang.Sorted clojure.lang.IPersistentSet
+     clojure.lang.IPersistentVector clojure.lang.IPersistentList
+     clojure.lang.IPersistentStack clojure.lang.IEditableCollection
+     clojure.lang.ITransientCollection
+     clojure.lang.ITransientAssociative clojure.lang.ITransientMap
+     clojure.lang.ITransientVector clojure.lang.ITransientSet
+     java.lang.Iterable})
+
 (defn- present-deftype
   "clojure.core/deftype, presented for SCI: a declaration of
    clojure.lang.ILookup or clojure.lang.Associative is presented as
    the full map declaration SCI takes, by appending
    clojure.lang.IPersistentMap after the specs (the position SCI
-   accepts, measured); any other declaration is passed through
-   unchanged."
+   accepts, measured); a declaration naming a JVM interface SCI
+   refuses (deftype-translate-heads) is translated onto eve.core's
+   protocols, as present-defrecord translates a record's spec;
+   any other declaration is passed through unchanged."
   [form env type-name fields & opts]
   (let [ifaces (interface-symbols opts)]
-    (if (and (some piecemeal-map-interfaces ifaces)
-             (not (some #(= full-map-interface %) ifaces)))
+    (cond
+      (and (some piecemeal-map-interfaces ifaces)
+           (not (some #(= full-map-interface %) ifaces)))
       ;; The map-mode instance is a babashka.impl.SciMap, which
       ;; carries no reference to its type: (type x) answers SciMap
       ;; and (instance? T x) answers false (measured on datascript's
@@ -115,6 +196,36 @@
             (list 'eve.host-completion/present-map-mode-type!
                   (list 'var (symbol (str "->" (name type-name))))
                   type-name))
+
+      (and (jvm-group-spec? opts)
+           (some deftype-translate-heads ifaces)
+           (not (some #(= full-map-interface %) ifaces)))
+      (let [_ (try (require 'eve.types 'eve.deftype-proto.data)
+                   (catch Throwable _ nil))
+            vocab (find-ns 'eve.deftype-proto.vocab)
+            types (find-ns 'eve.types)
+            parse (and vocab (ns-resolve vocab 'parse-protocol-impls))
+            translate (and types (ns-resolve types 'bb-translate-protos))
+            ->forms (and vocab (ns-resolve vocab 'impls->forms))]
+        (if ->forms
+          (let [parsed (spec-count-home (@parse opts))
+                translated (@translate parsed type-name)
+                forms (@->forms translated)]
+            (if (some #(= full-map-interface (:protocol %)) translated)
+              ;; a map-signature translation (bb-translate-protos
+              ;; kept the map groups and the marker): the type is
+              ;; a SciMap, and its factory is stamped, as in the
+              ;; piecemeal presentation above and eve.types'
+              ;; plain-type.
+              (list 'do
+                    (apply sci-deftype form env type-name fields forms)
+                    (list 'eve.host-completion/present-map-mode-type!
+                          (list 'var (symbol (str "->" (name type-name))))
+                          type-name))
+              (apply sci-deftype form env type-name fields forms)))
+          (apply sci-deftype form env type-name fields opts)))
+
+      :else
       (apply sci-deftype form env type-name fields opts))))
 
 (alter-var-root #'clojure.core/deftype (fn [_] present-deftype))
@@ -447,6 +558,18 @@
 ;; plain fn of the compare body; every other reify — including other
 ;; multi-interface reifies, which keep the seat's native refusal —
 ;; passes through argument-identical.
+;;
+;; The same definition on the current library pin carries a third
+;; group, clojure.lang.IFn$OOL, whose invokePrim is the JVM's
+;; primitive calling convention for the same delegation (datascript's
+;; defcomp, so the index comparators can be invoked without boxing
+;; the long result). The class exists in this seat's image
+;; (Class/forName resolves it, measured) but SCI's class registry
+;; does not carry the IFn$* primitive interfaces — the name does not
+;; resolve as a symbol at all — and nothing on this seat can call
+;; invokePrim in any case: the group is unobservable here, exactly
+;; as the pair's .compare is. The presenter admits the triple on
+;; the same terms as the pair.
 
 (defonce ^:private sci-reify
   @#'clojure.core/reify)
@@ -508,8 +631,13 @@
                  (list 'clojure.lang.IDeref deref1))
           (apply sci-reify form env specs)))
 
-      (and (= '#{java.util.Comparator clojure.lang.IFn}
-              (set (keys by-head)))
+      (and (contains? by-head 'java.util.Comparator)
+           (contains? by-head 'clojure.lang.IFn)
+           (every? (fn [h] (contains? '#{java.util.Comparator
+                                         clojure.lang.IFn
+                                         clojure.lang.IFn$OOL
+                                         IFn$OOL} h))
+                   (keys by-head))
              ;; the Comparator group carries a single 2-arg compare
              ;; (method names are matched by name: a macro's syntax
              ;; quote qualifies them — clojure.core/compare, the
@@ -520,7 +648,9 @@
                     (= 3 (count (second (first cmps)))))))
       (let [[_ [this a b] & body] (first (filter #(= "compare" (name (first %)))
                                                  (get by-head 'java.util.Comparator)))
-            invokes (get by-head 'clojure.lang.IFn)
+            invokes (concat (get by-head 'clojure.lang.IFn)
+                            (get by-head 'clojure.lang.IFn$OOL)
+                            (get by-head 'IFn$OOL))
             delegates? (every? (fn [[_ [ithis & iargs] & ibody]]
                                  (and (= 1 (count ibody))
                                       (let [[head target & args] (first ibody)]
@@ -601,35 +731,6 @@
 (defonce ^:private sci-defrecord
   @#'clojure.core/defrecord)
 
-(defn- record-count-home
-  "A record spec's count methods, re-homed for translation: on the
-   JVM count is an IPersistentCollection method, but the seat's
-   translation table homes it under clojure.lang.Counted (its
-   ICounted entry), and a count left under IPersistentCollection is
-   dropped by the split. Returns parsed impls with any such count
-   methods moved to a Counted group."
-  [parsed]
-  (let [counts (vec (mapcat (fn [{:keys [protocol methods]}]
-                              (if (= 'clojure.lang.IPersistentCollection protocol)
-                                (filter #(= 'count (:name %)) methods)
-                                []))
-                            parsed))]
-    (if (empty? counts)
-      parsed
-      (let [moved (mapv (fn [{:keys [protocol methods] :as impl}]
-                          (if (= 'clojure.lang.IPersistentCollection protocol)
-                            (assoc impl :methods
-                                   (vec (remove #(= 'count (:name %)) methods)))
-                            impl))
-                        parsed)]
-        (if (some #(= 'clojure.lang.Counted (:protocol %)) moved)
-          (mapv (fn [impl]
-                  (if (= 'clojure.lang.Counted (:protocol impl))
-                    (update impl :methods into counts)
-                    impl))
-                moved)
-          (conj moved {:protocol 'clojure.lang.Counted :methods counts}))))))
-
 (defn- record-object-group
   "The translated Object group of a record, cut to what a record on
    this seat can carry: SCI's defrecord rewrites an Object
@@ -646,17 +747,6 @@
                      (assoc impl :methods (vec ts))))
                  impl))
              translated)))
-
-(defn- jvm-group-spec?
-  "True when a defrecord/deftype spec sequence names a JVM interface
-   group (a clojure.lang.* or java.* head symbol) — the specs this
-   seat's defrecord cannot take untranslated."
-  [specs]
-  (boolean
-    (some (fn [s] (let [t (str s)]
-                    (or (str/starts-with? t "clojure.lang.")
-                        (str/starts-with? t "java."))))
-          (filter symbol? specs))))
 
 (defn- present-defrecord
   "clojure.core/defrecord, presented for SCI: a spec carrying JVM
@@ -709,7 +799,7 @@
                                                         clojure.lang.Counted
                                                         clojure.lang.Seqable}
                                                      (:protocol impl)))
-                                        (@translate (record-count-home parsed) name)))
+                                        (@translate (spec-count-home parsed) name)))
                            user-tostring?))))
       (apply sci-defrecord form env name fields specs))))
 
@@ -1184,6 +1274,16 @@
                                 :else (sci-rest x)))))
 (alter-var-root #'clojure.core/second
                 (fn [_] (fn [x] (presented-first (presented-next x)))))
+;; fnext/ffirst are the same shape as second and the seat's own
+;; spellings are native fns that seq host-side (measured: the query
+;; engine's substitute-constant calling (fnext (:tuples rel)) on a
+;; relation's sorted set threw "Don't know how to create ISeq
+;; from: sci.impl.deftype.SciType" where (first (:tuples rel))
+;; beside it was exact).
+(alter-var-root #'clojure.core/fnext
+                (fn [_] (fn [x] (presented-first (presented-next x)))))
+(alter-var-root #'clojure.core/ffirst
+                (fn [_] (fn [x] (presented-first (presented-first x)))))
 (alter-var-root #'clojure.core/last
                 (fn [_] (fn [x] (sci-last (presented-seq x)))))
 (alter-var-root #'clojure.core/empty?
@@ -1525,6 +1625,28 @@
       (apply f args)
       (apply f [(presented-seq (first args))]))))
 
+(defn- presented-mapcat
+  "clojure.core/mapcat, presented on its own (not xf-last): xf-last
+   views the INPUT collection, which is what filter/remove/keep
+   need — their elements come from the input. mapcat's elements
+   are the collections f RETURNS, and the seat's own mapcat seqs
+   those returns host-side (measured: datascript's retractEntity
+   gathering incoming-ref datoms — (mapcat (fn [a] (-search db
+   [nil a e])) attrs) threw \"Don't know how to create ISeq from:
+   sci.impl.deftype.SciType\" though seq/first/next/vec on the
+   same Iters were each exact). So mapcat is rebuilt from the
+   presented pieces: map f over the viewed inputs, view each
+   returned collection, concat the views. The one-argument
+   transducer arity passes through, as xf-last's does."
+  [f]
+  (fn [& args]
+    (if (= 1 (count args))
+      (apply f args)
+      (let [f' (presented-fn (first args))
+            colls (sci-map presented-seq (rest args))]
+        (apply sci-concat
+               (sci-map presented-seq (apply sci-map f' colls)))))))
+
 ;; ->Eduction captures its collection raw, and the host reduce
 ;; an eduction performs later seqs that collection host-side —
 ;; the query engine's -collect-tuples builds eductions over a
@@ -1620,7 +1742,7 @@
                 ;; wraps: f through presented-fn, colls viewed.
                 [#'clojure.core/mapv xf-map]
                 [#'clojure.core/filterv xf-last]
-                [#'clojure.core/mapcat xf-last]
+                [#'clojure.core/mapcat presented-mapcat]
                 [#'clojure.core/filter xf-last]
                 [#'clojure.core/remove xf-last]
                 [#'clojure.core/keep xf-last]
@@ -1761,6 +1883,15 @@
                                   (contains? ifs c)
                                   (orig x)))))))
 
+;; map? was missing from this list: a map-mode type whose spec never
+;; declared IPersistentMap (datascript's Datom: ILookup + Associative
+;; + Counted) is a SciMap, and the seat's own map? answers true for
+;; every SciMap — where the JVM answers false, Datom implementing
+;; ILookup but not IPersistentMap. Code that dispatches on map?
+;; (datascript's validate-tx-data!, which walks a Datom as an entity
+;; map and destructures its slot values) breaks on the divergence;
+;; from the registry the answer is the JVM's.
+(present-predicate! #'clojure.core/map? clojure.lang.IPersistentMap)
 (present-predicate! #'clojure.core/vector? clojure.lang.IPersistentVector)
 (present-predicate! #'clojure.core/set? clojure.lang.IPersistentSet)
 (present-predicate! #'clojure.core/list? clojure.lang.IPersistentList)
@@ -1881,9 +2012,20 @@
 
 (alter-var-root #'clojure.core/count
                 (fn [_] (fn [x] (if (scitype? x) (eve-count x) (sci-count x)))))
+;; nth's test is wider than scitype?: a stamped map-mode instance (a
+;; Datom read back from the store is one) is a SciMap, so the
+;; scitype?-only test sent it to the seat's nth, which refuses a
+;; SciMap outright ("nth not supported on this type: SciMap",
+;; measured on (nth datom 0)) though the type's own -nth answers.
+;; eve-or-sci falls back to the seat's fn when the dispatch refuses,
+;; so a stamped type with no -nth keeps the seat's answer.
+(defn- eve-stamped?
+  [x]
+  (or (scitype? x) (some? (map-mode-type x))))
+
 (alter-var-root #'clojure.core/nth
-                (fn [_] (fn ([x i] (if (scitype? x) (eve-nth x i) (sci-nth x i)))
-                          ([x i nf] (if (scitype? x) (eve-nth x i nf) (sci-nth x i nf))))))
+                (fn [_] (fn ([x i] (if (eve-stamped? x) (eve-nth x i) (sci-nth x i)))
+                          ([x i nf] (if (eve-stamped? x) (eve-nth x i nf) (sci-nth x i nf))))))
 (alter-var-root #'clojure.core/get
                 (fn [_] (fn ([x k] (cond (scitype? x) (eve-lookup x k)
                                          (scitype? k) (sci-get x (host-form k))
