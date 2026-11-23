@@ -242,11 +242,14 @@
 (deftype BytesVal [^bytes bs])
 (deftype TypedVal [tkey fp fields])   ;; fields: array-map field-keyword -> rep, declaration order
 (deftype MetaVal [inner meta-rep]
-  Object
   ;; A rep carrying metadata prints as the value it wraps: reps surface
   ;; in error messages and debug prints, and the default Object print
-  ;; (eve.flat.chunk.MetaVal@hash) hides the value entirely.
-  (toString [_] (pr-str inner)))
+  ;; (eve.flat.chunk.MetaVal@hash) hides the value entirely. Basilisp's
+  ;; deftype* admits no Object clause — its spelling of the same
+  ;; override is a bare __str__ method.
+  #?@(:lpy [(__str__ [_] (pr-str inner))]
+      :default [Object
+                (toString [_] (pr-str inner))]))
 
 (defprotocol IFlatHandle
   (-rep [h] "this handle's value as a rep, metadata included")
