@@ -201,9 +201,9 @@
 (defn- waiter-queue ^ConcurrentLinkedQueue [region byte-off]
   (let [k [region (long byte-off)]
         q (.get waiters k)]
-    (if q
-      q
-      (let [nq (ConcurrentLinkedQueue.) prev (.putIfAbsent waiters k nq)] (if prev prev nq)))))
+    (or q
+        (let [nq (ConcurrentLinkedQueue.), prev (.putIfAbsent waiters k nq)]
+          (or prev nq)))))
 
 (defn- waiter-dequeue
   "Remove thread t from region/offset's waiter queue; drop the queue key

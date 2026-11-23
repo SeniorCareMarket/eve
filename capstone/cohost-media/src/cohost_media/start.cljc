@@ -249,22 +249,51 @@
                       :cmd ["in-process" "cohost-media.gateway"]}}
           (map (fn [h]
                  (let [rid (name h)]
-                   (cond
-                     (= :jvm h)
-                     [rid {:host h :member? true :wait [] :logs logs :dir eve-dir :env {}
-                           :cmd ["in-process" "cohost-media.member"]}]
-                     (= :browser h)
-                     [rid {:host h :member? true :wait [] :logs logs :dir eve-dir :env {}
-                           :cmd ["in-process" "cohost.cljs-pool" ":browser"]
-                           :args (browser-args cfg)}]
-                     (= :node h)
-                     [rid {:host h :member? true :wait [] :logs logs :dir eve-dir :env {}
-                           :cmd ["in-process" "cohost.cljs-pool" ":node"]
-                           :args (node-args)}]
-                     :else
-                     (let [{:keys [cmd env dir]} (member-cmd h rid (:base run) (:out run) (:window run) cfg)]
-                       [rid {:host h :member? true :cmd (mapv str cmd) :env (or env {}) :dir (str (or dir eve-dir))
-                             :logs logs :wait (case h :bb [:gateway] [])}])))))
+                   (condp = h
+                     :jvm
+                     [rid
+                      {:host h,
+                       :member? true,
+                       :wait [],
+                       :logs logs,
+                       :dir eve-dir,
+                       :env {},
+                       :cmd ["in-process" "cohost-media.member"]}]
+                     :browser
+                     [rid
+                      {:host h,
+                       :member? true,
+                       :wait [],
+                       :logs logs,
+                       :dir eve-dir,
+                       :env {},
+                       :cmd ["in-process" "cohost.cljs-pool" ":browser"],
+                       :args (browser-args cfg)}]
+                     :node
+                     [rid
+                      {:host h,
+                       :member? true,
+                       :wait [],
+                       :logs logs,
+                       :dir eve-dir,
+                       :env {},
+                       :cmd ["in-process" "cohost.cljs-pool" ":node"],
+                       :args (node-args)}]
+                     (let [{:keys [cmd env dir]} (member-cmd
+                                                  h
+                                                  rid
+                                                  (:base run)
+                                                  (:out run)
+                                                  (:window run)
+                                                  cfg)]
+                       [rid
+                        {:host h,
+                         :member? true,
+                         :cmd (mapv str cmd),
+                         :env (or env {}),
+                         :dir (str (or dir eve-dir)),
+                         :logs logs,
+                         :wait (case h :bb [:gateway] [])}])))))
           hosts)))
 
 ;; ---------------------------------------------------------------------------
@@ -374,11 +403,11 @@
    thread (a cohost.thread spawn) waits for its readiness, then starts it."
   [atoms procs rid child]
   (thread/spawn
-   (fn []
-     (loop []
-       (cond (sv/stopping? (:control atoms)) nil
-             (sv/ready? (:control atoms) child) (spawn-child! atoms procs rid child)
-             :else (do (pool/sleep-ms! 200) (recur)))))))
+   #_{:splint/disable [lint/empty-loop-in-fn]} (fn [] ; the loop is this spawned watch's recur target; splint's suggestion for the shape is a broken hybrid (measured)
+                                                 (loop []
+                                                   (cond (sv/stopping? (:control atoms)) nil
+                                                         (sv/ready? (:control atoms) child) (spawn-child! atoms procs rid child)
+                                                         :else (do (pool/sleep-ms! 200) (recur)))))))
 
 (defn- watch-jvm-member!
   "The JVM member's pool: its serve! on the host executor ex, watched (this watch is a
@@ -386,29 +415,29 @@
    restart policy; a clean exit (the run's :stop) ends the watch."
   [run atoms cfg ex procs]
   (thread/spawn
-   (fn []
-     (loop []
-       (let [ctl (:control atoms)
-             rid "jvm"
-             child (get (:children (sv/value ctl)) rid)
-             n (sv/next-start ctl rid)]
-         (sv/started! ctl rid child (self-pid) n (now))
-         (let [fut (thread/submit-future
-                    ex (fn [] (member/attempt
-                               (fn [] (member/serve! (:base run) (:out run) (:window run) rid
-                                                     (str "http://127.0.0.1:" (:gateway-port cfg) "/gw")
-                                                     (:api-key cfg) (:jvm pool-configs))))))
-               _ (clojure.core/swap! procs assoc rid {:in-process true :future fut})
-               [code err] (try (let [[ok? e] (thread/deref-future fut)] [(if ok? 0 1) e])
-                               (catch Throwable t [1 t]))]
-           (when-not (zero? code)
-             (println (pr-str {:step :jvm-member-error :rid rid :error (str err)}))
-             (when (instance? Throwable err) (.printStackTrace ^Throwable err)))
-           (sv/exited! ctl rid code (now))
-           (when (and (not (sv/stopping? ctl)) (not (zero? code)))
-             (if (sv/restart? (:exits (get (:members (sv/value ctl)) rid)) (now))
-               (recur)
-               (sv/gave-up! ctl rid (now))))))))))
+   #_{:splint/disable [lint/empty-loop-in-fn]} (fn []
+                                                 (loop []
+                                                   (let [ctl (:control atoms)
+                                                         rid "jvm"
+                                                         child (get (:children (sv/value ctl)) rid)
+                                                         n (sv/next-start ctl rid)]
+                                                     (sv/started! ctl rid child (self-pid) n (now))
+                                                     (let [fut (thread/submit-future
+                                                                ex (fn [] (member/attempt
+                                                                           (fn [] (member/serve! (:base run) (:out run) (:window run) rid
+                                                                                                 (str "http://127.0.0.1:" (:gateway-port cfg) "/gw")
+                                                                                                 (:api-key cfg) (:jvm pool-configs))))))
+                                                           _ (clojure.core/swap! procs assoc rid {:in-process true :future fut})
+                                                           [code err] (try (let [[ok? e] (thread/deref-future fut)] [(if ok? 0 1) e])
+                                                                           (catch Throwable t [1 t]))]
+                                                       (when-not (zero? code)
+                                                         (println (pr-str {:step :jvm-member-error :rid rid :error (str err)}))
+                                                         (when (instance? Throwable err) (.printStackTrace ^Throwable err)))
+                                                       (sv/exited! ctl rid code (now))
+                                                       (when (and (not (sv/stopping? ctl)) (not (zero? code)))
+                                                         (if (sv/restart? (:exits (get (:members (sv/value ctl)) rid)) (now))
+                                                           (recur)
+                                                           (sv/gave-up! ctl rid (now))))))))))
 
 (defn- watch-asks!
   "The coordinator's restart asks (a member whose lease lapsed while its process lives): kill the
@@ -416,15 +445,15 @@
    JVM member's own watch restarts it when its serve! ends. The watch is a cohost.thread spawn."
   [atoms procs]
   (thread/spawn
-   (fn []
-     (loop []
-       (when-not (sv/stopping? (:control atoms))
-         (doseq [[rid pid] (sv/asked (:control atoms))]
-           (sv/restarting! (:control atoms) rid (now))
-           (when (and pid (p/proc? (get @procs rid)))
-             (p/shell {:continue true} "kill" "-9" (str pid))))
-         (pool/sleep-ms! 300)
-         (recur))))))
+   #_{:splint/disable [lint/empty-loop-in-fn]} (fn []
+                                                 (loop []
+                                                   (when-not (sv/stopping? (:control atoms))
+                                                     (doseq [[rid pid] (sv/asked (:control atoms))]
+                                                       (sv/restarting! (:control atoms) rid (now))
+                                                       (when (and pid (p/proc? (get @procs rid)))
+                                                         (p/shell {:continue true} "kill" "-9" (str pid))))
+                                                     (pool/sleep-ms! 300)
+                                                     (recur))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The browser seat's handler: the page's same-origin traffic — the gateway's
@@ -443,36 +472,36 @@
    "mp4" "video/mp4" "webm" "video/webm" "mov" "video/quicktime"})
 
 #?(:clj
-   (do
-     (defn- out-file-resp
-       "The run's output files as a browser-seat handler response: the file under
+   #_{:splint/disable [style/useless-do]} (do
+                                            (defn- out-file-resp
+                                              "The run's output files as a browser-seat handler response: the file under
       out-dir the request path names (the media outputs: /media/thumbs/<id>.jpg
       and friends), as base64 bytes (:body-as :b64 — the seat puts them on the
       wire as bytes), with the Range support the page's media elements use —
       the old page server's file answer, as a handler value instead of a
       socket's. nil when the path names no output file (the seat's 404)."
-       [out-dir req]
-       (let [path (URLDecoder/decode (subs (:uri req) 1) "UTF-8")
+                                              [out-dir req]
+                                              (let [path (URLDecoder/decode (subs (:uri req) 1) "UTF-8")
            ;; the page names its outputs under /media/ (the media server's
            ;; prefix); the files themselves live at the top of out-dir
-             rel (if (str/starts-with? path "media/") (subs path 6) path)
-             f (fs/file out-dir rel)]
-         (when (and (not (str/includes? rel "..")) (fs/exists? f) (not (fs/directory? f)))
-           (let [total (fs/size f)
-                 ctype (get page-mime (fs/extension f) "application/octet-stream")
-                 range-h (get (:headers req) "range")
-                 [a b] (when range-h
-                         (let [[_ a b] (re-find #"bytes=(\d*)-(\d*)" range-h)]
-                           [(when (seq a) (parse-long a)) (when (seq b) (parse-long b))]))
-                 start (or a 0)
-                 end (min (or b (dec total)) (dec total))
-                 bs (java.util.Arrays/copyOfRange (fs/read-all-bytes f) start (inc end))]
-             {:status (if range-h 206 200)
-              :headers (cond-> {"Content-Type" ctype
-                                "Accept-Ranges" "bytes"}
-                         range-h (assoc "Content-Range" (str "bytes " start "-" end "/" total)))
-              :body (.encodeToString (java.util.Base64/getEncoder) bs)
-              :body-as :b64}))))))
+                                                    rel (if (str/starts-with? path "media/") (subs path 6) path)
+                                                    f (fs/file out-dir rel)]
+                                                (when (and (not (str/includes? rel "..")) (fs/exists? f) (not (fs/directory? f)))
+                                                  (let [total (fs/size f)
+                                                        ctype (get page-mime (fs/extension f) "application/octet-stream")
+                                                        range-h (get (:headers req) "range")
+                                                        [a b] (when range-h
+                                                                (let [[_ a b] (re-find #"bytes=(\d*)-(\d*)" range-h)]
+                                                                  [(when (seq a) (parse-long a)) (when (seq b) (parse-long b))]))
+                                                        start (or a 0)
+                                                        end (min (or b (dec total)) (dec total))
+                                                        bs (java.util.Arrays/copyOfRange (fs/read-all-bytes f) start (inc end))]
+                                                    {:status (if range-h 206 200)
+                                                     :headers (cond-> {"Content-Type" ctype
+                                                                       "Accept-Ranges" "bytes"}
+                                                                range-h (assoc "Content-Range" (str "bytes " start "-" end "/" total)))
+                                                     :body (.encodeToString (java.util.Base64/getEncoder) bs)
+                                                     :body-as :b64}))))))
 
 #_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the seat wiring in run); no cljs caller exists
 #_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
@@ -535,36 +564,36 @@
   [run atoms _cfg procs child]
   #?(:clj
      (thread/spawn
-      (fn []
-        (loop []
-          (let [ctl (:control atoms)
-                rid "node"
-                n (sv/next-start ctl rid)
-                ex (cljs-pool/executor 1 (node-args))]
-            (clojure.core/swap! procs assoc "node" ex)
-            (sv/started! ctl rid child (self-pid) n (now))
-            (let [[code err]
-                  (try
-                    (thread/deref-future
-                     (thread/submit-call ex 'cohost-media.member/node-serve!
-                                         (:base run) (:out run) (:window run) rid
-                                         (get pool-configs :node)))
-                    (loop []
-                      (let [st (thread/deref-future
-                                (thread/submit-call ex 'cohost-media.member/node-state))]
-                        (if (= :stopped st)
-                          [0 nil]
-                          (do (pool/sleep-ms! 300) (recur)))))
-                    (catch Throwable t [1 t]))]
-              (when-not (zero? code)
-                (log "the node member errored:" (ex-message err))
-                (when (instance? Throwable err) (.printStackTrace ^Throwable err)))
-              (sv/exited! ctl rid code (now))
-              (try (thread/shutdown-executor! ex) (catch Throwable _ nil))
-              (when (and (not (sv/stopping? ctl)) (not (zero? code)))
-                (if (sv/restart? (:exits (get (:members (sv/value ctl)) rid)) (now))
-                  (recur)
-                  (sv/gave-up! ctl rid (now)))))))))
+      #_{:splint/disable [lint/empty-loop-in-fn]} (fn []
+                                                    (loop []
+                                                      (let [ctl (:control atoms)
+                                                            rid "node"
+                                                            n (sv/next-start ctl rid)
+                                                            ex (cljs-pool/executor 1 (node-args))]
+                                                        (clojure.core/swap! procs assoc "node" ex)
+                                                        (sv/started! ctl rid child (self-pid) n (now))
+                                                        (let [[code err]
+                                                              (try
+                                                                (thread/deref-future
+                                                                 (thread/submit-call ex 'cohost-media.member/node-serve!
+                                                                                     (:base run) (:out run) (:window run) rid
+                                                                                     (get pool-configs :node)))
+                                                                (loop []
+                                                                  (let [st (thread/deref-future
+                                                                            (thread/submit-call ex 'cohost-media.member/node-state))]
+                                                                    (if (= :stopped st)
+                                                                      [0 nil]
+                                                                      (do (pool/sleep-ms! 300) (recur)))))
+                                                                (catch Throwable t [1 t]))]
+                                                          (when-not (zero? code)
+                                                            (log "the node member errored:" (ex-message err))
+                                                            (when (instance? Throwable err) (.printStackTrace ^Throwable err)))
+                                                          (sv/exited! ctl rid code (now))
+                                                          (try (thread/shutdown-executor! ex) (catch Throwable _ nil))
+                                                          (when (and (not (sv/stopping? ctl)) (not (zero? code)))
+                                                            (if (sv/restart? (:exits (get (:members (sv/value ctl)) rid)) (now))
+                                                              (recur)
+                                                              (sv/gave-up! ctl rid (now)))))))))
      :cljs (throw (ex-info "start: the node seat starts on the boot seat" {}))))
 
 (defn- start-seat!
@@ -761,14 +790,14 @@
     (catch #_{:clj-kondo/ignore [:unresolved-symbol]} Exception e
            (log "the stop could not be written (" (ex-message e) "); the pools are killed")))
   (let [t0 (now)]
-    (loop []
-      (when (and (< (- (now) t0) 40000)
-                 (or (some (fn [[rid v]] (and (not= "browser" rid)
-                                              (p/proc? v) (p/alive? v))) @procs)
-                     (and (contains? @procs "jvm")
-                          (not= :stopped (get-in @(:control atoms) [:members "jvm" :state])))))
-        (pool/sleep-ms! 300)
-        (recur))))
+    (while
+     (and (< (- (now) t0) 40000)
+          (or (some
+               (fn [[rid v]] (and (not= "browser" rid) (p/proc? v) (p/alive? v)))
+               @procs)
+              (and (contains? @procs "jvm")
+                   (not= :stopped (get-in @(:control atoms) [:members "jvm" :state])))))
+      (pool/sleep-ms! 300)))
   (doseq [[_ v] @procs
           :when (p/proc? v)]
     (p/destroy-tree v))

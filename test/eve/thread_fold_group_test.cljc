@@ -34,7 +34,7 @@
       (let [g (gate)
             deadline (+ (proc/now-ms) 60000)]
         (eve.host/swap! g update :rids (fnil conj #{}) rid)
-        (loop [] (when (and (< (count (:rids @g)) 2) (< (proc/now-ms) deadline)) (proc/sleep-ms! 5) (recur)))))
+        (while (and (< (count (:rids @g)) 2) (< (proc/now-ms) deadline)) (proc/sleep-ms! 5))))
     (update acc rid (fnil inc 0))))
 
 (t/defconveyed *spins* 1)

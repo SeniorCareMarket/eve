@@ -382,8 +382,7 @@
    block is a no-op, and a doubly-held cache simply stays."
   [sio hdr cache-off]
   (when-let [row (alloc/desc-of sio hdr)]
-    (when (not (zero? (bit-and (flags row) F_PUB)))
-      (hold! sio cache-off :leaf))))
+    (when-not (zero? (bit-and (flags row) F_PUB)) (hold! sio cache-off :leaf))))
 
 (defn- drop-one!
   "One holder lets block off of kind go: :parked when its count reached 0 here (queued by park! unless its earlier
@@ -759,7 +758,7 @@
           ;; suffix, then whatever this scan (park!) or a concurrent
           ;; conj put on q since the drain — all stamped at the
           ;; epoch now, behind everything else
-          (swap! q (fn [parks] (into [] (concat @stay suffix parks))))
+          (swap! q (fn [parks] (vec (concat @stay suffix parks))))
           (if (and (nil? safe) (pos? @parked) (< rounds 4096))
             (recur (inc rounds) (+ freed n))
             (+ freed n)))))))

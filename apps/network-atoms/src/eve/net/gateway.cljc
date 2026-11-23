@@ -189,7 +189,7 @@
                 (let [ov (get old k ::none)]
                   (cond (= ov nv) c
                         (= ov ::none) (assoc c k nv)
-                        :else (assoc c k (patch (get c k) ov nv)))))
+                        :else (update c k patch ov nv))))
               cur new))
     :else new))
 

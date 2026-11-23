@@ -22,12 +22,9 @@
   [period-ms f]
   (let [t (Thread. ^Runnable
            (fn []
-             (loop []
-               (when (try (Thread/sleep (long period-ms))
-                          true
-                          (catch InterruptedException _ false))
-                 (f)
-                 (recur)))))]
+             (while
+              (try (Thread/sleep (long period-ms)) true (catch InterruptedException _ false))
+               (f))))]
     (.setDaemon t true)
     (.setName t "eve-heartbeat")
     (.start t)

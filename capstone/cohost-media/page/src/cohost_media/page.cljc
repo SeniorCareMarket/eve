@@ -583,7 +583,7 @@
             (h/start-threads! 1 'cohost-media.page/probe-main {} {}))]
     (swap! state assoc :check check :runtime w :viewer viewer)
     (add-watch state ::render (fn [_ _ old new] (when-not (identical? old new) (render!))))
-    (js/setInterval (fn [] (loop [] (let [m (h/receive! 0)] (when (map? m) (on-message m) (recur))))) 100)
+    (js/setInterval (fn ([] (let [m (h/receive! 0)] (when (map? m) (on-message m) (recur))))) 100)
     (render!)))
 
 (defn init

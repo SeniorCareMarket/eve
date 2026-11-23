@@ -1405,8 +1405,7 @@
             recipe? (pos? (bit-and flags 2))
             rhq (when recipe?
                   (let [u (fio/u32 b 32)]
-                    (when (not (== u 2147483648))
-                      (int (if (>= u 2147483648) (- u 4294967296) u)))))
+                    (when-not (== u 2147483648) (int (if (>= u 2147483648) (- u 4294967296) u)))))
             rdigest (when recipe?
                       (let [dg (mapv (fn [i] (fio/u8 b (+ 36 i))) (range 32))]
                         (when (some pos? dg) dg)))]
@@ -2168,16 +2167,15 @@
   "h reads its chunk's root (its chunk's bytes are its value's), not a node
    nested inside a larger value's chunk."
   [h]
-  (cond
-    (satisfies? IHandlePos h) (== (-hoff h) (.-root ^Ctx (-hctx h)))
-    ;; a sister reads through its field source: a record node is the root
-    ;; only at its chunk's root; a batch row never is
-    (satisfies? source/ISister h)
+  (condp satisfies? h
+    IHandlePos (== (-hoff h) (.-root (-hctx h)))
+    source/ISister
     (let [src (source/-sister-source h)]
-      (cond (instance? RecordSource src) (== (.-off ^RecordSource src) (.-root ^Ctx (.-ctx ^RecordSource src)))
-            (instance? RowSource src) false
-            :else true))
-    :else true))
+      (cond
+        (instance? RecordSource src) (== (.-off src) (.-root (.-ctx src)))
+        (instance? RowSource src) false
+        :else true))
+    true))
 
 (defprotocol IFlatDigest (-digest [h]))
 (defn digest-of [h] (-digest h))
@@ -2391,9 +2389,9 @@
                                                                                  (hasheq [this#] (let [v# ~'_h] (if (some? v#) (long v#) (let [n# (node-hasheq ~'ctx ~'off)] (set! ~'_h n#) n#))))
                                                                                  clojure.lang.IObj
                                                                                  (meta [_#] ~'mm)
-                                                                                 (withMeta [_# m] (new ~tname ~@remake))
+                                                                                 (withMeta [_# m] ((splint/unquote tname) . ~@remake))
                                                                                  IAttachMeta
-                                                                                 (-attach-meta [_# m] (new ~tname ~@remake))
+                                                                                 (-attach-meta [_# m] ((splint/unquote tname) . ~@remake))
                                                                                  (-hmeta [_#] ~'mm)
                                                                                  IFlatHandle
                                                                                  (-rep [this#] (let [r# (~repf ~'ctx ~'off)]
@@ -2630,7 +2628,7 @@
                                          (^void clear [_#] (throw (UnsupportedOperationException.)))
                                          (keySet [this#] (into #{} (map (fn [e#] (nth e# 0))) (-entries this#)))
                                          (values [this#] (into [] (map (fn [e#] (nth e# 1))) (-entries this#)))
-                                         (entrySet [this#] (into #{} (map (fn [e#] (clojure.lang.MapEntry. (nth e# 0) (nth e# 1))) (-entries this#)))))))])
+                                         (entrySet [this#] (set (map (fn [e#] (clojure.lang.MapEntry. (nth e# 0) (nth e# 1))) (-entries this#)))))))])
 
 ;; --- the sequential handles ----------------------------------------------
 

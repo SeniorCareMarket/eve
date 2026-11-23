@@ -428,7 +428,7 @@
       (let [left (when deadline (- deadline (now)))]
         (if (and left (<= left 0))
           :timeout
-          (let [m (h/receive! (if left left -1))]
+          (let [m (h/receive! (or left -1))]
             (if (= m :eve.thread/timeout)
               (recur)
               (do (handle! m) (recur)))))))))
@@ -494,7 +494,7 @@
              (let [left (when deadline (- deadline (now)))]
                (if (and left (<= left 0))
                  ::timeout
-                 (let [m (h/receive! (if left left -1))]
+                 (let [m (h/receive! (or left -1))]
                    (when-not (= m :eve.thread/timeout) (handle! m))
                    (recur))))
              (register-waiter! e me)
@@ -594,7 +594,7 @@
            (do (-idle! c me)
                (if (or (-claimable? c) (not (live?)))
                  (do (-unidle! c me) (recur))
-                 (let [m (h/receive! (if keep-alive-ms keep-alive-ms -1))]
+                 (let [m (h/receive! (or keep-alive-ms -1))]
                    (cond
                      (= m :eve.thread/timeout)
                      (if (and (-unidle! c me) (retire?)) :retired (recur))

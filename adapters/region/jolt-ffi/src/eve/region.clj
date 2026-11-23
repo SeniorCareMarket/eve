@@ -245,10 +245,7 @@
 (defn- unmap-unreachable!
   "Every mapped region the collector has found unreachable since the last call, unmapped."
   []
-  (loop []
-    (when-let [[p n] (unreachable)]
-      (jolt-munmap p n)
-      (recur))))
+  (when-let [[p n] (unreachable)] (jolt-munmap p n) (recur)))
 
 (defn open-mmap-region
   "Open (or create) a file-backed MAP_SHARED region of size-bytes at

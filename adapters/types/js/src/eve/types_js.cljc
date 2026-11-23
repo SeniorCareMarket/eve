@@ -542,7 +542,7 @@
                     (seq? form) (with-meta (apply list (map rw form)) (meta form))
                     (vector? form) (with-meta (mapv rw form) (meta form))
                     (map? form) (with-meta (into {} (map (fn [[k v]] [(rw k) (rw v)])) form) (meta form))
-                    (set? form) (into #{} (map rw form))
+                    (set? form) (set (map rw form))
                     :else form))]
     (mapv (fn [impl]
             (update impl :methods

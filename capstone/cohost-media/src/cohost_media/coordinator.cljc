@@ -51,7 +51,7 @@
         [entries deferred]
         (reduce (fn [[entries deferred] [kind after]]
                   (let [needs (em/needs kind offered)
-                        missing (into (into #{} (remove coverage needs))
+                        missing (into (set (remove coverage needs))
                                       (mapcat (fn [a] (:missing (get deferred a))) after))]
                     (if (seq missing)
                       [entries (assoc deferred kind {:needs needs :missing missing})]
@@ -211,7 +211,7 @@
                                 (keep (fn [[k info]]
                                         (when-not (or (contains? submitted k) (some #{k} deferred-escalated))
                                           [k (assoc info :missing
-                                                    (into #{} (remove coverage (:needs info))))])))
+                                                    (set (remove coverage (:needs info))))])))
                                 deferred)
             states (into states (map (fn [k] [k :queued])) (keys submitted))
             escalated (into escalated deferred-escalated)

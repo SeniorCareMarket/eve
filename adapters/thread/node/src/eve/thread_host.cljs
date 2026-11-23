@@ -108,22 +108,23 @@
        (catch :default _ (throw (ex-info (str "eve.thread-host: unreadable message: " (subs m 0 (min 400 (count m)))) {})))))
 
 (defn- drain-ports!
-  "Every message waiting on every port: a port handed over for a new peer is installed, data is queued locally (in
-   each port's order)."
+  "Every message waiting on every port: a port handed over for a new peer is installed, data is queued locally (in\n   each port's order)."
   []
-  (loop []
-    #_{:splint/disable [lint/let-when]} (let [got (reduce (fn [got p]
-                                                            (if-let [r (wt/receiveMessageOnPort p)]
-                                                              (let [m (.-message r)]
-                                                                (cond
-                              ;; data: eve.wire bytes (one flat chunk)
-                                                                  (instance? js/Uint8Array m) (swap! state update :local conj (wire/decode m))
-                                                                  (string? m) (swap! state update :local conj (read-message m))
-                                                                  :else (install! (.-peer m) (.-port m)))
-                                                                true)
-                                                              got))
-                                                          false (vals (:ports @state)))]
-                                          (when got (recur)))))
+  (let [got (reduce
+             (fn
+               [got p]
+               (if-let [r (wt/receiveMessageOnPort p)]
+                 (let [m (.-message r)]
+                   (cond
+                     (instance? js/Uint8Array m)
+                     (swap! state update :local conj (wire/decode m))
+                     (string? m) (swap! state update :local conj (read-message m))
+                     :else (install! (.-peer m) (.-port m)))
+                   true)
+                 got))
+             false
+             (vals (:ports @state)))]
+    (when got (recur))))
 
 (defn send!
   "Post msg to the thread at addr (to oneself: onto this thread's own queue, no port); never blocks. A message must be

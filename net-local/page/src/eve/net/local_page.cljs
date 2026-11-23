@@ -164,7 +164,7 @@
                  (render!)
                  (poll-health!)
                  (js/setInterval poll-health! 2000)
-                 (js/setInterval (fn [] (loop [] (let [m (h/receive! 0)] (when (map? m) (on-message m) (recur))))) 100))))))
+                 (js/setInterval (fn ([] (let [m (h/receive! 0)] (when (map? m) (on-message m) (recur))))) 100))))))
 
 (defn init
   "The program's entry, on the page and in every worker it starts (they run the whole program)."

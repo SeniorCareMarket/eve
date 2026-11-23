@@ -30,12 +30,15 @@
     (subs s i0 @(:i st))))
 
 (defn- number [t]
-  (cond (re-matches #"[+-]?\d+N?" t) (js/parseInt (str/replace t "N" "") 10)
-        (re-matches #"[+-]?0[xX][0-9a-fA-F]+N?" t)
-        (let [neg (str/starts-with? t "-") h (str/replace (str/replace t #"^[+-]?0[xX]" "") "N" "")]
-          (* (if neg -1 1) (js/parseInt h 16)))
-        (re-matches #"[+-]?\d+/\d+" t) (let [[n d] (str/split t #"/")] (/ (js/parseInt n 10) (js/parseInt d 10)))
-        (re-matches #"[+-]?\d+(\.\d*)?([eE][+-]?\d+)?M?" t) (js/parseFloat (str/replace t "M" ""))))
+  (condp re-matches t
+    #"[+-]?\\d+N?" (js/parseInt (str/replace t "N" "") 10)
+    #"[+-]?0[xX][0-9a-fA-F]+N?"
+    (let [neg (str/starts-with? t "-")
+          h (str/replace (str/replace t #"^[+-]?0[xX]" "") "N" "")]
+      (* (if neg -1 1) (js/parseInt h 16)))
+    #"[+-]?\\d+/\\d+"
+    (let [[n d] (str/split t #"/")] (/ (js/parseInt n 10) (js/parseInt d 10)))
+    #"[+-]?\\d+(\\.\\d*)?([eE][+-]?\\d+)?M?" (js/parseFloat (str/replace t "M" ""))))
 
 (defn- atom-of [st t]
   (cond (= t "nil") nil

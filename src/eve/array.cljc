@@ -351,15 +351,16 @@
 
   clojure.lang.IHashEq
   (hasheq [_this]
-    (if hash-cache__
-      hash-cache__
-      (let [sub subtype__
-            h (loop [i 0 h (unchecked-int (inc (* 31 sub)))]
-                (if (< i cnt)
-                  (recur (inc i) (unchecked-int (+ (* 31 h) (hash (read-element sio__ offset__ i sub)))))
-                  h))]
-        (set! hash-cache__ h)
-        h)))
+    (or hash-cache__
+        (let [sub subtype__
+              h (loop [i 0, h (unchecked-int (inc (* 31 sub)))]
+                  (if (< i cnt)
+                    (recur
+                     (inc i)
+                     (unchecked-int (+ (* 31 h) (hash (read-element sio__ offset__ i sub)))))
+                    h))]
+          (set! hash-cache__ h)
+          h)))
 
   ;; cons and empty too: basilisp's types refuse a partial interface
   clojure.lang.IPersistentCollection

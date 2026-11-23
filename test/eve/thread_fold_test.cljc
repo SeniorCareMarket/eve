@@ -35,7 +35,7 @@
   (when meet?
     (swap! runners conj (h/self))
     (let [deadline (+ (proc/now-ms) 10000)]
-      (loop [] (when (and (< (count @runners) 2) (< (proc/now-ms) deadline)) (proc/sleep-ms! 1) (recur))))))
+      (while (and (< (count @runners) 2) (< (proc/now-ms) deadline)) (proc/sleep-ms! 1)))))
 
 (t/deftask tally [acc [_ meet?]] (meet! meet?) (update acc (h/self) (fnil inc 0)))
 

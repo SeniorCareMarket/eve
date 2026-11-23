@@ -134,9 +134,9 @@
 ;;=============================================================================
 
 (defn get-schema [obj-or-arr]
-  (cond (satisfies? impl/IEveObj obj-or-arr) (first (impl/-obj-parts obj-or-arr))
-        (satisfies? impl/IEveObjArray obj-or-arr) (first (impl/-obj-array-parts obj-or-arr))
-        :else nil))
+  (condp satisfies? obj-or-arr
+    impl/IEveObj (first (impl/-obj-parts obj-or-arr))
+    impl/IEveObjArray (first (impl/-obj-array-parts obj-or-arr))))
 
 (defn get-offset
   "The object's block (its slab-qualified offset): what an :obj field holds."

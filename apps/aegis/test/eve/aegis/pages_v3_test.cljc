@@ -70,7 +70,7 @@
             rec-band (b/hex (first (c/band-of (c/attest message at3))))
             {:keys [cid off]} (get (:known r) rec-band)
             k (b/hex cid) local (- off (p/region-base off))
-            flip (fn [i] (assoc pm k (update (get pm k) (+ local i) (fn [x] (bit-xor x 1)))))]
+            flip (fn [i] (update pm k update (+ local i) (fn [x] (bit-xor x 1))))]
         (is (= :bad-page (thrown-type (fn [] (p/read-pages (:root w) (flip 70))))) "an attested byte (EPOCH)")
         (is (= :bad-page (thrown-type (fn [] (p/read-pages (:root w) (flip 300))))) "a payload byte")
         (is (= :bad-page (thrown-type (fn [] (p/read-pages (:root w) (assoc pm k (assoc (get pm k) (+ local 22) 2))))))

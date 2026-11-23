@@ -575,7 +575,7 @@
                                           (with-meta sym {:tag 'long})
                                           sym)]
                                 (if (= :mutable (:mutability f))
-                                  (with-meta sym (assoc (meta sym) :unsynchronized-mutable true))
+                                  (vary-meta sym assoc :unsynchronized-mutable true)
                                   sym)))
                             (filter :cached? fields))]
     `(do

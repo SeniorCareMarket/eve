@@ -65,4 +65,4 @@
     (let [s2 (disj s 53312)]
       (is (= 1 (count s2)))
       (is (not (contains? s2 53312)))
-      (is (= #{371} (into #{} s2))))))
+      (is (= #{371} (set s2))))))

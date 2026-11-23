@@ -500,17 +500,16 @@
             1 (let [dbm (alloc/node-i32 sio off 4)
                     nbm (alloc/node-i32 sio off 8)
                     bit (node-bit dbm nbm kh shift)]
-                (cond
-                  (has-bit? nbm bit)
-                  (recur (alloc/node-i32 sio off
-                                         (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
-                         (+ shift SHIFT_STEP))
-
-                  (has-bit? dbm bit)
+                (condp has-bit? bit
+                  nbm
+                  (recur
+                   (alloc/node-i32 sio off (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                   (+ shift SHIFT_STEP))
+                  dbm
                   (let [di (get-index dbm bit)
                         hs (hashes-start-off nbm)
                         sh (alloc/node-i32 sio off (+ hs (* di 4)))]
-                    (if (not (== sh kh))
+                    (if-not (== sh kh)
                       not-found
                       (let [kvs (kv-data-start-off dbm nbm)
                             pos (kv-pos sio off kvs di)
@@ -522,15 +521,14 @@
                                 vb (alloc/node-bytes sio off (+ vo 4) vl)]
                             (deserialize-value-bytes vb sio))
                           not-found))))
-
-                  :else not-found))
+                  not-found))
 
             ;; Collision node
             3 (let [ch (alloc/node-i32 sio off 4)]
-                (if (not (== ch kh))
+                (if-not (== ch kh)
                   not-found
                   (let [cc (alloc/node-u8 sio off 1)]
-                    (loop [i 0 pos COLLISION_HEADER_SIZE]
+                    (loop [i 0, pos COLLISION_HEADER_SIZE]
                       (if (>= i cc)
                         not-found
                         (let [kl (alloc/node-i32 sio off pos)]
@@ -540,8 +538,7 @@
                                   vl (alloc/node-i32 sio off vo)
                                   vb (alloc/node-bytes sio off (+ vo 4) vl)]
                               (deserialize-value-bytes vb sio))
-                            (let [vo (+ pos 4 kl)]
-                              (recur (inc i) (+ vo 4 (alloc/node-i32 sio off vo)))))))))))
+                            (let [vo (+ pos 4 kl)] (recur (inc i) (+ vo 4 (alloc/node-i32 sio off vo)))))))))))
 
             ;; Unknown
             not-found))))))
@@ -582,17 +579,16 @@
                 1 (let [dbm (alloc/parts-i32 arr rgn base 4)
                         nbm (alloc/parts-i32 arr rgn base 8)
                         bit (node-bit dbm nbm kh shift)]
-                    (cond
-                      (has-bit? nbm bit)
-                      (recur (alloc/parts-i32 arr rgn base
-                                              (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
-                             (+ shift SHIFT_STEP))
-
-                      (has-bit? dbm bit)
+                    (condp has-bit? bit
+                      nbm
+                      (recur
+                       (alloc/parts-i32 arr rgn base (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
+                       (+ shift SHIFT_STEP))
+                      dbm
                       (let [di (get-index dbm bit)
                             hs (hashes-start-off nbm)
                             sh (alloc/parts-i32 arr rgn base (+ hs (* di 4)))]
-                        (if (not (== sh kh))
+                        (if-not (== sh kh)
                           not-found
                           (let [kvs (kv-data-start-off dbm nbm)
                                 pos (- (kv-pos-parts arr rgn (+ base kvs) di) base)
@@ -604,15 +600,14 @@
                                     vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
                                 (deserialize-value-bytes vb sio))
                               not-found))))
-
-                      :else not-found))
+                      not-found))
 
               ;; Collision node
                 3 (let [ch (alloc/parts-i32 arr rgn base 4)]
-                    (if (not (== ch kh))
+                    (if-not (== ch kh)
                       not-found
                       (let [cc (alloc/parts-u8 arr rgn base 1)]
-                        (loop [i 0 pos COLLISION_HEADER_SIZE]
+                        (loop [i 0, pos COLLISION_HEADER_SIZE]
                           (if (>= i cc)
                             not-found
                             (let [kl (alloc/parts-i32 arr rgn base pos)]
@@ -678,12 +673,12 @@
           (let [dbm (alloc/node-i32 sio off 4)
                 nbm (alloc/node-i32 sio off 8)
                 bit (node-bit dbm nbm kh shift)]
-            (cond
-              (has-bit? nbm bit)
+            (condp has-bit? bit
+              nbm
               (recur
                (alloc/node-i32 sio off (+ NODE_HEADER_SIZE (* (get-index nbm bit) 4)))
                (+ shift SHIFT_STEP))
-              (has-bit? dbm bit)
+              dbm
               (let [di (get-index dbm bit)
                     hs (hashes-start-off nbm)
                     sh (alloc/node-i32 sio off (+ hs (* di 4)))]
@@ -694,8 +689,7 @@
                     (when (and (== kl (bytes-length kb))
                                (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                       (let [vo (+ pos 4 kl), vl (alloc/node-i32 sio off vo)]
-                        (alloc/node-bytes sio off (+ vo 4) vl))))))
-              :else nil))
+                        (alloc/node-bytes sio off (+ vo 4) vl))))))))
           3
           (let [ch (alloc/node-i32 sio off 4)]
             (when (== ch kh)

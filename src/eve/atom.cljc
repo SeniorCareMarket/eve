@@ -942,7 +942,7 @@
                     (or (list? v) (seq? v)) (ser/get-coll-writer :list)
                     :else nil)]
     (direct sio nil v)
-    (when (not (scalar-leaf? v)) (some-> (ser/convert-to-eve sio v) d/-root-header-off))))
+    (when-not (scalar-leaf? v) (some-> (ser/convert-to-eve sio v) d/-root-header-off))))
 
 (defn- write-typed-root!
   "A host typed array (or an IBackingArray value, its backing array) a swap!
@@ -1625,7 +1625,7 @@
   [a k f]
   (let [slot (-atom-slot-idx a)]
     (swap! (:watches (atom-domain-state a))
-           (fn [m] (assoc m slot (watch-add (get m slot) k f)))))
+           (fn [m] (update m slot watch-add k f))))
   a)
 
 (defn remove-watch*

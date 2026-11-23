@@ -273,7 +273,7 @@
       (meta form))
 
     (set? form)
-    (with-meta (into #{} (map rewrite-statics form)) (meta form))
+    (with-meta (set (map rewrite-statics form)) (meta form))
 
     :else form))
 
@@ -379,7 +379,7 @@
       (meta form))
 
     (set? form)
-    (with-meta (into #{} (map rewrite-lookup form)) (meta form))
+    (with-meta (set (map rewrite-lookup form)) (meta form))
 
     :else form))
 
@@ -482,7 +482,7 @@
                                                          (subst-symbol v from to)])
                                             form))
                      (meta form))
-    (set? form)    (with-meta (into #{} (map #(subst-symbol % from to) form)) (meta form))
+    (set? form)    (with-meta (set (map #(subst-symbol % from to) form)) (meta form))
     :else          form))
 
 (defn- present-reify

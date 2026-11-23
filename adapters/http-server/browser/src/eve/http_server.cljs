@@ -219,23 +219,25 @@
     nil))
 
 (defn- pump!
-  "The endpoint's pump, on the page's event loop (the page cannot block): drain this thread's mailbox —
-   controls, request events addressed here, and answers whose :reply was the endpoint. A poll that finds
-   the mailbox empty returns eve.thread-host's timeout keyword; the pass ends there (the next tick resumes)."
+  "The endpoint's pump, on the page's event loop (the page cannot block): drain this thread's mailbox —\n   controls, request events addressed here, and answers whose :reply was the endpoint. A poll that finds\n   the mailbox empty returns eve.thread-host's timeout keyword; the pass ends there (the next tick resumes)."
   []
-  (loop []
-    (let [m (h/receive! 0)]
-      (when (map? m)
-        (cond
-          (contains? m :eve.http-server/control) (on-control! m)
-          (contains? m :eve.http-server/request)
-          #_{:clj-kondo/ignore [:invalid-arity]} ; eve.http-server is defined per seat: this seat's dispatch! takes the one event map; the scittle seat's takes [event respond] - kondo merges the seats' namespaces and checks this seat's calls against the other seat's def
-          (dispatch! {:id (:eve.http-server/request m) :port (:port m) :req (:req m) :reply (:reply m)})
-          (contains? m :eve.http-server/response)
-          (do (dbg! "pump: response map arrived, id=" (:eve.http-server/response m))
-              (on-response! m))
-          :else nil)
-        (recur)))))
+  (let [m (h/receive! 0)]
+    (when (map? m)
+      (cond
+        (contains? m :eve.http-server/control) (on-control! m)
+        (contains? m :eve.http-server/request)
+        #_{:clj-kondo/ignore [:invalid-arity]} ; eve.http-server is defined per seat: this seat's dispatch! takes the one event map; the scittle seat's takes [event respond] - kondo merges the seats' namespaces and checks this seat's calls against the other seat's def
+        (dispatch!
+         {:id (:eve.http-server/request m),
+          :port (:port m),
+          :req (:req m),
+          :reply (:reply m)})
+        (contains? m :eve.http-server/response)
+        (do
+          (dbg! "pump: response map arrived, id=" (:eve.http-server/response m))
+          (on-response! m))
+        :else nil)
+      (recur))))
 
 ;; ---------------------------------------------------------------------------
 ;; The origin channel (the page's heap only): a long poll the origin host

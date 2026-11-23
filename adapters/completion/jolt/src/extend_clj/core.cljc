@@ -509,10 +509,10 @@
                     ~@methods)
                   (defn ~(with-meta ->name {:declared true})
                     ([~@fields]
-                     (new ~name ~@fields nil {} {}))
+                     ((splint/unquote name) . ~@fields nil {} {}))
                     ([~@fields & rest#]
                      (let [opts# (apply array-map rest#)
-                           ref#  (new ~name ~@fields nil {} {})]
+                           ref#  ((splint/unquote name) . ~@fields nil {} {})]
                        (when-some [validator# (:validator opts#)]
                          (validate ref# validator# @ref#)
                          (set! (.-validator ref#) validator#))
@@ -688,10 +688,10 @@
 
                   (defn ~->name
                     ([~@fields]
-                     (new ~name ~@fields nil {}))
+                     ((splint/unquote name) . ~@fields nil {}))
                     ([~@fields & rest#]
                      (let [opts# (apply array-map rest#)
-                           ref#  (new ~name ~@fields nil {})]
+                           ref#  ((splint/unquote name) . ~@fields nil {})]
                        (when-some [validator# (:validator opts#)]
                          (.setValidator ref# validator#))
                        (when-some [meta# (:meta opts#)]

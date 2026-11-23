@@ -56,15 +56,15 @@
    bb-map-protocols names onto eve.core's protocols."
   [parsed-protos]
   (keep (fn [{:keys [protocol methods] :as impl}]
-          (cond
-            (contains? bb-map-protocols protocol)
+          (condp contains? protocol
+            bb-map-protocols
             (let [[p names] (bb-map-protocols protocol)]
               (assoc impl :protocol p :methods (mapv #(update % :name names) methods)))
-            (contains? bb-rejected-protocols protocol) nil
-            (contains? #{'Object 'java.lang.Object} protocol)
+            bb-rejected-protocols nil
+            #{'Object 'java.lang.Object}
             (let [ms (remove #(contains? bb-rejected-object-methods (:name %)) methods)]
               (when (seq ms) (assoc impl :methods (vec ms))))
-            :else impl))
+            impl))
         parsed-protos))
 
 (def ^:private eve-core-protocols
@@ -481,14 +481,11 @@
    ;; as T__new before ->T becomes the constructor, builds instances
    ;; a map-entry type's instances are presented as host map entries
    :build (fn [type-name _fields new-name args]
-            (cond
-              (contains? @map-entry-types (qualified-type type-name))
-              (list 'eve.types/present-map-entry (list* new-name args))
-              ;; a record in map mode carries its type as a stamp on every
-              ;; instance (see map-signature? in bb-translate-protos)
-              (contains? @map-mode-record-types (qualified-type type-name))
+            (condp contains? (qualified-type type-name)
+              @map-entry-types (list 'eve.types/present-map-entry (list* new-name args))
+              @map-mode-record-types
               (list 'eve.host-completion/stamp-map-mode-type (list* new-name args) type-name)
-              :else (list* new-name args)))
+              (list* new-name args)))
    :factory-via-var? true
    ;; a map type keeps the map interfaces; another's go onto eve.core's protocols
    :slab-prepare (fn [parsed type-name]

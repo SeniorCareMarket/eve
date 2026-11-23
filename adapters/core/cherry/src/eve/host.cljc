@@ -12,7 +12,7 @@
 (defmacro defdelay
   "(defonce name (delay body))."
   [nm & body]
-  `(defonce ~nm (delay ~@body)))
+  `(defonce ~nm (delay (let [res# (do ~@body)] res#))))
 
 (defmacro extend-default
   "proto for every value, nil included: extend-type on nil and on default

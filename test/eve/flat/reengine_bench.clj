@@ -436,13 +436,15 @@
            :only (let [i (.indexOf args "--only")]
                    (when-not (neg? i)
                      (set (map keyword (str/split (nth args (inc i)) #",")))))}]
-    (cond (some #{"--transfer"} args) (run-transfer o)
-          (some #{"--s0"} args) (run-s0 o)
-          (some #{"--s1"} args) (run-s1 o (if (some #{"--tiny"} args) :tiny :canonical))
-          (some #{"--s2"} args) (run-s2 o (if (some #{"--tiny"} args) :tiny :canonical))
-          (some #{"--census"} args) (run-census o)
-          (some #{"--placeprobe"} args) (run-placeprobe o)
-          (some #{"--detachprobe"} args) (run-detachprobe o)
-          (some #{"--placesample"} args) (run-placesample o)
-          :else (println "usage: --transfer | --s0 | --s1 | --s2 [--tiny] | --census | --placeprobe | --detachprobe | --placesample [--runs N] [--warmup N]")))
+    (condp some args
+      #{"--transfer"} (run-transfer o)
+      #{"--s0"} (run-s0 o)
+      #{"--s1"} (run-s1 o (if (some #{"--tiny"} args) :tiny :canonical))
+      #{"--s2"} (run-s2 o (if (some #{"--tiny"} args) :tiny :canonical))
+      #{"--census"} (run-census o)
+      #{"--placeprobe"} (run-placeprobe o)
+      #{"--detachprobe"} (run-detachprobe o)
+      #{"--placesample"} (run-placesample o)
+      (println
+       "usage: --transfer | --s0 | --s1 | --s2 [--tiny] | --census | --placeprobe | --detachprobe | --placesample [--runs N] [--warmup N]")))
   (System/exit 0))

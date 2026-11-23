@@ -20,11 +20,12 @@
 
 (defn -main [& args]
   (let [code (try (let [[flag dir] args]
-                    (cond (= "--mat" flag) (contract.one-mat/-main dir)
-                          (= "--open-only" flag) (contract.one-mat/open-only dir)
-                          (= "--readback" flag) (contract.one-mat/readback dir)
-                          (= "--desc16k" flag) (contract.one-mat/one-16k dir)
-                          :else (apply contract.one/-main args)))
+                    (condp = flag
+                      "--mat" (contract.one-mat/-main dir)
+                      "--open-only" (contract.one-mat/open-only dir)
+                      "--readback" (contract.one-mat/readback dir)
+                      "--desc16k" (contract.one-mat/one-16k dir)
+                      (apply contract.one/-main args)))
                   0
                   (catch #_{:clj-kondo/ignore [:unresolved-symbol]} jank.runtime.object_ref e
                          (println (pr-str {:mark :ONE-AOT-ERROR :error (ex-message e) :data (ex-data e)}))

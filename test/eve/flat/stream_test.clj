@@ -23,7 +23,7 @@
   (doseq [[nm v] [["map" (into {} (map (fn [i] [i (* i i)])) (range 50))]
                   ["vec" (vec (range 2000))]
                   ["nested" {:a [1 2 {:b #{3 4 5}}] "s" (clojure.string/join (repeat 700 "x"))}]
-                  ["set" (into #{} (range 300))]
+                  ["set" (set (range 300))]
                   ["list" (apply list (range 100))]]]
     (testing nm
       (let [src (fresh-atom (str "st/s-" nm))
@@ -100,7 +100,7 @@
   (doseq [[nm v] [["map" (into {} (map (fn [i] [i (* i i)])) (range 50))]
                   ["vec" (vec (range 2000))]
                   ["nested" {:a [1 2 {:b #{3 4 5}}] "s" (clojure.string/join (repeat 700 "x"))}]
-                  ["set" (into #{} (range 300))]]]
+                  ["set" (set (range 300))]]]
     (testing nm
       (let [src (fresh-atom (str "st/cd-" nm))
             _ (swap! src (fn [_] v))

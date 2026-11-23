@@ -344,7 +344,7 @@
          4 (into {} (repeatedly (mod (.nextInt r) 8)
                                 (fn [] [(keyword (str "k" (mod (.nextInt r) 20)))
                                         (gen-value r (dec depth))])))
-         5 (into #{} (repeatedly (mod (.nextInt r) 8) #(gen-value r (dec depth))))
+         5 (set (repeatedly (mod (.nextInt r) 8) #(gen-value r (dec depth))))
          6 (apply list (repeatedly (mod (.nextInt r) 8) #(gen-value r (dec depth))))))))
 
 (defn- install-nested! [x]

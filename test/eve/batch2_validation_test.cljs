@@ -167,7 +167,7 @@
       (if (or (not (.-growable b)) (> n (* 1024 1024)))
         (is true "class 0 is not a small growable slab here")
         (let [before (total)
-              offs   (into [] (repeatedly n #(ps/alloc-offset 32)))]
+              offs   (vec (repeatedly n #(ps/alloc-offset 32)))]
           (is (> (total) before) "the slab grew")
           (is (fits?) "its header's total fits its buffer")
           (is (= n (count (set offs))) "every block distinct")

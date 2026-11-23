@@ -135,7 +135,7 @@
 (defmacro with-pool
   "body with *pool* bound to p: futures, pmap, pcalls and pvalues inside it run on p."
   [p & body]
-  `(binding [eve.thread/*pool* ~p] ~@body))
+  `(binding [eve.thread/*pool* ~p] (let [res# (do ~@body)] res#)))
 
 (defmacro deftask
   "defn, and the fn registered under its qualified name with its form's hash: a task that may cross a heap by name."
@@ -187,7 +187,7 @@
   [{:keys [kind forms keys]}]
   (case kind
     :step (first forms)
-    :seq `(eve.thread.fold/seq-run (comp ~@forms))
+    :seq `(eve.thread.fold/seq-run ~@forms)
     :par (let [in (gensym "in")
                chunk (gensym "chunk")
                ;; (realized once: a host's lazy seq need not memoize — clojerl's walked again would gensym anew)
@@ -200,9 +200,9 @@
            `((fn [~in]
                (let [~@binds]
                  (eve.thread.fold/par-run
-                  {:xf (fn [] (comp ~@xfs))
+                  {:xf (fn [] ~@xfs)
                    :spec ~spec
-                   :tfn (eve.thread/tfn [~chunk] (eve.thread.fold/into-chunk (comp ~@forms) ~chunk))}
+                   :tfn (eve.thread/tfn [~chunk] (eve.thread.fold/into-chunk ~@forms ~chunk))}
                   ~in)))))))
 
 (defmacro =>>

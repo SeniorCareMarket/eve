@@ -55,7 +55,7 @@
                   (if s (recur (next s) (inc n)) n))))
       (is (= xs (d/eve->clj walked))) ;; the plain deref path: -plain
       (is (= 50 (reduce (fn [a _] (inc a)) 0 walked)))
-      (is (= (vec xs) (into [] walked))))
+      (is (= (vec xs) #_{:splint/disable [lint/into-literal]} (into [] walked))))
     (testing "and allocates nothing in the domain"
       (is (empty? (alloc/logged-allocs lsio))
           (str "walking allocated " (count (alloc/logged-allocs lsio))

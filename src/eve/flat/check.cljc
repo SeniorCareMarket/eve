@@ -646,9 +646,12 @@
                                (and (pos? typetab) (> typetab blocktab)) typetab
                                :else end)
               region (- region-end blocktab)]
-          (when (not (zero? (rem region 8)))
-            (refuse :table-truncated "the block table is not a whole number of entries"
-                    :offset blocktab))
+          (when-not (zero? (rem region 8))
+            (refuse
+             :table-truncated
+             "the block table is not a whole number of entries"
+             :offset
+             blocktab))
           (let [blocks (mapv (fn [i]
                                {:off (u32 bs (+ blocktab (* i 8)))
                                 :size (u32 bs (+ blocktab (* i 8) 4))})
@@ -744,17 +747,22 @@
                  :version version))
        (when-not (contains? #{0 1 2 3} kind)
          (refuse :unknown-kind (str "chunk kind " kind) :kind kind))
-       (when (not (zero? (bit-and flags 0xFF00)))
-         (refuse :unknown-required-features
-                 (str "required feature bits " (bit-and flags 0xFF00) " are not known")
-                 :flags flags))
+       (when-not (zero? (bit-and flags 65280))
+         (refuse
+          :unknown-required-features
+          (str "required feature bits " (bit-and flags 65280) " are not known")
+          :flags
+          flags))
        (when (not= length len)
          (refuse :length-mismatch
                  (str "the header says " length " bytes, " len " were given")
                  :declared length :given len))
-       (when (not (zero? (rem length 8)))
-         (refuse :bad-length (str "chunk length " length " is not a multiple of 8")
-                 :length length))
+       (when-not (zero? (rem length 8))
+         (refuse
+          :bad-length
+          (str "chunk length " length " is not a multiple of 8")
+          :length
+          length))
        (let [digest? (not (zero? (bit-and flags 2)))
              wide? (not (zero? (bit-and flags 1)))
              types? (not (zero? (bit-and flags 4)))

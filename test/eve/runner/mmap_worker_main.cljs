@@ -249,8 +249,8 @@
                             (get-in v [:deep :a :b :c :d]))
                       (not= 40 (count (:items v)))
                       (not= [idx (* idx 2) (* idx 3)]
-                            (into [] (first (:matrix v))))
-                      (not= #{:alpha :beta :gamma :delta} (into #{} (:tags v)))
+                            (vec (first (:matrix v))))
+                      (not= #{:alpha :beta :gamma :delta} (set (:tags v)))
                       (not= '(:created :validated :committed) (into '() (reverse (:history v)))))
               (vswap! errors inc)
               (js/console.error "FAIL key" (str k) "got" (pr-str v)))))

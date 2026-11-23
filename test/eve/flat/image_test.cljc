@@ -290,7 +290,7 @@
                            (.countDown started)
                            (loop [i 0]
                              (when (and (< i 500) (not @stop))
-                               (swap! a (fn [m] (assoc m :n (inc (:n m)))))
+                               (swap! a (fn [m] (update m :n inc)))
                                (recur (inc i))))))]
     (try
       (ea/read-pinned

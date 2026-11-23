@@ -172,7 +172,7 @@
                nmask (dec ncap)]
            (dotimes [i (alength oks)]
              (let [kk (aget oks i)]
-               (when (not (zero? kk))
+               (when-not (zero? kk)
                  (loop [h (let [p (unchecked-multiply kk -7046029254386353131)]
                             (bit-and (bit-xor p (unsigned-bit-shift-right p 16)) nmask))]
                    (if (zero? (aget nks (int h)))
@@ -442,10 +442,8 @@
       computes, never stamps."
      [sio ^long off]
      (when-let [blk (digest/cache-block sio off)]
-       (when (not (zero? (bit-and (slab/read-i32 sio blk digest/F_FLAGS)
-                                  digest/FLAG_DIGEST)))
-         (mapv (fn [i] (slab/read-i32 sio blk (+ digest/F_DIGEST (* 4 i))))
-               (range 8))))))
+       (when-not (zero? (bit-and (slab/read-i32 sio blk digest/F_FLAGS) digest/FLAG_DIGEST))
+         (mapv (fn [i] (slab/read-i32 sio blk (+ digest/F_DIGEST (* 4 i)))) (range 8))))))
 
 #?(:clj
    (defn send-stream

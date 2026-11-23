@@ -64,7 +64,7 @@
   (assoc [_ k v] (->SlabDual (ec/assoc m k v)))
   (containsKey [_ k] (ec/contains? m k))
   (entryAt [_ k] (let [v (ec/get m k ::absent)]
-                   (when (not (identical? ::absent v)) [k v])))
+                   (when-not (identical? :eve.associative-transient-test/absent v) [k v])))
   clojure.lang.IPersistentCollection
   (count [_] (ec/count m)) (cons [_ entry] (->SlabDual (ec/conj m entry)))
   (empty [_] (->SlabDual (ec/empty m))) (equiv [_ other] (= m (.-m other)))

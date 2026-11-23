@@ -41,9 +41,10 @@
     (-> (ps/init! :force true)
         (.then (fn [_]
                  (let [[flag dir] args]
-                   (cond (= "--open-only" flag) (open-only dir)
-                         (= "--readback" flag) (readback dir)
-                         :else (apply contract.one/-main args)))))
+                   (condp = flag
+                     "--open-only" (open-only dir)
+                     "--readback" (readback dir)
+                     (apply contract.one/-main args)))))
         (.catch (fn [e]
                   (println (pr-str {:mark :ONE-CLJS-ERROR :error (str e)}))
                   (js/process.exit 1))))))

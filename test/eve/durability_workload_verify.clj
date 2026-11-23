@@ -35,7 +35,7 @@
 
 (defn -main [& [dir out rids-file]]
   (let [rids (when rids-file
-               (into #{} (remove str/blank? (str/split-lines (slurp rids-file)))))
+               (set (remove str/blank? (str/split-lines (slurp rids-file)))))
         _dom  (atom/persistent-atom-domain dir {:journal? true
                                                 :journal-batch 1000000})
         c    (atom/persistent-atom {:id :counter :persistent dir} 0)

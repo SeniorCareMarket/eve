@@ -391,11 +391,10 @@
                                                                       (when-not @swr (reset! swr (resampler a (:ctx d) fr FMT-FLT)))
                                                                       (write! (convert! a @swr fr FMT-FLT)))]
                                                        (check-fresh-packet! pkt)
-                                                       (loop []
-                                                         (when (>= (av-read-frame ic pkt) 0)
-                                                           (when (= (:index d) (rd pkt :int P-STREAM)) (decode! d pkt f on-frame))
-                                                           (av-packet-unref pkt)
-                                                           (recur)))
+                                                       (while
+                                                        (>= (av-read-frame ic pkt) 0)
+                                                         (when (= (:index d) (rd pkt :int P-STREAM)) (decode! d pkt f on-frame))
+                                                         (av-packet-unref pkt))
                                                        (decode! d nil f on-frame)
                                                        (when @swr
                                                          (write! (convert! a @swr nil FMT-FLT))
@@ -555,13 +554,13 @@
             on-audio (fn [fr]
                        (when-not @swr (reset! swr (resampler a (:ctx ad) fr FMT-FLTP)))
                        (push! (convert! a @swr fr FMT-FLTP)))]
-        (loop []
-          (when (>= (av-read-frame ic pkt) 0)
-            (let [si (rd pkt :int P-STREAM)]
-              (cond (and vd (= si (:index vd))) (decode! vd pkt f on-video)
-                    (and ad (= si (:index ad))) (decode! ad pkt f on-audio)))
-            (av-packet-unref pkt)
-            (recur)))
+        (while
+         (>= (av-read-frame ic pkt) 0)
+          (let [si (rd pkt :int P-STREAM)]
+            (cond
+              (and vd (= si (:index vd))) (decode! vd pkt f on-video)
+              (and ad (= si (:index ad))) (decode! ad pkt f on-audio)))
+          (av-packet-unref pkt))
         (when vd (decode! vd nil f on-video))
         (when ad
           (decode! ad nil f on-audio)

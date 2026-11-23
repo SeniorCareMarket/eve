@@ -138,7 +138,7 @@
         measured (loop [i 0 s {:today Double/MAX_VALUE :build Double/MAX_VALUE :place Double/MAX_VALUE}]
                    (if (== i runs)
                      s
-                     (let [s (assoc s :today (min (:today s) (today-rep)))
+                     (let [s (update s :today min (today-rep))
                            s (if direct-rep
                                (let [r (direct-rep)]
                                  (assoc s :build (min (:build s) (:build r))

@@ -401,18 +401,13 @@
               masked   (if (pos? bit-in-word)
                          (bit-and inverted (bit-shift-left -1 bit-in-word))
                          inverted)]
-          (if (not (zero? masked))
-            ;; masked has no bit below bit-in-word, so the search starts
-            ;; there: one step for a cursor-led allocation, not up to 32
+          (if-not (zero? masked)
             (let [bit-pos (loop [b bit-in-word]
-                            (if (>= b 32) 32
-                                (if (not (zero? (bit-and masked (bit-shift-left 1 b))))
-                                  b
-                                  (recur (inc b)))))
+                            (if (>= b 32)
+                              32
+                              (if-not (zero? (bit-and masked (bit-shift-left 1 b))) b (recur (inc b)))))
                   abs-bit (+ (bit-shift-left word-idx 5) bit-pos)]
-              (if (< abs-bit total-bits)
-                abs-bit
-                -1))
+              (if (< abs-bit total-bits) abs-bit -1))
             (recur (inc word-idx) 0)))))))
 
 (defn- bitmap-bits-in-region
@@ -466,12 +461,10 @@
         bit-mask      (bit-shift-left 1 (bit-and bit-idx 31))]
     (loop []
       (let [old-word (-load-i32 region word-byte-off)]
-        (if (not (zero? (bit-and old-word bit-mask)))
+        (if-not (zero? (bit-and old-word bit-mask))
           false
           (let [new-word (bit-or old-word bit-mask)]
-            (if (== old-word (-cas-i32! region word-byte-off old-word new-word))
-              true
-              (recur))))))))
+            (if (== old-word (-cas-i32! region word-byte-off old-word new-word)) true (recur))))))))
 
 (defn imr-bitmap-free!
   "Atomically clear bit-idx in the bitmap from 1→0 (mark block free).

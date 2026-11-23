@@ -65,7 +65,7 @@
 (defmacro defdelay
   "(defonce name (delay body))."
   [nm & body]
-  `(defonce ~nm (delay ~@body)))
+  `(defonce ~nm (delay (let [res# (do ~@body)] res#))))
 
 (defmacro extend-default
   "proto for every value, nil included: extend-type on nil and on default
@@ -95,7 +95,7 @@
 
 (defn- typed [ctor size-or-seq init]
   (if (number? size-or-seq)
-    (let [a (new ctor size-or-seq)] (when (some? init) (.fill a init)) a)
+    (let [a (ctor. size-or-seq)] (when (some? init) (.fill a init)) a)
     (.from ctor (core/into-array size-or-seq))))
 (defn byte-array ([s] (typed js/Int8Array s nil)) ([n init] (typed js/Int8Array n init)))
 (defn short-array ([s] (typed js/Int16Array s nil)) ([n init] (typed js/Int16Array n init)))

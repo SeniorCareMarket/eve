@@ -749,7 +749,7 @@
       (let [child (band-at (root-image! img) 5)
             es (if (empty-band? child) [] (hamt-entries get-block (b/hex child)))]
         (if set?
-          (into #{} (map (fn [[_ vb]] (decode-band get-block vb)) es))
+          (set (map (fn [[_ vb]] (decode-band get-block vb)) es))
           (into {} (map (fn [[kb vb]] [(key-of-bytes kb) (decode-band get-block vb)]) es))))
       (= tag T-VEC)
       (let [img (root-image! img)
@@ -931,7 +931,7 @@
         [root es] (if (empty-band? child) [nil []] (check-node get-block (b/hex child) 0 [] true set? []))
         n (if root (:n root) 0)]
     (when-not (= cnt n) (refuse 14 key (str "a map root counting " cnt " of " n " entries")))
-    (let [v (if set? (into #{} (map first es)) (into {} (map (fn [[k e]] [k (:v e)]) es)))]
+    (let [v (if set? (set (map first es)) (into {} (map (fn [[k e]] [k (:v e)]) es)))]
       (when-not (= n (count v)) (refuse 15 key "two entries of one key"))
       [v {:t (if set? :set :map) :band (b/unhex key) :n n :root root :by (into {} es) :v v :delta nil}])))
 

@@ -24,7 +24,7 @@
 
 ;; ── limbs
 
-(defn norm "drop trailing zero limbs (a fresh vector: a subvector is not editable)" [v]
+#_{:splint/disable [lint/into-literal]} (defn norm "drop trailing zero limbs (a fresh vector: a subvector is not editable)" [v]
   (loop [v (if (vector? v) (into [] v) (vec v))] (if (and (seq v) (zero? (peek v))) (recur (pop v)) v)))
 
 (defn from-bytes-be "the number of big-endian bytes" [bs]
@@ -146,7 +146,7 @@
 (defn- redc "T·R^-1 mod n for T < n·R" [{:keys [n k n0]} t]
   ;; the working vector is built fresh (into [] …), never a transient of the input: a host whose transient shares
   ;; the input's tail (glojure 0.7.22, measured 2026-10-23) would write through to the caller's value
-  (let [t (loop [t (into [] (concat t (repeat (- (inc (* 2 k)) (count t)) 0))) i 0]
+  (let [t (loop [t (vec (concat t (repeat (- (inc (* 2 k)) (count t)) 0))) i 0]
             (if (= i k) t
                 (let [m (mod (* (nth t i) n0) BASE)
                       t (loop [j 0 carry 0 t (transient t)]

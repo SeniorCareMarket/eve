@@ -54,13 +54,15 @@
    [varint klen][key bytes][varint vlen][value UTF-8 bytes]. Root = 32 (the payload)."
   [entries]
   (let [payload (byte-array
-                 (into []
-                       (concat (varint-bytes (count entries))
-                               (mapcat (fn [[k v]]
-                                         (let [vb (.getBytes ^String v "UTF-8")]
-                                           (concat (varint-bytes (alength k)) k
-                                                   (varint-bytes (alength vb)) vb)))
-                                       entries))))
+                 (vec
+                  (concat
+                   (varint-bytes (count entries))
+                   (mapcat
+                    (fn
+                      [[k v]]
+                      (let [vb (.getBytes v "UTF-8")]
+                        (concat (varint-bytes (alength k)) k (varint-bytes (alength vb)) vb)))
+                    entries))))
         total (* 8 (quot (+ 32 (alength payload) 7) 8))
         b (byte-array total)]
     (put-header b {:kind 0 :length total :root 32})

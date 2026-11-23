@@ -52,7 +52,7 @@
    {:a {:b {:c [1 2 #{"x" :y} ()]}}}
    [1 "two" :three 4.5 nil true [6] {:seven 7} #{8} (list 9 10)]
    (zipmap (range 200) (range 200))            ;; a HAMT past one level
-   (into #{} (range 200))
+   (set (range 200))
    (vec (range 1000))                          ;; a trie past one level
    (apply list (range 50))
    {:deep (vec (map (fn [i] {:i i :s (str "s" i) :v (vec (range (mod i 7)))})
@@ -104,7 +104,7 @@
 
 (deftest direct-build-no-garbage
   (doseq [v (into test-values [(zipmap (range 10000) (range 10000))
-                               (into #{} (range 5000))])]
+                               (set (range 5000))])]
     (let [b (build/build! v)
           sio (:sio b)
           root (:root b)

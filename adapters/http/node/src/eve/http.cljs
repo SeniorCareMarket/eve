@@ -40,7 +40,7 @@ parentPort.on('message', async ({ reqs, port, flag }) => {
 
 (def ^:private worker
   (delay (let [W (.-Worker wt)
-               w (new W WORKER #js {:eval true})]
+               w (W. WORKER #js {:eval true})]
            (.unref w)
            w)))
 
@@ -63,7 +63,8 @@ parentPort.on('message', async ({ reqs, port, flag }) => {
     []
     (let [flag (js/SharedArrayBuffer. 4)
           i32 (js/Int32Array. flag)
-          ch (new (.-MessageChannel wt))
+          ;; the constructor target is a property access, not a class name: the dot-sugar does not apply
+          ch #_{:splint/disable [style/new-object]} (new (.-MessageChannel wt))
           port (.-port2 ch)]
       (.postMessage @worker #js {:reqs (into-array (map js-req reqs)) :port port :flag flag} #js [port])
       (let [waited (js/Atomics.wait i32 0 0 TIMEOUT-MS)

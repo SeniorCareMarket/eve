@@ -610,9 +610,7 @@
           (puzzle-b-sample [elfs round]
             (let [elfs2 (move elfs)]
               ;;(println "round=" round "# elfs=" (count elfs))
-              (if (:ok elfs2)
-                (:ok elfs2)
-                (recur elfs2 (inc round)))))]
+              (or (:ok elfs2) (recur elfs2 (inc round)))))]
     (puzzle-b-sample (create-arr n) 1)))
 
 (defn puzzle-b-core [n]
