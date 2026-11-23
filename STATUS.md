@@ -66,3 +66,16 @@ tests; the format of record still applies to anything edited here.
   eve/ ("Configs copied"), activated via :config-paths.
   .gitignore: `.clj-kondo/` narrowed to `.clj-kondo/.cache/` so
   the fleet config is committable.
+- Step 2 (census) measured at 86fbaa2, tools: clj-kondo
+  2026.10.26, Splint 1.25.0, cljfmt 0.16.6, bb 1.13.230:
+  kondo 1455 errors / 2195 warnings / 265 info over 589 files;
+  Splint 2532 warnings; cljfmt 37 of 589 files unformatted;
+  clj-depend 0 violations (step 1). Carve's first run crashed
+  (its bundled kondo pod quit under load) — retried in two halves.
+  Full breakdown: CENSUS.md.
+- Baseline gate: the first full run died silently at 26 of 57
+  namespaces (process gone, no summary; box at load 30+ on 8 GB —
+  consistent with an OOM kill, unproven). Partial baseline banked
+  in the log: eve.type-io-test FAIL/ERRORs at the pin (tag-reader
+  rows) are pre-existing on bb. The baseline will be re-run in
+  namespace chunks before the format pass.
