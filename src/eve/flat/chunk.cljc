@@ -2325,6 +2325,17 @@
      :default (satisfies? IMapSource x)))
 ))
 
+;; basilisp reads no :clj arm, so the block above never defines
+;; IMapSource there; the :lpy section's map handles implement it.
+#?(:lpy (do
+(defprotocol IMapSource
+  (-entries [h] "[[key value] ...] with values as scalars or handles")
+  (-lookup [h k nf])
+  (-mcount [h])
+  (-assoc-entry [h k v])
+  (-dissoc-entry [h k]))
+(defn- map-source? [x] (satisfies? IMapSource x))))
+
 (defn rep-of
   "A read value (scalar or handle) as a rep."
   [x]
@@ -2472,9 +2483,6 @@
     :glj [(defmacro defseqhandle [tname & _]
             `(defn ~(symbol (str "->" tname)) [& ~'args]
                (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
-    :lpy [(defmacro defseqhandle [tname & _]
-            `(defn ~(symbol (str "->" tname)) [& ~'args]
-               (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :clj [(defmacro defseqhandle
   "A sequential handle over the node at off. nthf/countf/seqf/repf are
    fns of (ctx off) (nthf also takes i); flags pick the interfaces."
@@ -2607,9 +2615,6 @@
            `(defn ~(symbol (str "->" tname)) [& ~'args]
               (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :glj [(defmacro defmaphandle [tname & _]
-            `(defn ~(symbol (str "->" tname)) [& ~'args]
-               (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
-    :lpy [(defmacro defmaphandle [tname & _]
             `(defn ~(symbol (str "->" tname)) [& ~'args]
                (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
     :clj [(defmacro defmaphandle
@@ -2751,6 +2756,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lpy []
     :default [(defseqhandle FlatVec [ctx off mm _h _d] elem-at elem-count seq-of-node vec-rep-of :vector? true)
               (defseqhandle FlatColVec [ctx off mm _h _d] elem-at elem-count seq-of-node vec-rep-of :vector? true)
               (defseqhandle FlatList [ctx off mm _h _d] elem-at elem-count seq-of-node list-rep-of :list? true)
@@ -2784,6 +2790,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lpy []
     :default [(defmaphandle FlatMap [ctx off mm _h _d]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2793,6 +2800,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lpy []
     :default [(defmaphandle FlatRecord [ctx off mm _h _d tkey fp]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2803,6 +2811,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lpy []
     :default [(defmaphandle FlatTagged [ctx off mm _h _d tkey fp]
                 (entries-of-node ctx off)
                 (lookup-node ctx off k nf)
@@ -2813,6 +2822,7 @@
 #?@(:jank []
     :bb []
     :glj []
+    :lpy []
     :default [(defmaphandle FlatRow [ctx off row mm _h _d]
                 (row-entries ctx off row)
                 (row-lookup ctx off row k nf)
@@ -3592,6 +3602,503 @@
 (defmethod print-method FlatSet [x w] (.write w (pr-str (-rep x))))
 
 )) ; end bb handles
+
+;; --- the basilisp handles -------------------------------------------------
+;; Hand-written like the bb/glojure sections: the types implement
+;; basilisp's collection interfaces directly (the basilisp coll
+;; adapter's eve.core is clojure.core itself, so there is no eve.core
+;; protocol surface to write against), plus this namespace's handle
+;; protocols. Basilisp mechanics, each proven in miniature before this
+;; section was written: deftype* refuses partial interface
+;; implementations, so every inherited member is spelled; nth arrives
+;; with Python kwargs (the runtime passes notfound= as a keyword, the
+;; NTH_SENTINEL marking the two-arity call); meta is a Python property
+;; on the interfaces, so each type's meta is installed as a property
+;; after its deftype; IReversible is not an abstract class, so it
+;; cannot be claimed in deftype* and rseq is installed the same way;
+;; fields are not assignable, so the _h/_d caches stay uncomputed
+;; fields like the bb section's (its -hash/-digest compute on each
+;; call too).
+
+#?(:lpy (do
+
+(deftype FlatVec [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (vec-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatVec ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentVector
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assocN-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (seq [_] (seq-of-node ctx off))
+  (contains [_ k] (and (integer? k) (<= 0 k) (< k (elem-count ctx off))))
+  (entry [_ k] (when (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                 (basilisp.core/map-entry k (elem-at ctx off k))))
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (elem-at ctx off k)
+                         (second args))))
+  (empty [_] [])
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (elem-at ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  (peek [_] (when (pos? (elem-count ctx off))
+              (elem-at ctx off (dec (elem-count ctx off)))))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq-of-node ctx off))
+                       (pg-reduce (first args) (second args) (seq-of-node ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatVec ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__getitem__ [_ i] (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+                       (elem-at ctx off i)
+                       (throw (python/IndexError (str i)))))
+  (__iter__ [_] (python/iter (seq-of-node ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatVec "meta" (python/property (fn [this] (.-mm this))))
+(python/setattr FlatVec "rseq" (fn [this] (seq (into () (seq-of-node (.-ctx this) (.-off this))))))
+
+(deftype FlatColVec [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (vec-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatColVec ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentVector
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assocN-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (seq [_] (seq-of-node ctx off))
+  (contains [_ k] (and (integer? k) (<= 0 k) (< k (elem-count ctx off))))
+  (entry [_ k] (when (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                 (basilisp.core/map-entry k (elem-at ctx off k))))
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (elem-at ctx off k)
+                         (second args))))
+  (empty [_] [])
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (elem-at ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  (peek [_] (when (pos? (elem-count ctx off))
+              (elem-at ctx off (dec (elem-count ctx off)))))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq-of-node ctx off))
+                       (pg-reduce (first args) (second args) (seq-of-node ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatColVec ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__getitem__ [_ i] (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+                       (elem-at ctx off i)
+                       (throw (python/IndexError (str i)))))
+  (__iter__ [_] (python/iter (seq-of-node ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatColVec "meta" (python/property (fn [this] (.-mm this))))
+(python/setattr FlatColVec "rseq" (fn [this] (seq (into () (seq-of-node (.-ctx this) (.-off this))))))
+
+(deftype FlatList [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (list-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatList ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentStack
+  (peek [_] (when (pos? (elem-count ctx off)) (elem-at ctx off 0)))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IPersistentCollection
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (empty [_] ())
+  (seq [_] (seq-of-node ctx off))
+  basilisp.lang.interfaces/IIndexed
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (elem-at ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  basilisp.lang.interfaces/ILookup
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (elem-at ctx off k)
+                         (second args))))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq-of-node ctx off))
+                       (pg-reduce (first args) (second args) (seq-of-node ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatList ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__iter__ [_] (python/iter (seq-of-node ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatList "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatBatch [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (batch-rep-of ctx off)]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatBatch ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentVector
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assocN-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (seq [_] (batch-seq-of ctx off))
+  (contains [_ k] (and (integer? k) (<= 0 k) (< k (elem-count ctx off))))
+  (entry [_ k] (when (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                 (basilisp.core/map-entry k (row-handle ctx off k))))
+  (val-at [_ & args] (let [k (first args)]
+                       (if (and (integer? k) (<= 0 k) (< k (elem-count ctx off)))
+                         (row-handle ctx off k)
+                         (second args))))
+  (empty [_] [])
+  (^{:kwargs :collect} nth [_ i & kwargs]
+    (let [nf (:notfound kwargs ::none)]
+      (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+        (row-handle ctx off i)
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (throw (python/IndexError (str i)))
+          nf))))
+  (peek [_] (when (pos? (elem-count ctx off))
+              (row-handle ctx off (dec (elem-count ctx off)))))
+  (pop [_] (pop-flat _))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (batch-seq-of ctx off))
+                       (pg-reduce (first args) (second args) (batch-seq-of ctx off))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatBatch ctx off m _h _d))
+  (__len__ [_] (elem-count ctx off))
+  (__getitem__ [_ i] (if (and (integer? i) (<= 0 i) (< i (elem-count ctx off)))
+                       (row-handle ctx off i)
+                       (throw (python/IndexError (str i)))))
+  (__iter__ [_] (python/iter (batch-seq-of ctx off)))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatBatch "meta" (python/property (fn [this] (.-mm this))))
+(python/setattr FlatBatch "rseq" (fn [this] (seq (into () (batch-seq-of (.-ctx this) (.-off this))))))
+
+(deftype FlatMap [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (entries-rep-of (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatMap ctx off m _h _d))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  (entry [_ k] (let [v (lookup-node ctx off k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (lookup-node ctx off (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (entries-of-node ctx off)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (entries-of-node ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatMap ctx off m _h _d))
+  (__len__ [_] (count (entries-of-node ctx off)))
+  (__getitem__ [_ k] (let [v (lookup-node ctx off k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (entries-of-node ctx off))))
+  (__eq__ [_ other] (entries-equiv (entries-of-node ctx off) other))
+  (__hash__ [_] (entries-hasheq-of (entries-of-node ctx off)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatMap "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatRecord [ctx off mm _h _d tkey fp]
+  d/ISabpType
+  (-sabp-type-key [_] tkey)
+  IFlatHandle
+  (-rep [_] (let [r (record-entries-rep tkey fp (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatRecord ctx off m _h _d tkey fp))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRecordInfo
+  (-tkey [_] tkey)
+  (-fp [_] fp)
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  (entry [_ k] (let [v (lookup-node ctx off k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (lookup-node ctx off (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (entries-of-node ctx off)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (entries-of-node ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatRecord ctx off m _h _d tkey fp))
+  (__len__ [_] (count (entries-of-node ctx off)))
+  (__getitem__ [_ k] (let [v (lookup-node ctx off k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (entries-of-node ctx off))))
+  (__eq__ [_ other] (entries-equiv (entries-of-node ctx off) other))
+  (__hash__ [_] (entries-hasheq-of (entries-of-node ctx off)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatRecord "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatTagged [ctx off mm _h _d tkey fp]
+  d/ISabpType
+  (-sabp-type-key [_] tkey)
+  IFlatHandle
+  (-rep [_] (let [r (record-entries-rep tkey fp (entries-of-node ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatTagged ctx off m _h _d tkey fp))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (entries-of-node ctx off))
+  (-lookup [_ k nf] (lookup-node ctx off k nf))
+  (-mcount [_] (count (entries-of-node ctx off)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRecordInfo
+  (-tkey [_] tkey)
+  (-fp [_] fp)
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (lookup-node ctx off k ::absent))))
+  (entry [_ k] (let [v (lookup-node ctx off k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (lookup-node ctx off (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (entries-of-node ctx off)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (entries-of-node ctx off)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (entries-of-node ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatTagged ctx off m _h _d tkey fp))
+  (__len__ [_] (count (entries-of-node ctx off)))
+  (__getitem__ [_ k] (let [v (lookup-node ctx off k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (entries-of-node ctx off))))
+  (__eq__ [_ other] (entries-equiv (entries-of-node ctx off) other))
+  (__hash__ [_] (entries-hasheq-of (entries-of-node ctx off)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatTagged "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatRow [ctx off row mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (entries-rep-of (row-entries ctx off row))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (row-digest-of _))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatRow ctx off row m _h _d))
+  (-hmeta [_] mm)
+  IMapSource
+  (-entries [_] (row-entries ctx off row))
+  (-lookup [_ k nf] (row-lookup ctx off row k nf))
+  (-mcount [_] (count (row-entries ctx off row)))
+  (-assoc-entry [_ k v] (assoc-flat _ k v))
+  (-dissoc-entry [_ k] (dissoc-flat _ k))
+  IRowHandle
+  (-row-index [_] row)
+  basilisp.lang.interfaces/IPersistentMap
+  (assoc [_ & kvs] (loop [h _ ps (seq kvs)]
+                     (if ps (recur (assoc-flat h (first ps) (second ps)) (nnext ps)) h)))
+  (dissoc [_ & ks] (loop [h _ ps (seq ks)]
+                     (if ps (recur (dissoc-flat h (first ps)) (next ps)) h)))
+  (contains [_ k] (not (identical? ::absent (row-lookup ctx off row k ::absent))))
+  (entry [_ k] (let [v (row-lookup ctx off row k ::absent)]
+                 (when-not (identical? ::absent v)
+                   (basilisp.core/map-entry k v))))
+  (val-at [_ & args] (row-lookup ctx off row (first args) (second args)))
+  (cons [_ & xs] (pg-map-conj _ (first xs)))
+  (empty [_] {})
+  (seq [_] (pg-entries-seq (row-entries ctx off row)))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (pg-entries-seq (row-entries ctx off row)))
+                       (pg-reduce (first args) (second args) (pg-entries-seq (row-entries ctx off row)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatRow ctx off row m _h _d))
+  (__len__ [_] (count (row-entries ctx off row)))
+  (__getitem__ [_ k] (let [v (row-lookup ctx off row k ::absent)]
+                       (if (identical? ::absent v)
+                         (throw (python/KeyError k))
+                         v)))
+  (__iter__ [_] (python/iter (pg-entries-seq (row-entries ctx off row))))
+  (__eq__ [_ other] (entries-equiv (row-entries ctx off row) other))
+  (__hash__ [_] (entries-hasheq-of (row-entries ctx off row)))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatRow "meta" (python/property (fn [this] (.-mm this))))
+
+(deftype FlatSet [ctx off mm _h _d]
+  IFlatHandle
+  (-rep [_] (let [r (into #{} (map rep-of) (set-elements ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatSet ctx off m _h _d))
+  (-hmeta [_] mm)
+  basilisp.lang.interfaces/IPersistentSet
+  (disj [_ & xs] (loop [h _ ps (seq xs)]
+                   (if ps (recur (disjoin-flat h (first ps)) (next ps)) h)))
+  (cons [_ & xs] (cons-flat _ (first xs)))
+  (empty [_] #{})
+  (seq [_] (when (pos? (long (first (set-parts ctx off))))
+             (seq (set-elements ctx off))))
+  basilisp.lang.interfaces/ILookup
+  (val-at [_ & args] (let [k (first args)
+                           es (set-elements ctx off)]
+                       (loop [i 0]
+                         (cond (== i (count es)) (second args)
+                               (= (nth es i) k) (nth es i)
+                               :else (recur (inc i))))))
+  basilisp.lang.interfaces/IReduce
+  (reduce [_ & args] (if (== 1 (count args))
+                       (pg-reduce (first args) (seq (set-elements ctx off)))
+                       (pg-reduce (first args) (second args) (seq (set-elements ctx off)))))
+  basilisp.lang.interfaces/IWithMeta
+  (meta [_] mm)
+  (with-meta [_ m] (->FlatSet ctx off m _h _d))
+  (__len__ [_] (long (first (set-parts ctx off))))
+  (__contains__ [_ k] (boolean (some (fn [e] (= e k)) (set-elements ctx off))))
+  (__iter__ [_] (python/iter (seq (set-elements ctx off))))
+  (__eq__ [_ other] (node-equiv ctx off other))
+  (__hash__ [_] (node-hasheq ctx off))
+  (__str__ [_] (pr-str (-rep _))))
+
+(python/setattr FlatSet "meta" (python/property (fn [this] (.-mm this))))
+
+)) ; end lpy handles
 
 #?(:glj (do
 
