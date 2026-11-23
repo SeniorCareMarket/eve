@@ -237,24 +237,47 @@
            (define (eve-region-bytes n) (let ((bv (make-immobile-bytevector n))) (bytevector-fill! bv 0) bv))
            (define eve-region-memset (foreign-procedure \"memset\" (u8* int size_t) uptr))
            (define (eve-region-address bv) (eve-region-memset bv 0 0))
-           (define (eve-region-pl-i32 r b o) (let ((v (foreign-ref 'integer-32 b o))) (keep-live r) v))
-           (define (eve-region-pl-i64 r b o) (let ((v (foreign-ref 'integer-64 b o))) (keep-live r) v))
-           (define (eve-region-pl-u8 r b o) (let ((v (foreign-ref 'unsigned-8 b o))) (keep-live r) v))
-           (define (eve-region-ps-i32! r b o v) (foreign-set! 'unsigned-32 b o (bitwise-and v #xFFFFFFFF)) (keep-live r))
-           (define (eve-region-ps-u8! r b o v) (foreign-set! 'unsigned-8 b o (bitwise-and v #xFF)) (keep-live r))
+;; foreign-ref / foreign-set! at optimize-level 3 (#3%) where the address and offset are fixnums: the
+           ;; open-coded load or store, ~5 ns, where the checked procedure (check-args, the type resolved per call) is
+           ;; ~40 ns: 36% of sorted-set-build-200 on jolt (jolt.profile, 2026-11-22 ET). An address or offset that is
+           ;; not a fixnum takes the checked procedure, as before.
+           (define-syntax eve-region-fx2
+             (syntax-rules () ((_ b o fast slow) (if (and (fixnum? b) (fixnum? o)) fast slow))))
+           (define (eve-region-pl-i32 r b o)
+             (let ((v (eve-region-fx2 b o (#3%foreign-ref 'integer-32 b o) (foreign-ref 'integer-32 b o)))) (keep-live r) v))
+           (define (eve-region-pl-i64 r b o)
+             (let ((v (eve-region-fx2 b o (#3%foreign-ref 'integer-64 b o) (foreign-ref 'integer-64 b o)))) (keep-live r) v))
+           (define (eve-region-pl-u8 r b o)
+             (let ((v (eve-region-fx2 b o (#3%foreign-ref 'unsigned-8 b o) (foreign-ref 'unsigned-8 b o)))) (keep-live r) v))
+           (define (eve-region-ps-i32! r b o v)
+             (let ((w (bitwise-and v #xFFFFFFFF)))
+               (eve-region-fx2 b o (#3%foreign-set! 'unsigned-32 b o w) (foreign-set! 'unsigned-32 b o w)))
+             (keep-live r))
+           (define (eve-region-ps-u8! r b o v)
+             (let ((w (bitwise-and v #xFF)))
+               (eve-region-fx2 b o (#3%foreign-set! 'unsigned-8 b o w) (foreign-set! 'unsigned-8 b o w)))
+             (keep-live r))
            ;; the worker-registry scan (eve.atom/mmap-min-safe-epoch): from slot i, the first slot whose status word is
            ;; active and whose epoch word is not 0, as (slot * 2^32) + (epoch + 2^31); -1 when none. The same two
            ;; aligned seq-cst loads per slot, in the same order, as the loop over -load-i32 (a MOV each on x86-64)
+           ;; (#3%foreign-ref when the address is a fixnum, as the plain loads above: every offset here is fixnum
+           ;; arithmetic already.)
+           (define-syntax eve-region-scan-loop
+             (syntax-rules ()
+               ((_ ref r b start i0 n stride soff eoff active)
+                (let loop ((i i0))
+                  (if (fx>= i n)
+                      (begin (keep-live r) -1)
+                      (let* ((o (fx+ start (fx* i stride)))
+                             (st (ref 'integer-32 b (fx+ o soff)))
+                             (ep (ref 'integer-32 b (fx+ o eoff))))
+                        (if (and (fx= st active) (not (fx= ep 0)))
+                            (begin (keep-live r) (+ (* i 4294967296) (+ ep 2147483648)))
+                            (loop (fx+ i 1)))))))))
            (define (eve-region-scan-pinned r b start i n stride soff eoff active)
-             (let loop ((i i))
-               (if (fx>= i n)
-                   (begin (keep-live r) -1)
-                   (let* ((o (fx+ start (fx* i stride)))
-                          (st (foreign-ref 'integer-32 b (fx+ o soff)))
-                          (ep (foreign-ref 'integer-32 b (fx+ o eoff))))
-                     (if (and (fx= st active) (not (fx= ep 0)))
-                         (begin (keep-live r) (+ (* i 4294967296) (+ ep 2147483648)))
-                         (loop (fx+ i 1)))))))
+             (if (fixnum? b)
+                 (eve-region-scan-loop #3%foreign-ref r b start i n stride soff eoff active)
+                 (eve-region-scan-loop foreign-ref r b start i n stride soff eoff active)))
            (define eve-region-libatomic
              (guard (c (#t #f)) (load-shared-object \"libatomic.so.1\") #t))
            (define eve-region-cas4-raw
