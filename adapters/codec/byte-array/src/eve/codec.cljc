@@ -18,7 +18,8 @@
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
    [eve.encoding :as enc]
-   [eve.fast-proto :as fp]))
+   [eve.fast-proto :as fp]
+   #?(:jolt [jolt.scheme :as scheme])))
 
 (defn encode-sab-pointer
   "Encode a slab pointer: [0xEE 0xDB tag off0 off1 off2 off3], a fresh byte
@@ -86,53 +87,84 @@
 
 (def ^:private ^:const KW_CACHE_MAX 4096)
 
+;; jolt: the little-endian words below as Chez's bytevector-u32-ref / -s32-ref / -s64-ref / -ieee-double-ref and their
+;; setters, on the byte array's own bytevector (a jolt byte array is one). jolt's bit-shift-left never open-codes: each
+;; shift masks with a 2^64 bignum and wraps to 64 bits (wrap64), so read-u32-le was three of those per word; the codec's
+;; word reads were 13-19% of eve.db.ds's runtime and sorted-set-build-200 on jolt (jolt.profile, 2026-11-22 ET). The
+;; same values and bytes as the :default arms; an index out of range throws, as aget does.
+#?(:jolt
+   (do
+     (scheme/eval-string
+      "(begin
+         (define (eve-codec-u32 a i) (bytevector-u32-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-codec-s32 a i) (bytevector-s32-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-codec-s64 a i) (bytevector-s64-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-codec-f64 a i) (bytevector-ieee-double-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-codec-put-u32! a i v)
+           (bytevector-u32-set! (jolt-array-vec a) i (if (fixnum? v) (fxand v #xFFFFFFFF) (bitwise-and v #xFFFFFFFF))
+                                (endianness little)))
+         (define (eve-codec-put-s64! a i v) (bytevector-s64-set! (jolt-array-vec a) i v (endianness little)))
+         #t)")
+     (def ^:private u32-le* (scheme/proc "eve-codec-u32"))
+     (def ^:private i32-le* (scheme/proc "eve-codec-s32"))
+     (def ^:private i64-le* (scheme/proc "eve-codec-s64"))
+     (def ^:private f64-le* (scheme/proc "eve-codec-f64"))
+     (def ^:private put-u32-le* (scheme/proc "eve-codec-put-u32!"))
+     (def ^:private put-i64-le* (scheme/proc "eve-codec-put-s64!"))))
+
 ;; --- EVE binary format — manual LE byte helpers (no ByteBuffer alloc) ---
 
 (defn- read-u8  [^bytes b ^long i]
   (bit-and (aget b i) 0xFF))
 
 (defn- read-u32-le  [^bytes b ^long i]
-  (bit-or (bit-and (long (aget b i)) 0xFF)
-          (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
-          (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
-          (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)))
+  #?(:jolt (u32-le* b i)
+     :default (bit-or (bit-and (long (aget b i)) 0xFF)
+                      (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
+                      (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
+                      (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24))))
 
 (defn- read-i32-le  [^bytes b ^long i]
-  (let [u (read-u32-le b i)]
-    (if (>= u 0x80000000)
-      (- u 0x100000000)
-      u)))
+  #?(:jolt (i32-le* b i)
+     :default (let [u (read-u32-le b i)]
+                (if (>= u 0x80000000)
+                  (- u 0x100000000)
+                  u))))
 
 (defn- read-i64-le  [^bytes b ^long i]
-  (bit-or (bit-and (long (aget b i)) 0xFF)
-          (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
-          (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
-          (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)
-          (bit-shift-left (bit-and (long (aget b (+ i 4))) 0xFF) 32)
-          (bit-shift-left (bit-and (long (aget b (+ i 5))) 0xFF) 40)
-          (bit-shift-left (bit-and (long (aget b (+ i 6))) 0xFF) 48)
-          (bit-shift-left (long (aget b (+ i 7))) 56)))
+  #?(:jolt (i64-le* b i)
+     :default (bit-or (bit-and (long (aget b i)) 0xFF)
+                      (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
+                      (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
+                      (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)
+                      (bit-shift-left (bit-and (long (aget b (+ i 4))) 0xFF) 32)
+                      (bit-shift-left (bit-and (long (aget b (+ i 5))) 0xFF) 40)
+                      (bit-shift-left (bit-and (long (aget b (+ i 6))) 0xFF) 48)
+                      (bit-shift-left (long (aget b (+ i 7))) 56))))
 
 (defn- read-f64-le  [^bytes b ^long i]
-  (enc/long-bits->double (read-i64-le b i)))
+  #?(:jolt (f64-le* b i)
+     :default (enc/long-bits->double (read-i64-le b i))))
 
 ;; --- LE write helpers (eliminates ByteBuffer alloc for fixed-size types) ---
 
 (defn- put-i32-le! [^bytes b ^long off ^long v]
-  (aset b off       (unchecked-byte v))
-  (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
-  (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
-  (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24))))
+  #?@(:jolt [(put-u32-le* b off v)]
+      :default [(aset b off       (unchecked-byte v))
+                (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
+                (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
+                (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24)))]))
 
 (defn- put-i64-le! [^bytes b ^long off ^long v]
-  (aset b off       (unchecked-byte v))
-  (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
-  (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
-  (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24)))
-  (aset b (+ off 4) (unchecked-byte (unsigned-bit-shift-right v 32)))
-  (aset b (+ off 5) (unchecked-byte (unsigned-bit-shift-right v 40)))
-  (aset b (+ off 6) (unchecked-byte (unsigned-bit-shift-right v 48)))
-  (aset b (+ off 7) (unchecked-byte (unsigned-bit-shift-right v 56))))
+  #?@(:jolt [(put-i64-le* b off v)]
+      :default [(aset b off       (unchecked-byte v))
+                (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
+                (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
+                (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24)))
+                (aset b (+ off 4) (unchecked-byte (unsigned-bit-shift-right v 32)))
+                (aset b (+ off 5) (unchecked-byte (unsigned-bit-shift-right v 40)))
+                (aset b (+ off 6) (unchecked-byte (unsigned-bit-shift-right v 48)))
+                (aset b (+ off 7) (unchecked-byte (unsigned-bit-shift-right v 56)))]))
 
 (defn- put-f64-le! [^bytes b ^long off ^double v]
   (put-i64-le! b off (enc/double->long-bits v)))
