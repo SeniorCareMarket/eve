@@ -499,10 +499,10 @@
 ;; call, and on the protocol hosts the protocol fn call — the only
 ;; dispatch those hosts have (jank's completion objects have no native
 ;; members at all).
-(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :clj (.wRaw ^IBuf w) :default (.raw w)))
-(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :clj (.wPos ^IBuf w) :default (.pos w)))
+(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :lpy (wRaw w) :clj (.wRaw ^IBuf w) :default (.raw w)))
+(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :lpy (wPos w) :clj (.wPos ^IBuf w) :default (.pos w)))
 (defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :lpy (wSeek w p) :clj (.wSeek ^IBuf w p) :default (.seek w p)))
-(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :clj (.wU8 ^IBuf w v) :default (.u8 w v)))
+(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :lpy (wU8 w v) :clj (.wU8 ^IBuf w v) :default (.u8 w v)))
 (defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :lpy (wU16 w v) :clj (.wU16 ^IBuf w v) :default (.u16 w v)))
 (defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :lpy (wU32 w v) :clj (.wU32 ^IBuf w v) :default (.u32 w v)))
 (defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :lpy (wI64 w v) :clj (.wI64 ^IBuf w v) :default (.i64 w v)))
