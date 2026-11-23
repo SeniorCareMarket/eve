@@ -37,6 +37,21 @@
 ; falsifies the ->Type constructor arity kondo derives, and
 ; let-binding them per method costs an unused-binding warning on
 ; every method that does not use both.)
+;
+; The same :linters entry also excludes a small family of host
+; class/type names: Throwable, Thread, Duration, List, dynamic,
+; and the package heads java and clojure. Eve's sources are
+; portable .cljc/.cljd written per host — JVM-only drivers and
+; test scripts catch Throwable and name java.* classes outright,
+; .cljc tests name clojure.lang.* classes, and the Dart faces
+; (.cljd) name Dart's Duration, List and dynamic. Kondo lints
+; every file under passes for hosts that never load those
+; branches, where the names cannot resolve; on the hosts the
+; code actually runs on, each name is bound by the platform.
+; The exclusion is symbol-exact, and this part is deliberately
+; NOT mirrored into the kondo export: it models Eve's own
+; sources, and a consumer's stray Throwable should still warn
+; in their tree.
 {:min-clj-kondo-version "2026.10.26"
  :lint-as {eve.alpha/deftype clojure.core/deftype
            eve.alpha/extend-type clojure.core/extend-type
@@ -58,4 +73,6 @@
                         eve.host/field hooks.eve-host-field/field
                         jolt.ffi/defcfn hooks.jolt-ffi-defcfn/defcfn
                         eve.thread/api-defs hooks.eve-api-defs/thread}}
- :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}
+ :linters {:unresolved-symbol {:exclude [sio__ offset__ Throwable Thread
+                                          Duration List dynamic java
+                                          clojure]}}}
