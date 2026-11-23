@@ -395,3 +395,49 @@ kondo and fixed: start.cljc browser-args called
 display? before its def — the duplicate def deleted
 in the redefined-var batch was load-bearing for
 compile order; a (declare display?) now precedes it.
+
+## Third lane — session 2 bank 7 (2026-11-23, ~16:40 ET)
+
+KONDO LEG CLOSED. Recount17 (serial, fresh cache, gate
+scope): kondo exit=0 — 0 errors, 0 warnings. Census was
+1455E / 2195W / 265I; the 141 remaining findings are all
+info: unresolved-excluded-var 82 + unused-excluded-var 58
+(the recorded consequence of the central exclusion config —
+the excluded names ARE the host faces; account, don't
+chase) and aliased-referred-var 1 (the known merged-
+namespace ghost). Classes closed since bank 6:
+unresolved-var (centralized: per-file ns-config exclusions
+moved into the central config — a qualified name inside an
+ns-form config itself reads as unresolved-namespace;
+433 names with the merged-namespace reason in the header),
+unused-binding 445→0 (hook synthetic args underscore-
+prefixed; lang-aware renames; :keys removals — audited:
+ONE misfire, deftype_guard_test's `error` key, restored
+and gate-verified; per-pass discards on the inner forms),
+unused-referred-var (four host-face mirror files closed by
+file-level ns config — per-spec discards proved unstable
+across kondo's spec attribution), type-mismatch (site
+reasons + the array_test ns scoping), unresolved-symbol
+66→0 (teaching: deftype hook declares <Type>__Flat,
+<Type>__from-header, <Type>-type-key — the last emitted by
+deftype-proto.sio:590; defdelay lint-as; Dart core names;
+with-heap-slab anaphora hook binding sio only when the
+body names it; site discards for host core faces on the
+pass with no seat). DEAD END banked: :config-in {:ns ...}
+exclusions bind nothing in kondo 2026.10.26, standalone or
+at gate scope (measured both) — the table was removed.
+REAL DEFECTS found and fixed en route: place.cljc's
+owner-base binding (a prior lane's rename had broken its
+:clj arm; restored to the base-pin shape; provenance:
+665bcf84 text vs commit 1ee1c9b) and the deftype_guard
+`error` key above. PRE-EXISTING, proven at the pristine
+base pin under the lane's own gate driver: eve.flat
+.place-test and eve.flat.build-test die at load with
+"Unable to resolve symbol: definterface" (the bb/SCI seat
+provides no definterface for these isolated runs) — not
+lane damage; recorded here as their baseline state under
+this driver. OPEN Eve finding for RETRO: eve.atom's $,
+validate-storage-model!, dump-block-detail!,
+dump-block-stats! are called by test tooling but not
+defined at this pin. Remaining: Splint campaign, Carve
+campaign, full baseline reproduction, RETRO completion.
