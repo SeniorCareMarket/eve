@@ -1,4 +1,5 @@
-(ns eve.host-completion
+;; clj-kondo: redefined-var ignored for this whole file — eve.host-completion is one namespace per host: each adapters/completion/* file is a different host's face of it, selected by classpath and never co-loaded, and each face interns/defines the same completion vocabulary — so redefined-var is the layout, not a defect.
+(ns ^{:clj-kondo/ignore [:redefined-var]} eve.host-completion
   "ClojureDart's completion of its core to Clojure's, loaded first by eve.host (HOST-CONTRACT §10): what cljd.core
    lacks and eve's shared code calls. A ClojureDart namespace is compiled ahead of time and cljd.core cannot be added
    to, so a name here is found where cljd.core has none: a program's build resolves an unqualified symbol no namespace defines to the one here.

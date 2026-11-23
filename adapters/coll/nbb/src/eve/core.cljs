@@ -1,4 +1,5 @@
-(ns eve.core
+;; clj-kondo: redefined-var ignored for this whole file — eve.core is one namespace per host face: this file is nbb's face; the other adapters/coll/* files are the other hosts' faces of the same namespace, selected by classpath and never co-loaded. The defs intentionally shadow the referred cljs.core names where nbb's core lacks them — so redefined-var is the layout, not a defect.
+(ns ^{:clj-kondo/ignore [:redefined-var]} eve.core
   "EVE's collection vocabulary (adapters/README.md, coll) on nbb
    (ClojureScript on SCI): cljs.core's, as on ClojureScript, and the
    internals of cljs.core nbb lacks — the chunked seq protocols, ASeq,

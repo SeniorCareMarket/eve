@@ -1,4 +1,5 @@
-(ns eve.host
+;; clj-kondo: redefined-var ignored for this whole file — eve.host is one namespace per host: each adapters/core/* file is a different host's face of the host seam, selected by classpath and never co-loaded, and the faces define the same seam vocabulary — so redefined-var is the layout, not a defect.
+(ns ^{:clj-kondo/ignore [:redefined-var]} eve.host
   "eve.host's macros on cherry (host.cljs has the rest, as functions): the
    names that take forms rather than values. Their expansions name no core
    function eve.host also defines, which cherry would read as eve.host's own.")

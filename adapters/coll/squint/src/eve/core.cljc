@@ -1,4 +1,5 @@
-(ns eve.core
+;; clj-kondo: redefined-var ignored for this whole file — eve.core is one namespace per host face: this file is squint's SCI face, eve/core.cljs beside it the runtime face, and the other adapters/coll/* files the other hosts' faces. The defs intentionally shadow the referred cljs.core names — providing the internals squint's core lacks is the file's job — so redefined-var is the layout, not a defect.
+(ns ^{:clj-kondo/ignore [:redefined-var]} eve.core
   "eve.core's SCI face on squint: what squint's SCI sees when a .cljc
    consumer's macro graph loads eve.core. Squint takes a namespace's
    SCI vars from its .cljc only (the pair trap — eve.host's pair died
