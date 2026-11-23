@@ -79,3 +79,20 @@ tests; the format of record still applies to anything edited here.
   in the log: eve.type-io-test FAIL/ERRORs at the pin (tag-reader
   rows) are pre-existing on bb. The baseline will be re-run in
   namespace chunks before the format pass.
+- Baseline, second attempt (one bb process per namespace — a
+  19-namespace chunk was OOM-killed at exit 137, measured): the
+  per-namespace baseline is the lane's gate reference. Reds are
+  compared per namespace after every batch; a red that exists at
+  baseline is pre-existing, a new one is the batch's. In progress.
+- Kondo hook mechanics proven in scratch (hooktest2): an
+  analyze-call hook for the deftype family rewrites Eve deftype
+  to clojure.core/deftype with sio__/offset__ prepended to the
+  fields, the {:print} options map re-homed in a let binding the
+  fields, and protocol groups translated per pass from
+  eve.deftype-proto.proto-map's own tables. Two traps measured:
+  (1) :meta field nodes must be rebuilt as plain tokens or
+  kondo's parser dies ("Key must be integer"); (2) kondo's cache
+  does not key on hook code — clear .clj-kondo/.cache after any
+  hook edit or stale-hook results masquerade as hook bugs.
+  api/coerce of a whole sexpr is NOT recognized as deftype;
+  synthetic nodes preserving the original subnodes are.
