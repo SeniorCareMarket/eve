@@ -790,10 +790,12 @@
    sorted map epoch -> count, so its least is its first key however many
    views are alive)."
   [root-r slot-idx pins]
+  ;; one pass over the entries (no dissoc, no lazy seqs: on jolt they and the sorted map's seqs were a fifth of a
+  ;; small deref), and the views' first key read only where there are views
   (let [views (get pins ::views)
-        threads (dissoc pins ::views)
-        tmin (when (seq threads) (reduce min (map first (vals threads))))
-        vmin (when (seq views) (key (first views)))]
+        tmin (reduce-kv (fn [m k v] (if (= k ::views) m (let [e (first v)] (if (or (nil? m) (< e m)) e m))))
+                        nil pins)
+        vmin (when (pos? (count views)) (key (first views)))]
     (if (and (nil? tmin) (nil? vmin))
       (mmap-unpin-epoch! root-r slot-idx)
       (mmap-pin-epoch! root-r slot-idx (min (or tmin vmin) (or vmin tmin))))))
