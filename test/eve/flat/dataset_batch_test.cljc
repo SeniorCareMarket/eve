@@ -11,6 +11,7 @@
           one session, answers equal under the bench's own tolerance.
      H6.3 dataset-column-types — strings, keywords, booleans, nulls,
           int64 and instants as columns, round-tripped exactly."
+  (:refer-clojure :exclude [doubles])
   (:require [clojure.test :refer [deftest testing is]]
             [eve.alpha :as e]
             [eve.array :as arr]

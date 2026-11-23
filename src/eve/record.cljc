@@ -1,6 +1,6 @@
 (ns eve.record
   "Immutable nominal records in Eve memory. No process-local payloads."
-  (:refer-clojure :exclude [defrecord])
+  (:refer-clojure :exclude [defrecord record?])
   #?(:cljs (:require-macros [eve.record]))
   (:require [eve.host]
             [eve.core :as e]

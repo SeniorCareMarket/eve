@@ -22,6 +22,7 @@
    The alias must not munge to squint_core (an earlier :as squint-core
    did): squint emits its implicit core import under that name too,
    and the duplicate import declaration is a SyntaxError at load."
+  (:refer-clojure :exclude [uuid])
   (:require ["squint-cljs/core.js" :as core]
             [eve.core :refer [IEquiv IHash IPrintWithWriter]]
             [eve.hamt-util :as hu]

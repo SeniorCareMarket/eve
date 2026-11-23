@@ -5,7 +5,8 @@
    relied on (ClojureCLR, basilisp, whose unchecked-* do not narrow, clojerl,
    whose integers are unbounded): values are kept in [0, 2^32) through quot,
    mod, * and + — every intermediate under 2^53 — and two-argument bit
-   operations on them; no shift past 32 bits, no unsigned-bit-shift-right.")
+   operations on them; no shift past 32 bits, no unsigned-bit-shift-right."
+  (:refer-clojure :exclude [imul]))
 
 (def ^:private TWO32 4294967296)
 (def ^:private TWO31 2147483648)

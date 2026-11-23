@@ -5,7 +5,7 @@
    go of it, and a's next flush freed the map under b — every block of it back in the allocator while b's slot still
    named it (VS's docs/reclaim/atom-domains.md §1, T5; VS's spike/atom-domain/gaps.py G1). The same for a value moved
    between keys of one atom (G2), and an unshared atom's writes still free exactly what they replace."
-  (:refer-clojure :exclude [swap! reset!])
+  (:refer-clojure :exclude [swap! reset! ->Box Box])
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.host :refer [swap! reset!]]
             [eve.atom :as a]

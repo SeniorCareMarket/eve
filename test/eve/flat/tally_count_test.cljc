@@ -14,7 +14,7 @@
    by reading the target's graph back with the same reader and comparing
    edge for edge. A placement that does not read back identical fails the
    harness, not the tally."
-  (:refer-clojure :exclude [swap! reset!])
+  (:refer-clojure :exclude [swap! reset! ->Box Box])
   (:require [clojure.test :refer [deftest is testing]]
             [eve.host :refer [swap! reset!]]
             [eve.atom :as a]

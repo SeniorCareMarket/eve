@@ -19,6 +19,7 @@
      CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig \\
        clojure -M -i test/eve/flat/column_bench.clj \\
        -e \"(eve.flat.column-bench/-main)\""
+  (:refer-clojure :exclude [run!])
   (:require [clojure.string :as str]
             [eve.flat.column :as column]
             [eve.flat.column-scaffold :as scaffold])

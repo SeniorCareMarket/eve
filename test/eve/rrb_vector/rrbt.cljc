@@ -7,14 +7,7 @@
 ;   You must not remove this notice, or any other, from this software.
 
 (ns eve.rrb-vector.rrbt
-  (:refer-clojure :exclude [array-for push-tail pop-tail new-path do-assoc
-                            deftype make-array aget aset alength aclone
-                            array-seq array-chunk count into empty subvec
-                            pr-sequential-writer ->RSeq
-                            -count -nth -conj -with-meta -assoc-n -conj! -assoc-n!
-                            -chunked-rest -chunked-next array pr-str* pr-writer
-                            caching-hash hash-ordered-coll
-                            volatile! vswap! long])
+  (:refer-clojure :exclude [array-for push-tail pop-tail new-path do-assoc deftype make-array aget aset alength aclone array-seq array-chunk count into empty subvec pr-sequential-writer ->RSeq -count -nth -conj -with-meta -assoc-n -conj! -assoc-n! -chunked-rest -chunked-next array pr-str* pr-writer caching-hash hash-ordered-coll volatile! vswap! long IVecImpl])
   ;; long: index-of-nil's return hint (clojerl resolves it here, the caller)
   (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
    #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [volatile! vswap! long]]

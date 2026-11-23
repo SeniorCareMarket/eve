@@ -14,6 +14,7 @@
 #_{:clj-kondo/ignore [:duplicate-require]}
 (require '[eve.atom :as atom] '[coop.scenario :as sc] '[coop.mix :as mix])
 
+#_{:clj-kondo/ignore [:redefined-var]} ; this script and jolt_worker.clj both define user/plain: they are standalone scripts (no ns form) run as separate processes, never loaded together — the redefinition exists only in kondo's joint analysis of the two files
 (defn- plain [x]
   (cond (map? x) (into {} (map (fn [[k v]] [(plain k) (plain v)])) x)
         (set? x) (into #{} (map plain) x)

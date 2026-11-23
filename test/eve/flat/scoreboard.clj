@@ -15,6 +15,7 @@
      CP=$(CLJ_CONFIG=... clojure -Spath -X:jvm-test -Sdeps '{...transit...}')
      java -Xmx4g -cp \"$CP\" clojure.main -m eve.flat.scoreboard -- --runs 5
    Options: --runs N --warmup N --tiny --label TEXT --log PATH."
+  (:refer-clojure :exclude [run!])
   (:require [clojure.string :as str]
             [eve.atom :as ea]
             [eve.flat.corpora :as corpora])

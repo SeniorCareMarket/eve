@@ -3,6 +3,7 @@
    Its class name does not start with eve. — exactly the shape the DS11
    JVM defect misclassified (the field instance is the DataScript port's
    datascript.db/DB root in a persistent Eve atom)."
+  (:refer-clojure :exclude [->Box Box])
   (:require [eve.deftype :as edt]))
 
 (defprotocol IBox

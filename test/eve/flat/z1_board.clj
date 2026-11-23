@@ -16,6 +16,7 @@
      CP=$(CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig clojure -Spath -X:jvm-test)
      java -Xmx4g -cp \"$CP\" clojure.main -m eve.flat.z1-board -- --runs 5
    Options: --runs N --warmup N --tiny --label TEXT --log PATH."
+  (:refer-clojure :exclude [run!])
   (:require [clojure.string :as str]
             [eve.atom :as ea]
             [eve.deftype-proto.data :as d]

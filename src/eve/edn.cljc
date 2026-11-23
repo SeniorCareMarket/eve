@@ -14,6 +14,7 @@
    This is the reader data code names (eve.db.ds's DB-from-EDN contract,
    its rules-from-string, its serialize thaw): an Eve surface, never a
    host reader chosen per platform."
+  (:refer-clojure :exclude [read-string read])
   (:require ;; bb/SCI: the host-type presentation must be installed before
             ;; anything else in this graph loads — a consumer whose first
             ;; Eve require is eve.edn (eve.db.ds.core) otherwise reaches

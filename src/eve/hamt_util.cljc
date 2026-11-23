@@ -24,7 +24,7 @@
    (register-xxh3-128-impl!) only after it has passed the KAT suite in
    test/eve/xxh3_kat_test.cljc on that host — identity is proven by
    measurement, never assumed."
-  (:refer-clojure :exclude [aget aset alength bytes long reset!])
+  (:refer-clojure :exclude [aget aset alength bytes long reset! bitpos])
   (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
    #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget aset alength bytes long reset! const-bytes]]
    [eve.encoding :as enc]

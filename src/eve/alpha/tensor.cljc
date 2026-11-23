@@ -7,6 +7,7 @@
    Usage:
      (require '[eve.alpha.tensor :as tensor])
      (tensor/from-array (e/eve-array :float64 (range 12)) [3 4])"
+  (:refer-clojure :exclude [to-array])
   (:require
    [eve.tensor :as t]))
 

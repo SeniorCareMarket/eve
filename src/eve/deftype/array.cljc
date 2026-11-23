@@ -25,9 +25,7 @@
    before anything else can see it — and read after that. Copies (aclone,
    array-copy) share the values a slot points at, as a host array's copy
    shares its elements."
-  (:refer-clojure :exclude [make-array aget aset alength aclone array-seq
-                            byte-array object-array unchecked-byte unchecked-int long
-                            volatile! vswap! bytes objects])
+  (:refer-clojure :exclude [make-array aget aset alength aclone array-seq byte-array object-array unchecked-byte unchecked-int long volatile! vswap! bytes objects array-chunk])
   (:require [eve.host :refer [byte-array object-array unchecked-byte unchecked-int long
                               volatile! vswap! bytes objects]]
             [eve.core :as e]

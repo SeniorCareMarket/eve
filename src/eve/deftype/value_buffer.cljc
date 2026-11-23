@@ -13,7 +13,7 @@
    values, to publish. Writes come from the thread that made the buffer, or throw (sarr.vs's P1-8 owner rule): its
    array is never seen by anyone else, which is what lets it be written after it is new. An array the buffer
    outgrew stays where it is, as a dropped value does outside an atom."
-  (:refer-clojure :exclude [deftype])
+  (:refer-clojure :exclude [deftype pop!])
   (:require [eve.deftype-proto.macros :as eve]
             ;; Load order: host-deftype's expansion ends in a
             ;; top-level eve.type-readers/register! call, which needs

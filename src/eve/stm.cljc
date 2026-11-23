@@ -120,9 +120,7 @@
   The construction is written against deref / CAS / own-domain
   atoms only, so the port surface per target is the seat's atom +
   domain affordances."
-  (:refer-clojure :exclude [ref alter commute ref-set ensure sync dosync
-                            ref-history-count ref-min-history ref-max-history
-                            swap! reset! compare-and-set!])
+  (:refer-clojure :exclude [ref alter commute ref-set ensure sync dosync ref-history-count ref-min-history ref-max-history swap! reset! compare-and-set! get-validator])
   (:require [eve.atom :as ea]
             ;; The core of some seats (notably clojerl) accepts only its
             ;; own Atom. Ref cells / seated clocks and locks are Eve atoms;

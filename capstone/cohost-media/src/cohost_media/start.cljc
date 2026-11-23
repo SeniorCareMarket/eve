@@ -145,18 +145,6 @@
    carries it (prepare-page!) and the check that reads it back (browser-check!)."
   "f01:thumb")
 
-(defn- display?
-  "A GUI session this process can open a window in: a macOS or Windows demo runs in the
-   user's desktop session; on Linux a display server names itself in the environment
-   (DISPLAY, WAYLAND_DISPLAY). No display — a server box, a CI run — means the browser
-   member runs headless, as it always has there."
-  []
-  (let [os (str/lower-case (str (getprop "os.name")))]
-    (boolean (or (str/includes? os "mac")
-                 (str/includes? os "windows")
-                 (not-empty (getenv "DISPLAY"))
-                 (not-empty (getenv "WAYLAND_DISPLAY"))))))
-
 (defn browser-args
   "The browser pool's args, as data — the one source the start call (start-seat!) reads: the
    bootstream the seat opens and the server it serves it with. The bootstream is the run's

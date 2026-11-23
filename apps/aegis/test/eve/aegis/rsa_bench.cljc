@@ -3,6 +3,7 @@
    row for :adapter (the host's crypto feature) or :portable-client (eve.net.bignum through a cached Montgomery
    context; the issuer's row is left out there — it is minutes on the portable path). Times are eve.process/now-ms
    deltas over the RFC 9474 A.3 key and encoded message; run on a host, named in the report with its path."
+  (:refer-clojure :exclude [run!])
   (:require [eve.aegis.rsabssa :as rsa]
             [eve.aegis.rsa-vectors :as vectors]
             [eve.net.bignum :as bn]
