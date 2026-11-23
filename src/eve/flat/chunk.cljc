@@ -2329,6 +2329,7 @@
   (let [[n ko] (set-parts ctx off)]
     (mapv (fn [i] (elem-at ctx ko i)) (range n))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 #?(:cljs nil :default (do
 ;; On bb and glojure the handle macros below cannot run: SCI's
 ;; deftype takes only its emulated interfaces (not IReduce,

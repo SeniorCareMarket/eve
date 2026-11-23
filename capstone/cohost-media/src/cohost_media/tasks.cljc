@@ -35,6 +35,7 @@
 
 (pool/deftask group [job] (work/group! job))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (pool/deftask meta [job]
   #?(:cljs (throw (ex-info "meta is a JVM facility" {}))
      :default ((requiring-resolve 'cohost-media.meta/run!) job)))
@@ -51,6 +52,7 @@
 #?(:clj
    (defn- ffmpeg [& args] (apply sh "ffmpeg" "-nostdin" "-v" "error" "-y" args)))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (pool/deftask phash [{:keys [path kind]}]
   #?(:clj
      (let [{:keys [exit out err]} (apply ffmpeg (concat (when (= :video kind) ["-ss" "1"])
@@ -76,6 +78,7 @@
        (dotimes [i (alength xs)] (aset xs i (double (.get fb i))))
        xs)))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (pool/deftask loudness [{:keys [path]}]
   #?(:clj
      (let [pcm (get-in @(st/library) [:files path :results :pcm])]
@@ -114,6 +117,7 @@
 
      (defn- join [& xs] (apply (.-join node-path) xs))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (pool/deftask thumb [{:keys [path id kind out]}]
   #?(:cljs
      (let [dest (em/output-path out :thumb id)
@@ -127,6 +131,7 @@
            (.then (fn [^js info] (work/record! path :thumb {:path dest :width (.-width info) :height (.-height info)})))))
      :default (throw (ex-info "thumb is an npm task" {}))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (pool/deftask sheet [{:keys [path id out]}]
   #?(:cljs
      (let [dest (em/output-path out :sheet id)
@@ -153,6 +158,7 @@
                                                               :tiles (count tiles)}))))))
      :default (throw (ex-info "sheet is an npm task" {}))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (pool/deftask tags [{:keys [path]}]
   #?(:cljs
      (-> (.parseFile mm path)
@@ -196,6 +202,7 @@
 
      (defn- fmt [x] (/ (js/Math.round (* 100 x)) 100))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (pool/deftask waveform
   "The waveform of a file's audio, drawn in the browser: the loudness job's peaks (0..1, one per hundredth of the
   file) as the points of a mirrored polygon in a 100×20 box, written into the library."

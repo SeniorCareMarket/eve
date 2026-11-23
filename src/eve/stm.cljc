@@ -228,6 +228,7 @@
      :clje (proc/now-ms)
      :default (System/currentTimeMillis)))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- sleep-ms [ms]
   #?(:jank (proc/sleep-ms! ms)
      ;; jank has no Thread shim and claims :clj in reader

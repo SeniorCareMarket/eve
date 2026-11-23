@@ -36,6 +36,7 @@
   ([opts s]
    (numeric/read-edn s (type-readers/reader-options opts))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn read
   "Read one EDN object from a reader (clojure.edn/read's contract: opts,
    then the reader). Registered readers are honored exactly as in

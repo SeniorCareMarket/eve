@@ -85,6 +85,7 @@
          (.destroyForcibly p)
          nil))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn proc?
   "Is x a started process (a Proc)? Only the boot seat starts processes; on any other seat the
    answer is false, so a portable watch or kill step can hold pool entries of either kind."

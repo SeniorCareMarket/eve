@@ -66,6 +66,7 @@
   #?(:clj (System/getenv k)
      :cljs (aget js/process.env k)))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- getprop
   "This runtime's property k (on the JVM, its system properties), or nil."
   [k]
@@ -340,6 +341,7 @@
 ;; recorded it, so the checks read the same bookkeeping.
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- spawn-child!
   "Start process child rid once (its next incarnation): through /bin/sh -c supervise's script, so the
    child's OS process is the program's own and its output lands in its log files; a waiter thread
@@ -473,15 +475,18 @@
               :body-as :b64}))))))
 
 #_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the seat wiring in run); no cljs caller exists
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- seat-handler
   "The browser seat's :handler for this run: gateway/seat-handler over the
    started gateway, then the run's output files. The handler runs on the boot
    seat (its server and the gateway live here): the :clj arm builds it."
+  #_{:clj-kondo/ignore [:unused-binding]} ; run and procs are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
   [run _atoms procs]
   #?(:clj (let [gw (gateway/seat-handler (get @procs "gateway"))]
             (fn [req] (or (gw req) (out-file-resp (:out run) req))))
      :cljs (throw (ex-info "start: the browser seat's handler runs on the boot seat" {}))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- start-browser-seat!
   "The browser member: a cohost :browser runtime executor (cohost.cljs-pool)
    over the run's page directory — the seat's server on the run's page port,
@@ -514,6 +519,7 @@
        ex)
      :cljs (throw (ex-info "start: the browser seat starts on the boot seat" {}))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- start-node-seat!
   "The node member: a cohost :node runtime executor (cohost.cljs-pool) whose realm boots with
    the member's namespace graph (node-args' :load-ns) and whose require anchors at the app
@@ -795,6 +801,7 @@
         i (last (re-seq #"I:\s+(-?[0-9.]+) LUFS" err))]
     (some-> i second parse-double)))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn sha256
   "A file's SHA-256, hex (in process: macOS has no sha256sum). The digest is the boot seat's
    own work: the :clj arm."
@@ -1050,6 +1057,7 @@
              seen)
            (finally (p/destroy-tree proc)))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn browser-check!
   "Wait (up to timeout-ms) for the page's check (the app page in the browser seat's shell iframe, whose URL
    carries ?check=<page-check>, writes it into control :page-check); then a screenshot of the page

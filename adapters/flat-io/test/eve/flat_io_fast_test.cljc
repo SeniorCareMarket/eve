@@ -556,6 +556,7 @@
             bs (if (== kind 8) (f32-bytes x) (f64-bytes x))]
         (dotimes [k (count bs)] (ba-set! b (+ off (* i (count bs)) k) (nth bs k)))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (defn- hashable?
   "On ClojureScript a js/BigInt element has no cljs hash or compare (the same for a persistent vector holding it), so
    those rows are checked where every element is a number."
@@ -625,6 +626,7 @@
           (check-tuple (fio/tuple c off n kind) want)
           (check-tuple (fio/col c off n kind) want))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (deftest tuples-edges
   (testing "a chunk over bytes that sit at an odd offset in their buffer"
     #?(:cljs (let [big (js/Uint8Array. 64)]

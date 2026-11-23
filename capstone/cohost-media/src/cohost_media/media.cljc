@@ -4,6 +4,7 @@
    folder's watcher. The implementation is the runtime's own — glojure's, in cohost-media.media-impl
    (the eveglj/media Go package) — resolved lazily: only a runtime that carries it ever loads it.")
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- impl-fn
   "The runtime's media implementation var, when this runtime carries it."
   [sym]

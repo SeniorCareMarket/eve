@@ -72,6 +72,7 @@
   #?(:clj (Arrays/copyOfRange b (int off) (int (+ off len)))
      :cljs (.slice b off (+ off len))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- concat-bytes ^bytes [parts]
   #?(:clj (let [out (ByteArrayOutputStream.)]
             (doseq [^bytes p parts] (.write out p 0 (alength p)))
@@ -162,6 +163,7 @@
    (defn- u32-into [^ByteArrayOutputStream out ^long v]
      (dotimes [k 4] (.write out (int (bit-and (bit-shift-right v (* 8 k)) 0xFF))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn directory-bytes
   "The container's directory as a kind-2 chunk (§2)."
   ^bytes [{:keys [chunks first-keys root]}]
@@ -302,6 +304,7 @@
 ;; compression (C3.2): the container is the unit — one stream over all of it
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn deflated-size
   "The size of bs under zlib (level 6) — the probe convention (M3)."
   ^long [^bytes bs]
@@ -310,6 +313,7 @@
             (.setInput df bs) (.finish df)
             (loop [n 0] (if (.finished df) (do (.end df) n) (recur (+ n (.deflate df out))))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn compress-container
   "The whole container — chunks and directory — under one zlib stream."
   ^bytes [container]
@@ -324,6 +328,7 @@
             (.end df)
             (.toByteArray out))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn decompress-container-bytes
   "The container bytes a compress-container stream holds."
   ^bytes [^bytes z]

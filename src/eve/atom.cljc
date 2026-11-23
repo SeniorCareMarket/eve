@@ -900,6 +900,7 @@
           (throw (ex-info "mmap-atom: unknown root value type-id"
                           {:type-id type-id :ptr ptr})))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- scalar-leaf?
   "True when v is a host scalar leaf — a number, string, keyword, symbol,
    boolean, char, date or UUID: a value no IEveRoot / IBackingArray
@@ -1556,6 +1557,7 @@
         (identical? (alloc/sio-root (d/-eve-sio x)) (alloc/sio-root (d/-eve-sio y)))
         (== (d/-root-header-off x) (d/-root-header-off y)))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- env-setting
   "A setting from the environment (NAME) or a JVM system property (prop),
    else nil."

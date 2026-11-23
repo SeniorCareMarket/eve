@@ -608,6 +608,7 @@
 ;; forms). Equality and hash run against the LOGICAL value, so
 ;; a BasedValue equals its materialization and its refreeze.
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 #?(:bb (do (deftype BasedValue [base edits tail n bc mm]
              ecore/ICounted
              (-count [_] n)
@@ -742,8 +743,8 @@
                                        "Key must be integer"))))
           clojure.lang.IPersistentVector
           (length [_] n)
-          (assocN [this i v] (based-assoc-n base edits tail n bc mm i v))
-          (cons [this v] (based-assoc-n base edits tail n bc mm n v))
+          (assocN [_this i v] (based-assoc-n base edits tail n bc mm i v))
+          (cons [_this v] (based-assoc-n base edits tail n bc mm n v))
           (peek [this] (when (pos? n) (nth this (dec n))))
           (pop [_this] (if (zero? n)
                          (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
@@ -915,8 +916,11 @@
 ;; (frozen-value's cljs arm), so the wrappers never occur there —
 ;; the predicates answer false, the same splice deliver-flat's
 ;; FrozenValue arm already makes inline.
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- frozen-value? [v] #?(:cljs false :default (instance? FrozenValue v)))
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- concat-batch? [v] #?(:cljs false :default (instance? ConcatBatch v)))
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- based-value? [v] #?(:cljs false :default (instance? BasedValue v)))
 
 (defn deliver-flat
@@ -1043,6 +1047,7 @@
 ;; place eve->clj learns what the flat subsystem knows — a stored flat value
 ;; is its content, an eve-deftype or record is its flat instance, an eve value
 ;; array is its slots. Plain host collections answer nil at once.
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- host-coll? [v]
   #?(:clj (and (instance? clojure.lang.IPersistentCollection v)
                (.startsWith (.getName (class v)) "clojure.lang."))

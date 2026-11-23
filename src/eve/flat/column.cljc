@@ -251,6 +251,7 @@
      (let [ba (byte-array len)]
        [ba (doto (ByteBuffer/wrap ba) (.order ByteOrder/LITTLE_ENDIAN))])))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn encode-column
   "The bytes of the column segment holding values, as they will sit at
    chunk offset (:at opts, default 0) — alignment padding is computed
@@ -457,6 +458,7 @@
 ;; encoding batches: the columns first, the node last (children first)
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn encode-batch
   "The bytes of a BATCH node over ks/cols (column-major), as they will sit
    at chunk offset (:at opts, default 0): the column segments in field
@@ -515,6 +517,7 @@
 ;; reading: a handle is a parse of positions, never of values
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn open-column
   "Parse the column segment at chunk offset off in ba, holding n values,
    under ctx. Answers a handle: {:ba :ctx :off :kind :n :valid-off
@@ -571,6 +574,7 @@
   [col]
   (- (:end col) (:off col)))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn open-batch
   "Parse the BATCH node at chunk offset off in ba under ctx: [0x26]
    [shape varint][n varint][absolute column offsets of the chunk's
@@ -603,6 +607,7 @@
 ;; point reads, in place
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn col-ref
   "Row i of a column, read in place: the plain value, or nil when the
    validity bitmap marks the row absent."
@@ -685,6 +690,7 @@
 ;; scans and filters, in place
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn scan-sum
   "The sum of a numeric column, read in place: a double for the float
    kinds, a long for the integer kinds. Nil rows contribute nothing
@@ -726,6 +732,7 @@
              acc
              (recur (inc i) (let [v (col-ref col i)] (if (nil? v) acc (+ acc v))))))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn count-eq
   "How many rows of a column equal v, counted in place. Symbol columns
    compare codes; dense integer columns compare words; anything else
@@ -799,6 +806,7 @@
 ;; the zero-copy handoff (C2.5)
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn typed-array-view
   "A dense column (kinds 1-11) handed to the host as its typed array
    without a copy: on the JVM, a read-only NIO buffer view over the

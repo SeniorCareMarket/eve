@@ -13,6 +13,7 @@
             ; the alias is exercised on the other reader pass; the require loads on both 
    #_{:clj-kondo/ignore [:unused-namespace]}   [cohost-media.work :as work]))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- native-fn
   "The native implementation's var, when this runtime carries it."
   [sym]
@@ -43,6 +44,7 @@
                 "-threads" "1" "-x264-params" "threads=1:sliced-threads=0"])
              ["-c:a" "aac" "-b:a" "128k" "-ac" "2" "-ar" "48000" "-movflags" "+faststart" "-f" "mp4" out])))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- cli-transcode! [{:keys [path id kind out]}]
   #?(:clj
      (let [dest (em/output-path out :transcode id)
@@ -65,6 +67,7 @@
     (f job)
     (cli-transcode! job)))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- cli-pcm! [{:keys [path id window]}]
   #?(:clj
      (let [dest (em/pcm-path window id)]

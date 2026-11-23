@@ -60,6 +60,7 @@
   []
   (gc/available?))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- env-setting
   "A setting from the environment (NAME) or a JVM system property (prop),
    else nil."

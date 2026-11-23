@@ -390,10 +390,12 @@
 ;; Predicates for host-native exact types (before our wrappers).
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (defn- js-bigint? [x]
   #?(:cljs (and (some? x) (identical? (.-constructor x) js/BigInt))
      :default false))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- host-ratio? [v]
   #?(:clj (instance? clojure.lang.Ratio v)
      :lpy (instance? fractions/Fraction v)
@@ -401,11 +403,13 @@
      :jank (= "ratio" (type v))
      :default false))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- host-decimal? [v]
   #?(:clj (instance? java.math.BigDecimal v)
      :lpy (instance? decimal/Decimal v)
      :default false))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- host-bigint? [v]
   #?(:clj (or (instance? clojure.lang.BigInt v)
               (instance? java.math.BigInteger v))
@@ -638,17 +642,20 @@
      (__repr__ [_] (str n "N"))
      (__str__ [_] (str n))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (defn- eve-bigint-type? [x]
   #?(:cljs (instance? EveBigInt x)
      :lpy (instance? EveBigInt x)
      :default false))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (defn- eve-ratio-type? [x]
   #?(:cljs (instance? EveRatio x)
      :clje (instance? EveRatio x)
      :jank (instance? EveRatio x)
      :default false))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (defn- eve-bigdec-type? [x]
   #?(:cljs (instance? EveBigDec x)
      :clje (instance? EveBigDec x)
@@ -1590,6 +1597,7 @@
 
 (defonce ^:private installed* (atom false))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn install!
   "Hook the host printer and EDN reader so pr-str / clojure.edn/read-string
    (and cljs.reader/read-string) speak Clojure's exact-number tokens. Safe to

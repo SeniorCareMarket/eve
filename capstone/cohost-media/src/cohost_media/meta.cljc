@@ -31,6 +31,7 @@
                                "-of" "compact=p=0" path)]
          (str/split-lines (String. ^bytes out "UTF-8"))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn run!
   "The meta job: parse the file with Tika, list its streams with ffprobe, record both."
   [{:keys [path]}]

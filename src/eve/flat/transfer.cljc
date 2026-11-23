@@ -142,6 +142,7 @@
 
 (def ^:private esize-by-subtype [0 1 1 1 2 2 4 4 4 8 8 8]) ;; serialize.cljc subtypes 1-11
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- class-size
   "The block size of class ci in sio's domain (classes 0-5), for the kinds
    whose used size is their allocation: scalar blocks, eve-deftype
@@ -354,6 +355,7 @@
                             (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _
                               (alloc/-sio-read-bytes sio old 0 4096))))))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- walk
   "Every block the value rooted at root-off in sio reaches, each once.
    Ordinals are assigned at discovery (the root is ordinal 0), so a block

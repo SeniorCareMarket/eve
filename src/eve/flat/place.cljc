@@ -376,6 +376,7 @@
     (aset a (unchecked-add-int i 3) (unchecked-byte (bit-shift-right v 24)))
     nil))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- execute-plan!
   "Claim, copy and relocate per the plan: all claims first (unit-major,
    class slices), then all copies, then the pointer pass resolved from

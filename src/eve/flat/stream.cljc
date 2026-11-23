@@ -254,6 +254,7 @@
 ;; once, at their first completed visit.
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn walk-count
   "Post-order cursor walk over the value rooted at root-off in sio.
    Answers {:blocks n :bytes total-content-bytes :checksum c

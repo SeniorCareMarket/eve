@@ -473,6 +473,7 @@
   (equals [this other] (map-equiv this other))
   (hashCode [this] (p/hash-unordered (or (entries this (nodes root true)) ()))))
 
+#_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :cljs pass only; the :clj arm does not reference them (per-pass binding surface)
 (edt/deftype EveSortedSet [^:SortedNode root cmp mta]
   ISortedColl
   (-root [_] root)
