@@ -333,8 +333,10 @@
        ;; (ns$__GT_T), the later overwriting the earlier on disk, so the
        ;; slab factory captured above (raw) would load as THIS 13-arity
        ;; public fn ("Wrong number of args (16) passed to ->T").
-       (def ~(vary-meta ctor assoc :arglists (list 'quote (list fs)))
-         (fn ~(symbol (str type-name "__public-ctor")) [~@fs] (~ctor-in (alloc/current-sio) ~@fs)))
+       (defn ~(vary-meta ctor assoc :arglists (list 'quote (list fs)))
+         ~(symbol (str type-name "__public-ctor"))
+         [~@fs]
+         (~ctor-in (alloc/current-sio) ~@fs))
        (defn ~mapctor-in [~sio ~m]
          (assert-portable! ~sio ~m [:constructor])
          (binding [d/*domain-sio* ~sio ser/*shared-write* true]

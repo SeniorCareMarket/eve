@@ -188,7 +188,7 @@
         (is (not (:error alloc-result)))
         (let [desc-idx   (:descriptor-idx alloc-result) _read-epoch   (atom/begin-read! s-atom-env slot-idx)] (atom/retire-block! s-atom-env desc-idx) (let [result (atom/try-free-retired! s-atom-env desc-idx)]
                                                                                                                                                          (is (= :has-readers result) "Should not free block while reader at same epoch")) (atom/end-read-epoch! s-atom-env slot-idx) (atom/increment-epoch! s-atom-env) (let [result2 (atom/try-free-retired! s-atom-env desc-idx)]
-                                                                                                                                                                                                                                                                                                                          (is (= result2 :freed) "Should free after reader ends"))))
+                                                                                                                                                                                                                                                                                                                          (is (= :freed result2) "Should free after reader ends"))))
       (atom/unregister-worker! s-atom-env slot-idx))))
 
 (deftest sweep-retired-blocks-test
@@ -266,7 +266,7 @@
           (atom/retire-block! s-atom-env desc-idx)
           ;; Should not be freeable while any reader active
           (let [result (atom/try-free-retired! s-atom-env desc-idx)]
-            (is (= result :has-readers)))
+            (is (= :has-readers result)))
           ;; End reads one by one
           (atom/end-read-epoch! s-atom-env (:slot (first workers)))
           (is (= :has-readers (atom/try-free-retired! s-atom-env desc-idx)))

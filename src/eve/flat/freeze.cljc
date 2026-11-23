@@ -573,7 +573,7 @@
           (empty [_] [])
           (equiv [this other] (.equals this other))
           clojure.lang.Seqable
-          (seq [_] (apply concat (map seq handles)))
+          (seq [_] (mapcat seq handles))
           clojure.lang.IMeta
           (meta [_] mm)
           clojure.lang.IObj

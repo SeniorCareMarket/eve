@@ -73,7 +73,7 @@
             flip (fn [i] (update pm k update (+ local i) (fn [x] (bit-xor x 1))))]
         (is (= :bad-page (thrown-type (fn [] (p/read-pages (:root w) (flip 70))))) "an attested byte (EPOCH)")
         (is (= :bad-page (thrown-type (fn [] (p/read-pages (:root w) (flip 300))))) "a payload byte")
-        (is (= :bad-page (thrown-type (fn [] (p/read-pages (:root w) (assoc pm k (assoc (get pm k) (+ local 22) 2))))))
+        (is (= :bad-page (thrown-type (fn [] (p/read-pages (:root w) (assoc-in pm [k (+ local 22)] 2)))))
             "a v2 header (§2.3)")))))
 
 ;; a value another writer imaged, in a form this codec reads but does not write, keeps its keys through eve's next write:

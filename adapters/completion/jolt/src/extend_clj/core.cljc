@@ -680,7 +680,7 @@
                                                          `(reify clojure.lang.ILookupThunk
                                                             (get [thunk# ~gtarget]
                                                               (if (identical? (class ~gtarget) ~gclass)
-                                                                (. ~(with-meta gtarget {:tag name}) ~(symbol (str "-" (str field))))
+                                                                (. ~(with-meta gtarget {:tag name}) ~(symbol (str "-" field)))
                                                                 thunk#)))]))
                                             nil)))))
 

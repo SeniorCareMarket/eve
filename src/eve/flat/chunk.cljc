@@ -5078,7 +5078,7 @@
   (let [ctx (handle-ctx h) off (handle-off h) t (tag-at ctx off) vr (to-rep v)
         n (elem-count ctx off)]
     (cond
-      (or (< i 0) (> i n)) (throw #?(:cljs (js/Error. (str i)) :default (IndexOutOfBoundsException. (str i))))
+      (or (neg? i) (> i n)) (throw #?(:cljs (js/Error. (str i)) :default (IndexOutOfBoundsException. (str i))))
       (== i n) (cons-flat h v)
       (== t 0x22)
       (or (when (appendable? ctx vr)

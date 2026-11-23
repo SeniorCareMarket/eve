@@ -617,7 +617,7 @@
                   clojure.lang.ILookup
                   (valAt [_ k]
                          (live! live?)
-                         (if-let [n (find-node root (cmp-of cmp) k)] (-sv n) nil))
+                         (when-let [n (find-node root (cmp-of cmp) k)] (-sv n)))
                   (valAt [_ k not-found]
                          (live! live?)
                          (if-let [n (find-node root (cmp-of cmp) k)] (-sv n) not-found))
@@ -646,7 +646,7 @@
                   clojure.lang.ILookup
                   (valAt [_ x]
                          (live! live?)
-                         (if-let [n (find-node root (cmp-of cmp) x)] (-sk n) nil))
+                         (when-let [n (find-node root (cmp-of cmp) x)] (-sk n)))
                   (valAt [_ x not-found]
                          (live! live?)
                          (if-let [n (find-node root (cmp-of cmp) x)] (-sk n) not-found))
