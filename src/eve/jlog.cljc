@@ -414,6 +414,46 @@
     (mem/sync-region! r 0 (:data-off log))
     nil))
 
+;; ---------------------------------------------------------------------------
+;; The legacy journal (EVJ1, <base>.journal) — read once, for migration (§4.7)
+;; ---------------------------------------------------------------------------
+
+(def ^:const LEGACY_MAGIC 0x45564A31)     ;; "EVJ1"
+
+(defn- get-i32-be
+  "The big-endian u32 at OFF in B (EVJ1's word order), as a signed i32."
+  [^bytes b off]
+  (i32/i32 (bit-or (bit-shift-left (bit-and (aget b off) 0xFF) 24)
+                   (bit-shift-left (bit-and (aget b (+ off 1)) 0xFF) 16)
+                   (bit-shift-left (bit-and (aget b (+ off 2)) 0xFF) 8)
+                   (bit-and (aget b (+ off 3)) 0xFF))))
+
+(defn legacy-records
+  "The CRC-valid EVJ1 records in B (a legacy journal file's whole bytes), in
+   file order, each {:epoch :table :pos}. Record: [magic][len][epoch]
+   [table-len][table][crc32 over epoch..table-end], big-endian. Unlike the
+   per-host scanners it replaces, a framing failure does not end the read: the
+   scan resyncs on the magic a byte further on, so a record another host's
+   append overwrote never hides the good ones after it."
+  [^bytes b]
+  (let [n (alength b)
+        magic (i32/i32 LEGACY_MAGIC)]
+    (loop [pos 0
+           acc []]
+      (if (> (+ pos 16) n)
+        acc
+        (let [len (get-i32-be b (+ pos 4))
+              tlen (get-i32-be b (+ pos 12))]
+          (if (and (== (get-i32-be b pos) magic)
+                   (== tlen TABLE_BYTES)
+                   (== len (+ tlen 12))
+                   (<= (+ pos 8 len) n)
+                   (== (get-i32-be b (+ pos 16 tlen)) (crc/crc32 b (+ pos 8) (+ 8 tlen))))
+            (let [table (byte-array TABLE_BYTES)]
+              (enc/arraycopy b (+ pos 16) table 0 TABLE_BYTES)
+              (recur (+ pos 8 len) (conj acc {:epoch (get-i32-be b (+ pos 8)) :table table :pos pos})))
+            (recur (inc pos) acc)))))))
+
 (defn tail
   "Stripe K's tail word as it stands (the next seq to reserve)."
   [log k]

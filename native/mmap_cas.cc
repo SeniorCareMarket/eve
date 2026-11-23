@@ -748,7 +748,11 @@ static Napi::Value Msync(const Napi::CallbackInfo& info)
     auto len = static_cast<uint64_t>(info[2].As<Napi::Number>().DoubleValue());
     if (len == 0 || off >= buf.Length()) return env.Undefined();
     if (off + len > buf.Length()) len = buf.Length() - off;  // clamp to the mapping
-    const uint64_t page  = 4096;  // the page size the fcntl ops sync by
+    // the host's page size (16 KiB on Apple Silicon, 4 KiB on x86-64 Linux):
+    // msync's address must be page-aligned, so a hard-coded 4096 answered
+    // EINVAL for an unaligned start on a 16 KiB host (H4,
+    // eve-mmap-journal-plan §1.4)
+    static const uint64_t page = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
     uint64_t       start = off & ~(page - 1);
     uint64_t       end   = (off + len + page - 1) & ~(page - 1);
     if (::msync(buf.Data() + start, static_cast<size_t>(end - start), MS_SYNC) != 0) {

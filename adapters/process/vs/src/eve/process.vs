@@ -27,6 +27,17 @@
 (defn file-exists? [path]
   (not (number? (wasi/path-filestat path))))
 
+(defn file-size
+  "The size in bytes of the file at path, or nil when there is none. Not on this host yet: a legacy journal
+   migration (eve.jlog, eve-mmap-journal-plan §4.7) refuses here rather than guess."
+  [path]
+  (throw (ex-info "eve.process: file-size is not on this host" {:path path})))
+
+(defn rename-file!
+  "Rename the file at from to to. Not on this host yet (as file-size)."
+  [from to]
+  (throw (ex-info "eve.process: rename-file! is not on this host" {:from from :to to})))
+
 (defn create-exclusive!
   "Create the file at path, empty, if no file is there — one atomic step
    against every other process (wasi/path-write's create-exclusive mode):

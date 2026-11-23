@@ -372,8 +372,30 @@
           ;; .release is not reachable from bb; close releases (measured).
           (try (f) (finally (.close fl))))
         (let [^FileChannel c (FileChannel/open path (into-array OpenOption [StandardOpenOption/READ
-                                                                             StandardOpenOption/WRITE]))]
-          (try (.lock c (long byte-off) 4 false) (f) (finally (.close c))))))))
+                                                                            StandardOpenOption/WRITE]))]
+          (try (.lock c (long byte-off) 4 false) (f) (finally (.close c)))))))
+
+  ;; durability (eve.mem/ISyncableRegion): the mapped segments force, the whole
+  ;; table or the windows meeting a range (MappedByteBuffer.force(index, length),
+  ;; reachable on bb, measured 2026-11-23) — H1 for bb's lock-only region
+  mem/ISyncableRegion
+  (-sync! [_]
+    (dotimes [k (alength segments)]
+      (.force ^MappedByteBuffer (aget segments k)))
+    nil)
+  (-sync-range! [_ byte-off len]
+    (let [off (long byte-off)
+          end (+ off (long len))]
+      (when (pos? (long len))
+        (loop [k (unsigned-bit-shift-right off shift)]
+          (let [seg-start (bit-shift-left k shift)]
+            (when (and (< seg-start end) (< k (alength segments)))
+              (let [^MappedByteBuffer b (aget segments (int k))
+                    i0 (max off seg-start)
+                    i1 (min end (+ seg-start (long (.capacity b))))]
+                (.force b (int (- i0 seg-start)) (int (- i1 i0))))
+              (recur (inc k)))))))
+    nil))
 
 ;; ------------------------------------------------------------------
 ;; Native CAS — babashka.ffi over libatomic (the substrate of the

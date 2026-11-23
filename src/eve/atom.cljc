@@ -1090,18 +1090,39 @@
   {:slots (or (:jlog-slots opts) jlog/DEFAULT_SLOTS)
    :stripes (or (:jlog-stripes opts) jlog/DEFAULT_STRIPES)})
 
+(defn- legacy-install!
+  "Migration's install (§4.7 steps 1-3): the legacy <base>.journal's records read once (eve.jlog/legacy-records:
+   a framing failure resyncs on the magic rather than ending the read), the one with the highest epoch picked —
+   never the last in file order — and installed into the root when its epoch is at or after the root's and its
+   epoch or table differs; a legacy record OLDER than the root is never installed (that was the shootout's loss).
+   The file is read through a mapping of exactly its size: no host's open grows or truncates it."
+  [root-r legacy]
+  (let [size (or (proc/file-size legacy) 0)
+        recs (if (pos? size)
+               (jlog/legacy-records (mem/-read-bytes (region/open-mmap-region legacy size) 0 size))
+               [])
+        e-root (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+        rel (fn [r] (i32/i32 (- (:epoch r) e-root)))
+        best (when (seq recs) (reduce (fn [a r] (if (> (rel r) (rel a)) r a)) recs))]
+    (when (and best
+               (>= (rel best) 0)
+               (or (not (== (:epoch best) e-root))
+                   (not (enc/bytes= (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES) (:table best)))))
+      (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table best))
+      (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch best))
+      (mem/sync-region! root-r))
+    {:legacy-records (count recs) :installed? (some? best)}))
+
 (defn- jlog-for-recovery
-  "The log a non-live open recovers from: the existing one; a fresh one when there is none, or its creator died
-   before writing its magic (magic 0). A legacy <base>.journal is never silently passed over: migrating it is
-   §4.7's (legacy-migrate!). A wrong magic or version throws (eve.jlog/open): a log is never overwritten."
-  [base-path opts]
-  (let [path (jlog-path base-path)]
+  "The log a non-live open recovers from: the existing one; else a fresh one — after migrating a legacy
+   <base>.journal into the root (legacy-install!) when there is one, or when the log's creator died before
+   writing its magic (magic 0). A wrong magic or version throws (eve.jlog/open): a log is never overwritten."
+  [root-r base-path opts]
+  (let [path (jlog-path base-path)
+        legacy (str base-path ".journal")]
     (if (and (proc/file-exists? path) (not (zero? (jlog/magic path))))
       (jlog/open path)
-      (do (when (proc/file-exists? (str base-path ".journal"))
-            (throw (ex-info (str "eve: " base-path " is a legacy journal domain; opening it on the jlog needs the"
-                                 " legacy journal migrated (eve-mmap-journal-plan §4.7)")
-                            {:base-path base-path})))
+      (do (when (proc/file-exists? legacy) (legacy-install! root-r legacy))
           (jlog/create! path (jlog-create-opts opts))))))
 
 (defn- jlog-recover!
@@ -1112,7 +1133,7 @@
    process's slot inside the hold. Answers {:log :slot-idx :floor}."
   [root-r base-path opts]
   (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
-  (let [log (jlog-for-recovery base-path opts)
+  (let [log (jlog-for-recovery root-r base-path opts)
         recs (jlog/scan log)
         rstar (jlog/pick recs)
         e-root (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
@@ -1124,6 +1145,9 @@
       (mem/sync-region! root-r))
     (jlog/rebuild-header! log recs (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
     (jlog/append! log 0 -1 #(jlog-snapshot root-r) {:kind jlog/KIND_ANCHOR})
+    ;; §4.7 step 5: once the ANCHOR is durable a legacy journal is renamed aside, never deleted
+    (let [legacy (str base-path ".journal")]
+      (when (proc/file-exists? legacy) (proc/rename-file! legacy (str legacy ".migrated"))))
     {:log log :slot-idx (claim-live-slot! root-r true) :floor (if rstar (:label rstar) e-root)}))
 
 (defn- jlog-open!
