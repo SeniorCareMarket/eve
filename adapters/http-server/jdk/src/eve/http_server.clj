@@ -5,6 +5,12 @@
    atom id's %2F kept), :headers lower-case names, :body UTF-8 text and :body-b64 the same bytes as base64 (a blob) —
    and answers {:status :headers :body :body-as}: :body text, or with :body-as :b64 the base64 of the bytes to send
    (eve.net.run's conventions). Requests are handled on a pool of :threads threads (default 8): a handler may block."
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http-server/handle]}}}}
   (:import [com.sun.net.httpserver HttpServer HttpHandler HttpExchange]
            [java.net InetSocketAddress]
            [java.util Base64]

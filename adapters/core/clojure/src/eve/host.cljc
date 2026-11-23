@@ -8,6 +8,12 @@
    Every name is a macro expanding to clojure.core's own call, so a type hint
    on an argument reaches the host's compiler as written and nothing is added
    at run time. Being macros, they are called, never passed as values."
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.host/defcore eve.host/names]}}}}
   (:refer-clojure :exclude [aget aset alength aclone byte-array short-array int-array
                             long-array float-array double-array object-array into-array
                             to-array unchecked-byte unchecked-short unchecked-int

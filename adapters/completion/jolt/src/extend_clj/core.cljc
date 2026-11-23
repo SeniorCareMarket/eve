@@ -20,6 +20,12 @@
    accepts: Conn becomes an eve.deftype type carrying IAtom3 as a
    protocol group. Everything else is extend-clj as the DataScript
    port carries it, unchanged."
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [extend-clj.core/cljs-env?]}}}}
   (:require [clojure.string])
   #?(:cljs
      (:require-macros

@@ -12,6 +12,12 @@
    instead (libatomic hardware CAS — the Native CAS section below);
    the lock-only regions above are the fallback, announced on *err*
    when taken."
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.region/BbHeapRegion eve.region/BbMmapRegion eve.region/BbNativeRegion eve.region/announce-fallback! eve.region/fallback-announced eve.region/fence! eve.region/fence-word eve.region/lock-close-ok? eve.region/mac-os? eve.region/make-heap-region-niolock eve.region/native-add eve.region/native-cas eve.region/native-errno eve.region/native-load eve.region/native-notify eve.region/native-open-mmap-region eve.region/native-probe eve.region/native-scratch eve.region/native-scratch-tl eve.region/native-store eve.region/native-sync eve.region/native-wait eve.region/native-xchg eve.region/open-mmap-region-niolock]}}}}
   (:refer-clojure :exclude [aget aset alength byte-array int-array long-array object-array
                             into-array unchecked-byte unchecked-int unchecked-long
                             unchecked-inc-int unsigned-bit-shift-right long double class

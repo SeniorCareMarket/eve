@@ -6,6 +6,12 @@
    answers the response body as base64 (a blob's bytes), :as :bytes as a byte array (eve.encoding's, which eve.codec
    reads); otherwise bodies are UTF-8 text. A transport failure answers {:error message}, as eve.net.wire
    reads it. `request-all` sends a batch at once (sendAsync) and blocks until every answer is in."
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http/RESTRICTED eve.http/build eve.http/client eve.http/failure]}}}}
   (:require [clojure.string :as str])
   (:import [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$Builder HttpRequest$BodyPublishers HttpResponse

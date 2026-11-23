@@ -4,6 +4,12 @@
    WeakReference loses its target. sweep! scans the registered tokens and runs the releases of the collected ones —
    amortized: a scan runs once the registrations since the last one reach half the live count (at least 64).
 
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.gc/scan! eve.gc/since]}}}}
    token's release must not reach the token's holder. Written 2026-11-20 without a Dart runtime to run it on.")
 
 (def ^:private registry (atom []))

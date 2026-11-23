@@ -7,6 +7,12 @@
    out, as eve.net holds them; eve/test/eve/net/crypto_test.cljc holds this adapter to the portable one on the
    standards' vectors. The JDK has no XXH3, and no way from a raw seed to its public key: those are
    eve.net.portable-crypto's; random bytes are the process feature's (SecureRandom)."
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.crypto/PKCS8-PREFIX eve.crypto/SPKI-PREFIX eve.crypto/arr eve.crypto/vec*]}}}}
   (:require [eve.net.bigops :as bo]
             [eve.net.edwards :as edw]
             [eve.net.portable-crypto :as p]

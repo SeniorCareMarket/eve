@@ -12,6 +12,12 @@
    never here — open-mmap-region refuses :lustre?, as basilisp's does.
    A region is a deftype holding the mapping's base address; every op is
    the natives' call at base + offset."
+  ;; unresolved-var exclusions, this file only: this namespace is one of
+  ;; several seat files sharing the name; kondo's registry keeps one file's
+  ;; defs and reads the others' as unresolved (standalone lint of this file
+  ;; is clean). The excluded names are this file's own defs, verified
+  ;; against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.region/DartRegion]}}}}
   (:require ["package:eve_region/eve_region.dart" :as region]
             [eve.mem :as mem]))
 
