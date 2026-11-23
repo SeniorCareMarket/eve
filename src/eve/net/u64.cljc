@@ -6,7 +6,7 @@
    signed 32-bit one on JS, a 64-bit one on the JVM — with `mod`, which floors on every host.
 
    A host may supply faster arithmetic through its platform map; these are the defaults every override is checked
-   against.")
+   against." (:require [clojure.string]))
 
 (def ^:const TWO32 4294967296)
 (def ^:const TWO16 65536)
@@ -120,6 +120,9 @@
 (defn bswap64 "[hi lo]'s 8 bytes reversed" [[h l]] [(bswap32 l) (bswap32 h)])
 
 (defn hex32 "8 lower-case hex digits of a u32" [x]
-  (apply str (map (fn [i] (nth "0123456789abcdef" (mod (quot x (nth POW2 (* 4 (- 7 i)))) 16))) (range 8))))
+  (clojure.string/join
+   (map
+    (fn [i] (nth "0123456789abcdef" (mod (quot x (nth POW2 (* 4 (- 7 i)))) 16)))
+    (range 8))))
 
 (defn hex "16 lower-case hex digits of [hi lo]" [[h l]] (str (hex32 h) (hex32 l)))

@@ -23,7 +23,7 @@
                            :hash (.hashCode ^String v))
       (sequential? v) (println :count (count v)
                                :elem (count (str (first v)))
-                               :fills (str (first (first v))
+                               :fills (str (ffirst v)
                                            (first (nth v (quot (count v) 2)))
                                            (first (last v))))
       :else (println :value v))

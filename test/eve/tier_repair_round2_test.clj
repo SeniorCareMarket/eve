@@ -10,9 +10,9 @@
   (:refer-clojure :exclude [swap!])
   (:require [clojure.test :refer [deftest is]]
             [eve.host :refer [swap!]]
-            [eve.atom :as a]))
+            [eve.atom :as a] [clojure.string]))
 
-(def ^:private big (apply str (repeat 2000 "x")))
+(def ^:private big (clojure.string/join (repeat 2000 "x")))
 
 (defn- fill! [x n]
   (dotimes [i n]

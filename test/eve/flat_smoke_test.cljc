@@ -264,11 +264,11 @@
       ;; row measured 103 s on jank and 189 s on glj at 400 rows and
       ;; the suite budget is 60 s per host; the shape (multi-chunk
       ;; round-trip) is unchanged.
-      (let [rows (mapv (fn [i] {:id i :payload (str (apply str (repeat 1200 "x")) "-" i)}) (range 60))
+      (let [rows (mapv (fn [i] {:id i :payload (str (clojure.string/join (repeat 1200 "x")) "-" i)}) (range 60))
             chunks (@pack-all rows)]
         (is (< 1 (count chunks)) "400 rows of ~200 bytes did not split into multiple chunks")
         (is (= rows (vec (mapcat @unpack chunks))) "the multi-chunk value does not round-trip"))
-      (let [big (apply str (repeat 70000 "y"))
+      (let [big (clojure.string/join (repeat 70000 "y"))
             h (flat/pack [big])
             bs (flat/bytes h)]
         ;; the byte length of the chunk bytes: on cljs they are a

@@ -8,7 +8,7 @@
    jolt's, so do these. into and the chunked-seq fns likewise reach a type's
    own (below). (Calls compiled after this, in any namespace. seq is a native
    op a re-rooted var does not reach: eve.core's seq, adapters/coll/jvm, is
-   Clojure's.)")
+   Clojure's.)" (:require [clojure.string]))
 
 (#_{:clj-kondo/ignore [:unresolved-symbol]} alter-var-root #'clojure.core/swap!
                                             (fn [core]
@@ -180,7 +180,7 @@
                                                   (symbol (subs t 0 i) (subs t (inc i))))))
                                v      (or (resolve iface)
                                           (when-let [d (dotted s)] (resolve d))
-                                          (when-let [d (dotted (.replace s "_" "-"))] (resolve d)))]
+                                          (when-let [d (dotted (clojure.string/replace s "_" "-"))] (resolve d)))]
                            (when (and v (map? @v))
                              (set (map :name (vals (:sigs @v))))))
                          (catch Throwable _ nil))))

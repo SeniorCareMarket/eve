@@ -198,7 +198,7 @@
             dag (when (seq deferred) (into {} (em/file-jobs (:kind e) (offered-caps dh))))
             dead-inputs (into (set escalated) (:escalated e))
             orphan? (fn [k] (boolean (some dead-inputs (get dag k))))
-            deferred-escalated (vec (filter orphan? (keys deferred)))
+            deferred-escalated (filterv orphan? (keys deferred))
             submittable (reduce dissoc deferred deferred-escalated)
             submitted (if (seq submittable)
                         (submit-deferred! dh p (assoc e :jobs (merge ids resubmit) :deferred submittable)

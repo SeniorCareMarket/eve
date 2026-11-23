@@ -123,7 +123,7 @@
                                   v (sv/sab-vec (range n))]
                               (loop [current v
                                      expected-count n]
-                                (when (> expected-count 0)
+                                (when (pos? expected-count)
                                   (is (= expected-count (count current)))
                                   (is (= (dec expected-count) (peek current)))
                                   (recur (pop current) (dec expected-count))))
@@ -195,7 +195,7 @@
                               (loop [current l
                                      expected-count n
                                      expected-first 0]
-                                (when (> expected-count 0)
+                                (when (pos? expected-count)
                                   (is (= expected-count (count current)))
                                   (is (= expected-first (first current)))
                                   (recur (pop current) (dec expected-count) (inc expected-first))))
@@ -298,7 +298,7 @@
                                              m
                                              (filter #(zero? (mod % 3)) (range n)))]
                               (is (< (count m2) n))
-                              (is (> (count m2) 0))
+                              (is (pos? (count m2)))
                               (doseq [i (filter #(zero? (mod % 3)) (range n))]
                                 (is (nil? (get m2 i))))
                               (doseq [i (filter #(not= 0 (mod % 3)) (range n))]

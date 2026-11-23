@@ -602,7 +602,7 @@
                 {:ok (e/first elfs)}
                 (let [current      (e/first elfs)
                       opposite-pos (calculate-opposite lc)
-                      _ (assert (> opposite-pos 0))
+                      _ (assert (pos? opposite-pos))
                       _ (assert (< opposite-pos lc))
                       _opposite-elf (e/nth elfs opposite-pos)
                       other2       (fv-rest (remove-at elfs opposite-pos))]
@@ -639,9 +639,9 @@
     (doseq [[v msg] [[v1 ""]
                      [fv1 ""]
                      [(map #(nth v1 %) [0 1 2])   "#(nth v1 %)"]
-                     [(map #(v1 %) [0 1 2])       "#(v1 %)"]
+                     [(map v1 [0 1 2])       "#(v1 %)"]
                      [(map #(nth tv1 %) [0 1 2])  "#(nth tv1 %)"]
-                     [(map #(tv1 %) [0 1 2])      "#(tv1 %)"]
+                     [(map tv1 [0 1 2])      "#(tv1 %)"]
                      [(map #(e/nth fv1 %) [0 1 2])  "#(nth fv1 %)"]
                      [(map #(e/invoke fv1 %) [0 1 2])      "#(fv1 %)"]
                      [(map #(e/nth tfv1 %) [0 1 2]) "#(nth tfv1 %)"]

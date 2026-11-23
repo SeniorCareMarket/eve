@@ -4,7 +4,7 @@
   (:require [clojure.test :refer [deftest is]]
             [eve.net.bytes :as b]
             [eve.net.graft :as g]
-            [eve.net.sha256 :as s]))
+            [eve.net.sha256 :as s] [clojure.string]))
 
 (defn- sha [label] (s/sha256-hex (b/utf8 (str label))))
 
@@ -18,7 +18,7 @@
     (is (= br (:branch d)))
     (is (= [(sha "x")] (:blobs d)))
     (is (= [(sha "r0")] (:retired d))))
-  (is (= (apply str (repeat 64 "0")) (:old-root (g/decode (g/encode {:new-root (sha "n")}))))))
+  (is (= (clojure.string/join (repeat 64 "0")) (:old-root (g/decode (g/encode {:new-root (sha "n")}))))))
 
 (deftest the-layout-by-offset
   (let [v (g/encode {:old-root (sha "old") :new-root (sha "new") :epoch 7 :timestamp-ms 1700000000000

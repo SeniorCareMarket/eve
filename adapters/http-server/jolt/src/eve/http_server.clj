@@ -76,11 +76,13 @@
                     (.decode (Base64/getDecoder) ^String (str (or body "")))
                     (.getBytes (str (or body "")) "UTF-8"))
         head (str "HTTP/1.1 " status " " (get reasons status "") "\r\n"
-                  (apply str (keep (fn [[k v]]
-                                     (let [k (name k)]
-                                       (when-not (= "content-length" (str/lower-case k))
-                                         (str k ": " v "\r\n"))))
-                                   headers))
+                  (clojure.string/join
+                   (keep
+                    (fn
+                      [[k v]]
+                      (let [k (name k)]
+                        (when-not (= "content-length" (str/lower-case k)) (str k ": " v "\r\n"))))
+                    headers))
                   "Content-Length: " (alength bs) "\r\n"
                   "Connection: close\r\n"
                   "\r\n")

@@ -15,10 +15,10 @@
   ;; lives in several seat files and kondo's registry keeps one file's
   ;; defs, reading the others' as unresolved.
 
-  (:require ["http" :as http]))
+  (:require ["http" :as http] [clojure.string]))
 
 (defn- headers-map [^js h]
-  (into {} (map (fn [k] [(.toLowerCase k) (str (aget h k))])) (js/Object.keys h)))
+  (into {} (map (fn [k] [(clojure.string/lower-case k) (str (aget h k))])) (js/Object.keys h)))
 
 (defn serve!
   "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1)}: {:port :stop :bound}."

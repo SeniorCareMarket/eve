@@ -15,7 +15,7 @@
             [eve.region :as region]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]
-            [eve.deftype-proto.data :as d]))
+            [eve.deftype-proto.data :as d] [clojure.string]))
 
 (defn- now-ms []
   (js/performance.now))
@@ -147,7 +147,7 @@
                             [(+ i 100) (+ i 200) (+ i 300)]]
                    :tags #{:alpha :beta :gamma :delta}
                    :history (list :created :validated :committed)
-                   :payload (apply str (repeat 200 (str (char (+ 65 (mod i 26))))))}]
+                   :payload (clojure.string/join (repeat 200 (str (char (+ 65 (mod i 26))))))}]
             (swap! a assoc k v)))
         (let [elapsed (- (now-ms) t0)]
           (atom/close-atom-domain! d)

@@ -6,7 +6,7 @@
    no test here claims otherwise. The per-commit force itself is proven
    by counting msync under strace (doc/durability-spike-report-2026-10-27.md)."
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.atom :as atom]))
+            [eve.atom :as atom] [clojure.string]))
 
 (def ^:private base (str "target/durability-spike-test-" (System/currentTimeMillis)))
 
@@ -14,7 +14,7 @@
   (let [b (str base "-wsr")
         d (atom/persistent-atom-domain b)
         a (atom/persistent-atom {:id :eve/main :persistent b}
-                                {:n 41 :s (apply str (repeat 3000 "x"))})]
+                                {:n 41 :s (clojure.string/join (repeat 3000 "x"))})]
     (swap! a update :n inc)
     (atom/sync! a)
     (atom/close-atom-domain! d)

@@ -188,7 +188,7 @@
   ^bytes [container]
   (let [chunks (:chunks container)
         dir (directory-bytes container)
-        dir-offset (reduce + (map (fn [b] (alength b)) chunks))
+        dir-offset (reduce + (map #_{:splint/disable [lint/fn-wrapper]} (fn [b] (alength b)) chunks))
         tail (#_{:clj-kondo/ignore [:unresolved-symbol]} byte-array tail-size)]
     (wu64 tail 0 dir-offset)
     (enc/arraycopy (enc/utf8-bytes "EVS1") 0 tail 8 4)
@@ -361,7 +361,7 @@
    and are skipped. Returns [{:position :owner :target :from-unit :to-unit} …]."
   [container]
   (let [units (image-units container)
-        bounds (vec (reductions + 0 (map (fn [b] (alength b)) units)))
+        bounds (vec (reductions + 0 (map #_{:splint/disable [lint/fn-wrapper]} (fn [b] (alength b)) units)))
         unit-of (fn [off] (loop [i 0] (if (< off (nth bounds (inc i))) i (recur (inc i)))))
         ^bytes u0 (first units)
         h (header-at u0 0)

@@ -598,7 +598,7 @@
   "Read element at index."
   [arr idx]
   (let [cnt (e/count arr)]
-    (when (or (< idx 0) (>= idx cnt))
+    (when (or (neg? idx) (>= idx cnt))
       (throw (enc/index-out-of-bounds
               (str "Index out of bounds: " idx))))
     (-aget arr idx)))
@@ -607,7 +607,7 @@
   "Write element at index. Returns the value written."
   [arr idx val]
   (let [cnt (e/count arr)]
-    (when (or (< idx 0) (>= idx cnt))
+    (when (or (neg? idx) (>= idx cnt))
       (throw (enc/index-out-of-bounds
               (str "Index out of bounds: " idx))))
     (-aset! arr idx val)
@@ -623,7 +623,7 @@
 
 (defn- bounds-check! [arr idx op]
   (let [cnt (e/count arr)]
-    (when (or (< idx 0) (>= idx cnt))
+    (when (or (neg? idx) (>= idx cnt))
       (throw (enc/index-out-of-bounds
               (str op ": index out of bounds: " idx " for length " cnt))))))
 

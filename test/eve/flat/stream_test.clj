@@ -7,7 +7,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [eve.atom :as ea]
             [eve.deftype-proto.data :as d]
-            [eve.flat.stream :as stream]))
+            [eve.flat.stream :as stream] [clojure.string]))
 
 (def ^:private capacities
   {0 4194304 1 8388608 2 16777216 3 8388608 4 4194304 5 4194304})
@@ -22,7 +22,7 @@
 (deftest stream-roundtrips-small-values
   (doseq [[nm v] [["map" (into {} (map (fn [i] [i (* i i)])) (range 50))]
                   ["vec" (vec (range 2000))]
-                  ["nested" {:a [1 2 {:b #{3 4 5}}] "s" (apply str (repeat 700 "x"))}]
+                  ["nested" {:a [1 2 {:b #{3 4 5}}] "s" (clojure.string/join (repeat 700 "x"))}]
                   ["set" (into #{} (range 300))]
                   ["list" (apply list (range 100))]]]
     (testing nm
@@ -44,7 +44,7 @@
         dom (ea/atom-domain nil :capacities capacities)
         tgt (ea/lookup-or-create-mmap-atom! dom "st/seg-tgt" nil)
         _ (swap! tgt (fn [_] {:seed 1}))
-        tsio (ea/read-pinned tgt (fn [lv] (d/-eve-sio lv)))
+        tsio (ea/read-pinned tgt d/-eve-sio)
         r (stream/receive-stream! tsio (:bytes sent))]
     (is (= (:segments r) (:segments sent)) "receiver sees the sender's segments")
     (is (= (:claims r) (:segments r))
@@ -78,7 +78,7 @@
         dom (ea/atom-domain nil :capacities capacities)
         tgt (ea/lookup-or-create-mmap-atom! dom "st/v1-tgt" nil)
         _ (swap! tgt (fn [_] {:seed 1}))
-        tsio (ea/read-pinned tgt (fn [lv] (d/-eve-sio lv)))
+        tsio (ea/read-pinned tgt d/-eve-sio)
         r-run (stream/receive-stream! tsio (:bytes runned))
         tgt2 (fresh-atom "st/v1-tgt2")]
     (is (pos? (:runs runned)) "the vector's leaf blocks collapse into typed runs")
@@ -99,7 +99,7 @@
   ;; overflow strings, deftype-free collections).
   (doseq [[nm v] [["map" (into {} (map (fn [i] [i (* i i)])) (range 50))]
                   ["vec" (vec (range 2000))]
-                  ["nested" {:a [1 2 {:b #{3 4 5}}] "s" (apply str (repeat 700 "x"))}]
+                  ["nested" {:a [1 2 {:b #{3 4 5}}] "s" (clojure.string/join (repeat 700 "x"))}]
                   ["set" (into #{} (range 300))]]]
     (testing nm
       (let [src (fresh-atom (str "st/cd-" nm))
@@ -138,6 +138,6 @@
   (let [dom (ea/atom-domain nil :capacities capacities)
         tgt (ea/lookup-or-create-mmap-atom! dom "st/garbage" nil)
         _ (swap! tgt (fn [_] {:seed 1}))
-        tsio (ea/read-pinned tgt (fn [lv] (d/-eve-sio lv)))]
+        tsio (ea/read-pinned tgt d/-eve-sio)]
     (is (thrown? clojure.lang.ExceptionInfo
                  (stream/receive-stream! tsio (byte-array 64))))))

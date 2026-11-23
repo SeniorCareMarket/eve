@@ -20,7 +20,7 @@
             [eve.flat.check :as check]
             [eve.flat.chunk :as chunk]
             [eve.flat.corpora :as corpora]
-            [eve.flat.place :as place]))
+            [eve.flat.place :as place] [clojure.string]))
 
 (def ^:private capacities
   {0 4194304 1 4194304 2 8388608 3 4194304 4 2097152 5 2097152})
@@ -144,7 +144,7 @@
             (fn []
               (let [rs (subvec rows 0 n)
                     [bss ms] (timed-ms #(chunk/pack-all rs))]
-                {:ms (Math/round ms)
+                {:ms (clojure.math/round ms)
                  :chunks (count bss)
                  :max-len (reduce max (map alength bss))
                  :roundtrip (= rs (vec (mapcat (fn [^bytes bs] (chunk/unpack (chunk/open bs))) bss)))}))))
@@ -152,7 +152,7 @@
     ;; that seals several chunks either way
     (step "c3 seal search vs pre-fix algorithm, payload rows x2000"
           (fn []
-            (let [rs (mapv (fn [i] {:id i :payload (str (apply str (repeat 190 "x")) "-" i)}) (range 2000))
+            (let [rs (mapv (fn [i] {:id i :payload (str (clojure.string/join (repeat 190 "x")) "-" i)}) (range 2000))
                   old (old-pack-all rs)
                   new (chunk/pack-all rs)
                   same-bytes (and (== (count old) (count new))

@@ -13,7 +13,7 @@
    [eve.obj :as obj]
    ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
    #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.serialize :as ser]
-   [eve.map :as sm]))
+   [eve.map :as sm] [clojure.string]))
 
 ;;-----------------------------------------------------------------------------
 ;; Test setup — initialize global atom (requires sab-map for HAMT encoder)
@@ -1249,7 +1249,7 @@
              :with-spaces "a b c d e"
              :unicode "日本語 🎉 emoji"
              :newlines "line1\nline2\nline3"
-             :long (apply str (repeat 1000 "x")))
+             :long (clojure.string/join (repeat 1000 "x")))
       (let [m @a]
         (is (= "" (:empty m)))
         (is (= "hi" (:short m)))
@@ -1257,7 +1257,7 @@
         (is (= "a b c d e" (:with-spaces m)))
         (is (= "日本語 🎉 emoji" (:unicode m)))
         (is (= "line1\nline2\nline3" (:newlines m)))
-        (is (= (apply str (repeat 1000 "x")) (:long m)))))))
+        (is (= (clojure.string/join (repeat 1000 "x")) (:long m)))))))
 
 (deftest scalar-S1-keywords-test
   (testing "S1: Keyword values round-trip through atom"

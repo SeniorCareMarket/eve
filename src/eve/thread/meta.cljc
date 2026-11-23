@@ -388,7 +388,7 @@
   [m pool now]
   (if-not (contains? #{:running :shutdown :draining} (pool-state m pool))
     [m []]
-    (let [ids (vec (filter (fn [id] (= :queued (get-in m [:descs id :state]))) (get-in m [:q pool])))]
+    (let [ids (filterv (fn [id] (= :queued (get-in m [:descs id :state]))) (get-in m [:q pool]))]
       [(-> (reduce (fn [m id] (assoc-in m [:descs id] (d/cancel (get-in m [:descs id]) now))) m ids)
            (assoc-in [:q pool] [])
            (assoc-in [:pools pool :state] :stopped)

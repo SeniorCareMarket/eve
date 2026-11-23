@@ -260,7 +260,7 @@
     (is (nil? (get-in (eve-map :a 1) [:a :b]))))
 
   (testing "get-in with not-found"
-    (is (= :nope (get-in (eve-map :a 1) [:z] :nope)))))
+    (is (= :nope (get (eve-map :a 1) :z :nope)))))
 
 (deftest map-assoc-in-test
   (testing "assoc-in nested"

@@ -14,14 +14,14 @@
   (:import [com.sun.net.httpserver HttpServer HttpHandler HttpExchange]
            [java.net InetSocketAddress]
            [java.util Base64]
-           [java.util.concurrent Executors]))
+           [java.util.concurrent Executors]) (:require [clojure.string]))
 
 (defn- handle [handler ^HttpExchange ex]
   (try
     (let [raw (.readAllBytes (.getRequestBody ex))
           req {:method (.getRequestMethod ex)
                :url (str (.getRequestURI ex))
-               :headers (into {} (map (fn [[k vs]] [(.toLowerCase ^String k) (first vs)])) (.getRequestHeaders ex))
+               :headers (into {} (map (fn [[k vs]] [(clojure.string/lower-case k) (first vs)])) (.getRequestHeaders ex))
                :body (String. raw "UTF-8")
                :body-b64 (.encodeToString (Base64/getEncoder) raw)}
           {:keys [status headers body body-as]} (try (handler req)

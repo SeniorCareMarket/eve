@@ -20,7 +20,7 @@
   ;; lives in several seat files and kondo's registry keeps one file's
   ;; defs, reading the others' as unresolved.
   
-   found by a first short wait, and the worker then runs batches in turn, as the page's main thread always does.")
+   found by a first short wait, and the worker then runs batches in turn, as the page's main thread always does." (:require [clojure.string]))
 
 (defn- b64->bytes [s]
   (let [bin (js/atob s)
@@ -63,8 +63,8 @@
   (into {}
         (keep (fn [line]
                 (let [i (.indexOf line ":")]
-                  (when (pos? i) [(.toLowerCase (.trim (subs line 0 i))) (.trim (subs line (inc i)))])))
-              (.split (or (.getAllResponseHeaders xhr) "") "\r\n"))))
+                  (when (pos? i) [(clojure.string/lower-case (clojure.string/trim (subs line 0 i))) (.trim (subs line (inc i)))])))
+              (clojure.string/split (or (.getAllResponseHeaders xhr) "") "\r\n"))))
 
 (def ^:private forbidden
   "headers a browser sets itself and refuses from a script"
@@ -75,7 +75,7 @@
     (let [xhr (js/XMLHttpRequest.)]
       (.open xhr (or method "GET") url false)
       (when (#{:b64 :bytes} as) (.overrideMimeType xhr "text/plain; charset=x-user-defined"))
-      (doseq [[k v] headers :let [k (name k)] :when (not (forbidden (.toLowerCase k)))]
+      (doseq [[k v] headers :let [k (name k)] :when (not (forbidden (clojure.string/lower-case k)))]
         (.setRequestHeader xhr k (str v)))
       (.send xhr (cond (nil? body) nil
                        (= :b64 body-as) (b64->bytes body)
@@ -105,7 +105,7 @@
   "A request fetched on the page: a promise of its answer as plain JS ({status headers body} or {error})."
   [^js r]
   (let [hs (js-obj)]
-    (doseq [k (js/Object.keys (or (.-headers r) #js {})) :when (not (forbidden (.toLowerCase k)))]
+    (doseq [k (js/Object.keys (or (.-headers r) #js {})) :when (not (forbidden (clojure.string/lower-case k)))]
       (aset hs k (aget (.-headers r) k)))
     (-> (js/fetch (.-url r) #js {:method (or (.-method r) "GET") :headers hs
                                  :body (cond (nil? (.-body r)) js/undefined
@@ -116,7 +116,7 @@
                         (fn [ab]
                           (let [u8 (js/Uint8Array. ab)
                                 h (js-obj)]
-                            (.forEach (.-headers resp) (fn [v k] (aset h (.toLowerCase k) v)))
+                            (.forEach (.-headers resp) (fn [v k] (aset h (clojure.string/lower-case k) v)))
                             #js {:status (.-status resp) :headers h
                                  :body (if (.-as64 r) (bytes->b64 u8) (.decode (js/TextDecoder.) u8))})))))
         (.catch (fn [e] #js {:error (str (or (.-message e) e))})))))

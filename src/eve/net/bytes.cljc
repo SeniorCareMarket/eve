@@ -10,7 +10,7 @@
    and the reference every plug is held to byte for byte (eve/test/eve/net/bytes_codec_test.cljc)."
   (:refer-clojure :exclude [transient persistent! conj!])
   (:require [eve.host :refer [transient persistent! conj!]]
-            [eve.encoding :as e]))
+            [eve.encoding :as e] [clojure.string]))
 
 (def ^:private HEX "0123456789abcdef")
 (def ^:private B64 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
@@ -20,7 +20,7 @@
 (def ^:private HEX2 (mapv (fn [b] (str (nth HEX (quot b 16)) (nth HEX (mod b 16)))) (range 256)))
 
 (defn hex-portable "lower-case hex of a byte sequence — the portable reference eve.encoding's bytes->hex plug is held to" [bs]
-  (apply str (map (fn [b] (nth HEX2 b)) bs)))
+  (clojure.string/join (map (fn [b] (nth HEX2 b)) bs)))
 
 ;; The (if e/<plug> ...) tests below are host-plug presence
 ;; tests: the plug var is nil on a host without the plug and a
@@ -105,15 +105,19 @@
 
 (defn to-b64-portable "standard base64 (padded) of a byte sequence — the portable reference eve.encoding's bytes->b64 plug is held to" [bs]
   (let [v (vec bs) n (count v)]
-    (apply str
-           (mapcat (fn [i]
-                     (let [b0 (nth v i) b1 (if (< (inc i) n) (nth v (inc i)) 0) b2 (if (< (+ i 2) n) (nth v (+ i 2)) 0)
-                           x (+ (* b0 65536) (* b1 256) b2)]
-                       [(nth B64 (quot x 262144)) (nth B64 (mod (quot x 4096) 64))
-                        (if (< (inc i) n) (nth B64 (mod (quot x 64) 64)) \=)
-                        (if (< (+ i 2) n) (nth B64 (mod x 64)) \=)]))
-                   ;; not (range 0 n 3): clojerl's reduce drops a stepped range shorter than its step (eve.net.u64/steps)
-                   (take-while (fn [i] (< i n)) (iterate (fn [i] (+ i 3)) 0))))))
+    (clojure.string/join
+     (mapcat
+      (fn
+        [i]
+        (let [b0 (nth v i)
+              b1 (if (< (inc i) n) (nth v (inc i)) 0)
+              b2 (if (< (+ i 2) n) (nth v (+ i 2)) 0)
+              x (+ (* b0 65536) (* b1 256) b2)]
+          [(nth B64 (quot x 262144))
+           (nth B64 (mod (quot x 4096) 64))
+           (if (< (inc i) n) (nth B64 (mod (quot x 64) 64)) \=)
+           (if (< (+ i 2) n) (nth B64 (mod x 64)) \=)]))
+      (take-while (fn [i] (< i n)) (iterate (fn [i] (+ i 3)) 0))))))
 
 (defn to-b64 "standard base64 (padded) of a byte sequence (the host's eve.encoding plug when it has one, else to-b64-portable)" [bs]
   (if #_{:clj-kondo/ignore [:constant-condition]} e/bytes->b64 (e/bytes->b64 bs) (to-b64-portable bs)))

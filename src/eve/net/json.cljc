@@ -5,7 +5,7 @@
   (:refer-clojure :exclude [long])
   (:require [eve.host :refer [long]]
             [eve.encoding :as e]
-            [eve.net.bytes :as b]))
+            [eve.net.bytes :as b] [clojure.string]))
 
 (def ^:private HEX "0123456789abcdef")
 
@@ -29,7 +29,7 @@
             (if x
               (recur (next us) [] (conj out (b/units->str run) x))
               (recur (next us) (conj run i) out)))
-          (apply str (conj out (b/units->str run))))))))
+          (clojure.string/join (conj out (b/units->str run))))))))
 
 (defn write-str
   "the JSON text of v: a map (keys named: a keyword's name, else str), a sequential, a string, a number, a boolean,
@@ -41,8 +41,12 @@
         (string? v) (str "\"" (esc v) "\"")
         (keyword? v) (write-str (name v))
         (number? v) (let [s (str v)] (if (and (= (count s) (count (str (long v)))) (== v (long v))) (str (long v)) s))
-        (map? v) (str "{" (apply str (interpose "," (map (fn [[k x]] (str (write-str (if (keyword? k) (name k) (str k))) ":" (write-str x))) v))) "}")
-        (sequential? v) (str "[" (apply str (interpose "," (map write-str v))) "]")
+        (map? v) (str "{" (clojure.string/join
+                           ","
+                           (map
+                            (fn [[k x]] (str (write-str (if (keyword? k) (name k) (str k))) ":" (write-str x)))
+                            v)) "}")
+        (sequential? v) (str "[" (clojure.string/join "," (map write-str v)) "]")
         :else (throw (ex-info (str "json: cannot write " (pr-str v)) {:value v}))))
 
 ;; The reader is total: each step answers [value next-index], or nil when the text is not JSON there — so a caller that

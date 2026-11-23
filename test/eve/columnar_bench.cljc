@@ -23,7 +23,7 @@
    [eve.dataset.argops :as argops]
    [eve.tensor :as tensor]
    [eve.atom :as e]
-   #?(:clj [clojure.java.io :as io])))
+   #?(:clj [clojure.java.io :as io]) [clojure.string]))
 
 ;;=============================================================================
 ;; Platform + timing infrastructure
@@ -362,12 +362,12 @@
 (defn- pad-right [s n]
   (let [s (str s)]
     (if (>= (count s) n) s
-        (str s (apply str (repeat (- n (count s)) " "))))))
+        (str s (clojure.string/join (repeat (- n (count s)) " "))))))
 
 (defn- pad-left [s n]
   (let [s (str s)]
     (if (>= (count s) n) s
-        (str (apply str (repeat (- n (count s)) " ")) s))))
+        (str (clojure.string/join (repeat (- n (count s)) " ")) s))))
 
 (defn- format-n [n]
   (cond
@@ -383,11 +383,11 @@
                  " | " (pad-left "Eve (ms)" 10)
                  " | " (pad-left "Stock (ms)" 10)
                  " | " (pad-left "Speedup" 8) " |")
-        sep (str "|" (apply str (repeat 24 "-"))
-                 "|" (apply str (repeat 7 "-"))
-                 "|" (apply str (repeat 12 "-"))
-                 "|" (apply str (repeat 12 "-"))
-                 "|" (apply str (repeat 10 "-")) "|")]
+        sep (str "|" (clojure.string/join (repeat 24 "-"))
+                 "|" (clojure.string/join (repeat 7 "-"))
+                 "|" (clojure.string/join (repeat 12 "-"))
+                 "|" (clojure.string/join (repeat 12 "-"))
+                 "|" (clojure.string/join (repeat 10 "-")) "|")]
     (println)
     (println (str "## Eve Columnar Benchmark Results (" platform ", " mode-label ")"))
     (println)
@@ -416,7 +416,7 @@
       (swap! failures conj {:bench (some (fn [[k f]] (when (= f bench-fn) k)) @benches-by-name) :n n :mode mode
                             :error (ex-message e)})
       (println (str "  [FAIL] " (ex-message e)))
-      (doseq [l (take 16 #?(:cljs (some-> (field e stack) (.split "\n"))
+      (doseq [l (take 16 #?(:cljs (some-> (field e stack) (clojure.string/split "\n"))
                             :clj (map str (.getStackTrace ^Throwable e))
                             :default nil))]
         (println (str "    " l)))

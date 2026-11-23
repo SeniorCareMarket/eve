@@ -36,7 +36,7 @@
    #?(:clj ; part of the #?(:clj ...) cone block: it loads the JVM writer cone these hand-built-image tests drive; registrations are load-time effects 
       #_{:clj-kondo/ignore [:unused-namespace]}   [eve.process :as proc])
    #?(:clj [eve.retire :as retire])
-   #?(:clj [eve.flat :as flat]))
+   #?(:clj [eve.flat :as flat]) [clojure.string])
   ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
   #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays ArrayDeque]
                    [eve.deftype_proto.alloc JvmSlabCtx])))
@@ -644,7 +644,7 @@
 
 #?(:clj
    (deftest place-large-blocks
-     (let [v {:payload (apply str (repeat 5000 "x")) :small [1 2 3]}
+     (let [v {:payload (clojure.string/join (repeat 5000 "x")) :small [1 2 3]}
            img (hand-image v)
            sio (alloc/make-jvm-heap-slab-ctx {:capacities {0 (* 1024 1024) 1 (* 1024 1024) 2 (* 2 1024 1024)}})
            root (place/place! sio img)

@@ -29,7 +29,7 @@
 (defn- caught [f] (try (f) nil (catch #?(:cljs :default :jank jank.runtime.object_ref :default Exception) ex (or (:type (ex-data ex)) :thrown))))
 
 (deftest a-closure-s-captures
-  (let [f (fn [x] (inc x))
+  (let [f inc
         caps (arr/make-array 4)]
     (arr/aset caps 0 f)
     (arr/aset caps 1 41)

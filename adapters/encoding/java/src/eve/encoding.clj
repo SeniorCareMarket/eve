@@ -262,7 +262,7 @@
 (defn bytes-of
   "The bytes xs (each 0..255, or its signed byte), as a byte array."
   [xs]
-  (clojure.core/byte-array (map (fn [x] (unchecked-byte x)) xs)))
+  (clojure.core/byte-array (map #_{:splint/disable [lint/fn-wrapper]} (fn [x] (unchecked-byte x)) xs)))
 
 (defn bytes-copy
   "A copy of byte array b, in b's own representation (what the host's region
@@ -377,7 +377,7 @@
   [cps]
   (let [sb (StringBuilder.)]
     (doseq [cp cps] (.appendCodePoint sb (int cp)))
-    (.toString sb)))
+    (str sb)))
 
 ;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
 ;; This host's native codecs, plugged where eve.net.bytes dispatches to them (java.util.Base64 is Java 8;
@@ -404,7 +404,7 @@
   "standard base64 (padded) of a byte sequence — java.util.Base64"
   [bs]
   (.encodeToString (java.util.Base64/getEncoder)
-                   (clojure.core/byte-array (map (fn [x] (clojure.core/unchecked-byte x)) bs))))
+                   (clojure.core/byte-array (map #_{:splint/disable [lint/fn-wrapper]} (fn [x] (clojure.core/unchecked-byte x)) bs))))
 
 (defn b64->bytes
   "the bytes of base64 text, eve.net.bytes' contract over java.util.Base64 (see the section note)"
@@ -425,7 +425,7 @@
     (doseq [b bs]
       (.appendCodePoint sb (int (nth hex-chars (quot b 16))))
       (.appendCodePoint sb (int (nth hex-chars (mod b 16)))))
-    (.toString sb)))
+    (str sb)))
 
 (defn hex->bytes
   "the bytes of hex text (even length), eve.net.bytes' contract: throws on odd length and on a non-digit"

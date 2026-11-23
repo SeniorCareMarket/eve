@@ -9,7 +9,7 @@
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.data :as d])
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.data :as d] [clojure.string])
   (:import [java.io File]))
 
 ;; ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@
   (let [r (apply spawn-node! args)]
     (when-not (zero? (:exit r))
       (throw (ex-info "Node worker failed" {:args args :err (:err r)})))
-    (edn/read-string (.trim (:out r)))))
+    (edn/read-string (clojure.string/trim (:out r)))))
 
 (defn- tmp-base [suffix]
   (str "/tmp/eve-bench-" (System/currentTimeMillis) "-" suffix))
@@ -150,7 +150,7 @@
                                   :deep {:a {:b {:c {:d (str "deep-" i)}}}}
                                   :items (vec (range 40))
                                   :tags #{:alpha :beta :gamma}
-                                  :payload (apply str (repeat 200 "X"))})]]]
+                                  :payload (clojure.string/join (repeat 200 "X"))})]]]
         (let [b     (tmp-base (str "b3-" label))
               [d a] (create-domain-atom! b {})
               t0    (System/nanoTime)]
@@ -228,8 +228,7 @@
           (swap! a assoc (keyword (str "k" i))
                  {:id i
                   :label (str "item-" i)
-                  :payload (apply str (repeat payload-chars
-                                              (str (char (+ 65 (mod i 26))))))
+                  :payload (clojure.string/join (repeat payload-chars (str (char (+ 65 (mod i 26))))))
                   :tags #{:a :b :c :d}
                   :nested {:x i :y (* i 2)}}))
         (let [elapsed-ms (nanos->ms (- (System/nanoTime) t0))

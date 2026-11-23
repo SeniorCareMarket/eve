@@ -1718,9 +1718,9 @@
     (let [class-idx (alloc/decode-class-idx slab-off)
           block-idx (alloc/decode-block-idx slab-off)]
       (cond
-        (or (< class-idx 0) (> class-idx 5))
+        (or (neg? class-idx) (> class-idx 5))
         (str "invalid class-idx=" class-idx " (expected 0-5)")
-        (< block-idx 0)
+        (neg? block-idx)
         (str "negative block-idx=" block-idx)
         (> block-idx 10000000)
         (str "suspiciously large block-idx=" block-idx)

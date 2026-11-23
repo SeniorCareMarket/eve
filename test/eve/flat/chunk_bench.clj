@@ -90,7 +90,7 @@
                          label t-decode (/ (* t-decode 1000.0) (count rows))))
         (when pack-all
           (let [chunks (pack-all rows)
-                total (reduce + (map #(alength ^bytes %) chunks))
+                total (reduce + (map #_{:splint/disable [lint/fn-wrapper]} (fn [b] (alength b)) chunks))
                 unpack (resolve 'eve.flat.chunk/unpack)
                 _open (resolve 'eve.flat.chunk/open)
                 p-decode (bench-min-ms (fn [] (mapv unpack chunks)) 5)]

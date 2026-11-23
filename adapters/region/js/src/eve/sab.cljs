@@ -99,5 +99,5 @@
             seen (js/Atomics.load ia idx)
             r (js/Atomics.waitAsync ia idx seen)]
         (if (.-async r)
-          (.then (.-value r) (fn [v] (keyword v)))
+          (.then (.-value r) keyword)
           (js/Promise.resolve (keyword (.-value r))))))))

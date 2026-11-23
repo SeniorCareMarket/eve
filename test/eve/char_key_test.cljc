@@ -56,7 +56,7 @@
         digit (fn [c] (str/index-of "0123456789abcdef" (str c)))
         vals (map #(+ (* 16 (digit (nth s (* 2 %)))) (digit (nth s (inc (* 2 %))))) (range n))]
     #?(:cljs (js/Uint8Array. (to-array vals))
-       :default (byte-array (map #(unchecked-byte %) vals)))))
+       :default (byte-array (map #_{:splint/disable [lint/fn-wrapper]} #(unchecked-byte %) vals)))))
 
 (def two-key-map
   "One map holding both the char a (→ 1) and the string \"a\" (→ 2)."

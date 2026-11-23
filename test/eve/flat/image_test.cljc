@@ -21,7 +21,7 @@
             [eve.flat]
             [eve.flat.sio :as ssio]
             [eve.flat.image :as img]
-            [eve.vec] [eve.set] [eve.list])
+            [eve.vec] [eve.set] [eve.list] [clojure.string])
   ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
   (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays Random]
            [java.util.concurrent CountDownLatch]))
@@ -316,7 +316,7 @@
     1 (assoc m :p/vec (vec (range i)))
     2 (if-let [k (first (sort-by str (keys m)))] (dissoc m k) m)
     3 (assoc m :p/n (* 3 i))
-    4 (assoc m :p/nested {:i i :s (apply str (repeat i "x")) :set (set (range (mod i 7)))})))
+    4 (assoc m :p/nested {:i i :s (clojure.string/join (repeat i "x")) :set (set (range (mod i 7)))})))
 
 (deftest views-survive-appends
   (let [g (gen/map gen/keyword

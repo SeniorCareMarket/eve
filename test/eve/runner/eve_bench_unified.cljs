@@ -36,7 +36,7 @@
 
 (defn- exec-sync [cmd]
   (try
-    (str/trim (.toString (.execSync cp cmd #js {:encoding "utf8"})))
+    (str/trim (str (.execSync cp cmd {splint/tagged-literal (js {:encoding "utf8"})})))
     (catch :default _ "")))
 
 (defn- mkdir-p [dir]
@@ -126,7 +126,7 @@
     ;; 4. Wait for workers, then dispatch benchmarks to :core
     (on-when (and (contains? @s/peers :core)
                   (contains? @s/peers :future)
-                  (some #(.startsWith (name %) "fp-") (keys @s/peers)))
+                  (some #(clojure.string/starts-with? (name %) "fp-") (keys @s/peers)))
              {:max-time 30000}
              (println (str "Workers ready. Peers: " (set (keys @s/peers))))
              (js/setTimeout

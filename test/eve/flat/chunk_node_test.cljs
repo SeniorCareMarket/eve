@@ -17,7 +17,7 @@
    good as that pin."
   (:require [cljs.test :refer [deftest is testing]]
             [cljs.reader :as edn]
-            [eve.flat.chunk :as chunk]))
+            [eve.flat.chunk :as chunk] [clojure.string]))
 
 ;; ---------------------------------------------------------------------------
 ;; helpers
@@ -29,15 +29,16 @@
   (if (.existsSync (js/require "fs") fixture-path)
     (edn/read-string
      {:readers {'uuid uuid
-                'inst (fn [s] (js/Date. s))
-                'char (fn [s] (first s))}}
+                'inst #_{:splint/disable [lint/fn-wrapper]} (fn [s] (js/Date. s))
+                'char first}}
      (.readFileSync (js/require "fs") fixture-path "utf8"))
     []))
 
 (defn- u8->hex [^js/Uint8Array u8]
-  (apply str (map (fn [i] (let [h (.toString (aget u8 i) 16)]
-                            (if (< (aget u8 i) 16) (str "0" h) h)))
-                  (range (.-length u8)))))
+  (clojure.string/join
+   (map
+    (fn [i] (let [h (.toString (aget u8 i) 16)] (if (< (aget u8 i) 16) (str "0" h) h)))
+    (range (.-length u8)))))
 
 (defn- hex->u8 [s]
   (let [n (quot (count s) 2)

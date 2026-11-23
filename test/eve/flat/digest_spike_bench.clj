@@ -39,7 +39,7 @@
 (defn- fresh-domain-sio []
   (let [a (fresh-atom (str "ds-seed-" (rand-int 1000000000)))]
     (swap! a (fn [_] {:seed 1}))
-    (ea/read-pinned a (fn [lv] (d/-eve-sio lv)))))
+    (ea/read-pinned a d/-eve-sio)))
 
 (defn- row-map []
   (into {}

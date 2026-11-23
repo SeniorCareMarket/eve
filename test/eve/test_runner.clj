@@ -352,14 +352,14 @@
 (defn- keyword-arg?
   "True if arg looks like a keyword (:foo) or flag (--foo)."
   [s]
-  (or (.startsWith s ":") (.startsWith s "--")))
+  (or (clojure.string/starts-with? s ":") (clojure.string/starts-with? s "--")))
 
 (defn- normalize-arg
   "Normalize :foo and --foo to canonical keyword form."
   [s]
   (cond
-    (.startsWith s ":") (subs s 1)
-    (.startsWith s "--") (subs s 2)
+    (clojure.string/starts-with? s ":") (subs s 1)
+    (clojure.string/starts-with? s "--") (subs s 2)
     :else s))
 
 (defn- parse-args

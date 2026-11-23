@@ -144,7 +144,7 @@
        (ffmpeg! "-i" path "-vf" (str "fps=" n "/10,scale=" w ":" h ":force_original_aspect_ratio=decrease,pad=" w ":" h
                                      ":(ow-iw)/2:(oh-ih)/2")
                 "-frames:v" (str n) (join d "t%02d.png"))
-       (let [tiles (vec (sort (filter (fn [f] (.endsWith f ".png")) (vec (.readdirSync node-fs d)))))
+       (let [tiles (vec (sort (filter (fn [f] (clojure.string/ends-with? f ".png")) (vec (.readdirSync node-fs d)))))
              comps (clj->js (map-indexed (fn [i f] {:input (join d f)
                                                     :left (* w (mod i em/sheet-cols))
                                                     :top (* h (quot i em/sheet-cols))})

@@ -108,12 +108,12 @@
             [eve.aegis.regions :as regions]
             [eve.aegis.session :as session]
             [eve.crypto :as crypto]
-            [eve.net.bytes :as b]))
+            [eve.net.bytes :as b] [clojure.string]))
 
 ;; ── the spec
 
 (defn- seg [s] (if (keyword? s) (name s) (str s)))
-(defn path-string [p] (apply str (interpose "/" (map seg p))))
+(defn path-string [p] (clojure.string/join "/" (map seg p)))
 
 (defn branches [spec] (get-in spec [:policy :children]))
 (defn branch-named [spec name] (first (filter (fn [br] (= name (:branch br))) (branches spec))))
@@ -204,7 +204,7 @@
 (defn record-refusal "nil, or why the record does not match its schema (spec_rules.vs record-refusal)" [schema record]
   (cond (nil? schema) :no-schema
         (not (map? record)) :not-a-map
-        :else (let [keys-of (fn [r] (set (map (fn [k] (seg k)) (keys r))))
+        :else (let [keys-of (fn [r] (set (map seg (keys r))))
                     present (keys-of record)
                     required (set (map name (:required schema)))
                     allowed (into required (map name (:optional schema)))]
@@ -244,7 +244,7 @@
     :new (let [k (last side)] (when (= :last (nth side (- (count side) 2))) (merkle/record-get (:record claim) k)))
     nil))
 
-(defn- hex-pubkey? [s] (and (string? s) (= 64 (count s)) (every? (fn [c] (b/hex-value c)) s)))
+(defn- hex-pubkey? [s] (and (string? s) (= 64 (count s)) (every? b/hex-value s)))
 
 (defn- check-primitive [ctx claim _branch {:keys [name args]} _schema leaf _path]
   (case name

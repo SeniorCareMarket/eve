@@ -73,7 +73,7 @@
     (is (<= 5 (first @slept) 15) "attempt 0: 10 ms × (0.5 + a draw)")))
 
 (deftest denied-throws-once
-  (let [[ra s slept] (setup {:deny (fn [req] (some (fn [[kb _]] (str/includes? (apply str (map char kb)) "secret"))
+  (let [[ra s slept] (setup {:deny (fn [req] (some (fn [[kb _]] (str/includes? (clojure.string/join (map char kb)) "secret"))
                                                    (snap/unframe (b/from-b64 (get req "root_blob")))))})
         e (try (a/swap! ra assoc :secret 1) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e e))]
     (is (= :policy-denied (:type (ex-data e))) "T-4.7")

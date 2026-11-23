@@ -8,7 +8,7 @@
             [eve.map  :as eve-map]
             [eve.vec  :as eve-vec]
             [eve.set  :as eve-set]
-            [eve.list :as eve-list]))
+            [eve.list :as eve-list] [clojure.string]))
 
 ;; ============================================================================
 ;; Helpers
@@ -319,7 +319,7 @@
       (is (nil? (get-in (eve-map* :a 1) [:a :b]))))
 
     (testing "get-in with not-found"
-      (is (= :nope (get-in (eve-map* :a 1) [:z] :nope))))))
+      (is (= :nope (get (eve-map* :a 1) :z :nope))))))
 
 (deftest jvm-map-assoc-in-test
   (with-heap-slab
@@ -564,8 +564,8 @@
         (is (instance? java.util.List v))
         (is (= 3 (.size ^java.util.List v)))
         (is (= 10 (.get ^java.util.List v 0)))
-        (is (.contains ^java.util.List v 20))
-        (is (not (.contains ^java.util.List v 99)))))))
+        (is (clojure.string/includes? v 20))
+        (is (not (clojure.string/includes? v 99)))))))
 
 ;; ============================================================================
 ;; SET CONFORMANCE

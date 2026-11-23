@@ -5,9 +5,10 @@
    * + - / (truncating) < = and bit-and / bit-shift-right — never zero? odd? mod or quot, whose 0 and Math.floor are
    Numbers. Held to eve.net.portable-crypto's rows by eve/test/eve/net/crypto_fast_path_test.cljc."
   (:require [eve.net.bigops :as bo]
-            [eve.net.edwards :as edw]))
+            [eve.net.edwards :as edw] [clojure.string]))
 
-(defn- hex-of [bs] (apply str (map (fn [b] (let [h (.toString b 16)] (if (< b 16) (str "0" h) h))) bs)))
+(defn- hex-of [bs] (clojure.string/join
+                    (map (fn [b] (let [h (.toString b 16)] (if (< b 16) (str "0" h) h))) bs)))
 (defn- big [bs] (js/BigInt (str "0x0" (hex-of bs))))
 (def ^:private ZERO (js/BigInt 0))
 (def ^:private ONE (js/BigInt 1))
@@ -21,7 +22,7 @@
 
 (def OPS
   (bo/complete
-   {:int (fn [n] (js/BigInt n))
+   {:int js/BigInt
     :from-be big :to-be unbig
     :add (fn [a b] (+ a b)) :sub (fn [a b] (- a b)) :mul (fn [a b] (* a b))
     :quot (fn [a b] (/ a b)) :mod bmod

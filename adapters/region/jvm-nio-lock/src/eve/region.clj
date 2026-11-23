@@ -32,7 +32,7 @@
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
                             -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
                             -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]] [clojure.string])
   (:import
    [java.io RandomAccessFile]
    [java.nio ByteBuffer ByteOrder MappedByteBuffer]
@@ -401,7 +401,7 @@
 (def ^:private SEQ-CST 5)
 
 (def ^:private mac-os?
-  (.contains (.toLowerCase (str (System/getProperty "os.name"))) "mac"))
+  (clojure.string/includes? (clojure.string/lower-case (str (System/getProperty "os.name"))) "mac"))
 
 (def ^:private strict-alignment?
   ;; arm64's atomics fault at an address that is not a multiple of the
@@ -410,11 +410,11 @@
   ;; unaligned address is a plain one; eve's read-modify-writes are on
   ;; aligned words, so the RMW ops need no such guard.
   (boolean (or mac-os?
-               (#{"aarch64" "arm64"} (.toLowerCase (str (System/getProperty "os.arch"))))
+               (#{"aarch64" "arm64"} (clojure.string/lower-case (str (System/getProperty "os.arch"))))
                (= "1" (System/getenv "EVE_BB_STRICT_ALIGNMENT")))))
 
 (def ^:private SYS-futex
-  (case (.toLowerCase (str (System/getProperty "os.arch")))
+  (case (clojure.string/lower-case (str (System/getProperty "os.arch")))
     ("amd64" "x86_64") 202
     ("aarch64" "arm64") 98
     nil))

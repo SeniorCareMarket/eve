@@ -11,7 +11,7 @@
             [eve.codec :as codec]
             [eve.deftype-proto.data :as d]
             #?(:clj [clojure.test :refer [deftest is testing]]
-               :cljs [cljs.test :refer-macros [deftest is testing]])))
+               :cljs [cljs.test :refer-macros [deftest is testing]]) [clojure.string]))
 
 ;; ---------------------------------------------------------------------------
 ;; host bytes and a generator that answers the same on every host
@@ -83,7 +83,7 @@
   "The unsigned LEB128 bytes of a non-negative v."
   [v]
   #?(:clj (loop [v (biginteger v) out []]
-            (if (< (.compareTo ^BigInteger v (BigInteger/valueOf 128)) 0)
+            (if (neg? (.compareTo v (BigInteger/valueOf 128)))
               (conj out (.intValue ^BigInteger v))
               (recur (.shiftRight ^BigInteger v 7) (conj out (+ 128 (.intValue (.and ^BigInteger v (BigInteger/valueOf 127))))))))
      :cljs (loop [v v out []]
@@ -92,7 +92,7 @@
 
 (defn- host-utf8 [s] #?(:clj (.getBytes ^String s "UTF-8") :cljs (.encode (js/TextEncoder.) s)))
 (defn- units [s] (mapv #(#?(:clj int :cljs identity) (#?(:clj .charAt :cljs .charCodeAt) s %)) (range (count s))))
-(defn- from-units [us] #?(:clj (String. (char-array (map char us))) :cljs (apply str (map #(.fromCharCode js/String %) us))))
+(defn- from-units [us] (clojure.string/join (map #(.fromCharCode js/String %) us)))
 
 #?(:cljs (defn- type-tag [x] (.call (.-toString (.-prototype js/Object)) x)))
 
@@ -308,9 +308,9 @@
         (dotimes [k (count bs)] (ba-set! b (+ 3 k) (nth bs k)))
         (is (= want (units (fio/utf8 (fio/chunk b) 3 (count bs)))) (str "utf8 of " bs)))))
   (testing "strings round-trip through their UTF-8 bytes, across the short-ASCII path's bound"
-    (doseq [s ["" "a" "Station-123" (apply str (repeat 32 "x")) (apply str (repeat 33 "y"))
-               "é" "€uro" "😀" "a😀b€c" (apply str (repeat 300 "z")) (str (from-units [0xFEFF]) "bom")
-               (apply str (repeat 40 "ü"))]]
+    (doseq [s ["" "a" "Station-123" (clojure.string/join (repeat 32 "x")) (clojure.string/join (repeat 33 "y"))
+               "é" "€uro" "😀" "a😀b€c" (clojure.string/join (repeat 300 "z")) (str (from-units [0xFEFF]) "bom")
+               (clojure.string/join (repeat 40 "ü"))]]
       (let [u (host-utf8 s) b (ba (+ 2 (ba-len u)))]
         (dotimes [k (ba-len u)] (ba-set! b (+ 2 k) (ba-get u k)))
         (is (= s (fio/utf8 (fio/chunk b) 2 (ba-len u))) (str "utf8 round trip of " (pr-str s)))))))
@@ -367,18 +367,18 @@
   (testing "the length class, the length, the bytes"
     (doseq [[s k] [["" ""] ["a" ""] ["" "a"] ["ab" "abc"] ["abc" "ab"] ["abc" "abd"] ["abd" "abc"]
                    ["b" "aa"] ["Station-10" "Station-9"] ["é" "e"] ["€" "é"] ["😀" "€a"] ["a😀" "a😀"]
-                   ["Ω" "Ω"] [(apply str (repeat 255 "a")) (apply str (repeat 256 "a"))]
-                   [(apply str (repeat 256 "a")) (apply str (repeat 255 "a"))]
-                   [(apply str (repeat 256 "a")) (apply str (repeat 256 "a"))]
-                   [(apply str (repeat 256 "a")) (str (apply str (repeat 255 "a")) "b")]
-                   [(apply str (repeat 255 "b")) (apply str (repeat 300 "a"))]]]
+                   ["Ω" "Ω"] [(clojure.string/join (repeat (clojure.string/join (repeat 256 "a")) "a")) (clojure.string/join (repeat 256 "a"))]
+                   [(clojure.string/join (repeat (clojure.string/join (repeat 255 "a")) "a")) (clojure.string/join (repeat 255 "a"))]
+                   [(clojure.string/join (repeat (clojure.string/join (repeat 256 "a")) "a")) (clojure.string/join (repeat 256 "a"))]
+                   [(clojure.string/join (repeat 256 "a")) (str (clojure.string/join (repeat 255 "a")) "b")]
+                   [(clojure.string/join (repeat (clojure.string/join (repeat 300 "a")) "b")) (clojure.string/join (repeat 300 "a"))]]]
       (check-key-cmp s k)))
   (testing "past 256 bytes the u32 length compares little-endian, byte by byte (257 above 512)"
-    (let [[c _ off n] (stored (apply str (repeat 257 "a")))]
-      (is (= 1 (fio/key-cmp c off n (apply str (repeat 512 "a")))))
-      (check-key-cmp (apply str (repeat 257 "a")) (apply str (repeat 512 "a")))
-      (check-key-cmp (apply str (repeat 512 "q")) (apply str (repeat 257 "a")))
-      (check-key-cmp (apply str (repeat 300 "a")) (apply str (repeat 556 "a")))))
+    (let [[c _ off n] (stored (clojure.string/join (repeat 257 "a")))]
+      (is (= 1 (fio/key-cmp c off n (clojure.string/join (repeat 512 "a")))))
+      (check-key-cmp (clojure.string/join (repeat (clojure.string/join (repeat 512 "a")) "a")) (clojure.string/join (repeat 512 "a")))
+      (check-key-cmp (clojure.string/join (repeat (clojure.string/join (repeat 257 "a")) "q")) (clojure.string/join (repeat 257 "a")))
+      (check-key-cmp (clojure.string/join (repeat (clojure.string/join (repeat 556 "a")) "a")) (clojure.string/join (repeat 556 "a")))))
   (testing "a host string with lone surrogates encodes as the host's encoder does"
     (doseq [k [(from-units [0xD800]) (from-units [0xDC00]) (from-units [0x61 0xD83D]) (from-units [0xD83D 0x61])
                (from-units [0xDE00 0xD83D]) (from-units [0xD83D 0xDE00])]]
@@ -392,7 +392,7 @@
     (let [r (rng 99)
           alphabet ["a" "b" "z" "0" "é" "ß" "€" "Ω" "😀" "𝄞"]]
       (dotimes [_ 600]
-        (let [mk (fn [] (apply str (repeatedly (rnd r 6) #(nth alphabet (rnd r (count alphabet))))))
+        (let [mk (fn [] (clojure.string/join (repeatedly (rnd r 6) #(nth alphabet (rnd r (count alphabet))))))
               s (mk)
               k (if (zero? (rnd r 4)) s (mk))]
           (check-key-cmp s k)))))

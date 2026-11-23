@@ -6,7 +6,7 @@
     commit <i> journal-len <n>
   Exits WITHOUT closing the domain (close would checkpoint).
   Usage: record <variant J1|J10> <size counter|kb64> <workdir> <n>"
-  (:require [eve.atom :as atom])
+  (:require [eve.atom :as atom] [clojure.string])
   (:import [System.IO Directory File Path]))
 
 (defn- opts [variant]
@@ -28,7 +28,7 @@
         dir (str workdir "/domain")
         snap (fn [i] (copy-domain! workdir (str workdir "/snap-" i)))
         _dom (atom/persistent-atom-domain dir (opts variant))
-        big (fn [ch] (mapv (fn [_] (apply str (repeat 30 ch))) (range 2200)))
+        big (fn [ch] (mapv (fn [_] (clojure.string/join (repeat 30 ch))) (range 2200)))
         init (case size "counter" 0 (big \z))
         a (atom/persistent-atom {:id :eve/main :persistent dir} init)]
     (atom/sync! a)

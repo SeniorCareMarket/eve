@@ -705,7 +705,7 @@
         (>= ulen scale)
         (str (when neg "-") (subs digits 0 (- ulen scale)) "." (subs digits (- ulen scale)))
         :else
-        (str (when neg "-") "0." (apply str (repeat (- scale ulen) "0")) digits))
+        (str (when neg "-") "0." (clojure.string/join (repeat (- scale ulen) "0")) digits))
       ;; scientific
       (let [exp adj
             unsig (if (= ulen 1) digits (str (subs digits 0 1) "." (subs digits 1)))
@@ -1451,7 +1451,7 @@
   (let [n (count s)]
     (loop [i 0 in-str? false escaped? false acc (tvec [])]
       (if (>= i n)
-        (apply str (tpersist acc))
+        (clojure.string/join (tpersist acc))
         (let [ch (nth s i)]
           (cond
             escaped? (recur (inc i) in-str? false (tconj acc ch))

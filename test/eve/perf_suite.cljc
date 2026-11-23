@@ -61,13 +61,13 @@
       (fn [a] (swap! a update :n inc))]
      [:atom-deref-small
       (fn [] (e/atom ::small {:n 0 :name "eve"}))
-      (fn [a] @a)]
+      deref]
      [:atom-swap-map-1k
       (fn [] (let [a (e/atom ::map-1k {})] (reset! a (keys-1k)) a))
       (fn [a] (let [k (mod (next-i) 1000)] (swap! a assoc k (- k))))]
      [:atom-deref-map-1k
       (fn [] (let [a (e/atom ::deref-1k {})] (reset! a (keys-1k)) a))
-      (fn [a] @a)]
+      deref]
      [:atom-$-get-map-1k
       (fn [] (let [a (e/atom ::get-1k {})] (reset! a (keys-1k)) a))
       (fn [a] (ea/read-pinned a (fn [v] (ec/get v (mod (next-i) 1000)))))]

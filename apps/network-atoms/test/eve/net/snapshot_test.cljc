@@ -27,4 +27,6 @@
 
 (deftest one-blob-for-one-value
   (is (= (:key (snap/snapshot {:a 1 :b [2] :c 3})) (:key (snap/snapshot (into {} [[:c 3] [:b [2]] [:a 1]])))))
-  (is (= (b/hex (:blob (snap/snapshot {}))) "504e535600000000") "the empty map: the magic and a zero count"))
+  (is
+   (= "504e535600000000" (b/hex (:blob (snap/snapshot {}))))
+   "the empty map: the magic and a zero count"))

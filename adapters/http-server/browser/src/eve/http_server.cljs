@@ -40,7 +40,7 @@
 
   (:require [cljs.reader :as reader]
             [eve.net.bytes :as nb]
-            [eve.thread-host :as h]))
+            [eve.thread-host :as h] [clojure.string]))
 
 ;; ---------------------------------------------------------------------------
 ;; Small shapes
@@ -114,7 +114,7 @@
   (when (page-debug?)
     (try
       (-> (js/fetch (str (.-origin js/location) "/__eve_debug")
-                    #js {:method "POST" :body (apply str xs)})
+                    #js {:method "POST" :body (clojure.string/join xs)})
           (.catch (fn [_] nil)))
       (catch :default _ nil))))
 

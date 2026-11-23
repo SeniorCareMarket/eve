@@ -22,7 +22,7 @@
                             long class double bytes])
   (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
    [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
-                     long class double bytes]]))
+                     long class double bytes]] [clojure.string]))
 
 (defn throw-index-out-of-bounds
   "Throw an index-out-of-bounds error."
@@ -221,7 +221,7 @@
   "The string of a sequence of Unicode code points (one past U+FFFF as its UTF-16 surrogate pair, as a JavaScript
    string holds it) — the inverse of utf16-units."
   [cps]
-  (apply str (map (fn [cp] (.fromCodePoint js/String cp)) cps)))
+  (clojure.string/join (map (fn [cp] (.fromCodePoint js/String cp)) cps)))
 
 ;; ── the byte codec slot (eve.net.bytes, defect register #50) ──────────────────────────────────────────────
 ;; nil on this host: JavaScript has no native byte-array base64 or hex (btoa speaks a Latin-1 string, which is

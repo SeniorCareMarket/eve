@@ -22,7 +22,7 @@
   "[url-base stop] of a handler made from its own base URL (f base) → handler"
   [f]
   (let [hv (atom nil)
-        srv (hs/serve! {:port 0 :threads 16} (fn [req] (@hv req)))
+        srv (hs/serve! {:port 0 :threads 16} #_{:splint/disable [lint/fn-wrapper]} (fn [req] (@hv req)))
         base (str "http://127.0.0.1:" (:port srv))]
     (reset! hv (f base))
     [base (:stop srv)]))

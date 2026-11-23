@@ -75,10 +75,10 @@
       ;; clojure.edn reads #uuid and #inst itself (the JVM's UUID and Date, the
       ;; CLR's Guid and DateTime). #char is eve's own reader on both hosts: a
       ;; Character here, the codec's EveChar on ClojureScript (§4).
-      #?(:cljs {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}}
+      #?(:cljs {:readers {'uuid uuid 'inst #_{:splint/disable [lint/fn-wrapper]} (fn [s] (js/Date. s)) 'char codec/eve-char}}
          ;; (first s): the host's own character — .charAt is the JVM's, and ClojureCLR's String has none
          ;; (System.MissingMethodException: both fixture tests errored there)
-         :default {:readers {'char (fn [s] (first s))}})
+         :default {:readers {'char first}})
       #?(:cljs (.readFileSync (js/require "fs") fixture-path "utf8")
          :default (slurp fixture-path)))))
 
@@ -95,7 +95,7 @@
         digit (fn [c] (str/index-of "0123456789abcdef" (str c)))
         vals (map #(+ (* 16 (digit (nth s (* 2 %)))) (digit (nth s (inc (* 2 %))))) (range n))]
     #?(:cljs (js/Uint8Array. (to-array vals))
-       :default (byte-array (map #(unchecked-byte %) vals)))))
+       :default (byte-array (map #_{:splint/disable [lint/fn-wrapper]} #(unchecked-byte %) vals)))))
 
 (defn- encode-key [v]
   ;; a copy: a codec may answer a scratch buffer, valid until its next call
@@ -134,8 +134,8 @@
 (deftest long-symbol-has-no-encoding
   (testing "a symbol name or namespace past 255 UTF-8 bytes is refused on every host, never truncated (seam map L-40)"
     (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
-                 (encode-key (symbol (apply str (repeat 300 "s"))))))
+                 (encode-key (symbol (clojure.string/join (repeat 300 "s"))))))
     (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
-                 (encode-key (symbol (apply str (repeat 300 "n")) "k"))))
-    (is (= 255 (bytes-length (encode-key (symbol (apply str (repeat 251 "s"))))))
+                 (encode-key (symbol (clojure.string/join (repeat 300 "n")) "k"))))
+    (is (= 255 (bytes-length (encode-key (symbol (clojure.string/join (repeat 251 "s"))))))
         "251 bytes of name + the 4-byte header is the longest symbol")))

@@ -9,7 +9,7 @@
    (F-NBB-GOOG). Each var is Closure's own definition (goog/base.js),
    over JavaScript's objects. The surface is census-driven: a var joins
    this namespace when a library eve's adopters load names it — the
-   DataScript port names exportSymbol and getUid.")
+   DataScript port names exportSymbol and getUid." (:require [clojure.string]))
 
 (defn exportSymbol
   "Closure's goog.exportSymbol: exports a value as a globally accessible
@@ -17,7 +17,7 @@
    each intermediate object that does not yet exist."
   ([public-path object] (exportSymbol public-path object js/globalThis))
   ([public-path object object-to-export-to]
-   (let [parts (.split public-path ".")
+   (let [parts #_{:splint/disable [style/prefer-clj-string]} (.split public-path ".")
          last-idx (dec (count parts))]
      (loop [cur object-to-export-to i 0]
        (let [part (aget parts i)]

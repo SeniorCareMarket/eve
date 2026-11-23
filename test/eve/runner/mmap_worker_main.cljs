@@ -22,7 +22,7 @@
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]
             [cljs.reader :as reader]
             [coop.scenario :as sc]
-            [coop.mix :as mix]))
+            [coop.mix :as mix] [clojure.string]))
 
 (defn- join-domain-atom!
   "Join an existing domain at base and look up the 'main' atom.
@@ -225,7 +225,7 @@
                               [(+ idx 100) (+ idx 200) (+ idx 300)]]
                      :tags #{:alpha :beta :gamma :delta}
                      :history (list :created :validated :committed)
-                     :payload (apply str (repeat 200 (str (char (+ 65 (mod idx 26))))))}]
+                     :payload (clojure.string/join (repeat 200 (str (char (+ 65 (mod idx 26))))))}]
             (swap! a (fn [m] (-> m (assoc k v) (update :counter (fnil inc 0)))))))
         (atom/close-atom-domain! d)
         (js/process.exit 0))

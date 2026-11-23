@@ -17,7 +17,7 @@
    [eve.flat]
    [eve.flat.image :as img]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.sio :as ssio]))
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.sio :as ssio] [clojure.string]))
 
 ;; ---------------------------------------------------------------------------
 ;; helpers — Z1's, in their CLJS form. On this host a heap domain IS the
@@ -83,7 +83,7 @@
       (when extra (extra iv v im)))))
 
 (defn- bytes->hex [bs]
-  (apply str (map (fn [b] (.padStart (.toString (bit-and b 0xFF) 16) 2 "0")) bs)))
+  (clojure.string/join (map (fn [b] (.padStart (.toString (bit-and b 255) 16) 2 "0")) bs)))
 
 (defn- hex->bytes [hx]
   (let [n (quot (count hx) 2)

@@ -37,7 +37,7 @@
                      TYPED_ARRAY_BIGINT64 TYPED_ARRAY_BIGUINT64 TYPED_ARRAY_FLOAT32 TYPED_ARRAY_FLOAT64
                      TYPED_ARRAY_INT16 TYPED_ARRAY_INT32 TYPED_ARRAY_INT8 TYPED_ARRAY_UINT16
                      TYPED_ARRAY_UINT32 TYPED_ARRAY_UINT8 TYPED_ARRAY_UINT8_CLAMPED convert-to-eve
-                     get-type-constructor sab-tag->fast-tag*]]))
+                     get-type-constructor sab-tag->fast-tag*]] [clojure.string]))
 
 ;;-----------------------------------------------------------------------------
 ;; Pointer encoding — the 7-byte EVE pointer [0xEE 0xDB tag off:i32LE]
@@ -622,7 +622,7 @@
           ;; UUID
           (uuid? elem)
           (let [buf (js/Uint8Array. 19)
-                uuid-str (.toLowerCase (str elem))]
+                uuid-str (clojure.string/lower-case (str elem))]
             (aset buf 0 d/DIRECT_MAGIC_0)
             (aset buf 1 d/DIRECT_MAGIC_1)
             (aset buf 2 FAST_TAG_UUID)
@@ -671,7 +671,7 @@
           ;; shapes take this arm, primitives via the keyword arm
           ;; above never reach here.
           (or (string? elem) (instance? js/String elem))
-          (let [encoded (.encode fast-encoder (.toString elem))
+          (let [encoded (.encode fast-encoder (str elem))
                 len (.-length encoded)]
             (if (<= len 255)
               (let [buf (js/Uint8Array. (+ 4 len))]
@@ -752,7 +752,7 @@
 
           (uuid? elem)
           (let [buf (js/Uint8Array. 19)
-                uuid-str (.toLowerCase (str elem))]
+                uuid-str (clojure.string/lower-case (str elem))]
             (aset buf 0 d/DIRECT_MAGIC_0)
             (aset buf 1 d/DIRECT_MAGIC_1)
             (aset buf 2 FAST_TAG_UUID)
@@ -794,7 +794,7 @@
 
           ;; String — js/String objects as in serialize-value-a.
           (or (string? elem) (instance? js/String elem))
-          (let [encoded (.encode fast-encoder (.toString elem))
+          (let [encoded (.encode fast-encoder (str elem))
                 len (.-length encoded)]
             (if (<= len 255)
               (let [buf (js/Uint8Array. (+ 4 len))]

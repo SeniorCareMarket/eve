@@ -3,7 +3,7 @@
    Requires: native addon loaded, mmap slab path working (Phase 2 + 3).
    Run via: node target/thread-test/all.js mmap-atom"
   (:require [cljs.test :refer [deftest testing is]]
-            [eve.atom :as atom]))
+            [eve.atom :as atom] [clojure.string]))
 
 (def ^:private test-base (str "/tmp/eve-p5-atom-test-" (js/Date.now)))
 
@@ -69,7 +69,7 @@
 (defn- mapping-count
   "Lines of /proc/self/maps (one per mapping) on Linux; nil elsewhere."
   []
-  (try (count (.split (.readFileSync (js/require "fs") "/proc/self/maps" "utf8") "\n"))
+  (try (count (clojure.string/split (.readFileSync (js/require "fs") "/proc/self/maps" "utf8") "\n"))
        (catch :default _ nil)))
 
 (deftest test-deref-does-not-leak-mappings

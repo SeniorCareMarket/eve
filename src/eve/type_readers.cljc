@@ -16,7 +16,7 @@
                 :cljs [[cljs.reader :as reader]]
                 :bb [[clojure.edn :as edn]]
                 :lpy [[clojure.edn :as edn]]
-                :default []))
+                :default []) [clojure.string])
   #?(:lpy (:import io sys basilisp.lang.obj basilisp.lang.reader)))
 
 (defprotocol ITypeFields
@@ -35,8 +35,9 @@
   ([writer tag value field-order]
    (enc/write! writer
                (str "#" tag " {"
-                    (apply str (interpose ", " (map (fn [k] (str (pr-str k) " " (pr-str (get value k))))
-                                                    field-order)))
+                    (clojure.string/join
+                     ", "
+                     (map (fn [k] (str (pr-str k) " " (pr-str (get value k)))) field-order))
                     "}"))))
 
 (defn reader-options

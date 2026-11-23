@@ -42,7 +42,7 @@
         raw-data (double-array n)]
     ;; Fill with random data
     (dotimes [i n]
-      (aset raw-data i (* (Math/random) 1000.0)))
+      (aset raw-data i (* (clojure.math/random) 1000.0)))
     (let [data-vec (vec (seq raw-data))]
 
       (println)
@@ -136,7 +136,7 @@
       (println)
       (println "--- Level 5: argsort (10K elements) ---")
       (let [n-sort 10000
-            sort-data (vec (repeatedly n-sort #(int (* (Math/random) 100000))))
+            sort-data (vec (repeatedly n-sort #(int (* (clojure.math/random) 100000))))
             sort-arr (arr/eve-array :int32 sort-data)]
         (bench "argsort: eve-array :int32 10K"
                (fn [] (argops/argsort sort-arr :asc)))

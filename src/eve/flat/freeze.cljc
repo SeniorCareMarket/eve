@@ -46,7 +46,7 @@
             ;; types' surface through the seat's eve.core protocols,
             ;; as chunk's handles do there.
             #?@(:bb [[eve.core :as ecore]]
-                :glj [[eve.core :as ecore]])))
+                :glj [[eve.core :as ecore]]) [clojure.string]))
 
 ;; 0x20: eve's fixed fast-tag band (0x00-0x3F) ends its assignments
 ;; at 0x1F; 0x20 is the first unassigned byte there. NOT 0xF0:
@@ -170,7 +170,7 @@
    the directory re-slices the gathered stream into chunks."
   ^bytes [chunks]
   (let [n (count chunks)
-        total (+ 4 (* 4 n) (reduce + (map (fn [^bytes b] (alength b)) chunks)))
+        total (+ 4 (* 4 n) (reduce + (map #_{:splint/disable [lint/fn-wrapper]} (fn [^bytes b] (alength b)) chunks)))
         out (enc/make-bytes total)]
     (put-i32! out 0 n)
     (loop [i 0 pos (long (+ 4 (* 4 n)))]
@@ -784,7 +784,7 @@
 #_{:clj-kondo/ignore [:unused-private-var]} ; called from the sibling assoc-n helpers and the freeze walk's host-conditional arms; kondo's per-pass accounting splits the chain (deleting any link either orphans the next or breaks a live call site - measured on all three)
 (defn- based-assoc-n [base edits tail n bc mm i v]
   (cond
-    (or (< i 0) (> i n))
+    (or (neg? i) (> i n))
     (throw (#_{:clj-kondo/ignore [:unresolved-symbol]} IndexOutOfBoundsException. (str i)))
     (< i bc)
     (BasedValue. base (assoc edits i v) tail n bc mm)
@@ -970,7 +970,7 @@
    mid-conversion. What crosses the pin boundary is only the
    finished handle, which owns its bytes."
   [a]
-  (ea/read-pinned a (fn [root] (deliver-flat root))))
+  (ea/read-pinned a deliver-flat))
 
 (defn- embed-handle-bytes
   "Ingestion (UPGRADE-PLAN R10/S4): the slab writer met a heap
@@ -1050,7 +1050,7 @@
 #_{:clj-kondo/ignore [:unused-binding]} ; bindings in this form are used on the :clj pass only; the :cljs arm does not reference them (per-pass binding surface)
 (defn- host-coll? [v]
   #?(:clj (and (instance? clojure.lang.IPersistentCollection v)
-               (.startsWith (.getName (class v)) "clojure.lang."))
+               (clojure.string/starts-with? (.getName (class v)) "clojure.lang."))
      :default false))
 
 (defn- flat-of [v]
@@ -1135,7 +1135,7 @@
 ;; IFreezeThaw, emitted by eve-deftype for every type) route
 ;; here: freeze is freeze-value, thaw is the materialization.
 (sister/register-flat-hooks! (fn [sio v] (freeze-value sio v))
-                             (fn [v] (plain-of v)))
+                             plain-of)
 
 ;; The chunk writer's rep converter consults this hook for a
 ;; FrozenValue: its rep is its CONTENT's rep (the wrapped

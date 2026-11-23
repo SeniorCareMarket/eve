@@ -6,7 +6,7 @@
 ;; part of C1's reader, and its open counter is how C3.1 proves exactly one chunk is opened.
 (ns eve.flat.container-test
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.flat.container :as cont])
+            [eve.flat.container :as cont] [clojure.string])
   ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
   #?(:clj (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays])))
 
@@ -145,9 +145,9 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest container-compression
-  (let [big (mapv (fn [k] [(kbytes k) (apply str (repeat 40 (str "payload-" (mod k 5) "-")))])
+  (let [big (mapv (fn [k] [(kbytes k) (clojure.string/join (repeat 40 (str "payload-" (mod k 5) "-")))])
                   (range 100 160))
-        chunks (mapv (fn [part] {:bytes (toy-chunk part) :first-key (first (first part))})
+        chunks (mapv (fn [part] {:bytes (toy-chunk part) :first-key (ffirst part)})
                      (partition 20 big))
         c (cont/make-container chunks {:chunk 0 :offset 32})
         fb (cont/container-bytes c)

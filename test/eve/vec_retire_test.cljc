@@ -89,7 +89,7 @@
       (swap! x assoc :q (vec (range 40)))
       (is (= (vec (range 40)) (vec (:q @x))))
       (swap! x update :q (fn [q] (vec (remove even? q))))
-      (is (= (vec (filter odd? (range 40))) (vec (:q @x)))))))
+      (is (= (filterv odd? (range 40)) (vec (:q @x)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; What a write leaves allocated (2026-10-20 ET)

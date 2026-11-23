@@ -41,7 +41,7 @@
    and host controls throw identically, the constructor control
    passes)."
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.deftype-proto.macros :as pm]))
+            [eve.deftype-proto.macros :as pm] [clojure.string]))
 
 ;; ---------------------------------------------------------------------------
 ;; fixtures

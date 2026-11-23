@@ -13,7 +13,7 @@
      cworker <dir> <variant> <n> <sync-every> <elapsed-out>
      cread   <dir>
    Bench roots come from BENCH_DIR."
-  (:require [eve.atom :as atom]))
+  (:require [eve.atom :as atom] [clojure.string]))
 
 (def ^:private fs (js/require "fs"))
 
@@ -45,10 +45,10 @@
   (let [dir (str (env "BENCH_DIR") "/single-" variant "-" (name size))
         _ (delete-recursively! dir)
         dom (open-domain dir variant)
-        init (case size :counter 0 (apply str (repeat (case size :kb 1024 65536) "a")))
+        init (case size :counter 0 (clojure.string/join (repeat (case size :kb 1024 65536) "a")))
         a (atom/persistent-atom {:id :eve/main :persistent dir} init)
         vs (when (not= size :counter)
-             [init (apply str (repeat (case size :kb 1024 65536) "b"))])
+             [init (clojure.string/join (repeat (case size :kb 1024 65536) "b"))])
         idx (volatile! 0)
         step (case size
                :counter (fn [] (swap! a inc))

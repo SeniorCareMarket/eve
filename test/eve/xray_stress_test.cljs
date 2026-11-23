@@ -13,7 +13,7 @@
    6. High key-count maps (deep HAMT trees)"
   (:require
    [cljs.test :refer-macros [deftest testing is]]
-   [eve.atom :as a]))
+   [eve.atom :as a] [clojure.string]))
 
 ;;-----------------------------------------------------------------------------
 ;; Test infrastructure
@@ -85,7 +85,7 @@
   (dotimes [i 30]
     (step! (str "medium-" i)
            (fn [] (swap! the-atom assoc (keyword (str "med" i))
-                         (apply str (repeat 50 (str "val-" i)))))))
+                         (clojure.string/join (repeat 50 (str "val-" i)))))))
   ;; Large values (nested maps)
   (dotimes [i 10]
     (step! (str "large-" i)

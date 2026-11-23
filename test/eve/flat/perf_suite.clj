@@ -46,7 +46,7 @@
 (defn- fresh-domain-sio []
   (let [a (fresh-atom (str "ps-seed-" (rand-int 1000000000)))]
     (swap! a (fn [_] {:seed 1}))
-    (ea/read-pinned a (fn [lv] (d/-eve-sio lv)))))
+    (ea/read-pinned a d/-eve-sio)))
 
 (defn- transit-bytes ^bytes [v]
   (let [out (ByteArrayOutputStream.)]
@@ -138,7 +138,7 @@
                            s (probe-get kind vv ks)]
                        {:ms (/ (- (System/nanoTime) t0) 1e6) :sum s}))
         heap-acc (acc heap)
-        slab-acc (ea/read-pinned holder (fn [lv] (acc lv)))
+        slab-acc (ea/read-pinned holder acc)
         img-acc (acc iv)
         img-acc2 (acc iv)
         heap-scan (bench-min warmup runs (fn [] (scan-all kind heap)))
@@ -214,7 +214,7 @@
                       :scan-ms {:heap (bench-min warmup runs (fn [] (scan-all kind heap)))
                                 :flat (bench-min warmup runs (fn [] (scan-all kind flat)))
                                 :slab slab-scan}
-                      :hash-ms (row :hash (fn [x] (hash x)))
+                      :hash-ms (row :hash hash)
                       :equality-ms (row :eq (fn [x] (= x v)))
                       :assoc-ms (row :assoc (fn [x] (assoc-probe kind x i0)))
                       :footprint-bytes {:flat-chunk chunk-bytes

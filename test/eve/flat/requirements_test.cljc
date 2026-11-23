@@ -107,7 +107,7 @@
                (:check data)
                (some (fn [k] (and (keyword? k)
                                   (some-> (namespace k)
-                                          (.startsWith "eve.flat"))))
+                                          (clojure.string/starts-with? "eve.flat"))))
                      (keys data)))))
 
 (deftest api-surface

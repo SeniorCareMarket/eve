@@ -115,8 +115,7 @@
    throws there — the require-phase crash of the thread-family suites."
   [env body]
   (let [syms (body-symbols body)]
-    (vec (filter (fn [k] (and (symbol? k) (contains? syms k)))
-                 (when (map? env) (keys env))))))
+    (filterv (fn [k] (and (symbol? k) (contains? syms k))) (when (map? env) (keys env)))))
 
 (defn- qualify
   "body with every symbol that names a var here written fully qualified (eve.thread-host/var-symbol), so the runtime that evaluates

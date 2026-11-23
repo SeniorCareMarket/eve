@@ -133,7 +133,7 @@
         (recur (mod (* y (mod (- 2 (mod (* x y) BASE)) BASE)) BASE) (inc i)))))
 
 (defn mont-ctx "the Montgomery context of an odd modulus (bytes big-endian or limbs)" [n]
-  (let [n (if (and (seq n) (> (count n) 0) (> (reduce max 0 n) 255)) (vec n) (from-bytes-be n))]
+  (let [n (if (and (seq n) (pos? (count n)) (> (reduce max 0 n) 255)) (vec n) (from-bytes-be n))]
     (when-not (odd?* n) (throw (ex-info "bignum/mont-ctx: the modulus must be odd" {})))
     (let [k (count n)
           n0 (mod (- BASE (inv16 (nth n 0))) BASE)

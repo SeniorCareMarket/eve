@@ -2,7 +2,7 @@
   "eve's process primitives (HOST-CONTRACT §5) over Node's (ClojureScript, nbb): the clock, a
    thread's identity, sleep, a periodic timer, a hook at normal exit, and
    files' existence, their exclusive creation and directories, and standard input's lines."
-  (:refer-clojure :exclude [read-line]))
+  (:refer-clojure :exclude [read-line]) (:require [clojure.string]))
 
 (defn now-ms []
   (js/Date.now))
@@ -94,7 +94,7 @@
         (if (>= i 0)
           (let [line (.toString (.subarray buf 0 i) "utf8")]
             (reset! stdin-buf (.subarray buf (inc i)))
-            (if (.endsWith line "\r") (.slice line 0 -1) line))
+            (if (clojure.string/ends-with? line "\r") (.slice line 0 -1) line))
           (let [chunk (js/Buffer.alloc 65536)
                 n (try (.readSync fs 0 chunk 0 65536 nil)
                        (catch :default e (if (= "EAGAIN" (.-code e)) -1 (throw e))))]

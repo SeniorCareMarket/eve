@@ -103,11 +103,14 @@
                       "Connection: close\r\n"
                       (when (or payload (#{"POST" "PUT" "PATCH"} (or method "GET")))
                         (str "Content-Length: " (if payload (alength payload) 0) "\r\n"))
-                      (apply str (keep (fn [[k v]]
-                                         (let [k (name k)]
-                                           (when-not (#{"host" "connection" "content-length"} (str/lower-case k))
-                                             (str k ": " v "\r\n"))))
-                                       headers))
+                      (clojure.string/join
+                       (keep
+                        (fn
+                          [[k v]]
+                          (let [k (name k)]
+                            (when-not (#{"host" "connection" "content-length"} (str/lower-case k))
+                              (str k ": " v "\r\n"))))
+                        headers))
                       "\r\n")
             s (Socket. ^String host (int port))]
         (try

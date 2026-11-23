@@ -27,7 +27,7 @@
             [eve.map :as em]
             [eve.vec :as v]
             [eve.core :as e]
-            [eve.slab-io :as slab])
+            [eve.slab-io :as slab] [clojure.string])
   #?(:clj (:import [java.util Random])))
 
 ;; ---------------------------------------------------------------------------
@@ -353,7 +353,7 @@
              7 {:deep {:deeper [#{1 2} {:z 9}]}}}))
 
 (defn- install-string! [x]
-  (reset! x (apply str (repeat 300 "abcdefgh"))))
+  (reset! x (clojure.string/join (repeat 300 "abcdefgh"))))
 
 (defn- install-deftype! [x]
   (swap! x (fn [_] {:h (->Holder (->Box "b1") {:note [1 2 3]})})))

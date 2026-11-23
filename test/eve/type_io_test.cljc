@@ -53,7 +53,7 @@
 
 (host-deftype ProtocolPrint [x]
               {:tag example/protocol
-               :read (fn [v] (->ProtocolPrint v))}
+               :read ->ProtocolPrint}
               IPrintWithWriter
               (-pr-writer [this w _]
                           (enc/write! w (str "#example/protocol " (pr-str (:x (readers/-type-fields this))))))
@@ -62,7 +62,7 @@
 
 (host-deftype TaggedMap [m]
               {:tag example/map
-               :read (fn [data] (->TaggedMap data))}
+               :read ->TaggedMap}
               clojure.lang.ILookup
               (valAt [_ k] (get m k))
               (valAt [_ k nf] (get m k nf))

@@ -71,7 +71,7 @@
 (defn- measure-transfer [kind v {:keys [warmup runs]}]
   (let [holder (fresh-atom "rb/hold")
         _ (swap! holder (fn [_] v))
-        bytes (ea/read-pinned holder (fn [lv] (tf-detach-value lv)))
+        bytes (ea/read-pinned holder tf-detach-value)
         zip-ok (let [t (fresh-atom "rb/zip-check")]
                  (tf/place-image! t bytes)
                  (= v @t))
@@ -79,7 +79,7 @@
                 (flat/transfer! t holder)
                 (= v @t))
         detach-ms (bench-min warmup runs
-                             #(ea/read-pinned holder (fn [lv] (tf-detach-value lv))))
+                             #(ea/read-pinned holder tf-detach-value))
         zip-ms (bench-min warmup runs
                           #(tf/place-image! (fresh-atom "rb/zip") bytes))
         transfer-ms (bench-min warmup runs
@@ -109,8 +109,8 @@
   (let [holder (fresh-atom "rc/hold")
         _ (swap! holder (fn [_] v))
         deref-ms (bench-min 2 5 #(deref holder))
-        im (ea/read-pinned holder (fn [lv] (img/detach-image lv)))
-        mmap-ms (bench-min 1 3 #(ea/read-pinned holder (fn [lv] (img/detach-image lv))))
+        im (ea/read-pinned holder img/detach-image)
+        mmap-ms (bench-min 1 3 #(ea/read-pinned holder img/detach-image))
         blocks (img/image-blocks im)
         n (count blocks)
         by-class (frequencies (map (fn [b] (alloc/decode-class-idx (bit-and (long (:src-off b)) 0xFFFFFFFF)))
@@ -289,7 +289,7 @@
   (let [dom (ea/atom-domain nil :capacities capacities)
         a (ea/lookup-or-create-mmap-atom! dom "s1/seed" nil)]
     (swap! a (fn [_] {:seed 1}))
-    (ea/read-pinned a (fn [lv] (d/-eve-sio lv)))))
+    (ea/read-pinned a d/-eve-sio)))
 
 (defn- send-of
   "send-stream over holder's pinned slab value (the shipped arms'
@@ -306,7 +306,7 @@
           _ (swap! holder (fn [_] v))
           sent (send-of holder)
           wire (:bytes sent)
-          image (ea/read-pinned holder (fn [lv] (tf-detach-value lv)))
+          image (ea/read-pinned holder tf-detach-value)
           ok (let [t (fresh-atom (str "s1-check-" label))]
                (swap! t (fn [_] (stream/receive-value d/*domain-sio* wire)))
                (= v @t))
@@ -395,7 +395,7 @@
     (let [label (name kind)
           holder (fresh-atom (str "s2-" label))
           _ (swap! holder (fn [_] v))
-          image (ea/read-pinned holder (fn [lv] (tf-detach-value lv)))
+          image (ea/read-pinned holder tf-detach-value)
           base (send-of holder)
           base-recv (recv-bench o (:bytes base))
           budgets (into {}

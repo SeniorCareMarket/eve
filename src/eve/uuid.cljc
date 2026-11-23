@@ -90,4 +90,4 @@
 (defn squuid-time-millis
   "Recover the unsigned seconds prefix of a squuid, in milliseconds."
   [u]
-  (* 1000 (first (first (to-words u)))))
+  (* 1000 (ffirst (to-words u))))

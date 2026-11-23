@@ -132,7 +132,7 @@
      (defn- write-bits!
        "Write the LSB-first bitmap of truthy over vals into seg at rel."
        [seg rel vals]
-       (bitmap-loop seg rel vals (fn [v] (boolean v))))))
+       (bitmap-loop seg rel vals boolean))))
 
 ;; ---------------------------------------------------------------------------
 ;; planning: which kind a column of values takes (mirrors C1's column-plan)

@@ -7,7 +7,7 @@
    against.
 
    Input: a byte sequence (`nth` / `count` read 0..255). Output: 32 bytes as a vector of 0..255, or 64 hex digits."
-  (:require [eve.net.u64 :as u]))
+  (:require [eve.net.u64 :as u] [clojure.string]))
 
 (def ^:private K
   [0x428a2f98 0x71374491 0xb5c0fbcf 0xe9b5dba5 0x3956c25b 0x59f111f1 0x923f82a4 0xab1c5ed5
@@ -73,4 +73,9 @@
     (vec (mapcat (fn [x] [(quot x 16777216) (mod (quot x 65536) 256) (mod (quot x 256) 256) (mod x 256)]) h))))
 
 (defn sha256-hex "the digest as 64 lower-case hex digits" [bs]
-  (apply str (map (fn [b] (str (nth "0123456789abcdef" (quot b 16)) (nth "0123456789abcdef" (mod b 16)))) (sha256 bs))))
+  (clojure.string/join
+   (map
+    (fn
+      [b]
+      (str (nth "0123456789abcdef" (quot b 16)) (nth "0123456789abcdef" (mod b 16))))
+    (sha256 bs))))

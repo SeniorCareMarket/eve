@@ -22,7 +22,7 @@
    blocks, force slab, append record, force journal — eve.atom runs
    that sequence over this file."
   (:require [eve.mem :as mem]
-            [eve.deftype-proto.data :as d]))
+            [eve.deftype-proto.data :as d] [clojure.string]))
 
 (def ^:private journal-magic 0x45564A31)   ;; "EVJ1"
 (def ^:private journal-table-bytes (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
@@ -81,7 +81,7 @@
    mkdir, inside the directory only it can have created."
   [fs owner-path]
   (try (let [s (.readFileSync fs owner-path "utf8")
-             [pid token] (.split s " ")
+             [pid token] (clojure.string/split s " ")
              pid (js/parseInt pid 10)]
          (when (and (not (js/isNaN pid)) token)
            {:pid pid :token token}))

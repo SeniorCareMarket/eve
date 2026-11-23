@@ -17,7 +17,7 @@
             [eve.map :as m]
             [eve.set :as s]
             [eve.vec :as v]
-            [eve.list :as l]))
+            [eve.list :as l] [clojure.string]))
 
 (defn- in-a-domain-of-its-own
   "Construction law (2026-11-11): Eve data is constructed in a domain
@@ -141,7 +141,7 @@
     (is (= 2 (e/count (e/dissoc b 3870166))))))
 
 (deftest bulk-large-map-payload-size-is-not-truncated
-  (let [value (apply str (repeat 70000 "x"))
+  (let [value (clojure.string/join (repeat 70000 "x"))
         a (e/into (m/empty-hash-map) [["large" value] ["small" "ok"]])]
     (is (= 2 (e/count a)))
     (is (= value (e/get a "large")))

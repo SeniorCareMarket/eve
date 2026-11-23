@@ -32,7 +32,7 @@
             ;; cycles back through.
             #?@(:bb [[eve.core :as ecore]]
                 :glj [[eve.core :as ecore]]
-                :jank [[eve.core :as ecore]]))
+                :jank [[eve.core :as ecore]]) [clojure.string])
   #?(:clj (:import [java.util HashMap])))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -264,7 +264,7 @@
      #?(:jank false :bb false :glj false
         :clj (or (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x) (char? x)
                  (and (instance? clojure.lang.IPersistentCollection x)
-                      (.startsWith (.getName (class x)) "clojure.lang."))))))
+                      (clojure.string/starts-with? (.getName (class x)) "clojure.lang."))))))
 ;; the satisfies? answer of a class no interface answers, remembered per class in an atom (these marker protocols are
 ;; only ever implemented inline, so a class's answer never changes): the supers walk once a class, not once a value
 #?(:clj
@@ -2532,7 +2532,9 @@
                                          Object
                                          (equals [this# other#] (map-equiv-of this# other#))
                                          (hashCode [this#] (.hasheq this#))
-                                         (toString [this#] (str "{" (apply str (interpose ", " (map (fn [e#] (str (pr-str (nth e# 0)) " " (pr-str (nth e# 1)))) (-entries this#)))) "}"))
+                                         (toString [this#] (str "{" (clojure.string/join
+                                                                     ", "
+                                                                     (map (fn [e#] (str (pr-str (nth e# 0)) " " (pr-str (nth e# 1)))) (-entries this#))) "}"))
                                          clojure.lang.IHashEq
                                          (hasheq [this#] (let [v# ~'_h]
                                                            (if (some? v#) (long v#)
@@ -2723,7 +2725,7 @@
                                     Object
                                     (equals [_ other] (node-equiv ctx off other))
                                     (hashCode [this] (.hasheq this))
-                                    (toString [_] (str "#{" (apply str (interpose " " (map pr-str (set-elements ctx off)))) "}"))
+                                    (toString [_] (str "#{" (clojure.string/join " " (map pr-str (set-elements ctx off))) "}"))
                                     clojure.lang.IHashEq
                                     (hasheq [_] (let [v _h]
                                                   (if (some? v) (long v)
@@ -2762,7 +2764,7 @@
                                                                                 a))))
                                     (add [_ _v] (throw (UnsupportedOperationException.)))
                                     (remove [_ _v] (throw (UnsupportedOperationException.)))
-                                    (containsAll [this c] (every? (fn [v] (.contains this v)) c))
+                                    (containsAll [this c] (every? (fn [v] (clojure.string/includes? this v)) c))
                                     (addAll [_ _c] (throw (UnsupportedOperationException.)))
                                     (removeAll [_ _c] (throw (UnsupportedOperationException.)))
                                     (retainAll [_ _c] (throw (UnsupportedOperationException.)))

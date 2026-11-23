@@ -810,7 +810,7 @@
                 buf (byte-array 65536)]
             (with-open [in (java.io.FileInputStream. (str path))]
               (loop [] (let [n (.read in buf)] (when (pos? n) (.update md buf 0 n) (recur)))))
-            (apply str (map #(format "%02x" (bit-and % 0xff)) (.digest md))))
+            (clojure.string/join (map #(format "%02x" (bit-and % 255)) (.digest md))))
      :cljs (throw (ex-info "start: checksums are the boot seat's" {}))))
 
 (defn rid-of [owner] (when owner (first (str/split owner #"#"))))
@@ -906,7 +906,7 @@
      :cljs (throw (ex-info "start: ports are the boot seat's" {}))))
 
 (defn random-hex [n]
-  (apply str (repeatedly n #(rand-nth "0123456789abcdef"))))
+  (clojure.string/join (repeatedly n #(rand-nth "0123456789abcdef"))))
 
 (defn display?
   "Whether this machine shows windows: macOS, or a Linux session with an X or Wayland display."
@@ -1365,12 +1365,12 @@
    once the index is complete."
   [opts media-dir]
   (let [hosts (let [hs (or (:hosts opts) default-hosts)
-                    jolt? (or (not (some #{:jolt} hs)) (:strict opts) (empty? (preflight [:jolt])))]
+                    jolt? (or (not-any? #{:jolt} hs) (:strict opts) (empty? (preflight [:jolt])))]
                 (when-not jolt?
                   (log "jolt cannot run here (" (str/join "; " (preflight [:jolt])) "): the JVM's ffmpeg CLI transcodes"))
                 (vec (cond->> hs
                        (not jolt?) (remove #{:jolt})
-                       (or (:no-browser opts) (not (some #{:glj} hs)))
+                       (or (:no-browser opts) (not-any? #{:glj} hs))
                        (remove #{:browser}))))
         browser? (boolean (some #{:browser} hosts))
         _ (when (:install opts) (setup! hosts))

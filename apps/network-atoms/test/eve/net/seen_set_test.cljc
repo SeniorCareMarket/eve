@@ -5,15 +5,15 @@
    in is reported only when its 52-bit fold collides with a folded key's — the documented trade,
    pinned by the last test."
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.net.atom :as na]))
+            [eve.net.atom :as na] [clojure.string]))
 
 (defn- key-of
   "a 64-char hex block key whose first 13 hex chars are i, zero-padded — the fold
    (the first 13 chars) is i itself, so distinct i have distinct folds"
   [i]
   (let [h #?(:clj (Long/toString i 16) :cljs (.toString i 16))
-        p (str (apply str (repeat (- 13 (count h)) "0")) h)]
-    (str p (apply str (repeat 51 "0")))))
+        p (str (clojure.string/join (repeat (- 13 (count h)) "0")) h)]
+    (str p (clojure.string/join (repeat 51 "0")))))
 
 (defn- slots-of [seen] #?(:clj (alength (:slots seen)) :cljs (.-length (:slots seen))))
 
@@ -42,8 +42,8 @@
   (testing "two keys sharing their first 13 hex chars share a fold: the second reads as reached.
             In a fetch walk that skips a subtree whose blocks then fail to decode — loud, never
             a wrong value (fetched blocks are checked against their keys)."
-    (let [k1 (str "0123456789abc" (apply str (repeat 51 "0")))
-          k2 (str "0123456789abc" (apply str (repeat 51 "f")))
+    (let [k1 (str "0123456789abc" (clojure.string/join (repeat 51 "0")))
+          k2 (str "0123456789abc" (clojure.string/join (repeat 51 "f")))
           seen (na/see-all (na/empty-reached) [k1])]
       (is (na/reached? seen k1))
       (is (na/reached? seen k2) "the fold cannot tell k2 from k1 — the priced trade"))))

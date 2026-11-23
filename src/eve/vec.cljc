@@ -583,13 +583,13 @@
   (lastIndexOf [this o]
     (int (loop [i (dec cnt)]
            (cond
-             (< i 0) -1
+             (neg? i) -1
              (clojure.lang.Util/equiv (.nth this (int i)) o) i
              :else (recur (dec i))))))
   (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
   (^boolean contains [this o] (not= -1 (.indexOf this o)))
   (^boolean containsAll [this ^java.util.Collection c]
-    (every? #(.contains this %) c))
+    (every? #(clojure.string/includes? this %) c))
   (^java.util.List subList [this ^int from ^int to]
     (java.util.Collections/unmodifiableList
      (java.util.ArrayList. ^java.util.Collection (subvec (vec this) from to))))

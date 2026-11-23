@@ -24,7 +24,7 @@
    [eve.mem :as mem]
    [eve.region :as region]
    ; the alias is exercised on the other reader pass; the require loads on both 
-   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.slab-io :as slab])
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.slab-io :as slab] [clojure.string])
   #?(:clj (:import [eve.deftype_proto.alloc JvmSlabCtx])))
 
 ;; ---------------------------------------------------------------------------
@@ -225,14 +225,14 @@
            thaw   (resolve 'eve.flat.sister/thaw)]
        (is (some? freeze) "eve.flat.sister/freeze does not resolve")
        (when freeze
-         (let [block (apply str (repeat 1000 "z"))
+         (let [block (clojure.string/join (repeat 1000 "z"))
                ;; a vector holding a ~1.5 MB string (a bare string
                ;; is a scalar to the packer and is refused by
                ;; design): the frozen body is past the 983,032
                ;; stripe, so the chain is rung segment(s) + a tail.
                ;; Assertions compare through booleans/counts so a
                ;; failure never prints the megabyte values.
-               v   [(apply str (repeat 1500 block))]
+               v   [(clojure.string/join (repeat 1500 block))]
                a   (eatom/atom {})
                sio (eatom/atom-sio a)
                f   (@freeze sio v)]
@@ -240,7 +240,7 @@
            (reset! a f)
            (is (true? (= v @a)) "deref across the rungs differs")
            (is (= 1500000 (count (first @a))))
-           (let [v2 [(apply str (repeat 1400 block))]
+           (let [v2 [(clojure.string/join (repeat 1400 block))]
                  f2 (@freeze sio v2)]
              (reset! a f2)
              (is (true? (= v2 @a)) "deref after replacement differs")))))))

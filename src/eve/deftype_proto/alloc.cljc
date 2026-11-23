@@ -945,7 +945,7 @@
         region read, a torn pair re-read under the regions lock, so a
         concurrent remap can never pair an old bitmap with a new total."
     [^JvmSlabCtx ctx ci n]
-    (when (or (< ci 0) (>= ci OVERFLOW_CLASS_IDX))
+    (when (or (neg? ci) (>= ci OVERFLOW_CLASS_IDX))
       (throw (ex-info "alloc-run!: a run is claimed in a bitmap class (0-5)"
                       {:class-idx ci :n n})))
     (when (< n 1)

@@ -78,7 +78,7 @@
       (swap! a/*global-atom-instance* assoc :hello "world")
       (is (some? (aget index-view 0))
           "Reconstructed index-view should be able to read from SAB")
-      (is (> (.-byteLength sab) 0)
+      (is (pos? (.-byteLength sab))
           "SAB should have non-zero byte length")
       (is (= "world" (get @a/*global-atom-instance* :hello))
           "Original atom should still work after sab-transfer-data"))))

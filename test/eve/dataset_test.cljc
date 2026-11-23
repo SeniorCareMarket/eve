@@ -138,7 +138,7 @@
                                                  :qty   (e/eve-array :int32 [100 200])})]
                             (ds/rename-columns ds1 {:price :cost}))))]
       (is (some #{:cost} (ds/column-names ds2)))
-      (is (not (some #{:price} (ds/column-names ds2))))
+      (is (not-any? #{:price} (ds/column-names ds2)))
       (is (approx= 10.5 (e/nth (ds/column ds2 :cost) 0) 0.001)))))
 
 ;;=============================================================================

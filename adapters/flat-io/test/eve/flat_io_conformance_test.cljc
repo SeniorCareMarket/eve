@@ -24,7 +24,7 @@
             [eve.encoding :as enc]
             [eve.codec :as codec]
             [eve.deftype-proto.data :as d]
-            #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn])))
+            #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn]) [clojure.string]))
 
 ;; ---------------------------------------------------------------------------
 ;; byte strings and the reference reader (the contract's text, over a vector of 0..255)
@@ -220,7 +220,7 @@
       (is (zero? (fio/bytes-cmp c 0 0 (hb []) 0 0)))
       (is (zero? (fio/bytes-cmp c 3 2 (hb [5 2 3 5]) 1 2)) "from boff"))))
 
-(defn- rep* [s n] (apply str (repeat n s)))
+(defn- rep* [s n] (clojure.string/join (repeat n s)))
 
 (deftest key-cmp-in-key-byte-order
   (let [cases [["abc" "abc"] ["abc" "abd"] ["abd" "abc"] ["ab" "abc"] ["abc" "ab"]

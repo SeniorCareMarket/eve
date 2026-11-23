@@ -4,12 +4,12 @@
   clock and file appends (the shared .clj writer's clojure.java.io /
   System/currentTimeMillis spellings do not exist on this host)."
   (:require [eve.atom :as atom]
-            [eve.mem :as mem]))
+            [eve.mem :as mem] [clojure.string]))
 
 (defn- now-ms [] (.ToUnixTimeMilliseconds System.DateTimeOffset/Now))
 
 (defn- rec-value [v fill]
-  {:v v :data (apply str (repeat fill "x"))})
+  {:v v :data (clojure.string/join (repeat fill "x"))})
 
 (def classes
   {:s1k   [:rec-1k   12    60]

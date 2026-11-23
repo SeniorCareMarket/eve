@@ -45,8 +45,8 @@
         ;; Should be able to create typed views
         (let [i32 (js/Int32Array. buf)
               u8  (js/Uint8Array. buf)]
-          (is (> (.-length i32) 0) "Int32Array view should be non-empty")
-          (is (> (.-length u8) 0) "Uint8Array view should be non-empty")
+          (is (pos? (.-length i32)) "Int32Array view should be non-empty")
+          (is (pos? (.-length u8)) "Uint8Array view should be non-empty")
           ;; Should support Atomics (proving it's a SharedArrayBuffer)
           (js/Atomics.store i32 0 42)
           (is (= 42 (js/Atomics.load i32 0))
@@ -88,7 +88,7 @@
       (let [buf (wasm/slab-buffer class-idx)]
         (is (instance? js/SharedArrayBuffer buf)
             (str "slab-buffer for class " class-idx " should return SAB"))
-        (is (> (.-byteLength buf) 0)
+        (is (pos? (.-byteLength buf))
             (str "slab-buffer for class " class-idx " should have non-zero size"))))))
 
 ;;-----------------------------------------------------------------------------

@@ -107,7 +107,7 @@
   [form env type-name fields & opts]
   (let [ifaces (interface-symbols opts)]
     (if (and (some piecemeal-map-interfaces ifaces)
-             (not (some #(= full-map-interface %) ifaces)))
+             (not-any? #(= full-map-interface %) ifaces))
       ;; The map-mode instance is a babashka.impl.SciMap, which
       ;; carries no reference to its type: (type x) answers SciMap
       ;; and (instance? T x) answers false (measured on datascript's
@@ -175,7 +175,7 @@
 (intern 'clojure.lang.Util 'hashCombine
         (fn [seed hash] (hash-combine seed hash)))
 (intern 'clojure.lang.Util 'hasheq
-        (fn [x] (hash x)))
+        hash)
 
 (create-ns 'clojure.lang.Numbers)
 (intern 'clojure.lang.Numbers 'compare
@@ -221,7 +221,7 @@
 
 (create-ns 'clojure.lang.LazilyPersistentVector)
 (intern 'clojure.lang.LazilyPersistentVector 'createOwning
-        (fn [arr] (vec arr)))
+        vec)
 
 (def ^:private presented-statics
   "The statics presented above, by class name: the dot-form presenter
@@ -539,7 +539,7 @@
                                             (and (= '. head)
                                                  (= ithis target)
                                                  (sequential? (first args))
-                                                 (= 'compare (first (first args)))
+                                                 (= 'compare (ffirst args))
                                                  (= (vec iargs)
                                                     (vec (rest (first args)))))))))
                                invokes)]
@@ -948,8 +948,7 @@
     (let [x (nth args 0)
           inflight @eve-inflight]
       (if (and (some? x)
-               (not (some (fn [[o v]] (and (= o op) (identical? v x)))
-                          inflight))
+               (not-any? (fn [[o v]] (and (= o op) (identical? v x))) inflight)
                (eve-method method-sym))
         (do (swap! eve-inflight conj [op x])
             (try (apply (eve-method method-sym) args)

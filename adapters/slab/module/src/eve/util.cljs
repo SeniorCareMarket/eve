@@ -1,6 +1,6 @@
 (ns eve.util
   (:require
-   [eve.data :as d]))
+   [eve.data :as d] [clojure.string]))
 
 (def ^js wt-module
   (when (and (exists? js/process) (exists? js/require))
@@ -45,7 +45,7 @@
 ;; --- Atomic Operations Helpers ---
 (defn atomic-load-int ^number [^js ta-view ^number idx]
   ;; Debug logging for RangeError investigation
-  (when (or (< idx 0) (>= idx (.-length ta-view)) (js/isNaN idx))
+  (when (or (neg? idx) (>= idx (.-length ta-view)) (js/isNaN idx))
     (println "[DEBUG] atomic-load-int: INVALID INDEX!"
              "idx:" idx "array-length:" (.-length ta-view) "isNaN:" (js/isNaN idx))
     (println "[DEBUG] Stack trace:" (.-stack (js/Error. "Stack trace"))))
@@ -132,8 +132,8 @@
     (when (some? title) (println (str "\n--- Hex Window: " title " ---")))
     (println (str "Buffer: " buffer-total-length " bytes, offset: " view-byte-offset
                   ", display: " effective-display-length " bytes."))
-    (if (or (< view-byte-offset 0) (>= view-byte-offset buffer-total-length)
-            (and (zero? buffer-total-length) (> view-byte-offset 0))
+    (if (or (neg? view-byte-offset) (>= view-byte-offset buffer-total-length)
+            (and (zero? buffer-total-length) (pos? view-byte-offset))
             (<= effective-display-length 0))
       (println "Invalid offset or length for buffer.")
       (let [u8-data-view (js/Uint8Array. source-buffer view-byte-offset effective-display-length)
@@ -144,7 +144,7 @@
                   bytes-on-this-line (min bytes-per-row (- effective-display-length current-idx-in-u8-view))
                   hex-addr-raw (.toString row-start-abs-offset 16)
                   addr-padding-needed (max 0 (- target_addr_hex_len (count hex-addr-raw)))
-                  address-str (str (apply str (repeat addr-padding-needed "0")) hex-addr-raw ": ")
+                  address-str (str (clojure.string/join (repeat addr-padding-needed "0")) hex-addr-raw ": ")
                   hex-parts #js []]
               (dotimes [i bytes-per-row]
                 (if (< i bytes-on-this-line)
@@ -174,7 +174,7 @@
 
 (defn read-block-descriptor-field [sab-int32-view descriptor-idx field-col]
   (let [idx (get-block-descriptor-field-int32-offset sab-int32-view descriptor-idx field-col)]
-    (when (or (< idx 0) (>= idx (.-length sab-int32-view)) (js/isNaN idx))
+    (when (or (neg? idx) (>= idx (.-length sab-int32-view)) (js/isNaN idx))
       (println "[BUG] read-block-descriptor-field: INVALID idx=" idx
                "desc-idx=" descriptor-idx "field-col=" field-col
                "view-len=" (.-length sab-int32-view))
@@ -252,20 +252,20 @@
       (doseq [desc current-descriptors]
         (.push header-parts (format-descriptor-value (:idx desc) val-print-width))
         (.push header-parts col-spacing))
-      (println (.trim (.join header-parts ""))))
+      (println (clojure.string/trim (.join header-parts ""))))
 
     (let [sep-parts #js [(.padEnd "" (+ max-label-width 2) "-")]]
       (doseq [_ current-descriptors]
         (.push sep-parts (.padEnd "" val-print-width "-"))
         (.push sep-parts (.padEnd "" (count col-spacing) "-")))
-      (println (.trim (.join sep-parts ""))))
+      (println (clojure.string/trim (.join sep-parts ""))))
 
     (doseq [field-info fields]
       (let [row-parts #js [(.padEnd (str (:label field-info) ":") (+ max-label-width 2) " ")]]
         (doseq [desc current-descriptors]
           (.push row-parts (format-descriptor-value (get desc (:key field-info) "") val-print-width))
           (.push row-parts col-spacing))
-        (println (.trim (.join row-parts "")))))
+        (println (clojure.string/trim (.join row-parts "")))))
     (println "")))
 
 (defonce is-node? (exists? js/process))

@@ -46,7 +46,7 @@
         (case ra
           0 0
           1 (clojure.core/compare (if a 1 0) (if b 1 0))
-          2 (let [an (not (= a a)) bn (not (= b b))]
+          2 (let [an (not= a a) bn (not (= b b))]
               (cond (and an bn) 0 an 1 bn -1 :else (clojure.core/compare a b)))
           3 (clojure.core/compare (str a) (str b))
           4 (named-compare a b)

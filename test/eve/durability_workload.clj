@@ -10,12 +10,12 @@
   participant because its host cannot resolve FileChannel.lock)."
   (:require [eve.atom :as atom]
             [eve.mem :as mem]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io] [clojure.string]))
 
 (defn- rec-value
   "A record of the class shape: filler string sized by the class."
   [v fill]
-  {:v v :data (apply str (repeat fill "x"))})
+  {:v v :data (clojure.string/join (repeat fill "x"))})
 
 (defn make-records
   "n records {\"r<i>\" {:v 0 :data <fill chars>}} — real-world-shaped:
@@ -95,7 +95,7 @@
                           :epoch (root-epoch (:counter atoms))}))
 
               (< r 0.75)
-              (let [[aid n fill] (get-in classes [:s1k])
+              (let [[aid n fill] (get classes :s1k)
                     rid (str "r" (nxtint n))
                     v   (inc seqn)]
                 (swap! (get atoms aid) assoc-in [:records rid] (rec-value v fill))
@@ -103,7 +103,7 @@
                         :epoch (root-epoch (:counter atoms))}))
 
               (< r 0.90)
-              (let [[aid n fill] (get-in classes [:s100k])
+              (let [[aid n fill] (get classes :s100k)
                     rid (str "r" (nxtint n))
                     v   (inc seqn)]
                 (swap! (get atoms aid) assoc-in [:records rid] (rec-value v fill))
@@ -111,7 +111,7 @@
                         :epoch (root-epoch (:counter atoms))}))
 
               (< r 0.98)
-              (let [[aid n fill] (get-in classes [:s1m])
+              (let [[aid n fill] (get classes :s1m)
                     rid (str "r" (nxtint n))
                     v   (inc seqn)]
                 (swap! (get atoms aid) assoc-in [:records rid] (rec-value v fill))
@@ -122,7 +122,7 @@
               ;; the 100 MB class: JVM-family writers only (the runner
               ;; does not assign it to Node/nbb writers)
               (if (contains? #{:jvm :jolt} (keyword wid))
-                (let [[aid n fill] (get-in classes [:s100m])
+                (let [[aid n fill] (get classes :s100m)
                       rid (str "r" (nxtint n))
                       v   (inc seqn)]
                   (swap! (get atoms aid) assoc-in [:records rid] (rec-value v fill))

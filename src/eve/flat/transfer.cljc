@@ -481,7 +481,7 @@
    because the §3 reference refusal is fused into it — see the ns doc."
   ^bytes [x]
   (if (ea-atom? x)
-    (ea/read-pinned x (fn [v] (detach-value v)))
+    (ea/read-pinned x detach-value)
     (detach-value x)))
 
 ;; ---------------------------------------------------------------------------

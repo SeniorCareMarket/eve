@@ -13,9 +13,9 @@
             [eve.core :as e]
             [eve.deftype-proto.alloc :as alloc]
             ;; the collection writers a host map or vector is written through
-            [eve.map] [eve.set] [eve.vec] [eve.list]))
+            [eve.map] [eve.set] [eve.vec] [eve.list] [clojure.string]))
 
-(defn- big [c n] (apply str (repeat n c)))
+(defn- big [c n] (clojure.string/join (repeat n c)))
 
 (deftest a-node-past-64-kb-of-values
   (let [s (alloc/heap-domain-sio! {})

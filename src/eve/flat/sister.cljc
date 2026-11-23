@@ -62,7 +62,7 @@
             ;; Dart compile graph.
             #?@(:cljd [] :clj [[eve.flat.chunk]]
                 :cljs [[eve.flat.chunk :as flat-chunk]]
-                :clje [[eve.flat.chunk :as flat-chunk]])))
+                :clje [[eve.flat.chunk :as flat-chunk]]) [clojure.string]))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -433,7 +433,7 @@
   #?(:bb false :jank false :glj false
      :clj (or (nil? x) (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x) (char? x)
               (and (instance? clojure.lang.IPersistentCollection x)
-                   (.startsWith (.getName (class x)) "clojure.lang.")))
+                   (clojure.string/starts-with? (.getName (class x)) "clojure.lang.")))
      :default false))
 
 (defonce ^:private flat-rep-hook (atom nil))

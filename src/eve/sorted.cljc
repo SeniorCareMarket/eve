@@ -41,7 +41,7 @@
    [eve.slab-io :as slab]
    ;; the writers a collection stored in a field (metadata, a key, a value)
    ;; is written through
-   [eve.map] [eve.set] [eve.vec] [eve.list]))
+   [eve.map] [eve.set] [eve.vec] [eve.list] [clojure.string]))
 
 ;;-----------------------------------------------------------------------------
 ;; The node: [prio size left right entry], the entry [k v] its own block — a
@@ -347,9 +347,10 @@
 
 (defn- print-sorted [sc]
   (if (-map? sc)
-    (str "#eve/SortedMap{" (apply str (interpose ", " (map (fn [n] (str (pr-str (-sk n)) " " (pr-str (-sv n))))
-                                                           (nodes (-root sc) true)))) "}")
-    (str "#eve/SortedSet#{" (apply str (interpose " " (map (fn [n] (pr-str (-sk n))) (nodes (-root sc) true)))) "}")))
+    (str "#eve/SortedMap{" (clojure.string/join
+                            ", "
+                            (map (fn [n] (str (pr-str ((clojure.string/join " " (map (fn [n] (pr-str (-sk n))) (nodes (-root sc) true))) n)) " " (pr-str (-sv n)))) (nodes (-root sc) true))) "}")
+    (str "#eve/SortedSet#{" (clojure.string/join " " (map (fn [n] (pr-str (-sk n))) (nodes (-root sc) true))) "}")))
 
 (defn- map-equiv [sc other]
   (and (or (map? other) (eve.map/eve-hash-map? other) (satisfies? ISortedColl other))

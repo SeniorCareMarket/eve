@@ -193,5 +193,5 @@
     (let [x (enc/read-f64-le (enc/bytes-of input) 0)]
       (is (= expected (bits (math/sqrt x))))
       #?(:clj (is (= expected (bits (Math/sqrt x)))))))
-  (is (not (= (math/sqrt -1.0) (math/sqrt -1.0))))
-  (is (not (= (math/sqrt ##NaN) (math/sqrt ##NaN)))))
+  (is (not= (math/sqrt -1.0) (math/sqrt -1.0)))
+  (is (not= (math/sqrt ##NaN) (math/sqrt ##NaN))))

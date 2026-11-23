@@ -39,7 +39,7 @@
   [base store-url secret]
   (let [d (ea/persistent-atom-domain base)
         gv (volatile! nil)
-        srv (hs/serve! {:port 0 :threads 16} (fn [req] ((:handle @gv) req)))
+        srv (hs/serve! {:port 0 :threads 16} #_{:splint/disable [lint/fn-wrapper]} (fn [req] ((:handle @gv) req)))
         ep (str "http://127.0.0.1:" (:port srv))]
     (vreset! gv (gw/gateway d {:endpoint ep :domain-id l/domain-id :api-key l/api-key
                                :presign (gw/hmac-presigner {:url store-url :secret secret :now-ms proc/now-ms})
@@ -54,7 +54,7 @@
         counter (ea/lookup-or-create-mmap-atom! d "test/counter" {:n 0})
         seal0 (ea/seal a)
         gv (volatile! nil)
-        srv (hs/serve! {:port 0 :threads 16} (fn [req] ((:handle @gv) req)))
+        srv (hs/serve! {:port 0 :threads 16} #_{:splint/disable [lint/fn-wrapper]} (fn [req] ((:handle @gv) req)))
         ep (str "http://127.0.0.1:" (:port srv))
         g (gw/gateway d {:endpoint ep :domain-id l/domain-id :api-key l/api-key
                          :presign (gw/hmac-presigner {:url store-url :secret secret :now-ms proc/now-ms})

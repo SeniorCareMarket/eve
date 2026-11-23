@@ -1007,7 +1007,7 @@
         (let [arr (.-arr node)
               max-child-idx (last-non-nil-idx arr)
               num-elems-in-full-child (bit-shift-left 1 shift)]
-          (if (< max-child-idx 0)
+          (if (neg? max-child-idx)
             acc
             (recur (aget arr max-child-idx)
                    (- shift 5)

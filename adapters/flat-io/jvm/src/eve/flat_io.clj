@@ -644,7 +644,7 @@
   (indexOf [_this o]
     (loop [i 0] (cond (== i n) -1 (= o (elem b off kind i)) i :else (recur (unchecked-inc i)))))
   (lastIndexOf [_this o]
-    (loop [i (dec n)] (cond (< i 0) -1 (= o (elem b off kind i)) i :else (recur (dec i)))))
+    (loop [i (dec n)] (cond (neg? i) -1 (= o (elem b off kind i)) i :else (recur (dec i)))))
   (listIterator [_this] (.listIterator ^java.util.List (tuple-vec b off n kind)))
   (listIterator [_this i] (.listIterator ^java.util.List (tuple-vec b off n kind) (int i)))
   (subList [this a z] (subvec this a z))

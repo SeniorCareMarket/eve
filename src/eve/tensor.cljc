@@ -111,7 +111,7 @@
       (loop [i (dec rank)
              stride 1
              result (transient [])]
-        (if (< i 0)
+        (if (neg? i)
           (vec (reverse (persistent! result)))
           (recur (dec i)
                  (* stride (e/nth shape i))
@@ -133,7 +133,7 @@
     (loop [r (dec rank)
            remaining flat-iter-idx
            flat elem-offset]
-      (if (< r 0)
+      (if (neg? r)
         flat
         (let [dim (e/nth shape r)
               idx (rem remaining dim)]

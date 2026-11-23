@@ -57,7 +57,7 @@
    guard the browser adapter carries around that wart is unnecessary on this seat. The channel's EDN
    is likewise read with the seat's own reader: cljs.core/read-string (SCI's EDN reader) — stock
    scittle registers no cljs.reader namespace for programs (the reader in its bundle is SCI's
-   internal one), where the compiled build's adapter requires cljs.reader.")
+   internal one), where the compiled build's adapter requires cljs.reader." (:require [clojure.string]))
 
 ;; ---------------------------------------------------------------------------
 ;; Small shapes
@@ -82,7 +82,7 @@
       (recur (+ i 8192)
              (conj parts (.apply js/String.fromCharCode nil
                                  (.subarray u i (min (.-length u) (+ i 8192))))))
-      (js/btoa (apply str parts)))))
+      (js/btoa (clojure.string/join parts)))))
 
 (defn- resp-bytes-b64
   "a response's bytes as base64: with :body-as :b64 the :body already is base64; else its UTF-8 bytes'"
@@ -116,7 +116,7 @@
   (when (page-debug?)
     (try
       (-> (js/fetch (str (.-origin js/location) "/__eve_debug")
-                    #js {:method "POST" :body (apply str xs)})
+                    #js {:method "POST" :body (clojure.string/join xs)})
           (.catch (fn [_] nil)))
       (catch :default _ nil))))
 

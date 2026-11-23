@@ -7,7 +7,7 @@
   Exits WITHOUT closing the domain (close would checkpoint).
   Usage: record <variant B|J1|J10> <size counter|kb64> <workdir> <n>"
   (:require [eve.atom :as atom]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io] [clojure.string])
   (:import [java.nio.file Files CopyOption StandardCopyOption]
            [java.io File]))
 
@@ -22,7 +22,7 @@
   ;; not a directory: copy every file whose name starts with "domain".
   (.mkdirs dst)
   (doseq [^File f (.listFiles parent)
-          :when (and (.isFile f) (.startsWith (.getName f) "domain"))]
+          :when (and (.isFile f) (clojure.string/starts-with? (.getName f) "domain"))]
     (Files/copy (.toPath f)
                 (.toPath (io/file dst (.getName f)))
                 (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))))
@@ -39,7 +39,7 @@
         ;; identical on pristine main; a pre-existing limitation,
         ;; not the durability fix's doing), so multi-block coverage
         ;; uses a collection of small strings instead.
-        big (fn [ch] (mapv (fn [_] (apply str (repeat 30 ch))) (range 2200)))
+        big (fn [ch] (mapv (fn [_] (clojure.string/join (repeat 30 ch))) (range 2200)))
         init (case size "counter" 0 (big "z"))
         a (atom/persistent-atom {:id :eve/main :persistent dir} init)]
     (atom/sync! a)

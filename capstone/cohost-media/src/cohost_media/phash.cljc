@@ -2,7 +2,7 @@
   "Perceptual hashes and duplicate groups, portable cljc. A hash is the DCT pHash of a 32×32 grayscale image (1,024
    bytes, row-major, 0..255): the 2-D DCT-II, its top-left 8×8 coefficients without the DC term, each bit set when the
    coefficient is above their median — 64 bits, written as 16 hex digits. Two images are duplicates when their hashes
-   differ in at most 10 bits; a duplicate group is a connected set of duplicates.")
+   differ in at most 10 bits; a duplicate group is a connected set of duplicates." (:require [clojure.string]))
 
 (def ^:private N 32)
 
@@ -59,7 +59,7 @@
         median (nth (vec (sort ac)) (quot (count ac) 2))
         bits (mapv (fn [c] (if (> c median) 1 0)) coefs)
         digit (fn [i] (reduce (fn [acc b] (+ (* 2 acc) b)) 0 (subvec bits (* 4 i) (* 4 (inc i)))))]
-    (apply str (map (fn [i] (nth "0123456789abcdef" (digit i))) (range 16)))))
+    (clojure.string/join (map (fn [i] (nth "0123456789abcdef" (digit i))) (range 16)))))
 
 (def ^:private hex-value (zipmap "0123456789abcdef" (range 16)))
 

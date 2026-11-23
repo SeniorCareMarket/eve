@@ -66,7 +66,7 @@
        []
        (into {}
              (concat
-              (map (fn [c] [(cls c) (wh "array" (fn [x] (vec x)))]) seq-classes)
+              (map (fn [c] [(cls c) (wh "array" vec)]) seq-classes)
               [[(cls "eve.flat.freeze.FrozenValue")
                 (wh (fn [x] (if (sequential? (freeze/deliver-flat x)) "array" "map"))
                     (fn [x] (let [h (freeze/deliver-flat x)]
@@ -94,7 +94,7 @@
        []
        (into {}
              (concat
-              (map (fn [c] [(cls c) (wh "eve/flatseq" (fn [x] (seq-bytes x)))])
+              (map (fn [c] [(cls c) (wh "eve/flatseq" seq-bytes)])
                    seq-classes)
               [[(cls "eve.flat.freeze.FrozenValue")
                 (wh (fn [x] (if (sequential? (freeze/deliver-flat x))

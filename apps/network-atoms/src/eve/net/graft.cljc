@@ -60,4 +60,4 @@
 (defn possible?
   "graftPossibleV3: the loser's read Bloom (nil: none recorded) holds none of the winner's branch and retired keys"
   [reads winner]
-  (or (nil? reads) (not (some (fn [k] (might-contain? reads k)) (concat (:branch winner) (:retired winner))))))
+  (or (nil? reads) (not-any? (fn [k] (might-contain? reads k)) (concat (:branch winner) (:retired winner)))))

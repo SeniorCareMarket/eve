@@ -7,12 +7,12 @@
   class (materializing a ~100 MB value into JS objects per op) —
   those draws become counter increments; named in the census."
   (:require [eve.atom :as atom]
-            [eve.mem :as mem]))
+            [eve.mem :as mem] [clojure.string]))
 
 (def fs (js/require "fs"))
 
 (defn- rec-value [v fill]
-  {:v v :data (apply str (repeat fill "x"))})
+  {:v v :data (clojure.string/join (repeat fill "x"))})
 
 (def classes
   {:s1k   [:rec-1k   12    60]

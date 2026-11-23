@@ -31,7 +31,12 @@
             [eve.map] [eve.set] [eve.vec] [eve.list]
             #?@(:cljs [["fs" :as fs] ["os" :as os]])))
 
-(defn- hex [v] (apply str (map #(let [x (bit-and % 0xFF)] (str (nth "0123456789abcdef" (quot x 16)) (nth "0123456789abcdef" (mod x 16)))) v)))
+(defn- hex [v] (clojure.string/join
+                (map
+                 #(let
+                   [x (bit-and % 255)]
+                    (str (nth "0123456789abcdef" (quot x 16)) (nth "0123456789abcdef" (mod x 16))))
+                 v)))
 
 (defn- region-bytes [r off n]
   (let [b (mem/-read-bytes r off n)]

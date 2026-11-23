@@ -208,7 +208,7 @@
       (is (= 1 (get (:value b) :n)))
       (is (= [1 2 3] (map (fn [x] (bit-and x 0xFF)) (get (d/eve->clj (:value b)) :data))))))
   (testing "a value with no eve bytes (a fn): written by reference, recorded"
-    (let [f (fn [x] (inc x))
+    (let [f inc
           v {:handler f :n 2}
           b (build/build! v)]
       (is (some (fn [x] (= :reference (:reason x))) (:fallbacks b)))

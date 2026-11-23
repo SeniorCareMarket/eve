@@ -18,15 +18,19 @@
             [eve.core :as e]
             [eve.deftype-proto.alloc :as alloc]
             ;; the collection writers a host map or vector is written through
-            [eve.map] [eve.set] [eve.vec] [eve.list]))
+            [eve.map] [eve.set] [eve.vec] [eve.list] [clojure.string]))
 
 (defn- sio [] (alloc/heap-domain-sio! {}))
 
 (defn- hex [b]
   (let [n #?(:cljs (.-length b) :default (count b))]
-    (apply str (map (fn [i] (let [x (bit-and (int #?(:cljs (aget b i) :default (nth b i))) 0xFF)]
-                              (str (nth "0123456789abcdef" (quot x 16)) (nth "0123456789abcdef" (mod x 16)))))
-                    (range n)))))
+    (clojure.string/join
+     (map
+      (fn
+        [i]
+        (let [x (bit-and (int (aget b i)) 255)]
+          (str (nth "0123456789abcdef" (quot x 16)) (nth "0123456789abcdef" (mod x 16)))))
+      (range n)))))
 
 (defn- key-hex [v] (hex (codec/encode-key v)))
 

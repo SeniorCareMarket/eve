@@ -7,7 +7,7 @@
    symbol/shape table offsets are relative to the entries region, in the
    chunk's offset width."
   (:require [eve.codec :as codec]
-            [eve.crypto :as crypto])
+            [eve.crypto :as crypto] [clojure.string])
   (:import [java.io ByteArrayOutputStream]
            ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
            #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays]))
@@ -15,7 +15,7 @@
 ;; ---------------------------------------------------------------- hex
 
 (defn bytes->hex [^bytes bs]
-  (apply str (map (fn [b] (format "%02x" (bit-and b 0xFF))) bs)))
+  (clojure.string/join (map (fn [b] (format "%02x" (bit-and b 255))) bs)))
 
 (defn hex->bytes [^String s]
   (let [n (quot (count s) 2)

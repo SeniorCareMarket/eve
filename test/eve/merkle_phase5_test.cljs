@@ -60,7 +60,7 @@
       (is (= {:count 1 :name "x"} @a) "value intact")
       (is (= root0 (shared-root-desc-idx a)) "root desc unchanged — no new root installed")
       (is (= 1 (count @fires)) "watch fired on equal-but-rebuilt swap (Q5)")
-      (is (= {:count 1 :name "x"} (first (first @fires))) "watch old value")
+      (is (= {:count 1 :name "x"} (ffirst @fires)) "watch old value")
       (is (= {:count 1 :name "x"} (second (first @fires))) "watch new value")
       ;; changed swap: root moves, watch fires
       (swap! a assoc :count 2)

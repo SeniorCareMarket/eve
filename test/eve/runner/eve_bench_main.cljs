@@ -42,7 +42,7 @@
   "Run a shell command synchronously, return trimmed stdout."
   [cmd]
   (try
-    (str/trim (.toString (.execSync cp cmd #js {:encoding "utf8"})))
+    (str/trim (str (.execSync cp cmd {splint/tagged-literal (js {:encoding "utf8"})})))
     (catch :default _ "")))
 
 (defn- mkdir-p [dir]
@@ -81,7 +81,7 @@
   [k width]
   (let [s (pr-str k)
         padding (- width (count s))]
-    (str s (apply str (repeat (max 0 padding) " ")))))
+    (str s (clojure.string/join (repeat (max 0 padding) " ")))))
 
 (defn- pretty-edn
   "Pretty-print a map as an aligned EDN string.

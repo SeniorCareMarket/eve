@@ -61,7 +61,7 @@
                   clojure.lang.IDeref
                   (deref [this] (deref this))
                   clojure.lang.IAtom
-                  (swap [this f] (swap! this (fn [v] (f v))))
+                  (swap [this f] (swap! this f))
                   (swap [this f a] (swap! this (fn [v] (f v a))))
                   (swap [this f a b] (swap! this (fn [v] (f v a b))))
                   (swap [this f a b more] (swap! this (fn [v] (apply f v a b more))))
@@ -228,8 +228,8 @@
    held entries and the new entries"
   [held entries]
   (let [old (img-counts held) new (img-counts entries)]
-    {:fresh (vec (filter (fn [ik] (zero? (get old ik 0))) (keys new)))
-     :gone (vec (filter (fn [ik] (zero? (get new ik 0))) (keys old)))}))
+    {:fresh (filterv (fn [ik] (zero? (get old ik 0))) (keys new))
+     :gone (filterv (fn [ik] (zero? (get new ik 0))) (keys old))}))
 
 (defn- sync-step
   "a step answering the handle's state for the value the broker's deref dr names, from the state s the handle

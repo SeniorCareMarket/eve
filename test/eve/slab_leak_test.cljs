@@ -15,7 +15,7 @@
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.vec :as eve-vec]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.set :as eve-set]))
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.set :as eve-set] [clojure.string]))
 
 (def ^:private test-base (str "/tmp/eve-leak-test-" (js/Date.now)))
 
@@ -31,10 +31,10 @@
 (defn- all-stats-str []
   (let [stats (ps/all-slab-stats)]
     (str "{"
-         (apply str
-                (interpose ", "
-                           (for [[cls {:keys [total-blocks used-count]}] (sort stats)]
-                             (str cls ":" used-count "/" total-blocks))))
+         (clojure.string/join
+          ", "
+          (for [[cls {:keys [total-blocks used-count]}] (sort stats)]
+            (str cls ":" used-count "/" total-blocks)))
          "}")))
 
 (defn- wait-and-flush
@@ -332,7 +332,7 @@
                              (println (str "  Type trans map->scalar: map-baseline="
                                            map-baseline " after-scalar=" after-scalar
                                            " freed=" freed))
-                             (is (> freed 0)
+                             (is (pos? freed)
                                  "Map->scalar freed 0 blocks, old tree not retired")
                           ;; Build a vec incrementally (avoid builder intermediates)
                              (reset! a [])
@@ -352,7 +352,7 @@
                                                (println (str "  Type trans vec->scalar: vec-baseline="
                                                              vec-baseline " after=" after2
                                                              " freed=" vec-freed))
-                                               (is (> vec-freed 0)
+                                               (is (pos? vec-freed)
                                                    "Vec->scalar freed 0 blocks, old tree not retired")
                                                (atom/close-atom-domain! d)
                                                (done))))))))))))))))))))

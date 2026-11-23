@@ -539,7 +539,7 @@
            e
            (if-let [q (first (filter (fn [e] (let [dd @e] (and (= :queued (:state dd)) (may-help? dd false)))) es))]
              (do (claim-and-run! q) (recur))
-             (let [reg (vec (filter (fn [e] (register-waiter! e me)) es))]
+             (let [reg (filterv (fn [e] (register-waiter! e me)) es)]
                (if (< (count reg) (count es))
                ;; one finished while registering: undo the rest, consuming the wakes already on their way
                  (do (doseq [e reg] (when-not (deregister-waiter! e me) (wait-wake! (:id @e) nil))) (recur))

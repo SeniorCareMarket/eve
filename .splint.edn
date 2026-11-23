@@ -4,4 +4,23 @@
 ; A rule is disabled only fleet-wide, here, with the reason recorded —
 ; never per repo to make a repo pass. Where a Splint rule duplicates a
 ; clj-kondo idiom linter, the dedup choice is recorded here too.
-{}
+; ── Repo-local exceptions (eve, Phase 2; proposed to the fleet in
+; RETRO.md). Splint 1.25 has no per-path config: a rule is excepted
+; per file through the rule's :excludes matchers, so every excepted
+; file is named below and every other file keeps every rule.
+;
+; style/prefer-clj-math (7 files): the flagged calls name the HOST
+; Math face (Math/floor, Math/log, Math/addExact, ...) in portable
+; .cljc code and in Eve's own math facade — that spelling is the
+; portability layer: every Eve host provides Math, while
+; clojure.math exists only on JVM-Clojure-shaped seats. In
+; host_completion the Math/*Exact calls ARE the checked-arithmetic
+; primitives the seat wraps; in the flat-io conformance test the
+; host Math face is the probe subject.
+{style/prefer-clj-math {:excludes ["src/eve/math\\.cljc$"
+                                   "src/eve/flat/column\\.cljc$"
+                                   "src/eve/dataset/batch\\.cljc$"
+                                   "adapters/completion/jolt/src/eve/host_completion\\.cljc$"
+                                   "adapters/flat-io/test/eve/flat_io_conformance_test\\.cljc$"
+                                   "capstone/cohost-media/src/cohost_media/r128\\.cljc$"
+                                   "capstone/cohost-media/src/cohost_media/tasks\\.cljc$"]}}

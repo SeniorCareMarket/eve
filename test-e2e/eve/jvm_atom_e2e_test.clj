@@ -1,7 +1,7 @@
 (ns eve.jvm-atom-e2e-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.edn :as edn]
-            [eve.atom :as atom])
+            [eve.atom :as atom] [clojure.string])
   (:import [java.lang ProcessBuilder]
            [java.io File]))
 
@@ -25,7 +25,7 @@
   (let [r (spawn-node! worker "join-read" b)]
     (assert (zero? (:exit r))
             (str "join-read failed: " (:err r)))
-    (edn/read-string (.trim (:out r)))))
+    (edn/read-string (clojure.string/trim (:out r)))))
 
 (defn- node-reset!
   "Spawn Node worker to reset atom at base to edn-val."
@@ -302,7 +302,7 @@
   (let [r (spawn-node! worker "read-key-count" b)]
     (assert (zero? (:exit r))
             (str "read-key-count failed: " (:err r)))
-    (Long/parseLong (.trim (:out r)))))
+    (Long/parseLong (clojure.string/trim (:out r)))))
 
 (defn- slab-files-total-bytes
   "Sum the sizes of all .slab* and .root files for the given base path."
@@ -313,9 +313,9 @@
     (if (and parent (.exists parent))
       (->> (.listFiles parent)
            (filter #(let [n (.getName %)]
-                      (and (.startsWith n prefix)
-                           (or (.contains n ".slab")
-                               (.endsWith n ".root")))))
+                      (and (clojure.string/starts-with? n prefix)
+                           (or (clojure.string/includes? n ".slab")
+                               (clojure.string/ends-with? n ".root")))))
            (map #(.length %))
            (reduce + 0))
       0)))
@@ -503,7 +503,7 @@
             [(+ idx 100) (+ idx 200) (+ idx 300)]]
    :tags #{:alpha :beta :gamma :delta}
    :history (list :created :validated :committed)
-   :payload (apply str (repeat 200 (str (char (+ 65 (mod idx 26))))))})
+   :payload (clojure.string/join (repeat 200 (str (char (+ 65 (mod idx 26))))))})
 
 (defn- node-bulk-rich-grow!
   "Spawn Node worker to do compound swap: assoc unique key with rich

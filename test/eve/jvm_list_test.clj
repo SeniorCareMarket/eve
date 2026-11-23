@@ -129,8 +129,8 @@
         (is (instance? eve.list.EveList (pop l)))
         (is (= '(2 3) (seq (pop l))))
         (is (= '(2 3) (seq (next l))))
-        (is (= '(3) (seq (next (next l)))))
-        (is (nil? (next (next (next l)))))))))
+        (is (= '(3) (seq (nnext l))))
+        (is (nil? (nnext (next l))))))))
 
 (deftest list-rest
   (testing "rest returns rest or empty list"

@@ -116,9 +116,9 @@
    :str-astral "𝄞😀"
    :str-combining "é"
    :str-nul "a\u0000b"
-   :str-long (apply str (repeat 300 "é"))
+   :str-long (clojure.string/join (repeat 300 "é"))
    :kw-ns :a.b/c
-   :kw-long (keyword (apply str (repeat 300 "k")))
+   :kw-long (keyword (clojure.string/join (repeat 300 "k")))
    :sym-ns 'a.b/c
    :uuid #uuid "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
    :inst #inst "2026-10-15T12:00:00.000-00:00"

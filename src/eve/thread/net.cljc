@@ -41,7 +41,7 @@
 (extend-type NetRung
   rung/IRung
   (-kind [_] :net)
-  (-swap! [this f] (na/swap! (ra-of this) (fn [v] (f v))) nil)
+  (-swap! [this f] (na/swap! (ra-of this) f) nil)
   (-read [this f] (f (na/deref (ra-of this))))
   (-meta-rung [this init]
     (rung (:cfg this) (str "eve.meta/" (:nm this)) (:platform this) init))

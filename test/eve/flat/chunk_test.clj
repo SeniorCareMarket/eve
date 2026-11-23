@@ -7,7 +7,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [eve.flat.chunk :as chunk])
+            [eve.flat.chunk :as chunk] [clojure.string])
   ; the Arrays import is used below: the bare class name sits in the config's host-class unresolved-symbol exclusion (for the seats that reach it without an import), which blinds kondo to the import's use
   (:import #_{:clj-kondo/ignore [:unused-import]} [java.util Arrays Date]))
 
@@ -22,7 +22,7 @@
     out))
 
 (defn- bytes->hex ^String [^bytes bs]
-  (apply str (map #(format "%02x" (bit-and % 0xFF)) bs)))
+  (clojure.string/join (map #(format "%02x" (bit-and % 255)) bs)))
 
 (defn- fixture-rows []
   (edn/read-string (slurp "test/eve/fixtures/flat-bytes.edn")))
@@ -128,14 +128,14 @@
       (is (= 1 (count chunks)))
       (is (= (vec (range 100)) (vec (mapcat chunk/unpack chunks))))))
   (testing "a chunk seals when the next row would pass 65,535 bytes"
-    (let [rows (mapv (fn [i] {:id i :payload (str (apply str (repeat 190 "x")) "-" i)}) (range 2000))
+    (let [rows (mapv (fn [i] {:id i :payload (str (clojure.string/join (repeat 190 "x")) "-" i)}) (range 2000))
           chunks (chunk/pack-all rows)]
       (is (< 1 (count chunks)))
       (doseq [^bytes c chunks]
         (is (<= (alength c) 65535) "a non-wide chunk passed the seal limit"))
       (is (= rows (vec (mapcat chunk/unpack chunks))))))
   (testing "an oversize value makes one wide chunk"
-    (let [big (apply str (repeat 200000 "y"))
+    (let [big (clojure.string/join (repeat 200000 "y"))
           bs (packed-bytes [big])]
       (is (> (alength bs) 65535))
       (is (= [big] (chunk/unpack (chunk/open bs)))))))
@@ -262,8 +262,8 @@
               :mixed-shape-40 (into {} (concat (for [i (range 15)] [(keyword (str "k" i)) i])
                                                (for [i (range 15)] [(str "s" i) i])
                                                (for [i (range 10)] [(symbol (str "y" i)) i])))
-              :long-strings-20 (into {} (for [i (range 20)] [(str (apply str (repeat (+ 120 i) "é")) i) i]))
-              :boundary-strings-20 (into {} (for [i (range 250 270)] [(apply str (repeat i "a")) i]))
+              :long-strings-20 (into {} (for [i (range 20)] [(str (clojure.string/join (repeat (+ 120 i) "é")) i) i]))
+              :boundary-strings-20 (into {} (for [i (range 250 270)] [(clojure.string/join (repeat i "a")) i]))
               :ints-100 (into {} (for [i (range 100)] [i (str "v" i)]))
               :ints-negative-50 (into {} (for [i (range -25 25)] [(* i 1000003) i]))
               :ints-wide-30 (into {} (for [i (range 30)] [(+ 5000000000 (* i 7)) i]))
@@ -277,7 +277,7 @@
         probes (concat [nil 0 1 5 5N (int 5) 99 100 -1 -25000075 5000000000 5000000007 \a \z \A
                         100000000000000000005N "x3" "Station-5" "Station-406" "Station-407" "" "s3"
                         :k3 :k39 :k40 :ns0/k0 :ns1/k1 :ns1/k0 's3 'y9 'y10 [1 2] #{3} :f3 :a :b
-                        (apply str (repeat 255 "a")) (apply str (repeat 256 "a")) (apply str (repeat 257 "a"))
+                        (clojure.string/join (repeat (clojure.string/join (repeat (clojure.string/join (repeat 257 "a")) "a")) "a")) (clojure.string/join (repeat (clojure.string/join (repeat 257 "a")) "a")) (apply str (repeat 257 "a"))
                         true false]
                        (for [i (range 0 407 13)] (str "Station-" i)))]
     (doseq [[label m] maps]

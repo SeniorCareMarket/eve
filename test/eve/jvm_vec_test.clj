@@ -5,7 +5,7 @@
             [eve.map  :as eve-map]
             [eve.vec  :as eve-vec]
             [eve.set  :as eve-set]
-            [eve.list :as eve-list]))
+            [eve.list :as eve-list] [clojure.string]))
 
 (defmacro with-heap-slab [& body]
   `(let [~'sio (alloc/make-jvm-heap-slab-ctx {})]
@@ -240,8 +240,8 @@
         (is (= 3 (.size ^java.util.List v)))
         (is (= 10 (.get ^java.util.List v 0)))
         (is (= 30 (.get ^java.util.List v 2)))
-        (is (.contains ^java.util.List v 20))
-        (is (not (.contains ^java.util.List v 99)))
+        (is (clojure.string/includes? v 20))
+        (is (not (clojure.string/includes? v 99)))
         (is (= 1 (.indexOf ^java.util.List v 20)))
         (is (= -1 (.indexOf ^java.util.List v 99)))))))
 
