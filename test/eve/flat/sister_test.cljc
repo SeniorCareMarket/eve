@@ -17,7 +17,8 @@
    hosts' — ClojureScript has no slab domain to transfer between and no
    classpath to ask."
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.alpha :as e]
+            ; required so the alpha surface loads for this sister test; the surface is exercised on the :clj pass 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.alpha :as e]
             [eve.deftype :as edt]
             [eve.deftype-proto.data :as d]
             [eve.flat-io :as fio]

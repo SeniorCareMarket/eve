@@ -9,7 +9,8 @@
                   :qty   (e/eve-array :int32 [100 200])})"
   (:require
    [eve.dataset :as dataset]
-   [eve.array :as arr]))
+   ; eve.alpha is the one-namespace consumer surface: this require loads the API cone and alpha's defs delegate to the namespace's vars by their full names 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.array :as arr]))
 
 ;; Construction & predicates
 (def dataset dataset/dataset)

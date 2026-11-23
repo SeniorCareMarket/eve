@@ -16,12 +16,17 @@
   ;; the api table names its values by these aliases (adapters/core/
   ;; cljs-compiler's eve/alpha.cljs requires the same ones)
   (:require [eve.deftype]
-            [eve.core :as ec]
+            ; eve.alpha is the one-namespace consumer surface: this require loads the API cone and alpha's defs delegate to the namespace's vars by their full names 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :as ec]
             [eve.atom :as atm]
-            [eve.array :as arr]
-            [eve.deftype.array :as darr]
-            [eve.map :as emap]
-            [eve.set :as eset]
+            ; eve.alpha is the one-namespace consumer surface: this require loads the API cone and alpha's defs delegate to the namespace's vars by their full names 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.array :as arr]
+            ; eve.alpha is the one-namespace consumer surface: this require loads the API cone and alpha's defs delegate to the namespace's vars by their full names 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype.array :as darr]
+            ; eve.alpha is the one-namespace consumer surface: this require loads the API cone and alpha's defs delegate to the namespace's vars by their full names 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.map :as emap]
+            ; eve.alpha is the one-namespace consumer surface: this require loads the API cone and alpha's defs delegate to the namespace's vars by their full names 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.set :as eset]
             [eve.vec]
             [eve.list]
             [eve.process-slab :as ps]
