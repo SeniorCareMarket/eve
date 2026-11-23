@@ -429,7 +429,15 @@
           (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
   (wBytes [_ src off n]
     (when (> (+ @p n) (alength @b)) (vreset! b (ba-copy-of @b (max (+ @p n) (* 2 (alength @b))))))
-    (enc/arraycopy src off @b @p n) (vreset! p (+ @p n)))
+    ;; the host's byte producers (eve.encoding's utf8-bytes and
+    ;; friends) answer bytearray; the codec's arrays are signed
+    ;; array('b') and CPython refuses a bytearray slice into an
+    ;; array('b') slice (eve.encoding's copy-of-range docstring), so
+    ;; a bytearray source is re-read as signed bytes first.
+    (enc/arraycopy (if (python/isinstance src python/bytearray)
+                     (python/array.array "b" src)
+                     src)
+                   off @b @p n) (vreset! p (+ @p n)))
   (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
   (wPatchU32 [_ at v]
     (aset @b (int at) (unchecked-byte v))
