@@ -2,9 +2,10 @@
   "Bulk construction over already encoded HAMT entries [portable-hash key-bytes ...].
    No host hashing of values, slab reads, or intermediate path copies."
   (:refer-clojure :exclude [long])
-  (:require [eve.host :refer [long]]
-            [eve.hamt-util :as hu]
-            [eve.encoding :as enc]))
+  (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [long]]
+   [eve.hamt-util :as hu]
+   [eve.encoding :as enc]))
 
 (defn unique-entries
   "Byte equality, not host value equality. Retain the last payload for a key."

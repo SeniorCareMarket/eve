@@ -4,9 +4,11 @@
   (:require
    [cljs.test :refer [deftest testing is]]
    [eve.alpha :as eve]
-   [eve.atom :as atom]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.atom :as atom]
    [eve.deftype-proto.data :as d]
-   [eve.deftype-proto.alloc :as alloc]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
    [eve.process-slab :as ps]
    ;; Required so collection serializers are registered for serialized field tests
    [eve.map]

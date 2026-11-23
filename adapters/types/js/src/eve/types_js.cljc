@@ -4,9 +4,11 @@
    twist): an instance holds its cached fields and its block's offset in the
    module slab (offset__), its fields read through the slab's DataView."
   (:refer-clojure :exclude [aset])
-  (:require [eve.host :refer [aset]]
-            [eve.deftype-proto :as proto]
-            [eve.deftype-proto.vocab :as v]))
+  (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [aset]]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto :as proto]
+   [eve.deftype-proto.vocab :as v]))
 
 ;;-----------------------------------------------------------------------------
 ;; Code Generation Helpers (Slab Resolve Pattern)

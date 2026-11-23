@@ -8,9 +8,10 @@
 
 (ns eve.rrb-vector.nodes
   (:refer-clojure :exclude [clone make-array aget aset alength aclone long])
-  (:require [eve.host :refer [long]]
-            [eve.deftype :as edt]
-            [eve.deftype.array :refer [make-array aget aset alength aclone array-copy]]))
+  (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [long]]
+   [eve.deftype :as edt]
+   [eve.deftype.array :refer [make-array aget aset alength aclone array-copy]]))
 
 ;;; eve: cljs.core's VectorNode, as an eve-deftype — a node lives in eve
 ;;; memory, so a vector of them can sit in an atom shared across processes.

@@ -9,7 +9,8 @@
    [eve.host :refer [aget aset alength unchecked-byte unchecked-int
                      unsigned-bit-shift-right long bytes]]
    [eve.core :as e]
-   [eve.deftype :as edt]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype :as edt]
    [eve.deftype-proto.macros :as eve]
    ;; Load order: host-deftype's expansion ends in a top-level
    ;; eve.type-readers/register! call, which needs the registry first

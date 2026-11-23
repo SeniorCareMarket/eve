@@ -6,7 +6,8 @@
    only: the boot program runs on the JVM. As a .cljc the surface is the :clj arm, with one
    two-armed exception: proc?, so portable code (cohost-media.start's watches and kill steps)
    can ask whether a pool entry is a started process without naming the Proc class."
-  (:require [clojure.string :as str])
+  (:require ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.string :as str])
   #?(:clj (:import [java.io File]
                    [java.lang Process ProcessBuilder ProcessHandle]
                    [java.util.concurrent TimeUnit]

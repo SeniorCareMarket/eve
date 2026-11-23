@@ -9,7 +9,8 @@
    The broker's API key comes from the environment (EVE_API_KEY), never the command line. Prints one EDN line
    {:step :up :rid :port :pool} once it serves, and runs until its process is stopped."
   (:require [clojure.string :as str]
-            [eve.process :as proc]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.process :as proc]
             [eve.thread.server :as server]
             #?@(:cljs [["fs" :as fs] ["path" :as path]])))
 

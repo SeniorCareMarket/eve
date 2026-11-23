@@ -6,7 +6,8 @@
    OUT as EDN. The parent compares the two processes' sets: no block
    twice, and the domain's free counts exact against the claimed total."
   (:require [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d])
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.data :as d])
   (:import [java.io File]
            [java.util Random]))
 

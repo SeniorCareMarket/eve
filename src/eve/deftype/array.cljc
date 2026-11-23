@@ -31,7 +31,8 @@
   (:require [eve.host :refer [byte-array object-array unchecked-byte unchecked-int long
                               volatile! vswap! bytes objects]]
             [eve.core :as e]
-            [eve.deftype :as edt]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype :as edt]
             [eve.slab-io :as slab]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]

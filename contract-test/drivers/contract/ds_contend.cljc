@@ -23,7 +23,8 @@
   (:require
    [eve.host :refer [swap!]]
    [eve.atom :as atom]
-   [eve.core :as e]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :as e]
    [datascript.core :as d]))
 
 (defmacro attempt

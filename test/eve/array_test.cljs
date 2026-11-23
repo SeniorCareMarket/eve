@@ -4,7 +4,8 @@
    [eve.alpha :as eve]
    [eve.array :as arr]
    [eve.obj :as obj]
-   [eve.deftype-proto.serialize :as ser]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.serialize :as ser]
    [eve.map :as sm]))
 
 ;;-----------------------------------------------------------------------------

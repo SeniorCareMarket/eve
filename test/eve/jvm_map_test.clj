@@ -1,11 +1,15 @@
 (ns eve.jvm-map-test
   (:require [clojure.test :refer [deftest is testing]]
             [eve.deftype-proto.alloc :as alloc]
-            [eve.mem :as mem]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]
             [eve.map  :as eve-map]
-            [eve.vec  :as eve-vec]
-            [eve.set  :as eve-set]
-            [eve.list :as eve-list]))
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.vec  :as eve-vec]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.set  :as eve-set]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.list :as eve-list]))
 
 (defmacro with-heap-slab [& body]
   `(let [~'sio (alloc/make-jvm-heap-slab-ctx {})]

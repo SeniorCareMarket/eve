@@ -9,7 +9,8 @@
    Run from eve/: the mmap atoms load EVE's addon (build/Release) from the
    working directory. Exits non-zero on a failure."
   (:require [eve.clock-uuid-test] [eve.associative-transient-test] [cljs.test :as t]
-            [eve.deftype-proto.alloc :as alloc]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
             [eve.process-slab :as ps]
             [eve.deftype-proto.data :as d]
             [eve.atom :as a]

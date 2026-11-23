@@ -12,7 +12,8 @@
    #?(:cljs [cljs.test :refer-macros [deftest testing is]]
       :clj  [clojure.test :refer [deftest testing is]])
    [eve.array :as arr]
-   [eve.atom :as eatom]
+   ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.atom :as eatom]
    [eve.core :as e]
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.coalesc :as coalesc]
@@ -22,7 +23,8 @@
    [eve.flat.sister]
    [eve.mem :as mem]
    [eve.region :as region]
-   [eve.slab-io :as slab])
+   ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.slab-io :as slab])
   #?(:clj (:import [eve.deftype_proto.alloc JvmSlabCtx])))
 
 ;; ---------------------------------------------------------------------------

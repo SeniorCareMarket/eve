@@ -5,9 +5,11 @@
    [eve.array :as arr]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
-   [eve.dataset.argops :as argops]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.dataset.argops :as argops]
    [eve.atom :as e]
-   #?(:cljs [eve.deftype-proto.alloc :as alloc])
+   #?(:cljs ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+      #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc])
    #?(:cljs [eve.process-slab :as ps])
    #?(:clj [clojure.java.io :as io])))
 

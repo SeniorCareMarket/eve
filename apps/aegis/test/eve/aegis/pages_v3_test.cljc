@@ -17,7 +17,8 @@
 ;; run no assertions — never a failure, never a silent pass. With VS_DIR set, they run as they always have.
 (ns eve.aegis.pages-v3-test
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.string :as str]
             [eve.codec :as wire]
             [eve.encoding :as enc]
             [eve.net.bytes :as b]

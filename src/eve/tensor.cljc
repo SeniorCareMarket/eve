@@ -28,7 +28,8 @@
    [eve.array :as arr]
    [eve.deftype-proto.data :as d]
    [eve.encoding :as enc]
-   [eve.deftype-proto.serialize :as ser]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.serialize :as ser]
    [eve.deftype :as edt]
    ;; load order: the deftype expansion's top-level register-sister!
    ;; call needs eve.flat.sister first in the RUNTIME graph (a macro
@@ -38,7 +39,8 @@
    ;; also end in eve.type-readers/register! calls.
    [eve.type-readers]
    [eve.deftype-proto.alloc :as alloc]
-   [eve.deftype.slab-runtime :as slab-rt]))
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype.slab-runtime :as slab-rt]))
 
 ;; Forward declarations
 (declare flat-get)

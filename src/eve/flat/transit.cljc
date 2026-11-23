@@ -36,8 +36,10 @@
 ;; classpath — only calling the handler constructors does.
 
 (ns eve.flat.transit
-  (:require [eve.flat.chunk :as chunk]
-            [eve.flat.freeze :as freeze]))
+  (:require ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.chunk :as chunk]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.freeze :as freeze]))
 
 #?(:clj
    (do

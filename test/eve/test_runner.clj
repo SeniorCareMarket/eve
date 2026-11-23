@@ -31,8 +31,6 @@
             [cljs-thread.test.env :as env]
             [cljs-thread.test.failures :as failures]
             [cljs-thread.test.watch :as watch]
-            [clojure.java.io :as io]
-            [clojure.edn :as edn]
             [clojure.string :as str])
   (:import [java.util.concurrent Executors Future]))
 

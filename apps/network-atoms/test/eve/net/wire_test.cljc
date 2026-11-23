@@ -9,7 +9,8 @@
             [clojure.string :as str]
             [eve.net.bytes :as b]
             [eve.net.codec :as codec]
-            [eve.net.json :as json]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.net.json :as json]
             [eve.net.sha256 :as sha]
             [eve.net.snapshot :as snap]
             [eve.net.run :as r]

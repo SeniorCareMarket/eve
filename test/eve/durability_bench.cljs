@@ -13,8 +13,7 @@
      cworker <dir> <variant> <n> <sync-every> <elapsed-out>
      cread   <dir>
    Bench roots come from BENCH_DIR."
-  (:require [eve.atom :as atom]
-            [clojure.string :as str]))
+  (:require [eve.atom :as atom]))
 
 (def ^:private fs (js/require "fs"))
 

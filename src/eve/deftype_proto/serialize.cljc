@@ -7,7 +7,8 @@
    tags, the registries a type registers its constructors and writers in, the
    slab's default I/O."
   (:require
-   [eve.deftype-proto.data :as d]
+   ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.data :as d]
    [eve.process :as proc]))
 
 ;;-----------------------------------------------------------------------------

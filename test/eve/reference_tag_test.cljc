@@ -16,7 +16,8 @@
             ;; the collection writers a host map or vector is written through
             [eve.map] [eve.set] [eve.vec] [eve.list]
             [eve.net.codec :as wire]
-            [eve.process :as proc]))
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.process :as proc]))
 
 (defn- sio [] (alloc/heap-domain-sio! {}))
 

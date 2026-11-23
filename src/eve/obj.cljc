@@ -18,7 +18,8 @@
    [eve.host :refer [unchecked-int long]]
    [eve.encoding :as enc]
    [eve.slab-io :as slab]
-   [eve.deftype-proto.alloc :as alloc]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
    [eve.array :as arr]
    [eve.obj.impl :as impl]))
 

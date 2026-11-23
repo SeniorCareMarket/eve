@@ -4,7 +4,8 @@
    java.io.File), so the boot program's body reads the way the launcher's did. JVM-seat only: the
    boot program runs on the JVM. As a .cljc the whole surface is the :clj arm: every seat's reader
    reads this namespace, and no other seat calls it — the boot program is the primary seat's."
-  (:require [clojure.string :as str])
+  (:require ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.string :as str])
   #?(:clj (:import [java.io File]
                    [java.nio.file Files Path Paths StandardCopyOption CopyOption]
                    [java.nio.file.attribute FileAttribute]

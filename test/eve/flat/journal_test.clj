@@ -28,7 +28,8 @@
             [eve.deftype-proto.data :as d]
             [eve.flat :as flat]
             [eve.flat.check :as check]
-            [eve.flat.image :as image]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.image :as image]
             [eve.flat.place :as place])
   (:import [java.io File]
            [eve.deftype_proto.alloc JvmSlabCtx]))

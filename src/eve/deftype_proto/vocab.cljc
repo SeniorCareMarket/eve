@@ -7,9 +7,10 @@
    reads and writes an eve/deftype type's bodies get. A host realizes a type
    from these in its adapter (eve.types, eve/adapters/types/)."
   (:refer-clojure :exclude [into-array unchecked-inc-int long objects])
-  (:require [eve.host :refer [field into-array unchecked-inc-int long objects]]
-            [clojure.string :as str]
-            [eve.deftype-proto.proto-map :as pm]))
+  (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [field into-array unchecked-inc-int long objects]]
+   [clojure.string :as str]
+   [eve.deftype-proto.proto-map :as pm]))
 
 ;;=============================================================================
 ;; A body's impls

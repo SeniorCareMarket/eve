@@ -12,9 +12,11 @@
    (symbol table, scalar nodes, shapes) come from
    eve.flat.column-scaffold — SCAFFOLDING that C1's chunk.cljc
    replaces; the code under test is eve.flat.column alone."
-  (:require #?(:cljs [cljs.test :refer [deftest testing is]]
+  (:require #?(:cljs ; the test-framework require; its referred macros are this file's test surface
+               #_{:clj-kondo/ignore [:unused-namespace]}   [cljs.test :refer [deftest testing is]]
                :clj  [clojure.test :refer [deftest testing is]])
-            [eve.flat.column :as column]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.column :as column]
             #?(:clj [eve.flat.column-scaffold :as scaffold]))
   #?(:clj (:import [java.util Arrays Random]
                    [java.nio DoubleBuffer IntBuffer ReadOnlyBufferException])))

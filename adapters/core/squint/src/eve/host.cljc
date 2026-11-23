@@ -48,7 +48,8 @@
             ;; whose graphs reach an ILookup-naming deftype (eve.atom and
             ;; kin), so the stubs register before any deftype form in those
             ;; graphs evaluates. eve.core requires nothing: no cycle.
-   [eve.core :refer [ILookup IEquiv IHash IPrintWithWriter]]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :refer [ILookup IEquiv IHash IPrintWithWriter]]
    ["squint-cljs/core.js" :as core]
    [eve.host-prim :as prim]
    [eve.host-completion]))

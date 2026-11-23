@@ -22,13 +22,14 @@
      (default) — immutable, set at construction
      ^:mutable — mutable via set! (single-worker)
      ^:volatile-mutable — atomic via set!/cas! (cross-worker)"
-  (:require [eve.host :refer [field]]
-            [eve.deftype.registry :as reg]
-            [eve.deftype-proto :as proto]
-            [eve.deftype-proto.emission :as emission]
-            [eve.deftype-proto.type-io :as type-io]
-            [eve.deftype-proto.vocab :as v]
-            [eve.types :as t]))
+  (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [field]]
+   [eve.deftype.registry :as reg]
+   [eve.deftype-proto :as proto]
+   [eve.deftype-proto.emission :as emission]
+   [eve.deftype-proto.type-io :as type-io]
+   [eve.deftype-proto.vocab :as v]
+   [eve.types :as t]))
 
 ;;-----------------------------------------------------------------------------
 ;; deftype: a host type, written once

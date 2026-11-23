@@ -4,7 +4,8 @@
 
    Run via: node target/eve-test/all.js lustre-bench"
   (:require [eve.atom :as atom]
-            [eve.mem :as mem]))
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]))
 
 (def ^:private fs (js/require "fs"))
 

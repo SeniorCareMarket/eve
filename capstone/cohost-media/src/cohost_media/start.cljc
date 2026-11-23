@@ -41,7 +41,8 @@
             #?(:clj [cohost.cljs-pool :as cljs-pool])
             [cohost-media.boot-fs :as fs]
             [cohost-media.boot-proc :as p]
-            [clojure.data.json :as json]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [cohost-media.core :as em]

@@ -12,12 +12,13 @@
    \"$CP\" clojure.main -e \"(require 'eve.flat.place-bench)
    (eve.flat.place-bench/-main)\" — there is no :test alias in deps.edn;
    the :jvm-test alias carries the test paths (corrected 2026-11-12)."
-  (:require [eve.core :as e]
-            [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]
-            [eve.flat.corpora :as corpora]
-            [eve.flat.place :as place]
-            [eve.flat.place-test :as pt]))
+  (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :as e]
+   [eve.deftype-proto.alloc :as alloc]
+   [eve.deftype-proto.data :as d]
+   [eve.flat.corpora :as corpora]
+   [eve.flat.place :as place]
+   [eve.flat.place-test :as pt]))
 
 (def ^:private caps
   {0 (* 4 1024 1024) 1 (* 4 1024 1024) 2 (* 8 1024 1024) 3 (* 4 1024 1024) 4 (* 2 1024 1024) 5 (* 2 1024 1024)})

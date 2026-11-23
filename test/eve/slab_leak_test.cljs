@@ -6,12 +6,16 @@
    Run via: node target/eve-test/all.js slab-leak"
   (:require [cljs.test :refer [deftest testing is async]]
             [eve.atom :as atom]
-            [eve.deftype-proto.alloc :as alloc]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
             [eve.process-slab :as ps]
             [eve.deftype-proto.data :as d]
-            [eve.map :as eve-map]
-            [eve.vec :as eve-vec]
-            [eve.set :as eve-set]))
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.map :as eve-map]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.vec :as eve-vec]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.set :as eve-set]))
 
 (def ^:private test-base (str "/tmp/eve-leak-test-" (js/Date.now)))
 

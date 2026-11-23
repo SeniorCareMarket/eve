@@ -25,7 +25,6 @@
                      unchecked-byte unchecked-short unchecked-int unsigned-bit-shift-right
                      long double transient persistent! conj! bytes shorts ints floats
                      doubles locking defdelay]]
-   [clojure.string :as str]
    [eve.core :as e]
    [eve.deftype-proto.data :as d]
    [eve.encoding :as enc]
@@ -35,7 +34,8 @@
    [eve.codec :as codec]
    [eve.mem :as mem]
    [eve.deftype-proto.macros :as eve]
-   [eve.deftype :as edt]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype :as edt]
    ;; load order: the deftype expansion's top-level register-sister!
    ;; call needs eve.flat.sister first in the RUNTIME graph (a macro
    ;; ns's require is macro-side only). Guard: eve.deftype-guard-test.

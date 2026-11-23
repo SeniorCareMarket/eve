@@ -12,7 +12,8 @@
      JVM:   clojure -M:columnar-bench"
   (:refer-clojure :exclude [atom])
   (:require
-   [eve.host :refer [field]]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [field]]
    [eve.array :as arr]
    [eve.core :as ec]
    [eve.dataset :as ds]

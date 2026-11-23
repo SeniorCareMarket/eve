@@ -13,7 +13,8 @@
             ;; expansion also ends in an eve.type-readers/register!
             ;; call.
             [eve.type-readers]
-            [eve.core :as e]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :as e]
             [eve.encoding :as enc]
             [eve.process-slab]
             [eve.vec]

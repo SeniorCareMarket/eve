@@ -4,7 +4,8 @@
    slab's allocator as the eve.shared-atom test surface called it (get-env,
    alloc, free)."
   (:require [eve.atom :as a]
-            [eve.deftype-proto.alloc :as alloc]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             [eve.mem :as mem]
             [eve.process-slab :as ps]

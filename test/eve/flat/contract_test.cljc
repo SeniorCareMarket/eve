@@ -4,9 +4,10 @@
    entry with its per-block default, and the scoreboard on a tiny corpus."
   (:require [clojure.test :refer [deftest is testing]]
             [eve.flat.contract :as contract]
-            [eve.deftype-proto.alloc :as alloc]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
             #?(:clj [eve.atom :as ea])
-            #?(:clj [clojure.java.io :as io])))
+            #?(:clj)))
 
 ;; ---------------------------------------------------------------------------
 ;; W0.3 — contract-roundtrip

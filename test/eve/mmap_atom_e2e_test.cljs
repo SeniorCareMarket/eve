@@ -14,7 +14,8 @@
    - Stale slots from crashed processes are not reclaimed (Phase 7+)."
   (:require [cljs.test :refer [deftest testing is]]
             [eve.atom :as atom]
-            [eve.mem :as mem]))
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]))
 
 (def ^:private ^js cp (js* "require('child_process')"))
 (def ^:private ts (str "-" (js/Date.now)))

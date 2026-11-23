@@ -33,7 +33,8 @@
    the typed not-built refusal (the chunk itself is host-identical —
    lane X1 — and a byte-source reader for CLJS is H3/H4 territory)."
   (:require [eve.flat.chunk :as chunk]
-            [eve.flat.check :as check])
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.check :as check])
   #?(:clj (:import [java.io ByteArrayInputStream ByteArrayOutputStream
                     Closeable File InputStream OutputStream]
                    [java.util Arrays])))

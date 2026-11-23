@@ -3,8 +3,10 @@
    manifest (test/eve/flat/requirements.edn) covering every requirement id
    in doc/flat/IMPL-PLAN.md."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.edn :as edn]
-            [clojure.string :as str]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.edn :as edn]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.string :as str]
             [eve.flat]
             #?(:clj [clojure.java.io :as io])))
 

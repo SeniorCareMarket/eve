@@ -13,7 +13,8 @@
    [eve.atom :as a]
    [eve.sab :as sab]
    [eve.data :as d]
-   [eve.deftype-proto.alloc :as alloc]
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
    [eve.process-slab :as ps]
    ;; sab_map must be loaded so direct-map-encoder is registered
    [eve.map]))

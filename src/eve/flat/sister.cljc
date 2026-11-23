@@ -45,7 +45,8 @@
             [eve.flat-io :as fio]
             ;; unchecked-multiply is eve.host's: ClojureDart's core has
             ;; none, and sister's siblings refer it from there the same way
-            [eve.host :refer [unchecked-multiply]]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [unchecked-multiply]]
             ;; on the JVM the chunk is loaded with this namespace: a
             ;; generated sister class implements its IFlatHandle, so
             ;; the protocol must exist before any type is defined.

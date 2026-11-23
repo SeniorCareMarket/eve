@@ -30,8 +30,7 @@
             ["dart:convert" :as conv]
             ["package:eve_region/eve_region.dart" :as region]
             [cljd.edn :as edn]
-            [eve.process :as proc]
-            [clojure.string :as str]))
+            [eve.process :as proc]))
 
 ;; ---------------------------------------------------------------------------
 ;; The shared region and the rings

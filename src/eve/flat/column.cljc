@@ -42,7 +42,8 @@
    reads take. Two reads stay the JVM's own: scan-sum's NIO sums over the
    f32 / f64 / i32 / i64 kinds and typed-array-view's NIO views — bulk host
    views the seam has no call for."
-  (:require [eve.flat-io :as fio])
+  (:require ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat-io :as fio])
   #?(:clj (:import [java.nio ByteBuffer ByteOrder])))
 
 (declare open-batch batch-row)

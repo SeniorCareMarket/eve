@@ -9,7 +9,8 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [eve.aegis.claims :as claims]
-            [eve.aegis.merkle :as merkle]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.aegis.merkle :as merkle]
             [eve.aegis.regions :as r]
             [eve.aegis.regions-spec :as rs]
             [eve.crypto :as crypto]

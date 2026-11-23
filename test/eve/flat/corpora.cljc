@@ -4,7 +4,8 @@
    records, 5k chat messages — plus a :tiny set for the smoke test. The chat
    messages are the probe corpora's (doc/flat/probes/corpora.clj, seed 42),
    copied so the board's numbers stay comparable with M6's."
-  (:require [clojure.string :as str])
+  (:require ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.string :as str])
   #?(:clj (:import [java.util Random])))
 
 (def canonical-sizes

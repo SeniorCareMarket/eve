@@ -3,7 +3,8 @@
    Iterable, and lookup-ns? carves out eve.db.ds.* so library keyword
    lookup is rewritten to eve.core/get."
   (:require [clojure.test :refer [deftest is]]
-            [eve.deftype :as edt]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype :as edt]
             [eve.deftype-proto.macros :refer [host-deftype]]
             [eve.host-completion]))
 

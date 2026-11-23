@@ -17,7 +17,6 @@
    good as that pin."
   (:require [cljs.test :refer [deftest is testing]]
             [cljs.reader :as edn]
-            [clojure.string :as str]
             [eve.flat.chunk :as chunk]))
 
 ;; ---------------------------------------------------------------------------

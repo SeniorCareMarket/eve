@@ -3,7 +3,6 @@
    Uses [eve.alpha :as e] — the same require the README shows.
    Atom creation uses e/atom with :persistent — no explicit domain management."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.edn :as edn]
             [eve.alpha :as e]
             [eve.atom :as atom])
   (:import [java.lang ProcessBuilder]))

@@ -18,7 +18,8 @@
             [cohost-media.domain :as domain]
             [cohost-media.media :as media]
             [cohost-media.state :as st]
-            [cohost-media.tasks :as tasks]))
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [cohost-media.tasks :as tasks]))
 
 (defn ctx [] @st/ctx)
 

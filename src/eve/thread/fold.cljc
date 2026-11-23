@@ -34,7 +34,8 @@
    submitted."
   (:require [eve.process :as proc]
             [eve.thread-host :as h]
-            [eve.thread.cell :as c]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.thread.cell :as c]
             [eve.thread.pool :as pool]
             [eve.thread.task :as task]))
 

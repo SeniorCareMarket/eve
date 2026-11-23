@@ -5,7 +5,8 @@
   ;; the codec's ^bytes return hint names eve.host's bytes where it is called (clojerl resolves it there)
   (:refer-clojure :exclude [bytes])
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.host :refer [bytes]]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [bytes]]
             [eve.codec :as codec]
             [eve.core :as e]
             [eve.deftype-proto.alloc :as alloc]

@@ -18,8 +18,7 @@
      CP=$(CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig clojure -Spath -X:jvm-test)
      java -Xmx4g -cp \"$CP\" clojure.main -m eve.flat.b1-bench -- --runs 5
    Options: --runs N --warmup N --tiny"
-  (:require [clojure.string :as str]
-            [eve.atom :as ea]
+  (:require [eve.atom :as ea]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser]

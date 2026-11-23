@@ -16,17 +16,20 @@
    precedence silently preferred — and moved here when the page's sources became .cljc, so the
    namespace has one home again."
   (:refer-clojure :exclude [meta])
-  (:require [clojure.string :as str]
-            [cohost-media.av :as av]
-            [cohost-media.core :as em]
-            [cohost-media.media :as media]
-            [cohost-media.state :as st]
-            [cohost-media.work :as work]
-            #?@(:clj [[cohost.pool :as pool]
-                      [cohost-media.phash :as ph]
-                      [cohost-media.r128 :as r128]
-                      [cohost.region :as region]]
-                :cljs [[cohost.pool :as pool :include-macros true]])))
+  (:require ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.string :as str]
+   [cohost-media.av :as av]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [cohost-media.core :as em]
+   [cohost-media.media :as media]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [cohost-media.state :as st]
+   [cohost-media.work :as work]
+   #?@(:clj [[cohost.pool :as pool]
+             [cohost-media.phash :as ph]
+             [cohost-media.r128 :as r128]
+             [cohost.region :as region]]
+       :cljs [[cohost.pool :as pool :include-macros true]])))
 
 (pool/deftask index [job] (work/index! job))
 

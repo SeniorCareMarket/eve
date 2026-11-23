@@ -30,7 +30,8 @@
             ;; a reader-registering type is defined below: the registry must load first (a ClojureScript
             ;; bundle orders by requires; eve.deftype-guard-test's reader-registration-load-order)
             [eve.type-readers]
-            [eve.core :as e]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :as e]
             [eve.gc :as gc]))
 
 ;; ---------------------------------------------------------------------------

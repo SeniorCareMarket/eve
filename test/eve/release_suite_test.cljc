@@ -42,7 +42,8 @@
             ;; eve.host is required unconditionally (every host has one):
             ;; the :clje swap!/reset! shims below alias to it, and a #?@
             ;; splice in this ns's :require crashes clojerl's analyzer.
-            [eve.host :as host]))
+            ; the alias is exercised on the other reader pass; the require loads on both 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :as host]))
 
 (defn- area! [n] (println "AREA" n "OK") (flush))
 

@@ -14,8 +14,8 @@
      ^:mutable          - mutable via set! (single worker)
      ^:volatile-mutable - atomic via set!/cas! (multi-worker safe)"
   (:refer-clojure :exclude [aset volatile?])
-  (:require [eve.host :refer [aset volatile?]]
-            [clojure.string :as str]))
+  (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [aset volatile?]]))
 
 (defn has-volatile-fields? [fields]
   (some #(= :volatile-mutable (:mutability %)) fields))

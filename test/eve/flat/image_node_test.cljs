@@ -15,7 +15,8 @@
             [eve.dataset :as ds]
             [eve.flat]
             [eve.flat.image :as img]
-            [eve.flat.sio :as ssio]))
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.sio :as ssio]))
 
 ;; ---------------------------------------------------------------------------
 ;; helpers — Z1's, in their CLJS form. On this host a heap domain IS the

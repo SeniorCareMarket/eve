@@ -13,7 +13,8 @@
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.data :as d]
    [eve.region :as region]
-   [eve.mem :as mem]))
+   ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.mem :as mem]))
 
 (defn- in-a-domain-of-its-own
   "Construction law (2026-11-11): Eve data is constructed in a domain

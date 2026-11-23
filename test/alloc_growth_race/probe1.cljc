@@ -6,7 +6,8 @@
             [eve.slab-io :as slab]
             [eve.deftype-proto.data :as d]
             [eve.mem :as mem]
-            [eve.region :as region]))
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.region :as region]))
 
 (defn -main [& [dir n]]
   (let [dir (or dir "/home/john/j/alloc-growth-race-run/p1")
