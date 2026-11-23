@@ -377,18 +377,19 @@
 (declare to-rep)
 
 #?(:jank nil
-   :glj nil
+   ;; glojure: no Class/forName; its object arrays are Go []interface {}
+   :glj (def ^:private object-array-class (type (object-array 0)))
    :clj (def ^:private object-array-class
           ;; the JVM's Object[], looked up once (as byte-array-class; not on jank or glojure, as there)
           (Class/forName "[Ljava.lang.Object;")))
 
 (defn- host-object-array?
-  "x is a host object array: the JVM's Object[], a JS array. Jank and
-   glojure keep the per-call lookup they had before object-array-class
-   (they read :clj but have no top-level object-array-class)."
+  "x is a host object array: the JVM's Object[], glojure's []interface {},
+   a JS array. Jank keeps the per-call lookup it had before
+   object-array-class (it reads :clj but has no top-level object-array-class)."
   [x]
   #?(:jank (instance? (Class/forName "[Ljava.lang.Object;") x)
-     :glj (instance? (Class/forName "[Ljava.lang.Object;") x)
+     :glj (instance? object-array-class x)
      :clj (instance? object-array-class x)
      :cljs (array? x)
      :default false))
