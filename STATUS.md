@@ -218,3 +218,20 @@ post-batch-2 tree, splint5 2363/572 files, carve5 998 lines).
 Gate spot sets lane3-gate1 + lane3-gate2 all
 baseline-identical. Environment: /root/.m2 had 0-byte stubs
 after a VM cycle; restored from /home/hatch/m2repo (durable).
+
+Progress (2026-11-23 ~03:30 ET): dc35c39 (unused-import ×17),
+2a8c50c (return-type-hint: 1 JVM fix + 4 .cljd ns-scoped
+linter-offs with reasons), 9f4dc24 (redundant-let ×42),
+84de259 (unreachable-code ×8, constant-condition ×10,
+unused-value ×5, missing-test-assertion ×1), 18932bb
+(inline-def ×5, aliased-referred-var ×3, redundant-ignore
+×4). CORRECTION banked: gate3's eve.thread-fold-group-test
+exit=99 (bb native segfault) is NOT a redundant-let
+regression — the control run at the pre-batch commit
+2a8c50c segfaults identically under current box conditions
+(logs lane3-fg-now vs lane3-fg-control); it is the
+pre-existing native-crash family that took
+eve.thread-domain-test at baseline. Gate3's other 8
+namespaces baseline-identical. /root/.m2/repository is now
+a symlink to /home/hatch/m2repo (the wipes recur; the
+symlink is a one-command restore).
