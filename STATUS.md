@@ -271,3 +271,37 @@ occurs only at its def, no string/keyword mentions),
 bi-pos? deleted on both passes + 7 :clj-only-caller defs
 site-ignored with reasons (98e0762). Gate5:
 collection-hash baseline-identical. Recount 8 running.
+
+## Third lane — session 2 bank 2 (2026-11-23, ~10:35 ET)
+
+unused-private-var CLOSED (78 -> 0 by classes): 30
+deleted outright (tranches 1-4 + int-compare), the rest
+kept with site reasons in four measured families:
+(a) :clj-pass-only callers (tranche 2 pattern), (b) the
+chunk handle-helper web + freeze assoc-n chain — callers
+in host-conditional arms kondo's passes split, (c) the
+stream five, (d) host branches kondo does not model
+(:clje MAXL/MINL). CORRECTION banked in commit bbd3c12:
+the first chunk deletions (pg-reduce & 4 more) passed
+delete-and-relint but the GATE proved pg-reduce's def
+was the JVM/bb-loaded one — chunk load failed, gate6
+all red; all five restored as reasoned keeps and gate7
+re-verified green (map-entry, vec-retire 795 passes).
+LESSON: in branch-heavy files delete-and-relint is not
+evidence; the gate is. Also solved: the region
+unused-import pair belonged to the jvm-nio-lock copy of
+eve.region (three files, one namespace, kondo merges
+and misattributes); the types.clj aliased-referred-var
+info is the same merged-namespace effect at a position
+that exists in no copy (info-level, left with this
+note). rrb-vector-test: gate7 shows it ERROR
+(host-completion sci-concat over a SciType) — CONTROL
+at pre-edit commit d2a34c9 files fails byte-identically;
+pre-existing under current conditions, not the
+missing-else batch. Recount 8: 1865 total (from 2155 at
+recount 5). Remaining big classes: unresolved-var 443,
+unused-binding 427 (lang-aware protocol only),
+unused-referred-var 285, unused-namespace 233,
+unresolved-symbol 125E, unresolved-namespace 54,
+redefined-var 33, type-mismatch 30E (pre-existing
+sites), invalid-arity 15E, protocol classes 16+10.
