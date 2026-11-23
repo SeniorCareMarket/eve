@@ -12,7 +12,8 @@
             [eve.core :as e]
             [eve.codec :as codec]
             [eve.hamt-util :as hu]
-            [eve.deftype-proto.alloc :as alloc]))
+            [eve.deftype-proto.alloc :as alloc]
+            [eve.deftype-proto.data :as d]))
 
 (def ^:private a 3870166)
 (def ^:private b 8239693)
@@ -59,3 +60,21 @@
         (let [mk (reduce (fn [acc k] (e/assoc acc k k)) (em/hash-map (alloc/heap-domain-sio! {})) ks)]
           (is (= 3 (e/count mk)) (str "order " ks))
           (is (= ks (mapv #(e/get mk %) ks)) (str "order " ks)))))))
+
+(deftest hamt-get-matches-per-word-bytes
+  (testing "e/get answers the same values as hamt-get-bytes (the per-word path)"
+    (let [present (vec (concat (range 256)
+                               [:a :b :c "s" "key" -1 42 a b c 4095 4096 10000]))
+          m (reduce (fn [acc k] (e/assoc acc k (str "v-" k)))
+                    (em/hash-map (alloc/heap-domain-sio! {}))
+                    present)
+          sio (d/-eve-sio m)
+          [_ root] (em/read-map-header sio (d/-root-header-off m))
+          absent [:missing 9999 "no" 123456]]
+      (doseq [k (concat present absent)]
+        (let [kb (codec/encode-key k)
+              kh (hu/portable-hash-bytes kb)
+              vb (em/hamt-get-bytes sio root kh kb)
+              from-bytes (if (nil? vb) ::absent (codec/decode sio vb))
+              from-get (get m k ::absent)]
+          (is (= from-bytes from-get) (str "key=" (pr-str k))))))))

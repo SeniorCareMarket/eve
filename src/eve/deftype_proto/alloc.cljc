@@ -1512,6 +1512,10 @@
      (def ^:private logging-tag ((scheme/proc "eve-alloc-type-tag") LoggingSlabIO))
      (def ^:private slab-ctx-tag ((scheme/proc "eve-alloc-type-tag") JvmSlabCtx))
      (defn- slab-ctx? [x] (tag?* x slab-ctx-tag))
+     (defn jolt-ctx-tags
+       "The JvmSlabCtx and LoggingSlabIO Chez descriptor tags, for unwraps in other nses."
+       []
+       [slab-ctx-tag logging-tag])
 
      ;; eve.slab-io's read and write macros on jolt (each was an ISlabIO protocol call, the method's frame, then the
      ;; region's): through any LoggingSlabIO wrappers to the JvmSlabCtx by descriptor (each type's tag matched once,
