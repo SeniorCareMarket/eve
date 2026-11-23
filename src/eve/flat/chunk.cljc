@@ -23,6 +23,7 @@
             ;; every read and write of a chunk's bytes (doc/flat/FLAT-IO.md):
             ;; the byte layer that stood in this file moved there (flat lanes U2a)
             [eve.flat-io :as fio]
+            #?(:jolt [jolt.scheme :as scheme])
             [eve.platform :as platform]
             ;; The protocol hosts (bb, glojure) spell a handle's surface
             ;; through the seat's eve.core protocols — the same surface
@@ -36,6 +37,11 @@
   #?(:clj (:import [java.util Arrays HashMap ArrayList])))
 
 #?(:clj (set! *warn-on-reflection* true))
+
+#?(:clj
+   (def ^:private byte-array-class
+     ;; the JVM's [B, looked up once (Class/forName per call was a name lookup per value written or read)
+     (Class/forName "[B")))
 
 (defn- host-bytes?
   "x is a host byte array (the JVM's [B): the test the flat writer and
@@ -54,7 +60,7 @@
      :glj (boolean (and (enc/host-array? x)
                         (let [sb (enc/array-subtype+bytes x)]
                           (and sb (= 2 (nth sb 0))))))
-     :clj (instance? (Class/forName "[B") x)
+     :clj (instance? byte-array-class x)
      :cljs (instance? js/Uint8Array x)
      :default false))
 
@@ -252,6 +258,16 @@
   (-rep [h] "this handle's value as a rep, metadata included")
   (-chunk-bytes [h] "the bytes of the chunk this handle reads"))
 
+;; jolt: "a clojure.lang collection" — the JVM arm's class-name test — without (class x), .getName and .startsWith
+;; (measured on jolt v0.8.28: ~400 ns a collection, the class name a hashed string lookup; string-hash was 7% of a ds
+;; find, jseam r6). A jolt built-in collection is a Chez value that is not a jolt record (jrec): every deftype and
+;; defrecord instance is one, and their class names are their own, never clojure.lang's — checked equal to the
+;; class-name test on 37 values (maps, vectors, sets, lists, seqs, sorted, queue, subvec, map entry, records,
+;; deftypes, vector-of, scalars; probe/jseam/src/jseam/hashprobe3.clj). ~40 ns.
+#?(:jolt
+   (do (scheme/eval-string "(define (eve-not-jrec? x) (not (jrec? x)))")
+       (def ^:private not-jrec?* (scheme/proc "eve-not-jrec?"))))
+
 ;; THE FAST HANDLE TEST (2026-11-16, the eve-in-VS unit). `satisfies?` on a value whose class does not implement the
 ;; protocol walks the class's supers on every call (clojure.core/find-protocol-impl -> supers -> a fresh hash set):
 ;; MEASURED on the JVM (the 1BRC result shape, 407 string keys -> [min sum max count]), 64 % of fc/pack in three such
@@ -264,14 +280,18 @@
      #?(:jank false :bb false :glj false
         :clj (or (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x) (char? x)
                  (and (instance? clojure.lang.IPersistentCollection x)
-                      (.startsWith (.getName (class x)) "clojure.lang."))))))
+                      #?(:jolt (not-jrec?* x)
+                         :clj (.startsWith (.getName (class x)) "clojure.lang.")))))))
 ;; the satisfies? answer of a class no interface answers, remembered per class in an atom (these marker protocols are
 ;; only ever implemented inline, so a class's answer never changes): the supers walk once a class, not once a value
 #?(:clj
    (def ^:private class-answers (atom {})))
 #?(:clj
    (defn- class-satisfies? [k p x]
-     #?(:jank (satisfies? p x) :bb (satisfies? p x) :glj (satisfies? p x)
+     ;; jolt: satisfies? itself (jolt remembers the answer per type: 20–250 ns measured), where the remembered map
+     ;; below hashes [k (class x)] — the class a name-string lookup — at 130–2,000 ns a call (jseam hashprobe4)
+     #?(:jolt (satisfies? p x)
+        :jank (satisfies? p x) :bb (satisfies? p x) :glj (satisfies? p x)
         :clj (let [c (class x) key [k c] hit (get @class-answers key ::none)]
                (if (identical? hit ::none)
                  (let [r (boolean (satisfies? p x))] (swap! class-answers assoc key r) r)
@@ -325,10 +345,15 @@
 
 (declare to-rep)
 
+#?(:clj
+   (def ^:private object-array-class
+     ;; the JVM's Object[], looked up once (as byte-array-class)
+     (Class/forName "[Ljava.lang.Object;")))
+
 (defn- host-object-array?
   "x is a host object array: the JVM's Object[], a JS array."
   [x]
-  #?(:clj (instance? (Class/forName "[Ljava.lang.Object;") x)
+  #?(:clj (instance? object-array-class x)
      :cljs (array? x)
      :default false))
 
@@ -422,9 +447,10 @@
    shared form follows the JVM pin on both hosts)."
   [xs]
   (mapv second (sort-by first d/compare-bytes
-                        (map (fn [x] [(try (key-bytes x)
-                                           (catch #?(:clj Throwable :cljs :default) _
-                                             (utf8-bytes (pr-str x)))) x]) xs))))
+                        (#?(:jolt mapv :default map)
+                         (fn [x] [(try (key-bytes x)
+                                       (catch #?(:clj Throwable :cljs :default) _
+                                         (utf8-bytes (pr-str x)))) x]) xs))))
 
 (defn- shaped-keys
   "The canonical key list of rep map m when every key may live in a shape
@@ -496,13 +522,20 @@
     (scan! rep counts shapes types false)
     (let [member? (fn [e] (let [k (key e) ^longs c (val e)]
                             (or (keyword? k) (symbol? k) (>= (aget c 0) 2) (pos? (aget c 1)))))
-          syms (->> (filter member? counts)
-                    (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))]))
-                    (mapv key))
-          shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
-                           (sort-by second (map (fn [e] [(key e) (val e)]) shapes)))
-          type-list (mapv (fn [[tk _]] {:key (first tk) :fp (second tk)})
-                          (sort-by second (map (fn [e] [(key e) (val e)]) types)))]
+          syms #?(:jolt (mapv key
+                              (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))])
+                                       (filterv member? counts)))
+                  :clj (->> (filter member? counts)
+                            (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))]))
+                            (mapv key)))
+          shape-list #?(:jolt (mapv (fn [e] {:t (first (key e)) :ks (second (key e))})
+                                    (sort-by val (vec shapes)))
+                        :clj (mapv (fn [[k _]] {:t (first k) :ks (second k)})
+                                   (sort-by second (map (fn [e] [(key e) (val e)]) shapes))))
+          type-list #?(:jolt (mapv (fn [e] {:key (first (key e)) :fp (second (key e))})
+                                   (sort-by val (vec types)))
+                       :clj (mapv (fn [[tk _]] {:key (first tk) :fp (second tk)})
+                                  (sort-by second (map (fn [e] [(key e) (val e)]) types))))]
       ;; field classes need one instance per type; find them in the rep
       (let [instances (HashMap.)]
         (letfn [(find! [r]
@@ -1409,8 +1442,13 @@
                     (when (not (== u 2147483648))
                       (int (if (>= u 2147483648) (- u 4294967296) u)))))
             rdigest (when recipe?
-                      (let [dg (mapv (fn [i] (fio/u8 b (+ 36 i))) (range 32))]
-                        (when (some pos? dg) dg)))]
+                      #?(:jolt (loop [i 0 acc [] nz? false]
+                                 (if (== i 32)
+                                   (if nz? acc nil)
+                                   (let [x (fio/u8 b (+ 36 i))]
+                                     (recur (inc i) (conj acc x) (or nz? (pos? x))))))
+                         :default (let [dg (mapv (fn [i] (fio/u8 b (+ 36 i))) (range 32))]
+                                    (when (some pos? dg) dg))))]
         (->Ctx b bs root wide? syms shapes types (atom 0) rhq rdigest (atom {}))))))
 
 ;; --- columns, parsed -----------------------------------------------
@@ -2136,6 +2174,14 @@
         #?(:clj (if (satisfies? IAttachMeta inner)
                   (-attach-meta inner (read-value ctx mo))
                   inner)
+           ;; nbb: the :cljs arm's JVM class name does not resolve under SCI
+           ;; (analysis error, 2026-11-22); nbb takes the JVM arm's rule.
+           ;; (On cljs that name compiles to an undefined global: reading a
+           ;; meta-wrapped value throws "reading 'IObj'" — left as is here,
+           ;; it is a semantics question, see REPORT.md.)
+           :org.babashka/nbb (if (satisfies? IAttachMeta inner)
+                               (-attach-meta inner (read-value ctx mo))
+                               inner)
            :cljs (if (instance? clojure.lang.IObj inner)
                    (with-meta inner (read-value ctx mo))
                    inner)))
@@ -4995,7 +5041,7 @@
    case the caller re-packs instead."
   [thunk]
   (try (thunk)
-       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e
+       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :org.babashka/nbb :default :cljs cljs.core/ExceptionInfo) e
          (if (= ::append-overflow (:type (ex-data e)))
            nil
            (throw e)))))

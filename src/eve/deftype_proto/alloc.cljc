@@ -45,7 +45,8 @@
    [eve.region :as region]
    [eve.mem :as mem]
    [eve.codec :as codec]
-   [eve.encoding :as enc]))
+   [eve.encoding :as enc]
+   #?(:jolt [jolt.scheme :as scheme])))
 
 (defn- region-opts
   "The open-mmap-region opts that reopen a file the way r was opened — a
@@ -203,6 +204,10 @@
 ;; byte 0 of a slab block is its type-id. Registered on every host, as a named
 ;; fn: a fn that a top-level form makes is interpreted on clojerl (its Core
 ;; Erlang evaluator), a defn's compiled — and every read of a value calls this.
+;; jolt: eve.slab-io's macros expand to these (defined with LoggingSlabIO, below)
+#?(:jolt (declare fast-read-u8 fast-read-u16 fast-read-i32 fast-read-bytes
+                  fast-write-u8! fast-write-u16! fast-write-i32!))
+
 (defn read-header-tag
   "The type-id byte at the start of the block at slab-off."
   [sio slab-off]
@@ -229,6 +234,34 @@
      ;; are recorded by the per-swap LoggingSlabIO wrapper (below), and the
      ;; nodes a path-copy replaces are found by the retire-time structural
      ;; diff (eve.atom), on every host alike.
+
+     ;; jolt: one Chez procedure per slab access computes the block's region and address (the offset's class and
+     ;; block, the class's data offset and block size: fixnum ops on the arrays' own vectors) and calls the region
+     ;; op with them, where the shared body is two decodes, three host agets and the arithmetic, each a dispatched
+     ;; call with a wrap64 on jolt. The same region ops, the same bytes; other hosts read the :default arms.
+     #?(:jolt
+        (do
+          (scheme/eval-string
+           "(begin
+              (define-syntax eve-sio-ref
+                (syntax-rules ()
+                  ((_ a i) (let ((v (jolt-array-vec a))) (if (fxvector? v) (fxvector-ref v i) (vector-ref v i))))))
+              (define-syntax eve-sio-at
+                (syntax-rules ()
+                  ((_ rs dos bss so fo r a body)
+                   (let* ((u (logand so #xFFFFFFFF)) (ci (fxsrl u 29)) (bi (fxlogand u #x1FFFFFFF))
+                          (r (eve-sio-ref rs ci)) (a (+ (eve-sio-ref dos ci) (* bi (eve-sio-ref bss ci)) fo)))
+                     body))))
+              (define (eve-sio-get rs dos bss so fo op) (eve-sio-at rs dos bss so fo r a (op r a)))
+              (define (eve-sio-put rs dos bss so fo v op) (eve-sio-at rs dos bss so fo r a (op r a v)))
+              (define (eve-sio-u16 rs dos bss so fo pl)
+                (eve-sio-at rs dos bss so fo r a (logor (pl r a) (ash (pl r (+ a 1)) 8))))
+              (define (eve-sio-put-u16 rs dos bss so fo v ps)
+                (eve-sio-at rs dos bss so fo r a (begin (ps r a (logand v 255)) (ps r (+ a 1) (logand (ash v -8) 255))))))")
+          (def ^:private sio-get* (scheme/proc "eve-sio-get"))
+          (def ^:private sio-put* (scheme/proc "eve-sio-put"))
+          (def ^:private sio-u16* (scheme/proc "eve-sio-u16"))
+          (def ^:private sio-put-u16* (scheme/proc "eve-sio-put-u16"))))
 
      (deftype JvmSlabCtx
        [^objects regions         ;; IMemRegion[6+] — one per slab class (data files)
@@ -264,73 +297,85 @@
        ISlabIO
 
        (-sio-read-u8 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           ;; a plain load (eve.mem/IPlainLoad): no allocation where the region has a plain vehicle
-           (mem/-plain-load-u8 region (+ base (long field-off)))))
+         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off region/plain-load-u8-op)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             ;; a plain load (eve.mem/IPlainLoad): no allocation where the region has a plain vehicle
+             (mem/-plain-load-u8 region (+ base (long field-off))))))
 
        (-sio-write-u8! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-plain-store-u8! region (+ base (long field-off)) val)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val region/plain-store-u8-op)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-plain-store-u8! region (+ base (long field-off)) val))))
 
        (-sio-read-u16 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)
-               b         (mem/-read-bytes region (+ base field-off) 2)]
-           ;; Little-endian u16
-           (bit-or (bit-and (aget ^bytes b 0) 0xFF)
-                   (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8))))
+         #?(:jolt (sio-u16* regions data-offsets block-sizes slab-offset field-off region/plain-load-u8-op)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)
+                 b         (mem/-read-bytes region (+ base field-off) 2)]
+             ;; Little-endian u16
+             (bit-or (bit-and (aget ^bytes b 0) 0xFF)
+                     (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8)))))
 
        (-sio-write-u16! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-write-bytes! region (+ base field-off)
-                              (enc/bytes-of [(bit-and val 0xFF)
-                                             (bit-and (unsigned-bit-shift-right val 8) 0xFF)]))))
+         #?(:jolt (sio-put-u16* regions data-offsets block-sizes slab-offset field-off val region/plain-store-u8-op)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-write-bytes! region (+ base field-off)
+                                (enc/bytes-of [(bit-and val 0xFF)
+                                               (bit-and (unsigned-bit-shift-right val 8) 0xFF)])))))
 
        (-sio-read-i32 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           ;; Little-endian i32 through the PLAIN byte path (the u16
-           ;; pair's shape), never the region's atomic -load-i32: slab
-           ;; payload words are packed at arbitrary offsets (HAMT node
-           ;; write-kv! lays out [klen:i32][k][vlen:i32][v], so vlen
-           ;; lands at 4+klen), and IMemRegion's contract requires
-           ;; 4-byte alignment for its atomic ops -- arm64 faults on a
-           ;; misaligned atomic (F-REGION-ATOMIC-ALIGN). Payload words
-           ;; are not atomic fields: a node is immutable once published
-           ;; and publication is ordered by the root CAS, so a plain
-           ;; read is the correct semantics. Real atomic words (root
-           ;; fields, doorbells, CAS) go through mem/ directly, aligned.
-           ;; IPlainLoad's i32: plain, any alignment, little-endian -- the same bytes
-           (mem/-plain-load-i32 region (+ base (long field-off)))))
+         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off region/plain-load-i32-op)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             ;; Little-endian i32 through the PLAIN byte path (the u16
+             ;; pair's shape), never the region's atomic -load-i32: slab
+             ;; payload words are packed at arbitrary offsets (HAMT node
+             ;; write-kv! lays out [klen:i32][k][vlen:i32][v], so vlen
+             ;; lands at 4+klen), and IMemRegion's contract requires
+             ;; 4-byte alignment for its atomic ops -- arm64 faults on a
+             ;; misaligned atomic (F-REGION-ATOMIC-ALIGN). Payload words
+             ;; are not atomic fields: a node is immutable once published
+             ;; and publication is ordered by the root CAS, so a plain
+             ;; read is the correct semantics. Real atomic words (root
+             ;; fields, doorbells, CAS) go through mem/ directly, aligned.
+             ;; IPlainLoad's i32: plain, any alignment, little-endian -- the same bytes
+             (mem/-plain-load-i32 region (+ base (long field-off))))))
 
        (-sio-write-i32! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           ;; Plain bytes, as -sio-write-u16!: see -sio-read-i32 --
-           ;; payload words are packed, never atomic fields. The byte
-           ;; layout is unchanged, so seals stay byte-identical.
-           (mem/-plain-store-i32! region (+ base (long field-off)) val)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val region/plain-store-i32-op)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             ;; Plain bytes, as -sio-write-u16!: see -sio-read-i32 --
+             ;; payload words are packed, never atomic fields. The byte
+             ;; layout is unchanged, so seals stay byte-identical.
+             (mem/-plain-store-i32! region (+ base (long field-off)) val))))
 
        (-sio-cas-i32! [_ slab-offset field-off expected desired]
          (let [class-idx (decode-class-idx slab-offset)
@@ -341,20 +386,24 @@
            (mem/-cas-i32! region (+ base field-off) expected desired)))
 
        (-sio-read-bytes [_ slab-offset field-off len]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-read-bytes region (+ base field-off) len)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off len region/read-bytes-op)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-read-bytes region (+ base field-off) len))))
 
        (-sio-write-bytes! [_ slab-offset field-off src]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-write-bytes! region (+ base field-off) src)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off src mem/-write-bytes!)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-write-bytes! region (+ base field-off) src))))
 
        (-sio-alloc! [ctx size-bytes] (ctx-alloc! ctx size-bytes))
 
@@ -991,28 +1040,54 @@
 
                :else nil)))))
 
+     ;; jolt: desc-handle's reads in one Chez procedure — the class's three column regions, its COUNT offset and
+     ;; total blocks straight from the context's field vector (desc-regions 9, desc-flags-regions 10,
+     ;; desc-pointer-regions 11, total-blocks 4, desc-offsets 12 of a spilled record's) and the arithmetic in
+     ;; Chez, where the :default body is five field reads, five agets and the arithmetic, each a dispatched call
+     ;; with a wrap64. The row itself is built by a fixed-arity fn's vector literal. The same row.
+     #?(:jolt
+        (do
+          (scheme/eval-string
+           "(define (eve-desc-handle mk)
+              (define (ref a i) (let ((v (jolt-array-vec a))) (if (fxvector? v) (fxvector-ref v i) (vector-ref v i))))
+              (lambda (ctx ci bi)
+                (let* ((v (jrec*-vals ctx)) (dr (ref (vector-ref v 9) ci)))
+                  (if (or (not dr) (eq? dr jolt-nil))
+                      jolt-nil
+                      (let* ((fr (ref (vector-ref v 10) ci)) (pr (ref (vector-ref v 11) ci))
+                             (off (ref (vector-ref v 12) ci)) (b4 (* 4 bi))
+                             (foff (if (eq? fr dr) (+ off (* 4 (ref (vector-ref v 4) ci))) off))
+                             (poff (if (eq? pr dr) (+ off (* 8 (ref (vector-ref v 4) ci))) off)))
+                        (mk dr (+ off b4) fr (+ foff b4) pr (+ poff b4)))))))")
+          (def ^:private desc-handle*
+            ((scheme/proc "eve-desc-handle") (fn [dr co fr fo pr po] [dr co fr fo pr po])))))
+
      (defn- desc-handle
-       "The tally handle of block block-idx of bitmap class ci in ctx: [[count-region count-off]
-        [flags-region flags-off] [pointer-region pointer-off]] — the addresses of the block's COUNT,
-        FLAGS and POINTER column entries — or nil when the class carries no columns."
+       "The tally row of block block-idx of bitmap class ci in ctx, flat: [count-region count-off
+        flags-region flags-off pointer-region pointer-off] — the addresses of the block's COUNT,
+        FLAGS and POINTER column entries — or nil when the class carries no columns. One vector
+        per call, no nested pairs: the tally asks on every hold, drop and free (jolt round 6, the
+        nested pairs were 16% of reset-vec's self time); desc-of nests it for its callers."
        [^JvmSlabCtx ctx ^long ci ^long block-idx]
-       (let [dr (aget ^objects (field ctx desc-regions) ci)]
-         (when dr
-           (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
-                 pr   (aget ^objects (field ctx desc-pointer-regions) ci)
-                 off  (aget ^ints (field ctx desc-offsets) ci)
-                 ;; a heap / SAB slab carries all three columns in its own region (FLAGS right after
-                 ;; COUNT, POINTER right after FLAGS); an mmap class's flags and pointer regions are
-                 ;; their own files, their columns at offset 0 there
-                 foff (if (identical? fr dr)
-                        (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
-                        off)
-                 poff (if (identical? pr dr)
-                        (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
-                        off)]
-             [[dr (+ off (* 4 block-idx))]
-              [fr (+ foff (* 4 block-idx))]
-              [pr (+ poff (* 4 block-idx))]]))))
+       #?(:jolt (desc-handle* ctx ci block-idx)
+          :default
+          (let [dr (aget ^objects (field ctx desc-regions) ci)]
+            (when dr
+              (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
+                    pr   (aget ^objects (field ctx desc-pointer-regions) ci)
+                    off  (aget ^ints (field ctx desc-offsets) ci)
+                    ;; a heap / SAB slab carries all three columns in its own region (FLAGS right after
+                    ;; COUNT, POINTER right after FLAGS); an mmap class's flags and pointer regions are
+                    ;; their own files, their columns at offset 0 there
+                    foff (if (identical? fr dr)
+                           (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
+                           off)
+                    poff (if (identical? pr dr)
+                           (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
+                           off)]
+                [dr (+ off (* 4 block-idx))
+                 fr (+ foff (* 4 block-idx))
+                 pr (+ poff (* 4 block-idx))])))))
 
      (defn ctx-free!
        "The block at slab-offset in ctx's slabs freed: true, or false when it
@@ -1034,7 +1109,7 @@
                  ;; the block's descriptor is reset BEFORE its bit clears (after it another thread may claim the
                  ;; block): its count 0, its flags clear and its digest pointer 0 — the block's own
                  ;; columns, nothing else
-                 _         (when-let [[[cr co] [fr fo] [pr po]] (desc-handle ctx class-idx block-idx)]
+                 _         (when-let [[cr co fr fo pr po] (desc-handle ctx class-idx block-idx)]
                              (slab/region-store-i32! cr co 0)
                              (slab/region-store-i32! fr fo 0)
                              (slab/region-store-i32! pr po 0))
@@ -1043,12 +1118,9 @@
                (slab/region-add-i32! (aget regions class-idx) d/SLAB_HDR_FREE_COUNT 1))
              freed?))))
 
-     (defn ctx-desc-of
-       "The tally handle of the block at slab-offset in ctx (data.cljc, Descriptor Column Layout):
-        [[count-region count-off] [flags-region flags-off] [pointer-region pointer-off]], or nil
-        (a class with no columns, or a class-6 offset no allocated block starts at). A bitmap
-        class's descriptor i is block i's for the slab's life; a class-6 block's handle is its
-        coalescing descriptor's."
+     (defn ctx-desc-row
+       "The tally row of the block at slab-offset in ctx, flat: [count-region count-off flags-region
+        flags-off pointer-region pointer-off] (ctx-desc-of's three pairs in one vector), or nil."
        [^JvmSlabCtx ctx slab-offset]
        (let [ci (decode-class-idx slab-offset)]
          (cond
@@ -1058,9 +1130,19 @@
            (== ci OVERFLOW_CLASS_IDX)
            (when-let [r (aget ^objects (field ctx regions) OVERFLOW_CLASS_IDX)]
              (when-let [[co fo po] (coalesc/row-of r (decode-block-idx slab-offset))]
-               [[r co] [r fo] [r po]]))
+               [r co r fo r po]))
 
            :else nil)))
+
+     (defn ctx-desc-of
+       "The tally handle of the block at slab-offset in ctx (data.cljc, Descriptor Column Layout):
+        [[count-region count-off] [flags-region flags-off] [pointer-region pointer-off]], or nil
+        (a class with no columns, or a class-6 offset no allocated block starts at). A bitmap
+        class's descriptor i is block i's for the slab's life; a class-6 block's handle is its
+        coalescing descriptor's."
+       [^JvmSlabCtx ctx slab-offset]
+       (when-let [[cr co fr fo pr po] (ctx-desc-row ctx slab-offset)]
+         [[cr co] [fr fo] [pr po]]))
 
      (defn ctx-allocated?
        "True when the block at slab-offset in ctx is allocated: its bitmap bit set (classes 0-5), or an ALLOCATED
@@ -1417,14 +1499,108 @@
   ISlabRegion
   (-sio-mem-region [_ o f]      (slab/mem-region inner o f)))
 
+;; jolt: an (instance? T x) site caches ONE receiver type, and these tests see a LoggingSlabIO and a JvmSlabCtx in
+;; turn (every wrapper walk), so each one took jolt's miss path (~55 ns, against ~8 for the descriptor's tag compared
+;; in Chez). Exact type, as instance? of a deftype is.
+#?(:jolt
+   (do
+     (scheme/eval-string
+      "(begin
+         (define (eve-alloc-type-tag t) (deftype-ctor-tag t))
+         (define (eve-alloc-tag? x tag)
+           (and (jrec? x) (let ((t (jrdesc-tag (jrec-desc x)))) (or (eq? t tag) (string=? t tag))))))")
+     (def ^:private tag?* (scheme/proc "eve-alloc-tag?"))
+     (def ^:private logging-tag ((scheme/proc "eve-alloc-type-tag") LoggingSlabIO))
+     (def ^:private slab-ctx-tag ((scheme/proc "eve-alloc-type-tag") JvmSlabCtx))
+     (defn- slab-ctx? [x] (tag?* x slab-ctx-tag))
+     (defn jolt-ctx-tags
+       "The JvmSlabCtx and LoggingSlabIO Chez descriptor tags, for unwraps in other nses."
+       []
+       [slab-ctx-tag logging-tag])
+
+     ;; eve.slab-io's read and write macros on jolt (each was an ISlabIO protocol call, the method's frame, then the
+     ;; region's): through any LoggingSlabIO wrappers to the JvmSlabCtx by descriptor (each type's tag matched once,
+     ;; its descriptor kept for an eq? test after: a type's tag is a string, not one object), then the access above on
+     ;; its regions, data-offsets and block-sizes (fields 0, 2 and 5 of a spilled record's field vector) with the
+     ;; region's own op; any other slab I/O takes the protocol fn. LoggingSlabIO's inner is its field 0 (a 3-field
+     ;; record's). The same accesses, without the dispatch.
+     (scheme/eval-string
+      "(begin
+         (define-syntax eve-alloc-unwrap
+           (syntax-rules ()
+             ((_ sio s ctag ltag cd ld fast slow)
+              (let loop ((s sio))
+                (if (jrec? s)
+                    (let ((d (jrec-desc s)))
+                      (cond ((eq? d cd) fast)
+                            ((eq? d ld) (loop (jrec3-f0 s)))
+                            (else (let ((t (jrdesc-tag d)))
+                                    (cond ((and (string=? t ctag) (jrec*? s)) (set! cd d) fast)
+                                          ((and (string=? t ltag) (jrec3? s)) (set! ld d) (loop (jrec3-f0 s)))
+                                          (else slow))))))
+                    slow)))))
+         (define-syntax eve-alloc-ctx
+           (syntax-rules ()
+             ((_ s p arg ...)
+              (let ((v (jrec*-vals s))) (p (vector-ref v 0) (vector-ref v 2) (vector-ref v 5) arg ...)))))
+         (define (eve-alloc-fast-get ctag ltag get op f)
+           (let ((cd #f) (ld #f))
+             (lambda (sio so fo)
+               (eve-alloc-unwrap sio s ctag ltag cd ld (eve-alloc-ctx s get so fo op) (f s so fo)))))
+         (define (eve-alloc-fast-put ctag ltag put op f)
+           (let ((cd #f) (ld #f))
+             (lambda (sio so fo v)
+               (eve-alloc-unwrap sio s ctag ltag cd ld (eve-alloc-ctx s put so fo v op) (f s so fo v)))))
+         ;; a serialized field's bytes (eve.deftype.slab-runtime): the slot's i32, then the block's length i32 and
+         ;; bytes, through one walk to the context; nil for the slot's -1
+         (define (eve-alloc-fast-ser ctag ltag i32op rbop f)
+           (let ((cd #f) (ld #f))
+             (lambda (sio so fo)
+               (eve-alloc-unwrap sio s ctag ltag cd ld
+                 (let* ((v (jrec*-vals s)) (rs (vector-ref v 0)) (dos (vector-ref v 2)) (bss (vector-ref v 5))
+                        (x (eve-sio-get rs dos bss so fo i32op)))
+                   (if (eqv? x -1)
+                       jolt-nil
+                       (eve-sio-put rs dos bss x 4 (eve-sio-get rs dos bss x 0 i32op) rbop)))
+                 (f s so fo))))))")
+     (def ^:private fast-get (partial (scheme/proc "eve-alloc-fast-get") slab-ctx-tag logging-tag))
+     (def ^:private fast-put (partial (scheme/proc "eve-alloc-fast-put") slab-ctx-tag logging-tag))
+     (def fast-read-u8
+       "eve.slab-io/read-u8 on jolt (above)."
+       (fast-get sio-get* region/plain-load-u8-op -sio-read-u8))
+     (def fast-read-u16
+       "eve.slab-io/read-u16 on jolt (above)."
+       (fast-get sio-u16* region/plain-load-u8-op -sio-read-u16))
+     (def fast-read-i32
+       "eve.slab-io/read-i32 on jolt (above)."
+       (fast-get sio-get* region/plain-load-i32-op -sio-read-i32))
+     (def fast-read-bytes
+       "eve.slab-io/read-bytes on jolt (above)."
+       (fast-put sio-put* region/read-bytes-op -sio-read-bytes))
+     (def fast-write-u8!
+       "eve.slab-io/write-u8! on jolt (above)."
+       (fast-put sio-put* region/plain-store-u8-op -sio-write-u8!))
+     (def fast-write-u16!
+       "eve.slab-io/write-u16! on jolt (above)."
+       (fast-put sio-put-u16* region/plain-store-u8-op -sio-write-u16!))
+     (def fast-write-i32!
+       "eve.slab-io/write-i32! on jolt (above)."
+       (fast-put sio-put* region/plain-store-i32-op -sio-write-i32!))
+     (def fast-read-serialized
+       "A serialized field's bytes on jolt (above): nil where the slot holds -1."
+       ((scheme/proc "eve-alloc-fast-ser") slab-ctx-tag logging-tag region/plain-load-i32-op region/read-bytes-op
+        (fn [sio so fo]
+          (let [x (-sio-read-i32 sio so fo)]
+            (when (not= x -1) (-sio-read-bytes sio x 4 (-sio-read-i32 sio x 0)))))))))
+
 (defn logging-sio?
   [sio]
-  (instance? LoggingSlabIO sio))
+  #?(:jolt (tag?* sio logging-tag) :default (instance? LoggingSlabIO sio)))
 
 (defn sio-root
   "The domain's own slab I/O under any logging wrappers (a transient's log over a swap attempt's)."
   [sio]
-  (if (instance? LoggingSlabIO sio)
+  (if #?(:jolt (logging-sio? sio) :default (instance? LoggingSlabIO sio))
     (recur (field ^LoggingSlabIO sio inner))
     sio))
 
@@ -1447,8 +1623,8 @@
   "sio's JvmSlabCtx under its logging wrappers, or nil."
   [sio]
   (loop [s sio]
-    (cond (instance? JvmSlabCtx s) s
-          (instance? LoggingSlabIO s) (recur (field ^LoggingSlabIO s inner))
+    (cond #?(:jolt (slab-ctx? s) :default (instance? JvmSlabCtx s)) s
+          #?(:jolt (logging-sio? s) :default (instance? LoggingSlabIO s)) (recur (field ^LoggingSlabIO s inner))
           :else nil)))
 
 (defn- node-heap-bytes
@@ -1528,14 +1704,21 @@
 (defn node-i32
   "The little-endian i32 at slab-off + field-off (any alignment) of a published node."
    ^long [sio ^long slab-off ^long field-off]
-  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
-        arr (when ctx (node-heap-bytes ctx slab-off))]
-    (if (nil? arr)
-      (if ctx
-        (long (mem/-plain-load-i32 (node-region ctx slab-off)
-                                   (node-at ctx slab-off field-off)))
-        (long (-sio-read-i32 sio slab-off field-off)))
-      (bytes-i32 arr (node-at ctx slab-off field-off)))))
+  ;; jolt: JoltRegion has no IHeapBytes, so the portable body always took the
+  ;; nil-arr plain-load path — after instance? JvmSlabCtx, node-ctx*, node-heap-bytes
+  ;; and node-at, each a Clojure call (9.2% of swap-counter). fast-read-i32 is the
+  ;; same unwrap + eve-sio-get + plain-load-i32-op already used by slab-io reads:
+  ;; the same bytes, any alignment. Other hosts keep the heap-array path.
+  #?(:jolt (long (fast-read-i32 sio slab-off field-off))
+     :default
+     (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
+           arr (when ctx (node-heap-bytes ctx slab-off))]
+       (if (nil? arr)
+         (if ctx
+           (long (mem/-plain-load-i32 (node-region ctx slab-off)
+                                      (node-at ctx slab-off field-off)))
+           (long (-sio-read-i32 sio slab-off field-off)))
+         (bytes-i32 arr (node-at ctx slab-off field-off))))))
 
 ;; IWrappedSio is defined before node-bytes-equal? (not after it, as the JVM's
 ;; load order allowed): the jank slab-io adapter's bytes-equal-at? is a macro
@@ -1716,6 +1899,20 @@
       (ctx-desc-of ctx slab-offset)
       (when-let [f (host-op :desc-of)] (f ctx slab-offset)))))
 
+(defn desc-row
+  "desc-of flat, the tally's row: [count-region count-off flags-region flags-off pointer-region
+   pointer-off], or nil — one vector per call, no nested pairs. A host slab's :desc-row answers
+   where it registers one, else its :desc-of flattened."
+  [sio slab-offset]
+  (let [ctx (slab/domain-ctx (domain-root sio))]
+    (if (instance? JvmSlabCtx ctx)
+      (ctx-desc-row ctx slab-offset)
+      (if-let [f (host-op :desc-row)]
+        (f ctx slab-offset)
+        (when-let [f (host-op :desc-of)]
+          (when-let [[[cr co] [fr fo] [pr po]] (f ctx slab-offset)]
+            [cr co fr fo pr po]))))))
+
 (defn allocated?
   "True when the block at slab-offset in sio's domain is allocated (not free, never handed out)."
   [sio slab-offset]
@@ -1764,7 +1961,7 @@
   [sio]
   ;; every log in the chain: a transient's scope, the swap attempt's under it
   (loop [s sio]
-    (when (instance? LoggingSlabIO s)
+    (when #?(:jolt (logging-sio? s) :default (instance? LoggingSlabIO s))
       (reset! (field ^LoggingSlabIO s keep) true)
       (recur (field ^LoggingSlabIO s inner))))
   nil)

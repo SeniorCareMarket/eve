@@ -345,7 +345,7 @@
        ;; IFreezeThaw), built by the shared proto-layer emission
        ;; (plan §4, M3) — the pair total on the persistent kind, and
        ;; the sister kind's own pair when a sister was realized
-       (emission/freeze-thaw-forms type-name (when flat-forms flat-name))
+       (emission/freeze-thaw-forms type-name (when flat-forms flat-name) &env)
        ;; the construction + header wiring (plan §4, M4): the
        ;; value constructor and the from-header registration
        m4-forms))))

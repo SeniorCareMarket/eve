@@ -7,9 +7,48 @@
   (:require [eve.net.bigops :as bo]
             [eve.net.edwards :as edw]
             [eve.net.portable-crypto :as p]
-            [eve.process :as process]))
+            [eve.process :as process]
+            [jolt.scheme :as scheme]))
 
-(defn sha256 "the 32-byte digest" [bs] (p/sha256 bs))
+;; SHA-256 through the system's libcrypto when it loads (OpenSSL's one-shot SHA256(d, n, md), a Chez foreign
+;; procedure over the byte array's own bytevector), else eve.net.portable-crypto's — the same 32 bytes either way
+;; (crypto_fast_path_test holds the rows). eve.flat.chunk digests every chunk that leaves an atom (sha-vec, handle-digest):
+;; on jolt the portable SHA-256 was 37% of eve.db.ds's runtime (people-1k, jolt.profile, 2026-11-22 ET).
+(def ^:private native-sha256
+  (scheme/eval-string
+   "(let ((ok (or (guard (c (#t #f)) (load-shared-object \"libcrypto.so.3\") #t)
+                  (guard (c (#t #f)) (load-shared-object \"libcrypto.so\") #t)
+                  (guard (c (#t #f)) (load-shared-object \"libcrypto.dylib\") #t))))
+      (and ok
+           (guard (c (#t #f))
+             (let ((raw (foreign-procedure \"SHA256\" (u8* size_t u8*) uptr)))
+               (lambda (a)
+                 (let ((bv (jolt-array-vec a)))
+                   (and (bytevector? bv)
+                        (let ((out (make-bytevector 32)))
+                          (raw bv (bytevector-length bv) out)
+                          (make-jolt-array out 'byte)))))))))"))
+
+(defn- sha256-native
+  "bs's digest as a vector of 0..255 through libcrypto, or nil (no libcrypto, or bytes this path does not take)."
+  [bs]
+  (when native-sha256
+    (let [arr (cond (bytes? bs) bs
+                    (or (vector? bs) (seq? bs) (nil? bs)) (byte-array (map unchecked-byte bs))
+                    :else nil)]
+      (when arr
+        (when-let [ds (native-sha256 arr)]
+          (let [^bytes ds ds]
+            (loop [i 0 v (transient [])]
+              (if (< i 32) (recur (inc i) (conj! v (bit-and (aget ds i) 0xFF))) (persistent! v)))))))))
+
+(defn sha256
+  "the 32-byte digest. A byte array is taken as its bytes (eve.flat.chunk/sha-vec hands jolt one, reading the :clj
+   arm): the portable rows take 0..255, so its signed bytes are masked first — before, a byte >= 0x80 reached the
+   portable SHA-256 negative and the digest was not SHA-256's (nor the JVM's MessageDigest's) for that input."
+  [bs]
+  (or (sha256-native bs)
+      (p/sha256 (if (bytes? bs) (mapv (fn [b] (bit-and b 0xFF)) bs) bs))))
 (defn hmac-sha256 "RFC 2104 over SHA-256" [key msg] (p/hmac-sha256 key msg))
 (defn aes256-ctr "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key" [key iv data] (p/aes256-ctr key iv data))
 (defn xxh3-128 "the 16-byte XXH3-128 digest, big-endian hi then lo" [bs] (p/xxh3-128 bs))

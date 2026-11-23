@@ -12,10 +12,10 @@
 
    Uses eve/deftype macro: CLJ protocol names, auto-translated on CLJS."
   (:refer-clojure :exclude [hash-map
-                            aget alength unsigned-bit-shift-right volatile! vswap! transient
+                            aget aset alength object-array unsigned-bit-shift-right volatile! vswap! transient
                             persistent! conj! long bytes])
   (:require
-   [eve.host :refer [field aget alength unsigned-bit-shift-right volatile! vswap! transient
+   [eve.host :refer [field aget aset alength object-array unsigned-bit-shift-right volatile! vswap! transient
                      persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc]
@@ -37,7 +37,9 @@
    [eve.type-readers]
    [eve.vec :as evec]
    [eve.codec :as codec]
-   [eve.digest :as dg]))
+   [eve.digest :as dg]
+   #?(:jolt [jolt.scheme :as scheme])
+   #?(:jolt [eve.region :as region])))
 
 ;;=============================================================================
 ;; Shared Constants
@@ -87,6 +89,13 @@
 (def ^:private key-memo (enc/new-cache))
 (def ^:private ^:const KEY-MEMO-MAX 4096)
 
+;; Integers of the same magnitude are one HAMT key (codec §8, (= 5 5N)) but
+;; not one object, so they cannot use the identity-keyed keyword memo. A
+;; value-indexed array (host number, 0..4095) is exact and does not use
+;; Clojure =, which would also treat 1 and 1.0 as one key on some hosts.
+(def ^:private ^:const INT-KEY-MEMO-N 4096)
+(def ^:private ^{:tag "[Ljava.lang.Object;"} int-key-memo (object-array INT-KEY-MEMO-N))
+
 (defn- key-bytes+hash
   "The [kb kh] a HAMT lookup needs for k."
   [k]
@@ -96,8 +105,14 @@
               pair [kb (portable-hash-bytes kb)]]
           (enc/cache-put! key-memo k pair KEY-MEMO-MAX)
           pair))
-    (let [kb (serialize-key-bytes k)]
-      [kb (portable-hash-bytes kb)])))
+    (if (and (integer? k) (number? k) (not (neg? k)) (< k INT-KEY-MEMO-N))
+      (or (aget ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k))
+          (let [kb (serialize-key-bytes k)
+                pair [kb (portable-hash-bytes kb)]]
+            (aset ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k) pair)
+            pair))
+      (let [kb (serialize-key-bytes k)]
+        [kb (portable-hash-bytes kb)]))))
 
 (defn- serialize-val-bytes
   "Serialize a value to bytes (platform-specific).
@@ -626,6 +641,128 @@
               ;; Unknown
               not-found))))))))
 
+#?(:jolt
+   (do
+     ;; jolt: walk a published HAMT in Chez. Each node is resolved once
+     ;; (eve-sio-at), then its words are plain-load-i32/u8 at base+field.
+     ;; Key bytes are compared in place against the array's bytevector.
+     ;; Same layout and answers as hamt-get-view (including the shift-30
+     ;; node-bit compatibility); a sio that is not a JvmSlabCtx under its
+     ;; logging wrappers returns the fallback sentinel and hamt-get keeps
+     ;; the portable view/words descent. Value bytes are deserialized in
+     ;; Clojure, as before.
+     (scheme/eval-string
+      "(begin
+         (define (eve-hamt-popc n) (eve-i32-popcount n))
+         (define (eve-hamt-bitpos kh shift)
+           (fxsll 1 (fxand (eve-i32-ushr kh shift) #x1f)))
+         (define (eve-hamt-has-bit? bm bit)
+           (not (fxzero? (fxlogand (eve-i32-i32 bm) bit))))
+         (define (eve-hamt-node-bit dbm nbm kh shift)
+           (let ((bit (eve-hamt-bitpos kh shift)))
+             (if (and (fx= shift 30) (fx< (eve-i32-i32 kh) 0)
+                      (not (eve-hamt-has-bit? dbm bit))
+                      (not (eve-hamt-has-bit? nbm bit)))
+                 (let ((old (fxsll bit 28)))
+                   (if (or (eve-hamt-has-bit? dbm old)
+                           (eve-hamt-has-bit? nbm old))
+                       old
+                       bit))
+                 bit)))
+         (define (eve-hamt-index bm bit)
+           (eve-hamt-popc (fxlogand (eve-i32-i32 bm) (fx- bit 1))))
+         (define (eve-hamt-bytes=? r a fo kb n i32op u8op)
+           (let ((bv (jolt-array-vec kb)))
+             (let loop ((j 0))
+               (cond
+                 ((fx>= j n) #t)
+                 ((fx<= (fx+ j 4) n)
+                  (if (fx= (eve-i32-u32 (i32op r (fx+ a fo j)))
+                           (bytevector-u32-ref bv j (endianness little)))
+                      (loop (fx+ j 4))
+                      #f))
+                 (else
+                  (if (fx= (eve-i32-u32 (u8op r (fx+ a fo j)))
+                           (bytevector-u8-ref bv j))
+                      (loop (fx+ j 1))
+                      #f))))))
+         (define (eve-hamt-kv-pos r a start di i32op)
+           (let loop ((i 0) (p start))
+             (if (fx= i di)
+                 p
+                 (let* ((kl (i32op r (fx+ a p)))
+                        (vo (fx+ p 4 kl)))
+                   (loop (fx+ i 1) (fx+ vo 4 (i32op r (fx+ a vo))))))))
+         (define (eve-hamt-walk rs dos bss off kh kb i32op u8op rbop)
+           (let ((klen (bytevector-length (jolt-array-vec kb))))
+             (let loop ((off off) (shift 0))
+               (if (eqv? off -1)
+                   jolt-nil
+                   (eve-sio-at rs dos bss off 0 r a
+                     (let ((nt (u8op r a)))
+                       (cond
+                         ((fx= nt 1)
+                          (let* ((dbm (i32op r (fx+ a 4)))
+                                 (nbm (i32op r (fx+ a 8)))
+                                 (bit (eve-hamt-node-bit dbm nbm kh shift)))
+                            (cond
+                              ((eve-hamt-has-bit? nbm bit)
+                               (loop (i32op r (fx+ a 12 (fx* (eve-hamt-index nbm bit) 4)))
+                                     (fx+ shift 5)))
+                              ((eve-hamt-has-bit? dbm bit)
+                               (let* ((di (eve-hamt-index dbm bit))
+                                      (hs (fx+ 12 (fx* 4 (eve-hamt-popc nbm))))
+                                      (sh (i32op r (fx+ a hs (fx* di 4)))))
+                                 (if (not (fx= (eve-i32-i32 sh) (eve-i32-i32 kh)))
+                                     jolt-nil
+                                     (let* ((kvs (fx+ 12 (fx* 4 (eve-hamt-popc nbm))
+                                                      (fx* 4 (eve-hamt-popc dbm))))
+                                            (pos (eve-hamt-kv-pos r a kvs di i32op))
+                                            (kl (i32op r (fx+ a pos))))
+                                       (if (and (fx= kl klen)
+                                                (eve-hamt-bytes=? r a (fx+ pos 4)
+                                                                  kb klen i32op u8op))
+                                           (let* ((vo (fx+ pos 4 kl))
+                                                  (vl (i32op r (fx+ a vo))))
+                                             (rbop r (fx+ a vo 4) vl))
+                                           jolt-nil)))))
+                              (else jolt-nil))))
+                         ((fx= nt 3)
+                          (if (not (fx= (eve-i32-i32 (i32op r (fx+ a 4)))
+                                        (eve-i32-i32 kh)))
+                              jolt-nil
+                              (let ((cc (u8op r (fx+ a 1))))
+                                (let clp ((i 0) (pos 8))
+                                  (if (fx>= i cc)
+                                      jolt-nil
+                                      (let ((kl (i32op r (fx+ a pos))))
+                                        (if (and (fx= kl klen)
+                                                 (eve-hamt-bytes=? r a (fx+ pos 4)
+                                                                   kb klen i32op u8op))
+                                            (let* ((vo (fx+ pos 4 kl))
+                                                   (vl (i32op r (fx+ a vo))))
+                                              (rbop r (fx+ a vo 4) vl))
+                                            (let ((vo (fx+ pos 4 kl)))
+                                              (clp (fx+ i 1)
+                                                   (fx+ vo 4 (i32op r (fx+ a vo))))))))))))
+                         (else jolt-nil))))))))
+         (define (eve-hamt-get-bytes ctag ltag i32op u8op rbop fallback)
+           (let ((cd #f) (ld #f))
+             (lambda (sio root-off kh kb)
+               (eve-alloc-unwrap sio s ctag ltag cd ld
+                 (let ((v (jrec*-vals s)))
+                   (eve-hamt-walk (vector-ref v 0) (vector-ref v 2) (vector-ref v 5)
+                                  root-off kh kb i32op u8op rbop))
+                 fallback))))
+         #t)")
+     (def ^:private hamt-fallback (Object.))
+     (def ^:private hamt-bytes*
+       (let [tags (alloc/jolt-ctx-tags)]
+         ((scheme/proc "eve-hamt-get-bytes")
+          (nth tags 0) (nth tags 1)
+          region/plain-load-i32-op region/plain-load-u8-op region/read-bytes-op
+          hamt-fallback)))))
+
 (defn- hamt-get
   "Find key k in HAMT rooted at root-off. Returns value or not-found.
    The descent resolves each node once and reads its words through
@@ -654,9 +791,19 @@
       not-found
       ;; kbkh is [kb kh]: both descents start at shift 0 when it has no third
       ;; element, so it is passed as it is (no per-lookup vector)
-      (if (alloc/node-viewable? sio)
-        (hamt-get-view sio root-off kbkh not-found)
-        (hamt-get-words sio root-off kbkh not-found)))))
+      #?(:jolt
+         (let [vb (hamt-bytes* sio root-off (nth kbkh 1) (nth kbkh 0))]
+           (cond
+             (identical? vb hamt-fallback)
+             (if (alloc/node-viewable? sio)
+               (hamt-get-view sio root-off kbkh not-found)
+               (hamt-get-words sio root-off kbkh not-found))
+             (nil? vb) not-found
+             :else (deserialize-value-bytes vb sio)))
+         :default
+         (if (alloc/node-viewable? sio)
+           (hamt-get-view sio root-off kbkh not-found)
+           (hamt-get-words sio root-off kbkh not-found))))))
 
 ;;=============================================================================
 ;; HAMT Assoc (unified)

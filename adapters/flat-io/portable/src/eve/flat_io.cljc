@@ -21,7 +21,8 @@
    may carry more (a DataView, a VS leaf). All offsets are absolute from the
    chunk's start; all multi-byte reads little-endian (FORMAT-V1 §2)."
   (:refer-clojure :exclude [chunk])
-  (:require [eve.encoding :as enc]))
+  (:require [eve.encoding :as enc]
+            #?(:jolt [jolt.scheme :as scheme])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -33,13 +34,51 @@
 ;; float and i64 widths. Same bytes, host substrates.
 ;; ---------------------------------------------------------------------------
 
+;; jolt: the little-endian reads and the writer's multi-byte puts as Chez's bytevector refs and setters on the byte
+;; array's own bytevector (a jolt byte array is one), and the writer's IBuf a protocol (below). jolt's bit-shift-left
+;; never open-codes (each shift masks with a 2^64 bignum and wraps, wrap64), and a definterface method is called by name
+;; through jolt's interop dispatch: u32 was 110 ns and i64 254 ns a read, buf-u8 40 ns and buf-u32 270 ns a write
+;; (2026-11-22 ET); flat chunk building is ~23% of eve.db.ds's runtime on jolt. The same values and bytes as the :clj
+;; arms (adapters/flat-io/test).
+#?(:jolt
+   (do
+     (scheme/eval-string
+      "(begin
+         (define (eve-fio-m v m) (if (fixnum? v) (fxand v m) (bitwise-and v m)))
+         (define (eve-fio-u16 a i) (bytevector-u16-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-fio-u32 a i) (bytevector-u32-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-fio-i32 a i) (bytevector-s32-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-fio-i64 a i) (bytevector-s64-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-fio-f64 a i) (bytevector-ieee-double-ref (jolt-array-vec a) i (endianness little)))
+         (define (eve-fio-put-u8! a i v) (bytevector-u8-set! (jolt-array-vec a) i (eve-fio-m v #xFF)))
+         (define (eve-fio-put-u16! a i v) (bytevector-u16-set! (jolt-array-vec a) i (eve-fio-m v #xFFFF) (endianness little)))
+         (define (eve-fio-put-u32! a i v)
+           (bytevector-u32-set! (jolt-array-vec a) i (eve-fio-m v #xFFFFFFFF) (endianness little)))
+         (define (eve-fio-put-i64! a i v)
+           (if (fixnum? v)
+               (bytevector-s64-set! (jolt-array-vec a) i v (endianness little))
+               (bytevector-u64-set! (jolt-array-vec a) i (bitwise-and v #xFFFFFFFFFFFFFFFF) (endianness little))))
+         (define (eve-fio-put-f64! a i v)
+           (bytevector-ieee-double-set! (jolt-array-vec a) i (if (flonum? v) v (inexact v)) (endianness little)))
+         #t)")
+     (def ^:private u16* (scheme/proc "eve-fio-u16"))
+     (def ^:private u32* (scheme/proc "eve-fio-u32"))
+     (def ^:private i32* (scheme/proc "eve-fio-i32"))
+     (def ^:private i64* (scheme/proc "eve-fio-i64"))
+     (def ^:private f64* (scheme/proc "eve-fio-f64"))
+     (def ^:private put-u8* (scheme/proc "eve-fio-put-u8!"))
+     (def ^:private put-u16* (scheme/proc "eve-fio-put-u16!"))
+     (def ^:private put-u32* (scheme/proc "eve-fio-put-u32!"))
+     (def ^:private put-i64* (scheme/proc "eve-fio-put-i64!"))
+     (def ^:private put-f64* (scheme/proc "eve-fio-put-f64!"))))
+
 #?(:clj (do
 (defn u8 ^long [^bytes c ^long i] (bit-and (long (aget c (int i))) 0xFF))
-(defn u16 ^long [^bytes c ^long i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
-(defn u32 ^long [^bytes c ^long i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
-(defn i32 ^long [^bytes c ^long i] (long (unchecked-int (u32 c i))))
-(defn i64 ^long [^bytes c ^long i] (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32)))
-(defn f64 ^double [^bytes c ^long i] #?(:jank (enc/long-bits->double (i64 c i)) :default (Double/longBitsToDouble (i64 c i))))
+(defn u16 ^long [^bytes c ^long i] #?(:jolt (u16* c i) :default (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8))))
+(defn u32 ^long [^bytes c ^long i] #?(:jolt (u32* c i) :default (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16))))
+(defn i32 ^long [^bytes c ^long i] #?(:jolt (i32* c i) :default (long (unchecked-int (u32 c i)))))
+(defn i64 ^long [^bytes c ^long i] #?(:jolt (i64* c i) :default (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32))))
+(defn f64 ^double [^bytes c ^long i] #?(:jank (enc/long-bits->double (i64 c i)) :jolt (f64* c i) :default (Double/longBitsToDouble (i64 c i))))
 (defn f32 ^double [^bytes c ^long i] #?(:jank (enc/int-bits->float (unchecked-int (u32 c i))) :default (Float/intBitsToFloat (unchecked-int (u32 c i)))))
 
 (defn varint
@@ -309,6 +348,12 @@
             (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
             (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
             (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
+    ;; jolt: a protocol, as on bb / glojure / jank: jolt calls a definterface method by name through its interop
+    ;; dispatch, where a protocol fn is one dispatch on the type (buf-u8 40 -> 9 ns, 2026-11-22 ET)
+    :jolt [(defprotocol IBuf
+             (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+             (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+             (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))]
     :clj [(definterface IBuf
             (^bytes wRaw [])
             (^long wPos [])
@@ -371,11 +416,24 @@
   (wPos [_] p)
   (wSeek [_ np] (set! p np))
   (wU8 [_ v] (when (>= p (alength b)) (set! b (ba-copy-of b (* 2 (alength b)))))
-    #?(:bb (aset-byte b (int p) (unchecked-byte v)) :default (aset b (int p) (unchecked-byte v))) (set! p (inc p)))
-  (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
-  (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
-  (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
-  (wF64 [this v] (buf-i64 this #?(:jank (enc/double->long-bits v) :default (Double/doubleToRawLongBits v))))
+    #?(:bb (aset-byte b (int p) (unchecked-byte v)) :jolt (put-u8* b p v) :default (aset b (int p) (unchecked-byte v)))
+    (set! p (inc p)))
+  (wU16 [this v]
+    #?@(:jolt [(when (> (+ p 2) (alength b)) (set! b (ba-copy-of b (max (+ p 2) (* 2 (alength b))))))
+               (put-u16* b p v) (set! p (+ p 2))]
+        :default [(buf-u8 this v) (buf-u8 this (bit-shift-right v 8))]))
+  (wU32 [this v]
+    #?@(:jolt [(when (> (+ p 4) (alength b)) (set! b (ba-copy-of b (max (+ p 4) (* 2 (alength b))))))
+               (put-u32* b p v) (set! p (+ p 4))]
+        :default [(buf-u16 this v) (buf-u16 this (bit-shift-right v 16))]))
+  (wI64 [this v]
+    #?@(:jolt [(when (> (+ p 8) (alength b)) (set! b (ba-copy-of b (max (+ p 8) (* 2 (alength b))))))
+               (put-i64* b p v) (set! p (+ p 8))]
+        :default [(buf-u32 this v) (buf-u32 this (bit-shift-right v 32))]))
+  (wF64 [this v]
+    #?@(:jolt [(when (> (+ p 8) (alength b)) (set! b (ba-copy-of b (max (+ p 8) (* 2 (alength b))))))
+               (put-f64* b p v) (set! p (+ p 8))]
+        :default [(buf-i64 this #?(:jank (enc/double->long-bits v) :default (Double/doubleToRawLongBits v)))]))
   (wVarint [this v]
     (loop [v v]
       (if (< v 128) (buf-u8 this v)
@@ -385,10 +443,11 @@
     (enc/arraycopy src off b p n) (set! p (+ p n)))
   (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
   (wPatchU32 [_ at v]
-    #?(:bb (aset-byte b (int at) (unchecked-byte v)) :default (aset b (int at) (unchecked-byte v)))
-    #?(:bb (aset-byte b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))) :default (aset b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))))
-    #?(:bb (aset-byte b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))) :default (aset b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))))
-    #?(:bb (aset-byte b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))) :default (aset b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))))))
+    #?@(:jolt [(put-u32* b at v)]
+        :default [#?(:bb (aset-byte b (int at) (unchecked-byte v)) :default (aset b (int at) (unchecked-byte v)))
+                  #?(:bb (aset-byte b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))) :default (aset b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))))
+                  #?(:bb (aset-byte b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))) :default (aset b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))))
+                  #?(:bb (aset-byte b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))) :default (aset b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))))])))
 
 (defn buf
   "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
@@ -400,7 +459,64 @@
 ;; shared writer calls, over a growable Uint8Array + DataView. The
 ;; position field is `p`, as on the JVM, so it cannot collide with the
 ;; pos method.
-#?(:cljs (do
+#?(:org.babashka/nbb (do
+;; nbb: SCI's deftype takes protocols, not Object methods, so (.u8 w v)
+;; on the cljs Buf does not resolve there (sci.impl.deftype/varint,
+;; measured 2026-11-22). The same Uint8Array + DataView writer behind a
+;; protocol with the JVM protocol hosts' w-names (the reads own u8 …
+;; varint in this namespace); buf-* dispatch to it below.
+(defprotocol IBuf
+  (wGrow [_ need]) (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+  (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+  (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))
+(deftype Buf [^:mutable b ^:mutable dv ^:mutable p width]
+  IBuf
+  (wGrow [_ need]
+    (when (< (.-length b) need)
+      (let [nb (js/Uint8Array. (max (* 2 (.-length b)) need))]
+        (.set nb b)
+        (set! b nb)
+        (set! dv (js/DataView. (.-buffer nb))))))
+  (wRaw [_] b)
+  (wPos [_] p)
+  (wSeek [_ np] (set! p np))
+  (wU8 [this v]
+    (when (>= p (.-length b)) (wGrow this (* 2 (.-length b))))
+    (aset b p (bit-and v 0xFF))
+    (set! p (inc p)))
+  (wU16 [this v] (wU8 this v) (wU8 this (bit-shift-right (bit-and v 0xFFFF) 8)))
+  (wU32 [this v]
+    (wGrow this (+ p 4))
+    (.setUint32 dv p (bit-and v 0xFFFFFFFF) true)
+    (set! p (+ p 4)))
+  (wI64 [this v]
+    (wGrow this (+ p 8))
+    (.setBigInt64 dv p (bi v) true)
+    (set! p (+ p 8)))
+  (wF64 [this v]
+    (wGrow this (+ p 8))
+    (.setFloat64 dv p v true)
+    (set! p (+ p 8)))
+  (wVarint [this v]
+    (loop [v v]
+      (if (< v 128) (wU8 this v)
+          (do (wU8 this (bit-or (bit-and v 127) 128))
+              (recur (quot v 128))))))
+  (wBytes [this src off n]
+    (wGrow this (+ p n))
+    (.set b (.subarray src off (+ off n)) p)
+    (set! p (+ p n)))
+  (wOff [this v] (if (== width 2) (wU16 this v) (wU32 this v)))
+  (wPatchU32 [_ at v]
+    (.setUint32 dv at (bit-and v 0xFFFFFFFF) true)))
+
+(defn buf
+  "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
+  [width]
+  (let [b (js/Uint8Array. 1024)]
+    (->Buf b (js/DataView. (.-buffer b)) 0 width)))))
+
+#?(:org.babashka/nbb nil :cljs (do
 (deftype Buf [^:mutable b ^:mutable dv ^:mutable p width]
   Object
   (grow [_ need]
@@ -453,18 +569,18 @@
 ;; call, and on the protocol hosts the protocol fn call — the only
 ;; dispatch those hosts have (jank's completion objects have no native
 ;; members at all).
-(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :clj (.wRaw ^IBuf w) :default (.raw w)))
-(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :clj (.wPos ^IBuf w) :default (.pos w)))
-(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :clj (.wSeek ^IBuf w p) :default (.seek w p)))
-(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :clj (.wU8 ^IBuf w v) :default (.u8 w v)))
-(defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :clj (.wU16 ^IBuf w v) :default (.u16 w v)))
-(defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :clj (.wU32 ^IBuf w v) :default (.u32 w v)))
-(defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :clj (.wI64 ^IBuf w v) :default (.i64 w v)))
-(defn buf-f64 [w v] #?(:jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :clj (.wF64 ^IBuf w v) :default (.f64 w v)))
-(defn buf-varint [w v] #?(:jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :clj (.wVarint ^IBuf w v) :default (.varint w v)))
-(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :default (.putBytes w src off n)))
-(defn buf-off "Append an offset of the writer's width." [w v] #?(:jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :clj (.wOff ^IBuf w v) :default (.off w v)))
-(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :default (.patchU32 w at v)))
+(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:org.babashka/nbb (wRaw w) :jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :jolt (wRaw w) :clj (.wRaw ^IBuf w) :default (.raw w)))
+(defn buf-pos "The write position." [w] #?(:org.babashka/nbb (wPos w) :jank (wPos w) :bb (wPos w) :glj (wPos w) :jolt (wPos w) :clj (.wPos ^IBuf w) :default (.pos w)))
+(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:org.babashka/nbb (wSeek w p) :jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :jolt (wSeek w p) :clj (.wSeek ^IBuf w p) :default (.seek w p)))
+(defn buf-u8 [w v] #?(:org.babashka/nbb (wU8 w v) :jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :jolt (wU8 w v) :clj (.wU8 ^IBuf w v) :default (.u8 w v)))
+(defn buf-u16 [w v] #?(:org.babashka/nbb (wU16 w v) :jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :jolt (wU16 w v) :clj (.wU16 ^IBuf w v) :default (.u16 w v)))
+(defn buf-u32 [w v] #?(:org.babashka/nbb (wU32 w v) :jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :jolt (wU32 w v) :clj (.wU32 ^IBuf w v) :default (.u32 w v)))
+(defn buf-i64 [w v] #?(:org.babashka/nbb (wI64 w v) :jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :jolt (wI64 w v) :clj (.wI64 ^IBuf w v) :default (.i64 w v)))
+(defn buf-f64 [w v] #?(:org.babashka/nbb (wF64 w v) :jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :jolt (wF64 w v) :clj (.wF64 ^IBuf w v) :default (.f64 w v)))
+(defn buf-varint [w v] #?(:org.babashka/nbb (wVarint w v) :jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :jolt (wVarint w v) :clj (.wVarint ^IBuf w v) :default (.varint w v)))
+(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:org.babashka/nbb (wBytes w src off n) :jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :jolt (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :default (.putBytes w src off n)))
+(defn buf-off "Append an offset of the writer's width." [w v] #?(:org.babashka/nbb (wOff w v) :jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :jolt (wOff w v) :clj (.wOff ^IBuf w v) :default (.off w v)))
+(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:org.babashka/nbb (wPatchU32 w at v) :jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :jolt (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :default (.patchU32 w at v)))
 
 (defn buf-align
   "Zero bytes up to a multiple of a (chunk.cljc's align!)."
