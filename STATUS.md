@@ -155,3 +155,33 @@ REMAINING: fix campaign (recount on gate scope first), Splint
   bb lint exit 0, RETRO.md (incl. the consumer kondo-exports
   proposal), push branch. clj-depend: config in, 0 violations at
   the pin (confirm again at the endgame).
+
+## Successor lane — campaign state at handoff (2026-11-23)
+
+Committed this session (after 7df8e51): defcfn hook;
+redefined-var host-face ns ignores (98e12b9); host class-name
+exclusion (2e5c43c); eve.set dead vars + renames (c367fb6);
+unused-binding rename batch (4 commits) + its correction
+(ab7497a — READ IT before touching unused-binding again:
+kondo TEXT output drops the finding's lang, and .cljc
+unused-binding is per-lang; the batch broke eve.atom's
+scalar-leaf? and the gate caught it; 146 renames reverted,
+24 re-applied, single-lang renames stand); dprint leg +
+pre-commit (3365a4c); docs pass (141f1e2); RETRO.md.
+
+RECOUNT 4 (gate scope): kondo 181E / 1768W / 219I (from
+319E / 1872W at recount3, 1455E / 2195W at census). Splint
+2363 over 572 files. Carve recount still running at bank
+time (990+ report lines in eve-lane-logs/recount/carve2.txt).
+clj-depend 0 violations. fmt-check and dprint check green;
+bb lint is NOT green — the kondo/splint/carve legs still
+have the tail RETRO.md enumerates class by class.
+
+REMAINING WORK = RETRO.md "What remains": unresolved-var
+450 (host_completion.clj is the deep one), unused-binding
+427 (residue shapes named there), unresolved-symbol 125,
+unused-private-var 78, type-mismatch 30, invalid-arity 12,
+mechanical warning tail; Splint + Carve campaigns not yet
+started past measurement. Push state: branch pushed at
+handoff (see the lane's final report); merges to main are
+John's word, not the lane's.
