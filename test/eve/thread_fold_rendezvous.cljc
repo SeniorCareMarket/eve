@@ -93,7 +93,7 @@
           :value-same (= app-value @a)})))
 
 (def seam-input
-  (vec (concat (mapcat (fn [i] (repeat (inc (mod i 3)) (+ 1 (* 2 i)))) (range 20)) [60] (range 61 100 2))))
+  (vec (concat (mapcat (fn [i] (repeat (inc (mod i 3)) (inc (* 2 i)))) (range 20)) [60] (range 61 100 2))))
 
 (defn- turn [dh g rid]
   (let [;; the gated fold: its chunks claimed by both processes' threads

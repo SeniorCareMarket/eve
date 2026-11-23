@@ -383,7 +383,7 @@
                           (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
                           (wPatchU32 [_ at v]
                             #?(:bb (aset-byte b (int at) (unchecked-byte v)) :default (aset b (int at) (unchecked-byte v)))
-                            #?(:bb (aset-byte b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))) :default (aset b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))))
+                            #?(:bb (aset-byte b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8))) :default (aset b (int (inc at)) (unchecked-byte (bit-shift-right v 8))))
                             #?(:bb (aset-byte b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))) :default (aset b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16))))
                             #?(:bb (aset-byte b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))) :default (aset b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24))))))
 

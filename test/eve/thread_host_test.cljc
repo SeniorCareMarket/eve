@@ -190,7 +190,7 @@
       (is (every? #(= :normal (:reason %)) ns)))))
 
 (deftest attempt-and-error-data
-  (is (= [true 3] (h/attempt (fn [] (+ 1 2)))))
+  (is (= [true 3] (h/attempt (fn [] (inc 2)))))
   (let [[ok? e] (h/attempt (fn [] (throw (ex-info "boom" {:x 7}))))
         d (h/error-data e)]
     (is (false? ok?))

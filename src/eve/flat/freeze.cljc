@@ -106,7 +106,7 @@
   #?(:cljs (let [dv (js/DataView. (.-buffer b) (.-byteOffset b) (.-byteLength b))]
              (.setInt32 dv (int off) v true))
      :default (do (enc/typed-aset! b 1 (int off) (bit-and v 0xFF))
-                  (enc/typed-aset! b 1 (int (+ off 1)) (bit-and (unsigned-bit-shift-right v 8) 0xFF))
+                  (enc/typed-aset! b 1 (int (inc off)) (bit-and (unsigned-bit-shift-right v 8) 0xFF))
                   (enc/typed-aset! b 1 (int (+ off 2)) (bit-and (unsigned-bit-shift-right v 16) 0xFF))
                   (enc/typed-aset! b 1 (int (+ off 3)) (bit-and (unsigned-bit-shift-right v 24) 0xFF)))))
 
@@ -183,7 +183,7 @@
 
 (defn- get-i32 ^long [^bytes b ^long off]
   (bit-or (bit-and (aget b (int off)) 0xFF)
-          (bit-shift-left (bit-and (aget b (int (+ off 1))) 0xFF) 8)
+          (bit-shift-left (bit-and (aget b (int (inc off))) 0xFF) 8)
           (bit-shift-left (bit-and (aget b (int (+ off 2))) 0xFF) 16)
           (bit-shift-left (bit-and (aget b (int (+ off 3))) 0xFF) 24)))
 

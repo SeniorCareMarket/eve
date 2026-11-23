@@ -89,7 +89,7 @@
          (>= em-len (+ HLEN s-len 2))
          (= 0xbc (peek em))
          (let [masked (subvec em 0 (- em-len HLEN 1))
-               h (subvec em (- em-len HLEN 1) (- em-len 1))
+               h (subvec em (- em-len HLEN 1) (dec em-len))
                clear (- (* 8 em-len) em-bits)]
            (and (zero? (quot (nth masked 0) (pow2 (- 8 clear))))
                 (let [db-mask (mgf1 h (- em-len HLEN 1))

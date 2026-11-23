@@ -91,9 +91,9 @@
 (defn decode-cp "[code point, byte count] of the UTF-8 sequence at i" [bs i]
   (let [c (nth bs i)]
     (cond (< c 0x80) [c 1]
-          (< c 0xE0) [(+ (* 64 (mod c 32)) (mod (nth bs (+ i 1)) 64)) 2]
-          (< c 0xF0) [(+ (* 4096 (mod c 16)) (* 64 (mod (nth bs (+ i 1)) 64)) (mod (nth bs (+ i 2)) 64)) 3]
-          :else [(+ (* 262144 (mod c 8)) (* 4096 (mod (nth bs (+ i 1)) 64)) (* 64 (mod (nth bs (+ i 2)) 64))
+          (< c 0xE0) [(+ (* 64 (mod c 32)) (mod (nth bs (inc i)) 64)) 2]
+          (< c 0xF0) [(+ (* 4096 (mod c 16)) (* 64 (mod (nth bs (inc i)) 64)) (mod (nth bs (+ i 2)) 64)) 3]
+          :else [(+ (* 262144 (mod c 8)) (* 4096 (mod (nth bs (inc i)) 64)) (* 64 (mod (nth bs (+ i 2)) 64))
                     (mod (nth bs (+ i 3)) 64)) 4])))
 
 (defn utf8->str "the string of UTF-8 bytes" [bs]
@@ -107,10 +107,10 @@
   (let [v (vec bs) n (count v)]
     (apply str
            (mapcat (fn [i]
-                     (let [b0 (nth v i) b1 (if (< (+ i 1) n) (nth v (+ i 1)) 0) b2 (if (< (+ i 2) n) (nth v (+ i 2)) 0)
+                     (let [b0 (nth v i) b1 (if (< (inc i) n) (nth v (inc i)) 0) b2 (if (< (+ i 2) n) (nth v (+ i 2)) 0)
                            x (+ (* b0 65536) (* b1 256) b2)]
                        [(nth B64 (quot x 262144)) (nth B64 (mod (quot x 4096) 64))
-                        (if (< (+ i 1) n) (nth B64 (mod (quot x 64) 64)) \=)
+                        (if (< (inc i) n) (nth B64 (mod (quot x 64) 64)) \=)
                         (if (< (+ i 2) n) (nth B64 (mod x 64)) \=)]))
                    ;; not (range 0 n 3): clojerl's reduce drops a stepped range shorter than its step (eve.net.u64/steps)
                    (take-while (fn [i] (< i n)) (iterate (fn [i] (+ i 3)) 0))))))

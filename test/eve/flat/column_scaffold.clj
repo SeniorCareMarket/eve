@@ -56,7 +56,7 @@
    the §3 additions 0x00 and 0x28)."
   ^long [^bytes ba ^long i]
   (let [u (fn [j] (bit-and (aget ba (int j)) 0xFF))
-        u32 (fn [j] (+ (u j) (* 256 (u (+ j 1))) (* 65536 (u (+ j 2))) (* 16777216 (u (+ j 3)))))
+        u32 (fn [j] (+ (u j) (* 256 (u (inc j))) (* 65536 (u (+ j 2))) (* 16777216 (u (+ j 3)))))
         t (u i)]
     (case (int t)
       0x00 1

@@ -96,7 +96,7 @@
 
 (defn- i32-at [#?(:clj ^bytes bs :default bs) i]
   (let [v (bit-or (byte-at bs i)
-                  (bit-shift-left (byte-at bs (+ i 1)) 8)
+                  (bit-shift-left (byte-at bs (inc i)) 8)
                   (bit-shift-left (byte-at bs (+ i 2)) 16)
                   (bit-shift-left (byte-at bs (+ i 3)) 24))]
     (p/int32 v)))

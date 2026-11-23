@@ -63,7 +63,7 @@
    extent."
   [sio off p]
   (when-not (and (== 0xEE (slab/read-u8 sio off p))
-                 (== 0xDB (slab/read-u8 sio off (+ p 1))))
+                 (== 0xDB (slab/read-u8 sio off (inc p))))
     (throw (ex-info "place-graph!: no flat element header at the expected byte"
                     {:off off :at p})))
   (let [tag (slab/read-u8 sio off (+ p 2))
@@ -96,7 +96,7 @@
     (cond (< c 6) (nth class-slot-bytes c)
           (== c alloc/OVERFLOW_CLASS_IDX)
           (if (== 1 (slab/read-u8 sio off 0))
-            (+ 1 (flat-element-bytes sio off 1))
+            (inc (flat-element-bytes sio off 1))
             (throw (ex-info "place-graph!: a non-scalar overflow-class block is out of harness scope"
                             {:off off})))
           :else (throw (ex-info "place-graph!: a sentinel-class offset is not a block"

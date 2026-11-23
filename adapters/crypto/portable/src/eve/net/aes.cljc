@@ -46,7 +46,7 @@
     [(bit-xor x0 x1 a1 a2 a3) (bit-xor a0 x1 x2 a2 a3) (bit-xor a0 a1 x2 x3 a3) (bit-xor x0 a0 a1 a2 x3)]))
 
 (defn- sub-shift [st] (mapv (fn [i] (nth SBOX (nth st (nth SHIFT i)))) (range 16)))
-(defn- mix [st] (vec (mapcat (fn [c] (mix-col (nth st (* 4 c)) (nth st (+ (* 4 c) 1)) (nth st (+ (* 4 c) 2)) (nth st (+ (* 4 c) 3)))) (range 4))))
+(defn- mix [st] (vec (mapcat (fn [c] (mix-col (nth st (* 4 c)) (nth st (inc (* 4 c))) (nth st (+ (* 4 c) 2)) (nth st (+ (* 4 c) 3)))) (range 4))))
 (defn- ark [st rk] (mapv bit-xor st rk))
 
 (defn- encrypt-with [rks block]

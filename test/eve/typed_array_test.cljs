@@ -69,7 +69,7 @@
       (dotimes [i 10]
         (swap! a (fn [state]
                    (assoc-in state [:tiles i]
-                             (js/Uint8ClampedArray. #js [(* i 10) (+ (* i 10) 1) (+ (* i 10) 2) 255])))))
+                             (js/Uint8ClampedArray. #js [(* i 10) (inc (* i 10)) (+ (* i 10) 2) 255])))))
       (let [tiles (:tiles @a)]
         (is (= 10 (count tiles)))
         (doseq [i (range 10)]
@@ -108,8 +108,8 @@
       (swap! a (fn [state]
                  (let [arr (js/Uint8ClampedArray. (* tile-w tile-h 4))]
                    (dotimes [i (* tile-w tile-h)]
-                     (aset arr (+ (* i 4) 0) 255)  ; R
-                     (aset arr (+ (* i 4) 1) 0)    ; G
+                     (aset arr (* i 4) 255)  ; R
+                     (aset arr (inc (* i 4)) 0)    ; G
                      (aset arr (+ (* i 4) 2) 0)    ; B
                      (aset arr (+ (* i 4) 3) 255)) ; A
                    (assoc-in state [:tiles 0] arr))))
@@ -117,8 +117,8 @@
       (swap! a (fn [state]
                  (let [arr (js/Uint8ClampedArray. (* tile-w tile-h 4))]
                    (dotimes [i (* tile-w tile-h)]
-                     (aset arr (+ (* i 4) 0) 0)
-                     (aset arr (+ (* i 4) 1) 255)
+                     (aset arr (* i 4) 0)
+                     (aset arr (inc (* i 4)) 255)
                      (aset arr (+ (* i 4) 2) 0)
                      (aset arr (+ (* i 4) 3) 255))
                    (assoc-in state [:tiles 1] arr))))
@@ -126,8 +126,8 @@
       (swap! a (fn [state]
                  (let [arr (js/Uint8ClampedArray. (* tile-w tile-h 4))]
                    (dotimes [i (* tile-w tile-h)]
-                     (aset arr (+ (* i 4) 0) 0)
-                     (aset arr (+ (* i 4) 1) 0)
+                     (aset arr (* i 4) 0)
+                     (aset arr (inc (* i 4)) 0)
                      (aset arr (+ (* i 4) 2) 255)
                      (aset arr (+ (* i 4) 3) 255))
                    (assoc-in state [:tiles 2] arr))))
@@ -135,8 +135,8 @@
       (swap! a (fn [state]
                  (let [arr (js/Uint8ClampedArray. (* tile-w tile-h 4))]
                    (dotimes [i (* tile-w tile-h)]
-                     (aset arr (+ (* i 4) 0) 255)
-                     (aset arr (+ (* i 4) 1) 255)
+                     (aset arr (* i 4) 255)
+                     (aset arr (inc (* i 4)) 255)
                      (aset arr (+ (* i 4) 2) 255)
                      (aset arr (+ (* i 4) 3) 255))
                    (assoc-in state [:tiles 3] arr))))
@@ -174,16 +174,16 @@
 
         ;; Top-right pixel (4,0) should be green
         (let [off (* 4 4)]
-          (is (= 0 (aget result (+ off 0))) "R of top-right")
-          (is (= 255 (aget result (+ off 1))) "G of top-right"))
+          (is (= 0 (aget result off)) "R of top-right")
+          (is (= 255 (aget result (inc off))) "G of top-right"))
 
         ;; Bottom-left pixel (0,4) should be blue
         (let [off (* 4 img-w 4)]
-          (is (= 0 (aget result (+ off 0))) "R of bottom-left")
+          (is (= 0 (aget result off)) "R of bottom-left")
           (is (= 255 (aget result (+ off 2))) "B of bottom-left"))
 
         ;; Bottom-right pixel (4,4) should be white
         (let [off (+ (* 4 img-w 4) (* 4 4))]
-          (is (= 255 (aget result (+ off 0))) "R of bottom-right")
-          (is (= 255 (aget result (+ off 1))) "G of bottom-right")
+          (is (= 255 (aget result off)) "R of bottom-right")
+          (is (= 255 (aget result (inc off))) "G of bottom-right")
           (is (= 255 (aget result (+ off 2))) "B of bottom-right"))))))

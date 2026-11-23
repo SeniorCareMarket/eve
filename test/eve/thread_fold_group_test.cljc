@@ -117,7 +117,7 @@
 
 (deftest =>>-on-a-group
   (let [[a seal0 r1 r2 g1 g2] (group)
-        xs (vec (concat (mapcat (fn [i] (repeat (inc (mod i 3)) (+ 1 (* 2 i)))) (range 20)) [60] (range 61 100 2)))]
+        xs (vec (concat (mapcat (fn [i] (repeat (inc (mod i 3)) (inc (* 2 i)))) (range 20)) [60] (range 61 100 2)))]
     (doseq [n [16 nil]]
       (testing (str "*chunk* " n)
         (is (= (vec (->> xs (map sq) (filter big?) (mapcat twice) (dedupe) (take-while odd-x?) (partition-by tens-of)))

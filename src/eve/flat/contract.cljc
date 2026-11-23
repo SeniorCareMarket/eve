@@ -58,11 +58,11 @@
                            :default (aset ba i (unchecked-byte (bit-and v 0xFF)))))
 
 (defn- get-u16 [ba i]
-  (+ (u8 ba i) (* 256 (u8 ba (+ i 1)))))
+  (+ (u8 ba i) (* 256 (u8 ba (inc i)))))
 
 (defn- put-u16! [ba i v]
   (put-u8! ba i v)
-  (put-u8! ba (+ i 1) (quot v 256)))
+  (put-u8! ba (inc i) (quot v 256)))
 
 (defn- norm-u32 [v]
   #?(:clj (bit-and (long v) 0xFFFFFFFF)
@@ -70,14 +70,14 @@
 
 (defn- get-u32 [ba i]
   (+ (u8 ba i)
-     (* 256 (u8 ba (+ i 1)))
+     (* 256 (u8 ba (inc i)))
      (* 65536 (u8 ba (+ i 2)))
      (* 16777216 (u8 ba (+ i 3)))))
 
 (defn- put-u32! [ba i v]
   (let [v (norm-u32 v)]
     (put-u8! ba i v)
-    (put-u8! ba (+ i 1) (quot v 256))
+    (put-u8! ba (inc i) (quot v 256))
     (put-u8! ba (+ i 2) (quot v 65536))
     (put-u8! ba (+ i 3) (quot v 16777216))))
 

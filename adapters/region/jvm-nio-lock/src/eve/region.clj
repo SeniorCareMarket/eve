@@ -141,7 +141,7 @@
       (.getInt (seg-buf segments shift off) (int intra))
       (unchecked-int
        (bit-or (bit-and (.get (seg-buf segments shift off) (int (seg-intra shift off))) 0xFF)
-               (bit-shift-left (bit-and (.get (seg-buf segments shift (+ off 1)) (int (seg-intra shift (+ off 1)))) 0xFF) 8)
+               (bit-shift-left (bit-and (.get (seg-buf segments shift (inc off)) (int (seg-intra shift (inc off)))) 0xFF) 8)
                (bit-shift-left (bit-and (.get (seg-buf segments shift (+ off 2)) (int (seg-intra shift (+ off 2)))) 0xFF) 16)
                (bit-shift-left (bit-and (.get (seg-buf segments shift (+ off 3)) (int (seg-intra shift (+ off 3)))) 0xFF) 24))))))
 
@@ -151,7 +151,7 @@
     (if (<= (+ intra 4) (bit-shift-left 1 shift))
       (.putInt (seg-buf segments shift off) (int intra) (unchecked-int v))
       (do (.put (seg-buf segments shift off) (int (seg-intra shift off)) (unchecked-byte v))
-          (.put (seg-buf segments shift (+ off 1)) (int (seg-intra shift (+ off 1))) (unchecked-byte (unsigned-bit-shift-right v 8)))
+          (.put (seg-buf segments shift (inc off)) (int (seg-intra shift (inc off))) (unchecked-byte (unsigned-bit-shift-right v 8)))
           (.put (seg-buf segments shift (+ off 2)) (int (seg-intra shift (+ off 2))) (unchecked-byte (unsigned-bit-shift-right v 16)))
           (.put (seg-buf segments shift (+ off 3)) (int (seg-intra shift (+ off 3))) (unchecked-byte (unsigned-bit-shift-right v 24)))))))
 

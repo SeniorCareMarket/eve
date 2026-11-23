@@ -53,7 +53,7 @@
       (if (< i nblocks)
         (let [j (* i 4)
               k (bit-or (bit-or (ubyte buf j)
-                                (bit-shift-left (ubyte buf (+ j 1)) 8))
+                                (bit-shift-left (ubyte buf (inc j)) 8))
                         (bit-or (bit-shift-left (ubyte buf (+ j 2)) 16)
                                 (bit-shift-left (ubyte buf (+ j 3)) 24)))
               k (-> k (i32/imul 0xcc9e2d51) (i32/rotl 15) (i32/imul 0x1b873593))
@@ -79,10 +79,10 @@
                                :else    0)
                    :default (case (int r)
                               3 (bit-or (bit-or (ubyte buf t)
-                                                (bit-shift-left (ubyte buf (+ t 1)) 8))
+                                                (bit-shift-left (ubyte buf (inc t)) 8))
                                         (bit-shift-left (ubyte buf (+ t 2)) 16))
                               2 (bit-or (ubyte buf t)
-                                        (bit-shift-left (ubyte buf (+ t 1)) 8))
+                                        (bit-shift-left (ubyte buf (inc t)) 8))
                               1 (ubyte buf t)
                               0))
               h (if (pos? r)
@@ -192,14 +192,14 @@
   (second (mul128 [0 a] [0 b])))
 
 (defn- read-u32le [buf off]
-  (+ (ubyte buf off) (* (ubyte buf (+ off 1)) 256)
+  (+ (ubyte buf off) (* (ubyte buf (inc off)) 256)
      (* (ubyte buf (+ off 2)) 65536) (* (ubyte buf (+ off 3)) 16777216)))
 
 (defn- read-u64le [buf off]
   [(read-u32le buf (+ off 4)) (read-u32le buf off)])
 
 (defn- read-u32be [buf off]
-  (+ (* (ubyte buf off) 16777216) (* (ubyte buf (+ off 1)) 65536)
+  (+ (* (ubyte buf off) 16777216) (* (ubyte buf (inc off)) 65536)
      (* (ubyte buf (+ off 2)) 256) (ubyte buf (+ off 3))))
 
 (defn- bswap32 [x]
@@ -626,7 +626,7 @@
     (dotimes [w 4]
       (let [x (nth limbs w)]
         (put-byte! out (* w 4) (mod (quot x 16777216) 256))
-        (put-byte! out (+ (* w 4) 1) (mod (quot x 65536) 256))
+        (put-byte! out (inc (* w 4)) (mod (quot x 65536) 256))
         (put-byte! out (+ (* w 4) 2) (mod (quot x 256) 256))
         (put-byte! out (+ (* w 4) 3) (mod x 256))))
     out))

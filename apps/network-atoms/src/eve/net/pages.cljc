@@ -112,7 +112,7 @@
    32-byte class walked ~30,000 candidates (vs.tier's -page-cap, the same fix; basilisp, MEASURED 2026-10-26: 217 ms a
    call under cProfile, 28 calls in four chat writes). The answer is the same"
   [bs]
-  (loop [n (min (quot REGION bs) (quot (* 8 (- REGION PAGE-HDR)) (+ (* 8 (+ bs DESC-COL-BYTES)) 1)))]
+  (loop [n (min (quot REGION bs) (quot (* 8 (- REGION PAGE-HDR)) (inc (* 8 (+ bs DESC-COL-BYTES)))))]
     (if (<= (+ (data-off n) (* n bs)) REGION) n (recur (dec n)))))
 
 ;; ── the image's slots (eve.vs THE SEAL IMAGE's per-kind inventory) ───────────────────────────────────────────────

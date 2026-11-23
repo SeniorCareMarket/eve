@@ -58,7 +58,7 @@
        :else (compare-indexed xs ys xl 0))))
   ([xs ys len n]
    (let [d (compare (nth xs n) (nth ys n))]
-     (if (and (zero? d) (< (+ n 1) len))
+     (if (and (zero? d) (< (inc n) len))
        (recur xs ys len (inc n))
        d))))
 

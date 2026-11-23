@@ -178,7 +178,7 @@
      :div-exact (p (fn [] (/ 6 3)))
      :div-double (p (fn [] (/ 1.0 4)))
      :bigdec-lit (p (fn [] #?(:cljs :cljs/no-bigdec :default 1.5M)))
-     :bigdec-add (p (fn [] #?(:cljs :cljs/no-bigdec :default (+ 1.5M 1))))
+     :bigdec-add (p (fn [] #?(:cljs :cljs/no-bigdec :default #_{:splint/disable [style/plus-one]} (+ 1.5M 1))))
      :dbl-add (p (fn [] (+ 0.1 0.2)))
      :dbl-integral (p (fn [] 2.0))
      :=long-double (p (fn [] (= 1 1.0)))

@@ -320,7 +320,7 @@
          (when (< i slots)
            (let [o (* 4 i)]
              (aset bs o b0)
-             (aset bs (+ o 1) b1)
+             (aset bs (inc o) b1)
              (aset bs (+ o 2) b2)
              (aset bs (+ o 3) b3))
            (recur (inc i))))
@@ -453,7 +453,7 @@
         u8 (fn [o] (bit-and (aget raw o) 0xFF))]
     (scan-free (fn [i]
                  (let [o (* i 4)]
-                   (unchecked-int (bit-or (u8 o) (bit-shift-left (u8 (+ o 1)) 8)
+                   (unchecked-int (bit-or (u8 o) (bit-shift-left (u8 (inc o)) 8)
                                           (bit-shift-left (u8 (+ o 2)) 16)
                                           (bit-shift-left (u8 (+ o 3)) 24)))))
                total-bits start-bit)))

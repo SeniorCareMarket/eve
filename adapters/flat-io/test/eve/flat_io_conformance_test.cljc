@@ -111,8 +111,8 @@
           (is (= [0x45 0x56 0x53 0x31] (mapv (fn [i] (fio/u8 c i)) (range 4))) "the magic, EVS1")
           (is (= n (fio/u32 c 8)) "the header's length is the chunk's")
           (is (= bv (mapv (fn [i] (fio/u8 c i)) (range n))) "u8 at every offset")
-          (is (= (mapv (fn [i] (ref-u16 bv i)) (range (- n 1)))
-                 (mapv (fn [i] (fio/u16 c i)) (range (- n 1)))) "u16 at every offset")
+          (is (= (mapv (fn [i] (ref-u16 bv i)) (range (dec n)))
+                 (mapv (fn [i] (fio/u16 c i)) (range (dec n)))) "u16 at every offset")
           (is (= (mapv (fn [i] (ref-u32 bv i)) (range (- n 3)))
                  (mapv (fn [i] (fio/u32 c i)) (range (- n 3)))) "u32 at every offset")
           (is (= (mapv (fn [i] (ref-i32 bv i)) (range (- n 3)))
@@ -151,9 +151,9 @@
                     [[0x80 0x80 0x01] 16384] [[0xFF 0xFF 0x7F] 2097151]
                     [[0x80 0x80 0x80 0x01] 2097152]]]
       (let [c (ch (into [0x99] (conj bv 0x55)))]
-        (is (= [v (+ 1 (count bv))] (fio/varint c 1)) (str "varint " v))
+        (is (= [v (inc (count bv))] (fio/varint c 1)) (str "varint " v))
         (is (= v (fio/varint-v c 1)))
-        (is (= (+ 1 (count bv)) (fio/varint-next c 1)))
+        (is (= (inc (count bv)) (fio/varint-next c 1)))
         (is (= (count bv) (fio/varint-len v)) (str "varint-len " v))))))
 
 (deftest utf8-of-every-width

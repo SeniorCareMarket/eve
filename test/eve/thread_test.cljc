@@ -98,17 +98,17 @@
   (let [k 3
         row (fn [f] (let [[ok? v] (t/attempt f)] (if ok? v [:refused (get-in v [:data :eve.thread/refused])])))]
     (t/with-pool p
-      {:future (row (fn [] @(t/future (+ 1 2))))
+      {:future (row (fn [] @(t/future (inc 2))))
        :future-local (row (fn [] @(t/future (* k 7))))
-       :nested (row (fn [] @(t/future (+ 1 @(t/future (* 2 3))))))
-       :nested-pool-of-1 (row (fn [] (t/with-pool one @(t/future (+ 1 @(t/future (+ 2 @(t/future 3))))))))
+       :nested (row (fn [] @(t/future (inc @(t/future (* 2 3))))))
+       :nested-pool-of-1 (row (fn [] (t/with-pool one @(t/future (inc @(t/future (+ 2 @(t/future 3))))))))
        :nested-task (row (fn [] @(t/submit p 'eve.thread-test/nested [1])))
        :pmap-task (row (fn [] (let [xs (doall (t/pmap collatz-len (range 1 2001)))]
                                 [(count xs) (reduce + xs) (take 5 xs)])))
        :pmap-tfn (row (fn [] (vec (t/pmap (t/tfn [x] (* k x)) [1 2 3 4]))))
        :pmap-2colls (row (fn [] (vec (t/pmap (t/tfn [a b] (+ a b)) [1 2 3] [10 20 30]))))
-       :pcalls (row (fn [] (vec (t/pcalls (t/tfn [] 1) (t/tfn [] (+ k 1))))))
-       :pvalues (row (fn [] (vec (t/pvalues (+ 1 2) (* 3 4) (str "a" "b")))))
+       :pcalls (row (fn [] (vec (t/pcalls (t/tfn [] 1) (t/tfn [] (inc k))))))
+       :pvalues (row (fn [] (vec (t/pvalues (inc 2) (* 3 4) (str "a" "b")))))
        :binding (row (fn [] (binding [*scale* 10] @(t/future *scale*))))
        :binding-task (row (fn [] (binding [*scale* 10] (vec (t/pmap scaled [1 2 3])))))
        :error (row (fn [] (let [[ok? e] (t/attempt (fn [] @(t/submit p boom [7])))]
@@ -393,7 +393,7 @@
           (is (= :closure (refused r))))))
     (testing "forms cross only where the pool allows them (P§10 Q4), task names always"
       (is (= 3 @(t/submit strict three)))
-      (let [r (t/attempt (fn [] @(t/with-pool strict (t/future (+ 1 2)))))]
+      (let [r (t/attempt (fn [] @(t/with-pool strict (t/future (inc 2)))))]
         (if (= :local (form-of strict))
           (is (= [true 3] r))
           (is (= :form (refused r))))))

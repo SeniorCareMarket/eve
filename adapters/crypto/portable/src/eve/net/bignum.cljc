@@ -39,7 +39,7 @@
                     (if (< limb (count v))
                       (let [l (nth v limb)] (if (even? byte-i) (mod l 256) (quot l 256)))
                       0))))]
-    (when (> (count v) (quot (+ len 1) 2))
+    (when (> (count v) (quot (inc len) 2))
       (throw (ex-info "bignum/to-bytes-be: the number does not fit" {:limbs (count v) :len len})))
     bs))
 

@@ -30,7 +30,7 @@
        (testing "and not what it is not"
          (is (not (map? ev))) (is (not (vector? em))) (is (not (seq? ev))) (is (not (list? ev))) (is (not (set? em)))))))
 
-(defn- by-ref [x] (+ x 1))
+(defn- by-ref [x] (inc x))
 
 (deftest sets-compare-in-eves-vocabulary
   (testing "two Eve sets holding a by-reference member (the digest abstains): equal"

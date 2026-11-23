@@ -155,7 +155,7 @@
   (mapv (fn [i]
           (let [o (* 4 i)]
             (i32/i32 (bit-or (nth bs o)
-                             (bit-shift-left (nth bs (+ o 1)) 8)
+                             (bit-shift-left (nth bs (inc o)) 8)
                              (bit-shift-left (nth bs (+ o 2)) 16)
                              (bit-shift-left (nth bs (+ o 3)) 24)))))
         (range 8)))

@@ -111,7 +111,7 @@
                                                   :qty (arr/eve-array sio :int32 xs)})
                                bs (img/image-bytes (img/detach-image v))
                                u32 (fn [o] (bit-or (aget bs o)
-                                                   (bit-shift-left (aget bs (+ o 1)) 8)
+                                                   (bit-shift-left (aget bs (inc o)) 8)
                                                    (bit-shift-left (aget bs (+ o 2)) 16)
                                                    (bit-shift-left (aget bs (+ o 3)) 24)))
                                root (u32 12)]
@@ -140,7 +140,7 @@
                                                   :qty (arr/eve-array sio :int32 xs)})
                                bs (img/image-bytes (img/detach-image v))
                                u32 (fn [o] (bit-or (aget bs o)
-                                                   (bit-shift-left (aget bs (+ o 1)) 8)
+                                                   (bit-shift-left (aget bs (inc o)) 8)
                                                    (bit-shift-left (aget bs (+ o 2)) 16)
                                                    (bit-shift-left (aget bs (+ o 3)) 24)))
                                symtab (u32 20) shapetab (u32 24)

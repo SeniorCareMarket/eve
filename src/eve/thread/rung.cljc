@@ -159,7 +159,7 @@
   (reduce (fn [h u] (i32/imul (bit-xor h (bit-and u 0xFF)) 0x01000193)) (i32/i32 0x811c9dc5) (enc/utf16-units (str s))))
 
 (defn completion-word [] 0)
-(defn descriptor-word [id] (* 4 (+ 1 (mod (fnv id) 511))))
+(defn descriptor-word [id] (* 4 (inc (mod (fnv id) 511))))
 (defn pool-word [pool] (* 4 (+ 512 (mod (fnv pool) 512))))
 
 (defn bell-value

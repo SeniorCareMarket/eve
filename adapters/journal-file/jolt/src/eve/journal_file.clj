@@ -70,7 +70,7 @@
 (defn- put-i32! [b off v]
   (let [v (bit-and v 0xFFFFFFFF)]
     (aset b       off  (unchecked-byte (unsigned-bit-shift-right v 24)))
-    (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 16)))
+    (aset b (inc off) (unchecked-byte (unsigned-bit-shift-right v 16)))
     (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 8)))
     (aset b (+ off 3) (unchecked-byte v)))
   nil)
@@ -81,7 +81,7 @@
   [b off]
   (unchecked-int
    (bit-or (bit-shift-left (bit-and (aget b       off)  0xFF) 24)
-           (bit-shift-left (bit-and (aget b (+ off 1)) 0xFF) 16)
+           (bit-shift-left (bit-and (aget b (inc off)) 0xFF) 16)
            (bit-shift-left (bit-and (aget b (+ off 2)) 0xFF) 8)
            (bit-and (aget b (+ off 3)) 0xFF))))
 

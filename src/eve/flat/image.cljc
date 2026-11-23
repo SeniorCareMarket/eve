@@ -68,7 +68,7 @@
    value (scalar roots are rare and small; exactness over speed)."
   ^long [sio ^long off]
   (let [v (alloc/scalar-block->value sio off)]
-    (+ 1 (alength #?(:clj ^bytes (codec/encode-value sio v) :cljs (codec/encode-value sio v))))))
+    (inc (alength #?(:clj ^bytes (codec/encode-value sio v) :cljs (codec/encode-value sio v))))))
 
 (def ^:const SHORT
   "content-size-in's answer when the block runs past the window it was
@@ -125,7 +125,7 @@
                       SHORT
                       (recur (inc i) nxt)))))))))
       (and map? (== t 3))
-      (let [cnt (u8-at bs (+ base 1))]
+      (let [cnt (u8-at bs (inc base))]
         (loop [i 0 pos (+ base 8)]
           (if (== i cnt)
             (- pos base)
@@ -141,7 +141,7 @@
                       SHORT
                       (recur (inc i) nxt)))))))))
       (and (not map?) (== t 2))
-      (let [cnt (u8-at bs (+ base 1))]
+      (let [cnt (u8-at bs (inc base))]
         (loop [i 0 pos (+ base 12)]
           (if (== i cnt)
             (- pos base)
@@ -187,7 +187,7 @@
         0x12 24
         0x13 12
         0x01 (scalar-content-size sio off)
-        0x1D (let [st (u8-at bs (+ base 1))
+        0x1D (let [st (u8-at bs (inc base))
                    cnt (read-i32-at bs (+ base 4))
                    es (case (int st) (1 2 3) 1 (4 5) 2 (6 7 8) 4 (9 10 11) 8 -1)]
                (if (neg? es) -1 (+ 8 (* cnt es))))
@@ -253,7 +253,7 @@
                 (when (and p (not= p -1)) (add (+ (- vpos base) 7) :val p))
                 (recur (bit-and r (dec r)) (+ vpos 4 vlen)))))))
       (and map? (== t 3))
-      (let [cnt (u8-at bs (+ base 1))]
+      (let [cnt (u8-at bs (inc base))]
         (loop [i 0 pos (+ base 8)]
           (when-not (== i cnt)
             (let [klen (read-i32-at bs pos)

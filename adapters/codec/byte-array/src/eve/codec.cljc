@@ -99,7 +99,7 @@
 
 (defn- read-u32-le  [^bytes b ^long i]
   (bit-or (bit-and (long (aget b i)) 0xFF)
-          (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
+          (bit-shift-left (bit-and (long (aget b (inc i))) 0xFF) 8)
           (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
           (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)))
 
@@ -111,7 +111,7 @@
 
 (defn- read-i64-le  [^bytes b ^long i]
   (bit-or (bit-and (long (aget b i)) 0xFF)
-          (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
+          (bit-shift-left (bit-and (long (aget b (inc i))) 0xFF) 8)
           (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
           (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24)
           (bit-shift-left (bit-and (long (aget b (+ i 4))) 0xFF) 32)
@@ -126,13 +126,13 @@
 
 (defn- put-i32-le! [^bytes b ^long off ^long v]
   (aset b off       (unchecked-byte v))
-  (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
+  (aset b (inc off) (unchecked-byte (unsigned-bit-shift-right v 8)))
   (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
   (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24))))
 
 (defn- put-i64-le! [^bytes b ^long off ^long v]
   (aset b off       (unchecked-byte v))
-  (aset b (+ off 1) (unchecked-byte (unsigned-bit-shift-right v 8)))
+  (aset b (inc off) (unchecked-byte (unsigned-bit-shift-right v 8)))
   (aset b (+ off 2) (unchecked-byte (unsigned-bit-shift-right v 16)))
   (aset b (+ off 3) (unchecked-byte (unsigned-bit-shift-right v 24)))
   (aset b (+ off 4) (unchecked-byte (unsigned-bit-shift-right v 32)))
@@ -248,7 +248,7 @@
                  ns-str  (read-utf8 b 4 ns-len)
                  name-off (+ 4 ns-len)
                  name-len (read-u8 b name-off)
-                 name-str (read-utf8 b (+ name-off 1) name-len)]
+                 name-str (read-utf8 b (inc name-off) name-len)]
              (keyword ns-str name-str))
 
            0x0A  ; TAG-KW-NS-LONG
@@ -267,7 +267,7 @@
                  ns-str  (read-utf8 b 4 ns-len)
                  name-off (+ 4 ns-len)
                  name-len (read-u8 b name-off)
-                 name-str (read-utf8 b (+ name-off 1) name-len)]
+                 name-str (read-utf8 b (inc name-off) name-len)]
              (symbol ns-str name-str))
 
            0x0B  ; TAG-UUID — 16 raw bytes in big-endian order

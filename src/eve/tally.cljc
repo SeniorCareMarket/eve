@@ -143,7 +143,7 @@
   [sio blk pos len]
   (when (and (or (== len 7) (== len 11))
              (== 0xEE (slab/read-u8 sio blk pos))
-             (== 0xDB (slab/read-u8 sio blk (+ pos 1))))
+             (== 0xDB (slab/read-u8 sio blk (inc pos))))
     (let [tag (slab/read-u8 sio blk (+ pos 2))
           k (if (== len 11)
               (when (== tag 0x19) :leaf)

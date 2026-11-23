@@ -37,7 +37,7 @@
   (let [n (alength a)]
     (loop [i 0]
       (cond (> (+ i 4) n) nil
-            (and (= 13 (byte-at a i)) (= 10 (byte-at a (+ i 1))) (= 13 (byte-at a (+ i 2))) (= 10 (byte-at a (+ i 3))))
+            (and (= 13 (byte-at a i)) (= 10 (byte-at a (inc i))) (= 13 (byte-at a (+ i 2))) (= 10 (byte-at a (+ i 3))))
             (+ i 4)
             :else (recur (inc i))))))
 

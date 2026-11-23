@@ -285,7 +285,7 @@
   [^objects segments ^long shift ^long off]
   (unchecked-int
    (bit-or (seg-byte segments shift off)
-           (bit-shift-left (seg-byte segments shift (+ off 1)) 8)
+           (bit-shift-left (seg-byte segments shift (inc off)) 8)
            (bit-shift-left (seg-byte segments shift (+ off 2)) 16)
            (bit-shift-left (seg-byte segments shift (+ off 3)) 24))))
 
@@ -303,7 +303,7 @@
     (if (and (not (zero? (bit-and off 3)))
              (> (+ intra 4) (bit-shift-left 1 shift)))
       (do (seg-put-byte! segments shift off v)
-          (seg-put-byte! segments shift (+ off 1) (unsigned-bit-shift-right v 8))
+          (seg-put-byte! segments shift (inc off) (unsigned-bit-shift-right v 8))
           (seg-put-byte! segments shift (+ off 2) (unsigned-bit-shift-right v 16))
           (seg-put-byte! segments shift (+ off 3) (unsigned-bit-shift-right v 24)))
       (bb-store-i32! (seg-buf segments shift off) (int intra) v))))
@@ -670,7 +670,7 @@
       (if (<= (+ intra 4) (bit-shift-left 1 shift))
         (i32-set-unaligned! (aget segments (int (unsigned-bit-shift-right off shift))) (int intra) (long v))
         (do (seg-put-byte! segments shift off v)
-            (seg-put-byte! segments shift (+ off 1) (unsigned-bit-shift-right (long v) 8))
+            (seg-put-byte! segments shift (inc off) (unsigned-bit-shift-right (long v) 8))
             (seg-put-byte! segments shift (+ off 2) (unsigned-bit-shift-right (long v) 16))
             (seg-put-byte! segments shift (+ off 3) (unsigned-bit-shift-right (long v) 24))))
       nil))

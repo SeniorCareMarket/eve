@@ -127,7 +127,7 @@
   "The schema bytes of field-map, padded so 4 + their length is a multiple of 8."
   [field-map]
   (let [entries (mapv (fn [[k t]] [(enc/utf8-bytes (name k)) (obj-type-kw->code t)]) field-map)
-        len (+ 1 (reduce + 0 (map (fn [[^bytes nb _]] (+ 2 (alength nb))) entries)))
+        len (inc (reduce + 0 (map (fn [[^bytes nb _]] (+ 2 (alength nb))) entries)))
         ^bytes buf (enc/make-bytes (- (align-offset (+ 4 len) 8) 4))]
     (aset buf 0 (unchecked-byte (count entries)))
     (loop [pos 1 es (seq entries)]

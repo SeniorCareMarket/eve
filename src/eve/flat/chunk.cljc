@@ -1656,7 +1656,7 @@
       (let [[n ko] (set-parts ctx off)]
         (platform/hash-unordered (map (fn [i] (elem-at ctx ko i)) (range n))))
       (== t 0x29)
-      (let [_w (width-of ctx) vo (off-at (.-b ctx) (+ off 1) (.-wide? ctx))]
+      (let [_w (width-of ctx) vo (off-at (.-b ctx) (inc off) (.-wide? ctx))]
         (node-hasheq ctx vo))
       :else (rep-hasheq (read-value ctx off)))))
 
@@ -1902,7 +1902,7 @@
                                     (some (fn [e] (equiv-any (elem-at ctx ko i) e)) other) (recur (inc i))
                                     :else false)))))
       (== t 0x29)
-      (node-equiv ctx (off-at (.-b ctx) (+ off 1) (.-wide? ctx)) other)
+      (node-equiv ctx (off-at (.-b ctx) (inc off) (.-wide? ctx)) other)
       :else (= (read-value ctx off) other))))
 
 ;; --- the content digest: SHA-256 over Eve's flat bytes (FORMAT-V1 §8),
@@ -1961,7 +1961,7 @@
             parts (sort d/compare-bytes parts)]
         (emit-magic! out) (fio/buf-u8 out 0xEE) (emit-i32le out n)
         (doseq [p parts] (emit-i32le out (byte-len p)) (fio/buf-bytes out p 0 (byte-len p))))
-      (== t 0x29) (flat-emit! ctx (off-at b (+ off 1) (.-wide? ctx)) out)
+      (== t 0x29) (flat-emit! ctx (off-at b (inc off) (.-wide? ctx)) out)
       (== t 0x2A) (let [[_ p] (fio/varint b (+ off 2))]
                     (flat-emit! ctx (off-at b p (.-wide? ctx)) out))
       :else (let [n (scalar-len b off)]
@@ -2115,7 +2115,7 @@
       (== t 0x27) (->FlatMap ctx off nil nil nil)
       (== t 0x29)
       (let [w (width-of ctx)
-            vo (off-at b (+ off 1) (.-wide? ctx))
+            vo (off-at b (inc off) (.-wide? ctx))
             mo (off-at b (+ off 1 w) (.-wide? ctx))
             inner (read-value ctx vo)]
         #?(:clj (if (satisfies? IAttachMeta inner)
@@ -5223,7 +5223,7 @@
               (range n)))
       (== t 0x29)
       (let [w (width-of ctx)
-            vo (off-at (.-b ctx) (+ off 1) (.-wide? ctx))
+            vo (off-at (.-b ctx) (inc off) (.-wide? ctx))
             mo (off-at (.-b ctx) (+ off 1 w) (.-wide? ctx))
             inner (materialize ctx vo)]
         (if #?(:clj (instance? clojure.lang.IObj inner) :cljs (satisfies? IWithMeta inner))

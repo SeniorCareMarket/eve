@@ -98,7 +98,7 @@
 
 (def seam-input
   "Runs of repeats (dedupe's seams), a long odd prefix, an even (take-while's and halt-when's end), then odds again."
-  (vec (concat (mapcat (fn [i] (repeat (inc (mod i 3)) (+ 1 (* 2 i)))) (range 30)) [40] (range 41 140 2))))
+  (vec (concat (mapcat (fn [i] (repeat (inc (mod i 3)) (inc (* 2 i)))) (range 30)) [40] (range 41 140 2))))
 
 (defn- rows
   "[row =>>-thread ->>-thread]: each registered transducer, alone and in mixed threads. Where ->> gives a transducer no

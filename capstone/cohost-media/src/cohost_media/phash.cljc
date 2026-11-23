@@ -23,7 +23,7 @@
            term 1.0
            acc 0.0]
       (if (< k 30)
-        (recur (inc k) (/ (* (- term) r2) (* (+ (* 2 k) 1) (+ (* 2 k) 2)))
+        (recur (inc k) (/ (* (- term) r2) (* (inc (* 2 k)) (+ (* 2 k) 2)))
                (+ acc term))
         acc))))
 
@@ -31,7 +31,7 @@
   "cos((2x+1)uπ/2N) for u, x in [0, N)"
   (vec (for [u (range N)]
          (vec (for [x (range N)]
-                (cosine (/ (* (+ (* 2 x) 1) u PI) (* 2 N))))))))
+                (cosine (/ (* (inc (* 2 x)) u PI) (* 2 N))))))))
 
 (defn- dct-coefficient [px u v]
   (let [cu (nth cosines u)

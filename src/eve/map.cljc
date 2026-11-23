@@ -1633,7 +1633,7 @@
                   next-pos (+ val-data-pos vlen)
                   result (if (>= vlen 7)
                            (let [m0 (slab/read-u8 sio node-off val-data-pos)
-                                 m1 (slab/read-u8 sio node-off (+ val-data-pos 1))]
+                                 m1 (slab/read-u8 sio node-off (inc val-data-pos))]
                              (if (and (== m0 0xEE) (== m1 0xDB))
                                (let [tag (slab/read-u8 sio node-off (+ val-data-pos 2))]
                                  (if (or (and (>= tag 0x10) (<= tag 0x13))

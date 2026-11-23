@@ -112,13 +112,13 @@
          (let [i (int (+ (long o) (long f)))]
            (long (unchecked-int
                   (bit-or (bit-and (long (aget b i)) 0xFF)
-                          (bit-shift-left (bit-and (long (aget b (+ i 1))) 0xFF) 8)
+                          (bit-shift-left (bit-and (long (aget b (inc i))) 0xFF) 8)
                           (bit-shift-left (bit-and (long (aget b (+ i 2))) 0xFF) 16)
                           (bit-shift-left (bit-and (long (aget b (+ i 3))) 0xFF) 24))))))
        (-sio-write-i32! [_ o f v]
          (let [i (int (+ (long o) (long f))) v (long v)]
            (aset b i (unchecked-byte v))
-           (aset b (+ i 1) (unchecked-byte (bit-shift-right v 8)))
+           (aset b (inc i) (unchecked-byte (bit-shift-right v 8)))
            (aset b (+ i 2) (unchecked-byte (bit-shift-right v 16)))
            (aset b (+ i 3) (unchecked-byte (bit-shift-right v 24)))))
        (-sio-cas-i32! [this o f e dv]
@@ -170,7 +170,7 @@
        (let [i (int off)]
          (long (unchecked-int
                 (bit-or (bit-and (long (aget ba i)) 0xFF)
-                        (bit-shift-left (bit-and (long (aget ba (+ i 1))) 0xFF) 8)
+                        (bit-shift-left (bit-and (long (aget ba (inc i))) 0xFF) 8)
                         (bit-shift-left (bit-and (long (aget ba (+ i 2))) 0xFF) 16)
                         (bit-shift-left (bit-and (long (aget ba (+ i 3))) 0xFF) 24))))))
 
@@ -645,7 +645,7 @@
    contract's exactly; B1.3 reads both tables back through the contract."
        [^bytes ba ^long i ^long v]
        (aset ba (int i) (unchecked-byte v))
-       (aset ba (int (+ i 1)) (unchecked-byte (bit-shift-right v 8)))
+       (aset ba (int (inc i)) (unchecked-byte (bit-shift-right v 8)))
        (aset ba (int (+ i 2)) (unchecked-byte (bit-shift-right v 16)))
        (aset ba (int (+ i 3)) (unchecked-byte (bit-shift-right v 24))))
 

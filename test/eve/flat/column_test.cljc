@@ -294,7 +294,7 @@
            (testing "no copy: writing the column's own bytes moves the view"
              (let [doff (:data-off c)]
                (aset seg (int doff) (byte 0))
-               (aset seg (int (+ doff 1)) (byte 0))
+               (aset seg (int (inc doff)) (byte 0))
                (aset seg (int (+ doff 6)) (unchecked-byte 0xF0))
                (aset seg (int (+ doff 7)) (unchecked-byte 0x3F))
                (is (= 1.0 (.get view 0)))))

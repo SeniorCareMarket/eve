@@ -31,7 +31,7 @@
   "the 16 big-endian words of the 64-byte block at offset o of the padded message"
   [m o]
   (mapv (fn [i] (let [j (+ o (* 4 i))]
-                  (+ (* 16777216 (nth m j)) (* 65536 (nth m (+ j 1))) (* 256 (nth m (+ j 2))) (nth m (+ j 3)))))
+                  (+ (* 16777216 (nth m j)) (* 65536 (nth m (inc j))) (* 256 (nth m (+ j 2))) (nth m (+ j 3)))))
         (range 16)))
 
 (defn- schedule [w16]

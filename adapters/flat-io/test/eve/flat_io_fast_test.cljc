@@ -242,9 +242,9 @@
         (let [v (case (rnd r 4) 0 (rnd r 128) 1 (rnd r 16384) 2 (rnd r 2147483647)
                       3 (+ (* (rnd r 2097152) 4294967296) (rnd r 2147483647)))
               enc (leb128 v)
-              b (ba (+ 1 (count enc)))]
-          (dotimes [k (count enc)] (ba-set! b (+ 1 k) (nth enc k)))
-          (is (= [v (+ 1 (count enc))] (fio/varint (fio/chunk b) 1))))))))
+              b (ba (inc (count enc)))]
+          (dotimes [k (count enc)] (ba-set! b (inc k) (nth enc k)))
+          (is (= [v (inc (count enc))] (fio/varint (fio/chunk b) 1))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; utf8

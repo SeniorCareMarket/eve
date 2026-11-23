@@ -95,21 +95,21 @@
   [b off n]
   (case n
     1 (.fromCharCode js/String (aget b off))
-    2 (.fromCharCode js/String (aget b off) (aget b (+ off 1)))
-    3 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)))
-    4 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)))
-    5 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)))
-    6 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)))
-    7 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)))
-    8 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)))
-    9 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)))
-    10 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)))
-    11 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)))
-    12 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)))
-    13 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)))
-    14 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)) (aget b (+ off 13)))
-    15 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)) (aget b (+ off 13)) (aget b (+ off 14)))
-    16 (.fromCharCode js/String (aget b off) (aget b (+ off 1)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)) (aget b (+ off 13)) (aget b (+ off 14)) (aget b (+ off 15)))
+    2 (.fromCharCode js/String (aget b off) (aget b (inc off)))
+    3 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)))
+    4 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)))
+    5 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)))
+    6 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)))
+    7 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)))
+    8 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)))
+    9 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)))
+    10 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)))
+    11 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)))
+    12 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)))
+    13 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)))
+    14 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)) (aget b (+ off 13)))
+    15 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)) (aget b (+ off 13)) (aget b (+ off 14)))
+    16 (.fromCharCode js/String (aget b off) (aget b (inc off)) (aget b (+ off 2)) (aget b (+ off 3)) (aget b (+ off 4)) (aget b (+ off 5)) (aget b (+ off 6)) (aget b (+ off 7)) (aget b (+ off 8)) (aget b (+ off 9)) (aget b (+ off 10)) (aget b (+ off 11)) (aget b (+ off 12)) (aget b (+ off 13)) (aget b (+ off 14)) (aget b (+ off 15)))
     (let [a (make-array n)]
       (dotimes [i n] (aset a i (aget b (+ off i))))
       (.apply from-char-code nil a))))
@@ -175,7 +175,7 @@
   (let [s (aget b j)]
     (if (not (== s e0)) (if (< s e0) -1 1)
         (if (< cnt 2) 0
-            (let [s (aget b (+ j 1))]
+            (let [s (aget b (inc j))]
               (if (not (== s e1)) (if (< s e1) -1 1)
                   (if (< cnt 3) 0
                       (let [s (aget b (+ j 2))]

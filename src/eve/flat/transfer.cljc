@@ -99,7 +99,7 @@
   [^bytes a ^long pos ^long len]
   (and (== len 11)
        (== (aget a (int pos)) ref-magic-0)
-       (== (aget a (int (+ pos 1))) ref-magic-1)
+       (== (aget a (int (inc pos))) ref-magic-1)
        (== (u8 a (+ pos 2)) 0x15)))
 
 (defn- check-no-reference!

@@ -84,7 +84,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- magic-ok? [^bytes b ^long off]
-  (and (== 0x45 (ub b off)) (== 0x56 (ub b (+ off 1))) (== 0x53 (ub b (+ off 2))) (== 0x31 (ub b (+ off 3)))))
+  (and (== 0x45 (ub b off)) (== 0x56 (ub b (inc off))) (== 0x53 (ub b (+ off 2))) (== 0x31 (ub b (+ off 3)))))
 
 (defn- header-at
   "The §2 header of the chunk starting at off in b, parsed by the frozen contract

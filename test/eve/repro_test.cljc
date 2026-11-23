@@ -34,7 +34,7 @@
              base (ps/resolve-dv! off)
              dv ps/resolved-dv]
          {:type-id (.getUint8 dv base)
-          :subtype (.getUint8 dv (+ base 1))
+          :subtype (.getUint8 dv (inc base))
           :cnt (.getInt32 dv (+ base 4) true)
           :offset off}))))
 

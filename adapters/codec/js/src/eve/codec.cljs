@@ -1231,7 +1231,7 @@
     nil
     (if (and (>= data-len 3)
              (== (.getUint8 dv data-offset) d/DIRECT_MAGIC_0)
-             (== (.getUint8 dv (+ data-offset 1)) d/DIRECT_MAGIC_1))
+             (== (.getUint8 dv (inc data-offset)) d/DIRECT_MAGIC_1))
       (let [tag (.getUint8 dv (+ data-offset 2))
             off data-offset]
         (cond

@@ -48,7 +48,7 @@
     (if (< i 16)
       (let [v (+ (nth o i) c 65535)]
         (recur (inc i) (fdiv v 65536) (conj out (mod v 65536))))
-      (assoc out 0 (+ (nth out 0) (* 38 (- c 1)))))))
+      (assoc out 0 (+ (nth out 0) (* 38 (dec c)))))))
 
 (defn fadd [a b] (mapv + a b))
 (defn fsub [a b] (mapv - a b))

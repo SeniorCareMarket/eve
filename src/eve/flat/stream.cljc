@@ -284,7 +284,7 @@
            (if (== (aget fs (int (+ b 5))) 1)
              ;; EXIT: assign the post-order index
              (let [idx (aget cnt 0)
-                   size (aget fs (int (+ b 1)))]
+                   size (aget fs (int (inc b)))]
                (idx-put seen (unchecked-inc (bit-and off 0xFFFFFFFF)) (+ idx 2))
                (aset cnt 0 (inc idx))
                (aset byt 0 (+ (aget byt 0) size))
@@ -294,7 +294,7 @@
                (let [ci (alloc/decode-class-idx off)]
                  (aset per-class (int ci) (inc (aget per-class (int ci))))))
              ;; ENTER
-             (let [kind (aget fs (int (+ b 1))) p1 (aget fs (int (+ b 2)))
+             (let [kind (aget fs (int (inc b))) p1 (aget fs (int (+ b 2)))
                    p2 (aget fs (int (+ b 3))) p3 (aget fs (int (+ b 4)))
                    ci (alloc/decode-class-idx off)
                    bytes (cursor-fetch cur scratch off kind ci)
@@ -483,7 +483,7 @@
                 off (aget fs (int b))]
             (if (== (aget fs (int (+ b 5))) 1)
               ;; EXIT: index, rewrite, emit
-              (let [kind (aget fs (int (+ b 1))) p1 (aget fs (int (+ b 2)))
+              (let [kind (aget fs (int (inc b))) p1 (aget fs (int (+ b 2)))
                     p2 (aget fs (int (+ b 3))) p3 (aget fs (int (+ b 4)))
                     bytes ^bytes (aget ^objects (aget ^objects (.-cells stack) 1) (int top))
                     ptrs (aget ^objects (aget ^objects (.-cells stack) 2) (int top))
@@ -528,7 +528,7 @@
                             ;; (header-tagged) block — HAMT interiors,
                             ;; strings and scalar blocks skip the
                             ;; descriptor lookup entirely.
-                            dw (when (and use-digests (== (aget fs (int (+ b 1))) 0))
+                            dw (when (and use-digests (== (aget fs (int (inc b))) 0))
                                  (latched-digest sio off))
                             hit (when dw (.get dcache dw))]
                         (if hit
@@ -537,7 +537,7 @@
                           ;; to that index and never descend.
                           (do (idx-put seen k (+ (long hit) 2))
                               (aset deduped 0 (inc (aget deduped 0))))
-                          (let [kind (aget fs (int (+ b 1))) p1 (aget fs (int (+ b 2)))
+                          (let [kind (aget fs (int (inc b))) p1 (aget fs (int (+ b 2)))
                                 p2 (aget fs (int (+ b 3))) p3 (aget fs (int (+ b 4)))
                                 ci (alloc/decode-class-idx off)
                                 bytes0 (cursor-fetch cur scratch off kind ci)

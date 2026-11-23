@@ -308,7 +308,7 @@
                                            (push! (i32 a (+ vpos 7)) 0 0 0 0 (+ vpos 7) ord))
                                          (recur (inc j) (+ vpos 4 vlen)))))))
                                (and (== kind 1) (== t 3))
-                               (let [cnt (u8 a (+ base 1))]
+                               (let [cnt (u8 a (inc base))]
                                  (loop [j 0 pos (+ base 8)]
                                    (when (< j cnt)
                                      (let [klen (i32 a pos) vpos (+ pos 4 klen) vlen (i32 a vpos)]

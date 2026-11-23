@@ -13,7 +13,7 @@
 #_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clje (BEAM/clojerl) pass, a host branch kondo does not model
 (def ^:private MAXL 9223372036854775807)
 #_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clje (BEAM/clojerl) pass, a host branch kondo does not model
-(def ^:private MINL (- -9223372036854775807 1))
+(def ^:private MINL (dec -9223372036854775807))
 
 #?(:cljs
    (deftest js-numbers-have-no-i64-to-overflow
@@ -64,8 +64,8 @@
    (do
      (deftest checked-throws-on-overflow
        (testing "+ - * (and inc, dec, unary minus) throw on i64 overflow"
-         (is (thrown? #?(:jank nil :lpy Exception :glj Exception :default ArithmeticException) (+ MAXL 1)))
-         (is (thrown? #?(:jank nil :lpy Exception :glj Exception :default ArithmeticException) (- MINL 1)))
+         (is (thrown? #?(:jank nil :lpy Exception :glj Exception :default ArithmeticException) (inc MAXL)))
+         (is (thrown? #?(:jank nil :lpy Exception :glj Exception :default ArithmeticException) (dec MINL)))
          (is (thrown? #?(:jank nil :lpy Exception :glj Exception :default ArithmeticException) (* 3037000500 3037000500)))
          (is (thrown? #?(:jank nil :lpy Exception :glj Exception :default ArithmeticException) (- MINL)))
          (is (thrown? #?(:jank nil :lpy Exception :glj Exception :default ArithmeticException) (inc MAXL)))
@@ -74,7 +74,7 @@
          (is (= 5 (+ 2 3)))
          (is (= -1 (- 2 3)))
          (is (= 6 (* 2 3)))
-         (is (= MAXL (+ MAXL 0)))
+         (is (= MAXL MAXL))
          (is (= MINL (* MINL 1)))
          (is (= 0 (* MAXL 0)))
          (is (= MAXL (inc (dec MAXL))))))
