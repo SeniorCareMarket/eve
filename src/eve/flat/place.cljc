@@ -391,7 +391,7 @@
         sizes (long-array n)
         boff (long-array n)
         offs (long-array n)
-        claimed (boolean-array n)
+        claimed (#_{:clj-kondo/ignore [:unresolved-symbol]} boolean-array n)
         order-arr (int-array n)
         rpos (long-array nr)
         rown (long-array nr)

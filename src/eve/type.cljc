@@ -24,7 +24,7 @@
    interns a class rather than a var. Example: (token parser/Variable)."
   [type-name]
   (let [n (namespace type-name)
-        aliases (ns-aliases *ns*)
+        aliases (#_{:clj-kondo/ignore [:unresolved-symbol]} ns-aliases *ns*)
         full-ns (if n (str (or (get-in &env [:ns :requires (symbol n)])
                                (get aliases (symbol n)) n))
                     (str (or (get-in &env [:ns :name]) (ns-name *ns*))))]

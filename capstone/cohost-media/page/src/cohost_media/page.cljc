@@ -244,7 +244,7 @@
 ;; The feed: every step the page sees, newest first
 ;; ---------------------------------------------------------------------------
 
-(defn- clock [] (.toLocaleTimeString (js/Date.) js/undefined (js-obj "hour12" false)))
+(defn- clock [] (.toLocaleTimeString (js/Date.) js/undefined (#_{:clj-kondo/ignore [:unresolved-symbol]} js-obj "hour12" false)))
 
 (defn- feed! [events]
   (when (seq events)

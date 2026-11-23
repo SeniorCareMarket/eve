@@ -3,11 +3,11 @@
             [datascript.core :as d] [datascript.db :as db]
             [me.tonsky.persistent-sorted-set :as pss]))
 (defn attempt [label f]
-  (let [fut (future (try {:ok (f)} (catch Throwable t {:threw (str (type t) " " (.getMessage t))})))
+  (let [fut (#_{:clj-kondo/ignore [:unresolved-symbol]} future (try {:ok (f)} (catch Throwable t {:threw (str (type t) " " (.getMessage t))})))
         res #_{:clj-kondo/ignore [:invalid-arity]} ; deref with a timeout is clojure.core's 3-arity face; this driver runs on CLJ hosts only (contract-test/drivers), the :cljs pass has no seat here
         (deref fut 15000 ::timeout)]
     (println {:case label :res res})
-    (future-cancel fut)))
+    (#_{:clj-kondo/ignore [:unresolved-symbol]} future-cancel fut)))
 (defn -main [& _]
   (let [conn (d/create-conn)]
     (d/transact! conn [{:db/id 1 :name "Ivan" :age 34}

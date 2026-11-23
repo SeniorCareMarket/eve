@@ -694,7 +694,7 @@
    defines sym (the analyzer's defs: Clojure's resolve cannot see them), else
    nil."
   [env sym]
-  (when-let [compiler-env (some-> (find-ns 'cljs.env) (ns-resolve '*compiler*) deref)]
+  (when-let [compiler-env (some-> (find-ns 'cljs.env) (#_{:clj-kondo/ignore [:unresolved-symbol]} ns-resolve '*compiler*) deref)]
     (when-let [d (get-in @compiler-env [:cljs.analyzer/namespaces (-> env :ns :name) :defs sym])]
       {:value (get-in d [:init :val])})))
 

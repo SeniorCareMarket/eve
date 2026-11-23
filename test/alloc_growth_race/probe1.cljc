@@ -17,7 +17,7 @@
         sio (atom/atom-sio a)
         ctx (slab/domain-ctx sio)
         rgn (aget ^objects (.-regions ctx) 0)]
-    (println "FIELDS" (pr-str (keys (bean ctx))))
+    (println "FIELDS" (pr-str (keys (#_{:clj-kondo/ignore [:unresolved-symbol]} bean ctx))))
     (loop [i 0]
       (if (>= i n)
         (println "PROBE-DONE" i)

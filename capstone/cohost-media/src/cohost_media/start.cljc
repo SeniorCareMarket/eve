@@ -87,7 +87,7 @@
 
 (def eve-dir (str (fs/absolutize ".")))
 (def app-dir (str (fs/path eve-dir "capstone" "cohost-media")))
-(def hosts-edn (edn/read-string (slurp (str (fs/path eve-dir "hosts.edn")))))
+(def hosts-edn (edn/read-string (#_{:clj-kondo/ignore [:unresolved-symbol]} slurp (str (fs/path eve-dir "hosts.edn")))))
 
 (def cohost-src
   "cohost's sources: the members load the cohost surface (cohost.pool above all) from them, as the
@@ -758,8 +758,8 @@
   [atoms procs]
   (try
     (write! atoms :control assoc :stop true)
-    (catch Exception e
-      (log "the stop could not be written (" (ex-message e) "); the pools are killed")))
+    (catch #_{:clj-kondo/ignore [:unresolved-symbol]} Exception e
+           (log "the stop could not be written (" (ex-message e) "); the pools are killed")))
   (let [t0 (now)]
     (loop []
       (when (and (< (- (now) t0) 40000)
@@ -950,10 +950,10 @@
     (doseq [f ["main.js" "manifest.edn"]
             :when (fs/exists? (fs/path built f))]
       (fs/copy (fs/path built f) (fs/path dir "js" f)))
-    (spit (str (fs/path dir "config.json"))
-          (str "{\"domain_id\":\"" (:domain-id cfg) "\",\"api_key\":\""
-               (:api-key cfg) "\",\"out\":\"" (:out run) "\",\"window\":\""
-               (:window run) "\"}"))
+    (#_{:clj-kondo/ignore [:unresolved-symbol]} spit (str (fs/path dir "config.json"))
+                                                (str "{\"domain_id\":\"" (:domain-id cfg) "\",\"api_key\":\""
+                                                     (:api-key cfg) "\",\"out\":\"" (:out run) "\",\"window\":\""
+                                                     (:window run) "\"}"))
     (spit (str (fs/path dir "shell.html"))
           (str "<!doctype html><html><head><meta charset=\"utf-8\"><title>cohost-media</title></head>"
                "<body style=\"margin:0\"><iframe src=\"/index.html?check=" page-check "\" "
@@ -1262,7 +1262,7 @@
     (when (and brew? (seq casks))
       (log "setup: brew install --cask" (str/join " " casks))
       (apply p/shell "brew" "install" "--cask" casks))
-    (alter-var-root #'tools (fn [_] (find-tools)))
+    (#_{:clj-kondo/ignore [:unresolved-symbol]} alter-var-root #'tools (fn [_] (find-tools)))
     (let [left (preflight hosts)]
       (if (seq left)
         (log "setup: still missing:\n  " (str/join "\n  " left))
@@ -1444,7 +1444,7 @@
                                        :wall-ms])))
         (when (and (:stay opts) browser? page? (:show-page cfg))
           (log "the page stays up:" (str "http://127.0.0.1:" (:page-port cfg) "/index.html") "— Enter ends the run")
-          (read-line))
+          (#_{:clj-kondo/ignore [:unresolved-symbol]} read-line))
         report)
       (finally
         (stop-members! atoms procs)))))

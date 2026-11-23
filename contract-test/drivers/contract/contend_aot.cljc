@@ -10,7 +10,7 @@
 
 (defn -main [& args]
   (let [code (try (apply contract.ds-contend/-main args) 0
-                  (catch jank.runtime.object_ref e
-                    (println (pr-str {:mark :CONTEND-AOT-ERROR :error (ex-message e) :data (ex-data e)}))
-                    1))]
+                  (catch #_{:clj-kondo/ignore [:unresolved-symbol]} jank.runtime.object_ref e
+                         (println (pr-str {:mark :CONTEND-AOT-ERROR :error (ex-message e) :data (ex-data e)}))
+                         1))]
     (proc/exit! code)))

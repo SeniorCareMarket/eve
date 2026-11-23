@@ -5,6 +5,6 @@
 
 (defn -main [& args]
   (let [code (try (apply contract.one-db/-main args) 0
-                  (catch jank.runtime.object_ref e
-                    (println (pr-str {:mark :ONE-DB-ERROR :error (ex-message e)})) 1))]
+                  (catch #_{:clj-kondo/ignore [:unresolved-symbol]} jank.runtime.object_ref e
+                         (println (pr-str {:mark :ONE-DB-ERROR :error (ex-message e)})) 1))]
     (proc/exit! code)))

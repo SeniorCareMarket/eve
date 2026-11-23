@@ -31,7 +31,7 @@
 (use-fixtures :each in-a-domain-of-its-own)
 
 (host-deftype Point [x y])
-(host-deftype LegacyPoint [x] {:tag example.LegacyPoint})
+(host-deftype LegacyPoint [x] {:tag #_{:clj-kondo/ignore [:unresolved-symbol]} example.LegacyPoint})
 (edt/deftype SharedPoint [^:int32 x y])
 ;; A declared field projection must not be emitted a second time by the
 ;; default-printer machinery (on either plain or slab-backed types).

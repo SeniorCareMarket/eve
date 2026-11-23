@@ -103,7 +103,7 @@
                                 (cb/run-all!))]
                     (js/process.exit (if (pos? fails) 1 0))))
     "perf"  (run (fn [] (.then (require 'eve.perf-suite)
-                               (fn [_] ((resolve 'eve.perf-suite/run!) {:budget-ms (some-> (first args) read-string)})
+                               (fn [_] ((resolve 'eve.perf-suite/run!) {:budget-ms (some-> (first args) #_{:clj-kondo/ignore [:unresolved-symbol]} read-string)})
                                  (js/process.exit 0)))))
     (do (println "usage: -m eve.runner.nbb-main test [ns ...] | bench [name n mode]")
         (js/process.exit 2))))

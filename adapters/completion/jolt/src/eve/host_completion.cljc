@@ -10,13 +10,13 @@
    op a re-rooted var does not reach: eve.core's seq, adapters/coll/jvm, is
    Clojure's.)")
 
-(alter-var-root #'clojure.core/swap!
-                (fn [core]
-                  (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swap a f)))
-                    ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swap a f x)))
-                    ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swap a f x y)))
-                    ([a f x y & more]
-                     (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swap a f x y more))))))
+(#_{:clj-kondo/ignore [:unresolved-symbol]} alter-var-root #'clojure.core/swap!
+                                            (fn [core]
+                                              (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swap a f)))
+                                                ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swap a f x)))
+                                                ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swap a f x y)))
+                                                ([a f x y & more]
+                                                 (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swap a f x y more))))))
 
 (alter-var-root #'clojure.core/reset!
                 (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.reset a v)))))
@@ -221,7 +221,7 @@
 (def ^:private core- clojure.core/-)
 (def ^:private core* clojure.core/*)
 
-(defn checked-add [x y] (if (and (instance? Long x) (instance? Long y)) (Math/addExact x y) (core+ x y)))
+(defn checked-add [x y] (if (and (instance? #_{:clj-kondo/ignore [:unresolved-symbol]} Long x) (instance? Long y)) (Math/addExact x y) (core+ x y)))
 (defn checked-sub [x y] (if (and (instance? Long x) (instance? Long y)) (Math/subtractExact x y) (core- x y)))
 (defn checked-mul [x y] (if (and (instance? Long x) (instance? Long y)) (Math/multiplyExact x y) (core* x y)))
 (defn checked-negate [x] (if (instance? Long x) (Math/negateExact x) (core- x)))

@@ -465,36 +465,36 @@
         (is (= z42-value @x))
         (is (= walked (rows-by-source (:sio (ds-of x)) placed)))))
     (testing "a lost CAS: the loser's written counts unwind whole, the winner's are the walk's"
-      (with-redefs-fn {#'a/try-flush-retires! (fn [_ds] nil)}
-        (fn []
-          (let [dom (a/atom-domain nil)
-                x (a/lookup-or-create-mmap-atom! dom "z4/lost" nil)
-                _ (reset! x {:other 0})
-                attempts (clojure.core/atom 0)
-                placements (clojure.core/atom [])
-                before (tally/placed-write-count)]
-            (binding [tally/*count-at-place* true]
-              (swap! x (fn [_]
-                         (let [n (clojure.core/swap! attempts inc)
-                               sio d/*domain-sio*
-                               placed (place-graph! src-sio graph sio)]
-                           (tally/register-placed! sio (:root placed) (:kinds placed) (:edges placed))
-                           (clojure.core/swap! placements conj placed)
-                           (when (== n 1)
-                             @(future (reset! x {:other 1})))
-                           (reopen sio (:root placed))))))
-            (is (= 2 @attempts) "the first attempt lost its CAS and the swap retried")
-            (is (= (+ before 2) (tally/placed-write-count))
-                "both attempts' holds were written (the loser's, then the winner's)")
-            (is (= z42-value @x))
-            (let [[loser winner] @placements
-                  sio (:sio (ds-of x))]
-              (is (= walked (rows-by-source sio winner)) "the winner's rows are the walk's")
-              (flush! x)
-              (is (not-any? #(alloc/allocated? sio %) (vals (:blocks loser)))
-                  "after the flush, no block of the losing placement is allocated")
-              (is (every? #(alloc/allocated? sio %) (vals (:blocks winner)))
-                  "and every block of the winner still is"))))))
+      (#_{:clj-kondo/ignore [:unresolved-symbol]} with-redefs-fn {#'a/try-flush-retires! (fn [_ds] nil)}
+                                                  (fn []
+                                                    (let [dom (a/atom-domain nil)
+                                                          x (a/lookup-or-create-mmap-atom! dom "z4/lost" nil)
+                                                          _ (reset! x {:other 0})
+                                                          attempts (clojure.core/atom 0)
+                                                          placements (clojure.core/atom [])
+                                                          before (tally/placed-write-count)]
+                                                      (binding [tally/*count-at-place* true]
+                                                        (swap! x (fn [_]
+                                                                   (let [n (clojure.core/swap! attempts inc)
+                                                                         sio d/*domain-sio*
+                                                                         placed (place-graph! src-sio graph sio)]
+                                                                     (tally/register-placed! sio (:root placed) (:kinds placed) (:edges placed))
+                                                                     (clojure.core/swap! placements conj placed)
+                                                                     (when (== n 1)
+                                                                       @(#_{:clj-kondo/ignore [:unresolved-symbol]} future (reset! x {:other 1})))
+                                                                     (reopen sio (:root placed))))))
+                                                      (is (= 2 @attempts) "the first attempt lost its CAS and the swap retried")
+                                                      (is (= (+ before 2) (tally/placed-write-count))
+                                                          "both attempts' holds were written (the loser's, then the winner's)")
+                                                      (is (= z42-value @x))
+                                                      (let [[loser winner] @placements
+                                                            sio (:sio (ds-of x))]
+                                                        (is (= walked (rows-by-source sio winner)) "the winner's rows are the walk's")
+                                                        (flush! x)
+                                                        (is (not-any? #(alloc/allocated? sio %) (vals (:blocks loser)))
+                                                            "after the flush, no block of the losing placement is allocated")
+                                                        (is (every? #(alloc/allocated? sio %) (vals (:blocks winner)))
+                                                            "and every block of the winner still is"))))))
     (testing "a throw after placement: no count is written, nothing is held, the atom is untouched"
       (let [dom (a/atom-domain nil)
             x (a/lookup-or-create-mmap-atom! dom "z4/throw" nil)

@@ -201,7 +201,7 @@
 
 (deftest direct-build-fallback
   (testing "a host array element: written by today's array writer, recorded"
-    (let [v {:data (byte-array (map unchecked-byte [1 2 3])) :n 1}
+    (let [v {:data (#_{:clj-kondo/ignore [:unresolved-symbol]} byte-array (map unchecked-byte [1 2 3])) :n 1}
           b (build/build! v)]
       (is (seq (:fallbacks b)) "the fallback is said")
       (is (some (fn [f] (= :host-array (:reason f))) (:fallbacks b)))

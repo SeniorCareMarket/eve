@@ -162,7 +162,7 @@
           files (source-files root "src")
           stats (atom {:read 0 :scanned 0})]
       (doseq [f files]
-        (let [{:keys [forms]} (read-forms f)
+        (let [{:keys [forms error]} (read-forms f)
               path (rel-path root f)]
           (if error
             (do (swap! stats update :scanned inc)

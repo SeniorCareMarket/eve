@@ -21,7 +21,7 @@
    lexicographically (Eve's canonical order); the toy uses fixed-width ints so byte order
    and numeric order agree."
   [k]
-  (let [b (byte-array 4)]
+  (let [b (#_{:clj-kondo/ignore [:unresolved-symbol]} byte-array 4)]
     (aset b 0 (unchecked-byte (bit-shift-right k 24)))
     (aset b 1 (unchecked-byte (bit-shift-right k 16)))
     (aset b 2 (unchecked-byte (bit-shift-right k 8)))
@@ -85,7 +85,7 @@
           (let [[kl p] (read-varint b p)
                 k (Arrays/copyOfRange b (int p) (int (+ p kl)))
                 [vl p] (read-varint b (+ p kl))
-                v (String. b (int p) (int vl) "UTF-8")]
+                v (#_{:clj-kondo/ignore [:unresolved-symbol]} String. b (int p) (int vl) "UTF-8")]
             (recur (inc i) (+ p vl) (conj entries [k v]))))))))
 
 (defn toy-lookup

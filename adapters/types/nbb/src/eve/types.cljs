@@ -22,7 +22,7 @@
 ;; future nbb supplies itself is never shadowed.
 (doseq [tag '[number string object function bigint undefined]]
   (when-not (resolve tag)
-    (intern 'clojure.core tag tag)))
+    (#_{:clj-kondo/ignore [:unresolved-symbol]} intern 'clojure.core tag tag)))
 
 ;; F-NBB-PRWRITER: ClojureScript's writer helpers — cljs.core/pr-writer
 ;; and cljs.core/pr-sequential-writer — are private in compiled

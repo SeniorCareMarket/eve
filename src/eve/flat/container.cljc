@@ -189,7 +189,7 @@
   (let [chunks (:chunks container)
         dir (directory-bytes container)
         dir-offset (reduce + (map (fn [b] (alength b)) chunks))
-        tail (byte-array tail-size)]
+        tail (#_{:clj-kondo/ignore [:unresolved-symbol]} byte-array tail-size)]
     (wu64 tail 0 dir-offset)
     (enc/arraycopy (enc/utf8-bytes "EVS1") 0 tail 8 4)
     (concat-bytes (conj (vec chunks) dir tail))))

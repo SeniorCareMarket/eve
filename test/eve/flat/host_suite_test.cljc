@@ -20,7 +20,7 @@
   "Every eve.flat.* test namespace named by the requirement manifest
    (log rows and whole-suite kinds name no namespace)."
   []
-  (let [m (edn/read-string (slurp "test/eve/flat/requirements.edn"))]
+  (let [m (edn/read-string (#_{:clj-kondo/ignore [:unresolved-symbol]} slurp "test/eve/flat/requirements.edn"))]
     (into #{}
           (comp (map val)
                 (remove #(#{:log :suite} (:kind %)))

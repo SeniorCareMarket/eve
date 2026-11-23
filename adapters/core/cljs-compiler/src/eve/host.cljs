@@ -13,7 +13,7 @@
    over the same values; readers go through host aget + masking
    (hamt_util's ubyte), so it is indistinguishable to every caller."
   [values]
-  (js/Uint8Array. (into-array values)))
+  (js/Uint8Array. (#_{:clj-kondo/ignore [:unresolved-symbol]} into-array values)))
 
 (defn js-byte-array
   "Runtime half of the byte-array routing (the macro side,

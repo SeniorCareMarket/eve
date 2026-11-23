@@ -10,7 +10,7 @@
 (deftest get-slash-answers-the-page
   (let [dir (str (System/getProperty "java.io.tmpdir") "/eve-net-local-" (rand-int 1000000000))
         _ (.mkdirs (java.io.File. (str dir "/js")))
-        _ (spit (str dir "/index.html") "<!doctype html><title>eve local network</title>")
+        _ (#_{:clj-kondo/ignore [:unresolved-symbol]} spit (str dir "/index.html") "<!doctype html><title>eve local network</title>")
         _ (spit (str dir "/js/main.js") "console.log(1)")
         h (node/static-handler dir)
         srv (hs/serve! {:port 0} (fn [req] (or (h req) {:status 404 :headers {} :body "no"})))

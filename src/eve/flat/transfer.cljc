@@ -342,7 +342,7 @@
                     -1)
                 -1)]
     (cond (pos? exact) (if (<= exact 24)
-                         (let [nb (byte-array (int exact))]
+                         (let [nb (#_{:clj-kondo/ignore [:unresolved-symbol]} byte-array (int exact))]
                            (enc/arraycopy prefix 0 nb 0 (int (min (alength prefix) exact)))
                            nb)
                          (alloc/-sio-read-bytes sio old 0 exact))
@@ -554,7 +554,7 @@
    cycle is broken here, at the verb. If the stream namespace cannot
    be resolved (it always can in this tree), transfer! falls back to
    the detach+zip path below."
-  (delay (try (requiring-resolve 'eve.flat.stream/stream-transfer!)
+  (delay (try (#_{:clj-kondo/ignore [:unresolved-symbol]} requiring-resolve 'eve.flat.stream/stream-transfer!)
               (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))))
 
 (defn transfer!

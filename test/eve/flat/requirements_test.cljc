@@ -112,7 +112,7 @@
 
 (deftest api-surface
   (doseq [[sym arity] api-arities]
-    (let [v (ns-resolve 'eve.flat sym)]
+    (let [v (#_{:clj-kondo/ignore [:unresolved-symbol]} ns-resolve 'eve.flat sym)]
       (is (some? v) (str "eve.flat/" sym " does not exist"))
       (when v
         (is (fn? @v) (str "eve.flat/" sym " is not a function"))

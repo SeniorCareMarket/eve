@@ -15,10 +15,10 @@
           run (fn [label q]
                 (try
                   (println {:probe label :value (vec (sort (d/q q db)))})
-                  (catch StackOverflowError e
-                    (println {:probe label :result :overflow
-                              :frames (vec (map (fn [f] (str (.getClassName f) "." (.getMethodName f)))
-                                                (take 24 (.getStackTrace e))))}))
+                  (catch #_{:clj-kondo/ignore [:unresolved-symbol]} StackOverflowError e
+                         (println {:probe label :result :overflow
+                                   :frames (vec (map (fn [f] (str (.getClassName f) "." (.getMethodName f)))
+                                                     (take 24 (.getStackTrace e))))}))
                   (catch Throwable t
                     (println {:probe label :threw (str (type t) " " (.getMessage t))}))))]
       (run :names '[:find [?n ...] :where [?e :name ?n]])

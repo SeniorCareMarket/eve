@@ -367,6 +367,12 @@
         ;; The macro also emits (defn TypeName-offset [inst] ...)
         ;; — the field-offset accessor eve.sorted and the flat
         ;; machinery call (deftype-proto.macros, the sio emission).
+        ;; (def TypeName-type-key <qualified-key>) is emitted by
+        ;; the sio registration form (deftype-proto.sio); eve.map's
+        ;; eve-hash-map? names EveHashMap-type-key.
+        type-key-node (api/list-node
+                       [(api/token-node 'declare)
+                        (api/token-node (symbol (str (api/sexpr type-name) "-type-key")))])
         offset-node (api/list-node
                      [(api/token-node 'declare)
                       (api/token-node (symbol (str (api/sexpr type-name) "-offset")))])
@@ -389,5 +395,5 @@
                                                  binds))
                         opts])))]
     {:node (api/list-node
-            (into [(api/token-node 'do) deftype-node ctor-node pred-node type-id-node offset-node]
+            (into [(api/token-node 'do) deftype-node ctor-node pred-node type-id-node offset-node flat-node from-header-node type-key-node]
                   (when opts-node [opts-node])))}))

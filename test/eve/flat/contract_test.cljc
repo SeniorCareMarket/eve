@@ -20,7 +20,7 @@
                      :nsym 1 :nshape 0 :symtab 8192 :shapetab 12288 :typetab 16384}
                     {:kind :directory :version 1 :flags 32768 :length 1048576 :root 0
                      :nsym 0 :nshape 0 :symtab 0 :shapetab 0 :typetab 0}]]
-      (let [ba (byte-array contract/header-size)]
+      (let [ba (#_{:clj-kondo/ignore [:unresolved-symbol]} byte-array contract/header-size)]
         (contract/write-header! ba 0 fields)
         (is (= fields (contract/read-header ba 0))))))
   (testing "the magic is EVS1 and a wrong magic is refused by name"

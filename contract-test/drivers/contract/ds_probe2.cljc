@@ -14,8 +14,8 @@
           run (fn [label thunk]
                 (try
                   (println {:probe label :value (thunk)})
-                  (catch StackOverflowError _
-                    (println {:probe label :result :overflow}))
+                  (catch #_{:clj-kondo/ignore [:unresolved-symbol]} StackOverflowError _
+                         (println {:probe label :result :overflow}))
                   (catch Throwable t
                     (println {:probe label :threw (str (type t) " " (.getMessage t))}))))]
       (run :datoms-avet-all #(vec (map (fn [dt] [(:e dt) (:a dt) (:v dt)]) (d/datoms db :avet))))

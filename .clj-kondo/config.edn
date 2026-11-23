@@ -86,52 +86,7 @@
                         eve.jvm-set-test/with-heap-slab hooks.with-heap-slab/with-heap-slab
                         eve.jvm-conformance-test/with-heap-slab hooks.with-heap-slab/with-heap-slab
                         eve.jvm-fuzz-test/with-heap-slab hooks.with-heap-slab/with-heap-slab}}
- ;; Per-namespace unresolved-symbol exclusions: names that are a
- ;; host's own core faces, visible on the pass kondo assigns
- ;; them to but with no seat in this repo's analysis (CLJ-only
- ;; drivers read on the :cljs pass, cljs seats naming CLJ core,
- ;; and the like). Each entry names its file's situation; the
- ;; general host-name exclusions live in :linters below.
- :config-in {:ns {;; CLJ-only contract drivers read on the :cljs pass
-                  contract.ds-bisect {:linters {:unresolved-symbol {:exclude [future future-cancel]}}}
-                  contract.ds-probe {:linters {:unresolved-symbol {:exclude [StackOverflowError]}}}
-                  contract.ds-probe2 {:linters {:unresolved-symbol {:exclude [StackOverflowError]}}}
-                  ;; the jank host's catch class, named on the :jank branch
-                  contract.contend-aot {:linters {:unresolved-symbol {:exclude [jank]}}}
-                  contract.one-aot {:linters {:unresolved-symbol {:exclude [jank]}}}
-                  contract.one-db-aot {:linters {:unresolved-symbol {:exclude [jank]}}}
-                  ;; the capstone boot seat: CLJ core faces on its :clj
-                  ;; branches, read on the :cljs pass
-                  cohost-media.start {:linters {:unresolved-symbol {:exclude [slurp spit alter-var-root read-line Exception]}}}
-                  cohost-media.page {:linters {:unresolved-symbol {:exclude [js-obj]}}}
-                  ;; single-seat files naming their host's core faces
-                  eve.net.local-node-test {:linters {:unresolved-symbol {:exclude [spit]}}}
-                  eve.flat.host-suite-test {:linters {:unresolved-symbol {:exclude [slurp]}}}
-                  eve.thread-rotation {:linters {:unresolved-symbol {:exclude [read-string]}}}
-                  eve.runner.nbb-main {:linters {:unresolved-symbol {:exclude [read-string]}}}
-                  eve.http-server {:linters {:unresolved-symbol {:exclude [read-string]}}}
-                  eve.host-completion {:linters {:unresolved-symbol {:exclude [alter-var-root Long]}}}
-                  alloc-growth-race.probe1 {:linters {:unresolved-symbol {:exclude [bean]}}}
-                  ;; merged namespaces: the name is used by ONE seat's
-                  ;; file and is inert in the others
-                  eve.types {:linters {:unresolved-symbol {:exclude [intern]}}}
-                  eve.types-js {:linters {:unresolved-symbol {:exclude [ns-resolve]}}}
-                  eve.core {:linters {:unresolved-symbol {:exclude [IReversible__rseq]}}}
-                  eve.host {:linters {:unresolved-symbol {:exclude [into-array]}}}
-                  ;; shared flat code naming the host face's array
-                  ;; constructors and CLJ core on the :cljs pass
-                  eve.flat.transfer {:linters {:unresolved-symbol {:exclude [requiring-resolve byte-array]}}}
-                  eve.flat.freeze {:linters {:unresolved-symbol {:exclude [IndexOutOfBoundsException]}}}
-                  eve.flat.place {:linters {:unresolved-symbol {:exclude [boolean-array]}}}
-                  eve.flat.container {:linters {:unresolved-symbol {:exclude [byte-array]}}}
-                  eve.flat.build-test {:linters {:unresolved-symbol {:exclude [byte-array]}}}
-                  eve.flat.container-test {:linters {:unresolved-symbol {:exclude [byte-array String]}}}
-                  eve.flat.contract-test {:linters {:unresolved-symbol {:exclude [byte-array]}}}
-                  eve.flat.image-test {:linters {:unresolved-symbol {:exclude [byte-array class bytes? format]}}}
-                  eve.flat.requirements-test {:linters {:unresolved-symbol {:exclude [ns-resolve]}}}
-                  eve.flat.tally-count-test {:linters {:unresolved-symbol {:exclude [with-redefs-fn future]}}}
-                  ;; example.LegacyPoint is a data tag in a :tag map
-                  eve.type-io-test {:linters {:unresolved-symbol {:exclude [example]}}}}}
+
  :linters {:unresolved-symbol {:exclude [sio__ offset__ Throwable Thread
                                          Duration List dynamic java
                                          clojure

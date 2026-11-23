@@ -785,7 +785,7 @@
 (defn- based-assoc-n [base edits tail n bc mm i v]
   (cond
     (or (< i 0) (> i n))
-    (throw (IndexOutOfBoundsException. (str i)))
+    (throw (#_{:clj-kondo/ignore [:unresolved-symbol]} IndexOutOfBoundsException. (str i)))
     (< i bc)
     (BasedValue. base (assoc edits i v) tail n bc mm)
     :else

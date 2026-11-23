@@ -89,7 +89,7 @@
 (defn -main [& [cmd base rid order n c]]
   (let [[ok? e] (t/attempt (fn []
                              (case cmd
-                               "member" (member base rid order (read-string (str n)) (read-string (str c))))))]
+                               "member" (member base rid order (#_{:clj-kondo/ignore [:unresolved-symbol]} read-string (str n)) (read-string (str c))))))]
     (when-not ok? (say {:step :error :cmd cmd :rid rid :error e}))
     (t/shutdown-default-pools!)
     (exit! (if ok? 0 1))))

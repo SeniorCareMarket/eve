@@ -61,7 +61,7 @@
    object. Dispatch through the protocol when the value carries a
    -rseq impl; squint's own values keep squint's rseq."
   [x]
-  (if (and (some? x) (some? (aget x IReversible__rseq)))
+  (if (and (some? x) (some? (aget x #_{:clj-kondo/ignore [:unresolved-symbol]} IReversible__rseq)))
     ((aget x IReversible__rseq) x)
     (cljs.core/rseq x)))
 (def reduce-kv cljs.core/reduce-kv)

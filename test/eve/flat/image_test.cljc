@@ -92,7 +92,7 @@
       (is (frozen-throw? #(alloc/-sio-write-u8! view off 0 1)) "write-u8!")
       (is (frozen-throw? #(alloc/-sio-write-u16! view off 0 1)) "write-u16!")
       (is (frozen-throw? #(alloc/-sio-write-i32! view off 0 1)) "write-i32!")
-      (is (frozen-throw? #(alloc/-sio-write-bytes! view off 0 (byte-array 4))) "write-bytes!")
+      (is (frozen-throw? #(alloc/-sio-write-bytes! view off 0 (#_{:clj-kondo/ignore [:unresolved-symbol]} byte-array 4))) "write-bytes!")
       (is (frozen-throw? #(alloc/-sio-cas-i32! view off 0 0 1)) "cas-i32!")
       (is (frozen-throw? #(alloc/-sio-copy-block! view off 0 off 4 4)) "copy-block!"))
     (testing "and a write through a value read from the view is refused (assoc allocates)"
@@ -161,7 +161,7 @@
     (testing "a user eve-deftype with all four field classes"
       (let [[iv _ v] (through-image (fn [sio] (->ZItem sio 7 0 {:k [1 2 3] :s "serialized"}
                                                        (->ZTag sio 42 "the tag"))))]
-        (is (= (class v) (class iv)) "the same class reads the image — no sister needed on this host")
+        (is (= (#_{:clj-kondo/ignore [:unresolved-symbol]} class v) (class iv)) "the same class reads the image — no sister needed on this host")
         (is (and (= 7 (:n iv)) (= 0 (:hits iv))
                  (= {:k [1 2 3] :s "serialized"} (d/eve->clj (:payload iv)))
                  (some? (:tag iv)) (= 42 (:id (:tag iv))) (= 7 (count iv)))
@@ -192,7 +192,7 @@
     (let [plain {:a [1 2 3] :b {:c "x"}}
           v (in-domain (fn [sio] (build-plain sio plain)))
           bs (img/detach v)]
-      (is (bytes? bs) "a value detaches to one byte array")
+      (is (#_{:clj-kondo/ignore [:unresolved-symbol]} bytes? bs) "a value detaches to one byte array")
       (is (= plain (d/eve->clj (img/image-value (img/open-image bs))))
           "and the bytes open and read back")
       ;; byte-content equality: clojure.core/= on byte arrays is reference
@@ -406,6 +406,6 @@
             t-slab (bench-min-ms 3 7 #(read v reads))
             t-img (bench-min-ms 3 7 #(read iv reads))
             ratio (/ t-img (max 0.01 t-slab))]
-        (println (format "  Z1.7 %s: slab %.2f ms, image %.2f ms, ratio %.2f" label t-slab t-img ratio))
+        (println (#_{:clj-kondo/ignore [:unresolved-symbol]} format "  Z1.7 %s: slab %.2f ms, image %.2f ms, ratio %.2f" label t-slab t-img ratio))
         (is (<= ratio 1.2)
             (str label ": image reads within 1.2x of slab reads (was " (format "%.2f" ratio) "x)"))))))

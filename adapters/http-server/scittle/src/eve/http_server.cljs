@@ -202,7 +202,7 @@
                                          ;; indistinguishable from a clean re-poll — the chain's .catch
                                          ;; retries the poll either way).
                                          (try
-                                           (let [e  (read-string text)
+                                           (let [e  (#_{:clj-kondo/ignore [:unresolved-symbol]} read-string text)
                                                  id (:id e)]
                                              (dbg! "poll: event parsed id=" id " url=" (:url e))
                                              (swap! endpoint assoc-in [:pending id]
