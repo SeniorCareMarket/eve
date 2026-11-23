@@ -43,7 +43,8 @@
       (when-not (re-matches #"[0-9]+" digits)
         (throw (ex-info "Expected a signed 64-bit integer" {:value s})))
       (let [limit (if neg? "9223372036854775808" "9223372036854775807")
-            digits (str/replace digits #"^0+(?=.)" "")]
+            digits (let [t (str/replace digits #"^0+" "")] ; keep one digit; no regex lookahead (glj: Go RE2 has none)
+                     (if (= "" t) "0" t))]
         (when (or (> (count digits) 19)
                   (and (= (count digits) 19) (pos? (compare digits limit))))
           (throw (ex-info "64-bit integer out of range" {:value s})))
