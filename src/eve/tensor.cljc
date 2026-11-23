@@ -304,12 +304,6 @@
                                  (subvec st (inc axis))))]
     (->ndbuffer-in t new-offset (-data t) new-shape new-strides)))
 
-(defn- strided-read
-  "Read element at flat iteration index using stride translation.
-   Uses direct typed-view access (no nth protocol dispatch)."
-  [data-arr shape strides elem-offset flat-iter-idx]
-  (e/nth data-arr (flat-idx->multi shape strides elem-offset flat-iter-idx)))
-
 ;;-----------------------------------------------------------------------------
 ;; Bulk operations
 ;;-----------------------------------------------------------------------------

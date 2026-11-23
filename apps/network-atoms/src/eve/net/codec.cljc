@@ -76,7 +76,6 @@
 (defn- xor-bytes [x y] (mapv (fn [p q] (bit-xor p q)) x y))
 (defn- prefix? [bs p] (and (>= (count bs) (count p)) (= (vec p) (subvec (vec bs) 0 (count p)))))
 (defn- u16le [x] [(mod x 256) (mod (quot x 256) 256)])
-(defn- read-u16le [bs i] (+ (nth bs i) (* 256 (nth bs (inc i)))))
 (defn- popcount [x] (loop [x x c 0] (if (zero? x) c (recur (quot x 2) (+ c (mod x 2))))))   ;; x below 2^31
 (defn- bit? [x i] (= 1 (mod (quot x (nth POW2 i)) 2)))                                      ;; x below 2^31
 

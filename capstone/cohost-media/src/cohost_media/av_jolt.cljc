@@ -211,8 +211,6 @@
 (def ^:private S-RATE (off stream :avg-frame-rate))
 (def ^:private C-PB (off format-context :pb))
 (def ^:private C-STREAMS (off format-context :streams))
-(def ^:private C-NB-STREAMS (off format-context :nb-streams))
-
 ;; ---------------------------------------------------------------------------
 ;; Helpers
 ;; ---------------------------------------------------------------------------

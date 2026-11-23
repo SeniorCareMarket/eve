@@ -355,12 +355,6 @@
 
 ;; --- EVE binary format — serializer (primitive types only) ---
 
-(defn- bytes-header-tag
-  "Create a 3-byte prefix [0xEE 0xDB tag]. Only used for variable-size types
-   that need a fresh array. Fixed-size types use cached constants or put-* helpers."
-  [tag]
-  (doto (byte-array 3) (aset 0 MAGIC-0) (aset 1 MAGIC-1) (aset 2 (unchecked-byte tag))))
-
 (declare value->eve-bytes)
 
 ;; --- The numbers past a fixed width (§8) and references (§9) ---

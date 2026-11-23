@@ -15,16 +15,6 @@
 ;; Bulk extraction: the host array of the elements (IBulkAccess, else nth)
 ;;-----------------------------------------------------------------------------
 
-(defn- bulk-doubles
-  "Extract all elements as a double[] — fast path via IBulkAccess,
-   fallback via nth."
-  [col]
-  (or (d/-as-double-array col)
-      (let [n (e/count col)
-            out (double-array n)]
-        (dotimes [i n] (aset out i (double (e/nth col i))))
-        out)))
-
 (defn- bulk-ints
   "Extract all elements as an int[] — fast path via IBulkAccess,
    fallback via nth."

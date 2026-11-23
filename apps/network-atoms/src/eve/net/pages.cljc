@@ -247,8 +247,6 @@
 (defn- slot-core "a 64-byte slot: the child's page CID, its offset, VERSION 3, ACTIVE | its bits, its image" [cid off bits img]
   (b/join [cid (u48 off) [VERSION 0] (u32 (+ F-ACTIVE bits)) (zeros 4) img]))
 
-(defn- put-at [v off bs] (into (into (subvec v 0 off) bs) (subvec v (+ off (count bs)))))
-
 (defn- block-bytes
   "[the block of entry e at off in its page of block size bs, its own seal-equality bits]: its own header (type CID,
    own offset, VERSION 3, FLAGS, SHA, the attested band or the root's stamp) and its body, every slot the child's core"

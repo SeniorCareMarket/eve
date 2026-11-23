@@ -57,12 +57,6 @@
     (aset bs (+ i 3) (unchecked-byte (bit-shift-right v 24)))
     nil))
 
-(defn- put-u16-at! [bs ^long i ^long v]
-  (let [i (int i)]
-    (aset bs i (unchecked-byte v))
-    (aset bs (inc i) (unchecked-byte (bit-shift-right v 8)))
-    nil))
-
 (defn- align4 ^long [^long n] (bit-and (+ n 3) (bit-not 3)))
 (defn- align8 ^long [^long n] (bit-and (+ n 7) (bit-not 7)))
 

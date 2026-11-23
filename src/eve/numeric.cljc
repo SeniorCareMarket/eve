@@ -156,8 +156,6 @@
 (def ^:private LONG-MIN "-9223372036854775808")
 (def ^:private LONG-MAX "9223372036854775807")
 (def ^:private LONG-MIN-N -9223372036854775808)
-(def ^:private LONG-MAX-N 9223372036854775807)
-
 (defn- digit-abs-cmp
   "Compare the decimal absolute values of two integer strings (optional sign)."
   [a b]
@@ -186,11 +184,6 @@
       (<= (digit-abs-cmp t (subs LONG-MIN 1)) 0)
       (<= (digit-abs-cmp t LONG-MAX) 0))))
 
-(defn- parse-long-str [s]
-  #?(:cljs (js/parseInt s 10)
-     :default (let [t (if (and (pos? (count s)) (= (first s) \+)) (subs s 1) (str s))]
-                #?(:lpy (python/int t) :clje (read-string t) :jank (read-string t) :cljr (Int64/Parse t) :default (Long/parseLong t)))))
-
 ;; ---------------------------------------------------------------------------
 ;; Host-specific exact integer (the value inside a bigint).
 ;; ---------------------------------------------------------------------------
@@ -199,8 +192,6 @@
            (def ^:private BI-0 (js/BigInt 0))
            (def ^:private BI-1 (js/BigInt 1))
            (def ^:private BI-10 (js/BigInt 10))
-           (def ^:private BI-32 (js/BigInt 32))
-           (def ^:private BI-MASK32 (js/BigInt 0xffffffff))
            (def ^:private BI-MOD32 (js/BigInt 4294967296))
            (def ^:private BI-LONG-MIN (js/BigInt LONG-MIN))
            (def ^:private BI-LONG-MAX (js/BigInt LONG-MAX))
@@ -980,9 +971,6 @@
         ub (if (= s sb) ub (bi* ub (bi-pow10 (- s sb))))]
     (make-bigdec (bi+ ua ub) s)))
 
-(defn- dec-sub [a b]
-  (dec-add a (make-bigdec (bi-neg (unwrap-bi (unscaled-value b))) (scale b))))
-
 (defn- dec-mul [a b]
   (make-bigdec (bi* (unwrap-bi (unscaled-value a)) (unwrap-bi (unscaled-value b)))
                (clojure.core/+ (scale a) (scale b))))
@@ -1040,7 +1028,6 @@
       :div (reduce-ratio (bi* na db) (bi* da nb)))))
 
 (defn- int-add [a b] (wrap-bigint (bi+ (unwrap-bi (bigint a)) (unwrap-bi (bigint b)))))
-(defn- int-sub [a b] (wrap-bigint (bi- (unwrap-bi (bigint a)) (unwrap-bi (bigint b)))))
 (defn- int-mul [a b] (wrap-bigint (bi* (unwrap-bi (bigint a)) (unwrap-bi (bigint b)))))
 
 (defn- as-ratio [x]
@@ -1602,14 +1589,6 @@
               :clje (binding [*data-readers* (merge default-data-readers readers)]
                       (read-string rewritten))
               :default (edn/read-string (assoc opts :readers readers) rewritten))))))))
-
-(defn- write-number-to [w x]
-  #?(:cljs (enc/write! w (pr-number x))
-     :clje (enc/write! w (pr-number x))
-     :jank (enc/write! w (pr-number x))
-     :lpy (enc/write! w (pr-number x))
-     :clj (.write ^java.io.Writer w ^String (pr-number x))
-     :default nil))
 
 (defonce ^:private installed* (atom false))
 

@@ -145,11 +145,6 @@
   [region]
   (slab/region-load-i32 region d/SLAB_HDR_TOTAL_BLOCKS))
 
-(defn- data-region-offset
-  "Read the data region byte offset from the .slab6 header."
-  [region]
-  (slab/region-load-i32 region d/SLAB_HDR_DATA_OFFSET))
-
 (defn current-data-size
   "Read the current data-region size from the .slab6 header."
   [region]

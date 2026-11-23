@@ -36,18 +36,6 @@
              (:num-tests result) " tests.\n"
              "Shrunk: " (pr-str (get-in result [:shrunk :smallest]))))))
 
-(defn- assert-equivalent
-  "Assert two collections are equivalent in count, equality, hash, and contents."
-  [eve-coll ref-coll]
-  (is (= (count eve-coll) (count ref-coll))
-      (str "count mismatch: eve=" (count eve-coll) " ref=" (count ref-coll)))
-  (is (= eve-coll ref-coll)
-      (str "eve != ref: eve=" (pr-str eve-coll) " ref=" (pr-str ref-coll)))
-  (is (= ref-coll eve-coll)
-      (str "ref != eve: ref=" (pr-str ref-coll) " eve=" (pr-str eve-coll)))
-  (is (= (hash eve-coll) (hash ref-coll))
-      (str "hash mismatch: eve=" (hash eve-coll) " ref=" (hash ref-coll))))
-
 ;; ============================================================================
 ;; Map operations generator
 ;; ============================================================================

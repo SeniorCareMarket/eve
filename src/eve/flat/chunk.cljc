@@ -2087,12 +2087,6 @@
 
 (declare materialize)
 
-(defn- plain-tag?
-  "A node tag the whole-value decode walk (materialize) decodes:
-   the collection tags, META and the pointer tag."
-  [^long t]
-  (or (<= 0x21 t 0x27) (== t 0x29) (== t 0x2A)))
-
 (defn read-value
   "The value of the node at off: a plain scalar, or a handle reading in
    place. A META node attaches its metadata to the inner handle.

@@ -26,11 +26,6 @@
 
 (defn- fresh [] (alloc/heap-domain-sio! {}))
 
-(defn- scrambled
-  "xs in an order of their own, the same on every host (a red-black tree's shape depends on the order it is built in)."
-  [xs]
-  (sort-by (fn [x] (mod (* x 7919) 1009)) xs))
-
 (defn- as-map [x] (into {} (map (fn [kv] [(key kv) (val kv)])) (e/seq x)))
 (defn- as-set [x] (set (e/seq x)))
 (defn- as-vec [x] (vec (e/seq x)))

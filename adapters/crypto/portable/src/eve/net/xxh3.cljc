@@ -35,8 +35,6 @@
 (defn- s64 [o] (u/from-le SECRET o))
 (defn- s32 [o] [0 (u/u32-le SECRET o)])
 (defn- r64 [bs o] (u/from-le bs o))
-(defn- r32 [bs o] [0 (u/u32-le bs o)])
-
 (defn- avalanche64 "XXH64's finalizer" [h]
   (let [h (u/xor h (u/shr h 33))
         h (u/mul h P64-2)

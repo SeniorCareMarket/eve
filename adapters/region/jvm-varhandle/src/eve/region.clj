@@ -90,9 +90,6 @@
   (spread-handle (.toMethodHandle I64-VH VarHandle$AccessMode/COMPARE_AND_EXCHANGE) 4))
 (def ^:private ^MethodHandle I64-ADD
   (spread-handle (.toMethodHandle I64-VH VarHandle$AccessMode/GET_AND_ADD) 3))
-(def ^:private ^MethodHandle I64-XCHG
-  (spread-handle (.toMethodHandle I64-VH VarHandle$AccessMode/GET_AND_SET) 3))
-
 ;; A spread handle's argument array, typed so the .invoke call resolves when compiled. (Given a vector, the call was
 ;; resolved by reflection at every call — Class.getMethods, most of a JVM swap's time: JFR, 2026-10-21 ET.)
 (defn- args2 ^objects [a b] (let [arr (object-array 2)] (aset arr 0 a) (aset arr 1 b) arr))

@@ -1929,9 +1929,6 @@
           (i32/i32 0x811c9dc5)
           (enc/utf16-units s)))
 
-(defn- keyword-str [k]
-  (str (namespace k) "/" (name k)))
-
 (defn- claim-atom-slot!
   "CAS-claim the first free atom slot (from 1; 0 is the registry) with the
    CLAIMED sentinel, write the name hash, return the index."
