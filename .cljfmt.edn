@@ -13,10 +13,20 @@
 ; reader-normalized form-tree diff: require order was the only
 ; difference). Every non-default entry below is earned by a retro
 ; and recorded here with its reason.
+; v2 correction (Phase 2, Eve lane, 2026-11-22): there is NO
+; :indents entry. An :indents key in .cljfmt.edn REPLACES cljfmt
+; 0.16.6's built-in indent table in the standalone loader (it does
+; not merge), so the v1/v2 `:indents {}` silently dropped every
+; default rule — defn/ns bodies came out aligned under their first
+; argument instead of block-indented. Measured on one Eve file:
+; 2089 diff lines with `:indents {}` vs 111 under the defaults.
+; Trees formatted while `:indents {}` was in force carry that
+; alignment style and need one `cljfmt fix` after this correction
+; propagates. To add a fleet indent rule, write the FULL merged
+; table or use :extra-indents — never a bare :indents map.
 {:remove-surrounding-whitespace? true
  :remove-trailing-whitespace? true
  :remove-consecutive-blank-lines? true
  :insert-missing-whitespace? true
  :sort-ns-references? false
- :align-associative? false
- :indents {}}
+ :align-associative? false}
