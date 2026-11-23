@@ -204,7 +204,7 @@
   (cond (odd?* n) (modinv-odd a n)
         (odd?* a) (when-let [t (modinv-odd n a)]
                     (let [[k _] (divmod (sub (mul t n) [1]) a), k (mod-limbs k n)]
-                      (when (seq k) ((when (seq k) (sub n k)) n k))))
+                      (when (seq k) (sub n k))))
         :else nil))
 
 ;; ── the byte surface

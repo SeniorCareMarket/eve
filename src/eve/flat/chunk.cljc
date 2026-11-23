@@ -1101,17 +1101,7 @@
     (vector? rep)
     (let [bidx (columnable-map-rows? cx rep)]
       (cond
-        (if-let [plan (when (every?
-                             (fn [e] (or (nil? e) (not (coll? e)) (instance? BytesVal e)))
-                             rep)
-                        (when-not (some #(instance? BytesVal %) rep) (column-plan cx rep)))]
-          (let [s (fio/buf-pos w)]
-            (fio/buf-u8 w 35)
-            (fio/buf-varint w (count rep))
-            (write-column! w cx plan rep nil)
-            s)
-          (let [offs (mapv (fn [e] (write-node! w cx e)) rep)]
-            (write-offsets-node! w 34 #(fio/buf-varint w (count rep)) offs))) (write-batch! w cx bidx rep)
+        bidx (write-batch! w cx bidx rep)
         :else
         (if-let [plan (when (every? (fn [e] (or (nil? e) (not (coll? e)) (instance? BytesVal e))) rep)
                      ;; byte arrays have no §5 column; exclude them

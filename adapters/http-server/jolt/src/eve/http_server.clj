@@ -36,7 +36,7 @@
       (if-let [he (head-end acc)]
         (let [all (.toByteArray acc)
               head (String. all 0 (- he 4) "ISO-8859-1")
-              lines (str/split head #"\\r\\n")
+              lines (str/split head #"\r\n")
               rl (str/split (first lines) #" ")
               headers (into
                        {}
