@@ -2319,6 +2319,12 @@
           (swap! (.-plans ctx) assoc pk m)
           m))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; this def is the one the JVM/bb hosts load: its callers are handle methods in shared code, and the same-name def kondo credits sits in a branch those hosts do not take (measured: deleting pg-reduce broke chunk's load in the gate with 'Unable to resolve symbol: pg-reduce')
+(defn- row-lookup [^Ctx ctx boff row k nf]
+  (let [bp (batch-parts ctx boff) sh (nth (.-shapes ctx) (:shape bp))
+        i (shape-index ctx sh k)]
+    (if (neg? i) nf (col-at ctx (nth @(:cols bp) i) row))))
+
 (defn- set-elements [^Ctx ctx ^long off]
   (let [[n ko] (set-parts ctx off)]
     (mapv (fn [i] (elem-at ctx ko i)) (range n))))
@@ -2641,6 +2647,9 @@
 
 ;; --- the map handles --------------------------------------------------------
 
+                        #_{:clj-kondo/ignore [:unused-private-var]} ; this def is the one the JVM/bb hosts load: its callers are handle methods in shared code, and the same-name def kondo credits sits in a branch those hosts do not take (measured: deleting pg-reduce broke chunk's load in the gate with 'Unable to resolve symbol: pg-reduce')
+                        (defn- node-digest-of [h] (handle-digest (handle-ctx h) (handle-off h)))
+
                         #_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
                         (defn- record-rep-of [h]
                           (record-entries-rep (-tkey h) (-fp h) (-entries h)))
@@ -2785,6 +2794,32 @@
 ;; for the seat's other hand-written types.
 
 (declare unpack)
+
+#_{:clj-kondo/ignore [:unused-private-var]} ; this def is the one the JVM/bb hosts load: its callers are handle methods in shared code, and the same-name def kondo credits sits in a branch those hosts do not take (measured: deleting pg-reduce broke chunk's load in the gate with 'Unable to resolve symbol: pg-reduce')
+(defn- pg-reduce
+  "reduce over a node seq by first/next walking: the host's own
+   reduce may not dispatch over the seq types the node walks
+   answer (glojure's coll-reduce has no ChunkedCons dispatch,
+   measured in the flat smoke's handle row)."
+  ([f s] (if-let [s (seq s)] (pg-reduce f (first s) (next s)) (f)))
+  ([f init s] (loop [s (seq s) acc init]
+                (if (nil? s) acc (recur (next s) (f acc (first s)))))))
+
+#_{:clj-kondo/ignore [:unused-private-var]} ; this def is the one the JVM/bb hosts load: its callers are handle methods in shared code, and the same-name def kondo credits sits in a branch those hosts do not take (measured: deleting pg-reduce broke chunk's load in the gate with 'Unable to resolve symbol: pg-reduce')
+(defn- pg-entries-seq
+  "A seq of map entries over [[k v] ...]: the host's entry values,
+   as node-seq-entries builds on ClojureScript."
+  [entries]
+  (seq (map (fn [[k v]] (first (seq (array-map k v)))) entries)))
+
+#_{:clj-kondo/ignore [:unused-private-var]} ; this def is the one the JVM/bb hosts load: its callers are handle methods in shared code, and the same-name def kondo credits sits in a branch those hosts do not take (measured: deleting pg-reduce broke chunk's load in the gate with 'Unable to resolve symbol: pg-reduce')
+(defn- pg-map-conj
+  "conj onto a map handle, the proxy's cons shape: an entry or
+   two-element vector, a map, or a seq of entries."
+  [h o]
+  (cond (and (vector? o) (== 2 (count o))) (assoc-flat h (nth o 0) (nth o 1))
+        (map? o) (reduce (fn [m [k v]] (assoc-flat m k v)) h o)
+        :else (reduce (fn [m e] (assoc-flat m (nth e 0) (nth e 1))) h o)))
 
 #?(:bb (do
 
