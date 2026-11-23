@@ -5,7 +5,7 @@
    journal cannot engage is broken, not an alternate configuration.
    Placement is a commit like any other, so a placed value must be
    exactly as durable as a written one. The shape is
-   test/eve/journal_recovery_test.clj's: build on a persistent
+   test/eve/jlog_domain_test.clj's: build on a persistent
    (journaled, mmap) domain, simulate a process halt WITHOUT the
    close-time checkpoint, reopen, read back.
 
@@ -28,10 +28,10 @@
             [eve.deftype-proto.data :as d]
             [eve.flat :as flat]
             [eve.flat.check :as check]
+            [eve.jlog :as jlog]
             [eve.flat.image :as image]
             [eve.flat.place :as place])
-  (:import [java.io File]
-           [java.util Arrays]
+  (:import [java.util Arrays]
            [eve.deftype_proto.alloc JvmSlabCtx]))
 
 ;; ---------------------------------------------------------------------------
@@ -44,7 +44,11 @@
   (str (System/getProperty "java.io.tmpdir")
        "/eve-flat-journal-" (rand-int 1000000000) "/d"))
 
-(defn- file-len [path] (.length (File. path)))
+(defn- jpos
+  "The domain's journal position: the jlog's next seq (stripe 0) — it moves
+   by one for every record appended (the log's file never grows)."
+  [base]
+  (jlog/tail (jlog/open (str base ".jlog")) 0))
 
 (defn- halt-domain!
   "Simulate a process halt: stop the heartbeat and release the worker
@@ -94,10 +98,10 @@
           img  (checked-image the-value)
           dom  (a/persistent-atom-domain base)
           x    (a/lookup-or-create-mmap-atom! dom "h2/placed" nil)
-          j0   (file-len (str base ".journal"))]
+          j0   (jpos base)]
       (flat/place x img)
       (let [f1 (free-counts x)
-            j1 (file-len (str base ".journal"))]
+            j1 (jpos base)]
         (is (= the-value (d/eve->clj @x)) "the place committed in the live domain")
         (is (> j1 j0) "the place commit appended to the journal — the journal engaged for a placement")
         (halt-domain! dom base)
@@ -127,14 +131,14 @@
           y    (a/lookup-or-create-mmap-atom! dom "h2/failed" nil)]
       (reset! y v0)
       (let [f0 (free-counts y)
-            j0 (file-len (str base ".journal"))]
+            j0 (jpos base)]
         (is (thrown? clojure.lang.ExceptionInfo
                      (swap! y (fn [_]
                                 (place/place-value d/*domain-sio* img)
                                 (throw (ex-info "h2: deliberate throw after placement" {})))))
             "the throw propagates out of the swap")
         (is (= v0 (d/eve->clj @y)) "the atom still holds the pre-attempt value")
-        (is (= j0 (file-len (str base ".journal")))
+        (is (= j0 (jpos base))
             "no journal record was appended for an attempt that never committed")
         (let [f-live (free-counts y)]
           (println "H2 failed placement — free-count delta, live domain (Z3.4 leak class):"

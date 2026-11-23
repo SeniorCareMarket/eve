@@ -1,5 +1,5 @@
 (ns eve.jlog-domain-test
-  "A disk domain on the mmapped commit log (persistent-atom-domain :log :jlog;
+  "A disk domain on the mmapped commit log (persistent-atom-domain;
    eve.jlog, eve-mmap-journal-plan §4): the round trip, the open that follows
    the domain's own files, and the recovery wounds of journal-recovery-test
    (W1-W4) replayed against <base>.jlog, plus the ring lapping, the batch form,
@@ -53,9 +53,9 @@
   (let [log (jlog/open (str base ".jlog"))]
     [log (jlog/pick (jlog/scan log))]))
 
-(deftest round-trip-and-the-domain-decides
+(deftest round-trip
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :log :jlog)
+        dom (a/persistent-atom-domain base)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (swap! x + 40)
     (swap! x inc)
@@ -63,7 +63,7 @@
     (a/close-atom-domain! dom)
     (is (.exists (File. (str base ".jlog"))) "the log is <base>.jlog")
     (is (not (.exists (File. (str base ".journal")))) "no legacy journal is written")
-    (testing "a reopen without :log follows the domain's files"
+    (testing "a reopen finds the domain on its log"
       (let [dom2 (a/persistent-atom-domain base)
             x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
         (is (= 42 @x2))
@@ -79,7 +79,7 @@
   "t/x to 41 then 42 on a jlog domain, closed cleanly; answers the root table
    as it stood at 41 and the root epoch then."
   [base]
-  (let [dom (a/persistent-atom-domain base :log :jlog)
+  (let [dom (a/persistent-atom-domain base)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
         [s e] (table-range)]
     (swap! x + 41)
@@ -110,7 +110,7 @@
 
 (deftest w3-torn-newest-record-falls-back
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :log :jlog)
+        dom (a/persistent-atom-domain base)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (swap! x + 41)
     (swap! x inc)
@@ -138,7 +138,7 @@
 
 (deftest ring-laps
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :log :jlog :jlog-slots 8)
+        dom (a/persistent-atom-domain base :jlog-slots 8)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (dotimes [_ 50] (swap! x inc))
     (halt-domain! dom base)
@@ -151,7 +151,7 @@
 
 (deftest batch-form-is-durable-at-its-boundary-and-close
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :log :jlog :journal-batch 4)
+        dom (a/persistent-atom-domain base :journal-batch 4)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (dotimes [_ 10] (swap! x inc))
     (a/close-atom-domain! dom)
@@ -162,7 +162,7 @@
 
 (deftest a-dead-process-leftovers-are-recovered
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :log :jlog)
+        dom (a/persistent-atom-domain base)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
         _ (swap! x + 7)
         ds (halt-domain! dom base false)
@@ -184,64 +184,86 @@
 ;; Legacy journal migration (eve-mmap-journal-plan §4.7)
 ;; ---------------------------------------------------------------------------
 
+(defn- evj1-record
+  "One EVJ1 record's bytes: [magic][len][epoch][table-len][table][crc32 over
+   epoch..table-end], big-endian — what the legacy journal adapters wrote."
+  ^bytes [epoch ^bytes table]
+  (let [tlen (alength table)
+        buf (java.nio.ByteBuffer/allocate (+ 8 4 4 tlen 4))]
+    (.putInt buf (unchecked-int 0x45564A31))
+    (.putInt buf (int (+ 12 tlen)))
+    (.putInt buf (int epoch))
+    (.putInt buf (int tlen))
+    (.put buf table)
+    (let [crc (java.util.zip.CRC32.)]
+      (.update crc (.array buf) 8 (+ 8 tlen))
+      (.putInt buf (unchecked-int (.getValue crc))))
+    (.array buf)))
+
 (defn- legacy-domain!
-  "A legacy (EVJ1 <base>.journal) domain with t/x at N, every commit journaled,
-   halted without its checkpoint (the journal keeps every record). Answers the
-   root epoch at each value [[v epoch] ...]."
+  "A domain as a pre-jlog binary leaves it after a kill: t/x taken to 1..N,
+   one EVJ1 record per commit in <base>.journal, no <base>.jlog. (Built on
+   the jlog — the legacy writer is gone — then the log removed and the
+   journal written from the root states each commit left.) Answers
+   [[value epoch table] ...]."
   [base n]
   (let [dom (a/persistent-atom-domain base)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
-        epochs (doall (for [_ (range n)]
-                        (do (swap! x inc) [@x (read-i32 (str base ".root") d/ROOT_EPOCH_OFFSET)])))]
+        [s e] (table-range)
+        states (doall (for [_ (range n)]
+                        (do (swap! x inc)
+                            [@x (read-i32 (str base ".root") d/ROOT_EPOCH_OFFSET)
+                             (read-range (str base ".root") s (- e s))])))]
     (halt-domain! dom base)
-    epochs))
+    (.delete (File. (str base ".jlog")))
+    (let [raf (RandomAccessFile. (File. (str base ".journal")) "rw")]
+      (try (doseq [[_ ep tbl] states] (.write raf (evj1-record ep tbl)))
+           (finally (.close raf))))
+    states))
 
 (deftest legacy-journal-migrates-to-its-newest-record
   (let [base (fresh-base)
-        epochs (legacy-domain! base 5)
-        [_ e2] (nth epochs 1)]
-    (is (.exists (File. (str base ".journal"))))
-    ;; the wound: the root wound back to an older epoch (its table too: the journal's newest record is ahead)
+        states (legacy-domain! base 5)
+        [_ e2 t2] (nth states 1)]
+    ;; the wound: the root wound back to the second commit's state (the journal's newest record is ahead)
     (write-i32! (str base ".root") d/ROOT_EPOCH_OFFSET e2)
-    (xor-range! (str base ".root") (+ d/ATOM_TABLE_START 8) (+ d/ATOM_TABLE_START 16))
-    (let [dom (a/persistent-atom-domain base :log :jlog)
+    (write-range! (str base ".root") d/ATOM_TABLE_START t2)
+    (let [dom (a/persistent-atom-domain base)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 5 @x) "the legacy journal's newest record is installed")
       (swap! x inc)
       (a/close-atom-domain! dom))
     (is (not (.exists (File. (str base ".journal")))) "the legacy journal is renamed aside")
     (is (.exists (File. (str base ".journal.migrated"))) "... to <base>.journal.migrated, never deleted")
+    (is (.exists (File. (str base ".jlog"))))
     (let [dom (a/persistent-atom-domain base)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 6 @x) "and the domain lives on the jlog from here")
-      (is (some? (:log (:journal (#'a/atom-domain-state dom)))))
       (a/close-atom-domain! dom))))
 
 (deftest legacy-journal-with-an-overwritten-record-resyncs
   (let [base (fresh-base)
-        _ (legacy-domain! base 6)
-        j (str base ".journal")
+        states (legacy-domain! base 6)
+        [_ e1 t1] (first states)
         rec 2068]
-    ;; the wound: the framing of the third record overwritten (a foreign append's bytes); the scan resyncs past it
-    (write-range! j (* 2 rec) (byte-array (repeat 40 (byte 7))))
-    (write-i32! (str base ".root") d/ROOT_EPOCH_OFFSET 1)
-    (let [dom (a/persistent-atom-domain base :log :jlog)
+    ;; the wound: the framing of the third record overwritten (a foreign append's bytes); the read resyncs past it
+    (write-range! (str base ".journal") (* 2 rec) (byte-array (repeat 40 (byte 7))))
+    (write-i32! (str base ".root") d/ROOT_EPOCH_OFFSET e1)
+    (write-range! (str base ".root") d/ATOM_TABLE_START t1)
+    (let [dom (a/persistent-atom-domain base)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 6 @x) "the newest record, after the overwritten one, is found and installed")
       (a/close-atom-domain! dom))))
 
 (deftest a-legacy-record-older-than-the-root-never-rolls-it-back
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base)
-        x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
-    (swap! x inc)
-    (let [j (str base ".journal")
-          old (read-range j 0 (int (.length (File. j))))]
-      (swap! x + 10)
-      (halt-domain! dom base)
-      ;; the wound: the journal holds only an OLD record (the shootout's shape: file-order newest older than the root)
-      (let [raf (RandomAccessFile. (File. j) "rw")] (try (.setLength raf 0) (.write raf ^bytes old) (finally (.close raf)))))
-    (let [dom2 (a/persistent-atom-domain base :log :jlog)
-          x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
-      (is (= 11 @x2) "the root, newer than every legacy record, is kept")
-      (a/close-atom-domain! dom2))))
+        states (legacy-domain! base 6)
+        [_ e1 t1] (first states)]
+    ;; the wound: the journal holds only the FIRST commit's record while the root is at the sixth (the shootout's
+    ;; shape: the file-order newest record older than the root)
+    (let [raf (RandomAccessFile. (File. (str base ".journal")) "rw")]
+      (try (.setLength raf 0) (.write raf (evj1-record e1 t1)) (finally (.close raf))))
+    (let [dom (a/persistent-atom-domain base)
+          x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
+      (is (= 6 @x) "the root, newer than every legacy record, is kept")
+      (a/close-atom-domain! dom))))

@@ -63,6 +63,10 @@ but ValueScript.
 
 ### Journal support per host
 
+(Since the jlog — `eve.jlog`, one cljc commit log over every host's region, no file lock — there is no
+per-host journal adapter: a host carries a journaled disk domain when its region maps a file and forces
+(`ISyncableRegion`). The table below is 0.9.3.1's, kept as that release's record.)
+
 The disk tier is journaled by design in 0.9.3.1; a host's journal is its `eve.journal-file`
 adapter (`adapters/journal-file/<impl>`). A host with no adapter cannot carry a journaled disk
 domain.

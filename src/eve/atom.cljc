@@ -38,7 +38,6 @@
    [eve.type-readers]
    [eve.int32 :as i32]
    [eve.process :as proc]
-   [eve.journal-file :as jf]
    [eve.jlog :as jlog]
    [eve.read-region :as rr]
    ;; PROTOTYPE (jvm-heap-grade step 2): the automatic read guard, JVM only
@@ -662,9 +661,9 @@
   domain's floor epoch, the oldest epoch recovery may still install.
   The journal pins that epoch the way a slow reader pins its read
   epoch: blocks reachable from it are not recycled while its record
-  survives. The floor is per-process state set at recovery and
-  advanced at every flush (to the previous flush's epoch — the
-  FLUSH-ADVANCE rule below, journal-flush!) and at checkpoint, so
+  survives. The floor is per-process state set at the open and
+  advanced at every flush (to the previous flush's label — the
+  FLUSH-ADVANCE rule, jlog-append!) and at checkpoint, so
   a stale local floor only ever makes this process's flush more
   conservative.
 
@@ -672,7 +671,8 @@
   NOT forced here: the classes of the blocks it may free (the queue at
   entry — the set this flush used to force) are noted on the domain
   (:unforced) and the next commit's force sweeps them with its
-  own (journal-flush!'s sweep, the force-ordering form's pre-CAS sweep;
+  own (the pre-CAS sweep of a J1 commit, journaled or not; a batch flush's
+  whole-domain sweep;
   a checkpoint, sync! and close force the whole domain). Every block
   this flush frees is unreachable from every version recovery can
   install (its epoch is below the floor), so a crash before that force
@@ -742,33 +742,13 @@
           :else (do (when (> i 100) (proc/sleep-ms! 1)) (recur (inc i))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Commit journal (durability spike, variant J)
-;;
-;; A per-domain append-only file, <base>.journal, beside the .root.
-;; Records carry COMMIT METADATA ONLY — never values:
-;;   [magic i32][len i32][epoch i32][table-len i32][table bytes][crc32 i32]
-;; len counts the bytes after itself (epoch + table-len + table + crc);
-;; the crc32 covers the epoch and table bytes. The table is the root
-;; region's raw atom-table range (MAX_ATOM_SLOTS x ATOM_SLOT_SIZE — one
-;; pointer per atom per epoch), so the newest valid record IS the
-;; newest fully journaled epoch: recovery installs its table whole,
-;; no folding. A torn record (crash mid-append) fails framing or CRC
-;; and is skipped by its length. The journal decides nothing about
-;; liveness — the mmap root CAS + epoch bump coordinate running
-;; processes exactly as without it; it records which epochs are
-;; durable. Appends serialize on the journal file's own lock, held
-;; across a flush (append + force), never across the live CAS path.
-;; Every host writes the identical byte format (cross-host recovery
-;; verified: a Node opener recovers a JVM-written journal; the
-;; ClojureCLR and Basilisp seats write records the JVM reader
-;; recovers). The file itself — its lock, its record codec, its
-;; forces — is the host's adapter, eve.journal-file; everything below
-;; is the host-free sequence over it: lock, sweep, append, force.
+;; Commit journal — the instrumentation its flushes share (the journal itself:
+;; the commit log on the mmapped ring, eve.jlog, below)
 ;; ---------------------------------------------------------------------------
 
 (def ^:dynamic *flush-timing*
-  "When bound to an atom, journal-flush! conjs each flush's wall time
-  in ms (whole call: lock + slab sweep + append + journal force).
+  "When bound to an atom, each journal flush (jlog-append!) conjs its wall
+  time in ms (reserve + snapshot + write + the slot's force).
   Bench instrumentation only."
   nil)
 
@@ -781,80 +761,15 @@
   (proc/now-ms))
 
 (def ^:dynamic *flush-log*
-  "When bound to an atom, journal-flush! conjs {:at <wall-ms> :ms
+  "When bound to an atom, each journal flush (jlog-append!) conjs {:at <wall-ms> :ms
   <duration-ms>} per flush. Bench/workload instrumentation only."
   nil)
-
-(defn- journal-flush!
-  "Append one flush record (the live epoch + atom table) and force the
-   journal — the commit point of a journal domain. sweep selects what
-   is forced before the record lands, all inside the journal lock: a
-   collection of slab offsets sweeps exactly those (alloc/sync-touched!
-   — the J1 per-commit form: the publishing attempt's logged
-   allocations and descriptor touches, its drop's writes included);
-   true sweeps the whole domain (the J10 batch flush and checkpoints:
-   a flush record's table names blocks whichever live process wrote
-   them, and the sweep makes them all durable before the record can
-   land); falsy sweeps nothing."
-  [ds sweep]
-  (let [journal (:journal ds)
-        ;; the epoch the appended record will carry (read again
-        ;; inside the lock by jf/journal-record; epochs are
-        ;; monotone, so this earlier read never exceeds it)
-        floor-epoch (when journal
-                      (mem/-load-i32 (:root-r ds) d/ROOT_EPOCH_OFFSET))
-        t0 (when (and journal *flush-timing*) (now-ms))]
-    (when journal
-      (jf/with-journal-lock (:file journal)
-        (fn []
-          (cond
-            (coll? sweep)
-            (alloc/sync-touched! (:sio ds) (into sweep (take-unforced! ds)))
-            sweep
-            (do (take-unforced! ds) (alloc/sync-sio! (:sio ds))))
-          (jf/journal-append! (:file journal)
-                              (jf/journal-record (:root-r ds)))
-                              ;; data force: the record bytes and the file size they need
-                              ;; are durable; timestamps are not metadata recovery reads.
-          (jf/journal-force! (:file journal) false))))
-    (when journal
-      ;; RETENTION FLOOR — FLUSH-ADVANCE (decision 2026-10-27,
-      ;; after the sweep reconciliation measured the checkpoint-only
-      ;; floor's price): the floor advances at EVERY flush, not only
-      ;; at checkpoint. Recovery installs the newest valid record;
-      ;; appends are sequential and forced per flush, so a crash can
-      ;; tear only the tail append and recovery falls back at most
-      ;; one record — protection only needs to cover the two newest
-      ;; durable records. So: a first append into a floor-less
-      ;; journal pins the floor at that record's epoch (the journal's
-      ;; only record is the oldest installable); every later append
-      ;; advances the floor to the PREVIOUS append's epoch.
-      ;; :last-epoch tracks this process's own appends; records land
-      ;; in epoch order under the journal lock, so the record before
-      ;; this process's newest append has an epoch >= its own
-      ;; previous one — the own-previous epoch never exceeds the
-      ;; global second-newest durable record's epoch, and the floor
-      ;; stays conservative. (journal-anchor!'s reset of the floor
-      ;; to the anchor epoch at checkpoint is a separate mechanism —
-      ;; the anchor decides what the journal FILE holds — and is
-      ;; unchanged; the max keeps the floor monotone across it.)
-      (when (:floor journal)
-        (if (nil? @(:floor journal))
-          (reset! (:floor journal) floor-epoch)
-          (when (and (:last-epoch journal) @(:last-epoch journal))
-            (reset! (:floor journal)
-                    (max @(:floor journal) @(:last-epoch journal))))))
-      (when (:last-epoch journal) (reset! (:last-epoch journal) floor-epoch))
-      (when (:last-flush journal) (reset! (:last-flush journal) (now-ms)))
-      (when *flush-log*
-        (swap! *flush-log* conj {:at (now-ms) :ms (when t0 (- (now-ms) t0))})))
-    (when t0 (swap! *flush-timing* conj (- (now-ms) t0)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Commit log on the mmapped ring (eve.jlog; eve-mmap-journal-plan §4)
 ;;
-;; A journal domain opened with :log :jlog (or whose <base>.jlog exists)
-;; keeps its commit records in <base>.jlog, a fixed-size ring of 4 KiB slots
+;; A journaled disk domain (the default) keeps its commit records in
+;; <base>.jlog, a fixed-size ring of 4 KiB slots
 ;; mapped like the root and claimed by CAS (eve.jlog): no file lock is held
 ;; across a commit, so concurrent writers' forces overlap. A record is the
 ;; root's epoch label and its whole atom table, read after this commit's
@@ -864,8 +779,10 @@
 ;; so any snapshot of the table names only forced blocks — H2 closed), then
 ;; append and force the record — the commit point. Recovery installs the
 ;; valid record with the highest label, never the last in file order, and
-;; erases nothing. The journal map is the legacy one's shape with :log (the
-;; eve.jlog handle) where :file was: :limit, :pending, :floor, :last-epoch.
+;; erases nothing. The domain's journal map: :log (the eve.jlog handle),
+;; :limit (the batch), :pending, :floor and :last-epoch (the retention floor's
+;; FLUSH-ADVANCE: each flush advances the floor to this process's previous
+;; record's label), and with :journal-window-ms, :window-ms and :last-flush.
 ;; ---------------------------------------------------------------------------
 
 (defn- jlog-snapshot
@@ -880,8 +797,9 @@
   "Append one record of KIND to the domain's log, its [label table] from
    (SNAPSHOT!) — §4.3 steps 5-10 (eve.jlog/append!: reserve, snapshot, write,
    force the slot: the commit point) — then advance the retention floor by
-   the FLUSH-ADVANCE rule (journal-flush!'s, unchanged) with the record's
-   label as the appended epoch. The stripe is the worker slot's residue; a
+   the FLUSH-ADVANCE rule (decision 2026-10-27: a first append pins the floor
+   at its label, every later one advances it to this process's previous
+   record's label; monotone) with the record's label as the appended epoch. The stripe is the worker slot's residue; a
    holder of a slot this append waits on is judged dead by its heartbeat
    (the domain's own death rule). Answers the record's label."
   [ds kind snapshot!]
@@ -921,29 +839,24 @@
      (jlog-append! ds kind #(jlog-snapshot (:root-r ds))))))
 
 (defn- journal-note-commit!
-  "A journal domain's commit published: J1 (limit 1) flushes now — the
-   journal force is the commit point. offsets, when the caller hands
-   them, is the publishing attempt's full touched set (its logged
-   allocations and descriptor touches, its drop's writes included):
-   the flush sweeps exactly those inside the journal lock before it
-   appends, so a record recovery can accept was written only after
-   every page it references was forced. J10 counts the epoch toward
-   the batch; the batch's flush is one whole-domain sweep + one record
-   + one force (its record names blocks other processes wrote too).
-   With :journal-window-ms set, a commit also flushes when the
-   window has elapsed since the last flush (checked on the commit
+  "A journal domain's commit published: J1 (limit 1) appends its record now
+   (jlog-flush!: its blocks were forced before its CAS, so the record names
+   forced blocks only) — the slot's force is the commit point. J10 counts the
+   epoch toward the batch; the batch's flush reads the label and table, forces
+   the whole domain, then appends one record (its record names blocks other
+   processes wrote too). With :journal-window-ms set, a commit also flushes
+   when the window has elapsed since the last flush (checked on the commit
    path — no timer thread; the count batch remains the backstop)."
-  ([ds] (journal-note-commit! ds nil))
-  ([ds offsets]
-   (let [{:keys [limit pending window-ms last-flush log] :as journal} (:journal ds)]
-     (when journal
-       (if (<= limit 1)
-         (if log (jlog-flush! ds false) (journal-flush! ds offsets))
-         (let [n (swap! pending inc)]
-           (when (or (>= n limit)
-                     (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
-             (reset! pending 0)
-             (if log (jlog-flush! ds true) (journal-flush! ds true)))))))))
+  [ds]
+  (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
+    (when journal
+      (if (<= limit 1)
+        (jlog-flush! ds false)
+        (let [n (swap! pending inc)]
+          (when (or (>= n limit)
+                    (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
+            (reset! pending 0)
+            (jlog-flush! ds true)))))))
 
 (defn- domain-live?
   "Any worker slot ACTIVE with a fresh heartbeat: a process holds this
@@ -955,87 +868,6 @@
                    d/WORKER_STATUS_ACTIVE)
                (not (heartbeat-stale? root-r i))) true
           :else (recur (inc i)))))
-
-(defn- journal-recover!
-  "Open-time recovery for a journal domain, run before this process
-   claims its worker slot. Live domain: the journal is untouched (a
-   joining process reads the live root). Not live: install the newest
-   valid record's table + epoch when they differ from the mapped
-   root's — a different epoch, or, at the SAME epoch, a table that
-   differs byte for byte (the record is CRC-verified and the root's
-   table carries no integrity check, so a same-epoch divergence is
-   root-table corruption; without the repair the corrupted table
-   misses every lookup and lookup-or-create silently mints fresh
-   atoms over the lost ones — the F2 battery's W2). Then force the
-   root file, and compact the journal to that record — the torn tail
-   is discarded. A creator truncates the journal of a fresh domain."
-  [root-r journal create?]
-  (when journal
-    (jf/with-journal-lock (:file journal)
-      (fn []
-        (let [h (:file journal)]
-          (if create?
-            (do (jf/journal-truncate! h) (jf/journal-force! h true))
-            (let [{:keys [newest oldest torn?]} (jf/journal-scan h)
-                  e-map (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-              ;; RETENTION FLOOR (fix (b)): the oldest epoch
-              ;; recovery may still install — the journal's
-              ;; oldest surviving record, or the root's own
-              ;; epoch when no record survives. Set for live
-              ;; joiners too (read-only): their retire flush
-              ;; must honor it like anyone's.
-              (when (:floor journal)
-                (reset! (:floor journal) (or oldest e-map)))
-              (when-not (domain-live? root-r)
-                (let [install? (and newest
-                                    (or (not= (:epoch newest) e-map)
-                                        ;; W2: equal epochs, diverged
-                                        ;; tables — install the
-                                        ;; CRC-verified record's table
-                                        ;; over the root's corrupted
-                                        ;; one (see the docstring).
-                                        (not (enc/bytes=
-                                               (mem/-read-bytes root-r d/ATOM_TABLE_START
-                                                                (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE))
-                                               (:table newest)))))]
-                  (when install?
-                    (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
-                    (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
-                    (mem/sync-region! root-r))
-                  (when (or torn? install?)
-                    (jf/journal-truncate! h)
-                    (when newest
-                      (jf/journal-write-at! h (jf/journal-record root-r) 0))
-                    (jf/journal-force! h true)))))))))))
-
-(defn- journal-anchor!
-  "Checkpoint's tail — RECOVERY FLOOR FIX (a) (decision,
-  2026-10-27): checkpoint truncation never empties the journal. The
-  newest valid record — the checkpoint epoch's own — is rewritten as
-  the journal's sole record (the anchor); everything older goes.
-  Recovery's rule is then uniform: whenever a valid record exists,
-  install from the journal, never from the landed root — a root that
-  landed ahead of an emptied journal was exactly phase 2's
-  undefended floor. Also advances the retention floor (fix (b)) to
-  the anchor's epoch: monotone, at checkpoint, under the journal
-  lock, and nowhere else. A journal with no valid record (a fresh
-  domain) is left empty."
-  [journal]
-  (when journal
-    (jf/with-journal-lock (:file journal)
-      (fn [] (let [h (:file journal)
-                   {:keys [newest]} (jf/journal-scan h)]
-               (when newest
-                 (jf/journal-truncate! h)
-                 (jf/journal-write-at! h (jf/journal-record-of
-                                           (:epoch newest) (:table newest)) 0)
-                 (jf/journal-force! h true)
-                 (when (:floor journal)
-                   (reset! (:floor journal) (:epoch newest)))))))))
-
-(defn- journal-close! [journal]
-  (when (:file journal)
-    (jf/journal-close! (:file journal))))
 
 ;; ---------------------------------------------------------------------------
 ;; Opening a jlog domain: the recovery hold and recovery (eve-mmap-journal-plan §4.4)
@@ -1086,9 +918,16 @@
 
 (defn- jlog-path [base-path] (str base-path ".jlog"))
 
+(defn- jlog-region-opts
+  "The log's region options: the domain's own (a Lustre domain's log is a Lustre region, its atomics byte-range
+   locks across nodes, as its root's are)."
+  [opts]
+  {:lustre? (:lustre? opts)})
+
 (defn- jlog-create-opts [opts]
   {:slots (or (:jlog-slots opts) jlog/DEFAULT_SLOTS)
-   :stripes (or (:jlog-stripes opts) jlog/DEFAULT_STRIPES)})
+   :stripes (or (:jlog-stripes opts) jlog/DEFAULT_STRIPES)
+   :region (jlog-region-opts opts)})
 
 (defn- legacy-install!
   "Migration's install (§4.7 steps 1-3): the legacy <base>.journal's records read once (eve.jlog/legacy-records:
@@ -1121,7 +960,7 @@
   (let [path (jlog-path base-path)
         legacy (str base-path ".journal")]
     (if (and (proc/file-exists? path) (not (zero? (jlog/magic path))))
-      (jlog/open path)
+      (jlog/open path d/HEARTBEAT_TIMEOUT_MS (jlog-region-opts opts))
       (do (when (proc/file-exists? legacy) (legacy-install! root-r legacy))
           (jlog/create! path (jlog-create-opts opts))))))
 
@@ -1171,7 +1010,7 @@
                   (throw (ex-info (str "eve: " base-path " is live without a jlog (a legacy journal domain in use);"
                                        " it can move to the jlog only on an open no other process holds")
                                   {:base-path base-path})))
-              log (jlog/open path)]
+              log (jlog/open path d/HEARTBEAT_TIMEOUT_MS (jlog-region-opts opts))]
           {:log log
            :slot-idx (claim-live-slot! root-r)
            :floor (or (:label (jlog/pick (jlog/scan log))) (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))})
@@ -1191,33 +1030,20 @@
         sio    (alloc/mmap-domain-sio! base-path opts)
         rmap-r (region/open-mmap-region (str base-path ".rmap") READER_MAP_BYTES
                                         {:lustre? lustre?})
-        jlog? (and (:journal? opts)
-                   (or (= :jlog (:log opts))
-                       (and (not create?) (proc/file-exists? (jlog-path base-path)))))
+        jlog? (:journal? opts)
         _ (when create? (init-domain-root! root-r (if jlog? HOLD_RECOVERING 0)))
         jl (when jlog? (jlog-open! root-r base-path create? opts))
-        journal  (when (:journal? opts)
-                   (if jlog?
-                     {:log     (:log jl)
-                      :limit   (or (:journal-batch opts) 1)
-                      :pending (clojure.core/atom 0)
-                      :floor   (clojure.core/atom (:floor jl))
-                      :last-epoch (clojure.core/atom nil)}
-                     {:file    (jf/open-journal (str base-path ".journal"))
-                      :limit   (or (:journal-batch opts) 1)
-                      :pending (clojure.core/atom 0)
-                      ;; RETENTION FLOOR (fix (b)): the epoch the
-                      ;; journal pins against reclamation, set at
-                      ;; recovery (journal-recover!) and advanced
-                      ;; at every flush (journal-flush!, to the
-                      ;; previous flush's epoch) and at checkpoint
-                      ;; (journal-anchor!, to the anchor epoch).
-                      :floor   (clojure.core/atom nil)
-                      ;; FLUSH-ADVANCE: the epoch of the newest
-                      ;; record THIS process has durably appended —
-                      ;; the next flush advances :floor to it.
-                      :last-epoch (clojure.core/atom nil)}))
-        _        (when (:file journal) (journal-recover! root-r journal create?))
+        journal  (when jl
+                   {:log     (:log jl)
+                    :limit   (or (:journal-batch opts) 1)
+                    :pending (clojure.core/atom 0)
+                    ;; RETENTION FLOOR (fix (b)): the epoch the journal pins against reclamation, set at the open
+                    ;; (jlog-open!: the highest valid label, or the recovered one) and advanced at every flush
+                    ;; (jlog-append!'s FLUSH-ADVANCE)
+                    :floor   (clojure.core/atom (:floor jl))
+                    ;; FLUSH-ADVANCE: the label of the newest record THIS process has durably appended — the
+                    ;; next flush advances :floor to it
+                    :last-epoch (clojure.core/atom nil)})
         journal  (cond-> journal
                    (:journal-window-ms opts)
                    (assoc :window-ms (:journal-window-ms opts)
@@ -1881,17 +1707,14 @@
                 ;; tally holds mutated (alloc/sync-touched!) — not the whole slab.
                 ;; Inside the attempt, so a lost CAS wastes one force and the
                 ;; retry writes and forces its own blocks; nothing is held across the retry.
-                ;; Journal domains defer this sweep to their flush: J1's flush
-                ;; sweeps this attempt's touched set inside the journal lock
-                ;; before it appends (see the success path below); J10's flush
-                ;; sweeps the whole domain. Only the force-ordering form
-                ;; (durable, no journal) sweeps here — its root force below
-                ;; is its commit record.
-                ;; A jlog domain's J1 commit (eve-mmap-journal-plan §4.3 step 2) forces here too: no pointer is
-                ;; visible in the root before the blocks it reaches are durable, so the record its append reads
-                ;; names forced blocks only, whichever process published them (H2).
+                ;; A journal domain's J1 commit forces here too (eve-mmap-journal-plan
+                ;; §4.3 step 2): no pointer is visible in the root before the blocks
+                ;; it reaches are durable, so the record its append reads names
+                ;; forced blocks only, whichever process published them (H2). A batch
+                ;; (J10) journal domain defers to its flush, which sweeps the whole
+                ;; domain after reading the table it records.
                 _ (when (and durable-commits?
-                             (or (nil? journal) (and (:log journal) (<= (:limit journal) 1))))
+                             (or (nil? journal) (<= (:limit journal) 1)))
                     (alloc/sync-touched! sio
                                          (into (into @tally/*touches* (take-unforced! ds))
                                                (alloc/logged-allocs lsio))))
@@ -1904,26 +1727,17 @@
                 ;; classes through the logged allocations they already name
                 (tally/free-unreached! sio (alloc/logged-allocs lsio))
                 (if (and durable-commits? journal (<= (:limit journal) 1))
-                  ;; J1 (journal, per-commit durability): the slot lets
-                  ;; old go FIRST, so the drop's descriptor writes join
-                  ;; the set the flush is about to sweep; then the
-                  ;; flush — one touched sweep inside the journal lock,
-                  ;; the record append, the journal force — is the
-                  ;; commit point. (The attempt used to sweep twice
-                  ;; around the CAS and the flush swept nothing; the
-                  ;; invariant is unchanged — recovery accepts a record
-                  ;; only after the sweep that precedes its append
-                  ;; inside the same lock — at half the forces.)
+                  ;; J1 (journal, per-commit durability): the slot lets old go, then the
+                  ;; record append and the slot's force are the commit point. The commit
+                  ;; forced its blocks before its CAS; the drop's descriptor writes are left
+                  ;; to the next commit's pre-CAS sweep (a crash before it leaves a count
+                  ;; above its holders: the leak direction, never a use-after-free — §4.3
+                  ;; step 4).
                   (do
                     (tally/drop-root! sio old-ptr (park-fn ds))
-                    ;; a jlog commit forced before its CAS: the drop's descriptor writes are left to the next
-                    ;; commit's pre-CAS sweep (a crash before it leaves a count above its holders: the leak
-                    ;; direction, never a use-after-free — §4.3 step 4)
-                    (when (and (:log journal) (:unforced ds))
+                    (when (:unforced ds)
                       (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*))
-                    (journal-note-commit! ds
-                                          (into @tally/*touches*
-                                                (alloc/logged-allocs lsio))))
+                    (journal-note-commit! ds))
                   (do  ;; and the epoch is made durable before swap! returns: a
                     ;; batch journal domain appends its flush record at
                     ;; its batch boundary (that flush's force is the
@@ -2382,14 +2196,14 @@
    files, and processes may join the same domain with different
    windows.
 
-   :log :jlog keeps a journaled domain's commit records in <base>.jlog, the
-   mmapped ring (eve.jlog; eve-mmap-journal-plan §4) instead of
-   <base>.journal; :jlog-slots (a power of two, default 1024) and
-   :jlog-stripes (default 1) size it. A domain whose <base>.jlog exists is
-   opened on it by every opener, whatever :log says: the creator's choice is
-   the domain's."
+   The journal is <base>.jlog, the mmapped commit log (eve.jlog;
+   eve-mmap-journal-plan §4): a fixed-size ring of 4 KiB record slots claimed
+   by CAS — one implementation on every host, no file lock. :jlog-slots (a
+   power of two, default 1024) and :jlog-stripes (default 1) size it at
+   creation. A legacy domain's <base>.journal is migrated on the first open no
+   other process holds (and renamed <base>.journal.migrated)."
   [base-path & {:keys [capacities lustre? durable? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes
-                       log jlog-slots jlog-stripes] :or {capacities {} lustre? false durable? true}}]
+                       jlog-slots jlog-stripes] :or {capacities {} lustre? false durable? true}}]
   (or (get @domain-cache base-path)
       (let [_  (proc/ensure-parent-dir! base-path)
             ds (open-mmap-domain! base-path (cond-> {:capacities capacities
@@ -2405,7 +2219,6 @@
                                               (assoc :mem-budget mem-budget)
                                               segment-bytes
                                               (assoc :segment-bytes segment-bytes)
-                                              log (assoc :log log)
                                               jlog-slots (assoc :jlog-slots jlog-slots)
                                               jlog-stripes (assoc :jlog-stripes jlog-stripes)))
             d  (MmapAtomDomain. ds (clojure.core/atom {}))]
@@ -2428,25 +2241,19 @@
   (mem/sync-region! root-r))
 
 (defn- journal-checkpoint!
-  "Fold the journal into the root file: flush any pending batch,
-   force the whole domain (the root file is now the checkpoint),
-   then reduce the journal to its anchor record (never empty —
-   journal-anchor!). Without a journal this is sync-domain!."
+  "A checkpoint (sync!, close): the root's label and atom table read first,
+   the whole domain forced (any pending batch's commits with it: the root
+   file is a checkpoint), then an ANCHOR record appended to the log — no
+   truncation, no rewrite (eve-mmap-journal-plan §4.3). Without a journal
+   this is sync-domain!."
   [ds]
   (let [journal (:journal ds)]
-    (if (:log journal)
-      ;; jlog (§4.3 checkpoint): no truncation, no rewrite — the label and table are read first, the whole domain
-      ;; is forced (any pending batch's commits with it), then an ANCHOR record is appended
+    (if journal
       (let [_ (reset! (:pending journal) 0)
             snap (jlog-snapshot (:root-r ds))]
         (sync-domain! ds)
         (jlog-append! ds jlog/KIND_ANCHOR (constantly snap)))
-      (do
-        (when (and journal (pos? @(:pending journal)))
-          (reset! (:pending journal) 0)
-          (journal-flush! ds true))
-        (sync-domain! ds)
-        (when journal (journal-anchor! journal))))))
+      (sync-domain! ds))))
 
 (defn- release-domain! [ds]
   (let [{:keys [root-r slot-idx heartbeat closed? base-path]} ds]
@@ -2454,9 +2261,8 @@
       (reset! closed? true)
       ;; a disk domain is forced whole before it is let go: nothing a
       ;; commit wrote is left riding the page cache at close; a journal
-      ;; domain folds its journal into the root file as it closes.
+      ;; domain anchors its log as it closes.
       (when base-path (journal-checkpoint! ds))
-      (journal-close! (:journal ds))
       (proc/stop-timer! heartbeat)
       (mmap-release-slot! root-r slot-idx)
       (tally/unregister-parker! (:sio ds))

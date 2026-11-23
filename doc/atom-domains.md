@@ -39,17 +39,18 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 ### `persistent-atom-domain`
 
 ```text
-(persistent-atom-domain base-path & {:keys [capacities lustre? durable? journal? journal-batch
-                                             journal-window-ms coalesc-descriptors mem-budget
-                                             segment-bytes]})
+(persistent-atom-domain base-path & {:keys [capacities lustre? durable? journal-batch
+                                             journal-window-ms jlog-slots jlog-stripes
+                                             coalesc-descriptors mem-budget segment-bytes]})
 ```
 
 - `:capacities` — a map from class index to bytes: each class's initial size.
 - `:lustre? true` uses the fcntl byte-range-lock region, for file systems without cross-node atomics.
 - `:durable?` (default true) — durable commits. `false` is the non-durable comms form: no journal, no
   forces, `sync!` is the caller's explicit barrier.
-- `:journal?` — the disk tier is journaled by default (see *Journal durability*, below); `false` keeps
-  durable commits without the journal file, carried by the pre-CAS sweep + root-range force alone.
+- The disk tier is journaled whenever it is durable (see *Journal durability*, below): `:journal-batch` (default 1:
+  every commit durable when `swap!` returns) and `:journal-window-ms` batch the journal's forces; `:jlog-slots` (a power
+  of two, default 1024) and `:jlog-stripes` (default 1) size the log when the domain is created.
 - `:mem-budget` — bytes: caps the domain's total region growth (see *Tiers and the memory budget*).
 - `:segment-bytes` — a power of two (default 256 MiB): the region mapping window (see *Segmentation*).
 - Which process **creates** a domain is decided by one atomic exclusive create of `<base>.root`
@@ -89,15 +90,28 @@ join the same domain with different windows.
 
 ### Journal durability and the retention floor
 
-A disk domain carries `<base>.journal` (the disk tier is journaled by design), written through the host's
-`eve.journal-file` adapter (`adapters/journal-file/`): the shared code in `src/eve/atom.cljc` owns the sequence —
-lock, sweep, append, force — and the adapter owns only the file, its lock and its forces. Each record is one epoch
-and the atom table that epoch published, so recovery installs the newest valid record whole. The domain keeps a
-**retention floor**: the epoch the journal pins against reclamation. It is set at recovery, advanced at checkpoint
-— where truncation rewrites the newest valid record as the journal's sole anchor record and moves the floor to the
-anchor's epoch — and advanced by **flush-advance**: every flush records the newest durably appended epoch, and the
-next flush moves the floor to it. Blocks a still-recoverable epoch needs are therefore never reclaimed out from
-under the journal.
+A disk domain carries `<base>.jlog` (the disk tier is journaled by design): the commit log, `eve.jlog`
+(`src/eve/jlog.cljc`), one implementation on every host. It is a fixed-size file mapped like the root (the same
+`region/open-mmap-region`, the same native binding per host) — a header page, a reservation state per slot, and a
+ring of 4 KiB record slots — and it is coordinated only by CAS on mapped words, as the atom table is: no file lock.
+A commit forces the blocks it wrote BEFORE its root CAS (no pointer is visible before the blocks it reaches are
+durable), CASes the root and bumps the epoch, then reserves a slot (CAS on the stripe's tail, once the slot's previous
+lap is done: a slow writer back-pressures, it is never overwritten), writes a record — the epoch label and the whole
+atom table read after it, CRC-32 checked — and forces the slot's page: that force is the commit point, and no lock is
+held across it, so concurrent writers' forces overlap.
+
+Recovery (an open no live process holds) takes the root's hold word as its recovery hold, scans every slot, and
+installs the valid record with the highest epoch label — never the last in file order, never erasing a record — when
+its label or table differs from the root's; it repairs a leaked in-flight count, rebuilds the reservation state and
+appends an anchor record. A checkpoint (`sync!`, close) forces the whole domain and appends an anchor; nothing is
+truncated. A domain written by a pre-jlog build (`<base>.journal`, EVJ1) is migrated by the first open no other
+process holds: its newest record (by epoch, a legacy record never older than the root) is installed, and the file
+is renamed `<base>.journal.migrated`. The design and its proofs: eve.db.ds `doc/perf/eve-mmap-journal-plan.md`.
+
+The domain keeps a **retention floor**: the epoch the journal pins against reclamation. It is set at the open (the
+highest valid label, or the recovered one) and advanced by **flush-advance**: each flush records the label of the
+record it appended, and the next flush moves the floor to it. Blocks a still-recoverable epoch needs are therefore
+never reclaimed out from under the journal.
 
 ### Tiers and the memory budget
 

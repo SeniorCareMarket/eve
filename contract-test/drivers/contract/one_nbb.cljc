@@ -1,7 +1,7 @@
 (ns contract.one-nbb
   "nbb entry for the DataScript shootout contract — the SAME durable shape
    contract.one opens on every host (a fresh persistent Eve domain, journaled
-   by default, over the node mmap region and the node journal-file adapter):
+   by default on eve.jlog, over the node mmap region):
    the process slab first (the nbb seat's launcher pattern, as
    contract.flagship-main / contract.ds-nbb-main), then contract.one.
 

@@ -346,8 +346,8 @@
 ;; correct across nodes via the Lustre LDLM.
 
 (deftype LustreMmapRegion [^js buf   ; Node.js Buffer (mmap'd page)
-                            fd        ; file descriptor (kept open for fcntl)
-                            size]     ; byte length
+                           fd        ; file descriptor (kept open for fcntl)
+                           size]     ; byte length
   mem/IMemRegion
   (-byte-length [_] size)
 
@@ -411,6 +411,18 @@
   (-write-bytes! [_ byte-off src]
     (let [src-buf (js/Buffer.from (.-buffer src) (.-byteOffset src) (.-byteLength src))]
       (.copy src-buf buf byte-off))
+    nil)
+
+  ;; --- durability (eve.mem/ISyncableRegion): the addon's msync over the
+  ;; mapping, as NodeMmapRegion forces (a durable Lustre domain's log,
+  ;; eve.jlog, is a region of this kind and refuses a region that cannot) ---
+  mem/ISyncableRegion
+  (-sync! [_]
+    (.msync ^js (native) buf 0 size)
+    nil)
+
+  (-sync-range! [_ byte-off len]
+    (.msync ^js (native) buf byte-off len)
     nil))
 
 (defn open-lustre-region

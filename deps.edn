@@ -1,7 +1,7 @@
 ;; the JVM: eve's shared code and the JVM's adapters (hosts.edn :jvm)
 {:paths ["src" "apps/network-atoms/src" "adapters/slab-io/protocol/src" "adapters/http/java/src" "adapters/http-server/jdk/src" "adapters/crypto/java/src" "adapters/crypto/portable/src" "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src"
          "adapters/encoding/java/src" "adapters/int32/jvm/src" "adapters/codec/byte-array/src"
-         "adapters/process/java/src" "adapters/gc/java/src" "adapters/thread/jvm/src" "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/java/src"
+         "adapters/process/java/src" "adapters/gc/java/src" "adapters/thread/jvm/src" "adapters/types/jvm/src" "adapters/types/js/src"
          ;; eve.flat-io: the JVM fast root, then the inbuilt root (hosts.edn's :jvm row)
          "adapters/flat-io/jvm/src" "adapters/flat-io/portable/src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
@@ -17,12 +17,12 @@
                    "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
                    "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src"
                    "adapters/region/js/src" "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src"
-                   "adapters/process/node/src" "adapters/gc/js/src" "adapters/thread/node/src" "adapters/journal-file/node/src"
+                   "adapters/process/node/src" "adapters/gc/js/src" "adapters/thread/node/src"
                    ;; the compiler's own Clojure (a JVM)
                    "adapters/coll/jvm/src" "adapters/slab/heap/src"
                    "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src" "adapters/int32/jvm/src"
                    "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/gc/java/src" "adapters/thread/jvm/src"
-                   "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/java/src"
+                   "adapters/types/jvm/src" "adapters/types/js/src"
                    ;; eve.flat-io, the inbuilt root: its .cljc serves the compile and the compiler's own Clojure
                    ;; (hosts.edn's :cljs row: the ClojureScript fast root first)
                    "adapters/flat-io/js/src" "adapters/flat-io/portable/src"]
@@ -38,10 +38,10 @@
                    "adapters/crypto/portable/src" "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
                    "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
                    "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/gc/js/src"
-                   "adapters/thread/browser/src" "adapters/journal-file/node/src"
+                   "adapters/thread/browser/src"
                    "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src"
                    "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/gc/java/src"
-                   "adapters/thread/jvm/src" "adapters/types/jvm/src" "adapters/types/js/src" "adapters/journal-file/java/src"
+                   "adapters/thread/jvm/src" "adapters/types/jvm/src" "adapters/types/js/src"
                    ;; eve.flat-io: the ClojureScript fast root, then the inbuilt root (as :node-test)
                    "adapters/flat-io/js/src" "adapters/flat-io/portable/src"]
    :extra-paths ["test" "apps/network-atoms/test"]

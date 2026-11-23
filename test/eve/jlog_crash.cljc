@@ -1,6 +1,6 @@
 (ns eve.jlog-crash
   "The kill -9 crash driver (eve-mmap-journal-plan §6.3), one program for the
-   JVM, jolt and Node, over a disk domain on the commit log (:log :jlog):
+   JVM, jolt and Node, over a disk domain on the commit log (eve.jlog):
 
      init   <base> <slots>                  create the domain (its creator) and close it
      writer <base> <tag> <start-ms> <dur-ms> from start-ms for dur-ms: TRY tag i, then
@@ -31,7 +31,7 @@
 
 (defn- open [base slots]
   (if slots
-    (a/persistent-atom-domain base :log :jlog :jlog-slots slots)
+    (a/persistent-atom-domain base :jlog-slots slots)
     (a/persistent-atom-domain base)))
 
 (defn- writer! [base tag start-ms dur-ms]

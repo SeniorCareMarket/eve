@@ -187,9 +187,12 @@
    byte written once through the mapping (the preallocation: no page of the
    log is a hole, so a commit's force never allocates), the header and slot
    states are laid down, and the magic is written last, after a force: a
-   joiner that sees the magic sees a complete log. Answers the open log."
+   joiner that sees the magic sees a complete log. :region is the map
+   region/open-mmap-region takes (the domain's own: {:lustre? true} on a
+   Lustre mount, whose atomics are byte-range locks across nodes, as the
+   root's are). Answers the open log."
   ([path] (create! path nil))
-  ([path {:keys [slots stripes nonce] :or {slots DEFAULT_SLOTS stripes DEFAULT_STRIPES}}]
+  ([path {:keys [slots stripes nonce region] :or {slots DEFAULT_SLOTS stripes DEFAULT_STRIPES}}]
    (when-not (and (pow2? slots) (pow2? stripes) (<= stripes MAX_STRIPES))
      (throw (ex-info "eve.jlog: slots and stripes must be powers of two (stripes <= 63)"
                      {:slots slots :stripes stripes})))
@@ -198,7 +201,7 @@
          size (file-bytes n s)
          data-off (data-offset n s)
          nonce (or nonce (random-u32))
-         r (region/open-mmap-region path size)
+         r (region/open-mmap-region path size region)
          _ (check-syncable! r path)
          chunk (byte-array 65536)]
      ;; preallocate: every page written once (a sparse page would allocate at the force)
@@ -245,10 +248,12 @@
 
 (defn open
   "Open the existing log at PATH (waiting up to TIMEOUT-MS for its creator to
-   finish). Throws on a wrong magic or version: a log is never overwritten."
-  ([path] (open path d/HEARTBEAT_TIMEOUT_MS))
-  ([path timeout-ms]
-   (let [hr (region/open-mmap-region path 4096)
+   finish), mapped with REGION-OPTS (create!'s :region). Throws on a wrong
+   magic or version: a log is never overwritten."
+  ([path] (open path d/HEARTBEAT_TIMEOUT_MS nil))
+  ([path timeout-ms] (open path timeout-ms nil))
+  ([path timeout-ms region-opts]
+   (let [hr (region/open-mmap-region path 4096 region-opts)
          _ (await-magic hr path timeout-ms)
          version (mem/-load-i32 hr H_VERSION)
          slot-bytes (mem/-load-i32 hr H_SLOT_BYTES)
@@ -259,7 +264,7 @@
                     (== data-off (data-offset n s)))
        (throw (ex-info "eve.jlog: unsupported log version or layout"
                        {:path path :version version :slot-bytes slot-bytes :n n :s s})))
-     (let [r (region/open-mmap-region path (file-bytes n s))]
+     (let [r (region/open-mmap-region path (file-bytes n s) region-opts)]
        (check-syncable! r path)
        (handle r path n s (mem/-load-i32 r H_NONCE) data-off)))))
 
