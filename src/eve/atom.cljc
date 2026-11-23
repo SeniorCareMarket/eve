@@ -1103,8 +1103,6 @@
     (finally
       (unpin-epoch! ds))))
 
-(declare read-root-value)
-
 (defn- view-deref
   "deref outside `$` (and outside a swap!), where views are built: the root
    read under a pin and answered as a view that holds a pin of its own until

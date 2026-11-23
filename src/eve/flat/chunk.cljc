@@ -1610,15 +1610,20 @@
 
 ;; --- equality and hash over nodes (FORMAT-V1 §8) ----------------------
 
-(declare flat-emit! sym-entry-bytes emit-flat-value! emit-framed! emit-i32le sha-vec handle-digest node-equiv-walk digest-of handle-ctx handle-off eve-digest)
+;; sha-vec is declared a second time here on purpose: its first
+;; declare sits in the :clj arm above (before fingerprint, its
+;; first caller), which the other passes never read — this
+;; top-level declare is the one they see. Kondo's :clj pass calls
+;; it redundant; for the file's other passes it is load-bearing,
+;; so that one finding is ignored at the site.
+#_{:clj-kondo/ignore [:redundant-declare]}
+(declare flat-emit! sym-entry-bytes emit-flat-value! emit-framed! emit-i32le sha-vec node-equiv-walk digest-of handle-ctx handle-off eve-digest)
 
 (defn- rep-hasheq ^long [x]
   ;; clojure.core/hash IS hasheq over Eve values (and Murmur3's
   ;; hashLong over longs) on every host; the bare `hasheq` var is
   ;; not resolvable under bb's core.
   (hash x))
-
-(declare node-hasheq*)
 
 (defn- node-hasheq
   "eve.platform's fold, computed over the node at off without
@@ -2061,8 +2066,7 @@
 
 (declare ->FlatVec ->FlatColVec ->FlatList ->FlatSet ->FlatMap
          ->FlatBatch ->FlatRow ->FlatRecord ->FlatTagged
-         handle-ctx handle-off
-         lookup-node entries-of-node row-lookup row-entries)
+         row-lookup row-entries)
 
 ;; --- the field sources a generated sister reads through (lane H5) ----
 ;; On every host that realizes a sister (the JVM, babashka, ClojureScript;
@@ -2254,7 +2258,11 @@
 ;; the JVM-family arm above (the cljs handles implement the surface by
 ;; name through entries-of-node, and these shared helpers are the JVM
 ;; protocol's callers). Declared here so the helpers below name it
-;; before either host's definition point.
+;; before either host's definition point. (Kondo's :clj pass calls
+;; this declare redundant because the arm's defprotocol precedes it;
+;; on the passes that never read that arm it is the only declaration,
+;; so the finding is ignored at the site.)
+#_{:clj-kondo/ignore [:redundant-declare]}
 (declare -entries)
 
 (defn- record-entries-rep
@@ -2290,7 +2298,7 @@
   (entries-equiv (-entries h) other))
 
 (declare cons-flat assocN-flat pop-flat assoc-flat dissoc-flat
-         disjoin-flat open bytes-of)
+         disjoin-flat bytes-of)
 
 ;; row and set element walks, defined on neutral ground: every
 ;; host's FlatRow / FlatSet bodies call them, but they used to sit
@@ -5177,8 +5185,6 @@
   (when (satisfies? IRecordInfo h) (-tkey h)))
 
 (declare materialize-row)
-
-(declare unpack)
 
 (defn- materialize
   "The plain value of the node at off — the one whole-value decode
