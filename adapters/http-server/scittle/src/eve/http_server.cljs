@@ -57,8 +57,7 @@
    guard the browser adapter carries around that wart is unnecessary on this seat. The channel's EDN
    is likewise read with the seat's own reader: cljs.core/read-string (SCI's EDN reader) — stock
    scittle registers no cljs.reader namespace for programs (the reader in its bundle is SCI's
-   internal one), where the compiled build's adapter requires cljs.reader."
-  (:require))
+   internal one), where the compiled build's adapter requires cljs.reader.")
 
 ;; ---------------------------------------------------------------------------
 ;; Small shapes

@@ -21,7 +21,6 @@
    through the capture. Everything else is extend-clj's :cljs face
    as the DataScript port carries it, including its F-NBB-MACROS
    delta (no Object equiv group on this seat; IEquiv carries it)."
-  (:require)
   #?(:cljs
      (:require-macros
       [extend-clj.core])))

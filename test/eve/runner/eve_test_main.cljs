@@ -1,14 +1,14 @@
 (ns eve.runner.eve-test-main
-  {:clj-kondo/config {:linters {:unused-namespace {:level :off}}}}
-  ;; unused-namespace is off for this file alone: its :require list IS
-  ;; the test registry — every suite namespace is required purely so
-  ;; loading this main registers its deftests; almost none is
-  ;; referenced by name, by design.
   "Standalone eve test runner. Runs all eve test suites independently of
    cljs-thread. Suite selection via CLI args.
 
    Usage: node target/eve-test/all.js [suite]
    Example: node target/eve-test/all.js slab"
+  ;; unused-namespace is off for this file alone: its :require list IS
+  ;; the test registry — every suite namespace is required purely so
+  ;; loading this main registers its deftests; almost none is
+  ;; referenced by name, by design.
+  {:clj-kondo/config {:linters {:unused-namespace {:level :off}}}}
   (:require
    [goog]
    [cljs.test :as t]

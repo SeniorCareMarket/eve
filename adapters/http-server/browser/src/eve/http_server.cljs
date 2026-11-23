@@ -33,7 +33,6 @@
    vs shape); on the page itself, the endpoint's pump runs it — a handler there must not block, the constraint
    the page already lives under. :host is accepted and ignored: the origin is the host."
   (:require [cljs.reader :as reader]
-            [clojure.string :as str]
             [eve.net.bytes :as nb]
             [eve.thread-host :as h]))
 

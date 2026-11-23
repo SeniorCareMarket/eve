@@ -6,8 +6,7 @@
             [eve.flat.contract :as contract]
             ; the alias is exercised on the other reader pass; the require loads on both 
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
-            #?(:clj [eve.atom :as ea])
-            #?(:clj)))
+            #?(:clj [eve.atom :as ea])))
 
 ;; ---------------------------------------------------------------------------
 ;; W0.3 — contract-roundtrip
