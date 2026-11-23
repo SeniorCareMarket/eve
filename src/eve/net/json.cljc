@@ -127,7 +127,7 @@
         (let [m (fold-digits (into ip fp))
               x (* (if (= 45 esign) -1 1) (if xp (fold-digits xp) 0))
               ex (- x (count fp))
-              v (if (neg? ex) (/ (* 1.0 m) (pow10 (- ex))) (* (* 1.0 m) (pow10 ex)))]
+              v (if (neg? ex) (/ (* 1.0 m) (pow10 (- ex))) (* 1.0 m (pow10 ex)))]
           [(if minus? (- v) v) i3])))))
 
 (def ^:private TRUE [116 114 117 101])

@@ -144,7 +144,7 @@
                                (println "\n-- Benchmarks complete --")
                                (js/setTimeout #(js/process.exit 0) 500)))
                       (.catch (fn [err]
-                                (println (str "\nFATAL: " (str err)))
+                                (println (str "\nFATAL: "  err))
                                 (js/process.exit 1))))))
               8000))))
 

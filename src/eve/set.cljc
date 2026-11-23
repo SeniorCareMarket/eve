@@ -125,7 +125,7 @@
 
 (defn- make-single-value-node! [sio data-bm vb]
   (let [vlen (bytes-length vb)
-        nsize (+ NODE_HEADER_SIZE (+ 4 vlen))
+        nsize (+ NODE_HEADER_SIZE 4 vlen)
         node-off (slab/alloc! sio nsize)]
     (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
     (slab/write-u8!  sio node-off 1 0)
@@ -147,7 +147,7 @@
 
 (defn- make-child-and-value-node! [sio data-bm node-bm child-off vb]
   (let [vlen (bytes-length vb)
-        nsize (+ NODE_HEADER_SIZE 4 (+ 4 vlen))
+        nsize (+ NODE_HEADER_SIZE 4 4 vlen)
         node-off (slab/alloc! sio nsize)]
     (slab/write-u8!  sio node-off 0 NODE_TYPE_BITMAP)
     (slab/write-u8!  sio node-off 1 0)

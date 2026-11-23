@@ -172,7 +172,7 @@
     :vec-root 145
     :vec-node (+ 9 (* CORE (count (body-slots body kind cap))))
     :node (let [cc (popcount (rd32 body 9)) dc (popcount (rd32 body 5))]
-            (+ 13 (* CORE cc) (* 16 dc) (+ (nth body 3) (* 256 (nth body 4)))))))
+            (+ 13 (* CORE cc) (* 16 dc) (nth body 3) (* 256 (nth body 4))))))
 
 (defn- vec-cap "eve.vs eve_vec_node_cap: the slots a vector node's allocation holds" [bs]
   (if (< bs (+ 265 CORE)) 32 (min 32 (quot (- bs 265) CORE))))

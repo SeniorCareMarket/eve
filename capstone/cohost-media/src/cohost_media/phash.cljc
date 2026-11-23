@@ -47,7 +47,7 @@
                        (if (< x N)
                          (recur (inc x)
                                 (+ a
-                                   (* (nth cu x) (* 1.0 (nth px (+ (* y N) x))))))
+                                   (* (nth cu x) 1.0 (nth px (+ (* y N) x)))))
                          a)))))
         acc))))
 

@@ -43,7 +43,7 @@
         _          (println (str "  entries: " n-entries
                                  "  swaps: " n-swaps
                                  "  lustre?: " lustre?
-                                 "  est-size: " (str (/ (estimate-map-size n-entries) 1048576) "MB")))
+                                 "  est-size: "  (/ (estimate-map-size n-entries) 1048576) "MB"))
         ;; Build initial map
         t0         (now-ms)
         init-map   (build-map n-entries)

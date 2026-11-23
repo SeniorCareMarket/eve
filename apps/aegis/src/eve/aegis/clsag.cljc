@@ -138,7 +138,7 @@
     (and (pos? n)
          (= n (count s))
          (every? (fn [si] (and (= 32 (count si)) (ed/below-l? (vec si)))) s)
-         (and (= 32 (count c1)) (ed/below-l? (vec c1)))
+         (= 32 (count c1)) (ed/below-l? (vec c1))
          (= 32 (count I))
          (not= IDENTITY (vec I))
          (in-subgroup? (vec I))
