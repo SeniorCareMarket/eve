@@ -17,7 +17,8 @@
   (:require [eve.codec :as codec]
             [eve.encoding :as enc]
             #?(:clj [eve.crypto :as crypto]
-               :cljs [eve.crypto :as crypto])
+               :cljs [eve.crypto :as crypto]
+               :lpy [eve.crypto :as crypto])
             [eve.deftype-proto.data :as d]
             [eve.flat.source :as source]
             ;; every read and write of a chunk's bytes (doc/flat/FLAT-IO.md):
