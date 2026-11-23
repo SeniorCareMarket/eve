@@ -1699,14 +1699,21 @@
 (defn node-i32
   "The little-endian i32 at slab-off + field-off (any alignment) of a published node."
    ^long [sio ^long slab-off ^long field-off]
-  (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
-        arr (when ctx (node-heap-bytes ctx slab-off))]
-    (if (nil? arr)
-      (if ctx
-        (long (mem/-plain-load-i32 (node-region ctx slab-off)
-                                   (node-at ctx slab-off field-off)))
-        (long (-sio-read-i32 sio slab-off field-off)))
-      (bytes-i32 arr (node-at ctx slab-off field-off)))))
+  ;; jolt: JoltRegion has no IHeapBytes, so the portable body always took the
+  ;; nil-arr plain-load path — after instance? JvmSlabCtx, node-ctx*, node-heap-bytes
+  ;; and node-at, each a Clojure call (9.2% of swap-counter). fast-read-i32 is the
+  ;; same unwrap + eve-sio-get + plain-load-i32-op already used by slab-io reads:
+  ;; the same bytes, any alignment. Other hosts keep the heap-array path.
+  #?(:jolt (long (fast-read-i32 sio slab-off field-off))
+     :default
+     (let [ctx (if (instance? JvmSlabCtx sio) sio (node-ctx* sio))
+           arr (when ctx (node-heap-bytes ctx slab-off))]
+       (if (nil? arr)
+         (if ctx
+           (long (mem/-plain-load-i32 (node-region ctx slab-off)
+                                      (node-at ctx slab-off field-off)))
+           (long (-sio-read-i32 sio slab-off field-off)))
+         (bytes-i32 arr (node-at ctx slab-off field-off))))))
 
 ;; IWrappedSio is defined before node-bytes-equal? (not after it, as the JVM's
 ;; load order allowed): the jank slab-io adapter's bytes-equal-at? is a macro
