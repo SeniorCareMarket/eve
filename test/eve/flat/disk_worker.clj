@@ -41,7 +41,7 @@
                             {:class ci :n n :round round})))
           (.addAll claimed offs)))
       (let [ci (mod round 3)]
-        (.add claimed (alloc/-sio-alloc! sio (nth alloc/CLASS_BLOCK_SIZES ci))))
+        (.add claimed (alloc/-sio-alloc! sio (nth alloc/class-block-sizes ci))))
       ;; a breath of jitter so the two processes interleave unevenly
       (Thread/sleep (.nextInt rnd 3)))
     (spit out (pr-str (vec claimed)))

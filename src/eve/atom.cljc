@@ -83,7 +83,7 @@
 
 ;; Time-throttled retire flush — skip the 256-slot scan when the last scan
 ;; was recent and the queue is small. Only ever delays a free.
-(def ^:const FLUSH_INTERVAL_MS 50)
+(def ^:const flush-interval-ms 50)
 (def ^:const flush-queue-threshold 64)
 
 ;; CAS retry backoff — jittered exponential backoff after the third failure.
@@ -94,7 +94,7 @@
 
 ;; The exclusive hold a joining lock-only participant takes before it has a
 ;; slot (its value in ROOT_HOLD); cleared by a waiter after HEARTBEAT_TIMEOUT_MS.
-(def ^:const hold-joining (inc d/MAX_WORKERS))
+(def ^:const hold-joining (inc d/max-workers))
 
 ;; ---------------------------------------------------------------------------
 ;; The host's process primitives — the clock, a thread's identity, sleep, a
@@ -115,7 +115,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- worker-slot-offset [slot-idx field-offset]
-  (+ d/ROOT_WORKER_REGISTRY_START (* slot-idx d/WORKER_SLOT_SIZE) field-offset))
+  (+ d/root-worker-registry-start (* slot-idx d/worker-slot-size) field-offset))
 
 (defn- write-heartbeat!
   "Write the clock as a 64-bit millisecond timestamp in two i32 words.
@@ -146,23 +146,23 @@
   [root-r]
   (or
    (loop [i 0]
-     (when (< i d/MAX_WORKERS)
+     (when (< i d/max-workers)
        (let [status-off (worker-slot-offset i d/OFFSET_WS_STATUS)
              witness (mem/-cas-i32! root-r status-off
-                                    d/WORKER_STATUS_INACTIVE
-                                    d/WORKER_STATUS_ACTIVE)]
-         (if (== witness d/WORKER_STATUS_INACTIVE)
+                                    d/worker-status-inactive
+                                    d/worker-status-active)]
+         (if (== witness d/worker-status-inactive)
            (do (mem/-store-i32! root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
                i)
            (recur (inc i))))))
    (loop [i 0]
-     (when (< i d/MAX_WORKERS)
+     (when (< i d/max-workers)
        (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
-         (if (and (== status d/WORKER_STATUS_ACTIVE)
+         (if (and (== status d/worker-status-active)
                   (heartbeat-stale? root-r i))
            (let [witness (mem/-cas-i32! root-r (worker-slot-offset i d/OFFSET_WS_STATUS)
-                                        d/WORKER_STATUS_ACTIVE d/WORKER_STATUS_ACTIVE)]
-             (if (== witness d/WORKER_STATUS_ACTIVE)
+                                        d/worker-status-active d/worker-status-active)]
+             (if (== witness d/worker-status-active)
                (do (mem/-store-i32! root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH) 0)
                    i)
                (recur (inc i))))
@@ -174,7 +174,7 @@
   [root-r slot-idx]
   (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_CURRENT_EPOCH) 0)
   (mem/-store-i32! root-r (worker-slot-offset slot-idx d/OFFSET_WS_STATUS)
-                   d/WORKER_STATUS_INACTIVE))
+                   d/worker-status-inactive))
 
 (defn- mmap-pin-epoch!
   "Announce this slot reads at epoch. Before the root pointer is read."
@@ -191,11 +191,11 @@
    pinned (every retired entry is reclaimable)."
   [root-r]
   (loop [i 0 result nil]
-    (if (>= i d/MAX_WORKERS)
+    (if (>= i d/max-workers)
       result
       (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))
             epoch (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_CURRENT_EPOCH))]
-        (if (and (== status d/WORKER_STATUS_ACTIVE)
+        (if (and (== status d/worker-status-active)
                  (not (zero? epoch))
                  (not (heartbeat-stale? root-r i)))
           (recur (inc i) (if (nil? result) epoch (min result epoch)))
@@ -331,24 +331,24 @@
    the magic is there (await-domain-root!). Slab allocation is the caller's
    job. Returns root-r."
   [root-r]
-  (mem/-store-i32! root-r d/ROOT_ATOM_PTR_OFFSET 0) ;; now: atom slot count
-  (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET 1)
-  (mem/-store-i32! root-r d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
+  (mem/-store-i32! root-r d/root-atom-ptr-offset 0) ;; now: atom slot count
+  (mem/-store-i32! root-r d/root-epoch-offset 1)
+  (mem/-store-i32! root-r d/root-worker-reg-offset d/root-worker-registry-start)
   (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_OFFSET d/ATOM_TABLE_START)
   (mem/-store-i32! root-r d/ROOT_ATOM_TABLE_CAPACITY d/MAX_ATOM_SLOTS)
   (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0)
   (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
-  (dotimes [slot d/MAX_WORKERS]
+  (dotimes [slot d/max-workers]
     (mem/-store-i32! root-r
-                     (+ d/ROOT_WORKER_REGISTRY_START (* slot d/WORKER_SLOT_SIZE))
-                     d/WORKER_STATUS_INACTIVE))
+                     (+ d/root-worker-registry-start (* slot d/worker-slot-size))
+                     d/worker-status-inactive))
   (mem/-store-i32! root-r d/ATOM_TABLE_HEADER_START d/ATOM_TABLE_MAGIC)
   (mem/-store-i32! root-r (+ d/ATOM_TABLE_HEADER_START 4) 0) ;; slot count
   (dotimes [s d/MAX_ATOM_SLOTS]
-    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET) alloc/NIL_OFFSET)
+    (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_PTR_OFFSET) alloc/nil-offset)
     (mem/-store-i32! root-r (d/atom-slot-offset s d/ATOM_SLOT_HASH_OFFSET) 0))
   ;; the region's store is fenced: everything above is visible before it
-  (mem/-store-i32! root-r d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC_V2)
+  (mem/-store-i32! root-r d/root-magic-offset d/ROOT_MAGIC_V2)
   root-r)
 
 ;; ---------------------------------------------------------------------------
@@ -399,7 +399,7 @@
   "The domain's park!: a block whose count reached 0 queued on the zero queue at the epoch now."
   [{:keys [root-r retire-q]}]
   (fn [off kind]
-    (swap! retire-q conj {:off off :kind kind :epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)})))
+    (swap! retire-q conj {:off off :kind kind :epoch (mem/-load-i32 root-r d/root-epoch-offset)})))
 
 (defn- take-unforced!
   "One offset in each slab class the zero-queue flush wrote that no force has covered yet, taken (the note emptied):
@@ -441,7 +441,7 @@
   (let [note? (and durable-commits? base-path unforced)
         queued (when note? (mapv :off @retire-q))]
     (tally/flush! sio retire-q
-                  (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+                  (fn [] (mem/-load-i32 root-r d/root-epoch-offset))
                   (fn [] (let [readers (mmap-min-safe-epoch root-r)
                                floor   (some-> journal :floor deref)]
                            (cond (and readers floor) (min readers floor)
@@ -465,7 +465,7 @@
   [root-r base-path]
   (let [t0 (proc/now-ms)]
     (loop [i 0]
-      (let [magic (mem/-load-i32 root-r d/ROOT_MAGIC_OFFSET)]
+      (let [magic (mem/-load-i32 root-r d/root-magic-offset)]
         (cond
           (== magic d/ROOT_MAGIC_V2) nil
           (not (zero? magic))
@@ -537,7 +537,7 @@
         ;; inside the lock by jf/journal-record; epochs are
         ;; monotone, so this earlier read never exceeds it)
         floor-epoch (when journal
-                      (mem/-load-i32 (:root-r ds) d/ROOT_EPOCH_OFFSET))
+                      (mem/-load-i32 (:root-r ds) d/root-epoch-offset))
         t0 (when (and journal *flush-timing*) (now-ms))]
     (when journal
       (jf/with-journal-lock (:file journal)
@@ -615,9 +615,9 @@
    domain open right now."
   [root-r]
   (loop [i 0]
-    (cond (>= i d/MAX_WORKERS) false
+    (cond (>= i d/max-workers) false
           (and (== (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))
-                   d/WORKER_STATUS_ACTIVE)
+                   d/worker-status-active)
                (not (heartbeat-stale? root-r i))) true
           :else (recur (inc i)))))
 
@@ -642,7 +642,7 @@
           (if create?
             (do (jf/journal-truncate! h) (jf/journal-force! h true))
             (let [{:keys [newest oldest torn?]} (jf/journal-scan h)
-                  e-map (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+                  e-map (mem/-load-i32 root-r d/root-epoch-offset)]
               ;; RETENTION FLOOR (fix (b)): the oldest epoch
               ;; recovery may still install — the journal's
               ;; oldest surviving record, or the root's own
@@ -665,7 +665,7 @@
                                               (:table newest)))))]
                   (when install?
                     (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table newest))
-                    (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:epoch newest))
+                    (mem/-store-i32! root-r d/root-epoch-offset (:epoch newest))
                     (mem/sync-region! root-r))
                   (when (or torn? install?)
                     (jf/journal-truncate! h)
@@ -858,13 +858,13 @@
    here, else raw delivered flat."
   [{:keys [root-r] :as ds} _atom-slot-idx raw]
   (if-let [h (view-read-fn)]
-    (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+    (let [epoch (mem/-load-i32 root-r d/root-epoch-offset)]
       ;; the read api eve.view chooses from: a pin of the read's own (:hold,
       ;; answering its release), or per-access pins (:enter / :exit) checked
       ;; against the epoch the read was taken at
       (h raw {:epoch epoch
               :hold (fn [] (view-pin! ds epoch) (fn [] (view-unpin! ds epoch)))
-              :enter (fn [] (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+              :enter (fn [] (let [e (mem/-load-i32 root-r d/root-epoch-offset)]
                               (pin-epoch! ds e)
                               e))
               :exit (fn [] (unpin-epoch! ds))}))
@@ -883,7 +883,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- live-ptr? [ptr]
-  (and (not= ptr alloc/NIL_OFFSET) (not= ptr claimed-sentinel)))
+  (and (not= ptr alloc/nil-offset) (not= ptr claimed-sentinel)))
 
 (defn- read-root-value
   "The slab-backed value at ptr, read through sio. The caller pins."
@@ -983,7 +983,7 @@
   ([sio new-val foreign-policy]
    (cond
      (nil? new-val)
-     alloc/NIL_OFFSET
+     alloc/nil-offset
 
      (and (not (scalar-leaf? new-val)) (satisfies? d/IEveRoot new-val))
      (let [vs (d/-eve-sio new-val)]
@@ -1019,7 +1019,7 @@
    queue is past FLUSH_QUEUE_THRESHOLD. Only ever delays a free."
   [{:keys [retire-q flush-ts] :as ds}]
   (let [now (proc/now-ms)]
-    (when (or (> (- now @flush-ts) FLUSH_INTERVAL_MS)
+    (when (or (> (- now @flush-ts) flush-interval-ms)
               (> (count @retire-q) flush-queue-threshold))
       (reset! flush-ts now)
       (flush-zero-queue! ds))))
@@ -1036,7 +1036,7 @@
   (rr/hold! ds
             (fn []
               (refresh-slabs! ds)
-              (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)))
+              (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset)))
             (fn [] (unpin-epoch! ds)))
   (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
     (refresh-slabs! ds)
@@ -1095,7 +1095,7 @@
   [{:keys [root-r sio] :as ds} atom-slot-idx]
   (deref-deliver)
   (refresh-slabs! ds)
-  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
   (try
     (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
       ;; the root may name blocks another process allocated after growing a
@@ -1111,7 +1111,7 @@
    the GC collects it (eve.view)."
   [{:keys [root-r sio] :as ds} atom-slot-idx]
   (refresh-slabs! ds)
-  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
   (try
     (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
       (refresh-slabs! ds)
@@ -1130,7 +1130,7 @@
   [{:keys [root-r sio] :as ds} atom-slot-idx]
   (if-let [deliver (deref-deliver)]
     (do (refresh-slabs! ds)
-        (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+        (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
         (try
           (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
             ;; the root may name blocks another process allocated after
@@ -1155,7 +1155,7 @@
      (guard/hold! ds
                   (fn []
                     (refresh-slabs! ds)
-                    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)))
+                    (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset)))
                   (fn [] (unpin-epoch! ds)))
      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))
            _   (refresh-slabs! ds)
@@ -1315,7 +1315,7 @@
    _exclusive?
    want-vals?]
   (refresh-slabs! ds)
-  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
   ;; the touched set feeds the durable sweeps alone (every read of it below is inside a durable-commits? arm):
   ;; an in-memory domain binds none, and tally/note-touch! is one nil check (it was a set conj per mutation)
   (binding [tally/*touches* (when durable-commits? (clojure.core/atom #{}))]
@@ -1373,7 +1373,7 @@
                 w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
             (if (== w old-ptr)
               (do
-                (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)
+                (mem/-add-i32! root-r d/root-epoch-offset 1)
                 ;; what the attempt allocated that the new root does not reach (the swap function's intermediates)
                 ;; is held by nothing: freed now, before the drop and the durable sweeps below, which cover these
                 ;; classes through the logged allocations they already name
@@ -1406,10 +1406,10 @@
                       (if journal
                         (journal-note-commit! ds)
                         (mem/sync-region! root-r
-                                          (min ptr-off d/ROOT_EPOCH_OFFSET)
+                                          (min ptr-off d/root-epoch-offset)
                                           (+ 4
-                                             (- (max ptr-off d/ROOT_EPOCH_OFFSET)
-                                                (min ptr-off d/ROOT_EPOCH_OFFSET))))))
+                                             (- (max ptr-off d/root-epoch-offset)
+                                                (min ptr-off d/root-epoch-offset))))))
                     ;; the slot lets old go: a block at 0 is parked at the epoch now
                     (tally/drop-root! sio old-ptr (park-fn ds))
                     ;; the drop's descriptor writes are forced too (the root
@@ -1601,7 +1601,7 @@
   (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
         slot (-atom-slot-idx a)]
     (refresh-slabs! ds)
-    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+    (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
     (try
       (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
         (refresh-slabs! ds)
@@ -1737,7 +1737,7 @@
                          old-val new-val))
 
 ;; SharedAtom compat alias (tests reference a/SharedAtom)
-(def SharedAtom MmapAtom)
+(def shared-atom MmapAtom)
 
 #_{:clj-kondo/ignore [:missing-protocol-method]} ; the watch surface is carried in this form's clojure.lang.IRef group (addWatch/removeWatch); the :cljs pass asks for the cljs spellings, which live in the cljs adapter's atom types
 (eve/host-deftype MmapAtomDomain [domain-state registry-cache]
@@ -1954,7 +1954,7 @@
                         {:capacity cap :region-slots d/MAX_ATOM_SLOTS})))
       (let [ptr-off (d/atom-slot-offset i d/ATOM_SLOT_PTR_OFFSET)
             cur-ptr (mem/-load-i32 root-r ptr-off)]
-        (if (or (== cur-ptr alloc/NIL_OFFSET) (zero? cur-ptr))
+        (if (or (== cur-ptr alloc/nil-offset) (zero? cur-ptr))
           (let [w (mem/-cas-i32! root-r ptr-off cur-ptr claimed-sentinel)]
             (if (== w cur-ptr)
               (do (mem/-store-i32! root-r (d/atom-slot-offset i d/ATOM_SLOT_HASH_OFFSET) name-hash)
@@ -2058,7 +2058,7 @@
    in the domain, or the same value written again)."
   [a]
   (let [{:keys [root-r]} (atom-domain-state a)
-        e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+        e (mem/-load-i32 root-r d/root-epoch-offset)]
     [e (mem/-load-i32 root-r (d/atom-slot-offset (-atom-slot-idx a) d/ATOM_SLOT_PTR_OFFSET))]))
 
 (defn- fnv-fold [h x] (i32/imul (bit-xor h (i32/i32 x)) 0x01000193))
@@ -2074,7 +2074,7 @@
   (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
         slot (-atom-slot-idx a)]
     (refresh-slabs! ds)
-    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+    (pin-epoch! ds (mem/-load-i32 root-r d/root-epoch-offset))
     (try
       (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))
             nh (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))
@@ -2246,14 +2246,14 @@
   (not (heartbeat-stale? (:root-r env) slot-idx)))
 
 (defn get-current-epoch [env]
-  (mem/-load-i32 (:root-r env) d/ROOT_EPOCH_OFFSET))
+  (mem/-load-i32 (:root-r env) d/root-epoch-offset))
 
 (defn increment-epoch! [env]
-  (inc (mem/-add-i32! (:root-r env) d/ROOT_EPOCH_OFFSET 1)))
+  (inc (mem/-add-i32! (:root-r env) d/root-epoch-offset 1)))
 
 (defn begin-read! [env slot-idx]
   (let [root-r (:root-r env)
-        epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+        epoch (mem/-load-i32 root-r d/root-epoch-offset)]
     (mmap-pin-epoch! root-r slot-idx epoch)
     epoch))
 
@@ -2304,10 +2304,10 @@
   [env]
   (let [root-r (:root-r env)]
     (loop [i 0 count 0]
-      (if (>= i d/MAX_WORKERS)
+      (if (>= i d/max-workers)
         count
         (let [status (mem/-load-i32 root-r (worker-slot-offset i d/OFFSET_WS_STATUS))]
-          (if (and (== status d/WORKER_STATUS_ACTIVE)
+          (if (and (== status d/worker-status-active)
                    (heartbeat-stale? root-r i))
             (recur (inc i) (inc count))
             (recur (inc i) count)))))))

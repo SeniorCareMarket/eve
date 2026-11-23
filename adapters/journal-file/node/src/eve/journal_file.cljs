@@ -185,7 +185,7 @@
    Uint8Array."
   [root-r]
   (let [tbl (js/Uint8Array. (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes))
-        epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+        epoch (mem/-load-i32 root-r d/root-epoch-offset)
         len (+ 4 4 (.-length tbl) 4)
         out (js/Uint8Array. (+ 8 len))
         dv (js/DataView. (.-buffer out))]

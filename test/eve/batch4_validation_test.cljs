@@ -140,7 +140,7 @@
     (let [embedded (a/atom {:x 42})]
       (is (some? embedded)
           "a/atom should return non-nil")
-      (is (instance? a/SharedAtom embedded)
+      (is (instance? a/shared-atom embedded)
           "a/atom should return an SharedAtom instance")
       (is (= 42 (get @embedded :x))
           "SharedAtom should deref to the correct value"))))

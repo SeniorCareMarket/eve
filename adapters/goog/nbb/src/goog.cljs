@@ -11,11 +11,11 @@
    this namespace when a library eve's adopters load names it — the
    DataScript port names exportSymbol and getUid." (:require [clojure.string]))
 
-(defn exportSymbol
+(defn export-symbol
   "Closure's goog.exportSymbol: exports a value as a globally accessible
    symbol, walking the dotted path from the global object and creating
    each intermediate object that does not yet exist."
-  ([public-path object] (exportSymbol public-path object js/globalThis))
+  ([public-path object] (export-symbol public-path object js/globalThis))
   ([public-path object object-to-export-to]
    (let [parts #_{:splint/disable [style/prefer-clj-string]} (.split public-path ".")
          last-idx (dec (count parts))]
@@ -34,7 +34,7 @@
 
 (def ^:private uid-counter (atom 0))
 
-(defn getUid
+(defn get-uid
   "Closure's goog.getUid: a unique id for the object, assigned on first
    ask and stable for the object's lifetime."
   [obj]

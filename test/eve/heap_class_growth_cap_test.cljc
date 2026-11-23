@@ -23,14 +23,14 @@
 
 (deftest growth-past-the-cap-is-refused
   (testing "the doubling that overflowed: 32 B blocks, 2^25 -> 2^26"
-    (is (> (layout-bytes 32 67108864) d/MAX_HEAP_CLASS_BYTES))
+    (is (> (layout-bytes 32 67108864) d/max-heap-class-bytes))
     (is (nil? (d/heap-class-growth-total 32 33554432 0))))
   (testing "every class refuses before its layout passes the cap"
     (doseq [blk [32 64 128 256 512 1024]]
       (let [last-ok (loop [n 1024]
                       (if-let [n' (d/heap-class-growth-total blk n 0)] (recur n') n))]
-        (is (<= (layout-bytes blk last-ok) d/MAX_HEAP_CLASS_BYTES) (str "class of " blk " B"))
-        (is (> (layout-bytes blk (* 2 last-ok)) d/MAX_HEAP_CLASS_BYTES) (str "class of " blk " B"))))))
+        (is (<= (layout-bytes blk last-ok) d/max-heap-class-bytes) (str "class of " blk " B"))
+        (is (> (layout-bytes blk (* 2 last-ok)) d/max-heap-class-bytes) (str "class of " blk " B"))))))
 
 #?(:bb nil
    :clj

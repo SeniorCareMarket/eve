@@ -24,7 +24,7 @@
    [cljs-thread.eve-perf-test :as perf-test]))
 
 ;; Anti-DCE: Export symbol to prevent Closure from eliminating test vars
-(goog/exportSymbol "cljs_thread.eve_perf_test" perf-test)
+(goog/export-symbol "cljs_thread.eve_perf_test" perf-test)
 
 ;; ---------------------------------------------------------------------------
 ;; Node.js interop (only used on main thread)

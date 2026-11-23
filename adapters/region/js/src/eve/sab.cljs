@@ -74,7 +74,7 @@
   [ds]
   (let [root-r (:root-r ds)]
     (when (and root-r (mem/-supports-watch? root-r))
-      (mem/-notify-i32! root-r d/ROOT_EPOCH_OFFSET 2147483647))))
+      (mem/-notify-i32! root-r d/root-epoch-offset 2147483647))))
 
 (defn install-watch-signaling!
   "Install the trunk notify listener (eve.atom/register-notify-listener!)
@@ -95,7 +95,7 @@
   (let [root-r (:root-r ds)]
     (when (and root-r (.-sab ^js root-r) (exists? js/Atomics.waitAsync))
       (let [ia (js/Int32Array. (.-sab ^js root-r))
-            idx (quot d/ROOT_EPOCH_OFFSET 4)
+            idx (quot d/root-epoch-offset 4)
             seen (js/Atomics.load ia idx)
             r (js/Atomics.waitAsync ia idx seen)]
         (if (.-async r)

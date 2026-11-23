@@ -34,9 +34,9 @@
   (testing "slab header fields are correct for class 5"
     (let [inst   (wasm/get-slab-instance 5)
           region (:region inst)]
-      (is (== d/SLAB_MAGIC   (mem/load-i32 region d/SLAB_HDR_MAGIC))      "magic")
-      (is (== 1024           (mem/load-i32 region d/SLAB_HDR_BLOCK_SIZE)) "block-size")
-      (is (== 5              (mem/load-i32 region d/SLAB_HDR_CLASS_IDX))  "class-idx"))))
+      (is (== d/slab-magic   (mem/load-i32 region d/slab-hdr-magic))      "magic")
+      (is (== 1024           (mem/load-i32 region d/slab-hdr-block-size)) "block-size")
+      (is (== 5              (mem/load-i32 region d/slab-hdr-class-idx))  "class-idx"))))
 
 ;;=============================================================================
 ;; Alloc / free mechanics
@@ -60,12 +60,12 @@
   (testing "free count decrements on alloc, restores on free"
     (let [inst    (wasm/get-slab-instance 5)
           region  (:region inst)
-          before  (mem/load-i32 region d/SLAB_HDR_FREE_COUNT)
+          before  (mem/load-i32 region d/slab-hdr-free-count)
           slot    (ps/alloc-offset 1024)
-          after   (mem/load-i32 region d/SLAB_HDR_FREE_COUNT)]
+          after   (mem/load-i32 region d/slab-hdr-free-count)]
       (is (== (dec before) after) "decremented by 1 after alloc")
       (ps/free! slot)
-      (is (== before (mem/load-i32 region d/SLAB_HDR_FREE_COUNT)) "restored after free"))))
+      (is (== before (mem/load-i32 region d/slab-hdr-free-count)) "restored after free"))))
 
 (deftest test-mmap-slab-double-free
   (testing "double-free returns false"
@@ -107,9 +107,9 @@
       (is (some? inst) "instance non-nil")
       (is (some? (:region inst)) ":region present")
       (let [region (:region inst)]
-        (is (== d/SLAB_MAGIC (mem/load-i32 region d/SLAB_HDR_MAGIC)) "magic valid")
-        (is (== 1024         (mem/load-i32 region d/SLAB_HDR_BLOCK_SIZE)) "block-size 1024")
-        (is (== 5            (mem/load-i32 region d/SLAB_HDR_CLASS_IDX)) "class-idx 5")))))
+        (is (== d/slab-magic (mem/load-i32 region d/slab-hdr-magic)) "magic valid")
+        (is (== 1024         (mem/load-i32 region d/slab-hdr-block-size)) "block-size 1024")
+        (is (== 5            (mem/load-i32 region d/slab-hdr-class-idx)) "class-idx 5")))))
 
 (deftest test-mmap-slab-persistence
   (testing "allocation is visible after reopening the slab file"
@@ -117,8 +117,8 @@
           block-idx (alloc/decode-block-idx slot)
           inst2     (ps/open-mmap-slab! 5 test-path)
           region2   (:region inst2)
-          bm-off    (mem/load-i32 region2 d/SLAB_HDR_BITMAP_OFFSET)
-          total     (mem/load-i32 region2 d/SLAB_HDR_TOTAL_BLOCKS)
+          bm-off    (mem/load-i32 region2 d/slab-hdr-bitmap-offset)
+          total     (mem/load-i32 region2 d/slab-hdr-total-blocks)
           ;; Find the first free slot in the reopened region — should be after our alloc
           next-free (mem/imr-bitmap-find-free region2 bm-off total (inc block-idx))]
       (is (> next-free block-idx) "next free block is after our allocated block")

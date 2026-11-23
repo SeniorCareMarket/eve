@@ -381,7 +381,7 @@
         _ (stream/receive-stream! after wire)]
     (into {}
           (map (fn [ci]
-                 (let [cap-blocks (quot (get capacities ci) (nth alloc/CLASS_BLOCK_SIZES ci))
+                 (let [cap-blocks (quot (get capacities ci) (nth alloc/class-block-sizes ci))
                        c (largest-run control ci cap-blocks)
                        a (largest-run after ci cap-blocks)]
                    [ci {:control c :after a

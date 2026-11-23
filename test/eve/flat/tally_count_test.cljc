@@ -94,7 +94,7 @@
   [sio off]
   (let [c (alloc/decode-class-idx off)]
     (cond (< c 6) (nth class-slot-bytes c)
-          (== c alloc/OVERFLOW_CLASS_IDX)
+          (== c alloc/overflow-class-idx)
           (if (== 1 (slab/read-u8 sio off 0))
             (inc (flat-element-bytes sio off 1))
             (throw (ex-info "place-graph!: a non-scalar overflow-class block is out of harness scope"
@@ -111,7 +111,7 @@
 (defn- live-word?
   "The word at p of block off in sio names a block (not NIL, not a sentinel)."
   [sio off p]
-  (< (alloc/decode-class-idx (slab/read-i32 sio off p)) alloc/SENTINEL_CLASS_IDX))
+  (< (alloc/decode-class-idx (slab/read-i32 sio off p)) alloc/sentinel-class-idx))
 
 (defn- kv-word-positions
   "The offset-word positions of the slab pointers among the n key/value
@@ -164,8 +164,8 @@
       :vec (let [cnt (word 4) root (word 12) tail (word 16)]
              (cond-> []
                (and (pos? (tally-tail-offset cnt))
-                    (< (alloc/decode-class-idx root) alloc/SENTINEL_CLASS_IDX)) (conj 12)
-               (< (alloc/decode-class-idx tail) alloc/SENTINEL_CLASS_IDX) (conj 16)))
+                    (< (alloc/decode-class-idx root) alloc/sentinel-class-idx)) (conj 12)
+               (< (alloc/decode-class-idx tail) alloc/sentinel-class-idx) (conj 16)))
       :vnode (slot-word-positions sio off (tally-live-slots (nth kind 3) (nth kind 2) (nth kind 1)))
       :vleaf (slot-word-positions sio off (nth kind 1))
       :vval (if (tally-value-ref sio off 4 (word 0)) [7] [])
@@ -182,7 +182,7 @@
                           hit (and (or (and (== kd 2)
                                             (tally-tag-kind (slab/read-u8 sio off (+ 8 n i))))
                                        (== kd 4))
-                                   (< (alloc/decode-class-idx p) alloc/SENTINEL_CLASS_IDX))]
+                                   (< (alloc/decode-class-idx p) alloc/sentinel-class-idx))]
                       (recur (inc i) (if hit (conj acc (+ base (* 4 i))) acc))))))
       :deftype (into [] (keep (fn [[foff _]] (when (live-word? sio off foff) foff)))
                      (tally-type-layout sio off))
@@ -195,8 +195,8 @@
   [sio off]
   (when-let [row (alloc/desc-of sio off)]
     (let [p (slab/region-load-i32 (nth (nth row 2) 0) (nth (nth row 2) 1))]
-      (when (and (not (zero? p)) (not (== p alloc/NIL_OFFSET))
-                 (< (alloc/decode-class-idx p) alloc/SENTINEL_CLASS_IDX)
+      (when (and (not (zero? p)) (not (== p alloc/nil-offset))
+                 (< (alloc/decode-class-idx p) alloc/sentinel-class-idx)
                  (alloc/allocated? sio p))
         p))))
 

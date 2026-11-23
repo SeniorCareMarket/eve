@@ -25,15 +25,15 @@
    [cljs-thread.parallel-futures-repro-test :as parallel-test]))
 
 ;; Anti-DCE: Export specific test vars to prevent Closure from eliminating them
-(goog/exportSymbol "cljs_thread.eve_integration_test.cljs_thread_boots" integration-test/cljs-thread-boots)
-(goog/exportSymbol "cljs_thread.eve_batch2_validation_test.util_loads_on_worker" batch2-test/util-loads-on-worker)
-(goog/exportSymbol "cljs_thread.eve_batch3_validation_test.wasm_data_view" batch3-test/wasm-data-view-available-on-worker)
-(goog/exportSymbol "cljs_thread.eve_batch4_validation_test.sab_transfer" batch4-test/sab-transfer-data-enables-worker-atoms)
-(goog/exportSymbol "cljs_thread.eve_batch5_validation_test.spawn_conveys" batch5-test/spawn-conveys-shared-atom)
-(goog/exportSymbol "cljs_thread.eve_smoke_test.sanity_check" smoke-test/sanity-check)
-(goog/exportSymbol "cljs_thread.go_integration_test.park_basic" go-test/park-basic-future)
-(goog/exportSymbol "cljs_thread.atom_transfer_test.typed_array" atom-test/typed-array-in-atom-single-thread)
-(goog/exportSymbol "cljs_thread.parallel_futures_repro_test.single_future" parallel-test/single-future-works)
+(goog/export-symbol "cljs_thread.eve_integration_test.cljs_thread_boots" integration-test/cljs-thread-boots)
+(goog/export-symbol "cljs_thread.eve_batch2_validation_test.util_loads_on_worker" batch2-test/util-loads-on-worker)
+(goog/export-symbol "cljs_thread.eve_batch3_validation_test.wasm_data_view" batch3-test/wasm-data-view-available-on-worker)
+(goog/export-symbol "cljs_thread.eve_batch4_validation_test.sab_transfer" batch4-test/sab-transfer-data-enables-worker-atoms)
+(goog/export-symbol "cljs_thread.eve_batch5_validation_test.spawn_conveys" batch5-test/spawn-conveys-shared-atom)
+(goog/export-symbol "cljs_thread.eve_smoke_test.sanity_check" smoke-test/sanity-check)
+(goog/export-symbol "cljs_thread.go_integration_test.park_basic" go-test/park-basic-future)
+(goog/export-symbol "cljs_thread.atom_transfer_test.typed_array" atom-test/typed-array-in-atom-single-thread)
+(goog/export-symbol "cljs_thread.parallel_futures_repro_test.single_future" parallel-test/single-future-works)
 
 ;; ---------------------------------------------------------------------------
 ;; Test execution (runs on :core via thread/init! main function)

@@ -14,7 +14,7 @@
                                                                     conj! bytes #?@(:clje [long])]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
-    :refer [NIL_OFFSET]]
+    :refer [nil-offset]]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
    [eve.encoding :as enc]
@@ -86,7 +86,7 @@
 (defn- alloc-node! [sio]
   (let [node-off (slab/alloc! sio (* NODE_SIZE 4))]
     (dotimes [i NODE_SIZE]
-      (slab/write-i32! sio node-off (* i 4) NIL_OFFSET))
+      (slab/write-i32! sio node-off (* i 4) nil-offset))
     node-off))
 
 (defn- write-node!
@@ -98,7 +98,7 @@
   [sio offs]
   (let [node-off (slab/alloc! sio (* NODE_SIZE 4))
         n (count offs)
-        words (if (< n NODE_SIZE) (into (vec offs) (repeat (- NODE_SIZE n) NIL_OFFSET)) (vec offs))]
+        words (if (< n NODE_SIZE) (into (vec offs) (repeat (- NODE_SIZE n) nil-offset)) (vec offs))]
     (slab/write-bytes! sio node-off 0 (enc/i32s->bytes-le (eve.host/int-array words)))
     node-off))
 
@@ -131,7 +131,7 @@
     slab-off))
 
 (defn- read-value-block [sio val-off]
-  (when (not= val-off NIL_OFFSET)
+  (when (not= val-off nil-offset)
     (let [val-len (alloc/node-i32 sio val-off 0)
           val-bs  (slab/read-bytes sio val-off 4 val-len)]
       (deserialize-element-bytes val-bs sio))))
@@ -165,14 +165,14 @@
 
 (defn- push-tail [sio shift parent-off tail-off cnt]
   (let [idx (bit-and (unsigned-bit-shift-right (dec cnt) shift) MASK)
-        new-parent-off (if (== parent-off NIL_OFFSET)
+        new-parent-off (if (== parent-off nil-offset)
                          (alloc-node! sio)
                          (clone-node! sio parent-off))]
     (if (== shift shift-step)
       (do (node-set! sio new-parent-off idx tail-off)
           new-parent-off)
       (let [child-off (node-get sio new-parent-off idx)
-            new-child-off (if (== child-off NIL_OFFSET)
+            new-child-off (if (== child-off nil-offset)
                             (new-path sio (- shift shift-step) tail-off)
                             (push-tail sio (- shift shift-step) child-off tail-off cnt))]
         (node-set! sio new-parent-off idx new-child-off)
@@ -202,18 +202,18 @@
       (> shift shift-step)
       (let [child-off (node-get sio node-off idx)
             new-child (pop-tail sio (- shift shift-step) child-off cnt)]
-        (if (and (== new-child NIL_OFFSET) (zero? idx))
-          NIL_OFFSET
+        (if (and (== new-child nil-offset) (zero? idx))
+          nil-offset
           (let [new-node-off (clone-node! sio node-off)]
             (node-set! sio new-node-off idx new-child)
             new-node-off)))
 
       (zero? idx)
-      NIL_OFFSET
+      nil-offset
 
       :else
       (let [new-node-off (clone-node! sio node-off)]
-        (node-set! sio new-node-off idx NIL_OFFSET)
+        (node-set! sio new-node-off idx nil-offset)
         new-node-off))))
 
 ;;=============================================================================
@@ -267,7 +267,7 @@
                   new-shift (+ shift shift-step)
                   _ (node-set! sio new-root-off 1 (new-path sio shift old-tail))]
               (make-vec-impl sio (inc cnt) new-shift new-root-off new-tail 1))
-            (let [new-root (if (== root NIL_OFFSET)
+            (let [new-root (if (== root nil-offset)
                              (let [nr (alloc-node! sio)]
                                (node-set! sio nr 0 old-tail)
                                nr)
@@ -289,7 +289,7 @@
     (cond
       (== cnt 1)
       (let [new-tail (alloc-node! sio)]
-        (make-vec-impl sio 0 shift-step NIL_OFFSET new-tail 0))
+        (make-vec-impl sio 0 shift-step nil-offset new-tail 0))
 
       (> tail-len 1)
       (let [new-tail (alloc-node! sio)]
@@ -310,8 +310,8 @@
           ;; never from a slot past the live ones (Clojure tests array[1] == null)
             [new-root new-shift]
             (cond
-              (== new-root NIL_OFFSET)
-              [NIL_OFFSET shift-step]
+              (== new-root nil-offset)
+              [nil-offset shift-step]
 
               (and (> shift shift-step)
                    (<= new-toff (bit-shift-left 1 shift)))
@@ -368,7 +368,7 @@
     (dotimes [i (live-slots toff base sh)]
       (let [c (node-get sio node-off i)]
         (if (zero? sh)
-          (when (not= c NIL_OFFSET) (vswap! result conj! c))
+          (when (not= c nil-offset) (vswap! result conj! c))
           (collect-trie-live! sio c (- sh shift-step) (+ base (* i w)) toff result))))))
 
 (defn live-offsets
@@ -379,11 +379,11 @@
         result (volatile! (transient [header-off]))]
     (when (pos? toff)
       (collect-trie-live! sio root shift 0 toff result))
-    (when (not= tail NIL_OFFSET)
+    (when (not= tail nil-offset)
       (vswap! result conj! tail)
       (dotimes [i tail-len]
         (let [v (node-get sio tail i)]
-          (when (not= v NIL_OFFSET) (vswap! result conj! v)))))
+          (when (not= v nil-offset) (vswap! result conj! v)))))
     (persistent! @result)))
 
 (defn- last-leaf
@@ -396,7 +396,7 @@
         node
         (recur (node-get sio node (bit-and (unsigned-bit-shift-right (dec toff) sh) MASK))
                (- sh shift-step))))
-    NIL_OFFSET))
+    nil-offset))
 
 ;;=============================================================================
 ;; EveVector deftype — unified via eve/deftype macro.
@@ -466,7 +466,7 @@
     (vec-conj-impl sio__ cnt shift root tail tail-len val))
   (empty [_]
     (let [new-tail (alloc-node! sio__)]
-      (make-vec-impl sio__ 0 shift-step NIL_OFFSET new-tail 0)))
+      (make-vec-impl sio__ 0 shift-step nil-offset new-tail 0)))
   (equiv [this other]
     (cond
       (not (sequential? other)) false
@@ -656,7 +656,7 @@
   [sio v x]
   (let [hdr (d/-root-header-off v)
         [cnt _ _ tail tl] (read-vec-header sio hdr)]
-    (if (and (< tl NODE_SIZE) (not= tail NIL_OFFSET) (alloc/owns? sio hdr) (alloc/owns? sio tail))
+    (if (and (< tl NODE_SIZE) (not= tail nil-offset) (alloc/owns? sio hdr) (alloc/owns? sio tail))
       (let [val-off (make-value-block! sio (serialize-element-bytes sio x))]
         (node-set! sio tail tl val-off)
         (slab/write-i32! sio hdr sabvecroot-cnt-offset (inc cnt))
@@ -711,7 +711,7 @@
     ([] (empty-vec (default-sio)))
     ([sio]
      (let [tail (alloc-node! sio)]
-       (make-vec-impl sio 0 shift-step NIL_OFFSET tail 0))))
+       (make-vec-impl sio 0 shift-step nil-offset tail 0))))
 
   (defn eve-vec
     "Create an Eve vector from a collection."
@@ -745,11 +745,11 @@
   ([sio old-root new-root shift-val idx]
    (retire-replaced-trie-path! sio old-root new-root shift-val idx :free))
   ([sio old-root new-root shift-val idx _mode]
-   (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+   (when (and (not= old-root nil-offset) (not= old-root new-root))
      (loop [old-off old-root
             new-off new-root
             sh shift-val]
-       (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+       (when (and (not= old-off nil-offset) (not= old-off new-off))
          ;; Free this old trie node
          (slab/free! sio old-off)
          ;; Continue down the trie path
@@ -758,7 +758,7 @@
                  old-child (node-get sio old-off child-idx)
                  ;; idx must be live in both tries (the caller's contract); a NIL
                  ;; new node has no slots
-                 new-child (if (== new-off NIL_OFFSET) NIL_OFFSET (node-get sio new-off child-idx))]
+                 new-child (if (== new-off nil-offset) nil-offset (node-get sio new-off child-idx))]
              (recur old-child new-child (- sh shift-step)))))))))
 
 ;;=============================================================================
@@ -775,12 +775,12 @@
   (when (and (not= old-off new-off) (not (contains? keep old-off)))
     (vswap! result conj! old-off)
     (let [w  (bit-shift-left 1 sh)
-          k1 (if (== new-off NIL_OFFSET) 0 (live-slots toff1 base sh))]
+          k1 (if (== new-off nil-offset) 0 (live-slots toff1 base sh))]
       (dotimes [i (live-slots toff0 base sh)]
         (let [oc (node-get sio old-off i)
-              nc (if (< i k1) (node-get sio new-off i) NIL_OFFSET)]
+              nc (if (< i k1) (node-get sio new-off i) nil-offset)]
           (if (zero? sh)
-            (when (and (not= oc NIL_OFFSET) (not= oc nc))
+            (when (and (not= oc nil-offset) (not= oc nc))
               (vswap! result conj! oc))
             (trie-diff! sio oc nc (- sh shift-step) (+ base (* i w)) toff0 toff1 keep result)))))))
 
@@ -803,7 +803,7 @@
             keep    #{tail1 leaf1}]
         (when (pos? toff0)
           (if (== shift0 shift1)
-            (trie-diff! sio root0 (if (pos? toff1) root1 NIL_OFFSET) shift0 0 toff0 toff1 keep result)
+            (trie-diff! sio root0 (if (pos? toff1) root1 nil-offset) shift0 0 toff0 toff1 keep result)
             (let [live1 (set (live-offsets sio new-hdr))
                   old   (volatile! (transient []))]
               (collect-trie-live! sio root0 shift0 0 toff0 old)
@@ -811,18 +811,18 @@
                 (when-not (contains? live1 off) (vswap! result conj! off))))))
         ;; the old tail, unless it became the new trie's last leaf; its live values
         ;; unless the new tail holds them in place
-        (when (and (not= tail0 NIL_OFFSET) (not= tail0 tail1) (not= tail0 leaf1))
+        (when (and (not= tail0 nil-offset) (not= tail0 tail1) (not= tail0 leaf1))
           (vswap! result conj! tail0)
           (dotimes [i tl0]
             (let [ov (node-get sio tail0 i)
-                  nv (if (and (not= tail1 NIL_OFFSET) (< i tl1)) (node-get sio tail1 i) NIL_OFFSET)]
-              (when (and (not= ov NIL_OFFSET) (not= ov nv))
+                  nv (if (and (not= tail1 nil-offset) (< i tl1)) (node-get sio tail1 i) nil-offset)]
+              (when (and (not= ov nil-offset) (not= ov nv))
                 (vswap! result conj! ov))))))
       ;; no longer a vector: everything the old one owns
       (doseq [off (rest (live-offsets sio header-off))]
         (vswap! result conj! off)))
     ;; Always include header
-    (when (and header-off (not= header-off NIL_OFFSET))
+    (when (and header-off (not= header-off nil-offset))
       (vswap! result conj! header-off))
     (persistent! @result)))
 
@@ -873,13 +873,13 @@
   (let [cnt (count val-offs)]
     (if (zero? cnt)
       (let [empty-tail (write-node! sio [])]
-        (write-vec-header! sio 0 shift-step NIL_OFFSET empty-tail 0))
+        (write-vec-header! sio 0 shift-step nil-offset empty-tail 0))
       (let [toff     (tail-offset-calc cnt)
             tail-off (write-node! sio (subvec val-offs toff cnt))
             trie-val-offs (subvec val-offs 0 toff)
             [root sft]
             (if (empty? trie-val-offs)
-              [NIL_OFFSET shift-step]
+              [nil-offset shift-step]
               (let [leaf-nodes (mapv (fn [chunk] (write-node! sio chunk))
                                      (partition-all NODE_SIZE trie-val-offs))]
                 (loop [nodes leaf-nodes sh shift-step]

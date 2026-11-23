@@ -160,10 +160,10 @@
           inst      (wasm/get-slab-instance class-idx)
           ^js b     (.-buffer ^js (:u8 inst))
           r         (:region inst)
-          total     #(mem/load-i32 r d/SLAB_HDR_TOTAL_BLOCKS)
-          fits?     #(<= (+ (mem/load-i32 r d/SLAB_HDR_DATA_OFFSET) (* (total) (d/slab-size class-idx)))
+          total     #(mem/load-i32 r d/slab-hdr-total-blocks)
+          fits?     #(<= (+ (mem/load-i32 r d/slab-hdr-data-offset) (* (total) (d/slab-size class-idx)))
                          (.-byteLength b))
-          n         (+ 16 (mem/load-i32 r d/SLAB_HDR_FREE_COUNT))]
+          n         (+ 16 (mem/load-i32 r d/slab-hdr-free-count))]
       (if (or (not (.-growable b)) (> n (* 1024 1024)))
         (is true "class 0 is not a small growable slab here")
         (let [before (total)
@@ -185,7 +185,7 @@
               size   (* 3 before)
               off    (ps/alloc-offset size)]
           (is (>= (coalesc/current-data-size r) (* 4 before)) "the region grew")
-          (is (<= (+ (mem/load-i32 r d/SLAB_HDR_DATA_OFFSET) (coalesc/current-data-size r)) (.-byteLength b)))
+          (is (<= (+ (mem/load-i32 r d/slab-hdr-data-offset) (coalesc/current-data-size r)) (.-byteLength b)))
           (is (true? (ps/free! off))))))))
 
 (deftest a-sab-region-holds-an-i64-test

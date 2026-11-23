@@ -180,7 +180,7 @@
 ;; direct writers below in place of the registered collection writers)
 ;; ---------------------------------------------------------------------------
 
-     (def ^:private NIL alloc/NIL_OFFSET)
+     (def ^:private NIL alloc/nil-offset)
 
      (defn- scalar? [v]
        (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)

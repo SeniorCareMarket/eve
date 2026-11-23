@@ -125,7 +125,7 @@
   (let [n (count blocks)
         new-offs (long-array n)
         class-of (fn [size] (loop [c 0] (cond (== c 6) 6
-                                              (<= size (nth alloc/CLASS_BLOCK_SIZES c)) c
+                                              (<= size (nth alloc/class-block-sizes c)) c
                                               :else (recur (inc c)))))
         by-class (group-by (fn [i] (class-of (:size (nth blocks i)))) (range n))]
     (doseq [[c idxs] by-class]

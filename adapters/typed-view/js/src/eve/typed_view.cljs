@@ -47,7 +47,7 @@
 (defn get-offset
   "Get the absolute byte offset of the data region in the backing buffer."
   [^EveArray arr]
-  (+ (ps/slab-offset->byte-offset (.-offset__ arr)) arr/HEADER_SIZE))
+  (+ (ps/slab-offset->byte-offset (.-offset__ arr)) arr/header-size))
 
 (defn get-typed-view
   "Get a raw JS typed array view of this array's data region.
@@ -93,7 +93,7 @@
 (defn- array-data-byte-offset
   "Get the absolute byte offset of element `start` in an i32 array's backing buffer."
   [^EveArray arr start]
-  (+ (ps/slab-offset->byte-offset (.-offset__ arr)) arr/HEADER_SIZE (* start 4)))
+  (+ (ps/slab-offset->byte-offset (.-offset__ arr)) arr/header-size (* start 4)))
 
 (defn afill-simd!
   "Fill :int32 array with value using SIMD (4 elements at a time).
@@ -190,5 +190,5 @@
         a (arr/eve-array-uninit (arr/subtype->type-kw subtype) (.-length elem))
         ;; Bulk copy element bytes into the data region
         byte-view (js/Uint8Array. (.-buffer elem) (.-byteOffset elem) (.-byteLength elem))]
-    (alloc/-sio-write-bytes! (d/-eve-sio a) (d/-root-header-off a) arr/HEADER_SIZE byte-view)
+    (alloc/-sio-write-bytes! (d/-eve-sio a) (d/-root-header-off a) arr/header-size byte-view)
     a))

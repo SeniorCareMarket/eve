@@ -43,12 +43,12 @@
 
 (deftest a-flag-beside-the-lock-does-not-block-it
   (let [data-size (* 64 1024)
-        layout    (coalesc/coalesc-layout data-size coalesc/MAX_DESCRIPTORS)
+        layout    (coalesc/coalesc-layout data-size coalesc/max-descriptors)
         r         (region/make-heap-region (:total-bytes layout))]
-    (coalesc/init-coalesc-region! r data-size coalesc/MAX_DESCRIPTORS)
-    (let [dt (mem/-load-i32 r d/SLAB_HDR_BITMAP_OFFSET)
+    (coalesc/init-coalesc-region! r data-size coalesc/max-descriptors)
+    (let [dt (mem/-load-i32 r d/slab-hdr-bitmap-offset)
           ;; descriptor 0's FLAGS entry: the FLAGS column starts 16 bytes-per-descriptor into the columns
-          flags0 (+ dt (* 16 coalesc/MAX_DESCRIPTORS))]
+          flags0 (+ dt (* 16 coalesc/max-descriptors))]
       ;; descriptor 0 is the one FREE extent: a flag (bit 1) beside its lock bit
       (mem/-store-i32! r flags0 2)
       (is (some? (coalesc/try-coalesc-alloc! r 2000)) "the lock is bit 0: a flag beside it leaves it takeable")

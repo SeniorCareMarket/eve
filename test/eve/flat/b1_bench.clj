@@ -58,7 +58,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- class-of [size]
-  (let [sizes alloc/CLASS_BLOCK_SIZES]
+  (let [sizes alloc/class-block-sizes]
     (loop [c 0]
       (cond (== c (count sizes)) 6
             (<= size (nth sizes c)) c

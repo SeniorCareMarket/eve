@@ -38,9 +38,9 @@
 
 (deftest class-6-blocks-are-8-aligned
   (let [data-size (* 64 1024)
-        layout    (coalesc/coalesc-layout data-size coalesc/MAX_DESCRIPTORS)
+        layout    (coalesc/coalesc-layout data-size coalesc/max-descriptors)
         r         (region/make-heap-region (:total-bytes layout))]
-    (coalesc/init-coalesc-region! r data-size coalesc/MAX_DESCRIPTORS)
+    (coalesc/init-coalesc-region! r data-size coalesc/max-descriptors)
     ;; sizes of an odd number of words, as an int32 array of odd length makes
     (doseq [n [1036 1028 2052 1500 1025 4100 1036]]
       (let [off (coalesc/coalesc-alloc! r n)]

@@ -66,7 +66,7 @@
   (set! eve.list/EveList-type-id 0x13)
   (set! eve.map/EveHashMap-type-id 0xED)
   (set! eve.set/EveHashSet-type-id 0xEE)
-  (set! eve.array/EveArray-type-id 0x1D)
+  (set! eve.array/eve-array-type-id 0x1D)
   ;; eve.deftype-proto.alloc's plumbing into serialize's registry
   (ser/register-header-tag-reader! alloc/read-header-tag)
   (ser/register-sio-root! alloc/sio-root)
@@ -118,14 +118,14 @@
      (let [subtype (eve.array/-subtype arr)
            n (count arr)
            byte-len (* n (eve.array/subtype->elem-size subtype))
-           blk-off (slab/alloc! sio (+ eve.array/HEADER_SIZE byte-len))]
+           blk-off (slab/alloc! sio (+ eve.array/header-size byte-len))]
        (slab/write-u8!  sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
        (slab/write-u8!  sio blk-off 1 subtype)
        (slab/write-u16! sio blk-off 2 0)
        (slab/write-i32! sio blk-off 4 n)
        (when (pos? byte-len)
-         (slab/write-bytes! sio blk-off eve.array/HEADER_SIZE
-                            (slab/read-bytes (d/-eve-sio arr) (d/-root-header-off arr) eve.array/HEADER_SIZE byte-len)))
+         (slab/write-bytes! sio blk-off eve.array/header-size
+                            (slab/read-bytes (d/-eve-sio arr) (d/-root-header-off arr) eve.array/header-size byte-len)))
        (reify d/IEveRoot
          (-root-header-off [_] blk-off)))))
   (ser/register-type-constructor!

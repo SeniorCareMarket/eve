@@ -151,8 +151,8 @@
   #?(:clj (let [root (alloc/sio-root sio)]
             (if (instance? JvmSlabCtx root)
               (long (aget ^ints (.-block-sizes ^JvmSlabCtx root) (int ci)))
-              (long (nth alloc/CLASS_BLOCK_SIZES ci))))
-     :cljs (long (nth alloc/CLASS_BLOCK_SIZES ci))))
+              (long (nth alloc/class-block-sizes ci))))
+     :cljs (long (nth alloc/class-block-sizes ci))))
 
 (defn- fallback-size
   "The size of a block of kind/tag whose used size is its allocation:
@@ -495,7 +495,7 @@
 (defn- class-for-size ^long [^long size]
   (loop [ci 0]
     (cond (== ci 6) 6
-          (<= size (long (nth alloc/CLASS_BLOCK_SIZES ci))) ci
+          (<= size (long (nth alloc/class-block-sizes ci))) ci
           :else (recur (inc ci)))))
 
 (defn- claim-blocks!
@@ -511,7 +511,7 @@
       (if (== ci 6)
         (doseq [[i b] idxs]
           (aset offs (int i) (long (alloc/-sio-alloc! sio (long (:size b))))))
-        (let [csize (long (nth alloc/CLASS_BLOCK_SIZES ci))
+        (let [csize (long (nth alloc/class-block-sizes ci))
               run (try (alloc/alloc-run! sio ci (count idxs))
                        (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
               run (or run (mapv (fn [_] (alloc/-sio-alloc! sio csize)) idxs))]

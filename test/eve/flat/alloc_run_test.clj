@@ -28,10 +28,10 @@
 (defn- class-region [^JvmSlabCtx ctx ci] (aget ^objects (.regions ctx) ci))
 
 (defn- total-blocks [sio ci]
-  (mem/-load-i32 (class-region (ctx-of sio) ci) d/SLAB_HDR_TOTAL_BLOCKS))
+  (mem/-load-i32 (class-region (ctx-of sio) ci) d/slab-hdr-total-blocks))
 
 (defn- free-count [sio ci]
-  (mem/-load-i32 (class-region (ctx-of sio) ci) d/SLAB_HDR_FREE_COUNT))
+  (mem/-load-i32 (class-region (ctx-of sio) ci) d/slab-hdr-free-count))
 
 (defn- heap-sio
   "A fresh heap domain with small classes (capacities are region bytes)."

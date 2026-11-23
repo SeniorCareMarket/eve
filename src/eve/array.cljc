@@ -56,7 +56,7 @@
 ;; Shared Constants
 ;;-----------------------------------------------------------------------------
 
-(def ^:const HEADER_SIZE 8) ;; [subtype:u8][pad:3][count:u32LE]
+(def ^:const header-size 8) ;; [subtype:u8][pad:3][count:u32LE]
 
 ;;-----------------------------------------------------------------------------
 ;; Shared type metadata lookup
@@ -121,7 +121,7 @@
 ;; Shared implementation — slab-backed via ISlabIO (eve/deftype)
 ;;=============================================================================
 
-(def ^:const EveArray-type-id 0x1D)
+(def ^:const eve-array-type-id 0x1D)
 
 ;;-----------------------------------------------------------------------------
 ;; Element read/write through ISlabIO
@@ -132,7 +132,7 @@
   [sio offset n subtype]
   (let [es (subtype->elem-shift subtype)
         elem-size (bit-shift-left 1 es)
-        fld-off (+ HEADER_SIZE (* n elem-size))]
+        fld-off (+ header-size (* n elem-size))]
     (case (int subtype)
       (1 3) (slab/read-u8 sio offset fld-off)
       2     (let [b (slab/read-u8 sio offset fld-off)]
@@ -151,7 +151,7 @@
   [sio offset n subtype val]
   (let [es (subtype->elem-shift subtype)
         elem-size (bit-shift-left 1 es)
-        fld-off (+ HEADER_SIZE (* n elem-size))]
+        fld-off (+ header-size (* n elem-size))]
     (case (int subtype)
       (1 2 3) (slab/write-u8! sio offset fld-off (bit-and (int val) 0xFF))
       (4 5)   (slab/write-u16! sio offset fld-off (bit-and (int val) 0xFFFF))
@@ -176,7 +176,7 @@
    word that holds it (a sub-word element is masked in place). Answers old."
   [sio offset n subtype f]
   (let [es (subtype->elem-size subtype)
-        fld (+ HEADER_SIZE (* n es))]
+        fld (+ header-size (* n es))]
     (if (== es 4)
       (loop []
         (let [w (slab/read-i32 sio offset fld)
@@ -204,7 +204,7 @@
       (loop [have (subtype->elem-size subtype)]
         (when (< have total)
           (let [len (min have (- total have))]
-            (slab/copy-block! sio offset (+ HEADER_SIZE have) offset HEADER_SIZE len)
+            (slab/copy-block! sio offset (+ header-size have) offset header-size len)
             (recur (+ have len))))))))
 
 ;;-----------------------------------------------------------------------------
@@ -382,7 +382,7 @@
   (-sab-encode [_this _s-atom-env]
     (codec/encode-sab-pointer ser/FAST_TAG_EVE_ARRAY offset__))
   (-sab-dispose [_ _s-atom-env]
-    (when (and (some? offset__) (not= offset__ alloc/NIL_OFFSET))
+    (when (and (some? offset__) (not= offset__ alloc/nil-offset))
       (slab/free! sio__ offset__)))
 
   d/IsEve
@@ -405,7 +405,7 @@
   (-sab-retire-diff! [_ new-value _slab-env _mode]
     (when-not (and (instance? EveArray new-value)
                    (== offset__ (d/-root-header-off new-value)))
-      (when (and (some? offset__) (not= offset__ alloc/NIL_OFFSET))
+      (when (and (some? offset__) (not= offset__ alloc/nil-offset))
         (slab/free! sio__ offset__))))
 
   ;; the elements as the host's own double / int array (eve.encoding's
@@ -413,10 +413,10 @@
   d/IBulkAccess
   (-as-double-array [_]
     (when (== subtype__ 9)
-      (enc/f64s-le (slab/read-bytes sio__ offset__ HEADER_SIZE (* cnt 8)) 0 cnt)))
+      (enc/f64s-le (slab/read-bytes sio__ offset__ header-size (* cnt 8)) 0 cnt)))
   (-as-int-array [_]
     (when (== subtype__ 6)
-      (enc/i32s-le (slab/read-bytes sio__ offset__ HEADER_SIZE (* cnt 4)) 0 cnt)))
+      (enc/i32s-le (slab/read-bytes sio__ offset__ header-size (* cnt 4)) 0 cnt)))
 
   java.lang.Iterable
   (iterator [this] (clojure.lang.SeqIterator. (.seq this)))
@@ -439,9 +439,9 @@
   [sio subtype n]
   (let [es (subtype->elem-shift subtype)
         elem-size (bit-shift-left 1 es)
-        total-size (+ HEADER_SIZE (* n elem-size))
+        total-size (+ header-size (* n elem-size))
         slab-off (slab/alloc! sio total-size)]
-    (slab/write-u8!  sio slab-off 0 EveArray-type-id)
+    (slab/write-u8!  sio slab-off 0 eve-array-type-id)
     (slab/write-u8!  sio slab-off 1 subtype)
     (slab/write-u16! sio slab-off 2 0)
     (slab/write-i32! sio slab-off 4 n)
@@ -480,8 +480,8 @@
             slab-off (alloc-eve-region sio subtype n)]
         ;; float64 / int32 elements go in as one write of their bytes
         (case (int subtype)
-          9 (slab/write-bytes! sio slab-off HEADER_SIZE (enc/f64s->bytes-le (double-array v)))
-          6 (slab/write-bytes! sio slab-off HEADER_SIZE (enc/i32s->bytes-le (int-array v)))
+          9 (slab/write-bytes! sio slab-off header-size (enc/f64s->bytes-le (double-array v)))
+          6 (slab/write-bytes! sio slab-off header-size (enc/i32s->bytes-le (int-array v)))
           (dotimes [i n]
             (write-element! sio slab-off i subtype (nth v i))))
         (make-eve-array-instance sio slab-off)))))
@@ -691,7 +691,7 @@
 (defn- element-region
   "[region byte-off] of an :int32 element of a slab-backed array."
   [arr idx]
-  (slab/mem-region (d/-eve-sio arr) (d/-root-header-off arr) (+ HEADER_SIZE (* idx 4))))
+  (slab/mem-region (d/-eve-sio arr) (d/-root-header-off arr) (+ header-size (* idx 4))))
 
 (defn wait!
   "Block until the value at index is not equal to `expected`, or until timeout.
@@ -797,7 +797,7 @@
    Call when replacing this array with a new version."
   [arr]
   (let [slab-off (d/-root-header-off arr)]
-    (when (and (some? slab-off) (not= slab-off alloc/NIL_OFFSET))
+    (when (and (some? slab-off) (not= slab-off alloc/nil-offset))
       (slab/free! (d/-eve-sio arr) slab-off))))
 
 ;;=============================================================================
@@ -811,7 +811,7 @@
     (if (and (instance? EveArray new-value)
              (== old-off (d/-root-header-off new-value)))
       [] ;; Same block — no-op
-      (if (and (some? old-off) (not= old-off alloc/NIL_OFFSET))
+      (if (and (some? old-off) (not= old-off alloc/nil-offset))
         [old-off]
         []))))
 
@@ -835,14 +835,14 @@
    (let [subtype (-subtype arr)
          n (e/count arr)
          byte-len (* n (subtype->elem-size subtype))
-         blk-off (slab/alloc! sio (+ HEADER_SIZE byte-len))]
+         blk-off (slab/alloc! sio (+ header-size byte-len))]
      (slab/write-u8!  sio blk-off 0 ser/EVE_ARRAY_SLAB_TYPE_ID)
      (slab/write-u8!  sio blk-off 1 subtype)
      (slab/write-u16! sio blk-off 2 0)
      (slab/write-i32! sio blk-off 4 n)
      (when (pos? byte-len)
-       (slab/write-bytes! sio blk-off HEADER_SIZE
-                          (slab/read-bytes (d/-eve-sio arr) (d/-root-header-off arr) HEADER_SIZE byte-len)))
+       (slab/write-bytes! sio blk-off header-size
+                          (slab/read-bytes (d/-eve-sio arr) (d/-root-header-off arr) header-size byte-len)))
      (reify d/IEveRoot
        (-root-header-off [_] blk-off)))))
 
@@ -868,7 +868,7 @@
          n (quot (alength ^bytes bs) (subtype->elem-size inferred))
          off (alloc-eve-region sio (or subtype inferred) n)]
      (when (pos? n)
-       (slab/write-bytes! sio off HEADER_SIZE bs))
+       (slab/write-bytes! sio off header-size bs))
      off)))
 
 (codec/register-collection-writer! :array
@@ -917,7 +917,7 @@
 (defn- from-element-bytes [type-kw n bs]
   (let [arr (eve-array-uninit type-kw n)]
     (when (pos? n)
-      (slab/write-bytes! (d/-eve-sio arr) (d/-root-header-off arr) HEADER_SIZE bs))
+      (slab/write-bytes! (d/-eve-sio arr) (d/-root-header-off arr) header-size bs))
     arr))
 
 (defn from-double-array

@@ -57,7 +57,7 @@
       (is (every? true? (map (fn [o] (slab/free! sio o)) offs)))))
   (testing "a block past 1024 B is the coalescing class 6's"
     (let [o (slab/alloc! sio 5000)]
-      (is (= alloc/OVERFLOW_CLASS_IDX (alloc/decode-class-idx o)))
+      (is (= alloc/overflow-class-idx (alloc/decode-class-idx o)))
       (slab/write-i32! sio o 4996 77)
       (is (= 77 (slab/read-i32 sio o 4996)))
       (is (true? (slab/free! sio o))))))

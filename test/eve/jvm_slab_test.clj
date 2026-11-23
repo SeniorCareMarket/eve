@@ -4,7 +4,7 @@
 
 (deftest heap-slab-alloc-free
   (testing "alloc and free a block in a heap slab"
-    (let [ctx   (alloc/make-jvm-heap-slab-ctx {}) off   (alloc/-sio-alloc! ctx 32)] (is (not= off alloc/NIL_OFFSET)) (is (true? (alloc/-sio-free! ctx off))))))
+    (let [ctx   (alloc/make-jvm-heap-slab-ctx {}) off   (alloc/-sio-alloc! ctx 32)] (is (not= off alloc/nil-offset)) (is (true? (alloc/-sio-free! ctx off))))))
 
 (deftest heap-slab-read-write
   (testing "write and read back bytes in a heap slab"

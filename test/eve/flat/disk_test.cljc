@@ -41,17 +41,17 @@
        (str (Files/createTempDirectory "eve-h1" (into-array FileAttribute []))))
 
      (defn- class-total [^JvmSlabCtx ctx ci]
-       (mem/-load-i32 (aget ^objects (.-regions ctx) ci) d/SLAB_HDR_TOTAL_BLOCKS))
+       (mem/-load-i32 (aget ^objects (.-regions ctx) ci) d/slab-hdr-total-blocks))
 
      (defn- class-free [^JvmSlabCtx ctx ci]
-       (mem/-load-i32 (aget ^objects (.-regions ctx) ci) d/SLAB_HDR_FREE_COUNT))
+       (mem/-load-i32 (aget ^objects (.-regions ctx) ci) d/slab-hdr-free-count))
 
      (defn- blocks-in-use
        "The domain's allocated set, counted the way place_test counts it:
    per bitmap class, TOTAL_BLOCKS - FREE_COUNT from the region headers."
        [sio]
        (let [ctx (alloc/sio-root sio)]
-         (reduce + (for [ci (range d/NUM_SLAB_CLASSES)]
+         (reduce + (for [ci (range d/num-slab-classes)]
                      (- (class-total ctx ci) (class-free ctx ci))))))
 
      (defn- spawn-worker!

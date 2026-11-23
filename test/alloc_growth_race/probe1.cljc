@@ -24,9 +24,9 @@
         (do
           (when (zero? (mod i 16))
             (println "AT" i
-                     "total" (mem/-load-i32 rgn d/SLAB_HDR_TOTAL_BLOCKS)
-                     "free" (mem/-load-i32 rgn d/SLAB_HDR_FREE_COUNT)
-                     "cursor" (mem/-load-i32 rgn d/SLAB_HDR_ALLOC_CURSOR)
+                     "total" (mem/-load-i32 rgn d/slab-hdr-total-blocks)
+                     "free" (mem/-load-i32 rgn d/slab-hdr-free-count)
+                     "cursor" (mem/-load-i32 rgn d/slab-hdr-alloc-cursor)
                      "ctx-total" (aget ^ints (.-total-blocks ctx) 0)))
           (slab/alloc! sio 32)
           (recur (inc i)))))))

@@ -24,7 +24,7 @@
    #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
    #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
    #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.deftype-proto.alloc :as alloc
-                                                   :refer [ISlabIO ISlabRegion ISlabRunAlloc IFlatDoor NIL_OFFSET OVERFLOW_CLASS_IDX
+                                                   :refer [ISlabIO ISlabRegion ISlabRunAlloc IFlatDoor nil-offset overflow-class-idx
                                                            decode-block-idx decode-class-idx encode-slab-offset
                                                            -sio-alloc! -sio-alloc-flat-block! -sio-alloc-run! -sio-cas-i32! -sio-copy-block! -sio-free! -sio-mem-region
                                                            -sio-read-bytes -sio-read-i32 -sio-read-u16 -sio-read-u8
@@ -180,14 +180,14 @@
         slab-region (region/js-sab-region sab)
         u8-view     (js/Uint8Array. sab)]
     ;; Write slab header via IMemRegion
-    (mem/store-i32! slab-region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
-    (mem/store-i32! slab-region d/SLAB_HDR_BLOCK_SIZE block-size)
-    (mem/store-i32! slab-region d/SLAB_HDR_TOTAL_BLOCKS blocks)
-    (mem/store-i32! slab-region d/SLAB_HDR_FREE_COUNT blocks)
-    (mem/store-i32! slab-region d/SLAB_HDR_ALLOC_CURSOR 0)
-    (mem/store-i32! slab-region d/SLAB_HDR_CLASS_IDX class-idx)
-    (mem/store-i32! slab-region d/SLAB_HDR_BITMAP_OFFSET bitmap-offset)
-    (mem/store-i32! slab-region d/SLAB_HDR_DATA_OFFSET data-offset)
+    (mem/store-i32! slab-region d/slab-hdr-magic d/slab-magic)
+    (mem/store-i32! slab-region d/slab-hdr-block-size block-size)
+    (mem/store-i32! slab-region d/slab-hdr-total-blocks blocks)
+    (mem/store-i32! slab-region d/slab-hdr-free-count blocks)
+    (mem/store-i32! slab-region d/slab-hdr-alloc-cursor 0)
+    (mem/store-i32! slab-region d/slab-hdr-class-idx class-idx)
+    (mem/store-i32! slab-region d/slab-hdr-bitmap-offset bitmap-offset)
+    (mem/store-i32! slab-region d/slab-hdr-data-offset data-offset)
     ;; Zero the bitmap (all blocks free = all bits 0)
     (.fill u8-view 0 bitmap-offset (+ bitmap-offset bitmap-size))
     ;; Cache layout info
@@ -218,7 +218,7 @@
       (set! initialized? true)
       (let [slab-promises
             (into-array
-             (for [i (range d/NUM_SLAB_CLASSES)]
+             (for [i (range d/num-slab-classes)]
                (let [cap (get capacities i (d/default-capacity-for-class i))]
                  (init-slab! i :capacity cap :growable? growable?))))]
         (init-root-sab!)
@@ -254,7 +254,7 @@
 (defn reset-all-slabs!
   "Reset all slab bitmaps to free state. Nuclear reset for test runners."
   []
-  (dotimes [class-idx d/NUM_SLAB_CLASSES]
+  (dotimes [class-idx d/num-slab-classes]
     (when-let [inst (wasm/get-slab-instance class-idx)]
       (let [region   (:region inst)
             u8-view  (:u8 inst)
@@ -266,8 +266,8 @@
         (when (identical? (aget slab-desc-regions class-idx) region)
           (let [dt (aget slab-desc-offsets class-idx)]
             (.fill u8-view 0 dt (+ dt (d/desc-table-byte-size total)))))
-        (mem/store-i32! region d/SLAB_HDR_FREE_COUNT total)
-        (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)))))
+        (mem/store-i32! region d/slab-hdr-free-count total)
+        (mem/store-i32! region d/slab-hdr-alloc-cursor 0)))))
 
 ;; -----------------------------------------------------------------------
 ;; Root SAB (control plane)
@@ -280,16 +280,16 @@
 (defn init-root-sab!
   "Create the root/control SharedArrayBuffer."
   []
-  (let [sab (js/SharedArrayBuffer. d/ROOT_SAB_SIZE)
+  (let [sab (js/SharedArrayBuffer. d/root-sab-size)
         i32 (js/Int32Array. sab)
         rgn (region/js-sab-region sab)]
-    (mem/store-i32! rgn d/ROOT_MAGIC_OFFSET d/ROOT_MAGIC)
-    (mem/store-i32! rgn d/ROOT_ATOM_PTR_OFFSET NIL_OFFSET)
-    (mem/store-i32! rgn d/ROOT_EPOCH_OFFSET 1)
-    (mem/store-i32! rgn d/ROOT_WORKER_REG_OFFSET d/ROOT_WORKER_REGISTRY_START)
-    (dotimes [slot-idx d/MAX_WORKERS]
-      (let [slot-byte-offset (+ d/ROOT_WORKER_REGISTRY_START (* slot-idx d/WORKER_SLOT_SIZE))]
-        (mem/store-i32! rgn slot-byte-offset d/WORKER_STATUS_INACTIVE)))
+    (mem/store-i32! rgn d/root-magic-offset d/root-magic)
+    (mem/store-i32! rgn d/root-atom-ptr-offset nil-offset)
+    (mem/store-i32! rgn d/root-epoch-offset 1)
+    (mem/store-i32! rgn d/root-worker-reg-offset d/root-worker-registry-start)
+    (dotimes [slot-idx d/max-workers]
+      (let [slot-byte-offset (+ d/root-worker-registry-start (* slot-idx d/worker-slot-size))]
+        (mem/store-i32! rgn slot-byte-offset d/worker-status-inactive)))
     (reset! root-sab sab)
     (reset! root-i32 i32)
     (reset! root-region rgn)
@@ -318,7 +318,7 @@
   "Extract all 6 slab SharedArrayBuffers for passing to workers."
   []
   (let [sabs #js []]
-    (dotimes [i d/NUM_SLAB_CLASSES]
+    (dotimes [i d/num-slab-classes]
       (.push sabs (wasm/slab-buffer i)))
     sabs))
 
@@ -326,9 +326,9 @@
   "Read a slab's header and populate module-level caches."
   [class-idx sab]
   (let [sab-region    (region/js-sab-region sab)
-        data-offset   (mem/load-i32 sab-region d/SLAB_HDR_DATA_OFFSET)
-        bitmap-offset (mem/load-i32 sab-region d/SLAB_HDR_BITMAP_OFFSET)
-        total-blocks  (mem/load-i32 sab-region d/SLAB_HDR_TOTAL_BLOCKS)]
+        data-offset   (mem/load-i32 sab-region d/slab-hdr-data-offset)
+        bitmap-offset (mem/load-i32 sab-region d/slab-hdr-bitmap-offset)
+        total-blocks  (mem/load-i32 sab-region d/slab-hdr-total-blocks)]
     (aset slab-data-offsets class-idx data-offset)
     (aset slab-bitmap-offsets class-idx bitmap-offset)
     (aset slab-total-blocks class-idx total-blocks)
@@ -341,7 +341,7 @@
   "Initialize the slab system on a worker from existing SABs."
   [slab-sabs root-sab-arg legacy-sab]
   (set! initialized? true)
-  (dotimes [i d/NUM_SLAB_CLASSES]
+  (dotimes [i d/num-slab-classes]
     (let [sab (if (array? slab-sabs) (aget slab-sabs i) (nth slab-sabs i))]
       (wasm/register-slab-instance-from-sab! i sab)
       (populate-slab-caches-from-header! i sab)))
@@ -375,7 +375,7 @@
             block-size  (d/slab-size class-idx)
             data-offset (aget slab-data-offsets class-idx)
             cached      (aget slab-total-blocks class-idx)
-            hdr-total   (mem/load-i32 region d/SLAB_HDR_TOTAL_BLOCKS)
+            hdr-total   (mem/load-i32 region d/slab-hdr-total-blocks)
             max-blocks  (quot (- (.-maxByteLength sab) data-offset) block-size)]
         (cond
           (> hdr-total cached) (do (aset slab-total-blocks class-idx hdr-total) true)
@@ -383,9 +383,9 @@
           :else
           (let [new-blocks (min (* 2 hdr-total) max-blocks)
                 _          (ensure-sab-length! sab (+ data-offset (* new-blocks block-size)))
-                witness    (mem/-cas-i32! region d/SLAB_HDR_TOTAL_BLOCKS hdr-total new-blocks)]
+                witness    (mem/-cas-i32! region d/slab-hdr-total-blocks hdr-total new-blocks)]
             (if (== witness hdr-total)
-              (do (mem/add-i32! region d/SLAB_HDR_FREE_COUNT (- new-blocks hdr-total))
+              (do (mem/add-i32! region d/slab-hdr-free-count (- new-blocks hdr-total))
                   (aset slab-total-blocks class-idx new-blocks))
               (aset slab-total-blocks class-idx witness))
             true))))))
@@ -406,7 +406,7 @@
         total-bits (aget slab-total-blocks class-idx)
         inst       (wasm/get-slab-instance class-idx)
         region     (:region inst)
-        cursor     (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)]
+        cursor     (mem/load-i32 region d/slab-hdr-alloc-cursor)]
     (loop [start-bit cursor
            wrapped?  false]
       (let [candidate (wasm/bitmap-find-free class-idx bm-offset total-bits start-bit)]
@@ -414,9 +414,9 @@
           (not= candidate -1)
           (if (wasm/bitmap-alloc-cas! class-idx bm-offset candidate)
             (let [slab-offset (encode-slab-offset class-idx candidate)]
-              (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR
+              (mem/store-i32! region d/slab-hdr-alloc-cursor
                               (mod (inc candidate) total-bits))
-              (mem/sub-i32! region d/SLAB_HDR_FREE_COUNT 1)
+              (mem/sub-i32! region d/slab-hdr-free-count 1)
               (when alloc-hook (alloc-hook slab-offset))
               {:offset slab-offset :class-idx class-idx :block-idx candidate})
             (recur (inc candidate) wrapped?))
@@ -451,19 +451,19 @@
                                    (recur (inc attempts))
                                    (throw (ex-info "coalesc-alloc!: out of memory after growth"
                                                    {:size size-bytes}))))))))
-              slab-offset (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)]
+              slab-offset (encode-slab-offset overflow-class-idx byte-off)]
           (when alloc-hook (alloc-hook slab-offset))
-          {:offset slab-offset :class-idx OVERFLOW_CLASS_IDX :block-idx byte-off})
+          {:offset slab-offset :class-idx overflow-class-idx :block-idx byte-off})
         (if overflow-alloc-fn
           (let [result (overflow-alloc-fn size-bytes)]
             (if (:error result)
               {:error :overflow-oom :size size-bytes}
               (let [byte-off    (:offset result)
                     desc-idx    (:descriptor-idx result)
-                    slab-offset (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)]
+                    slab-offset (encode-slab-offset overflow-class-idx byte-off)]
                 (.set overflow-desc-map byte-off desc-idx)
                 (when alloc-hook (alloc-hook slab-offset))
-                {:offset slab-offset :class-idx OVERFLOW_CLASS_IDX :block-idx byte-off})))
+                {:offset slab-offset :class-idx overflow-class-idx :block-idx byte-off})))
           {:error :overflow-no-legacy-env :size size-bytes}))
       ;; Slab path — try alloc, grow on OOM (loop up to 20x), spill to next class
       (loop [ci class-idx]
@@ -522,7 +522,7 @@
                                    (recur (inc attempts))
                                    (throw (ex-info "alloc-flat-block!: out of memory after growth"
                                                    {:size size-bytes}))))))))
-              slab-offset (encode-slab-offset OVERFLOW_CLASS_IDX byte-off)]
+              slab-offset (encode-slab-offset overflow-class-idx byte-off)]
           (when alloc-hook (alloc-hook slab-offset))
           slab-offset)
 
@@ -533,12 +533,12 @@
   "Free a block identified by its slab-qualified offset.
    Returns true if freed, false if already free (double-free detected)."
   [^number slab-offset]
-  (if (== slab-offset NIL_OFFSET)
+  (if (== slab-offset nil-offset)
     false
     (do
       (when recycle-hook (recycle-hook slab-offset))
       (let [class-idx (decode-class-idx slab-offset)]
-        (if (== class-idx OVERFLOW_CLASS_IDX)
+        (if (== class-idx overflow-class-idx)
           (if mmap-coalesc-region
             ;; mmap coalescing path
             (let [byte-off (decode-block-idx slab-offset)]
@@ -564,7 +564,7 @@
                             (mem/store-i32! pr po 0))
                 freed?    (wasm/bitmap-free! class-idx bm-offset block-idx)]
             (when freed?
-              (mem/add-i32! region d/SLAB_HDR_FREE_COUNT 1))
+              (mem/add-i32! region d/slab-hdr-free-count 1))
             freed?))))))
 
 (defn- batch-alloc-once
@@ -574,7 +574,7 @@
         total-bits (aget slab-total-blocks class-idx)
         inst       (wasm/get-slab-instance class-idx)
         region     (:region inst)
-        cursor     (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)
+        cursor     (mem/load-i32 region d/slab-hdr-alloc-cursor)
         results    #js []]
     (loop [start-bit cursor wrapped? false]
       (when (< (.-length results) max-count)
@@ -593,9 +593,9 @@
     (when (pos? (.-length results))
       (let [last-offset (aget results (dec (.-length results)))
             last-block  (decode-block-idx last-offset)]
-        (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR
+        (mem/store-i32! region d/slab-hdr-alloc-cursor
                         (mod (inc last-block) total-bits))
-        (mem/sub-i32! region d/SLAB_HDR_FREE_COUNT (.-length results))))
+        (mem/sub-i32! region d/slab-hdr-free-count (.-length results))))
     results))
 
 (defn batch-alloc
@@ -629,7 +629,7 @@
         total-bits (aget slab-total-blocks class-idx)
         inst       (wasm/get-slab-instance class-idx)
         region     (:region inst)
-        cursor     (mem/load-i32 region d/SLAB_HDR_ALLOC_CURSOR)]
+        cursor     (mem/load-i32 region d/slab-hdr-alloc-cursor)]
     (when (<= n total-bits)
       (loop [start-bit cursor wrapped? false]
         (let [cand (wasm/bitmap-find-free class-idx bm-offset total-bits start-bit)]
@@ -669,9 +669,9 @@
                                       (wasm/bitmap-alloc-cas! class-idx bm-offset k) (recur (inc k))
                                       :else k))]
                   (if (== claimed run-end)
-                    (do (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR
+                    (do (mem/store-i32! region d/slab-hdr-alloc-cursor
                                         (mod run-end total-bits))
-                        (mem/sub-i32! region d/SLAB_HDR_FREE_COUNT n)
+                        (mem/sub-i32! region d/slab-hdr-free-count n)
                         (encode-slab-offset class-idx cand))
                     (do (dotimes [i (- claimed cand)]
                           (wasm/bitmap-free! class-idx bm-offset (+ cand i)))
@@ -1009,13 +1009,13 @@
 (defn read-root-ptr
   "Read the atom root pointer (a slab-qualified offset)."
   ^number []
-  (mem/load-i32 @root-region d/ROOT_ATOM_PTR_OFFSET))
+  (mem/load-i32 @root-region d/root-atom-ptr-offset))
 
 (defn cas-root-ptr!
   "CAS the atom root pointer. Returns true on success."
   [^number expected ^number new-val]
   (== expected
-      (mem/cas-i32! @root-region d/ROOT_ATOM_PTR_OFFSET expected new-val)))
+      (mem/cas-i32! @root-region d/root-atom-ptr-offset expected new-val)))
 
 ;; -----------------------------------------------------------------------
 ;; Epoch Management
@@ -1024,12 +1024,12 @@
 (defn get-current-epoch
   "Read the current global epoch."
   ^number []
-  (mem/load-i32 @root-region d/ROOT_EPOCH_OFFSET))
+  (mem/load-i32 @root-region d/root-epoch-offset))
 
 (defn increment-epoch!
   "Atomically increment global epoch. Returns the new epoch."
   ^number []
-  (inc (mem/add-i32! @root-region d/ROOT_EPOCH_OFFSET 1)))
+  (inc (mem/add-i32! @root-region d/root-epoch-offset 1)))
 
 ;; -----------------------------------------------------------------------
 ;; Worker Registry
@@ -1037,19 +1037,19 @@
 
 (defn- worker-slot-byte-offset
   ^number [^number slot-idx]
-  (+ d/ROOT_WORKER_REGISTRY_START (* slot-idx d/WORKER_SLOT_SIZE)))
+  (+ d/root-worker-registry-start (* slot-idx d/worker-slot-size)))
 
 (defn register-worker!
   "Claim a worker slot. Returns slot index or nil."
   [worker-id]
   (let [rgn @root-region]
     (loop [slot-idx 0]
-      (when (< slot-idx d/MAX_WORKERS)
+      (when (< slot-idx d/max-workers)
         (let [slot-byte-off (worker-slot-byte-offset slot-idx)]
-          (if (== d/WORKER_STATUS_INACTIVE
+          (if (== d/worker-status-inactive
                   (mem/cas-i32! rgn slot-byte-off
-                                d/WORKER_STATUS_INACTIVE
-                                d/WORKER_STATUS_ACTIVE))
+                                d/worker-status-inactive
+                                d/worker-status-active))
             (do
               (mem/store-i32! rgn (+ slot-byte-off d/OFFSET_WS_WORKER_ID) worker-id)
               (mem/store-i32! rgn (+ slot-byte-off d/OFFSET_WS_CURRENT_EPOCH) 0)
@@ -1059,11 +1059,11 @@
 (defn unregister-worker!
   "Release a worker slot."
   [slot-idx]
-  (when (and (>= slot-idx 0) (< slot-idx d/MAX_WORKERS))
+  (when (and (>= slot-idx 0) (< slot-idx d/max-workers))
     (let [rgn          @root-region
           slot-byte-off (worker-slot-byte-offset slot-idx)]
       (mem/store-i32! rgn (+ slot-byte-off d/OFFSET_WS_CURRENT_EPOCH) 0)
-      (mem/store-i32! rgn slot-byte-off d/WORKER_STATUS_INACTIVE))))
+      (mem/store-i32! rgn slot-byte-off d/worker-status-inactive))))
 
 ;; -----------------------------------------------------------------------
 ;; Diagnostic Helpers
@@ -1075,7 +1075,7 @@
   (let [inst   (wasm/get-slab-instance class-idx)
         region (:region inst)
         total  (aget slab-total-blocks class-idx)
-        free   (mem/load-i32 region d/SLAB_HDR_FREE_COUNT)]
+        free   (mem/load-i32 region d/slab-hdr-free-count)]
     {:block-size   (d/slab-size class-idx)
      :total-blocks total
      :free-count   free
@@ -1084,7 +1084,7 @@
 (defn all-slab-stats
   "Return stats for all slab classes."
   []
-  (into {} (for [i (range d/NUM_SLAB_CLASSES)]
+  (into {} (for [i (range d/num-slab-classes)]
              [i (slab-stats i)])))
 
 ;; -----------------------------------------------------------------------
@@ -1109,17 +1109,17 @@
         desc-flags-region (region/open-mmap-region (str path ".desc-flags") (:desc-column-bytes layout))
         desc-pointer-region (region/open-mmap-region (str path ".desc-pointer") (:desc-column-bytes layout))]
     ;; Write slab header
-    (mem/store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
-    (mem/store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
-    (mem/store-i32! region d/SLAB_HDR_TOTAL_BLOCKS total-blocks)
-    (mem/store-i32! region d/SLAB_HDR_FREE_COUNT total-blocks)
-    (mem/store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)
-    (mem/store-i32! region d/SLAB_HDR_CLASS_IDX class-idx)
-    (mem/store-i32! region d/SLAB_HDR_BITMAP_OFFSET 0)
-    (mem/store-i32! region d/SLAB_HDR_DATA_OFFSET d/SLAB_HEADER_SIZE)
+    (mem/store-i32! region d/slab-hdr-magic d/slab-magic)
+    (mem/store-i32! region d/slab-hdr-block-size block-size)
+    (mem/store-i32! region d/slab-hdr-total-blocks total-blocks)
+    (mem/store-i32! region d/slab-hdr-free-count total-blocks)
+    (mem/store-i32! region d/slab-hdr-alloc-cursor 0)
+    (mem/store-i32! region d/slab-hdr-class-idx class-idx)
+    (mem/store-i32! region d/slab-hdr-bitmap-offset 0)
+    (mem/store-i32! region d/slab-hdr-data-offset d/slab-header-size)
     ;; Bitmap is already zeroed by ftruncate (all blocks free)
     ;; Cache layout info + paths for lazy growth
-    (aset slab-data-offsets class-idx d/SLAB_HEADER_SIZE)
+    (aset slab-data-offsets class-idx d/slab-header-size)
     (aset slab-bitmap-offsets class-idx 0)
     (aset slab-total-blocks class-idx total-blocks)
     (aset slab-file-paths class-idx path)
@@ -1137,9 +1137,9 @@
    and populates the module-level layout caches."
   [class-idx path]
   (let [peek-region  (region/open-mmap-region path 64)
-        total-blocks (mem/load-i32 peek-region d/SLAB_HDR_TOTAL_BLOCKS)
+        total-blocks (mem/load-i32 peek-region d/slab-hdr-total-blocks)
         block-size   (d/slab-size class-idx)
-        data-bytes   (+ d/SLAB_HEADER_SIZE (* total-blocks block-size))
+        data-bytes   (+ d/slab-header-size (* total-blocks block-size))
         bm-path      (str path ".bm")
         bm-bytes     (d/bitmap-byte-size total-blocks)
         region       (region/open-mmap-region path data-bytes)
@@ -1149,7 +1149,7 @@
         desc-flags-region (region/open-mmap-region (str path ".desc-flags") (d/desc-column-byte-size total-blocks))
         desc-pointer-region (region/open-mmap-region (str path ".desc-pointer") (d/desc-column-byte-size total-blocks))]
     ;; Cache layout info + paths for lazy growth
-    (aset slab-data-offsets class-idx d/SLAB_HEADER_SIZE)
+    (aset slab-data-offsets class-idx d/slab-header-size)
     (aset slab-bitmap-offsets class-idx 0)
     (aset slab-total-blocks class-idx total-blocks)
     (aset slab-file-paths class-idx path)
@@ -1167,7 +1167,7 @@
   (let [path       (aget slab-file-paths class-idx)
         bm-path    (aget slab-bitmap-paths class-idx)
         block-size (d/slab-size class-idx)
-        data-bytes (+ d/SLAB_HEADER_SIZE (* total-blocks block-size))
+        data-bytes (+ d/slab-header-size (* total-blocks block-size))
         bm-bytes   (d/bitmap-byte-size total-blocks)
         region     (region/open-mmap-region path data-bytes)
         bm-region  (region/open-mmap-region bm-path bm-bytes)
@@ -1190,7 +1190,7 @@
         cached-total (aget slab-total-blocks class-idx)
         ;; Peek header — use small region to read current state
         peek-r       (region/open-mmap-region path 64)
-        hdr-total    (mem/load-i32 peek-r d/SLAB_HDR_TOTAL_BLOCKS)]
+        hdr-total    (mem/load-i32 peek-r d/slab-hdr-total-blocks)]
     (if (> hdr-total cached-total)
       ;; Another process grew — just re-map at the header's size
       (do (remap-mmap-slab! class-idx hdr-total)
@@ -1198,14 +1198,14 @@
       ;; Try to be the growth leader via CAS on total_blocks
       (let [new-blocks (* 2 hdr-total)
             added      (- new-blocks hdr-total)
-            witness    (mem/-cas-i32! peek-r d/SLAB_HDR_TOTAL_BLOCKS
+            witness    (mem/-cas-i32! peek-r d/slab-hdr-total-blocks
                                       hdr-total new-blocks)]
         (if (== witness hdr-total)
           ;; We won — extend both files and re-map
           (do (remap-mmap-slab! class-idx new-blocks)
               (let [inst   (wasm/get-slab-instance class-idx)
                     region (:region inst)]
-                (mem/add-i32! region d/SLAB_HDR_FREE_COUNT added))
+                (mem/add-i32! region d/slab-hdr-free-count added))
               true)
           ;; Lost CAS — someone else grew, re-map at their size
           (do (remap-mmap-slab! class-idx witness)
@@ -1216,7 +1216,7 @@
    cached value (i.e. another process grew them). Called before deref
    in cross-process swap! to ensure we can read all blocks."
   []
-  (dotimes [ci d/NUM_SLAB_CLASSES]
+  (dotimes [ci d/num-slab-classes]
     (when-let [path (aget slab-file-paths ci)]
       (let [cached (aget slab-total-blocks ci)
             ;; The header is the first bytes of this process's own
@@ -1227,7 +1227,7 @@
             ;; reads through its region.
             cur-r (:region (wasm/get-slab-instance ci))
             hdr-total (mem/load-i32 (or cur-r (region/open-mmap-region path 64))
-                                    d/SLAB_HDR_TOTAL_BLOCKS)]
+                                    d/slab-hdr-total-blocks)]
         (when (> hdr-total cached)
           (remap-mmap-slab! ci hdr-total)))))
   ;; Also refresh coalesc region
@@ -1316,9 +1316,9 @@
    Registers the region for mmap overflow allocation.
    Uses initial-data-size for the file and max-data-size for growth cap."
   [path & {:keys [initial-data-size max-data-size max-desc]
-           :or   {initial-data-size coalesc/INITIAL_DATA_SIZE
-                  max-data-size     coalesc/DEFAULT_DATA_SIZE
-                  max-desc          coalesc/MAX_DESCRIPTORS}}]
+           :or   {initial-data-size coalesc/initial-data-size
+                  max-data-size     coalesc/default-data-size
+                  max-desc          coalesc/max-descriptors}}]
   ;; Descriptor table is sized for max-desc; data region starts after it.
   ;; Use max-desc layout to compute fixed offsets (desc table + data-offset).
   (let [layout      (coalesc/coalesc-layout initial-data-size max-desc)
@@ -1327,35 +1327,35 @@
         region      (region/open-mmap-region path total-bytes)]
     (coalesc/init-coalesc-region! region initial-data-size max-desc)
     ;; Cache layout info so slab-offset->byte-offset works for class 6
-    (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
-    (aset slab-bitmap-offsets OVERFLOW_CLASS_IDX (:desc-table-offset layout))
-    (aset slab-total-blocks OVERFLOW_CLASS_IDX max-desc)
+    (aset slab-data-offsets overflow-class-idx data-offset)
+    (aset slab-bitmap-offsets overflow-class-idx (:desc-table-offset layout))
+    (aset slab-total-blocks overflow-class-idx max-desc)
     ;; Store path and growth caps for lazy growth
     (set! mmap-coalesc-path path)
     (set! mmap-coalesc-max-data-size max-data-size)
     (set! mmap-coalesc-cached-data-size initial-data-size)
     ;; Register for read/write access
-    (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
+    (wasm/register-mmap-slab-instance! overflow-class-idx region nil)
     (set! mmap-coalesc-region region)))
 
 (defn open-mmap-coalesc!
   "Open an existing .slab6 file for the coalescing allocator."
   [path]
   (let [peek-region  (region/open-mmap-region path 64)
-        data-offset  (mem/load-i32 peek-region d/SLAB_HDR_DATA_OFFSET)
-        dt-offset    (mem/load-i32 peek-region d/SLAB_HDR_BITMAP_OFFSET)
-        max-desc     (mem/load-i32 peek-region d/SLAB_HDR_TOTAL_BLOCKS)
-        cur-data-sz  (mem/load-i64 peek-region coalesc/COALESC_HDR_DATA_SIZE)
+        data-offset  (mem/load-i32 peek-region d/slab-hdr-data-offset)
+        dt-offset    (mem/load-i32 peek-region d/slab-hdr-bitmap-offset)
+        max-desc     (mem/load-i32 peek-region d/slab-hdr-total-blocks)
+        cur-data-sz  (mem/load-i64 peek-region coalesc/coalesc-hdr-data-size)
         ;; Map the file at current data size (will grow via grow-mmap-coalesc!)
         total-bytes  (+ data-offset cur-data-sz)
         region       (region/open-mmap-region path total-bytes)]
-    (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
-    (aset slab-bitmap-offsets OVERFLOW_CLASS_IDX dt-offset)
-    (aset slab-total-blocks OVERFLOW_CLASS_IDX max-desc)
+    (aset slab-data-offsets overflow-class-idx data-offset)
+    (aset slab-bitmap-offsets overflow-class-idx dt-offset)
+    (aset slab-total-blocks overflow-class-idx max-desc)
     (set! mmap-coalesc-path path)
-    (set! mmap-coalesc-max-data-size coalesc/DEFAULT_DATA_SIZE)
+    (set! mmap-coalesc-max-data-size coalesc/default-data-size)
     (set! mmap-coalesc-cached-data-size cur-data-sz)
-    (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
+    (wasm/register-mmap-slab-instance! overflow-class-idx region nil)
     (set! mmap-coalesc-region region)))
 
 (defn- grow-mmap-coalesc!
@@ -1366,12 +1366,12 @@
     (let [result (coalesc/grow-coalesc-region!
                   mmap-coalesc-region mmap-coalesc-max-data-size)]
       (when result
-        (let [_data-offset (aset slab-data-offsets OVERFLOW_CLASS_IDX
-                                 (aget slab-data-offsets OVERFLOW_CLASS_IDX))
-              total-bytes (+ (aget slab-data-offsets OVERFLOW_CLASS_IDX) result)
+        (let [_data-offset (aset slab-data-offsets overflow-class-idx
+                                 (aget slab-data-offsets overflow-class-idx))
+              total-bytes (+ (aget slab-data-offsets overflow-class-idx) result)
               region      (region/open-mmap-region mmap-coalesc-path total-bytes)]
           (set! mmap-coalesc-cached-data-size result)
-          (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
+          (wasm/register-mmap-slab-instance! overflow-class-idx region nil)
           (set! mmap-coalesc-region region)
           true)))))
 
@@ -1380,10 +1380,10 @@
    size (coalesc/grow-coalesc-region!'s CAS publishes it). true when grown, or grown by another thread."
   []
   (when (and mmap-coalesc-region (nil? mmap-coalesc-path))
-    (let [inst    (wasm/get-slab-instance OVERFLOW_CLASS_IDX)
+    (let [inst    (wasm/get-slab-instance overflow-class-idx)
           ^js sab (when inst (.-buffer ^js (:u8 inst)))]
       (when (and sab (.-growable sab))
-        (let [data-offset (aget slab-data-offsets OVERFLOW_CLASS_IDX)
+        (let [data-offset (aget slab-data-offsets overflow-class-idx)
               result      (coalesc/grow-coalesc-region!
                            mmap-coalesc-region (- (.-maxByteLength sab) data-offset)
                            (fn [new-size] (ensure-sab-length! sab (+ data-offset new-size))))]
@@ -1397,11 +1397,11 @@
   (when (and mmap-coalesc-region mmap-coalesc-path)
     (let [hdr-data-sz (coalesc/current-data-size mmap-coalesc-region)]
       (when (> hdr-data-sz mmap-coalesc-cached-data-size)
-        (let [total-bytes (+ (aget slab-data-offsets OVERFLOW_CLASS_IDX)
+        (let [total-bytes (+ (aget slab-data-offsets overflow-class-idx)
                              hdr-data-sz)
               region      (region/open-mmap-region mmap-coalesc-path total-bytes)]
           (set! mmap-coalesc-cached-data-size hdr-data-sz)
-          (wasm/register-mmap-slab-instance! OVERFLOW_CLASS_IDX region nil)
+          (wasm/register-mmap-slab-instance! overflow-class-idx region nil)
           (set! mmap-coalesc-region region))))))
 
 (defn reset-mmap-coalesc!
@@ -1421,10 +1421,10 @@
    physical pages on first touch)."
   [& {:keys [max-data-size max-desc growable?]
       :or   {max-data-size (* 1024 1024 1024) ;; 1GB
-             max-desc      coalesc/MAX_DESCRIPTORS
+             max-desc      coalesc/max-descriptors
              growable?     (wasm/grow-slabs?)}}]
   (let [grow?       (and growable? (wasm/growable-sabs?))
-        data-size   (if grow? (min coalesc/INITIAL_DATA_SIZE max-data-size) max-data-size)
+        data-size   (if grow? (min coalesc/initial-data-size max-data-size) max-data-size)
         layout      (coalesc/coalesc-layout data-size max-desc)
         total-bytes (:total-bytes layout)
         data-offset (:data-offset layout)
@@ -1433,13 +1433,13 @@
                       (js/SharedArrayBuffer. total-bytes))
         region      (region/js-sab-region sab)]
     (coalesc/init-coalesc-region! region data-size max-desc)
-    (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
-    (aset slab-bitmap-offsets OVERFLOW_CLASS_IDX (:desc-table-offset layout))
-    (aset slab-total-blocks OVERFLOW_CLASS_IDX max-desc)
+    (aset slab-data-offsets overflow-class-idx data-offset)
+    (aset slab-bitmap-offsets overflow-class-idx (:desc-table-offset layout))
+    (aset slab-total-blocks overflow-class-idx max-desc)
     (set! mmap-coalesc-path nil)
     (set! mmap-coalesc-max-data-size 0)
     (set! mmap-coalesc-cached-data-size data-size)
-    (wasm/register-slab-instance-from-sab! OVERFLOW_CLASS_IDX sab)
+    (wasm/register-slab-instance-from-sab! overflow-class-idx sab)
     (set! mmap-coalesc-region region)))
 
 ;; ---------------------------------------------------------------------------
@@ -1465,11 +1465,11 @@
   (set! domain-ks nil)
   (set! domain-ks-bytes nil)
   (if create?
-    (do (dotimes [i d/NUM_SLAB_CLASSES]
+    (do (dotimes [i d/num-slab-classes]
           (init-mmap-slab! i (str base-path ".slab" i)
                            :capacity (get capacities i (d/initial-capacity-for-class i))))
         (init-mmap-coalesc! (str base-path ".slab6")))
-    (do (dotimes [i d/NUM_SLAB_CLASSES]
+    (do (dotimes [i d/num-slab-classes]
           (open-mmap-slab! i (str base-path ".slab" i)))
         (open-mmap-coalesc! (str base-path ".slab6"))))
   (cljs-sio))
@@ -1481,10 +1481,10 @@
   [_sio slab-offset]
   (let [ci (decode-class-idx slab-offset)]
     (cond
-      (< ci OVERFLOW_CLASS_IDX)
+      (< ci overflow-class-idx)
       (desc-handle ci (decode-block-idx slab-offset))
 
-      (and (== ci OVERFLOW_CLASS_IDX) mmap-coalesc-region)
+      (and (== ci overflow-class-idx) mmap-coalesc-region)
       (when-let [[co fo po] (coalesc/row-of mmap-coalesc-region (decode-block-idx slab-offset))]
         [[mmap-coalesc-region co] [mmap-coalesc-region fo] [mmap-coalesc-region po]])
 
@@ -1494,7 +1494,7 @@
   "True when the block is allocated: its bitmap bit set (classes 0-5), its coalescing descriptor ALLOCATED (class 6)."
   [sio slab-offset]
   (let [ci (decode-class-idx slab-offset)]
-    (if (< ci OVERFLOW_CLASS_IDX)
+    (if (< ci overflow-class-idx)
       (let [bi   (decode-block-idx slab-offset)
             inst (wasm/get-slab-instance ci)
             rgn  (or (:bitmap-region inst) (:region inst))]
@@ -1509,7 +1509,7 @@
    to durable storage (eve.mem/sync-region!: a SAB region, the module's
    own slabs, has nothing to force). Registered as :sync-domain-sio!."
   [_sio]
-  (dotimes [i d/NUM_SLAB_CLASSES]
+  (dotimes [i d/num-slab-classes]
     (when-let [inst (wasm/get-slab-instance i)]
       (mem/sync-region! (:region inst))
       (mem/sync-region! (:bitmap-region inst)))

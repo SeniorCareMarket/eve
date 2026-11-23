@@ -39,7 +39,7 @@
    transfer-direct-equal :305 under load."
   [name x]
   (let [a (ea/lookup-or-create-mmap-atom! (ea/atom-domain {}) name x)]
-    (Thread/sleep (long (inc ea/FLUSH_INTERVAL_MS)))
+    (Thread/sleep (long (inc ea/flush-interval-ms)))
     a))
 
 (defn- slab-of
@@ -62,7 +62,7 @@
   [a]
   (let [ctx (alloc/sio-root (ea/atom-sio a))
         regions (.-regions ^eve.deftype_proto.alloc.JvmSlabCtx ctx)]
-    (mapv (fn [ci] (mem/-load-i32 (aget ^objects regions ci) d/SLAB_HDR_FREE_COUNT))
+    (mapv (fn [ci] (mem/-load-i32 (aget ^objects regions ci) d/slab-hdr-free-count))
           (range 6))))
 
 (defn- reach-count [a]
@@ -78,7 +78,7 @@
         nb (quot (- (:shapetab h) (:symtab h)) contract/block-entry-size)
         blocks (contract/read-block-table bs (:symtab h) nb)
         class-of (fn [size] (or (first (keep-indexed (fn [ci cs] (when (<= size cs) ci))
-                                                     alloc/CLASS_BLOCK_SIZES))
+                                                     alloc/class-block-sizes))
                                 6))]
     {:nblocks nb
      :by-class (frequencies (map (fn [b] (class-of (:size b))) blocks))}))

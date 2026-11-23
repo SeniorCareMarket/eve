@@ -51,7 +51,7 @@
   (ps/reset-all-slabs!)
   (let [sio (alloc/heap-domain-sio! {})
         ci 0
-        size (nth alloc/CLASS_BLOCK_SIZES ci)
+        size (nth alloc/class-block-sizes ci)
         ;; the fill door is the slab's per-class batch-alloc: the
         ;; size-routed -sio-alloc! spills to the next class on
         ;; exhaustion by design (measured: 32,256 blocks = all classes)

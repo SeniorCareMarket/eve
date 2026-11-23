@@ -10,7 +10,7 @@
    defaultCompare, at three call sites in datascript.db (comparing type
    names, attribute names, and same-typed values).")
 
-(defn defaultCompare
+(defn default-compare
   "Closure's goog.array.defaultCompare: 1 if a > b, -1 if a < b, else 0,
    over JavaScript's relational operators — its own definition, word for
    word."

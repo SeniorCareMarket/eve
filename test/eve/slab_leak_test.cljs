@@ -23,7 +23,7 @@
   "Sum of used-count across all 6 bitmap slab classes."
   []
   (loop [i 0 total 0]
-    (if (>= i d/NUM_SLAB_CLASSES)
+    (if (>= i d/num-slab-classes)
       total
       (let [stats (ps/slab-stats i)]
         (recur (inc i) (+ total (:used-count stats)))))))

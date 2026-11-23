@@ -81,10 +81,10 @@
 ;; so WASM can read them (WASM can only access the shared memory).
 ;; 4KB per worker is enough for most keys (keywords, strings, etc.)
 (def ^:const scratch-size 4096)         ;; Per-worker scratch (4KB)
-(def ^:const MAX_WORKERS 256)           ;; Max concurrent workers (256 × 4KB = 1MB scratch)
+(def ^:const max-workers 256)           ;; Max concurrent workers (256 × 4KB = 1MB scratch)
 
 ;; Node types (matching sab_map.cljs)
-(def ^:const NODE_TYPE_BITMAP 1)
+(def ^:const node-type-bitmap 1)
 (def ^:const node-type-collision 3)
 (def ^:const node-type-bitmap-hashed 5)  ;; Enhanced with per-key hashes
 
@@ -652,8 +652,8 @@
    Each worker has SCRATCH_SIZE bytes of scratch space.
    IMPORTANT: slot-idx must be 0 to (MAX_WORKERS-1), NOT the random worker-id!"
   [slot-idx scratch-region-start]
-  (when-not (and (>= slot-idx 0) (< slot-idx MAX_WORKERS))
-    (throw (js/Error. (str "scratch-offset: slot-idx " slot-idx " out of bounds [0, " MAX_WORKERS ")"))))
+  (when-not (and (>= slot-idx 0) (< slot-idx max-workers))
+    (throw (js/Error. (str "scratch-offset: slot-idx " slot-idx " out of bounds [0, " max-workers ")"))))
   (+ scratch-region-start (* slot-idx scratch-size)))
 
 (defn copy-to-scratch!

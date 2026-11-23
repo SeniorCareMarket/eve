@@ -88,7 +88,7 @@
   [sio hdr p]
   (and (some? p)
        (not (zero? p))
-       (not (== p alloc/NIL_OFFSET))
+       (not (== p alloc/nil-offset))
        (alloc/allocated? sio p)
        (== MAGIC (slab/read-i32 sio p f-magic))
        (== hdr (slab/read-i32 sio p f-backptr))))

@@ -103,7 +103,7 @@
         (recur)))))
 
 ;; a block's offset: NIL (-1), an atom slot's CLAIMED sentinel (-2) and every other offset of class 7 name no block
-(defn- live? [off] (< (alloc/decode-class-idx off) alloc/SENTINEL_CLASS_IDX))
+(defn- live? [off] (< (alloc/decode-class-idx off) alloc/sentinel-class-idx))
 
 ;; ---------------------------------------------------------------------------
 ;; Kinds and references
@@ -260,7 +260,7 @@
   [sio off acc]
   (if-let [row (alloc/desc-of sio off)]
     (let [p (slab/region-load-i32 (nth (nth row 2) 0) (nth (nth row 2) 1))]
-      (if (and (not (zero? p)) (not (== p alloc/NIL_OFFSET)) (live? p) (alloc/allocated? sio p))
+      (if (and (not (zero? p)) (not (== p alloc/nil-offset)) (live? p) (alloc/allocated? sio p))
         (conj acc [p :leaf])
         acc))
     acc))

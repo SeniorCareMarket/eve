@@ -72,7 +72,7 @@
 ;; Size Classes
 ;;=============================================================================
 
-(def ^:const NUM_SLAB_CLASSES 6)
+(def ^:const num-slab-classes 6)
 
 ;; Block sizes for each slab class (bytes)
 (def ^:const slab-size-0 32)
@@ -84,7 +84,7 @@
 
 ;; Lookup table: class index → block size
 ;; Index 6 = overflow (legacy SAB): block_size=1 so block_idx * 1 = byte_offset
-(def SLAB_SIZES [32 64 128 256 512 1024 1])
+(def slab-sizes [32 64 128 256 512 1024 1])
 
 (defn slab-size
   "The block size of slab class class-idx (SLAB_SIZES' entry)."
@@ -159,20 +159,20 @@
 ;; Slab Header Layout (64 bytes, cache-line aligned)
 ;;=============================================================================
 
-(def ^:const SLAB_HEADER_SIZE 64)
+(def ^:const slab-header-size 64)
 
 ;; Byte offsets within slab header
-(def ^:const SLAB_HDR_MAGIC 0)           ;; u32: 0x534C4142
-(def ^:const SLAB_HDR_BLOCK_SIZE 4)      ;; u32: block size in bytes
-(def ^:const SLAB_HDR_TOTAL_BLOCKS 8)    ;; u32: number of blocks in this slab
-(def ^:const SLAB_HDR_FREE_COUNT 12)     ;; u32: atomic free block counter
-(def ^:const SLAB_HDR_ALLOC_CURSOR 16)   ;; u32: hint for next scan start
-(def ^:const SLAB_HDR_CLASS_IDX 20)      ;; u32: which size class (0-5)
-(def ^:const SLAB_HDR_BITMAP_OFFSET 24)  ;; u32: byte offset where bitmap starts
-(def ^:const SLAB_HDR_DATA_OFFSET 28)    ;; u32: byte offset where data region starts
+(def ^:const slab-hdr-magic 0)           ;; u32: 0x534C4142
+(def ^:const slab-hdr-block-size 4)      ;; u32: block size in bytes
+(def ^:const slab-hdr-total-blocks 8)    ;; u32: number of blocks in this slab
+(def ^:const slab-hdr-free-count 12)     ;; u32: atomic free block counter
+(def ^:const slab-hdr-alloc-cursor 16)   ;; u32: hint for next scan start
+(def ^:const slab-hdr-class-idx 20)      ;; u32: which size class (0-5)
+(def ^:const slab-hdr-bitmap-offset 24)  ;; u32: byte offset where bitmap starts
+(def ^:const slab-hdr-data-offset 28)    ;; u32: byte offset where data region starts
 ;; 32..63 reserved for future use (epoch, generation, etc.)
 
-(def ^:const SLAB_MAGIC 0x534C4142)      ;; 'SLAB' in ASCII
+(def ^:const slab-magic 0x534C4142)      ;; 'SLAB' in ASCII
 
 ;;=============================================================================
 ;; Bitmap Layout
@@ -246,7 +246,7 @@
    [header 64][bitmap][descriptor columns][data]."
   [block-size capacity-bytes]
   (let [total-blocks  (quot capacity-bytes block-size)
-        bitmap-offset SLAB_HEADER_SIZE
+        bitmap-offset slab-header-size
         bm-size       (bitmap-byte-size total-blocks)
         desc-offset   (+ bitmap-offset bm-size)
         data-offset   (+ desc-offset (desc-table-byte-size total-blocks))
@@ -258,7 +258,7 @@
      :data-offset   data-offset
      :total-blocks  total-blocks}))
 
-(def ^:const MAX_HEAP_CLASS_BYTES
+(def ^:const max-heap-class-bytes
   "The largest one-buffer heap slab a bitmap class may grow to, in bytes. Its
    offsets (header data/bitmap offsets, block addresses) are i32, and a JVM
    heap region is one byte array, indexed by int (Integer/MAX_VALUE - 8, the
@@ -281,7 +281,7 @@
                      (* 2 old-total))]
     (when (and (> new-total old-total)
                (<= (long (:total-bytes (slab-layout block-size (* new-total block-size))))
-                   MAX_HEAP_CLASS_BYTES))
+                   max-heap-class-bytes))
       new-total)))
 
 (defn mmap-slab-layout
@@ -290,7 +290,7 @@
    SLAB_HEADER_SIZE. Returns {:data-bytes :bitmap-bytes :desc-column-bytes :total-blocks}."
   [block-size capacity-bytes]
   (let [total-blocks (quot capacity-bytes block-size)]
-    {:data-bytes   (+ SLAB_HEADER_SIZE (* total-blocks block-size))
+    {:data-bytes   (+ slab-header-size (* total-blocks block-size))
      :bitmap-bytes (bitmap-byte-size total-blocks)
      :desc-column-bytes (desc-column-byte-size total-blocks)
      :total-blocks total-blocks}))
@@ -370,32 +370,32 @@
 ;; - Global epoch counter
 ;; - Worker registry
 
-(def ^:const SIZE_OF_INT32 4)
+(def ^:const size-of-int32 4)
 
 (def ^:const root-sab-header-size 64)   ;; cache-line aligned header
 
-(def ^:const ROOT_MAGIC_OFFSET 0)         ;; u32: 0x524F4F54 ('ROOT')
-(def ^:const ROOT_ATOM_PTR_OFFSET 4)      ;; i32: packed slab ptr (class|block)
-(def ^:const ROOT_EPOCH_OFFSET 8)         ;; u32: global epoch counter
-(def ^:const ROOT_WORKER_REG_OFFSET 12)   ;; u32: byte offset to worker registry start
+(def ^:const root-magic-offset 0)         ;; u32: 0x524F4F54 ('ROOT')
+(def ^:const root-atom-ptr-offset 4)      ;; i32: packed slab ptr (class|block)
+(def ^:const root-epoch-offset 8)         ;; u32: global epoch counter
+(def ^:const root-worker-reg-offset 12)   ;; u32: byte offset to worker registry start
 ;; Bytes 16..63 reserved
 
-(def ^:const ROOT_MAGIC 0x524F4F54)       ;; 'ROOT' in ASCII
+(def ^:const root-magic 0x524F4F54)       ;; 'ROOT' in ASCII
 
 ;; Worker registry begins at byte 64 (right after header)
-(def ^:const ROOT_WORKER_REGISTRY_START root-sab-header-size)
+(def ^:const root-worker-registry-start root-sab-header-size)
 
 ;; Worker registry config (same as eve.data)
-(def ^:const MAX_WORKERS 256)
-(def ^:const WORKER_SLOT_SIZE 24)
-(def ^:const worker-registry-size (* MAX_WORKERS WORKER_SLOT_SIZE))
+(def ^:const max-workers 256)
+(def ^:const worker-slot-size 24)
+(def ^:const worker-registry-size (* max-workers worker-slot-size))
 
 ;; Total root SAB size
-(def ^:const ROOT_SAB_SIZE (+ root-sab-header-size worker-registry-size))
+(def ^:const root-sab-size (+ root-sab-header-size worker-registry-size))
 
 ;; Worker status values
-(def ^:const WORKER_STATUS_INACTIVE 0)
-(def ^:const WORKER_STATUS_ACTIVE 1)
+(def ^:const worker-status-inactive 0)
+(def ^:const worker-status-active 1)
 (def ^:const worker-status-stale 2)
 
 ;; Worker slot layout (24 bytes per worker)
@@ -712,7 +712,7 @@
 (def ^:const direct-marker-map 0xED)
 ;; Linked list constants
 (def ^:const offset-ll-node-value 0)
-(def ^:const ll-node-next-offset-size-bytes SIZE_OF_INT32)
+(def ^:const ll-node-next-offset-size-bytes size-of-int32)
 
 ;; Chunked list
 (def ^:const chunked-list-chunk-size 32)

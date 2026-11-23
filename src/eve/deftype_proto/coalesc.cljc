@@ -51,13 +51,13 @@
 ;;=============================================================================
 
 (def ^:const desc-col-bytes 28)     ;; total column bytes per descriptor (the columns below)
-(def ^:const MAX_DESCRIPTORS 16384) ;; heap-form default descriptor count; overridable per domain
+(def ^:const max-descriptors 16384) ;; heap-form default descriptor count; overridable per domain
 ;; The descriptor count is a CREATION parameter of the domain (stored in
 ;; the .slab6 header, read back at open) — never an intrinsic ceiling:
 ;; a domain opener sizes the table with :coalesc-descriptors. The mmap
 ;; form defaults far larger: its table lives in the sparse .slab6 file,
 ;; so untouched descriptor pages cost no resident memory.
-(def ^:const DEFAULT_MMAP_DESCRIPTORS 1048576)
+(def ^:const default-mmap-descriptors 1048576)
 
 ;; Descriptor field ids — a field names a COLUMN, not a byte offset in a row (2026-10-25). A field's entry
 ;; sits at dt-off + max-desc * (column prefix) + idx * (column width) + sub-offset (desc-byte-off):
@@ -68,7 +68,7 @@
 (def ^:const desc-data-length 3)
 (def ^:const desc-lock-owner 4)
 (def ^:const desc-reserved 5)
-(def ^:const DESC_DIGEST_PTR 5) ;; the POINTER column, claimed 2026-10-25 (Merkle P3 eve half, layout
+(def ^:const desc-digest-ptr 5) ;; the POINTER column, claimed 2026-10-25 (Merkle P3 eve half, layout
                                 ;; B-prime): the digest-cache side-block pointer — DESC_RESERVED above
                                 ;; is this column under its former name (in row form both were the @16
                                 ;; word). Birth stores write -1, the bitmap free resets write 0; both
@@ -82,8 +82,8 @@
 (def ^:const desc-flags 4)
 
 ;; Status values
-(def ^:const STATUS_FREE 0)
-(def ^:const STATUS_ALLOCATED 1)
+(def ^:const status-free 0)
+(def ^:const status-allocated 1)
 (def ^:const status-zeroed-unused -1)
 
 ;; Lock: bit 0 of LOCK_OWNER (bits 1-8 are the count's flags, which a lock never touches)
@@ -99,8 +99,8 @@
 ;; The pointer format is untouched — a rung block's slab offset is an
 ;; ordinary class-6 offset (its data-region byte offset); the rung
 ;; identity lives in the descriptor, never in the pointer.
-(def ^:const RUNG_FIELD_SHIFT 3)
-(def ^:const RUNG_FIELD_MASK 120) ;; bits 3-6
+(def ^:const rung-field-shift 3)
+(def ^:const rung-field-mask 120) ;; bits 3-6
 (def ^:const rung-chunk 65536)    ;; one chunk, the rung quantum
 (def ^:const rung-count 14)       ;; rungs of 2..15 chunks
 
@@ -122,14 +122,14 @@
 ;; Default data region max capacity for growth (4 PiB).
 ;; COALESC_HDR_DATA_SIZE is stored as i64, so the theoretical ceiling is 8 EiB.
 ;; 4 PiB = 2^52 bytes, exactly representable as both JS Number and JVM long.
-(def ^:const DEFAULT_DATA_SIZE (* 4 1024 1024 1024 1024 1024))
+(def ^:const default-data-size (* 4 1024 1024 1024 1024 1024))
 
 ;; Initial data region size for lazy growth (64 KB)
-(def ^:const INITIAL_DATA_SIZE (* 64 1024))
+(def ^:const initial-data-size (* 64 1024))
 
 ;; Header extension: current data-region size at offset 32 (reserved bytes).
 ;; Stored as i64 (8 bytes at offsets 32-39) for >2 GB capacity.
-(def ^:const COALESC_HDR_DATA_SIZE 32)
+(def ^:const coalesc-hdr-data-size 32)
 
 ;;=============================================================================
 ;; Header access (reuses standard slab header field offsets)
@@ -138,17 +138,17 @@
 (defn- desc-table-offset
   "Read the descriptor table byte offset from the .slab6 header."
   [region]
-  (slab/region-load-i32 region d/SLAB_HDR_BITMAP_OFFSET))
+  (slab/region-load-i32 region d/slab-hdr-bitmap-offset))
 
 (defn- max-descs
   "Read the max descriptor count from the .slab6 header."
   [region]
-  (slab/region-load-i32 region d/SLAB_HDR_TOTAL_BLOCKS))
+  (slab/region-load-i32 region d/slab-hdr-total-blocks))
 
 (defn current-data-size
   "Read the current data-region size from the .slab6 header."
   [region]
-  (slab/region-load-i64 region COALESC_HDR_DATA_SIZE))
+  (slab/region-load-i64 region coalesc-hdr-data-size))
 
 ;;=============================================================================
 ;; Descriptor field access
@@ -256,7 +256,7 @@
   "Calculate .slab6 file layout.
    Returns {:total-bytes :desc-table-offset :data-offset :max-descriptors}."
   [data-size max-desc]
-  (let [dt-off   d/SLAB_HEADER_SIZE
+  (let [dt-off   d/slab-header-size
         dt-size  (* max-desc desc-col-bytes)
         ;; Align data region to 16 bytes
         data-off (let [raw (+ dt-off dt-size)]
@@ -273,19 +273,19 @@
   [region data-size max-desc]
   (let [{:keys [desc-table-offset data-offset]} (coalesc-layout data-size max-desc)]
     ;; Write header (reuse standard slab header field offsets)
-    (slab/region-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
-    (slab/region-store-i32! region d/SLAB_HDR_BLOCK_SIZE 1)       ;; class 6 convention
-    (slab/region-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS max-desc)
-    (slab/region-store-i32! region d/SLAB_HDR_FREE_COUNT 1)       ;; 1 free descriptor
-    (slab/region-store-i32! region d/SLAB_HDR_ALLOC_CURSOR 0)
-    (slab/region-store-i32! region d/SLAB_HDR_CLASS_IDX 6)
-    (slab/region-store-i32! region d/SLAB_HDR_BITMAP_OFFSET desc-table-offset)
-    (slab/region-store-i32! region d/SLAB_HDR_DATA_OFFSET data-offset)
+    (slab/region-store-i32! region d/slab-hdr-magic d/slab-magic)
+    (slab/region-store-i32! region d/slab-hdr-block-size 1)       ;; class 6 convention
+    (slab/region-store-i32! region d/slab-hdr-total-blocks max-desc)
+    (slab/region-store-i32! region d/slab-hdr-free-count 1)       ;; 1 free descriptor
+    (slab/region-store-i32! region d/slab-hdr-alloc-cursor 0)
+    (slab/region-store-i32! region d/slab-hdr-class-idx 6)
+    (slab/region-store-i32! region d/slab-hdr-bitmap-offset desc-table-offset)
+    (slab/region-store-i32! region d/slab-hdr-data-offset data-offset)
     ;; Extension: store current data-region size for lazy growth (i64)
-    (slab/region-store-i64! region COALESC_HDR_DATA_SIZE data-size)
+    (slab/region-store-i64! region coalesc-hdr-data-size data-size)
 
     ;; Descriptor 0: one big FREE block covering entire data region
-    (desc-store! region desc-table-offset max-desc 0 desc-status STATUS_FREE)
+    (desc-store! region desc-table-offset max-desc 0 desc-status status-free)
     (desc-store! region desc-table-offset max-desc 0 desc-data-offset 0)
     (desc-store! region desc-table-offset max-desc 0 desc-data-length 0)
     (desc-store! region desc-table-offset max-desc 0 desc-block-capacity data-size)
@@ -327,11 +327,11 @@
    Returns the new data size on success, or nil if already at max."
   ([region max-data-size] (grow-coalesc-region! region max-data-size nil))
   ([region max-data-size ensure!]
-   (let [cur-data-size (slab/region-load-i64 region COALESC_HDR_DATA_SIZE)]
+   (let [cur-data-size (slab/region-load-i64 region coalesc-hdr-data-size)]
      (when (< cur-data-size max-data-size)
        (let [new-data-size (min (* cur-data-size 2) max-data-size)
              _             (when ensure! (ensure! new-data-size))
-             witness       (slab/region-cas-i64! region COALESC_HDR_DATA_SIZE
+             witness       (slab/region-cas-i64! region coalesc-hdr-data-size
                                                  cur-data-size new-data-size)]
          (if (== witness cur-data-size)
           ;; We won — create a FREE descriptor for the new space
@@ -350,13 +350,13 @@
                        (desc-store! region dt-off max-desc slot desc-reserved -1)
                        (desc-store! region dt-off max-desc slot desc-reserved2 0)
                        (desc-store! region dt-off max-desc slot desc-lock-owner lock-sentinel)  ;; flags clear, still locked
-                       (desc-store! region dt-off max-desc slot desc-status STATUS_FREE)
+                       (desc-store! region dt-off max-desc slot desc-status status-free)
                       ;; merge with the FREE block ending at cur-data-size (releases slot's lock)
                        (coalesce-adjacent! region dt-off max-desc slot))
                      (unlock! region dt-off max-desc slot)))))
              new-data-size)
           ;; Lost CAS — someone else grew, return their new size
-           (let [actual (slab/region-load-i64 region COALESC_HDR_DATA_SIZE)]
+           (let [actual (slab/region-load-i64 region coalesc-hdr-data-size)]
              actual)))))))
 
 ;;=============================================================================
@@ -371,8 +371,8 @@
   ^long [region dt-off max-desc idx]
   (bit-shift-right
    (bit-and (desc-load region dt-off max-desc idx desc-lock-owner)
-            (long RUNG_FIELD_MASK))
-   (long RUNG_FIELD_SHIFT)))
+            (long rung-field-mask))
+   (long rung-field-shift)))
 
 (defn try-coalesc-alloc!
   "Allocate a contiguous block of at least size-bytes from the coalescing region.
@@ -393,7 +393,7 @@
                    (* (quot (+ raw 7) 8) 8))  ;; 8-byte align
         dt-off   (desc-table-offset region)
         max-desc (max-descs region)
-        cursor   (slab/region-load-i32 region d/SLAB_HDR_ALLOC_CURSOR)]
+        cursor   (slab/region-load-i32 region d/slab-hdr-alloc-cursor)]
     (loop [i cursor wrapped? false]
       (cond
         ;; Wrapped past cursor — OOM
@@ -410,10 +410,10 @@
         (let [status   (desc-load region dt-off max-desc i desc-status)
               ;; A FREE descriptor stamped with a rung field is reserved
               ;; to its rung — never a variable candidate.
-              capacity (when (and (== status STATUS_FREE)
+              capacity (when (and (== status status-free)
                                   (zero? (desc-rung-field region dt-off max-desc i)))
                          (desc-load region dt-off max-desc i desc-block-capacity))]
-          (if (and (== status STATUS_FREE)
+          (if (and (== status status-free)
                    (not (nil? capacity))
                    (>= capacity size))
             ;; Candidate found — try to lock
@@ -421,7 +421,7 @@
               ;; Got the lock — verify still FREE, unflagged, with sufficient capacity (TOCTOU)
               (let [status2   (desc-load region dt-off max-desc i desc-status)
                     capacity2 (desc-load region dt-off max-desc i desc-block-capacity)]
-                (if (and (== status2 STATUS_FREE)
+                (if (and (== status2 status-free)
                          (zero? (desc-rung-field region dt-off max-desc i))
                          (>= capacity2 size))
                   ;; Good — allocate
@@ -446,7 +446,7 @@
                                   (desc-store! region dt-off max-desc split-slot desc-reserved -1)
                                   (desc-store! region dt-off max-desc split-slot desc-reserved2 0)
                                   (desc-store! region dt-off max-desc split-slot desc-lock-owner lock-sentinel)
-                                  (desc-store! region dt-off max-desc split-slot desc-status STATUS_FREE)
+                                  (desc-store! region dt-off max-desc split-slot desc-status status-free)
                                   (unlock! region dt-off max-desc split-slot)
                                   ;; Shrink our capacity
                                   (desc-store! region dt-off max-desc i desc-block-capacity size))
@@ -457,9 +457,9 @@
                     (desc-store! region dt-off max-desc i desc-lock-owner lock-sentinel)
                     (desc-store! region dt-off max-desc i desc-reserved -1)
                     (desc-store! region dt-off max-desc i desc-reserved2 0)
-                    (desc-store! region dt-off max-desc i desc-status STATUS_ALLOCATED)
+                    (desc-store! region dt-off max-desc i desc-status status-allocated)
                     ;; Update cursor
-                    (slab/region-store-i32! region d/SLAB_HDR_ALLOC_CURSOR
+                    (slab/region-store-i32! region d/slab-hdr-alloc-cursor
                                             (mod (inc i) max-desc))
                     ;; Release lock and return
                     (unlock! region dt-off max-desc i)
@@ -506,10 +506,10 @@
    ALLOCATED and return its data offset. Any other outcome: nil (the
    caller keeps scanning); a lock we took is always released."
   [region dt-off max-desc i size field]
-  (when (and (== (desc-load region dt-off max-desc i desc-status) STATUS_FREE)
+  (when (and (== (desc-load region dt-off max-desc i desc-status) status-free)
              (== (desc-rung-field region dt-off max-desc i) field)
              (try-lock! region dt-off max-desc i))
-    (let [ok?      (and (== (desc-load region dt-off max-desc i desc-status) STATUS_FREE)
+    (let [ok?      (and (== (desc-load region dt-off max-desc i desc-status) status-free)
                         (== (desc-rung-field region dt-off max-desc i) field)
                         (== (desc-load region dt-off max-desc i desc-block-capacity) size))
           data-off (when ok?
@@ -518,7 +518,7 @@
         (desc-store! region dt-off max-desc i desc-data-length 0)
         (desc-store! region dt-off max-desc i desc-reserved -1)
         (desc-store! region dt-off max-desc i desc-reserved2 0)
-        (desc-store! region dt-off max-desc i desc-status STATUS_ALLOCATED))
+        (desc-store! region dt-off max-desc i desc-status status-allocated))
       (unlock! region dt-off max-desc i)
       data-off)))
 
@@ -531,11 +531,11 @@
   (desc-store! region dt-off max-desc i desc-data-length 0)
   (desc-store! region dt-off max-desc i desc-lock-owner
                (bit-or lock-sentinel
-                       (bit-shift-left field (long RUNG_FIELD_SHIFT))))
+                       (bit-shift-left field (long rung-field-shift))))
   (desc-store! region dt-off max-desc i desc-reserved -1)
   (desc-store! region dt-off max-desc i desc-reserved2 0)
-  (desc-store! region dt-off max-desc i desc-status STATUS_ALLOCATED)
-  (slab/region-store-i32! region d/SLAB_HDR_ALLOC_CURSOR
+  (desc-store! region dt-off max-desc i desc-status status-allocated)
+  (slab/region-store-i32! region d/slab-hdr-alloc-cursor
                           (mod (inc i) max-desc)))
 
 (defn- try-carve-rung!
@@ -546,13 +546,13 @@
    complete is not a carve. Returns the data offset, or nil to keep
    scanning; a lock we took is always released."
   [region dt-off max-desc i size field]
-  (when (and (== (desc-load region dt-off max-desc i desc-status) STATUS_FREE)
+  (when (and (== (desc-load region dt-off max-desc i desc-status) status-free)
              (zero? (desc-rung-field region dt-off max-desc i))
              (>= (desc-load region dt-off max-desc i desc-block-capacity) size)
              (try-lock! region dt-off max-desc i))
     (let [status2   (desc-load region dt-off max-desc i desc-status)
           capacity2 (desc-load region dt-off max-desc i desc-block-capacity)]
-      (if (and (== status2 STATUS_FREE)
+      (if (and (== status2 status-free)
                (zero? (desc-rung-field region dt-off max-desc i))
                (>= capacity2 size))
         (let [data-off  (desc-load region dt-off max-desc i desc-data-offset)
@@ -580,7 +580,7 @@
                   (desc-store! region dt-off max-desc split-slot desc-reserved -1)
                   (desc-store! region dt-off max-desc split-slot desc-reserved2 0)
                   (desc-store! region dt-off max-desc split-slot desc-lock-owner lock-sentinel)
-                  (desc-store! region dt-off max-desc split-slot desc-status STATUS_FREE)
+                  (desc-store! region dt-off max-desc split-slot desc-status status-free)
                   (unlock! region dt-off max-desc split-slot)
                   (mark-rung-allocated! region dt-off max-desc i size field)
                   (unlock! region dt-off max-desc i)
@@ -660,7 +660,7 @@
   (let [dt-off   (desc-table-offset region)
         max-desc (max-descs region)
         idx      (find-desc-by-data-offset region dt-off max-desc data-off-in-region)]
-    (when (and (not= idx -1) (== STATUS_ALLOCATED (desc-load region dt-off max-desc idx desc-status)))
+    (when (and (not= idx -1) (== status-allocated (desc-load region dt-off max-desc idx desc-status)))
       [(desc-byte-off dt-off max-desc idx desc-count)
        (desc-byte-off dt-off max-desc idx desc-flags)
        (desc-byte-off dt-off max-desc idx desc-reserved)])))
@@ -683,7 +683,7 @@
             (if (>= j max-desc)
               -1
               (let [status (desc-load region dt-off max-desc j desc-status)]
-                (if (and (== status STATUS_FREE)
+                (if (and (== status status-free)
                          (not= j idx)
                          (zero? (desc-rung-field region dt-off max-desc j))
                          (let [loff (desc-load region dt-off max-desc j desc-data-offset)
@@ -697,7 +697,7 @@
           (if (and (not= left-idx -1) (spin-lock! region dt-off max-desc left-idx 200))
             ;; Verify still FREE (TOCTOU)
             (let [ls (desc-load region dt-off max-desc left-idx desc-status)]
-              (if (and (== ls STATUS_FREE)
+              (if (and (== ls status-free)
                        (zero? (desc-rung-field region dt-off max-desc left-idx)))
                 (let [loff (desc-load region dt-off max-desc left-idx desc-data-offset)
                       lcap (desc-load region dt-off max-desc left-idx desc-block-capacity)]
@@ -723,14 +723,14 @@
             (if (>= j max-desc)
               -1
               (let [status (desc-load region dt-off max-desc j desc-status)]
-                (if (and (== status STATUS_FREE)
+                (if (and (== status status-free)
                          (not= j survivor)
                          (zero? (desc-rung-field region dt-off max-desc j))
                          (== (desc-load region dt-off max-desc j desc-data-offset) surv-end))
                   j
                   (recur (inc j))))))] (when (and (not= right-idx -1) (spin-lock! region dt-off max-desc right-idx 200))
                                          (let [rs (desc-load region dt-off max-desc right-idx desc-status)]
-                                           (if (and (== rs STATUS_FREE)
+                                           (if (and (== rs status-free)
                                                     (zero? (desc-rung-field region dt-off max-desc right-idx))
                                                     (== (desc-load region dt-off max-desc right-idx desc-data-offset) surv-end))
                                              (let [rcap (desc-load region dt-off max-desc right-idx desc-block-capacity)]
@@ -754,7 +754,7 @@
       false
       (if (spin-lock! region dt-off max-desc idx 400)
         (let [status (desc-load region dt-off max-desc idx desc-status)]
-          (if (== status STATUS_ALLOCATED)
+          (if (== status status-allocated)
             (let [rfield (desc-rung-field region dt-off max-desc idx)]
               (if (pos? rfield)
                 ;; Rung free: mark FREE, KEEP the rung field and the
@@ -764,15 +764,15 @@
                   (desc-store! region dt-off max-desc idx desc-data-length 0)
                   (desc-store! region dt-off max-desc idx desc-lock-owner
                                (bit-or lock-sentinel
-                                       (bit-shift-left rfield (long RUNG_FIELD_SHIFT))))
-                  (desc-store! region dt-off max-desc idx desc-status STATUS_FREE)
+                                       (bit-shift-left rfield (long rung-field-shift))))
+                  (desc-store! region dt-off max-desc idx desc-status status-free)
                   (unlock! region dt-off max-desc idx)
                   true)
                 (do
                   ;; Mark FREE: its count and flags go with it (still locked)
                   (desc-store! region dt-off max-desc idx desc-data-length 0)
                   (desc-store! region dt-off max-desc idx desc-lock-owner lock-sentinel)
-                  (desc-store! region dt-off max-desc idx desc-status STATUS_FREE)
+                  (desc-store! region dt-off max-desc idx desc-status status-free)
                   ;; Coalesce (releases lock)
                   (coalesce-adjacent! region dt-off max-desc idx)
                   true)))

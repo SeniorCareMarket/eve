@@ -37,9 +37,9 @@
                              bm     (aget ^objects bm-rgns 0)
                              bm-off (aget ^ints bm-offs 0)
                              total  (aget ^ints totals 0)
-                             htotal (mem/-load-i32 rgn d/SLAB_HDR_TOTAL_BLOCKS)
-                             hfree  (mem/-load-i32 rgn d/SLAB_HDR_FREE_COUNT)
-                             cursor (mem/-load-i32 rgn d/SLAB_HDR_ALLOC_CURSOR)
+                             htotal (mem/-load-i32 rgn d/slab-hdr-total-blocks)
+                             hfree  (mem/-load-i32 rgn d/slab-hdr-free-count)
+                             cursor (mem/-load-i32 rgn d/slab-hdr-alloc-cursor)
                              found  (mem/imr-bitmap-find-free bm bm-off total (mod cursor (max 1 total)))]
                          (when (and (= found -1) (> hfree 100))
                            (swap! witness-events conj
@@ -73,6 +73,6 @@
     (println "WITNESS-BLIND-EVENTS" (count @witness-events))
     (doseq [e (take 6 @witness-events)] (println "  EV" (pr-str e)))
     (println "FINAL-CLASS0" {:ctx-total (aget ^ints totals 0)
-                             :hdr-total (mem/-load-i32 (aget ^objects regions 0) d/SLAB_HDR_TOTAL_BLOCKS)
-                             :hdr-free (mem/-load-i32 (aget ^objects regions 0) d/SLAB_HDR_FREE_COUNT)})
+                             :hdr-total (mem/-load-i32 (aget ^objects regions 0) d/slab-hdr-total-blocks)
+                             :hdr-free (mem/-load-i32 (aget ^objects regions 0) d/slab-hdr-free-count)})
     (System/exit (if (empty? @failures) 0 1))))

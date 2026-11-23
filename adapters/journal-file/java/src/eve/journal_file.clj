@@ -120,7 +120,7 @@
 (defn journal-record
   "The commit record for ROOT-R's CURRENT epoch and atom table."
   [root-r]
-  (journal-record-of (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+  (journal-record-of (mem/-load-i32 root-r d/root-epoch-offset)
                      (mem/-read-bytes root-r d/ATOM_TABLE_START journal-table-bytes)))
 
 (defn journal-scan

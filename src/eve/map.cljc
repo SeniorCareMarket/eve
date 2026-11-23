@@ -66,7 +66,7 @@
 (def ^:const sabmaproot-cnt-offset 4)
 (def ^:const sabmaproot-root-off-offset 8)
 
-(def ^:const NIL_OFFSET alloc/NIL_OFFSET)
+(def ^:const NIL_OFFSET alloc/nil-offset)
 
 ;;=============================================================================
 ;; Platform-specific helpers

@@ -74,7 +74,7 @@
           (str "storm failures: " (pr-str (map str (take 3 @failures)))))
       (doseq [ci (range 6)]
         (let [need  (nth @counts ci)
-              total (mem/-load-i32 (aget ^objects (.-regions ctx) ci) d/SLAB_HDR_TOTAL_BLOCKS)
+              total (mem/-load-i32 (aget ^objects (.-regions ctx) ci) d/slab-hdr-total-blocks)
               bound (* 4 (loop [p 64] (if (>= p (max 64 need)) p (recur (* 2 p)))))]
           (is (<= total bound)
               (str "class " ci ": total " total " vs bound " bound

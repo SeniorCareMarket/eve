@@ -16,7 +16,7 @@
    [cljs-thread.eve-smoke-test :as smoke-test]))
 
 ;; Anti-DCE: Export a var to prevent Closure from eliminating test namespace
-(goog/exportSymbol "cljs_thread.eve_smoke_test.sanity_check" smoke-test/sanity-check)
+(goog/export-symbol "cljs_thread.eve_smoke_test.sanity_check" smoke-test/sanity-check)
 
 ;; ---------------------------------------------------------------------------
 ;; Test execution (runs on worker via `in`)

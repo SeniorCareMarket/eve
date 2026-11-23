@@ -39,8 +39,8 @@
   (testing "a class 6 offset's block index is its data-region byte offset"
     (is (= 231072 (alloc/decode-block-idx (alloc/encode-slab-offset 6 231072)))))
   (testing "NIL is class 7, block all-ones"
-    (is (= 7 (alloc/decode-class-idx alloc/NIL_OFFSET)))
-    (is (= 536870911 (alloc/decode-block-idx alloc/NIL_OFFSET))))
+    (is (= 7 (alloc/decode-class-idx alloc/nil-offset)))
+    (is (= 536870911 (alloc/decode-block-idx alloc/nil-offset))))
   (testing "the rung table is the kernel's coarse table"
     (is (= 131072 (coalesc/rung-size 0)))
     (is (= 983040 (coalesc/rung-size 13)))
@@ -67,8 +67,8 @@
    word — the same word eve.tally reads its flag bits from."
   [r data-off]
   (let [[_co fo _po] (coalesc/row-of r data-off)]
-    (bit-shift-right (bit-and (mem/-load-i32 r fo) coalesc/RUNG_FIELD_MASK)
-                     coalesc/RUNG_FIELD_SHIFT)))
+    (bit-shift-right (bit-and (mem/-load-i32 r fo) coalesc/rung-field-mask)
+                     coalesc/rung-field-shift)))
 
 (deftest rung-carve-reserve-reuse
   (let [r (fresh-region (* 1024 1024) 64)
@@ -164,8 +164,8 @@
                       (let [[_co fo _po] (coalesc/row-of region6
                                                          (alloc/decode-block-idx slab-off))]
                         (bit-shift-right
-                         (bit-and (mem/-load-i32 region6 fo) coalesc/RUNG_FIELD_MASK)
-                         coalesc/RUNG_FIELD_SHIFT)))]
+                         (bit-and (mem/-load-i32 region6 fo) coalesc/rung-field-mask)
+                         coalesc/rung-field-shift)))]
        (testing "the chain is two rung segments and a variable tail"
          (is (= 6 (alloc/decode-class-idx seg0)))
          (is (= 14 (field-of seg0)))

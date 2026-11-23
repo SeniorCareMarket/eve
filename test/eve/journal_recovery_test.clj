@@ -71,7 +71,7 @@
     (swap! x inc)
     (swap! x inc)
     (a/close-atom-domain! dom)
-    (read-i32 (str base ".root") d/ROOT_EPOCH_OFFSET)))
+    (read-i32 (str base ".root") d/root-epoch-offset)))
 
 (defn- halt-domain!
   "Simulate a process halt: stop the heartbeat and release the worker
@@ -104,7 +104,7 @@
         epoch (build-domain! base)]
     ;; the wound: wind the root epoch back; the journal's newest
     ;; record is newer and must be installed.
-    (write-i32! (str base ".root") d/ROOT_EPOCH_OFFSET (- epoch 2))
+    (write-i32! (str base ".root") d/root-epoch-offset (- epoch 2))
     (let [dom (a/persistent-atom-domain base)
           x   (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 42 @x) "the journal's newest record is installed over the stale root")

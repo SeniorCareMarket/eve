@@ -195,7 +195,7 @@
    to, up to the count asked. The count assertion in the test is what
    proves the fill was exact."
   [sio ci]
-  (let [arr (ps/batch-alloc (nth alloc/CLASS_BLOCK_SIZES ci)
+  (let [arr (ps/batch-alloc (nth alloc/class-block-sizes ci)
                             (total-blocks sio ci))]
     (vec (array-seq arr))))
 

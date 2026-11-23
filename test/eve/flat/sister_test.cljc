@@ -214,7 +214,7 @@
             (let [h (contract/read-header bs 0)
                   nb (quot (- (:shapetab h) (:symtab h)) contract/block-entry-size)
                   blocks (contract/read-block-table bs (:symtab h) nb)
-                  size->class (zipmap alloc/CLASS_BLOCK_SIZES (range 6))]
+                  size->class (zipmap alloc/class-block-sizes (range 6))]
               {:nblocks nb
                :by-class (frequencies (map (fn [b] (get size->class (:size b) 6)) blocks))}))
 

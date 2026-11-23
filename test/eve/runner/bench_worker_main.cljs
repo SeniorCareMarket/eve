@@ -122,9 +122,9 @@
             stats (mapv (fn [i]
                           (let [file-bytes (slab-file-size base i)]
                             {:class i
-                             :block-size (nth d/SLAB_SIZES i)
+                             :block-size (nth d/slab-sizes i)
                              :file-bytes file-bytes}))
-                        (range d/NUM_SLAB_CLASSES))
+                        (range d/num-slab-classes))
             total-bytes (reduce + (map :file-bytes stats))]
         (atom/close-atom-domain! d)
         (println (pr-str {:slab-stats stats :total-bytes total-bytes}))

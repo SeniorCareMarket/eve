@@ -400,10 +400,10 @@
    counts it: per bitmap class, TOTAL_BLOCKS - FREE_COUNT from the region headers."
        [sio]
        (let [ctx (alloc/sio-root sio)]
-         (reduce + (for [ci (range d/NUM_SLAB_CLASSES)
+         (reduce + (for [ci (range d/num-slab-classes)
                          :let [r (aget ^objects (.-regions ^JvmSlabCtx ctx) ci)]]
-                     (- (mem/-load-i32 r d/SLAB_HDR_TOTAL_BLOCKS)
-                        (mem/-load-i32 r d/SLAB_HDR_FREE_COUNT))))))
+                     (- (mem/-load-i32 r d/slab-hdr-total-blocks)
+                        (mem/-load-i32 r d/slab-hdr-free-count))))))
 
      (defn- caught-check
        "The :eve.flat.place/check of the ex-info f throws, or nil when f does not throw."

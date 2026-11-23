@@ -13,7 +13,7 @@
    #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
-    :refer [NIL_OFFSET]]
+    :refer [nil-offset]]
    [eve.deftype-proto.data :as d]
    [eve.core :as ecore]
    [eve.deftype-proto.serialize :as ser]
@@ -97,7 +97,7 @@
    in its domain — a plain deref of a 50-element list took 50 blocks,
    and a walk over a frozen view threw on the first step."
   [sio off remaining]
-  (when (and (pos? remaining) (not= off NIL_OFFSET))
+  (when (and (pos? remaining) (not= off nil-offset))
     (lazy-seq
      (cons (read-node-value sio off)
            (list-seq sio (read-node-next sio off) (dec remaining))))))
@@ -187,7 +187,7 @@
           node-off (alloc-list-node! sio__ head-off vb)]
       (make-list sio__ (inc cnt) node-off)))
   (empty [_]
-    (make-list sio__ 0 NIL_OFFSET))
+    (make-list sio__ 0 nil-offset))
   (equiv [this other]
     (cond
       (not (sequential? other)) false
@@ -230,7 +230,7 @@
   clojure.lang.IReduceInit
   (reduce [_ f init]
     (loop [off head-off i 0 acc init]
-      (if (or (== off NIL_OFFSET) (>= i cnt) (reduced? acc))
+      (if (or (== off nil-offset) (>= i cnt) (reduced? acc))
         (unreduced acc)
         (let [v (read-node-value sio__ off)
               nxt (read-node-next sio__ off)]
@@ -242,7 +242,7 @@
       (f)
       (loop [off (read-node-next sio__ head-off) i 1
              acc (read-node-value sio__ head-off)]
-        (if (or (== off NIL_OFFSET) (>= i cnt))
+        (if (or (== off nil-offset) (>= i cnt))
           acc
           (let [v (read-node-value sio__ off)
                 result (f acc v)]
@@ -296,7 +296,7 @@
     "Free all nodes in a list linked-list chain via ISlabIO."
     [sio head-off]
     (loop [node-off head-off]
-      (when (not= node-off NIL_OFFSET)
+      (when (not= node-off nil-offset)
         (let [next-off (read-node-next sio node-off)]
           (slab/free! sio node-off)
           (recur next-off)))))
@@ -311,9 +311,9 @@
       (let [sio (field ^EveList eve-list sio__)
             hdr (field ^EveList eve-list offset__)
             hd  (when hdr (slab/read-i32 sio hdr list-head-offset))]
-        (when (and hd (not= hd NIL_OFFSET))
+        (when (and hd (not= hd nil-offset))
           (free-list-chain! sio hd))
-        (when (and hdr (not= hdr NIL_OFFSET))
+        (when (and hdr (not= hdr nil-offset))
           (slab/free! sio hdr)))))
 
   (defn retire-replaced-chain!
@@ -322,9 +322,9 @@
     ([sio old-head new-head]
      (retire-replaced-chain! sio old-head new-head :free))
     ([sio old-head new-head _mode]
-     (when (and (not= old-head NIL_OFFSET) (not= old-head new-head))
+     (when (and (not= old-head nil-offset) (not= old-head new-head))
        (loop [node-off old-head]
-         (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))
+         (when (and (not= node-off nil-offset) (not= node-off new-head))
            (let [next-off (read-node-next sio node-off)]
              (slab/free! sio node-off)
              (recur next-off)))))))
@@ -360,18 +360,18 @@
         [old-cnt old-head] (read-list-header sio hdr)
         [new-cnt new-head] (if (eve-list? new-value)
                              (read-list-header sio (d/-root-header-off new-value))
-                             [0 NIL_OFFSET])
+                             [0 nil-offset])
         skip (fn [off n] (if (pos? n) (recur (read-node-next sio off) (dec n)) off))
         ;; the old cells past the new list's length are its own; then the chains in step
         result (loop [o old-head n (- old-cnt new-cnt) out (transient [])]
                  (if (pos? n)
                    (recur (read-node-next sio o) (dec n) (conj! out o))
                    (loop [o o m (skip new-head (- new-cnt old-cnt)) out out]
-                     (if (or (== o NIL_OFFSET) (== o m))
+                     (if (or (== o nil-offset) (== o m))
                        out
                        (recur (read-node-next sio o) (read-node-next sio m) (conj! out o))))))]
     (persistent! (cond-> result
-                   (and hdr (not= hdr NIL_OFFSET)) (conj! hdr)))))
+                   (and hdr (not= hdr nil-offset)) (conj! hdr)))))
 
 ;;=============================================================================
 ;; Constructors
@@ -394,7 +394,7 @@
    0-arity: uses platform default sio (fresh heap domain on JVM).
    1-arity: explicit sio."
     ([] (empty-list (default-sio)))
-    ([sio] (make-list sio 0 NIL_OFFSET)))
+    ([sio] (make-list sio 0 nil-offset)))
 
   (defn eve-list
     "Create an Eve list from a collection (reversed, as cons-list)."
@@ -425,10 +425,10 @@
   (let [elems (vec coll)
         cnt (count elems)]
     (if (zero? cnt)
-      (write-list-header! sio 0 NIL_OFFSET)
+      (write-list-header! sio 0 nil-offset)
       ;; back to front, each node pointing at the one after it — by index: glojure's reduce has no coll-reduce
       ;; method for a vector's rseq (main's tally test, the first to store a list there)
-      (let [head-off (loop [i (dec cnt) next-off NIL_OFFSET]
+      (let [head-off (loop [i (dec cnt) next-off nil-offset]
                        (if (neg? i)
                          next-off
                          (recur (dec i) (alloc-list-node! sio next-off (codec/encode-value sio (nth elems i))))))]
@@ -441,7 +441,7 @@
   [sio header-off]
   (let [[cnt head-off] (read-list-header sio header-off)]
     (loop [off head-off i 0 acc (transient [])]
-      (if (or (>= i cnt) (== off NIL_OFFSET))
+      (if (or (>= i cnt) (== off nil-offset))
         (apply list (persistent! acc))
         (recur (read-node-next sio off)
                (inc i)

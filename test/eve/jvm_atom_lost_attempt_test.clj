@@ -24,9 +24,9 @@
 
 (defn- blocks-in-use [a]
   (let [ctx (atom/atom-sio a)]
-    (reduce + (for [ci (range d/NUM_SLAB_CLASSES)
+    (reduce + (for [ci (range d/num-slab-classes)
                     :let [r (aget ^objects (.-regions ctx) ci)]]
-                (- (mem/-load-i32 r d/SLAB_HDR_TOTAL_BLOCKS) (mem/-load-i32 r d/SLAB_HDR_FREE_COUNT))))))
+                (- (mem/-load-i32 r d/slab-hdr-total-blocks) (mem/-load-i32 r d/slab-hdr-free-count))))))
 
 (defn- writes! [id contend?]
   (let [a (atom/atom id {})

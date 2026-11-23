@@ -63,7 +63,7 @@
      (let [root (alloc/sio-root sio)]
        (if (instance? JvmSlabCtx root)
          (long (aget ^ints (.-block-sizes ^JvmSlabCtx root) (int ci)))
-         (long (nth alloc/CLASS_BLOCK_SIZES ci))))))
+         (long (nth alloc/class-block-sizes ci))))))
 
 #?(:clj
    (defn- cursor-class-size
@@ -72,7 +72,7 @@
      (let [root (.-root cur)]
        (if (instance? JvmSlabCtx root)
          (long (aget ^ints (.-block-sizes ^JvmSlabCtx root) (int ci)))
-         (long (nth alloc/CLASS_BLOCK_SIZES ci))))))
+         (long (nth alloc/class-block-sizes ci))))))
 
 #?(:clj
    (defn- class-access

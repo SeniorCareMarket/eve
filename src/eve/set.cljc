@@ -16,7 +16,7 @@
                                                                     transient persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
-    :refer [NIL_OFFSET]]
+    :refer [nil-offset]]
    [eve.deftype-proto.data :as d]
    [eve.encoding :as enc]
    [eve.core :as ecore]
@@ -204,7 +204,7 @@
 
 (defn- hamt-find [sio root-off _v vh vb]
   (loop [off root-off shift 0]
-    (if (== off NIL_OFFSET)
+    (if (== off nil-offset)
       false
       (let [nt (slab/read-u8 sio off 0)]
         (case (int nt)
@@ -239,7 +239,7 @@
 ;;=============================================================================
 
 (defn hamt-conj [sio root-off vh vb shift]
-  (if (== root-off NIL_OFFSET)
+  (if (== root-off nil-offset)
     [(make-single-value-node! sio (bitpos vh shift) vb) true]
     (let [nt (slab/read-u8 sio root-off 0)]
       (case (int nt)
@@ -309,7 +309,7 @@
                             existing-vh (portable-hash-bytes existing-vb)
                             _existing-bit (bitpos existing-vh sub-shift)
                             _new-bit (bitpos vh sub-shift)
-                            [sub _] (hamt-conj sio NIL_OFFSET existing-vh existing-vb sub-shift)
+                            [sub _] (hamt-conj sio nil-offset existing-vh existing-vb sub-shift)
                             [final-sub _] (hamt-conj sio sub vh vb sub-shift)
                             _ (slab/free! sio sub)
                             new-data-bm (bit-xor data-bm bit)
@@ -413,7 +413,7 @@
 ;;=============================================================================
 
 (defn- hamt-disj [sio root-off vh vb shift]
-  (if (== root-off NIL_OFFSET)
+  (if (== root-off nil-offset)
     [root-off false]
     (let [nt (slab/read-u8 sio root-off 0)]
       (case (int nt)
@@ -427,8 +427,8 @@
                     [new-child removed?] (hamt-disj sio child-off vh vb (+ shift shift-step))]
                 (if-not removed?
                   [root-off false]
-                  (if (== new-child NIL_OFFSET)
-                    [(copy-node-patch-child! sio root-off data-bm node-bm child-idx NIL_OFFSET)
+                  (if (== new-child nil-offset)
+                    [(copy-node-patch-child! sio root-off data-bm node-bm child-idx nil-offset)
                      true]
                     [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child)
                      true])))
@@ -442,7 +442,7 @@
                         new-dc (popcount32 new-data-bm)
                         cc (popcount32 node-bm)]
                     (if (and (zero? new-dc) (zero? cc))
-                      [NIL_OFFSET true]
+                      [nil-offset true]
                       (let [old-dc (popcount32 data-bm)
                             val-list (let [v-off (values-start-off node-bm)]
                                        (loop [i 0, p v-off, acc []]
@@ -485,7 +485,7 @@
                 (if-let [idx (some (fn [i] (when (bytes-equal? (nth entries i) vb) i))
                                    (range cc))]
                   (if (== cc 1)
-                    [NIL_OFFSET true]
+                    [nil-offset true]
                     (let [remaining (vec (concat (subvec entries 0 idx) (subvec entries (inc idx))))]
                       [(make-collision-node! sio vh (mapv (fn [ev] [ev]) remaining)) true]))
                   [root-off false]))))
@@ -497,7 +497,7 @@
 ;;=============================================================================
 
 (defn hamt-val-reduce [sio root-off f init]
-  (if (== root-off NIL_OFFSET)
+  (if (== root-off nil-offset)
     init
     (let [nt (slab/read-u8 sio root-off 0)]
       (case (int nt)
@@ -565,7 +565,7 @@
 (defn- free-hamt-node!
   "Recursively free a HAMT node and all its children via ISlabIO."
   [sio slab-off]
-  (when (not= slab-off NIL_OFFSET)
+  (when (not= slab-off nil-offset)
     (let [node-type (slab/read-u8 sio slab-off 0)]
       (case (int node-type)
         ;; Bitmap node — free children first
@@ -593,9 +593,9 @@
   (let [sio (d/-eve-sio hash-set)
         header-off (d/-root-header-off hash-set)
         root-off (slab/read-i32 sio header-off sabsetroot-root-off-offset)]
-    (when (not= root-off NIL_OFFSET)
+    (when (not= root-off nil-offset)
       (free-hamt-node! sio root-off))
-    (when (not= header-off NIL_OFFSET)
+    (when (not= header-off nil-offset)
       (slab/free! sio header-off))))
 
 (defn retire-replaced-path!
@@ -603,17 +603,17 @@
    path nodes that are no longer referenced by the new tree.
    vh: the hash of the value that was modified"
   [sio old-root new-root vh]
-  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+  (when (and (not= old-root nil-offset) (not= old-root new-root))
     (loop [old-off old-root
            new-off new-root
            sh 0]
-      (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+      (when (and (not= old-off nil-offset) (not= old-off new-off))
         (slab/free! sio old-off)
         (let [old-type (slab/read-u8 sio old-off 0)]
           (when (== old-type NODE_TYPE_BITMAP)
             (let [bit-pos (bit-and (unsigned-bit-shift-right vh sh) MASK)
                   old-node-bm (slab/read-i32 sio old-off 8)
-                  new-type (when (not= new-off NIL_OFFSET) (slab/read-u8 sio new-off 0))
+                  new-type (when (not= new-off nil-offset) (slab/read-u8 sio new-off 0))
                   new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
                                 (slab/read-i32 sio new-off 8))
                   old-bit (bit-shift-left 1 bit-pos)]
@@ -630,14 +630,14 @@
   "Full tree diff: walk old and new HAMT trees in parallel, freeing all
    old nodes that differ from the new tree."
   [sio old-root new-root]
-  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+  (when (and (not= old-root nil-offset) (not= old-root new-root))
     (letfn [(walk [old-off new-off]
-              (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+              (when (and (not= old-off nil-offset) (not= old-off new-off))
                 (slab/free! sio old-off)
                 (let [old-type (slab/read-u8 sio old-off 0)]
                   (when (== old-type NODE_TYPE_BITMAP)
                     (let [old-node-bm (slab/read-i32 sio old-off 8)
-                          new-type (when (not= new-off NIL_OFFSET) (slab/read-u8 sio new-off 0))
+                          new-type (when (not= new-off nil-offset) (slab/read-u8 sio new-off 0))
                           new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
                                         (slab/read-i32 sio new-off 8))]
                       (loop [remaining (bit-and old-node-bm 0xFFFFFFFF) ;; unsigned: bit 31 as a negative long never reaches zero
@@ -648,7 +648,7 @@
                                 new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
                                             (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
                                               (slab/read-i32 sio new-off (+ node-header-size (* new-idx 4))))
-                                            NIL_OFFSET)]
+                                            nil-offset)]
                             (walk old-child new-child)
                             (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
       (walk old-root new-root))))
@@ -766,7 +766,7 @@
         this
         (make-hash-set sio (inc cnt) new-root))))
   (empty [_]
-    (make-hash-set sio__ 0 NIL_OFFSET))
+    (make-hash-set sio__ 0 nil-offset))
   (equiv [this other]
     (let [verdict (root-digest-verdict this other)]
       (cond
@@ -867,7 +867,7 @@
 (defn collect-hamt-offsets
   "Recursively collect all slab offsets in a HAMT node tree."
   [sio slab-off result]
-  (when (not= slab-off NIL_OFFSET)
+  (when (not= slab-off nil-offset)
     (vswap! result conj! slab-off)
     (let [node-type (slab/read-u8 sio slab-off 0)]
       (when (== node-type NODE_TYPE_BITMAP)
@@ -880,14 +880,14 @@
 (defn- collect-hamt-diff-offsets
   "Collect old HAMT nodes that differ from the new tree."
   [sio old-root new-root result]
-  (when (and (not= old-root NIL_OFFSET) (not= old-root new-root))
+  (when (and (not= old-root nil-offset) (not= old-root new-root))
     (letfn [(walk [old-off new-off]
-              (when (and (not= old-off NIL_OFFSET) (not= old-off new-off))
+              (when (and (not= old-off nil-offset) (not= old-off new-off))
                 (vswap! result conj! old-off)
                 (let [old-type (slab/read-u8 sio old-off 0)]
                   (when (== old-type NODE_TYPE_BITMAP)
                     (let [old-node-bm (slab/read-i32 sio old-off 8)
-                          new-type (when (not= new-off NIL_OFFSET) (slab/read-u8 sio new-off 0))
+                          new-type (when (not= new-off nil-offset) (slab/read-u8 sio new-off 0))
                           new-node-bm (when (and new-type (== new-type NODE_TYPE_BITMAP))
                                         (slab/read-i32 sio new-off 8))]
                       (loop [remaining (bit-and old-node-bm 0xFFFFFFFF) ;; unsigned: bit 31 as a negative long never reaches zero
@@ -898,7 +898,7 @@
                                 new-child (if (and new-node-bm (not (zero? (bit-and new-node-bm bit))))
                                             (let [new-idx (popcount32 (bit-and new-node-bm (dec bit)))]
                                               (slab/read-i32 sio new-off (+ node-header-size (* new-idx 4))))
-                                            NIL_OFFSET)]
+                                            nil-offset)]
                             (walk old-child new-child)
                             (recur (bit-and remaining (dec remaining)) (inc old-idx))))))))))]
       (walk old-root new-root))))
@@ -917,7 +917,7 @@
       ;; Different type — collect entire old tree
       (collect-hamt-offsets sio root-off result))
     ;; Always include header
-    (when (not= header-off NIL_OFFSET)
+    (when (not= header-off nil-offset)
       (vswap! result conj! header-off))
     (persistent! @result)))
 
@@ -933,10 +933,10 @@
       (if (eve-hash-set? new-value)
         (let [new-root-off (slab/read-i32 sio (d/-root-header-off new-value) sabsetroot-root-off-offset)]
           (retire-tree-diff! sio old-root new-root-off))
-        (when (not= old-root NIL_OFFSET)
+        (when (not= old-root nil-offset)
           (free-hamt-node! sio old-root)))
       ;; Free the header block
-      (when (not= (field this offset__) NIL_OFFSET)
+      (when (not= (field this offset__) nil-offset)
         (slab/free! sio (field this offset__))))))
 
 ;;=============================================================================
@@ -960,7 +960,7 @@
    0-arity: uses platform default sio (fresh heap domain on JVM).
    1-arity: explicit sio."
     ([]  (empty-hash-set (default-sio)))
-    ([sio] (make-hash-set sio 0 NIL_OFFSET)))
+    ([sio] (make-hash-set sio 0 nil-offset)))
 
   (defn hash-set
     "Create an Eve hash set from values.
@@ -993,16 +993,16 @@
         root-of (fn [x] (slab/read-i32 sio (d/-root-header-off x) sabsetroot-root-off-offset))
         ;; the child on vh's path, NIL where vh's slot holds none
         down (fn [off shift]
-               (if (and (not= off NIL_OFFSET) (== NODE_TYPE_BITMAP (slab/read-u8 sio off 0)))
+               (if (and (not= off nil-offset) (== NODE_TYPE_BITMAP (slab/read-u8 sio off 0)))
                  (let [dbm (slab/read-i32 sio off 4)
                        nbm (slab/read-i32 sio off 8)
                        bit (node-bit dbm nbm vh shift)]
                    (if (has-bit? nbm bit)
                      (slab/read-i32 sio off (+ node-header-size (* (get-index nbm bit) 4)))
-                     NIL_OFFSET))
-                 NIL_OFFSET))]
+                     nil-offset))
+                 nil-offset))]
     (loop [o (root-of old-set) n (root-of new-set) shift 0 out [(d/-root-header-off old-set)]]
-      (if (or (== o NIL_OFFSET) (== o n))
+      (if (or (== o nil-offset) (== o n))
         out
         (recur (down o shift) (down n shift) (+ shift shift-step) (conj out o))))))
 
@@ -1021,7 +1021,7 @@
 
 (defn- build-batch-set [sio entries]
   (let [entries (batch/unique-entries entries)
-        root (if (empty? entries) NIL_OFFSET
+        root (if (empty? entries) nil-offset
                  (batch/build
                   entries 0
                   (fn [db nb data children]
@@ -1106,7 +1106,7 @@
                           [vh vb]))
                       coll)]
     (if (empty? entries)
-      (write-set-header! sio 0 NIL_OFFSET)
+      (write-set-header! sio 0 nil-offset)
       (let [root-off (reduce (fn [root [vh vb]]
                                (let [[new-root _] (hamt-conj sio root vh vb 0)
                                      gone (volatile! (transient []))]
@@ -1116,7 +1116,7 @@
                                  (doseq [off (persistent! @gone)]
                                    (slab/free! sio off))
                                  new-root))
-                             NIL_OFFSET entries)]
+                             nil-offset entries)]
         (write-set-header! sio (count coll) root-off)))))
 
 ;; into-hash-set — the builder register-eve-type! installs for plain sets

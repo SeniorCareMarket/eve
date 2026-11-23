@@ -62,7 +62,7 @@
   [x]
   (let [ctx (alloc/sio-root (a/atom-sio x))
         regions (.-regions ^JvmSlabCtx ctx)]
-    (mapv (fn [ci] (mem/-load-i32 (aget ^objects regions ci) d/SLAB_HDR_FREE_COUNT))
+    (mapv (fn [ci] (mem/-load-i32 (aget ^objects regions ci) d/slab-hdr-free-count))
           (range 6))))
 
 (def ^:private capacities
