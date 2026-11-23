@@ -7,6 +7,12 @@
    :main eve.runner.eve-test-main/main
    :output-to "target/eve-test/all.js"}
 
+  ;; the jlog spike's driver (test/eve/jlog_spike.cljc; scripts/jlog-spike.sh): node target/jlog-spike/main.js <mode> ...
+  :jlog-spike
+  {:target :node-script
+   :main eve.jlog-spike/main
+   :output-to "target/jlog-spike/main.js"}
+
   ;; merkle-phase5 acceptance suite only (small compile graph; see
   ;; test/eve/runner/merkle_phase5_main.cljs)
   :merkle-phase5

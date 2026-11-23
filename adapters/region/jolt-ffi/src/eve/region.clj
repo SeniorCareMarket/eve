@@ -107,6 +107,12 @@
 ;; syscall(SYS-futex, uaddr, op, val, timeout*, uaddr2, val3) — Linux's only (its variadic convention is the fixed one)
 (ffi/defcfn jolt-futex "syscall" [:long :pointer :int :int :pointer :pointer :int] :long
   {:blocking true :capture-native-error true})
+;; msync(2) over a mapped range (eve.mem/ISyncableRegion below), and the page size its address is rounded to (kondo
+;; reads a defcfn's name as an unresolved symbol, as it does every binding above: the ignores keep the count at base)
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-msync "msync" [:pointer :size_t :int] :int {:blocking true :capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-getpagesize "getpagesize" [] :int)
 
 ;; The platform's atomics, each word width's: load, store, fetch-add (the value before), exchange (the value before),
 ;; compare-and-swap (the value found: expected when it swapped).
@@ -183,6 +189,24 @@
 (declare ^:private read-bytes* ^:private pl-i32 ^:private pl-u8 ^:private pl-i64 ^:private ps-i32! ^:private ps-u8!
          ^:private x86-64-linux? ^:private fast-cas4 ^:private fast-cas8)
 
+(def ^:private MS-SYNC (if (= :macos os) 0x10 4))
+
+(def ^:private page-bytes (delay (jolt-getpagesize)))
+
+(defn- msync-range!
+  "msync(2) MS_SYNC over [off, off+len) of the mapping at BASE, widened to whole pages of the host's own size: on
+   return the range's pages are on stable storage. A failure throws (never swallowed: a durable commit must not
+   report success over a flush that did not happen)."
+  [base off len]
+  (when (pos? len)
+    (let [ps @page-bytes
+          start (+ base off)
+          a (- start (mod start ps))
+          [r e] (jolt-msync a (- (+ start len) a) MS-SYNC)]
+      (when (neg? r)
+        (throw (ex-info (str "eve.region: msync failed: errno " e) {:errno e :off off :len len})))))
+  nil)
+
 (deftype JoltRegion [base size backing]
   mem/IMemRegion
   (-byte-length [_] size)
@@ -217,7 +241,11 @@
   (-plain-load-u8 [this off] (pl-u8 this base off))
   mem/IPlainStore
   (-plain-store-i32! [this off v] (ps-i32! this base off v) nil)
-  (-plain-store-u8! [this off v] (ps-u8! this base off v) nil))
+  (-plain-store-u8! [this off v] (ps-u8! this base off v) nil)
+  ;; durability: a mapped region's pages force by msync; a heap region (a bytevector backing) has nothing to force
+  mem/ISyncableRegion
+  (-sync! [_] (when-not backing (msync-range! base 0 size)) nil)
+  (-sync-range! [_ off len] (when-not backing (msync-range! base off len)) nil))
 
 ;; A region's memory goes back when the region does, as a JVM byte array or a Go slice does. A heap region IS Chez heap
 ;; memory: an immobile bytevector (the collector marks it where it is and never moves it, so its address holds for the
