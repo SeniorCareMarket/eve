@@ -711,7 +711,7 @@
    slabs are module state: one mmap domain per process). A creator writes the
    slabs, then the root, its magic last; a joiner opens the slabs only once
    the magic is there."
-  [base-path {:keys [capacities lustre? create?] :as opts}]
+  [base-path {:keys [lustre? create?] :as opts}]
   (when create? (proc/ensure-parent-dir! base-path))
   (let [root-r (region/open-mmap-region (str base-path ".root") ROOT_BYTES
                                         {:lustre? lustre? :lockable? true})

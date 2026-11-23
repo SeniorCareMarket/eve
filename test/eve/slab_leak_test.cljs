@@ -33,7 +33,7 @@
     (str "{"
          (apply str
                 (interpose ", "
-                           (for [[cls {:keys [block-size total-blocks free-count used-count]}] (sort stats)]
+                           (for [[cls {:keys [total-blocks used-count]}] (sort stats)]
                              (str cls ":" used-count "/" total-blocks))))
          "}")))
 

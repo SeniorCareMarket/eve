@@ -67,7 +67,7 @@
 (defn place-image
   "Place image {:bytes :blocks :relocations :root} in sio. Returns the
    placed root's slab offset."
-  [sio {:keys [bytes blocks relocations root]}]
+  [sio {:keys [bytes blocks relocations]}]
   (let [n (count blocks)
         new-offs (long-array n)
         by-class (group-by (fn [i] (class-of (:size (nth blocks i)))) (range n))]

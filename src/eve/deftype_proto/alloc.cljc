@@ -1290,7 +1290,7 @@
     (let [capacity   (long (or capacity (* 1 1024 1024)))   ; default 1 MB
           block-size (d/slab-size class-idx)
           layout     (d/slab-layout block-size capacity)
-          {:keys [total-bytes bitmap-offset bitmap-size data-offset total-blocks]} layout
+          {:keys [total-bytes bitmap-offset data-offset total-blocks]} layout
           region     (region/make-heap-region total-bytes)]
       (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
       (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)

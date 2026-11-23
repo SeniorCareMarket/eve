@@ -388,7 +388,7 @@
                         :frag (when (pos? c) (- 1.0 (/ (double a) (double c))))}])))
           classes)))
 
-(defn run-s2 [{:keys [runs warmup only] :as o} size-set]
+(defn run-s2 [{:keys [only] :as o} size-set]
   (println "STREAM S2 — segment budgets, run thresholds, wire vs image, fragmentation")
   (doseq [[kind v] (corpora/corpora size-set)
           :when (or (nil? only) (contains? only kind))]
