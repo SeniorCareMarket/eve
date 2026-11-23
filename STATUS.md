@@ -235,3 +235,39 @@ eve.thread-domain-test at baseline. Gate3's other 8
 namespaces baseline-identical. /root/.m2/repository is now
 a symlink to /home/hatch/m2repo (the wipes recur; the
 symlink is a one-command restore).
+
+## Third lane — session 2 bank (2026-11-23, ~10:15 ET)
+
+Since the last bank: redundant-str-call closed (80792c4,
+d2a34c9; start.cljc's 36 are Path->string coercions, scoped
+off in its ns config with reason); missing-else-branch ×27
+closed in the rrb-vector port (5e91ae0, when/when-not/
+when-let). RECOUNT 7 (fresh cache, EDN, tools/recount.sh —
+NOTE: --output '{:format :edn}' is IGNORED by kondo
+2026.10.26; the working form is --config '{:output
+{:format :edn}}') read 1943 total: unresolved-var 443,
+unused-binding 427, unused-referred-var 284,
+unused-namespace 233, unresolved-symbol 125E,
+type-mismatch 54E, unresolved-namespace 54,
+redefined-var 33, unused-private-var 78. Recount-7
+cleanups (82c4959, e03b48e): my do-unwrap created
+let-in-let ×17 in the jvm host tests (merged); my
+inline-def fix typed xray's fixtures nil via (def x nil)
+-> 24 type-mismatches, fixed with declare; the
+collection-hash MTA is a kondo quirk (a bare (dissoc! ...)
+statement in a deftest reads as missing-test-assertion;
+minimal repro in scratch) — the mutation is now folded
+into its count assertion; duplicate-require ×7 SOLVED:
+they fire only with the full dependency cache (standalone
+runs are blind to transitive requires) — the glj probe
+re-requires as its bisect method and the coop workers
+name their whole cone in one require; site ignores with
+reasons. Phantom lesson, third time: a full-scope recount
+must start from a cache no other process is touching, or
+per-file results go stale (recount7 briefly showed
+region.clj imports deleted two batches earlier).
+unused-private-var: 21 deleted outright (4ddc512; name
+occurs only at its def, no string/keyword mentions),
+bi-pos? deleted on both passes + 7 :clj-only-caller defs
+site-ignored with reasons (98e0762). Gate5:
+collection-hash baseline-identical. Recount 8 running.
