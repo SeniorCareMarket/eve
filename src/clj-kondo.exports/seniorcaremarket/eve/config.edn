@@ -48,5 +48,6 @@
                         jolt.ffi/defcfn hooks.jolt-ffi-defcfn/defcfn
                         eve.host/extend-default hooks.extend-default/extend-default
                         eve.deftype/extend-host-vectors hooks.extend-default/extend-host-vectors
+                        eve.deftype-proto.macros/register-eve-type! hooks.register-eve-type/register-eve-type
                         eve.thread/api-defs hooks.eve-api-defs/thread}}
  :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}
