@@ -8,6 +8,8 @@
   ;; types (see eve.host's ns note); the JVM-placement linter is
   ;; scoped off for this namespace only.
   {:clj-kondo/config {:linters {:non-arg-vec-return-type-hint {:level :off}}}}
+  ;; unresolved-var exclusions, this file only: this namespace is one of several seat files sharing the name; kondo's registry keeps one file's defs and reads the others' as unresolved (standalone lint of this file is clean). The excluded names are this file's own defs, verified against the file.
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.encoding/as-int8 eve.encoding/as-uint8 eve.encoding/view]}}}}
   (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
                             long class double bytes])
   (:require ["dart:convert" :as convert]

@@ -39,6 +39,8 @@
    offers only lookup and assoc on the JVM offers only lookup and
    assoc here; nothing it does offer changes meaning (the upstream
    datascript.test.lru suite passes against the presented type)."
+  ;; unresolved-var exclusions, this file only: generated in this file: ->PrintDupProbe by its (clojure.core/deftype PrintDupProbe) form and -realized? by its IPending protocol; kondo's models generate neither name
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.host-completion/->PrintDupProbe eve.host-completion/-realized?]}}}}
   (:require [clojure.string :as str]
             [clojure.walk]))
 

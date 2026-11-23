@@ -26,9 +26,11 @@
      cljs->jvm (IPrintWithWriter drops — JVM printing is a
      print-method, not a deftype group; its body is analyzed on
      the :cljs pass);
-   - declares for the two vars the macro generates that no
+   - declares for the vars the macro generates that no
      deftype model knows exactly: <TypeName>? (the predicate —
-     kondo's deftype generates no such var) and ->TypeName (the
+     kondo's deftype generates no such var), <TypeName>-type-id
+     (the (def TypeName-type-id ...) the macro emits when the
+     namespace does not define it first), and ->TypeName (the
      constructor — a two-arity defn, [fields] and [sio__ fields],
      where kondo's model derives only [fields] and would
      false-flag the sio arity at every call site; the declare
@@ -353,6 +355,15 @@
         pred-node (api/list-node
                    [(api/token-node 'declare)
                     (api/token-node (symbol (str (api/sexpr type-name) "?")))])
+        ;; The macro also emits (def TypeName-type-id ...) in the
+        ;; namespace (deftype-proto.macros, the derived type-id)
+        ;; when the namespace does not already define it; consumers
+        ;; name it (ds11-fixture's Box-type-id is read by
+        ;; eve.user-ns-root-test). Kondo's deftype model generates
+        ;; no such var, so declare it like the predicate.
+        type-id-node (api/list-node
+                      [(api/token-node 'declare)
+                       (api/token-node (symbol (str (api/sexpr type-name) "-type-id")))])
         opts-node (when opts
                     (let [binds (referenced-names opts (into ['sio__ 'offset__] field-names))]
                       (api/list-node
@@ -361,5 +372,5 @@
                                                  binds))
                         opts])))]
     {:node (api/list-node
-            (into [(api/token-node 'do) deftype-node ctor-node pred-node]
+            (into [(api/token-node 'do) deftype-node ctor-node pred-node type-id-node]
                   (when opts-node [opts-node])))}))

@@ -30,7 +30,7 @@
 
 (def thread-names
   '[future-call promise deliver realized? future-done?
-    future-cancel future-cancelled? future? deref-within
+    future-cancel future-cancelled? future? deref deref-within
     descriptor-of pmap pcalls fixed-pool single-pool cached-pool
     per-task-pool scheduled-pool schedule! schedule-at-fixed-rate!
     schedule-with-fixed-delay! default-pool shutdown-default-pools!
