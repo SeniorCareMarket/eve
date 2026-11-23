@@ -349,7 +349,7 @@
   (if (-map? sc)
     (str "#eve/SortedMap{" (clojure.string/join
                             ", "
-                            (map (fn [n] (str (pr-str ((clojure.string/join " " (map (fn [n] (pr-str (-sk n))) (nodes (-root sc) true))) n)) " " (pr-str (-sv n)))) (nodes (-root sc) true))) "}")
+                            (map (fn [n] (str (pr-str (-sk n)) " " (pr-str (-sv n)))) (nodes (-root sc) true))) "}")
     (str "#eve/SortedSet#{" (clojure.string/join " " (map (fn [n] (pr-str (-sk n))) (nodes (-root sc) true))) "}")))
 
 (defn- map-equiv [sc other]
