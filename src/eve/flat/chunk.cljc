@@ -58,10 +58,14 @@
 
 #?(:clj (set! *warn-on-reflection* true))
 
-#?(:clj
-   (def ^:private byte-array-class
-     ;; the JVM's [B, looked up once (Class/forName per call was a name lookup per value written or read)
-     (Class/forName "[B")))
+#?(;; jank and glojure read the :clj arm but have no Class/forName (jank: the
+   ;; symbol does not resolve; glojure: EvalASTMaybeHostForm), so the def lives
+   ;; on the JVM-class hosts only; host-bytes? answers through their own arms.
+   :jank nil
+   :glj nil
+   :clj (def ^:private byte-array-class
+          ;; the JVM's [B, looked up once (Class/forName per call was a name lookup per value written or read)
+          (Class/forName "[B")))
 
 (defn- host-bytes?
   "x is a host byte array (the JVM's [B): the test the flat writer and
@@ -372,15 +376,20 @@
 
 (declare to-rep)
 
-#?(:clj
-   (def ^:private object-array-class
-     ;; the JVM's Object[], looked up once (as byte-array-class)
-     (Class/forName "[Ljava.lang.Object;")))
+#?(:jank nil
+   :glj nil
+   :clj (def ^:private object-array-class
+          ;; the JVM's Object[], looked up once (as byte-array-class; not on jank or glojure, as there)
+          (Class/forName "[Ljava.lang.Object;")))
 
 (defn- host-object-array?
-  "x is a host object array: the JVM's Object[], a JS array."
+  "x is a host object array: the JVM's Object[], a JS array. Jank and
+   glojure keep the per-call lookup they had before object-array-class
+   (they read :clj but have no top-level object-array-class)."
   [x]
-  #?(:clj (instance? object-array-class x)
+  #?(:jank (instance? (Class/forName "[Ljava.lang.Object;") x)
+     :glj (instance? (Class/forName "[Ljava.lang.Object;") x)
+     :clj (instance? object-array-class x)
      :cljs (array? x)
      :default false))
 
