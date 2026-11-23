@@ -373,13 +373,13 @@
            me (h/self)]
        (loop []
          (let [s @(:state p)]
-           (cond
-             (and (= :terminated (:state s)) (empty? (:pending-notices s))) true
-             (and (= :terminated (:state s)) (not= me (:creator s))) true
-             (and deadline (>= (c/now) deadline)) (= :terminated (:state s))
-             :else (let [m (h/receive! (if deadline (max 1 (min 10 (- deadline (c/now)))) 10))]
-                     (when-not (= m :eve.thread/timeout) (c/handle! m))
-                     (recur)))))))))
+           #_{:splint/disable [lint/identical-branches]}   (cond
+                                                             (and (= :terminated (:state s)) (empty? (:pending-notices s))) true
+                                                             (and (= :terminated (:state s)) (not= me (:creator s))) true
+                                                             (and deadline (>= (c/now) deadline)) (= :terminated (:state s))
+                                                             :else (let [m (h/receive! (if deadline (max 1 (min 10 (- deadline (c/now)))) 10))]
+                                                                     (when-not (= m :eve.thread/timeout) (c/handle! m))
+                                                                     (recur)))))))))
 
 (extend-type Pool
   IExecutor

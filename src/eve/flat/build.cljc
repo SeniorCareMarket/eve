@@ -424,24 +424,24 @@
                (if (nil? g)
                  (recur (inc f) children data)
                  (let [n (.size ^ArrayList g)]
-                   (cond
-                     (== n 1)
-                     (recur (inc f) children (conj data [f (.get ^ArrayList g 0)]))
+                   #_{:splint/disable [lint/identical-branches]}   (cond
+                                                                     (== n 1)
+                                                                     (recur (inc f) children (conj data [f (.get ^ArrayList g 0)]))
 
-                     (all-same-kh? g)
-                     (recur (inc f)
-                            (conj children [f (make-collision (nth (.get ^ArrayList g 0) 0) (vec g))])
-                            data)
+                                                                     (all-same-kh? g)
+                                                                     (recur (inc f)
+                                                                            (conj children [f (make-collision (nth (.get ^ArrayList g 0) 0) (vec g))])
+                                                                            data)
 
-                     (>= shift 30)
-                     (recur (inc f)
-                            (conj children [f (make-collision (nth (.get ^ArrayList g 0) 0) (vec g))])
-                            data)
+                                                                     (>= shift 30)
+                                                                     (recur (inc f)
+                                                                            (conj children [f (make-collision (nth (.get ^ArrayList g 0) 0) (vec g))])
+                                                                            data)
 
-                     :else
-                     (recur (inc f)
-                            (conj children [f (hamt-build (vec g) (+ shift 5) make-node make-collision)])
-                            data)))))))))
+                                                                     :else
+                                                                     (recur (inc f)
+                                                                            (conj children [f (hamt-build (vec g) (+ shift 5) make-node make-collision)])
+                                                                            data)))))))))
 
      (defn- key-info
        "A key's [bytes hash], memoized for the length of one build: record

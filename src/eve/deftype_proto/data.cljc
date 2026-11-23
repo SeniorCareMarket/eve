@@ -576,15 +576,15 @@
    caches its absence (a host with no flat layer)."
   []
   (let [h @flat-of-hook]
-    (cond
-      (fn? h) h
-      (= ::none h) nil
-      :else #?(:cljs nil
-               :clje nil
-               :default (do (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
-                                 (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
-                            (let [h @flat-of-hook]
-                              (if (fn? h) h (do (reset! flat-of-hook ::none) nil))))))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (fn? h) h
+                                                      (= ::none h) nil
+                                                      :else #?(:cljs nil
+                                                               :clje nil
+                                                               :default (do (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
+                                                                                 (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
+                                                                            (let [h @flat-of-hook]
+                                                                              (if (fn? h) h (do (reset! flat-of-hook ::none) nil))))))))
 
 (defn- eve-slab-value?
   "x is persistent Eve data: slab-backed, rooted in a domain."

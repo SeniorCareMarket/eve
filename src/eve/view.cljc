@@ -398,14 +398,14 @@
    flat value, a typed array, a dataset, a list...) delivered flat; anything
    else as is."
   [x cell]
-  (cond
-    (scalar? x) x
-    (not (slab? x)) x
-    (sister-desc x) (deftype-view x (sister-desc x) cell)
-    (map? x) (ViewMap. x cell (volatile! nil))
-    (or (vector? x) (value-array? x)) (ViewVec. x cell (volatile! nil))
-    (set? x) (ViewSet. x cell (volatile! nil))
-    :else (freeze/deliver-flat x)))
+  #_{:splint/disable [lint/identical-branches]}   (cond
+                                                    (scalar? x) x
+                                                    (not (slab? x)) x
+                                                    (sister-desc x) (deftype-view x (sister-desc x) cell)
+                                                    (map? x) (ViewMap. x cell (volatile! nil))
+                                                    (or (vector? x) (value-array? x)) (ViewVec. x cell (volatile! nil))
+                                                    (set? x) (ViewSet. x cell (volatile! nil))
+                                                    :else (freeze/deliver-flat x)))
 
 (defn- view-of
   "The read's answer for raw (read under a pin whose release is release):

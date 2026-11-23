@@ -208,12 +208,12 @@
 (defn- box-ok? [box] (and (map? box) (hexn? (get box "enc") 32) (hexn? (get box "ct") 48)))
 
 (defn lockbox-shape-refusal "nil, or why a lockbox is malformed" [lb]
-  (cond (not (map? lb)) :lockbox-malformed
-        (not (and (integer? (get lb "epoch")) (pos? (get lb "epoch")))) :lockbox-epoch
-        (not (hexn? (get lb "commit") 32)) :lockbox-malformed
-        (not (and (map? (get lb "boxes")) (every? (fn [[k v]] (and (hexn? k 32) (box-ok? v))) (get lb "boxes")))) :lockbox-malformed
-        (not (and (map? (get lb "history" {})) (every? (fn [[k v]] (and (int-of k) (hexn? v 48))) (get lb "history" {})))) :lockbox-malformed
-        :else nil))
+  #_{:splint/disable [lint/identical-branches]}   #_{:splint/disable [lint/identical-branches]}   (cond (not (map? lb)) :lockbox-malformed
+                                                                                                        (not (and (integer? (get lb "epoch")) (pos? (get lb "epoch")))) :lockbox-epoch
+                                                                                                        (not (hexn? (get lb "commit") 32)) :lockbox-malformed
+                                                                                                        (not (and (map? (get lb "boxes")) (every? (fn [[k v]] (and (hexn? k 32) (box-ok? v))) (get lb "boxes")))) :lockbox-malformed
+                                                                                                        (not (and (map? (get lb "history" {})) (every? (fn [[k v]] (and (int-of k) (hexn? v 48))) (get lb "history" {})))) :lockbox-malformed
+                                                                                                        :else nil))
 
 (defn lockbox-refusal
   "nil when `new` is a valid next lockbox after `old` (nil: none yet) for the readers' roster (a set of hex public keys)

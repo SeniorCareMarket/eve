@@ -354,11 +354,11 @@
   [ctx issuer info]
   (let [ih (b/hex info)
         stmt (get (:statements ctx) ih)]
-    (cond (nil? stmt) nil
-          (and (:stmt-pk issuer) (not (ballot/verify-statement (:stmt-pk issuer) stmt))) (fail :issuance-statement)
-          (not= (vec info) (vec (:info stmt))) (fail :issuance-statement)
-          (>= (get (:spent-counts ctx) ih 0) (:count stmt)) (fail :over-issued {:count (:count stmt)})
-          :else nil)))
+    #_{:splint/disable [lint/identical-branches]}   (cond (nil? stmt) nil
+                                                          (and (:stmt-pk issuer) (not (ballot/verify-statement (:stmt-pk issuer) stmt))) (fail :issuance-statement)
+                                                          (not= (vec info) (vec (:info stmt))) (fail :issuance-statement)
+                                                          (>= (get (:spent-counts ctx) ih 0) (:count stmt)) (fail :over-issued {:count (:count stmt)})
+                                                          :else nil)))
 
 (defn- check-anonymous-auth "cast-vote: a ballot of the group's issuer, or a ring signature over the group's roster" [ctx claim digest acl schema scope]
   (let [{:keys [auth record]} claim

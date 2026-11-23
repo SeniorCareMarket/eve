@@ -963,19 +963,19 @@
                                   :default Throwable)
                                e {:error e})))]
         (if-let [e (:error outcome)]
-          (cond (basis-fault-ex? e)
-                (if (>= basis-faults basis-fault-limit)
-                  (throw (illegal-state "Transaction failed after reaching retry limit"))
-                  (do (swap! stats* update :retries inc)
-                      (recur (inc basis-faults))))
-                (retry-ex? e) (do (swap! stats* (fn [s]
-                                                  (-> s
-                                                      (update :retries inc)
-                                                      (update-in [:retry-causes (or (:eve.stm/retry-cause (ex-data (signal-of e))) :unspecified)]
-                                                                 (fnil inc 0)))))
-                                  (recur basis-faults))
-                (interrupted-ex? e) (throw e)
-                :else (throw e))
+          #_{:splint/disable [lint/identical-branches]}   (cond (basis-fault-ex? e)
+                                                                (if (>= basis-faults basis-fault-limit)
+                                                                  (throw (illegal-state "Transaction failed after reaching retry limit"))
+                                                                  (do (swap! stats* update :retries inc)
+                                                                      (recur (inc basis-faults))))
+                                                                (retry-ex? e) (do (swap! stats* (fn [s]
+                                                                                                  (-> s
+                                                                                                      (update :retries inc)
+                                                                                                      (update-in [:retry-causes (or (:eve.stm/retry-cause (ex-data (signal-of e))) :unspecified)]
+                                                                                                                 (fnil inc 0)))))
+                                                                                  (recur basis-faults))
+                                                                (interrupted-ex? e) (throw e)
+                                                                :else (throw e))
           (do (swap! stats* update :commits inc)
               (doseq [[r old new] (:watches outcome)]
                 (ea/fire-watches! (:watches @(:state r)) r old new))

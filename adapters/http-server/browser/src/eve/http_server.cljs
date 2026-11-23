@@ -133,25 +133,25 @@
     (dbg! "serve-thread " (h/self) ": up, handler " handler " resolved " (some? f))
     (loop []
       (let [m (h/receive! -1)]
-        (cond
+        #_{:splint/disable [lint/identical-branches]}   (cond
           ;; eve.thread-host's own stop request is a bare keyword, not one of this ns's maps
-          (= :eve.thread/stop m) nil
-          (and (map? m) (= :stop (:eve.http-server/control m))) nil
-          (and (map? m) (contains? m :eve.http-server/request))
-          (do (try
-                (dbg! "serve-thread " (h/self) ": request " (:eve.http-server/request m)
-                      " url " (:url (:req m)) " reply " (:reply m))
-                (let [resp (run-handler f (:req m))]
-                  (dbg! "serve-thread " (h/self) ": answered " (:eve.http-server/request m)
-                        " status " (:status resp) " — send! to " (:reply m))
-                  (h/send! (:reply m) {:eve.http-server/response (:eve.http-server/request m)
-                                       :resp resp})
-                  (dbg! "serve-thread " (h/self) ": answer sent for " (:eve.http-server/request m)))
-                (catch :default e
-                  (dbg! "serve-thread " (h/self) ": THREW on " (:eve.http-server/request m)
-                        ": " (err-str e))))
-              (recur))
-          :else (recur))))))
+                                                          (= :eve.thread/stop m) nil
+                                                          (and (map? m) (= :stop (:eve.http-server/control m))) nil
+                                                          (and (map? m) (contains? m :eve.http-server/request))
+                                                          (do (try
+                                                                (dbg! "serve-thread " (h/self) ": request " (:eve.http-server/request m)
+                                                                      " url " (:url (:req m)) " reply " (:reply m))
+                                                                (let [resp (run-handler f (:req m))]
+                                                                  (dbg! "serve-thread " (h/self) ": answered " (:eve.http-server/request m)
+                                                                        " status " (:status resp) " — send! to " (:reply m))
+                                                                  (h/send! (:reply m) {:eve.http-server/response (:eve.http-server/request m)
+                                                                                       :resp resp})
+                                                                  (dbg! "serve-thread " (h/self) ": answer sent for " (:eve.http-server/request m)))
+                                                                (catch :default e
+                                                                  (dbg! "serve-thread " (h/self) ": THREW on " (:eve.http-server/request m)
+                                                                        ": " (err-str e))))
+                                                              (recur))
+                                                          :else (recur))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The endpoint (the page's heap only): the registry of servers, the pending
@@ -408,14 +408,14 @@
         (register! s)
         (loop []
           (let [m (h/receive! -1)]
-            (cond
-              (= :eve.thread/stop m) nil
-              (and (map? m) (= :stop (:eve.http-server/control m))) nil
-              (and (map? m) (contains? m :eve.http-server/request))
-              (do (h/send! (:reply m) {:eve.http-server/response (:eve.http-server/request m)
-                                       :resp (run-handler handler (:req m))})
-                  (recur))
-              :else (recur))))
+            #_{:splint/disable [lint/identical-branches]}   (cond
+                                                              (= :eve.thread/stop m) nil
+                                                              (and (map? m) (= :stop (:eve.http-server/control m))) nil
+                                                              (and (map? m) (contains? m :eve.http-server/request))
+                                                              (do (h/send! (:reply m) {:eve.http-server/response (:eve.http-server/request m)
+                                                                                       :resp (run-handler handler (:req m))})
+                                                                  (recur))
+                                                              :else (recur))))
         (unregister! s)
         {:port port :stop (fn [] nil)})
 

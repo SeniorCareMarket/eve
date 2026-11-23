@@ -315,9 +315,9 @@
 (def ^:private log-dir (env "COOP_LOG_DIR" "/tmp/coop-atom-logs"))
 
 (defn- num-kind [x]
-  (cond (instance? Long x) :long (instance? Integer x) :long (instance? Double x) :double
-        (instance? clojure.lang.BigInt x) :bigint (instance? java.math.BigInteger x) :bigint
-        (instance? clojure.lang.Ratio x) :ratio (instance? java.math.BigDecimal x) :bigdec :else (class x)))
+  #_{:splint/disable [lint/identical-branches]}   (cond (instance? Long x) :long (instance? Integer x) :long (instance? Double x) :double
+                                                        (instance? clojure.lang.BigInt x) :bigint (instance? java.math.BigInteger x) :bigint
+                                                        (instance? clojure.lang.Ratio x) :ratio (instance? java.math.BigDecimal x) :bigdec :else (class x)))
 
 (defn- strict=
   "= that also holds the number kind (Long 2 is not Double 2.0, BigInt 1N not Long 1), -0.0 apart from 0.0 and NaN

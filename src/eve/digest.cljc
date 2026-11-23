@@ -139,9 +139,9 @@
   (write!)
   (loop []
     (let [f (slab/read-i32 sio blk f-flags)]
-      (cond (not (zero? (bit-and f flag))) true
-            (== f (slab/cas-i32! sio blk f-flags f (bit-or f flag))) true
-            :else (recur)))))
+      #_{:splint/disable [lint/identical-branches]}   (cond (not (zero? (bit-and f flag))) true
+                                                            (== f (slab/cas-i32! sio blk f-flags f (bit-or f flag))) true
+                                                            :else (recur)))))
 
 (defn- pack-words
   "32 digest bytes (unsigned, in order) as 8 i32 words, little-endian.

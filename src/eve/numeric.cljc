@@ -176,9 +176,9 @@
   [s]
   (let [s (str s)
         neg? (= (first s) \-)
-        t (cond (= (first s) \-) (subs s 1)
-                (= (first s) \+) (subs s 1)
-                :else s)
+        t #_{:splint/disable [lint/identical-branches]}   (cond (= (first s) \-) (subs s 1)
+                                                                (= (first s) \+) (subs s 1)
+                                                                :else s)
         t (or (second (re-matches #"^0+(.*)$" t)) t)
         t (if (= t "") "0" t)]
     (if neg?
@@ -663,16 +663,16 @@
      :default false))
 
 (defn- unwrap-bi [x]
-  (cond
-    (eve-bigint-type? x) #?(:cljs (.-n x) :lpy (.-n x) :clje (.-n x) :default x)
-    (js-bigint? x) x
-    (host-bigint? x) #?(:jank x
-                        :clj (if (instance? clojure.lang.BigInt x)
-                               (or (.-bipart ^clojure.lang.BigInt x)
-                                   (BigInteger/valueOf (.-lpart ^clojure.lang.BigInt x)))
-                               x)
-                        :default x)
-    :else (bi-from x)))
+  #_{:splint/disable [lint/identical-branches]}   #_{:splint/disable [lint/identical-branches]}   (cond
+                                                                                                    (eve-bigint-type? x) #?(:cljs (.-n x) :lpy (.-n x) :clje (.-n x) :default x)
+                                                                                                    (js-bigint? x) x
+                                                                                                    (host-bigint? x) #?(:jank x
+                                                                                                                        :clj (if (instance? clojure.lang.BigInt x)
+                                                                                                                               (or (.-bipart ^clojure.lang.BigInt x)
+                                                                                                                                   (BigInteger/valueOf (.-lpart ^clojure.lang.BigInt x)))
+                                                                                                                               x)
+                                                                                                                        :default x)
+                                                                                                    :else (bi-from x)))
 
 ;; declared later; placeholders so deftype methods can close over names
 (defn- canonical-unscaled-scale
@@ -815,15 +815,15 @@
    number or exact integer is scale 0. Two-arg (bigdec unscaled scale) is
    unscaled × 10^-scale."
   ([x]
-   (cond
-     (decimal? x) x
-     (string? x) (let [tok (if (and (pos? (count x)) (= (last x) \M)) (subs x 0 (dec (count x))) x)]
-                   (read-bigdec-significand tok))
-     (ratio? x) (divide (bigdec (numerator x)) (bigdec (denominator x)))
-     (or (bigint? x) (integer? x) (js-bigint? x))
-     (make-bigdec (unwrap-bi x) 0)
-     (number? x) (read-bigdec-significand (str x))
-     :else (read-bigdec-significand (str x))))
+   #_{:splint/disable [lint/identical-branches]}   (cond
+                                                     (decimal? x) x
+                                                     (string? x) (let [tok (if (and (pos? (count x)) (= (last x) \M)) (subs x 0 (dec (count x))) x)]
+                                                                   (read-bigdec-significand tok))
+                                                     (ratio? x) (divide (bigdec (numerator x)) (bigdec (denominator x)))
+                                                     (or (bigint? x) (integer? x) (js-bigint? x))
+                                                     (make-bigdec (unwrap-bi x) 0)
+                                                     (number? x) (read-bigdec-significand (str x))
+                                                     :else (read-bigdec-significand (str x))))
   ([unscaled scale]
    (make-bigdec (unwrap-bi unscaled) (int scale))))
 
@@ -943,24 +943,24 @@
          :default (integer? x))))
 
 (defn- as-double [x]
-  (cond
-    (number? x) #?(:clje (float x) :default (double x))
-    (bigint? x) #?(:cljs (js/Number (unwrap-bi x))
+  #_{:splint/disable [lint/identical-branches]}   #_{:splint/disable [lint/identical-branches]}   #_{:splint/disable [lint/identical-branches]}   (cond
+                                                                                                                                                    (number? x) #?(:clje (float x) :default (double x))
+                                                                                                                                                    (bigint? x) #?(:cljs (js/Number (unwrap-bi x))
                    ;; basilisp: (double an EveBigInt) is float() of the
                    ;; wrapper, which is not a number; unwrap first.
-                   :lpy (double (unwrap-bi x))
-                   :clje (float x)
-                   :default (double x))
-    (js-bigint? x) #?(:cljs (js/Number x) :clje (float x) :default (double x))
-    (ratio? x) (/ (as-double (numerator x)) (as-double (denominator x)))
-    (decimal? x) #?(:clje (float x)
-                    :clj (double x)
-                    :cljs (let [u (.-unscaled x) s (.-scale x)]
-                            (if (zero? s) (js/Number u)
-                                (/ (js/Number u) (js/Number (bi-pow10 s)))))
-                    :lpy (double (str x))
-                    :default (double (str x)))
-    :else #?(:clje (float x) :default (double x))))
+                                                                                                                                                                   :lpy (double (unwrap-bi x))
+                                                                                                                                                                   :clje (float x)
+                                                                                                                                                                   :default (double x))
+                                                                                                                                                    (js-bigint? x) #?(:cljs (js/Number x) :clje (float x) :default (double x))
+                                                                                                                                                    (ratio? x) (/ (as-double (numerator x)) (as-double (denominator x)))
+                                                                                                                                                    (decimal? x) #?(:clje (float x)
+                                                                                                                                                                    :clj (double x)
+                                                                                                                                                                    :cljs (let [u (.-unscaled x) s (.-scale x)]
+                                                                                                                                                                            (if (zero? s) (js/Number u)
+                                                                                                                                                                                (/ (js/Number u) (js/Number (bi-pow10 s)))))
+                                                                                                                                                                    :lpy (double (str x))
+                                                                                                                                                                    :default (double (str x)))
+                                                                                                                                                    :else #?(:clje (float x) :default (double x))))
 
 (defn- as-bigdec [x]
   (cond
@@ -1356,9 +1356,9 @@
   [s]
   (let [s (str s)
         neg? (= (first s) \-)
-        s (cond (= (first s) \-) (subs s 1)
-                (= (first s) \+) (subs s 1)
-                :else s)
+        s #_{:splint/disable [lint/identical-branches]}   (cond (= (first s) \-) (subs s 1)
+                                                                (= (first s) \+) (subs s 1)
+                                                                :else s)
         e-idx (or (str/index-of s \e) (str/index-of s \E))]
     (if e-idx
       (let [sig (subs s 0 e-idx)
@@ -1411,30 +1411,30 @@
             body (if (or neg? plus?) (subs s 1) s)
             as-n? (and (pos? (count body)) (= (last body) \N))
             int-body (if as-n? (subs body 0 (dec (count body))) body)]
-        (cond
+        #_{:splint/disable [lint/identical-branches]}   (cond
           ;; float / double (but not a bare integer)
-          (and (not as-n?)
-               (re-matches #"(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)" body))
-          #?(:cljs (js/parseFloat (str (when neg? "-") body))
-             :lpy (python/float (str (when neg? "-") body))
-             :jank (read-string (str (when neg? "-") body))
-             :clje (read-string (str (when neg? "-") body))
-             :cljr (Double/Parse (str (when neg? "-") body))
-             :default (Double/parseDouble (str (when neg? "-") body)))
-          (and (not as-n?) (re-matches #"(\d+\.\d*|\.\d+)" body))
-          #?(:cljs (js/parseFloat (str (when neg? "-") body))
-             :lpy (python/float (str (when neg? "-") body))
-             :jank (read-string (str (when neg? "-") body))
-             :clje (read-string (str (when neg? "-") body))
-             :cljr (Double/Parse (str (when neg? "-") body))
-             :default (Double/parseDouble (str (when neg? "-") body)))
-          :else
-          (if-let [[radix digits] (radix-prefix int-body)]
-            (let [n (parse-int-body digits radix)]
-              (when-not (= n :eve.numeric/invalid)
-                (finish-int neg? n as-n?)))
-            (when (re-matches #"\d+" int-body)
-              (finish-int neg? (parse-int-body int-body 10) as-n?))))))))
+                                                          (and (not as-n?)
+                                                               (re-matches #"(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)" body))
+                                                          #?(:cljs (js/parseFloat (str (when neg? "-") body))
+                                                             :lpy (python/float (str (when neg? "-") body))
+                                                             :jank (read-string (str (when neg? "-") body))
+                                                             :clje (read-string (str (when neg? "-") body))
+                                                             :cljr (Double/Parse (str (when neg? "-") body))
+                                                             :default (Double/parseDouble (str (when neg? "-") body)))
+                                                          (and (not as-n?) (re-matches #"(\d+\.\d*|\.\d+)" body))
+                                                          #?(:cljs (js/parseFloat (str (when neg? "-") body))
+                                                             :lpy (python/float (str (when neg? "-") body))
+                                                             :jank (read-string (str (when neg? "-") body))
+                                                             :clje (read-string (str (when neg? "-") body))
+                                                             :cljr (Double/Parse (str (when neg? "-") body))
+                                                             :default (Double/parseDouble (str (when neg? "-") body)))
+                                                          :else
+                                                          (if-let [[radix digits] (radix-prefix int-body)]
+                                                            (let [n (parse-int-body digits radix)]
+                                                              (when-not (= n :eve.numeric/invalid)
+                                                                (finish-int neg? n as-n?)))
+                                                            (when (re-matches #"\d+" int-body)
+                                                              (finish-int neg? (parse-int-body int-body 10) as-n?))))))))
 
 ;; clojerl has no transients; its scan accumulator is a plain vector.
 (defn- tvec [v] #?(:clje v :default (transient v)))

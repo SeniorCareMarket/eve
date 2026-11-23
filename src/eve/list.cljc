@@ -189,22 +189,22 @@
   (empty [_]
     (make-list sio__ 0 nil-offset))
   (equiv [this other]
-    (cond
-      (not (sequential? other)) false
-      (not= cnt #?(:bb (ecore/count other) :default (count other))) false
-      :else
-      (let [verdict (root-digest-verdict this other)]
-        (cond
-          (= verdict :equal) true
-          (= verdict :unequal) false
-          :else
-          (loop [off head-off i 0 os (clojure.core/seq other)]
-            (if (or (>= i cnt) (nil? os))
-              true
-              (let [v (read-node-value sio__ off)]
-                (if (= v (first os))
-                  (recur (read-node-next sio__ off) (inc i) (clojure.core/next os))
-                  false))))))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (not (sequential? other)) false
+                                                      (not= cnt #?(:bb (ecore/count other) :default (count other))) false
+                                                      :else
+                                                      (let [verdict (root-digest-verdict this other)]
+                                                        (cond
+                                                          (= verdict :equal) true
+                                                          (= verdict :unequal) false
+                                                          :else
+                                                          (loop [off head-off i 0 os (clojure.core/seq other)]
+                                                            (if (or (>= i cnt) (nil? os))
+                                                              true
+                                                              (let [v (read-node-value sio__ off)]
+                                                                (if (= v (first os))
+                                                                  (recur (read-node-next sio__ off) (inc i) (clojure.core/next os))
+                                                                  false))))))))
 
   clojure.lang.IHashEq
   (hasheq [this] (dg/root-hash sio__ offset__ (fn [] (p/hash-ordered this))))

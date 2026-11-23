@@ -119,7 +119,7 @@
       (let [g (dom/pool dh :g {:threads (if (threads?) 2 0)})
             want (mapv (fn [x] (* x x)) (range 12))
             {:keys [block]} (h/driving)]
-        (is (= (cond (= :never block) :sweep (not (rung/futex? r)) :sweep (= :cheap block) :waiters :else :in-order)
+        (is (= #_{:splint/disable [lint/identical-branches]}   (cond (= :never block) :sweep (not (rung/futex? r)) :sweep (= :cheap block) :waiters :else :in-order)
                (dom/choose-driver dh))
             "the driver P§5.7 reads from the declared :block and the rung's wake")
         (doseq [driver [:in-order :sweep :waiters]]

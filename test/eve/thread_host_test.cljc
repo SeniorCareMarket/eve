@@ -39,9 +39,9 @@
             (if (<= left 0)
               :eve.thread/timeout
               (let [m (h/receive! left)]
-                (cond (= m :eve.thread/timeout) m
-                      (pred m) m
-                      :else (do (swap! pending conj m) (recur))))))))))
+                #_{:splint/disable [lint/identical-branches]}   (cond (= m :eve.thread/timeout) m
+                                                                      (pred m) m
+                                                                      :else (do (swap! pending conj m) (recur))))))))))
 
 (defn- op? [op] (fn [m] (and (map? m) (= op (:op m)))))
 (defn- exit-of? [addr] (fn [m] (and (exit-notice? m) (= addr (:eve.thread/exit m)))))

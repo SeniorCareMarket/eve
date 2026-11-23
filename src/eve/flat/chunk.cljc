@@ -480,12 +480,12 @@
                                    (instance? BytesVal rep) [:prim 1]
                                    (instance? MetaVal rep) (field-class (.-inner ^MetaVal rep) types)
                                    (coll? rep) [:ser 0]
-                                   :else [:prim (cond (instance? Double rep) 9
-                                                      (instance? Float rep) 8
-                                                      (instance? Long rep) 10
-                                                      (instance? Integer rep) 6
-                                                      (instance? Boolean rep) 0
-                                                      :else 0)]))
+                                   :else [:prim #_{:splint/disable [lint/identical-branches]}   (cond (instance? Double rep) 9
+                                                                                                      (instance? Float rep) 8
+                                                                                                      (instance? Long rep) 10
+                                                                                                      (instance? Integer rep) 6
+                                                                                                      (instance? Boolean rep) 0
+                                                                                                      :else 0)]))
 
                                (defn- scan
                                  "The chunk context for rep: symbol codes, shapes, types."

@@ -26,11 +26,11 @@
   [a b]
   (let [ta (when-not (number? a) (arr/subtype->type-kw (arr/array-subtype-code a)))
         tb (when-not (number? b) (arr/subtype->type-kw (arr/array-subtype-code b)))]
-    (cond
-      (or (= ta :float64) (= tb :float64)) :float64
-      (or (= ta :float32) (= tb :float32)) :float64
-      (or (nil? ta) (nil? tb))              (or ta tb :int32)
-      :else                                 ta)))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (or (= ta :float64) (= tb :float64)) :float64
+                                                      (or (= ta :float32) (= tb :float32)) :float64
+                                                      (or (nil? ta) (nil? tb))              (or ta tb :int32)
+                                                      :else                                 ta)))
 
 (defn- arr-count [x]
   ;; a scalar broadcasts: "unbounded". Every caller takes (int (min ...)), and (int ##Inf) is Integer/MAX_VALUE, so

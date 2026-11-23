@@ -132,7 +132,7 @@
    for a ClojureScript compile (its &env carries :ns; nbb reads this
    file's :cljs)."
   [proto & impls]
-  (let [root (if (:ns &env) 'default #?(:cljs 'default :default 'Object))]
+  (let [root #_{:splint/disable [lint/identical-branches]}   (if (:ns &env) 'default #?(:cljs 'default :default 'Object))]
     `(clojure.core/extend-protocol ~proto nil ~@impls ~root ~@impls)))
 
 (defmacro field

@@ -841,16 +841,16 @@
    flat layer yet: basilisp)."
   []
   (let [h @view-read-hook]
-    (cond
-      (fn? h) h
-      (= ::none h) nil
-      :else #?(:cljs nil
-               :clje nil
-               :lpy (do (reset! view-read-hook ::none) nil)
-               :default (do (try (requiring-resolve 'eve.view/wrap)
-                                 (catch #?(:cljd dynamic :cljr Exception :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
-                            (let [h @view-read-hook]
-                              (if (fn? h) h (do (reset! view-read-hook ::none) nil))))))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (fn? h) h
+                                                      (= ::none h) nil
+                                                      :else #?(:cljs nil
+                                                               :clje nil
+                                                               :lpy (do (reset! view-read-hook ::none) nil)
+                                                               :default (do (try (requiring-resolve 'eve.view/wrap)
+                                                                                 (catch #?(:cljd dynamic :cljr Exception :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))
+                                                                            (let [h @view-read-hook]
+                                                                              (if (fn? h) h (do (reset! view-read-hook ::none) nil))))))))
 
 (defn- read-answer
   "The answer a read gives for raw, read now under the caller's pin: a view
@@ -1065,16 +1065,16 @@
    static require."
   []
   (let [h @deref-deliver-hook]
-    (cond
-      (fn? h) h
-      (= ::none h) nil
-      :else #?(:cljs nil
-               :clje nil
-               :default (let [v (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
-                                     (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
-                          (if v
-                            (do (reset! deref-deliver-hook @v) @v)
-                            (do (reset! deref-deliver-hook ::none) nil)))))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (fn? h) h
+                                                      (= ::none h) nil
+                                                      :else #?(:cljs nil
+                                                               :clje nil
+                                                               :default (let [v (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
+                                                                                     (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+                                                                          (if v
+                                                                            (do (reset! deref-deliver-hook @v) @v)
+                                                                            (do (reset! deref-deliver-hook ::none) nil)))))))
 
 (defn- plain-deref
   "The atom's value as plain data (d/eve->clj), read under a pinned epoch.

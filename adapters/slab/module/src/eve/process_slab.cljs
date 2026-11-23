@@ -633,52 +633,52 @@
     (when (<= n total-bits)
       (loop [start-bit cursor wrapped? false]
         (let [cand (wasm/bitmap-find-free class-idx bm-offset total-bits start-bit)]
-          (cond
+          #_{:splint/disable [lint/identical-branches]}   (cond
             ;; no free bit at or after start-bit: wrap once, then give up
-            (== cand -1)
-            (when (and (not wrapped?) (pos? cursor))
-              (recur 0 true))
+                                                            (== cand -1)
+                                                            (when (and (not wrapped?) (pos? cursor))
+                                                              (recur 0 true))
 
             ;; the run would run past the class: no run starts here or later
-            (> (+ cand n) total-bits)
-            (when (and (not wrapped?) (pos? cursor))
-              (recur 0 true))
+                                                            (> (+ cand n) total-bits)
+                                                            (when (and (not wrapped?) (pos? cursor))
+                                                              (recur 0 true))
 
-            :else
-            (let [run-end (+ cand n)
+                                                            :else
+                                                            (let [run-end (+ cand n)
                   ;; the whole run free? the next free bit after each
                   ;; position of the run must be that next position
-                  free-run? (loop [k (inc cand)]
-                              (if (== k run-end)
-                                true
-                                (let [f (wasm/bitmap-find-free class-idx bm-offset total-bits k)]
-                                  (if (== f k)
-                                    (recur (inc k))
-                                    false))))
-                  next-start (wasm/bitmap-find-free class-idx bm-offset total-bits (inc cand))]
-              (if-not free-run?
+                                                                  free-run? (loop [k (inc cand)]
+                                                                              (if (== k run-end)
+                                                                                true
+                                                                                (let [f (wasm/bitmap-find-free class-idx bm-offset total-bits k)]
+                                                                                  (if (== f k)
+                                                                                    (recur (inc k))
+                                                                                    false))))
+                                                                  next-start (wasm/bitmap-find-free class-idx bm-offset total-bits (inc cand))]
+                                                              (if-not free-run?
                 ;; no run at cand; resume after the first gap (next-start
                 ;; is the first free bit past cand, -1 when none is left)
-                (cond (not= next-start -1) (recur next-start wrapped?)
-                      (and (not wrapped?) (pos? cursor)) (recur 0 true)
-                      :else nil)
+                                                                (cond (not= next-start -1) (recur next-start wrapped?)
+                                                                      (and (not wrapped?) (pos? cursor)) (recur 0 true)
+                                                                      :else nil)
                 ;; claim it, one CAS per bit; a lost CAS rolls the
                 ;; claimed prefix back and the scan resumes past it
-                (let [claimed (loop [k cand]
-                                (cond (== k run-end) run-end
-                                      (wasm/bitmap-alloc-cas! class-idx bm-offset k) (recur (inc k))
-                                      :else k))]
-                  (if (== claimed run-end)
-                    (do (mem/store-i32! region d/slab-hdr-alloc-cursor
-                                        (mod run-end total-bits))
-                        (mem/sub-i32! region d/slab-hdr-free-count n)
-                        (encode-slab-offset class-idx cand))
-                    (do (dotimes [i (- claimed cand)]
-                          (wasm/bitmap-free! class-idx bm-offset (+ cand i)))
-                        (let [f (wasm/bitmap-find-free class-idx bm-offset total-bits (inc claimed))]
-                          (cond (not= f -1) (recur f wrapped?)
-                                (and (not wrapped?) (pos? cursor)) (recur 0 true)
-                                :else nil)))))))))))))
+                                                                (let [claimed (loop [k cand]
+                                                                                (cond (== k run-end) run-end
+                                                                                      (wasm/bitmap-alloc-cas! class-idx bm-offset k) (recur (inc k))
+                                                                                      :else k))]
+                                                                  (if (== claimed run-end)
+                                                                    (do (mem/store-i32! region d/slab-hdr-alloc-cursor
+                                                                                        (mod run-end total-bits))
+                                                                        (mem/sub-i32! region d/slab-hdr-free-count n)
+                                                                        (encode-slab-offset class-idx cand))
+                                                                    (do (dotimes [i (- claimed cand)]
+                                                                          (wasm/bitmap-free! class-idx bm-offset (+ cand i)))
+                                                                        (let [f (wasm/bitmap-find-free class-idx bm-offset total-bits (inc claimed))]
+                                                                          (cond (not= f -1) (recur f wrapped?)
+                                                                                (and (not wrapped?) (pos? cursor)) (recur 0 true)
+                                                                                :else nil)))))))))))))
 
 (defn batch-alloc-run
   "The run claim over the module slab: the slab-qualified offset of the

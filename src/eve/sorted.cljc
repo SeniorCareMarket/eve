@@ -302,13 +302,13 @@
   "acc with the blocks of old subtree o that new subtree n does not hold, o and
    n over the same key interval."
   [acc o n c]
-  (cond
-    (nil? o) acc
-    (and (some? n) (same-block? (SortedNode-offset o) (SortedNode-offset n))) acc
+  #_{:splint/disable [lint/identical-branches]}   (cond
+                                                    (nil? o) acc
+                                                    (and (some? n) (same-block? (SortedNode-offset o) (SortedNode-offset n))) acc
     ;; the same key: a path copy shares the entry (no key decoded), a new value's entry holds the same key
-    (and (some? n) (or (same-block? (entry-block o) (entry-block n)) (zero? (c (-sk o) (-sk n)))))
-    (-> acc (gone o n) (diff-at (-sl o) (-sl n) c) (diff-at (-sr o) (-sr n) c))
-    :else (diff-under acc o n c)))
+                                                    (and (some? n) (or (same-block? (entry-block o) (entry-block n)) (zero? (c (-sk o) (-sk n)))))
+                                                    (-> acc (gone o n) (diff-at (-sl o) (-sl n) c) (diff-at (-sr o) (-sr n) c))
+                                                    :else (diff-under acc o n c)))
 
 (defn- diff-under
   "acc with the blocks of old subtree o that the new tree does not hold, n the

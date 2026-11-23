@@ -232,21 +232,21 @@
    Returns slot index or -1 if none found."
   [region dt-off max-desc hint]
   (loop [i hint wrapped? false]
-    (cond
-      (and (>= i max-desc) (not wrapped?))
-      (recur 0 true)
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (and (>= i max-desc) (not wrapped?))
+                                                      (recur 0 true)
 
-      (and (>= i max-desc) wrapped?)
-      -1
+                                                      (and (>= i max-desc) wrapped?)
+                                                      -1
 
-      (and wrapped? (>= i hint))
-      -1
+                                                      (and wrapped? (>= i hint))
+                                                      -1
 
-      :else
-      (let [status (desc-load region dt-off max-desc i desc-status)]
-        (if (== status status-zeroed-unused)
-          i
-          (recur (inc i) wrapped?))))))
+                                                      :else
+                                                      (let [status (desc-load region dt-off max-desc i desc-status)]
+                                                        (if (== status status-zeroed-unused)
+                                                          i
+                                                          (recur (inc i) wrapped?))))))
 
 ;;=============================================================================
 ;; Init

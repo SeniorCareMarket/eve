@@ -242,36 +242,36 @@
   [[head-node & method-nodes]]
   (let [head (api/sexpr head-node)
         t (get jvm->cljs head)]
-    (cond
+    #_{:splint/disable [lint/identical-branches]}   (cond
       ;; A namespaced head (eve.core/IRef, eve.foo/IProto) or a
       ;; non-dotted head (a CLJS protocol written directly, an Eve
       ;; protocol) passes through as written.
-      (or (not (symbol? head)) (namespace head) (not (re-find #"\." (str head))))
-      [(into [head-node] method-nodes)]
+                                                      (or (not (symbol? head)) (namespace head) (not (re-find #"\." (str head))))
+                                                      [(into [head-node] method-nodes)]
 
       ;; A JVM class with no entry in Eve's table has no CLJS home
       ;; the macro can realize; the macro drops it, and so do we.
-      (nil? t) []
+                                                      (nil? t) []
 
-      (:clj-only? t) []
+                                                      (:clj-only? t) []
 
-      (:proto t)
-      [(into [(api/token-node (:proto t))]
-             (keep (fn [m]
-                     (let [mt (get (:methods t) (api/sexpr (first (:children m))))]
-                       (when (:name mt) (rename-method (:name mt) m))))
-                   method-nodes))]
+                                                      (:proto t)
+                                                      [(into [(api/token-node (:proto t))]
+                                                             (keep (fn [m]
+                                                                     (let [mt (get (:methods t) (api/sexpr (first (:children m))))]
+                                                                       (when (:name mt) (rename-method (:name mt) m))))
+                                                                   method-nodes))]
 
       ;; Split interface: fan methods out by their per-method proto.
-      :else
-      (let [by-proto (reduce (fn [acc m]
-                               (let [mt (get (:methods t) (api/sexpr (first (:children m))))]
-                                 (if (:name mt)
-                                   (update acc (:proto mt) (fnil conj [])
-                                           (rename-method (:name mt) m))
-                                   acc)))
-                             {} method-nodes)]
-        (map (fn [[p ms]] (into [(api/token-node p)] ms)) by-proto)))))
+                                                      :else
+                                                      (let [by-proto (reduce (fn [acc m]
+                                                                               (let [mt (get (:methods t) (api/sexpr (first (:children m))))]
+                                                                                 (if (:name mt)
+                                                                                   (update acc (:proto mt) (fnil conj [])
+                                                                                           (rename-method (:name mt) m))
+                                                                                   acc)))
+                                                                             {} method-nodes)]
+                                                        (map (fn [[p ms]] (into [(api/token-node p)] ms)) by-proto)))))
 
 (defn- translate-group-clj
   "One protocol group on the :clj pass -> a seq of groups. JVM
@@ -281,24 +281,24 @@
   [[head-node & method-nodes]]
   (let [head (api/sexpr head-node)
         t (when (and (symbol? head) (not (namespace head))) (get cljs->jvm head))]
-    (cond
-      (nil? t) [(into [head-node] method-nodes)]
-      (= :print t) []
-      (= :drop t) []
-      (= :marker t) [[(api/token-node 'clojure.lang.Sequential)]]
-      (= :marker-nil t) []
-      :else
-      (let [by-iface (reduce (fn [acc m]
-                               (let [entry (get t (api/sexpr (first (:children m))))
-                                     entry (if (map? entry)
-                                             (get entry (count (:children (second (:children m)))))
-                                             entry)]
-                                 (if entry
-                                   (update acc (first entry) (fnil conj [])
-                                           (rename-method (second entry) m))
-                                   acc)))
-                             {} method-nodes)]
-        (map (fn [[iface ms]] (into [(api/token-node iface)] ms)) by-iface)))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (nil? t) [(into [head-node] method-nodes)]
+                                                      (= :print t) []
+                                                      (= :drop t) []
+                                                      (= :marker t) [[(api/token-node 'clojure.lang.Sequential)]]
+                                                      (= :marker-nil t) []
+                                                      :else
+                                                      (let [by-iface (reduce (fn [acc m]
+                                                                               (let [entry (get t (api/sexpr (first (:children m))))
+                                                                                     entry (if (map? entry)
+                                                                                             (get entry (count (:children (second (:children m)))))
+                                                                                             entry)]
+                                                                                 (if entry
+                                                                                   (update acc (first entry) (fnil conj [])
+                                                                                           (rename-method (second entry) m))
+                                                                                   acc)))
+                                                                             {} method-nodes)]
+                                                        (map (fn [[iface ms]] (into [(api/token-node iface)] ms)) by-iface)))))
 
 (defn- referenced-names
   "The subset of `names` that appear as symbols anywhere in the

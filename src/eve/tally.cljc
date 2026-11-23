@@ -736,23 +736,23 @@
                    (let [row (alloc/desc-of sio off)
                          t (if row (flags row) 0)
                          c (if row (cnt row) CDEAD)]
-                     (cond
-                       (or (zero? (bit-and t f-queued)) (== c CDEAD)) n
-                       (not (zero? c))
-                       (do (clear-flags! row (bit-or f-queued f-taken))
-                           (when (and (zero? (cnt row)) (not (set-flag! row f-queued)))
-                             (park! off kind))
-                           n)
-                       (not (zero? (bit-and t f-taken)))
-                       (do (clear-flags! row f-taken) (park! off kind) n)
-                       (not (or (nil? safe) (< epoch safe)))
-                       (do (vswap! stay conj e) n)
+                     #_{:splint/disable [lint/identical-branches]}   (cond
+                                                                       (or (zero? (bit-and t f-queued)) (== c CDEAD)) n
+                                                                       (not (zero? c))
+                                                                       (do (clear-flags! row (bit-or f-queued f-taken))
+                                                                           (when (and (zero? (cnt row)) (not (set-flag! row f-queued)))
+                                                                             (park! off kind))
+                                                                           n)
+                                                                       (not (zero? (bit-and t f-taken)))
+                                                                       (do (clear-flags! row f-taken) (park! off kind) n)
+                                                                       (not (or (nil? safe) (< epoch safe)))
+                                                                       (do (vswap! stay conj e) n)
                    ;; THE STILL-ZERO CHECK, one CAS: 0 -> CDEAD claims it (a hold racing in is refused)
-                       (not (zero? (ccas row 0 CDEAD)))
-                       (do (vswap! stay conj e) n)
-                       :else
-                       (do (clear-flags! row (bit-or f-queued f-pub))
-                           (+ n (free-claimed! sio off kind row t park!))))))
+                                                                       (not (zero? (ccas row 0 CDEAD)))
+                                                                       (do (vswap! stay conj e) n)
+                                                                       :else
+                                                                       (do (clear-flags! row (bit-or f-queued f-pub))
+                                                                           (+ n (free-claimed! sio off kind row t park!))))))
                  0 prefix)]
           ;; restore in epoch order: stays, then the unexamined
           ;; suffix, then whatever this scan (park!) or a concurrent

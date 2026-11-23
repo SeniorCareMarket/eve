@@ -468,21 +468,21 @@
     (let [new-tail (alloc-node! sio__)]
       (make-vec-impl sio__ 0 shift-step nil-offset new-tail 0)))
   (equiv [this other]
-    (cond
-      (not (sequential? other)) false
-      (not= cnt (other-count other)) false
-      :else
-      (let [verdict (root-digest-verdict this other)]
-        (cond
-          (= verdict :equal) true
-          (= verdict :unequal) false
-          :else
-          (loop [i 0]
-            (if (>= i cnt)
-              true
-              (if (= (nth-impl sio__ cnt shift root tail i) (other-nth other i))
-                (recur (inc i))
-                false)))))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (not (sequential? other)) false
+                                                      (not= cnt (other-count other)) false
+                                                      :else
+                                                      (let [verdict (root-digest-verdict this other)]
+                                                        (cond
+                                                          (= verdict :equal) true
+                                                          (= verdict :unequal) false
+                                                          :else
+                                                          (loop [i 0]
+                                                            (if (>= i cnt)
+                                                              true
+                                                              (if (= (nth-impl sio__ cnt shift root tail i) (other-nth other i))
+                                                                (recur (inc i))
+                                                                false)))))))
 
   clojure.lang.IHashEq
   (hasheq [this] (dg/root-hash sio__ offset__ (fn [] (p/hash-ordered this))))

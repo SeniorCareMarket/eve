@@ -664,13 +664,13 @@
              (and deadline (>= (now) deadline)) (do (when blocked? (unblock-mine! dh run)) :eve.thread.cell/timeout)
              :else
              (let [blocked? (or blocked? (when run (block-mine! dh run id) true))]
-               (cond
-                 (and run (nil? deadline) (help-one! dh (:pool run) (:tid run))) (recur 1 blocked?)
-                 (and threadless? (help-one! dh (:pool x) "rt")) (recur 1 blocked?)
-                 :else (do (when threadless? (threadless-beat! dh))
-                           (idle-wait! dh (rung/descriptor-word id) seen b
-                                       (if deadline (- deadline (now)) 100))
-                           (recur (min (poll-cap dh) (* 2 b)) blocked?)))))))))))
+               #_{:splint/disable [lint/identical-branches]}   (cond
+                                                                 (and run (nil? deadline) (help-one! dh (:pool run) (:tid run))) (recur 1 blocked?)
+                                                                 (and threadless? (help-one! dh (:pool x) "rt")) (recur 1 blocked?)
+                                                                 :else (do (when threadless? (threadless-beat! dh))
+                                                                           (idle-wait! dh (rung/descriptor-word id) seen b
+                                                                                       (if deadline (- deadline (now)) 100))
+                                                                           (recur (min (poll-cap dh) (* 2 b)) blocked?)))))))))))
 
 (defn entry
   "An entry of domain descriptor id (eve.thread.cell's remote entry): its submitter's future's (opts :forget true —
@@ -934,10 +934,10 @@
    each, :in-order otherwise."
   [dh]
   (let [{:keys [block]} (h/driving)]
-    (cond (= :never block) :sweep
-          (not (rung/futex? (mcell dh))) :sweep
-          (= :cheap block) :waiters
-          :else :in-order)))
+    #_{:splint/disable [lint/identical-branches]}   (cond (= :never block) :sweep
+                                                          (not (rung/futex? (mcell dh))) :sweep
+                                                          (= :cheap block) :waiters
+                                                          :else :in-order)))
 
 (defn- settled-of
   "Of ids, those settled, as {id descriptor} — one read of the meta-atom (pinned on an eve rung)."
@@ -959,13 +959,13 @@
                  done (settled-of dh pending)
                  got (merge got (into {} (map (fn [[id x]] [id (or x (lost id))])) done))
                  left (filterv (fn [id] (not (contains? done id))) pending)]
-             (cond
-               (seq done) (recur left got 1)
+             #_{:splint/disable [lint/identical-branches]}   (cond
+                                                               (seq done) (recur left got 1)
                ;; (a runtime with no threads runs its pool's work in its waits, and keeps its lease there)
-               (and pool (help-one! dh pool "rt")) (recur left got 1)
-               :else (do (when pool (threadless-beat! dh))
-                         (idle-wait! dh (rung/completion-word) seen b)
-                         (recur left got (min (poll-cap dh) (* 2 b))))))))))))
+                                                               (and pool (help-one! dh pool "rt")) (recur left got 1)
+                                                               :else (do (when pool (threadless-beat! dh))
+                                                                         (idle-wait! dh (rung/completion-word) seen b)
+                                                                         (recur left got (min (poll-cap dh) (* 2 b))))))))))))
 
 (defn- settled-now?
   "Is descriptor id done, or gone — read from its state alone (a waiter needs no more of it)."
@@ -1094,10 +1094,10 @@
        (let [deadline (+ (now) (* 4 (:ttl dh)))]
          (loop []
            (let [m (h/receive! (max 1 (- deadline (now))))]
-             (cond
-               (= m :eve.thread/timeout) nil
-               (and (map? m) (= t (:eve.thread/exit m))) nil
-               :else (do (c/handle! m) (recur)))))))))
+             #_{:splint/disable [lint/identical-branches]}   (cond
+                                                               (= m :eve.thread/timeout) nil
+                                                               (and (map? m) (= t (:eve.thread/exit m))) nil
+                                                               :else (do (c/handle! m) (recur)))))))))
   (swap-forgetting! dh (fn [v fg] [(mt/leave (mt/forget v fg) (:rid dh)) nil]))
   (doseq [nm (keys (:pools @(:st dh)))]
     (when-let [p (c/find-pool nm)] (when (= (:key (:dh p)) (:key dh)) (c/unregister-pool! p))))

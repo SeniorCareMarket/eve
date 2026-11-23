@@ -555,17 +555,17 @@
         refused (the kernel's -3): the caller decomposes (whole
         chunks on rungs, the tail in the variable class)."
     [^JvmSlabCtx ctx size-bytes]
-    (cond
-      (<= size-bytes 65536)   (ctx-alloc! ctx size-bytes)
-      (>= size-bytes 1048576) (ctx-alloc! ctx size-bytes)
-      :else
-      (let [rung-idx (coalesc/rung-idx-for-size size-bytes)]
-        (if (== rung-idx -1)
-          (throw (ex-info (str "alloc-flat-block!: flat block of " size-bytes
-                               " bytes is not chunk-aligned — refused "
-                               "(decompose it: whole chunks on rungs, tail in the variable class)")
-                          {:size size-bytes :refusal -3}))
-          (coalesc-rung-alloc-growing! ctx rung-idx)))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (<= size-bytes 65536)   (ctx-alloc! ctx size-bytes)
+                                                      (>= size-bytes 1048576) (ctx-alloc! ctx size-bytes)
+                                                      :else
+                                                      (let [rung-idx (coalesc/rung-idx-for-size size-bytes)]
+                                                        (if (== rung-idx -1)
+                                                          (throw (ex-info (str "alloc-flat-block!: flat block of " size-bytes
+                                                                               " bytes is not chunk-aligned — refused "
+                                                                               "(decompose it: whole chunks on rungs, tail in the variable class)")
+                                                                          {:size size-bytes :refusal -3}))
+                                                          (coalesc-rung-alloc-growing! ctx rung-idx)))))
 
   (extend-type JvmSlabCtx
     IFlatDoor

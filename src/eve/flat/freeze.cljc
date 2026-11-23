@@ -939,26 +939,26 @@
   ;; one flat form on every host (the value model, EVE-FIX-PLAN §0): a
   ;; deftype delivers as its flat sister, never as a copy placed into a
   ;; private heap domain
-  (cond
+  #_{:splint/disable [lint/identical-branches]}   #_{:splint/disable [lint/identical-branches]}   #_{:splint/disable [lint/identical-branches]}   (cond
     ;; already flat: a frozen subtree delivers as its opened
     ;; handle (whose bytes were copied out of the slab — the
     ;; handle owns them); a heap flat handle delivers as itself.
-    #?(:clj (instance? FrozenValue v) :cljs false)
-    (-handle v (.-sio ^FrozenValue v) (.-hdr ^FrozenValue v))
-    #?(:clj (instance? ConcatBatch v) :cljs false) v
-    (chunk/flat-handle? v) v
-    (sequential? v) (open-stream (chunk/pack-all v))
-    (coll? v) (chunk/pack v)
+                                                                                                                                                    #?(:clj (instance? FrozenValue v) :cljs false)
+                                                                                                                                                    (-handle v (.-sio ^FrozenValue v) (.-hdr ^FrozenValue v))
+                                                                                                                                                    #?(:clj (instance? ConcatBatch v) :cljs false) v
+                                                                                                                                                    (chunk/flat-handle? v) v
+                                                                                                                                                    (sequential? v) (open-stream (chunk/pack-all v))
+                                                                                                                                                    (coll? v) (chunk/pack v)
     ;; a slab instance of a sister-registered type that is not
     ;; itself a collection (a field-oriented deftype root): the
     ;; same pack — the writer's rep converter turns it into its
     ;; typed rep by its descriptor, and it delivers as its flat
     ;; sister, as a collection root does (plan §4, M4: proto types
     ;; ride this funnel with no type-side hook)
-    (and (satisfies? d/ISabpType v)
-         (sister/descriptor (d/-sabp-type-key v)))
-    (chunk/pack v)
-    :else v))
+                                                                                                                                                    (and (satisfies? d/ISabpType v)
+                                                                                                                                                         (sister/descriptor (d/-sabp-type-key v)))
+                                                                                                                                                    (chunk/pack v)
+                                                                                                                                                    :else v))
 
 (defn deliver-atom
   "Deliver an Eve atom's current value as a heap flat object,

@@ -54,19 +54,19 @@
    var, an object of no eve kind)? A walk, no packing: the cheap test a
    sender runs before encoding."
   [v]
-  (cond
-    (or (nil? v) (boolean? v) (number? v) (string? v) (keyword? v) (symbol? v)
-        (char? v) (uuid? v) (inst? v)) true
-    (satisfies? chunk/IFlatHandle v) true
-    (record? v) false
-    (map? v) (every? (fn [[k x]] (and (data? k) (data? x))) v)
-    (coll? v) (every? data? v)
-    :else (or (satisfies? d/IEveRoot v)
-              (satisfies? d/ISabpType v)
-              (satisfies? source/ISister v)
-              #?(:clj (instance? (Class/forName "[B") v)
-                 :cljs (instance? js/Uint8Array v)
-                 :default false))))
+  #_{:splint/disable [lint/identical-branches]}   (cond
+                                                    (or (nil? v) (boolean? v) (number? v) (string? v) (keyword? v) (symbol? v)
+                                                        (char? v) (uuid? v) (inst? v)) true
+                                                    (satisfies? chunk/IFlatHandle v) true
+                                                    (record? v) false
+                                                    (map? v) (every? (fn [[k x]] (and (data? k) (data? x))) v)
+                                                    (coll? v) (every? data? v)
+                                                    :else (or (satisfies? d/IEveRoot v)
+                                                              (satisfies? d/ISabpType v)
+                                                              (satisfies? source/ISister v)
+                                                              #?(:clj (instance? (Class/forName "[B") v)
+                                                                 :cljs (instance? js/Uint8Array v)
+                                                                 :default false))))
 
 (defn encodable?
   "Can v cross a wire (it holds no host object)?"

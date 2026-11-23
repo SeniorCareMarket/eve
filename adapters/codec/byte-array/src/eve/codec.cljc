@@ -184,16 +184,16 @@
    reaches eve.flat.freeze: requiring-resolve, never a static require."
   []
   (let [h @frozen-ctor-hook]
-    (cond
-      (fn? h) h
-      (= ::none h) nil
-      :else #?(:cljs nil
-               :clje nil
-               :default (let [v (try (requiring-resolve 'eve.flat.freeze/frozen-value)
-                                     (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
-                          (if v
-                            (do (reset! frozen-ctor-hook @v) @v)
-                            (do (reset! frozen-ctor-hook ::none) nil)))))))
+    #_{:splint/disable [lint/identical-branches]}   (cond
+                                                      (fn? h) h
+                                                      (= ::none h) nil
+                                                      :else #?(:cljs nil
+                                                               :clje nil
+                                                               :default (let [v (try (requiring-resolve 'eve.flat.freeze/frozen-value)
+                                                                                     (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+                                                                          (if v
+                                                                            (do (reset! frozen-ctor-hook @v) @v)
+                                                                            (do (reset! frozen-ctor-hook ::none) nil)))))))
 
 ;; --- EVE binary format — deserializer ---
 
