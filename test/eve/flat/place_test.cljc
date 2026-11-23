@@ -14,22 +14,29 @@
    end-to-end arm places a real detach instead. Chunk bytes reach place
    only as an eve.flat.check CheckedBytes handle (lane C4's contract):
    raw byte arrays are refused :unchecked-bytes before any parsing."
-  (:require [clojure.test :refer [deftest is testing]]
-            [eve.flat.check :as check]
-            [eve.flat.contract :as contract]
-            [eve.flat.image :as image]
-            [eve.flat.place :as place]
-            #?(:clj [eve.atom :as ea])
-            #?(:clj [eve.codec :as codec])
-            #?(:clj [eve.core :as e])
-            #?(:clj [eve.deftype-proto.alloc :as alloc])
-            #?(:clj [eve.deftype-proto.data :as d])
-            #?(:clj [eve.deftype-proto.serialize :as ser])
-            #?(:clj [eve.keyring :as kr])
-            #?(:clj [eve.mem :as mem])
-            #?(:clj [eve.process :as proc])
-            #?(:clj [eve.retire :as retire])
-            #?(:clj [eve.flat :as flat]))
+  (:require ; the test-framework require (clojure.test on :clj, cljs.test on :cljs); its referred macros are this file's test surface 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [clojure.test :refer [deftest is testing]]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.check :as check]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.contract :as contract]
+            ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.image :as image]
+            ; the alias is exercised on the other reader pass; the require loads on both 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.place :as place]
+   #?(:clj [eve.atom :as ea])
+   #?(:clj [eve.codec :as codec])
+   #?(:clj ; part of the #?(:clj ...) cone block below: it loads the JVM writer cone these hand-built-image tests drive; registrations are load-time effects 
+      #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :as e])
+   #?(:clj [eve.deftype-proto.alloc :as alloc])
+   #?(:clj [eve.deftype-proto.data :as d])
+   #?(:clj [eve.deftype-proto.serialize :as ser])
+   #?(:clj [eve.keyring :as kr])
+   #?(:clj [eve.mem :as mem])
+   #?(:clj ; part of the #?(:clj ...) cone block: it loads the JVM writer cone these hand-built-image tests drive; registrations are load-time effects 
+      #_{:clj-kondo/ignore [:unused-namespace]}   [eve.process :as proc])
+   #?(:clj [eve.retire :as retire])
+   #?(:clj [eve.flat :as flat]))
   #?(:clj (:import [java.util Arrays ArrayDeque]
                    [eve.deftype_proto.alloc JvmSlabCtx])))
 
