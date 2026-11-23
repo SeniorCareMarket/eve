@@ -29,19 +29,31 @@
    value with no Eve bytes (written by reference, as today), an Eve
    value of a foreign domain (materialized with eve->clj and rebuilt —
    its offsets mean nothing in this buffer)."
-  (:require [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]
-            [eve.deftype-proto.serialize :as ser]
-            [eve.encoding :as enc]
-            [eve.hamt-util :as hu]
-            [eve.list :as elist]
-            [eve.map :as emap]
-            [eve.retire :as retire]
-            [eve.set :as eset]
-            [eve.slab-io :as slab]
-            [eve.flat.contract :as contract]
-            [eve.vec :as evec]
-            #?(:clj [eve.codec :as codec]))
+  (:require ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.data :as d]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.serialize :as ser]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.encoding :as enc]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.hamt-util :as hu]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.list :as elist]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.map :as emap]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.retire :as retire]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.set :as eset]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.slab-io :as slab]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.contract :as contract]
+   ; required for load on both passes (the flat build cone); the alias is exercised on the :clj pass 
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.vec :as evec]
+   #?(:clj [eve.codec :as codec]))
   #?(:clj (:import [java.util ArrayList Arrays HashMap])))
 
 #?(:clj
