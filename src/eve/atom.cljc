@@ -960,12 +960,11 @@
    require (a cycle). A missing namespace is a named error, not a silent
    fall back to :throw."
   [sym]
-  #?(:clj (let [v (try (requiring-resolve sym)
-                       (catch Throwable _ nil))]
-            (if v
-              @v
-              (throw (ex-info (str "swap!: the :zip foreign policy needs " sym ", which is not on the classpath")
-                              {:eve.flat.transfer/not-built sym}))))
+  #?(:clj (if-let [v (try (requiring-resolve sym)
+                          (catch Throwable _ nil))]
+            @v
+            (throw (ex-info (str "swap!: the :zip foreign policy needs " sym ", which is not on the classpath")
+                            {:eve.flat.transfer/not-built sym})))
      :cljs (throw (ex-info (str "swap!: the :zip foreign policy needs " sym ", which is not built for this host")
                            {:eve.flat.transfer/not-built sym}))))
 
@@ -1070,11 +1069,10 @@
                                                       (= ::none h) nil
                                                       :else #?(:cljs nil
                                                                :clje nil
-                                                               :default (let [v (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
-                                                                                     (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
-                                                                          (if v
-                                                                            (do (reset! deref-deliver-hook @v) @v)
-                                                                            (do (reset! deref-deliver-hook ::none) nil)))))))
+                                                               :default (if-let [v (try (requiring-resolve 'eve.flat.freeze/deliver-flat)
+                                                                                        (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+                                                                          (do (reset! deref-deliver-hook @v) @v)
+                                                                          (do (reset! deref-deliver-hook ::none) nil))))))
 
 (defn- plain-deref
   "The atom's value as plain data (d/eve->clj), read under a pinned epoch.

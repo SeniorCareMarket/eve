@@ -716,92 +716,92 @@
         1 (let [data-bm (slab/read-i32 sio root-off 4)
                 node-bm (slab/read-i32 sio root-off 8)
                 bit (node-bit data-bm node-bm kh shift)]
-            (cond
+            #_{:splint/disable [style/prefer-condp]} (cond
               ;; Child node — descend
-              (has-bit? node-bm bit)
-              (let [child-idx (get-index node-bm bit)
-                    child-off (slab/read-i32 sio root-off (+ node-header-size (* child-idx 4)))
-                    [new-child added?] (hamt-assoc sio child-off kh kb vb (+ shift shift-step))]
-                (if (== new-child child-off)
-                  [root-off false]
-                  [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child)
-                   added?]))
+                                                       (has-bit? node-bm bit)
+                                                       (let [child-idx (get-index node-bm bit)
+                                                             child-off (slab/read-i32 sio root-off (+ node-header-size (* child-idx 4)))
+                                                             [new-child added?] (hamt-assoc sio child-off kh kb vb (+ shift shift-step))]
+                                                         (if (== new-child child-off)
+                                                           [root-off false]
+                                                           [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child)
+                                                            added?]))
 
               ;; Inline data at this position
-              (has-bit? data-bm bit)
-              (let [data-idx (get-index data-bm bit)
-                    existing-kh (slab/read-i32 sio root-off
-                                               (+ (hashes-start-off node-bm) (* data-idx 4)))
-                    kvs (kv-data-start-off data-bm node-bm)
-                    pos (loop [i 0 p kvs]
-                          (if (== i data-idx) p
-                              (recur (inc i) (skip-kv-at sio root-off p))))]
-                (if (key-bytes-match? sio root-off pos kb)
+                                                       (has-bit? data-bm bit)
+                                                       (let [data-idx (get-index data-bm bit)
+                                                             existing-kh (slab/read-i32 sio root-off
+                                                                                        (+ (hashes-start-off node-bm) (* data-idx 4)))
+                                                             kvs (kv-data-start-off data-bm node-bm)
+                                                             pos (loop [i 0 p kvs]
+                                                                   (if (== i data-idx) p
+                                                                       (recur (inc i) (skip-kv-at sio root-off p))))]
+                                                         (if (key-bytes-match? sio root-off pos kb)
                   ;; Same key — replace value
-                  (let [kl (slab/read-i32 sio root-off pos)
-                        val-off (+ pos 4 kl)
-                        vl (slab/read-i32 sio root-off val-off)]
-                    (if (and (== vl (bytes-length vb))
-                             (slab/bytes-equal-at? sio root-off (+ val-off 4) vb))
-                      [root-off false]
-                      [(copy-node-replace-kv! sio root-off data-bm node-bm data-idx kh kb vb)
-                       false]))
+                                                           (let [kl (slab/read-i32 sio root-off pos)
+                                                                 val-off (+ pos 4 kl)
+                                                                 vl (slab/read-i32 sio root-off val-off)]
+                                                             (if (and (== vl (bytes-length vb))
+                                                                      (slab/bytes-equal-at? sio root-off (+ val-off 4) vb))
+                                                               [root-off false]
+                                                               [(copy-node-replace-kv! sio root-off data-bm node-bm data-idx kh kb vb)
+                                                                false]))
                   ;; Different key — push down
-                  (let [kl (slab/read-i32 sio root-off pos)
-                        existing-kb (slab/read-bytes sio root-off (+ pos 4) kl)
-                        voff (+ pos 4 kl)
-                        vl (slab/read-i32 sio root-off voff)
-                        existing-vb (slab/read-bytes sio root-off (+ voff 4) vl)]
-                    (if (or (== existing-kh kh) (>= shift 30))
+                                                           (let [kl (slab/read-i32 sio root-off pos)
+                                                                 existing-kb (slab/read-bytes sio root-off (+ pos 4) kl)
+                                                                 voff (+ pos 4 kl)
+                                                                 vl (slab/read-i32 sio root-off voff)
+                                                                 existing-vb (slab/read-bytes sio root-off (+ voff 4) vl)]
+                                                             (if (or (== existing-kh kh) (>= shift 30))
                       ;; Collision
-                      (let [coll (make-collision-node! sio kh
-                                                       [[existing-kh existing-kb existing-vb] [kh kb vb]])
-                            new-data-bm (bit-xor data-bm bit)
-                            new-node-bm (bit-or node-bm bit)
-                            new-child-idx (get-index new-node-bm bit)]
-                        [(copy-node-remove-kv-add-child!
-                          sio root-off data-bm node-bm new-data-bm new-node-bm
-                          data-idx new-child-idx coll)
-                         true])
+                                                               (let [coll (make-collision-node! sio kh
+                                                                                                [[existing-kh existing-kb existing-vb] [kh kb vb]])
+                                                                     new-data-bm (bit-xor data-bm bit)
+                                                                     new-node-bm (bit-or node-bm bit)
+                                                                     new-child-idx (get-index new-node-bm bit)]
+                                                                 [(copy-node-remove-kv-add-child!
+                                                                   sio root-off data-bm node-bm new-data-bm new-node-bm
+                                                                   data-idx new-child-idx coll)
+                                                                  true])
                       ;; Push down to sub-node
-                      (let [sub-shift (+ shift shift-step)
-                            existing-bit (bitpos existing-kh sub-shift)
-                            new-bit (bitpos kh sub-shift)]
-                        (if (== existing-bit new-bit)
-                          (let [[sub _] (hamt-assoc sio nil-offset existing-kh existing-kb existing-vb sub-shift)
-                                [final-sub _] (hamt-assoc sio sub kh kb vb sub-shift)
+                                                               (let [sub-shift (+ shift shift-step)
+                                                                     existing-bit (bitpos existing-kh sub-shift)
+                                                                     new-bit (bitpos kh sub-shift)]
+                                                                 (if (== existing-bit new-bit)
+                                                                   (let [[sub _] (hamt-assoc sio nil-offset existing-kh existing-kb existing-vb sub-shift)
+                                                                         [final-sub _] (hamt-assoc sio sub kh kb vb sub-shift)
                                 ;; sub (a single-entry node made here, never published) is copied into final-sub,
                                 ;; never referenced by it: freed now (eve.set's conj left such nodes allocated)
-                                _ (slab/free! sio sub)
-                                new-data-bm (bit-xor data-bm bit)
-                                new-node-bm (bit-or node-bm bit)
-                                new-child-idx (get-index new-node-bm bit)]
-                            [(copy-node-remove-kv-add-child!
-                              sio root-off data-bm node-bm new-data-bm new-node-bm
-                              data-idx new-child-idx final-sub)
-                             true])
-                          (let [sub-data-bm (bit-or existing-bit new-bit)
-                                sub (if (< (unsigned-bit-shift-right existing-bit 0)
-                                           (unsigned-bit-shift-right new-bit 0))
-                                      (make-two-entry-node! sio sub-data-bm
-                                                            existing-kh existing-kb existing-vb kh kb vb)
-                                      (make-two-entry-node! sio sub-data-bm
-                                                            kh kb vb existing-kh existing-kb existing-vb))
-                                new-data-bm (bit-xor data-bm bit)
-                                new-node-bm (bit-or node-bm bit)
-                                new-child-idx (get-index new-node-bm bit)]
-                            [(copy-node-remove-kv-add-child!
-                              sio root-off data-bm node-bm new-data-bm new-node-bm
-                              data-idx new-child-idx sub)
-                             true])))))))
+                                                                         _ (slab/free! sio sub)
+                                                                         new-data-bm (bit-xor data-bm bit)
+                                                                         new-node-bm (bit-or node-bm bit)
+                                                                         new-child-idx (get-index new-node-bm bit)]
+                                                                     [(copy-node-remove-kv-add-child!
+                                                                       sio root-off data-bm node-bm new-data-bm new-node-bm
+                                                                       data-idx new-child-idx final-sub)
+                                                                      true])
+                                                                   (let [sub-data-bm (bit-or existing-bit new-bit)
+                                                                         sub (if (< (unsigned-bit-shift-right existing-bit 0)
+                                                                                    (unsigned-bit-shift-right new-bit 0))
+                                                                               (make-two-entry-node! sio sub-data-bm
+                                                                                                     existing-kh existing-kb existing-vb kh kb vb)
+                                                                               (make-two-entry-node! sio sub-data-bm
+                                                                                                     kh kb vb existing-kh existing-kb existing-vb))
+                                                                         new-data-bm (bit-xor data-bm bit)
+                                                                         new-node-bm (bit-or node-bm bit)
+                                                                         new-child-idx (get-index new-node-bm bit)]
+                                                                     [(copy-node-remove-kv-add-child!
+                                                                       sio root-off data-bm node-bm new-data-bm new-node-bm
+                                                                       data-idx new-child-idx sub)
+                                                                      true])))))))
 
               ;; Empty position — add to data_bitmap
-              :else
-              (let [data-idx (get-index data-bm bit)
-                    new-data-bm (bit-or data-bm bit)]
-                [(copy-node-add-kv! sio root-off data-bm new-data-bm node-bm
-                                    data-idx kh kb vb)
-                 true])))
+                                                       :else
+                                                       (let [data-idx (get-index data-bm bit)
+                                                             new-data-bm (bit-or data-bm bit)]
+                                                         [(copy-node-add-kv! sio root-off data-bm new-data-bm node-bm
+                                                                             data-idx kh kb vb)
+                                                          true])))
 
         ;; Collision node
         3 (let [node-hash (slab/read-i32 sio root-off 4)
@@ -863,61 +863,61 @@
         1 (let [data-bm (slab/read-i32 sio root-off 4)
                 node-bm (slab/read-i32 sio root-off 8)
                 bit (node-bit data-bm node-bm kh shift)]
-            (cond
+            #_{:splint/disable [style/prefer-condp]} (cond
               ;; Child — descend
-              (has-bit? node-bm bit)
-              (let [child-idx (get-index node-bm bit)
-                    child-off (slab/read-i32 sio root-off (+ node-header-size (* child-idx 4)))
-                    [new-child removed?] (hamt-dissoc sio child-off kh kb (+ shift shift-step))]
-                (if-not removed?
-                  [root-off false]
-                  (if (== new-child nil-offset)
+                                                       (has-bit? node-bm bit)
+                                                       (let [child-idx (get-index node-bm bit)
+                                                             child-off (slab/read-i32 sio root-off (+ node-header-size (* child-idx 4)))
+                                                             [new-child removed?] (hamt-dissoc sio child-off kh kb (+ shift shift-step))]
+                                                         (if-not removed?
+                                                           [root-off false]
+                                                           (if (== new-child nil-offset)
                     ;; Child empty — remove from node_bitmap
                     ;; TODO: compact node if only 1 entry remains
-                    [(copy-node-patch-child! sio root-off data-bm node-bm child-idx nil-offset)
-                     true]
-                    [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child)
-                     true])))
+                                                             [(copy-node-patch-child! sio root-off data-bm node-bm child-idx nil-offset)
+                                                              true]
+                                                             [(copy-node-patch-child! sio root-off data-bm node-bm child-idx new-child)
+                                                              true])))
 
               ;; Inline data
-              (has-bit? data-bm bit)
-              (let [data-idx (get-index data-bm bit)
-                    kvs (kv-data-start-off data-bm node-bm)
-                    pos (loop [i 0 p kvs]
-                          (if (== i data-idx) p
-                              (recur (inc i) (skip-kv-at sio root-off p))))]
-                (if (key-bytes-match? sio root-off pos kb)
+                                                       (has-bit? data-bm bit)
+                                                       (let [data-idx (get-index data-bm bit)
+                                                             kvs (kv-data-start-off data-bm node-bm)
+                                                             pos (loop [i 0 p kvs]
+                                                                   (if (== i data-idx) p
+                                                                       (recur (inc i) (skip-kv-at sio root-off p))))]
+                                                         (if (key-bytes-match? sio root-off pos kb)
                   ;; Found — remove it
-                  (let [new-data-bm (bit-xor data-bm bit)
-                        dc (popcount32 new-data-bm)
-                        cc (popcount32 node-bm)]
-                    (if (and (zero? dc) (zero? cc))
-                      [nil-offset true]
+                                                           (let [new-data-bm (bit-xor data-bm bit)
+                                                                 dc (popcount32 new-data-bm)
+                                                                 cc (popcount32 node-bm)]
+                                                             (if (and (zero? dc) (zero? cc))
+                                                               [nil-offset true]
                       ;; Rebuild without this entry
                       ;; Read all children, hashes, kvs except removed
-                      (let [old-dc   (popcount32 data-bm)
-                            children   (mapv #(slab/read-i32 sio root-off (+ node-header-size (* % 4))) (range cc))
-                            h-off   (hashes-start-off node-bm)
-                            hashes   (vec (keep-indexed
-                                           (fn [i _] (when (not= i data-idx)
-                                                       (slab/read-i32 sio root-off (+ h-off (* i 4)))))
-                                           (range old-dc)))
-                            kvs-list   (let [kv-off (kv-data-start-off data-bm node-bm)]
-                                         (loop [i 0 pos kv-off acc []]
-                                           (if (>= i old-dc) acc
-                                               (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
-                                                 (recur (inc i) np
-                                                        (if (== i data-idx) acc (conj acc [ek ev]))))))) kvs-size   (reduce (fn [a [kb vb]] (+ a (calc-kv-size kb vb))) 0 kvs-list)
-                            nsize   (+ node-header-size (* 4 cc) (* 4 dc) kvs-size)
-                            new-off   (slab/alloc! sio nsize)] (slab/write-u8! sio new-off 0 node-type-bitmap) (slab/write-u8! sio new-off 1 0) (slab/write-u16! sio new-off 2 (kv-total-cache kvs-size)) (slab/write-i32! sio new-off 4 new-data-bm) (slab/write-i32! sio new-off 8 node-bm) (dotimes [i cc]
-                                                                                                                                                                                                                                                                                                (slab/write-i32! sio new-off (+ node-header-size (* i 4)) (nth children i))) (let [new-h-off (hashes-start-off node-bm)]
-                                                                                                                                                                                                                                                                                                                                                                               (dotimes [i dc]
-                                                                                                                                                                                                                                                                                                                                                                                 (slab/write-i32! sio new-off (+ new-h-off (* i 4)) (nth hashes i)))) (reduce (fn [p [ek ev]] (write-kv! sio new-off p ek ev))
-                                                                                                                                                                                                                                                                                                                                                                                                                                                              (kv-data-start-off new-data-bm node-bm) kvs-list) [new-off true])))
+                                                               (let [old-dc   (popcount32 data-bm)
+                                                                     children   (mapv #(slab/read-i32 sio root-off (+ node-header-size (* % 4))) (range cc))
+                                                                     h-off   (hashes-start-off node-bm)
+                                                                     hashes   (vec (keep-indexed
+                                                                                    (fn [i _] (when (not= i data-idx)
+                                                                                                (slab/read-i32 sio root-off (+ h-off (* i 4)))))
+                                                                                    (range old-dc)))
+                                                                     kvs-list   (let [kv-off (kv-data-start-off data-bm node-bm)]
+                                                                                  (loop [i 0 pos kv-off acc []]
+                                                                                    (if (>= i old-dc) acc
+                                                                                        (let [[ek ev np] (read-kv-bytes-at sio root-off pos)]
+                                                                                          (recur (inc i) np
+                                                                                                 (if (== i data-idx) acc (conj acc [ek ev]))))))) kvs-size   (reduce (fn [a [kb vb]] (+ a (calc-kv-size kb vb))) 0 kvs-list)
+                                                                     nsize   (+ node-header-size (* 4 cc) (* 4 dc) kvs-size)
+                                                                     new-off   (slab/alloc! sio nsize)] (slab/write-u8! sio new-off 0 node-type-bitmap) (slab/write-u8! sio new-off 1 0) (slab/write-u16! sio new-off 2 (kv-total-cache kvs-size)) (slab/write-i32! sio new-off 4 new-data-bm) (slab/write-i32! sio new-off 8 node-bm) (dotimes [i cc]
+                                                                                                                                                                                                                                                                                                                                         (slab/write-i32! sio new-off (+ node-header-size (* i 4)) (nth children i))) (let [new-h-off (hashes-start-off node-bm)]
+                                                                                                                                                                                                                                                                                                                                                                                                                        (dotimes [i dc]
+                                                                                                                                                                                                                                                                                                                                                                                                                          (slab/write-i32! sio new-off (+ new-h-off (* i 4)) (nth hashes i)))) (reduce (fn [p [ek ev]] (write-kv! sio new-off p ek ev))
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       (kv-data-start-off new-data-bm node-bm) kvs-list) [new-off true])))
                   ;; Key doesn't match
-                  [root-off false]))
+                                                           [root-off false]))
 
-              :else [root-off false]))
+                                                       :else [root-off false]))
 
         ;; Collision node
         3 (let [node-hash (slab/read-i32 sio root-off 4)

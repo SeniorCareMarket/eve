@@ -95,13 +95,11 @@
       (let [methods-map (:methods mapping)
             method-info (get methods-map name)]
         (when method-info
-          (if-let [cljs-name (:cljs-name method-info)]
+          (when-let [cljs-name (:cljs-name method-info)]
             (assoc method-spec
                    :name cljs-name
                    :cljs-proto-override (or (:cljs-proto-override method-info)
-                                            (:cljs-proto method-info)))
-            ;; nil cljs-name means CLJ-only method, skip
-            nil))))))
+                                            (:cljs-proto method-info)))))))))
 
 (defn cljs-translate-protocol
   "Translate a parsed protocol to its CLJS form.

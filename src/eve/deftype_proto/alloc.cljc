@@ -995,23 +995,22 @@
         [flags-region flags-off] [pointer-region pointer-off]] — the addresses of the block's COUNT,
         FLAGS and POINTER column entries — or nil when the class carries no columns."
     [^JvmSlabCtx ctx ^long ci ^long block-idx]
-    (let [dr (aget ^objects (field ctx desc-regions) ci)]
-      (when dr
-        (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
-              pr   (aget ^objects (field ctx desc-pointer-regions) ci)
-              off  (aget ^ints (field ctx desc-offsets) ci)
+    (when-let [dr (aget ^objects (field ctx desc-regions) ci)]
+      (let [fr   (aget ^objects (field ctx desc-flags-regions) ci)
+            pr   (aget ^objects (field ctx desc-pointer-regions) ci)
+            off  (aget ^ints (field ctx desc-offsets) ci)
                  ;; a heap / SAB slab carries all three columns in its own region (FLAGS right after
                  ;; COUNT, POINTER right after FLAGS); an mmap class's flags and pointer regions are
                  ;; their own files, their columns at offset 0 there
-              foff (if (identical? fr dr)
-                     (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
-                     off)
-              poff (if (identical? pr dr)
-                     (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
-                     off)]
-          [[dr (+ off (* 4 block-idx))]
-           [fr (+ foff (* 4 block-idx))]
-           [pr (+ poff (* 4 block-idx))]]))))
+            foff (if (identical? fr dr)
+                   (+ off (* 4 (aget ^ints (field ctx total-blocks) ci)))
+                   off)
+            poff (if (identical? pr dr)
+                   (+ off (* 8 (aget ^ints (field ctx total-blocks) ci)))
+                   off)]
+        [[dr (+ off (* 4 block-idx))]
+         [fr (+ foff (* 4 block-idx))]
+         [pr (+ poff (* 4 block-idx))]])))
 
   (defn ctx-free!
     "The block at slab-offset in ctx's slabs freed: true, or false when it
@@ -1464,8 +1463,7 @@
 (defn bytes-i32
   "The little-endian i32 at byte i of byte array a (plain loads)."
   ^long [^bytes a ^long i]
-  (let [a a
-        i (int i)]
+  (let [i (int i)]
     (long (unchecked-int
            (bit-or (bit-and (long (aget a i)) 0xFF)
                    (bit-shift-left (bit-and (long (aget a (eve.host/unchecked-add-int i 1))) 0xFF) 8)
@@ -1548,7 +1546,6 @@
     (if (nil? arr)
       (slab/bytes-equal-at? sio slab-off field-off b)
       (let [^bytes a arr
-            b b
             n (alength b)
             i0 (node-at ctx slab-off field-off)]
         (loop [j 0]

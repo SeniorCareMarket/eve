@@ -371,15 +371,15 @@
   [v]
   (some (fn [f] (f v)) @nominal-rep-converters))
 
-#?(:jank (do) :glj (do) :clj (do
-                               (defn- typed-rep [v]
-                                 (let [c (class v) tkey (type-key-of c)
+#_{:splint/disable [style/useless-do]} #?(:jank (do) :glj (do) :clj (do
+                                                                      (defn- typed-rep [v]
+                                                                        (let [c (class v) tkey (type-key-of c)
         ;; a record's field keys are keywords; the class basis names
         ;; them as symbols -- one enumeration, keyword form, basis order
-                                       basis (mapv (fn [f] (keyword (name f))) (or (record-basis c) []))
-                                       fields (reduce (fn [m k] (assoc m k (to-rep (get v k)))) (array-map)
-                                                      (distinct (concat basis (keys v))))]
-                                   (TypedVal. tkey (fingerprint tkey fields) fields)))))
+                                                                              basis (mapv (fn [f] (keyword (name f))) (or (record-basis c) []))
+                                                                              fields (reduce (fn [m k] (assoc m k (to-rep (get v k)))) (array-map)
+                                                                                             (distinct (concat basis (keys v))))]
+                                                                          (TypedVal. tkey (fingerprint tkey fields) fields)))))
 
 (defn to-rep
   "A plain value (or a flat handle) as a rep tree."
@@ -490,41 +490,41 @@
                                (defn- scan
                                  "The chunk context for rep: symbol codes, shapes, types."
                                  [rep]
-                                 (let [counts (HashMap.) shapes (HashMap.) types (HashMap.)]
-                                   (scan! rep counts shapes types false)
-                                   (let [member? (fn [e] (let [k (key e) ^longs c (val e)]
-                                                           (or (keyword? k) (symbol? k) (>= (aget c 0) 2) (pos? (aget c 1)))))
-                                         syms (->> (filter member? counts)
-                                                   (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))]))
-                                                   (mapv key))
-                                         shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
-                                                          (sort-by second (map (fn [e] [(key e) (val e)]) shapes)))
-                                         type-list (mapv (fn [[tk _]] {:key (first tk) :fp (second tk)})
-                                                         (sort-by second (map (fn [e] [(key e) (val e)]) types)))]
+                                 #_{:splint/disable [style/redundant-let]} (let [counts (HashMap.) shapes (HashMap.) types (HashMap.)]
+                                                                             (scan! rep counts shapes types false)
+                                                                             (let [member? (fn [e] (let [k (key e) ^longs c (val e)]
+                                                                                                     (or (keyword? k) (symbol? k) (>= (aget c 0) 2) (pos? (aget c 1)))))
+                                                                                   syms (->> (filter member? counts)
+                                                                                             (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))]))
+                                                                                             (mapv key))
+                                                                                   shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
+                                                                                                    (sort-by second (map (fn [e] [(key e) (val e)]) shapes)))
+                                                                                   type-list (mapv (fn [[tk _]] {:key (first tk) :fp (second tk)})
+                                                                                                   (sort-by second (map (fn [e] [(key e) (val e)]) types)))]
       ;; field classes need one instance per type; find them in the rep
-                                     (let [instances (HashMap.)]
-                                       (letfn [(find! [r]
-                                                 (cond (instance? TypedVal r)
-                                                       (let [tv ^TypedVal r tk [(.-tkey tv) (.-fp tv)]]
-                                                         (when-not (.containsKey instances tk) (.put instances tk tv))
-                                                         (doseq [[_ v] (.-fields tv)] (find! v)))
-                                                       (instance? MetaVal r) (find! (.-inner ^MetaVal r))
-                                                       (instance? BytesVal r) nil
-                                                       (coll? r) (doseq [e r] (find! e))
-                                                       (map? r) (doseq [[_ v] r] (find! v))
-                                                       :else nil))]
-                                         (find! rep))
-                                       {:sym (zipmap syms (range)) :syms syms
-                                        :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
-                                        :shape-list shape-list
-                                        :types (zipmap (map (fn [t] [(:key t) (:fp t)]) type-list) (range))
-                                        :type-list (mapv (fn [t]
-                                                           (let [tv (.get instances [(:key t) (:fp t)])]
-                                                             (assoc t :fields
-                                                                    (mapv (fn [k] {:name k
-                                                                                   :class (field-class (get (.-fields ^TypedVal tv) k) types)})
-                                                                          (sort-by-key-bytes (keys (.-fields ^TypedVal tv)))))))
-                                                         type-list)}))))))
+                                                                               (let [instances (HashMap.)]
+                                                                                 (letfn [(find! [r]
+                                                                                           (cond (instance? TypedVal r)
+                                                                                                 (let [tv ^TypedVal r tk [(.-tkey tv) (.-fp tv)]]
+                                                                                                   (when-not (.containsKey instances tk) (.put instances tk tv))
+                                                                                                   (doseq [[_ v] (.-fields tv)] (find! v)))
+                                                                                                 (instance? MetaVal r) (find! (.-inner ^MetaVal r))
+                                                                                                 (instance? BytesVal r) nil
+                                                                                                 (coll? r) (doseq [e r] (find! e))
+                                                                                                 (map? r) (doseq [[_ v] r] (find! v))
+                                                                                                 :else nil))]
+                                                                                   (find! rep))
+                                                                                 {:sym (zipmap syms (range)) :syms syms
+                                                                                  :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
+                                                                                  :shape-list shape-list
+                                                                                  :types (zipmap (map (fn [t] [(:key t) (:fp t)]) type-list) (range))
+                                                                                  :type-list (mapv (fn [t]
+                                                                                                     (let [tv (.get instances [(:key t) (:fp t)])]
+                                                                                                       (assoc t :fields
+                                                                                                              (mapv (fn [k] {:name k
+                                                                                                                             :class (field-class (get (.-fields ^TypedVal tv) k) types)})
+                                                                                                                    (sort-by-key-bytes (keys (.-fields ^TypedVal tv)))))))
+                                                                                                   type-list)}))))))
 
 #?(:jank (do
 ;; The type table on jank: the JVM's walk — a TypedVal registers its
@@ -825,26 +825,26 @@
 ;; narrowed kind and :base-plan/:runs for run-end.
 ;; ---------------------------------------------------------------------------
 
-#?(:clj (do
-          (defn- plain-integer? [x]
-            (and (integer? x) (not (instance? clojure.lang.BigInt x))
-                 (not (instance? java.math.BigInteger x)) (not (instance? java.math.BigDecimal x)))))
-   :cljs (do
-           (defn- plain-integer?
-             "An integer on this host: a js/BigInt, or an integral JS number
+#_{:splint/disable [style/useless-do]} #?(:clj (do
+                                                 (defn- plain-integer? [x]
+                                                   (and (integer? x) (not (instance? clojure.lang.BigInt x))
+                                                        (not (instance? java.math.BigInteger x)) (not (instance? java.math.BigDecimal x)))))
+                                          :cljs (do
+                                                  (defn- plain-integer?
+                                                    "An integer on this host: a js/BigInt, or an integral JS number
    (Eve's CLJS number model writes those as integers, as its scalar
    codec does). NaN and the infinities are not integers."
-             [x]
-             (or (bigint? x)
-                 (and (number? x) (== x (js/Math.floor x)) (js/isFinite x))))
+                                                    [x]
+                                                    (or (bigint? x)
+                                                        (and (number? x) (== x (js/Math.floor x)) (js/isFinite x))))
 
-           (defn- val=
-             "Column-value equality: integers compare in BigInt space, so a
+                                                  (defn- val=
+                                                    "Column-value equality: integers compare in BigInt space, so a
    js/BigInt and an integral number of the same value are one value."
-             [a b]
-             (if (or (bigint? a) (bigint? b))
-               (and (plain-integer? a) (plain-integer? b) (bi= a b))
-               (= a b)))))
+                                                    [a b]
+                                                    (if (or (bigint? a) (bigint? b))
+                                                      (and (plain-integer? a) (plain-integer? b) (bi= a b))
+                                                      (= a b)))))
 
 (defn- runs-of
   "[[value run-length] ...] over consecutive distinct values."
@@ -888,36 +888,36 @@
   [cx vals]
   (let [present (filterv some? vals) n (count vals)]
     (when (seq present)
-      (let [base
-            (cond
-              (every? boolean? present) {:kind 16}
-              (every? plain-integer? present)
-              (let [mn (col-min present) mx (col-max present)
-                    range (col-range mn mx)]
-                (cond
-                  (and (>= n 16) (ile range 255)) {:kind 22 :base mn :width 1}
-                  (and (>= n 16) (ile range 65535)) {:kind 22 :base mn :width 2}
-                  (ile I32-MIN mn) (if (ile mx I32-MAX)
-                                     {:kind 6}
-                                     (if (and (>= n 16) (ile range 4294967295))
-                                       {:kind 22 :base mn :width 4}
-                                       {:kind 10}))
-                  :else {:kind 10}))
-              #?@(:jank [(every? number? present) {:kind 9}]
-                  :clj [(every? #(instance? Float %) present) {:kind 8}
-                        (every? #(instance? Double %) present) {:kind 9}]
+      #_{:splint/disable [lint/let-when style/prefer-condp]} (let [base
+                                                                   (cond
+                                                                     (every? boolean? present) {:kind 16}
+                                                                     (every? plain-integer? present)
+                                                                     (let [mn (col-min present) mx (col-max present)
+                                                                           range (col-range mn mx)]
+                                                                       (cond
+                                                                         (and (>= n 16) (ile range 255)) {:kind 22 :base mn :width 1}
+                                                                         (and (>= n 16) (ile range 65535)) {:kind 22 :base mn :width 2}
+                                                                         (ile I32-MIN mn) (if (ile mx I32-MAX)
+                                                                                            {:kind 6}
+                                                                                            (if (and (>= n 16) (ile range 4294967295))
+                                                                                              {:kind 22 :base mn :width 4}
+                                                                                              {:kind 10}))
+                                                                         :else {:kind 10}))
+                                                                     #?@(:jank [(every? number? present) {:kind 9}]
+                                                                         :clj [(every? #(instance? Float %) present) {:kind 8}
+                                                                               (every? #(instance? Double %) present) {:kind 9}]
                   ;; no Float on this host: the numbers that are not
                   ;; integers are doubles (kind 9), as on the JVM
-                  :cljs [(every? number? present) {:kind 9}])
-              (every? #(contains? (:sym cx) %) present)
-              {:kind (if (< (reduce max (map #(get (:sym cx) %) present)) 256) 17 18)}
-              (every? string? present) {:kind 19}
-              :else nil)]
-        (when base
-          (if (and (contains? #{6 10 17 18} (:kind base)) (>= n 32)
-                   (<= (count (runs-of vals)) (max 2 (quot n 16))))
-            {:kind 23 :base-plan base :runs (runs-of vals)}
-            base))))))
+                                                                         :cljs [(every? number? present) {:kind 9}])
+                                                                     (every? #(contains? (:sym cx) %) present)
+                                                                     {:kind (if (< (reduce max (map #(get (:sym cx) %) present)) 256) 17 18)}
+                                                                     (every? string? present) {:kind 19}
+                                                                     :else nil)]
+                                                               (when base
+                                                                 (if (and (contains? #{6 10 17 18} (:kind base)) (>= n 32)
+                                                                          (<= (count (runs-of vals)) (max 2 (quot n 16))))
+                                                                   {:kind 23 :base-plan base :runs (runs-of vals)}
+                                                                   base))))))
 
 (declare write-node!)
 
@@ -1113,14 +1113,13 @@
           (let [offs (mapv (fn [e] (write-node! w cx e)) rep)]
             (write-offsets-node! w 34 #(fio/buf-varint w (count rep)) offs))) (write-batch! w cx bidx rep)
         :else
-        (let [plan (when (every? (fn [e] (or (nil? e) (not (coll? e)) (instance? BytesVal e))) rep)
+        (if-let [plan (when (every? (fn [e] (or (nil? e) (not (coll? e)) (instance? BytesVal e))) rep)
                      ;; byte arrays have no §5 column; exclude them
-                     (when-not (some #(instance? BytesVal %) rep) (column-plan cx rep)))]
-          (if plan
-            (let [s (fio/buf-pos w)]
-              (fio/buf-u8 w 0x23) (fio/buf-varint w (count rep)) (write-column! w cx plan rep nil) s)
-            (let [offs (mapv (fn [e] (write-node! w cx e)) rep)]
-              (write-offsets-node! w 0x22 #(fio/buf-varint w (count rep)) offs))))))
+                        (when-not (some #(instance? BytesVal %) rep) (column-plan cx rep)))]
+          (let [s (fio/buf-pos w)]
+            (fio/buf-u8 w 0x23) (fio/buf-varint w (count rep)) (write-column! w cx plan rep nil) s)
+          (let [offs (mapv (fn [e] (write-node! w cx e)) rep)]
+            (write-offsets-node! w 0x22 #(fio/buf-varint w (count rep)) offs)))))
 
     (sequential? rep)
     (let [offs (mapv (fn [e] (write-node! w cx e)) rep)]

@@ -309,7 +309,7 @@
     ;; 4. Wait for workers, then dispatch benchmarks to :core
     (on-when (and (contains? @s/peers :core)
                   (contains? @s/peers :future)
-                  (some #(.startsWith (name %) "fp-") (keys @s/peers)))
+                  (some #(str/starts-with? (name %) "fp-") (keys @s/peers)))
              {:max-time 30000}
              (println (str "Workers ready. Peers: " (set (keys @s/peers))))
       ;; Give all 16 fp workers time to register before starting bench

@@ -58,11 +58,11 @@
 (defn- ref-i64-str
   "The i64 at i as a decimal string, exact on every host."
   [bv i]
-  (let [lo (ref-u32 bv i) hi (ref-u32 bv (+ i 4))]
-    #?(:cljs (let [v (+ (js/BigInt lo) (* (js/BigInt hi) (js/BigInt 4294967296)))]
-               (str (if (>= hi 2147483648) (- v (js/BigInt "18446744073709551616")) v)))
-       :default (let [v (+' lo (*' hi 4294967296))]
-                  (str (if (>= hi 2147483648) (-' v 18446744073709551616N) v))))))
+  #_{:splint/disable [style/redundant-let]} (let [lo (ref-u32 bv i) hi (ref-u32 bv (+ i 4))]
+                                              #?(:cljs (let [v (+ (js/BigInt lo) (* (js/BigInt hi) (js/BigInt 4294967296)))]
+                                                         (str (if (>= hi 2147483648) (- v (js/BigInt "18446744073709551616")) v)))
+                                                 :default (let [v (+' lo (*' hi 4294967296))]
+                                                            (str (if (>= hi 2147483648) (-' v 18446744073709551616N) v))))))
 (defn- ref-varint
   "[value next] of the unsigned LEB128 at i, or nil when it runs past the end."
   [bv i]

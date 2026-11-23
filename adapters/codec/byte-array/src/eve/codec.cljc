@@ -189,11 +189,10 @@
                                                       (= ::none h) nil
                                                       :else #?(:cljs nil
                                                                :clje nil
-                                                               :default (let [v (try (requiring-resolve 'eve.flat.freeze/frozen-value)
-                                                                                     (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
-                                                                          (if v
-                                                                            (do (reset! frozen-ctor-hook @v) @v)
-                                                                            (do (reset! frozen-ctor-hook ::none) nil)))))))
+                                                               :default (if-let [v (try (requiring-resolve 'eve.flat.freeze/frozen-value)
+                                                                                        (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))]
+                                                                          (do (reset! frozen-ctor-hook @v) @v)
+                                                                          (do (reset! frozen-ctor-hook ::none) nil))))))
 
 ;; --- EVE binary format — deserializer ---
 

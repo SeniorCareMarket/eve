@@ -932,12 +932,11 @@
         ;; here at the entry every decode path shares.
         bytes (if (instance? js/Uint8Array bytes) bytes (js/Uint8Array. bytes))
         len   (.-length bytes)]
-    (if (zero? len)
-      nil
+    (when-not (zero? len)
       ;; Check for fast-path magic prefix
-      (if (and (>= len 3)
-               (== (aget bytes 0) d/direct-magic-0)
-               (== (aget bytes 1) d/direct-magic-1))
+      (when (and (>= len 3)
+                 (== (aget bytes 0) d/direct-magic-0)
+                 (== (aget bytes 1) d/direct-magic-1))
         (let [tag (aget bytes 2)]
           (cond
             (== tag fast-tag-false) false
@@ -1059,7 +1058,7 @@
             ;; Data is always 16-byte aligned (SIMD-ready), so no alignment check needed.
             (== tag fast-tag-typed-array)
             (let [data-len (.-byteLength bytes)]
-              (if (== data-len 7)
+              (when (== data-len 7)
                 ;; SAB pointer format (16-byte header)
                 (let [ptr-dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                       slab-offset (.getInt32 ptr-dv 3 true)
@@ -1114,9 +1113,7 @@
                               0x09 (js/Float64Array. ab)
                               0x0A (when (exists? js/BigInt64Array) (js/BigInt64Array. ab))
                               0x0B (when (exists? js/BigUint64Array) (js/BigUint64Array. ab))
-                              nil)))))))
-                ;; Inline format (8+N bytes) — not currently used in deserialize-element path
-                nil))
+                              nil)))))))))
 
             ;; Flat map — cross-process binary map encoding
             (== tag fast-tag-flat-map)
@@ -1159,9 +1156,7 @@
             (when-let [ctor (get-type-constructor tag)]
               (let [dv (js/DataView. (.-buffer bytes) (.-byteOffset bytes) (.-byteLength bytes))
                     offset (.getInt32 dv 3 true)]
-                (ctor s-atom-env offset)))))
-        ;; No magic prefix — unsupported legacy format
-        nil))))
+                (ctor s-atom-env offset)))))))))
 
 ;;-----------------------------------------------------------------------------
 ;; Zero-copy deserialization from SAB DataView (Phase 6 atom optimization)
@@ -1175,11 +1170,10 @@
    For SAB pointer types (map/set/vec/list), constructs the wrapper directly
    from the DataView bytes — true O(1) deref."
   [s-atom-env ^js dv data-offset data-len]
-  (if (zero? data-len)
-    nil
-    (if (and (>= data-len 3)
-             (== (.getUint8 dv data-offset) d/direct-magic-0)
-             (== (.getUint8 dv (inc data-offset)) d/direct-magic-1))
+  (when-not (zero? data-len)
+    (when (and (>= data-len 3)
+               (== (.getUint8 dv data-offset) d/direct-magic-0)
+               (== (.getUint8 dv (inc data-offset)) d/direct-magic-1))
       (let [tag (.getUint8 dv (+ data-offset 2))
             off data-offset]
         (cond
@@ -1297,22 +1291,20 @@
 
           ;; SAB pointer tags — direct constructor
           (and (>= tag fast-tag-sab-map) (<= tag fast-tag-sab-list))
-          (let [ctor (get-type-constructor tag)]
-            (when ctor
-              (let [instance-offset (.getInt32 dv (+ off 3) true)]
-                (ctor s-atom-env instance-offset))))
+          (when-let [ctor (get-type-constructor tag)]
+            (let [instance-offset (.getInt32 dv (+ off 3) true)]
+              (ctor s-atom-env instance-offset)))
 
           ;; Record tag
           (== tag fast-tag-record)
-          (let [sab-map-ctor (get-type-constructor fast-tag-sab-map)]
-            (when sab-map-ctor
-              (let [instance-offset (.getInt32 dv (+ off 3) true)
-                    sab-m (sab-map-ctor s-atom-env instance-offset)
-                    tag-str (get sab-m :eve/record-tag)]
-                (if-let [map-fn (and tag-str (.get record-ctor-by-tag tag-str))]
-                  (let [field-map (dissoc (reduce-kv assoc {} sab-m) :eve/record-tag)]
-                    (map-fn field-map))
-                  sab-m))))
+          (when-let [sab-map-ctor (get-type-constructor fast-tag-sab-map)]
+            (let [instance-offset (.getInt32 dv (+ off 3) true)
+                  sab-m (sab-map-ctor s-atom-env instance-offset)
+                  tag-str (get sab-m :eve/record-tag)]
+              (if-let [map-fn (and tag-str (.get record-ctor-by-tag tag-str))]
+                (let [field-map (dissoc (reduce-kv assoc {} sab-m) :eve/record-tag)]
+                  (map-fn field-map))
+                sab-m)))
 
           ;; Typed array — SAB pointer or inline blob.
           ;; Format 1 (SAB pointer, 7 bytes): [magic][magic][tag][sab-offset:i32]
@@ -1391,14 +1383,11 @@
 
           ;; EveArray pointer — live SAB-backed array (zero-copy reconstruct)
           (== tag fast-tag-eve-array)
-          (let [ctor (get-type-constructor tag)]
-            (when ctor
-              (let [block-offset (.getInt32 dv (+ off 3) true)]
-                (ctor s-atom-env block-offset))))
+          (when-let [ctor (get-type-constructor tag)]
+            (let [block-offset (.getInt32 dv (+ off 3) true)]
+              (ctor s-atom-env block-offset)))
 
-          :else nil))
-      ;; No magic prefix — unsupported legacy format
-      nil)))
+          :else nil)))))
 
 ;;-----------------------------------------------------------------------------
 ;; Disposal helper for memory management

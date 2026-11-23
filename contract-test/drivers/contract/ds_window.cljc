@@ -41,9 +41,9 @@
   "Run body; on any throw, answer the string ':throws <err>' (the
    ds-flagship / contend.cljc convention)."
   [& body]
-  `(try ~@body
-        (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
-          (str :throws " " t#))))
+  #_{:splint/disable [lint/body-unquote-splicing]} `(try ~@body
+                                                         (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
+                                                           (str :throws " " t#))))
 
 (def ^:private atom-name "contract/ds-flagship")
 (def ^:private window-ms 60000)

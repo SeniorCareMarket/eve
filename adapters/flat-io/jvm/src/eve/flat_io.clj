@@ -627,7 +627,7 @@
   java.util.RandomAccess
   java.util.Collection
   (contains [this o] (boolean (some #(= % o) this)))
-  (containsAll [this c] (every? #(.contains this %) c))
+  #_{:splint/disable [style/prefer-clj-string]} (containsAll [this c] (every? #(.contains this %) c))
   (isEmpty [_] (zero? n))
   (toArray [_this] (let [a (object-array n)] (dotimes [i n] (aset a i (elem b off kind i))) a))
   (^objects toArray [_this ^objects arr] (.toArray ^java.util.List (tuple-vec b off n kind) arr))

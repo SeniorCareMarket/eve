@@ -15,10 +15,10 @@
 (defn -main [& args]
   ;; fs3run8 window modes (seed/go/window/counters) dispatch to
   ;; contract.ds-window; the classic rounds stay on contract.ds-flagship.
-  (let [run (fn [] (if (#{"seed" "go" "window" "counters"} (first args))
-                     (apply window/-main args)
-                     (apply flagship/-main args)))]
-    #?(:cljs (-> (ps/init! :force true)
-                 (.then (fn [_] (run))))
-       :default (do (run)
-                    #?(:jank (proc/exit! 0) :default nil)))))
+  #_{:splint/disable [style/let-do]} (let [run (fn [] (if (#{"seed" "go" "window" "counters"} (first args))
+                                                        (apply window/-main args)
+                                                        (apply flagship/-main args)))]
+                                       #?(:cljs (-> (ps/init! :force true)
+                                                    (.then (fn [_] (run))))
+                                          :default (do (run)
+                                                       #?(:jank (proc/exit! 0) :default nil)))))

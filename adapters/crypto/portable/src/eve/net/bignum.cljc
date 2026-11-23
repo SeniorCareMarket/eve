@@ -159,7 +159,7 @@
                                   (let [x (+ (nth t p) carry)]
                                     (recur (inc p) (quot x BASE) (assoc! t p (mod x BASE))))))))]
                   (recur t (inc i)))))
-        r (norm (into [] (subvec t k)))]
+        r #_{:splint/disable [lint/into-literal]} (norm (into [] (subvec t k)))]
     (if (neg? (cmp r n)) r (sub r n))))
 
 (defn mont-mul "a·b·R^-1 mod n for a, b < n" [ctx a b] (redc ctx (mul a b)))
@@ -187,7 +187,7 @@
 
 (defn modinv-odd "a^-1 mod p for odd p and gcd(a, p) = 1, else nil (HAC 14.64)" [a p]
   (let [a (mod-limbs a p)]
-    (when-not (empty? a)
+    (when (seq a)
       (loop [u a, v p, x1 [1], x2 []]
         (cond
           (= u [1]) x1
@@ -204,7 +204,7 @@
   (cond (odd?* n) (modinv-odd a n)
         (odd?* a) (when-let [t (modinv-odd n a)]
                     (let [[k _] (divmod (sub (mul t n) [1]) a), k (mod-limbs k n)]
-                      (if (empty? k) nil ((when-not (empty? k) (sub n k)) n k))))
+                      (when (seq k) ((when (seq k) (sub n k)) n k))))
         :else nil))
 
 ;; ── the byte surface

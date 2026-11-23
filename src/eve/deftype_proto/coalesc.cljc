@@ -402,8 +402,7 @@
 
         ;; Past end — wrap around
         (>= i max-desc)
-        (if wrapped?
-          nil
+        (when-not wrapped?
           (recur 0 true))
 
         :else
@@ -414,7 +413,7 @@
                                   (zero? (desc-rung-field region dt-off max-desc i)))
                          (desc-load region dt-off max-desc i desc-block-capacity))]
           (if (and (== status status-free)
-                   (not (nil? capacity))
+                   (some? capacity)
                    (>= capacity size))
             ;; Candidate found — try to lock
             (if (try-lock! region dt-off max-desc i)

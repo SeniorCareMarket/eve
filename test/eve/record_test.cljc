@@ -1,9 +1,10 @@
 (ns eve.record-test
   (:refer-clojure :exclude [defrecord])
+  #_{:splint/disable [naming/conventional-aliases]}
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             ;; one alias for whichever reader the seat provides (cljs.reader on :cljs, clojure.edn elsewhere)
-            #?(:cljs [cljs.reader :as reader] :default #_{:splint/disable [naming/conventional-aliases]} [clojure.edn :as reader])
+            #?(:cljs [cljs.reader :as reader] :default [clojure.edn :as reader])
             [eve.host :refer [swap!]]
             [eve.record :as r #?@(:cljs [:refer-macros [defrecord]] :default [:refer [defrecord]])]
             [eve.deftype :as edt]

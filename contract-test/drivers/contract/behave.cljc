@@ -16,9 +16,9 @@
    is a reader conditional: basilisp rejects (catch Throwable ..) — there
    Throwable is a Var, not a class type."
   [& body]
-  `(try ~@body
-        (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
-          (str :throws " " t#))))
+  #_{:splint/disable [lint/body-unquote-splicing]} `(try ~@body
+                                                         (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) t#
+                                                           (str :throws " " t#))))
 
 (defn- row [aspect value]
   (println (pr-str {:aspect aspect :value value})))

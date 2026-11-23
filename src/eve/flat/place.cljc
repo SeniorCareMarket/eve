@@ -466,12 +466,12 @@
                     ;; the other passes by construction of the #?
                     ;; binding above), so this test is the fast
                     ;; path's gate, constant only per pass.
-                    (if #_{:clj-kondo/ignore [:constant-condition]} (and arr (not (== ci 6)))
-                        #?(:clj (System/arraycopy ^bytes bytes o arr (int (alloc/node-base sio (aget offs i))) s)
-                           :cljs nil)
-                        (alloc/-sio-write-bytes! sio (aget offs i) 0
-                                                 #?(:clj (Arrays/copyOfRange ^bytes bytes o (int (+ o s)))
-                                                    :cljs (.slice bytes o (+ o s))))))
+                    #_{:splint/disable [lint/if-nil-else]} (if #_{:clj-kondo/ignore [:constant-condition]} (and arr (not (== ci 6)))
+                                                               #?(:clj (System/arraycopy ^bytes bytes o arr (int (alloc/node-base sio (aget offs i))) s)
+                                                                  :cljs nil)
+                                                               (alloc/-sio-write-bytes! sio (aget offs i) 0
+                                                                                        #?(:clj (Arrays/copyOfRange ^bytes bytes o (int (+ o s)))
+                                                                                           :cljs (.slice bytes o (+ o s))))))
                   (recur (inc p))))))
           ;; PHASE C — the pointer pass: every relocation, resolved from
           ;; the completed plan. Owner byte bases are cached per block.
@@ -480,18 +480,18 @@
             (dotimes [j nr]
               (let [o (aget rown j) t (aget rtgt j) pos (aget rpos j)
                     arr #?(:clj (aget fast-arr (aget classes o)) :cljs nil)]
-                (if #_{:clj-kondo/ignore [:constant-condition]} (and arr (not (== (aget classes o) 6)))
-                    #?(:clj (let [base (if (aget owner-seen o)
-                                         (aget owner-base o)
-                                         (let [b (alloc/node-base sio (aget offs o))]
-                                           (aset owner-base o b)
-                                           (aset owner-seen o true)
-                                           b))]
-                              (put-i32-arr! arr (+ base (- pos (aget boff o))) (aget offs t)))
-                       :cljs nil)
-                    (alloc/-sio-write-i32! sio (aget offs o)
-                                           (- pos (aget boff o))
-                                           (aget offs t))))))))
+                #_{:splint/disable [lint/if-nil-else]} (if #_{:clj-kondo/ignore [:constant-condition]} (and arr (not (== (aget classes o) 6)))
+                                                           #?(:clj (let [base (if (aget owner-seen o)
+                                                                                (aget owner-base o)
+                                                                                (let [b (alloc/node-base sio (aget offs o))]
+                                                                                  (aset owner-base o b)
+                                                                                  (aset owner-seen o true)
+                                                                                  b))]
+                                                                     (put-i32-arr! arr (+ base (- pos (aget boff o))) (aget offs t)))
+                                                              :cljs nil)
+                                                           (alloc/-sio-write-i32! sio (aget offs o)
+                                                                                  (- pos (aget boff o))
+                                                                                  (aget offs t))))))))
       (aget offs @root-idx)
       (catch #?(:clj Throwable :cljs :default) t
         (dotimes [i n]

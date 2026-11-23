@@ -61,15 +61,15 @@
                  (println (str "  price cnt=" (count p) " qty cnt=" (count q)))
 
                  (let [rev (func/mul p q)]
-                   (println (str "  rev cnt=" (count rev)
-                                 #?(:cljs (str " hdr=" (pr-str (read-raw-header rev))))))
+                   (println #_{:splint/disable [style/redundant-nested-call]} (str "  rev cnt=" (count rev)
+                                                                                   #?(:cljs (str " hdr=" (pr-str (read-raw-header rev))))))
 
                    (let [ds1 (ds/dataset {:price p :qty q :cat c :id id})]
                      (println (str "  ds1 created, nrows=" (ds/row-count ds1)))
 
                      ;; Check rev AFTER dataset creation
-                     (println (str "  rev after ds1: cnt=" (count rev)
-                                   #?(:cljs (str " hdr=" (pr-str (read-raw-header rev))))))
+                     (println #_{:splint/disable [style/redundant-nested-call]} (str "  rev after ds1: cnt=" (count rev)
+                                                                                     #?(:cljs (str " hdr=" (pr-str (read-raw-header rev))))))
 
                      (let [ds2 (ds/add-column ds1 :revenue rev)]
                        (println (str "  ds2 (add-col) nrows=" (ds/row-count ds2)))
@@ -86,10 +86,10 @@
 
                              (let [rev5 (ds/column ds5 :revenue)
                                    p5 (ds/column ds5 :price)]
-                               (println (str "  rev5 cnt=" (count rev5)
-                                             #?(:cljs (str " hdr=" (pr-str (read-raw-header rev5))))))
-                               (println (str "  p5 cnt=" (count p5)
-                                             #?(:cljs (str " hdr=" (pr-str (read-raw-header p5))))))
+                               (println #_{:splint/disable [style/redundant-nested-call]} (str "  rev5 cnt=" (count rev5)
+                                                                                               #?(:cljs (str " hdr=" (pr-str (read-raw-header rev5))))))
+                               (println #_{:splint/disable [style/redundant-nested-call]} (str "  p5 cnt=" (count p5)
+                                                                                               #?(:cljs (str " hdr=" (pr-str (read-raw-header p5))))))
                                (assoc s :result
                                       {:rev-sum (func/sum rev5)
                                        :price-mean (func/mean p5)})))))))))))

@@ -1495,11 +1495,11 @@
 
 (defonce ^:private host-read-string* (atom nil))
 
-(def ^:private number-reader
-  (fn [tok] (or (read-number tok)
-                (throw (#?(:cljs js/Error. :default ex-info)
-                        (str "Not a number token: " tok)
-                        #?(:cljs nil :default {:token tok}))))))
+(defn ^:private number-reader [tok]
+  (or (read-number tok)
+      (throw (#?(:cljs js/Error. :default ex-info)
+              (str "Not a number token: " tok)
+              #?(:cljs nil :default {:token tok})))))
 
 (defn- read-tagged-N [form]
   (bigint (if (string? form) form (str form))))
@@ -1610,81 +1610,81 @@
    per-host print-method in user code."
   []
   (register-exact-io!)
-  (when (compare-and-set! installed* false true)
-    #?(:cljs
-       (do
+  #_{:splint/disable [style/when-do]} (when (compare-and-set! installed* false true)
+                                        #?(:cljs
+                                           (do
          ;; (= 5 5N) in either order: keep cljs (= 1 1.0) (do not change it).
          ;; nbb/SCI cannot extend IEquiv onto number; tests use equiv.
-         (try
-           (extend-type number
-             IEquiv
-             (-equiv [x y]
-               (or (identical? x y)
-                   (and (number? y)
-                        (or (identical? x y)
-                            (and (js/Number.isNaN x) (js/Number.isNaN y))
-                            (cljs.core/== x y)))
-                   (and (or (bigint? y) (js-bigint? y) (eve-bigint-type? y))
-                        (js/Number.isInteger x)
-                        (bi= (js/BigInt x) (unwrap-bi y))))))
-           (catch :default _ nil))
-         (when (exists? js/BigInt)
-           (try
-             (let [proto (js/Object.getPrototypeOf (js/BigInt 0))]
-               (set! (.-cljs$core$IPrintWithWriter$ proto) true)
-               (aset proto "cljs$core$IPrintWithWriter$_pr_writer$arity$3"
-                     (fn [this w opts] (enc/write! w (host-pr-number this)))))
-             (catch :default _ nil)))
+                                             (try
+                                               (extend-type number
+                                                 IEquiv
+                                                 (-equiv [x y]
+                                                   (or (identical? x y)
+                                                       (and (number? y)
+                                                            (or (identical? x y)
+                                                                (and (js/Number.isNaN x) (js/Number.isNaN y))
+                                                                (cljs.core/== x y)))
+                                                       (and (or (bigint? y) (js-bigint? y) (eve-bigint-type? y))
+                                                            (js/Number.isInteger x)
+                                                            (bi= (js/BigInt x) (unwrap-bi y))))))
+                                               (catch :default _ nil))
+                                             (when (exists? js/BigInt)
+                                               (try
+                                                 (let [proto (js/Object.getPrototypeOf (js/BigInt 0))]
+                                                   (set! (.-cljs$core$IPrintWithWriter$ proto) true)
+                                                   (aset proto "cljs$core$IPrintWithWriter$_pr_writer$arity$3"
+                                                         (fn [this w opts] (enc/write! w (host-pr-number this)))))
+                                                 (catch :default _ nil)))
          ;; nbb's cljs.reader has only read-string until eve.types interns
          ;; register-tag-parser! (F-NBB-EDNREADER). Resolve so analysis
          ;; does not see a missing var. read-edn always passes :readers.
-         (when-let [reg (resolve 'cljs.reader/register-tag-parser!)]
-           (doseq [[tag f] (exact-tag-readers)]
-             (reg tag f)))
+                                             (when-let [reg (resolve 'cljs.reader/register-tag-parser!)]
+                                               (doseq [[tag f] (exact-tag-readers)]
+                                                 (reg tag f)))
          ;; Do not replace cljs.reader/read-string: lexical 123N / 1/3 / 1.5M
          ;; are not tag parsers, and a global rewrite would surprise other Eve
          ;; tests. read-edn / read-number remain for those tokens (serialize).
-         (when-not @host-read-string*
-           (reset! host-read-string* cljs-reader/read-string)))
-       :lpy
-       (do
-         (defn- lpy-pr [o]
-           (cond
-             (or (decimal? o) (ratio? o) (bigint? o)) (host-pr-number o)
-             (and (integer? o) (not (in-long-range-str? (str o))))
-             (tagged-form "eve/N" (str o))
-             :else nil))
+                                             (when-not @host-read-string*
+                                               (reset! host-read-string* cljs-reader/read-string)))
+                                           :lpy
+                                           (do
+                                             (defn- lpy-pr [o]
+                                               (cond
+                                                 (or (decimal? o) (ratio? o) (bigint? o)) (host-pr-number o)
+                                                 (and (integer? o) (not (in-long-range-str? (str o))))
+                                                 (tagged-form "eve/N" (str o))
+                                                 :else nil))
          ;; Prefer a declared printer over Python's default.
-         (when-let [reg (resolve 'basilisp.lang.obj/lrepr)]
-           (doseq [t [decimal/Decimal fractions/Fraction python/int EveBigInt]]
-             (try
-               (.register basilisp.lang.obj/lrepr t
-                          (fn [o & _] (or (lpy-pr o) (str o))))
-               (catch python/Exception _ nil))))
-         (when (resolve 'clojure.edn/read-string)
-           (when-not @host-read-string*
-             (reset! host-read-string* edn/read-string)
-             (alter-var-root #'edn/read-string
-                             (fn [_]
-                               (fn
-                                 ([s] (read-edn s))
-                                 ([a b] (if (map? a) (read-edn b a) (read-edn a b)))))))))
-       :clje
+                                             (when-let [reg (resolve 'basilisp.lang.obj/lrepr)]
+                                               (doseq [t [decimal/Decimal fractions/Fraction python/int EveBigInt]]
+                                                 (try
+                                                   (.register basilisp.lang.obj/lrepr t
+                                                              (fn [o & _] (or (lpy-pr o) (str o))))
+                                                   (catch python/Exception _ nil))))
+                                             (when (resolve 'clojure.edn/read-string)
+                                               (when-not @host-read-string*
+                                                 (reset! host-read-string* edn/read-string)
+                                                 (alter-var-root #'edn/read-string
+                                                                 (fn [_]
+                                                                   (fn
+                                                                     ([s] (read-edn s))
+                                                                     ([a b] (if (map? a) (read-edn b a) (read-edn a b)))))))))
+                                           :clje
        ;; clojerl var roots cannot be altered (module-backed vars;
        ;; alter-var-root is unsupported). register-exact-io! above has
        ;; already installed the exact tag readers in Eve's own registry
        ;; via eve.type-readers/register!, and read-edn's rewrite path
        ;; passes them explicitly — there is no host root to merge into.
-       nil
-       :default
-       (do
+                                           nil
+                                           :default
+                                           (do
          ;; JVM / bb already print and read these tokens natively. Still
          ;; register the tagged reader used by read-edn's rewrite path.
-         (when-let [ddr (resolve 'default-data-readers)]
-           (alter-var-root ddr merge (exact-tag-readers)))
-         (alter-var-root #'*data-readers* merge (exact-tag-readers))
-         (when (resolve 'clojure.edn/read-string)
-           nil))))
+                                             (when-let [ddr (resolve 'default-data-readers)]
+                                               (alter-var-root ddr merge (exact-tag-readers)))
+                                             (alter-var-root #'*data-readers* merge (exact-tag-readers))
+                                             (when (resolve 'clojure.edn/read-string)
+                                               nil))))
   nil)
 
 (install!)

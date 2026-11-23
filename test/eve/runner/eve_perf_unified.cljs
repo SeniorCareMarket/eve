@@ -6,6 +6,7 @@
    function symbols match between main thread and workers."
   (:require-macros [cljs-thread.core :refer [in on-when]])
   (:require
+   [clojure.string :as str]
    [goog]
    [cljs-thread.core :as thread]
    [cljs-thread.state :as s]
@@ -49,7 +50,7 @@
   ;; Wait for workers, then dispatch tests to :core
   (on-when (and (contains? @s/peers :core)
                 (contains? @s/peers :future)
-                (some #(.startsWith (name %) "fp-") (keys @s/peers)))
+                (some #(str/starts-with? (name %) "fp-") (keys @s/peers)))
            {:max-time 30000}
            (println "Workers ready. Peers:" (set (keys @s/peers)))
            (js/setTimeout

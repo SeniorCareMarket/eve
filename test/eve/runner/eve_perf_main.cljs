@@ -2,6 +2,7 @@
   "Main-thread entry point for eve performance tests."
   (:require-macros [cljs-thread.core :refer [in on-when]])
   (:require
+   [clojure.string :as str]
    [cljs-thread.core :as thread]
    [cljs-thread.state :as s]
    [cljs-thread.strategy.fat-kernel :as fat-kernel]
@@ -34,7 +35,7 @@
   ;; Wait for workers, then dispatch tests to :core
   (on-when (and (contains? @s/peers :core)
                 (contains? @s/peers :future)
-                (some #(.startsWith (name %) "fp-") (keys @s/peers)))
+                (some #(str/starts-with? (name %) "fp-") (keys @s/peers)))
            {:max-time 30000}
            (println "Workers ready. Peers:" (set (keys @s/peers)))
            (js/setTimeout

@@ -44,12 +44,11 @@
 
 (defn- delegate
   [lane-sym args]
-  #?(:clj (let [v (try (requiring-resolve lane-sym)
-                       (catch Throwable _ nil))]
-            (if v
-              (apply @v args)
-              (throw (ex-info (str "eve.flat: " lane-sym " is not built yet")
-                              {:eve.flat/not-built lane-sym}))))
+  #?(:clj (if-let [v (try (requiring-resolve lane-sym)
+                          (catch Throwable _ nil))]
+            (apply @v args)
+            (throw (ex-info (str "eve.flat: " lane-sym " is not built yet")
+                            {:eve.flat/not-built lane-sym})))
      :cljs (if-let [f (get cljs-lanes lane-sym)]
              (apply f args)
              (throw (ex-info (str "eve.flat: " lane-sym " is not built yet")

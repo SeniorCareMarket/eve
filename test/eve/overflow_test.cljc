@@ -75,8 +75,8 @@
          (is (= -1 (- 2 3)))
          (is (= 6 (* 2 3)))
          (is (= MAXL MAXL))
-         (is (= MINL (* MINL 1)))
-         (is (zero? (* MAXL 0)))
+         #_{:splint/disable [style/multiply-by-one]} (is (= MINL (* MINL 1)))
+         #_{:splint/disable [style/multiply-by-zero]} (is (zero? (* MAXL 0)))
          (is (= MAXL (inc (dec MAXL))))))
 
      (deftest primed-promotes

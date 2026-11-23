@@ -7,10 +7,11 @@
    Every row also prints one PARITY line (fn, type, ok/FAIL) for the
    cross-host audit table."
   (:refer-clojure :exclude [defrecord])
+  #_{:splint/disable [naming/conventional-aliases]}
   (:require [clojure.test :refer [deftest is]]
             [clojure.string :as str]
             ;; one alias for whichever reader the seat provides (cljs.reader on :cljs, clojure.edn elsewhere)
-            #?(:cljs [cljs.reader :as reader] :default #_{:splint/disable [naming/conventional-aliases]} [clojure.edn :as reader])
+            #?(:cljs [cljs.reader :as reader] :default [clojure.edn :as reader])
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             [eve.record #?@(:cljs [:refer-macros [defrecord]] :default [:refer [defrecord]])]
