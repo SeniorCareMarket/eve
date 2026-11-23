@@ -447,9 +447,10 @@
    shared form follows the JVM pin on both hosts)."
   [xs]
   (mapv second (sort-by first d/compare-bytes
-                        (map (fn [x] [(try (key-bytes x)
-                                           (catch #?(:clj Throwable :cljs :default) _
-                                             (utf8-bytes (pr-str x)))) x]) xs))))
+                        (#?(:jolt mapv :default map)
+                         (fn [x] [(try (key-bytes x)
+                                       (catch #?(:clj Throwable :cljs :default) _
+                                         (utf8-bytes (pr-str x)))) x]) xs))))
 
 (defn- shaped-keys
   "The canonical key list of rep map m when every key may live in a shape
@@ -521,13 +522,20 @@
     (scan! rep counts shapes types false)
     (let [member? (fn [e] (let [k (key e) ^longs c (val e)]
                             (or (keyword? k) (symbol? k) (>= (aget c 0) 2) (pos? (aget c 1)))))
-          syms (->> (filter member? counts)
-                    (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))]))
-                    (mapv key))
-          shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
-                           (sort-by second (map (fn [e] [(key e) (val e)]) shapes)))
-          type-list (mapv (fn [[tk _]] {:key (first tk) :fp (second tk)})
-                          (sort-by second (map (fn [e] [(key e) (val e)]) types)))]
+          syms #?(:jolt (mapv key
+                              (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))])
+                                       (filterv member? counts)))
+                  :clj (->> (filter member? counts)
+                            (sort-by (fn [e] [(- (aget ^longs (val e) 0)) (str (key e))]))
+                            (mapv key)))
+          shape-list #?(:jolt (mapv (fn [e] {:t (first (key e)) :ks (second (key e))})
+                                    (sort-by val (vec shapes)))
+                        :clj (mapv (fn [[k _]] {:t (first k) :ks (second k)})
+                                   (sort-by second (map (fn [e] [(key e) (val e)]) shapes))))
+          type-list #?(:jolt (mapv (fn [e] {:key (first (key e)) :fp (second (key e))})
+                                   (sort-by val (vec types)))
+                       :clj (mapv (fn [[tk _]] {:key (first tk) :fp (second tk)})
+                                  (sort-by second (map (fn [e] [(key e) (val e)]) types))))]
       ;; field classes need one instance per type; find them in the rep
       (let [instances (HashMap.)]
         (letfn [(find! [r]
@@ -1434,8 +1442,13 @@
                     (when (not (== u 2147483648))
                       (int (if (>= u 2147483648) (- u 4294967296) u)))))
             rdigest (when recipe?
-                      (let [dg (mapv (fn [i] (fio/u8 b (+ 36 i))) (range 32))]
-                        (when (some pos? dg) dg)))]
+                      #?(:jolt (loop [i 0 acc [] nz? false]
+                                 (if (== i 32)
+                                   (if nz? acc nil)
+                                   (let [x (fio/u8 b (+ 36 i))]
+                                     (recur (inc i) (conj acc x) (or nz? (pos? x))))))
+                         :default (let [dg (mapv (fn [i] (fio/u8 b (+ 36 i))) (range 32))]
+                                    (when (some pos? dg) dg))))]
         (->Ctx b bs root wide? syms shapes types (atom 0) rhq rdigest (atom {}))))))
 
 ;; --- columns, parsed -----------------------------------------------
