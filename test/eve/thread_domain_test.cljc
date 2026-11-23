@@ -193,6 +193,7 @@
 
 (deftest a-dead-runtimes-work-is-adopted-on-lease-expiry
   (if-not (threads?)
+    #_{:clj-kondo/ignore [:type-mismatch]} ; the assertion is the host contract under test: on a threadless host (h/driving) answers :max-threads 0; kondo types the lookup nil
     (is (zero? (:max-threads (h/driving))) "no threads: no runtime's pump to lose")
     (let [[a seal0] (rendezvous)
           gate (ea/lookup-or-create-mmap-atom! (ea/persistent-atom-domain (:base-path (ea/-domain-state a))) "test/gate" {})

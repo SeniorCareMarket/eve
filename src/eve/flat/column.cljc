@@ -776,6 +776,7 @@
              (if (== i n)
                acc
                (recur (inc i)
+                      #_{:clj-kondo/ignore [:type-mismatch]} ; want is (boolean v) and (bit-set? ...) is boolean by construction: Eve's == is the host value-equality on this surface; kondo models clojure.core/=='s numeric-only contract
                       (if (and (valid? i) (== want (bit-set? b d i)))
                         (inc acc) acc)))))
 

@@ -1,4 +1,10 @@
 (ns eve.array-test
+  ;; type-mismatch is off for this file alone: _init-atom is a
+  ;; lazily-initialized atom (def'd nil, set! to (eve/atom {}) by the
+  ;; init fixture before any test runs), so kondo types every
+  ;; swap!/deref of it as receiving nil; the pattern is the file's
+  ;; setup contract and all 17 findings are this one root cause.
+  {:clj-kondo/config {:linters {:type-mismatch {:level :off}}}}
   (:require
    ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
    #_{:clj-kondo/ignore [:unused-referred-var]}   [cljs.test :refer-macros [deftest testing is are use-fixtures]]

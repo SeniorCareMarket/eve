@@ -43,6 +43,7 @@
           (aset t n c))))
     t))
 
+#_{:clj-kondo/ignore [:type-mismatch]} ; the tables are Dart typed arrays (Uint8List); kondo's aget expects its own array type - a .cljd modeling gap, the seat's aget is the typed-array read
 (defn- crc32-of
   "CRC-32 of the byte array SUB from OFF for LEN bytes, as a signed i32."
   [sub off len]

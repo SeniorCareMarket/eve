@@ -56,7 +56,7 @@
 
 (defn- max-threads [] (:max-threads (h/driving)))
 
-(defn- cap [n] (let [m (max-threads)] (if (nil? m) n (min n m))))
+(defn- cap [n] (let [m (max-threads)] (if m (min n m) n)))
 
 (defn- routed? [n] (and (pos? n) (not (h/ships-closures?))))
 
