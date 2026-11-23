@@ -79,10 +79,10 @@
 (def ^:const F_LEAF 128)    ;; bit 7: held as a leaf
 (def ^:const F_TAKEN 256)   ;; bit 8: taken back while its entry was queued
 
-(defn- cnt [row] (slab/region-load-i32 (nth (nth row 0) 0) (nth (nth row 0) 1)))
-(defn- ccas [row old new] (slab/region-cas-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) old new))
-(defn- flags [row] (slab/region-load-i32 (nth (nth row 1) 0) (nth (nth row 1) 1)))
-(defn- fcas [row old new] (slab/region-cas-i32! (nth (nth row 1) 0) (nth (nth row 1) 1) old new))
+(defn- cnt [row] (slab/region-load-i32 (nth row 0) (nth row 1)))
+(defn- ccas [row old new] (slab/region-cas-i32! (nth row 0) (nth row 1) old new))
+(defn- flags [row] (slab/region-load-i32 (nth row 2) (nth row 3)))
+(defn- fcas [row old new] (slab/region-cas-i32! (nth row 2) (nth row 3) old new))
 
 (defn- set-flag!
   "f set on the row's flags (the word's other bits, the coalescer's lock among them, kept): true when it was set
@@ -251,15 +251,15 @@
 
 (defn- cache+
   "acc with block off's digest-cache side block (eve.digest: the pointer in
-   the POINTER column of off's descriptor — the desc-of handle's third pair),
+   the POINTER column of off's descriptor — the desc-row's last two entries),
    when the word names a live, allocated block. The side block is held as a
    leaf: it references nothing.
    The word is only ever 0, -1 (no cache) or a stamped offset; a stale word
    (its block freed and the offset reused) fails the allocated? check or the
    reader's own validation (eve.digest re-checks magic + back-pointer)."
   [sio off acc]
-  (if-let [row (alloc/desc-of sio off)]
-    (let [p (slab/region-load-i32 (nth (nth row 2) 0) (nth (nth row 2) 1))]
+  (if-let [row (alloc/desc-row sio off)]
+    (let [p (slab/region-load-i32 (nth row 4) (nth row 5))]
       (if (and (not (zero? p)) (not (== p alloc/NIL_OFFSET)) (live? p) (alloc/allocated? sio p))
         (conj acc [p :leaf])
         acc))
@@ -330,7 +330,7 @@
    :held, :norow (the block has no row: its references are held on every hold, and it is never freed here — a
    leak, never a use-after-free), or nil (a dangling reference: the block is free, or a flush has claimed it)."
   [sio off leaf?]
-  (if-let [row (alloc/desc-of sio off)]
+  (if-let [row (alloc/desc-row sio off)]
     (loop []
       (let [t (flags row)]
         (if-not (zero? (bit-and t F_PUB))
@@ -351,7 +351,7 @@
             (let [nt (if leaf? (bit-or t F_PUB F_LEAF) (bit-or t F_PUB))]
               (if (== t (fcas row t nt))
                 (do (note-touch! off)
-                    (slab/region-add-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) 1)
+                    (slab/region-add-i32! (nth row 0) (nth row 1) 1)
                     :new)
                 (recur)))))))
     :norow))
@@ -381,7 +381,7 @@
    a bounded 48-byte leak, never a use-after-free: a drop of an unheld
    block is a no-op, and a doubly-held cache simply stays."
   [sio hdr cache-off]
-  (when-let [row (alloc/desc-of sio hdr)]
+  (when-let [row (alloc/desc-row sio hdr)]
     (when (not (zero? (bit-and (flags row) F_PUB)))
       (hold! sio cache-off :leaf))))
 
@@ -389,7 +389,7 @@
   "One holder lets block off of kind go: :parked when its count reached 0 here (queued by park! unless its earlier
    entry still is), :dropped, or nil (a hold never taken: an uncounted block, a second drop of one hold)."
   [sio off kind park!]
-  (when-let [row (alloc/desc-of sio off)]
+  (when-let [row (alloc/desc-row sio off)]
     (when-not (zero? (bit-and (flags row) F_PUB))
       (loop []
         (let [c (cnt row)]
@@ -445,7 +445,7 @@
   [sio c old new kind]
   (when-not (== old new)
     (note-touch! c)
-    (when-let [row (alloc/desc-of sio c)]
+    (when-let [row (alloc/desc-row sio c)]
       (let [t (flags row)]
         (when (and (not (zero? (bit-and t F_PUB))) (zero? (bit-and t F_LEAF)))
           (hold! sio new kind)
@@ -548,7 +548,7 @@
   (and (live? off)
        (alloc/allocated? sio off)
        (boolean
-        (when-let [row (alloc/desc-of sio off)]
+        (when-let [row (alloc/desc-row sio off)]
           (and (zero? (bit-and (flags row) F_PUB))
                (zero? (cnt row)))))))
 
@@ -590,11 +590,11 @@
        (every? (fn [[off _]] (fresh-placed-block? sio off)) blocks)
        (let [counts (placed-counts sio root-off blocks edges)]
          (doseq [[off n] counts]
-           (let [row (alloc/desc-of sio off)]
+           (let [row (alloc/desc-row sio off)]
              (set-flag! row (if (readable? sio off (get blocks off))
                               F_PUB
                               (bit-or F_PUB F_LEAF)))
-             (slab/region-store-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) (int n))
+             (slab/region-store-i32! (nth row 0) (nth row 1) (int n))
              (note-touch! off)))
          (swap! placed-write-counter inc)
          true)))
@@ -627,7 +627,7 @@
   "A lost attempt's allocations freed: every block of offs no holder took (still uncounted). Answers how many."
   [sio offs]
   (reduce (fn [n off]
-            (let [row (alloc/desc-of sio off)]
+            (let [row (alloc/desc-row sio off)]
               (if (and row (not (zero? (bit-and (flags row) F_PUB))))
                 n
                 (if (slab/free! sio off) (inc n) n))))
@@ -643,7 +643,7 @@
    direction, never a use-after-free). Answers how many."
   [sio offs]
   (reduce (fn [n off]
-            (let [row (alloc/desc-of sio off)]
+            (let [row (alloc/desc-row sio off)]
               (if (and row (zero? (bit-and (flags row) F_PUB)) (alloc/allocated? sio off))
                 (if (slab/free! sio off) (inc n) n)
                 n)))
@@ -653,7 +653,7 @@
   "How many hold the block at off: -1 uncounted, 0 parked (or claimed by a flush), k, or 2147483647 (held for ever,
    or a count past 2^31 - 1)."
   [sio off]
-  (if-let [row (alloc/desc-of sio off)]
+  (if-let [row (alloc/desc-row sio off)]
     (if (zero? (bit-and (flags row) F_PUB))
       -1
       (let [c (cnt row)]
@@ -671,7 +671,7 @@
    count goes back to 0, uncounted. Answers 1 freed, 0 not."
   [sio off kind row t park!]
   (if (or (= kind :opaque) (and (zero? (bit-and t F_LEAF)) (not (readable? sio off kind))))
-    (do (slab/region-store-i32! (nth (nth row 0) 0) (nth (nth row 0) 1) 0) 0)
+    (do (slab/region-store-i32! (nth row 0) (nth row 1) 0) 0)
     (let [rs (if (zero? (bit-and t F_LEAF)) (refs sio off kind) [])   ;; read BEFORE the free hands the block back
           freed? (slab/free! sio off)]
       (doseq [[o k] rs] (drop-one! sio o k park!))
@@ -734,7 +734,7 @@
           stay (volatile! [])
           n (reduce
              (fn [n {:keys [off kind epoch] :as e}]
-               (let [row (alloc/desc-of sio off)
+               (let [row (alloc/desc-row sio off)
                      t (if row (flags row) 0)
                      c (if row (cnt row) CDEAD)]
                  (cond

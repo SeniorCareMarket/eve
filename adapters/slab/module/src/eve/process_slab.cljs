@@ -58,9 +58,10 @@
 (def ^:private slab-desc-offsets   #js [0 0 0 0 0 0 0])
 
 (defn- desc-handle
-  "The tally handle of block block-idx of bitmap class ci: [[count-region count-off]
-   [flags-region flags-off] [pointer-region pointer-off]] — the addresses of its COUNT, FLAGS
-   and POINTER column entries — or nil when the class carries no columns."
+  "The tally row of block block-idx of bitmap class ci, flat: [count-region count-off
+   flags-region flags-off pointer-region pointer-off] — the addresses of its COUNT, FLAGS
+   and POINTER column entries — or nil when the class carries no columns (one vector per
+   call; desc-of nests it)."
   [ci block-idx]
   (when-let [dr (aget slab-desc-regions ci)]
     (let [fr   (aget slab-desc-flags-regions ci)
@@ -75,9 +76,9 @@
           poff (if (identical? pr dr)
                  (+ off (* 8 (aget slab-total-blocks ci)))
                  off)]
-      [[dr (+ off (* 4 block-idx))]
-       [fr (+ foff (* 4 block-idx))]
-       [pr (+ poff (* 4 block-idx))]])))
+      [dr (+ off (* 4 block-idx))
+       fr (+ foff (* 4 block-idx))
+       pr (+ poff (* 4 block-idx))])))
 
 (defn slab-offset->byte-offset
   "Convert a slab-qualified offset to the actual byte offset within the slab's SAB."
@@ -559,7 +560,7 @@
                 region    (:region inst)
                 ;; the block's descriptor is reset BEFORE its bit clears: its count 0, its flags
                 ;; clear and its digest pointer 0 (its own columns)
-                _         (when-let [[[cr co] [fr fo] [pr po]] (desc-handle class-idx block-idx)]
+                _         (when-let [[cr co fr fo pr po] (desc-handle class-idx block-idx)]
                             (mem/store-i32! cr co 0)
                             (mem/store-i32! fr fo 0)
                             (mem/store-i32! pr po 0))
@@ -1475,10 +1476,10 @@
         (open-mmap-coalesc! (str base-path ".slab6"))))
   (cljs-sio))
 
-(defn- desc-of
-  "The block's tally handle: [[count-region count-off] [flags-region flags-off]
-   [pointer-region pointer-off]] (a bitmap class's columns, or class 6's coalescing
-   descriptor on an mmap domain), or nil (the legacy SAB overflow keeps none)."
+(defn- desc-row
+  "The block's tally row, flat: [count-region count-off flags-region flags-off pointer-region
+   pointer-off] (a bitmap class's columns, or class 6's coalescing descriptor on an mmap
+   domain), or nil (the legacy SAB overflow keeps none)."
   [_sio slab-offset]
   (let [ci (decode-class-idx slab-offset)]
     (cond
@@ -1487,9 +1488,16 @@
 
       (and (== ci OVERFLOW_CLASS_IDX) mmap-coalesc-region)
       (when-let [[co fo po] (coalesc/row-of mmap-coalesc-region (decode-block-idx slab-offset))]
-        [[mmap-coalesc-region co] [mmap-coalesc-region fo] [mmap-coalesc-region po]])
+        [mmap-coalesc-region co mmap-coalesc-region fo mmap-coalesc-region po])
 
       :else nil)))
+
+(defn- desc-of
+  "The block's tally handle: [[count-region count-off] [flags-region flags-off]
+   [pointer-region pointer-off]] (desc-row's pairs), or nil."
+  [sio slab-offset]
+  (when-let [[cr co fr fo pr po] (desc-row sio slab-offset)]
+    [[cr co] [fr fo] [pr po]]))
 
 (defn- allocated?
   "True when the block is allocated: its bitmap bit set (classes 0-5), its coalescing descriptor ALLOCATED (class 6)."
@@ -1523,6 +1531,7 @@
  {:default-sio cljs-sio
   :sync-domain-sio! sync-domain-sio!
   :desc-of desc-of
+  :desc-row desc-row
   :allocated? allocated?
   :refresh! (fn [_sio] (when (aget slab-file-paths 0) (refresh-mmap-slabs!)))
   ;; the module slab is an mmap domain's files while it holds their paths
