@@ -219,7 +219,9 @@
     nil))
 
 (defn- pump!
-  "The endpoint's pump, on the page's event loop (the page cannot block): drain this thread's mailbox —\n   controls, request events addressed here, and answers whose :reply was the endpoint. A poll that finds\n   the mailbox empty returns eve.thread-host's timeout keyword; the pass ends there (the next tick resumes)."
+  "The endpoint's pump, on the page's event loop (the page cannot block): drain this thread's mailbox —
+   controls, request events addressed here, and answers whose :reply was the endpoint. A poll that finds
+   the mailbox empty returns eve.thread-host's timeout keyword; the pass ends there (the next tick resumes)."
   []
   (let [m (h/receive! 0)]
     (when (map? m)

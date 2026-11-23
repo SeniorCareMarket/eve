@@ -108,7 +108,8 @@
        (catch :default _ (throw (ex-info (str "eve.thread-host: unreadable message: " (subs m 0 (min 400 (count m)))) {})))))
 
 (defn- drain-ports!
-  "Every message waiting on every port: a port handed over for a new peer is installed, data is queued locally (in\n   each port's order)."
+  "Every message waiting on every port: a port handed over for a new peer is installed, data is queued locally (in
+   each port's order)."
   []
   ;; when-let's condition-only binding reads as unused to kondo; the let+when names the test
   #_{:splint/disable [lint/let-when]} (let [got (reduce

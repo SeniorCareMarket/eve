@@ -179,21 +179,16 @@
         0
         (let [s (aget b (inc j))]
           (if-not (== s e1)
-            (if (< s e1)
-              -1
-              (if-not (== s e2)
-                (if (< s e2) -1 1)
-                (if (< cnt 4)
-                  0
-                  (let [s (if-not (== s e2)
-                            (if (< s e2) -1 1)
-                            (if (< cnt 4) 0 (let [s (aget b (+ j 3))] (if-not (== s e3) (if (< s e3) -1 1) 0))))] (if-not (== s e3) (if (< s e3) -1 1) 0)))))
+            (if (< s e1) -1 1)
             (if (< cnt 3)
               0
               (let [s (aget b (+ j 2))]
                 (if-not (== s e2)
                   (if (< s e2) -1 1)
-                  (if (< cnt 4) 0 (let [s (aget b (+ j 3))] (if-not (== s e3) (if (< s e3) -1 1) 0))))))))))))
+                  (if (< cnt 4)
+                    0
+                    (let [s (aget b (+ j 3))]
+                      (if-not (== s e3) (if (< s e3) -1 1) 0))))))))))))
 
 (defn- key-cmp-general
   "key-cmp's whole rule: k's UTF-8 length first, then the class and length
