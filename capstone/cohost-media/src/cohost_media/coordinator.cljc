@@ -70,8 +70,6 @@
 
 (defn- descs [dh ids] (let [all (pool/descriptors dh)] (into {} (map (fn [id] [id (get all id)]) ids))))
 
-(defn- settled? [d] (contains? #{:done :failed :cancelled} (:state d)))
-
 (defn- plan-new!
   "Every :new file's DAG submitted — once the members the launcher started have joined (bounded: join-wait ms from
    each one's start), so a job is routed by the caps of the whole set (a slow-starting member's native transcoder, not

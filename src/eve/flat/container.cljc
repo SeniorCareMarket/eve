@@ -46,9 +46,6 @@
 
 (defn- ru64 ^long [^bytes b ^long i] (bit-or (ru32 b i) (bit-shift-left (ru32 b (+ i 4)) 32)))
 
-(defn- wu32 [^bytes b ^long i ^long v]
-  (dotimes [k 4] (aset b (+ i k) (unchecked-byte (bit-shift-right v (* 8 k))))))
-
 (defn- wu64 [^bytes b ^long i ^long v]
   (dotimes [k 8] (aset b (+ i k) (unchecked-byte (bit-shift-right v (* 8 k))))))
 

@@ -59,10 +59,6 @@
              (while (< (js/Date.now) end)))
      :default (Thread/sleep ms)))
 
-(defn- base-tx []
-  (mapv (fn [i] {:db/id i :name (str "base-" i) :age (+ 20 i)})
-        (range 1 11)))
-
 (defn- worker-tx [w i]
   {:db/id (+ 1000 (* w 1000) i) :name (str "w" w "-" i) :age i})
 

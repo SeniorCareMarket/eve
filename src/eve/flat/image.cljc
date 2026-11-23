@@ -46,9 +46,6 @@
 (defn- u8-at ^long [#?(:clj ^bytes bs :cljs bs) ^long i]
   (bit-and (aget bs (int i)) 0xFF))
 
-(defn- u16-at ^long [bs ^long i]
-  (bit-or (u8-at bs i) (bit-shift-left (u8-at bs (inc i)) 8)))
-
 (defn- put-i32-at! [#?(:clj ^bytes bs :cljs bs) ^long i ^long v]
   (let [i (int i)]
     (aset bs i (unchecked-byte v))
@@ -223,8 +220,6 @@
              (pointer-tag? (bit-and (bit-shift-right w 16) 0xFF)))
       (read-i32-at bs (+ base p 3))
       -1)))
-
-(defn- bit-pos [b] (hu/popcount32 (dec b)))
 
 (defn- hamt-pointers
   [bs ^long base map? add]
