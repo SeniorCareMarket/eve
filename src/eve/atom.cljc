@@ -77,6 +77,11 @@
 ;; was recent and the queue is small. Only ever delays a free.
 (def ^:const FLUSH_INTERVAL_MS 50)
 (def ^:const FLUSH_QUEUE_THRESHOLD 64)
+;; ... counted in commits too: the queue passes FLUSH_QUEUE_THRESHOLD on nearly every commit (a swap retires a
+;; path's nodes), so the node count alone never held the scan back (REPORT.md 3.6 #1). The scan runs when the last
+;; is FLUSH_INTERVAL_MS old, FLUSH_COMMIT_THRESHOLD commits ago, or the queue is past FLUSH_QUEUE_CAP nodes.
+(def ^:const FLUSH_COMMIT_THRESHOLD 16)
+(def ^:const FLUSH_QUEUE_CAP 1024)
 
 ;; CAS retry backoff — jittered exponential backoff after the third failure.
 (def ^:const BACKOFF_CAP_MS 8)
@@ -389,6 +394,7 @@
             ;; yet, {class one-offset-of-it}: the next commit's force sweeps them with its own (take-unforced!)
             :unforced (clojure.core/atom {})
             :flush-ts (clojure.core/atom 0)
+            :flush-n (volatile! 0)
             :pins (clojure.core/atom {})
             :pin-lock (token)
             :holder (clojure.core/atom nil)
@@ -1039,13 +1045,18 @@
 ;; every block a value owns.
 
 (defn- try-flush-retires!
-  "The zero queue's flush, throttled: the 256-slot pin scan runs when the last one is FLUSH_INTERVAL_MS old or the
-   queue is past FLUSH_QUEUE_THRESHOLD. Only ever delays a free."
-  [{:keys [retire-q flush-ts] :as ds}]
-  (let [now (proc/now-ms)]
+  "The zero queue's flush, throttled: the 256-slot pin scan runs when the last one is FLUSH_INTERVAL_MS old, or
+   FLUSH_COMMIT_THRESHOLD commits ago with the queue past FLUSH_QUEUE_THRESHOLD, or the queue is past
+   FLUSH_QUEUE_CAP. Only ever delays a free."
+  [{:keys [retire-q flush-ts flush-n] :as ds}]
+  (let [now (proc/now-ms)
+        n (vswap! flush-n inc)]
     (when (or (> (- now @flush-ts) FLUSH_INTERVAL_MS)
-              (> (count @retire-q) FLUSH_QUEUE_THRESHOLD))
+              (let [q (count @retire-q)]
+                (or (and (>= n FLUSH_COMMIT_THRESHOLD) (> q FLUSH_QUEUE_THRESHOLD))
+                    (> q FLUSH_QUEUE_CAP))))
       (reset! flush-ts now)
+      (vreset! flush-n 0)
       (flush-zero-queue! ds))))
 
 ;; ---------------------------------------------------------------------------
