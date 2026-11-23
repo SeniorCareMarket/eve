@@ -1981,6 +1981,7 @@
 
 ;; --- read-value --------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- byte-vec
   "Host bytes bs as a vector of 0..255."
   [bs]
@@ -2220,21 +2221,26 @@
     (flat-handle? x) (flat-emit! (handle-ctx x) (handle-off x) out)
     :else (let [bs (flat-bytes-of-plain x)] (fio/buf-bytes out bs 0 (byte-len bs)))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- row-digest-of [h]
   (try (let [out (fio/buf 4)]
          (emit-flat-any! out h)
          (sha-vec (buf-bytes-out out)))
        (catch #?(:clj Throwable :cljs :default) _ nil)))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- vec-rep-of [ctx off]
   (mapv (fn [i] (rep-of (elem-at ctx off i))) (range (elem-count ctx off))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- list-rep-of [ctx off]
   (apply list (map (fn [i] (rep-of (elem-at ctx off i))) (range (elem-count ctx off)))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- batch-rep-of [ctx off]
   (mapv (fn [i] (rep-of (row-handle ctx off i))) (range (elem-count ctx off))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- batch-seq-of [ctx off]
   (map (fn [i] (row-handle ctx off i)) (range (elem-count ctx off))))
 
@@ -2260,6 +2266,7 @@
   (TypedVal. tkey fp
              (reduce (fn [m [k v]] (assoc m k (rep-of v))) (array-map) entries)))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- map-rep-of [h]
   (entries-rep-of (-entries h)))
 
@@ -2270,6 +2277,7 @@
   (platform/hash-unordered
    (map (fn [[k v]] [k v]) entries)))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- entries-hasheq ^long [h]
   (entries-hasheq-of (-entries h)))
 
@@ -2283,6 +2291,7 @@
        (every? (fn [[k v]] (and (contains? other k) (equiv-any v (get other k))))
                entries)))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
 (defn- map-equiv-of [h other]
   (entries-equiv (-entries h) other))
 
@@ -2309,11 +2318,6 @@
               m (zipmap (:ks sh) @(:cols bp))]
           (swap! (.-plans ctx) assoc pk m)
           m))))
-
-(defn- row-lookup [^Ctx ctx boff row k nf]
-  (let [bp (batch-parts ctx boff) sh (nth (.-shapes ctx) (:shape bp))
-        i (shape-index ctx sh k)]
-    (if (neg? i) nf (col-at ctx (nth @(:cols bp) i) row))))
 
 (defn- set-elements [^Ctx ctx ^long off]
   (let [[n ko] (set-parts ctx off)]
@@ -2637,8 +2641,7 @@
 
 ;; --- the map handles --------------------------------------------------------
 
-                        (defn- node-digest-of [h] (handle-digest (handle-ctx h) (handle-off h)))
-
+                        #_{:clj-kondo/ignore [:unused-private-var]} ; handle-section helper web: called from the host-conditional arms of the handle deftypes below, which kondo's clj/cljs passes attribute to other branches; deleting any one orphans the next (measured - the chain is live, the passes are partial)
                         (defn- record-rep-of [h]
                           (record-entries-rep (-tkey h) (-fp h) (-entries h)))
 
@@ -2782,29 +2785,6 @@
 ;; for the seat's other hand-written types.
 
 (declare unpack)
-
-(defn- pg-reduce
-  "reduce over a node seq by first/next walking: the host's own
-   reduce may not dispatch over the seq types the node walks
-   answer (glojure's coll-reduce has no ChunkedCons dispatch,
-   measured in the flat smoke's handle row)."
-  ([f s] (if-let [s (seq s)] (pg-reduce f (first s) (next s)) (f)))
-  ([f init s] (loop [s (seq s) acc init]
-                (if (nil? s) acc (recur (next s) (f acc (first s)))))))
-
-(defn- pg-entries-seq
-  "A seq of map entries over [[k v] ...]: the host's entry values,
-   as node-seq-entries builds on ClojureScript."
-  [entries]
-  (seq (map (fn [[k v]] (first (seq (array-map k v)))) entries)))
-
-(defn- pg-map-conj
-  "conj onto a map handle, the proxy's cons shape: an entry or
-   two-element vector, a map, or a seq of entries."
-  [h o]
-  (cond (and (vector? o) (== 2 (count o))) (assoc-flat h (nth o 0) (nth o 1))
-        (map? o) (reduce (fn [m [k v]] (assoc-flat m k v)) h o)
-        :else (reduce (fn [m e] (assoc-flat m (nth e 0) (nth e 1))) h o)))
 
 #?(:bb (do
 
