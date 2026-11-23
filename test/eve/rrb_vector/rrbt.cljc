@@ -83,10 +83,12 @@
                   (-meta [coll] meta)
 
                   ISeqable
+                  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
                   (-seq [coll] coll)
 
                   ISequential
                   IEquiv
+                  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
                   (-equiv [coll other] (equiv-sequential coll other))
 
                   ASeq
@@ -311,6 +313,7 @@
 ;;; on the instance (^:mutable, no slab type): it never enters eve memory.
 ;;; ->Vector allocates a vector in the current eve domain, where Vector.
 ;;; would make a host object: every vector here is built with ->Vector.
+#_{:clj-kondo/ignore [:missing-protocol-method]} ; the :cljs pass asks for IAssociative's -contains-key?; the port's groups are JVM-spelled and key membership rides ILookup's -lookup with a not-found sentinel, as in the vector implementation this ports
 (edt/deftype Vector [^:int32 cnt ^:int32 shift root tail meta ^:mutable __hash]
   Object
   (toString [this]
@@ -325,6 +328,7 @@
     (->Vector cnt shift root tail meta __hash))
 
   IMeta
+  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (-meta [this]
     meta)
 

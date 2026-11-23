@@ -446,6 +446,7 @@
   (-conj [_ o] (-conj (vec (elems c off n kind)) o))
 
   IEmptyableCollection
+  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (-empty [_] [])
 
   ISequential

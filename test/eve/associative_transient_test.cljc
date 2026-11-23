@@ -10,6 +10,7 @@
 (declare ->DualCollection)
 
 ;; DataScript DB analogue: one type has both persistent and transient behavior.
+#_{:clj-kondo/ignore [:missing-protocol-method]} ; a JVM-spelled protocol group (clojure.lang.Counted) read on the :cljs pass; the type is a test analogue exercised through seq/get
 (host-deftype DualCollection [m]
               clojure.lang.Counted
               clojure.lang.Seqable

@@ -4497,6 +4497,7 @@
              (-assoc [_ n v] (assocN-flat _ n v))
              (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off))))
              ISeqable
+             #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
              (-seq [_] (seq-of-node ctx off))
              ISequential
              IVector
@@ -4537,6 +4538,7 @@
              (-assoc [_ n v] (assocN-flat _ n v))
              (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (elem-count ctx off))))
              ISeqable
+             #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
              (-seq [_] (seq-of-node ctx off))
              ISequential
              IVector
@@ -4569,6 +4571,7 @@
              ICounted
              (-count [_] (elem-count ctx off))
              ISeqable
+             #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
              (-seq [_] (seq-of-node ctx off))
              ISequential
              IList
@@ -4690,6 +4693,7 @@
              (-assoc [_ n v] (assocN-flat _ n v))
              (-contains-key? [_ k] (and (number? k) (== k (js/Math.floor k)) (<= 0 k) (< k (:n (batch-parts ctx off)))))
              ISeqable
+             #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
              (-seq [_] (seq (batch-seq-of ctx off)))
              ISequential
              IVector

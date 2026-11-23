@@ -13,6 +13,7 @@
             ;; eve.deftype-guard-test.
             [eve.type-readers]))
 
+#_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
 (eve/host-deftype RSeq [ci i mta]
                   clojure.lang.IMeta
                   (meta [_] mta)
@@ -31,6 +32,7 @@
                   (equiv [coll other] (c/equiv-sequential coll other))
                   clojure.lang.ISeq
                   (first [_] (e/nth ci i))
+                  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
                   (next [_] (when (pos? i) (RSeq. ci (dec i) nil)))
                   (more [_] (if (pos? i) (RSeq. ci (dec i) nil) ()))
                   IPrintWithWriter

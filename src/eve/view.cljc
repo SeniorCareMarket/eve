@@ -267,6 +267,7 @@
                   (-rep [_] (in cell (fn [] (chunk/to-rep raw))))
                   (-chunk-bytes [_] (chunk/bytes-of (consume raw fl cell)))
                   chunk/IFlatDigest
+                  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
                   (-digest [_] (chunk/digest-of (consume raw fl cell)))
                   clojure.lang.Sequential
                   clojure.lang.Counted

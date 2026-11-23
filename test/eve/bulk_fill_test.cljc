@@ -10,6 +10,7 @@
     (let [spans (atom [])
           expected (mapv #(bit-and (unsigned-bit-shift-right value %) 255)
                          [0 8 16 24])
+          #_{:clj-kondo/ignore [:missing-protocol-method]} ; a deliberate partial reify: the fake implements only the region methods this fill test exercises
           region (reify mem/IMemRegion
                    (-write-bytes! [_ offset bs]
                      (let [values (vec bs)]

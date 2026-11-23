@@ -20,6 +20,7 @@
             [eve.vec]
             [eve.map]))
 
+#_{:clj-kondo/ignore [:unresolved-protocol-method]} ; IMapEntry's key/val are the JVM spellings; the proto-map's cljs translation maps them to -key/-val, which kondo's analysis does not join
 (edt/deftype MapEntry [k v]
   clojure.lang.IMapEntry
   (key [_] k)

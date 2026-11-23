@@ -40,10 +40,12 @@
   (-value [x])
   (-missing [x y]))
 
+#_{:clj-kondo/ignore [:missing-protocol-method]} ; deliberate: Partial implements only -value - partial protocol implementation is what this surface test measures
 (host-deftype Partial [v]
               PartialProtocol
               (-value [_] v))
 
+#_{:clj-kondo/ignore [:missing-protocol-method]} ; deliberate: MetaPartial implements only -value - partial protocol implementation is what this surface test measures
 (host-deftype MetaPartial [v m]
               PartialProtocol
               (-value [_] v)

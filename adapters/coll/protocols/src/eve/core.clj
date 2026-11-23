@@ -317,9 +317,11 @@
   (-nth [_ n] (if (and (<= 0 n) (< n (- end start)))
                 (-nth v (+ start n))
                 (throw (IndexOutOfBoundsException.))))
+  #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
   (-nth [_ n nf] (if (and (<= 0 n) (< n (- end start))) (-nth v (+ start n)) nf))
-  ISeqable (-seq [_] (when (< start end)
-                       (clojure.core/map #(-nth v %) (range start end))))
+  ISeqable #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
+  (-seq [_] (when (< start end)
+              (clojure.core/map #(-nth v %) (range start end))))
   ISequential
   IEquiv (-equiv [this other] (= (seq this) (seq other)))
   IMeta (-meta [_] meta)

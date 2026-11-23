@@ -672,6 +672,7 @@
                        (d/-eve-sio b) (d/-root-header-off b) b)
     :walk))
 
+#_{:clj-kondo/ignore [:unresolved-protocol-method :missing-protocol-method]} ; Eve protocol surface on the :cljs pass: -eve-sio/-disjoin are Eve protocol methods whose definitions kondo does not join to this macro-built deftype
 (eve/deftype EveHashSet [^:int32 cnt ^:int32 root-off]
   clojure.lang.Counted
   (count [_] (int cnt))

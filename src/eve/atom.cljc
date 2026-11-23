@@ -1677,6 +1677,7 @@
 ;; One definition for every host, written with the JVM's names: each host's
 ;; types adapter realizes it (ClojureScript's ISwap/IReset, sci's own IAtom,
 ;; basilisp's duck-typed swap/reset, clojerl's through eve.host).
+#_{:clj-kondo/ignore [:missing-protocol-method]} ; the watch surface is carried in this form's clojure.lang.IRef group (addWatch/removeWatch); the :cljs pass asks for the cljs spellings, which live in the cljs adapter's atom types
 (eve/host-deftype MmapAtom [domain-state atom-slot-idx]
                   clojure.lang.IDeref
                   (deref [_] (mmap-deref domain-state atom-slot-idx))
@@ -1743,6 +1744,7 @@
 ;; SharedAtom compat alias (tests reference a/SharedAtom)
 (def SharedAtom MmapAtom)
 
+#_{:clj-kondo/ignore [:missing-protocol-method]} ; the watch surface is carried in this form's clojure.lang.IRef group (addWatch/removeWatch); the :cljs pass asks for the cljs spellings, which live in the cljs adapter's atom types
 (eve/host-deftype MmapAtomDomain [domain-state registry-cache]
                   clojure.lang.IDeref
                   (deref [_] (mmap-deref domain-state 0))
