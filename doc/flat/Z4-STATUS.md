@@ -8,13 +8,13 @@ collates locally); commits are local.
 
 ## Pins and tools (2026-11-12)
 
-| thing | value |
-|---|---|
-| tree | SeniorCareMarket/eve @ `7402ef9`, + W0 `cfa86c6` merged |
-| java / clojure | OpenJDK 21.0.13 · Clojure CLI 1.12.6.1673 (`/home/hatch/.local/bin/clojure`) |
-| deps | `CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig` → `:mvn/local-repo "/home/hatch/m2repo"` |
-| test runner | `clojure -X:jvm-test`, scoped `-n eve.static.tally-count-test` while iterating |
-| test names | fixed by W0's `test/eve/static/requirements.edn`: ns `eve.static.tally-count-test`, vars `written-counts-equal-walked`, `written-counts-exact`, `written-counts-release-clean`, `written-counts-shared`, `flag-off-is-the-walk` |
+| thing          | value                                                                                                                                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| tree           | SeniorCareMarket/eve @ `7402ef9`, + W0 `cfa86c6` merged                                                                                                                                                                         |
+| java / clojure | OpenJDK 21.0.13 · Clojure CLI 1.12.6.1673 (`/home/hatch/.local/bin/clojure`)                                                                                                                                                    |
+| deps           | `CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig` → `:mvn/local-repo "/home/hatch/m2repo"`                                                                                                                                   |
+| test runner    | `clojure -X:jvm-test`, scoped `-n eve.static.tally-count-test` while iterating                                                                                                                                                  |
+| test names     | fixed by W0's `test/eve/static/requirements.edn`: ns `eve.static.tally-count-test`, vars `written-counts-equal-walked`, `written-counts-exact`, `written-counts-release-clean`, `written-counts-shared`, `flag-off-is-the-walk` |
 
 ## Load gate
 

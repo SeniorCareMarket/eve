@@ -92,7 +92,7 @@ the var resolves against the loaded namespace at call time.
 
 Two facts that bound the fix:
 
-- On CLJS no sister *class* is generated
+- On CLJS no sister _class_ is generated
   (`adapters/types/js/src/eve/types_js.cljc`, `static-type`: the
   sister on ClojureScript is not realized; the expansion "still
   registers the type's sister layout (register-sister! with no

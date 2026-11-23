@@ -11,6 +11,7 @@ net-local, capstone — 589 Clojure files. Raw outputs banked in
 ## clj-kondo — 1455 errors / 2195 warnings / 265 info (3915)
 
 By rule (errors first):
+
 - unresolved-symbol 1062 (error)
 - invalid-arity 305 (error)
 - type-mismatch 58 (error)
@@ -161,6 +162,7 @@ API names (eve.alpha consumers in test: unresolved-var
 124 -> 12; eve.thread's surface likewise).
 
 Where the remaining errors live (recount 2):
+
 - contract-test vendored trees (lib-ds 491 findings of all
   levels, lib 95): the exception decided above — the gate scope
   narrows to contract-test/drivers, which stays fully in scope.

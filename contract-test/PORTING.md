@@ -8,6 +8,7 @@ here is byte-identical in structure to vanilla (modulo the mechanical
 constructor/protocol renames in T1/T2, which are listed as rules, not per-site).
 
 ## S — substrate (host arrays → Eve vectors), `arrays.cljc` + construction sites
+
 - **S1.** The arrays namespace is re-based on Eve persistent vectors: an
   "array" is an Eve vector. `make-array` → n nils; `aget` → `nth`; `alength` →
   `count`; `aconcat` → `into`; `amap` → `mapv`; `asort` → sorted copy;
@@ -21,6 +22,7 @@ constructor/protocol renames in T1/T2, which are listed as rules, not per-site).
 - **S3.** `aclone` is the identity: persistent vectors need no defensive copy.
 
 ## N — numbers (JS 32-bit path machinery removed)
+
 - **N1.** Vanilla encodes tree paths in JS numbers and carries a double-based
   fallback past 2^31 (`max-safe-path`, the `factors` table, branches in
   `path-get`/`path-set`/`path-same-leaf`, `Math/floor` in `path-str`). Eve
@@ -31,6 +33,7 @@ constructor/protocol renames in T1/T2, which are listed as rules, not per-site).
   `js/Math.pow`.
 
 ## T — types and protocols
+
 - **T1.** `BTSet`, `Node`, `Leaf` — the values that must live in slab memory —
   are `eve-deftype`s. `Iter`/`ReverseIter` (per-process cursors, never
   persisted) stay host types via `eve.deftype/deftype`, as in vanilla.
@@ -70,6 +73,7 @@ constructor/protocol renames in T1/T2, which are listed as rules, not per-site).
   `ex-info` (X1).
 
 ## E — value encoding (what Eve's slab can carry)
+
 - **E1.** The default comparator is stored as `nil` in the `comparator` field
   and unwrapped to `clojure.core/compare` at use sites (`cmp-of`). A host
   function is not a slab value; vanilla stores `compare` itself. Custom
@@ -93,7 +97,8 @@ constructor/protocol renames in T1/T2, which are listed as rules, not per-site).
   types; vanilla has no equivalent because vanilla never crosses a slab.
 
 ## F — field access
-- **F0 (deliberately unchanged).** Vanilla reads fields of *other* instances
+
+- **F0 (deliberately unchanged).** Vanilla reads fields of _other_ instances
   through untyped parameters — `(.-keys next)`, `(.-root set)`,
   `(.-pointers node)`, `(.-comparator set)`, … — and the port keeps every one
   of those reads verbatim. This is the shape the identity audit is measuring
@@ -141,6 +146,7 @@ constructor/protocol renames in T1/T2, which are listed as rules, not per-site).
   same family as T5/T6.
 
 ## V — vocabulary (Eve's core routing for Eve values; added on measured evidence)
+
 Vanilla's bodies call cljs.core functions on the set itself (`(seq this)`,
 `(count other)`, `(contains? this %)`, `(set? other)`, `(rseq iter)`). On
 Eve seats, host core functions do not reliably route to Eve types: bb's SCI
@@ -150,6 +156,7 @@ Measured per seat (see STATUS.md Findings F1–F3), the port therefore speaks
 Eve's vocabulary inside the library wherever an operation touches an Eve
 value. Semantics are unchanged — the JVM reference values (including hash
 -177922471) are identical before and after.
+
 - **V1.** `hasheq`, `print-btset`, `-plain`: `(e/seq this)` for core `seq`.
   `IFn/invoke`: `e/get` for core `get`. `BTSet/rseq`: `e/rseq` for core
   `rseq` (core rseq casts the iterator to the host Reversible interface,
@@ -162,11 +169,13 @@ value. Semantics are unchanged — the JVM reference values (including hash
   on bb: SCI `=` never consults it for a mixed Eve-type/host pair — F2.)
 
 ## U — the 0.3.1 upgrade (Phase 2 substrate step, 2026-11-06)
+
 Phase 1 pinned PSS 0.2.3. DataScript 1.8.1 (Phase 2) pins PSS **0.3.1**,
 so the port was upgraded to 0.3.1's CLJS form (banked:
 vanilla/persistent_sorted_set_031.cljs; its arrays.cljc is byte-identical
 to 0.2.3's, so the arrays port is untouched). The entire 0.2.3→0.3.1 CLJS
 delta is: from-sorted-array arities, sorted-set*, settings.
+
 - **U1 (Eve-surface adaptation).** `from-sorted-array` gains the
   ([cmp arr _len]) and ([cmp arr _len _opts]) arities delegating to the
   existing body; _len is advisory and _opts (0.3.x storage settings) is
@@ -185,6 +194,7 @@ delta is: from-sorted-array arities, sorted-set*, settings.
   Phase-1 reference hash is unchanged after the upgrade (-177922471).
 
 ## X — miscellaneous
+
 - **X1.** `js/Error.` → `ex-info` (portable throw).
 - **X2.** `pr-str*`/`pr-sequential-writer` (cljs printing internals) →
   an explicit `print-btset` producing the identical `#{…}` text, wired

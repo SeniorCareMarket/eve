@@ -161,19 +161,19 @@ Status: the JVM and babashka rows are the 0.9.3.1 release battery (2026-11-09, o
 the other rows are the final pass of 2026-10-21/22 ET, not re-run for 0.9.0 or 0.9.3.1. Each host's page in
 [doc/hosts/](doc/hosts/README.md) has its runs, its performance, how eve is built on it and its gotchas.
 
-| Host | Runs on | Runner | Measured |
-|---|---|---|---|
-| JVM | Clojure 1.12, JDK 21 | `clojure -M:jvm-test` | **green** (0.9.3.1): 659 tests, 10,730 assertions, 0 failures, 0 errors, 630 s |
-| ClojureScript (Node) | shadow-cljs, Node + eve's N-API addon | `node target/eve-test/all.js <suite>` | **green**: `all` 482 tests, 34,980 assertions; `net` 62 / 1,429, `slab-grow` 105 / 28,902, `thread-domain` 12 / 146, `deftype` 63 / 710 green |
-| ClojureScript (browser) | a cross-origin-isolated page | `bb test:browser` | **green**: 48 tests, 633 assertions (headless Chromium) |
-| babashka | bb 1.13 | `bb test:bb` | **green** (0.9.3.1): 251 tests / 4,678 assertions (30 namespaces) + 42 / 890 (the remaining 9), 0 failures, 0 errors both counts; `eve.thread-net-test` and `eve.aegis.rsabssa-test` excluded by name |
-| nbb | Node | `bb test:nbb` | **green**: 242 tests, 4,617 assertions |
-| ClojureCLR | .NET 8, ClojureCLR 1.12.6 | `bb test:cljr` | **green**: 202 tests, 4,499 assertions |
-| basilisp | CPython 3.13, basilisp 0.5.1 | `bb test:lpy` | 180 tests, 4,350 assertions passing, **7 errors**: eve.thread.domain's 120 s waits run out late in the full run (checklist 9.26; fold on a group's three with a leak of its own, 9.35); each of those namespaces alone green |
-| jolt | threaded Chez Scheme 10.4 | `bb test:jolt` | **green**: 199 tests, 4,479 assertions |
-| clojerl | the BEAM | `bb test:clje` | **green**: 198 tests, 4,400 assertions |
-| glojure | Go (`glj-eve`, built by `bb glj-eve`) | `bb test:glj` | **green**: 182 tests, 4,458 assertions |
-| ValueScript | wasmtime | `bb test:vs` | **green**: 260 passed, 0 failed (2026-10-21) |
+| Host                    | Runs on                               | Runner                                | Measured                                                                                                                                                                                                                     |
+| ----------------------- | ------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM                     | Clojure 1.12, JDK 21                  | `clojure -M:jvm-test`                 | **green** (0.9.3.1): 659 tests, 10,730 assertions, 0 failures, 0 errors, 630 s                                                                                                                                               |
+| ClojureScript (Node)    | shadow-cljs, Node + eve's N-API addon | `node target/eve-test/all.js <suite>` | **green**: `all` 482 tests, 34,980 assertions; `net` 62 / 1,429, `slab-grow` 105 / 28,902, `thread-domain` 12 / 146, `deftype` 63 / 710 green                                                                                |
+| ClojureScript (browser) | a cross-origin-isolated page          | `bb test:browser`                     | **green**: 48 tests, 633 assertions (headless Chromium)                                                                                                                                                                      |
+| babashka                | bb 1.13                               | `bb test:bb`                          | **green** (0.9.3.1): 251 tests / 4,678 assertions (30 namespaces) + 42 / 890 (the remaining 9), 0 failures, 0 errors both counts; `eve.thread-net-test` and `eve.aegis.rsabssa-test` excluded by name                        |
+| nbb                     | Node                                  | `bb test:nbb`                         | **green**: 242 tests, 4,617 assertions                                                                                                                                                                                       |
+| ClojureCLR              | .NET 8, ClojureCLR 1.12.6             | `bb test:cljr`                        | **green**: 202 tests, 4,499 assertions                                                                                                                                                                                       |
+| basilisp                | CPython 3.13, basilisp 0.5.1          | `bb test:lpy`                         | 180 tests, 4,350 assertions passing, **7 errors**: eve.thread.domain's 120 s waits run out late in the full run (checklist 9.26; fold on a group's three with a leak of its own, 9.35); each of those namespaces alone green |
+| jolt                    | threaded Chez Scheme 10.4             | `bb test:jolt`                        | **green**: 199 tests, 4,479 assertions                                                                                                                                                                                       |
+| clojerl                 | the BEAM                              | `bb test:clje`                        | **green**: 198 tests, 4,400 assertions                                                                                                                                                                                       |
+| glojure                 | Go (`glj-eve`, built by `bb glj-eve`) | `bb test:glj`                         | **green**: 182 tests, 4,458 assertions                                                                                                                                                                                       |
+| ValueScript             | wasmtime                              | `bb test:vs`                          | **green**: 260 passed, 0 failed (2026-10-21)                                                                                                                                                                                 |
 
 What each host lacks today: eve's typed arrays are not on ClojureCLR, basilisp, jolt, clojerl or glojure; jolt
 has no http adapter (no network atoms; the browser's is new in 0.9: synchronous XHR); the JVM, babashka,
@@ -197,11 +197,11 @@ eve's host interface is sixteen features, each an adapter namespace with one imp
 (`adapters/<feature>/<implementation>/`). They fall in three tiers — measured, with every host's composition, in
 [doc/adopter-tiers.md](doc/adopter-tiers.md):
 
-| Tier | Features | What it means for a new language |
-|---|---|---|
-| **Minimal** — you write it | `region` (memory and atomics), `encoding` (strings, floats, numbers), `process` (clock, sleep, files, entropy), `types` (eve's types as your host's) — plus `core` / `completion` if your core is not Clojure's | four namespaces; on babashka they are 972 lines |
-| **Inbuilt** — portable, ships with eve | `slab-io/protocol`, `core/clojure`, `completion/clojure`, `coll/protocols`, `slab/heap`, `int32/portable`, `codec/byte-array`, `crypto/portable`, `thread/none` | free: with the minimal four they run every shared suite but the network one (babashka on just these: 242 tests, 4,623 assertions, 0 failures, 2026-10-21 ET — `bb test:bb-minimal`) |
-| **Fast** — native seams you plug in | `crypto`, `int32`, `codec`, `coll`, `slab`, `slab-io`, `thread`, `typed-view`; and `http` / `http-server` for network atoms and gateways | speed and capability: native crypto is ~55–1,100× the portable code on babashka (2026-10-21 ET); real threads turn the pools on |
+| Tier                                   | Features                                                                                                                                                                                                        | What it means for a new language                                                                                                                                                    |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Minimal** — you write it             | `region` (memory and atomics), `encoding` (strings, floats, numbers), `process` (clock, sleep, files, entropy), `types` (eve's types as your host's) — plus `core` / `completion` if your core is not Clojure's | four namespaces; on babashka they are 972 lines                                                                                                                                     |
+| **Inbuilt** — portable, ships with eve | `slab-io/protocol`, `core/clojure`, `completion/clojure`, `coll/protocols`, `slab/heap`, `int32/portable`, `codec/byte-array`, `crypto/portable`, `thread/none`                                                 | free: with the minimal four they run every shared suite but the network one (babashka on just these: 242 tests, 4,623 assertions, 0 failures, 2026-10-21 ET — `bb test:bb-minimal`) |
+| **Fast** — native seams you plug in    | `crypto`, `int32`, `codec`, `coll`, `slab`, `slab-io`, `thread`, `typed-view`; and `http` / `http-server` for network atoms and gateways                                                                        | speed and capability: native crypto is ~55–1,100× the portable code on babashka (2026-10-21 ET); real threads turn the pools on                                                     |
 
 - [doc/adopting-eve-minimal.md](doc/adopting-eve-minimal.md) — implement eve for your language with the minimal set
   and the inbuilt one.
@@ -231,22 +231,22 @@ numbers are in [doc/hosts/](doc/hosts/README.md). The cost of each seam, portabl
 
 ## Documentation
 
-| Document | What it covers |
-|---|---|
-| [doc/getting-started.md](doc/getting-started.md) | using eve from this tree on the JVM, babashka, Node |
-| [doc/api-guide.md](doc/api-guide.md) | the public API, namespace by namespace |
-| [doc/atom-domains.md](doc/atom-domains.md) | atoms, domains, disk domains, meta-atoms, processes sharing a domain |
-| [doc/network-atoms/README.md](doc/network-atoms/README.md) | network atoms, gateways, sign-in |
-| [doc/collections.md](doc/collections.md), [doc/data-structures.md](doc/data-structures.md), [doc/obj.md](doc/obj.md) | the collections, typed arrays, objects, datasets |
-| [doc/platform-support.md](doc/platform-support.md) | the host matrix |
-| [doc/stm.md](doc/stm.md) | the STM: refs on Eve atoms, `dosync`, the history-encoding disclosure |
-| [doc/performance.md](doc/performance.md) | the 0.9.3.1 performance record: Eve-DataScript vs stock, the startup shootout, gaps named |
-| [doc/hosts/](doc/hosts/README.md) | one page per host: its battery, its performance, how eve is built on it, gotchas, next steps |
-| [doc/architecture.md](doc/architecture.md), [doc/internals.md](doc/internals.md) | the design, the byte format, the slab allocator |
-| [doc/memory-model.md](doc/memory-model.md) | how memory is reclaimed, and where eve's code differs from the model |
-| [doc/testing.md](doc/testing.md) | the test suites and runners |
-| [doc/unification/HOST-CONTRACT.md](doc/unification/HOST-CONTRACT.md), [adapters/README.md](adapters/README.md) | the host interface and its adapters |
-| [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md) | |
+| Document                                                                                                             | What it covers                                                                               |
+| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [doc/getting-started.md](doc/getting-started.md)                                                                     | using eve from this tree on the JVM, babashka, Node                                          |
+| [doc/api-guide.md](doc/api-guide.md)                                                                                 | the public API, namespace by namespace                                                       |
+| [doc/atom-domains.md](doc/atom-domains.md)                                                                           | atoms, domains, disk domains, meta-atoms, processes sharing a domain                         |
+| [doc/network-atoms/README.md](doc/network-atoms/README.md)                                                           | network atoms, gateways, sign-in                                                             |
+| [doc/collections.md](doc/collections.md), [doc/data-structures.md](doc/data-structures.md), [doc/obj.md](doc/obj.md) | the collections, typed arrays, objects, datasets                                             |
+| [doc/platform-support.md](doc/platform-support.md)                                                                   | the host matrix                                                                              |
+| [doc/stm.md](doc/stm.md)                                                                                             | the STM: refs on Eve atoms, `dosync`, the history-encoding disclosure                        |
+| [doc/performance.md](doc/performance.md)                                                                             | the 0.9.3.1 performance record: Eve-DataScript vs stock, the startup shootout, gaps named    |
+| [doc/hosts/](doc/hosts/README.md)                                                                                    | one page per host: its battery, its performance, how eve is built on it, gotchas, next steps |
+| [doc/architecture.md](doc/architecture.md), [doc/internals.md](doc/internals.md)                                     | the design, the byte format, the slab allocator                                              |
+| [doc/memory-model.md](doc/memory-model.md)                                                                           | how memory is reclaimed, and where eve's code differs from the model                         |
+| [doc/testing.md](doc/testing.md)                                                                                     | the test suites and runners                                                                  |
+| [doc/unification/HOST-CONTRACT.md](doc/unification/HOST-CONTRACT.md), [adapters/README.md](adapters/README.md)       | the host interface and its adapters                                                          |
+| [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md)                         |                                                                                              |
 
 ## License
 

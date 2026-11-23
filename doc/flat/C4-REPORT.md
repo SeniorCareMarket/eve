@@ -8,12 +8,12 @@ Files owned: `src/eve/static/check.cljc`, `test/eve/fixtures/static-malformed.ed
 
 ## Verdicts (IMPL-PLAN §3.3, lane C4)
 
-| Req | Test var | Result |
-|---|---|---|
-| C4.1 `malformed-refused-by-name` | `eve.static.check-test/malformed-refused-by-name` | **green** — every one of the 46 fixture rows is refused with exactly its named check, as a typed `ex-info` carrying `:check`; never a host Error |
-| C4.2 `limits-enforced` | `eve.static.check-test/limits-enforced` | **green** — 10,000 levels of nesting refused `:nesting-too-deep` (no stack overflow); the boundary is exact (64 deep accepted, 65 refused); lying counts refused `:count-exceeds-bytes` before any element is read (VEC count 4294967295; COL count 10,000,000) |
-| C4.3 `fuzz-never-crashes` | `eve.static.check-test/fuzz-never-crashes` | **green** — 250 seeded mutants × 6 valid chunks (byte set / bit flip / truncate / append): every outcome a typed refusal or an accepted handle; no crash, no hang, no untyped throwable |
-| C4.4 `place-requires-checked` | `eve.static.check-test/place-requires-checked` | **green** — at the contract level (see "What Z3/T1 must call") |
+| Req                              | Test var                                          | Result                                                                                                                                                                                                                                                          |
+| -------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C4.1 `malformed-refused-by-name` | `eve.static.check-test/malformed-refused-by-name` | **green** — every one of the 46 fixture rows is refused with exactly its named check, as a typed `ex-info` carrying `:check`; never a host Error                                                                                                                |
+| C4.2 `limits-enforced`           | `eve.static.check-test/limits-enforced`           | **green** — 10,000 levels of nesting refused `:nesting-too-deep` (no stack overflow); the boundary is exact (64 deep accepted, 65 refused); lying counts refused `:count-exceeds-bytes` before any element is read (VEC count 4294967295; COL count 10,000,000) |
+| C4.3 `fuzz-never-crashes`        | `eve.static.check-test/fuzz-never-crashes`        | **green** — 250 seeded mutants × 6 valid chunks (byte set / bit flip / truncate / append): every outcome a typed refusal or an accepted handle; no crash, no hang, no untyped throwable                                                                         |
+| C4.4 `place-requires-checked`    | `eve.static.check-test/place-requires-checked`    | **green** — at the contract level (see "What Z3/T1 must call")                                                                                                                                                                                                  |
 
 Final suite run (this branch, after both merges): **5 tests, 73 assertions, 0 failures, 0 errors**
 (`eve.static.check-test`, via `clojure.main`/clojure.test on JDK 25 — this box has no

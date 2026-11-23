@@ -44,12 +44,12 @@ The harness floor is ~40 ns per op: a no-op `(identity x)` through the same loop
 
 ## 2. Step-2 baselines, re-measured in this session (step2 arm, run2)
 
-| | step-2 REPORT | step2 arm, this session |
-|---|---|---|
-| guarded `(get @a k)`, 100 root, extent/op | 2.7 µs | 2.48–2.93 µs |
-| guarded get, in an open extent | 1.5–1.8 µs | 1.45–1.69 µs |
-| guarded deref alone, 100 | 1.4 µs | 1.30–1.47 µs |
-| direct get, 100-map | ~866 ns (step 1, fixed `:k42`) | 1.03–1.10 µs (random key, incl. the ~40 ns floor) |
+|                                           | step-2 REPORT                  | step2 arm, this session                           |
+| ----------------------------------------- | ------------------------------ | ------------------------------------------------- |
+| guarded `(get @a k)`, 100 root, extent/op | 2.7 µs                         | 2.48–2.93 µs                                      |
+| guarded get, in an open extent            | 1.5–1.8 µs                     | 1.45–1.69 µs                                      |
+| guarded deref alone, 100                  | 1.4 µs                         | 1.30–1.47 µs                                      |
+| direct get, 100-map                       | ~866 ns (step 1, fixed `:k42`) | 1.03–1.10 µs (random key, incl. the ~40 ns floor) |
 
 All four reproduce. Direct get reads slightly higher here: random-key selection and the harness floor are inside the cell.
 
@@ -112,16 +112,16 @@ The anatomy rows carry the ~40 ns harness floor. Net of it, one node read is ~7�
 
 ## 4. The anatomy, piece by piece
 
-| step-2 anatomy | what step 3 did | status |
-|---|---|---|
-| ISlabIO protocol dispatch per read | Node reads call `alloc/node-u8` / `node-i32` / `node-bytes-equal?` / `node-bytes`: one `instance? JvmSlabCtx` check (LoggingSlabIO unwrapped), the slab offset decoded inline with primitive math, no protocol hop. | **gone** on node reads |
-| IMemRegion protocol dispatch per read | Collapsed to one region call per read, `eve.mem/-heap-bytes`, which returns the region's own `byte[]`. In the KV scan it happens once per node (`node-heap-array` / `node-base`, then `bytes-i32`). | **resists: one call remains** (wall 1) |
+| step-2 anatomy                                                                  | what step 3 did                                                                                                                                                                                                                                          | status                                                          |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| ISlabIO protocol dispatch per read                                              | Node reads call `alloc/node-u8` / `node-i32` / `node-bytes-equal?` / `node-bytes`: one `instance? JvmSlabCtx` check (LoggingSlabIO unwrapped), the slab offset decoded inline with primitive math, no protocol hop.                                      | **gone** on node reads                                          |
+| IMemRegion protocol dispatch per read                                           | Collapsed to one region call per read, `eve.mem/-heap-bytes`, which returns the region's own `byte[]`. In the KV scan it happens once per node (`node-heap-array` / `node-base`, then `bytes-i32`).                                                      | **resists: one call remains** (wall 1)                          |
 | volatile VarHandle load through a spread MethodHandle (Object[] alloc + boxing) | Plain array loads from the heap `byte[]`. Immutability licenses them: a published node is written before its pointer is published and read after the reader acquired that pointer (step 2). A transient's nodes are read by the thread that writes them. | **gone** for heap regions; mmap keeps the volatile load (below) |
-| `read-u8` allocates a 1-byte `byte[]` | `node-u8` is one `aget`. | **gone** (0 B/op) |
-| hash ~175–250 ns, boxed | `eve.int32` and the hamt-util bit helpers are primitive-hinted. `portable-hash-bytes` returns a primitive. Its tail uses `case` instead of `cond`, whose implicit nil tail boxed every hash. | **4.3×** (250 → 58 ns in harness, 21–31 ns at the REPL) |
-| linear `skip-kv-at` scan in the node | The scan's `loop` sat in a let binding, so it compiled to a closure, allocated and boxed per lookup (the JFR top frame `hamt_get$fn`). It is now a primitive fn that scans the node's heap bytes in place, two plain loads per skipped pair. | **cheaper; the scan itself resists** (wall 2) |
-| `not=` on hashes (JFR top frame `Util.equiv`, 131 samples) | `==` on primitives. | **gone** |
-| header field read (`root-off`) via `-sio-read-i32` on every valAt | eve/deftype's field reads (`vocab/sio-read-expr`): an **immutable** `:int32` field reads through `node-i32`. Mutable and volatile-mutable fields keep the atomic read. | **gone** for immutable fields |
+| `read-u8` allocates a 1-byte `byte[]`                                           | `node-u8` is one `aget`.                                                                                                                                                                                                                                 | **gone** (0 B/op)                                               |
+| hash ~175–250 ns, boxed                                                         | `eve.int32` and the hamt-util bit helpers are primitive-hinted. `portable-hash-bytes` returns a primitive. Its tail uses `case` instead of `cond`, whose implicit nil tail boxed every hash.                                                             | **4.3×** (250 → 58 ns in harness, 21–31 ns at the REPL)         |
+| linear `skip-kv-at` scan in the node                                            | The scan's `loop` sat in a let binding, so it compiled to a closure, allocated and boxed per lookup (the JFR top frame `hamt_get$fn`). It is now a primitive fn that scans the node's heap bytes in place, two plain loads per skipped pair.             | **cheaper; the scan itself resists** (wall 2)                   |
+| `not=` on hashes (JFR top frame `Util.equiv`, 131 samples)                      | `==` on primitives.                                                                                                                                                                                                                                      | **gone**                                                        |
+| header field read (`root-off`) via `-sio-read-i32` on every valAt               | eve/deftype's field reads (`vocab/sio-read-expr`): an **immutable** `:int32` field reads through `node-i32`. Mutable and volatile-mutable fields keep the atomic read.                                                                                   | **gone** for immutable fields                                   |
 
 **Wall 1: the last region call (a dispatch the layering needs).**
 
@@ -132,7 +132,7 @@ The anatomy rows carry the ~40 ns harness floor. Net of it, one node read is ~7�
 
 **Wall 2: the linear KV scan (the format needs it).**
 
-- A bitmap node stores its KV pairs as variable-length `[key-len:i32][key][val-len:i32][val]` with no offset table. Reaching pair *di* means walking the *di* pairs before it.
+- A bitmap node stores its KV pairs as variable-length `[key-len:i32][key][val-len:i32][val]` with no offset table. Reaching pair _di_ means walking the _di_ pairs before it.
 - After step 3 this is the largest remaining frame in a JFR of the direct get: `kv_pos`, 288 of 862 top-frame samples.
 - Removing it needs either a format change (an offset table) or a per-node position cache (new state). The first is out of scope. The second is state that the memory rules ("atoms all the way down") do not license without a ruling.
 - I stopped there.

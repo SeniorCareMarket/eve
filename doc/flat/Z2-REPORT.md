@@ -76,14 +76,14 @@ pre-existing by running W0's tree standalone: same 3 failures there;
 they are W0.6's not-yet-logged SPIKE-LOG and scoreboard-smoke state,
 named as expected in W0-STATUS).
 
-| Req | Verdict | Evidence |
-|---|---|---|
-| Z2.1 run-is-consecutive-and-allocated | **PASS** | claim of 50 on a fresh class 2: offsets are exactly the consecutive blocks ascending, all `allocated?`, FREE_COUNT −50, 50 subsequent singles disjoint |
-| Z2.2 run-wastes-nothing | **PASS** | crafted pattern (one run of 40 at unaligned start 37, isolated free singles at 5/90/100): claim starts at 37 exactly, FREE_COUNT −40 exactly, the allocated set afterwards is the before-set ∪ the run — no bit outside the run changed |
-| Z2.3 no-run-claims-nothing | **PASS** | fragmented class (50 free singles, none adjacent): claim of 4 answers nil, FREE_COUNT and allocated set untouched |
-| Z2.4 run-claim-contention | **PASS** | 8 threads × 25 mixed run claims (n 1–8) and singles on one domain: no offset handed out twice, FREE_COUNT exact (total − free = handed out), every handed block allocated |
-| Z2.5 run-claim-across-growth | **PASS** | claim of 4× the class's total on a tiny heap class: class grew, run consecutive and allocated, FREE_COUNT exact across the growth, class still claims and allocates singly after |
-| Z2.6 run-claim-encrypted | **PASS, on the default arm** | through eve.keyring's EncryptedSlabIO the claim answers n blocks of the domain, all allocated; a claimed block writes/reads 123456789 through the keystream while the raw inner read differs. **Caveat:** EncryptedSlabIO implements no run claim and keyring.cljc is not this lane's file, so the encrypted claim is served by W0's per-block default, not the masked-CAS fast path. The fast path through a wrapper is a one-method `ISlabRunAlloc` delegation owed in eve.keyring |
+| Req                                   | Verdict                      | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Z2.1 run-is-consecutive-and-allocated | **PASS**                     | claim of 50 on a fresh class 2: offsets are exactly the consecutive blocks ascending, all `allocated?`, FREE_COUNT −50, 50 subsequent singles disjoint                                                                                                                                                                                                                                                                                                                               |
+| Z2.2 run-wastes-nothing               | **PASS**                     | crafted pattern (one run of 40 at unaligned start 37, isolated free singles at 5/90/100): claim starts at 37 exactly, FREE_COUNT −40 exactly, the allocated set afterwards is the before-set ∪ the run — no bit outside the run changed                                                                                                                                                                                                                                              |
+| Z2.3 no-run-claims-nothing            | **PASS**                     | fragmented class (50 free singles, none adjacent): claim of 4 answers nil, FREE_COUNT and allocated set untouched                                                                                                                                                                                                                                                                                                                                                                    |
+| Z2.4 run-claim-contention             | **PASS**                     | 8 threads × 25 mixed run claims (n 1–8) and singles on one domain: no offset handed out twice, FREE_COUNT exact (total − free = handed out), every handed block allocated                                                                                                                                                                                                                                                                                                            |
+| Z2.5 run-claim-across-growth          | **PASS**                     | claim of 4× the class's total on a tiny heap class: class grew, run consecutive and allocated, FREE_COUNT exact across the growth, class still claims and allocates singly after                                                                                                                                                                                                                                                                                                     |
+| Z2.6 run-claim-encrypted              | **PASS, on the default arm** | through eve.keyring's EncryptedSlabIO the claim answers n blocks of the domain, all allocated; a claimed block writes/reads 123456789 through the keystream while the raw inner read differs. **Caveat:** EncryptedSlabIO implements no run claim and keyring.cljc is not this lane's file, so the encrypted claim is served by W0's per-block default, not the masked-CAS fast path. The fast path through a wrapper is a one-method `ISlabRunAlloc` delegation owed in eve.keyring |
 
 Regression, same discipline: eve.alloc-growth-race-test,
 eve.descriptor-table-test, eve.keyring-test green alongside (19
@@ -106,11 +106,11 @@ makes unsound). Deciding run: the bench re-take on J
 contended first run on this box (bench4.log; load 4.56 → 26.85;
 class rows 4.18× / 5.42× / 2.40×):
 
-| class | per-block alloc+copy | alloc-only | run claim+copy | ratio | claim-only | claim-only ratio | raw `-sio-alloc-run!` |
-|---|---|---|---|---|---|---|---|
-| 0 (32B) × 20,000 | 516.1 ns/blk | 458.9 ns/blk | 176.0 ns/blk | **2.93×** | 88.6 ns/blk | **5.18×** | 48.1 ns/blk |
-| 2 (128B) × 20,000 | 606.6 ns/blk | 551.4 ns/blk | 68.5 ns/blk | **8.85×** | 51.1 ns/blk | **10.78×** | 32.8 ns/blk |
-| 3 (256B) × 5,000 | 319.0 ns/blk | 413.4 ns/blk | 121.0 ns/blk | **2.64×** | 85.9 ns/blk | **4.81×** | 50.7 ns/blk |
+| class             | per-block alloc+copy | alloc-only   | run claim+copy | ratio     | claim-only  | claim-only ratio | raw `-sio-alloc-run!` |
+| ----------------- | -------------------- | ------------ | -------------- | --------- | ----------- | ---------------- | --------------------- |
+| 0 (32B) × 20,000  | 516.1 ns/blk         | 458.9 ns/blk | 176.0 ns/blk   | **2.93×** | 88.6 ns/blk | **5.18×**        | 48.1 ns/blk           |
+| 2 (128B) × 20,000 | 606.6 ns/blk         | 551.4 ns/blk | 68.5 ns/blk    | **8.85×** | 51.1 ns/blk | **10.78×**       | 32.8 ns/blk           |
+| 3 (256B) × 5,000  | 319.0 ns/blk         | 413.4 ns/blk | 121.0 ns/blk   | **2.64×** | 85.9 ns/blk | **4.81×**        | 50.7 ns/blk           |
 
 **Gate: the run claim beats per-block allocation on every class,
 and claim-only passes ≥ 3× on all three classes — but the

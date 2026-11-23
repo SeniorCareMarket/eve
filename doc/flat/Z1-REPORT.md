@@ -52,30 +52,30 @@ owns the contract amendment; the same wall C1 documented).
 ## The walk defects (all re-derived at their pins, all fixed)
 
 1. **hash-of intCast overflow** (a3a0d20) — `(int 0x9E3779B1)` throws on
-  every call (the literal is a Long past Integer/MAX_VALUE), so no
-  detach ever completed a value at the first pin. One defect, three
-  sightings (this lane, Transfer's STM cell map, Sister's log). Fixed:
-  Fibonacci hashing in long arithmetic, one `unchecked-int` wrap.
+   every call (the literal is a Long past Integer/MAX_VALUE), so no
+   detach ever completed a value at the first pin. One defect, three
+   sightings (this lane, Transfer's STM cell map, Sister's log). Fixed:
+   Fibonacci hashing in long arithmetic, one `unchecked-int` wrap.
 2. **HAMT inline-pointer double-base** — the walk's scan positions are
-  absolute in the image buffer; the HAMT data-entry sites passed them
-  to block-relative consumers, so every map/set value pointer was
-  missed: detach copied 2 of 24 reachable blocks. The 44
-  detach-tables-complete failures at round 2 were this one defect.
+   absolute in the image buffer; the HAMT data-entry sites passed them
+   to block-relative consumers, so every map/set value pointer was
+   missed: detach copied 2 of 24 reachable blocks. The 44
+   detach-tables-complete failures at round 2 were this one defect.
 3. **Unbounded content-size over an estimated copy window** — heap-block
-  class sizes are unrelated to content; the scan read garbage past the
-  copy (a 68 MB arraycopy; a scan off the 64 KiB buffer). Sizes are now
-  window-bounded; detach doubles the window until the scan fits.
+   class sizes are unrelated to content; the scan read garbage past the
+   copy (a 68 MB arraycopy; a scan off the 64 KiB buffer). Sizes are now
+   window-bounded; detach doubles the window until the scan fits.
 4. **StaticSio state access** — the deftype's mutable fields compile
-  package-private in this toolchain; `.-b`/`.-t`/`.-na` all threw.
-  State now goes through the `IStaticSioState` protocol.
+   package-private in this toolchain; `.-b`/`.-t`/`.-na` all threw.
+   State now goes through the `IStaticSioState` protocol.
 5. **Set bitmap-node size used the map layout** — set nodes carry no
-  per-entry hash array (values at 12+4nc, not 12+4nc+4nd); the scan
-  started 4·nd into the values and walked garbage.
+   per-entry hash array (values at 12+4nc, not 12+4nc+4nd); the scan
+   started 4·nd into the values and walked garbage.
 6. **Unsigned root offsets** (a78dac5) — a root offset delivered
-  unsigned (an eve array's 0xC0000000) threw intCast in the ordinal
-  table, which keyed on `(int off)`; child edges arrive sign-extended,
-  so only roots hit it. Keys are now the offset's low 32 bits,
-  bit-preserved, everywhere.
+   unsigned (an eve array's 0xC0000000) threw intCast in the ordinal
+   table, which keyed on `(int off)`; child edges arrive sign-extended,
+   so only roots hit it. Keys are now the offset's low 32 bits,
+   bit-preserved, everywhere.
 
 Test-side defects fixed on the way: a missing closer that made the
 suite unloadable at the first pin; the sorted-map row calling
@@ -102,12 +102,12 @@ line numbers exactly.)
 Per-corpus legs on J (JVM 21.0.9, min of 5, at 017ddad), today (@a)
 vs the static arm (detach):
 
-| corpus | @a | detach | ratio |
-|---|---|---|---|
-| map 10k int->int | 16.06 ms | 1,830.73 ms | 0.01x |
-| vector 100k ints | 51.02 ms | 37,375.29 ms | 0.00x |
+| corpus             | @a       | detach       | ratio |
+| ------------------ | -------- | ------------ | ----- |
+| map 10k int->int   | 16.06 ms | 1,830.73 ms  | 0.01x |
+| vector 100k ints   | 51.02 ms | 37,375.29 ms | 0.00x |
 | vector 10k records | 71.97 ms | 19,770.32 ms | 0.00x |
-| 5k chat messages | 95.64 ms | 45,070.88 ms | 0.00x |
+| 5k chat messages   | 95.64 ms | 45,070.88 ms | 0.00x |
 
 Gate: detach ≥2× faster than @a on every corpus. **Missed by
 114–733×.** Detach as built is a correctness mechanism; the walk's
@@ -123,16 +123,16 @@ The mechanism is Eve core read machinery, not this lane's files —
 established by the layered diag2 bisect (J, one session, min of 5
 after 2 warmups, tip 3d22d90; z1-diag2c.log):
 
-| layer | slab | view/image | reading |
-|---|---|---|---|
-| G0 full get ×50k | 24.73 ms | 1,536.70 ms | 62× end to end |
-| G1 key bytes+hash ×50k | 3.01 ms | (shared) | prep is innocent |
-| G2 hamt-get-words ×50k, precomputed keys | 16.02 ms | 1,112.21 ms | the descent itself, 69× by sio |
-| G3 hamt-get-view on slab sio ×50k | 9.98 ms | — | the production descent |
-| G4 node-i32 ×200k, varied offsets | — | 2.92 ms | ~15 ns/read through the view |
-| G5 -sio-read-i32 ×200k, same offsets | — | 2.57 ms | ~13 ns/read; G4≈G5 |
-| G6 node-bytes ×50k | 209.64 ms | 670.36 ms | byte copies 3.2× via the view |
-| G7 full vec nth ×50k | 20.69 ms | 348.40 ms | 17×, same class |
+| layer                                    | slab      | view/image  | reading                        |
+| ---------------------------------------- | --------- | ----------- | ------------------------------ |
+| G0 full get ×50k                         | 24.73 ms  | 1,536.70 ms | 62× end to end                 |
+| G1 key bytes+hash ×50k                   | 3.01 ms   | (shared)    | prep is innocent               |
+| G2 hamt-get-words ×50k, precomputed keys | 16.02 ms  | 1,112.21 ms | the descent itself, 69× by sio |
+| G3 hamt-get-view on slab sio ×50k        | 9.98 ms   | —           | the production descent         |
+| G4 node-i32 ×200k, varied offsets        | —         | 2.92 ms     | ~15 ns/read through the view   |
+| G5 -sio-read-i32 ×200k, same offsets     | —         | 2.57 ms     | ~13 ns/read; G4≈G5             |
+| G6 node-bytes ×50k                       | 209.64 ms | 670.36 ms   | byte copies 3.2× via the view  |
+| G7 full vec nth ×50k                     | 20.69 ms  | 348.40 ms   | 17×, same class                |
 
 Reading of the layers: Eve's HAMT get has two descents. A JvmSlabCtx
 (or a wrapper over one) resolves each node **once** via

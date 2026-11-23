@@ -20,12 +20,12 @@ this pin's own numbers, not the brief's.
 
 ### B1 — shipped place! (eve.flat.place-bench, HEAD 6124bb3, claim mode: run)
 
-| corpus | blocks | place! | ns/block |
-|---|---|---|---|
-| map 10k int->int | 2,380 | 60.15 ms | 25,274 |
-| vector 100k ints | 103,229 | 2,374.32 ms | 23,001 |
-| vector 10k records | 30,325 | 557.89 ms | 18,397 |
-| 5k chat messages | 70,997 | 1,475.31 ms | 20,780 |
+| corpus             | blocks  | place!      | ns/block |
+| ------------------ | ------- | ----------- | -------- |
+| map 10k int->int   | 2,380   | 60.15 ms    | 25,274   |
+| vector 100k ints   | 103,229 | 2,374.32 ms | 23,001   |
+| vector 10k records | 30,325  | 557.89 ms   | 18,397   |
+| 5k chat messages   | 70,997  | 1,475.31 ms | 20,780   |
 
 CONFIRMED: shipped place costs 18.4–25.3 µs/block against the batch
 claim+copy engine's measured 68.5–176.0 ns/block (Z2's bench, this
@@ -35,12 +35,12 @@ the raw claim's 32.8–50.7 ns/block. Gate ≤50 ns/block missed ~400×.
 Phase decomposition (reengine-bench --placeprobe, HEAD 443f8be —
 shipped sources identical to base):
 
-| corpus | plan (normalize+validate) | full | no-reloc | pointer pass |
-|---|---|---|---|---|
-| map | 15.73 ms | 50.21 ms | 46.00 ms | 4.20 ms |
-| vec | 168.84 ms | 1,664.05 ms | 1,354.46 ms | 309.58 ms |
-| records | 47.10 ms | 389.86 ms | 396.61 ms | ~0 |
-| messages | 165.48 ms | 807.12 ms | 793.85 ms | 13.26 ms |
+| corpus   | plan (normalize+validate) | full        | no-reloc    | pointer pass |
+| -------- | ------------------------- | ----------- | ----------- | ------------ |
+| map      | 15.73 ms                  | 50.21 ms    | 46.00 ms    | 4.20 ms      |
+| vec      | 168.84 ms                 | 1,664.05 ms | 1,354.46 ms | 309.58 ms    |
+| records  | 47.10 ms                  | 389.86 ms   | 396.61 ms   | ~0           |
+| messages | 165.48 ms                 | 807.12 ms   | 793.85 ms   | 13.26 ms     |
 
 The pointer pass is a minor term (vec's 3.0 µs/reloc aside). The
 dominant term is claims+copies inside `execute-plan!` at
@@ -51,12 +51,12 @@ checked gate's validation; not this lane's to weaken).
 
 ### B3 — shipped detach vs @a (eve.flat.z1-board, HEAD 6124bb3, same session)
 
-| corpus | @a | detach | missed by |
-|---|---|---|---|
-| map 10k int->int | 13.48 ms | 1,372.22 ms | ~102× |
-| vector 100k ints | 32.07 ms | 48,658.76 ms | ~1,517× |
-| vector 10k records | 46.80 ms | 28,017.30 ms | ~599× |
-| 5k chat messages | 66.72 ms | 53,092.28 ms | ~796× |
+| corpus             | @a       | detach       | missed by |
+| ------------------ | -------- | ------------ | --------- |
+| map 10k int->int   | 13.48 ms | 1,372.22 ms  | ~102×     |
+| vector 100k ints   | 32.07 ms | 48,658.76 ms | ~1,517×   |
+| vector 10k records | 46.80 ms | 28,017.30 ms | ~599×     |
+| 5k chat messages   | 66.72 ms | 53,092.28 ms | ~796×     |
 
 CONFIRMED in substance (the brief's session read 114–733×; this
 busier session reads worse). Detach as shipped is a correctness
@@ -64,12 +64,12 @@ mechanism.
 
 ### Detach census (reengine-bench --census, HEAD ede970c)
 
-| corpus | blocks | classes | content B | image B | detach (mmap) | detach (FlatSio view) |
-|---|---|---|---|---|---|---|
-| map | 2,380 | {0:35, 1:1179, 2:216, 3:780, 4:170} | 298,072 | 346,952 | 1,533.91 ms (644.5 µs/blk) | 1,554.32 ms |
-| vec | 103,229 | {0:100001, 2:3228} | 1,513,208 | 3,677,808 | 51,457.87 ms (498.5 µs/blk) | 176,326.61 ms (contention) |
-| records | 30,325 | {0:20001, 2:10324} | 1,540,386 | 2,167,976 | 12,754.17 ms (420.6 µs/blk) | 27,270.16 ms |
-| messages | 70,997 | {0:41668, 1:5416, 2:15579, 3:8334} | 3,701,012 | 5,162,744 | 23,732.64 ms (334.3 µs/blk) | 47,511.56 ms |
+| corpus   | blocks  | classes                             | content B | image B   | detach (mmap)               | detach (FlatSio view)      |
+| -------- | ------- | ----------------------------------- | --------- | --------- | --------------------------- | -------------------------- |
+| map      | 2,380   | {0:35, 1:1179, 2:216, 3:780, 4:170} | 298,072   | 346,952   | 1,533.91 ms (644.5 µs/blk)  | 1,554.32 ms                |
+| vec      | 103,229 | {0:100001, 2:3228}                  | 1,513,208 | 3,677,808 | 51,457.87 ms (498.5 µs/blk) | 176,326.61 ms (contention) |
+| records  | 30,325  | {0:20001, 2:10324}                  | 1,540,386 | 2,167,976 | 12,754.17 ms (420.6 µs/blk) | 27,270.16 ms               |
+| messages | 70,997  | {0:41668, 1:5416, 2:15579, 3:8334}  | 3,701,012 | 5,162,744 | 23,732.64 ms (334.3 µs/blk) | 47,511.56 ms               |
 
 Byte-identity anchors (SHA-256 of the shipped detach image; the
 re-engineered detach must reproduce them exactly — image v1 is a
@@ -82,6 +82,7 @@ Images byte-identical across the mmap and view source paths; value
 read-back equal on every corpus. NO overflow-class blocks anywhere.
 
 TWO THEORIES KILLED by these rows:
+
 - "per-block generic slab reads are the cost" (the Z1 report's
   attribution): the FlatSio arm has no slab reads at all — direct
   array copies — and is exactly as slow. The cost is inside the
@@ -346,7 +347,6 @@ same-session ratios are the evidence.
   cleared earlier today). A retry loop is committing the bench
   --only change + this STATUS when it clears; the s2b leg files
   after that bundle ships.
-
 
 ## CLOSE-OUT — judged from the J legs at 39dc57e (coordinator, 2026-11-12 19:5x ET, logs read firsthand)
 

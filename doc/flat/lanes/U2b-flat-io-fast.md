@@ -7,6 +7,7 @@
 portable root and the conformance test at the same time; you write ONLY your two roots and your bench.
 
 ## The work
+
 1. **adapters/flat-io/jvm/src/eve/flat_io.clj** — every contract function, fast: reads through
    `MethodHandles/byteArrayViewVarHandle` (little-endian short / int / long / float / double views of byte[]) instead
    of per-byte bit assembly; `bytes=` / `bytes-cmp` / `key-cmp` through `java.util.Arrays/mismatch` and
@@ -28,10 +29,12 @@ portable root and the conformance test at the same time; you write ONLY your two
    407 keys, a tuple's reduce) per root.
 
 ## Tests (targeted, rule 3)
+
 JVM: your namespaces through `clojure -M:jvm-test -n …`; Node: a shadow-cljs build of just your test namespace
 (shadow-cljs.edn's :eve-test is the pattern) or nbb if it serves; never the whole battery.
 
 ## Done bar
+
 Both roots implement the whole contract; your contract test green on the JVM and Node; the seam micro-bench and flatx
 numbers, portable vs fast, per host, in your ledger. (The end-to-end flat suite over your roots is measured by the
 coordinator at collation, after U2a's chunk.cljc lands.)

@@ -8,6 +8,7 @@ set), and this lane roster's rules (`doc/flat/lanes/README.md`, a copy of race-n
 writes flat-io/jvm and flat-io/js against the same contract at the same time — you own everything else in this unit.
 
 ## The work
+
 1. **adapters/flat-io/portable/src/eve/flat_io.cljc** — the contract's functions, made by MOVING chunk.cljc's byte
    layer (ru8 … rf64, rvarint, varint-len, ba-copy-of, the IBuf interface/protocol and its `Buf` deftypes, dv-of and
    the BigInt helpers it needs) — moved, not rewritten: its :clj / :bb / :glj / :jank / :cljs arms come with it, so
@@ -30,11 +31,13 @@ writes flat-io/jvm and flat-io/js against the same contract at the same time —
    shape's sorted symbol codes / key bytes; keep the answers equal (contract_test, chunk_test).
 
 ## Tests (targeted, rule 3)
+
 JVM: `clojure -M:jvm-test -n eve.flat.chunk-test -n eve.flat.contract-test …` (the flat namespaces
 test/eve/flat/host_suite.cljc lists for :jvm). bb and Node: the :bb and :cljs suites host_suite.cljc names (its
 `:runner` strings say how). Record before / after for each.
 
 ## Done bar
+
 The flat suite green on the JVM, bb and Node with chunk.cljc over the seam; the conformance test green on all three;
 byte-level reader conditionals in chunk.cljc counted before / after; the 1BRC-shape probe (race-nk `eve/flatx.clj`,
 copy it into your worktree) on the JVM before / after — pack, get ×407, seq walk, format.

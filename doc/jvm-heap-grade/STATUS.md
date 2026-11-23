@@ -3,6 +3,7 @@
 Branch: claude/eve-jvm-heap-grade · Base: origin/main @ d241de3fbc27e5dd80d5f1e17661103b0680b9c0 (verified via ls-remote 11:51 ET 2026-11-05)
 
 ## Log (US Eastern)
+
 - 11:51 — STEP 0 done: base verified, branch created and pushed. Next: read Eve JVM collection/slab code, set up REPL.
 - 11:52 — Toolchain: clojure CLI installer blocked by the session's sandbox policy (remote script); worked around with Maven-fetched jars (clojure 1.12.0, spec, test.check) + deps.edn :paths as a hand-built classpath; live socket REPL on the JVM seat (OpenJDK 21, 4 cores, load ~0.3).
 - 11:54 — REPL probes (first pass, same session, min-of-3 batches; NOT yet the banked interleaved run):
@@ -20,6 +21,7 @@ Branch: claude/eve-jvm-heap-grade · Base: origin/main @ d241de3fbc27e5dd80d5f1e
 - **STOP — stop condition "the baseline does not reproduce" hit.** Map lookup measures ~0.8–1.1 µs (spike: ~119–134 µs), vec nth ~0.32 µs, deref scalar ~0.6 µs (spike ~104 µs), deref 100-map ~49–63 µs (spike ~1.78 ms), collection assoc ~4 µs (spike 0.5–5 ms); 1k vec does not hit the wall. swap! (~21–25 µs inc, ~140–185 µs assoc on a 100-map root) and the map capacity wall (dies between 1k and 5k entries) do reproduce. The ~10² µs "lookup" class reproduces only as `(get @atom k)`, which is deref materialization. And the lookup is not decode-on-access: decode is ~38 ns of ~800 ns; the HAMT is already walked in place. The in-place-read design this step was to build is therefore aimed at a mechanism the code does not have. Steps 2–3 (design, prototype) not started. Full report: REPORT.md.
 
 ## STEP 2 — automatic guard vs whole-root materialization (US Eastern)
+
 - 13:31 — STEP 2 started (cohost agent, ordered via lane M 12:01, re-confirmed 13:25). Branch tip f97dde6. Reading step-1 harness + atom read path (atom.cljc deref / read-pinned / read-region / $). Next: toolchain + reproduce step-1 deref numbers.
 - 13:34 — Toolchain re-made (fresh container): Maven jars + deps.edn :paths, socket REPL. First REPL probes of the SAME-DOMAIN question (anonymous heap atoms share one domain sio — verified `identical?`):
   - plain `@a` → `PersistentHashMap` (materialized). Inside `$`: `EveHashMap`, header off **806 == the atom slot's ptr 806**, sio `identical?` to the atom's; `(get v :k3)` → child `EveHashMap` @689 (in place).

@@ -40,7 +40,6 @@ Board row: B3 (detach under the pin vs `@a`, gate ≥ 2× on every corpus).
   written in full and its seq half is expected red until L1 lands.
 - Next: tests first (red), then sio.cljc, then image.cljc, then the B3 board run.
 
-
 ## Log (2026-11-12, ~02:00 ET)
 
 - Push route closed by the coordinator (verified: this box has no GitHub
@@ -141,8 +140,7 @@ Board row: B3 (detach under the pin vs `@a`, gate ≥ 2× on every corpus).
   `clojure -M:jvm-test -n <ns>` per namespace (image-test, then
   requirements-test), log → ~/static-eve-results/z1-tests.log;
   `static-eve-detach-b3-board2.json` — board via classpath from
-  `clojure -Spath -M:jvm-test` + `clojure.main -m eve.static.z1-board
-  -- --runs 5`, log → ~/static-eve-results/z1-b3-board.log (the board
+  `clojure -Spath -M:jvm-test` + `clojure.main -m eve.static.z1-board -- --runs 5`, log → ~/static-eve-results/z1-b3-board.log (the board
   prints its SPIKE-LOG section to stdout, captured in the log).
 - **BUNDLE REFRESH NEEDED to this commit's tip** before either leg
   runs, or they test the pre-fix tree.

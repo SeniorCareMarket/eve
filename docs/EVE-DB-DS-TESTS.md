@@ -7,13 +7,13 @@ No release merge or tag. Logs are in `docs/eve-db-ds-logs/`.
 
 ## Isolated regression proof
 
-| Host | Tests | Assertions passed | Fail/errors | Scope |
-|---|---:|---:|---|---|
-| JVM, Clojure 1.12.0 / Temurin 21.0.13 | 12 | 152 | 0/0 | MapEntry + bytes + existing collection/type/hash regressions |
-| nbb 1.6.214 / Node 24.22.1 | 12 | 152 | 0/0 | same |
-| Basilisp 0.5.1 / Python 3.13, fresh namespace cache | 12 | 152 | 0/0 | same |
-| bb 1.13.226 | 10 | 81 | 0/0 | byte storage + existing collection/type/hash regressions, **not native MapEntry parity** |
-| bb 1.13.226 native MapEntry contract | 2 | 16 | 17/38 | **OPEN**, full failure log retained |
+| Host                                                | Tests | Assertions passed | Fail/errors | Scope                                                                                    |
+| --------------------------------------------------- | ----: | ----------------: | ----------- | ---------------------------------------------------------------------------------------- |
+| JVM, Clojure 1.12.0 / Temurin 21.0.13               |    12 |               152 | 0/0         | MapEntry + bytes + existing collection/type/hash regressions                             |
+| nbb 1.6.214 / Node 24.22.1                          |    12 |               152 | 0/0         | same                                                                                     |
+| Basilisp 0.5.1 / Python 3.13, fresh namespace cache |    12 |               152 | 0/0         | same                                                                                     |
+| bb 1.13.226                                         |    10 |                81 | 0/0         | byte storage + existing collection/type/hash regressions, **not native MapEntry parity** |
+| bb 1.13.226 native MapEntry contract                |     2 |                16 | 17/38       | **OPEN**, full failure log retained                                                      |
 
 The focused MapEntry + byte-storage contract alone is 3 tests / 76
 assertions on JVM, nbb and fresh-cache Basilisp. It covers native
@@ -85,12 +85,12 @@ function and asserts `eve.core/nth` resolves. The release's existing E1
 All four official/default suite attempts were leashed to 600 seconds and
 ended with **exit 124**. Raw logs are retained; no complete totals exist.
 
-| Host | Command | Last observed progress / errors |
-|---|---|---|
-| JVM | `timeout 600 clojure -J-Xmx1g -M:jvm-test` | Reached eve.net.seen-set-test; had loaded an earlier version of the new bytes test with an untyped scalar initializer (fixed and proven by the isolated 152-assertion rerun) |
-| bb | `timeout 600 bb --classpath "$BB_CP:test" -m eve.runner.bb-main test` | Reached eve.rrb-vector-test |
-| nbb | `timeout 600 nbb --classpath "$NBB_CP:test" -m eve.runner.nbb-main test` | Reached eve.thread-test; encrypted-domain/keyring and domain reopen tests report unimplemented host operations |
-| Basilisp | `timeout 600 basilisp run <reversed -p roots> -n eve.runner.lpy-main test` | Reached numeric-tags tests; decimal values beyond int64 unscaled fail with ArithmeticException integer overflow |
+| Host     | Command                                                                    | Last observed progress / errors                                                                                                                                              |
+| -------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM      | `timeout 600 clojure -J-Xmx1g -M:jvm-test`                                 | Reached eve.net.seen-set-test; had loaded an earlier version of the new bytes test with an untyped scalar initializer (fixed and proven by the isolated 152-assertion rerun) |
+| bb       | `timeout 600 bb --classpath "$BB_CP:test" -m eve.runner.bb-main test`      | Reached eve.rrb-vector-test                                                                                                                                                  |
+| nbb      | `timeout 600 nbb --classpath "$NBB_CP:test" -m eve.runner.nbb-main test`   | Reached eve.thread-test; encrypted-domain/keyring and domain reopen tests report unimplemented host operations                                                               |
+| Basilisp | `timeout 600 basilisp run <reversed -p roots> -n eve.runner.lpy-main test` | Reached numeric-tags tests; decimal values beyond int64 unscaled fail with ArithmeticException integer overflow                                                              |
 
 These broad exploratory runs shared the repository working directory and
 were started before the final bytes-test correction. They are **not**

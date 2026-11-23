@@ -173,7 +173,7 @@ thread pool down since `b20fe09a9`, so the JVM exits when the script ends.)
 - **Without `:gak`, nothing is encrypted.** The object store holds every block in plaintext.
 - **With `:gak`**, every blob in the store is AES-256-CTR under a per-blob key, HKDF(gak, the first 16 bytes of the
   blob's key) (`src/eve/net/blobs.cljc:8-27`). The scheme is **deterministic**: equal plaintexts encrypt equally. A
-  blob's address is the SHA-256 of its *plaintext*, so the store sees content hashes.
+  blob's address is the SHA-256 of its _plaintext_, so the store sees content hashes.
 - **The root snapshot the broker receives is never encrypted.** Each swap sends it in the CAS body, and each deref
   answers it. It carries every top-level key and every top-level scalar value of the map in plaintext, and the content
   keys of the collections (`src/eve/net/snapshot.cljc`).
@@ -185,10 +185,10 @@ thread pool down since `b20fe09a9`, so the JVM exits when the script ends.)
 
 A host needs an `http` root in its `hosts.edn` row:
 
-| Has http | jvm (`http/java`), cljs and nbb (`http/node`), browser (`http/browser`), bb (`http/java`), cljr (`http/clr`), lpy (`http/python`), clje (`http/beam`), glj (`http/go`) |
-|---|---|
-| **No http** | jolt, ValueScript (vs) |
-| **Can serve a gateway** (`http-server`) | jvm (`http-server/jdk`), cljs (`http-server/node`), bb (`http-server/httpkit`) |
+| Has http                                | jvm (`http/java`), cljs and nbb (`http/node`), browser (`http/browser`), bb (`http/java`), cljr (`http/clr`), lpy (`http/python`), clje (`http/beam`), glj (`http/go`) |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No http**                             | jolt, ValueScript (vs)                                                                                                                                                 |
+| **Can serve a gateway** (`http-server`) | jvm (`http-server/jdk`), cljs (`http-server/node`), bb (`http-server/httpkit`)                                                                                         |
 
 Each host's crypto is its own crypto adapter, or the portable one (the browser, jolt, vs, glj). The portable code is the reference
 every native adapter is held to; it is not constant-time (see SECURITY.md).
@@ -197,7 +197,7 @@ every native adapter is held to; it is not constant-time (see SECURITY.md).
 
 These are history: the work's plans and reports, kept for their rationale. This page and the code are current.
 
-| File | What it is |
-|---|---|
-| [WIRE.md](WIRE.md) | the wire protocol (routes, bodies, the snapshot and graft formats): the **current spec** |
+| File                       | What it is                                                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------- |
+| [WIRE.md](WIRE.md)         | the wire protocol (routes, bodies, the snapshot and graft formats): the **current spec** |
 | [ADAPTERS.md](ADAPTERS.md) | the network atom's host seams (http, crypto, process, encoding) and their measured costs |

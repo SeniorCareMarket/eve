@@ -73,7 +73,7 @@ registry. No arity conflict exists in the merged tree.
   qualified type-key) and c97fe26's concat appended after `reader`:
   (apply list 'do eve-type registration-form layout type-refs reader
   (concat (when static-forms [static-forms])
-          [(register-sister! …)])). Diff vs release = sister hunks
+  [(register-sister! …)])). Diff vs release = sister hunks
   only (verified firsthand). Diff vs the campaign form = release
   hunks only.
 - deftype.cljc: the disjoint union of the require blocks — the
@@ -115,7 +115,7 @@ acceptance: loads and runs; only H4.1's Dataset row red).
   release's machinery.
 - (b) **Sister suite on the h5 tree: not green, residuals lawfully
   attributed — none to the reconciliation.**
-  (i) Four errors were the release's *construction law* meeting the
+  (i) Four errors were the release's _construction law_ meeting the
   pre-release test: the test's own `(->Gadget …)` call (sister_test.clj:41,
   from :191) threw `{:eve.alloc{:error:no-domain-context}}` at
   alloc.cljc:1764 — no sister code in the stack. The release changed the
@@ -161,14 +161,14 @@ requirements.edn merge-replays (original merge blobs), racily-clean
 stat phantoms (stat refresh; the coordinator's b1 class), and the
 deftype stops resolved by the reconciled form.
 
-| lane | old tip | new tip | stops |
-|---|---|---|---|
-| h5 (this staging branch) | 512b619 | dced716 | d102173 merge-replay; **c97fe26 reconciled** (reconciled equivalent 662dee4); construction-law rider on the test |
-| collate | d2a5cff | d7d2cb4, then rider c4911c2 | d102173, 2e98d4d merge-replays; stat phantom; **c97fe26 reconciled** (stage-2 bases blob-identical to the h5 stop — macros b1fab69, deftype.cljc 4f29051 — reconciled files taken from 662dee4); aa1e624 chunk merge-replay; 14 merge-replays to original results; sisterfix pick cc108d5 conflicted in the CLJS shim — union resolution (release's [eve.type-readers] kept, sister require added; mirrors deftype.cljc) |
-| sisterfix | d2a5cff | d7d2cb4 | its three commits are collate's final three by construction (its old tip WAS collate's tip); a cherry rebase was attempted and aborted — it re-walked the whole lineage to the same wall — and the branch was re-pointed at the replayed tip; equivalence by identical pre-rebase tip commit and subject-identical replay |
-| rename | 271a9bd (6124bb3 + its own verification commit, banked after the coordinator's table) | dea1514 | the rename commit conflicted only in the two deftype files: resolved by applying the rename's own FULL sed rules to the reconciled parent content — zero `eve.static` survivors in code, `eve.flat.sister/register-sister!` at the reconciled tail (reader line 242, registration line 252 pre-rename numbering); re-run over the collate rider with the same rule for sister_test.clj |
-| flatdoc | 2743a7e | tip over dea1514 (0fe8cc0 lineage) | none — both commits replayed clean over the rebased rename, twice (before and after the rider) |
-| f3measure | fd51026 | 82e5b72 | stat phantom; **c97fe26 reconciled** (same blob-identical stage-2 bases); 16 merge-replays to original results |
+| lane                     | old tip                                                                               | new tip                            | stops                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| h5 (this staging branch) | 512b619                                                                               | dced716                            | d102173 merge-replay; **c97fe26 reconciled** (reconciled equivalent 662dee4); construction-law rider on the test                                                                                                                                                                                                                                                                                                         |
+| collate                  | d2a5cff                                                                               | d7d2cb4, then rider c4911c2        | d102173, 2e98d4d merge-replays; stat phantom; **c97fe26 reconciled** (stage-2 bases blob-identical to the h5 stop — macros b1fab69, deftype.cljc 4f29051 — reconciled files taken from 662dee4); aa1e624 chunk merge-replay; 14 merge-replays to original results; sisterfix pick cc108d5 conflicted in the CLJS shim — union resolution (release's [eve.type-readers] kept, sister require added; mirrors deftype.cljc) |
+| sisterfix                | d2a5cff                                                                               | d7d2cb4                            | its three commits are collate's final three by construction (its old tip WAS collate's tip); a cherry rebase was attempted and aborted — it re-walked the whole lineage to the same wall — and the branch was re-pointed at the replayed tip; equivalence by identical pre-rebase tip commit and subject-identical replay                                                                                                |
+| rename                   | 271a9bd (6124bb3 + its own verification commit, banked after the coordinator's table) | dea1514                            | the rename commit conflicted only in the two deftype files: resolved by applying the rename's own FULL sed rules to the reconciled parent content — zero `eve.static` survivors in code, `eve.flat.sister/register-sister!` at the reconciled tail (reader line 242, registration line 252 pre-rename numbering); re-run over the collate rider with the same rule for sister_test.clj                                   |
+| flatdoc                  | 2743a7e                                                                               | tip over dea1514 (0fe8cc0 lineage) | none — both commits replayed clean over the rebased rename, twice (before and after the rider)                                                                                                                                                                                                                                                                                                                           |
+| f3measure                | fd51026                                                                               | 82e5b72                            | stat phantom; **c97fe26 reconciled** (same blob-identical stage-2 bases); 16 merge-replays to original results                                                                                                                                                                                                                                                                                                           |
 
 Every rebased tip verified firsthand: release tip 356df6b is an
 ancestor of HEAD; trees clean. The collate rider (c4911c2) carries the

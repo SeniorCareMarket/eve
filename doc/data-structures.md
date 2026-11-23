@@ -6,19 +6,19 @@ collection in the atom's domain; every thread of the process, and on disk every 
 
 ## Overview
 
-| Type | Constructor | In |
-|------|------------|-----------|
-| Atom | `e/atom` | a slot of an atom domain (in-process: a heap domain per `:id`; `:persistent`: a disk domain) |
-| Atom domain | `e/atom-domain`, `eve.atom/persistent-atom-domain` | the domain itself, an atom (its slot 0, the registry) |
-| HashMap | `e/hash-map`, or any map stored in an atom | HAMT in slab memory |
-| HashSet | `e/hash-set`, or any set stored in an atom | HAMT in slab memory |
-| Vector | `eve.vec/eve-vec`, or any vector stored in an atom | persistent vector trie in slab memory |
-| List | `eve.list/eve-list`, or any list stored in an atom | persistent list in slab memory |
-| Array | `e/eve-array` | typed array (a heap array on the JVM family; a slab block elsewhere) |
-| Integer map, sorted set, sorted map | `eve.deftype.int-map`, `eve.sorted` | `doc/collections.md` |
-| Dataset | `eve.alpha.ds/dataset` | columnar data frame (named EveArray columns) |
-| Tensor | `eve.alpha.tensor/from-array` | N-dimensional view over an EveArray |
-| Custom types | `e/deftype` (`eve.deftype/eve-deftype`) | user-defined types in slab memory |
+| Type                                | Constructor                                        | In                                                                                           |
+| ----------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Atom                                | `e/atom`                                           | a slot of an atom domain (in-process: a heap domain per `:id`; `:persistent`: a disk domain) |
+| Atom domain                         | `e/atom-domain`, `eve.atom/persistent-atom-domain` | the domain itself, an atom (its slot 0, the registry)                                        |
+| HashMap                             | `e/hash-map`, or any map stored in an atom         | HAMT in slab memory                                                                          |
+| HashSet                             | `e/hash-set`, or any set stored in an atom         | HAMT in slab memory                                                                          |
+| Vector                              | `eve.vec/eve-vec`, or any vector stored in an atom | persistent vector trie in slab memory                                                        |
+| List                                | `eve.list/eve-list`, or any list stored in an atom | persistent list in slab memory                                                               |
+| Array                               | `e/eve-array`                                      | typed array (a heap array on the JVM family; a slab block elsewhere)                         |
+| Integer map, sorted set, sorted map | `eve.deftype.int-map`, `eve.sorted`                | `doc/collections.md`                                                                         |
+| Dataset                             | `eve.alpha.ds/dataset`                             | columnar data frame (named EveArray columns)                                                 |
+| Tensor                              | `eve.alpha.tensor/from-array`                      | N-dimensional view over an EveArray                                                          |
+| Custom types                        | `e/deftype` (`eve.deftype/eve-deftype`)            | user-defined types in slab memory                                                            |
 
 Most user code needs only `eve.alpha`. Atoms and domains in depth — disk domains, member atoms, meta-atoms, `$` — are
 `doc/atom-domains.md`.
@@ -253,23 +253,23 @@ protocol names, on every host. The expansion is `eve.deftype.macros`
 
 Each host realizes a type through its `eve.types` adapter (`hosts.edn`'s `types/<impl>` root):
 
-| Host | `eve.types` adapter | What a type is |
-|---|---|---|
-| JVM | `types/jvm` | a `deftype` with the interfaces as written |
-| ClojureScript (compiled) | `types/jvm` → `types/js` (the compiler runs in the JVM) | a `deftype` with the CLJS protocols they translate to |
-| nbb | `types/js` + `types/nbb` | the same ClojureScript `deftype`, run by SCI |
-| babashka | `types/bb` | a `deftype` with those interfaces on `eve.core`'s protocols; a map type keeps the map interfaces |
-| ClojureCLR | `types/clr` | a `deftype` with the JVM's interfaces under the CLR's names (below) |
-| basilisp | `types/basilisp` | a basilisp `deftype` (a Python class) with the JVM's interfaces translated onto basilisp's (below) |
-| jolt | `types/jvm` | the JVM's `deftype`, as written (below) |
-| clojerl | `types/beam` | a clojerl `deftype` with the JVM's interfaces translated onto clojerl's protocols (below) |
-| glojure (glj-eve) | `types/glojure` | the completion's `deftype` — a record extended to its protocols (glojure v0.7.22 has none) — with every interface translated onto `eve.core`'s protocols, as on babashka; `IDeref`/`IAtom`/`IPending` onto the completion's (below) |
-| ValueScript | `types/vs` | VS's `deftype`, whose instances VS's core reads as its own typed maps: every interface translated onto `eve.core`'s protocols. eve's own `eve/deftype` expansion does not yet run on VS (`hosts.edn`'s `:vs` comment: it waits on VS's analyzer and macro evaluator); the codec, regions, the allocator and the HAMT functions do |
+| Host                     | `eve.types` adapter                                     | What a type is                                                                                                                                                                                                                                                                                                                    |
+| ------------------------ | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM                      | `types/jvm`                                             | a `deftype` with the interfaces as written                                                                                                                                                                                                                                                                                        |
+| ClojureScript (compiled) | `types/jvm` → `types/js` (the compiler runs in the JVM) | a `deftype` with the CLJS protocols they translate to                                                                                                                                                                                                                                                                             |
+| nbb                      | `types/js` + `types/nbb`                                | the same ClojureScript `deftype`, run by SCI                                                                                                                                                                                                                                                                                      |
+| babashka                 | `types/bb`                                              | a `deftype` with those interfaces on `eve.core`'s protocols; a map type keeps the map interfaces                                                                                                                                                                                                                                  |
+| ClojureCLR               | `types/clr`                                             | a `deftype` with the JVM's interfaces under the CLR's names (below)                                                                                                                                                                                                                                                               |
+| basilisp                 | `types/basilisp`                                        | a basilisp `deftype` (a Python class) with the JVM's interfaces translated onto basilisp's (below)                                                                                                                                                                                                                                |
+| jolt                     | `types/jvm`                                             | the JVM's `deftype`, as written (below)                                                                                                                                                                                                                                                                                           |
+| clojerl                  | `types/beam`                                            | a clojerl `deftype` with the JVM's interfaces translated onto clojerl's protocols (below)                                                                                                                                                                                                                                         |
+| glojure (glj-eve)        | `types/glojure`                                         | the completion's `deftype` — a record extended to its protocols (glojure v0.7.22 has none) — with every interface translated onto `eve.core`'s protocols, as on babashka; `IDeref`/`IAtom`/`IPending` onto the completion's (below)                                                                                               |
+| ValueScript              | `types/vs`                                              | VS's `deftype`, whose instances VS's core reads as its own typed maps: every interface translated onto `eve.core`'s protocols. eve's own `eve/deftype` expansion does not yet run on VS (`hosts.edn`'s `:vs` comment: it waits on VS's analyzer and macro evaluator); the codec, regions, the allocator and the HAMT functions do |
 
 **The vocabulary.** `eve.core` (re-exported by `eve.alpha`) is the surface
 every EVE value answers on every host: `count`, `nth`, `get`, `seq`, `conj`,
 `empty`, `contains?`, `disj`, `meta`, `with-meta`, `invoke`, `reduce`. On the
-JVM, ClojureScript and nbb these *are* `clojure.core`'s functions (with its
+JVM, ClojureScript and nbb these _are_ `clojure.core`'s functions (with its
 inlining on the JVM), because a type there carries the host's own collection
 interfaces — `(count x)` and `(e/count x)` are the same call. On babashka,
 whose `deftype` takes protocols, `Object` and `IPersistentMap` only (the
@@ -418,14 +418,14 @@ written under the old name no longer read as it.
 
 ### Field Metadata
 
-| Hint | Storage | Notes |
-|------|---------|-------|
-| `^:int32`, `^:uint32` | 4-byte slot in the instance's block | Atomic read/write |
-| `^:float32` | 4-byte slot | Non-atomic |
-| `^:float64` | 8-byte slot | Non-atomic |
-| `^:MyEveType` | Offset reference | Links to another `eve/deftype`; read when a method reads it |
-| (no hint) | An eve value | Any value in eve's encoding (its own block): an eve map, vector, array, another eve type's instance |
-| `^:host` | On the instance | Not in eve memory — a cache, a transient's edit token; `nil` in an instance read back from eve memory |
+| Hint                  | Storage                             | Notes                                                                                                 |
+| --------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `^:int32`, `^:uint32` | 4-byte slot in the instance's block | Atomic read/write                                                                                     |
+| `^:float32`           | 4-byte slot                         | Non-atomic                                                                                            |
+| `^:float64`           | 8-byte slot                         | Non-atomic                                                                                            |
+| `^:MyEveType`         | Offset reference                    | Links to another `eve/deftype`; read when a method reads it                                           |
+| (no hint)             | An eve value                        | Any value in eve's encoding (its own block): an eve map, vector, array, another eve type's instance   |
+| `^:host`              | On the instance                     | Not in eve memory — a cache, a transient's edit token; `nil` in an instance read back from eve memory |
 
 An immutable field (all but a `^:MyEveType` reference) is read when an instance
 is reached and kept on it, so `(.-field x)` reads it on every host, as a
@@ -435,12 +435,12 @@ otherwise read the whole structure the moment one is reached.
 
 ### Mutability
 
-| Modifier | Behavior |
-|----------|----------|
-| (default) | Immutable — set at construction |
-| `^:mutable` with a slab type | Mutable via `set!` (single-worker), in eve memory |
-| `^:mutable` with none | On the instance only (as `^:host`), mutable — ClojureScript's `^:mutable __hash` cache |
-| `^:volatile-mutable` | Atomic via `set!`/`cas!` (cross-worker safe) |
+| Modifier                     | Behavior                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| (default)                    | Immutable — set at construction                                                        |
+| `^:mutable` with a slab type | Mutable via `set!` (single-worker), in eve memory                                      |
+| `^:mutable` with none        | On the instance only (as `^:host`), mutable — ClojureScript's `^:mutable __hash` cache |
+| `^:volatile-mutable`         | Atomic via `set!`/`cas!` (cross-worker safe)                                           |
 
 A field the JVM reserves for types (`__hash`, ...) is renamed there, in the
 field and in the bodies that read it.
@@ -503,14 +503,14 @@ class of its domain (`doc/internals.md`). The slab classes start small and grow 
 demand (`eve.deftype-proto.data`, `SLAB_CLASS_INITIAL_CAPACITIES` /
 `SLAB_CLASS_CAPACITIES`; a disk domain overrides the maxima with `:capacities`):
 
-| Class | Block Size | Initial Capacity | Max Capacity | Max Blocks |
-|-------|-----------|-------------------|-------------|-----------|
-| 0 | 32 B | 64 KB (2K blocks) | 1 GB | 32M blocks |
-| 1 | 64 B | 64 KB (1K blocks) | 1 GB | 16M blocks |
-| 2 | 128 B | 32 KB (256 blocks) | 1 GB | 8M blocks |
-| 3 | 256 B | 32 KB (128 blocks) | 512 MB | 2M blocks |
-| 4 | 512 B | 16 KB (32 blocks) | 256 MB | 512K blocks |
-| 5 | 1024 B | 16 KB (16 blocks) | 256 MB | 256K blocks |
+| Class | Block Size | Initial Capacity   | Max Capacity | Max Blocks  |
+| ----- | ---------- | ------------------ | ------------ | ----------- |
+| 0     | 32 B       | 64 KB (2K blocks)  | 1 GB         | 32M blocks  |
+| 1     | 64 B       | 64 KB (1K blocks)  | 1 GB         | 16M blocks  |
+| 2     | 128 B      | 32 KB (256 blocks) | 1 GB         | 8M blocks   |
+| 3     | 256 B      | 32 KB (128 blocks) | 512 MB       | 2M blocks   |
+| 4     | 512 B      | 16 KB (32 blocks)  | 256 MB       | 512K blocks |
+| 5     | 1024 B     | 16 KB (16 blocks)  | 256 MB       | 256K blocks |
 
 Total initial slab capacity: about 224 KB (64+64+32+32+16+16). Sparse files and
 lazy page commit mean untouched pages cost neither memory nor disk. The overflow
@@ -715,27 +715,29 @@ before the release branch's own commits (not bisected). On 2026-10-16 the bench 
 alternating rounds, did not move (JVM dataset mmap 230–245 vs 215–234 ms, Node column arithmetic mmap 7–11 vs 8–13 ms)
 — an intermittent slow mode (a ~1 s tensor pipeline) showed on either tree.
 
-| Pipeline (1M) | Mode | JVM Eve / Stock ms | Node Eve / Stock ms | nbb Eve / Stock ms | bb Eve / Stock ms |
-|---|---|---|---|---|---|
-| Column Arithmetic | mmap | 18 / 147 | 115 / 710 | 206 / 625 | 339 / 485 |
-| Dataset Pipeline | mmap | 128 / 998 | 484 / 3434 | 1494 / 3496 | 3533 / 3388 |
-| Filter + Aggregate | mmap | 37 / 35 | 109 / 90 | 141 / 66 | 462 / 86 |
-| Sort + Top-N | mmap | 154 / 552 | 354 / 1269 | 2364 / 1273 | 6402 / 1190 |
-| Tensor Pipeline | mmap | 243 / 167 | 315 / 938 | 261 / 547 | 429 / 384 |
-| Column Arithmetic | in-memory | 22 / 127 | 186 / 799 | 202 / 647 | 360 / 433 |
-| Dataset Pipeline | in-memory | 164 / 1077 | 518 / 3195 | 1409 / 3466 | 3463 / 3455 |
-| Filter + Aggregate | in-memory | 27 / 92 | 102 / 103 | 149 / 69 | 507 / 117 |
-| Sort + Top-N | in-memory | 164 / 519 | 383 / 1466 | 2395 / 1312 | 6869 / 1075 |
-| Tensor Pipeline | in-memory | 270 / 168 | 169 / 851 | 174 / 637 | 489 / 365 |
+| Pipeline (1M)      | Mode      | JVM Eve / Stock ms | Node Eve / Stock ms | nbb Eve / Stock ms | bb Eve / Stock ms |
+| ------------------ | --------- | ------------------ | ------------------- | ------------------ | ----------------- |
+| Column Arithmetic  | mmap      | 18 / 147           | 115 / 710           | 206 / 625          | 339 / 485         |
+| Dataset Pipeline   | mmap      | 128 / 998          | 484 / 3434          | 1494 / 3496        | 3533 / 3388       |
+| Filter + Aggregate | mmap      | 37 / 35            | 109 / 90            | 141 / 66           | 462 / 86          |
+| Sort + Top-N       | mmap      | 154 / 552          | 354 / 1269          | 2364 / 1273        | 6402 / 1190       |
+| Tensor Pipeline    | mmap      | 243 / 167          | 315 / 938           | 261 / 547          | 429 / 384         |
+| Column Arithmetic  | in-memory | 22 / 127           | 186 / 799           | 202 / 647          | 360 / 433         |
+| Dataset Pipeline   | in-memory | 164 / 1077         | 518 / 3195          | 1409 / 3466        | 3463 / 3455       |
+| Filter + Aggregate | in-memory | 27 / 92            | 102 / 103           | 149 / 69           | 507 / 117         |
+| Sort + Top-N       | in-memory | 164 / 519          | 383 / 1466          | 2395 / 1312        | 6869 / 1075       |
+| Tensor Pipeline    | in-memory | 270 / 168          | 169 / 851           | 174 / 637          | 489 / 365         |
 
 ### JVM IBulkAccess Fast Paths
 
 On the JVM, the `IBulkAccess` protocol (`eve.deftype-proto.data`) gives `double[]`/`int[]` `aget` loops that avoid
 per-element protocol dispatch and byte-array allocation. Design principle: **one extraction, flat loop**. Every bulk
 operation:
+
 1. extracts the backing `double[]`/`int[]` once (O(1));
 2. loops with `aget`/`aset` over the raw primitive array (O(n), no allocation);
 3. wraps the result as an EveArray at the end (O(1)).
+
 ### Running Benchmarks
 
 ```bash

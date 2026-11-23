@@ -6,14 +6,14 @@ API, `alloc-run!` default, scoreboard, requirements manifest). All times ET.
 
 ## Pins and tools (2026-11-12)
 
-| thing | value |
-|---|---|
-| eve pin | `7402ef9` (code identical to the census pin `4a92129` outside `doc/static/`) + W0 `cfa86c6` |
-| java | OpenJDK 21.0.13 (on PATH) |
-| clojure CLI | 1.12.6.1673 at `/home/hatch/.local/bin/clojure` |
-| deps | `CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig` → `:mvn/local-repo "/home/hatch/m2repo"` |
-| tests | `clojure -X:jvm-test`, scoped `-n eve.static.transfer-test` |
-| pushes | none — this box has no GitHub credential for SeniorCareMarket/eve (coordinator correction); commits are local, cross-lane code via path remotes `w0`, `z1`, `z3` |
+| thing       | value                                                                                                                                                            |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| eve pin     | `7402ef9` (code identical to the census pin `4a92129` outside `doc/static/`) + W0 `cfa86c6`                                                                      |
+| java        | OpenJDK 21.0.13 (on PATH)                                                                                                                                        |
+| clojure CLI | 1.12.6.1673 at `/home/hatch/.local/bin/clojure`                                                                                                                  |
+| deps        | `CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig` → `:mvn/local-repo "/home/hatch/m2repo"`                                                                    |
+| tests       | `clojure -X:jvm-test`, scoped `-n eve.static.transfer-test`                                                                                                      |
+| pushes      | none — this box has no GitHub credential for SeniorCareMarket/eve (coordinator correction); commits are local, cross-lane code via path remotes `w0`, `z1`, `z3` |
 
 ## What T1 owns and the shape chosen
 
@@ -51,7 +51,7 @@ Design, from the evidence read at this pin:
   with `eve.static.contract` (FORMAT-V1 §9). A `0x15` reference scalar
   anywhere in a value block is refused by name (T1.5; FORMAT-V1 §3, A12).
 - **Place (per-block default until Z3/Z2 land).** Validate the whole image
-  (header, tables, every offset/owner/target) *before* claiming anything —
+  (header, tables, every offset/owner/target) _before_ claiming anything —
   a throw inside a swap frees nothing (atom.cljc:982,1085; census §4.2), so
   validation is the point of no return's front side. Then claim each block
   (`alloc/alloc-run!` per class where W0's contract applies, `-sio-alloc!`
@@ -69,7 +69,7 @@ Design, from the evidence read at this pin:
   fix inside T1's files is constructive: with `:zip` on the refs' cell
   atoms (public `ea/set-foreign-policy!` on `(:cell r)`), the store no
   longer refuses — the value is zipped into each cell's domain and the
-  transaction commits both refs. All-or-nothing against *arbitrary*
+  transaction commits both refs. All-or-nothing against _arbitrary_
   mid-commit store failures is a property of `eve.stm`'s commit protocol
   (pre-flight or rollback in `commit!`), which is not a file T1 owns; that
   residual is reported, not silently absorbed.
@@ -208,6 +208,7 @@ correctly, deref-ref reads the donor's map). Requirement-suite verdict
 and B4 numbers are owed from J.
 
 Jobs filed (~/workspace/job-agent/inbox/):
+
 - `static-eve-t1-transfer-tests-1.json` — the 6-test requirement suite
   (`clojure -M:jvm-test -n eve.static.transfer-test`); log on J:
   ~/static-eve-results/t1-transfer-tests-1.log.
@@ -440,11 +441,10 @@ at c9e64be (no transfer-code change):
    (suite censuses: 3330 vs 1262). Q2b never claimed cross-
    construction equality — it measured the control against its OWN
    census. Fix: the control is judged against its own census only.
-3. **L142 (`(= cvec delta-c`)`)** — the control's delta against the
+3. **L142 (``(= cvec delta-c``)``)** — the control's delta against the
    TRANSFER's census vector: wrong on its face given (2). The
    control's residual vs its own census reads [2 1 0 0 0 0] in
-   suite3, where Q2b reported [0 0 0 0 0 0] — but the test evaluates
-   `(free-counts c)` AFTER `(st/detach c)` (L139), so detach's
+   suite3, where Q2b reported [0 0 0 0 0 0] — but the test evaluates ``(free-counts c)``AFTER``(st/detach c)` (L139), so detach's
    effect on its source domain is inside the measurement. Which
    staging is sound is probe3's question, not a guess.
 

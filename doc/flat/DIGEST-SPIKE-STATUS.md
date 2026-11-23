@@ -33,10 +33,10 @@ Repeats corpus — a vector of 200 independently built copies of one
 50-entry map (distinct blocks, equal content; all 200 row digests
 latched):
 
-| | blocks | wire bytes | send | receive |
-|---|---|---|---|---|
-| digests off | 3,409 | 341,693 | 179.7 ms | 204.2 ms |
-| digests on | **225** | **7,015** | **8.4 ms** | **9.1 ms** |
+|             | blocks  | wire bytes | send       | receive    |
+| ----------- | ------- | ---------- | ---------- | ---------- |
+| digests off | 3,409   | 341,693    | 179.7 ms   | 204.2 ms   |
+| digests on  | **225** | **7,015**  | **8.4 ms** | **9.1 ms** |
 
 199 subtrees deduped; exactly 1 digest shipped (the table carries
 only roots actually emitted); 1 root stamped on receive; placed

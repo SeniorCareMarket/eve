@@ -24,11 +24,11 @@ pick an implementation your language can load or write one; list the roots in a 
 The minimal profile, verbatim from `hosts.edn` (lines 74–78):
 
 ```clojure
- :bb-minimal ["adapters/region/jvm-nio-lock/src" "adapters/encoding/java/src" "adapters/process/java/src"
-              "adapters/types/bb/src"
-              "adapters/slab-io/protocol/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
-              "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/int32/portable/src"
-              "adapters/codec/byte-array/src" "adapters/crypto/portable/src" "adapters/thread/none/src"]
+:bb-minimal ["adapters/region/jvm-nio-lock/src" "adapters/encoding/java/src" "adapters/process/java/src"
+             "adapters/types/bb/src"
+             "adapters/slab-io/protocol/src" "adapters/core/clojure/src" "adapters/completion/clojure/src"
+             "adapters/coll/protocols/src" "adapters/slab/heap/src" "adapters/int32/portable/src"
+             "adapters/codec/byte-array/src" "adapters/crypto/portable/src" "adapters/thread/none/src"]
 ```
 
 The first four are babashka's own: the **minimal set**. The other nine are the **inbuilt set**: portable code every host
@@ -62,12 +62,12 @@ are 982.
 
 Supply three functions and a region type:
 
-| Name | Contract |
-|---|---|
-| `(make-heap-region size-bytes)` | in-process memory, **zero-initialised** (a fresh bitmap relies on it) |
-| `(open-mmap-region path size-bytes)` | a `MAP_SHARED` mapping of the file: create it if missing, **grow, never truncate**, new bytes read as zero, the mapping valid after the handle closes, writes visible to every other mapping of the file in this process and in others |
-| `(lustre-region? r)` | true only for a region whose atomics are fcntl byte-range locks |
-| a type implementing `eve.mem/IMemRegion` (17 methods) and `eve.mem/IHostAtomics` (2) | below |
+| Name                                                                                 | Contract                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `(make-heap-region size-bytes)`                                                      | in-process memory, **zero-initialised** (a fresh bitmap relies on it)                                                                                                                                                                  |
+| `(open-mmap-region path size-bytes)`                                                 | a `MAP_SHARED` mapping of the file: create it if missing, **grow, never truncate**, new bytes read as zero, the mapping valid after the handle closes, writes visible to every other mapping of the file in this process and in others |
+| `(lustre-region? r)`                                                                 | true only for a region whose atomics are fcntl byte-range locks                                                                                                                                                                        |
+| a type implementing `eve.mem/IMemRegion` (17 methods) and `eve.mem/IHostAtomics` (2) | below                                                                                                                                                                                                                                  |
 
 The traps, each a rule the shared code relies on:
 
@@ -107,29 +107,29 @@ babashka's region is that lock-only kind. Its type, `adapters/region/jvm-nio-loc
 and the half that tells eve it is lock-only (`:156-167`):
 
 ```clojure
-  mem/IHostAtomics
-  (-atomic-rmw? [_] false)
-  (-with-file-lock [_ byte-off f]
-    (when-not chan
-      (throw (ex-info "BbMmapRegion: not opened :lockable? — no channel for the file lock"
-                      {:byte-off byte-off})))
-    (.lock in-process)
-    (try
-      (let [fl (.lock chan (long byte-off) 4 false)]
-        ;; .release is not reachable from bb; close releases (measured).
-        (try (f) (finally (.close fl))))
-      (finally (.unlock in-process)))))
+mem/IHostAtomics
+(-atomic-rmw? [_] false)
+(-with-file-lock [_ byte-off f]
+  (when-not chan
+    (throw (ex-info "BbMmapRegion: not opened :lockable? — no channel for the file lock"
+                    {:byte-off byte-off})))
+  (.lock in-process)
+  (try
+    (let [fl (.lock chan (long byte-off) 4 false)]
+      ;; .release is not reachable from bb; close releases (measured).
+      (try (f) (finally (.close fl))))
+    (finally (.unlock in-process)))))
 ```
 
 Grow-never-truncate is the opener's first step (`:174-179`):
 
 ```clojure
-  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
-  ([path-str size-bytes opts]
-   (let [size  (long size-bytes)
-         _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
-                 (try (when (< (.length raf) size) (.setLength raf size))
-                      (finally (.close raf))))
+([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+([path-str size-bytes opts]
+ (let [size  (long size-bytes)
+       _     (let [^RandomAccessFile raf (RandomAccessFile. ^String path-str "rw")]
+               (try (when (< (.length raf) size) (.setLength raf size))
+                    (finally (.close raf))))
 ```
 
 A host with hardware atomics on mapped memory implements the full region instead — `region/jvm-varhandle` (the JVM),
@@ -262,17 +262,17 @@ no mutable memory, no arrays — write your own `eve.host`, as clojerl's `core/b
 
 ## 3. The nine you take as they are
 
-| Root | What you get |
-|---|---|
-| `slab-io/protocol` | `eve.slab-io`, the memory seam: 28 macros over `ISlabIO` / `IMemRegion` |
-| `core/clojure` | `eve.host` over `clojure.core` |
-| `completion/clojure` | an empty `eve.host-completion` |
-| `coll/protocols` | `eve.core` as eve's own protocols (§2.5) |
-| `slab/heap` | `eve.process-slab`: the allocator's own heap domain is this process's |
-| `int32/portable` | Murmur3 / FNV-1a / bitmap arithmetic by `quot`, `mod`, `*`, `+` |
-| `codec/byte-array` | the whole codec, values ⇄ EVE bytes, over `eve.host`'s byte arrays and your `eve.encoding` |
-| `crypto/portable` | SHA-256, HMAC, AES-256-CTR, XXH3-128, Ed25519 in portable code; random bytes from your `eve.process` |
-| `thread/none` | one thread: `start-threads!` refuses, eve.thread's pools run their work on the calling thread |
+| Root                 | What you get                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `slab-io/protocol`   | `eve.slab-io`, the memory seam: 28 macros over `ISlabIO` / `IMemRegion`                              |
+| `core/clojure`       | `eve.host` over `clojure.core`                                                                       |
+| `completion/clojure` | an empty `eve.host-completion`                                                                       |
+| `coll/protocols`     | `eve.core` as eve's own protocols (§2.5)                                                             |
+| `slab/heap`          | `eve.process-slab`: the allocator's own heap domain is this process's                                |
+| `int32/portable`     | Murmur3 / FNV-1a / bitmap arithmetic by `quot`, `mod`, `*`, `+`                                      |
+| `codec/byte-array`   | the whole codec, values ⇄ EVE bytes, over `eve.host`'s byte arrays and your `eve.encoding`           |
+| `crypto/portable`    | SHA-256, HMAC, AES-256-CTR, XXH3-128, Ed25519 in portable code; random bytes from your `eve.process` |
+| `thread/none`        | one thread: `start-threads!` refuses, eve.thread's pools run their work on the calling thread        |
 
 Two of them meet your host once:
 
@@ -352,12 +352,12 @@ task in `bb.edn`.
 Then compare your row with a shipped host's. babashka's real row differs from the minimal profile in exactly the fast
 seams it plugs:
 
-| Feature | `:bb-minimal` (inbuilt) | `:bb` (shipped) | What the swap buys |
-|---|---|---|---|
-| crypto | `crypto/portable` | `crypto/java` | native SHA-256 / HMAC / AES / Ed25519 |
-| int32 | `int32/portable` | `int32/jvm` | cheaper hashing |
-| thread | `thread/none` | `thread/jvm` | real threads: eve.thread's pools run in parallel; the thread contract's full rows (55 assertions, against 30 on `thread/none`) |
-| http | — | `http/java` | network atoms (`eve.net`) |
-| http-server | — | `http-server/httpkit` | serving a gateway |
+| Feature     | `:bb-minimal` (inbuilt) | `:bb` (shipped)       | What the swap buys                                                                                                             |
+| ----------- | ----------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| crypto      | `crypto/portable`       | `crypto/java`         | native SHA-256 / HMAC / AES / Ed25519                                                                                          |
+| int32       | `int32/portable`        | `int32/jvm`           | cheaper hashing                                                                                                                |
+| thread      | `thread/none`           | `thread/jvm`          | real threads: eve.thread's pools run in parallel; the thread contract's full rows (55 assertions, against 30 on `thread/none`) |
+| http        | —                       | `http/java`           | network atoms (`eve.net`)                                                                                                      |
+| http-server | —                       | `http-server/httpkit` | serving a gateway                                                                                                              |
 
 The measured difference, seam by seam, and how to plug each one, is [adopting-eve-fast.md](adopting-eve-fast.md).

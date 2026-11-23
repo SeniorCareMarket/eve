@@ -43,13 +43,14 @@ lines in the launcher's supervision shape ("ANT-HOST-READY" /
 "ANT-HOST-DONE" substrings + tag= N).
 
 run.cljc changes (demo/run.cljc):
+
 - roster: jank's :no-driver row removed — jank is a real seat.
 - probe-runtime: :jank case added (jank has no -e verb: the probe
   writes (println (+ 1 2)) to a file in the run dir and `jank run`s
   it, 180 s, wants "3").
 - member-spec: :jank case added — jank --module-path <cp-for :jank
-  + docs/stm-eve + docs/stm-ants + hosts/jank> run-main
-  ants-jank-main, LC_ALL=en_US.UTF-8, config via write-cfg!.
+  - docs/stm-eve + docs/stm-ants + hosts/jank> run-main
+    ants-jank-main, LC_ALL=en_US.UTF-8, config via write-cfg!.
 - find-root: the root test also accepts eve/src/eve/stm.cljc (the
   composed trees carry eve.stm in-tree; the vendored docs/stm-eve/
   eve/stm.cljc exists only on the older ants trees).
@@ -57,6 +58,7 @@ run.cljc changes (demo/run.cljc):
 ## Walls found and fixed in the loop
 
 ### W1. ants' sleep! — :jank arm unreachable (reader-conditional order)
+
 ants.cljc's sleep! carried its :jank arm AFTER :clj. Jank claims
 :clj in reader conditionals, so the :clj arm (Thread/sleep) was
 selected and Thread/sleep does not resolve under jank (no Thread
@@ -67,11 +69,13 @@ same arm-order discipline the STM wrap-up applied inside eve.stm.
 the body was already proc/sleep-ms!. The order was the defect.)
 
 ### W2. clojure.core/flush is a jank runtime stub
+
 (flush) throws ex-info "TODO: port flesh" under jank. Both new
 mains called it (copied from the bb/jolt mains). Removed;
 stm_jank_main.cljc never calls it either.
 
 ### W3. THE COMPOSITION GAP — disk-tier STM seating never reached eve/src
+
 With W1 fixed, analysis failed on stm/seat-clock!: unresolved.
 Verified across every STM branch: the disk-tier seating API —
 seat-clock!, seat-process-tag!, make-ref's :seat opt, the commit
@@ -114,6 +118,7 @@ identical to the wrap-up's pre-merge run; and the load bisect t2
 module path) exits 0 with ants resolved against the merged stm.
 
 ### W5. Read-only transactions advanced the commit-point clock
+
 Stage (a) run 4 (after W4's fix) reopened the world exactly —
 audit clean in both processes — but the clock read 9 in create
 and 11 in reopen, so the values-exact digest (which hashes the
@@ -133,6 +138,7 @@ only consumer. With the fix, stage (a)'s create clock is exactly
 reopen reproduces 8.
 
 ### W4. jank region adapter holds every mmap fd — EMFILE at ~30 domains
+
 Stage (a) run 2: create died "eve.region: open .../cell-0029...
 Too many open files" (then segfaulted in jank teardown on the
 error path). Measured: one persistent domain maps ~37 files (7
@@ -153,6 +159,7 @@ in the tree reads a region's fd field (grepped).
 ## Staged proofs
 
 ### (a) jank alone: create + reopen, values exact
+
 docs/stm-ants/hosts/jank/run_jank_probe.sh (probe_jank_world.cljc,
 dim 8 world, 2 ants, 3 behave steps per ant, digest = hash of
 [snapshot, registry, clock]):
@@ -168,6 +175,7 @@ runs, mostly other lanes): create ~11 min for 65 domains (mint
 mint-bound.
 
 ### (b) jank as a launcher member (jvm,jank), small board
+
 bb docs/stm-ants/demo/run.cljc --members jvm,jank --root <this
 checkout> on J; run dir ants-demo-20261108-171657:
 
@@ -185,6 +193,7 @@ checkout> on J; run dir ants-demo-20261108-171657:
 :validation contention against the driver's ants.)
 
 ### (c) mixed run (jvm,bb,jolt,jank), small board
+
 Same launcher, --members jvm,bb,jolt,jank; run dir
 ants-demo-20261108-172245. All four seats probed READY; tags:
 driver 1, jolt 2, bb 3, jank 4.

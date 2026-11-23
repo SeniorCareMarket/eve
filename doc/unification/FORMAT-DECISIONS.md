@@ -21,28 +21,28 @@ not resolve, `AtomicIntegerArray` is absent. What bb has is `MappedByteBuffer`
 plain loads and stores, `FileChannel.lock` (released by `.close`), and a
 lock-prefixed `AtomicInteger.incrementAndGet` that serves as a full fence.
 
-* A **lock-free host** (VarHandle, Node's native addon, Atomics) brackets
+- A **lock-free host** (VarHandle, Node's native addon, Atomics) brackets
   every write to the domain — a swap attempt, a worker-slot claim, an atom
   slot claim — with `-add-i32!` on `ROOT_INFLIGHT` before and `-sub-i32!`
   after. Having added, it loads `ROOT_HOLD`; if the hold is set it subtracts
   again, waits for the hold to clear, and retries.
-* A **lock-only host** takes an exclusive byte-range file lock on the four
+- A **lock-only host** takes an exclusive byte-range file lock on the four
   bytes at `ROOT_HOLD` (serialising against its own kind; POSIX record locks
   are per process, so an in-process lock guards its own threads), stores
   `1 + its worker slot` into `ROOT_HOLD` (the store is fenced), waits until
   `ROOT_INFLIGHT` reads 0, runs its whole write with plain loads and
   stores, and stores 0. A joining participant that has no slot yet holds
   with `HOLD_JOINING` (257).
-* Why it is correct: both sides write their word with a full fence before
+- Why it is correct: both sides write their word with a full fence before
   reading the other's, so of any lock-free write and any held write, at
   least one sees the other and yields; the lock-free side yields by
   subtracting and waiting, so the two never wait on each other.
-* A dead holder: a hold whose holder's heartbeat is `HEARTBEAT_TIMEOUT_MS`
+- A dead holder: a hold whose holder's heartbeat is `HEARTBEAT_TIMEOUT_MS`
   (30 s) old, or a joining hold watched that long, is cleared by the waiter
   with a CAS.
-* Cost to a lock-free host: two atomic adds and one load per write — on
+- Cost to a lock-free host: two atomic adds and one load per write — on
   the `.root` header line, which the epoch counter already shares.
-* The gap: a participant that implements neither word races a lock-only
+- The gap: a participant that implements neither word races a lock-only
   participant and nothing else. At the time of writing `vs.eve-disk` (the
   wasm host) is such a participant; it must add the two words to share a
   domain with bb. It is already safe with the JVM and Node, whose root CAS
@@ -241,14 +241,14 @@ The rule is Clojure's own equality, measured on the JVM 2026-10-18:
 `(= 5 5N)` with one hash, `(= 1.5M 1.50M)` with one hash, `(= 0M 0.0M)`; but
 `(= 1 1M)` false, `(= 1/2 0.5)` false. So:
 
-* An integer is written by its magnitude, whatever its host type: INT32 in
+- An integer is written by its magnitude, whatever its host type: INT32 in
   `[-2^31, 2^31)`, INT64 in `[-2^63, 2^63)`, BIGINT past that. `5N` is
   `eedb0305000000`, the bytes of `5`; it reads back as the host's fixed-width
   integer. A BIGINT reads back as the host's big integer (`BigInt` on the JVM
   and bb, `int` on basilisp, `BigInt` in JavaScript).
-* A ratio is in lowest terms with a positive denominator (Clojure keeps it so;
+- A ratio is in lowest terms with a positive denominator (Clojure keeps it so;
   a ratio whose denominator is 1 is an integer and never a RATIO).
-* A decimal's trailing zeros are stripped down to scale 0, and a negative
+- A decimal's trailing zeros are stripped down to scale 0, and a negative
   scale is raised to 0: `1.50M` writes `1.5M`'s bytes, `1E+2M` writes
   `100M`'s, zero is unscaled 0 at scale 0.
 
@@ -338,7 +338,7 @@ recorded (a directory rooted at byte 32 of the `.root` header, 512 u16 counts to
 with it — reserved, never written, and a domain whose header carries one has it ignored. `eve.tally`; the memory
 model's statement is VS's `docs/reclaim/atom-domains.md` §0.
 
-* **Where.** Every block of a bitmap class has a descriptor: eve's 28-byte row, the same row as class 6's
+- **Where.** Every block of a bitmap class has a descriptor: eve's 28-byte row, the same row as class 6's
   coalescing table and the ValueScript kernel's. The count is the u32 at +8 (the row's DATA_LENGTH word, which
   nothing read): 0 unused, −1 held forever (a permanent root's), −2 claimed by a flush, −3 saturated (kept from
   then on). The count's flags ride the LOCK_OWNER word at +20: bit 0 is the coalescer's lock, bits 1–8 the
@@ -346,19 +346,18 @@ model's statement is VS's `docs/reclaim/atom-domains.md` §0.
   Heap and SAB slabs carry the table between the bitmap and the data; an mmap domain carries it in a
   `{base}.slabN.desc` file beside the `.bm` (a domain written before the tables opens with a virgin, all-zero
   one). Class 6's rows are its coalescing descriptors.
-* **Who counts.** A store counts what it stores (`eve.tally` hold!/drop!/store!): an atom slot holds its new root
+- **Who counts.** A store counts what it stores (`eve.tally` hold!/drop!/store!): an atom slot holds its new root
   before the CAS that publishes it and lets the old one go after; a reference an eve-deftype writes in place is
   counted by the store rule (the new reference held, then the old let go); every block a dropped value held is
   let go in turn. A hold descends only through blocks it newly counts — reaching a parent node you walked the
   branch, so you know it's not at 0 members. Same-domain references are tallied; a cross-domain plain reference
   is an error (`$` materializes a crossing).
-* **Freeing.** Never on the spot: a block whose count reaches 0 is parked on its domain's zero queue under the
+- **Freeing.** Never on the spot: a block whose count reaches 0 is parked on its domain's zero queue under the
   epoch, and the flush frees it once no pinned reader can see it, claiming it by CAS (0 → −2) so a hold racing
   in is refused.
-* **The gap.** A participant that does not read counts frees a piece another place still holds when it drops one
+- **The gap.** A participant that does not read counts frees a piece another place still holds when it drops one
   of its places. A domain shared with one must not hold a piece at two places. (The wasm participant counts
   through `eve.tally` — `eve_disk.vs`'s hand-copy walk is deleted.)
-
 
 ## 12. The atom slot table grows: root words 20 and 36 (2026-10-24)
 
@@ -367,19 +366,19 @@ that so and ensure it's fully scalable." The named-atom registry at slot 0 was a
 under CAS, unbounded); what bounded a domain to 256 atoms was the slot table: 256 × 8-byte slots laid out in the
 `.root` header (`ATOM_TABLE` 6272, `MAX_ATOM_SLOTS` / `MAX_ATOMS` 256, the claim throwing "no free atom slot").
 
-* **Where.** Slot *i* lives at `ATOM_TABLE + 8 i` for every *i*: the 256 the header holds are followed, past
+- **Where.** Slot _i_ lives at `ATOM_TABLE + 8 i` for every _i_: the 256 the header holds are followed, past
   `ROOT_BYTES` (8320), by as many as the `.root` file holds. Nothing else in the file moves.
-* **Root word 20** (`ROOT_ATOM_TABLE_CAPACITY`, written 256 by every earlier writer) is the capacity: the number of
+- **Root word 20** (`ROOT_ATOM_TABLE_CAPACITY`, written 256 by every earlier writer) is the capacity: the number of
   slots the file holds. A claim that finds every slot below it taken doubles it by CAS (cap → 2 cap); the writer whose
   CAS won extends the file to `ATOM_TABLE + 8 · 2 cap` bytes; a writer whose CAS lost, and any participant that reads a
   capacity past its file's size, extends to the word's value. The bytes a file gains are zero, and a **zero ptr word is
   a slot never claimed: free** (NIL −1 is an atom holding nil, CLAIMED −2 a claim in flight). A domain written before
   this decision reads as capacity 256 and grows on its first claim past it.
-* **Root word 36** is the next-free hint: a claim starts its scan there and stores *i* + 1 after claiming *i*. It is a
+- **Root word 36** is the next-free hint: a claim starts its scan there and stores _i_ + 1 after claiming _i_. It is a
   hint, never a bound: a stale value only costs a scan, and 0 reads as 1 (slot 0 is the registry).
-* **Bounds.** The format's bound is the file system's (the on-disk domain's 4 PiB: 2^49 slots). Each participant maps
+- **Bounds.** The format's bound is the file system's (the on-disk domain's 4 PiB: 2^49 slots). Each participant maps
   the root through a window: eve-disk's is `VS_EVE_ROOT_MB` (1 MiB by default, 130,000 slots; a claim or a read past
   the window throws, naming the variable), as a class's is `VS_EVE_WINDOW_MB`.
-* **Who.** VS's `src/vs/eve_disk.vs` (`claim-atom-slot!`, `grow-slots!`, `ensure-root-capacity!`, `slot-capacity`) and
+- **Who.** VS's `src/vs/eve_disk.vs` (`claim-atom-slot!`, `grow-slots!`, `ensure-root-capacity!`, `slot-capacity`) and
   `eve/src/eve/atom.cljc` / `deftype_proto/data.cljc` (`claim-atom-slot!`, `init`) — the same words, the same
   formula; `test/coop-atom` is where the participants prove they agree.

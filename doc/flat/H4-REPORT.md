@@ -55,7 +55,7 @@ L1's defect on a second host).
 2. **Detach's pad bytes carried source-block slack — PRODUCT, fixed.**
    The same-bytes arm differed in exactly 1 of 512 bytes: byte 340,
    the alignment pad after the last block (JVM 0x00, Node 0x05).
-   Detach sizes a block's content *after* copying a window, so window
+   Detach sizes a block's content _after_ copying a window, so window
    slack lands in the inter-block and pre-table gaps; the byte is a
    function of the source slab, not the value. detach-image now
    zero-fills every gap at table emission (shared code, both hosts),
@@ -70,7 +70,7 @@ L1's defect on a second host).
    merge into a tree with a CLJS build.
 4. **H4.2's fill could never fill — TEST PREMISE, fixed.** The fill
    looped `-sio-alloc!` until refusal; the module slab's size-routed
-   alloc *spills to the next class on exhaustion by design*
+   alloc _spills to the next class on exhaustion by design_
    (process_slab.cljs `alloc`: "grow on OOM, spill to next class").
    Measured: the "class 0 fill" handed out **32,256 blocks = the sum
    of all six classes** at the suite geometry, the pattern frees then

@@ -13,6 +13,7 @@ release-face stamps. None requires a code change to the mechanism.
 ## FINDINGS (severity order)
 
 ### F1 — Row 4: four jank map-hash test rows ship with no disposition recorded in the tree
+
 `test/eve/collection_hash_test.cljc`, deftest `an-eve-collection-hashes-as-the-host-value`:
 the map assertions (L23 `{:a 1 :b 2}` vs `m/hash-map`; L33 nested `{:k1 {:i 10 :s "v10"}}`;
 L34 `{:k [1 2] :s #{3}}`; plus the constructor-map row from VS Agent 3's sweep) fail on the
@@ -27,6 +28,7 @@ itself — no fix commits.) Recommend: record the disposition in-tree (test comm
 jank.md row) as part of the cut.
 
 ### F2 — Row 7: release-face stamps still owed
+
 - CHANGELOG.md: all 0.9.3 content (jank host Added entry, the Fixed entries incl. the
   blind-spot identity entries) sits under `## [Unreleased]` — there is no `[0.9.3]`
   heading. Content matches what actually merged (seat + fixes + identity mechanism);
@@ -39,6 +41,7 @@ jank.md row) as part of the cut.
   numbers appear anywhere in the tree.
 
 ### F3 — Row 1: the collation manifest document is not in the shipped tree
+
 Completeness (John's definition: every manifest row dispositioned) was verified by
 reconstruction: the manifest of record lived on branch `muse/eve-093-collation`
 (removed from origin after the release branch was created); its rows survive as the
@@ -50,6 +53,7 @@ only — but the next release should ship its manifest in-tree.
 ## ROW VERDICTS
 
 ### Row 1 — Manifest completeness: PASS (no silent miss)
+
 Walked against the merged tree's commit series (branch point = main 6502d37, 36 commits):
 seat merge PIECE 0 (729e9090); bb guard fix 85a3e5a (85a3e5ae/8213d78e); heap-grade
 steps 1–3 (b98d5f09 + step-3 series); legacy-index fix (a) 67ff60b (12324bb6);
@@ -63,6 +67,7 @@ excluded from the PR #27 collation as a separate landing decision (collation STA
 the per-node offset cache is a post-0.9.3 future optimization by John's disposition.
 
 ### Row 2 — Tree hygiene: PASS
+
 - Conflict markers: `git grep` for `<<<<<<<` and `>>>>>>>` over the COMMITTED merged
   tree, no extension filter → zero matches (grep exit 1).
 - Load smoke: JVM require of eve.core, eve.atom, eve.map, eve.set, eve.sorted,
@@ -74,6 +79,7 @@ the per-node offset cache is a post-0.9.3 future optimization by John's disposit
   Maven pom — neither is a tree defect.
 
 ### Row 3 — BB parity: PASS (guard in; spot check environment-blocked, cause proven pre-existing)
+
 All THREE :bb sites of Agent 2's fix verified at HEAD in src/eve/atom.cljc:
 L30 `#?@(:bb [] :clj [[eve.guard :as guard]])` (require), L838 `#?(:bb nil :clj ...)`
 (guard-deref), L865 `#?@(:bb [] :clj [(guard/active?) (guard-deref ...)])` (mmap-deref arm).
@@ -93,12 +99,14 @@ can load the tree, on any box.
 ### Row 4 — Map-hash rows: FINDING F1 (above)
 
 ### Row 5 — Seat parity spot-check: PASS
+
 14 adapters/*/jank roots present in the merged tree. Spot-checked 3 roots untouched
 by the blind-spot merge against the seat source lines (origin/claude/eve-jank, eve/
 tree): adapters/slab-io/jank/src/eve/slab_io.jank, adapters/region/jank/src/eve/
 region.jank, adapters/crypto/jank/src/eve/crypto.jank — all BYTE-IDENTICAL.
 
 ### Row 6 — Main divergence: PASS (nothing missing; move is one-directional)
+
 `git rev-list --count 6502d37..origin/main` = 0 — Eve main IS the branch point; it
 gained nothing after the release branched. The release is strictly ahead (36 commits).
 The reverse divergence (release-only content main lacks — the bb guard fix, the whole
@@ -108,6 +116,7 @@ flow ruling the bb fix is NOT for main ahead of the cut. No blocker for this rel
 ### Row 7 — Release face: FINDING F2 (above); jank.md present, README clean of unapproved numbers.
 
 ## Bottom line
+
 Ship-shaped. Close F1's in-tree disposition note and F2's two stamps at the cut;
 F3 is a process note for the next release. Everything else on the audit list verified
 with the evidence above.

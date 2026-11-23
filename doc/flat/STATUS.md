@@ -5,11 +5,11 @@ Lane: validate/kill the flat-Eve assumptions, census the integration surface, pr
 
 ## Pins (recorded 2026-11-11 2:41 PM ET)
 
-| tree | commit | note |
-|---|---|---|
-| SeniorCareMarket/eve | `4a92129` (main tip, 2026-11-09 10:11 PM ET, release 0.9.3.1) | the design tree |
-| johnmn3/atom.broker | `163cb656c` (main tip, 2026-11-11 1:58 AM ET) | VS kernel (`vs/`); **no `eve/` subtree at this pin** |
-| johnmn3/valuescript | no commits on any branch | empty repository |
+| tree                 | commit                                                        | note                                                 |
+| -------------------- | ------------------------------------------------------------- | ---------------------------------------------------- |
+| SeniorCareMarket/eve | `4a92129` (main tip, 2026-11-09 10:11 PM ET, release 0.9.3.1) | the design tree                                      |
+| johnmn3/atom.broker  | `163cb656c` (main tip, 2026-11-11 1:58 AM ET)                 | VS kernel (`vs/`); **no `eve/` subtree at this pin** |
+| johnmn3/valuescript  | no commits on any branch                                      | empty repository                                     |
 
 Tools on PATH: OpenJDK 21.0.12, Node v22.23.4, Python 3 (`/usr/local/bin/python3`), Maven 3.9.11. No `clojure`
 CLI and no `bb` on the box (Clojure jars fetched from Maven Central for probes). 4 cores, 15 GB.

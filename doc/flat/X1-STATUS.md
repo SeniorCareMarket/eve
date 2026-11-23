@@ -8,12 +8,12 @@ path remote: `w0` = ../w0 (`claude/static-w0-contracts`), `c1` = ../c1
 
 ## Pins
 
-| what | pin |
-|---|---|
-| research base | `7402ef9` (`claude/sweet-carson-6pt29d`) |
-| W0 contracts merged | w0 `cfa86c6` (requirements.edn, `eve.static`, contract, corpora, scoreboard) |
+| what                 | pin                                                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| research base        | `7402ef9` (`claude/sweet-carson-6pt29d`)                                                                       |
+| W0 contracts merged  | w0 `cfa86c6` (requirements.edn, `eve.static`, contract, corpora, scoreboard)                                   |
 | C1 byte-identity pin | **`9ea620b`** (merged at `55a0b76`) — "C1 chunk implementation (compiles; tests not yet run) — downstream pin" |
-| tools | Node v24.22.1, OpenJDK (box), clojure/bb in `/home/hatch/.local/bin` |
+| tools                | Node v24.22.1, OpenJDK (box), clojure/bb in `/home/hatch/.local/bin`                                           |
 
 ## What X1 must prove (IMPL-PLAN §3.3, lane X1)
 
@@ -81,14 +81,14 @@ path remote: `w0` = ../w0 (`claude/static-w0-contracts`), `c1` = ../c1
   refusal of a `0x15` scalar body is mirrored.
 - **No type table on CLJS in v1**: records / `eve-deftype` values pack as
   their field maps (the generated sisters are Wave 2 lane H5). JVM typed
-  chunks still *read* on Node — an unregistered type opens as a generic
+  chunks still _read_ on Node — an unregistered type opens as a generic
   tagged handle; `eve.static.chunk/type-registry` +
   `register-type!` are the seam H5 fills. Byte-identical re-pack of
   typed values is not claimed on CLJS.
 - **i64 host rendering**: `col-at` for kind 10/22 answers a JS number
   while the value is a safe integer, a `js/BigInt` past that — Eve's
   CLJS number model. Through `column-view` (BigInt64Array) values are
-  always exact. Consequence to name, not hide: a column of *only*
+  always exact. Consequence to name, not hide: a column of _only_
   integral doubles plans as an integer column on CLJS (3.0 is the
   integer 3 in this host's number model, exactly as the scalar codec
   writes it), where the JVM plans f64 for `Double` objects; X1.3's
@@ -150,7 +150,7 @@ path remote: `w0` = ../w0 (`claude/static-w0-contracts`), `c1` = ../c1
   finding for C1, not papered over.
 - **Finding F-D (C1 test defect, fixed here):** at the pin,
   `eve.static.chunk-test` cannot load — `gen/large-integer*` is a
-  *function* in test.check 1.1.1 and is passed bare into `gen/one-of`
+  _function_ in test.check 1.1.1 and is passed bare into `gen/one-of`
   (chunk_test.clj:99), so the suite throws during namespace load.
   C1's "tests not yet run" is literal. Fixed minimally in `680c9f1`
   (`(gen/large-integer* {})`); C1's implementation untouched.

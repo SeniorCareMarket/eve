@@ -110,7 +110,7 @@ more gates exist where the tree demands them:
   (`hosts/nbb/probe_nbb_domains.cljc`: three persistent domains
   written 0/100/200 must read back distinct — the CLJS seat's
   domain-aliasing defect is still open, and a seat whose domains
-  alias never joins). nbb is also spawned only *after* the
+  alias never joins). nbb is also spawned only _after_ the
   driver reports the world built, because its main does not
   wait for the build the way the other hosts do.
 - Seats with **no ant-host driver in the tree** (ClojureScript/
@@ -129,7 +129,7 @@ never hardcoded. On the 144 board exactly 12 group processes
 as evenly as possible; a group is seeded by whichever process
 draws its tag, so the board is fully seeded with any non-empty
 set of joined members — down to the JVM alone. A member that
-dies *mid-join* (after spawning, before its READY line) fails
+dies _mid-join_ (after spawning, before its READY line) fails
 the run loudly with the member named: its process tag may
 already be claimed, so its slice cannot be honestly re-dealt
 after the fact. Pre-join unavailability is what falls back;
@@ -137,13 +137,13 @@ mid-join death is a failure, never a silently partial world.
 
 ## Exit codes
 
-| code | meaning |
-|---|---|
-| 0 | run completed; the driver's audits all held, final audit registry-exact |
-| 1 | the run completed but an audit failed (see FINAL-AUDIT in the driver log) |
-| 2 | setup abort: no checkout found, world dir already has content, or the JVM seat cannot join |
-| 3 | a member died mid-join, missed the join deadline, or the run hit its absolute deadline |
-| 130 | stopped by the operator (SIGINT/SIGTERM) — partial state, not a verdict |
+| code | meaning                                                                                    |
+| ---- | ------------------------------------------------------------------------------------------ |
+| 0    | run completed; the driver's audits all held, final audit registry-exact                    |
+| 1    | the run completed but an audit failed (see FINAL-AUDIT in the driver log)                  |
+| 2    | setup abort: no checkout found, world dir already has content, or the JVM seat cannot join |
+| 3    | a member died mid-join, missed the join deadline, or the run hit its absolute deadline     |
+| 130  | stopped by the operator (SIGINT/SIGTERM) — partial state, not a verdict                    |
 
 ## What it runs
 

@@ -5,6 +5,7 @@ Requirements H8.1 `writer-reader-handlers`, H8.2 `reader-default`,
 H8.3 `file-roundtrip` — registered in requirements.edn, all `:planned`.
 
 Design (Transit-shaped, per IMPL-PLAN §3.4 + the lane brief):
+
 - `src/eve/static/io.cljc`: a writer emits each value as its packed
   chunk (chunk/pack of the value framed as a 1-vector, so scalars
   travel too), framed by a 4-byte big-endian length; write! flushes —
@@ -19,12 +20,14 @@ Design (Transit-shaped, per IMPL-PLAN §3.4 + the lane brief):
   answer as chunk/open answers them (statics in place, scalars plain).
 
 ## Log
+
 - Tests first: test/eve/static/io_test.clj committed red (io + check
   namespaces absent at this pin in this tree).
 - Bundle: h8.bundle creation needed (coordinator stages to J) when the
   suite leg is filed.
 
 ## Close-out
+
 - Suite green in the lane's own run: 3 tests, 39 assertions, 0/0
   (io-test; includes a real second-JVM file read). H8.1–H8.3 flipped
   :built. Report: doc/static/H8-REPORT.md.

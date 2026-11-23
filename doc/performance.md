@@ -26,18 +26,18 @@ Nov 14, perf-doc-inputs run).
 
 ### ClojureScript (node) — Mac, Nov 14, exit 0, 37 s wall
 
-| workload | ns/op |
-|---|---:|
-| atom-swap-counter | 13,214 |
-| atom-deref-small | 2,792 |
-| atom-swap-map-1k | 4,127 |
-| atom-deref-map-1k | 589,843 |
-| atom-$-get-map-1k | 3,168 |
-| atom-reset-vec-1k | 6,085,937 |
+| workload             |      ns/op |
+| -------------------- | ---------: |
+| atom-swap-counter    |     13,214 |
+| atom-deref-small     |      2,792 |
+| atom-swap-map-1k     |      4,127 |
+| atom-deref-map-1k    |    589,843 |
+| atom-$-get-map-1k    |      3,168 |
+| atom-reset-vec-1k    |  6,085,937 |
 | sorted-set-build-200 | 14,320,312 |
-| int-map-build-200 | 3,599,609 |
-| disk-swap-counter | 6,117,187 |
-| thread-submit-64 | 2,158,203 |
+| int-map-build-200    |  3,599,609 |
+| disk-swap-counter    |  6,117,187 |
+| thread-submit-64     |  2,158,203 |
 
 ### ClojureCLR — Mac, Nov 14, round-40 pin, exit 0, 44 s wall
 

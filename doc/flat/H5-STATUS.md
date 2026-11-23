@@ -176,8 +176,8 @@ where hosts genuinely differ. No hand-written per-type static code.
   - `h5-reg2.json` — image + transfer suites → `reg2.log`.
   - `h5-reg3.json` — type-id + dataset + tally suites → `reg3.log`
     (the generation change touches every eve-deftype in the repo).
-  Results come back through the coordinator; the lane does not idle —
-  light work (STATUS, the report draft) continues here.
+    Results come back through the coordinator; the lane does not idle —
+    light work (STATUS, the report draft) continues here.
 - **Finding for Z1 (banked, not fixed here):** `eve.static.image/detach`
   throws ArithmeticException (RT.intCast overflow in its ordinal
   table's hash-of, image.cljc) on an atom holding an eve-deftype

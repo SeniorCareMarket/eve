@@ -80,12 +80,12 @@ every corpus and every run.
 **Venue rows of record — J (j.slaa.us, clean box), same bench,
 min of 9, interleaved:**
 
-| corpus | gate (probe figure) | today | direct | ratio | split (build + place/swap) |
-|---|---|---|---|---|---|
-| map 10k int->int | 0.37× | 484.46 ms | 52.56 ms | **0.11× — PASS, beats the whole 0.37–0.56 band** | 35.68 + 16.88 |
-| vector 10k records | 0.51× | 747.39 ms | 449.92 ms | 0.60× — near-miss, just over the band's 0.56 top | 348.97 + 100.96 |
-| 5k chat messages | 0.56× | 1,195.92 ms | 811.59 ms | 0.68× — MISS | 600.56 + 211.03 |
-| vector 100k ints | 0.47× | 387.35 ms | 623.21 ms | 1.61× — MISS | 278.62 + 344.60 |
+| corpus             | gate (probe figure) | today       | direct    | ratio                                            | split (build + place/swap) |
+| ------------------ | ------------------- | ----------- | --------- | ------------------------------------------------ | -------------------------- |
+| map 10k int->int   | 0.37×               | 484.46 ms   | 52.56 ms  | **0.11× — PASS, beats the whole 0.37–0.56 band** | 35.68 + 16.88              |
+| vector 10k records | 0.51×               | 747.39 ms   | 449.92 ms | 0.60× — near-miss, just over the band's 0.56 top | 348.97 + 100.96            |
+| 5k chat messages   | 0.56×               | 1,195.92 ms | 811.59 ms | 0.68× — MISS                                     | 600.56 + 211.03            |
+| vector 100k ints   | 0.47×               | 387.35 ms   | 623.21 ms | 1.61× — MISS                                     | 278.62 + 344.60            |
 
 **B5 gate as written — under the probe's figure on every corpus —
 is NOT met.** It is met on map-10k only (0.11×, under the band's

@@ -10,7 +10,7 @@ and the broker/store layers are form-agnostic (key → bytes) and untouched.
    hand copy used tag 7 with the same 8-byte little-endian payload). int32, double, string, boolean
    and char forms are byte-identical to before.
 
-2. **Collection entries: the reference slot is VERSION 3.** A v3 ref names a *flat-image key* — the
+2. **Collection entries: the reference slot is VERSION 3.** A v3 ref names a _flat-image key_ — the
    hex SHA-256 of the entry value's whole trunk image (one image per entry, stored and fetched as one
    block). A v2 ref named a codec band root (a block graph). Readers refuse v2 refs with
    `:legacy-band-root`; there is no in-place upgrade — a v2 atom's value must be re-committed by a

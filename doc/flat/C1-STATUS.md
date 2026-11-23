@@ -51,12 +51,12 @@ Branch `claude/static-c1-chunk`, base = research tip 7402ef9. JVM only for the g
 
 Run at load1 ≈ 1.2–4 with `eve.static.chunk-bench` (min of 5, one warmup):
 
-| Row | Corpus | Transit MessagePack | Eve flat codec |
-|---|---|---:|---:|
-| B6 bytes | 5,000 messages | 874,085 B | 2,083,799 B |
-| B6 bytes | 10,000 records | 646,605 B | 1,872,016 B |
-| B7 decode | 5,000 messages | 417.6 ms (83.5 µs/row) | — |
-| B7 decode | 10,000 records | 315.3 ms (31.5 µs/row) | — |
+| Row       | Corpus         |    Transit MessagePack | Eve flat codec |
+| --------- | -------------- | ---------------------: | -------------: |
+| B6 bytes  | 5,000 messages |              874,085 B |    2,083,799 B |
+| B6 bytes  | 10,000 records |              646,605 B |    1,872,016 B |
+| B7 decode | 5,000 messages | 417.6 ms (83.5 µs/row) |              — |
+| B7 decode | 10,000 records | 315.3 ms (31.5 µs/row) |              — |
 
 Transit decode absolutes are far above the research session's (M4:
 7.1 µs/row messages) — this box is shared by all twelve lanes right now.
@@ -204,9 +204,9 @@ end of the lane, and the absolutes are reported alongside.
   ~/workspace/job-agent/inbox/:
   - static-eve-c1-suite.json (leash 1800 s) → ~/static-eve-results/c1-suite.log on J
   - static-eve-c1-bench.json (leash 2400 s) → ~/static-eve-results/c1-bench.log on J
-  Each run clones ~/static-eve-bundles/c1.bundle on J, checks out
-  claude/static-c1-chunk, echoes EXPECTED/ACTUAL tip, builds the
-  classpath from the tree + ~/m2repo jars, and runs the leg.
+    Each run clones ~/static-eve-bundles/c1.bundle on J, checks out
+    claude/static-c1-chunk, echoes EXPECTED/ACTUAL tip, builds the
+    classpath from the tree + ~/m2repo jars, and runs the leg.
 - **BUNDLE REFRESH NEEDED on J**: J's staged c1.bundle is STALE at
   a58f383 (verified firsthand by ssh 05:40 ET — it predates the whole
   921fb7a patch batch). The current bundle is refreshed locally at
@@ -249,8 +249,8 @@ end of the lane, and the absolutes are reported alongside.
     (eve.static.chunk-bench; test tree appended via -Sdeps extra-paths,
     transit-clj 1.0.333 supplied via -Sdeps :deps — never a replacing
     :paths).
-  Each log's first line is TIP=<full hash>; the close-out verdict
-  requires it to read acee946b0f75f20c2b1f8a77f878ef14c2bdd341.
+    Each log's first line is TIP=<full hash>; the close-out verdict
+    requires it to read acee946b0f75f20c2b1f8a77f878ef14c2bdd341.
 - Owed on delivery of the two logs: B6/B7 rows to SPIKE-LOG.md with
   gates reported exactly as measured, C1-REPORT.md finalized (the
   owed B6/B7 section replaced), and the completion declaration. If a

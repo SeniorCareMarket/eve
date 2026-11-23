@@ -14,6 +14,7 @@ surface forces a delta, recorded here in the same style as PORTING.md
 (category: Eve-surface adaptation / host-quirk workaround / NONE).
 
 ## D1 — storage: vanilla's storage layer replaced by Eve-atom semantics
+
 `datascript/storage.cljc` — NEW file, no vanilla counterpart in the
 staged set (vanilla's storage rides PSS 0.3.x's storage-capable sets: a
 StorageAdapter inside each index set, the JVM form's classes doing the
@@ -33,6 +34,7 @@ Category: Eve-surface adaptation (the project's headline shape: the
 whole DB as a user value in one shared Eve atom).
 
 ## D2 — query: tuple arrays are Eve vectors; writes thread functionally
+
 `datascript/query.cljc`, two sites (join-tuples, -collect-tuples).
 Vanilla's tuples are host Object[] arrays, mutated in place. Here a
 tuple is a substrate array — an Eve vector, via
@@ -50,6 +52,7 @@ line is identical and consistent there (host arrays throughout); in
 the port it is `arrays/into-array`. Same category, one site.
 
 ## D3 — serialize: the JVM form's class import dropped
+
 `datascript/serialize.cljc`: vanilla imports
 `[me.tonsky.persistent_sorted_set PersistentSortedSet]` — the JVM
 form's class, which does not exist in the Eve world (the port's type
@@ -58,9 +61,11 @@ the file. Dropped; the `[datascript.db Datom]` import stays.
 Category: host-quirk workaround (a name that cannot resolve on Eve).
 
 ## D4 — comparators: core `compare`, not a host `compareTo` method call
+
 `datascript/db.cljc`, four sites — every `.compareTo` call in the
 port, plus the one static host compare the same value path depends on
 (F-JOLT-CMP, the 0.9.3.1 jolt lane's finding):
+
 - `value-compare`'s `:clj` Comparable clause: `(.compareTo ^Comparable x y)` → `(compare x y)`.
 - `cmp-attr-quick`'s `:inline` expansion: `` `(long (.compareTo <Comparable-tagged> a1 a2)) `` → `` `(long (compare a1 a2)) ``.
 - `cmp-attr-quick`'s `:clj` body: `(.compareTo ^Comparable a1 a2)` → `(long (compare a1 a2))`.
@@ -90,6 +95,7 @@ implementation; vanilla-ds/ is untouched. (db.cljc therefore leaves
 the byte-identical list below.)
 
 ## Not deltas (verified byte-identical to vanilla-ds at first writing)
+
 built_ins, conn, core, datafy, impl/entity, inline, lru, parser,
 pull_api, pull_parser, query_v3, util, pprint. (db left this list
 under D4.) query_v3 is upstream's
@@ -97,12 +103,14 @@ own newer query engine, carried unchanged; whether the port's drivers
 exercise it is a suite-coverage question, not a porting delta.
 
 ## D5 — FilteredDB: NO delta — the flagship smoke's failure was a stale classpath (successor lane, 2026-11-06; corrected by measurement)
+
 History, kept in full because two lanes acted on the first read:
 the flagship3 lane's JVM smoke failed with "No such var:
 db/FilteredDB" at conn.cljc:27, and its STATUS diagnosed a missing
 :clj var def in db.cljc (`#?(:clj (def FilteredDB FilteredDB))`),
 by analogy with a Datom precedent. Both halves of that diagnosis
 fail against the actual trees:
+
 - The port's conn.cljc:27 is a doc COMMENT ("the types are named
   qualified (db/DB)"); the code at conn.cljc:31 and every other
   FilteredDB use in the port (core.cljc:247/261/266-268) already
@@ -124,18 +132,19 @@ fail against the actual trees:
   proceeded). The Datom precedent does not exist either: Datom is
   an eve-deftype, whose expansion interns its name as a var on
   every seat — no manual def was ever written for it.
-Disposition: the delta is REMOVED (a comment at the site records
-this). Verification, honestly scoped: with the def removed,
-datascript.db and datascript.conn now COMPILE on the JVM seat
-against eve-release-0931 (the def's throw is gone); the load then
-reaches the NEXT, older defect (below), so a full
-datascript.core load is not yet claimed. The flagship lane should
-regenerate its classpaths against the 0.9.3.1 tree + this
-branch's tip and re-run its smoke; if the "No such var" error
-recurs there with a verified-current classpath, it reopens here
-with that evidence.
+  Disposition: the delta is REMOVED (a comment at the site records
+  this). Verification, honestly scoped: with the def removed,
+  datascript.db and datascript.conn now COMPILE on the JVM seat
+  against eve-release-0931 (the def's throw is gone); the load then
+  reaches the NEXT, older defect (below), so a full
+  datascript.core load is not yet claimed. The flagship lane should
+  regenerate its classpaths against the 0.9.3.1 tree + this
+  branch's tip and re-run its smoke; if the "No such var" error
+  recurs there with a verified-current classpath, it reopens here
+  with that evidence.
 
 ## D8 — pull_api's spliced hint in binding-vector position does not read on the JVM (successor lane, 2026-11-06; the db.cljc:707-family throw, found by the clean JVM run)
+
 With D5's illegal def removed, the standalone JVM load of
 datascript.core (probe contract.ds-loadprobe) dies READING
 datascript/pull_api.cljc:65:35: "Metadata can only be applied to
@@ -167,6 +176,7 @@ eve-release-0931 (probe contract.ds-loadprobe:
 no FilteredDB var exists or is needed).
 
 ## D6 — F-IFNOOL: the IFn$OOL import and defcomp's invokePrim arm dropped (successor lane, 2026-11-06)
+
 `datascript/db.cljc`: vanilla's ns form carries
 `(:import clojure.lang.IFn$OOL)` and defcomp's reify carries an
 `IFn$OOL (invokePrim ...)` arm — the import's only use in the file.
@@ -185,6 +195,7 @@ implementation; host quirk NOT absorbed — Eve's bb adapter layer
 cannot register a class into SCI, so the port must not name it).
 
 ## D7 — patch-tag's primitive tag quoted (successor lane, 2026-11-06; found by the bb proof)
+
 `datascript/db.cljc` patch-tag: vanilla stores the bare symbol
 `clojure.core$long` as a defn+ :tag value. That resolves on the JVM
 only incidentally — clojure.core's compiled `long` fn class makes
@@ -200,8 +211,10 @@ Category: port-layout fix, same family as D6 (a name the
 interpreter cannot resolve, re-homed to a form every host accepts).
 
 ## D2 amendment 2 (multi-host lane — measured by the upstream suite)
+
 Two more sites of the same disease, found by the unchanged upstream
 suite (not by the lane's probes):
+
 - `query.cljc sum-rel*`: a bare `aset` filled each merged tuple —
   "No matching method aset found taking 3 args" on every or/or-join
   query (upstream query-or: 3 errors). Now a threaded da/aset reduce.
@@ -222,8 +235,10 @@ suite (not by the lane's probes):
   transact-built — never saw it.
 
 ## D2 amendment (same category, more sites — measured during the first query runs)
+
 The first JVM query runs found the same disease at three more sites in
 query.cljc, all fixed the same way (functional da threading):
+
 - the two int-getter :clj branches (`(aget ^objects tuple idx)` →
   `(da/aget tuple idx)`);
 - `-call-fn`: static-args/tuples-args were built and per-call filled by
@@ -232,21 +247,22 @@ query.cljc, all fixed the same way (functional da threading):
   predicate-call path). Both are now threaded reduces; the per-call fill
   builds the argument array functionally — vanilla mutates a shared
   static-args, the per-call result is the same.
-Measured motive chain: `(d/q ...)` first threw "PersistentVector cannot
-be cast to [Ljava.lang.Object;" at -collect-tuples; after D2's first two
-sites, name queries answered (#{[Bo] [Ada]}) and predicate calls exposed
-the -call-fn sites. One subtlety the port had to learn by measurement:
-at predicate/function-call time the production relation's tuples are
-raw Datoms and its attrs map symbols to Datom FIELD NAMES
-({?e e, ?a v}), not tuple indexes — vanilla's fill reads them with
-`get` (Datom's ILookup answers field names), and an early version of
-this port that substituted da/aget (= nth) there failed with
-"String cannot be cast to Number". The fill keeps vanilla's
-`(#?(:cljs da/aget :clj get)` read; da/aget is used only where the
-tuple is provably a substrate array. After all D2 sites: full JVM smoke
-green — q #{[Bo] [Ada]}, pred q #{[41]}, entity, datoms 4.
+  Measured motive chain: `(d/q ...)` first threw "PersistentVector cannot
+  be cast to [Ljava.lang.Object;" at -collect-tuples; after D2's first two
+  sites, name queries answered (#{[Bo] [Ada]}) and predicate calls exposed
+  the -call-fn sites. One subtlety the port had to learn by measurement:
+  at predicate/function-call time the production relation's tuples are
+  raw Datoms and its attrs map symbols to Datom FIELD NAMES
+  ({?e e, ?a v}), not tuple indexes — vanilla's fill reads them with
+  `get` (Datom's ILookup answers field names), and an early version of
+  this port that substituted da/aget (= nth) there failed with
+  "String cannot be cast to Number". The fill keeps vanilla's
+  `(#?(:cljs da/aget :clj get)` read; da/aget is used only where the
+  tuple is provably a substrate array. After all D2 sites: full JVM smoke
+  green — q #{[Bo] [Ada]}, pred q #{[41]}, entity, datoms 4.
 
 ## Dependencies (vendored, not part of DataScript)
+
 - extend-clj 0.1.0 (io.github.tonsky/extend-clj, MIT (c) 2023 Nikita
   Prokopov), DataScript's second pinned dependency, is vendored verbatim
   at lib-ds-deps/extend_clj/core.cljc — NONE.
@@ -288,6 +304,7 @@ green — q #{[Bo] [Ada]}, pred q #{[41]}, entity, datoms 4.
   and it transacts a third entity against the resident DB.
 
 ## Types — the port's center of gravity (design measured 2026-11-06; implementation is the next step)
+
 - **Measured fact T0.** Vanilla DataScript loads and runs on Eve's JVM
   seat as host code, but a host-record DB is not an Eve value: it cannot
   be an Eve atom's value or cross the codec. And a bare eve-deftype does
@@ -315,6 +332,7 @@ green — q #{[Bo] [Ada]}, pred q #{[41]}, entity, datoms 4.
   hash/equiv/seal can agree — the property the Phase-2 drivers test.
 
 ## Open (updated 2026-11-06 evening)
+
 - The port LOADS and ANSWERS on the JVM seat (host-typed DB): empty-db,
   db-with, datoms=4 for the 2-entity smoke, name query, entity lookup —
   with the substrate and D1/D2/D3 applied. The T1/T2/T3 conversion is
@@ -326,6 +344,7 @@ green — q #{[Bo] [Ada]}, pred q #{[41]}, entity, datoms 4.
   validation, after the port loads and behaves under the Lane-M drivers.
 
 ## D2 addendum (2026-11-06 ~2:12 PM ET) — the -call-fn site, and a repair
+
 The D2 rewrite has a THIRD site, -call-fn (~line 491): static-args /
 tuples-args are built by a single reduce threading da/aset results
 (vanilla mutates two preallocated arrays in a dotimes), and both
@@ -410,7 +429,7 @@ the port tree (lib-ds/, lib-ds-deps/) unless marked Eve-side:
   arm's deftype* surgery has no meaning in a cljs macro read);
   combine-cmp's :cljs body uses the literal 0 for (num 0)
   (clojure.core/num is JVM-only); util log's :cljs arm drops the
-  System/getProperty gate (the runtime *debug* gate remains).
+  System/getProperty gate (the runtime _debug_ gate remains).
 - **cljs-env?** (db.cljc, extend-clj): the :cljs arm answers true
   literally. Measured: in nbb's SCI macro environment &env is {}
   — the :clj test (boolean (:ns env)) answers false there and

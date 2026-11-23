@@ -5,13 +5,13 @@ Lane: Wave 0 of `IMPL-PLAN.md` §3.2 (requirements W0.1–W0.6). Branch
 
 ## Pins and tools (recorded 2026-11-12 01:22 AM ET)
 
-| thing | value |
-|---|---|
-| tree | `/home/hatch/workspace/static-eve/w0`, SeniorCareMarket/eve @ `7402ef9` |
-| java | OpenJDK 21.0.13 (on PATH) |
-| clojure CLI | 1.12.6.1673 at `/home/hatch/.local/bin/clojure` (not on the default PATH) |
-| deps | `CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig` → `:mvn/local-repo "/home/hatch/m2repo"`; test-runner git dep cached in `~/.gitlibs`; transit-clj 1.0.333 in the local repo |
-| test runner | `clojure -X:jvm-test` (cognitect test-runner, `-d test`) |
+| thing       | value                                                                                                                                                                            |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| tree        | `/home/hatch/workspace/static-eve/w0`, SeniorCareMarket/eve @ `7402ef9`                                                                                                          |
+| java        | OpenJDK 21.0.13 (on PATH)                                                                                                                                                        |
+| clojure CLI | 1.12.6.1673 at `/home/hatch/.local/bin/clojure` (not on the default PATH)                                                                                                        |
+| deps        | `CLJ_CONFIG=/home/hatch/workspace/eve-env/cljconfig` → `:mvn/local-repo "/home/hatch/m2repo"`; test-runner git dep cached in `~/.gitlibs`; transit-clj 1.0.333 in the local repo |
+| test runner | `clojure -X:jvm-test` (cognitect test-runner, `-d test`)                                                                                                                         |
 
 ## Load gate
 
@@ -51,6 +51,7 @@ all passed.** The run's 91 failures were all inside requirements-covered: 90 fro
 bug (my var-name regex omitted `-`; fixed in `b31eaf2`) and 1 = W0.6's log check.
 
 Not yet verified:
+
 - **W0.2** — the regex fix is committed but the suite has not been re-run since.
 - **W0.6** — SPIKE-LOG.md has ONE section (map-10k, 02:37 ET). Its figures are
   cold-JVM + contention inflated (B2 9,932 ms against M6's 202 ms) and its Transit

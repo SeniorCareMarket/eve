@@ -48,12 +48,12 @@ regression in the fix.** Evidence, all read first-hand at this pin:
    deftype_proto/macros.cljc:11); its `cnt`/`head-off` exist solely as
    bytes in its slab header block. There is no host-side field in which
    a tail could carry its own (cnt, head).
-2. Pre-fix, `next`/`more` answered an EveList *because* they called
+2. Pre-fix, `next`/`more` answered an EveList _because_ they called
    `make-list` per step, minting that header (visible in the 4be0814
    diff). The assertions therefore held only under per-step domain
    allocation — the exact mechanism of the re-derived defect (197
    blocks over 4 walks of a 50-list). L1.1 and the assertions are
-   mutually exclusive: satisfying them *is* re-introducing the leak.
+   mutually exclusive: satisfying them _is_ re-introducing the leak.
 3. Nothing a reader can observe changed except the concrete class of
    the object `next`/`rest` return. The ISeq contract — values, order,
    nil termination, rest count — is asserted by the neighbouring

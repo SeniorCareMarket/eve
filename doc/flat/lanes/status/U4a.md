@@ -50,6 +50,7 @@ sources, the reader's factory lookups, the writer's type table, an exact 64-bit 
 ## 2026-11-17 2:33 AM ET — the sister on three hosts (commits f33c3aadf9, a04fc5f0b3, 956dae1350, 1f4c7d552c)
 
 What changed (each measured below):
+
 - **sister.cljc**: a float32 / float64 field of a slab instance is decoded by `fio/f32` / `fio/f64` over the field's
   own bytes (`slab-io/read-bytes`) — the per-host casts and ClojureScript's throw are gone; `uint32` by `bit-and`, no
   clojerl branch; no `#?` is left in the byte reads. The factory registers with the chunk on every host. The `:cljs`
@@ -77,6 +78,7 @@ What changed (each measured below):
 
 Measured (provenance: flat-u4a at the commit named per line, JDK 21.0.12.1 / Clojure 1.12.0, bb 1.12.218, Node
 22.23.4 + shadow-cljs 3.3.6; load1 2.1–3.8; each run a fresh process; the Node build recompiled from the tree):
+
 - **JVM** `clojure -M:jvm-test -n eve.flat.sister-test` (a04fc5f0b3): **6 tests / 45 assertions, 0 F, 0 E** (= base).
   sister.cljc under its own `*warn-on-reflection*`: 0 warnings; chunk.cljc's 52 warnings the same 52 messages as at
   the base (diffed), none on the field-read path (col-at, batch-parts, RowSource, batch-field-cols, row-handle).
@@ -112,19 +114,20 @@ load1 3.1–5.0; every run a fresh process. Answers, every round on every host: 
 both; `equal?` true for both; field-sum −82,621 for both; format 10,605 chars for both; a record value is the
 generated sister (`Stats__Flat`, `ISister` true); chunk bytes 15,720 (vector) / 19,864 (record).
 
-| row (µs) | JVM vec | JVM rec | bb vec | bb rec | Node vec | Node rec |
-|---|---|---|---|---|---|---|
-| build the persistent map ×407 | 47 / 48 / 76 | 21,238 / 19,908 / 21,914 | 4,290 / 6,867 / 4,281 | 842,079 / 922,708 / 943,303 | 182 / 138 / 193 | 75,804 / 55,746 / 58,630 |
-| fc/pack | 9,720 / 6,636 / 5,670 | 12,669 / 14,676 / 15,211 | 393,797 / 437,472 / 395,462 | 445,479 / 467,645 / 465,735 | 21,890 / 17,136 / 22,515 | 29,328 / 23,556 / 24,325 |
-| get ×407 (+ one field) | 1,204 / 901 / 768 | 368 / 359 / 513 | 21,304 / 21,743 / 20,561 | 34,701 / 34,746 / 35,449 | 1,446 / 1,320 / 1,407 | 1,259 / 1,186 / 1,391 |
-| field read on every row (min, summed) | 279 / 313 / 484 | 801 / 775 / 1,251 | 3,596 / 3,679 / 3,549 | 29,687 / 30,384 / 30,497 | 1,313 / 1,014 / 1,095 | 1,438 / 1,362 / 1,185 |
-| … as `(:min s)` | — | 1,133 / 772 / 807 | — | n/a (below) | — | 1,648 / 1,262 / 1,363 |
-| format | 614 / 633 / 860 | 1,395 / 978 / 866 | 7,077 / 7,273 / 7,145 | 16,687 / 16,895 / 17,114 | 4,712 / 3,232 / 3,438 | 4,088 / 2,428 / 2,689 |
-| `=` flat vs persistent | 4,602 / 4,536 / 4,392 | 817 / 1,353 / 1,069 | 510,849 / 504,616 / 485,916 | 41,663 / 43,005 / 43,135 | 12,787 / 9,828 / 9,548 | 4,926 / 4,738 / 4,544 |
-| 407 records as a vector: pack | — | 10,179 / 9,544 / 14,726 | — | 340,340 / 348,126 / 357,729 | — | 23,635 / 24,660 / 23,437 |
-| … field read on every row (column[row]) | — | 203 / 217 / 217 | — | 5,067 / 5,165 / 5,153 | — | 1,101 / 1,164 / 1,082 |
+| row (µs)                                | JVM vec               | JVM rec                  | bb vec                      | bb rec                      | Node vec                 | Node rec                 |
+| --------------------------------------- | --------------------- | ------------------------ | --------------------------- | --------------------------- | ------------------------ | ------------------------ |
+| build the persistent map ×407           | 47 / 48 / 76          | 21,238 / 19,908 / 21,914 | 4,290 / 6,867 / 4,281       | 842,079 / 922,708 / 943,303 | 182 / 138 / 193          | 75,804 / 55,746 / 58,630 |
+| fc/pack                                 | 9,720 / 6,636 / 5,670 | 12,669 / 14,676 / 15,211 | 393,797 / 437,472 / 395,462 | 445,479 / 467,645 / 465,735 | 21,890 / 17,136 / 22,515 | 29,328 / 23,556 / 24,325 |
+| get ×407 (+ one field)                  | 1,204 / 901 / 768     | 368 / 359 / 513          | 21,304 / 21,743 / 20,561    | 34,701 / 34,746 / 35,449    | 1,446 / 1,320 / 1,407    | 1,259 / 1,186 / 1,391    |
+| field read on every row (min, summed)   | 279 / 313 / 484       | 801 / 775 / 1,251        | 3,596 / 3,679 / 3,549       | 29,687 / 30,384 / 30,497    | 1,313 / 1,014 / 1,095    | 1,438 / 1,362 / 1,185    |
+| … as `(:min s)`                         | —                     | 1,133 / 772 / 807        | —                           | n/a (below)                 | —                        | 1,648 / 1,262 / 1,363    |
+| format                                  | 614 / 633 / 860       | 1,395 / 978 / 866        | 7,077 / 7,273 / 7,145       | 16,687 / 16,895 / 17,114    | 4,712 / 3,232 / 3,438    | 4,088 / 2,428 / 2,689    |
+| `=` flat vs persistent                  | 4,602 / 4,536 / 4,392 | 817 / 1,353 / 1,069      | 510,849 / 504,616 / 485,916 | 41,663 / 43,005 / 43,135    | 12,787 / 9,828 / 9,548   | 4,926 / 4,738 / 4,544    |
+| 407 records as a vector: pack           | —                     | 10,179 / 9,544 / 14,726  | —                           | 340,340 / 348,126 / 357,729 | —                        | 23,635 / 24,660 / 23,437 |
+| … field read on every row (column[row]) | —                     | 203 / 217 / 217          | —                           | 5,067 / 5,165 / 5,153       | —                        | 1,101 / 1,164 / 1,082    |
 
 Read with it:
+
 - **The record values before this lane** (the same bench, one round, on a `git archive 036644a5c8` export with only
   flatx_rec.cljc and run-bench copied in): **JVM** — the record rows run through `rec/format` (pack 32,131; get 292;
   field-sum 603; format 744) and the run **dies at `rec/eq-flat-persistent`: `IllegalArgumentException` at
@@ -137,7 +140,7 @@ Read with it:
 - **Where a record value's field read goes.** The writer packs a map whose values are records as a MAP node of the
   407 keys whose every value is its own record node (a MAP of the type's 4-key shape) — so a map value's field read
   is that node's slot (`RecordSource` → `lookup-node`: the shape's index, then the scalar), not column[row]. A
-  *vector* of the same records is a BATCH, and there a sister's field read is column[row] (`RowSource` → the batch's
+  _vector_ of the same records is a BATCH, and there a sister's field read is column[row] (`RowSource` → the batch's
   field plan → `col-at` → `fio/i64` …): 203–217 µs for 407 rows on the JVM, under the vector values' 279–484. Writing a
   map of one type's instances as a KMAP whose values are a struct column (FORMAT-V1 §6 "a collection of instances is a
   BATCH of it"; a KMAP's values node may be a COL, and kind 21 is the struct column — the reader already reads it:
@@ -159,6 +162,7 @@ Read with it:
 
 `ps`: no process survived the pause; every log above was complete on disk (the base Node run had finished its round
 and died where recorded). Re-run at a43dc13b61, each a fresh process (load1 1–5, the box otherwise idle):
+
 - **JVM** `clojure -M:jvm-test -n eve.flat.sister-test`: **6 tests / 45 assertions, 0 F / 0 E** (10.9 s). With -n
   host-suite-test, chunk-test, contract-test beside it: 19 / 628, 1 F — host-flat-suite's `:squint` row, red at the
   base too. **0 reflection warnings from sister.cljc** (the file sets the flag itself now).
@@ -168,6 +172,7 @@ and died where recorded). Re-run at a43dc13b61, each a fresh process (load1 1–
   target/flat-sister-test) `&& node target/flat-sister-test/main.js`: **4 tests / 30 assertions, 0 F / 0 E.**
 
 **Defects outside this lane's files** (recorded, not fixed):
+
 1. eve.flat.stream `cursor-class-size` (stream.cljc:69, and its twin `class-size` at :60) on babashka: `(aget ^ints
    (.-block_sizes ^JvmSlabCtx root) (int ci))` — `sci.lang.Type cannot be cast to java.lang.Class` once `root` is a
    JvmSlabCtx (a sci type on bb, so the class hint cannot resolve). Reached by `eve.flat.transfer/transfer!`. Repro:

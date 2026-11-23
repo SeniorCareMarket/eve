@@ -7,16 +7,16 @@ a type author implements) is in [adopting-eve-minimal.md](adopting-eve-minimal.m
 Arglists are the source's. Every sample was run as written on 2026-10-20 ET on babashka 1.13.226 and on the JVM
 (JDK 21.0.12, Clojure 1.12.0), against this tree; classpaths are in [getting-started.md](getting-started.md).
 
-| Namespace | What it is | Hosts |
-|---|---|---|
-| [`eve.alpha`](#evealpha) | the entry point: atoms, the core constructors, typed-array access, eve.core's vocabulary, the type macros | every host but ValueScript |
-| [`eve.atom`](#eveatom) | atoms and atom domains | every host but ValueScript |
-| [`eve.stm`](#evestm) | software transactional memory: refs and `dosync` on eve atoms | every host but ValueScript |
-| [`eve.thread`, `eve.thread.fold`](#evethread) | the executor service: futures, pools, `pmap`, `fold`, `=>>` | every host with a thread adapter (all but ValueScript) |
-| [`eve.net.atom`, `.gateway`, `.auth`, `.platform`](#evenet) | network atoms | hosts with an http adapter |
-| [`eve.keyring`](#evekeyring) | encryption at rest, at the slab level | every host but ValueScript |
-| [`eve.sorted`](#evesorted) | sorted maps and sets with comparators | every host but ValueScript |
-| [`eve.deftype.int-map`](#evedeftypeint-map) | integer maps (a PATRICIA trie) | every host but ValueScript |
+| Namespace                                                   | What it is                                                                                                | Hosts                                                  |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| [`eve.alpha`](#evealpha)                                    | the entry point: atoms, the core constructors, typed-array access, eve.core's vocabulary, the type macros | every host but ValueScript                             |
+| [`eve.atom`](#eveatom)                                      | atoms and atom domains                                                                                    | every host but ValueScript                             |
+| [`eve.stm`](#evestm)                                        | software transactional memory: refs and `dosync` on eve atoms                                             | every host but ValueScript                             |
+| [`eve.thread`, `eve.thread.fold`](#evethread)               | the executor service: futures, pools, `pmap`, `fold`, `=>>`                                               | every host with a thread adapter (all but ValueScript) |
+| [`eve.net.atom`, `.gateway`, `.auth`, `.platform`](#evenet) | network atoms                                                                                             | hosts with an http adapter                             |
+| [`eve.keyring`](#evekeyring)                                | encryption at rest, at the slab level                                                                     | every host but ValueScript                             |
+| [`eve.sorted`](#evesorted)                                  | sorted maps and sets with comparators                                                                     | every host but ValueScript                             |
+| [`eve.deftype.int-map`](#evedeftypeint-map)                 | integer maps (a PATRICIA trie)                                                                            | every host but ValueScript                             |
 
 | [`eve.obj`](#eveobj) | typed objects and object arrays | every host but ValueScript |
 | [`eve.array`](#evearray) | typed arrays with atomics | JVM, babashka, ClojureScript, nbb (not yet ClojureCLR, basilisp, jolt, clojerl, glojure) |
@@ -49,17 +49,17 @@ the samples below use them. A dereferenced value is the host's own data everywhe
 (println (e/$ (e/get @counter :count)))         ; 11
 ```
 
-| Name | Arglist | What |
-|---|---|---|
-| `atom` | `(atom v)` `(atom ::id v)` `(atom {:id ::id} v)` `(atom {:id ::id :persistent "path"} v)` `(atom {:id ::id :persistent true} v)` | an atom: in-process (one heap domain per `:id`), or with `:persistent` a named atom in the disk domain at the path (`true`: `./eve/`). An anonymous persistent atom is named `"__anon__/<n>"` from a per-process counter, so give persistent atoms an `:id` |
-| `atom-domain` | `[initial-value & opts]` | a fresh in-process domain whose own value starts as `initial-value`. Reads no options |
-| `close-atom-domain!` | `[d]` | releases this process's worker slot in domain `d` |
-| `shared-atom?` | `[x]` | true for an eve atom or domain |
-| `hash-map`, `empty-hash-map`, `hash-set`, `empty-hash-set` | `[& args]` (a first argument that is a slab I/O names the domain), `[]` `[sio]` | eve's HAMT map and set (rarely needed: plain maps and sets become eve's when stored) |
-| `eve-array`, `aget`, `aset!` | `[type-kw size-or-coll]` `[a b c]` `[sio type-kw n init-val]`, `[arr idx]`, `[arr idx val]` | typed arrays (see `eve.array`) |
-| `count nth get seq conj empty contains? disj meta with-meta invoke reduce` | eve.core's | the collection vocabulary every eve value answers on every host |
-| `deftype`, `extend-type` (macros) | `[& args]` | `eve.deftype/eve-deftype` and `eve-extend-type` |
-| `$` (macro) | `[& body]` | a read region: in body, `@` of an eve atom answers its stored, slab-backed value; every domain it reads stays pinned (a network atom's lease kept) until the outermost `$` exits; body's result is materialized as it leaves. A `$` inside another joins it |
+| Name                                                                       | Arglist                                                                                                                          | What                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `atom`                                                                     | `(atom v)` `(atom ::id v)` `(atom {:id ::id} v)` `(atom {:id ::id :persistent "path"} v)` `(atom {:id ::id :persistent true} v)` | an atom: in-process (one heap domain per `:id`), or with `:persistent` a named atom in the disk domain at the path (`true`: `./eve/`). An anonymous persistent atom is named `"__anon__/<n>"` from a per-process counter, so give persistent atoms an `:id` |
+| `atom-domain`                                                              | `[initial-value & opts]`                                                                                                         | a fresh in-process domain whose own value starts as `initial-value`. Reads no options                                                                                                                                                                       |
+| `close-atom-domain!`                                                       | `[d]`                                                                                                                            | releases this process's worker slot in domain `d`                                                                                                                                                                                                           |
+| `shared-atom?`                                                             | `[x]`                                                                                                                            | true for an eve atom or domain                                                                                                                                                                                                                              |
+| `hash-map`, `empty-hash-map`, `hash-set`, `empty-hash-set`                 | `[& args]` (a first argument that is a slab I/O names the domain), `[]` `[sio]`                                                  | eve's HAMT map and set (rarely needed: plain maps and sets become eve's when stored)                                                                                                                                                                        |
+| `eve-array`, `aget`, `aset!`                                               | `[type-kw size-or-coll]` `[a b c]` `[sio type-kw n init-val]`, `[arr idx]`, `[arr idx val]`                                      | typed arrays (see `eve.array`)                                                                                                                                                                                                                              |
+| `count nth get seq conj empty contains? disj meta with-meta invoke reduce` | eve.core's                                                                                                                       | the collection vocabulary every eve value answers on every host                                                                                                                                                                                             |
+| `deftype`, `extend-type` (macros)                                          | `[& args]`                                                                                                                       | `eve.deftype/eve-deftype` and `eve-extend-type`                                                                                                                                                                                                             |
+| `$` (macro)                                                                | `[& body]`                                                                                                                       | a read region: in body, `@` of an eve atom answers its stored, slab-backed value; every domain it reads stays pinned (a network atom's lease kept) until the outermost `$` exits; body's result is materialized as it leaves. A `$` inside another joins it |
 
 `eve.alpha` does not re-export `eve.core`'s `assoc`, `dissoc`, `into`, `pop`, `peek`, `reduce-kv` or `transient`;
 require `eve.core` for them.
@@ -68,22 +68,22 @@ require `eve.core` for them.
 
 The domain API is described in [atom-domains.md](atom-domains.md), with a run sample. In brief:
 
-| Var | Arglist | What |
-|---|---|---|
-| `atom`, `persistent-atom` | `[& args]` | as `eve.alpha/atom`; `persistent-atom` always on disk |
-| `persistent-atom-domain` | `[base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes]}]` | open or create a disk domain, cached by path; the creator is the one exclusive create of `<base>.root`. `:journal?` (default: on unless `:durable? false`) — the disk tier is journaled by design; `false` keeps durable commits without the journal file. `:mem-budget` (bytes) caps the domain's total region growth; refused growth names the budget (defaults: `MEM-BUDGET-DESKTOP` 2 GB, `MEM-BUDGET-BROWSER` 1 GB, `MEM-BUDGET-WORKERD` 48 MB — developer-settable defaults, not ceilings). `:segment-bytes` (a power of two, default 256 MiB) sets the region mapping window: segmentation takes a domain past the 2 GiB single-mapping ceiling, and the value is stored nowhere in the domain's files, so processes may join one domain with different windows |
-| `join-atom-domain` | `[base-path]` | the same |
-| `lookup-or-create-mmap-atom!` | `[domain "ns/name" init]` | a member atom by string name |
-| `domain-lookup` | `[domain k]` `[domain k not-found]` | a member atom by keyword |
-| `registered-name` | `[a]` | the name `a` is registered under |
-| `meta-atom` | `[a]` `[a init]` | a's coordination atom, beside it in the same domain |
-| `version` | `[a]` | `[domain-epoch root-pointer]` |
-| `seal` | `[a]` | a digest of a's stored version, byte for byte |
-| `$*` | `[f]` | the region `eve.alpha/$` expands to: `(f)` as a read region |
-| `read-pinned` | `[a f & args]` | `(f value & args)` with the slab-backed value, under a pin released when f returns; f's result must not keep it (eve's own bounded reads; a program reads with `eve.alpha/$`) |
-| `compare-and-set!*` | `[a old new]` | CAS on every host |
-| `atom-sio` | `[a]` | the domain's slab I/O, to build a value in that domain outside `swap!` |
-| `close-atom-domain!`, `close!` | `[d]`, `[a]` | release the worker slot |
+| Var                            | Arglist                                                                                                                                     | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `atom`, `persistent-atom`      | `[& args]`                                                                                                                                  | as `eve.alpha/atom`; `persistent-atom` always on disk                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `persistent-atom-domain`       | `[base-path & {:keys [capacities lustre? durable? journal? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes]}]` | open or create a disk domain, cached by path; the creator is the one exclusive create of `<base>.root`. `:journal?` (default: on unless `:durable? false`) — the disk tier is journaled by design; `false` keeps durable commits without the journal file. `:mem-budget` (bytes) caps the domain's total region growth; refused growth names the budget (defaults: `MEM-BUDGET-DESKTOP` 2 GB, `MEM-BUDGET-BROWSER` 1 GB, `MEM-BUDGET-WORKERD` 48 MB — developer-settable defaults, not ceilings). `:segment-bytes` (a power of two, default 256 MiB) sets the region mapping window: segmentation takes a domain past the 2 GiB single-mapping ceiling, and the value is stored nowhere in the domain's files, so processes may join one domain with different windows |
+| `join-atom-domain`             | `[base-path]`                                                                                                                               | the same                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `lookup-or-create-mmap-atom!`  | `[domain "ns/name" init]`                                                                                                                   | a member atom by string name                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `domain-lookup`                | `[domain k]` `[domain k not-found]`                                                                                                         | a member atom by keyword                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `registered-name`              | `[a]`                                                                                                                                       | the name `a` is registered under                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `meta-atom`                    | `[a]` `[a init]`                                                                                                                            | a's coordination atom, beside it in the same domain                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `version`                      | `[a]`                                                                                                                                       | `[domain-epoch root-pointer]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `seal`                         | `[a]`                                                                                                                                       | a digest of a's stored version, byte for byte                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `$*`                           | `[f]`                                                                                                                                       | the region `eve.alpha/$` expands to: `(f)` as a read region                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `read-pinned`                  | `[a f & args]`                                                                                                                              | `(f value & args)` with the slab-backed value, under a pin released when f returns; f's result must not keep it (eve's own bounded reads; a program reads with `eve.alpha/$`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `compare-and-set!*`            | `[a old new]`                                                                                                                               | CAS on every host                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `atom-sio`                     | `[a]`                                                                                                                                       | the domain's slab I/O, to build a value in that domain outside `swap!`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `close-atom-domain!`, `close!` | `[d]`, `[a]`                                                                                                                                | release the worker slot                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Deref (`@a`) materializes the value into the host's own collections. Its other public vars (`register-worker!`,
 `begin-read!`, `retire-block!`, and the like) are the epoch surface the tests drive, not application API.
@@ -92,24 +92,24 @@ Deref (`@a`) materializes the value into the host's own collections. Its other p
 
 Software transactional memory in Eve, on Eve atoms, with no host STM beneath: stock Clojure's semantics over a per-ref construction — each ref's cell is the sole atom of its own Eve atom domain, so the ref's domain is its contention domain. The full page is [stm.md](stm.md); in brief:
 
-| Var | Arglist | What |
-|---|---|---|
-| `make-ref` | `[x]`, `[x opts]` | a new ref holding `x`; opts `:meta`, `:validator`, `:min-history`, `:max-history`, `:seat` (disk-tier seating: `{:domain-path :name :durable?}`) |
-| `dosync` (macro) | `[& body]` | run the body in a transaction; a nested call joins the running attempt |
-| `sync` (macro) | `[flags & body]` | the same runner (the `:release-pending-sends` flag is not modelled) |
-| `run-in-transaction` | `[f]` | the runner itself: run `f` in an attempt, retrying per the STM page's rules |
-| `deref-ref` | `[r]` | in a transaction, the value as of the attempt's read point, folded with its own writes; outside, the latest committed value |
-| `ref-set*` | `[r v]` | the attempt's value of `r` becomes `v` |
-| `alter*` | `[r f args]` | apply `f` to the attempt's view of `r`, recorded as a set; an altered ref is validated at commit |
-| `commute*` | `[r f args]` | record `f` to fold over the ref's current committed value at commit time, in call order; not validated |
-| `ensure*` | `[r]` | enrol `r` in the attempt's validated set (the write-skew guard) |
-| `ref-history-count`, `ref-min-history`, `ref-max-history`, `set-min-history!`, `set-max-history!` | `[r]`, `[r n]` | the ref's retained versioned history (max defaults to 10, min to 0) |
-| `add-watch*`, `remove-watch*`, `get-watches` | `[r k f]`, `[r k]`, `[r]` | ref watches — refs carry watches and a validator in their own state (eve atoms have neither) |
-| `set-validator*`, `get-validator` | `[r f]`, `[r]` | the ref's validator, run at commit |
-| `seat-clock!` | `[a]` | seat the commit-point clock in a shared Eve atom: the disk-tier seating, with `make-ref`'s `:seat`, that lets two processes transact against the same refs |
-| `dispatch!`, `set-send-dispatcher!` | `[msg]`, `[f]` | the agent seam: a send inside a transaction is held and released exactly once, after the winning commit |
-| `stats`, `reset-stats!` | `[]` | attempt / retry / commit counters |
-| `in-transaction?`, `ref-value?` | `[]`, `[x]` | predicates |
+| Var                                                                                               | Arglist                   | What                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make-ref`                                                                                        | `[x]`, `[x opts]`         | a new ref holding `x`; opts `:meta`, `:validator`, `:min-history`, `:max-history`, `:seat` (disk-tier seating: `{:domain-path :name :durable?}`)           |
+| `dosync` (macro)                                                                                  | `[& body]`                | run the body in a transaction; a nested call joins the running attempt                                                                                     |
+| `sync` (macro)                                                                                    | `[flags & body]`          | the same runner (the `:release-pending-sends` flag is not modelled)                                                                                        |
+| `run-in-transaction`                                                                              | `[f]`                     | the runner itself: run `f` in an attempt, retrying per the STM page's rules                                                                                |
+| `deref-ref`                                                                                       | `[r]`                     | in a transaction, the value as of the attempt's read point, folded with its own writes; outside, the latest committed value                                |
+| `ref-set*`                                                                                        | `[r v]`                   | the attempt's value of `r` becomes `v`                                                                                                                     |
+| `alter*`                                                                                          | `[r f args]`              | apply `f` to the attempt's view of `r`, recorded as a set; an altered ref is validated at commit                                                           |
+| `commute*`                                                                                        | `[r f args]`              | record `f` to fold over the ref's current committed value at commit time, in call order; not validated                                                     |
+| `ensure*`                                                                                         | `[r]`                     | enrol `r` in the attempt's validated set (the write-skew guard)                                                                                            |
+| `ref-history-count`, `ref-min-history`, `ref-max-history`, `set-min-history!`, `set-max-history!` | `[r]`, `[r n]`            | the ref's retained versioned history (max defaults to 10, min to 0)                                                                                        |
+| `add-watch*`, `remove-watch*`, `get-watches`                                                      | `[r k f]`, `[r k]`, `[r]` | ref watches — refs carry watches and a validator in their own state (eve atoms have neither)                                                               |
+| `set-validator*`, `get-validator`                                                                 | `[r f]`, `[r]`            | the ref's validator, run at commit                                                                                                                         |
+| `seat-clock!`                                                                                     | `[a]`                     | seat the commit-point clock in a shared Eve atom: the disk-tier seating, with `make-ref`'s `:seat`, that lets two processes transact against the same refs |
+| `dispatch!`, `set-send-dispatcher!`                                                               | `[msg]`, `[f]`            | the agent seam: a send inside a transaction is held and released exactly once, after the winning commit                                                    |
+| `stats`, `reset-stats!`                                                                           | `[]`                      | attempt / retry / commit counters                                                                                                                          |
+| `in-transaction?`, `ref-value?`                                                                   | `[]`, `[x]`               | predicates                                                                                                                                                 |
 
 A transaction fixes one read point and reads every ref as of it from its versioned history — the multi-ref snapshot defect (a **jagged transaction**, a combination that never existed at one commit point) is what this prevents. Commit locks each written or ensured ref in creation order, validates, claims the next commit point, and installs each written ref with one CAS on its own cell atom; there is no single atomic swap anywhere in the construction. Ordinary retries are unbounded and never counted; basis faults (a cell beyond the commit-point clock — only an out-of-band write can produce one) are counted per invocation and bounded at 10,000. **History encoding:** this release ships the OLD encoding; the accepted flat encoding is not in this release, the two do not read each other, and seated worlds must be re-created at an encoding change ([stm.md](stm.md#history-encoding--read-this-before-seating-worlds)).
 
@@ -137,23 +137,23 @@ their work on the calling thread.
 
 It printed `3`, `(2 3 4)`, `499500`, `30`, `:on-p` and `:timeout` on both hosts [ran].
 
-| Name | Arglist | What |
-|---|---|---|
-| `future` (macro), `future-call` | `[& body]`, `[f]` | on `*pool*`, else the `:io` pool. A closure where the pool's threads share this heap; a form with the locals it uses where they do not |
-| `promise`, `deliver` | `[]`, `[p v]` | |
-| `deref` | `[f]` `[f ms timeout-val]` | the three-argument deref on every host |
-| `realized?`, `future-done?`, `future-cancel`, `future-cancelled?`, `future?`, `deref-within`, `descriptor-of` | `[f]` (`deref-within` `[f ms v]`) | |
-| `pmap`, `pcalls`, `pvalues` (macro) | `[f coll & colls]`, `[& fns]`, `[& exprs]` | on `*pool*`, else the `:compute` pool; `pmap` is unchunked |
-| `with-pool` (macro) | `[p & body]` | `*pool*` bound to `p` |
-| `=>>` (macro) | `[x & forms]` | `->>`, with its separable transducer runs (`map filter remove keep mapcat cat replace`) folded over the pool |
-| `fixed-pool`, `single-pool`, `cached-pool`, `per-task-pool`, `scheduled-pool` | `[n]` `[n opts]` / `[]` `[opts]` | pools |
-| `schedule!`, `schedule-at-fixed-rate!`, `schedule-with-fixed-delay!` | on a scheduled pool | |
-| `submit`, `invoke-all`, `invoke-any` | `[p f]` `[p f args]` `[p f args opts]`, `[p fs]`, `[p fs]` | |
-| `shutdown!`, `shutdown-now!`, `shutdown?`, `terminated?`, `await-termination` | `[p]` (`await-termination` `[p ms]`) | |
-| `default-pool`, `shutdown-default-pools!`, `current-pool`, `pool-name`, `pool-descriptor`, `registry` | | |
-| `deftask`, `defconveyed`, `tfn` (macros) | | a task that may cross a heap by name; a dynamic var conveyed to tasks; a fn that travels as its form |
-| `eve.thread.fold/fold` | `[reducef coll]` `[combinef reducef coll]` `[n combinef reducef coll]` | `clojure.core.reducers/fold` on `*pool*`, chunks sized from the pool's measured swap cost |
-| `eve.thread.fold/fold-in` | `[p n combinef reducef coll]` | fold on pool `p` |
+| Name                                                                                                          | Arglist                                                                | What                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `future` (macro), `future-call`                                                                               | `[& body]`, `[f]`                                                      | on `*pool*`, else the `:io` pool. A closure where the pool's threads share this heap; a form with the locals it uses where they do not |
+| `promise`, `deliver`                                                                                          | `[]`, `[p v]`                                                          |                                                                                                                                        |
+| `deref`                                                                                                       | `[f]` `[f ms timeout-val]`                                             | the three-argument deref on every host                                                                                                 |
+| `realized?`, `future-done?`, `future-cancel`, `future-cancelled?`, `future?`, `deref-within`, `descriptor-of` | `[f]` (`deref-within` `[f ms v]`)                                      |                                                                                                                                        |
+| `pmap`, `pcalls`, `pvalues` (macro)                                                                           | `[f coll & colls]`, `[& fns]`, `[& exprs]`                             | on `*pool*`, else the `:compute` pool; `pmap` is unchunked                                                                             |
+| `with-pool` (macro)                                                                                           | `[p & body]`                                                           | `*pool*` bound to `p`                                                                                                                  |
+| `=>>` (macro)                                                                                                 | `[x & forms]`                                                          | `->>`, with its separable transducer runs (`map filter remove keep mapcat cat replace`) folded over the pool                           |
+| `fixed-pool`, `single-pool`, `cached-pool`, `per-task-pool`, `scheduled-pool`                                 | `[n]` `[n opts]` / `[]` `[opts]`                                       | pools                                                                                                                                  |
+| `schedule!`, `schedule-at-fixed-rate!`, `schedule-with-fixed-delay!`                                          | on a scheduled pool                                                    |                                                                                                                                        |
+| `submit`, `invoke-all`, `invoke-any`                                                                          | `[p f]` `[p f args]` `[p f args opts]`, `[p fs]`, `[p fs]`             |                                                                                                                                        |
+| `shutdown!`, `shutdown-now!`, `shutdown?`, `terminated?`, `await-termination`                                 | `[p]` (`await-termination` `[p ms]`)                                   |                                                                                                                                        |
+| `default-pool`, `shutdown-default-pools!`, `current-pool`, `pool-name`, `pool-descriptor`, `registry`         |                                                                        |                                                                                                                                        |
+| `deftask`, `defconveyed`, `tfn` (macros)                                                                      |                                                                        | a task that may cross a heap by name; a dynamic var conveyed to tasks; a fn that travels as its form                                   |
+| `eve.thread.fold/fold`                                                                                        | `[reducef coll]` `[combinef reducef coll]` `[n combinef reducef coll]` | `clojure.core.reducers/fold` on `*pool*`, chunks sized from the pool's measured swap cost                                              |
+| `eve.thread.fold/fold-in`                                                                                     | `[p n combinef reducef coll]`                                          | fold on pool `p`                                                                                                                       |
 
 The `api-defs` names above carry no docstring at the REPL in 0.9 (see the limitations below).
 
@@ -167,15 +167,15 @@ the rungs of `eve.thread.rung` (`place`, `rendezvous`, `open-atom`: `:heap`, `:d
 
 Network atoms: see [network-atoms/README.md](network-atoms/README.md), with two run samples.
 
-| Var | Arglist | What |
-|---|---|---|
-| `eve.net.atom/remote-atom` | `[cfg]` `[cfg platform]` | a handle on the atom `cfg` names (`{:endpoint :domain-id :atom-id :api-key}`, optional `:gak`) |
-| `eve.net.atom/deref`, `swap!`, `reset!` | `[ra]`, `[ra f & args]`, `[ra v]` | synchronous on every host; the value is a map |
-| `eve.net.atom/cached`, `release!`, `renew!` | `[ra]`, `[ra]`, `[ra]` `[ra force?]` | the last value without the network; the lease |
-| `eve.net.gateway/gateway` | `[domain opts]` | serve a disk domain's atoms on the broker's routes: `{:handle (fn [req] resp) ...}`; opts `:endpoint :domain-id :api-key :presign :platform :deny :gak` |
-| `eve.net.gateway/hmac-presigner`, `hmac-ok?` | `[{:keys [url secret now-ms]}]`, `[secret k mode exp sig now-s]` | a stand-in for an S3 store's presigning, and its check |
-| `eve.net.gateway/atom-id`, `atom-name`, `stats` | `[name]`, `[id]`, `[g]` | |
-| `eve.net.platform/platform` | `[]` `[overrides]` | the host's `{:request :sleep :now-ms :seed}` |
+| Var                                             | Arglist                                                          | What                                                                                                                                                    |
+| ----------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve.net.atom/remote-atom`                      | `[cfg]` `[cfg platform]`                                         | a handle on the atom `cfg` names (`{:endpoint :domain-id :atom-id :api-key}`, optional `:gak`)                                                          |
+| `eve.net.atom/deref`, `swap!`, `reset!`         | `[ra]`, `[ra f & args]`, `[ra v]`                                | synchronous on every host; the value is a map                                                                                                           |
+| `eve.net.atom/cached`, `release!`, `renew!`     | `[ra]`, `[ra]`, `[ra]` `[ra force?]`                             | the last value without the network; the lease                                                                                                           |
+| `eve.net.gateway/gateway`                       | `[domain opts]`                                                  | serve a disk domain's atoms on the broker's routes: `{:handle (fn [req] resp) ...}`; opts `:endpoint :domain-id :api-key :presign :platform :deny :gak` |
+| `eve.net.gateway/hmac-presigner`, `hmac-ok?`    | `[{:keys [url secret now-ms]}]`, `[secret k mode exp sig now-s]` | a stand-in for an S3 store's presigning, and its check                                                                                                  |
+| `eve.net.gateway/atom-id`, `atom-name`, `stats` | `[name]`, `[id]`, `[g]`                                          |                                                                                                                                                         |
+| `eve.net.platform/platform`                     | `[]` `[overrides]`                                               | the host's `{:request :sleep :now-ms :seed}`                                                                                                            |
 
 ## eve.keyring
 
@@ -195,11 +195,11 @@ plaintext. Read [../SECURITY.md](../SECURITY.md) before relying on it.
 It printed `1 true <dir>/enc.keyring`. The directory held `enc.keyring` and the slab files `enc.slab0`–`enc.slab6`
 with their bitmaps [ran].
 
-| Var | Arglist | What |
-|---|---|---|
-| `open-encrypted-domain!` | `[base-path {:keys [create? status key capacities]}]` | `[slab-io ring]`. `:status` 1 auto (a fresh key, stored), 2 a user key (stored), 3 a user key not stored (only its fingerprint) |
-| `encrypted-sio`, `encrypted-sio?` | `[inner gak salt]`, `[sio]` | |
-| `open-ring`, `init!`, `status`, `read-gak`, `keyring-path`, `fingerprint`, `domain-salt`, `class-key` | | the key ring |
+| Var                                                                                                   | Arglist                                               | What                                                                                                                            |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `open-encrypted-domain!`                                                                              | `[base-path {:keys [create? status key capacities]}]` | `[slab-io ring]`. `:status` 1 auto (a fresh key, stored), 2 a user key (stored), 3 a user key not stored (only its fingerprint) |
+| `encrypted-sio`, `encrypted-sio?`                                                                     | `[inner gak salt]`, `[sio]`                           |                                                                                                                                 |
+| `open-ring`, `init!`, `status`, `read-gak`, `keyring-path`, `fingerprint`, `domain-salt`, `class-key` |                                                       | the key ring                                                                                                                    |
 
 ## eve.sorted
 
@@ -239,24 +239,24 @@ with their bitmaps [ran].
 Every line printed what its comment shows, on both hosts [ran]. The same sample serves the sections below. Inside an
 atom, build these collections inside `swap!` (see [getting-started.md](getting-started.md#eve-collections)).
 
-| Var | Arglist | What |
-|---|---|---|
-| `sorted-map`, `sorted-map-by` | `[& kvs]`, `[cmp & kvs]` | |
-| `sorted-set`, `sorted-set-by` | `[& ks]`, `[cmp & ks]` | |
-| `subseq`, `rsubseq` | `[sc test k]` `[sc start-test start-k end-test end-k]` | Clojure's |
-| `rank`, `nth-entry`, `find` | `[sc k]`, `[sc i]`, `[sc k]` | index of a key; the i-th entry; the stored entry |
-| `sorted-coll?`, `shape`, `disj!`, `dissoc!` | | |
+| Var                                         | Arglist                                                | What                                             |
+| ------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------ |
+| `sorted-map`, `sorted-map-by`               | `[& kvs]`, `[cmp & kvs]`                               |                                                  |
+| `sorted-set`, `sorted-set-by`               | `[& ks]`, `[cmp & ks]`                                 |                                                  |
+| `subseq`, `rsubseq`                         | `[sc test k]` `[sc start-test start-k end-test end-k]` | Clojure's                                        |
+| `rank`, `nth-entry`, `find`                 | `[sc k]`, `[sc i]`, `[sc k]`                           | index of a key; the i-th entry; the stored entry |
+| `sorted-coll?`, `shape`, `disj!`, `dissoc!` |                                                        |                                                  |
 
 ## eve.deftype.int-map
 
 A 16-way PATRICIA trie over 32-bit integer keys, negative keys included.
 
-| Var | Arglist | What |
-|---|---|---|
-| `int-map` | `[]` `[k v]` `[k v & kvs]` | |
-| `merge`, `merge-with` | `[a b & more]`, `[f a b & more]` | |
-| `update` | `[m k f & args]` | |
-| `range` | `[m min-k max-k]` | the entries with keys in `[min-k, max-k]` |
+| Var                   | Arglist                          | What                                      |
+| --------------------- | -------------------------------- | ----------------------------------------- |
+| `int-map`             | `[]` `[k v]` `[k v & kvs]`       |                                           |
+| `merge`, `merge-with` | `[a b & more]`, `[f a b & more]` |                                           |
+| `update`              | `[m k f & args]`                 |                                           |
+| `range`               | `[m min-k max-k]`                | the entries with keys in `[min-k, max-k]` |
 
 ## eve.deftype.rb-tree
 
@@ -324,12 +324,12 @@ To store one in an atom, build it with the atom's slab I/O (`eve.atom/atom-sio`)
 
 ## eve.deftype
 
-| Macro | Arglist | What |
-|---|---|---|
-| `eve-deftype` | `[type-name fields & body]` | a type whose fields live in eve memory, written with ClojureScript's protocol names or the JVM's; each host's `eve.types` adapter realizes it |
-| `eve-extend-type` | `[type-name & body]` | extend protocols to an existing eve type |
-| `deftype` | `[type-name fields & body]` | a plain host type, written once for every host |
-| `extend-host-vectors` | `[proto & impls]` | extend a protocol to the host's own vector types |
+| Macro                 | Arglist                     | What                                                                                                                                          |
+| --------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve-deftype`         | `[type-name fields & body]` | a type whose fields live in eve memory, written with ClojureScript's protocol names or the JVM's; each host's `eve.types` adapter realizes it |
+| `eve-extend-type`     | `[type-name & body]`        | extend protocols to an existing eve type                                                                                                      |
+| `deftype`             | `[type-name fields & body]` | a plain host type, written once for every host                                                                                                |
+| `extend-host-vectors` | `[proto & impls]`           | extend a protocol to the host's own vector types                                                                                              |
 
 `eve.alpha/deftype` and `extend-type` are `eve-deftype` and `eve-extend-type`. The worked example is
 `eve.deftype.rb-tree` ([data-structures.md](data-structures.md)).

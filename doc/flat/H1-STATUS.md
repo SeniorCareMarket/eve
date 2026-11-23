@@ -11,6 +11,7 @@ H1.2 `eve.static.disk-test/place-exact-disk` — registered in requirements.edn,
 both `:planned`.
 
 First commit 2da614e is the requirement tests, written before any lane code:
+
 - H1.1: parent creates an mmap domain's files and releases them; two child
   JVMs (test/eve/static/disk_worker.clj) join the same files cold, wait on a
   go file, and claim runs (script 37 5 64 1 13 128 3 21 8 55 2 34, classes

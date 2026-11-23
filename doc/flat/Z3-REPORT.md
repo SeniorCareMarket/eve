@@ -154,10 +154,10 @@ and per-block sio ops included.
    "Z3.5 concurrency", "Z3.7 the root cases incl. the past-1016-bytes
    correction". The manifest (W0, frozen) and IMPL-PLAN §3.3 name
    them as tested above: the run-claim discipline is Z3.3's fallback
-   + the claim path itself, the concurrency content is Z3.4's
-   lost-CAS arm, Z3.7 is units. The "root scalar past 1,016 bytes
-   reads nil" item is a research-census defect on a read path, not a
-   Z3 requirement; no Z3 test names it and this lane does not own it.
+   - the claim path itself, the concurrency content is Z3.4's
+     lost-CAS arm, Z3.7 is units. The "root scalar past 1,016 bytes
+     reads nil" item is a research-census defect on a read path, not a
+     Z3 requirement; no Z3 test names it and this lane does not own it.
 
 ## Flags for collation
 

@@ -25,6 +25,7 @@ read firsthand. 2026-11-12.
   everything else. Not a regression; carried as a named residual.
 
 ### Node image suite — `final-node.log` (build `:flat-h4-test`,
+
 runner `eve.runner.flat-h4-main`)
 
 - The suite **loads and runs** on the assembled tree — the load death

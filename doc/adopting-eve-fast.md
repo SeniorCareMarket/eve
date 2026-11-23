@@ -340,14 +340,14 @@ moves most between runs. XXH3 is portable on both ends (no native adapter has on
 
 From `hosts.edn` ([ADOPTER-TIERS §5.1](adopter-tiers.md) has the full table):
 
-| Seam | Native on |
-|---|---|
-| crypto | jvm, bb (`crypto/java`); cljs, nbb (`crypto/node`); lpy; cljr; clje — portable on jolt, glj, vs, browser |
-| int32 | jvm, bb, jolt (`int32/jvm`); cljs, browser, nbb (`int32/js`); vs — portable on cljr, lpy, clje, glj |
-| thread | every row but vs (no thread root) |
-| coll | jvm, cljr, jolt (`coll/jvm`); cljs, browser; nbb; lpy; clje — protocols on bb, glj, vs |
-| codec | cljs, browser, nbb (`codec/js`) |
-| slab | cljs, browser, nbb (`slab/module`) |
-| slab-io | vs (`slab-io/vs`) |
-| http | jvm, bb, cljs, browser (`http/browser`, synchronous XHR), nbb, lpy, cljr, clje, glj — none on jolt, vs |
-| http-server | jvm (`http-server/jdk`), bb (`http-server/httpkit`), cljs (`http-server/node`) |
+| Seam        | Native on                                                                                                |
+| ----------- | -------------------------------------------------------------------------------------------------------- |
+| crypto      | jvm, bb (`crypto/java`); cljs, nbb (`crypto/node`); lpy; cljr; clje — portable on jolt, glj, vs, browser |
+| int32       | jvm, bb, jolt (`int32/jvm`); cljs, browser, nbb (`int32/js`); vs — portable on cljr, lpy, clje, glj      |
+| thread      | every row but vs (no thread root)                                                                        |
+| coll        | jvm, cljr, jolt (`coll/jvm`); cljs, browser; nbb; lpy; clje — protocols on bb, glj, vs                   |
+| codec       | cljs, browser, nbb (`codec/js`)                                                                          |
+| slab        | cljs, browser, nbb (`slab/module`)                                                                       |
+| slab-io     | vs (`slab-io/vs`)                                                                                        |
+| http        | jvm, bb, cljs, browser (`http/browser`, synchronous XHR), nbb, lpy, cljr, clje, glj — none on jolt, vs   |
+| http-server | jvm (`http-server/jdk`), bb (`http-server/httpkit`), cljs (`http-server/node`)                           |

@@ -53,7 +53,7 @@ Landed, all in the `#?(:clj …)` handle section unless noted:
   the record test is `(satisfies? IRecordInfo h)` on both hosts (the CLJS
   FlatRecord/FlatTagged deftypes implement IRecordInfo too).
 
-Choice: C1 7969199 *deletes* `cached-hash`/`cached-digest`. They are
+Choice: C1 7969199 _deletes_ `cached-hash`/`cached-digest`. They are
 **kept** in the collated file: the task's constraint lists them as X1
 features that must survive, and the CLJS-adjacent shared plumbing still
 names them. On :clj they are now unused by the seq handles (which inline
@@ -153,7 +153,7 @@ by `val`).
 
 X1's planner computes a narrowed column's range **without ever forming
 a host long difference that can overflow**: on :clj `col-range` is the
-*promoting* subtraction `(-' mx mn)` (C1's pin had `(- mx mn)`, which
+_promoting_ subtraction `(-' mx mn)` (C1's pin had `(- mx mn)`, which
 throws ArithmeticException on a full-range i64 column — finding F-C);
 on :cljs the planner's integer math is BigInt throughout (`col-min`/
 `col-max` reduce over `bi`, `col-range` is `bi-`). The port does not

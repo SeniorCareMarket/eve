@@ -1,7 +1,7 @@
 # Software transactional memory: `eve.stm`
 
 Eve ships an STM in its own substrate: `eve.stm`, software transactional
-memory implemented *in* Eve, on Eve atoms, with no host STM beneath it.
+memory implemented _in_ Eve, on Eve atoms, with no host STM beneath it.
 The semantics are stock Clojure's — refs, `dosync`, `alter`, `commute`,
 `ensure`, snapshot reads as of a commit point — with the mechanism
 rebuilt so that every piece of transactional state lives in Eve atoms
@@ -44,7 +44,7 @@ none is needed for the semantics. A transaction:
 
 Cross-ref atomicity is the composed lock / validate / install, exactly
 as in stock Clojure. Commutes are not validated; at commit they fold
-over the ref's *current* committed value, in call order. Plain
+over the ref's _current_ committed value, in call order. Plain
 read-only refs are not validated either — that is stock's answer, and
 why `ensure` exists: `ensure` enrols a ref in the attempt's validated
 set, so a concurrent commit to it retries this attempt (the write-skew
@@ -59,7 +59,7 @@ existed at any single commit point. It is not a torn read: a single
 Eve atom's deref is one consistent snapshot and cannot tear. The
 hazard lives in the layer above the atoms, and the read point is the
 answer: every read in a transaction is served from the ref's versioned
-history *as of the transaction's one read point*, so the attempt sees
+history _as of the transaction's one read point_, so the attempt sees
 exactly one committed world. A read, in a transaction or out, waits
 while another attempt holds the ref's commit lock, so no reader sees
 part of a commit either.
@@ -69,10 +69,10 @@ part of a commit either.
 A ref's Eve domain is its contention domain at the memory tier. The
 tiers widen with the atom's own tier:
 
-| Tier | A ref's contention domain is |
-|---|---|
-| memory | the ref's own Eve atom domain |
-| disk | a whole process |
+| Tier    | A ref's contention domain is                                                                                                                                          |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| memory  | the ref's own Eve atom domain                                                                                                                                         |
+| disk    | a whole process                                                                                                                                                       |
 | network | a whole server — in a network organisation each ref is its own server with its own atom broker, and cross-broker commit is protocol design, not a substrate primitive |
 
 The substrate at the network tier is Eve's network atoms
@@ -126,24 +126,24 @@ no invariant violations).
 
 ## The API
 
-| Var | What |
-|---|---|
-| `(make-ref x)`, `(make-ref x opts)` | a new ref holding `x`. Opts: `:meta`, `:validator`, `:min-history`, `:max-history`, and `:seat` (disk-tier seating, above). The cell — and its Eve domain — are minted immediately; creation is not transactional, as stock's is not |
-| `(dosync & body)` | run the body in a transaction; a nested call joins the running attempt |
-| `(sync flags & body)` | the same runner (`flags` are accepted; the `:release-pending-sends` flag is not modelled — pending sends are the agent seam's, released at commit) |
-| `(run-in-transaction f)` | the runner itself: run `f` in an attempt, retrying per the rules below |
-| `(deref-ref r)` | in a transaction, the attempt's view (the value as of its read point, folded with its own writes); outside, the latest committed value, read once no commit holds the ref's lock |
-| `(ref-set* r v)` | the attempt's value of `r` becomes `v` |
-| `(alter* r f args)` | apply `f` to the attempt's view of `r` and record the result as a set; an altered ref is validated at commit |
-| `(commute* r f args)` | record `f` to fold over the ref's *current* committed value at commit time, in call order; a commute-only ref is not validated |
-| `(ensure* r)` | enrol `r` in the attempt's validated set (the write-skew guard) |
-| `(ref-history-count r)`, `(ref-min-history r)`, `(ref-max-history r)`, `(set-min-history! r n)`, `(set-max-history! r n)` | the ref's retained versioned history: never more than max-history entries (default 10), never fewer than min-history (default 0). A read point older than the oldest retained entry retries with a fresh point |
-| `(add-watch* r k f)`, `(remove-watch* r k)`, `(get-watches r)` | ref watches; watches fire once per written ref after the winning installs, before held sends are released. (Refs carry watches and a validator in their own state; Eve *atoms* have neither) |
-| `(set-validator* r f)`, `(get-validator r)` | the ref's validator, run at commit |
-| `(seat-clock! a)` | seat the commit-point clock in a shared Eve atom (disk tier) |
-| `(dispatch! msg)`, `(set-send-dispatcher! f)` | the agent seam: Eve has no agent machinery in its standalone tree, so sends are a seam — inside a transaction a send is held and released through the installed dispatcher exactly once, after the winning commit; outside, it dispatches immediately. Until a dispatcher is installed, released sends are dropped |
-| `(stats)`, `(reset-stats!)` | attempt / retry / commit counters for the namespace |
-| `(in-transaction?)`, `(ref-value? x)` | predicates |
+| Var                                                                                                                       | What                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `(make-ref x)`, `(make-ref x opts)`                                                                                       | a new ref holding `x`. Opts: `:meta`, `:validator`, `:min-history`, `:max-history`, and `:seat` (disk-tier seating, above). The cell — and its Eve domain — are minted immediately; creation is not transactional, as stock's is not                                                                               |
+| `(dosync & body)`                                                                                                         | run the body in a transaction; a nested call joins the running attempt                                                                                                                                                                                                                                             |
+| `(sync flags & body)`                                                                                                     | the same runner (`flags` are accepted; the `:release-pending-sends` flag is not modelled — pending sends are the agent seam's, released at commit)                                                                                                                                                                 |
+| `(run-in-transaction f)`                                                                                                  | the runner itself: run `f` in an attempt, retrying per the rules below                                                                                                                                                                                                                                             |
+| `(deref-ref r)`                                                                                                           | in a transaction, the attempt's view (the value as of its read point, folded with its own writes); outside, the latest committed value, read once no commit holds the ref's lock                                                                                                                                   |
+| `(ref-set* r v)`                                                                                                          | the attempt's value of `r` becomes `v`                                                                                                                                                                                                                                                                             |
+| `(alter* r f args)`                                                                                                       | apply `f` to the attempt's view of `r` and record the result as a set; an altered ref is validated at commit                                                                                                                                                                                                       |
+| `(commute* r f args)`                                                                                                     | record `f` to fold over the ref's _current_ committed value at commit time, in call order; a commute-only ref is not validated                                                                                                                                                                                     |
+| `(ensure* r)`                                                                                                             | enrol `r` in the attempt's validated set (the write-skew guard)                                                                                                                                                                                                                                                    |
+| `(ref-history-count r)`, `(ref-min-history r)`, `(ref-max-history r)`, `(set-min-history! r n)`, `(set-max-history! r n)` | the ref's retained versioned history: never more than max-history entries (default 10), never fewer than min-history (default 0). A read point older than the oldest retained entry retries with a fresh point                                                                                                     |
+| `(add-watch* r k f)`, `(remove-watch* r k)`, `(get-watches r)`                                                            | ref watches; watches fire once per written ref after the winning installs, before held sends are released. (Refs carry watches and a validator in their own state; Eve _atoms_ have neither)                                                                                                                       |
+| `(set-validator* r f)`, `(get-validator r)`                                                                               | the ref's validator, run at commit                                                                                                                                                                                                                                                                                 |
+| `(seat-clock! a)`                                                                                                         | seat the commit-point clock in a shared Eve atom (disk tier)                                                                                                                                                                                                                                                       |
+| `(dispatch! msg)`, `(set-send-dispatcher! f)`                                                                             | the agent seam: Eve has no agent machinery in its standalone tree, so sends are a seam — inside a transaction a send is held and released through the installed dispatcher exactly once, after the winning commit; outside, it dispatches immediately. Until a dispatcher is installed, released sends are dropped |
+| `(stats)`, `(reset-stats!)`                                                                                               | attempt / retry / commit counters for the namespace                                                                                                                                                                                                                                                                |
+| `(in-transaction?)`, `(ref-value? x)`                                                                                     | predicates                                                                                                                                                                                                                                                                                                         |
 
 ## Retry semantics — decided
 
@@ -157,7 +157,7 @@ there. Basis faults are counted per invocation; at `basis-fault-limit`
 throws `IllegalStateException` "Transaction failed after reaching
 retry limit" instead of spinning.
 
-**The single-writer contract:** a ref's cell is written *only* through
+**The single-writer contract:** a ref's cell is written _only_ through
 this namespace — transactions, and sends this namespace releases at
 commit. The cell rides an ordinary Eve atom and nothing physically
 stops other code from swapping it, but doing so is outside the

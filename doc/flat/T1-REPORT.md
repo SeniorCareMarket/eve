@@ -81,12 +81,12 @@ lane's own tests, each killed by a staged probe on J:
 At pin a1eaab6 (messages row at ae9366e, reduced config 0 warmup / 1 run,
 stated in the row), min of 5 after 2 warmups, all arms read back equal:
 
-| corpus | transfer! | ratio vs detach+zip | cap |
-|---|---|---|---|
-| map-10k | 1,539.74 ms | 0.93 PASS | 5 ms MISSED |
-| vec-100k | 28,645.78 ms | 1.02 PASS | 26 ms MISSED |
-| records-10k | 8,371.81 ms | 1.10 PASS | 9 ms MISSED |
-| messages-5k | 45,284.57 ms | 1.73 PASS | 26 ms MISSED |
+| corpus      | transfer!    | ratio vs detach+zip | cap          |
+| ----------- | ------------ | ------------------- | ------------ |
+| map-10k     | 1,539.74 ms  | 0.93 PASS           | 5 ms MISSED  |
+| vec-100k    | 28,645.78 ms | 1.02 PASS           | 26 ms MISSED |
+| records-10k | 8,371.81 ms  | 1.10 PASS           | 9 ms MISSED  |
+| messages-5k | 45,284.57 ms | 1.73 PASS           | 26 ms MISSED |
 
 `transfer!` ≈ detach+zip composed — no composition tax on any corpus.
 The caps are missed by ~300–1000× at these pins because the pins carry

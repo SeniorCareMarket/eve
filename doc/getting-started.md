@@ -9,10 +9,10 @@ Every sample here was run as written on 2026-10-20 ET, on babashka 1.13.226 and 
 
 ## Prerequisites
 
-| For | What ran here |
-|---|---|
-| the JVM | JDK 21 (21.0.12 tested; `adapters/thread/jvm` starts virtual threads, a JDK 21 API) and the Clojure CLI with Clojure 1.12.0 |
-| babashka | babashka 1.13.226 |
+| For                   | What ran here                                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the JVM               | JDK 21 (21.0.12 tested; `adapters/thread/jvm` starts virtual threads, a JDK 21 API) and the Clojure CLI with Clojure 1.12.0                                              |
+| babashka              | babashka 1.13.226                                                                                                                                                        |
 | ClojureScript on Node | Node 24.22.0 and npm. Disk domains also need eve's N-API addon (`native/mmap_cas.cc`), compiled on `npm install` by a C++20 toolchain (Python, `make`, a C++20 compiler) |
 
 ## The JVM

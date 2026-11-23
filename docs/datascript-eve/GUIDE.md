@@ -13,7 +13,7 @@ release: [CHANGELOG.md](CHANGELOG.md).
 
 Why this matters is what Eve puts underneath it. In ordinary DataScript,
 a database is a value in one process's memory. On Eve, a database is
-still a value — but an *Eve* value: it can live in a persistent Eve atom,
+still a value — but an _Eve_ value: it can live in a persistent Eve atom,
 in a domain on disk, shared by other processes, and — this is the part
 no other DataScript host can do — the **same database can be transacted
 in parallel by programs running on different host runtimes at once**,
@@ -26,7 +26,7 @@ plain .cljc — running everywhere Eve runs.
   persistent (memory-mapped) domain on disk. Anything that is an Eve
   value can be an atom's value — and the port makes the whole DataScript
   DB an Eve value (its `DB` and `Datom` types are Eve types), so
-  *storing the database is placing it in an atom*. There is no separate
+  _storing the database is placing it in an atom_. There is no separate
   storage layer to configure; vanilla DataScript's storage machinery is
   replaced by exactly this (porting delta D1).
 - **The journal.** A persistent Eve domain is journaled by default — the disk tier is
@@ -34,7 +34,7 @@ plain .cljc — running everywhere Eve runs.
   DB atom appends a journal record and the journal force is the commit point. This is
   a requirement, not an option to design around: a seat with no journal adapter cannot
   carry a durable shared database (ValueScript is the one such seat).
-- **The sorted set.** DataScript's EAVT/AEVT/AVET indexes *are*
+- **The sorted set.** DataScript's EAVT/AEVT/AVET indexes _are_
   persistent sorted sets upstream — tonsky's persistent-sorted-set.
   Eve's port of that same library (upgraded to 0.3.1, the version
   DataScript 1.8.1 pins) is the index substrate here, its sets
@@ -44,7 +44,7 @@ plain .cljc — running everywhere Eve runs.
   lets hashes, equality and seals agree across hosts.
 - **The seal.** An Eve value can be sealed — a content digest over its
   blocks. Two processes that read the same database can compare seals
-  and *know* they are looking at the same data, not merely data that
+  and _know_ they are looking at the same data, not merely data that
   prints the same.
 - **One source, every seat.** The library is portable .cljc; each Eve
   host seat (JVM, Babashka, Jolt, nbb, glojure, and more as they are
@@ -80,7 +80,7 @@ This is ordinary DataScript's API, under the `eve.db.ds` names:
 ### Eve form — a database that persists and is shared
 
 Open (or create) a persistent Eve atom in a domain on disk, and put the
-database in it. The DB is constructed *inside* the swap, so it allocates
+database in it. The DB is constructed _inside_ the swap, so it allocates
 in the atom's own domain (Eve's domain-construction contract). This is
 the flagship driver pattern, verbatim in shape
 (`contract-test/drivers/contract/ds_flagship.cljc`):
@@ -125,15 +125,15 @@ see CHANGELOG.md). Babashka's behave driver runs **fully green**.
 
 ## Normally vs with Eve
 
-| | Ordinary DataScript | DataScript on Eve |
-|---|---|---|
-| The DB is… | an immutable value in one process's memory | an immutable **Eve value** — same semantics, new residence |
-| Persistence | none built in; serialize it yourself | put it in a persistent Eve atom; the domain on disk *is* the database file |
-| Sharing | one process (or copy the value around) | any number of processes open the same domain and deref the same DB |
-| Cross-runtime | JVM *or* ClojureScript builds, separately | the same .cljc library on every Eve seat; a DB written by the JVM seat is read — identically, seal and all — by Babashka, Jolt, nbb, glojure |
-| Concurrent writers | one process transacts at a time | multiple host processes transact **in parallel** into one shared DB via atom swaps |
-| Indexes | persistent-sorted-set (host arrays underneath) | the same library's Eve port — Eve vectors, slab-resident sets |
-| API | `datascript.core` | `eve.db.ds.core` — the same API, under the new names |
+|                    | Ordinary DataScript                            | DataScript on Eve                                                                                                                            |
+| ------------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| The DB is…         | an immutable value in one process's memory     | an immutable **Eve value** — same semantics, new residence                                                                                   |
+| Persistence        | none built in; serialize it yourself           | put it in a persistent Eve atom; the domain on disk _is_ the database file                                                                   |
+| Sharing            | one process (or copy the value around)         | any number of processes open the same domain and deref the same DB                                                                           |
+| Cross-runtime      | JVM _or_ ClojureScript builds, separately      | the same .cljc library on every Eve seat; a DB written by the JVM seat is read — identically, seal and all — by Babashka, Jolt, nbb, glojure |
+| Concurrent writers | one process transacts at a time                | multiple host processes transact **in parallel** into one shared DB via atom swaps                                                           |
+| Indexes            | persistent-sorted-set (host arrays underneath) | the same library's Eve port — Eve vectors, slab-resident sets                                                                                |
+| API                | `datascript.core`                              | `eve.db.ds.core` — the same API, under the new names                                                                                         |
 
 What is identical: the API, the transaction format, the query language,
 the data model, the failure modes of the library itself. What changes
@@ -161,19 +161,19 @@ database, zero divergence.
 
 ## Seat status — the honest table (2026-11-07, updated 2026-11-09 for 0.9.3.1)
 
-| Seat | State |
-|---|---|
-| JVM | **Proven** — suite tally + flagship writer/reader |
-| Babashka | **Proven** — behave fully green; flagship writer |
-| Jolt | **Proven** — flagship writer |
-| nbb | **Proven as a flagship writer** — with a named caveat: if the nbb process *dies mid-window* on a growing shared DB, its writes can corrupt the shared state (F-EVE-NBB-VIEW, isolated by discriminator runs; owner: Eve's nbb seat). Runs where nbb survives are clean — fs4run2's nbb survived |
-| glojure | **Proven** — solo acceptance clean; flagship fifth host (its residence + interaction fixes are landed in the 0.9.3.1 tree) |
-| jank | **Proven at the pin, compiled form** — the AOT build is clean (165 files, 0 failures) and the one-datum DataScript contract passes 5/5 cold runs (0.317 s median, journal engaged, fresh-process readback exact) |
-| basilisp | **In progress** — 0.9.3.1 carries this seat's crypto, serialize freeze/thaw and Iter-hash fixes (the Iter fix is this seat's own port work, taken into the shared code); the dataset acceptance re-run on the fixed tree is still owed |
-| clojerl (BEAM) | **In progress** — 0.9.3.1 fixes the seat's first `swap!` wall. The people-1k dataset run is diagnosed slow-not-stuck (its transact cost grows superlinearly); at the previous tree its checks died on `clojerl.IHash` for the sorted set's Iter, and the rebuild carrying this tree's Iter-hash fix has not been run |
-| ClojureCLR | **Entry datasets run** — people-1k is complete-verified on this seat; people-20k is walled at the region's 2 GiB ceiling (signed-i32 slab addressing). The segmentation in 0.9.3.1 is the JVM seat's; this seat's wall is a separate, still-open item |
+| Seat                          | State                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM                           | **Proven** — suite tally + flagship writer/reader                                                                                                                                                                                                                                                                                         |
+| Babashka                      | **Proven** — behave fully green; flagship writer                                                                                                                                                                                                                                                                                          |
+| Jolt                          | **Proven** — flagship writer                                                                                                                                                                                                                                                                                                              |
+| nbb                           | **Proven as a flagship writer** — with a named caveat: if the nbb process _dies mid-window_ on a growing shared DB, its writes can corrupt the shared state (F-EVE-NBB-VIEW, isolated by discriminator runs; owner: Eve's nbb seat). Runs where nbb survives are clean — fs4run2's nbb survived                                           |
+| glojure                       | **Proven** — solo acceptance clean; flagship fifth host (its residence + interaction fixes are landed in the 0.9.3.1 tree)                                                                                                                                                                                                                |
+| jank                          | **Proven at the pin, compiled form** — the AOT build is clean (165 files, 0 failures) and the one-datum DataScript contract passes 5/5 cold runs (0.317 s median, journal engaged, fresh-process readback exact)                                                                                                                          |
+| basilisp                      | **In progress** — 0.9.3.1 carries this seat's crypto, serialize freeze/thaw and Iter-hash fixes (the Iter fix is this seat's own port work, taken into the shared code); the dataset acceptance re-run on the fixed tree is still owed                                                                                                    |
+| clojerl (BEAM)                | **In progress** — 0.9.3.1 fixes the seat's first `swap!` wall. The people-1k dataset run is diagnosed slow-not-stuck (its transact cost grows superlinearly); at the previous tree its checks died on `clojerl.IHash` for the sorted set's Iter, and the rebuild carrying this tree's Iter-hash fix has not been run                      |
+| ClojureCLR                    | **Entry datasets run** — people-1k is complete-verified on this seat; people-20k is walled at the region's 2 GiB ceiling (signed-i32 slab addressing). The segmentation in 0.9.3.1 is the JVM seat's; this seat's wall is a separate, still-open item                                                                                     |
 | ClojureScript / Node, browser | **Persistent writes proven (Node)** — one compiled-ClojureScript process writes people-1k, and fresh compiled-CLJS, nbb and JVM readers each match the expected checks 9/9; a single compiled datum reads back exactly in a fresh process. The browser seat is not attempted for this library (it additionally needs a rendezvous design) |
-| ValueScript seat | **Blocked** on Eve-in-VS residence machinery |
+| ValueScript seat              | **Blocked** on Eve-in-VS residence machinery                                                                                                                                                                                                                                                                                              |
 
 One named caveat on the Babashka seat: `:db-hash` of a DB value throws there — a
 standing SciMap limitation (bb's map type does not carry it). It is the sole

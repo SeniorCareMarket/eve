@@ -14,13 +14,13 @@ bench, re-derived, and fixed en route (u16 chunk-offset truncation).
 
 ## Requirements
 
-| req | test | evidence |
-|---|---|---|
-| C2.1 | `eve.static.column-test/column-roundtrip` | suite green on J (c2-suite3.log), 9,459 assertions total |
-| C2.2 | `eve.static.column-test/column-ops-equal-host` | same run |
-| C2.3 | `eve.static.column-test/column-encodings-point-read` | same run |
-| C2.4 | `eve.static.column-test/rows-and-columns-same-bytes` | same run |
-| C2.5 | `eve.static.column-test/column-zero-copy-handoff` | same run |
+| req  | test                                                 | evidence                                                 |
+| ---- | ---------------------------------------------------- | -------------------------------------------------------- |
+| C2.1 | `eve.static.column-test/column-roundtrip`            | suite green on J (c2-suite3.log), 9,459 assertions total |
+| C2.2 | `eve.static.column-test/column-ops-equal-host`       | same run                                                 |
+| C2.3 | `eve.static.column-test/column-encodings-point-read` | same run                                                 |
+| C2.4 | `eve.static.column-test/rows-and-columns-same-bytes` | same run                                                 |
+| C2.5 | `eve.static.column-test/column-zero-copy-handoff`    | same run                                                 |
 
 All five flipped to `:built` in `test/eve/static/requirements.edn`.
 Column bytes are byte-for-byte the bytes C1's writer emits (the lane
@@ -66,12 +66,12 @@ The fixed code is what c2-suite3.log and c2-b7-wide2.log ran on J.
 One batch of 50,000 records (WIDE), min of 5, JVM 21.0.9, commit
 f4a8b14. Source: c2-b7-wide2.log on J; appended to SPIKE-LOG.md.
 
-| arm | host | static | gate | verdict |
-|---|---|---|---|---|
-| scan (sum :score) | 203.93 ns/row | 129.52 ns/row | ≤ 2 ns/row | MISS — static 1.6x faster than host |
+| arm                         | host          | static        | gate       | verdict                             |
+| --------------------------- | ------------- | ------------- | ---------- | ----------------------------------- |
+| scan (sum :score)           | 203.93 ns/row | 129.52 ns/row | ≤ 2 ns/row | MISS — static 1.6x faster than host |
 | filter (count :dept = :eng) | 364.38 ns/row | 100.54 ns/row | ≤ 4 ns/row | MISS — static 3.6x faster than host |
-| one cell (:ts, 200k random) | 123.8 ns | 637.1 ns | ≤ 2x host | MISS — static 5.1x host |
-| row view (20k random) | 0.301 µs | 5.346 µs | ≤ 1 µs | MISS |
+| one cell (:ts, 200k random) | 123.8 ns      | 637.1 ns      | ≤ 2x host  | MISS — static 5.1x host             |
+| row view (20k random)       | 0.301 µs      | 5.346 µs      | ≤ 1 µs     | MISS                                |
 
 The columnar bet pays where it was aimed — sequential scan and filter
 beat host maps per row — and loses on random point access: a single

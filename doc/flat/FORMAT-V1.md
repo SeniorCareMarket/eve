@@ -11,15 +11,15 @@ A flat value is an immutable Eve value held as bytes outside every domain: no sl
 allocator. It is a value, never state. It has **two byte forms in one container**, because the evidence did not
 allow one:
 
-| | **image** | **packed** |
-|---|---|---|
-| What the bytes are | every block the value reaches, byte-for-byte as the slab holds it, pointers rewritten to positions in the buffer | chunks: a symbol table, shapes, nodes, typed columns; scalars are Eve's scalar bytes |
-| Job | leaving a domain and entering one — a deref snapshot, a crossing between domains or threads of one program, a build made off-allocator and then placed | the wire and storage form; columnar work; anything that crosses versions, hosts or the kernel |
-| Out of a slab | a relocating block copy: 1.8–6.3× `eve->clj` (M5) | an encoder walk (not built; bounded below by the image's walk plus a dictionary probe per key) |
-| Into a slab | one run claimed per size class, a `memcpy`, a pointer pass: 3–45× a plain `swap!` end to end (M6) | one block per chunk, by `memcpy` (§7) |
-| Bytes | 2.6–7× EDN text (M2) | 0.55–0.86× Transit MessagePack on Eve-shaped data (M2) |
-| Reader code | none new on the ISlabIO hosts: Eve's own types through a slab I/O over the buffer (M1) | new types, generated (§6) |
-| Sharing inside a value | kept — a block reached twice is copied once (M7) | kept — a node is addressed by offset and may have several parents |
+|                        | **image**                                                                                                                                              | **packed**                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| What the bytes are     | every block the value reaches, byte-for-byte as the slab holds it, pointers rewritten to positions in the buffer                                       | chunks: a symbol table, shapes, nodes, typed columns; scalars are Eve's scalar bytes           |
+| Job                    | leaving a domain and entering one — a deref snapshot, a crossing between domains or threads of one program, a build made off-allocator and then placed | the wire and storage form; columnar work; anything that crosses versions, hosts or the kernel  |
+| Out of a slab          | a relocating block copy: 1.8–6.3× `eve->clj` (M5)                                                                                                      | an encoder walk (not built; bounded below by the image's walk plus a dictionary probe per key) |
+| Into a slab            | one run claimed per size class, a `memcpy`, a pointer pass: 3–45× a plain `swap!` end to end (M6)                                                      | one block per chunk, by `memcpy` (§7)                                                          |
+| Bytes                  | 2.6–7× EDN text (M2)                                                                                                                                   | 0.55–0.86× Transit MessagePack on Eve-shaped data (M2)                                         |
+| Reader code            | none new on the ISlabIO hosts: Eve's own types through a slab I/O over the buffer (M1)                                                                 | new types, generated (§6)                                                                      |
+| Sharing inside a value | kept — a block reached twice is copied once (M7)                                                                                                       | kept — a node is addressed by offset and may have several parents                              |
 
 A value can move between the forms: `pack` (image or slab → packed) and `lay-out` (packed → image, then placed).
 Both forms satisfy the same protocols and are `=` to each other, to their slab original and to plain data (§8).
@@ -38,16 +38,16 @@ tail     := [directory offset u64 LE][magic "EVS1" u32][0 u32]        16 bytes, 
 
 Chunk header — 32 bytes, little-endian, the chunk 8-aligned in whatever holds it:
 
-| off | field | |
-|---:|---|---|
-| 0 | magic `45 56 53 31` ("EVS1") | constant for the life of the format (A1g of the format research: Vortex moved its magic twice before freezing it) |
-| 4 | `version` u8 = 1 | a reader refuses a version above its own |
-| 5 | `kind` u8 | 0 packed · 1 image · 2 directory · 3 raw bytes (a part of a large scalar; reserved) |
-| 6 | `flags` u16 | bit 0 WIDE (offsets are u32; else u16) · bit 1 DIGEST (a 32-byte SHA-256 of the chunk, its own field zeroed, ends the chunk) · bit 2 TYPES (a type table is present) · bits 8–15 **required features**: a reader that does not know a set bit refuses the chunk |
-| 8 | `length` u32 | bytes, header included; a multiple of 8 |
-| 12 | `root` u32 | offset of the root node (packed) or root block (image) |
-| 16 | `nsym` u16 · 18 `nshape` u16 | packed only |
-| 20 | `symtab` u32 · 24 `shapetab` u32 · 28 `typetab` u32 | offsets; 0 = absent. In an image: the block table, the relocation table, the type table |
+| off | field                                               |                                                                                                                                                                                                                                                                 |
+| --: | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|   0 | magic `45 56 53 31` ("EVS1")                        | constant for the life of the format (A1g of the format research: Vortex moved its magic twice before freezing it)                                                                                                                                               |
+|   4 | `version` u8 = 1                                    | a reader refuses a version above its own                                                                                                                                                                                                                        |
+|   5 | `kind` u8                                           | 0 packed · 1 image · 2 directory · 3 raw bytes (a part of a large scalar; reserved)                                                                                                                                                                             |
+|   6 | `flags` u16                                         | bit 0 WIDE (offsets are u32; else u16) · bit 1 DIGEST (a 32-byte SHA-256 of the chunk, its own field zeroed, ends the chunk) · bit 2 TYPES (a type table is present) · bits 8–15 **required features**: a reader that does not know a set bit refuses the chunk |
+|   8 | `length` u32                                        | bytes, header included; a multiple of 8                                                                                                                                                                                                                         |
+|  12 | `root` u32                                          | offset of the root node (packed) or root block (image)                                                                                                                                                                                                          |
+|  16 | `nsym` u16 · 18 `nshape` u16                        | packed only                                                                                                                                                                                                                                                     |
+|  20 | `symtab` u32 · 24 `shapetab` u32 · 28 `typetab` u32 | offsets; 0 = absent. In an image: the block table, the relocation table, the type table                                                                                                                                                                         |
 
 **64 KiB is a target, not a cap** (A7, Q12). A writer seals a chunk when the next row would pass 65,535 bytes; under
 that, every offset in the chunk is 16 bits (M3: this is why 64 KiB is the smallest total on the datom shape). One
@@ -67,10 +67,10 @@ chunk is a copy (A17). Tags `0x01–0x0F`, `0x14`, `0x16–0x18` are taken as th
 
 Added, from the unassigned range Eve reserves for itself (`0x00`, `0x20–0x3F`; `census/BYTE-PATHS.md` §1.4):
 
-| tag | | bytes |
-|---|---|---|
-| `0x00` | nil | 1 byte (Eve's nil is zero bytes, which a node cannot address) |
-| `0x28` | bytes | `[len varint][bytes]` — the scalar Eve lacks (A1) |
+| tag    |       | bytes                                                         |
+| ------ | ----- | ------------------------------------------------------------- |
+| `0x00` | nil   | 1 byte (Eve's nil is zero bytes, which a node cannot address) |
+| `0x28` | bytes | `[len varint][bytes]` — the scalar Eve lacks (A1)             |
 
 Not carried, by the rule a disk domain already applies: a reference (`0x15`) — a fn, a regex, a host object. The
 writer refuses it by name (A12). A slab pointer tag (`0x10–0x13`, `0x19`, `0x1C–0x1F`, `0x40–0xEC`) never occurs in
@@ -89,20 +89,20 @@ The prototype wrote parents first with node-relative offsets; the spike writes t
 
 Offsets are u16, or u32 in a WIDE chunk — one width per chunk.
 
-| tag | node | layout |
-|---|---|---|
-| `0x20` | SYM | `[code varint]` — a symbol-table entry |
-| `0x21` | MAP | `[shape varint][value offsets × n]` — n and the keys come from the shape |
-| `0x22` | VEC | `[n varint][element offsets × n]` |
-| `0x23` | COL | a column standing alone — a typed vector; `[n varint][column]` (§5) |
-| `0x24` | SET | `[n varint][keys: offset of a VEC or COL of n]` — keys in key order |
-| `0x25` | LIST | as VEC |
-| `0x26` | BATCH | `[shape varint][n rows varint][column offsets × fields]` (§5) |
-| `0x27` | KMAP | a map whose keys are not all symbols: `[n varint][keys offset][values offset]`, each a VEC or COL of n, keys in key order |
-| `0x29` | META | `[value offset][meta offset]` |
-| `0x2A` | TAGGED | `[tag: SYM][value offset]` — a value whose type the reader does not have (§6) |
-| `0x2C` | REF | `[chunk varint][offset u32]` — a node of another chunk of the same value |
-| `0x2D–0x3F` | reserved | a reader refuses them |
+| tag         | node     | layout                                                                                                                    |
+| ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `0x20`      | SYM      | `[code varint]` — a symbol-table entry                                                                                    |
+| `0x21`      | MAP      | `[shape varint][value offsets × n]` — n and the keys come from the shape                                                  |
+| `0x22`      | VEC      | `[n varint][element offsets × n]`                                                                                         |
+| `0x23`      | COL      | a column standing alone — a typed vector; `[n varint][column]` (§5)                                                       |
+| `0x24`      | SET      | `[n varint][keys: offset of a VEC or COL of n]` — keys in key order                                                       |
+| `0x25`      | LIST     | as VEC                                                                                                                    |
+| `0x26`      | BATCH    | `[shape varint][n rows varint][column offsets × fields]` (§5)                                                             |
+| `0x27`      | KMAP     | a map whose keys are not all symbols: `[n varint][keys offset][values offset]`, each a VEC or COL of n, keys in key order |
+| `0x29`      | META     | `[value offset][meta offset]`                                                                                             |
+| `0x2A`      | TAGGED   | `[tag: SYM][value offset]` — a value whose type the reader does not have (§6)                                             |
+| `0x2C`      | REF      | `[chunk varint][offset u32]` — a node of another chunk of the same value                                                  |
+| `0x2D–0x3F` | reserved | a reader refuses them                                                                                                     |
 
 **Symbol table** — the chunk's cache. Every keyword and symbol, and every string that is a map key or occurs twice
 in the chunk, is stored once as its scalar bytes; a use is a SYM, or a code in a column. Codes are assigned by
@@ -132,16 +132,16 @@ vector); a BATCH is rows of one shape, one column per field, index = row. So a v
 arrive at the same bytes, and that is also what an Eve `Dataset` is (a map of name → typed array,
 `src/eve/dataset.cljc:50-52`).
 
-| kind | column | data |
-|---|---|---|
-| 1–11 | dense numbers: Eve's typed-array subtype codes as they are — 1 u8, 2 i8, 3 u8-clamped, 4 i16, 5 u16, 6 i32, 7 u32, 8 f32, 9 f64, 10 i64, 11 u64 (`serialize.cljc:106-116`) | little-endian, contiguous, aligned to the element size from the chunk's start |
-| 16 | bits | one bit a row, least-significant first |
-| 17, 18 | symbol codes, 1 or 2 bytes a row | a code into the chunk's symbol table |
-| 19 | utf-8 | `n + 1` offsets, then the bytes — the offsets are **u32 always**, not the chunk's offset width (§2's WIDE definition notwithstanding), as kind 23's ends are |
-| 20 | any | `n` node offsets — the column for mixed values |
-| 21 | struct | a BATCH of the same row count — a nested map or typed field |
-| 22 | narrowed integers | `[base i64][width u8 = 1, 2, 4][data]`; a read is a load and an add (M7: 1.4–3.1 ns) |
-| 23 | run-end | `[runs varint][values column][ends u32 × runs]`; a read is a binary search (M7: 42–102 ns); for sorted and near-constant columns only |
+| kind   | column                                                                                                                                                                     | data                                                                                                                                                         |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1–11   | dense numbers: Eve's typed-array subtype codes as they are — 1 u8, 2 i8, 3 u8-clamped, 4 i16, 5 u16, 6 i32, 7 u32, 8 f32, 9 f64, 10 i64, 11 u64 (`serialize.cljc:106-116`) | little-endian, contiguous, aligned to the element size from the chunk's start                                                                                |
+| 16     | bits                                                                                                                                                                       | one bit a row, least-significant first                                                                                                                       |
+| 17, 18 | symbol codes, 1 or 2 bytes a row                                                                                                                                           | a code into the chunk's symbol table                                                                                                                         |
+| 19     | utf-8                                                                                                                                                                      | `n + 1` offsets, then the bytes — the offsets are **u32 always**, not the chunk's offset width (§2's WIDE definition notwithstanding), as kind 23's ends are |
+| 20     | any                                                                                                                                                                        | `n` node offsets — the column for mixed values                                                                                                               |
+| 21     | struct                                                                                                                                                                     | a BATCH of the same row count — a nested map or typed field                                                                                                  |
+| 22     | narrowed integers                                                                                                                                                          | `[base i64][width u8 = 1, 2, 4][data]`; a read is a load and an add (M7: 1.4–3.1 ns)                                                                         |
+| 23     | run-end                                                                                                                                                                    | `[runs varint][values column][ends u32 × runs]`; a read is a binary search (M7: 42–102 ns); for sorted and near-constant columns only                        |
 
 Validity is one bit a row, least-significant first — the convention Arrow uses, so a dense column and its bitmap
 can be handed to an Arrow consumer, a typed array, a `double[]` or DLPack as they lie (8-byte alignment is what
@@ -221,7 +221,7 @@ byte-identical to the slab's but for pointers, which hold buffer offsets where t
   pointer pass, and it is who-holds-whom: the in-degree of every block, which is what the tally counts (M6).
 - the **type table** of §6 for every eve-deftype in it — an image's blocks carry 32 bits of name, not the name.
 
-These two tables are the mapping by which an allocator *zips* an image into place (the operator's word): given
+These two tables are the mapping by which an allocator _zips_ an image into place (the operator's word): given
 room it knows is free, it claims one run per size class, copies each block to its slot and rewrites each pointer.
 Header spacing is the layout's to state — layout 1's class runs have nothing between blocks; layout 2's blocks
 each begin with their own 256-byte header, and its pages with a header, bitmap and rows.

@@ -74,8 +74,8 @@ Board row: B1. Gate: claim+copy ≥ 3× per-block allocation, net of the domain.
   credential for SeniorCareMarket/eve on this box; the local branch
   is the durable record and is collated locally. No more push attempts.
 - Regression (gate-run session, load ≤ 5.7 at start): alloc-growth-race
-  + descriptor-table + keyring + run-claim = **19 tests, 158 assertions,
-  0 failures**.
+  - descriptor-table + keyring + run-claim = **19 tests, 158 assertions,
+    0 failures**.
 - First bench was methodologically broken (arms in separate loops,
   domain cost cold-then-warm: negative nets, an inverted row). Bench
   rewritten: arms interleaved, domain cost netted per iteration, copy
@@ -127,14 +127,14 @@ Board row: B1. Gate: claim+copy ≥ 3× per-block allocation, net of the domain.
     STALE-BUNDLE in the log if the staged bundle is behind.
 - Filed to the job agent (lane static-eve/claim, venue_pref j,
   class heavy): (1) verification — alloc-run-test + W0 contract-test
-  + regression trio on J, log ~/static-eve-results/z2-verify.log;
-  (2) bench re-take — doc/static/z2/bench.clj on J, log
-  ~/static-eve-results/z2-bench.log. Known artifact to expect in
-  (1), stated before the run: contract-test's scoreboard-smoke may
-  fail on this tree's scoreboard/SPIKE-LOG state (W0.5/W0.6 at this
-  pin), exactly as in final-run.log; the Z2 verdict rides on
-  alloc-run-test, contract-roundtrip, alloc-run-default, and the
-  trio.
+  - regression trio on J, log ~/static-eve-results/z2-verify.log;
+    (2) bench re-take — doc/static/z2/bench.clj on J, log
+    ~/static-eve-results/z2-bench.log. Known artifact to expect in
+    (1), stated before the run: contract-test's scoreboard-smoke may
+    fail on this tree's scoreboard/SPIKE-LOG state (W0.5/W0.6 at this
+    pin), exactly as in final-run.log; the Z2 verdict rides on
+    alloc-run-test, contract-roundtrip, alloc-run-default, and the
+    trio.
 - Lane state: implementation and tests unchanged by this session;
   only the report/STATUS/bundle moved. J results land via the
   coordinator; on their arrival the report's provisional caveat is

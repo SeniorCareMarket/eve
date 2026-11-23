@@ -19,8 +19,11 @@ against FORMAT-V1 §5 with its own minimal scaffolding, marked as such, to be
 replaced by C1's `chunk.cljc` on merge.
 
 ### Design decisions — aligned to C1's writer/reader (read firsthand from
+
 ### C1's working tree 2026-11-12 ~01:57 ET; C1 pin: branch
+
 ### claude/static-c1-chunk, commits ff30e92 + a58f383, chunk.cljc 1,866 lines
+
 ### uncommitted in its tree at read time)
 
 Where §5 was silent, C1's `write-column!`/`parse-column`/`col-at` are the
@@ -155,10 +158,10 @@ fixed at `fd77ce3` (preceded by `bdb6a49`, green-run fixes). The
      20,000 rows (old form overflows at that size): encode → open →
      scan/filter/cell/row arms all run, host/static agreement
      assertions pass.
-  Noted, not fixed (unproven, out of the measured defect's scope):
-  kind 18 writes symbol codes as u16 data with no range check — a
-  symtab past 65,536 symbols in one chunk would truncate the same
-  way; no corpus in the campaign approaches it.
+     Noted, not fixed (unproven, out of the measured defect's scope):
+     kind 18 writes symbol codes as u16 data with no range check — a
+     symtab past 65,536 symbols in one chunk would truncate the same
+     way; no corpus in the campaign approaches it.
 - **Re-filed on J** (lane `static-eve/columns`, venue_pref `j`):
   (1) suite re-run after the `put-off!` change; (2) B7 bench, 50,000
   rows, min of 5. **BUNDLE REFRESH REQUIRED** to this commit before

@@ -21,7 +21,7 @@ the seat. The gap is a property of the context the seat runs, and the
 context is the seat's to configure:
 
 - SCI resolves an unqualified `(Type. ...)` form through the context's
-  `:classes` map. A SCI *namespace* entry does not do it (measured: merging
+  `:classes` map. A SCI _namespace_ entry does not do it (measured: merging
   `'MapEntry` into the context's `cljs.core` namespace map does not land —
   the built-in namespace's interns are not mutable through the opts merge;
   `register-plugin!` with `{:classes {'MapEntry <host class>}}` does).
@@ -41,7 +41,7 @@ registers no `cljs.reader` for programs — `(require 'cljs.reader)` throws
 is in the bundle (the context's own `cljs.core/read-string` entry is a
 handle onto it; the two share one tag table, measured). What is missing
 is only the namespace registration, and a plugin's `:namespaces` merge
-lands for a *new* namespace (unlike the built-in `cljs.core` map above),
+lands for a _new_ namespace (unlike the built-in `cljs.core` map above),
 so the plugin registers cljs.reader's public vars — `read-string`,
 `read`, the tag-parser registrars, the timestamp parsers — compiled,
 under their own namespace, plus `*tag-table*` and

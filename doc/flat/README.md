@@ -2,16 +2,16 @@
 
 A research lane, not a feature: verdicts with evidence, and a plan. Nothing under `src/` or `adapters/` is changed.
 
-| Read | For |
-|---|---|
-| `IMPL-PLAN.md` (D5) | what to build as waves of parallel lanes, every lane's requirements each with its test, the scoreboard the spike is driven by, what is decided, the two stop conditions that fired (§0), and the four forks that are the operator's |
-| `ASSUMPTIONS.md` (D1) | ten premises that died at the pin, and the 18 assumptions with verdict, evidence and provenance |
-| `FORMAT-V1.md` (D4) | the format: container, scalars, packed nodes, columns, types, the image, validation, evolution |
-| `BLIND-SPOTS.md` (D3) | the twelve questions nobody had asked, and the ValueScript aside assessed |
-| `CENSUS.md` (D2) | the map to the file:line census in `census/` and `research/`; the allocator surface; tree differences; defects found on the way |
-| `MEASUREMENTS.md` | every figure, with the probe that produced it |
-| `probes/` | the probes' source and raw output; `probes/eve-cp.sh` is the classpath they ran on |
-| `STATUS.md` | the lane's log |
+| Read                  | For                                                                                                                                                                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IMPL-PLAN.md` (D5)   | what to build as waves of parallel lanes, every lane's requirements each with its test, the scoreboard the spike is driven by, what is decided, the two stop conditions that fired (§0), and the four forks that are the operator's |
+| `ASSUMPTIONS.md` (D1) | ten premises that died at the pin, and the 18 assumptions with verdict, evidence and provenance                                                                                                                                     |
+| `FORMAT-V1.md` (D4)   | the format: container, scalars, packed nodes, columns, types, the image, validation, evolution                                                                                                                                      |
+| `BLIND-SPOTS.md` (D3) | the twelve questions nobody had asked, and the ValueScript aside assessed                                                                                                                                                           |
+| `CENSUS.md` (D2)      | the map to the file:line census in `census/` and `research/`; the allocator surface; tree differences; defects found on the way                                                                                                     |
+| `MEASUREMENTS.md`     | every figure, with the probe that produced it                                                                                                                                                                                       |
+| `probes/`             | the probes' source and raw output; `probes/eve-cp.sh` is the classpath they ran on                                                                                                                                                  |
+| `STATUS.md`           | the lane's log                                                                                                                                                                                                                      |
 
 Pins: `SeniorCareMarket/eve` `4a92129`; `johnmn3/atom.broker` `163cb656c`. Everything measured ran on one JVM
 (OpenJDK 21.0.12, Clojure 1.12.0) on a 4-core box, 2026-11-11 ET.

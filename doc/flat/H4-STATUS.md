@@ -34,8 +34,8 @@ d575706 — its `alloc.cljc` carries the shared run claim). All times US Eastern
   `ISlabIO` + `ISlabRegion` but not `ISlabRunAlloc`, so on CLJS
   `alloc-run!` falls to the looping default (one bitmap scan + CAS per
   block). Note the semantic gap the lane must close honestly:
-  `batch-alloc` claims *up to* n blocks, not necessarily consecutive,
-  partial fills allowed; the run claim's contract (Z2) is n *consecutive*
+  `batch-alloc` claims _up to_ n blocks, not necessarily consecutive,
+  partial fills allowed; the run claim's contract (Z2) is n _consecutive_
   blocks or nil, nothing claimed. The batch machinery (cursor scan,
   `bitmap-find-free`, `bitmap-alloc-cas!`, cursor/free-count bookkeeping
   in `batch-alloc-once`) is the substrate; the run claim is built from it.

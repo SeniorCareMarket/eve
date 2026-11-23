@@ -14,14 +14,14 @@ EVE_BROWSER_PERF=1 bb test:browser    # the performance suite in a worker (a pag
 
 ## Correctness
 
-| Run | Result | When (ET) |
-|---|---|---|
-| `bb test:browser` | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (36 s) | 2026-10-21, this tree (the final pass) |
-| `bb test:browser` | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (44 s; slabs that grow) | 2026-10-20, the final sweep |
-| `bb test:browser` | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (48 s) | 2026-10-20, earlier in this round |
-| `bb test:browser` | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (65 s) | 2026-10-20, the 0.9 release preparation's final tree |
-| the capstone, `bb eve-media verify` | passed: the page a runtime of its own in the core and extended runs, its library and re-queue checked, the screenshot 11 of 11 rows | 2026-10-22, this tree (the final pass) |
-| the capstone, `bb eve-media verify` | the page as a runtime of its own (a worker pool over the network rung) | 2026-10-20 |
+| Run                                 | Result                                                                                                                              | When (ET)                                            |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `bb test:browser`                   | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (36 s)                                               | 2026-10-21, this tree (the final pass)               |
+| `bb test:browser`                   | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (44 s; slabs that grow)                              | 2026-10-20, the final sweep                          |
+| `bb test:browser`                   | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (48 s)                                               | 2026-10-20, earlier in this round                    |
+| `bb test:browser`                   | **48 tests, 633 assertions, 0 failures, 0 errors**, every main-thread row true (65 s)                                               | 2026-10-20, the 0.9 release preparation's final tree |
+| the capstone, `bb eve-media verify` | passed: the page a runtime of its own in the core and extended runs, its library and re-queue checked, the screenshot 11 of 11 rows | 2026-10-22, this tree (the final pass)               |
+| the capstone, `bb eve-media verify` | the page as a runtime of its own (a worker pool over the network rung)                                                              | 2026-10-20                                           |
 
 The page runs the thread feature's conformance (`eve.thread-host-test`), eve.thread's battery, the meta-atom's suite and
 eve.thread.fold's suite in a worker, and checks three rows only the main thread can show: it declares `:block :never`,
@@ -31,21 +31,23 @@ a browser (they run on Node; a page has no disk domain).
 ## Performance
 
 <!-- perf:browser (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
-| Workload | per operation | operations in the timed round | × the JVM's |
-|---|---:|---:|---:|
-| `atom-swap-counter` | 15.3 µs | 65536 | 1.3 |
-| `atom-deref-small` | 4.5 µs | 262144 | 0.26 |
-| `atom-swap-map-1k` | 4.7 µs | 262144 | 1.0 |
-| `atom-deref-map-1k` | 1.0 ms | 1024 | 2.7 |
-| `atom-$-get-map-1k` | 3.4 µs | 524288 | 1.7 |
-| `atom-reset-vec-1k` | 6.0 ms | 256 | 3.9 |
-| `sorted-set-build-200` | 19.7 ms | 64 | 1.8 |
-| `int-map-build-200` | 6.4 ms | 256 | 1.4 |
-| `disk-swap-counter` | n/a — no disk domains in a page |  |  |
-| `thread-submit-64` | 5.8 ms | 256 | 5.9 |
+
+| Workload               |                   per operation | operations in the timed round | × the JVM's |
+| ---------------------- | ------------------------------: | ----------------------------: | ----------: |
+| `atom-swap-counter`    |                         15.3 µs |                         65536 |         1.3 |
+| `atom-deref-small`     |                          4.5 µs |                        262144 |        0.26 |
+| `atom-swap-map-1k`     |                          4.7 µs |                        262144 |         1.0 |
+| `atom-deref-map-1k`    |                          1.0 ms |                          1024 |         2.7 |
+| `atom-$-get-map-1k`    |                          3.4 µs |                        524288 |         1.7 |
+| `atom-reset-vec-1k`    |                          6.0 ms |                           256 |         3.9 |
+| `sorted-set-build-200` |                         19.7 ms |                            64 |         1.8 |
+| `int-map-build-200`    |                          6.4 ms |                           256 |         1.4 |
+| `disk-swap-counter`    | n/a — no disk domains in a page |                               |             |
+| `thread-submit-64`     |                          5.8 ms |                           256 |         5.9 |
 
 Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
 a time; a round of at least 1 s.
+
 <!-- /perf:browser -->
 
 Reading it: the fastest small deref of any host (4.5 µs) and within ~1.3× of the JVM's on swaps, with growable slab
@@ -59,13 +61,13 @@ worker's batch meanwhile (15.4 s against 5.7 s), so the capstone reads in a work
 
 ## How eve is built in a browser
 
-| Feature | Adapter | How |
-|---|---|---|
-| thread | `thread/browser` | dedicated Web Workers by the fat-kernel route: a Blob bootstrap `importScripts` the kernel (the program itself, a `:simple` build with no output wrapper, its URL found from the build's `manifest.edn` by synchronous XHR); every thread's mailbox a 256 KB ring in one SharedArrayBuffer; workers created by the page from a spawn ring it pumps (`Atomics.waitAsync`), because a blocked worker never turns its own event loop to start a child; a worker closes itself once its entry returns and its exit notice is sent |
-| http | `http/browser` | synchronous `XMLHttpRequest`; on the main thread bytes come as an `x-user-defined` binary string; a worker's batch (a level of a network atom's blocks) is posted to the page, fetched with `Promise.all`, the worker waiting on `Atomics.wait` |
-| crypto | `crypto/portable` | `eve.net.portable-crypto` (WebCrypto is promise-only) |
-| process | `process/node` | its browser-safe parts: `Date.now`, `crypto.getRandomValues`, an interval heartbeat |
-| slab, region, typed-view, slab-io, coll, types, encoding, int32, codec | as ClojureScript on Node | SharedArrayBuffer slabs through DataViews, `Atomics` |
+| Feature                                                                | Adapter                  | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| thread                                                                 | `thread/browser`         | dedicated Web Workers by the fat-kernel route: a Blob bootstrap `importScripts` the kernel (the program itself, a `:simple` build with no output wrapper, its URL found from the build's `manifest.edn` by synchronous XHR); every thread's mailbox a 256 KB ring in one SharedArrayBuffer; workers created by the page from a spawn ring it pumps (`Atomics.waitAsync`), because a blocked worker never turns its own event loop to start a child; a worker closes itself once its entry returns and its exit notice is sent |
+| http                                                                   | `http/browser`           | synchronous `XMLHttpRequest`; on the main thread bytes come as an `x-user-defined` binary string; a worker's batch (a level of a network atom's blocks) is posted to the page, fetched with `Promise.all`, the worker waiting on `Atomics.wait`                                                                                                                                                                                                                                                                               |
+| crypto                                                                 | `crypto/portable`        | `eve.net.portable-crypto` (WebCrypto is promise-only)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| process                                                                | `process/node`           | its browser-safe parts: `Date.now`, `crypto.getRandomValues`, an interval heartbeat                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| slab, region, typed-view, slab-io, coll, types, encoding, int32, codec | as ClojureScript on Node | SharedArrayBuffer slabs through DataViews, `Atomics`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## Gotchas
 

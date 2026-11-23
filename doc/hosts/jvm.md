@@ -10,15 +10,15 @@ clojure -M:perf              # the performance suite (test/eve/perf_suite.cljc)
 
 ## Correctness
 
-| Run | Result | When (ET) |
-|---|---|---|
-| `clojure -M:jvm-test` | **546 tests, 9,615 assertions, 0 failures, 0 errors** (136 s, peak 3.4 GB, the process tree; the same tests counted 9,634 assertions in 157 s earlier that evening — the fuzz test asserts per generated case) | 2026-10-21, this tree (the final pass) |
-| `clojure -M:jvm-test` | **522 tests, 8,078 assertions, 0 failures, 0 errors** (163 s, peak 3.4 GB resident; 364 s before the reflection fix) | 2026-10-20, the final sweep |
-| `clojure -M:jvm-test` | **520 tests, 7,964 assertions, 0 failures, 0 errors** (6 min 04 s) | 2026-10-20, the 0.9 release preparation's final tree |
-| `bb scripts/thread-rendezvous.clj jvm <host>` | 18 of 18 checks with jvm, nbb, bb, clje, cljr, jolt, lpy and glj, and with nbb, bb and glj as the first member (14–133 s a pair; `f-rv-*.log`) | 2026-10-22, this tree (the final pass) |
-| `bb scripts/thread-rotation.clj jvm glj bb nbb clje` | every turn's sum right, one registry (64 s, `f-rotation.log`) | 2026-10-22, this tree (the final pass) |
-| `bb scripts/thread-rendezvous.clj jvm <host>` | 18 of 18 checks with jvm, glj, and each extended host it was paired with | 2026-10-19 / 2026-10-20 |
-| `bb scripts/thread-rotation.clj jvm glj bb nbb clje` | every turn's sum right, one registry | 2026-10-20 |
+| Run                                                  | Result                                                                                                                                                                                                         | When (ET)                                            |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `clojure -M:jvm-test`                                | **546 tests, 9,615 assertions, 0 failures, 0 errors** (136 s, peak 3.4 GB, the process tree; the same tests counted 9,634 assertions in 157 s earlier that evening — the fuzz test asserts per generated case) | 2026-10-21, this tree (the final pass)               |
+| `clojure -M:jvm-test`                                | **522 tests, 8,078 assertions, 0 failures, 0 errors** (163 s, peak 3.4 GB resident; 364 s before the reflection fix)                                                                                           | 2026-10-20, the final sweep                          |
+| `clojure -M:jvm-test`                                | **520 tests, 7,964 assertions, 0 failures, 0 errors** (6 min 04 s)                                                                                                                                             | 2026-10-20, the 0.9 release preparation's final tree |
+| `bb scripts/thread-rendezvous.clj jvm <host>`        | 18 of 18 checks with jvm, nbb, bb, clje, cljr, jolt, lpy and glj, and with nbb, bb and glj as the first member (14–133 s a pair; `f-rv-*.log`)                                                                 | 2026-10-22, this tree (the final pass)               |
+| `bb scripts/thread-rotation.clj jvm glj bb nbb clje` | every turn's sum right, one registry (64 s, `f-rotation.log`)                                                                                                                                                  | 2026-10-22, this tree (the final pass)               |
+| `bb scripts/thread-rendezvous.clj jvm <host>`        | 18 of 18 checks with jvm, glj, and each extended host it was paired with                                                                                                                                       | 2026-10-19 / 2026-10-20                              |
+| `bb scripts/thread-rotation.clj jvm glj bb nbb clje` | every turn's sum right, one registry                                                                                                                                                                           | 2026-10-20                                           |
 
 What the battery covers: every namespace under `test/` the JVM loads, `.clj` and `.cljc` — the shared suites every host
 runs, eve.net's fourteen suites (the network atom, gateways, the crypto primitives), and fifteen JVM-only files
@@ -32,21 +32,23 @@ read all 71 rows on the JVM, none skipped.
 ## Performance
 
 <!-- perf:jvm (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
-| Workload | per operation | operations in the timed round | × the JVM's |
-|---|---:|---:|---:|
-| `atom-swap-counter` | 11.8 µs | 131072 | 1.0 |
-| `atom-deref-small` | 17.1 µs | 65536 | 1.0 |
-| `atom-swap-map-1k` | 4.7 µs | 262144 | 1.0 |
-| `atom-deref-map-1k` | 377.7 µs | 4096 | 1.0 |
-| `atom-$-get-map-1k` | 2.1 µs | 524288 | 1.0 |
-| `atom-reset-vec-1k` | 1.5 ms | 1024 | 1.0 |
-| `sorted-set-build-200` | 11.1 ms | 128 | 1.0 |
-| `int-map-build-200` | 4.5 ms | 256 | 1.0 |
-| `disk-swap-counter` | 17.6 µs | 65536 | 1.0 |
-| `thread-submit-64` | 985.4 µs | 2048 | 1.0 |
+
+| Workload               | per operation | operations in the timed round | × the JVM's |
+| ---------------------- | ------------: | ----------------------------: | ----------: |
+| `atom-swap-counter`    |       11.8 µs |                        131072 |         1.0 |
+| `atom-deref-small`     |       17.1 µs |                         65536 |         1.0 |
+| `atom-swap-map-1k`     |        4.7 µs |                        262144 |         1.0 |
+| `atom-deref-map-1k`    |      377.7 µs |                          4096 |         1.0 |
+| `atom-$-get-map-1k`    |        2.1 µs |                        524288 |         1.0 |
+| `atom-reset-vec-1k`    |        1.5 ms |                          1024 |         1.0 |
+| `sorted-set-build-200` |       11.1 ms |                           128 |         1.0 |
+| `int-map-build-200`    |        4.5 ms |                           256 |         1.0 |
+| `disk-swap-counter`    |       17.6 µs |                         65536 |         1.0 |
+| `thread-submit-64`     |      985.4 µs |                          2048 |         1.0 |
 
 Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
 a time; a round of at least 1 s.
+
 <!-- /perf:jvm -->
 
 Reading it: the fastest host on every workload but the small deref (the browser's and Node's are faster there), and
@@ -83,19 +85,19 @@ column arithmetic over an mmap domain at 19 ms against 141 ms for the stock pipe
 
 ## How eve is built on the JVM
 
-| Feature | Adapter | How |
-|---|---|---|
-| region | `region/jvm-varhandle` | one `JvmByteBufferRegion` over a ByteBuffer — a heap `byte[]` or a `MappedByteBuffer` — with VarHandle atomics; wait/notify by `LockSupport` park/unpark; a Lustre mount gets `FileChannel.lock` byte-range locks instead |
-| slab | `slab/heap` | the process's own slab is alloc's `JvmSlabCtx` heap domain (six 1 MB classes and a growing overflow class) |
-| slab-io | `slab-io/protocol` | macros expanding to the `ISlabIO` / `IMemRegion` call, so a hint reaches the compiler and nothing is added at run time |
-| core, completion | `core/clojure`, `completion/clojure` | each `eve.host` name is a macro over `clojure.core`'s own call; nothing to complete |
-| coll | `coll/jvm` | `clojure.core`'s functions, inlined through `clojure.lang.RT`: eve values answer `count`, `get`, `seq`, `=` directly |
-| types | `types/jvm` (+ `types/js` for a ClojureScript compile's macros) | `deftype` with the JVM's interfaces |
-| encoding, int32, codec | `encoding/java`, `int32/jvm`, `codec/byte-array` | java.lang / java.util, `unchecked-int` narrowing, the codec over byte arrays |
-| process | `process/java` | `System.currentTimeMillis`, a daemon heartbeat thread, a shutdown hook, `File.createNewFile` for exclusive creation, `SecureRandom` |
-| thread | `thread/jvm` | platform threads (daemon) by default, virtual threads with `-Deve.thread.virtual=true`; a `LinkedBlockingQueue` mailbox each |
-| crypto | `crypto/java` | `MessageDigest`, `Mac`, `Cipher "AES/CTR/NoPadding"`, `Signature "Ed25519"`; XXH3 is the portable code (the JDK has none) |
-| http, http-server | `http/java`, `http-server/jdk` | `java.net.http.HttpClient` answered synchronously; `com.sun.net.httpserver` on a fixed pool, `TCP_NODELAY` on |
+| Feature                | Adapter                                                         | How                                                                                                                                                                                                                       |
+| ---------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| region                 | `region/jvm-varhandle`                                          | one `JvmByteBufferRegion` over a ByteBuffer — a heap `byte[]` or a `MappedByteBuffer` — with VarHandle atomics; wait/notify by `LockSupport` park/unpark; a Lustre mount gets `FileChannel.lock` byte-range locks instead |
+| slab                   | `slab/heap`                                                     | the process's own slab is alloc's `JvmSlabCtx` heap domain (six 1 MB classes and a growing overflow class)                                                                                                                |
+| slab-io                | `slab-io/protocol`                                              | macros expanding to the `ISlabIO` / `IMemRegion` call, so a hint reaches the compiler and nothing is added at run time                                                                                                    |
+| core, completion       | `core/clojure`, `completion/clojure`                            | each `eve.host` name is a macro over `clojure.core`'s own call; nothing to complete                                                                                                                                       |
+| coll                   | `coll/jvm`                                                      | `clojure.core`'s functions, inlined through `clojure.lang.RT`: eve values answer `count`, `get`, `seq`, `=` directly                                                                                                      |
+| types                  | `types/jvm` (+ `types/js` for a ClojureScript compile's macros) | `deftype` with the JVM's interfaces                                                                                                                                                                                       |
+| encoding, int32, codec | `encoding/java`, `int32/jvm`, `codec/byte-array`                | java.lang / java.util, `unchecked-int` narrowing, the codec over byte arrays                                                                                                                                              |
+| process                | `process/java`                                                  | `System.currentTimeMillis`, a daemon heartbeat thread, a shutdown hook, `File.createNewFile` for exclusive creation, `SecureRandom`                                                                                       |
+| thread                 | `thread/jvm`                                                    | platform threads (daemon) by default, virtual threads with `-Deve.thread.virtual=true`; a `LinkedBlockingQueue` mailbox each                                                                                              |
+| crypto                 | `crypto/java`                                                   | `MessageDigest`, `Mac`, `Cipher "AES/CTR/NoPadding"`, `Signature "Ed25519"`; XXH3 is the portable code (the JDK has none)                                                                                                 |
+| http, http-server      | `http/java`, `http-server/jdk`                                  | `java.net.http.HttpClient` answered synchronously; `com.sun.net.httpserver` on a fixed pool, `TCP_NODELAY` on                                                                                                             |
 
 No Panama FFM and no `sun.misc.Unsafe`. The `--add-opens` and `--enable-native-access` flags in `deps.edn` belong to
 the test aliases; an application does not need them.
@@ -112,7 +114,7 @@ the test aliases; an application does not need them.
 - **`swap!` returns the slab-backed value**, lazily materialized, where `deref` answers host collections.
 - **No watches on eve atoms** (`add-watch` throws: an eve atom is not a `clojure.lang.IRef`).
 - **A user `eve/deftype` value and an `eve.sorted` map deref as eve-type instances**, not host collections
- .
+  .
 - `eve.deftype.int-map/range` over a value read inside `eve.alpha/$` throws (known issues).
 - **A persistent chain a swap's function builds and drops is not reclaimed** (every host — the model's scope-local
   temporaries): `(reduce assoc (int-map) ks)` inside one `swap!` leaves every intermediate version allocated. Build

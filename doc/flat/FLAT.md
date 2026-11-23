@@ -20,7 +20,7 @@ What flat buys instead is the subject of this document.
 ## Why flat exists
 
 The persistent form is the right shape inside an atom domain. It is
-the wrong shape almost everywhere a value has to *go*:
+the wrong shape almost everywhere a value has to _go_:
 
 - **Storage** — a value as one linear buffer, not a tree of
   size-class-padded blocks scattered through slab files.
@@ -74,8 +74,8 @@ smaller than Transit MessagePack on the corpora measured (below).
 row would pass 65,535 bytes, the largest size at which every offset
 inside the chunk stays 16 bits.
 
-Which form when: images move *Eve values* (exact graphs, placed back
-as persistent values); chunks move *data* (rows and values encoded,
+Which form when: images move _Eve values_ (exact graphs, placed back
+as persistent values); chunks move _data_ (rows and values encoded,
 read through the packed machinery, decoded only on demand).
 
 ## Domain boundaries
@@ -109,18 +109,18 @@ outside:
   only that handle. The checker refuses with named, typed errors,
   and a 10,000-deep nesting is refused at the exact boundary (64)
   without overflowing (Check's report: 46-row malformed corpus, 250
-  fuzz mutants, all refused cleanly). The gate vouches *form*, not
+  fuzz mutants, all refused cleanly). The gate vouches _form_, not
   integrity: a flipped value byte yields a different well-formed
   value. Integrity is the digest's job (below).
 
 ## Flat inside atoms
 
 Flat is not only a travel form. Inside an atom, a subtree can live
-in its flat form — flat is a *value state*, at subtree granularity:
+in its flat form — flat is a _value state_, at subtree granularity:
 
 - **Freeze** (`eve.flat.freeze/freeze-value`, and the generated
   `freeze` method every `eve-deftype` type carries) converts a
-  value to flat form *in place in the domain*: the packed chunk is
+  value to flat form _in place in the domain_: the packed chunk is
   striped into a chain of fixed-size-class blocks (never the
   variable-size class), and the value's slot points at the chain.
   A frozen value is closed — it holds no pointers into the
@@ -141,7 +141,7 @@ in its flat form — flat is a *value state*, at subtree granularity:
 - **Refreeze is a verb** (`freeze/refreeze`, `freeze/refreeze!`):
   collapse a composite back to a pure flat value, equal — and
   digest-equal — to its materialization.
-- **Ingestion embeds.** Swapping host data that *contains* flat
+- **Ingestion embeds.** Swapping host data that _contains_ flat
   values (a delivered batch nested in a map, say) persistent-izes
   the host parts and embeds the flat parts by reference at their
   positions — no materialization on the way in, and reading back
@@ -184,9 +184,9 @@ storage:
   or equality check is a field read, not a walk.
 - **Nesting in host structures.** Flat values nest inside ordinary
   host maps and vectors and navigate there. Two handler sets in
-  `eve.flat.transit` ship them through Transit: the *plain* flavor
+  `eve.flat.transit` ship them through Transit: the _plain_ flavor
   writes a flat value as its content (the far side gets ordinary
-  data); the *flat* flavor writes it as its chunk bytes (the far
+  data); the _flat_ flavor writes it as its chunk bytes (the far
   side gets the flat value back, still flat). Bare Transit refuses
   chunk classes — it dispatches on class, not protocols — so one
   of the two handler sets is required.
@@ -224,13 +224,13 @@ storage:
   produces the persistent type, its flat mirror, and the
   conversions between them.
 - **Run claim.** Placement used to allocate block by block. The
-  allocator now answers a *run claim*: one consecutive run of blocks
+  allocator now answers a _run claim_: one consecutive run of blocks
   per size class, claimed in a single CAS-guarded operation, safe
   across processes on a shared disk domain (Disk's lane: two
   processes claiming concurrently get disjoint runs, every block
   freed exactly once). The zip then copies into the claimed run.
 - **Counts are walked, not written.** Counts-at-placement was spiked
-  (fork F5) and **not adopted**: written counts measured *slower*
+  (fork F5) and **not adopted**: written counts measured _slower_
   than walking — in the decider probe, walk 161.57 ms (min) against
   written 391.26 ms — so placement recomputes counts by walking,
   and the spike stays in the tree behind an off-by-default flag
@@ -249,7 +249,7 @@ storage:
 - **Appends.** A flat value is a view (buffer, length, root).
   Appending writes past the current length; older views over the
   same buffer are undisturbed and stay equal to what they were.
-  There is no append *inside* a placed persistent value — append is
+  There is no append _inside_ a placed persistent value — append is
   a property of the flat form in hand.
 - **Persistence of placed values.** A placed value is an ordinary
   persistent value afterwards: it survives on disk (Disk's lane:
@@ -288,7 +288,7 @@ only where a host's byte machinery genuinely differs. Measured state
   pins, not to jolt.
 - **jank, basilisp (lpy)** — no flat namespace loads yet; each
   block
-...[truncated 11083 chars]er is measured and named in Hosts' lists (missing
+  ...[truncated 11083 chars]er is measured and named in Hosts' lists (missing
   `clojure.java.io` / `java.io.File` host modules, macroexpansion
   breaks) — host work, not flat work.
 - **ClojureCLR, clojerl, let-go (glj)** — not measured: their
@@ -313,22 +313,22 @@ Sizes first — the packed form against the alternatives, same
 values (records: 10,000 uniform maps; messages: 5,000 nested
 payloads):
 
-| form | records-10k | messages-5k |
-|---|---|---|
-| image | 2,167,976 B | 5,162,744 B |
-| stream | 1,817,243 B | 4,402,009 B |
-| **packed** | **230,600 B** | **696,152 B** |
-| Transit (MessagePack) | 358,526 B | 870,399 B |
+| form                  | records-10k   | messages-5k   |
+| --------------------- | ------------- | ------------- |
+| image                 | 2,167,976 B   | 5,162,744 B   |
+| stream                | 1,817,243 B   | 4,402,009 B   |
+| **packed**            | **230,600 B** | **696,152 B** |
+| Transit (MessagePack) | 358,526 B     | 870,399 B     |
 
 Reads, on delivered flat values versus the same data as heap
 objects — the read taxonomy the whole design steers by:
 
-| operation | flat | heap | verdict |
-|---|---|---|---|
-| hash of a delivered value | 46–100 ms (whole corpora) | — | latched at pack: a field read with root recipes |
-| point access (one cell) | 1,274–1,878 ns | 37–43 ns | flat loses ~35× |
-| full scan | 7.5–12.2 ms (whole corpora) | slower | flat wins |
-| row materialization / full decode | ~11× Transit's cost | — | flat loses; don't |
+| operation                         | flat                        | heap     | verdict                                         |
+| --------------------------------- | --------------------------- | -------- | ----------------------------------------------- |
+| hash of a delivered value         | 46–100 ms (whole corpora)   | —        | latched at pack: a field read with root recipes |
+| point access (one cell)           | 1,274–1,878 ns              | 37–43 ns | flat loses ~35×                                 |
+| full scan                         | 7.5–12.2 ms (whole corpora) | slower   | flat wins                                       |
+| row materialization / full decode | ~11× Transit's cost         | —        | flat loses; don't                               |
 
 The rule those numbers write: **freeze what is scanned or
 shipped, never what is navigated or picked at.** Flat wins full
@@ -338,14 +338,14 @@ point reads, deep navigation, row materialization, and full
 decode — those belong to the persistent form in an atom, or to
 materialized heap data.
 
-In atoms, the swap-cost shape (frozen values are frozen *inside*
+In atoms, the swap-cost shape (frozen values are frozen _inside_
 the swap function, per repetition — the only legal pattern, since
 a frozen value belongs to its domain): replacing a root with its
 frozen form costs the freeze itself (a pack striped into the
 domain); editing a frozen value costs the edit — materialize,
 edit, refreeze, all inside the swap — never the value's size in
 machinery, though the current refreeze is a full repack (the
-overlay machinery makes the *stored* form O(edit); the verb
+overlay machinery makes the _stored_ form O(edit); the verb
 itself is O(value) and priced as such). The sections below are
 the campaign's detailed record behind these summaries.
 
@@ -384,12 +384,12 @@ the walk and placement costs above (Transfer's report).
 Whole-value ingest of a plain host value, against today's `swap!`
 of the same value (Builder's report):
 
-| corpus | ratio vs swap! | reading |
-|---|---|---|
-| map 10k int→int | **0.11×** | beats the 0.37–0.56× probe band outright |
-| records 10k | 0.60× | near-miss over the band |
-| messages 5k | 0.68× | miss — build cost dominates |
-| vector 100k ints | 1.61× | miss — placement cost dominates |
+| corpus           | ratio vs swap! | reading                                  |
+| ---------------- | -------------- | ---------------------------------------- |
+| map 10k int→int  | **0.11×**      | beats the 0.37–0.56× probe band outright |
+| records 10k      | 0.60×          | near-miss over the band                  |
+| messages 5k      | 0.68×          | miss — build cost dominates              |
+| vector 100k ints | 1.61×          | miss — placement cost dominates          |
 
 The B5 gate as written (band met on every corpus) is **missed**;
 the map row is the campaign's one unambiguous speed win. One
@@ -427,12 +427,12 @@ Arrow-class absolute gates. Lane-pin numbers, with the collated
 re-take beside them (F3 measurement; both sessions agree on the
 relative verdicts, absolutes move with box weather):
 
-| row | lane pin | collated re-take | gate |
-|---|---|---|---|
-| scan | 129.52 ns/row (host 203.93) | **21.08** (host 29.90) | ≤2 ns/row — missed |
-| filter | 100.54 (host 364.38) | **20.13** (host 31.25) | ≤4 ns/row — missed |
-| one cell | 637.1 ns (host 123.8) | 100.4 (host 48.2) | ≤2× host — missed (5.1×, then 2.08×) |
-| row view | 5.346 µs (host 0.301) | **0.817 µs** (host 0.076) | ≤1 µs — missed at the lane pin, **passed** at the re-take |
+| row      | lane pin                    | collated re-take          | gate                                                      |
+| -------- | --------------------------- | ------------------------- | --------------------------------------------------------- |
+| scan     | 129.52 ns/row (host 203.93) | **21.08** (host 29.90)    | ≤2 ns/row — missed                                        |
+| filter   | 100.54 (host 364.38)        | **20.13** (host 31.25)    | ≤4 ns/row — missed                                        |
+| one cell | 637.1 ns (host 123.8)       | 100.4 (host 48.2)         | ≤2× host — missed (5.1×, then 2.08×)                      |
+| row view | 5.346 µs (host 0.301)       | **0.817 µs** (host 0.076) | ≤1 µs — missed at the lane pin, **passed** at the re-take |
 
 Through row handles instead of the column door, a chunk reads
 40–400× slower than heap on scans and ~100–140× on single cells
@@ -486,6 +486,7 @@ suite green except image read speed, across two waves of lanes and
 a full collation. What is open is named, not buried:
 
 **Forks.**
+
 - **F1, the name — DECIDED**: flat types, `eve.flat` (operator,
   Nov 12 2026). Verbs unchanged: detach / pack / place / open.
 - **F2, equality default** — implemented as (a): sisters compare by
@@ -499,6 +500,7 @@ a full collation. What is open is named, not buried:
 
 **Defects measured at the assembled pin (F3 measurement) — all
 three fixed in the F3 wave and re-measured.**
+
 - Builder image → `place` did not compose (the `:relocations` /
   `:relocs` key disagreement) — see Ingest, above.
 - `chunk/open-checked` refused 100% of the chunk writer's own
@@ -508,6 +510,7 @@ three fixed in the F3 wave and re-measured.**
 - `pack-all`'s superlinear writer cost — see Writers, above.
 
 **Residuals carried by collation (COLLATION-REPORT.md).**
+
 - **A16** — a two-ref `dosync` can half-commit when the second
   ref's foreign value throws at store time. Eve STM commit-protocol
   territory; the `:zip` policy removes the refusal that triggers
@@ -532,8 +535,8 @@ three fixed in the F3 wave and re-measured.**
   load failure (see Hosts).
 
 **Flagged for the operator.** The contract amendment (collation
-commit 15d3d3b): the contract's nil-probe accepts a verb's *typed
-refusal* as a valid answer. It is how four lanes' worth of nil
+commit 15d3d3b): the contract's nil-probe accepts a verb's _typed
+refusal_ as a valid answer. It is how four lanes' worth of nil
 handling got repaired; it stands in the tree as a flagged commit
 awaiting the operator's disposition.
 

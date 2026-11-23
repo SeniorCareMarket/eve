@@ -8,10 +8,11 @@ Public repo: branch work only — no merge, no PR from this lane.
 
 Eve's test gate for this lane: `bb test:bb` — the shared (.cljc)
 tests on babashka over hosts.edn's :bb roots (test + apps/aegis/test
-+ apps/network-atoms/test), run with bb 1.13.230. This is the gate
-the repo's own bb.edn defines for the shared suite and the one this
-box can run end to end; the JVM suite (clojure -M:jvm-test) is not
-this lane's gate and no partial run will be called the gate.
+
+- apps/network-atoms/test), run with bb 1.13.230. This is the gate
+  the repo's own bb.edn defines for the shared suite and the one this
+  box can run end to end; the JVM suite (clojure -M:jvm-test) is not
+  this lane's gate and no partial run will be called the gate.
 
 Lint gate: `bb lint` (fleet): clj-kondo default fail level, Splint
 1.25.0, Carve report, cljfmt check, clj-depend, dprint check.
@@ -28,8 +29,8 @@ eve/aegis/rsabssa.cljc on classpath. So the lane's gate is the
 test:bb suite run through the runner with the one missing root
 composed into the classpath, verbatim:
 
-  bb -cp "$(bb classpath bb):apps/aegis/src:test:apps/aegis/test:apps/network-atoms/test" \
-     -m eve.runner.bb-main test
+bb -cp "$(bb classpath bb):apps/aegis/src:test:apps/aegis/test:apps/network-atoms/test"\
+-m eve.runner.bb-main test
 
 Same namespaces, same runner; the wiring gap itself is Eve's,
 already on the release-line backlog, and is reported in CENSUS.md
@@ -149,7 +150,8 @@ map-entry, edn-test, associative-transient) identical to
 baseline, edn-test's pre-existing 1F unchanged.
 
 REMAINING: fix campaign (recount on gate scope first), Splint
-+ Carve legs to zero, dprint + docs pass, .githooks/pre-commit,
-bb lint exit 0, RETRO.md (incl. the consumer kondo-exports
-proposal), push branch. clj-depend: config in, 0 violations at
-the pin (confirm again at the endgame).
+
+- Carve legs to zero, dprint + docs pass, .githooks/pre-commit,
+  bb lint exit 0, RETRO.md (incl. the consumer kondo-exports
+  proposal), push branch. clj-depend: config in, 0 violations at
+  the pin (confirm again at the endgame).

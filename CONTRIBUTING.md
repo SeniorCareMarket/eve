@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Eve!
 
 Every user-visible change — a public namespace's behavior, a host added or changed, a format or wire change, a fixed
 defect an adopter could have hit — adds a line under `## [Unreleased]` in `CHANGELOG.md` in the same commit
-(*Added*, *Changed*, *Removed*, *Fixed*). A release moves those lines under its version. (0.1.0 to 0.9 went seven
+(_Added_, _Changed_, _Removed_, _Fixed_). A release moves those lines under its version. (0.1.0 to 0.9 went seven
 months without an entry;.)
 
 ## Development Setup
@@ -108,6 +108,7 @@ src/eve/
 ## Reporting Issues
 
 Please include:
+
 - ClojureScript/Clojure versions
 - Node.js version
 - Platform (Linux, macOS)

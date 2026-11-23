@@ -10,16 +10,16 @@ Branch `claude/static-z4-counts`, final tip at writing: see git log
 ## F5 verdict — NOT ADOPTED (FINAL)
 
 Exactness is proven; speed is not. All five requirement tests pass
-(below), so written counts are *correct* — indistinguishable from
+(below), so written counts are _correct_ — indistinguishable from
 walked counts, row for row, including rollback. But the deciding
 bench row missed its gate and the written count did not beat the
 walk in the only completed same-session run:
 
-| 5k chat messages, 70,997 blocks | ms (min of 5, 2 warmup) | × placement |
-|---|---|---|
-| placement alone (harness, per-block) | 2,957.20 | 1.00× |
-| placed swap!, counts walked | 8,484.55 | 2.87× |
-| placed swap!, counts written (F5) | 9,977.79 | 3.37× |
+| 5k chat messages, 70,997 blocks      | ms (min of 5, 2 warmup) | × placement |
+| ------------------------------------ | ----------------------- | ----------- |
+| placement alone (harness, per-block) | 2,957.20                | 1.00×       |
+| placed swap!, counts walked          | 8,484.55                | 2.87×       |
+| placed swap!, counts written (F5)    | 9,977.79                | 3.37×       |
 
 Gate (row B2): ≤ 2× placement — **MISS** (written arm 3.37×).
 Written vs walked: **1.18× slower**, i.e. the count written from the
@@ -46,14 +46,14 @@ stable load1 ~8.5–9.0, hold-root!-only arm (the count alone, no
 placement), 70,997 blocks, 5k chat messages. Rows re-checked equal:
 written == walked, true.
 
-| count only, 70,997 blocks | min | median |
-|---|---|---|
-| walked | 161.57 ms | 170.79 ms |
-| written (F5) | 391.26 ms | 885.12 ms |
+| count only, 70,997 blocks | min       | median    |
+| ------------------------- | --------- | --------- |
+| walked                    | 161.57 ms | 170.79 ms |
+| written (F5)              | 391.26 ms | 885.12 ms |
 
 Written counts are **2.4× slower than the walk at best, ~5× slower
 at median** — with the load confound removed, the written count
-loses by *worse* margins than the confounded bench suggested. The
+loses by _worse_ margins than the confounded bench suggested. The
 provisional verdict is confirmed and is now **FINAL: F5 is NOT
 ADOPTED.** Counts stay walked. The `*count-at-place*` mechanism
 stays in the tree behind its flag, **off** (its shipped default):

@@ -9,14 +9,14 @@ on this box); the coordinator collates by path.
 
 ## Per-requirement verdicts
 
-| Req | Verdict | Evidence |
-|---|---|---|
-| W0.1 api-surface | **PASS** | Scoped JVM suite green in three consecutive successor runs (final: 5 tests / 559 assertions / 0 failures / 0 errors, load1 6.17 at start). `eve.static` exposes detach/place/transfer!/pack/open/open-checked/bytes at the frozen arities, each delegating by requiring-resolve to its lane namespace and otherwise throwing a typed `{:eve.static/not-built …}` ex-info. |
-| W0.2 requirements-covered | **PASS** | The `b31eaf2` hyphen-regex fix was re-run by the successor: requirements-covered is clean (the first successor run's only 2 failures were both in scoreboard-smoke; the second and third runs were fully green). The manifest (`test/eve/static/requirements.edn`) covers every requirement id in IMPL-PLAN.md — Waves 0–1 as numbered there, Wave 2's rows numbered H*.n in plan order — and every `:built` entry resolves. |
-| W0.3 contract-roundtrip | **PASS** | Same runs. Header (incl. flag bits, required-features byte, image layout-id in nsym, block/relocation table offsets), block table and relocation table round-trip exactly per FORMAT-V1 §2/§9; bad magic refused by name. |
-| W0.4 alloc-run-default | **PASS** | Same runs, against a real heap domain: n blocks of the class answered by looping `-sio-alloc!`, each allocated (free! true, then false), overflow class throws. `alloc-run!` + `ISlabRunAlloc` live in `src/eve/deftype_proto/alloc.cljc`. |
-| W0.5 scoreboard-smoke | **PASS, after a correction** | See "Correction" below. The smoke runs all rows B1–B8 on the tiny corpora and appends the section; B4 is measured and stated as one run. Green in the successor's second and third scoped runs. |
-| W0.6 baselines | **PASS** | `doc/static/SPIKE-LOG.md` now carries corrected-scoreboard sections for all four corpora (map-10k re-run, vec-100k, records-10k, messages-5k), Transit arms populated. Figures and conditions below. |
+| Req                       | Verdict                      | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0.1 api-surface          | **PASS**                     | Scoped JVM suite green in three consecutive successor runs (final: 5 tests / 559 assertions / 0 failures / 0 errors, load1 6.17 at start). `eve.static` exposes detach/place/transfer!/pack/open/open-checked/bytes at the frozen arities, each delegating by requiring-resolve to its lane namespace and otherwise throwing a typed `{:eve.static/not-built …}` ex-info.                                                    |
+| W0.2 requirements-covered | **PASS**                     | The `b31eaf2` hyphen-regex fix was re-run by the successor: requirements-covered is clean (the first successor run's only 2 failures were both in scoreboard-smoke; the second and third runs were fully green). The manifest (`test/eve/static/requirements.edn`) covers every requirement id in IMPL-PLAN.md — Waves 0–1 as numbered there, Wave 2's rows numbered H*.n in plan order — and every `:built` entry resolves. |
+| W0.3 contract-roundtrip   | **PASS**                     | Same runs. Header (incl. flag bits, required-features byte, image layout-id in nsym, block/relocation table offsets), block table and relocation table round-trip exactly per FORMAT-V1 §2/§9; bad magic refused by name.                                                                                                                                                                                                    |
+| W0.4 alloc-run-default    | **PASS**                     | Same runs, against a real heap domain: n blocks of the class answered by looping `-sio-alloc!`, each allocated (free! true, then false), overflow class throws. `alloc-run!` + `ISlabRunAlloc` live in `src/eve/deftype_proto/alloc.cljc`.                                                                                                                                                                                   |
+| W0.5 scoreboard-smoke     | **PASS, after a correction** | See "Correction" below. The smoke runs all rows B1–B8 on the tiny corpora and appends the section; B4 is measured and stated as one run. Green in the successor's second and third scoped runs.                                                                                                                                                                                                                              |
+| W0.6 baselines            | **PASS**                     | `doc/static/SPIKE-LOG.md` now carries corrected-scoreboard sections for all four corpora (map-10k re-run, vec-100k, records-10k, messages-5k), Transit arms populated. Figures and conditions below.                                                                                                                                                                                                                         |
 
 ## Correction — the earlier W0.5 PASS was a phantom
 
@@ -44,12 +44,12 @@ Corrected scoreboard (warm-up sweep `915383d`, census-sized capacities
 3 runs, `--runs 3 --warmup 1`. Static arms are "not built" — these rows are
 the incumbents Wave 1 lanes are judged against, within-session.
 
-| corpus (section) | B2 store today | B3 @a | B4 atom→atom, ONE run | B6 Transit msgpack | B7 Transit decode | B8 whole-value gzip |
-|---|---|---|---|---|---|---|
-| map 10k int->int (03:22 ET) | 2329.38 ms | 198.42 ms | **3898.34 ms** | 59235 B | 209.46 ms | 23984 B |
-| vector 100k ints (03:25 ET) | 2487.32 ms | 102.02 ms | **3907.36 ms** | 368549 B | 193.79 ms | 212000 B |
-| vector 10k records (03:31 ET) | 4102.48 ms | 95.71 ms | **9345.98 ms** | 358526 B | 1036.75 ms | 65556 B |
-| 5k chat messages (04:00 ET) | 6305.34 ms | 282.73 ms | **4868.24 ms** | 874085 B | 285.61 ms | 174004 B |
+| corpus (section)              | B2 store today | B3 @a     | B4 atom→atom, ONE run | B6 Transit msgpack | B7 Transit decode | B8 whole-value gzip |
+| ----------------------------- | -------------- | --------- | --------------------- | ------------------ | ----------------- | ------------------- |
+| map 10k int->int (03:22 ET)   | 2329.38 ms     | 198.42 ms | **3898.34 ms**        | 59235 B            | 209.46 ms         | 23984 B             |
+| vector 100k ints (03:25 ET)   | 2487.32 ms     | 102.02 ms | **3907.36 ms**        | 368549 B           | 193.79 ms         | 212000 B            |
+| vector 10k records (03:31 ET) | 4102.48 ms     | 95.71 ms  | **9345.98 ms**        | 358526 B           | 1036.75 ms        | 65556 B             |
+| 5k chat messages (04:00 ET)   | 6305.34 ms     | 282.73 ms | **4868.24 ms**        | 874085 B           | 285.61 ms         | 174004 B            |
 
 Conditions, stated plainly: every run **started** under the load gate
 (load1 ≤ 8: 7.41 / 7.82 / 6.04 / 7.60 at start), but this box is shared with

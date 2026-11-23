@@ -81,10 +81,10 @@ Same rows both arms, one session, zlib level 6 (the M3 convention). Container ar
 first 16 probe-packed 64 KiB chunks + this lane's directory bytes, one zlib stream over
 the run. One-chunk arm = the same rows packed as one chunk, one zlib stream.
 
-| corpus | rows in 16 chunks | zlib container | zlib one chunk | overhead | per-chunk summed (context) |
-|---|---:|---:|---:|---:|---:|
-| messages (10k) | 5,568 | 218,441 | 175,654 | **+24.36 %** | 224,784 (+27.97 %) |
-| records (50k) | 27,680 | 392,383 | 313,306 | **+25.24 %** | 379,404 (+21.10 %) |
+| corpus         | rows in 16 chunks | zlib container | zlib one chunk |     overhead | per-chunk summed (context) |
+| -------------- | ----------------: | -------------: | -------------: | -----------: | -------------------------: |
+| messages (10k) |             5,568 |        218,441 |        175,654 | **+24.36 %** |         224,784 (+27.97 %) |
+| records (50k)  |            27,680 |        392,383 |        313,306 | **+25.24 %** |         379,404 (+21.10 %) |
 
 Gate ≤ +5 %: **not met.** The mechanism is visible in the numbers: the overhead is the
 per-chunk symbol/shape tables repeating every 64 KiB, and deflate's 32 KiB window cannot

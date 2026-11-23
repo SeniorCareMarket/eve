@@ -67,7 +67,7 @@ table offsets are "range-checked only — table offsets are NOT
 aligned: §2–§5 lay the tables out contiguously, and real chunks put
 the shape table at 34 and 39". Not a fifth prose conflict — the
 prose was right; the header door was the defect. (The chunk's own
-8-alignment *in its container* and its length being a multiple of
+8-alignment _in its container_ and its length being a multiple of
 8 are separate properties, and the writer does honor those.)
 
 **Fix.** header-ctx's checked clause range-checks only
@@ -116,14 +116,14 @@ implementation:
 
 **Acceptance** (same probe, fixed tree, single timed calls):
 
-| records rows | pre-fix | post-fix |
-|---|---|---|
-| 250 | 1,438 ms | 89 ms |
-| 500 | 4,736 ms | 108 ms |
-| 1,000 | 21,446 ms | 120 ms |
-| 2,000 | 51,410 ms | 254 ms |
-| 4,000 | — | 2,825 ms (2 chunks) |
-| 10,000 | 662,564 ms (F3 pin) | 8,720 ms (4 chunks) |
+| records rows | pre-fix             | post-fix            |
+| ------------ | ------------------- | ------------------- |
+| 250          | 1,438 ms            | 89 ms               |
+| 500          | 4,736 ms            | 108 ms              |
+| 1,000        | 21,446 ms           | 120 ms              |
+| 2,000        | 51,410 ms           | 254 ms              |
+| 4,000        | —                   | 2,825 ms (2 chunks) |
+| 10,000       | 662,564 ms (F3 pin) | 8,720 ms (4 chunks) |
 
 Matched-size speedups ×16 / ×44 / ×179 / ×202. The residual growth
 past one chunk is the search's log factor times the per-encode

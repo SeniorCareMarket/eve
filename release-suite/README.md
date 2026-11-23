@@ -27,17 +27,17 @@ eve.release-suite-test` on the JVM). Each area asserts a property of a
 surface the release exercises and prints `AREA <name> OK` as it completes,
 so a leg killed by its cap still shows which areas ran:
 
-| area | property |
-|---|---|
-| seams | `eve.math` sqrt; the `eve.edn` reader (incl. exact number tokens) |
-| mem-atom | in-memory atom: 200 swaps land, reset/deref agree |
-| disk-atom | mmap domain: write, close, reopen — value and `.root` survive |
-| collections | 1,000-entry map / 500-vector / 100-set built and read inside swaps |
-| codec | `eve.net.codec` wire format: deterministic, round-trips |
-| crypto | SHA-256 and HMAC-SHA-256 against the published vectors |
-| net-atom | network atom over the in-process broker: a swap commits at epoch 1, the root key is the root blob's SHA-256, a second client reads the value |
-| proc-io | `eve.process`: exclusive create wins once, file existence, clock advances, entropy length |
-| thread | `eve.thread` promise delivery + a registered-task future |
+| area        | property                                                                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| seams       | `eve.math` sqrt; the `eve.edn` reader (incl. exact number tokens)                                                                            |
+| mem-atom    | in-memory atom: 200 swaps land, reset/deref agree                                                                                            |
+| disk-atom   | mmap domain: write, close, reopen — value and `.root` survive                                                                                |
+| collections | 1,000-entry map / 500-vector / 100-set built and read inside swaps                                                                           |
+| codec       | `eve.net.codec` wire format: deterministic, round-trips                                                                                      |
+| crypto      | SHA-256 and HMAC-SHA-256 against the published vectors                                                                                       |
+| net-atom    | network atom over the in-process broker: a swap commits at epoch 1, the root key is the root blob's SHA-256, a second client reads the value |
+| proc-io     | `eve.process`: exclusive create wins once, file existence, clock advances, entropy length                                                    |
+| thread      | `eve.thread` promise delivery + a registered-task future                                                                                     |
 
 The http serve area lives in its own namespace
 (`test/eve/release_suite_http_test.cljc`) and runs as a separate leg per

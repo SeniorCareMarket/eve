@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `doc/performance.md` is updated at this pin: host-suite tables, the columnar bench, and the gaps named with their measured causes (the startup shootout and the Eve-DataScript comparison carry no rows at this pin).
 
 ### Fixed
+
 - **clojerl STM writes use Eve atom dispatch.** `eve.stm` called native core `swap!` on an Eve ref cell, failing in `clojerl.Atom:swap/2` with `:function_clause`. It now imports the existing `eve.host` atom operations (also covering seated clocks/locks). Verified on the original S3 probe: write and committed read both return 42; the write/abort regression passes on clojerl, JVM and Babashka (2 tests / 14 assertions), and JVM portable STM passes all 15 checks. See `doc/stm-clojerl-write-fix.md`.
 - **nbb can load the bulk-fill default in `eve.mem`.** The new i32 pattern builder used `byte-array` / `unchecked-byte`, which SCI JavaScript does not provide. Its JS arm now uses `Uint8Array` and masked octets; other hosts retain signed byte arrays. Verified: nbb 1.6.214, Babashka 1.13.226 and JVM 21 each pass the default-fill regression (1 test / 108 assertions, chunk boundaries and signed patterns); nbb release one-datum returns `ONE-DONE`, 2 datoms.
 - **`eve.tally` loads on clojerl.** `eve.hamt-util/popcount32`'s `^long` return tag is resolved by clojerl in the caller's namespace, so `(require 'eve.tally)` failed with "Unable to resolve symbol: long" at tally.cljc:190. `eve.tally` now takes `eve.host`'s `long` under `:clje`. Source: `clje-tally-long` dab410673579c8abf9d4eab90baafa3d28f7f2bc. (Verified on the JVM suite only; the clojerl load check is a separate run.)
@@ -67,7 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The ants demo (`docs/stm-ants/demo/run.cljc`) is disk-safe by default.** It wrote a world to disk (about 10 GB at dim 60, one Eve domain per board cell) and never deleted it or checked space: an operator's disk filled. Now it refuses to start below `--min-free-gb` free (default 15 GB at dim >= 60, else 5), a 5 s watchdog aborts below `--disk-floor-gb` (default 3: kills every seat's process tree, prints `DISK-FLOOR abort <free>`, deletes the world, exits 4), the world is deleted when the run ends by any route unless `--keep-run`, and any log over `--log-cap-mb` (50) is trimmed. Source: lane-m/stm-standing c7bb992c. Proof: on babashka 1.13.226, a preflight refusal (rc=2) and a forced floor trip with a 21 MB world and a live child (world size printed, world deleted, child killed, rc=3/4) were run on a stand-in root; the full launcher against a real driver was not run (no Clojure CLI on that box).
 - **basilisp: `eve.host-completion` carries `sorted-set-by`, `comparator`, `array-map`, `transient`/`persistent!` duck-typing and the lpy lane's other completion deltas.** basilisp could not resolve `clojure.core/sorted-set-by`, which walled the DataScript one-datum run. Source: atom.broker lane-m/perf-doc-0931-lpyfix 5d1775f1 (`host_completion.lpy` only; byte-identical at the proven tip 01c42450). Proof: vm RESULT #55 (2026-11-10 20:35 ET), lpy one-datum 5/5 ONE-DONE on basilisp 0.5.1 (median 25,071 ms warm, 132,023 ms cold); and `(require 'eve.atom)` on the release tree with this file loads rc=0 with `sorted-set-by` resolved.
 - **`eve.mem` bulk extend-default fill.** The fill is chunked through `-write-bytes!`. Source: `eve-bulk-fill-fix` f3a1e76d32e1ae8cd0896a52d879c5656831178b (record: BULK-FILL-FIX-REPORT.md).
+
 ### Added
+
 - **`eve.aegis.chat-spec`** (`test/eve/aegis/chat_spec.cljc`): the self-contained data namespace the aegis chat's JVM suite requires, absent from 0.9.3.1. Source: `aegis-chat-spec` 032a6f1d23700ab69b624eab0cc00bbde612cf78 (sha256 3cb414f8d8362a61c25da0185033553adbeb0e427eadddeb0a13141d453bb823).
 
 ## [0.9.3.1] - 2026-11-09
@@ -160,7 +163,7 @@ back. This tree is the 620 files the checker ships. No API change.
 ## [0.9.0] - 2026-11-04
 
 0.9 is the API and host contract 1.0 will freeze, published for adopters to build against. Between 0.9 and 1.0 the
-public namespaces (`doc/api-guide.md`) change only with an entry here under *Changed* or *Removed*; the host contract
+public namespaces (`doc/api-guide.md`) change only with an entry here under _Changed_ or _Removed_; the host contract
 (`doc/unification/HOST-CONTRACT.md` §1–§12) grows only by optional features. **The on-disk and wire formats may still
 change before 1.0 without a migration**: the slab and root files carry a magic but no format-version field yet
 .
@@ -432,6 +435,7 @@ transient or a constructor, which reclaim — 9.25); **a domain shared with a pa
 ## [0.1.0] - 2026-03-10
 
 ### Added
+
 - Shared-memory persistent data structures for ClojureScript and Clojure
   - `atom`, `hash-map`, `hash-set`, `vector`, `list` backed by SharedArrayBuffer
   - Cross-process mmap-backed persistent atoms (JVM + Node.js)

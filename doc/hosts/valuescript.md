@@ -15,12 +15,12 @@ bb test:vs        # VS_CLJ_ROOTS=src:<hosts.edn :vs roots>:adapters/slab-io/test
 
 ## Correctness
 
-| Run | Result | When (ET) |
-|---|---|---|
-| `bb test:vs` | **260 passed, 0 failed** (123 s) | 2026-10-22, this tree (the final pass) |
-| `bb test:vs` | **260 passed, 0 failed** (97 s) | 2026-10-21 |
-| `bb test:vs` | **260 passed, 0 failed** (145 s): hamt-util, the byte fixtures (71 rows, none skipped) and the slab-io conformance test | 2026-10-20, the installed `vs` |
-| `bb test:vs` | hamt-util and the byte fixtures: 209 passed; then the slab-io test's first allocation stopped in `ctx-alloc!`'s `letfn` (regions read as nil) — VS's letfn-capture defect, since fixed in VS (L20) | 2026-10-19 |
+| Run          | Result                                                                                                                                                                                             | When (ET)                              |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `bb test:vs` | **260 passed, 0 failed** (123 s)                                                                                                                                                                   | 2026-10-22, this tree (the final pass) |
+| `bb test:vs` | **260 passed, 0 failed** (97 s)                                                                                                                                                                    | 2026-10-21                             |
+| `bb test:vs` | **260 passed, 0 failed** (145 s): hamt-util, the byte fixtures (71 rows, none skipped) and the slab-io conformance test                                                                            | 2026-10-20, the installed `vs`         |
+| `bb test:vs` | hamt-util and the byte fixtures: 209 passed; then the slab-io test's first allocation stopped in `ctx-alloc!`'s `letfn` (regions read as nil) — VS's letfn-capture defect, since fixed in VS (L20) | 2026-10-19                             |
 
 The runner (`test/eve/runner/vs_main.vs`) runs `eve.hamt-util-test`, the byte-format fixtures and the slab-io feature's
 conformance test (`eve.slab-io-test`); a `deftest` runs as its namespace loads. Every other shared test is built on
@@ -47,19 +47,19 @@ every unit still grows.
 
 ## How eve is built on ValueScript
 
-| Feature | Adapter | How |
-|---|---|---|
-| slab-io | `slab-io/vs` | plain functions over linear memory, not macros over a protocol: a domain is a 64-byte record, so a slab offset is an address in two loads; aligned offsets take the atomic op, unaligned a plain load or store; up to 16,383 domains |
-| core | `core/vs` | the `eve.host` macros written by one macro (a VS macro cannot call a `defn`); `locking` is a re-entrant lock in a 65,536-slot linear-memory table keyed by the object's address, the owner word taken by CAS, a waiter on `wait32` with a 10 ms timeout |
-| region | `region/vs` | a region is an address: a heap region an `mmap/reserve!` window, a mapped one `vs.mmap/map-file!` under vs-eve-host's doorbell; exchange and 64-bit add are CAS loops |
-| encoding | `encoding/vs` | UTF-8 and IEEE bits through a 1,000,000-byte linear-memory cell; decimals read from printed digits; no typed arrays |
-| int32 | `int32/vs` | `unchecked-int` narrowing; popcount by bit sums |
-| process | `process/vs` | thread id is the worker id + 1; no timer, exit hook or files (`file-exists?` answers false); `random-bytes` is `rand-int` (xorshift128, clock-seeded) |
-| coll | `coll/protocols` | babashka's protocols: VS's core never reaches a type's interfaces |
-| types | `types/vs` | every interface translated onto `eve.core` (VS reads a deftype instance as its own typed map: `count` and `seq` refuse, `get` answers nil, `=` is identity) |
-| crypto | `crypto/portable` | `eve.net.portable-crypto` (a `crypto/vs` exists, unwired) |
-| slab, codec, completion | `slab/heap`, `codec/byte-array`, `completion/clojure` | as the JVM's |
-| thread, http | — | none yet |
+| Feature                 | Adapter                                               | How                                                                                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| slab-io                 | `slab-io/vs`                                          | plain functions over linear memory, not macros over a protocol: a domain is a 64-byte record, so a slab offset is an address in two loads; aligned offsets take the atomic op, unaligned a plain load or store; up to 16,383 domains                    |
+| core                    | `core/vs`                                             | the `eve.host` macros written by one macro (a VS macro cannot call a `defn`); `locking` is a re-entrant lock in a 65,536-slot linear-memory table keyed by the object's address, the owner word taken by CAS, a waiter on `wait32` with a 10 ms timeout |
+| region                  | `region/vs`                                           | a region is an address: a heap region an `mmap/reserve!` window, a mapped one `vs.mmap/map-file!` under vs-eve-host's doorbell; exchange and 64-bit add are CAS loops                                                                                   |
+| encoding                | `encoding/vs`                                         | UTF-8 and IEEE bits through a 1,000,000-byte linear-memory cell; decimals read from printed digits; no typed arrays                                                                                                                                     |
+| int32                   | `int32/vs`                                            | `unchecked-int` narrowing; popcount by bit sums                                                                                                                                                                                                         |
+| process                 | `process/vs`                                          | thread id is the worker id + 1; no timer, exit hook or files (`file-exists?` answers false); `random-bytes` is `rand-int` (xorshift128, clock-seeded)                                                                                                   |
+| coll                    | `coll/protocols`                                      | babashka's protocols: VS's core never reaches a type's interfaces                                                                                                                                                                                       |
+| types                   | `types/vs`                                            | every interface translated onto `eve.core` (VS reads a deftype instance as its own typed map: `count` and `seq` refuse, `get` answers nil, `=` is identity)                                                                                             |
+| crypto                  | `crypto/portable`                                     | `eve.net.portable-crypto` (a `crypto/vs` exists, unwired)                                                                                                                                                                                               |
+| slab, codec, completion | `slab/heap`, `codec/byte-array`, `completion/clojure` | as the JVM's                                                                                                                                                                                                                                            |
+| thread, http            | —                                                     | none yet                                                                                                                                                                                                                                                |
 
 ## Gotchas
 

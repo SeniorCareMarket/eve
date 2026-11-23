@@ -102,6 +102,7 @@ below run against namespaces `eve.flat.*` only — a surviving
 `eve.static` reference in living code would fail at load.
 
 ## 6. Verdicts (J; first round jobs 20261112T171151/171156/171201,
+
 ## rerun jobs 20261112T172027/172029/172033)
 
 Each job: clone staged collate bundle (tip ca967b8 — docs-only delta from
@@ -113,27 +114,27 @@ spec, verify every renamed blob by `git hash-object`, run suites as
 
 VERIFY: **80/80 OK in all three jobs** (rerun round).
 
-| namespace (eve.flat.*) | before (eve.static.*, collated 4fb369f) | after (renamed) |
-|---|---|---|
-| contract-test | 33 assertions, green | 33, green |
-| requirements-test | 594, 0F/1E (host-blindness) | 594, 0F/1E — same residual, citing `eve.flat.image-node-test/run-wastes-nothing` |
-| place-test | 96, green | 96, green |
-| alloc-run-test | 32, green | 32, green |
-| build-test | 354, green | 354, green |
-| chunk-test | 153, green | 153, green |
-| column-test | 9,459, green | 9,459, green |
-| container-test | 38, green | 38, green |
-| check-test | 73, green | 73, green |
-| list-test | 12, green | 12, green |
-| sister-test | 45, green | 45, green |
-| tally-count-test | 83, green | 83, green |
-| image-test | 208, 2F (read-speed, Z1.7) | 208, 2F — both FAIL in (image-read-speed), same residual |
-| transfer-test | 150, green | 150, green |
-| disk-test | 7,462, green | 7,462, green |
-| journal-test | 10, green | 10, green |
-| io-test | 39, green | 39, green |
-| host-suite-test | 331, green | 331, green |
-| dataset-batch-test | 29, green | 29, green |
+| namespace (eve.flat.*) | before (eve.static.*, collated 4fb369f) | after (renamed)                                                                  |
+| ---------------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
+| contract-test          | 33 assertions, green                    | 33, green                                                                        |
+| requirements-test      | 594, 0F/1E (host-blindness)             | 594, 0F/1E — same residual, citing `eve.flat.image-node-test/run-wastes-nothing` |
+| place-test             | 96, green                               | 96, green                                                                        |
+| alloc-run-test         | 32, green                               | 32, green                                                                        |
+| build-test             | 354, green                              | 354, green                                                                       |
+| chunk-test             | 153, green                              | 153, green                                                                       |
+| column-test            | 9,459, green                            | 9,459, green                                                                     |
+| container-test         | 38, green                               | 38, green                                                                        |
+| check-test             | 73, green                               | 73, green                                                                        |
+| list-test              | 12, green                               | 12, green                                                                        |
+| sister-test            | 45, green                               | 45, green                                                                        |
+| tally-count-test       | 83, green                               | 83, green                                                                        |
+| image-test             | 208, 2F (read-speed, Z1.7)              | 208, 2F — both FAIL in (image-read-speed), same residual                         |
+| transfer-test          | 150, green                              | 150, green                                                                       |
+| disk-test              | 7,462, green                            | 7,462, green                                                                     |
+| journal-test           | 10, green                               | 10, green                                                                        |
+| io-test                | 39, green                               | 39, green                                                                        |
+| host-suite-test        | 331, green                              | 331, green                                                                       |
+| dataset-batch-test     | 29, green                               | 29, green                                                                        |
 
 Exact match on all 19 namespaces: everything green except the two
 named residuals, both preserved identically under their renamed names.
@@ -189,8 +190,8 @@ RENAME-STATUS.md.
 3. Apply the 2 manual doc edits of §4.
 4. Place this file at doc/flat/RENAME-STATUS.md, commit, bundle to
    ~/workspace/static-eve/bundles/rename.bundle, stage on J.
-Merge order: after the sister load-fix lane; the diff is purely
-mechanical and rebases trivially.
+   Merge order: after the sister load-fix lane; the diff is purely
+   mechanical and rebases trivially.
 
 ## Materialization (coordinator, Nov 12 2026)
 

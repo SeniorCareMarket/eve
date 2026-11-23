@@ -82,12 +82,12 @@ Validated on the same frozen source tree with `eve.type-io-test`,
 `eve.deftype.type-id-test`, `eve.map-entry-test`, `eve.deftype.rb-tree-test`,
 and `eve.deftype.int-map-test` (all zero failures/errors):
 
-| Host | Tests | Assertions |
-|---|---:|---:|
-| JVM Clojure 1.12.0 | 65 | 797 |
-| bb 1.13.226 | 64 | 796 |
-| nbb 1.6.214 | 63 | 788 |
-| Basilisp 0.5.1 | 65 | 798 |
+| Host               | Tests | Assertions |
+| ------------------ | ----: | ---------: |
+| JVM Clojure 1.12.0 |    65 |        797 |
+| bb 1.13.226        |    64 |        796 |
+| nbb 1.6.214        |    63 |        788 |
+| Basilisp 0.5.1     |    65 |        798 |
 
 The IO tests cover plain types and slab-backed types, live mutable fields,
 explicit and dynamic reader overrides, custom and protocol printers, legacy

@@ -131,15 +131,15 @@ batches per process, headline = median of 3; loads 0.42–1.93 recorded per
 run in `fix-passes-driver.log`. Raw logs: `~/workspace/wt/eve-093-fastpath/logs/fix-*`
 and on J under `~/jvj-bench/logs/`.
 
-| Shape | JVM pre-fix (rel median) | JVM FIXED (median of 3) | Heap-grade line (banked) | Jank pre-fix | Jank FIXED (median of 3) |
-|---|---|---|---|---|---|
-| S1a sparse get @a | 126.49 µs | **71.08 µs** | 62.89 µs | 2,917.99 µs | 2,981.83 µs |
-| S1b guarded get | 184.79 µs | **1.82 µs** | 1.89 µs | — | — |
-| S2 direct get 100-map | 188.06 µs | **0.40 µs** | 0.39 µs | 243.87 µs | 250.94 µs |
-| S3a swap! inc | 178.54 µs | **107.53 µs** | 39.63 µs † | 633.65 µs | 660.16 µs |
-| S3b reset! alt | 222.19 µs | **65.25 µs** | 26.42 µs † | 614.57 µs | 623.64 µs |
-| S4a deref @a | 109.04 µs | **47.16 µs** | 57.79 µs | 3,100.96 µs | 3,012.61 µs |
-| S4b raw root handle | 1.58 µs | **1.59 µs** | 1.63 µs | 19.83 µs | 19.77 µs |
+| Shape                 | JVM pre-fix (rel median) | JVM FIXED (median of 3) | Heap-grade line (banked) | Jank pre-fix | Jank FIXED (median of 3) |
+| --------------------- | ------------------------ | ----------------------- | ------------------------ | ------------ | ------------------------ |
+| S1a sparse get @a     | 126.49 µs                | **71.08 µs**            | 62.89 µs                 | 2,917.99 µs  | 2,981.83 µs              |
+| S1b guarded get       | 184.79 µs                | **1.82 µs**             | 1.89 µs                  | —            | —                        |
+| S2 direct get 100-map | 188.06 µs                | **0.40 µs**             | 0.39 µs                  | 243.87 µs    | 250.94 µs                |
+| S3a swap! inc         | 178.54 µs                | **107.53 µs**           | 39.63 µs †               | 633.65 µs    | 660.16 µs                |
+| S3b reset! alt        | 222.19 µs                | **65.25 µs**            | 26.42 µs †               | 614.57 µs    | 623.64 µs                |
+| S4a deref @a          | 109.04 µs                | **47.16 µs**            | 57.79 µs                 | 3,100.96 µs  | 3,012.61 µs              |
+| S4b raw root handle   | 1.58 µs                  | **1.59 µs**             | 1.63 µs                  | 19.83 µs     | 19.77 µs                 |
 
 † S3a/S3b: the round-1 "line" figures did not reproduce on the heap-grade
 checkout itself today — same-day control (eve-jvm, its own staging/harness):
@@ -166,6 +166,7 @@ clojure -M:jvm-test` (log: `~/workspace/wt/eve-093-fastpath/logs/final-jvm-gate-
 **Printed: Ran 630 tests containing 10422 assertions. 2 failures, 2 errors.**
 
 The four reds, each identified:
+
 - FAIL ×2 — `eve.aegis.pages_v3_test/the-kernel-gets-what-eve-wrote`
   (pages_v3_test.cljc:286, :287). Trace shows the cause plainly:
   `FileNotFoundError: ../vs/test/...` — the missing sibling `../vs` checkout.

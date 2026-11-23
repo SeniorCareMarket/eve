@@ -27,10 +27,10 @@ frozen.
 The real arm, run by doc/static/C3-B8-MEASURE.clj (same rows, one session,
 zlib level 6; row committed in doc/static/SPIKE-LOG.md):
 
-| corpus | rows in 16 chunks | container (zlib) | one chunk (zlib) | overhead | gate |
-|---|---:|---:|---:|---:|---|
-| messages (10k chat) | 5,568 | 218,441 | 175,654 | **+24.36 %** | ≤ +5 % — NOT MET |
-| records (50k rows) | 27,680 | 392,383 | 313,306 | **+25.24 %** | ≤ +5 % — NOT MET |
+| corpus              | rows in 16 chunks | container (zlib) | one chunk (zlib) |     overhead | gate             |
+| ------------------- | ----------------: | ---------------: | ---------------: | -----------: | ---------------- |
+| messages (10k chat) |             5,568 |          218,441 |          175,654 | **+24.36 %** | ≤ +5 % — NOT MET |
+| records (50k rows)  |            27,680 |          392,383 |          313,306 | **+25.24 %** | ≤ +5 % — NOT MET |
 
 The research figure behind this row was a proxy (chunk sizes compressed
 alone); sixteen chunks under one compression had never been run. It has now.

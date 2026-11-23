@@ -42,7 +42,7 @@ EveList. No `make-list` on any read path.
   not a regression.** An EveList is only `[sio__ offset__]`; its
   cnt/head exist solely as bytes in a slab header block, so `next`
   could answer an EveList only by minting a header per step — the
-  assertions held *because of* the defect mechanism and are mutually
+  assertions held _because of_ the defect mechanism and are mutually
   exclusive with L1.1. Every observable behavior in their contract —
   values, order, nil termination, rest count — is asserted by the
   neighbouring assertions in the same deftests and all still pass;

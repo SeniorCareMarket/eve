@@ -103,15 +103,15 @@ word, the hold set, the other participants' in-flight writes drained (lock-free 
 
 Six size-stratified classes hold fixed-size blocks; a seventh handles overflow (> 1024 B):
 
-| Class | Block Size | Typical Contents |
-|---|---|---|
-| 0 | 32 B | small HAMT bitmap nodes |
-| 1 | 64 B | common HAMT nodes |
-| 2 | 128 B | medium nodes, vector trie nodes |
-| 3 | 256 B | dense nodes, collision nodes, encoded values |
-| 4 | 512 B | very dense or large collision nodes |
-| 5 | 1024 B | large nodes, big payloads |
-| 6 | variable | coalescing overflow allocator (blocks > 1024 B) |
+| Class | Block Size | Typical Contents                                |
+| ----- | ---------- | ----------------------------------------------- |
+| 0     | 32 B       | small HAMT bitmap nodes                         |
+| 1     | 64 B       | common HAMT nodes                               |
+| 2     | 128 B      | medium nodes, vector trie nodes                 |
+| 3     | 256 B      | dense nodes, collision nodes, encoded values    |
+| 4     | 512 B      | very dense or large collision nodes             |
+| 5     | 1024 B     | large nodes, big payloads                       |
+| 6     | variable   | coalescing overflow allocator (blocks > 1024 B) |
 
 Each slab (classes 0–5) has a 64-byte header (magic, block size, total blocks, free count, alloc cursor, class index,
 bitmap offset, data offset), a bitmap (1 bit per block, 0 free, 1 allocated) and a data region of uniform blocks. A
@@ -207,12 +207,12 @@ field it uses. The model eve follows — and the places eve's code diverges from
 A domain holds up to **256 atom slots**: slot 0 is the registry (a map from atom name to slot index), so **255 named
 atoms**; each meta-atom (`eve.atom/meta-atom`) is a named atom too. The `.root` file:
 
-| Region | Size | Purpose |
-|---|---|---|
-| Header | 64 B | magic (`ROOT` V2 = `0x524F4F55`), root pointer, epoch counter, hold and in-flight words, tally word (byte 32) |
-| Worker registry | 6,144 B | 256 slots × 24 B (status, current epoch, heartbeat lo/hi, worker id) |
-| Atom table header | 64 B | magic (`ATOM`), table metadata |
-| Atom table | 2,048 B | 256 slots × 8 B (root pointer, FNV-1a hash of the name) |
+| Region            | Size    | Purpose                                                                                                       |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| Header            | 64 B    | magic (`ROOT` V2 = `0x524F4F55`), root pointer, epoch counter, hold and in-flight words, tally word (byte 32) |
+| Worker registry   | 6,144 B | 256 slots × 24 B (status, current epoch, heartbeat lo/hi, worker id)                                          |
+| Atom table header | 64 B    | magic (`ATOM`), table metadata                                                                                |
+| Atom table        | 2,048 B | 256 slots × 8 B (root pointer, FNV-1a hash of the name)                                                       |
 
 **Total root file: 8,320 bytes.**
 
@@ -253,17 +253,17 @@ wait/notify on an i32 (a bounded poll and a 0-returning notify are legal), and b
 
 Implementations (`eve.region`, one adapter per host capability):
 
-| Adapter | Host(s) | Type(s) |
-|---|---|---|
-| `region/jvm-varhandle` | JVM | `JvmByteBufferRegion` (heap `ByteBuffer` or `MappedByteBuffer`, VarHandle atomics), `LustreJvmMmapRegion` |
-| `region/jvm-nio-lock` | babashka | `BbMmapRegion`, `BbHeapRegion` (lock-only: a `FileChannel` byte-range lock) |
-| `region/js` | ClojureScript, nbb | `JsSabRegion` (SharedArrayBuffer + Atomics), `NodeMmapRegion` (eve's N-API addon), `LustreMmapRegion` |
-| `region/clr` | ClojureCLR | `ClrRegion` (`MemoryMappedFile`, `Interlocked`, futex) |
-| `region/ctypes` | basilisp | `LpyRegion` (Python `mmap`, `ctypes` + libatomic, futex) |
-| `region/jolt-ffi` | jolt | `JoltRegion` (`jolt.ffi` over mmap, libatomic, futex) |
-| `region/beam` | clojerl | `CljeRegion` (eve's NIF, `adapters/core/beam/native/eve_clje_nif.c`) |
-| `region/glojure` | glojure | `GljRegion`, `GljLockedRegion` (eve's Go region package in glj-eve) |
-| `region/vs` | ValueScript | an address in the program's linear memory |
+| Adapter                | Host(s)            | Type(s)                                                                                                   |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------------------------------------- |
+| `region/jvm-varhandle` | JVM                | `JvmByteBufferRegion` (heap `ByteBuffer` or `MappedByteBuffer`, VarHandle atomics), `LustreJvmMmapRegion` |
+| `region/jvm-nio-lock`  | babashka           | `BbMmapRegion`, `BbHeapRegion` (lock-only: a `FileChannel` byte-range lock)                               |
+| `region/js`            | ClojureScript, nbb | `JsSabRegion` (SharedArrayBuffer + Atomics), `NodeMmapRegion` (eve's N-API addon), `LustreMmapRegion`     |
+| `region/clr`           | ClojureCLR         | `ClrRegion` (`MemoryMappedFile`, `Interlocked`, futex)                                                    |
+| `region/ctypes`        | basilisp           | `LpyRegion` (Python `mmap`, `ctypes` + libatomic, futex)                                                  |
+| `region/jolt-ffi`      | jolt               | `JoltRegion` (`jolt.ffi` over mmap, libatomic, futex)                                                     |
+| `region/beam`          | clojerl            | `CljeRegion` (eve's NIF, `adapters/core/beam/native/eve_clje_nif.c`)                                      |
+| `region/glojure`       | glojure            | `GljRegion`, `GljLockedRegion` (eve's Go region package in glj-eve)                                       |
+| `region/vs`            | ValueScript        | an address in the program's linear memory                                                                 |
 
 ---
 

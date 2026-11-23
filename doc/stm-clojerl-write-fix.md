@@ -11,7 +11,7 @@ its STEP lines, not that exit status, determine success.
 
 ## Actual cause, not the Throwable warning
 
-Capture the raw BEAM stack *inside* run-in-transaction's catch using clojerl's
+Capture the raw BEAM stack _inside_ run-in-transaction's catch using clojerl's
 `e :stack raw-stack` catch binding, before it rethrows the reason. The first
 frame is `clojerl.Atom:swap/2`, clojerl/src/erl/lang/clojerl.Atom.erl:62:
 its first argument is an Eve shared atom, not a clojerl.Atom. The next frames

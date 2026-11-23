@@ -15,14 +15,14 @@ CLOJURE_LOAD_PATH=... cljr -m eve.runner.cljr-main perf     # the performance su
 
 ## Correctness
 
-| Run | Result | When (ET) |
-|---|---|---|
-| `bb test:cljr` | **202 tests, 4,499 assertions, 0 failures, 0 errors** (188 s, peak 958 MB, the process tree) | 2026-10-21, this tree (the final pass) |
-| `bb scripts/thread-rendezvous.clj jvm cljr` | 18 of 18 checks (51 s) | 2026-10-22, this tree (the final pass) |
-| `bb test:cljr` | **188 tests, 2,907 assertions, 0 failures, 0 errors** (203 s, peak 773 MB) | 2026-10-20, the final sweep, ClojureCLR 1.12.6 on .NET 8 |
-| `bb test:cljr` | **181 tests, 2,107 assertions, 0 failures, 0 errors** (199 s) | 2026-10-20, ClojureCLR 1.12.6 on .NET 8 |
-| `bb test:cljr eve.vec-retire-test eve.domain-open-test` | **5 tests, 779 assertions, green** — now in the default run (`domain-open-test`'s temp directory needed a `:cljr` arm, as `keyring-test` has) | 2026-10-20 |
-| `bb scripts/thread-rendezvous.clj jvm cljr` | 18 of 18 checks | 2026-10-19 |
+| Run                                                     | Result                                                                                                                                        | When (ET)                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `bb test:cljr`                                          | **202 tests, 4,499 assertions, 0 failures, 0 errors** (188 s, peak 958 MB, the process tree)                                                  | 2026-10-21, this tree (the final pass)                   |
+| `bb scripts/thread-rendezvous.clj jvm cljr`             | 18 of 18 checks (51 s)                                                                                                                        | 2026-10-22, this tree (the final pass)                   |
+| `bb test:cljr`                                          | **188 tests, 2,907 assertions, 0 failures, 0 errors** (203 s, peak 773 MB)                                                                    | 2026-10-20, the final sweep, ClojureCLR 1.12.6 on .NET 8 |
+| `bb test:cljr`                                          | **181 tests, 2,107 assertions, 0 failures, 0 errors** (199 s)                                                                                 | 2026-10-20, ClojureCLR 1.12.6 on .NET 8                  |
+| `bb test:cljr eve.vec-retire-test eve.domain-open-test` | **5 tests, 779 assertions, green** — now in the default run (`domain-open-test`'s temp directory needed a `:cljr` arm, as `keyring-test` has) | 2026-10-20                                               |
+| `bb scripts/thread-rendezvous.clj jvm cljr`             | 18 of 18 checks                                                                                                                               | 2026-10-19                                               |
 
 The runner (`test/eve/runner/cljr_main.clj`) runs the fixtures (71 rows, none skipped), the HAMT helpers, type ids,
 the red-black set, int-map, sorted collections, core.rrb-vector's suite, big values, value buffers, the key ring, the
@@ -33,21 +33,23 @@ including the network rung. Not run: the four typed-array suites — ClojureCLR 
 ## Performance
 
 <!-- perf:cljr (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
-| Workload | per operation | operations in the timed round | × the JVM's |
-|---|---:|---:|---:|
-| `atom-swap-counter` | 92.1 µs | 16384 | 7.8 |
-| `atom-deref-small` | 89.7 µs | 16384 | 5.3 |
-| `atom-swap-map-1k` | 33.6 µs | 32768 | 7.2 |
-| `atom-deref-map-1k` | 4.2 ms | 256 | 11 |
-| `atom-$-get-map-1k` | 25.2 µs | 65536 | 12 |
-| `atom-reset-vec-1k` | 9.1 ms | 128 | 6.0 |
-| `sorted-set-build-200` | 77.8 ms | 16 | 7.0 |
-| `int-map-build-200` | 22.2 ms | 64 | 5.0 |
-| `disk-swap-counter` | 98.1 µs | 16384 | 5.6 |
-| `thread-submit-64` | 2.4 ms | 512 | 2.4 |
+
+| Workload               | per operation | operations in the timed round | × the JVM's |
+| ---------------------- | ------------: | ----------------------------: | ----------: |
+| `atom-swap-counter`    |       92.1 µs |                         16384 |         7.8 |
+| `atom-deref-small`     |       89.7 µs |                         16384 |         5.3 |
+| `atom-swap-map-1k`     |       33.6 µs |                         32768 |         7.2 |
+| `atom-deref-map-1k`    |        4.2 ms |                           256 |          11 |
+| `atom-$-get-map-1k`    |       25.2 µs |                         65536 |          12 |
+| `atom-reset-vec-1k`    |        9.1 ms |                           128 |         6.0 |
+| `sorted-set-build-200` |       77.8 ms |                            16 |         7.0 |
+| `int-map-build-200`    |       22.2 ms |                            64 |         5.0 |
+| `disk-swap-counter`    |       98.1 µs |                         16384 |         5.6 |
+| `thread-submit-64`     |        2.4 ms |                           512 |         2.4 |
 
 Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
 a time; a round of at least 1 s.
+
 <!-- /perf:cljr -->
 
 Reading it: the fastest host outside the JVM and V8 on swaps (92.1 µs, 33.6 µs for a 1,000-key map's), and faster
@@ -62,18 +64,18 @@ narrow.
 
 ## How eve is built on ClojureCLR
 
-| Feature | Adapter | How |
-|---|---|---|
-| region | `region/clr` | `ClrRegion` over a `MemoryMappedFile` view or a `GCHandle`-pinned `byte[]`; atomics are `Interlocked` / `Volatile` emitted as IL (`DynamicMethod`: .NET's atomics take `ref int`); futex(2) through libc's `syscall()` by `calli`. Measured exact across two processes on one `MAP_SHARED` file |
-| types | `types/clr` | the JVM's interface names translated against the CLR's types: `Object`'s methods become `Equals` / `GetHashCode` / `ToString`, `Iterable` becomes `IEnumerable`, `java.util.Map` a read-only `IDictionary`; interfaces the CLR lacks are dropped; a method overloaded by return type is defined once per type, hinted |
-| coll | `coll/jvm` | the JVM's adapter: `clojure.core` through `clojure.lang.RT` |
-| int32 | `int32/portable` | quot / mod arithmetic |
-| encoding | `encoding/clr` | .NET's `System` |
-| process | `process/clr` | `DateTimeOffset`, `ManagedThreadId`, a background heartbeat thread, `ProcessExit`, `FileMode.CreateNew`, `RandomNumberGenerator` |
-| thread | `thread/clr` | a background `Thread` per thread; a `PersistentQueue` mailbox in an atom under a monitor (`Monitor.Wait` / `Pulse`: `BlockingCollection`'s timed take needs an out parameter); `:wake :futex` |
-| crypto | `crypto/clr` | `SHA256.HashData`, `HMACSHA256.HashData`, AES-256-CTR as `Aes.EncryptEcb` over counter blocks (.NET has no CTR mode); XXH3 and Ed25519 are the portable code |
-| http | `http/clr` | `HttpClient` (`Send` synchronous, `request-all` by `SendAsync`) |
-| core, completion, slab, slab-io, codec | `core/clojure`, `completion/clojure`, `slab/heap`, `slab-io/protocol`, `codec/byte-array` | as the JVM's |
+| Feature                                | Adapter                                                                                   | How                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| region                                 | `region/clr`                                                                              | `ClrRegion` over a `MemoryMappedFile` view or a `GCHandle`-pinned `byte[]`; atomics are `Interlocked` / `Volatile` emitted as IL (`DynamicMethod`: .NET's atomics take `ref int`); futex(2) through libc's `syscall()` by `calli`. Measured exact across two processes on one `MAP_SHARED` file                       |
+| types                                  | `types/clr`                                                                               | the JVM's interface names translated against the CLR's types: `Object`'s methods become `Equals` / `GetHashCode` / `ToString`, `Iterable` becomes `IEnumerable`, `java.util.Map` a read-only `IDictionary`; interfaces the CLR lacks are dropped; a method overloaded by return type is defined once per type, hinted |
+| coll                                   | `coll/jvm`                                                                                | the JVM's adapter: `clojure.core` through `clojure.lang.RT`                                                                                                                                                                                                                                                           |
+| int32                                  | `int32/portable`                                                                          | quot / mod arithmetic                                                                                                                                                                                                                                                                                                 |
+| encoding                               | `encoding/clr`                                                                            | .NET's `System`                                                                                                                                                                                                                                                                                                       |
+| process                                | `process/clr`                                                                             | `DateTimeOffset`, `ManagedThreadId`, a background heartbeat thread, `ProcessExit`, `FileMode.CreateNew`, `RandomNumberGenerator`                                                                                                                                                                                      |
+| thread                                 | `thread/clr`                                                                              | a background `Thread` per thread; a `PersistentQueue` mailbox in an atom under a monitor (`Monitor.Wait` / `Pulse`: `BlockingCollection`'s timed take needs an out parameter); `:wake :futex`                                                                                                                         |
+| crypto                                 | `crypto/clr`                                                                              | `SHA256.HashData`, `HMACSHA256.HashData`, AES-256-CTR as `Aes.EncryptEcb` over counter blocks (.NET has no CTR mode); XXH3 and Ed25519 are the portable code                                                                                                                                                          |
+| http                                   | `http/clr`                                                                                | `HttpClient` (`Send` synchronous, `request-all` by `SendAsync`)                                                                                                                                                                                                                                                       |
+| core, completion, slab, slab-io, codec | `core/clojure`, `completion/clojure`, `slab/heap`, `slab-io/protocol`, `codec/byte-array` | as the JVM's                                                                                                                                                                                                                                                                                                          |
 
 ## Gotchas
 

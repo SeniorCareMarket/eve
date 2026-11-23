@@ -30,7 +30,7 @@ see [PROVENANCE.md](PROVENANCE.md).
   vendored verbatim as the second pinned dependency. The deltas
   (full catalogue: `contract-test/PORTING-DS.md`):
   - **D1 — storage:** vanilla's storage layer replaced by Eve-atom
-    semantics. A DB is an Eve value; storing it *is* placing it in an
+    semantics. A DB is an Eve value; storing it _is_ placing it in an
     Eve atom — a disk atom for durability, a shared disk atom for
     cross-process / cross-host access.
   - **D2 — query tuples are Eve vectors;** writes thread functionally
@@ -40,7 +40,7 @@ see [PROVENANCE.md](PROVENANCE.md).
     `compareTo` call (D4); the `IFn$OOL` import and primitive-invoke
     arm dropped (D6, F-IFNOOL); a primitive tag quoted in patch-tag
     (D7); a spliced reader hint in pull-api re-spelled for the JVM
-    reader (D8). D5 records a *non*-delta: a flagship smoke failure
+    reader (D8). D5 records a _non_-delta: a flagship smoke failure
     traced to a stale classpath, corrected by measurement.
   - **T1/T2 — Datom and DB became Eve types** (`eve-deftype`s) with
     record semantics expressed as protocol groups; vanilla's mutable
@@ -175,7 +175,7 @@ see [PROVENANCE.md](PROVENANCE.md).
   `IStringable` extension for the array types; the xxh3 secret made a
   runtime construction instead of a module literal; and a seat law
   discovered in the analyzer — clojerl resolves a callee's declared
-  type tags in the *caller's* namespace — remedied by stripping pure
+  type tags in the _caller's_ namespace — remedied by stripping pure
   decoration tags from function bodies (118 tags, 20 files).
   **Green so far: `eve.hamt-util` loads and passes its own suite on
   BEAM (5 tests, 51 assertions, 0 failures).** The domain-open proof

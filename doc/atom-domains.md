@@ -24,13 +24,13 @@ So a domain holds at most 255 named atoms. A meta-atom (below) takes a slot of i
 
 ## In-process and disk domains
 
-| You write | You get |
-|---|---|
-| `(e/atom v)` | an anonymous atom in this process's default in-process domain |
-| `(e/atom ::name v)` or `(e/atom {:id ::name} v)` | a named in-process atom. **Each `:id` gets its own heap domain**, cached by id (`atom.cljc:1065-1085`) |
-| `(e/atom {:id ::name :persistent "path/db"} v)` | a named atom in the disk domain at `path/db` (`:persistent true` uses the default domain `./eve/`) |
-| `(eve.atom/persistent-atom-domain "path/db")` | the disk domain itself; opens it, or creates it when absent, cached by path |
-| `(e/atom-domain v)` | a fresh in-process domain: slot 0 holds `v` (a map, or nil) with the entry `"__atom-domain__/root" 1` added, and member slot 1 holds `v`. It reads no options |
+| You write                                        | You get                                                                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `(e/atom v)`                                     | an anonymous atom in this process's default in-process domain                                                                                                 |
+| `(e/atom ::name v)` or `(e/atom {:id ::name} v)` | a named in-process atom. **Each `:id` gets its own heap domain**, cached by id (`atom.cljc:1065-1085`)                                                        |
+| `(e/atom {:id ::name :persistent "path/db"} v)`  | a named atom in the disk domain at `path/db` (`:persistent true` uses the default domain `./eve/`)                                                            |
+| `(eve.atom/persistent-atom-domain "path/db")`    | the disk domain itself; opens it, or creates it when absent, cached by path                                                                                   |
+| `(e/atom-domain v)`                              | a fresh in-process domain: slot 0 holds `v` (a map, or nil) with the entry `"__atom-domain__/root" 1` added, and member slot 1 holds `v`. It reads no options |
 
 In process, the regions are the heap regions of the host's region adapter (`make-heap-region`: a heap `ByteBuffer`
 on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they are memory-mapped files
@@ -48,10 +48,10 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 - `:lustre? true` uses the fcntl byte-range-lock region, for file systems without cross-node atomics.
 - `:durable?` (default true) — durable commits. `false` is the non-durable comms form: no journal, no
   forces, `sync!` is the caller's explicit barrier.
-- `:journal?` — the disk tier is journaled by default (see *Journal durability*, below); `false` keeps
+- `:journal?` — the disk tier is journaled by default (see _Journal durability_, below); `false` keeps
   durable commits without the journal file, carried by the pre-CAS sweep + root-range force alone.
-- `:mem-budget` — bytes: caps the domain's total region growth (see *Tiers and the memory budget*).
-- `:segment-bytes` — a power of two (default 256 MiB): the region mapping window (see *Segmentation*).
+- `:mem-budget` — bytes: caps the domain's total region growth (see _Tiers and the memory budget_).
+- `:segment-bytes` — a power of two (default 256 MiB): the region mapping window (see _Segmentation_).
 - Which process **creates** a domain is decided by one atomic exclusive create of `<base>.root`
   (`eve.process/create-exclusive!`). It is never an existence check followed by a create, which two processes opening a
   fresh domain together would both pass (`atom.cljc:797-813`). Every other process joins.
@@ -59,14 +59,14 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 
 ### A disk domain's files
 
-| File | Size | What it holds |
-|---|---|---|
-| `<base>.root` | 8,320 bytes | header, 256 worker slots, 256 atom slots (`atom.cljc:55`, `data.cljc:280-339`) |
-| `<base>.rmap` | 262,144 bytes | the reader map (`atom.cljc:56`) |
-| `<base>.slab0` … `<base>.slab5` | grows on demand | the six fixed size classes: 32, 64, 128, 256, 512 and 1024 bytes |
-| `<base>.slab0.bm` … `<base>.slab5.bm` | grows with its slab | each class's allocation bitmap |
-| `<base>.slab6` | grows on demand | the overflow class, for blocks over 1024 bytes |
-| `<base>.keyring` | — | only for a domain opened through `eve.keyring/open-encrypted-domain!` (see [SECURITY.md](../SECURITY.md)) |
+| File                                  | Size                | What it holds                                                                                             |
+| ------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------- |
+| `<base>.root`                         | 8,320 bytes         | header, 256 worker slots, 256 atom slots (`atom.cljc:55`, `data.cljc:280-339`)                            |
+| `<base>.rmap`                         | 262,144 bytes       | the reader map (`atom.cljc:56`)                                                                           |
+| `<base>.slab0` … `<base>.slab5`       | grows on demand     | the six fixed size classes: 32, 64, 128, 256, 512 and 1024 bytes                                          |
+| `<base>.slab0.bm` … `<base>.slab5.bm` | grows with its slab | each class's allocation bitmap                                                                            |
+| `<base>.slab6`                        | grows on demand     | the overflow class, for blocks over 1024 bytes                                                            |
+| `<base>.keyring`                      | —                   | only for a domain opened through `eve.keyring/open-encrypted-domain!` (see [SECURITY.md](../SECURITY.md)) |
 
 A run of the getting-started disk sample left exactly `db.root db.rmap db.slab0 … db.slab5 db.slab0.bm … db.slab5.bm
 db.slab6` [ran].
@@ -161,20 +161,20 @@ true
 true [:first]
 ```
 
-| Var | What it does |
-|---|---|
-| `(lookup-or-create-mmap-atom! domain "ns/name" init)` | the member atom by string name, created holding `init` when absent |
-| `(domain-lookup domain :ns/name)`, `(domain-lookup domain k not-found)` | the member atom by keyword, or `not-found`. On hosts whose types take `ILookup`, `(:ns/name domain)` too |
-| `(registered-name a)` | the name `a` is registered under (nil for the domain itself) |
-| `(meta-atom a)`, `(meta-atom a init)` | a's meta-atom: the member registered as `"eve.meta/" + a's name`, created on first ask (exactly one process creates it). Its traffic never touches a's slot, so a's value, version and registry entry stay as they were (`atom.cljc:929-962`) |
-| `(version a)` | `[domain-epoch root-pointer]`, epoch read first. Equal readings name one value of `a`; unequal readings say nothing (`atom.cljc:964-972`) |
-| `(seal a)` | `{:ptr :name-hash :blocks :digest}`: an FNV-1a digest of every block a's stored version owns, read under a pin. Equal seals mean one version, byte for byte (`atom.cljc:976-1004`) |
-| `(eve.alpha/$ & body)` | a read region: inside body, `@` of an eve atom answers its stored, slab-backed value, and every domain read stays pinned until the outermost `$` exits; body's result is materialized as it leaves. A `$` inside another joins it (`alpha.cljc:37`, `atom.cljc:556-568`, `read_region.cljc`) |
-| `(read-pinned a f & args)` | `(f value & args)` with the stored value, under a pin released when f returns: eve's own bounded reads. **f's result must not keep the value** (`atom.cljc:696`) |
-| `(compare-and-set!* a old new)` | CAS on every host |
-| `(atom-sio a)` | the domain's slab I/O, to build a value in that domain outside `swap!` |
-| `(close-atom-domain! d)` | releases this process's worker slot and stops its heartbeat. The domain's atoms are invalid afterwards |
-| `(shared-atom? x)` | true for an eve atom or domain |
+| Var                                                                     | What it does                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `(lookup-or-create-mmap-atom! domain "ns/name" init)`                   | the member atom by string name, created holding `init` when absent                                                                                                                                                                                                                           |
+| `(domain-lookup domain :ns/name)`, `(domain-lookup domain k not-found)` | the member atom by keyword, or `not-found`. On hosts whose types take `ILookup`, `(:ns/name domain)` too                                                                                                                                                                                     |
+| `(registered-name a)`                                                   | the name `a` is registered under (nil for the domain itself)                                                                                                                                                                                                                                 |
+| `(meta-atom a)`, `(meta-atom a init)`                                   | a's meta-atom: the member registered as `"eve.meta/" + a's name`, created on first ask (exactly one process creates it). Its traffic never touches a's slot, so a's value, version and registry entry stay as they were (`atom.cljc:929-962`)                                                |
+| `(version a)`                                                           | `[domain-epoch root-pointer]`, epoch read first. Equal readings name one value of `a`; unequal readings say nothing (`atom.cljc:964-972`)                                                                                                                                                    |
+| `(seal a)`                                                              | `{:ptr :name-hash :blocks :digest}`: an FNV-1a digest of every block a's stored version owns, read under a pin. Equal seals mean one version, byte for byte (`atom.cljc:976-1004`)                                                                                                           |
+| `(eve.alpha/$ & body)`                                                  | a read region: inside body, `@` of an eve atom answers its stored, slab-backed value, and every domain read stays pinned until the outermost `$` exits; body's result is materialized as it leaves. A `$` inside another joins it (`alpha.cljc:37`, `atom.cljc:556-568`, `read_region.cljc`) |
+| `(read-pinned a f & args)`                                              | `(f value & args)` with the stored value, under a pin released when f returns: eve's own bounded reads. **f's result must not keep the value** (`atom.cljc:696`)                                                                                                                             |
+| `(compare-and-set!* a old new)`                                         | CAS on every host                                                                                                                                                                                                                                                                            |
+| `(atom-sio a)`                                                          | the domain's slab I/O, to build a value in that domain outside `swap!`                                                                                                                                                                                                                       |
+| `(close-atom-domain! d)`                                                | releases this process's worker slot and stops its heartbeat. The domain's atoms are invalid afterwards                                                                                                                                                                                       |
+| `(shared-atom? x)`                                                      | true for an eve atom or domain                                                                                                                                                                                                                                                               |
 
 ### Reads: deref materializes, except inside `$`
 

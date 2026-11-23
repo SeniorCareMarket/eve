@@ -43,18 +43,18 @@ A schema defines the shape of an object — like a V8 hidden class. Create once,
 
 ### Supported Field Types
 
-| Type | Size | Atomic ops | Description |
-|------|------|---------|-------------|
-| `:int8` | 1B | — | Signed 8-bit integer |
-| `:uint8` | 1B | — | Unsigned 8-bit integer |
-| `:int16` | 2B | — | Signed 16-bit integer |
-| `:uint16` | 2B | — | Unsigned 16-bit integer |
-| `:int32` | 4B | `cas!` `add!` `sub!` `exchange!` | Signed 32-bit integer |
-| `:uint32` | 4B | `cas!` `add!` `sub!` `exchange!` | Unsigned 32-bit integer |
-| `:float32` | 4B | — | 32-bit float |
-| `:float64` | 8B | — | 64-bit float |
-| `:obj` | 4B | `cas!` `exchange!` | Offset reference to another object (`obj/get-offset`) |
-| `:array` | 4B | `cas!` `exchange!` | Offset reference to an eve array |
+| Type       | Size | Atomic ops                       | Description                                           |
+| ---------- | ---- | -------------------------------- | ----------------------------------------------------- |
+| `:int8`    | 1B   | —                                | Signed 8-bit integer                                  |
+| `:uint8`   | 1B   | —                                | Unsigned 8-bit integer                                |
+| `:int16`   | 2B   | —                                | Signed 16-bit integer                                 |
+| `:uint16`  | 2B   | —                                | Unsigned 16-bit integer                               |
+| `:int32`   | 4B   | `cas!` `add!` `sub!` `exchange!` | Signed 32-bit integer                                 |
+| `:uint32`  | 4B   | `cas!` `add!` `sub!` `exchange!` | Unsigned 32-bit integer                               |
+| `:float32` | 4B   | —                                | 32-bit float                                          |
+| `:float64` | 8B   | —                                | 64-bit float                                          |
+| `:obj`     | 4B   | `cas!` `exchange!`               | Offset reference to another object (`obj/get-offset`) |
+| `:array`   | 4B   | `cas!` `exchange!`               | Offset reference to an eve array                      |
 
 Fields are sorted by alignment (descending) for packing.
 

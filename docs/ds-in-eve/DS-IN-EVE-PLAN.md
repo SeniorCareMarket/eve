@@ -38,15 +38,15 @@ Upstream `tonsky/datascript` tag 1.8.1, commit
 `datascript.` to `eve.db.ds.` (extend `scripts/vendor_upstream_ds.sh`). The
 published port's source is not an input. Every file gets one class:
 
-| Upstream file | Class | Allowed change |
-|---|---|---|
-| `parser`, `pull_parser`, `built_ins`, `lru`, `util` | verbatim | none |
-| `query`, `pull_api`, `impl/entity`, `datafy` | verbatim + list | only hunks in the trap list (§6) |
-| `db.cljc` | type swap | `Datom`, `DB`, `FilteredDB` become `eve/deftype`; mutable hash caches removed; index calls unchanged |
-| persistent-sorted-set | new | `eve.db.ds.bset`, §5 |
-| `conn.cljc` | new | §4 |
-| `serialize` | new | datoms out inside `$`, datoms in through a transact |
-| `storage` | deleted | — |
+| Upstream file                                       | Class           | Allowed change                                                                                       |
+| --------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------- |
+| `parser`, `pull_parser`, `built_ins`, `lru`, `util` | verbatim        | none                                                                                                 |
+| `query`, `pull_api`, `impl/entity`, `datafy`        | verbatim + list | only hunks in the trap list (§6)                                                                     |
+| `db.cljc`                                           | type swap       | `Datom`, `DB`, `FilteredDB` become `eve/deftype`; mutable hash caches removed; index calls unchanged |
+| persistent-sorted-set                               | new             | `eve.db.ds.bset`, §5                                                                                 |
+| `conn.cljc`                                         | new             | §4                                                                                                   |
+| `serialize`                                         | new             | datoms out inside `$`, datoms in through a transact                                                  |
+| `storage`                                           | deleted         | —                                                                                                    |
 
 Gate: `scripts/diff_upstream.sh` fails on any hunk in a verbatim file that is
 not listed in §6.
@@ -95,16 +95,16 @@ replacement. Agents apply rows; they do not invent them.
 
 ## 7. Units — one agent each, files never shared
 
-| Unit | Owns | Done when |
-|---|---|---|
-| U0 | scripts, deps, laws test, trap list, API var list | laws test green on JVM + browser at the fixed Eve pin; grep gate and diff gate run |
-| U1 | `bset` | sorted-set suite green, both hosts |
-| U2 | `db.cljc` types | db, index, components slices green |
-| U3 | `conn.cljc`, handles | conn, transact, listen, upsert slices green |
-| U4 | query, pull, entity, datafy trap rows | their slices green |
-| U5 | serialize, persistence | round-trip and close/reopen digests match v1 §7.3 |
-| U6 | acceptance | v1 §7, all six, on JVM and in the browser |
-| U7 | README, GUIDE | states §4's rules where users see them |
+| Unit | Owns                                              | Done when                                                                          |
+| ---- | ------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| U0   | scripts, deps, laws test, trap list, API var list | laws test green on JVM + browser at the fixed Eve pin; grep gate and diff gate run |
+| U1   | `bset`                                            | sorted-set suite green, both hosts                                                 |
+| U2   | `db.cljc` types                                   | db, index, components slices green                                                 |
+| U3   | `conn.cljc`, handles                              | conn, transact, listen, upsert slices green                                        |
+| U4   | query, pull, entity, datafy trap rows             | their slices green                                                                 |
+| U5   | serialize, persistence                            | round-trip and close/reopen digests match v1 §7.3                                  |
+| U6   | acceptance                                        | v1 §7, all six, on JVM and in the browser                                          |
+| U7   | README, GUIDE                                     | states §4's rules where users see them                                             |
 
 Order: U0, then U1, then U2, then U3; U4 and U5 after U3; U6; U7.
 Every unit runs its tests on both hosts. A unit that needs an Eve call

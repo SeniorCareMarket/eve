@@ -19,24 +19,24 @@ the `.clj` files).
 
 ## Correctness
 
-| Run | Result | When (ET) |
-|---|---|---|
-| `node target/eve-test/all.js all` | **482 tests, 34,980 assertions, 0 failures, 0 errors** (72 s, peak 2.7 GB, the process tree) | 2026-10-21, this tree (the final pass) |
-| `node target/eve-test/all.js slab-grow` | **105 tests, 28,902 assertions, green** (20 s): the slab suites over slabs that start small and grow (a browser's default) | 2026-10-21, this tree (the final pass) |
-| `node target/eve-test/all.js thread-domain` | **12 tests, 146 assertions, green** (36 s, peak 1.6 GB) | 2026-10-21, this tree (the final pass) |
-| `node target/eve-test/all.js thread-fold-group` | **3 tests, 49 assertions, green** (16 s, peak 1.6 GB) | 2026-10-21, this tree (the final pass) |
-| `node target/eve-test/all.js net` | **62 tests, 1,429 assertions, green** (274 s, peak 1.9 GB) | 2026-10-21, this tree (the final pass) |
-| `node target/eve-test/all.js deftype` | **63 tests, 710 assertions, green** (3 s) | 2026-10-21, this tree (the final pass) |
-| `node target/eve-test/all.js rrb-vector` | **22 tests, 68 assertions, green** (24 s) | 2026-10-21, this tree (the final pass) |
-| `node target/eve-test/all.js all` | **468 tests, 33,388 assertions, 0 failures, 0 errors** (84 s, peak 2.2 GB) | 2026-10-20, the final sweep |
-| `node target/eve-test/all.js slab-grow` | **91 tests, 27,310 assertions, green** (18 s) | 2026-10-20, the final sweep |
-| `node target/eve-test/all.js thread-domain` | **12 tests, 146 assertions, green** (43 s, peak 1.5 GB) | 2026-10-20, the final sweep |
-| `node target/eve-test/all.js thread-fold-group` | **3 tests, 49 assertions, green** (18 s, peak 1.5 GB) | 2026-10-20, the final sweep |
-| `node target/eve-test/all.js net` | **62 tests, 1,429 assertions, green** (313 s, peak 4.2 GB) | 2026-10-20, the final sweep |
-| `node target/eve-test/all.js all` | **462 tests, 33,353 assertions, 0 failures, 0 errors** (78 s, peak 2.1 GB) | 2026-10-20, earlier in this round |
-| `node target/eve-test/all.js thread-domain` | **12 tests, 146 assertions, green**; peak 1.55 GB (the baseline note: ~3.8 GB, before the heartbeat fix) | 2026-10-20 |
-| `node target/eve-test/all.js thread-fold-group` | 3 tests, 49 assertions, green; peak 1.5 GB | 2026-10-20 |
-| `node target/eve-test/all.js net` | 62 tests, 1,429 assertions, green (302 s) | 2026-10-20, the 0.9 release preparation's final tree |
+| Run                                             | Result                                                                                                                     | When (ET)                                            |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `node target/eve-test/all.js all`               | **482 tests, 34,980 assertions, 0 failures, 0 errors** (72 s, peak 2.7 GB, the process tree)                               | 2026-10-21, this tree (the final pass)               |
+| `node target/eve-test/all.js slab-grow`         | **105 tests, 28,902 assertions, green** (20 s): the slab suites over slabs that start small and grow (a browser's default) | 2026-10-21, this tree (the final pass)               |
+| `node target/eve-test/all.js thread-domain`     | **12 tests, 146 assertions, green** (36 s, peak 1.6 GB)                                                                    | 2026-10-21, this tree (the final pass)               |
+| `node target/eve-test/all.js thread-fold-group` | **3 tests, 49 assertions, green** (16 s, peak 1.6 GB)                                                                      | 2026-10-21, this tree (the final pass)               |
+| `node target/eve-test/all.js net`               | **62 tests, 1,429 assertions, green** (274 s, peak 1.9 GB)                                                                 | 2026-10-21, this tree (the final pass)               |
+| `node target/eve-test/all.js deftype`           | **63 tests, 710 assertions, green** (3 s)                                                                                  | 2026-10-21, this tree (the final pass)               |
+| `node target/eve-test/all.js rrb-vector`        | **22 tests, 68 assertions, green** (24 s)                                                                                  | 2026-10-21, this tree (the final pass)               |
+| `node target/eve-test/all.js all`               | **468 tests, 33,388 assertions, 0 failures, 0 errors** (84 s, peak 2.2 GB)                                                 | 2026-10-20, the final sweep                          |
+| `node target/eve-test/all.js slab-grow`         | **91 tests, 27,310 assertions, green** (18 s)                                                                              | 2026-10-20, the final sweep                          |
+| `node target/eve-test/all.js thread-domain`     | **12 tests, 146 assertions, green** (43 s, peak 1.5 GB)                                                                    | 2026-10-20, the final sweep                          |
+| `node target/eve-test/all.js thread-fold-group` | **3 tests, 49 assertions, green** (18 s, peak 1.5 GB)                                                                      | 2026-10-20, the final sweep                          |
+| `node target/eve-test/all.js net`               | **62 tests, 1,429 assertions, green** (313 s, peak 4.2 GB)                                                                 | 2026-10-20, the final sweep                          |
+| `node target/eve-test/all.js all`               | **462 tests, 33,353 assertions, 0 failures, 0 errors** (78 s, peak 2.1 GB)                                                 | 2026-10-20, earlier in this round                    |
+| `node target/eve-test/all.js thread-domain`     | **12 tests, 146 assertions, green**; peak 1.55 GB (the baseline note: ~3.8 GB, before the heartbeat fix)                   | 2026-10-20                                           |
+| `node target/eve-test/all.js thread-fold-group` | 3 tests, 49 assertions, green; peak 1.5 GB                                                                                 | 2026-10-20                                           |
+| `node target/eve-test/all.js net`               | 62 tests, 1,429 assertions, green (302 s)                                                                                  | 2026-10-20, the 0.9 release preparation's final tree |
 
 `all` runs the core collections (map, vector, set, list, the slab), epoch GC, typed objects, typed arrays, datasets,
 tensors, int-map, the red-black set, deftype, validation, the fixtures (**52 of 71 rows, 19 skipped**: ClojureScript
@@ -48,21 +48,23 @@ many workers), `fuzz`, `conformance`, `lustre`, `repro`, `slab-leak`, and the be
 ## Performance
 
 <!-- perf:cljs (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
-| Workload | per operation | operations in the timed round | × the JVM's |
-|---|---:|---:|---:|
-| `atom-swap-counter` | 33.2 µs | 32768 | 2.8 |
-| `atom-deref-small` | 8.9 µs | 131072 | 0.52 |
-| `atom-swap-map-1k` | 10.1 µs | 131072 | 2.2 |
-| `atom-deref-map-1k` | 1.7 ms | 1024 | 4.6 |
-| `atom-$-get-map-1k` | 6.4 µs | 262144 | 3.1 |
-| `atom-reset-vec-1k` | 11.5 ms | 128 | 7.5 |
-| `sorted-set-build-200` | 36.4 ms | 32 | 3.3 |
-| `int-map-build-200` | 8.1 ms | 128 | 1.8 |
-| `disk-swap-counter` | 43.7 µs | 32768 | 2.5 |
-| `thread-submit-64` | 7.6 ms | 256 | 7.7 |
+
+| Workload               | per operation | operations in the timed round | × the JVM's |
+| ---------------------- | ------------: | ----------------------------: | ----------: |
+| `atom-swap-counter`    |       33.2 µs |                         32768 |         2.8 |
+| `atom-deref-small`     |        8.9 µs |                        131072 |        0.52 |
+| `atom-swap-map-1k`     |       10.1 µs |                        131072 |         2.2 |
+| `atom-deref-map-1k`    |        1.7 ms |                          1024 |         4.6 |
+| `atom-$-get-map-1k`    |        6.4 µs |                        262144 |         3.1 |
+| `atom-reset-vec-1k`    |       11.5 ms |                           128 |         7.5 |
+| `sorted-set-build-200` |       36.4 ms |                            32 |         3.3 |
+| `int-map-build-200`    |        8.1 ms |                           128 |         1.8 |
+| `disk-swap-counter`    |       43.7 µs |                         32768 |         2.5 |
+| `thread-submit-64`     |        7.6 ms |                           256 |         7.7 |
 
 Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
 a time; a round of at least 1 s.
+
 <!-- /perf:cljs -->
 
 Reading it: 2–5× the JVM's on swaps and its reads (a 1,000-key map's deref 1.7 ms against 0.38 ms), an int-map
@@ -76,19 +78,19 @@ ClojureScript only); a worker starts in ~80 ms (the compiled kernel, `eve.thread
 
 ## How eve is built on ClojureScript (Node)
 
-| Feature | Adapter | How |
-|---|---|---|
-| slab | `slab/module` | the module slabs: six SharedArrayBuffer slabs (or one disk domain's files) through DataViews, bitmap allocation with SIMD where wasm is ready, a class-6 coalescing region, the atom root and the worker registry; a wasm instance per slab |
-| region | `region/js` | `JsSabRegion` (SharedArrayBuffer + `Atomics`) in process; `NodeMmapRegion` through the N-API addon across processes; `LustreMmapRegion` by fcntl locks |
-| slab-io | `slab-io/protocol` + `slab-io/cljs-compiler` | macros over `ISlabIO` / `IMemRegion`, taken through `:require-macros` |
-| typed-view | `typed-view/js` | JS TypedArrays over an EveArray; wasm-SIMD bulk ops on `:int32` |
-| coll | `coll/cljs` | cljs.core's own functions: eve values answer `count`, `get`, `seq`, `=` |
-| types | `types/jvm` (its ClojureScript arm) + `types/js` | ClojureScript `deftype`s with cljs.core's protocols |
-| encoding, int32, codec | `encoding/js`, `int32/js`, `codec/js` | `TextEncoder` / `TextDecoder`, `Math.imul`, DataView with a keyword cache |
-| process | `process/node` | `Date.now`, `Atomics.wait` sleep, an unref'd heartbeat interval, `fs` `"wx"` for exclusive creation, `crypto.getRandomValues` |
-| thread | `thread/node` | `worker_threads` by the fat-kernel route (`new Worker(kernel-source, {eval: true})`, the kernel the program's own compiled file); one `MessagePort` per pair of threads; a SharedArrayBuffer doorbell |
-| crypto | `crypto/node` | `node:crypto`; XXH3 portable |
-| http, http-server | `http/node`, `http-server/node` | fetch on a worker thread, the caller parked on `Atomics.wait`; Node's `http` module (ClojureScript on Node serves a gateway) |
+| Feature                | Adapter                                          | How                                                                                                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| slab                   | `slab/module`                                    | the module slabs: six SharedArrayBuffer slabs (or one disk domain's files) through DataViews, bitmap allocation with SIMD where wasm is ready, a class-6 coalescing region, the atom root and the worker registry; a wasm instance per slab |
+| region                 | `region/js`                                      | `JsSabRegion` (SharedArrayBuffer + `Atomics`) in process; `NodeMmapRegion` through the N-API addon across processes; `LustreMmapRegion` by fcntl locks                                                                                      |
+| slab-io                | `slab-io/protocol` + `slab-io/cljs-compiler`     | macros over `ISlabIO` / `IMemRegion`, taken through `:require-macros`                                                                                                                                                                       |
+| typed-view             | `typed-view/js`                                  | JS TypedArrays over an EveArray; wasm-SIMD bulk ops on `:int32`                                                                                                                                                                             |
+| coll                   | `coll/cljs`                                      | cljs.core's own functions: eve values answer `count`, `get`, `seq`, `=`                                                                                                                                                                     |
+| types                  | `types/jvm` (its ClojureScript arm) + `types/js` | ClojureScript `deftype`s with cljs.core's protocols                                                                                                                                                                                         |
+| encoding, int32, codec | `encoding/js`, `int32/js`, `codec/js`            | `TextEncoder` / `TextDecoder`, `Math.imul`, DataView with a keyword cache                                                                                                                                                                   |
+| process                | `process/node`                                   | `Date.now`, `Atomics.wait` sleep, an unref'd heartbeat interval, `fs` `"wx"` for exclusive creation, `crypto.getRandomValues`                                                                                                               |
+| thread                 | `thread/node`                                    | `worker_threads` by the fat-kernel route (`new Worker(kernel-source, {eval: true})`, the kernel the program's own compiled file); one `MessagePort` per pair of threads; a SharedArrayBuffer doorbell                                       |
+| crypto                 | `crypto/node`                                    | `node:crypto`; XXH3 portable                                                                                                                                                                                                                |
+| http, http-server      | `http/node`, `http-server/node`                  | fetch on a worker thread, the caller parked on `Atomics.wait`; Node's `http` module (ClojureScript on Node serves a gateway)                                                                                                                |
 
 ## Gotchas
 

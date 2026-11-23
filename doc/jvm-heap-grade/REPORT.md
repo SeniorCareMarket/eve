@@ -44,16 +44,16 @@ stock 10k-entry map build: 1.52 ms
 
 ### Against the spike (HEAP-SPIKE.md §P3)
 
-| op | spike | measured here | verdict |
-|---|---|---|---|
-| map lookup | ~119–134 µs | **0.77–1.08 µs** on the collection (`(get @atom k)` is 54–65 µs) | **does not reproduce.** About 2 orders lower. The 10² µs class appears only when the lookup goes through a deref, which materializes the whole root. |
-| vec nth | (not given) | 0.32 µs | — |
-| atom deref, scalar root | ~104 µs | **0.60–0.64 µs** | **does not reproduce.** About 2 orders lower. |
-| deref, 100-entry map root | ~1.78 ms | **49–63 µs** | **does not reproduce.** About 1.5 orders lower. |
-| atom swap! inc | ~178 µs | 21–25 µs | Same class (10¹–10² µs). Reproduces. |
-| swap! on a 100-map root | ~199 µs | 139–185 µs (swap! assoc) | Reproduces. |
-| map assoc | 0.5–5 ms each | **~4 µs** on the collection | **does not reproduce.** 2–3 orders lower. |
-| capacity wall | 10k map and 1k vec both die | the map dies between 1k and 5k entries; the vec survives 10k and dies by 30k | **Map wall reproduces. The vec claim does not** (1k vec is fine). |
+| op                        | spike                       | measured here                                                                | verdict                                                                                                                                              |
+| ------------------------- | --------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| map lookup                | ~119–134 µs                 | **0.77–1.08 µs** on the collection (`(get @atom k)` is 54–65 µs)             | **does not reproduce.** About 2 orders lower. The 10² µs class appears only when the lookup goes through a deref, which materializes the whole root. |
+| vec nth                   | (not given)                 | 0.32 µs                                                                      | —                                                                                                                                                    |
+| atom deref, scalar root   | ~104 µs                     | **0.60–0.64 µs**                                                             | **does not reproduce.** About 2 orders lower.                                                                                                        |
+| deref, 100-entry map root | ~1.78 ms                    | **49–63 µs**                                                                 | **does not reproduce.** About 1.5 orders lower.                                                                                                      |
+| atom swap! inc            | ~178 µs                     | 21–25 µs                                                                     | Same class (10¹–10² µs). Reproduces.                                                                                                                 |
+| swap! on a 100-map root   | ~199 µs                     | 139–185 µs (swap! assoc)                                                     | Reproduces.                                                                                                                                          |
+| map assoc                 | 0.5–5 ms each               | **~4 µs** on the collection                                                  | **does not reproduce.** 2–3 orders lower.                                                                                                            |
+| capacity wall             | 10k map and 1k vec both die | the map dies between 1k and 5k entries; the vec survives 10k and dies by 30k | **Map wall reproduces. The vec claim does not** (1k vec is fine).                                                                                    |
 
 ## 2. The spike's root cause does not match the code
 
@@ -159,12 +159,12 @@ swap! (~22 µs inc, ~140–185 µs assoc on a 100-map root, against ~30–90 ns 
 
 ## 2. Step-1 numbers, reproduced in this session
 
-| | step 1 | step 2 (run2, rounds 2–3) |
-|---|---|---|
-| plain `(get @a k)`, 100 root | 53.6–64.8 µs | 57.5–58.6 µs |
-| plain `(get @a k)`, 1k root | 342–363 µs (probe) | 375–378 µs |
-| plain deref, 100 root | 48.6–63.2 µs | 58.3–65.3 µs |
-| `$ (get @a k)`, 100 root | 1.86–2.04 µs | 2.49–2.51 µs |
+|                              | step 1             | step 2 (run2, rounds 2–3) |
+| ---------------------------- | ------------------ | ------------------------- |
+| plain `(get @a k)`, 100 root | 53.6–64.8 µs       | 57.5–58.6 µs              |
+| plain `(get @a k)`, 1k root  | 342–363 µs (probe) | 375–378 µs                |
+| plain deref, 100 root        | 48.6–63.2 µs       | 58.3–65.3 µs              |
+| `$ (get @a k)`, 100 root     | 1.86–2.04 µs       | 2.49–2.51 µs              |
 
 All four reproduce.
 
@@ -172,11 +172,11 @@ All four reproduce.
 
 **`(get @a k)`**
 
-| root | plain | `$` (manual) | guard, extent per op | guard, in an open extent | read-pinned floor |
-|---|---|---|---|---|---|
-| 100 | 58 µs · 118 KB | 2.5 µs · 4.4 KB | **2.7 µs · 4.6 KB** | 1.5 µs · 2.8 KB | 2.0 µs |
-| 1k | 375 µs · 955 KB | 2.6 µs · 5.5 KB | **2.7 µs · 5.6 KB** | 1.6 µs · 3.9 KB | 2.1 µs |
-| 10k | 3.7 ms · 8.5 MB | 2.9 µs · 5.8 KB | **2.9 µs · 5.9 KB** | 1.8 µs · 4.3 KB | 2.3 µs |
+| root | plain           | `$` (manual)    | guard, extent per op | guard, in an open extent | read-pinned floor |
+| ---- | --------------- | --------------- | -------------------- | ------------------------ | ----------------- |
+| 100  | 58 µs · 118 KB  | 2.5 µs · 4.4 KB | **2.7 µs · 4.6 KB**  | 1.5 µs · 2.8 KB          | 2.0 µs            |
+| 1k   | 375 µs · 955 KB | 2.6 µs · 5.5 KB | **2.7 µs · 5.6 KB**  | 1.6 µs · 3.9 KB          | 2.1 µs            |
+| 10k  | 3.7 ms · 8.5 MB | 2.9 µs · 5.8 KB | **2.9 µs · 5.9 KB**  | 1.8 µs · 4.3 KB          | 2.3 µs            |
 
 **Deref of the root alone**
 
@@ -185,33 +185,33 @@ All four reproduce.
 
 **Sparse read: 8-key sum from one deref**
 
-| root | plain | `$` | guard |
-|---|---|---|---|
-| 100 | 59 µs | 9.6 µs | **9.8 µs** |
-| 1k | 380 µs | 11.2 µs | **11.4 µs** |
-| 10k | 3.7 ms | 11.0 µs | **11.2 µs** |
+| root | plain  | `$`     | guard       |
+| ---- | ------ | ------- | ----------- |
+| 100  | 59 µs  | 9.6 µs  | **9.8 µs**  |
+| 1k   | 380 µs | 11.2 µs | **11.4 µs** |
+| 10k  | 3.7 ms | 11.0 µs | **11.2 µs** |
 
 **Full traversal: reduce-kv sum over all entries (the weak case)**
 
-| root | plain | `$` | guard |
-|---|---|---|---|
-| 100 | 59 µs | 33 µs | 32 µs |
-| 1k | 390 µs | 218 µs | 230 µs |
-| 10k | 4.1 ms | 2.05 ms | 2.2 ms |
+| root | plain  | `$`     | guard  |
+| ---- | ------ | ------- | ------ |
+| 100  | 59 µs  | 33 µs   | 32 µs  |
+| 1k   | 390 µs | 218 µs  | 230 µs |
+| 10k  | 4.1 ms | 2.05 ms | 2.2 ms |
 
 Allocation is about 0.8 KB per entry for both `$` and the guard.
 
 **Against the spike (the ratios are the claim)**
 
-| | spike | here |
-|---|---|---|
-| 10k root, plain ÷ guard | 15,111× | **1,290×** |
-| 10k root, manual ÷ guard | 1.95× | **1.0×** |
-| 100 root, plain ÷ guard | 110× | **22×** |
-| 100 root, manual ÷ guard | 0.89× | **0.94×** |
-| sparse access vs manual `$` | tracks it, flat in root size | **reproduces**: tracks within noise, flat 100 → 10k |
-| full traversal vs manual `$` | ~4× | **does NOT reproduce: guard ≈ `$`** |
-| full traversal vs plain | ~2.5× better | ~1.8× better |
+|                              | spike                        | here                                                |
+| ---------------------------- | ---------------------------- | --------------------------------------------------- |
+| 10k root, plain ÷ guard      | 15,111×                      | **1,290×**                                          |
+| 10k root, manual ÷ guard     | 1.95×                        | **1.0×**                                            |
+| 100 root, plain ÷ guard      | 110×                         | **22×**                                             |
+| 100 root, manual ÷ guard     | 0.89×                        | **0.94×**                                           |
+| sparse access vs manual `$`  | tracks it, flat in root size | **reproduces**: tracks within noise, flat 100 → 10k |
+| full traversal vs manual `$` | ~4×                          | **does NOT reproduce: guard ≈ `$`**                 |
+| full traversal vs plain      | ~2.5× better                 | ~1.8× better                                        |
 
 The spike's absolute plain costs were inflated (step 1 §1). The ratios to plain are therefore smaller here, but still 1–3 orders of magnitude.
 
@@ -227,12 +227,12 @@ Setup: a nested 100-entry root `aN` and a receiving atom `bN`. Both are anonymou
 
 **Store: `(swap! bN (fn [_] (get @aN k)))`**
 
-| path | bN slot pointer | result | cost | allocated |
-|---|---|---|---|---|
-| plain | 530 | **copy** | 4.0 ms | 9.4 MB/op |
-| `$` | **108 == aN's subtree pointer** | shared | 49–54 µs | 110 KB |
-| guard, proxied | **108** | shared | **14–15 µs** | 21 KB |
-| guard, raw | **108** | shared | **14–15 µs** | 22 KB |
+| path           | bN slot pointer                 | result   | cost         | allocated |
+| -------------- | ------------------------------- | -------- | ------------ | --------- |
+| plain          | 530                             | **copy** | 4.0 ms       | 9.4 MB/op |
+| `$`            | **108 == aN's subtree pointer** | shared   | 49–54 µs     | 110 KB    |
+| guard, proxied | **108**                         | shared   | **14–15 µs** | 21 KB     |
+| guard, raw     | **108**                         | shared   | **14–15 µs** | 22 KB     |
 
 `$` is slower here because it materializes swap!'s return value when the region exits.
 

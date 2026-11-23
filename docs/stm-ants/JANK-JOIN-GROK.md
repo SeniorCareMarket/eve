@@ -29,5 +29,4 @@ E: Failed to fetch http://deb.debian.org/debian/dists/trixie-updates/InRelease  
 E: The repository 'http://deb.debian.org/debian trixie-updates InRelease' is not signed.
 E: Failed to fetch http://deb.debian.org/debian-security/dists/trixie-security/InRelease  500  Internal Server Error [IP: 198.18.0.1 80]
 E: The repository 'http://deb.debian.org/debian-security trixie-security InRelease' is not signed.
-
 ```

@@ -4,17 +4,18 @@ Operator, 2026-11-17 (verbatim): "lets fan this impl out. Make it a quick phase 
 files/phase lanes for impl plans. The a fanout across a 2 or 3 agents in wave 1 for 1 and 2, and a wave 2 for 3 and 4.
 And then we'll let you collate the landing." The plan these lanes implement: ../PLAN.md.
 
-| lane | wave | unit (PLAN.md) | repo · worktree · local branch | brief | ledger |
-|---|---|---|---|---|---|
-| U1 | 1 | 1 — the VS flat map, full API | valuescript · /home/user/w/wt/u1 · flat-u1 | U1-vs-full-api.md | status/U1.md |
-| U2a | 1 | 2 — eve.flat-io: the seam, portable, chunk.cljc over it, conformance, the lookup | atom.broker (eve) · /home/user/w/eve-u2a · flat-u2a | U2a-flat-io-seam.md | status/U2a.md |
-| U2b | 1 | 2 — eve.flat-io: the JVM and JS fast implementations, the three-host bench | atom.broker (eve) · /home/user/w/eve-u2b · flat-u2b | U2b-flat-io-fast.md | status/U2b.md |
-| U3 | 2 | 3 — flat-io/vs, eve's flat layer on VS | both | U3-eve-flat-on-vs.md | status/U3.md |
-| U4 | 2 | 4 — deftype / defrecord flat sisters, field reads as loads | both | U4-deftype-sisters.md | status/U4.md |
+| lane | wave | unit (PLAN.md)                                                                   | repo · worktree · local branch                      | brief                 | ledger        |
+| ---- | ---- | -------------------------------------------------------------------------------- | --------------------------------------------------- | --------------------- | ------------- |
+| U1   | 1    | 1 — the VS flat map, full API                                                    | valuescript · /home/user/w/wt/u1 · flat-u1          | U1-vs-full-api.md     | status/U1.md  |
+| U2a  | 1    | 2 — eve.flat-io: the seam, portable, chunk.cljc over it, conformance, the lookup | atom.broker (eve) · /home/user/w/eve-u2a · flat-u2a | U2a-flat-io-seam.md   | status/U2a.md |
+| U2b  | 1    | 2 — eve.flat-io: the JVM and JS fast implementations, the three-host bench       | atom.broker (eve) · /home/user/w/eve-u2b · flat-u2b | U2b-flat-io-fast.md   | status/U2b.md |
+| U3   | 2    | 3 — flat-io/vs, eve's flat layer on VS                                           | both                                                | U3-eve-flat-on-vs.md  | status/U3.md  |
+| U4   | 2    | 4 — deftype / defrecord flat sisters, field reads as loads                       | both                                                | U4-deftype-sisters.md | status/U4.md  |
 
 The seam's contract, which U2a, U2b and U3 implement and U1's core forms already follow: CONTRACT-flat-io.md.
 
 ## Rules every lane keeps (the parent CLAUDE.md is the conduct authority; these are the lane's own)
+
 1. **Your worktree, your local branch, commit often, never push.** The coordinator (race-nk, the session that spawned
    you) merges and pushes. Do not touch /home/user/valuescript, /home/user/w/eve-ab or another lane's worktree.
 2. **Write your ledger as you go**, append-only, newest at the tail: status/<lane>.md in YOUR worktree's copy of this

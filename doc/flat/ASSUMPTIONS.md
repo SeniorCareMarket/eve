@@ -6,27 +6,27 @@ research plan named, and a provenance line. Measurements are in `MEASUREMENTS.md
 
 **Pins.** `SeniorCareMarket/eve` `4a92129` (main tip, release 0.9.3.1, 2026-11-09). `johnmn3/atom.broker` `163cb656c`
 (main tip, 2026-11-11 1:58 AM ET). `johnmn3/valuescript`: no commits. **Tools:** OpenJDK 21.0.12, Clojure 1.12.0,
-Node 22.23.4 (unused: no ClojureScript build was made); no `clojure` CLI, no `bb`. **Kinds of evidence:** *read* (the
-code at the pin, file:line), *ran* (a probe or a one-liner executed here, its output committed or quoted in the
-census), *measured* (a timed or sized probe, both arms in one session). Nothing ran on any host but the JVM.
+Node 22.23.4 (unused: no ClojureScript build was made); no `clojure` CLI, no `bb`. **Kinds of evidence:** _read_ (the
+code at the pin, file:line), _ran_ (a probe or a one-liner executed here, its output committed or quoted in the
+census), _measured_ (a timed or sized probe, both arms in one session). Nothing ran on any host but the JVM.
 
 ## Corrections first — premises that died under re-derivation
 
 Each is a claim of the research plan or of the proto-research it builds on, the discriminator that killed it, and
 what stands in its place.
 
-| # | The premise | What the pin says | Discriminator |
-|---|---|---|---|
-| C1 | "The integration census additionally covers atom.broker main's `eve/` subtree, because the net/codec surface lives there" | atom.broker has no `eve/` subtree: `163cb656c` "Land the Eve extraction: eve/ subtree removed; Eve lives in SeniorCareMarket/eve and atom.broker consumes it as a dep pin (0.9.3.1)". The net layer is 29 files of canonical Eve, `src/eve/net/` | TREE — `git log -1`, `ls` |
-| C2 | "Container = the 1 MiB Eve page"; "only a page's owner allocates / frees in it; foreign frees go through return queues" | That is the **kernel's** allocator (atom.broker `vs/src/vs/kernel/wasm/alloc.vs`: `REGION_SIZE` 1,048,576, sub-pages of 64 KiB / 256 KiB / 1 MiB, 16 classes, owner-only allocation, return queues). Canonical Eve has **no pages**: six bitmap classes of 32–1024 B and a coalescing class 6, any thread or process allocating by CAS on a bitmap (`src/eve/deftype_proto/alloc.cljc:533-606`). In canonical Eve, 1 MiB appears as `eve.net.pages`' `REGION` (a writer of kernel pages with no caller in `src/`) and as a heap class's starting capacity | TREE — `census/VS-KERNEL.md` §1.1, §1.4; `census/BYTE-PATHS.md` §4.4 |
-| C3 | "Registry ids are expansion-order and cannot travel" | Ids are derived from the type's name: `type-id = 0x40 + (h mod 173)`, `name-hash = h & 0xFFFFFF`, `h` = the int32 fold of XXH3-128 of the name's key bytes — "the same in every process" (`src/eve/deftype/macros.cljc:96-97`; the derivation is `src/eve/deftype/registry.cljc:25-26,47-67`; declared break 2026-10-25; pinned on every host by `test/eve/deftype/type_id_test.cljc`) | TREE |
-| C4 | "Under the construction law (Eve data constructed outside a swap throws; the heap-slab fallback is abolished)" | Not in the tree. `current-sio` is `(or d/*domain-sio* (default-sio))` (`alloc.cljc:1726-1731`): a constructor outside a swap allocates in the process's heap domain; **nothing throws at construction**; the refusal is at store time. "The deftype constructor guard" (`data.cljc:557-563`) is a stale comment; `eve.guard` is a read guard. On ClojureScript a value built outside a swap lands in the module slab every in-process atom uses — and in an open disk domain's files, unlogged | TREE + ran — `census/TYPES-AND-DEREF.md` §0 C1–C3, §2.8 (probes A1–A11) |
-| C5 | "The flat codec … is exactly your packed/wire format … cross-process" | At the pin flat bytes are **key bytes and digest input only**: map keys, set elements, sorted-collection keys, the type-id hash, the root digest. No thread descriptor, journal record or network payload uses them; the JS codec refuses `value->eve-bytes` outright. They decode to plain data only, and nothing reads inside them without decoding the whole | TREE — `census/BYTE-PATHS.md` §2.2, §2.7 |
-| C6 | "`eve->clj` has produced plain host data … atom deref was explicitly contracted not to return Eve wrappers" | A deref returns a **live slab-backed value** for every type with no `IPlain` — every user `eve-deftype` (a DataScript `DB`), `ValueArray` — through `eve->clj`'s `:else v` arm; `swap!` returns whatever its function returned, unpinned; `eve.sorted`'s `-plain` answers another slab collection built in the process domain | TREE + ran — `census/TYPES-AND-DEREF.md` §2.2, §3.1, §3.3 |
-| C7 | "One byte format lineage" | Six byte encodings of a scalar exist at the pin: Eve tags; ExtCID v3 bands and value blocks (16-byte type CIDs); `eve.net.codec` key images; the VSNP serial form (Eve's magic, but `0x07` is an int64 there and a keyword in Eve); aegis fields; JSON on the envelope | TREE — `census/BYTE-PATHS-2.md` §6 A17 |
-| C8 | Watches' value delivery is a path to census | `MmapAtom` has no watches and no validator (`add-watch` → `ClassCastException`); they existed in the legacy ClojureScript atom, which nothing requires | ran — `census/TYPES-AND-DEREF.md` §3.1 (I2/I3); `-2` §3 |
-| C9 | "Datomic: ~50 KB is unofficial"; "ORC's compression block is precisely 65,536 bytes"; "Vortex's per-chunk dictionary" | Datomic's own docs: "These segments range up to about 50kb each", 1,000–20,000 datoms a segment. ORC: 262,144 in the Java writer, 65,536 in the C++ writer. Vortex's dictionary is shared across a run of chunks, cut at 1 MiB or 65,535 entries; its 1 MiB is the **uncompressed** block target and its stated reason is object-store request sizing | primary sources — `research/FORMATS.md` A1c, A5, A6 |
-| C10 | "Transit's cache" as the model for a per-chunk cache | Transit never caches string *values* (keywords, symbols, tags, and strings in map-key position only), scopes the cache to one top-level write, and defines it by traversal order — a reader cannot enter in the middle. "The property a seekable chunk format must not copy" | primary sources — `research/FORMATS.md` A9 |
+| #   | The premise                                                                                                               | What the pin says                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Discriminator                                                           |
+| --- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| C1  | "The integration census additionally covers atom.broker main's `eve/` subtree, because the net/codec surface lives there" | atom.broker has no `eve/` subtree: `163cb656c` "Land the Eve extraction: eve/ subtree removed; Eve lives in SeniorCareMarket/eve and atom.broker consumes it as a dep pin (0.9.3.1)". The net layer is 29 files of canonical Eve, `src/eve/net/`                                                                                                                                                                                                                                                                                                          | TREE — `git log -1`, `ls`                                               |
+| C2  | "Container = the 1 MiB Eve page"; "only a page's owner allocates / frees in it; foreign frees go through return queues"   | That is the **kernel's** allocator (atom.broker `vs/src/vs/kernel/wasm/alloc.vs`: `REGION_SIZE` 1,048,576, sub-pages of 64 KiB / 256 KiB / 1 MiB, 16 classes, owner-only allocation, return queues). Canonical Eve has **no pages**: six bitmap classes of 32–1024 B and a coalescing class 6, any thread or process allocating by CAS on a bitmap (`src/eve/deftype_proto/alloc.cljc:533-606`). In canonical Eve, 1 MiB appears as `eve.net.pages`' `REGION` (a writer of kernel pages with no caller in `src/`) and as a heap class's starting capacity | TREE — `census/VS-KERNEL.md` §1.1, §1.4; `census/BYTE-PATHS.md` §4.4    |
+| C3  | "Registry ids are expansion-order and cannot travel"                                                                      | Ids are derived from the type's name: `type-id = 0x40 + (h mod 173)`, `name-hash = h & 0xFFFFFF`, `h` = the int32 fold of XXH3-128 of the name's key bytes — "the same in every process" (`src/eve/deftype/macros.cljc:96-97`; the derivation is `src/eve/deftype/registry.cljc:25-26,47-67`; declared break 2026-10-25; pinned on every host by `test/eve/deftype/type_id_test.cljc`)                                                                                                                                                                    | TREE                                                                    |
+| C4  | "Under the construction law (Eve data constructed outside a swap throws; the heap-slab fallback is abolished)"            | Not in the tree. `current-sio` is `(or d/*domain-sio* (default-sio))` (`alloc.cljc:1726-1731`): a constructor outside a swap allocates in the process's heap domain; **nothing throws at construction**; the refusal is at store time. "The deftype constructor guard" (`data.cljc:557-563`) is a stale comment; `eve.guard` is a read guard. On ClojureScript a value built outside a swap lands in the module slab every in-process atom uses — and in an open disk domain's files, unlogged                                                            | TREE + ran — `census/TYPES-AND-DEREF.md` §0 C1–C3, §2.8 (probes A1–A11) |
+| C5  | "The flat codec … is exactly your packed/wire format … cross-process"                                                     | At the pin flat bytes are **key bytes and digest input only**: map keys, set elements, sorted-collection keys, the type-id hash, the root digest. No thread descriptor, journal record or network payload uses them; the JS codec refuses `value->eve-bytes` outright. They decode to plain data only, and nothing reads inside them without decoding the whole                                                                                                                                                                                           | TREE — `census/BYTE-PATHS.md` §2.2, §2.7                                |
+| C6  | "`eve->clj` has produced plain host data … atom deref was explicitly contracted not to return Eve wrappers"               | A deref returns a **live slab-backed value** for every type with no `IPlain` — every user `eve-deftype` (a DataScript `DB`), `ValueArray` — through `eve->clj`'s `:else v` arm; `swap!` returns whatever its function returned, unpinned; `eve.sorted`'s `-plain` answers another slab collection built in the process domain                                                                                                                                                                                                                             | TREE + ran — `census/TYPES-AND-DEREF.md` §2.2, §3.1, §3.3               |
+| C7  | "One byte format lineage"                                                                                                 | Six byte encodings of a scalar exist at the pin: Eve tags; ExtCID v3 bands and value blocks (16-byte type CIDs); `eve.net.codec` key images; the VSNP serial form (Eve's magic, but `0x07` is an int64 there and a keyword in Eve); aegis fields; JSON on the envelope                                                                                                                                                                                                                                                                                    | TREE — `census/BYTE-PATHS-2.md` §6 A17                                  |
+| C8  | Watches' value delivery is a path to census                                                                               | `MmapAtom` has no watches and no validator (`add-watch` → `ClassCastException`); they existed in the legacy ClojureScript atom, which nothing requires                                                                                                                                                                                                                                                                                                                                                                                                    | ran — `census/TYPES-AND-DEREF.md` §3.1 (I2/I3); `-2` §3                 |
+| C9  | "Datomic: ~50 KB is unofficial"; "ORC's compression block is precisely 65,536 bytes"; "Vortex's per-chunk dictionary"     | Datomic's own docs: "These segments range up to about 50kb each", 1,000–20,000 datoms a segment. ORC: 262,144 in the Java writer, 65,536 in the C++ writer. Vortex's dictionary is shared across a run of chunks, cut at 1 MiB or 65,535 entries; its 1 MiB is the **uncompressed** block target and its stated reason is object-store request sizing                                                                                                                                                                                                     | primary sources — `research/FORMATS.md` A1c, A5, A6                     |
+| C10 | "Transit's cache" as the model for a per-chunk cache                                                                      | Transit never caches string _values_ (keywords, symbols, tags, and strings in map-key position only), scopes the cache to one top-level write, and defines it by traversal order — a reader cannot enter in the middle. "The property a seekable chunk format must not copy"                                                                                                                                                                                                                                                                              | primary sources — `research/FORMATS.md` A9                              |
 
 ## The register
 
@@ -50,7 +50,7 @@ The tags are a workable alphabet; they are not a sufficient foundation for a wir
 Kill check — "any Eve scalar or leaf that cannot be represented, or that round-trips changed": hit several times.
 What stands: the design takes tags `0x01–0x0F`, `0x14`, `0x16–0x18` and their payloads **verbatim**, adds a bytes
 scalar and an explicit nil, and carries f32 / f64 / i64 exactly in typed columns.
-*Prov: eve `4a92129`; read + ran (`census/BYTE-PATHS.md` Part 1–2, `-2` §6); measured (P2, P4).*
+_Prov: eve `4a92129`; read + ran (`census/BYTE-PATHS.md` Part 1–2, `-2` §6); measured (P2, P4)._
 
 ### A2 — the `eve-deftype` registry carries enough to generate a sister · **VALIDATED**
 
@@ -60,7 +60,7 @@ scalar and an explicit nil, and carries f32 / f64 / i64 exactly in typed columns
 - The compile-time `registry` holds the slab-field layout, total size and identity (`macros.cljc:106-112`), keyed
   by the type's simple name, read only by `eve-extend-type`, and absent at runtime; the protocol bodies and the
   host-local fields are only in the expansion's locals. At runtime a process knows, per type, a constructor and
-  *which offsets hold references* — no field names, no primitive types, no total size
+  _which offsets hold references_ — no field names, no primitive types, no total size
   (`census/DEFTYPE-AND-COLUMNAR.md` §1.4–1.5).
 - One edit reaches every host: the `(list 'do …)` at `macros.cljc:130-153` (hook H1, same file §1.6).
 - Two emission families. On the ISlabIO hosts (JVM, babashka, CLR, basilisp, jolt, clojerl, glojure, jank) an
@@ -71,7 +71,7 @@ scalar and an explicit nil, and carries f32 / f64 / i64 exactly in typed columns
 Kill check — "layout or identity information that exists only at runtime, or only on one host's macro path": none
 for layout or identity. One-family only: `IDirectSerialize`, `ISabStorable`, the pointer-tag registration
 (ClojureScript). ValueScript does not run the expansion at this pin (`hosts.edn` `:vs` comment).
-*Prov: eve `4a92129`; read (`census/DEFTYPE-AND-COLUMNAR.md` Part 1); ran (P5.2).*
+_Prov: eve `4a92129`; read (`census/DEFTYPE-AND-COLUMNAR.md` Part 1); ran (P5.2)._
 
 ### A3 — `IPlain` is the materialization seam · **REFUTED**
 
@@ -85,8 +85,8 @@ for layout or identity. One-family only: `IDirectSerialize`, `ISabStorable`, the
   second per-type protocol method that would inherit the same gaps.
 
 Kill check — "materialization paths that bypass `IPlain` in numbers that make the seam the wrong place": hit.
-*Prov: eve `4a92129`; read + ran (`census/TYPES-AND-DEREF.md` §2.2, §3; `src/eve/deftype_proto/data.cljc:515-543`
-read first-hand).*
+_Prov: eve `4a92129`; read + ran (`census/TYPES-AND-DEREF.md` §2.2, §3; `src/eve/deftype_proto/data.cljc:515-543`
+read first-hand)._
 
 ### A4 — length-view persistence is sound · **VALIDATED, one type excepted**
 
@@ -103,7 +103,7 @@ read first-hand).*
 
 Kill check — "any protocol whose correct behavior needs bytes past the view's length, or mutation of written
 bytes": one — the list's seq. It is a defect of the producer, fixed there (a host cursor), not designed around.
-*Prov: eve `4a92129`; ran (P1, P5 — JVM); read.*
+_Prov: eve `4a92129`; ran (P1, P5 — JVM); read._
 
 ### A5 — retention is acceptable · **VALIDATED, with a required copy-out**
 
@@ -118,7 +118,7 @@ bytes": one — the list's seq. It is a defect of the producer, fixed there (a h
 Kill check — "pin ratios that make statics a memory hazard in the flagship uses with no copy-out policy": the hazard
 is real and the policy exists; the plan makes it a rule (a build is compacted before it is kept; a view kept past
 its parent is copied out).
-*Prov: eve `4a92129`; measured (P6 §6.3).*
+_Prov: eve `4a92129`; measured (P6 §6.3)._
 
 ### A6 — columnar dictionaries pay on Eve-shaped data · **VALIDATED**
 
@@ -127,7 +127,7 @@ Measured (M2, M3): on messages / records / datoms the symbol table takes 24 / 31
 the repository's own EDN files); hit rates at 64 KiB are 99.1–99.6 %. Against the flat codec: 0.36–0.19×.
 Not covered by the prototype: a map with non-symbol keys (3.04× MessagePack on int → int), and plain data handed
 over column-major (1.10×: its typed vectors cover numbers only).
-*Prov: eve `4a92129`; measured (P2).*
+_Prov: eve `4a92129`; measured (P2)._
 
 ### A7 — 64 KiB is the right chunk · **VALIDATED as a target, not a cap**
 
@@ -144,7 +144,7 @@ over column-major (1.10×: its typed vectors cover numbers only).
 - One thing loses at 64 KiB: opaque compression per chunk (+23–35 % against one chunk). Compress per container.
 
 Kill check — "a size that dominates 64 KiB on the heterogeneous mix, with numbers": none found.
-*Prov: eve `4a92129`; measured (P2 §2, P4); primary sources for the precedents.*
+_Prov: eve `4a92129`; measured (P2 §2, P4); primary sources for the precedents._
 
 ### A8 — a static chunk can live in an Eve page · **as the operator means it: A9's placement, validated by probe; as first read (bytes resident uncopied): false on both trees**
 
@@ -176,7 +176,7 @@ Corrected 2026-11-11 11:40 PM ET. This row first read "validated on the kernel";
   **15** to a 1 MiB region, not 16 (its data region is 989,600 B), 4-byte aligned, at an allocator-picked address
   (`census/VS-KERNEL.md` §1.3, §1.6). Nothing inside such a block is a block to the tally, and the page writer
   refuses class 15 (`vs/src/vs/tier.vs:326-327`), so it cannot travel as kernel pages.
-- Kernel, without a copy: page adoption — but an adopted page is *beside* the allocator for good: never allocated
+- Kernel, without a copy: page adoption — but an adopted page is _beside_ the allocator for good: never allocated
   into, uncounted, frees refused, in-place builders trap, evicted whole, and at this pin evictable under an atom
   that names it (`census/VS-KERNEL-2.md` §3.7 (e)). That is not co-residence with persistent blocks.
 
@@ -187,7 +187,7 @@ What survives, and all the design uses: a chunk as **one opaque leaf block** tha
 counts and frees as a unit. The copy is one `memcpy` of at most 64 KiB — no re-layout, no per-value work — and
 none when the decoder writes into the block. "Sixteen chunks to a page, the hand-off page-aligned" (O8) is not
 available on either tree, and nothing in `FORMAT-V1.md` depends on it.
-*Prov: atom.broker `163cb656c`, eve `4a92129`; read (`census/VS-KERNEL.md`, `-2`); nothing was run in the kernel.*
+_Prov: atom.broker `163cb656c`, eve `4a92129`; read (`census/VS-KERNEL.md`, `-2`); nothing was run in the kernel._
 
 ### A9 — the allocator can consume pre-mapped spacing · **DEAD as a present capability on both trees; the shape admits it (a probe, one host)**
 
@@ -199,7 +199,7 @@ available on either tree, and nothing in `FORMAT-V1.md` depends on it.
   slab and not guaranteed contiguous; nothing in the tree calls it. It is the precedent for the run claim. Kernel: `alloc_blocks` is a loop over `alloc_block`
   (`alloc.vs:4188-4201`); it takes memory only by claiming regions; page adoption and the bump-filled BLOCK PAGES
   keep their bytes out of the allocator for good (`census/VS-KERNEL.md` §1.7, §2.5; `-2` "A9").
-- The plan's kill check is about the allocator's *shape* — "placement information cannot be used and ingest is
+- The plan's kill check is about the allocator's _shape_ — "placement information cannot be used and ingest is
   necessarily per-value allocation". On canonical Eve that is not so: a research probe (not product code) claimed
   one run of blocks per size class by CAS on whole bitmap words of the unchanged JVM heap slab, and placed an image
   3–9× faster than per-block allocation, net of creating the domain (M5). On the kernel a run entry on an owned
@@ -210,21 +210,21 @@ available on either tree, and nothing in `FORMAT-V1.md` depends on it.
 
 So O5's "placement, not planning" is false today; true of allocation once a run entry exists; true of a whole
 commit only if the count is also taken from the image's tables (fork F5).
-*Prov: eve `4a92129`, atom.broker `163cb656c`; read; measured (P3, P3c, P6 — JVM heap domains only; no disk domain,
-no second process, no other host, nothing in the kernel).*
+_Prov: eve `4a92129`, atom.broker `163cb656c`; read; measured (P3, P3c, P6 — JVM heap domains only; no disk domain,
+no second process, no other host, nothing in the kernel)._
 
 ### A10 — hash and equality from the binary · **split**
 
-| What | Today | From the packed form? |
-|---|---|---|
-| equality of two eve roots | the content digest when both carry one — SHA-256 of the root's flat bytes (`src/eve/digest.cljc:163-199`) — else an element walk | **yes**: canonical bytes are already Eve's equality on byte-array hosts; and they already disagree with Clojure's `=` at the float edges (`{:a 0.0}` ≠ `{:a -0.0}`, `{:a ##NaN}` = `{:a ##NaN}`; ran, `census/BYTE-PATHS-2.md` §1.3) |
-| `hash` of a collection | the host's fold over the host's `hash` of each decoded element; host-specific by ruling (`test/eve/collection_hash_test.cljc:18-26`) | **no** without decoding every element; it cannot ride in a cross-host form. It is computed once by a walk and kept on the static object, as the slab keeps it in the digest side block |
-| a user `eve-deftype` that supplies no hash or equals of its own | `hash` = the host's hash of the block's offset; `equals` = same type and same offset (`src/eve/deftype_proto/sio.cljc:215-231`) | **no** — a copy has another offset. Ran (P5.2): the image of an instance is not `=` its slab original |
+| What                                                            | Today                                                                                                                                | From the packed form?                                                                                                                                                                                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| equality of two eve roots                                       | the content digest when both carry one — SHA-256 of the root's flat bytes (`src/eve/digest.cljc:163-199`) — else an element walk     | **yes**: canonical bytes are already Eve's equality on byte-array hosts; and they already disagree with Clojure's `=` at the float edges (`{:a 0.0}` ≠ `{:a -0.0}`, `{:a ##NaN}` = `{:a ##NaN}`; ran, `census/BYTE-PATHS-2.md` §1.3) |
+| `hash` of a collection                                          | the host's fold over the host's `hash` of each decoded element; host-specific by ruling (`test/eve/collection_hash_test.cljc:18-26`) | **no** without decoding every element; it cannot ride in a cross-host form. It is computed once by a walk and kept on the static object, as the slab keeps it in the digest side block                                               |
+| a user `eve-deftype` that supplies no hash or equals of its own | `hash` = the host's hash of the block's offset; `equals` = same type and same offset (`src/eve/deftype_proto/sio.cljc:215-231`)      | **no** — a copy has another offset. Ran (P5.2): the image of an instance is not `=` its slab original                                                                                                                                |
 
 Kill check — "a type whose Eve hash cannot be produced from the packed form without a full walk that
 materialization would beat": the collection hash needs the walk either way (it does not need the host collections);
 identity-compared user types cannot be reproduced at all. That last row is a semantics choice — fork F2.
-*Prov: eve `4a92129`; read + ran (`census/BYTE-PATHS-2.md` §1; P1; P5.2).*
+_Prov: eve `4a92129`; read + ran (`census/BYTE-PATHS-2.md` §1; P1; P5.2)._
 
 ### A11 — type-key identity is a sufficient wire contract · **VALIDATED, two additions required**
 
@@ -240,7 +240,7 @@ identity-compared user types cannot be reproduced at all. That last row is a sem
 
 Kill check — "an identity case keys cannot disambiguate": two unrelated types with one key string and one layout in
 two programs. Nothing disambiguates that in Transit either; accepted.
-*Prov: eve `4a92129`; read.*
+_Prov: eve `4a92129`; read._
 
 ### A12 — `:serialized` fields pack · **VALIDATED, with the reference rule**
 
@@ -254,7 +254,7 @@ Kill check — "a field class whose static form needs information the slab form 
 not in memory at all (nil when read back, today as well). The packed, columnar form of a type needs its field names
 and hints, which are not in the slab — they come from the expansion (A2), so a type unknown to the process can be
 carried as an image or as a generic record, never columnized.
-*Prov: eve `4a92129`; read + ran (P5.2).*
+_Prov: eve `4a92129`; read + ran (P5.2)._
 
 ### A13 — mutable and volatile fields freeze coherently · **VALIDATED as declared snapshot semantics, opt-in only**
 
@@ -267,7 +267,7 @@ carried as an image or as a generic record, never columnized.
 Kill check — "a contract that a frozen copy violates silently": avoided only while static is opt-in at the boundary
 (the deref contract unchanged), views cannot write, and the docs say a static of a mutable type is its value at the
 copy.
-*Prov: eve `4a92129`; read + ran.*
+_Prov: eve `4a92129`; read + ran._
 
 ### A14 — ClojureScript parity is reachable · **OPEN (not runnable here); no kill found by reading**
 
@@ -282,7 +282,7 @@ copy.
 - The JS number model already makes a generic double's bytes host-dependent (`-0.0` and integral doubles go out as
   int32, `doc/unification/FORMAT-DECISIONS.md:127-131`). Typed columns do not inherit that; generic scalars do.
 
-*Prov: eve `4a92129`; read only. The plan names the probe that settles it.*
+_Prov: eve `4a92129`; read only. The plan names the probe that settles it._
 
 ### A15 — ingest respects the construction law and the journal · **VALIDATED by reading and on a heap domain; the journal case by reading only**
 
@@ -299,8 +299,8 @@ run claim must do, from the tally and the swap as they are (`census/TYPES-AND-DE
    root tables only — "COMMIT METADATA ONLY — never values" (`atom.cljc:452-475`) — so it does not see how blocks
    were produced.
 
-*Prov: eve `4a92129`; read (`src/eve/tally.cljc` whole, `atom.cljc:964-1085`); ran on JVM heap domains (P6). No disk
-domain was exercised.*
+_Prov: eve `4a92129`; read (`src/eve/tally.cljc` whole, `atom.cljc:964-1085`); ran on JVM heap domains (P6). No disk
+domain was exercised._
 
 ### A16 — STM behaves · **VALIDATED for release; three findings about `eve.stm` itself**
 
@@ -313,7 +313,7 @@ domain was exercised.*
 - Ran: a two-ref transaction whose second value is a slab value of another domain throws at store time **and leaves
   the first ref installed** (`census/TYPES-AND-DEREF-2.md` §1, R5). Provenance: JVM, `4a92129`, fresh heap domains.
 
-*Prov: eve `4a92129`; read + ran.*
+_Prov: eve `4a92129`; read + ran._
 
 ### A17 — one byte format, not two · **VALIDATED for the design; its premise corrected (C7)**
 
@@ -326,7 +326,7 @@ The kernel's universe has no uuid, instant, big number or bytes at all; the mapp
 Kill check — "a design requirement that forces re-tagging scalars": none.
 Standing fact to carry: FORMAT-DECISIONS §8 says of the live wire "neither is this format" — a static wire is a new
 generation that ValueScript's own client cannot read until the kernel reads chunks.
-*Prov: eve `4a92129`; read; measured (P2 round-trips every corpus through the verbatim scalar bytes).*
+_Prov: eve `4a92129`; read; measured (P2 round-trips every corpus through the verbatim scalar bytes)._
 
 ### A18 — encodings keep random access · **VALIDATED for dictionary codes and narrowing; run-end admitted with its cost stated**
 
@@ -334,7 +334,7 @@ Measured (M4, M7): a dictionary-coded cell 68–156 ns against the host's 59; a 
 1.4–3.1 ns a read at half or a quarter of the bytes; a run-end column 42–102 ns a read (a binary search over the
 runs) at 3–300× fewer bytes. Nothing opaque is admitted inside a chunk; delta coding is not admitted (a read would
 need a prefix sum).
-*Prov: eve `4a92129`; measured (P4, P6b).*
+_Prov: eve `4a92129`; measured (P4, P6b)._
 
 ## The three load-bearing rows — the stop conditions
 

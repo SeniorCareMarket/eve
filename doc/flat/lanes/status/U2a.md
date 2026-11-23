@@ -1,10 +1,11 @@
 # U2a ledger (append-only, newest at the tail)
 
-
 ## 2026-11-17 00:47 AM ET — baselines at the Phase-0 pin (before any change)
+
 Provenance: atom.broker worktree /home/user/w/eve-u2a, branch flat-u2a at 3b656fea20 (unmodified tree); OpenJDK 21.0.12.1,
 Clojure CLI (deps.edn: clojure 1.12.0), babashka v1.12.218, Node v22.23.4 (/opt/node22/bin/node), shadow-cljs 3.3.6 from ~/.m2.
 Fresh: a clean checkout, no target/ before the Node build. Logs: the session scratchpad (logs/*-before.log).
+
 - **JVM flat suite** (host_suite.cljc :jvm, 15 namespaces):
   `clojure -M:jvm-test -n eve.flat.requirements-test -n eve.flat.contract-test -n eve.flat.chunk-test -n eve.flat.host-suite-test -n eve.flat.image-test -n eve.flat.alloc-run-test -n eve.flat.place-test -n eve.flat.tally-count-test -n eve.flat.transfer-test -n eve.flat.build-test -n eve.flat.column-test -n eve.flat.container-test -n eve.flat.check-test -n eve.flat.list-test -n eve.flat.sister-test`
   → **72 tests, 11,530 assertions, 5 failures, 5 errors** (1 m 04 s). None in chunk-test, contract-test, build, column,
@@ -30,6 +31,7 @@ Fresh: a clean checkout, no target/ before the Node build. Logs: the session scr
   pinned by the conformance test.
 
 ## 2026-11-17 00:59 AM ET — the seam: flat-io/portable, chunk.cljc over it, every row wired (12295ecefc)
+
 - adapters/flat-io/portable/src/eve/flat_io.cljc: chunk.cljc's byte layer moved with its :clj / :bb / :glj / :jank /
   :cljs arms (ru8 … rf64 → u8 … f64, rvarint → varint, varint-len, ba-copy-of, IBuf + the three Buf deftypes, dv-of,
   the BigInt helpers the writer's i64 needs) plus the contract's additions (varint-v, varint-next, utf8, bytes=,
@@ -49,6 +51,7 @@ Fresh: a clean checkout, no target/ before the Node build. Logs: the session scr
 - The cljs i32 defect: probe after the fix `[-5 -1 3 -2147483648]`, `=` true.
 
 ## 2026-11-17 01:04 AM ET — the conformance test (29e18468eb)
+
 adapters/flat-io/test/eve/flat_io_conformance_test.cljc, 11 tests; runners `clojure -M:flat-io-test` (deps.edn),
 `bb test:flat-io` (bb.edn), `clojure -M:node-test:flat-io-node -m shadow.cljs.devtools.cli compile flat-io-test && node
 target/flat-io-test/main.js` (shadow-cljs.edn :flat-io-test, test/eve/runner/flat_io_main.cljs).
@@ -58,6 +61,7 @@ divisor; the JVM passed only because the read stayed a primitive double) — the
 Math/copySign (ClojureScript: 1/x) instead.
 
 ## 2026-11-17 01:11 AM ET — the lookup (ab723cde77)
+
 Measured first (scratch getprof.clj, JVM, the 1BRC map, best of 30, at 3b656fea20's chunk): get×407 ≈ 900 µs, of
 which the shape's linear `=` index ≈ 960 µs alone and the value's nth ≈ 52 µs — the key walk is the cost.
 lookup-node / row-lookup / assoc-flat: from 16 keys a binary search in key-byte order — MAP over its shape's symbol
@@ -65,6 +69,7 @@ codes (parse-shapetab keeps :codes), KMAP over its keys node (COL kinds 17/18 �
 number kinds → the cell's key bytes; VEC → SYM or scalar bodies in place) — only for a key whose `=` is its bytes'
 equality (string, keyword, symbol, integer, boolean, char) and a keys node of scalars (no nil, no collection; memoized
 in the Ctx's plans). fio/key-cmp for a string against a stored string; fio/bytes-cmp against encode-key bytes else.
+
 - Equivalence (scratch lookups.clj vs the Phase-0 chunk's linear `=`): 22 maps (every key layout: 407 strings,
   keywords, ns keywords, symbols, mixed, long + 255/256 boundary strings, ints narrowed / negative / wide / run-coded,
   mixed scalars, chars, bigints, nil key, doubles, 0.0 with -0.0 probed, collection keys, uuids, a record, batch rows)
@@ -77,6 +82,7 @@ in the Ctx's plans). fio/key-cmp for a string against a stored string; fio/bytes
   the change: the interleaved A/B above (same JVM, same moment) has the seam's pack at or below the old one's.
 
 ## 2026-11-17 01:18 AM ET — column.cljc and sio.cljc read through the seam; doc rows (7e95edfcbf)
+
 - eve.flat.column: open-column / open-batch / col-ref / scan-sum's kind-22 arm / count-eq read through fio (a handle
   carries :c, the chunk); its private ru8 … ri64 and read-varint are gone. Kept as the JVM's own, by name: scan-sum's
   NIO sums over kinds 6 / 8 / 9 / 10 and typed-array-view's NIO views (bulk host views; the contract has no bulk read
@@ -103,10 +109,12 @@ in the Ctx's plans). fio/key-cmp for a string against a stored string; fio/bytes
   The byte-level conditionals live where the contract puts them: flat_io.cljc has 28.
 
 ## 2026-11-17 01:45 AM ET — the done bar, measured at 915402b9dc
+
 Provenance: branch flat-u2a at 915402b9dc (flat_io.cljc unchanged since 12295ecefc); JDK 21.0.12.1, bb 1.12.218,
 Node 22.23.4, shadow-cljs 3.3.6; the box shared with two lanes (load 3.5–7.6 on 4 cores during these runs). Base
 comparisons for the bb image suite and the extra Node suites ran on a `git archive 3b656fea20` export (scratch),
 never a second worktree.
+
 - **JVM flat suite** (15 ns, `clojure -M:jvm-test -n …`): before 72 t / 11,530 a / 5 F / 5 E → after (7e95edfcbf)
   72 / 11,530 / 5 / 5, the same ten (host-flat-suite, image-read-speed, requirements-covered, tally-count ×3,
   transfer ×4 OOM). Plus `-n eve.flat.chunk-test -n eve.flat.contract-test` at 915402b9dc: 12 t / 252 a / 0 F
@@ -124,19 +132,20 @@ never a second worktree.
 - **Conformance test**: JVM 11 t / 264 a / 0 F · bb 11 / 264 / 0 · Node 11 / 264 / 0.
 - **Reader conditionals in chunk.cljc**: 131 → 75; byte-level 58 → 2 (the entry above lists both sets).
 - **flatx, JVM** (doc/flat/lanes/flatx.clj, best-µs of 20 after a first run; 3 runs each):
-  | | before (3b656fea20, load ≈ 2.7) | after (915402b9dc, load ≈ 4.9) |
-  |---|---|---|
-  | pack | 6,884 / 6,198 / 9,571 | 5,843 / 6,663 / 5,438 |
-  | get ×407 | 1,060 / 1,049 / 1,064 | 731 / 978 / 840 |
-  | seq walk | 132 / 114 / 121 | 116 / 128 / 115 |
-  | format | 565 / 427 / 471 | 555 / 584 / 414 |
-  `equal?` true in all six. The standalone probe stops at 21 calls a measure, before the JIT has settled on the
-  search; interleaved in one JVM (scratch flatxab.clj, the Phase-0 chunk beside the seam's, 4 rounds, load 4.9),
-  round 3: **get ×407 933 → 258 µs**, pack 3,289 → 2,961, seq 38 → 40, format 288 → 290.
+  |                                                                                                                | before (3b656fea20, load ≈ 2.7) | after (915402b9dc, load ≈ 4.9) |
+  | -------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------ |
+  | pack                                                                                                           | 6,884 / 6,198 / 9,571           | 5,843 / 6,663 / 5,438          |
+  | get ×407                                                                                                       | 1,060 / 1,049 / 1,064           | 731 / 978 / 840                |
+  | seq walk                                                                                                       | 132 / 114 / 121                 | 116 / 128 / 115                |
+  | format                                                                                                         | 565 / 427 / 471                 | 555 / 584 / 414                |
+  | `equal?` true in all six. The standalone probe stops at 21 calls a measure, before the JIT has settled on the  |                                 |                                |
+  | search; interleaved in one JVM (scratch flatxab.clj, the Phase-0 chunk beside the seam's, 4 rounds, load 4.9), |                                 |                                |
+  | round 3: **get ×407 933 → 258 µs**, pack 3,289 → 2,961, seq 38 → 40, format 288 → 290.                         |                                 |                                |
 - **flatx, bb** (same probe, `bb -cp $(bb classpath bb)`; base on the export): pack 742,875 → 735,599 µs;
   **get ×407 86,265 → 23,670**; seq 851 → 848; format 16,082 → 16,446; `equal?` true.
 
 ## 2026-11-17 01:48 AM ET — for U2b and the collation
+
 - **What the flat code calls** (the subset a fast root must answer for chunk.cljc / column.cljc / sio.cljc to run on
   it): chunk, chunk-bytes, chunk-len, u8, u16, u32, i32, i64, f32, f64, varint, varint-v, utf8, bytes-cmp, key-cmp,
   buf, buf-pos, buf-seek, buf-u8, buf-u16, buf-u32, buf-i64, buf-f64, buf-varint, buf-bytes, buf-off, buf-patch-u32,

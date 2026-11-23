@@ -138,22 +138,22 @@ segments 1–2 at 453273e (repairs 1–4), segment 3 at 377902f (repair 5;
 the delta is check.cljc's boundary test, judged by check-test in
 segment 3 and by the B4 bench).
 
-| namespace | tests | assertions | verdict |
-|---|---|---|---|
-| contract-test | 3 | 33 | green |
-| requirements-test | 2 | 571 | green (amendment + repairs 2–4) |
-| image-test | 7 | 208 | **2 failures** — image-read-speed: read ratios 152.7× and 33.1× vs the ≤1.2 gate. Detach's open Z1.7 wound; the collated image.cljc is byte-identical to Z1's tip, so this is the lane's state, not a merge artifact. |
-| place-test | 7 | 96 | green |
-| alloc-run-test | 6 | 32 | green |
-| transfer-test | 6 | 150 | **2 failures** — the Q2b writer-route control (below) |
-| build-test | 4 | 354 | green |
-| chunk-test | 8 | 153 | green |
-| column-test | 5 | 9,459 | green |
-| container-test | 5 | 38 | green |
-| check-test | 5 | 73 | green |
-| list-test | 2 | 12 | green |
-| sister-test | 6 | 45 | green — boundary-conversion passes: repair 1 judged |
-| tally-count-test | 5 | 83 | green |
+| namespace         | tests | assertions | verdict                                                                                                                                                                                                               |
+| ----------------- | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| contract-test     | 3     | 33         | green                                                                                                                                                                                                                 |
+| requirements-test | 2     | 571        | green (amendment + repairs 2–4)                                                                                                                                                                                       |
+| image-test        | 7     | 208        | **2 failures** — image-read-speed: read ratios 152.7× and 33.1× vs the ≤1.2 gate. Detach's open Z1.7 wound; the collated image.cljc is byte-identical to Z1's tip, so this is the lane's state, not a merge artifact. |
+| place-test        | 7     | 96         | green                                                                                                                                                                                                                 |
+| alloc-run-test    | 6     | 32         | green                                                                                                                                                                                                                 |
+| transfer-test     | 6     | 150        | **2 failures** — the Q2b writer-route control (below)                                                                                                                                                                 |
+| build-test        | 4     | 354        | green                                                                                                                                                                                                                 |
+| chunk-test        | 8     | 153        | green                                                                                                                                                                                                                 |
+| column-test       | 5     | 9,459      | green                                                                                                                                                                                                                 |
+| container-test    | 5     | 38         | green                                                                                                                                                                                                                 |
+| check-test        | 5     | 73         | green                                                                                                                                                                                                                 |
+| list-test         | 2     | 12         | green                                                                                                                                                                                                                 |
+| sister-test       | 6     | 45         | green — boundary-conversion passes: repair 1 judged                                                                                                                                                                   |
+| tally-count-test  | 5     | 83         | green                                                                                                                                                                                                                 |
 
 The transfer failures, precisely: T1's Q2b control asserts that a
 plain writer-route store (`swap!` of the same foreign value under the
@@ -163,13 +163,13 @@ the writer route holds **3,330 blocks** (free-count delta
 the conversion route allocates ~2.6× the blocks for this shape (the
 path-copying garbage problem in miniature). Transfer's own arms all
 pass (source untouched, census == reach, refusal paths, cross-process);
-the assertion that fails is the *control's* exactness, an open T1
+the assertion that fails is the _control's_ exactness, an open T1
 residual (its finisher #6 is still working the lane), not a collation
 break — collated transfer.cljc/image.cljc are the owner tips' bytes
 plus repair 1's check-wrapping, which touches neither census.
 
 **Resolved by the final Transfer refresh (below):** T1's declared
-test judges the writer route against its *own* census, and both
+test judges the writer route against its _own_ census, and both
 routes show the identical residual [2 1 0 0 0 0] — the committing
 swap freeing the fresh atom's initial root, a bookkeeping fact about
 the holder, not a route difference. The ~2.6× block-count difference
@@ -180,17 +180,17 @@ assertions, 0 failures, 0 errors.**
 ## Scoreboard on the collated tree (B1–B8)
 
 A fact about the instrument first: W0's `scoreboard.clj` measures only
-the *today* arms — its flat arm is hard-coded `"not built"` (the
+the _today_ arms — its flat arm is hard-coded `"not built"` (the
 lanes' own benches were always the flat-arm instruments). The board
 was run on the collated tree anyway (tip 7887386, min of 5) to re-take
 the baselines the gates compare against:
 
-| corpus | B2/B5 today swap! | B3 today @a (deref) | B4 today atom→atom (:copy, one run) |
-|---|---|---|---|
-| map 10k | 542.89 ms | 18.94 ms | 637.60 ms |
-| vector 100k | 401.35 ms | 17.56 ms | 484.07 ms |
-| records 10k | 475.02 ms | 22.19 ms | 529.76 ms |
-| messages 5k | 1,175.38 ms | 48.09 ms | 1,255.25 ms |
+| corpus      | B2/B5 today swap! | B3 today @a (deref) | B4 today atom→atom (:copy, one run) |
+| ----------- | ----------------- | ------------------- | ----------------------------------- |
+| map 10k     | 542.89 ms         | 18.94 ms            | 637.60 ms                           |
+| vector 100k | 401.35 ms         | 17.56 ms            | 484.07 ms                           |
+| records 10k | 475.02 ms         | 22.19 ms            | 529.76 ms                           |
+| messages 5k | 1,175.38 ms       | 48.09 ms            | 1,255.25 ms                         |
 
 (B6 baselines: Transit MessagePack 59,235 / 368,549 / 358,526 /
 874,085 B. B8 baselines: whole-value gzip 23,984 / 212,000 / 65,556 /
@@ -203,11 +203,11 @@ instruments:
 ≥2× faster than @a on every corpus. MISSED on every corpus, by
 ~100–250×:**
 
-| corpus | @a | detach | ratio |
-|---|---|---|---|
-| map 10k | 13.63 ms | 1,400.47 ms | 0.01× |
+| corpus      | @a       | detach       | ratio |
+| ----------- | -------- | ------------ | ----- |
+| map 10k     | 13.63 ms | 1,400.47 ms  | 0.01× |
 | vector 100k | 92.47 ms | 23,425.94 ms | 0.00× |
-| records 10k | 40.68 ms | 6,732.04 ms | 0.01× |
+| records 10k | 40.68 ms | 6,732.04 ms  | 0.01× |
 | messages 5k | 89.64 ms | 16,212.26 ms | 0.01× |
 
 Values verified equal on every row (no BOARD MISMATCH) — detach is
@@ -223,11 +223,11 @@ transfer!/(detach+zip) ≤2× — PASSED on all four (0.92 / 0.96 / 1.00 /
 1.08; the composition is free, as at T1's own pin). Absolute caps
 ≤5/26/9/26 ms — MISSED on all four, by ~250–1,900×:**
 
-| corpus | detach | zip | transfer! | cap |
-|---|---|---|---|---|
-| map 10k | 481.74 ms | 924.96 ms | 1,287.41 ms | 5 ms |
+| corpus      | detach       | zip          | transfer!    | cap   |
+| ----------- | ------------ | ------------ | ------------ | ----- |
+| map 10k     | 481.74 ms    | 924.96 ms    | 1,287.41 ms  | 5 ms  |
 | vector 100k | 21,907.34 ms | 29,110.73 ms | 49,114.47 ms | 26 ms |
-| records 10k | 5,667.95 ms | 8,452.57 ms | 14,106.30 ms | 9 ms |
+| records 10k | 5,667.95 ms  | 8,452.57 ms  | 14,106.30 ms | 9 ms  |
 | messages 5k | 13,652.31 ms | 20,435.57 ms | 36,957.08 ms | 26 ms |
 
 The caps were set from the research probes' zip numbers (~2.5 ms for
@@ -329,17 +329,17 @@ Detach refresh + Wave 2 merges + the list flip + Transfer refresh;
 logs collate-w2-suites.log and collate-w2-spotcheck.log, HEAD lines
 verified):
 
-| namespace | tests | assertions | verdict |
-|---|---|---|---|
-| disk-test | 2 | 7,462 | green |
-| journal-test | 1 | 10 | green |
-| io-test | 3 | 39 | green |
-| host-suite-test | 1 | 329 | green — the flipped lists judge |
-| requirements-test | 2 | 590 | green (assertion count grew with the merged manifest) |
-| contract-test | 3 | 33 | green |
-| image-test | 7 | 208 | **2 failures** — image-read-speed only (Z1.7, above) |
-| sister-test | 6 | 45 | green |
-| transfer-test | 6 | 150 | green |
+| namespace         | tests | assertions | verdict                                               |
+| ----------------- | ----- | ---------- | ----------------------------------------------------- |
+| disk-test         | 2     | 7,462      | green                                                 |
+| journal-test      | 1     | 10         | green                                                 |
+| io-test           | 3     | 39         | green                                                 |
+| host-suite-test   | 1     | 329        | green — the flipped lists judge                       |
+| requirements-test | 2     | 590        | green (assertion count grew with the merged manifest) |
+| contract-test     | 3     | 33         | green                                                 |
+| image-test        | 7     | 208        | **2 failures** — image-read-speed only (Z1.7, above)  |
+| sister-test       | 6     | 45         | green                                                 |
+| transfer-test     | 6     | 150        | green                                                 |
 
 With the successor pass's table, the collated test set now stands:
 **every namespace green except image-test's Z1.7 pair.** No
@@ -402,13 +402,13 @@ Disk/Journal/IO received in the final pass (commit ca967b8).
 logs collate-w3-jvm.log and collate-w3-node.log, HEAD lines
 verified):
 
-| namespace | tests | assertions | verdict |
-|---|---|---|---|
-| dataset-batch-test | 3 | 29 | green |
-| requirements-test | 2 | 594 | **1 error** — attributed below |
-| contract-test | 3 | 33 | green |
-| host-suite-test | 1 | 331 | green (count grew with the landed files) |
-| image-node-test (Node) | — | — | **dies at load** — cross-lane break below |
+| namespace              | tests | assertions | verdict                                   |
+| ---------------------- | ----- | ---------- | ----------------------------------------- |
+| dataset-batch-test     | 3     | 29         | green                                     |
+| requirements-test      | 2     | 594        | **1 error** — attributed below            |
+| contract-test          | 3     | 33         | green                                     |
+| host-suite-test        | 1     | 331        | green (count grew with the landed files)  |
+| image-node-test (Node) | —     | —          | **dies at load** — cross-lane break below |
 
 **The requirements error is the manifest's host blindness, not the
 api-surface probe.** `requirements-covered` errors on exactly one
