@@ -4,10 +4,15 @@
    host's numbers, instants, uuids, exceptions, map entries, small caches —
    over the JVM's java.lang and java.util (the JVM, babashka, jolt — whose
    interop answers these classes)."
+  ;; unused-referred-var is off for this file alone: its eve.host refer list
+  ;; mirrors the file's :refer-clojure :exclude declaration - the host-face
+  ;; surface, kept in sync by construction; the flagged names are not called
+  ;; from this file's body (per-spec discards proved unstable here: kondo
+  ;; attributes the findings across the shared specs).
+  {:clj-kondo/config {:linters {:unused-referred-var {:level :off}}}}
   (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
                             long class double bytes])
   (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
-   #_{:clj-kondo/ignore [:unused-referred-var]} ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
    [eve.host :refer [aget aset byte-array unchecked-byte unsigned-bit-shift-right
                      long class double bytes]]))
 

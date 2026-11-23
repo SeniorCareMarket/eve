@@ -243,10 +243,9 @@
         u0 (build-image-unit 256 {:root 32 :symtab 144 :shapetab 184
                                   :blocks [[32 40] [80 56]]
                                   :block-table block-table :reloc-table reloc-table})
-        #_{:clj-kondo/ignore [:type-mismatch]} ; build-image-unit defaults :symtab/:shapetab when absent (the (or ...) fallbacks in its body and put-header's); kondo's inferred map type requires them because sibling calls pass them
-        u1 (build-image-unit 256 {:root 288 :unit-start 256 :blocks [[288 48] [352 64]]})
-        #_{:clj-kondo/ignore [:type-mismatch]} ; build-image-unit defaults :symtab/:shapetab when absent (the (or ...) fallbacks in its body and put-header's); kondo's inferred map type requires them because sibling calls pass them
-        u2 (build-image-unit 256 {:root 544 :unit-start 512 :blocks [[544 40]]})
+        ;; build-image-unit defaults :symtab/:shapetab when absent (the (or ...) fallbacks in its body and put-header's); kondo's inferred map type requires them because sibling calls pass them - the two discards below carry that reason
+        u1 #_{:clj-kondo/ignore [:type-mismatch]} (build-image-unit 256 {:root 288 :unit-start 256 :blocks [[288 48] [352 64]]})
+        u2 #_{:clj-kondo/ignore [:type-mismatch]} (build-image-unit 256 {:root 544 :unit-start 512 :blocks [[544 40]]})
         c (cont/make-container [{:bytes u0} {:bytes u1} {:bytes u2}] {:chunk 0 :offset 32})
         plan (cont/cross-unit-plan c)]
     (testing "the container hands Z3 its units in order"
