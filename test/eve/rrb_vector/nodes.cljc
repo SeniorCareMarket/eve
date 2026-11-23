@@ -9,9 +9,9 @@
 (ns eve.rrb-vector.nodes
   (:refer-clojure :exclude [clone make-array aget aset alength aclone long])
   (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-   #_{:clj-kondo/ignore [:unused-namespace]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
-   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
-   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [long]]
+   ;; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
+   ;; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body
+   #_{:clj-kondo/ignore [:unused-namespace :unused-referred-var]}   [eve.host :refer [long]]
    [eve.deftype :as edt]
    [eve.deftype.array :refer [make-array aget aset alength aclone array-copy]]))
 
