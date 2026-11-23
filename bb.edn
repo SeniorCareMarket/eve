@@ -285,11 +285,24 @@
   lint-depend {:doc "clj-depend layer check (.clj-depend/config.edn)"
                :extra-deps {com.fabiodomingues/clj-depend {:mvn/version "0.11.1"}}
                :task (do (require 'clj-depend.api 'clojure.java.io)
-                         (let [r (clj-depend.api/analyze {:project-root (clojure.java.io/file ".")
-                                                          :files #{(clojure.java.io/file "src") (clojure.java.io/file "adapters") (clojure.java.io/file "apps/aegis/src") (clojure.java.io/file "apps/network-atoms/src")}})
-                               vs (:violations r)]
-                           (doseq [v vs] (println v))
-                           (when (seq vs) (System/exit 1))))}
+                         ;; requiring-resolve, not a qualified call: SCI analyzes the
+                         ;; whole task body before the :extra-deps require is evaluated,
+                         ;; so clj-depend.api/analyze does not resolve as a symbol here.
+                         ;; Canonical (absolute) paths throughout: clj-depend filters
+                         ;; the namespaces to analyze by path prefix, and the
+                         ;; "./"-prefixed paths a relative project-root produces match
+                         ;; nothing — with relative paths this leg analyzes zero
+                         ;; namespaces and can never fail (measured on a violating
+                         ;; fixture; the pre-fix leg was vacuously green).
+                         (let [root (.getCanonicalFile (clojure.java.io/file "."))
+                               r ((requiring-resolve 'clj-depend.api/analyze)
+                                  {:project-root root
+                                   :files (into #{} (map (fn [p] (clojure.java.io/file root p)))
+                                                ["src" "adapters" "apps/aegis/src" "apps/network-atoms/src"])})]
+                           (doseq [v (:violations r)] (println v))
+                           (when (not= 0 (:result-code r))
+                             (println (:message r))
+                             (System/exit 1))))}
   carve-report {:doc "fail if any unused var is reported"
                 :task (shell "carve --opts '{:paths [\"src\" \"adapters\" \"apps\" \"test\"] :report {:format :text}}'")}
   fmt-check {:doc "cljfmt check — the fleet .cljfmt.edn is the rules"

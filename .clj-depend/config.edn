@@ -1,5 +1,6 @@
 ;; Eve's layers, derived from the tree (hosts.edn + the namespace
-;; census on syntax/formalization-1, Nov 22 2026):
+;; census on syntax/formalization-1, Nov 22 2026; corrected
+;; 2026-11-23, see the :net note):
 ;;
 ;; :host-seam — the primitive namespaces ONLY adapters define
 ;; (eve.host, eve.codec, eve.slab-io, eve.crypto, ...): each host
@@ -13,15 +14,39 @@
 ;;
 ;; :core — every eve.* namespace defined under src/ (the CLJC core).
 ;;
-;; :apps — the two apps' namespaces (eve.aegis.*, eve.net.* as
-;; defined under apps/). Nothing in the core or the seam may depend
-;; on an app; apps may depend on everything below them.
+;; :net — the network-atoms subsystem (the eve.net.* namespaces
+;; defined under apps/network-atoms/src). CORRECTION (2026-11-23):
+;; the first model put every eve.net.* name in :apps, which was
+;; wrong twice over. (1) eve.net.bytes, eve.net.json and
+;; eve.net.u64 are defined under src/ — they are core. (2) The
+;; network-atoms namespaces are not a leaf application: the core's
+;; own eve.thread.net (the thread layer's network rung) and
+;; eve.keyring require eve.net.atom/platform/run/wire and
+;; eve.net.crypto directly — network atoms are an Eve subsystem
+;; the core builds on, so :net sits between :core and :apps:
+;; core and apps may access it, it may access core and the seam.
+;; The mis-model was invisible until the lint-depend leg was made
+;; non-vacuous (it had analyzed zero namespaces since its first
+;; run; see bb.edn). Whether eve.thread.net/eve.keyring should
+;; instead move out of the core is an architecture question for
+;; the Eve owners, recorded in the lane's RETRO.md — this config
+;; models the tree as it stands.
+;;
+;; :apps — the application namespaces (eve.aegis.*). Nothing in
+;; the core, the seam or the net layer may depend on an app; apps
+;; may depend on everything below them.
+;;
+;; Layer order matters: clj-depend assigns a namespace to the
+;; FIRST layer whose :defined-by matches, so :apps and :net are
+;; listed before the :core catch-all.
 ;;
 ;; Namespaces outside eve.* (clojure.*, goog.*) are not layered.
 {:layers
- {:apps {:defined-by "eve\\.(aegis|net)\\..*"
+ {:apps {:defined-by "eve\\.aegis\\..*"
          :accessed-by-layers #{:apps}}
+  :net {:defined-by "eve\\.net\\.(atom|blobs|broker|broker-disk|codec|crypto|gateway|graft|pages|platform|presign|run|snapshot|stand-in|store|wire)(\\..*)?"
+        :accessed-by-layers #{:apps :net :core}}
   :host-seam {:defined-by "eve\\.(codec|core|crypto|crypto-bigint|data|deftype-proto\\.wasm|encoding|flat-io|gc|host|host-completion|host-init|host-prim|http|http-server|int32|journal-file|logical-protocol|process|process-slab|region|rrb-vector\\.macros|sab|slab-io|thread-host|typed-view|types|types-js|util|wasm-mem)"
-              :accessed-by-layers #{:host-seam :core :apps}}
+              :accessed-by-layers #{:host-seam :core :apps :net}}
   :core {:defined-by "eve\\..*"
-         :accessed-by-layers #{:host-seam :core :apps}}}}
+         :accessed-by-layers #{:host-seam :core :apps :net}}}}
