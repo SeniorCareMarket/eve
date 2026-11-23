@@ -408,6 +408,29 @@
                   (recur (inc i) (+ sp entry-size) (+ dp entry-size)))))))
         dst-off))))
 
+;; jolt: the same-size replace (a counter's swap) as two Chez calls around the alloc! (replace-geom* /
+;; replace-write*): its dispatched reads, copy and writes were ~8% of atom-swap-counter there (profile q5,
+;; 2026-11-23 ET). The same block, the same bytes; any other case is copy-node-replace-kv!.
+#?(:jolt (declare ^:private replace-geom* ^:private replace-write*))
+#?(:jolt
+   (defn- copy-node-replace-kv-fast!
+     [sio src-off data-bm node-bm data-idx kh kb vb]
+     (let [g (replace-geom* sio src-off data-bm node-bm data-idx (bytes-length kb) (bytes-length vb))]
+       (if (neg? g)
+         (copy-node-replace-kv! sio src-off data-bm node-bm data-idx kh kb vb)
+         (let [nsize (unsigned-bit-shift-right g 32)
+               kv-pos (bit-and g 0xFFFFFFFF)
+               dst-off (slab/alloc! sio nsize)
+               hoff (+ (hashes-start-off node-bm) (* data-idx 4))]
+           (when-not (true? (replace-write* sio dst-off src-off nsize kv-pos kb vb kh hoff))
+             (slab/copy-block! sio dst-off 0 src-off 0 nsize)
+             (slab/write-i32! sio dst-off kv-pos (bytes-length kb))
+             (slab/write-bytes! sio dst-off (+ kv-pos 4) kb)
+             (slab/write-i32! sio dst-off (+ kv-pos 4 (bytes-length kb)) (bytes-length vb))
+             (slab/write-bytes! sio dst-off (+ kv-pos 4 (bytes-length kb) 4) vb)
+             (slab/write-i32! sio dst-off hoff kh))
+           dst-off)))))
+
 (defn- copy-node-add-kv!
   "Copy a bitmap node, inserting a new KV at data-idx."
   [sio src-off src-data-bm new-data-bm node-bm
@@ -800,6 +823,75 @@
                          ((fixnum? vb) vb)
                          (else (dec vb sio))))
                  fallback))))
+         ;; the same lookup from the map's header block at hoff: its root word (at roff, the plain load the root-off
+         ;; field reads) and the walk in one call
+         (define (eve-hamt-get-val-at ctag ltag i32op u8op rbop fallback absent dec roff)
+           (let ((cd #f) (ld #f))
+             (lambda (sio hoff kh kb)
+               (eve-alloc-unwrap sio s ctag ltag cd ld
+                 (let* ((v (jrec*-vals s)) (rs (vector-ref v 0)) (dos (vector-ref v 2)) (bss (vector-ref v 5))
+                        (root (eve-sio-at rs dos bss hoff roff r a
+                                (let ((b (and (fixnum? a) (eve-region-base r))))
+                                  (if b
+                                      (let ((x (#3%foreign-ref 'integer-32 b a))) (keep-live r) x)
+                                      (i32op r a)))))
+                        (vb (eve-hamt-walk rs dos bss root kh kb i32op u8op rbop)))
+                   (cond ((eq? vb jolt-nil) absent)
+                         ((fixnum? vb) vb)
+                         (else (dec vb sio))))
+                 fallback))))
+         ;; copy-node-replace-kv!'s same-size copy in two calls around its alloc!: (geom) the bitmap node at src's
+         ;; size and its data-idx'th pair's position, packed (size << 32 | pos), -2 where the new pair's size differs
+         ;; (the splice path), -1 where src is not in a JoltRegion here; (write) the node's bytes copied to dst and the
+         ;; pair and hash written over them, the plain stores slab/copy-block!, write-i32! and write-bytes! make, #t,
+         ;; or -1 before any write
+         (define-syntax eve-map-at
+           (syntax-rules ()
+             ((_ rs dos bss off b body)
+              (eve-sio-at rs dos bss off 0 r a
+                (let ((b (let ((rb (and (fixnum? a) (eve-region-base r)))) (and rb (fx+ rb a)))))
+                  (if b (let ((x body)) (keep-live r) x) -1))))))
+         (define (eve-map-replace-geom ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio src dbm nbm di klen vlen)
+               (eve-alloc-unwrap sio s ctag ltag cd ld
+                 (let ((v (jrec*-vals s)))
+                   (eve-map-at (vector-ref v 0) (vector-ref v 2) (vector-ref v 5) src b0
+                     (let-syntax ((i32 (syntax-rules () ((_ x) (#3%foreign-ref 'integer-32 b0 x))))
+                                  (u16 (syntax-rules () ((_ x) (#3%foreign-ref 'unsigned-16 b0 x)))))
+                       (let* ((dc (eve-hamt-popc dbm)) (cc (eve-hamt-popc nbm))
+                              (kvs (fx+ 12 (fx* 4 cc) (fx* 4 dc)))
+                              (skip (lambda (p) (let ((vo (fx+ p 4 (i32 p)))) (fx+ vo 4 (i32 vo)))))
+                              (pos (let loop ((i 0) (p kvs)) (if (fx= i di) p (loop (fx+ i 1) (skip p)))))
+                              (old (fx- (skip pos) pos)))
+                         (if (not (fx= old (fx+ 8 klen vlen)))
+                             -2
+                             (let* ((cached (u16 2))
+                                    (kvt (if (fx> cached 0)
+                                             cached
+                                             (let loop ((i 0) (p kvs))
+                                               (if (fx>= i dc) (fx- p kvs) (loop (fx+ i 1) (skip p)))))))
+                               (fxior (fxsll (fx+ kvs kvt) 32) pos)))))))
+                 -1))))
+         (define (eve-map-replace-write ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio dst src nsize pos kb vb kh hoff)
+               (eve-alloc-unwrap sio s ctag ltag cd ld
+                 (let* ((v (jrec*-vals s)) (rs (vector-ref v 0)) (dos (vector-ref v 2)) (bss (vector-ref v 5)))
+                   (eve-map-at rs dos bss src bs
+                     (eve-map-at rs dos bss dst bd
+                       (let* ((kbv (jolt-array-vec kb)) (vbv (jolt-array-vec vb))
+                              (kl (bytevector-length kbv)) (vl (bytevector-length vbv))
+                              (tmp (make-bytevector nsize)))
+                         (sa-foreign-bytes-ref! bs tmp nsize)
+                         (sa-foreign-bytes-set! bd tmp nsize)
+                         (#3%foreign-set! 'unsigned-32 bd pos kl)
+                         (when (fx> kl 0) (sa-foreign-bytes-set! (fx+ bd pos 4) kbv kl))
+                         (#3%foreign-set! 'unsigned-32 bd (fx+ pos 4 kl) vl)
+                         (when (fx> vl 0) (sa-foreign-bytes-set! (fx+ bd pos 8 kl) vbv vl))
+                         (#3%foreign-set! 'unsigned-32 bd hoff (bitwise-and kh #xFFFFFFFF))
+                         #t))))
+                 -1))))
          #t)")
      (def ^:private hamt-fallback (Object.))
      (def ^:private hamt-absent (Object.))
@@ -808,7 +900,17 @@
          ((scheme/proc "eve-hamt-get-val")
           (nth tags 0) (nth tags 1)
           region/plain-load-i32-op region/plain-load-u8-op region/read-bytes-op
-          hamt-fallback hamt-absent deserialize-value-bytes)))))
+          hamt-fallback hamt-absent deserialize-value-bytes)))
+     (def ^:private hamt-val-at*
+       (let [tags (alloc/jolt-ctx-tags)]
+         ((scheme/proc "eve-hamt-get-val-at")
+          (nth tags 0) (nth tags 1)
+          region/plain-load-i32-op region/plain-load-u8-op region/read-bytes-op
+          hamt-fallback hamt-absent deserialize-value-bytes SABMAPROOT_ROOT_OFF_OFFSET)))
+     (def ^:private replace-geom*
+       (let [tags (alloc/jolt-ctx-tags)] ((scheme/proc "eve-map-replace-geom") (nth tags 0) (nth tags 1))))
+     (def ^:private replace-write*
+       (let [tags (alloc/jolt-ctx-tags)] ((scheme/proc "eve-map-replace-write") (nth tags 0) (nth tags 1))))))
 
 (defn- hamt-get
   "Find key k in HAMT rooted at root-off. Returns value or not-found.
@@ -851,6 +953,18 @@
          (if (alloc/node-viewable? sio)
            (hamt-get-view sio root-off kbkh not-found)
            (hamt-get-words sio root-off kbkh not-found))))))
+
+#?(:jolt
+   (defn- hamt-get-at
+     "hamt-get of the map whose header block is at hdr-off: its root-off word and the walk in one Chez call (the
+      field's read was ~7% of atom-$-get-map-1k on jolt, profile q4, 2026-11-23 ET); the same answer."
+     [sio hdr-off k not-found]
+     (let [kbkh (key-bytes+hash k)
+           v (hamt-val-at* sio hdr-off (nth kbkh 1) (nth kbkh 0))]
+       (cond
+         (identical? v hamt-fallback) (hamt-get sio (slab/read-i32 sio hdr-off SABMAPROOT_ROOT_OFF_OFFSET) k not-found)
+         (identical? v hamt-absent) not-found
+         :else v))))
 
 ;;=============================================================================
 ;; HAMT Assoc (unified)
@@ -947,7 +1061,8 @@
                     (if (and (== vl (bytes-length vb))
                              (slab/bytes-equal-at? sio root-off (+ val-off 4) vb))
                       [root-off false]
-                      [(copy-node-replace-kv! sio root-off data-bm node-bm data-idx kh kb vb)
+                      [#?(:jolt (copy-node-replace-kv-fast! sio root-off data-bm node-bm data-idx kh kb vb)
+                          :default (copy-node-replace-kv! sio root-off data-bm node-bm data-idx kh kb vb))
                        false]))
                   ;; Different key — push down
                   (let [kl (slab/read-i32 sio root-off pos)
@@ -1299,9 +1414,9 @@
   (withMeta [this m] this)
 
   clojure.lang.ILookup
-  (valAt [_ k] (hamt-get sio__ root-off k nil))
+  (valAt [_ k] #?(:jolt (hamt-get-at sio__ offset__ k nil) :default (hamt-get sio__ root-off k nil)))
   (valAt [_ k not-found]
-    (hamt-get sio__ root-off k not-found))
+    #?(:jolt (hamt-get-at sio__ offset__ k not-found) :default (hamt-get sio__ root-off k not-found)))
 
   clojure.lang.Associative
   (containsKey [_ k]
@@ -1391,8 +1506,6 @@
   (invoke [this k] (hamt-get sio__ root-off k nil))
   (invoke [this k nf] (hamt-get sio__ root-off k nf))
 
-  
-
   d/IDirectSerialize
   (-direct-serialize [this] offset__)
 
@@ -1421,7 +1534,7 @@
 
   java.lang.Iterable
   (iterator [this]
-            (clojure.lang.SeqIterator. (.seq this)))
+    (clojure.lang.SeqIterator. (.seq this)))
 
   java.util.Map
   (size [_] (int cnt))
@@ -1443,9 +1556,9 @@
   java.lang.Object
   (toString [this] (pr-str this))
   (equals [this other]
-          (clojure.lang.APersistentMap/mapEquals this other))
+    (clojure.lang.APersistentMap/mapEquals this other))
   (hashCode [this]
-            (enc/map-hash-code this))) ;; end eve/deftype
+    (enc/map-hash-code this))) ;; end eve/deftype
 
 ;;=============================================================================
 ;; Constructors

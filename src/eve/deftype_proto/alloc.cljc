@@ -682,6 +682,49 @@
              (slab/regions-changed! ctx)
              true))))
 
+     ;; jolt: ctx-alloc!'s try-alloc of a bitmap class in one Chez call where the class's data and bitmap regions are
+     ;; JoltRegions on Linux x86-64 (region/chez-atomics?): the same free-count skip, total snapshot, cursor, scan
+     ;; (eve-bitmap-find-free), bit CAS (eve-bitmap-alloc-cas!), cursor store (__atomic_store_4, as -store-i32!) and
+     ;; free-count decrement (__atomic_fetch_add_4, as -sub-i32!), in the same order. -2 is try-alloc's nil; -1 hands
+     ;; the class to the portable body before any word is written (a changed total, another region kind). Its
+     ;; dispatched region and slab calls were ~5% of atom-swap-counter on jolt (profile q3b, 2026-11-23 ET).
+     #?(:jolt
+   (do
+     (scheme/eval-string
+      "(begin
+              (define eve-alloc-add4
+                (and eve-region-libatomic (foreign-procedure \"__atomic_fetch_add_4\" (uptr integer-32 int) integer-32)))
+              (define eve-alloc-store4
+                (and eve-region-libatomic (foreign-procedure \"__atomic_store_4\" (uptr integer-32 int) void)))
+              (define (eve-alloc-try ctx ci)
+                (let* ((v (jrec*-vals ctx)) (rg (eve-sio-ref (vector-ref v 0) ci)) (rb (eve-region-base rg)))
+                  (if (not (and rb eve-alloc-add4 eve-alloc-store4))
+                      -1
+                      (let ((fp (eve-sio-ref (vector-ref v 6) ci)))
+                        (if (and (or (not fp) (eq? fp jolt-nil)) (fx<= (#3%foreign-ref 'integer-32 rb 12) 0))
+                            -2
+                            (let* ((tbs (vector-ref v 4)) (total (eve-sio-ref tbs ci))
+                                   (br (eve-sio-ref (vector-ref v 1) ci)) (boff (eve-sio-ref (vector-ref v 3) ci))
+                                   (bb (eve-region-base br)))
+                              (if (not (and bb (fixnum? total) (fx> total 0) (eqv? total (eve-sio-ref tbs ci))
+                                            (fixnum? boff) (fixnum? (jrec3-f1 br))))
+                                  -1
+                                  (let ((bsz (jrec3-f1 br)))
+                                    (let loop ((sb (modulo (#3%foreign-ref 'integer-32 rb 16) total)) (wrapped? #f))
+                                      (let ((cand (eve-bitmap-find-free br bb bsz boff total sb)))
+                                        (cond ((not (fixnum? cand)) -1)
+                                              ((not (fx= cand -1))
+                                               (if (eve-bitmap-alloc-cas! br bb boff cand)
+                                                   (begin
+                                                     (eve-alloc-store4 (fx+ rb 16) (modulo (fx+ cand 1) total) 5)
+                                                     (eve-alloc-add4 (fx+ rb 12) -1 5)
+                                                     (keep-live rg)
+                                                     (fxior (fxsll ci 29) (fxand cand #x1FFFFFFF)))
+                                                   (loop (fx+ cand 1) wrapped?)))
+                                              ((and (not wrapped?) (fx> sb 0)) (loop 0 #t))
+                                              (else -2)))))))))))))")
+     (def ^:private alloc-try* (when (region/chez-atomics?) (scheme/proc "eve-alloc-try")))))
+
      (defn ctx-alloc!
        "A block of at least size-bytes in ctx's slabs: its slab-qualified
         offset. Classes 0-5 are bitmap slabs that grow (a file-backed class
@@ -836,7 +879,9 @@
                                  (do (remap-jvm! ci (long witness))
                                      true)))))))))]
              (loop [ci class-idx, attempts 0]
-               (or (try-alloc ci)
+               (or #?(:jolt (let [r (if alloc-try* (alloc-try* ctx ci) -1)]
+                              (cond (== r -1) (try-alloc ci) (== r -2) nil :else r))
+                      :default (try-alloc ci))
                    (if (and (< attempts 20) (grow! ci))
                      (recur ci (inc attempts))
                      ;; Growth exhausted — spill to next larger class

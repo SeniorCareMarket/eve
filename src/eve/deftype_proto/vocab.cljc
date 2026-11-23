@@ -610,11 +610,26 @@
       (meta form))
     :else form))
 
+#?(:jolt
+   (defn- body-symbols
+     "Every symbol in form, at any depth."
+     [form]
+     (cond (symbol? form) #{form}
+           (seq? form) (reduce into #{} (map body-symbols form))
+           (vector? form) (reduce into #{} (map body-symbols form))
+           (map? form) (reduce into #{} (map body-symbols (concat (keys form) (vals form))))
+           (set? form) (reduce into #{} (map body-symbols form))
+           :else #{})))
+
 (defn transform-method-body
-  "Wrap method body with field-read let-bindings and set! rewriting."
+  "Wrap method body with field-read let-bindings and set! rewriting. On jolt a method binds only the fields its body
+   names: each binding is a slab read the compiler cannot drop (EveHashMap's valAt read cnt and root-off on every
+   lookup, ~7% of atom-$-get-map-1k, 2026-11-23 ET); a field the body never names is never read by it."
   [body fields field-map]
-  (let [field-read-bindings (field-bindings fields)
-        rewritten (map #(rewrite-set!-forms % field-map) body)]
+  (let [rewritten (map #(rewrite-set!-forms % field-map) body)
+        field-read-bindings #?(:jolt (let [used (body-symbols rewritten)]
+                                       (field-bindings (filter #(contains? used (symbol (:name %))) fields)))
+                               :default (field-bindings fields))]
     (if (empty? field-read-bindings)
       rewritten
       (list (apply list 'let field-read-bindings (vec rewritten))))))
