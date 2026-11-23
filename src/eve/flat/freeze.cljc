@@ -237,7 +237,8 @@
 ;; root pointer neither knows nor cares that it is flat.
 
 (declare -handle frozen-value?)
-#?(:clj (declare based-of based-assoc based-pop))
+#?(:clj (declare based-of based-assoc based-pop)
+   :lpy (declare based-of based-assoc based-pop))
 ;; The protocol hosts' spellings of the based/concat helpers
 ;; (eve.core calls instead of host collection calls), defined
 ;; after BasedValue below.
@@ -769,6 +770,189 @@
      (hashCode [this] (hash (vec (seq this))))
      (toString [this] (pr-str (seq this)))))
 
+#?(:lpy (do
+  ;; the frozen wrapper types on basilisp: the same three types the
+  ;; other runtime-require hosts define per-host above, spelled over
+  ;; basilisp.lang.interfaces. FrozenValue delegates every read to
+  ;; its opened handle; writes the handle refuses upgrade to a
+  ;; BasedValue embedding it, exactly as the :clj arm's law states.
+  ;; IAssociative cannot be listed beside IPersistentCollection
+  ;; (MRO), so FrozenValue claims the IAssociative-led set, whose
+  ;; abstract surface is precisely assoc/cons/contains/entry/seq/
+  ;; nth/val-at/peek/pop/reduce.
+  (defn- cb-assoc-one [cb k v]
+    (cond (not (integer? k)) (throw (python/ValueError "Key must be integer"))
+          (== (long k) (.-total cb)) (conj cb v)
+          :else (concat-assoc-n (.-handles cb) (.-cums cb) (.-total cb)
+                                (.-mm cb) (long k) v)))
+  (defn- bv-assoc-one [bv k v]
+    (if (integer? k)
+      (based-assoc-n (.-base bv) (.-edits bv) (.-tail bv) (.-n bv)
+                     (.-bc bv) (.-mm bv) (long k) v)
+      (throw (python/ValueError "Key must be integer"))))
+  (deftype FrozenValue [sio hdr cells]
+    d/IEveRoot
+    (-root-header-off [_] hdr)
+    d/IEveSio
+    (-eve-sio [_] sio)
+    basilisp.lang.interfaces/IAssociative
+    (assoc [this & kvs]
+      (loop [ret this xs (seq kvs)]
+        (if xs
+          (recur (if (identical? ret this)
+                   (try (assoc (-handle this sio hdr) (first xs) (second xs))
+                        (catch python/BaseException _
+                          (based-assoc this (first xs) (second xs))))
+                   (assoc ret (first xs) (second xs)))
+                 (nnext xs))
+          ret)))
+    (contains [this k] (contains? (-handle this sio hdr) k))
+    (entry [this k] (find (-handle this sio hdr) k))
+    (seq [this] (seq (-handle this sio hdr)))
+    (cons [this x] (try (conj (-handle this sio hdr) x)
+                        (catch python/BaseException _
+                          (conj (based-of this) x))))
+    (empty [_] (throw (python/NotImplementedError "empty on a frozen value")))
+    basilisp.lang.interfaces/ILookup
+    (val-at [this & args]
+      (let [h (-handle this sio hdr)]
+        (if (== 1 (count args))
+          (get h (first args))
+          (get h (first args) (second args)))))
+    basilisp.lang.interfaces/IIndexed
+    (^{:kwargs :collect} nth [this i & kwargs]
+      (let [nf (:notfound kwargs ::none)
+            h (-handle this sio hdr)]
+        (if (or (identical? nf ::none)
+                (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+          (nth h i)
+          (nth h i nf))))
+    basilisp.lang.interfaces/IPersistentStack
+    (peek [this] (peek (-handle this sio hdr)))
+    (pop [this] (try (pop (-handle this sio hdr))
+                     (catch python/BaseException _ (based-pop this))))
+    basilisp.lang.interfaces/IReduce
+    (reduce [this & args]
+      (if (== 1 (count args))
+        (clojure.core/reduce (first args) (seq this))
+        (clojure.core/reduce (first args) (second args) (seq this))))
+    (__len__ [this] (count (-handle this sio hdr)))
+    (__iter__ [this] (python/iter (or (seq this) ())))
+    (__eq__ [this other] (= (-handle this sio hdr) other))
+    (__hash__ [this] (hash (-handle this sio hdr)))
+    (__str__ [_] (str "#eve/frozen " hdr)))
+  (deftype ConcatBatch [handles cums total mm]
+    chunk/IFlatHandle
+    (-rep [this] (mapv chunk/rep-of this))
+    (-chunk-bytes [_] (frame-stream (mapv chunk/bytes-of handles)))
+    basilisp.lang.interfaces/IPersistentVector
+    (assoc [this & kvs]
+      (loop [ret this xs (seq kvs)]
+        (if xs
+          (recur (cb-assoc-one ret (first xs) (second xs)) (nnext xs))
+          ret)))
+    (cons [this v] (let [h' (chunk/open (first (chunk/pack-all [v])))]
+                     (ConcatBatch. (conj handles h') (conj cums total)
+                                   (inc total) mm)))
+    (contains [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) total)))
+    (entry [this k] (when (and (integer? k) (<= 0 (long k)) (< (long k) total))
+                      (basilisp.core/map-entry (long k) (nth this (long k)))))
+    (empty [_] [])
+    (seq [this] (apply concat (map seq handles)))
+    (peek [this] (when (pos? total) (nth this (dec total))))
+    (pop [this] (if (zero? total)
+                  (throw (python/RuntimeError "Can't pop empty vector"))
+                  (let [hl (peek handles)]
+                    (if (== 1 (count hl))
+                      (ConcatBatch. (pop handles) (pop cums) (dec total) mm)
+                      (ConcatBatch. (assoc handles (dec (count handles)) (pop hl))
+                                    cums (dec total) mm)))))
+    (^{:kwargs :collect} nth [this i & kwargs]
+      (let [nf (:notfound kwargs ::none)]
+        (if (and (integer? i) (<= 0 i) (< i total))
+          (let [j (cb-locate cums i)]
+            (nth (nth handles j) (- i (nth cums j))))
+          (if (or (identical? nf ::none)
+                  (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+            (throw (python/IndexError (str i)))
+            nf))))
+    (val-at [this & args]
+      (let [k (first args)]
+        (if (and (integer? k) (<= 0 (long k)) (< (long k) total))
+          (nth this (long k))
+          (when (== 2 (count args)) (second args)))))
+    basilisp.lang.interfaces/IReduce
+    (reduce [this & args]
+      (if (== 1 (count args))
+        (clojure.core/reduce (first args) (seq this))
+        (clojure.core/reduce (first args) (second args) (seq this))))
+    basilisp.lang.interfaces/IWithMeta
+    (meta [_] mm)
+    (with-meta [_ m] (ConcatBatch. handles cums total m))
+    (__len__ [_] total)
+    (__getitem__ [this i] (if (integer? i) (nth this i) (throw (python/IndexError (str i)))))
+    (__iter__ [this] (python/iter (or (seq this) ())))
+    (__eq__ [this other] (and (sequential? other)
+                              (== total (count other))
+                              (= (seq this) (seq other))))
+    (__hash__ [this] (hash (vec (seq this))))
+    (__str__ [this] (pr-str (seq this))))
+  (deftype BasedValue [base edits tail n bc mm]
+    basilisp.lang.interfaces/IPersistentVector
+    (assoc [this & kvs]
+      (loop [ret this xs (seq kvs)]
+        (if xs
+          (recur (bv-assoc-one ret (first xs) (second xs)) (nnext xs))
+          ret)))
+    (cons [this v] (based-assoc-n base edits tail n bc mm n v))
+    (contains [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) n)))
+    (entry [this k] (when (and (integer? k) (<= 0 (long k)) (< (long k) n))
+                      (basilisp.core/map-entry (long k) (nth this (long k)))))
+    (empty [_] [])
+    (seq [this] (when (pos? n) (map (fn [i] (nth this i)) (range n))))
+    (peek [this] (when (pos? n) (nth this (dec n))))
+    (pop [this] (if (zero? n)
+                  (throw (python/RuntimeError "Can't pop empty vector"))
+                  (let [i (dec n)]
+                    (if (< i bc)
+                      (BasedValue. base (dissoc edits i) tail i bc mm)
+                      (BasedValue. base edits (pop tail) i bc mm)))))
+    (^{:kwargs :collect} nth [this i & kwargs]
+      (let [nf (:notfound kwargs ::none)]
+        (if (and (integer? i) (<= 0 i) (< i n))
+          (if (< i bc)
+            (if (contains? edits i) (get edits i) (nth base i))
+            (nth tail (- i bc)))
+          (if (or (identical? nf ::none)
+                  (identical? nf (.-NTH_SENTINEL basilisp.lang.interfaces/IIndexed)))
+            (throw (python/IndexError (str i)))
+            nf))))
+    (val-at [this & args]
+      (let [k (first args)]
+        (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
+          (nth this (long k))
+          (when (== 2 (count args)) (second args)))))
+    basilisp.lang.interfaces/IReduce
+    (reduce [this & args]
+      (if (== 1 (count args))
+        (clojure.core/reduce (first args) (seq this))
+        (clojure.core/reduce (first args) (second args) (seq this))))
+    basilisp.lang.interfaces/IWithMeta
+    (meta [_] mm)
+    (with-meta [_ m] (BasedValue. base edits tail n bc m))
+    (__len__ [_] n)
+    (__getitem__ [this i] (if (integer? i) (nth this i) (throw (python/IndexError (str i)))))
+    (__iter__ [this] (python/iter (or (seq this) ())))
+    (__eq__ [this other] (and (sequential? other)
+                              (== n (count other))
+                              (= (seq this) (seq other))))
+    (__hash__ [this] (hash (vec (seq this))))
+    (__str__ [this] (pr-str (seq this))))
+  (python/setattr ConcatBatch "meta" (python/property (fn [this] (.-mm this))))
+  (python/setattr BasedValue "meta" (python/property (fn [this] (.-mm this))))
+  (python/setattr ConcatBatch "rseq" (fn [this] (seq (reverse (vec (seq this))))))
+  (python/setattr BasedValue "rseq" (fn [this] (seq (reverse (vec (seq this))))))))
+
 ;; the assocN logic of the two vector-shaped frozen types, as plain
 ;; fns in eve.flat.chunk's assocN-flat style: a method body that
 ;; self-calls (.assocN this ...) is a C++ member call on hosts whose
@@ -802,6 +986,10 @@
 #?(:clj (defn based-assoc [base k v] (assoc (based-of base) k v)))
 #?(:clj (defn based-pop [base] (pop (based-of base))))
 
+#?(:lpy (do (defn based-of [base] (BasedValue. base {} [] (count base) (count base) nil))
+            (defn based-assoc [base k v] (assoc (based-of base) k v))
+            (defn based-pop [base] (pop (based-of base)))))
+
 ;; The protocol hosts' spellings of the three helpers above and of
 ;; concat-assoc-n's handle assoc: the same logic with eve.core
 ;; calls where the base or the edited element is a flat value.
@@ -833,6 +1021,10 @@
                   counts (mapv count handles)
                   cums (vec (reductions + 0 (butlast counts)))]
               (ConcatBatch. handles cums (long (reduce + counts)) nil))
+       :lpy (let [handles (mapv chunk/open chunks)
+                  counts (mapv count handles)
+                  cums (vec (reductions + 0 (butlast counts)))]
+              (ConcatBatch. handles cums (long (reduce + counts)) nil))
        :cljs (throw (ex-info "eve.flat.freeze: multi-chunk open not built on this host"
                              {:chunks (count chunks)})))))
 
@@ -848,6 +1040,17 @@
                      :framed (open-stream (unframe-stream (read-chain-bytes sio hdr)))
                      (chunk/open (read-chain-bytes sio hdr)))]
              (aset cells 0 h)
+             h)))))
+
+#?(:lpy
+   (defn -handle [fv sio hdr]
+     (let [cells (.-cells fv)]
+       (or (nth @cells 0)
+           (let [mode (nth @cells 1)
+                 h (if (= mode :framed)
+                     (open-stream (unframe-stream (read-chain-bytes sio hdr)))
+                     (chunk/open (read-chain-bytes sio hdr)))]
+             (swap! cells assoc 0 h)
              h)))))
 
 (defn frozen-value
@@ -867,6 +1070,13 @@
               (chunk/open (read-chain-bytes sio header-off))
               (do (when (== (bit-and flags 2) 2)
                     (aset cells 1 :framed))
+                  (->FrozenValue sio (long header-off) cells))))
+     :lpy (let [cells (atom [nil nil])
+                flags (slab/read-i32 sio header-off 44)]
+            (if (== (bit-and flags 4) 4)
+              (chunk/open (read-chain-bytes sio header-off))
+              (do (when (== (bit-and flags 2) 2)
+                    (swap! cells assoc 1 :framed))
                   (->FrozenValue sio (long header-off) cells))))
      :cljs (chunk/open (read-chain-bytes sio header-off))))
 
@@ -938,9 +1148,9 @@
     ;; already flat: a frozen subtree delivers as its opened
     ;; handle (whose bytes were copied out of the slab — the
     ;; handle owns them); a heap flat handle delivers as itself.
-    #?(:clj (instance? FrozenValue v) :cljs false)
+    #?(:clj (instance? FrozenValue v) :cljs false :lpy (instance? FrozenValue v))
     (-handle v (.-sio ^FrozenValue v) (.-hdr ^FrozenValue v))
-    #?(:clj (instance? ConcatBatch v) :cljs false) v
+    #?(:clj (instance? ConcatBatch v) :cljs false :lpy (instance? ConcatBatch v)) v
     (chunk/flat-handle? v) v
     (sequential? v) (open-stream (chunk/pack-all v))
     (coll? v) (chunk/pack v)
