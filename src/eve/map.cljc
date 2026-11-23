@@ -12,10 +12,10 @@
 
    Uses eve/deftype macro: CLJ protocol names, auto-translated on CLJS."
   (:refer-clojure :exclude [hash-map
-                            aget alength unsigned-bit-shift-right volatile! vswap! transient
+                            aget aset alength object-array unsigned-bit-shift-right volatile! vswap! transient
                             persistent! conj! long bytes])
   (:require
-   [eve.host :refer [field aget alength unsigned-bit-shift-right volatile! vswap! transient
+   [eve.host :refer [field aget aset alength object-array unsigned-bit-shift-right volatile! vswap! transient
                      persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc]
@@ -87,6 +87,13 @@
 (def ^:private key-memo (enc/new-cache))
 (def ^:private ^:const KEY-MEMO-MAX 4096)
 
+;; Integers of the same magnitude are one HAMT key (codec §8, (= 5 5N)) but
+;; not one object, so they cannot use the identity-keyed keyword memo. A
+;; value-indexed array (host number, 0..4095) is exact and does not use
+;; Clojure =, which would also treat 1 and 1.0 as one key on some hosts.
+(def ^:private ^:const INT-KEY-MEMO-N 4096)
+(def ^:private ^{:tag "[Ljava.lang.Object;"} int-key-memo (object-array INT-KEY-MEMO-N))
+
 (defn- key-bytes+hash
   "The [kb kh] a HAMT lookup needs for k."
   [k]
@@ -96,8 +103,14 @@
               pair [kb (portable-hash-bytes kb)]]
           (enc/cache-put! key-memo k pair KEY-MEMO-MAX)
           pair))
-    (let [kb (serialize-key-bytes k)]
-      [kb (portable-hash-bytes kb)])))
+    (if (and (integer? k) (number? k) (not (neg? k)) (< k INT-KEY-MEMO-N))
+      (or (aget ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k))
+          (let [kb (serialize-key-bytes k)
+                pair [kb (portable-hash-bytes kb)]]
+            (aset ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k) pair)
+            pair))
+      (let [kb (serialize-key-bytes k)]
+        [kb (portable-hash-bytes kb)]))))
 
 (defn- serialize-val-bytes
   "Serialize a value to bytes (platform-specific).
