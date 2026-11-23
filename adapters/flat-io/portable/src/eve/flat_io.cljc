@@ -559,22 +559,22 @@
     (->Buf b (js/DataView. (.-buffer b)) 0 width))))
 
 ;; The one portable spelling of the writer calls (declared above): on
-;; the JVM the body is the IBuf interface call, on cljs the IBuf
-;; protocol fn call, as on the other protocol hosts — the only
-;; dispatch those hosts have (jank's completion objects have no native
-;; members at all).
-(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :lg (wRaw w) :clj (.wRaw ^IBuf w) :cljs (wRaw w) :default (.raw w)))
-(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :lg (wPos w) :clj (.wPos ^IBuf w) :cljs (wPos w) :default (.pos w)))
-(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :lg (wSeek w p) :clj (.wSeek ^IBuf w p) :cljs (wSeek w p) :default (.seek w p)))
-(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :lg (wU8 w v) :clj (.wU8 ^IBuf w v) :cljs (wU8 w v) :default (.u8 w v)))
-(defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :lg (wU16 w v) :clj (.wU16 ^IBuf w v) :cljs (wU16 w v) :default (.u16 w v)))
-(defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :lg (wU32 w v) :clj (.wU32 ^IBuf w v) :cljs (wU32 w v) :default (.u32 w v)))
-(defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :lg (wI64 w v) :clj (.wI64 ^IBuf w v) :cljs (wI64 w v) :default (.i64 w v)))
-(defn buf-f64 [w v] #?(:jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :lg (wF64 w v) :clj (.wF64 ^IBuf w v) :cljs (wF64 w v) :default (.f64 w v)))
-(defn buf-varint [w v] #?(:jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :lg (wVarint w v) :clj (.wVarint ^IBuf w v) :cljs (wVarint w v) :default (.varint w v)))
-(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :lg (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :cljs (wBytes w src off n) :default (.putBytes w src off n)))
-(defn buf-off "Append an offset of the writer's width." [w v] #?(:jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :lg (wOff w v) :clj (.wOff ^IBuf w v) :cljs (wOff w v) :default (.off w v)))
-(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :lg (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :cljs (wPatchU32 w at v) :default (.patchU32 w at v)))
+;; the JVM the body is the IBuf interface call, and on every other
+;; host — the protocol hosts and the ClojureScript face alike — the
+;; IBuf protocol fn call, the one dispatch those hosts share (jank's
+;; completion objects have no native members at all).
+(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :lg (wRaw w) :clj (.wRaw ^IBuf w) :cljs (wRaw w) :default (wRaw w)))
+(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :lg (wPos w) :clj (.wPos ^IBuf w) :cljs (wPos w) :default (wPos w)))
+(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :lg (wSeek w p) :clj (.wSeek ^IBuf w p) :cljs (wSeek w p) :default (wSeek w p)))
+(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :lg (wU8 w v) :clj (.wU8 ^IBuf w v) :cljs (wU8 w v) :default (wU8 w v)))
+(defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :lg (wU16 w v) :clj (.wU16 ^IBuf w v) :cljs (wU16 w v) :default (wU16 w v)))
+(defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :lg (wU32 w v) :clj (.wU32 ^IBuf w v) :cljs (wU32 w v) :default (wU32 w v)))
+(defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :lg (wI64 w v) :clj (.wI64 ^IBuf w v) :cljs (wI64 w v) :default (wI64 w v)))
+(defn buf-f64 [w v] #?(:jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :lg (wF64 w v) :clj (.wF64 ^IBuf w v) :cljs (wF64 w v) :default (wF64 w v)))
+(defn buf-varint [w v] #?(:jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :lg (wVarint w v) :clj (.wVarint ^IBuf w v) :cljs (wVarint w v) :default (wVarint w v)))
+(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :lg (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :cljs (wBytes w src off n) :default (wBytes w src off n)))
+(defn buf-off "Append an offset of the writer's width." [w v] #?(:jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :lg (wOff w v) :clj (.wOff ^IBuf w v) :cljs (wOff w v) :default (wOff w v)))
+(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :lg (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :cljs (wPatchU32 w at v) :default (wPatchU32 w at v)))
 
 (defn buf-align
   "Zero bytes up to a multiple of a (chunk.cljc's align!)."

@@ -149,6 +149,7 @@
 (defprotocol ISeq (-first [o]) (-rest [o]) (-more [o]) (-cons [o v]))
 (defprotocol ISeqable (-seq [o]))
 (defprotocol ISequential)
+(defprotocol IList)
 (defprotocol ISet (-disjoin [o v]))
 (defprotocol IStack (-peek [o]) (-pop [o]))
 (defprotocol ISwap (-swap! [o f] [o f a] [o f a b] [o f a b xs]))

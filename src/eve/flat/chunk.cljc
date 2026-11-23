@@ -27,14 +27,31 @@
             [eve.platform :as platform]
             ;; The protocol hosts (bb, glojure) spell a handle's surface
             ;; through the seat's eve.core protocols — the same surface
-            ;; eve's other types use there. Only these two hosts read
-            ;; this require; their eve.core is the coll/protocols
-            ;; adapter, which nothing in this namespace's load path
-            ;; cycles back through.
+            ;; eve's other types use there. Their eve.core is the
+            ;; coll/protocols adapter, which nothing in this namespace's
+            ;; load path cycles back through.
             #?@(:bb [[eve.core :as ecore]]
                 :glj [[eve.core :as ecore]]
                 :jank [[eve.core :as ecore]]
-                :lg [[eve.core :as ecore]]))
+                :lg [[eve.core :as ecore]])
+            ;; squint: this file is SCI-evaluated in macro cones there,
+            ;; and SCI resolves a deftype's protocol names from the
+            ;; current ns's refers — eve.core's, whose SCI face carries
+            ;; the protocols as defprotocol stubs and whose runtime
+            ;; face aliases squint core's own protocol objects (the
+            ;; adapters/codec/squint shape). The cljs faces below keep
+            ;; the bare names the ClojureScript compiler requires (a
+            ;; protocol named through a def alias is "not a protocol"
+            ;; to its analyzer, measured); staging keeps this refer
+            ;; for squint only, so no other host's reader sees it.
+            #?@(:squint [[eve.core :refer [ICounted ILookup IAssociative
+                                           ISeqable ISequential IVector
+                                           IEquiv IHash IMeta IWithMeta
+                                           IPrintWithWriter IStack
+                                           ICollection IEmptyableCollection
+                                           IReduce IFn IMap ISet IList
+                                           -lookup]]]
+                :default []))
   #?(:clj (:import [java.util Arrays HashMap ArrayList])))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -407,6 +424,8 @@
               (sequential? v) (apply list (map to-rep v))
               :else (or (convert-rep v) v))
         m #?(:clj (when (instance? clojure.lang.IObj v) (meta v))
+             ;; bare IMeta: cljs.core's on the ClojureScript face;
+             ;; under squint the ns refer (eve.core's stub) answers it.
              :cljs (when (satisfies? IMeta v) (meta v)))]
     (if m
       (MetaVal. rep (to-rep m))
@@ -2240,6 +2259,10 @@
         #?(:clj (if (satisfies? IAttachMeta inner)
                   (-attach-meta inner (read-value ctx mo))
                   inner)
+           ;; IWithMeta, as at this file's other meta-attach sites:
+           ;; clojure.lang.IObj names nothing on the cljs face (an
+           ;; undeclared var the JVM compiler only warns about; SCI
+           ;; hosts reject it outright).
            :cljs (if (satisfies? IWithMeta inner)
                    (with-meta inner (read-value ctx mo))
                    inner)))
@@ -5624,6 +5647,10 @@
    case the caller re-packs instead."
   [thunk]
   (try (thunk)
+       ;; :cljs :default, as in eve.dataset.batch: cljs.core/ExceptionInfo
+       ;; names nothing an SCI host evaluating this file can resolve,
+       ;; and the body already discriminates on the ex-data type and
+       ;; rethrows everything else.
        (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs :default) e
          (if (= ::append-overflow (:type (ex-data e)))
            nil

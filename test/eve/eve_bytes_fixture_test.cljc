@@ -18,6 +18,7 @@
             [clojure.string :as str]
             [eve.hamt-util :as hu]
             [eve.codec :as codec]
+            [eve.numeric :as num]
             [eve.deftype-proto.alloc :as alloc]))
 
 (defn- in-a-domain-of-its-own
@@ -70,6 +71,33 @@
                       {:hosts #{}}
                       (edn/read-string line))))
                 (str/split-lines (slurp fixture-path :encoding "UTF-8"))))
+     :squint
+     ;; squint's EDN reader (its edn module) rejects Clojure number
+     ;; tokens outright ("Invalid number: 1/2"); eve.numeric/read-edn
+     ;; is Eve's reader for exactly those tokens, on every host. And
+     ;; squint's reader erases distinctions the format keeps: it
+     ;; returns one plain string for a string, a keyword and a
+     ;; symbol alike (squint has no ident types), and it builds a
+     ;; map as a plain JS object, coercing every non-string key to a
+     ;; string at parse. Rows whose values turn on those distinctions
+     ;; — the string and symbol rows, and the collection rows with
+     ;; string elements or non-string keys — name values this host
+     ;; cannot represent: they are skipped unread, as the :clje arm
+     ;; skips its own unrepresentable rows. A named limitation of
+     ;; the host's reader, not a branch in the format.
+     (vec (keep (fn [line]
+                  (when (str/starts-with? line "{")
+                    (when-not (or (str/includes? line ":note \"string")
+                                  (str/includes? line ":note \"symbol")
+                                  (str/includes? line ":note \"flat map mixed key types")
+                                  (str/includes? line ":note \"flat set mixed element types")
+                                  (str/includes? line ":note \"flat vec with nil and scalars")
+                                  (str/includes? line ":note \"vector key, flat on every host")
+                                  (str/includes? line ":note \"set key")
+                                  (str/includes? line ":note \"map key"))
+                      (num/read-edn line
+                                    {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}}))))
+                (str/split-lines (.readFileSync (js/require "fs") fixture-path "utf8"))))
      :default
      (edn/read-string
       ;; clojure.edn reads #uuid and #inst itself (the JVM's UUID and Date, the
@@ -108,7 +136,8 @@
   "Equality that holds a date by its time and NaN to itself."
   [a b]
   (cond
-    (inst? a) (and (inst? b) (= (inst-ms a) (inst-ms b)))
+    (inst? a) (and (inst? b) (= #?(:squint (.getTime a) :default (inst-ms a))
+                                #?(:squint (.getTime b) :default (inst-ms b))))
     :else (= a b)))
 
 (deftest eve-bytes-fixtures
@@ -133,9 +162,15 @@
 
 (deftest long-symbol-has-no-encoding
   (testing "a symbol name or namespace past 255 UTF-8 bytes is refused on every host, never truncated (seam map L-40)"
-    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
-                 (encode-key (symbol (apply str (repeat 300 "s"))))))
-    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
-                 (encode-key (symbol (apply str (repeat 300 "n")) "k"))))
+    ;; squint has no symbol type: a symbol there is a string (keyword?
+    ;; and symbol? both answer string?), and a long keyword has a
+    ;; lawful long encoding — the refusal's precondition, a symbol
+    ;; distinct from a keyword, cannot be constructed on that host.
+    ;; A named limitation of the host, not a branch in the seam.
+    #?(:squint nil
+       :default (do (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
+                                 (encode-key (symbol (apply str (repeat 300 "s"))))))
+                    (is (thrown? #?(:cljs js/Error :jank nil :default Exception)
+                                 (encode-key (symbol (apply str (repeat 300 "n")) "k"))))))
     (is (= 255 (bytes-length (encode-key (symbol (apply str (repeat 251 "s"))))))
         "251 bytes of name + the 4-byte header is the longest symbol")))

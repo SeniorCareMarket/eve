@@ -269,6 +269,16 @@
           (source/-field-map (source/-sister-source x)))
     :else x))
 
+;; The three frozen types are not built on the ClojureScript face:
+;; every entry point there is gated (frozen-value? and its siblings
+;; answer false, multi-chunk open throws "not built on this host").
+;; The names are declared so the shared code below — the constructor
+;; calls in the assocN helpers and the gated instance? tests —
+;; resolves on that face; an SCI host evaluating this file rejects
+;; an undeclared type name outright, where the ClojureScript
+;; compiler only warns.
+#?(:cljs (declare FrozenValue ConcatBatch BasedValue))
+
 #?(:bb (do (deftype FrozenValue [sio hdr cells]
            d/IEveRoot
            (-root-header-off [_] hdr)
