@@ -4,8 +4,9 @@
    names; a type written with the JVM's is translated onto them here, at
    expansion.
    The entry points eve's macros call (every eve.types has them):
-     host-type, plain-type, slab-type, eve-type, extend-eve-type,
-     existing-def, rename-fields, reader-of, print-form, vector-types."
+     host-type, plain-type, slab-type, eve-type, flat-type,
+     extend-eve-type, existing-def, rename-fields, reader-of,
+     print-form, vector-types."
   (:require [clojure.string :as str]
             [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
                                                  cljs-protocol? rename-syms parse-protocol-impls
@@ -927,6 +928,21 @@
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
 (defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn flat-type
+  "An eve-deftype's generated flat sister on basilisp: the shared
+   generator (eve.deftype-proto.sio/flat-type) with this host's
+   steps, as on bb and jank. Without this entry
+   emission/flat-forms answers nil for every type on this seat:
+   no Datom__Flat is generated, the type registers its layout
+   alone (factory nil), and packed values read as the generic
+   FlatTagged/FrozenValue carriers, which carry no per-type
+   protocol surface (ds's IDatom on Datom had no implementation
+   on the flat kind — LPY-SISTER-STATUS). No :build override is
+   needed: this host's build ignores the passed new-name and
+   builds (new T ...), which for the sister is exactly
+   (new Datom__Flat ...) — the factory-name recursion bb's and
+   jank's overrides answer cannot occur."
+  [ctx] (sio/flat-type ctx (hooks)))
 (defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
 
 (defn existing-def
