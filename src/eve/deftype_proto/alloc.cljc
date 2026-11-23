@@ -1459,14 +1459,29 @@
   ISlabRegion
   (-sio-mem-region [_ o f]      (slab/mem-region inner o f)))
 
+;; jolt: an (instance? T x) site caches ONE receiver type, and these tests see a LoggingSlabIO and a JvmSlabCtx in
+;; turn (every wrapper walk), so each one took jolt's miss path (~55 ns, against ~8 for the descriptor's tag compared
+;; in Chez). Exact type, as instance? of a deftype is.
+#?(:jolt
+   (do
+     (scheme/eval-string
+      "(begin
+         (define (eve-alloc-type-tag t) (deftype-ctor-tag t))
+         (define (eve-alloc-tag? x tag)
+           (and (jrec? x) (let ((t (jrdesc-tag (jrec-desc x)))) (or (eq? t tag) (string=? t tag))))))")
+     (def ^:private tag?* (scheme/proc "eve-alloc-tag?"))
+     (def ^:private logging-tag ((scheme/proc "eve-alloc-type-tag") LoggingSlabIO))
+     (def ^:private slab-ctx-tag ((scheme/proc "eve-alloc-type-tag") JvmSlabCtx))
+     (defn- slab-ctx? [x] (tag?* x slab-ctx-tag))))
+
 (defn logging-sio?
   [sio]
-  (instance? LoggingSlabIO sio))
+  #?(:jolt (tag?* sio logging-tag) :default (instance? LoggingSlabIO sio)))
 
 (defn sio-root
   "The domain's own slab I/O under any logging wrappers (a transient's log over a swap attempt's)."
   [sio]
-  (if (instance? LoggingSlabIO sio)
+  (if #?(:jolt (logging-sio? sio) :default (instance? LoggingSlabIO sio))
     (recur (field ^LoggingSlabIO sio inner))
     sio))
 
@@ -1489,8 +1504,8 @@
   "sio's JvmSlabCtx under its logging wrappers, or nil."
   [sio]
   (loop [s sio]
-    (cond (instance? JvmSlabCtx s) s
-          (instance? LoggingSlabIO s) (recur (field ^LoggingSlabIO s inner))
+    (cond #?(:jolt (slab-ctx? s) :default (instance? JvmSlabCtx s)) s
+          #?(:jolt (logging-sio? s) :default (instance? LoggingSlabIO s)) (recur (field ^LoggingSlabIO s inner))
           :else nil)))
 
 (defn- node-heap-bytes
@@ -1806,7 +1821,7 @@
   [sio]
   ;; every log in the chain: a transient's scope, the swap attempt's under it
   (loop [s sio]
-    (when (instance? LoggingSlabIO s)
+    (when #?(:jolt (logging-sio? s) :default (instance? LoggingSlabIO s))
       (reset! (field ^LoggingSlabIO s keep) true)
       (recur (field ^LoggingSlabIO s inner))))
   nil)
