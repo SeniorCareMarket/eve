@@ -27,12 +27,8 @@
 
 ;; The step script's shared fixtures: assigned in order by the
 ;; steps in run-tests! and read across steps, so they are vars
-;; defined here and set! there, not defs inside the step fns.
-(def the-atom nil)
-(def e1 nil)
-(def e2 nil)
-(def extra-atoms nil)
-(def stress-atoms nil)
+;; declared here and set! there, not defs inside the step fns.
+(declare the-atom e1 e2 extra-atoms stress-atoms)
 
 (defn- step!
   "Run one step: print label, execute thunk, X-RAY, check invariant.
