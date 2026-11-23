@@ -96,3 +96,60 @@ tests; the format of record still applies to anything edited here.
   hook edit or stale-hook results masquerade as hook bugs.
   api/coerce of a whole sexpr is NOT recognized as deftype;
   synthetic nodes preserving the original subnodes are.
+
+## Successor lane session (2026-11-22 evening, agent 2fd20618)
+
+Inherited state verified firsthand (branch, commits 86fbaa2 /
+9a5c57a / 88255d4, dirty STATUS.md committed as 46fc194).
+
+BASELINE GATE — COMPLETE. Per-namespace (one bb process per ns,
+composed classpath per the hosts.edn wiring gap): 51 of 54
+namespaces have verdicts across baseline/ + baseline2/ +
+baseline3/ logs. Pre-existing reds at the pin: eve.type-io-test
+(2F/6E), eve.array-hosts-test (17E), eve.dataset-test (5E),
+eve.tensor-test (1F/2E), eve.edn-test (1F), eve.read-region-test
+(1F), eve.bb-logical-protocol-test (4E), eve.thread-host-test
+(1F), eve.thread-fold-group-test (1E). eve.thread-domain-test
+SEGFAULTS the bb native image (3 attempts; memory-map dump in
+baseline3 log) — pre-existing at the pin; this lane's changes
+are kondo-only and bb never reads them. eve.aegis.rsabssa-test
+and eve.net.crypto-fast-path-test exceed the 600 s/ns timeout
+on this loaded box (no verdict). A duplicate baseline driver
+left by the dead lane was found and killed (it was the
+contention source behind the exit=99 kills).
+
+KONDO TEACHING — commits 9a8906a (deftype hook), 3c45849
+(api-defs hook), 79b92ab (flat-handles + eve.host/field hooks),
+each mirrored into src/clj-kondo.exports/. Recounts (full
+scope): census 1455E/2195W/265I -> deftype hook 711E/2225W ->
+api-defs hook 711E/2112W/225I. Details in CENSUS.md.
+
+FLEET TEMPLATE DEFECT FOUND + FIXED (coordinator: propagate):
+templates/cljfmt.edn carried `:indents {}` — in the cljfmt
+0.16.6 standalone loader an :indents key REPLACES the built-in
+indent table instead of merging, so every default rule was
+silently dropped (defn/ns bodies aligned under first args;
+measured 2089 vs 111 diff lines on one file). Fixed in the
+templates with the reason in the header; propagated here as
+9e19e0f. CONSEQUENCE: trees formatted while `:indents {}` was
+in force (Phase 1 narcis + cohost-media-example, and any other
+lane that ran cljfmt fix) carry the alignment style and need
+one `cljfmt fix` after the corrected template propagates, or
+their fmt-check fails. The census's "37/589 unformatted" was
+measured without the correction in force — superseded.
+
+GATE SCOPE — 38fe8c6: contract-test enters the lint tasks as
+contract-test/drivers only (vendored lib/lib-ds/lib-ds-deps
+excepted per CENSUS.md; drivers stay in scope).
+
+FORMAT PASS — 94ba995: cljfmt fix over the gate scope, 213
+files. Verified: cljfmt check exit 0; a second fix changed 0
+files (idempotent); gate spot-check (portable-surface,
+map-entry, edn-test, associative-transient) identical to
+baseline, edn-test's pre-existing 1F unchanged.
+
+REMAINING: fix campaign (recount on gate scope first), Splint
++ Carve legs to zero, dprint + docs pass, .githooks/pre-commit,
+bb lint exit 0, RETRO.md (incl. the consumer kondo-exports
+proposal), push branch. clj-depend: config in, 0 violations at
+the pin (confirm again at the endgame).
