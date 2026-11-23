@@ -180,7 +180,7 @@
               (>= (System/nanoTime) deadline) :timed-out
               :else (do (Thread/sleep 0 100000) (recur)))))))
 
-(declare ^:private pl-i32 ^:private pl-u8 ^:private pl-i64 ^:private ps-i32! ^:private ps-u8!
+(declare ^:private read-bytes* ^:private pl-i32 ^:private pl-u8 ^:private pl-i64 ^:private ps-i32! ^:private ps-u8!
          ^:private x86-64-linux? ^:private fast-cas4 ^:private fast-cas8)
 
 (deftype JoltRegion [base size backing]
@@ -210,7 +210,7 @@
   (-notify-i32! [_ off n]
     (if SYS-futex (first (jolt-futex SYS-futex (+ base off) 1 (int n) ffi/null ffi/null 0)) 0))
   (-supports-watch? [_] true)
-  (-read-bytes [_ off len] (ffi/read-array (+ base off) len))
+  (-read-bytes [this off len] (read-bytes* this base off len))
   (-write-bytes! [_ off src] (ffi/write-array (+ base off) src) nil)
   mem/IPlainLoad
   (-plain-load-i32 [this off] (pl-i32 this base off))
@@ -309,6 +309,52 @@
 (def ^:private ps-i32! (scheme/proc "eve-region-ps-i32!"))
 (def ^:private ps-u8! (scheme/proc "eve-region-ps-u8!"))
 
+;; A slab context's plain accesses as Chez procedures (eve.deftype-proto.alloc's jolt arms pass these where they
+;; passed eve.mem's protocol fns): on a JoltRegion, the region's base read off the record and the load or store above
+;; with no protocol dispatch (two jolt protocol calls per slab word, ~12% of sorted-set-build-200); on another
+;; IMemRegion, the protocol fn. JoltRegion's descriptor is kept once its tag (a string, not one object) matched. A
+;; byte read is one copy (make-bytevector, the foreign bytes, the byte array over it) where ffi/read-array copies
+;; twice; one of 64 KB or more takes ffi/read-array (a large array is jolt's own kind).
+(scheme/eval-string
+ "(begin
+    (define eve-region-own-tag #f)
+    (define (eve-region-own! t) (set! eve-region-own-tag t))
+    (define eve-region-own-desc #f)
+    (define (eve-region-own-desc? r d)
+      (or (eq? d eve-region-own-desc)
+          (and (string=? (jrdesc-tag d) eve-region-own-tag) (jrec3? r) (begin (set! eve-region-own-desc d) #t))))
+    ;; a JoltRegion's base address (its field 0, a 3-field record's own accessor) when it is a fixnum, else #f
+    (define-syntax eve-region-base
+      (syntax-rules ()
+        ((_ r) (and (jrec? r) (let ((d (jrec-desc r))) (or (eq? d eve-region-own-desc) (eve-region-own-desc? r d)))
+                    (let ((b (jrec3-f0 r))) (and (fixnum? b) b))))))
+    (define-syntax eve-region-op
+      (syntax-rules ()
+        ((_ (r a arg ...) b fast slow)
+         (lambda (r a arg ...) (let ((b (and (fixnum? a) (eve-region-base r)))) (if b fast slow))))))
+    (define (eve-region-rb r b o n)
+      (if (and (fixnum? n) (fx>= n 0) (fx< n 65536) (fixnum? b) (fixnum? o))
+          (let ((bv (make-bytevector n)))
+            (sa-foreign-bytes-ref! (fx+ b o) bv n)
+            (keep-live r)
+            (make-jolt-array bv 'byte))
+          (let ((v (ffi-read-array (+ b o) n))) (keep-live r) v)))
+    (define (eve-region-op-pl-i32 f)
+      (eve-region-op (r a) b (let ((v (#3%foreign-ref 'integer-32 b a))) (keep-live r) v) (f r a)))
+    (define (eve-region-op-pl-u8 f)
+      (eve-region-op (r a) b (let ((v (#3%foreign-ref 'unsigned-8 b a))) (keep-live r) v) (f r a)))
+    (define (eve-region-op-ps-i32 f)
+      (eve-region-op (r a v) b
+                     (begin (#3%foreign-set! 'unsigned-32 b a (bitwise-and v #xFFFFFFFF)) (keep-live r) jolt-nil)
+                     (f r a v)))
+    (define (eve-region-op-ps-u8 f)
+      (eve-region-op (r a v) b (begin (#3%foreign-set! 'unsigned-8 b a (bitwise-and v #xFF)) (keep-live r) jolt-nil)
+                     (f r a v)))
+    (define (eve-region-op-rb f)
+      (eve-region-op (r a n) b (eve-region-rb r b a n) (f r a n))))")
+
+(def ^:private read-bytes* (scheme/proc "eve-region-rb"))
+
 ;; Linux x86-64 atomics without a foreign call where none is needed, and without a witness malloc per CAS:
 ;; - a sequentially consistent LOAD of an aligned word on x86-64 is a plain MOV (the C11 mapping; libatomic's
 ;;   __atomic_load_4/8 is that MOV behind a call), so -load-i32/-load-i64 read through foreign-ref. Stores, add and
@@ -400,3 +446,21 @@
   "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
   [_r]
   false)
+
+;; the slab context's ops (above): JoltRegion's tag, then each over its eve.mem fallback
+((scheme/proc "eve-region-own!") ((scheme/eval-string "deftype-ctor-tag") JoltRegion))
+(def plain-load-i32-op
+  "IPlainLoad's -plain-load-i32 as a Chez procedure (above)."
+  ((scheme/proc "eve-region-op-pl-i32") mem/-plain-load-i32))
+(def plain-load-u8-op
+  "IPlainLoad's -plain-load-u8 as a Chez procedure (above)."
+  ((scheme/proc "eve-region-op-pl-u8") mem/-plain-load-u8))
+(def plain-store-i32-op
+  "IPlainStore's -plain-store-i32! as a Chez procedure (above)."
+  ((scheme/proc "eve-region-op-ps-i32") mem/-plain-store-i32!))
+(def plain-store-u8-op
+  "IPlainStore's -plain-store-u8! as a Chez procedure (above)."
+  ((scheme/proc "eve-region-op-ps-u8") mem/-plain-store-u8!))
+(def read-bytes-op
+  "IMemRegion's -read-bytes as a Chez procedure (above)."
+  ((scheme/proc "eve-region-op-rb") mem/-read-bytes))

@@ -23,35 +23,42 @@
 (defmacro read-u8
   "The unsigned byte at slab-off + field-off."
   [sio slab-off field-off]
-  (list 'eve.deftype-proto.alloc/-sio-read-u8 sio slab-off field-off))
+  (list #?(:jolt 'eve.deftype-proto.alloc/fast-read-u8 :default 'eve.deftype-proto.alloc/-sio-read-u8)
+        sio slab-off field-off))
 
 (defmacro read-u16
   "The little-endian u16 at slab-off + field-off."
   [sio slab-off field-off]
-  (list 'eve.deftype-proto.alloc/-sio-read-u16 sio slab-off field-off))
+  (list #?(:jolt 'eve.deftype-proto.alloc/fast-read-u16 :default 'eve.deftype-proto.alloc/-sio-read-u16)
+        sio slab-off field-off))
 
 (defmacro read-i32
   "The little-endian i32 at slab-off + field-off (any alignment)."
   [sio slab-off field-off]
-  (list 'eve.deftype-proto.alloc/-sio-read-i32 sio slab-off field-off))
+  (list #?(:jolt 'eve.deftype-proto.alloc/fast-read-i32 :default 'eve.deftype-proto.alloc/-sio-read-i32)
+        sio slab-off field-off))
 
 (defmacro read-bytes
   "The len bytes at slab-off + field-off, as a host byte array (HOST-CONTRACT
    §2.4: valid until the next write to them)."
   [sio slab-off field-off len]
-  (list 'eve.deftype-proto.alloc/-sio-read-bytes sio slab-off field-off len))
+  (list #?(:jolt 'eve.deftype-proto.alloc/fast-read-bytes :default 'eve.deftype-proto.alloc/-sio-read-bytes)
+        sio slab-off field-off len))
 
 (defmacro write-u8!
   [sio slab-off field-off v]
-  (list 'eve.deftype-proto.alloc/-sio-write-u8! sio slab-off field-off v))
+  (list #?(:jolt 'eve.deftype-proto.alloc/fast-write-u8! :default 'eve.deftype-proto.alloc/-sio-write-u8!)
+        sio slab-off field-off v))
 
 (defmacro write-u16!
   [sio slab-off field-off v]
-  (list 'eve.deftype-proto.alloc/-sio-write-u16! sio slab-off field-off v))
+  (list #?(:jolt 'eve.deftype-proto.alloc/fast-write-u16! :default 'eve.deftype-proto.alloc/-sio-write-u16!)
+        sio slab-off field-off v))
 
 (defmacro write-i32!
   [sio slab-off field-off v]
-  (list 'eve.deftype-proto.alloc/-sio-write-i32! sio slab-off field-off v))
+  (list #?(:jolt 'eve.deftype-proto.alloc/fast-write-i32! :default 'eve.deftype-proto.alloc/-sio-write-i32!)
+        sio slab-off field-off v))
 
 (defmacro write-bytes!
   "All of byte array src at slab-off + field-off."
