@@ -43,6 +43,7 @@
             [eve.flat.source :as source]
             [eve.deftype.registry :as registry]
             [eve.flat-io :as fio]
+            #?(:jolt [jolt.scheme :as scheme])
             ;; unchecked-multiply is eve.host's: ClojureDart's core has
             ;; none, and sister's siblings refer it from there the same way
             [eve.host :refer [unchecked-multiply]]
@@ -425,11 +426,22 @@
 ;; a slab instance, a sister or a frozen value: answered before any
 ;; satisfies? (eve.flat.chunk's fast handle test, the same rule). bb,
 ;; glojure and jank keep satisfies? (their types generate no JVM classes).
+;; jolt: "a clojure.lang collection" — the JVM arm's class-name test — without (class x), .getName and .startsWith
+;; (measured on jolt v0.8.28: ~400 ns a collection, the class name a hashed string lookup; string-hash was 7% of a ds
+;; find, jseam r6). A jolt built-in collection is a Chez value that is not a jolt record (jrec): every deftype and
+;; defrecord instance is one, and their class names are their own, never clojure.lang's — checked equal to the
+;; class-name test on 37 values (maps, vectors, sets, lists, seqs, sorted, queue, subvec, map entry, records,
+;; deftypes, vector-of, scalars; probe/jseam/src/jseam/hashprobe3.clj; the same test as eve.flat.chunk's). ~40 ns.
+#?(:jolt
+   (do (scheme/eval-string "(define (eve-not-jrec? x) (not (jrec? x)))")
+       (def ^:private not-jrec?* (scheme/proc "eve-not-jrec?"))))
+
 (defn- plain-value? [x]
   #?(:bb false :jank false :glj false
      :clj (or (nil? x) (string? x) (number? x) (keyword? x) (symbol? x) (boolean? x) (char? x)
               (and (instance? clojure.lang.IPersistentCollection x)
-                   (.startsWith (.getName (class x)) "clojure.lang.")))
+                   #?(:jolt (not-jrec?* x)
+                      :clj (.startsWith (.getName (class x)) "clojure.lang."))))
      :default false))
 
 (defonce ^:private flat-rep-hook (atom nil))
