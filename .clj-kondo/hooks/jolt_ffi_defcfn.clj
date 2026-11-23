@@ -18,7 +18,10 @@
   (let [[_ fname _foreign types-vec] (:children node)
         argc (count (filter (fn [t] (not= :& (api/sexpr t)))
                             (:children types-vec)))
-        args (map (fn [i] (api/token-node (symbol (str "arg" i))))
+        ;; Underscore-prefixed: the modeled defn has no body, so
+        ;; plain names would read as unused bindings at every
+        ;; defcfn site.
+        args (map (fn [i] (api/token-node (symbol (str "_arg" i))))
                   (range argc))]
     {:node (api/list-node
             [(api/token-node 'defn)
