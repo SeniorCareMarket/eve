@@ -593,7 +593,9 @@
       (if (:cached? field-spec)
         ;; Cached fields use normal set! (they're real JVM/JS fields)
         form
-        (sio-write-expr field-spec 'offset__ (:offset field-spec) val-expr)))
+        ;; an in-place write noted for a redo-log commit (eve.deftype-proto.alloc/note-write!)
+        (list 'do (list 'eve.deftype-proto.alloc/note-write! 'offset__)
+              (sio-write-expr field-spec 'offset__ (:offset field-spec) val-expr))))
 
     ;; Recurse into forms
     (seq? form)

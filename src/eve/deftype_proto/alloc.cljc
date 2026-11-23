@@ -58,6 +58,14 @@
 ;; Slab-Qualified Offset Encoding  (shared)
 ;;=============================================================================
 
+(defn- force-grown!
+  "Force the sizes of slab files a class growth just extended (each file's first bytes: an msync of a file's range
+   commits its size as fdatasync does). Growth is rare (a class doubles); a redo-log commit (eve.atom, jlog v2)
+   forces no slab file, so every block its record names must lie in a file whose size a crash keeps."
+  [& regions]
+  (doseq [r regions]
+    (when r (mem/sync-region! r 0 64))))
+
 (def ^:const CLASS_BITS 3)
 (def ^:const BLOCK_IDX_BITS 29)
 (def ^:const BLOCK_IDX_MASK (dec (bit-shift-left 1 BLOCK_IDX_BITS)))
@@ -777,6 +785,10 @@
                            new-desc   (region/open-mmap-region (str path ".desc-count") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-regions ci)))
                            new-desc-f (region/open-mmap-region (str path ".desc-flags") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-flags-regions ci)))
                            new-desc-p (region/open-mmap-region (str path ".desc-pointer") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
+                       ;; the grown files' sizes forced before any block past the old end is handed out: a redo-log
+                       ;; commit (eve.atom, jlog v2) forces no slab file, so a block its record names must lie in a
+                       ;; file whose size a crash keeps
+                       (force-grown! new-region new-bm new-desc new-desc-f new-desc-p)
                        (aset regions ci new-region)
                        (aset bitmap-regions ci new-bm)
                        (aset desc-regions ci new-desc)
@@ -1162,6 +1174,22 @@
 
            :else false)))
 
+
+     (defn ctx-mark-allocated!
+       "Recovery's replay of a redo record (eve.atom, jlog v2): set the bitmap bit of the block at slab-offset (classes
+        0-5) when it is clear, taking one from its class's free count. true when it set it; throws for a block past
+        the class's mapped end (a record names only blocks of files whose growth was forced, force-grown!)."
+       [^JvmSlabCtx ctx slab-offset]
+       (let [ci (decode-class-idx slab-offset)
+             bi (decode-block-idx slab-offset)]
+         (when (< ci OVERFLOW_CLASS_IDX)
+           (when-not (< bi (aget ^ints (field ctx total-blocks) ci))
+             (throw (ex-info "eve: a logged block past its slab class's end" {:class ci :block bi})))
+           (when (slab/bitmap-alloc-cas! (aget ^objects (field ctx bitmap-regions) ci)
+                                         (aget ^ints (field ctx bitmap-offsets) ci) bi)
+             (slab/region-sub-i32! (aget ^objects (field ctx regions) ci) d/SLAB_HDR_FREE_COUNT 1)
+             true))))
+
      (defn make-jvm-slab-ctx
        "Build a JvmSlabCtx from vectors of data regions and bitmap regions.
         Indices 0-5: bitmap slab classes. Index 6 (optional): coalescing overflow.
@@ -1292,6 +1320,7 @@
                                                                      (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-flags-regions ci)))
                                  new-desc-p (region/open-mmap-region (str path ".desc-pointer")
                                                                      (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
+                             (force-grown! new-region new-bm new-desc new-desc-f new-desc-p)
                              (aset regions ci new-region)
                              (aset bitmap-regions ci new-bm)
                              (aset desc-regions ci new-desc)
@@ -1924,6 +1953,29 @@
     (if (instance? JvmSlabCtx ctx)
       (ctx-allocated? ctx slab-offset)
       (if-let [f (host-op :allocated?)] (f ctx slab-offset) false))))
+
+(defn mark-allocated!
+  "Recovery's replay of a redo record (eve.atom, jlog v2): the block at slab-offset marked allocated in its class's
+   bitmap when it is not (ctx-mark-allocated!; the process slab's :mark-allocated! where it is the domain). true when
+   it set the bit."
+  [sio slab-offset]
+  (let [ctx (slab/domain-ctx (domain-root sio))]
+    (if (instance? JvmSlabCtx ctx)
+      (ctx-mark-allocated! ctx slab-offset)
+      (if-let [f (host-op :mark-allocated!)] (f ctx slab-offset) false))))
+
+(def ^:dynamic *inplace*
+  "Bound by a redo-log commit attempt (eve.atom, jlog v2) to an atom of a set: each block an eve-deftype set! or cas!
+   writes in place is noted in it (note-write!), so a commit that wrote into a block it did not allocate takes the
+   forced fallback — a record carries the bytes of the commit's own new blocks, never of a block other values share."
+  nil)
+
+(defn note-write!
+  "An eve-deftype field of the block at off is about to be written in place (the set!/cas! rewriters emit this)."
+  [off]
+  (when-let [w *inplace*]
+    (swap! w conj (bit-and (long off) 0xFFFFFFFF)))
+  nil)
 
 (defn shared-domain?
   "True when sio's domain is files other processes map (an mmap domain): eve's

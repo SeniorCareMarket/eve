@@ -55,7 +55,7 @@
 
 (deftest round-trip
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base)
+        dom (a/persistent-atom-domain base :jlog-version 1)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (swap! x + 40)
     (swap! x inc)
@@ -64,7 +64,7 @@
     (is (.exists (File. (str base ".jlog"))) "the log is <base>.jlog")
     (is (not (.exists (File. (str base ".journal")))) "no legacy journal is written")
     (testing "a reopen finds the domain on its log"
-      (let [dom2 (a/persistent-atom-domain base)
+      (let [dom2 (a/persistent-atom-domain base :jlog-version 1)
             x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
         (is (= 42 @x2))
         (is (some? (:log (:journal (#'a/atom-domain-state dom2)))) "opened on the jlog")
@@ -79,7 +79,7 @@
   "t/x to 41 then 42 on a jlog domain, closed cleanly; answers the root table
    as it stood at 41 and the root epoch then."
   [base]
-  (let [dom (a/persistent-atom-domain base)
+  (let [dom (a/persistent-atom-domain base :jlog-version 1)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
         [s e] (table-range)]
     (swap! x + 41)
@@ -94,7 +94,7 @@
     ;; the wound: the root wound back to the state of an older commit (its table and epoch)
     (write-range! (str base ".root") d/ATOM_TABLE_START table41)
     (write-i32! (str base ".root") d/ROOT_EPOCH_OFFSET epoch41)
-    (let [dom (a/persistent-atom-domain base)
+    (let [dom (a/persistent-atom-domain base :jlog-version 1)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 42 @x) "the log's newest record is installed over the stale root")
       (a/close-atom-domain! dom))))
@@ -103,14 +103,14 @@
   (let [base (fresh-base)
         _ (build-domain! base)]
     (apply xor-range! (str base ".root") (table-range))
-    (let [dom (a/persistent-atom-domain base)
+    (let [dom (a/persistent-atom-domain base :jlog-version 1)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 42 @x) "the CRC-valid record at the same epoch repairs the corrupted root table")
       (a/close-atom-domain! dom))))
 
 (deftest w3-torn-newest-record-falls-back
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base)
+        dom (a/persistent-atom-domain base :jlog-version 1)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (swap! x + 41)
     (swap! x inc)
@@ -119,7 +119,7 @@
     (let [[log rstar] (newest-record base)
           off (+ (:data-off log) (* jlog/SLOT_BYTES (:slot rstar)))]
       (xor-range! (str base ".jlog") (+ off 100) (+ off 200)))
-    (let [dom2 (a/persistent-atom-domain base)
+    (let [dom2 (a/persistent-atom-domain base :jlog-version 1)
           x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
       (is (= 41 @x2) "the torn newest record is passed over; the newest valid one, a commit back, is installed")
       (swap! x2 inc)
@@ -131,38 +131,38 @@
         _ (build-domain! base)
         before (read-range (str base ".jlog") 0 64)]
     (xor-range! (str base ".jlog") 0 1)
-    (is (thrown? Exception (a/persistent-atom-domain base)) "a log of the wrong magic is refused")
+    (is (thrown? Exception (a/persistent-atom-domain base :jlog-version 1)) "a log of the wrong magic is refused")
     (is (= (seq (byte-array (cons (bit-xor (first before) -1) (rest before))))
            (seq (read-range (str base ".jlog") 0 64)))
         "and left exactly as it was")))
 
 (deftest ring-laps
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :jlog-slots 8)
+        dom (a/persistent-atom-domain base :jlog-version 1 :jlog-slots 8)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (dotimes [_ 50] (swap! x inc))
     (halt-domain! dom base)
     (let [log (jlog/open (str base ".jlog"))]
       (is (= 8 (count (jlog/scan log))) "every slot of the lapped ring holds a valid record"))
-    (let [dom2 (a/persistent-atom-domain base)
+    (let [dom2 (a/persistent-atom-domain base :jlog-version 1)
           x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
       (is (= 50 @x2))
       (a/close-atom-domain! dom2))))
 
 (deftest batch-form-is-durable-at-its-boundary-and-close
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base :journal-batch 4)
+        dom (a/persistent-atom-domain base :jlog-version 1 :journal-batch 4)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
     (dotimes [_ 10] (swap! x inc))
     (a/close-atom-domain! dom)
-    (let [dom2 (a/persistent-atom-domain base)
+    (let [dom2 (a/persistent-atom-domain base :jlog-version 1)
           x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
       (is (= 10 @x2))
       (a/close-atom-domain! dom2))))
 
 (deftest a-dead-process-leftovers-are-recovered
   (let [base (fresh-base)
-        dom (a/persistent-atom-domain base)
+        dom (a/persistent-atom-domain base :jlog-version 1)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
         _ (swap! x + 7)
         ds (halt-domain! dom base false)
@@ -172,7 +172,7 @@
     (write-i32! root (+ hb d/OFFSET_WS_HEARTBEAT_LO) 1)
     (write-i32! root (+ hb d/OFFSET_WS_HEARTBEAT_HI) 0)
     (write-i32! root d/ROOT_INFLIGHT_OFFSET 1)
-    (let [dom2 (a/persistent-atom-domain base)
+    (let [dom2 (a/persistent-atom-domain base :jlog-version 1)
           x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" 0)]
       (is (= 7 @x2))
       (is (zero? (read-i32 root d/ROOT_INFLIGHT_OFFSET)) "recovery repaired the leaked in-flight count (H5)")
@@ -207,7 +207,7 @@
    journal written from the root states each commit left.) Answers
    [[value epoch table] ...]."
   [base n]
-  (let [dom (a/persistent-atom-domain base)
+  (let [dom (a/persistent-atom-domain base :jlog-version 1)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
         [s e] (table-range)
         states (doall (for [_ (range n)]
@@ -228,7 +228,7 @@
     ;; the wound: the root wound back to the second commit's state (the journal's newest record is ahead)
     (write-i32! (str base ".root") d/ROOT_EPOCH_OFFSET e2)
     (write-range! (str base ".root") d/ATOM_TABLE_START t2)
-    (let [dom (a/persistent-atom-domain base)
+    (let [dom (a/persistent-atom-domain base :jlog-version 1)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 5 @x) "the legacy journal's newest record is installed")
       (swap! x inc)
@@ -236,7 +236,7 @@
     (is (not (.exists (File. (str base ".journal")))) "the legacy journal is renamed aside")
     (is (.exists (File. (str base ".journal.migrated"))) "... to <base>.journal.migrated, never deleted")
     (is (.exists (File. (str base ".jlog"))))
-    (let [dom (a/persistent-atom-domain base)
+    (let [dom (a/persistent-atom-domain base :jlog-version 1)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 6 @x) "and the domain lives on the jlog from here")
       (a/close-atom-domain! dom))))
@@ -250,7 +250,7 @@
     (write-range! (str base ".journal") (* 2 rec) (byte-array (repeat 40 (byte 7))))
     (write-i32! (str base ".root") d/ROOT_EPOCH_OFFSET e1)
     (write-range! (str base ".root") d/ATOM_TABLE_START t1)
-    (let [dom (a/persistent-atom-domain base)
+    (let [dom (a/persistent-atom-domain base :jlog-version 1)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 6 @x) "the newest record, after the overwritten one, is found and installed")
       (a/close-atom-domain! dom))))
@@ -263,7 +263,7 @@
     ;; shape: the file-order newest record older than the root)
     (let [raf (RandomAccessFile. (File. (str base ".journal")) "rw")]
       (try (.setLength raf 0) (.write raf (evj1-record e1 t1)) (finally (.close raf))))
-    (let [dom (a/persistent-atom-domain base)
+    (let [dom (a/persistent-atom-domain base :jlog-version 1)
           x (a/lookup-or-create-mmap-atom! dom "t/x" 0)]
       (is (= 6 @x) "the root, newer than every legacy record, is kept")
       (a/close-atom-domain! dom))))

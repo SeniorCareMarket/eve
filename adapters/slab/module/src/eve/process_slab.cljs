@@ -1176,6 +1176,11 @@
         desc-region (region/open-mmap-region (str path ".desc-count") (d/desc-column-byte-size total-blocks))
         desc-flags-region (region/open-mmap-region (str path ".desc-flags") (d/desc-column-byte-size total-blocks))
         desc-pointer-region (region/open-mmap-region (str path ".desc-pointer") (d/desc-column-byte-size total-blocks))]
+    ;; the grown files' sizes forced before a block past the old end is handed out (an msync of a range commits its
+    ;; file's size): a redo-log commit (eve.atom, jlog v2) forces no slab file, so a block its record names must lie
+    ;; in a file whose size a crash keeps
+    (doseq [r [region bm-region desc-region desc-flags-region desc-pointer-region]]
+      (mem/sync-region! r 0 64))
     (aset slab-total-blocks class-idx total-blocks)
     (aset slab-desc-regions class-idx desc-region)
     (aset slab-desc-flags-regions class-idx desc-flags-region)
@@ -1512,6 +1517,19 @@
                                   (bit-shift-left 1 (bit-and bi 31)))))))
       (some? (desc-of sio slab-offset)))))
 
+(defn- mark-allocated!
+  "Recovery's replay of a redo record (eve.atom, jlog v2): the block's bitmap bit set when it is clear (classes 0-5),
+   one taken from its class's free count. true when it set it; throws for a block past its class's mapped end."
+  [_sio slab-offset]
+  (let [ci (decode-class-idx slab-offset)
+        bi (decode-block-idx slab-offset)]
+    (when (< ci OVERFLOW_CLASS_IDX)
+      (when-not (< bi (aget slab-total-blocks ci))
+        (throw (ex-info "eve: a logged block past its slab class's end" {:class ci :block bi})))
+      (when (wasm/bitmap-alloc-cas! ci (aget slab-bitmap-offsets ci) bi)
+        (mem/sub-i32! (:region (wasm/get-slab-instance ci)) d/SLAB_HDR_FREE_COUNT 1)
+        true))))
+
 (defn- sync-domain-sio!
   "Force the module slabs' file-backed regions — an mmap domain's slab,
    bitmap and descriptor regions per class, and the coalescing region —
@@ -1522,8 +1540,10 @@
     (when-let [inst (wasm/get-slab-instance i)]
       (mem/sync-region! (:region inst))
       (mem/sync-region! (:bitmap-region inst)))
-    (when-let [dr (aget slab-desc-regions i)]
-      (mem/sync-region! dr)))
+    ;; all three descriptor columns: a flags or pointer column left unforced is a row whose count survives a crash
+    ;; and whose flags do not
+    (doseq [dr [(aget slab-desc-regions i) (aget slab-desc-flags-regions i) (aget slab-desc-pointer-regions i)]]
+      (when dr (mem/sync-region! dr))))
   (when mmap-coalesc-region
     (mem/sync-region! mmap-coalesc-region)))
 
@@ -1533,6 +1553,7 @@
   :desc-of desc-of
   :desc-row desc-row
   :allocated? allocated?
+  :mark-allocated! mark-allocated!
   :refresh! (fn [_sio] (when (aget slab-file-paths 0) (refresh-mmap-slabs!)))
   ;; the module slab is an mmap domain's files while it holds their paths
   :shared-domain? (fn [_sio] (some? (aget slab-file-paths 0)))

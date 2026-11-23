@@ -188,7 +188,9 @@
          (contains? field-map (name (second form))))
     (let [field-spec (get field-map (name (second form)))
           val-expr (cljs-rewrite-set!-forms (nth form 2) field-map offset-expr)
-          write (cljs-emit-field-write field-spec offset-expr val-expr)]
+          ;; an in-place write noted for a redo-log commit (eve.deftype-proto.alloc/note-write!)
+          write (list 'do (list 'eve.deftype-proto.alloc/note-write! offset-expr)
+                      (cljs-emit-field-write field-spec offset-expr val-expr))]
       (when (= :immutable (:mutability field-spec))
         (throw (ex-info (str "Cannot set! immutable field: " (:name field-spec)) {})))
       (if-let [kind (v/ref-kind field-spec)]
@@ -213,6 +215,7 @@
       ;; Delegate to proto's cas! rewrite pattern
       (let [expected-expr (cljs-rewrite-set!-forms (nth form 2) field-map offset-expr)
             new-expr (cljs-rewrite-set!-forms (nth form 3) field-map offset-expr)
+            note (list 'eve.deftype-proto.alloc/note-write! offset-expr)
             abs-offset (list '+ 'slab-base__ (:offset field-spec))
             cas (list '==
                       expected-expr
@@ -224,7 +227,7 @@
                             (list 'eve.process-slab/ks-cas-i32! 'slab-off__ (:offset field-spec) expected-expr new-expr)))]
         (if-let [kind (v/ref-kind field-spec)]
           ;; a reference field's cas!: when it lands, the store rule (eve.tally/store!) — expected out, new in
-          (list 'let ['exp__ref expected-expr 'new__ref new-expr
+          (list 'let ['note__ref note 'exp__ref expected-expr 'new__ref new-expr
                       'ok__ref (list '==
                                      'exp__ref
                                      (list 'if '(nil? eve.process-slab/domain-ks)
@@ -238,21 +241,21 @@
                       (list 'eve.deftype.slab-runtime/ref-stored! '(eve.deftype-proto.alloc/current-sio) offset-expr
                             'exp__ref 'new__ref kind))
                 'ok__ref)
-          cas)))
+          (list 'do note cas))))
 
     ;; Recurse into collections
     (seq? form)
     (with-meta (apply list (map #(cljs-rewrite-set!-forms % field-map offset-expr) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(cljs-rewrite-set!-forms % field-map offset-expr) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(cljs-rewrite-set!-forms k field-map offset-expr)
                                 (cljs-rewrite-set!-forms v field-map offset-expr)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 (defn- cljs-transform-method-body

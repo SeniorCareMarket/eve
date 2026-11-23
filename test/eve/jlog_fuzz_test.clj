@@ -47,7 +47,7 @@
   "t/x through 1..k, one record per commit; answers {label value} (the label a
    commit's record carries is the epoch after its bump: one writer)."
   [base k]
-  (let [dom (a/persistent-atom-domain base :jlog-slots 16)
+  (let [dom (a/persistent-atom-domain base :jlog-version 1 :jlog-slots 16)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
         m (into {} (for [_ (range k)]
                      (do (swap! x inc) [(read-i32 (str base ".root") d/ROOT_EPOCH_OFFSET) @x])))]
@@ -78,7 +78,7 @@
         recs (sort-by :label #(compare %2 %1) (jlog/scan log))]
     (wound! base log recs))
   (let [want (expected base by-label nil)
-        dom (a/persistent-atom-domain base)
+        dom (a/persistent-atom-domain base :jlog-version 1)
         x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
         got @x
         on? (if commit? (do (swap! x inc) (= (inc got) @x)) true)]
