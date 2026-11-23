@@ -76,11 +76,11 @@
                               (pr-sequential-writer writer pr-writer "(" " " ")" opts this))
 
                   IWithMeta
-                  (-with-meta [coll m]
+                  (-with-meta [_coll m]
                               (rrb-chunked-seq vec node i off m))
 
                   IMeta
-                  (-meta [coll] meta)
+                  (-meta [_coll] meta)
 
                   ISeqable
                   #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
@@ -93,7 +93,7 @@
 
                   ASeq
                   ISeq
-                  (-first [coll]
+                  (-first [_coll]
                           (aget node off))
 
                   (-rest [coll]
@@ -118,14 +118,14 @@
                          (cons o coll))
 
                   IEmptyableCollection
-                  (-empty [coll]
+                  (-empty [_coll]
                           (with-meta () meta))
 
                   IChunkedSeq
-                  (-chunked-first [coll]
+                  (-chunked-first [_coll]
                                   (array-chunk node off))
 
-                  (-chunked-rest [coll]
+                  (-chunked-rest [_coll]
                                  (let [l (alength node)
                                        s (when (< (+ i l) (-count vec))
                                            (rrb-chunked-seq vec (+ i l) 0))]
@@ -134,7 +134,7 @@
                                      s)))
 
                   IChunkedNext
-                  (-chunked-next [coll]
+                  (-chunked-next [_coll]
                                  (let [l (alength node)
                                        s (when (< (+ i l) (-count vec))
                                            (rrb-chunked-seq vec (+ i l) 0))]
@@ -146,10 +146,10 @@
                   (-hash [coll] (caching-hash coll hash-ordered-coll __hash))
 
                   IReduce
-                  (-reduce [coll f]
+                  (-reduce [_coll f]
                            (ci-reduce (subvec vec (+ i off) (count vec)) f))
 
-                  (-reduce [coll f start]
+                  (-reduce [_coll f start]
                            (ci-reduce (subvec vec (+ i off) (count vec)) f start)))
 
 (defn rrb-chunked-seq
@@ -324,12 +324,12 @@
     (pr-sequential-writer writer pr-writer "[" " " "]" opts this))
 
   IWithMeta
-  (-with-meta [this meta]
+  (-with-meta [_this meta]
     (->Vector cnt shift root tail meta __hash))
 
   IMeta
   #_{:clj-kondo/ignore [:unresolved-protocol-method]} ; Eve protocol method: the protocol is Eve's own and the implementing type is built by Eve's deftype macros; kondo's cljs analysis does not join the two
-  (-meta [this]
+  (-meta [_this]
     meta)
 
   ISequential
@@ -398,7 +398,7 @@
     (-nth this 1))
 
   ICollection
-  (-conj [this val]
+  (-conj [_this val]
     (if (< (alength tail) 32)
       (let [tail-len (alength tail)
             new-tail (make-array (inc tail-len))]
@@ -556,7 +556,7 @@
     (compare-indexed this that))
 
   IEditableCollection
-  (-as-transient [this]
+  (-as-transient [_this]
     (->Transient cnt
                  shift
                  (editable-root root)
@@ -619,7 +619,7 @@
     (splice-rrbts this (-as-rrbt that)))
 
   IVecImpl
-  (-tail-offset [this]
+  (-tail-offset [_this]
     (- cnt (alength tail)))
 
   (-array-for [this i]
@@ -1328,7 +1328,7 @@
                                   this))))
                           (throw (ex-info "conj! after persistent!" {}))))
 
-                  (persistent [this]
+                  (persistent [_this]
                               (if (.-edit root)
       ;; eve: the edit token is on the root instance, not in eve memory; the
       ;; transient lets go of it by taking the same node without it (the JVM
@@ -1409,13 +1409,13 @@
                          (throw (ex-info "count after persistent!" {}))))
 
                   clojure.lang.Counted
-                  (count [this]
+                  (count [_this]
                          (if (.-edit root)
                            cnt
                            (throw (ex-info "count after persistent!" {}))))
 
                   IVecImpl
-                  (-tail-offset [this]
+                  (-tail-offset [_this]
                                 (- cnt tidx))
 
                   (-array-for [this i]

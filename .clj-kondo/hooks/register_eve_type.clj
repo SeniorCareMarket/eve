@@ -24,8 +24,11 @@
                   (api/list-node
                    [(api/token-node 'defn)
                     (api/token-node (symbol (str (name type-id) "--" suffix)))
-                    (api/vector-node [(api/token-node 'sio)
-                                      (api/token-node 'x)])]))]
+                    ;; Underscore-prefixed: the modeled defns have no
+                    ;; bodies, so plain names would read as unused
+                    ;; bindings at every registration site.
+                    (api/vector-node [(api/token-node '_sio)
+                                      (api/token-node '_x)])]))]
         (when type-id
           ;; The opts node itself rides along in the do: its values
           ;; name the type's own fns (the :host-value, :dispose and

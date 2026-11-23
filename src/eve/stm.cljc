@@ -786,7 +786,7 @@
    The CAS gives up after 100 failures and escalates to the retry
    signal (or the basis-fault signal against a beyond-clock cell)
    — the runner re-runs the body against a fresh read point."
-  [att e cp]
+  [_att e cp]
   (let [r (:ref e)]
     (loop [n 0]
       (let [cur (cell-deref r)

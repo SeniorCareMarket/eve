@@ -859,7 +859,7 @@
   "The answer a read gives for raw, read now under the caller's pin: a view
    holding a pin of its own (from the current epoch) when views are built
    here, else raw delivered flat."
-  [{:keys [root-r] :as ds} atom-slot-idx raw]
+  [{:keys [root-r] :as ds} _atom-slot-idx raw]
   (if-let [h (view-read-fn)]
     (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
       ;; the read api eve.view chooses from: a pin of the read's own (:hold,
@@ -1230,7 +1230,7 @@
    the registered deliver-flat; the eve->clj materialization only when no
    delivery is registered (Eve without flat). The caller holds the pin;
    what this returns owns its bytes."
-  [ds atom-slot-idx raw]
+  [_ds _atom-slot-idx raw]
   (if-let [deliver (deref-deliver)]
     (deliver raw)
     (d/eve->clj raw)))
@@ -1304,7 +1304,7 @@
    ran again under the domain's hold); a descriptor count is a CAS word on
    the descriptor row, safe to raise from any write, so no attempt ever
    needs the hold and there is no [:hold nil] return."
-  [{:keys [root-r sio durable-commits? journal] :as ds}
+  [{:keys [_root-r _sio _durable-commits? _journal] :as ds}
    ptr-off
    atom-slot-idx
    f
@@ -1318,7 +1318,7 @@
    atom-slot-idx
    f
    args
-   exclusive?
+   _exclusive?
    want-vals?]
   (refresh-slabs! ds)
   (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))

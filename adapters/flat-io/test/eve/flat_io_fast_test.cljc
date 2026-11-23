@@ -579,7 +579,7 @@
   (when (seq want) (is (= (reduce (fn [a x] (if (vector? a) (conj a x) [a x])) want)
                           (reduce (fn [a x] (if (vector? a) (conj a x) [a x])) t)) "reduce without init"))
   (is (= (reduce-kv (fn [a i x] (conj a [i x])) [] want) (reduce-kv (fn [a i x] (conj a [i x])) [] t)) "reduce-kv")
-  (when (seq want) (is (= 1 (reduce (fn [a _] (reduced 1)) 0 t)) "reduced"))
+  (when (seq want) (is (= 1 (reduce (fn [_a _] (reduced 1)) 0 t)) "reduced"))
   (is (nil? (get t -1)))
   (is (nil? (get t (count want))))
   (is (= :nf (get t :k :nf)))

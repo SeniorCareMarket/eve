@@ -246,7 +246,7 @@
 
 (defn- hex-pubkey? [s] (and (string? s) (= 64 (count s)) (every? (fn [c] (b/hex-value c)) s)))
 
-(defn- check-primitive [ctx claim branch {:keys [name args]} schema leaf path]
+(defn- check-primitive [ctx claim _branch {:keys [name args]} schema leaf path]
   (case name
     :p/not-quarantined
     (cond (nil? (:principal claim)) (fail :no-principal)

@@ -155,7 +155,7 @@
 
         :else
         (let [arr      (aclone (.-arr current-node))
-              child    (aget arr subidx)
+              _child    (aget arr subidx)
               new-rngs (aclone rngs)]
           (aset arr subidx nil)
           (aset arr 32 new-rngs)

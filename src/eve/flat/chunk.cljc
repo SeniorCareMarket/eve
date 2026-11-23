@@ -1656,7 +1656,7 @@
       (let [[n ko] (set-parts ctx off)]
         (platform/hash-unordered (map (fn [i] (elem-at ctx ko i)) (range n))))
       (== t 0x29)
-      (let [w (width-of ctx) vo (off-at (.-b ctx) (+ off 1) (.-wide? ctx))]
+      (let [_w (width-of ctx) vo (off-at (.-b ctx) (+ off 1) (.-wide? ctx))]
         (node-hasheq ctx vo))
       :else (rep-hasheq (read-value ctx off)))))
 

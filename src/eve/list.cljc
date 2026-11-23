@@ -169,7 +169,7 @@
   (meta [_] nil)
 
   clojure.lang.IObj
-  (withMeta [this m] this)
+  (withMeta [this _m] this)
 
   clojure.lang.IPersistentStack
   (peek [_]
@@ -253,7 +253,7 @@
                 (recur (read-node-next sio__ off) (inc i) result)))))))
 
   d/IDirectSerialize
-  (d/-direct-serialize [this] offset__)
+  (d/-direct-serialize [_this] offset__)
 
   d/ISabStorable
   (d/-sab-tag [_] :eve-list)
@@ -264,7 +264,7 @@
   (d/-eve? [_] true)
 
   d/IEveRoot
-  (d/-root-header-off [this] offset__)
+  (d/-root-header-off [_this] offset__)
 
   d/IEveSio
   (d/-eve-sio [_] sio__)
@@ -324,7 +324,7 @@
    by the new list."
     ([sio old-head new-head]
      (retire-replaced-chain! sio old-head new-head :free))
-    ([sio old-head new-head mode]
+    ([sio old-head new-head _mode]
      (when (and (not= old-head NIL_OFFSET) (not= old-head new-head))
        (loop [node-off old-head]
          (when (and (not= node-off NIL_OFFSET) (not= node-off new-head))

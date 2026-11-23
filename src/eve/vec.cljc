@@ -526,8 +526,8 @@
     (and (integer? k) (>= k 0) (< k cnt)))
 
   clojure.lang.IFn
-  (invoke [this k] (nth-impl sio__ cnt shift root tail k))
-  (invoke [this k not-found]
+  (invoke [_this k] (nth-impl sio__ cnt shift root tail k))
+  (invoke [_this k not-found]
     (if (and (integer? k) (>= k 0) (< k cnt))
       (nth-impl sio__ cnt shift root tail k)
       not-found))
@@ -551,7 +551,7 @@
             (if (reduced? val) @val (recur (inc i) val)))))))
 
   d/IDirectSerialize
-  (d/-direct-serialize [this] offset__)
+  (d/-direct-serialize [_this] offset__)
 
   d/ISabStorable
   (d/-sab-tag [_] :eve-vec)
@@ -562,7 +562,7 @@
   (d/-eve? [_] true)
 
   d/IEveRoot
-  (d/-root-header-off [this] offset__)
+  (d/-root-header-off [_this] offset__)
 
   d/IEveSio
   (d/-eve-sio [_] sio__)

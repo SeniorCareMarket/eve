@@ -484,7 +484,7 @@
 (defn- run-discovered!
   "Run tests via the discovery pipeline. Returns exit code (does NOT call System/exit).
    Callers are responsible for exiting."
-  [{:keys [platform opt-level flags tier ns-filter dir exclude output timeout par]
+  [{:keys [platform opt-level flags tier ns-filter dir exclude _output _timeout _par]
     :as parsed}]
   (let [dry-run? (contains? flags "dry-run")
         watch?   (contains? flags "watch")

@@ -95,7 +95,7 @@
               "the old root and the image whose count fell to zero retire"))))))
 
 (deftest a-non-canonical-image-is-refused
-  (let [[_ s p] (setup)
+  (let [[_ _s p] (setup)
         kb (snap/trunk-bytes :x)
         slot (fn [img] (snap/ref-slot (sha/sha256-hex img)))
         blob-of (fn [img] (snap/frame [[kb (slot img)]]))

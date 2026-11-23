@@ -647,7 +647,7 @@
     [^JvmSlabCtx ctx size-bytes]
     (let [^objects regions        (field ctx regions)
           ^objects bitmap-regions (field ctx bitmap-regions)
-          ^ints    data-offsets   (field ctx data-offsets)
+          ^ints    _data-offsets   (field ctx data-offsets)
           ^ints    bitmap-offsets (field ctx bitmap-offsets)
           ^ints    total-blocks   (field ctx total-blocks)
           ^ints    block-sizes    (field ctx block-sizes)
@@ -1174,7 +1174,7 @@
                    (recur (inc ci))))))
              ;; Check coalesc (class 6) growth without lock
            coalesc-grew?
-           (when-let [path (aget file-paths OVERFLOW_CLASS_IDX)]
+           (when-let [_path (aget file-paths OVERFLOW_CLASS_IDX)]
              (let [cur-region (aget regions OVERFLOW_CLASS_IDX)]
                (if (nil? cur-region)
                  true ;; never opened — must check
@@ -1656,7 +1656,7 @@
    already added by the caller — a fn taking primitives supports at
    most 4 args) of a node given as its view parts, as a new byte
    array."
-  [arr region ^long abs-off ^long len]
+  [_arr region ^long abs-off ^long len]
   (mem/-read-bytes region abs-off len))
 
 (defn parts-bytes-equal?

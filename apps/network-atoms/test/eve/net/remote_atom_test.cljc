@@ -83,7 +83,7 @@
     (is (= {:ok 1} (a/swap! ra assoc :ok 1)) "the handle is usable after a deny")))
 
 (deftest retries-are-bounded
-  (let [[ra s slept] (setup {:before-cas (fn [st] (swap! st update-in [:atoms "a1" :root_key] str "x"))})
+  (let [[ra _s slept] (setup {:before-cas (fn [st] (swap! st update-in [:atoms "a1" :root_key] str "x"))})
         e (try (a/swap! ra assoc :n 1) nil (catch #?(:cljs :default :lpy python/Exception :jank jank.runtime.object_ref :default Exception) e e))]
     (is (= :retries-exhausted (:type (ex-data e))))
     (is (= 50 (count @slept)))

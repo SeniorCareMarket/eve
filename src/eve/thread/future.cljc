@@ -47,7 +47,7 @@
                   (-entry [_] e)
                   (-deref-within [_ ms v] (within e ms v))
                   (-cancel! [_] (c/cancel! e))
-                  (-deliver! [_ v] false))
+                  (-deliver! [_ _v] false))
 
 (eve/host-deftype Promise [e token]
                   clojure.lang.IDeref
