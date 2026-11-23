@@ -345,10 +345,12 @@
 ;; record header above; dictionary coding of descriptors is S2.
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the refusal paths in the #?(:clj ...) sections); no cljs caller exists
 (defn- refuse! [name msg data]
   (throw (ex-info (str "eve.flat.stream: " msg)
                   (assoc data :eve.flat.stream/refusal name))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the byte reader/writer sections); no cljs caller exists
 (defn- w-i32 ^long [^bytes a ^long i]
   (let [i (int i)]
     (long (unchecked-int
@@ -357,6 +359,7 @@
                    (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 2))) 0xFF) 16)
                    (bit-shift-left (bit-and (long (aget a (unchecked-add-int i 3))) 0xFF) 24))))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the byte reader/writer sections); no cljs caller exists
 (defn- w-put-i32! [^bytes a ^long i ^long v]
   (let [i (int i)]
     (aset a i (unchecked-byte v))
@@ -365,6 +368,7 @@
     (aset a (unchecked-add-int i 3) (unchecked-byte (bit-shift-right v 24)))
     nil))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (the byte reader/writer sections); no cljs caller exists
 (defn- w-put-u8! [^bytes a ^long i ^long v]
   (aset a (int i) (unchecked-byte v))
   nil)
@@ -866,6 +870,7 @@
    sweep lands."
   {})
 
+#_{:clj-kondo/ignore [:unused-private-var]} ; used only on the :clj pass (stream-transfer!); no cljs caller exists
 (defn- ea-atom? [x]
   (some? (try (ea/-domain-state x) (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))))
 
