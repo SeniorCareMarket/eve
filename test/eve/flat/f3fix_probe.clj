@@ -54,7 +54,11 @@
           (let [img (build/build-image v)]
             (println "  image: blocks" (count (:blocks img))
                      "relocations-key count" (count (:relocations img))
-                     "relocs-key count" (count (:relocs img)))
+                     ;; this probe exists to compare the two key
+                     ;; spellings against the built image — :relocs
+                     ;; is read deliberately, so its unknown-map-key
+                     ;; finding is the probe working as designed.
+                     "relocs-key count" (count #_{:clj-kondo/ignore [:unknown-map-key]} (:relocs img)))
             (let [a (fresh-atom (str "f3fix/c1-" (rand-int 1000000000)))
                   placed (place/place a img)]
               (= v (d/eve->clj placed)))))))

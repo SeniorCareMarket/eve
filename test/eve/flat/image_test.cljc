@@ -21,7 +21,7 @@
             [eve.flat]
             [eve.flat.sio :as ssio]
             [eve.flat.image :as img]
-            [eve.map] [eve.vec] [eve.set] [eve.list])
+            [eve.vec] [eve.set] [eve.list])
   (:import [java.util Arrays Random]
            [java.util.concurrent CountDownLatch]))
 

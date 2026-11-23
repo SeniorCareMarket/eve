@@ -2,8 +2,7 @@
   "Tests for multi-atom domain API (Phase F).
    Run via: node target/thread-test/all.js mmap-domain"
   (:require [cljs.test :refer [deftest testing is]]
-            [eve.atom :as atom]
-            [eve.atom :as sa]))
+            [eve.atom :as atom]))
 
 (def ^:private test-base (str "/tmp/eve-domain-test-" (js/Date.now)))
 
@@ -70,8 +69,8 @@
   (testing "t/atom with :persistent — two atoms are independent"
     (let [b (str test-base "-ta-multi")
           d (atom/persistent-atom-domain b)]
-      (let [a (sa/atom {:id :test.ns/counter :persistent b} {:count 0})
-            b-atom (sa/atom {:id :test.ns/users :persistent b} {})]
+      (let [a (atom/atom {:id :test.ns/counter :persistent b} {:count 0})
+            b-atom (atom/atom {:id :test.ns/users :persistent b} {})]
         (swap! a update :count inc)
         (swap! b-atom assoc :alice {:role :admin})
         (is (= 1 (:count @a)))
@@ -85,7 +84,7 @@
   (testing "t/atom with :persistent — map values work"
     (let [b (str test-base "-ta-scalar")
           d (atom/persistent-atom-domain b)]
-      (let [a (sa/atom {:id :test.ns/num :persistent b} {:v 42})]
+      (let [a (atom/atom {:id :test.ns/num :persistent b} {:v 42})]
         (is (= 42 (:v @a)))
         (swap! a update :v inc)
         (is (= 43 (:v @a))))
@@ -95,7 +94,7 @@
   (testing "t/atom with :persistent — nil initial value"
     (let [b (str test-base "-ta-nil")
           d (atom/persistent-atom-domain b)]
-      (let [a (sa/atom {:id :test.ns/maybe :persistent b} nil)]
+      (let [a (atom/atom {:id :test.ns/maybe :persistent b} nil)]
         (is (nil? @a))
         (reset! a {:x 1})
         (is (= {:x 1} @a)))
@@ -106,10 +105,10 @@
     (let [b (str test-base "-ta-ptrue-" (js/Date.now))
           d (atom/persistent-atom-domain b)]
       (binding [atom/*global-persistent-atom-domain* d]
-        (let [a (sa/atom {:id ::counter :persistent true} {:count 0})]
+        (let [a (atom/atom {:id ::counter :persistent true} {:count 0})]
           (swap! a update :count inc)
           (is (= 1 (:count @a)))
-          (let [b-atom (sa/atom {:id ::users :persistent true} {})]
+          (let [b-atom (atom/atom {:id ::users :persistent true} {})]
             (swap! b-atom assoc :alice {:role :admin})
             (is (= {:alice {:role :admin}} @b-atom))
             (is (= 1 (:count @a))))))
@@ -118,7 +117,7 @@
 (deftest test-t-atom-persistent-path
   (testing "t/atom with :persistent path auto-creates domain"
     (let [b (str test-base "-ta-path")]
-      (let [a (sa/atom {:id :test.ns/x :persistent b} {:v 42})]
+      (let [a (atom/atom {:id :test.ns/x :persistent b} {:v 42})]
         (is (= 42 (:v @a)))
         (swap! a update :v inc)
         (is (= 43 (:v @a))))
@@ -127,10 +126,10 @@
 (deftest test-t-atom-persistent-path-rejoin
   (testing "t/atom with :persistent path — close and rejoin sees data"
     (let [b (str test-base "-ta-rejoin")]
-      (let [a (sa/atom {:id :test.ns/val :persistent b} {:count 10})]
+      (let [a (atom/atom {:id :test.ns/val :persistent b} {:count 10})]
         (is (= {:count 10} @a)))
       (atom/close-atom-domain! (atom/persistent-atom-domain b))
       ;; Re-open
-      (let [a2 (sa/atom {:id :test.ns/val :persistent b} nil)]
+      (let [a2 (atom/atom {:id :test.ns/val :persistent b} nil)]
         (is (= {:count 10} @a2)))
       (atom/close-atom-domain! (atom/persistent-atom-domain b)))))

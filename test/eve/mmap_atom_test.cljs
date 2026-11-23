@@ -3,8 +3,7 @@
    Requires: native addon loaded, mmap slab path working (Phase 2 + 3).
    Run via: node target/thread-test/all.js mmap-atom"
   (:require [cljs.test :refer [deftest testing is]]
-            [eve.atom :as atom]
-            [eve.atom :as sa]))
+            [eve.atom :as atom]))
 
 (def ^:private test-base (str "/tmp/eve-p5-atom-test-" (js/Date.now)))
 
@@ -50,7 +49,7 @@
 (deftest test-t-atom-swap
   (testing "t/atom with :persistent path — swap! works"
     (let [b (str test-base "-ta-sw")
-          a (sa/atom {:id :eve/main :persistent b} {:count 0})]
+          a (atom/atom {:id :eve/main :persistent b} {:count 0})]
       (swap! a update :count inc)
       (is (= 1 (:count @a)))
       (swap! a assoc :y 99)
@@ -60,7 +59,7 @@
 (deftest test-t-atom-reset
   (testing "t/atom with :persistent path — reset! works"
     (let [b (str test-base "-ta-rs")
-          a (sa/atom {:id :eve/main :persistent b} {:n 0})]
+          a (atom/atom {:id :eve/main :persistent b} {:n 0})]
       (reset! a {:n 42})
       (is (= 42 (:n @a)))
       (atom/close-atom-domain! (atom/persistent-atom-domain b)))))
