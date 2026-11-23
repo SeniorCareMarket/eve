@@ -45,7 +45,10 @@
         (let [want (images row)
               {:keys [root set-root? blocks]} (c/encode (read-edn (:value row)))]
           (is (= (:root row) root) "the root key")
-          (is (= (boolean (:set-root? row)) (boolean set-root?)))
+          ;; both sides are coerced on purpose: the fixture row's
+          ;; value is data (any truthy) and the encoder's answer
+          ;; is compared by truthiness, not identity.
+          (is (= (boolean (:set-root? row)) #_{:clj-kondo/ignore [:redundant-primitive-coercion]} (boolean set-root?)))
           (is (= (set (keys want)) (set (keys blocks))) "the keys")
           (is (every? (fn [[k img]] (= img (get blocks k))) want) "every image"))))))
 

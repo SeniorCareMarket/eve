@@ -48,13 +48,13 @@
      :clj (let [^Class i (:on-interface p)]
             (cond
               (and i (.isInstance i x)) true
-              (or (nil? x) (nil? i)) (boolean (satisfies? p x))
+              (or (nil? x) (nil? i)) (satisfies? p x)
               :else (let [^java.util.concurrent.ConcurrentHashMap m (remembered p i)
                           c (class x)
                           hit (.get m c)]
                       (if (nil? hit)
-                        (let [r (boolean (satisfies? p x))] (.put m c r) r)
-                        (boolean hit)))))
+                        (let [r (satisfies? p x)] (.put m c r) r)
+                        hit))))
      :default (satisfies? p x)))
 
 (defmacro fast-satisfies?

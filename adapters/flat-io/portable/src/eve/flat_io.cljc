@@ -490,8 +490,11 @@
   (let [s (elem-size k) at (+ (long data-off) (* s (long i)))]
     (case (int k)
       (1 3) (u8 c at)
-      2 (let [v (long (u8 c at))] (if (>= v 128) (- v 256) v))
-      4 (let [v (long (u16 c at))] (if (>= v 32768) (- v 65536) v))
+      ;; the (long ...) coercions pin the value's type across
+      ;; hosts (a byte read is a plain number on some): kondo's
+      ;; redundancy verdict is for the :clj pass only.
+      2 (let [v #_{:clj-kondo/ignore [:redundant-primitive-coercion]} (long (u8 c at))] (if (>= v 128) (- v 256) v))
+      4 (let [v #_{:clj-kondo/ignore [:redundant-primitive-coercion]} (long (u16 c at))] (if (>= v 32768) (- v 65536) v))
       5 (u16 c at)
       6 (i32 c at)
       7 (u32 c at)

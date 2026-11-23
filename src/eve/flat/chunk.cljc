@@ -274,7 +274,7 @@
      #?(:jank (satisfies? p x) :bb (satisfies? p x) :glj (satisfies? p x)
         :clj (let [c (class x) key [k c] hit (get @class-answers key ::none)]
                (if (identical? hit ::none)
-                 (let [r (boolean (satisfies? p x))] (swap! class-answers assoc key r) r)
+                 (let [r (satisfies? p x)] (swap! class-answers assoc key r) r)
                  hit)))))
 (defn flat-handle?
   "THE FAST HANDLE TEST: x implements IFlatHandle. On the JVM one instanceof for every eve handle type, a per-class

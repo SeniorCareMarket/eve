@@ -28,7 +28,6 @@
 (defn valid-session?
   "is the session pk registered in the registry's value with this issuance, and now within max-lifetime of it"
   [registry pk issuance now max-lifetime]
-  (boolean
-   (and (map? registry) (integer? issuance) (integer? now) (integer? max-lifetime)
-        (= issuance (get registry (pk-key pk)))
-        (<= 0 (- now issuance) max-lifetime))))
+  (and (map? registry) (integer? issuance) (integer? now) (integer? max-lifetime)
+       (= issuance (get registry (pk-key pk)))
+       (<= 0 (- now issuance) max-lifetime)))

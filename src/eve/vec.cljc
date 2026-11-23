@@ -588,7 +588,7 @@
   (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
   (^boolean contains [this o] (not= -1 (.indexOf this o)))
   (^boolean containsAll [this ^java.util.Collection c]
-    (boolean (every? #(.contains this %) c)))
+    (every? #(.contains this %) c))
   (^java.util.List subList [this ^int from ^int to]
     (java.util.Collections/unmodifiableList
      (java.util.ArrayList. ^java.util.Collection (subvec (vec this) from to))))

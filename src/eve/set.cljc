@@ -802,7 +802,7 @@
   (toArray [this] (clojure.lang.RT/seqToArray (.seq this)))
   ;; contains is already defined via IPersistentSet above
   (^boolean containsAll [this ^java.util.Collection c]
-    (boolean (every? #(.contains this %) c)))
+    (every? #(.contains this %) c))
   ;; Unsupported mutators (immutable set)
   (add [_ _] (throw (UnsupportedOperationException.)))
   (remove [_ _] (throw (UnsupportedOperationException.)))

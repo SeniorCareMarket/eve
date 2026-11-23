@@ -914,14 +914,14 @@
    jank takes the :default behavior explicitly."
   [v]
   #?(:jank false
-     :clj (boolean (or (instance? Number v)
-                       (instance? String v)
-                       (instance? Boolean v)
-                       (instance? Character v)
-                       (instance? clojure.lang.Keyword v)
-                       (instance? clojure.lang.Symbol v)
-                       (instance? java.util.Date v)
-                       (instance? java.util.UUID v)))
+     :clj (or (instance? Number v)
+              (instance? String v)
+              (instance? Boolean v)
+              (instance? Character v)
+              (instance? clojure.lang.Keyword v)
+              (instance? clojure.lang.Symbol v)
+              (instance? java.util.Date v)
+              (instance? java.util.UUID v))
      :default false))
 
 (defn- write-plain-collection!

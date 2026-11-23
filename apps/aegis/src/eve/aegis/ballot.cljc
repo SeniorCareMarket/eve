@@ -112,6 +112,10 @@
   (let [ih (b/hex info)
         entries (filter (fn [e] (= ih (:info e))) log)
         members (map :member entries)]
+    ;; the boolean coercion is the predicate's contract: the
+    ;; (and stmt ...) disjunct can make the or answer nil, and
+    ;; this fn answers a strict boolean, never nil.
+    #_{:clj-kondo/ignore [:redundant-primitive-coercion]}
     (boolean (or (> (count entries) roster-size)
                  (not= (count members) (count (set members)))
                  (and stmt (or (not (verify-statement stmt-pk stmt))

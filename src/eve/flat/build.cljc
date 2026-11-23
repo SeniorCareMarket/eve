@@ -126,7 +126,7 @@
            (set! t end)
            (.add offs (int off))
            (.add szs (int n))
-           (.put by-off (long off) (long n))
+           (.put by-off off n)
            off))
        (-sio-free! [_ _o] true)
        (-sio-copy-block! [_ dd df s sf n]

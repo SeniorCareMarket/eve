@@ -331,7 +331,7 @@
                 (== k 1) (let [i (aget idxs lo)
                                r (run-offsets sio ci 1)
                                off (long (if r (nth r 0) (alloc/-sio-alloc! sio (aget sizes i))))]
-                           (aset offs i (long off))
+                           (aset offs i off)
                            (aset claimed i true))
                 :else (if-let [r (run-offsets sio ci k)]
                         (dotimes [j k]
@@ -481,7 +481,7 @@
                     #?(:clj (let [base (if (aget owner-seen o)
                                          (aget owner-base o)
                                          (let [b (alloc/node-base sio (aget offs o))]
-                                           (aset owner-base o (long b))
+                                           (aset owner-base o b)
                                            (aset owner-seen o true)
                                            b))]
                               (put-i32-arr! arr (+ base (- pos (aget boff o))) (aget offs t)))
