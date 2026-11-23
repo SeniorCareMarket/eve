@@ -13,8 +13,8 @@
 
 (eve/deftype CasCounter [^:volatile-mutable ^:int32 value]
   ICasCounter
-  (cas-value! [this expected new] (cas! value expected new))
-  (value-of [this] value))
+  (cas-value! [_this expected new] (cas! value expected new))
+  (value-of [_this] value))
 
 (deftest jvm-deftype-cas!
   (let [sio (alloc/default-sio)
@@ -31,7 +31,7 @@
     (testing "contended cas! from several threads: exactly one winner per round"
       (let [rounds 200
             wins   (atom 0)]
-        (dotimes [r rounds]
+        (dotimes [_r rounds]
           (let [cur (value-of c)
                 ts  (doall (for [_ (range 4)]
                              (future (cas-value! c cur (inc cur)))))]

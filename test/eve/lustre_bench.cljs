@@ -84,7 +84,7 @@
   ;; then scale up if they work.
 
   (let [ts       (js/Date.now)
-        results  []
+        _results  []
         ;; Small warmup
         _        (println "\n=== Lustre Swap! Benchmark ===")
         _        (println (str "Timestamp: " (.toISOString (js/Date.))))

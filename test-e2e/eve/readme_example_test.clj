@@ -100,7 +100,7 @@
   (testing "Process A (Node) writes {:count 1}, Process B (JVM) joins and sees 1"
     (let [b (str base "-na-jb")]
       ;; Bootstrap domain files with :eve/main atom (mmap-worker protocol)
-      (let [a (e/atom {:id :eve/main :persistent b} {:count 0})]
+      (let [_a (e/atom {:id :eve/main :persistent b} {:count 0})]
         (atom/close-atom-domain! (atom/persistent-atom-domain b)))
 
       ;; Node acts as Process A: swap :count 0 → 1

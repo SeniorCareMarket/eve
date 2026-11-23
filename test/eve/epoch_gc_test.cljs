@@ -130,7 +130,7 @@
           slot1 (atom/register-worker! s-atom-env worker1-id)
           slot2 (atom/register-worker! s-atom-env worker2-id)]
       ;; Initially, no one is reading
-      (let [min-before (atom/get-min-active-epoch s-atom-env)]
+      (let [_min-before (atom/get-min-active-epoch s-atom-env)]
         ;; min-before could be nil if no workers reading
 
         ;; Worker 1 starts reading
@@ -174,7 +174,7 @@
           alloc-result (sab/alloc s-atom-env 64)]
       (is (not (:error alloc-result)) "Allocation should succeed")
       (let [desc-idx (:descriptor-idx alloc-result)
-            epoch-before (atom/get-current-epoch s-atom-env)]
+            _epoch-before (atom/get-current-epoch s-atom-env)]
         ;; Retire the block
         (let [retired? (atom/retire-block! s-atom-env desc-idx)]
           (is retired? "Should successfully retire the block"))
@@ -206,7 +206,7 @@
         (is (not (:error alloc-result)))
         (let [desc-idx (:descriptor-idx alloc-result)]
           ;; Start a read at current epoch
-          (let [read-epoch (atom/begin-read! s-atom-env slot-idx)]
+          (let [_read-epoch (atom/begin-read! s-atom-env slot-idx)]
             ;; Retire the block at this epoch
             (atom/retire-block! s-atom-env desc-idx)
             ;; Try to free - should fail because reader is still active

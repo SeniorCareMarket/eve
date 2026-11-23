@@ -43,14 +43,14 @@
 
 (deftest wasm-mem-cached-views-test
   (testing "wasm-mem/data-view returns DataView after atom init (commit 18)"
-    (let [env (fresh-env)
+    (let [_env (fresh-env)
           dv (wasm/data-view)]
       (is (some? dv) "data-view should return non-nil after atom init")
       (is (instance? js/DataView dv)
           "data-view should return a DataView instance")))
 
   (testing "wasm-mem/u8-view returns Uint8Array after atom init (commit 18)"
-    (let [env (fresh-env)
+    (let [_env (fresh-env)
           u8 (wasm/u8-view)]
       (is (some? u8) "u8-view should return non-nil after atom init")
       (is (instance? js/Uint8Array u8)
@@ -68,7 +68,7 @@
           "Uint8Array should be backed by the atom's SAB")))
 
   (testing "Cached views work for reading/writing data (commit 18)"
-    (let [env (fresh-env)
+    (let [_env (fresh-env)
           dv (wasm/data-view)
           u8 (wasm/u8-view)
           ;; Write through DataView, read through Uint8Array

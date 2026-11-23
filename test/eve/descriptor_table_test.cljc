@@ -21,7 +21,7 @@
       (let [b0 (slab/alloc! sio size)
             b1 (slab/alloc! sio size)
             [[cr0 co0] [fr0 fo0]] (alloc/desc-of sio b0)
-            [[cr1 co1] [fr1 fo1]] (alloc/desc-of sio b1)]
+            [[cr1 co1] [_fr1 fo1]] (alloc/desc-of sio b1)]
         (testing (str size " bytes")
           (is (some? cr0) "a bitmap-class block has a descriptor")
           (is (= (* 4 (- (alloc/decode-block-idx b1) (alloc/decode-block-idx b0))) (- co1 co0))

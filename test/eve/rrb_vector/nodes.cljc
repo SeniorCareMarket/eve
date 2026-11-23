@@ -29,7 +29,7 @@
 (defn empty-node []
   (->VectorNode nil (make-array 32)))
 
-(defn clone [shift node]
+(defn clone [_shift node]
   (->VectorNode (.-edit node) (aclone (.-arr node))))
 
 (defn regular? [node]
@@ -109,7 +109,7 @@
       (aget arr (dec (index-of-nil arr)))
       (aget arr (dec (aget (node-ranges node) 32))))))
 
-(defn remove-leftmost-child [shift parent]
+(defn remove-leftmost-child [_shift parent]
   (let [arr (.-arr parent)]
     (if (nil? (aget arr 1))
       nil

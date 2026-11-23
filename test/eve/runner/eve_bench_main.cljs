@@ -142,7 +142,7 @@
 
 (defn- bench-annotation
   "Build the comment block for a benchmark result."
-  [test-name result timestamp git-meta mode]
+  [_test-name result timestamp git-meta mode]
   (let [branch (:branch git-meta)
         commit (:commit git-meta)
         ms (:elapsed-ms result)

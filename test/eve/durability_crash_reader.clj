@@ -14,7 +14,7 @@
     {}))
 
 (defn -main [variant dir]
-  (let [dom (atom/persistent-atom-domain dir (opts variant))
+  (let [_dom (atom/persistent-atom-domain dir (opts variant))
         a (atom/persistent-atom {:id :eve/main :persistent dir} ::absent)
         v @a]
     (cond

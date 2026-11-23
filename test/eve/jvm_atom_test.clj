@@ -50,7 +50,7 @@
 (deftest test-join-atom
   (let [base2 (str base "-join")
         d1    (atom/persistent-atom-domain base2)
-        a     (atom/persistent-atom {:id :eve/main :persistent base2} {:count 5})]
+        _a     (atom/persistent-atom {:id :eve/main :persistent base2} {:count 5})]
     (atom/close-atom-domain! d1)
     (let [d2 (atom/persistent-atom-domain base2)
           b  (atom/persistent-atom {:id :eve/main :persistent base2} nil)]

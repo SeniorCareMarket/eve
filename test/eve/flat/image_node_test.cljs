@@ -168,7 +168,7 @@
 
 (defn- off [ci bi] (alloc/encode-slab-offset ci bi))
 
-(defn- total-blocks [sio ci]
+(defn- total-blocks [_sio _ci]
   ;; the class's block count, counted through the allocator's own
   ;; allocated? over a generous bound is too slow; the geometry comes
   ;; from the slab header through the sio's region, as Z2 read it.

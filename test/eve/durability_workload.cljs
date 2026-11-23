@@ -48,7 +48,7 @@
                  "J" {:journal? true :journal-batch 1000000
                       :journal-window-ms 5000}
                  {:durable? false})
-        dom    (atom/persistent-atom-domain dir jopts)
+        _dom    (atom/persistent-atom-domain dir jopts)
         atoms  (into {:counter (atom/persistent-atom {:id :counter :persistent dir} 0)}
                      (map (fn [[_ [aid _ _]]] [aid (atom/persistent-atom {:id aid :persistent dir} {:records {}})]))
                      classes)

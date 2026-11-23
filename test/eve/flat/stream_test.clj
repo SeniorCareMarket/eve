@@ -31,7 +31,7 @@
             sent (send-of src)
             wc (ea/read-pinned src (fn [lv] (stream/walk-count (d/-eve-sio lv) (d/-root-header-off lv))))
             tgt (fresh-atom (str "st/t-" nm))
-            placed (swap! tgt (fn [_] (stream/receive-value d/*domain-sio* (:bytes sent))))]
+            _placed (swap! tgt (fn [_] (stream/receive-value d/*domain-sio* (:bytes sent))))]
         (is (= v @tgt) "placed value equals the source value")
         (is (= (:blocks sent) (:blocks wc))
             "the sender's block count is the S0 walk's count")))))

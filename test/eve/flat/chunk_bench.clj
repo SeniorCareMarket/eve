@@ -93,7 +93,7 @@
           (let [chunks (pack-all rows)
                 total (reduce + (map #(alength ^bytes %) chunks))
                 unpack (resolve 'eve.flat.chunk/unpack)
-                open (resolve 'eve.flat.chunk/open)
+                _open (resolve 'eve.flat.chunk/open)
                 p-decode (bench-min-ms (fn [] (mapv unpack chunks)) 5)]
             (println (format "B6 %-9s packed %,d bytes in %d chunks = %.3fx transit-msgpack %s"
                              label total (count chunks) (/ (double total) (alength tb))

@@ -27,7 +27,7 @@
            (try (stm/run-in-transaction
                  (fn [] (stm/ref-set* r 99) (throw (ex-info "abort" {}))))
                 :not-aborted
-                (catch #?(:clje _ :cljs :default :default Throwable) e :aborted))))
+                (catch #?(:clje _ :cljs :default :default Throwable) _e :aborted))))
     (is (= 7 (stm/deref-ref r)))
     (is (= 8 (stm/run-in-transaction (fn [] (stm/alter* r inc [])))))
     (is (= 8 (stm/deref-ref r)))))

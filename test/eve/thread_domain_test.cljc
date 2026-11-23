@@ -107,7 +107,7 @@
         g2 (dom/pool r2 :g {:threads n})]
     (testing "the registry is the meta-atom's: both runtimes read the same one"
       (let [reg1 (dom/registry r1)
-            reg2 (dom/registry r2)]
+            _reg2 (dom/registry r2)]
         ;; (two reads, one through each runtime: equal at a moment no lease was stretched between them)
         (is (until 30000 (fn [] (= (dom/registry r1) (dom/registry r2)))))
         (is (= ["r1" "r2"] (sort (keys (:runtimes reg1)))))

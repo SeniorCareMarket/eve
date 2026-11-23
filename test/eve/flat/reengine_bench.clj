@@ -178,7 +178,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- run-detachprobe [_]
-  (let [mx nil]
+  (let [_mx nil]
     (println "DETACH PROBE — stack sampling during img/detach")
     (doseq [[kind v] (corpora/corpora :canonical)]
       (let [holder (fresh-atom "rd/hold")
@@ -212,7 +212,7 @@
 (defn- run-placesample [_]
   (require 'eve.flat.place-test)
   (let [hand-image (resolve 'eve.flat.place-test/hand-image)
-        mx nil]
+        _mx nil]
     (println "PLACE SAMPLE — stack sampling during shipped place!")
     (doseq [[kind v] (corpora/corpora :canonical)]
       (let [img (hand-image v)

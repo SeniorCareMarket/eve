@@ -21,7 +21,7 @@
   (if-not elide-debug-printouts?
     `(prn ~@args)))
 
-(defmacro dbg- [& args])
+(defmacro dbg- [& _args])
 
 ;; eve: the tail is an eve array and the root an empty node, both in eve memory
 ;; (the current domain's), and ->Vector allocates the vector there too

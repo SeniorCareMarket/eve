@@ -19,25 +19,25 @@
 
 (eve/deftype Counter [^:mutable ^:int32 count]
   ICounted
-  (-count [this] count))
+  (-count [_this] count))
 
 (eve/deftype Point [^:int32 x ^:int32 y]
   ILookup
-  (-lookup [this k]
+  (-lookup [_this k]
     (case k :x x :y y nil))
-  (-lookup [this k not-found]
+  (-lookup [_this k not-found]
     (case k :x x :y y not-found)))
 
 (eve/deftype LabeledPoint [^:int32 x ^:int32 y label]
   ILookup
-  (-lookup [this k]
+  (-lookup [_this k]
     (case k :x x :y y :label label nil))
-  (-lookup [this k not-found]
+  (-lookup [_this k not-found]
     (case k :x x :y y :label label not-found)))
 
 (eve/deftype AtomicCounter [^:volatile-mutable ^:int32 value]
   IDeref
-  (-deref [this] value))
+  (-deref [_this] value))
 
 ;;-----------------------------------------------------------------------------
 ;; Tests

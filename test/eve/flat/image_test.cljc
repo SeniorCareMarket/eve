@@ -63,14 +63,14 @@
 ;; a user type: a primitive, a mutable primitive, a serialized value, a reference to another instance
 (edt/deftype ZTag [^:int32 id label]
   clojure.lang.ILookup
-  (valAt [this k] (case k :id id :label label nil))
-  (valAt [this k nf] (case k :id id :label label nf)))
+  (valAt [_this k] (case k :id id :label label nil))
+  (valAt [_this k nf] (case k :id id :label label nf)))
 (edt/deftype ZItem [^:int32 n ^:mutable ^:int32 hits payload ^:ZTag tag]
   clojure.lang.ILookup
-  (valAt [this k] (case k :n n :hits hits :payload payload :tag tag nil))
-  (valAt [this k nf] (case k :n n :hits hits :payload payload :tag tag nf))
+  (valAt [_this k] (case k :n n :hits hits :payload payload :tag tag nil))
+  (valAt [_this k nf] (case k :n n :hits hits :payload payload :tag tag nf))
   clojure.lang.Counted
-  (count [this] n))
+  (count [_this] n))
 
 ;; ---------------------------------------------------------------------------------------------------------------
 ;; Z1.1 — a read-only slab I/O over one byte array refuses every mutator

@@ -121,7 +121,7 @@
   (testing "JVM writes flat map with string, int, float, bool, keyword — Node reads back"
     (let [b     (str base "-x01")
           m     {:name "alice" :age 30 :active true :score 3.14 :role :admin}
-          [d a] (create-domain-atom! b m)]
+          [d _a] (create-domain-atom! b m)]
       (atom/close-atom-domain! d)
       (let [v (node-read b)]
         (is (= "alice" (:name v)))
@@ -134,7 +134,7 @@
 (deftest xenv-02-node-writes-jvm-reads-map
   (testing "Node resets atom to flat map, JVM reads back via join-atom-domain"
     (let [b     (str base "-x02")
-          [d a] (create-domain-atom! b {:placeholder true})]
+          [d _a] (create-domain-atom! b {:placeholder true})]
       (atom/close-atom-domain! d)
       (node-reset! b {:x 10 :y 20 :label "origin"})
       (let [[d2 c] (join-domain-atom! b)
@@ -148,7 +148,7 @@
 (deftest xenv-03-multi-key-node-assoc
   (testing "JVM writes map, Node assocs 3 keys, JVM reads all"
     (let [b     (str base "-x03")
-          [d a] (create-domain-atom! b {:base-key "original"})]
+          [d _a] (create-domain-atom! b {:base-key "original"})]
       (atom/close-atom-domain! d)
       (node-swap-assoc! b :added-int 42)
       (node-swap-assoc! b :added-str "hello")
@@ -165,9 +165,9 @@
 (deftest xenv-04-vector-root-cross-env
   (testing "JVM writes vector at atom root, Node verifies readable, JVM reads back"
     (let [b     (str base "-x04")
-          [d a] (create-domain-atom! b [10 20 30 "four" :five])]
+          [d _a] (create-domain-atom! b [10 20 30 "four" :five])]
       (atom/close-atom-domain! d)
-      (let [r (spawn-node! worker "join-swap-fn" b "to-vec")]
+      (let [_r (spawn-node! worker "join-swap-fn" b "to-vec")]
         :noop)
       ;; JVM re-joins and reads the vector
       (let [[d2 c] (join-domain-atom! b)
@@ -223,7 +223,7 @@
 (deftest xenv-07-string-transform-cross-env
   (testing "JVM writes {:greeting \"hello\"}, Node appends \" world\", JVM reads"
     (let [b     (str base "-x07")
-          [d a] (create-domain-atom! b {:greeting "hello"})]
+          [d _a] (create-domain-atom! b {:greeting "hello"})]
       (atom/close-atom-domain! d)
       (node-swap-fn! b "append-greeting")
       (let [[d2 c] (join-domain-atom! b)
@@ -235,7 +235,7 @@
 (deftest xenv-08-node-merge-meta
   (testing "JVM writes base map, Node merges :source and :pid, JVM reads all"
     (let [b     (str base "-x08")
-          [d a] (create-domain-atom! b {:status "ready" :version 1})]
+          [d _a] (create-domain-atom! b {:status "ready" :version 1})]
       (atom/close-atom-domain! d)
       (node-swap-fn! b "merge-meta")
       (let [[d2 c] (join-domain-atom! b)
@@ -250,7 +250,7 @@
 (deftest xenv-09-inc-vals-transform
   (testing "JVM writes map with numeric vals, Node inc-vals, JVM reads incremented"
     (let [b     (str base "-x09")
-          [d a] (create-domain-atom! b {:a 1 :b 2 :c 3 :label "keep"})]
+          [d _a] (create-domain-atom! b {:a 1 :b 2 :c 3 :label "keep"})]
       (atom/close-atom-domain! d)
       (node-swap-fn! b "inc-vals")
       (let [[d2 c] (join-domain-atom! b)
@@ -265,7 +265,7 @@
 (deftest xenv-10-concurrent-contention
   (testing "3 Node workers each increment 5 times + JVM 5 times = 20"
     (let [b     (str base "-x10")
-          [d a] (create-domain-atom! b {:count 0})]
+          [d _a] (create-domain-atom! b {:count 0})]
       (atom/close-atom-domain! d)
       ;; Launch 3 Node workers concurrently, each doing 5 increments
       (let [futs (doall

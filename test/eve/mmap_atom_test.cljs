@@ -38,7 +38,7 @@
   (testing "join-atom reads value written by persistent-atom"
     (let [base (str test-base "-join")
           d1   (atom/persistent-atom-domain base)
-          a    (atom/persistent-atom {:id :eve/main :persistent base} {:count 5})]
+          _a    (atom/persistent-atom {:id :eve/main :persistent base} {:count 5})]
       (atom/close-atom-domain! d1)
       (let [d2 (atom/persistent-atom-domain base)
             b  (atom/persistent-atom {:id :eve/main :persistent base} nil)]

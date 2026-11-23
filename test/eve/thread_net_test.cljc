@@ -213,7 +213,7 @@
         (let [rn (dom/attach! (net/rung gcfg "app/state" platform) (assoc opts :rid "net" :ttl 4000 :threads local?))]
           (try
             (let [gd (dom/pool rd :g {:threads 0})
-                  gn (dom/pool rn :g {:threads (if local? 1 0)})]
+                  _gn (dom/pool rn :g {:threads (if local? 1 0)})]
               (testing "a disk runtime and a network runtime in one registry, one pool"
                 (is (= ["disk" "net"] (sort (keys (:runtimes (dom/registry rd))))))
                 (is (= (dom/registry rd) (dom/registry rn)) "the same registry by either rung")

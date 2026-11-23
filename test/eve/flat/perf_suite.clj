@@ -193,7 +193,7 @@
         n (count v)
         ks (probes kind n)
         i0 (first ks)
-        row (fn [op f]
+        row (fn [_op f]
               {:heap (bench-min warmup runs (fn [] (f heap)))
                :flat (try-op (fn [] (bench-min warmup runs (fn [] (f flat)))))})
         slab-acc (ea/read-pinned holder

@@ -57,7 +57,7 @@
    (fn []
      (let [a (ea/atom (keyword "eve.swap-intermediate-reclaim-test" (str "same-" (System/nanoTime)))
                       (zipmap kws (range 200)))
-           _ (dotimes [i 50] (swap! a identity))
+           _ (dotimes [_i 50] (swap! a identity))
            start (used-blocks a)]
        ;; f builds a new map on the way and answers the old one: nothing is published
        (dotimes [i 2000]

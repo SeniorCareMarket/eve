@@ -254,7 +254,7 @@
       (let [total-swaps 500
             per-worker  (quot total-swaps writers)
             b           (tmp-base (str "b7-" writers))
-            [d a]       (create-domain-atom! b {:counter 0})]
+            [d _a]       (create-domain-atom! b {:counter 0})]
         (atom/close-atom-domain! d)
         (let [t0      (System/nanoTime)
               futures (mapv (fn [_]
@@ -301,7 +301,7 @@
         (cleanup-atom-files! b))
       ;; Node side
       (let [b     (tmp-base "b9-node")
-            [d a] (create-domain-atom! b {})]
+            [d _a] (create-domain-atom! b {})]
         (atom/close-atom-domain! d)
         (let [r (spawn-node-edn! bench-worker "bench-write" b (str n) "k")]
           (print-result "B9-node-throughput"
@@ -325,7 +325,7 @@
       (is (pos? elapsed-ms))
       (atom/close-atom-domain! d)
       (let [t1      (System/nanoTime)
-            [d2 b2] (join-domain-atom! b)
+            [d2 _b2] (join-domain-atom! b)
             join-ms (nanos->ms (- (System/nanoTime) t1))]
         (print-result "B10-jvm-join" {} {:elapsed-ms join-ms})
         (atom/close-atom-domain! d2))
@@ -346,7 +346,7 @@
       (dotimes [i n]
         (let [t0 (System/nanoTime)]
           (swap! a assoc :seq (inc i))
-          (let [r (spawn-node-edn! bench-worker "bench-traverse" b)]
+          (let [_r (spawn-node-edn! bench-worker "bench-traverse" b)]
             (.add lats (nanos->ms (- (System/nanoTime) t0))))))
       (let [sorted (sort (vec lats))
             cnt    (count sorted)]
@@ -436,7 +436,7 @@
 
   (testing "Swap latency distribution (Node, no contention)"
     (let [b     (tmp-base "b14-node")
-          [d a] (build-atom! b 100)]
+          [d _a] (build-atom! b 100)]
       (atom/close-atom-domain! d)
       (let [r (spawn-node-edn! bench-worker "bench-swap-latencies"
                                b "500" "w")]
@@ -448,7 +448,7 @@
 
   (testing "Swap latency under contention (4 Node writers)"
     (let [b     (tmp-base "b14-contend")
-          [d a] (build-atom! b 100)]
+          [d _a] (build-atom! b 100)]
       (atom/close-atom-domain! d)
       (let [futures (mapv (fn [i]
                             (future

@@ -504,9 +504,9 @@
                                             (sm/empty-hash-map)
                                             (range 5000))]
                               (is (= (reduce + (map #(* % 2) (range 5000)))
-                                     (reduce (fn [acc [k v]] (+ acc v)) 0 m)))
+                                     (reduce (fn [acc [_k v]] (+ acc v)) 0 m)))
                               (is (= (reduce + (range 5000))
-                                     (reduce (fn [acc [k v]] (+ acc k)) 0 m)))
+                                     (reduce (fn [acc [k _v]] (+ acc k)) 0 m)))
                               :done)))]
       (is (= :done result)))))
 

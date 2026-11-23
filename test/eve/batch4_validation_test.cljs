@@ -47,7 +47,7 @@
 
 (deftest sab-transfer-data-returns-sab-refs-test
   (testing "sab-transfer-data returns map with :sab and :reader-map-sab"
-    (let [env (fresh-env)
+    (let [_env (fresh-env)
           transfer (sab/sab-transfer-data a/*global-atom-instance*)]
       (is (map? transfer)
           "should return a map")
@@ -69,11 +69,11 @@
 
 (deftest sab-transfer-data-round-trip-test
   (testing "SAB refs from sab-transfer-data can reconstruct atom env"
-    (let [env (fresh-env)
+    (let [_env (fresh-env)
           transfer (sab/sab-transfer-data a/*global-atom-instance*)
           sab (:sab transfer)
           index-view (js/Int32Array. sab)
-          data-view (js/Uint8Array. sab)]
+          _data-view (js/Uint8Array. sab)]
       (swap! a/*global-atom-instance* assoc :hello "world")
       (is (some? (aget index-view 0))
           "Reconstructed index-view should be able to read from SAB")

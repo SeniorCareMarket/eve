@@ -27,7 +27,7 @@
   (let [n (parse-long n-str)
         dir (str workdir "/domain")
         snap (fn [i] (copy-domain! workdir (str workdir "/snap-" i)))
-        dom (atom/persistent-atom-domain dir (opts variant))
+        _dom (atom/persistent-atom-domain dir (opts variant))
         big (fn [ch] (mapv (fn [_] (apply str (repeat 30 ch))) (range 2200)))
         init (case size "counter" 0 (big \z))
         a (atom/persistent-atom {:id :eve/main :persistent dir} init)]

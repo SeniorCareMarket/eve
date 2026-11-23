@@ -49,7 +49,7 @@
 (t/deftask by-runtime ([] {}) ([a b] (merge-with + a b)))
 
 (t/deftask gate-tally
-  [acc [turn i]]
+  [acc [turn _i]]
   ;; a chunk's first element waits at the gate until four chunks of this turn run at once (both members' two threads)
   (when (empty? acc)
     (let [h (harness)]

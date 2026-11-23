@@ -101,7 +101,7 @@
   [mk]
   (let [sio (alloc/heap-domain-sio! {})
         lsio (alloc/logging-sio sio)
-        [p v] (binding [d/*domain-sio* lsio] (root lsio (mk)))]
+        [p _v] (binding [d/*domain-sio* lsio] (root lsio (mk)))]
     [(set (map block (reach sio p))) (set (map block (alloc/logged-allocs lsio)))]))
 
 (def ^:private kv (interleave (range 200) (range 200)))
@@ -237,11 +237,11 @@
   (let [big (into {} (map (fn [k] [k (vec (range 8))])) (range 200))]
     (held-elsewhere "interior" big #(e/assoc (e/get % :a) :z 1) (assoc big :z 1)))
   (held-elsewhere "transient" {:x (vec (range 50))}
-                  (fn [m] (let [t (e/transient (eve.alpha/hash-map))
-                                t (e/assoc! t :v {:x (vec (range 50))})
-                                t (e/assoc! t :w (e/get t :v))
-                                t (e/assoc! t :v 1)]
-                            (e/get (e/persistent! t) :w)))
+                  (fn [_m] (let [t (e/transient (eve.alpha/hash-map))
+                                 t (e/assoc! t :v {:x (vec (range 50))})
+                                 t (e/assoc! t :w (e/get t :v))
+                                 t (e/assoc! t :v 1)]
+                             (e/get (e/persistent! t) :w)))
                   {:x (vec (range 50))}))
 
 (deftest a-piece-of-one-atom-held-by-another-survives-its-blocks-reuse

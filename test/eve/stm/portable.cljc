@@ -60,14 +60,14 @@
     ;; -- S5: writes outside a transaction throw -------------------------
     (check "S5 (=JVM 5) alter outside tx throws" :threw
            (try (stm/alter* r1 inc []) :no-throw
-                (catch #?(:cljs :default :lpy python/RuntimeError :cljr System.InvalidOperationException :jank jank.runtime.object_ref :default IllegalStateException) e :threw)))
+                (catch #?(:cljs :default :lpy python/RuntimeError :cljr System.InvalidOperationException :jank jank.runtime.object_ref :default IllegalStateException) _e :threw)))
 
     ;; -- S6: an aborting transaction leaves no partial writes -----------
     (check "S6 (=JVM 6) abort rolls back both refs" [42 100]
            (do (try (stm/run-in-transaction
                      (fn [] (stm/ref-set* r1 0) (stm/ref-set* r2 0)
                        (throw (ex-info "boom" {}))))
-                    (catch #?(:cljs :default :lpy python/Exception :cljr System.Exception :default Throwable) e :caught))
+                    (catch #?(:cljs :default :lpy python/Exception :cljr System.Exception :default Throwable) _e :caught))
                [(stm/deref-ref r1) (stm/deref-ref r2)]))
 
     ;; -- A11: commute algebra (JVM 11's totals, sequential) -------------
@@ -93,11 +93,11 @@
     ;; -- S14-S15: validators run at commit --------------------------------
     (check "S14 (=JVM 14) validator rejects the commit" :threw
            (try (stm/run-in-transaction (fn [] (stm/ref-set* vr -1))) :no-throw
-                (catch #?(:cljs :default :lpy python/RuntimeError :cljr System.InvalidOperationException :jank jank.runtime.object_ref :default IllegalStateException) e :threw)))
+                (catch #?(:cljs :default :lpy python/RuntimeError :cljr System.InvalidOperationException :jank jank.runtime.object_ref :default IllegalStateException) _e :threw)))
     (check "S15 (=JVM 15) value unchanged after rejected commit" 5 (stm/deref-ref vr))
 
     ;; -- S16: watches fire once per written ref, at commit -----------------
-    (stm/add-watch* wr :w (fn [k r old new] (swap! watch-log conj [k old new])))
+    (stm/add-watch* wr :w (fn [k _r old new] (swap! watch-log conj [k old new])))
     (stm/run-in-transaction (fn [] (stm/ref-set* wr 2) (stm/ref-set* wr 3)))
     (check "S16 (=JVM 16) watch fired once, pre-commit and final values" [[:w 1 3]] @watch-log)
 
@@ -107,7 +107,7 @@
     (check "S17 (=JVM 17) send from a committing tx fired once" [[:committed]] @delivered)
     (try (stm/run-in-transaction
           (fn [] (stm/dispatch! [:aborted]) (throw (ex-info "boom" {}))))
-         (catch #?(:cljs :default :lpy python/Exception :cljr System.Exception :default Throwable) e nil))
+         (catch #?(:cljs :default :lpy python/Exception :cljr System.Exception :default Throwable) _e nil))
     (check "S18 (=JVM 18) send from an aborting tx never fired" [[:committed]] @delivered)
 
     ;; -- S19: history count ---------------------------------------------------

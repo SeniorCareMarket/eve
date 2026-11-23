@@ -560,7 +560,7 @@
   ;; npe-for-1025-then-pop! but both test cases are included for extra
   ;; testing goodness.
   (let [v1128 (:marbles (last (play-rrbv 10 1128)))
-        vpop1 (reduce (fn [v i] (e/pop v))
+        vpop1 (reduce (fn [v _i] (e/pop v))
                       v1128 (range 1026))]
     (is (every? integer? (e/seq (e/pop vpop1))))
     ;; The transient version below gave a similar exception with
@@ -604,7 +604,7 @@
                       opposite-pos (calculate-opposite lc)
                       _ (assert (> opposite-pos 0))
                       _ (assert (< opposite-pos lc))
-                      opposite-elf (e/nth elfs opposite-pos)
+                      _opposite-elf (e/nth elfs opposite-pos)
                       other2       (fv-rest (remove-at elfs opposite-pos))]
                   (my-catvec other2 (cvec [current]))))))
           (puzzle-b-sample [elfs round]

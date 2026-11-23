@@ -37,7 +37,7 @@
   re-materialize the growing value on every chunk)."
   [dir]
   (let [dom (atom/persistent-atom-domain dir {})
-        c   (atom/persistent-atom {:id :counter :persistent dir} 0)]
+        _c   (atom/persistent-atom {:id :counter :persistent dir} 0)]
     (doseq [[_ [aid n fill]] classes]
       (let [a (atom/persistent-atom {:id aid :persistent dir} {:records {}})]
         (reset! a {:records (make-records n fill)})
@@ -73,7 +73,7 @@
                        :journal-window-ms 5000}
                  ;; Jn: jolt in a J cell — non-journal participant
                  "Jn" {:durable? false})
-        dom    (atom/persistent-atom-domain dir jopts)
+        _dom    (atom/persistent-atom-domain dir jopts)
         atoms  {:counter (atom/persistent-atom {:id :counter :persistent dir} 0)}
         atoms  (into atoms
                      (map (fn [[_ [aid _ _]]] [aid (atom/persistent-atom {:id aid :persistent dir} {:records {}})]))

@@ -286,7 +286,7 @@
 (deftest amap-test
   (testing "amap creates new array"
     (let [a (arr/int32-array-from [1 2 3 4 5])
-          b (arr/amap a (fn [idx val] (* val val)))]
+          b (arr/amap a (fn [_idx val] (* val val)))]
       ;; Original unchanged
       (is (= 1 (arr/aget a 0)))
       (is (= 2 (arr/aget a 1)))
@@ -300,7 +300,7 @@
 (deftest amap-preserves-type-test
   (testing "amap preserves array type"
     (let [a (arr/eve-array :float64 [1.0 2.0 3.0])
-          b (arr/amap a (fn [idx val] (* val 2.0)))]
+          b (arr/amap a (fn [_idx val] (* val 2.0)))]
       (is (= :float64 (arr/array-type b)))
       (is (= 2.0 (arr/aget b 0)))
       (is (= 4.0 (arr/aget b 1)))
@@ -309,7 +309,7 @@
 (deftest amap!-test
   (testing "amap! modifies in place"
     (let [a (arr/int32-array-from [1 2 3 4 5])]
-      (arr/amap! a (fn [idx val] (* val 10)))
+      (arr/amap! a (fn [_idx val] (* val 10)))
       (is (= 10 (arr/aget a 0)))
       (is (= 20 (arr/aget a 1)))
       (is (= 30 (arr/aget a 2)))

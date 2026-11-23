@@ -62,7 +62,7 @@
   (testing "5 sequential worker processes each increment count once -> {:count 5}"
     (let [b (base "conv")
           d (atom/persistent-atom-domain b)
-          a (atom/persistent-atom {:id :eve/main :persistent b} {:count 0})]
+          _a (atom/persistent-atom {:id :eve/main :persistent b} {:count 0})]
       (atom/close-atom-domain! d)
       (dotimes [_ 5]
         (let [r (spawn "join-swap" b)]

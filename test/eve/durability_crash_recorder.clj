@@ -31,7 +31,7 @@
   (let [n (parse-long n-str)
         dir (str workdir "/domain")
         snap (fn [i] (copy-domain! (io/file workdir) (io/file (str workdir "/snap-" i))))
-        dom (atom/persistent-atom-domain dir (opts variant))
+        _dom (atom/persistent-atom-domain dir (opts variant))
         ;; the "kb64" shape is a 2200-element vector of 30-char
         ;; strings (~66 KB across many blocks): a single string
         ;; above ~1-5 KB does NOT round-trip through this eve

@@ -118,7 +118,7 @@
 (deftest reduce-test
   (testing "Reduce values"
     (let [m (sm/hash-map 1 10 2 20 3 30)
-          total (reduce (fn [acc [k v]] (+ acc v)) 0 m)]
+          total (reduce (fn [acc [_k v]] (+ acc v)) 0 m)]
       (is (= 60 total)))))
 
 ;;-----------------------------------------------------------------------------
