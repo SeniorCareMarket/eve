@@ -185,3 +185,19 @@ mechanical warning tail; Splint + Carve campaigns not yet
 started past measurement. Push state: branch pushed at
 handoff (see the lane's final report); merges to main are
 John's word, not the lane's.
+
+## Third lane session (2026-11-23, agent 662d86ab)
+
+Inherited state verified firsthand: branch
+syntax/formalization-1 at 8f0a0bc (== origin, clean tree),
+STATUS/RETRO/CENSUS read in full. Recount4 EDN re-analyzed:
+181E / 1768W / 219I confirmed (invalid-arity is 15 in the
+EDN, not 12 as RETRO's summary said — the EDN governs).
+Per-class working lists extracted to
+eve-lane-logs/lane3/classes/. Carve recount DID finish:
+carve2.txt is complete (992 lines, done.txt ALLDONE) — the
+"still running" note in the handoff section above is stale.
+Campaign order: small error classes first, mechanical
+warning classes, unused-private-var, lang-aware
+unused-binding, the refer/namespace classes, then the
+unresolved-* modeling classes; Splint and Carve after kondo.
