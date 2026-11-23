@@ -25,12 +25,13 @@
 
    A worker's end is never silent: the worker itself sends its starter {:eve.thread/exit addr :reason r} when its
    entry returns or throws; the Worker's error event (on the page's event loop) is the backstop."
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.thread-host/CTL-WORDS eve.thread-host/RING eve.thread-host/SPAWN eve.thread-host/bootstrap eve.thread-host/can-block? eve.thread-host/data? eve.thread-host/fetch-text-sync eve.thread-host/get-bytes eve.thread-host/head-word eve.thread-host/init-data eve.thread-host/kernel-url eve.thread-host/lock-word eve.thread-host/mem eve.thread-host/pump! eve.thread-host/put! eve.thread-host/put-bytes! eve.thread-host/ring-base eve.thread-host/shared eve.thread-host/spawn! eve.thread-host/tail-word eve.thread-host/take!]}}}}
   ;; unresolved-var exclusions, this file only: this namespace is one of
   ;; several seat files sharing the name; kondo's registry keeps one file's
   ;; defs and reads the others' as unresolved (standalone lint of this file
   ;; is clean). The excluded names are this file's own defs, verified
   ;; against the file.
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.thread-host/CTL-WORDS eve.thread-host/RING eve.thread-host/SPAWN eve.thread-host/bootstrap eve.thread-host/can-block? eve.thread-host/data? eve.thread-host/fetch-text-sync eve.thread-host/get-bytes eve.thread-host/head-word eve.thread-host/init-data eve.thread-host/kernel-url eve.thread-host/lock-word eve.thread-host/mem eve.thread-host/pump! eve.thread-host/put! eve.thread-host/put-bytes! eve.thread-host/ring-base eve.thread-host/shared eve.thread-host/spawn! eve.thread-host/tail-word eve.thread-host/take!]}}}}
+
   (:require [cljs.reader :as reader]
             [eve.wire :as wire]
             [clojure.string :as str]))

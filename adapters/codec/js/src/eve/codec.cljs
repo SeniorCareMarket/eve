@@ -7,12 +7,13 @@
    a key and its value can be encoded at once.
    The interface every eve.codec has is at the end (adapters/README.md);
    eve.deftype-proto.serialize is what the codecs share."
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.codec/as-js-bigint eve.codec/serialize-bigdec eve.codec/serialize-ratio]}}}}
   ;; unresolved-var exclusions, this file only: this namespace is one of
   ;; several seat files sharing the name; kondo's registry keeps one file's
   ;; defs and reads the others' as unresolved (standalone lint of this file
   ;; is clean). The excluded names are this file's own defs, verified
   ;; against the file.
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.codec/as-js-bigint eve.codec/serialize-bigdec eve.codec/serialize-ratio]}}}}
+
   (:require [eve.hamt-util :as hu]
             [eve.numeric :as num]
             [eve.deftype-proto.data :as d]

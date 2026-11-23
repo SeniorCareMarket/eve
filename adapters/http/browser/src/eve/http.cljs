@@ -20,8 +20,9 @@
   ;; defs and reads the others' as unresolved (standalone lint of this file
   ;; is clean). The excluded names are this file's own defs, verified
   ;; against the file.
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http/BATCH-BYTES eve.http/PROBE-MS eve.http/WAIT-MS eve.http/answer! eve.http/b64->bytes eve.http/batch-buffer eve.http/batch-state eve.http/binary-string->b64 eve.http/binary-string->bytes eve.http/bytes->b64 eve.http/fetch-one eve.http/forbidden eve.http/in-turn eve.http/page? eve.http/plain eve.http/response-headers eve.http/serve-batch!]}}}}
-   found by a first short wait, and the worker then runs batches in turn, as the page's main thread always does.")
+  
+   found by a first short wait, and the worker then runs batches in turn, as the page's main thread always does."
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http/BATCH-BYTES eve.http/PROBE-MS eve.http/WAIT-MS eve.http/answer! eve.http/b64->bytes eve.http/batch-buffer eve.http/batch-state eve.http/binary-string->b64 eve.http/binary-string->bytes eve.http/bytes->b64 eve.http/fetch-one eve.http/forbidden eve.http/in-turn eve.http/page? eve.http/plain eve.http/response-headers eve.http/serve-batch!]}}}})
 
 (defn- b64->bytes [s]
   (let [bin (js/atob s)

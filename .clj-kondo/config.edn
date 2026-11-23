@@ -123,7 +123,11 @@
            ;;   the jank contract drivers (the lint classpath's
            ;;   process seats do not carry it);
            ;; - clojure.test/*report-counters* is clojure.test's CLJ
-           ;;   var, read by a CLJ-host contract driver in a .cljc;
+           ;;   var, read by a CLJ-host contract driver in a .cljc
+           ;;   (the cljs.test spelling covers its :cljs pass); the
+           ;;   cljs.core spellings of the completion's trio cover
+           ;;   the jolt completion's :cljs pass; goog/DEBUG is the
+           ;;   Closure define the bench runner reads;
            ;; - eve.atom's $, validate-storage-model!,
            ;;   dump-block-detail! and dump-block-stats! are NOT
            ;;   defined in eve.atom at this pin (grep-verified over
@@ -174,4 +178,9 @@
                                       eve.atom/$
                                       eve.atom/validate-storage-model!
                                       eve.atom/dump-block-detail!
-                                      eve.atom/dump-block-stats!]}}}
+                                      eve.atom/dump-block-stats!
+                                      cljs.core/class
+                                      cljs.core/find-var
+                                      cljs.core/intern
+                                      cljs.test/*report-counters*
+                                      goog/DEBUG]}}}

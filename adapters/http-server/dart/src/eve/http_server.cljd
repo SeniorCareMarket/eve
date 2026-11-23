@@ -13,12 +13,13 @@
    :body-as \"base64\" and :body a base64 string for binary payloads —
    the eve.net.store / presign / gateway shapes. {:threads n} is
    ignored: concurrency here is the event loop's."
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http-server/answer! eve.http-server/on-request eve.http-server/request-map]}}}}
   ;; unresolved-var exclusions, this file only: this namespace is one of
   ;; several seat files sharing the name; kondo's registry keeps one file's
   ;; defs and reads the others' as unresolved (standalone lint of this file
   ;; is clean). The excluded names are this file's own defs, verified
   ;; against the file.
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.http-server/answer! eve.http-server/on-request eve.http-server/request-map]}}}}
+
   (:require ["dart:io" :as io]
             ["dart:convert" :as conv]
             ["dart:typed_data" :as td]))

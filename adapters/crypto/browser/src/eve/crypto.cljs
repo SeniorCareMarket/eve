@@ -4,12 +4,13 @@
    edwards25519 rows and Ed25519's public key and signature JavaScript's BigInt (eve.crypto-bigint, shared with the
    Node adapter: under Scittle a signature took 252 ms portable, 7.8 ms over BigInt, the same 64 bytes);
    random bytes are the process feature's. Bytes are vectors of 0..255 in and out."
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.crypto/ED-ROWS]}}}}
   ;; unresolved-var exclusions, this file only: this namespace is one of
   ;; several seat files sharing the name; kondo's registry keeps one file's
   ;; defs and reads the others' as unresolved (standalone lint of this file
   ;; is clean). The excluded names are this file's own defs, verified
   ;; against the file.
-  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.crypto/ED-ROWS]}}}}
+
   (:require [eve.crypto-bigint :as bi]
             [eve.net.portable-crypto :as p]
             [eve.process :as process]))

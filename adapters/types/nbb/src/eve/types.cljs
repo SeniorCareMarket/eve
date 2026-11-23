@@ -4,6 +4,7 @@
    The entry points eve's macros call (every eve.types has them):
      host-type, plain-type, slab-type, eve-type, extend-eve-type,
      existing-def, rename-fields, reader-of, print-form, vector-types."
+  {:clj-kondo/config {:linters {:unresolved-var {:exclude [eve.types/nbb-absent-protocol-groups eve.types/nbb-data-readers eve.types/nbb-es6-entries-iterator eve.types/nbb-es6-iterator eve.types/nbb-missing-protocols eve.types/nbb-pr-sequential-writer eve.types/nbb-translate-protos]}}}}
   (:require [eve.core]
             [eve.deftype-proto.vocab :as v]
             [eve.types-js :as js]))
