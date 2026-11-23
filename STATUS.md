@@ -375,3 +375,23 @@ was 1F). Remaining big classes: unresolved-symbol
 126E, unresolved-var residue (~240: squint cljs.core
 family, host_completion internals, proc/exit! drivers,
 runner api-defs vars), unused-binding 427.
+
+## Third lane — session 2 bank 6 (2026-11-23, ~14:20 ET)
+
+MEASUREMENT CORRECTION (banked per the phantom-defect
+doctrine): recounts 10-12 ran clj-kondo with
+--parallel, which breaks per-file ns-config handling
+for namespaces shared by several seat files — it
+manufactured ~240 phantom unresolved-var findings.
+The gate (bb.edn lint-kondo) runs serial; recount.sh
+no longer uses --parallel and the serial numbers
+govern. Also measured: which of a shared namespace's
+files loses kondo's registry varies by run mode, so
+each seat file's ns-config exclusion unions its own
+defs across both analyses; and kondo reads only the
+FIRST {:clj-kondo/config} map in an ns form (the .cljd
+files carried two — merged). REAL DEFECT found by
+kondo and fixed: start.cljc browser-args called
+display? before its def — the duplicate def deleted
+in the redefined-var batch was load-bearing for
+compile order; a (declare display?) now precedes it.
