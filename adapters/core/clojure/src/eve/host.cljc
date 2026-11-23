@@ -79,6 +79,18 @@
       ;; java.util.Arrays call here does not compile there: eve.alpha did
       ;; not load on basilisp, measured 2026-11-19)
       :lpy (clojure.core/byte-array size init)
+      ;; let-go: no java.util.Arrays either (its reader feature is :lg,
+      ;; so it compiles the :default arm and eve.host itself does not
+      ;; load — measured on :lg, host-matrix survey 2026-11-22). Its
+      ;; core byte-array takes a fill byte as init, like basilisp's,
+      ;; but not a sequence (byte-array 4 [9 8] throws "byte-array
+      ;; expects Int"), so a seq init is the :default arm's doseq.
+      :lg (if (number? init)
+            (clojure.core/byte-array size init)
+            (let [a (clojure.core/byte-array (int size))]
+              (doseq [i (range (min (int size) (count init)))]
+                (clojure.core/aset a i (clojure.core/byte (nth init i))))
+              a))
       :default (let [a (clojure.core/byte-array (int size))]
                  (if (number? init)
                    (java.util.Arrays/fill a (clojure.core/byte init))

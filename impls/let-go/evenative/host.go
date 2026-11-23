@@ -438,6 +438,26 @@ func init() {
 		}
 		return vm.Int(int64(math.Float64bits(float64(f)))), nil
 	})
+	def(ns, "int-bits->float", func(vs []vm.Value) (vm.Value, error) {
+		if err := argc("int-bits->float", vs, 1); err != nil {
+			return vm.NIL, err
+		}
+		x, err := intOf(vs[0], "bits")
+		if err != nil {
+			return vm.NIL, err
+		}
+		return vm.Float(float64(math.Float32frombits(uint32(x)))), nil
+	})
+	def(ns, "float->int-bits", func(vs []vm.Value) (vm.Value, error) {
+		if err := argc("float->int-bits", vs, 1); err != nil {
+			return vm.NIL, err
+		}
+		f, ok := vs[0].(vm.Float)
+		if !ok {
+			return vm.NIL, fmt.Errorf("eve.native: float->int-bits takes a double")
+		}
+		return vm.Int(int64(int32(math.Float32bits(float32(f))))), nil
+	})
 	def(ns, "read-f64-le", func(vs []vm.Value) (vm.Value, error) {
 		b, err := anyBytes(vs[0])
 		if err != nil {

@@ -46,7 +46,8 @@
             ;; types' surface through the seat's eve.core protocols,
             ;; as chunk's handles do there.
             #?@(:bb [[eve.core :as ecore]]
-                :glj [[eve.core :as ecore]])))
+                :glj [[eve.core :as ecore]]
+                :lg [[eve.core :as ecore]])))
 
 ;; 0x20: eve's fixed fast-tag band (0x00-0x3F) ends its assignments
 ;; at 0x1F; 0x20 is the first unassigned byte there. NOT 0xF0:
@@ -242,7 +243,8 @@
 ;; (eve.core calls instead of host collection calls), defined
 ;; after BasedValue below.
 #?(:bb (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n)
-    :glj (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n))
+    :glj (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n)
+    :lg (declare pg-based-of pg-based-assoc pg-based-pop pg-concat-assoc-n))
 
 (defn plain-of
   "Materialize a chunk handle (or a plain value) into plain
@@ -307,6 +309,44 @@
            (hashCode [this] (unchecked-int (ecore/-hash (-handle this sio hdr))))
            (toString [_] (str "#eve/frozen " hdr))))
     :glj (do (deftype FrozenValue [sio hdr cells]
+            d/IEveRoot
+            (-root-header-off [_] hdr)
+            d/IEveSio
+            (-eve-sio [_] sio)
+            ecore/ICounted
+            (-count [this] (ecore/count (-handle this sio hdr)))
+            ecore/IIndexed
+            (-nth [this i] (ecore/nth (-handle this sio hdr) i))
+            (-nth [this i nf] (ecore/nth (-handle this sio hdr) i nf))
+            ecore/ILookup
+            (-lookup [this k] (ecore/get (-handle this sio hdr) k))
+            (-lookup [this k nf] (ecore/get (-handle this sio hdr) k nf))
+            ecore/IAssociative
+            (-assoc [this k v] (try (ecore/assoc (-handle this sio hdr) k v)
+                                    (catch UnsupportedOperationException _
+                                      (pg-based-assoc this k v))))
+            (-contains-key? [this k] (ecore/contains? (-handle this sio hdr) k))
+            ecore/ISeqable
+            (-seq [this] (ecore/seq (-handle this sio hdr)))
+            ecore/ICollection
+            (-conj [this x] (try (ecore/conj (-handle this sio hdr) x)
+                                 (catch UnsupportedOperationException _
+                                   (ecore/conj (pg-based-of this) x))))
+            ecore/IEmptyableCollection
+            (-empty [_] (throw (UnsupportedOperationException. "empty on a frozen value")))
+            ecore/IStack
+            (-peek [this] (ecore/peek (-handle this sio hdr)))
+            (-pop [this] (try (ecore/pop (-handle this sio hdr))
+                              (catch UnsupportedOperationException _
+                                (pg-based-pop this))))
+            ecore/IEquiv
+            (-equiv [this other] (ecore/equiv (-handle this sio hdr) other))
+            ecore/IHash
+            (-hash [this] (ecore/-hash (-handle this sio hdr)))
+            ecore/IPrintWithWriter
+            (-pr-writer [_ w _] (ecore/-write w (str "#eve/frozen " hdr))))
+           (defmethod print-method FrozenValue [x w] (ecore/-pr-writer x w nil)))
+    :lg (do (deftype FrozenValue [sio hdr cells]
             d/IEveRoot
             (-root-header-off [_] hdr)
             d/IEveSio
@@ -474,6 +514,65 @@
            (hashCode [this] (unchecked-int (ecore/hash-ordered-coll (ecore/seq this))))
            (toString [this] (pr-str (ecore/seq this)))))
     :glj (do (deftype ConcatBatch [handles cums total mm]
+            chunk/IFlatHandle
+            (-rep [this] (mapv chunk/rep-of this))
+            (-chunk-bytes [_] (frame-stream (mapv chunk/bytes-of handles)))
+            ecore/ICounted
+            (-count [_] total)
+            ecore/IIndexed
+            (-nth [this i] (if (and (<= 0 i) (< i total))
+                             (let [j (cb-locate cums i)]
+                               (ecore/nth (nth handles j) (- i (nth cums j))))
+                             (throw (IndexOutOfBoundsException. (str i)))))
+            (-nth [this i nf] (if (and (<= 0 i) (< i total)) (ecore/nth this i) nf))
+            ecore/ILookup
+            (-lookup [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) total))
+                                (ecore/nth this (long k)) nil))
+            (-lookup [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) total))
+                                   (ecore/nth this (long k)) nf))
+            ecore/IAssociative
+            (-assoc [this k v] (cond
+                                 (not (integer? k)) (throw (IllegalArgumentException.
+                                                            "Key must be integer"))
+                                 (== (long k) total) (ecore/conj this v)
+                                 :else (pg-concat-assoc-n handles cums total mm (long k) v)))
+            (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) total)))
+            ecore/IVector
+            (-assoc-n [this i v] (pg-concat-assoc-n handles cums total mm i v))
+            ecore/ICollection
+            (-conj [this v] (let [h' (chunk/open (first (chunk/pack-all [v])))]
+                              (ConcatBatch. (conj handles h') (conj cums total)
+                                            (inc total) mm)))
+            ecore/IEmptyableCollection
+            (-empty [_] [])
+            ecore/IStack
+            (-peek [this] (when (pos? total) (ecore/nth this (dec total))))
+            (-pop [this] (if (zero? total)
+                           (throw (IllegalStateException. "Can't pop empty vector"))
+                           (let [hl (peek handles)]
+                             (if (== 1 (ecore/count hl))
+                               (ConcatBatch. (pop handles) (pop cums) (dec total) mm)
+                               (ConcatBatch. (assoc handles (dec (count handles)) (ecore/pop hl))
+                                             cums (dec total) mm)))))
+            ecore/ISeqable
+            (-seq [_] (apply concat (map ecore/seq handles)))
+            ecore/IReduce
+            (-reduce [this f] (reduce f (ecore/seq this)))
+            (-reduce [this f init] (reduce f init (ecore/seq this)))
+            ecore/IEquiv
+            (-equiv [this other] (and (ecore/sequential? other)
+                                      (== total (ecore/count other))
+                                      (ecore/equiv (vec (ecore/seq this)) (vec (ecore/seq other)))))
+            ecore/IHash
+            (-hash [this] (ecore/hash-ordered-coll (ecore/seq this)))
+            ecore/IMeta
+            (-meta [_] mm)
+            ecore/IWithMeta
+            (-with-meta [_ m] (ConcatBatch. handles cums total m))
+            ecore/IPrintWithWriter
+            (-pr-writer [this w _] (ecore/-write w (pr-str (ecore/seq this)))))
+           (defmethod print-method ConcatBatch [x w] (ecore/-pr-writer x w nil)))
+    :lg (do (deftype ConcatBatch [handles cums total mm]
             chunk/IFlatHandle
             (-rep [this] (mapv chunk/rep-of this))
             (-chunk-bytes [_] (frame-stream (mapv chunk/bytes-of handles)))
@@ -717,6 +816,59 @@
             ecore/IPrintWithWriter
             (-pr-writer [this w _] (ecore/-write w (pr-str (ecore/seq this)))))
            (defmethod print-method BasedValue [x w] (ecore/-pr-writer x w nil)))
+    :lg (do (deftype BasedValue [base edits tail n bc mm]
+            ecore/ICounted
+            (-count [_] n)
+            ecore/IIndexed
+            (-nth [this i] (if (and (<= 0 i) (< i n))
+                             (if (< i bc)
+                               (if (contains? edits i) (get edits i) (ecore/nth base i))
+                               (nth tail (- i bc)))
+                             (throw (IndexOutOfBoundsException. (str i)))))
+            (-nth [this i nf] (if (and (<= 0 i) (< i n)) (ecore/nth this i) nf))
+            ecore/ILookup
+            (-lookup [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
+                                (ecore/nth this (long k)) nil))
+            (-lookup [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
+                                   (ecore/nth this (long k)) nf))
+            ecore/IAssociative
+            (-assoc [this k v] (if (integer? k)
+                                 (based-assoc-n base edits tail n bc mm (long k) v)
+                                 (throw (IllegalArgumentException.
+                                         "Key must be integer"))))
+            (-contains-key? [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) n)))
+            ecore/IVector
+            (-assoc-n [this i v] (based-assoc-n base edits tail n bc mm i v))
+            ecore/ICollection
+            (-conj [this v] (based-assoc-n base edits tail n bc mm n v))
+            ecore/IEmptyableCollection
+            (-empty [_] [])
+            ecore/IStack
+            (-peek [this] (when (pos? n) (ecore/nth this (dec n))))
+            (-pop [this] (if (zero? n)
+                           (throw (IllegalStateException. "Can't pop empty vector"))
+                           (let [i (dec n)]
+                             (if (< i bc)
+                               (BasedValue. base (dissoc edits i) tail i bc mm)
+                               (BasedValue. base edits (pop tail) i bc mm)))))
+            ecore/ISeqable
+            (-seq [this] (when (pos? n) (map (fn [i] (ecore/nth this i)) (range n))))
+            ecore/IReduce
+            (-reduce [this f] (reduce f (ecore/seq this)))
+            (-reduce [this f init] (reduce f init (ecore/seq this)))
+            ecore/IEquiv
+            (-equiv [this other] (and (ecore/sequential? other)
+                                      (== n (ecore/count other))
+                                      (ecore/equiv (vec (ecore/seq this)) (vec (ecore/seq other)))))
+            ecore/IHash
+            (-hash [this] (ecore/hash-ordered-coll (ecore/seq this)))
+            ecore/IMeta
+            (-meta [_] mm)
+            ecore/IWithMeta
+            (-with-meta [_ m] (BasedValue. base edits tail n bc m))
+            ecore/IPrintWithWriter
+            (-pr-writer [this w _] (ecore/-write w (pr-str (ecore/seq this)))))
+           (defmethod print-method BasedValue [x w] (ecore/-pr-writer x w nil)))
     :clj (deftype BasedValue [base edits tail ^long n ^long bc mm]
      clojure.lang.Counted
      (count [_] n)
@@ -820,6 +972,14 @@
           (defn- pg-based-of [base]
             (BasedValue. base {} [] (ecore/count base) (ecore/count base) nil))
           (defn- pg-based-assoc [base k v] (ecore/assoc (pg-based-of base) k v))
+          (defn- pg-based-pop [base] (ecore/pop (pg-based-of base))))
+    :lg (do (defn- pg-concat-assoc-n [handles cums total mm i v]
+            (let [j (cb-locate cums i)
+                  h' (ecore/assoc (nth handles j) (- i (nth cums j)) v)]
+              (ConcatBatch. (assoc handles j h') cums total mm)))
+          (defn- pg-based-of [base]
+            (BasedValue. base {} [] (ecore/count base) (ecore/count base) nil))
+          (defn- pg-based-assoc [base k v] (ecore/assoc (pg-based-of base) k v))
           (defn- pg-based-pop [base] (ecore/pop (pg-based-of base)))))
 
 (defn open-stream
@@ -833,6 +993,12 @@
                   counts (mapv count handles)
                   cums (vec (reductions + 0 (butlast counts)))]
               (ConcatBatch. handles cums (long (reduce + counts)) nil))
+       ;; let-go: the :clj body is host-neutral (chunk/open, count,
+       ;; reductions) and is spelled for it directly
+       :lg (let [handles (mapv chunk/open chunks)
+                 counts (mapv count handles)
+                 cums (vec (reductions + 0 (butlast counts)))]
+             (ConcatBatch. handles cums (long (reduce + counts)) nil))
        :cljs (throw (ex-info "eve.flat.freeze: multi-chunk open not built on this host"
                              {:chunks (count chunks)})))))
 
@@ -841,6 +1007,19 @@
 ;; digest-spike lesson), a plain public array field is.
 #?(:clj
    (defn -handle [^FrozenValue fv sio ^long hdr]
+     (let [cells (.-cells fv)]
+       (or (aget cells 0)
+           (let [mode (aget cells 1)
+                 h (case mode
+                     :framed (open-stream (unframe-stream (read-chain-bytes sio hdr)))
+                     (chunk/open (read-chain-bytes sio hdr)))]
+             (aset cells 0 h)
+             h)))))
+
+;; let-go does not read :clj: the same body (its object-array cells
+;; answer aget/aset as the JVM's do)
+#?(:lg
+   (defn -handle [fv sio hdr]
      (let [cells (.-cells fv)]
        (or (aget cells 0)
            (let [mode (aget cells 1)
@@ -868,6 +1047,15 @@
               (do (when (== (bit-and flags 2) 2)
                     (aset cells 1 :framed))
                   (->FrozenValue sio (long header-off) cells))))
+     ;; let-go: the :clj body as it stands (object-array, aset and
+     ;; slab/read-i32 are all its own)
+     :lg (let [cells (object-array 2)
+               flags (slab/read-i32 sio header-off 44)]
+           (if (== (bit-and flags 4) 4)
+             (chunk/open (read-chain-bytes sio header-off))
+             (do (when (== (bit-and flags 2) 2)
+                   (aset cells 1 :framed))
+                 (->FrozenValue sio (long header-off) cells))))
      :cljs (chunk/open (read-chain-bytes sio header-off))))
 
 (defn enter-checked!
@@ -938,9 +1126,9 @@
     ;; already flat: a frozen subtree delivers as its opened
     ;; handle (whose bytes were copied out of the slab — the
     ;; handle owns them); a heap flat handle delivers as itself.
-    #?(:clj (instance? FrozenValue v) :cljs false)
+    #?(:clj (instance? FrozenValue v) :cljs false :lg (instance? FrozenValue v))
     (-handle v (.-sio ^FrozenValue v) (.-hdr ^FrozenValue v))
-    #?(:clj (instance? ConcatBatch v) :cljs false) v
+    #?(:clj (instance? ConcatBatch v) :cljs false :lg (instance? ConcatBatch v)) v
     (chunk/flat-handle? v) v
     (sequential? v) (open-stream (chunk/pack-all v))
     (coll? v) (chunk/pack v)

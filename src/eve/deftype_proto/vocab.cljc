@@ -146,7 +146,7 @@
   ;; same body with the unqualified name and gets the same disposition
   ;; (its group is dropped by the proto map's Object entry, here its
   ;; toString and equals are re-homed as below)
-  (let [object? #(contains? '#{java.lang.Object Object} (:protocol %))
+  (let [object? #(contains? (hash-set 'java.lang.Object 'Object) (:protocol %))
         ms (mapcat :methods (filter object? parsed-protos))
         equiv? (some (fn [{:keys [protocol methods]}]
                        (or (= 'IEquiv protocol)
@@ -338,7 +338,7 @@
    as a JVM deftype's impls. Answers {:impls [{:protocol :methods}] :print
    (fn form, from IPrintWithWriter's -pr-writer, or nil)}."
   [parsed-protos]
-  (let [object? #(contains? '#{Object java.lang.Object} (:protocol %))
+  (let [object? #(contains? (hash-set 'Object 'java.lang.Object) (:protocol %))
         {objects true others false} (group-by (comp boolean object?) parsed-protos)
         print (some (fn [{:keys [protocol methods]}]
                       (when (= 'IPrintWithWriter (strip-cljs-core protocol))

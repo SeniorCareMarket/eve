@@ -8,7 +8,7 @@
    unsigned LEB128 varint, the growable children-first writer (IBuf and its
    Buf deftypes) and the helpers those need, with every host arm they had:
    :clj (the JVM and jolt; bb, glojure and jank read it too, their own arms
-   inside), :bb, :glj, :jank and :cljs. So every host writes and reads exactly
+   inside), :bb, :glj, :jank, :cljs, :lpy and :lg. So every host writes and reads exactly
    the bytes it did before the seam. Added for the contract: varint-v /
    varint-next (the varint without its vector), utf8, bytes=, bytes-cmp,
    key-cmp (eve's key-byte order, in place), the chunk constructors, buf-chunk
@@ -129,6 +129,63 @@
   "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
   [bs i]
   (bit-and (aget bs i) 0xFF))
+
+(defn- ba-copy-of
+  "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating shrink)."
+  [b n]
+  (let [nb (byte-array n)]
+    (enc/arraycopy b 0 nb 0 (min (alength b) n))
+    nb))
+
+(defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
+(defn chunk-bytes "The host byte array of chunk c." [c] c)
+(defn chunk-len "The byte length of chunk c." [c] (alength c))
+(defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))
+))
+
+#?(:lg (do
+;; let-go: the :lpy arm's shape over its typed byte array, with let-go's
+;; own twists (measured on lg-eve, 2026-11-22): aget answers UNSIGNED
+;; bytes (0xFF reads 255, as on cljs), and its 64-bit bit ops wrap like
+;; the JVM's, so i64 is the plain composition (no sign conversion) while
+;; i32 still needs the :lpy arm's conversion (a u32 fits an int64
+;; positive). The float widths go through eve.encoding, as on :lpy.
+(defn u8 [c i] (aget c i))
+(defn u16 [c i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
+(defn u32 [c i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
+(defn i32 [c i] (let [v (u32 c i)] (if (>= v 0x80000000) (- v 0x100000000) v)))
+(defn i64 [c i] (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32)))
+(defn f64 [c i] (enc/long-bits->double (i64 c i)))
+(defn f32 [c i] (enc/int-bits->float (u32 c i)))
+
+(defn varint
+  "[value next-pos] — unsigned LEB128."
+  [c i]
+  (loop [i i sh 0 v 0]
+    (let [x (u8 c i)]
+      (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
+          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+(defn varint-v
+  "The unsigned LEB128 value at i (varint's first element, no vector)."
+  [c i]
+  (loop [i i sh 0 v 0]
+    (let [x (u8 c i)]
+      (if (< x 128) (bit-or v (bit-shift-left x sh))
+          (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+(defn varint-next
+  "The position after the unsigned LEB128 at i (varint's second element)."
+  [c i]
+  (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
+
+(defn varint-len [v]
+  (loop [v v n 1] (if (< v 128) n (recur (unsigned-bit-shift-right v 7) (inc n)))))
+
+(defn- hb
+  "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
+  [bs i]
+  (aget bs i))
 
 (defn- ba-copy-of
   "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating shrink)."
@@ -396,6 +453,51 @@
   (Buf. (byte-array 256) 0 width))))
 ))
 
+;; let-go's writer: the whole IBuf section above sits inside the :clj
+;; block (bb / glojure / jank read :clj; let-go does not), so on :lg
+;; neither the protocol nor Buf exists and the shared writer has
+;; nothing to dispatch to. Here both, in the protocol hosts' shape:
+;; IBuf a defprotocol (let-go has no definterface) and Buf the glojure
+;; realization — the two mutable fields hold volatiles from
+;; construction and every method works through them; the method
+;; surface and byte layout are the shared text's, unchanged.
+#?(:lg (do
+(defprotocol IBuf
+  (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+  (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+  (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))
+
+(deftype Buf [b p ^long width]
+  IBuf
+  (wRaw [_] @b)
+  (wPos [_] @p)
+  (wSeek [_ np] (vreset! p np))
+  (wU8 [_ v] (when (>= @p (alength @b)) (vreset! b (ba-copy-of @b (* 2 (alength @b)))))
+    (aset @b (int @p) (unchecked-byte v)) (vreset! p (inc @p)))
+  (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
+  (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
+  (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
+  (wF64 [this v] (buf-i64 this (enc/double->long-bits v)))
+  (wVarint [this v]
+    (loop [v v]
+      (if (< v 128) (buf-u8 this v)
+          (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
+  (wBytes [_ src off n]
+    (when (> (+ @p n) (alength @b)) (vreset! b (ba-copy-of @b (max (+ @p n) (* 2 (alength @b))))))
+    (enc/arraycopy src off @b @p n) (vreset! p (+ @p n)))
+  (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
+  (wPatchU32 [_ at v]
+    (aset @b (int at) (unchecked-byte v))
+    (aset @b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8)))
+    (aset @b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16)))
+    (aset @b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24)))))
+
+(defn buf
+  "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
+  [width]
+  (Buf. (volatile! (byte-array 256)) (volatile! 0) width)))
+)
+
 ;; The writer's buffer on ClojureScript: the same method surface the
 ;; shared writer calls, over a growable Uint8Array + DataView. The
 ;; position field is `p`, as on the JVM, so it cannot collide with the
@@ -453,18 +555,18 @@
 ;; call, and on the protocol hosts the protocol fn call — the only
 ;; dispatch those hosts have (jank's completion objects have no native
 ;; members at all).
-(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :clj (.wRaw ^IBuf w) :default (.raw w)))
-(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :clj (.wPos ^IBuf w) :default (.pos w)))
-(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :clj (.wSeek ^IBuf w p) :default (.seek w p)))
-(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :clj (.wU8 ^IBuf w v) :default (.u8 w v)))
-(defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :clj (.wU16 ^IBuf w v) :default (.u16 w v)))
-(defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :clj (.wU32 ^IBuf w v) :default (.u32 w v)))
-(defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :clj (.wI64 ^IBuf w v) :default (.i64 w v)))
-(defn buf-f64 [w v] #?(:jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :clj (.wF64 ^IBuf w v) :default (.f64 w v)))
-(defn buf-varint [w v] #?(:jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :clj (.wVarint ^IBuf w v) :default (.varint w v)))
-(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :default (.putBytes w src off n)))
-(defn buf-off "Append an offset of the writer's width." [w v] #?(:jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :clj (.wOff ^IBuf w v) :default (.off w v)))
-(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :default (.patchU32 w at v)))
+(defn buf-raw "The writer's host bytes so far (its whole buffer; buf-pos of them written)." [w] #?(:jank (wRaw w) :bb (wRaw w) :glj (wRaw w) :lg (wRaw w) :clj (.wRaw ^IBuf w) :default (.raw w)))
+(defn buf-pos "The write position." [w] #?(:jank (wPos w) :bb (wPos w) :glj (wPos w) :lg (wPos w) :clj (.wPos ^IBuf w) :default (.pos w)))
+(defn buf-seek "Move the write position to p (inside what is written)." [w p] #?(:jank (wSeek w p) :bb (wSeek w p) :glj (wSeek w p) :lg (wSeek w p) :clj (.wSeek ^IBuf w p) :default (.seek w p)))
+(defn buf-u8 [w v] #?(:jank (wU8 w v) :bb (wU8 w v) :glj (wU8 w v) :lg (wU8 w v) :clj (.wU8 ^IBuf w v) :default (.u8 w v)))
+(defn buf-u16 [w v] #?(:jank (wU16 w v) :bb (wU16 w v) :glj (wU16 w v) :lg (wU16 w v) :clj (.wU16 ^IBuf w v) :default (.u16 w v)))
+(defn buf-u32 [w v] #?(:jank (wU32 w v) :bb (wU32 w v) :glj (wU32 w v) :lg (wU32 w v) :clj (.wU32 ^IBuf w v) :default (.u32 w v)))
+(defn buf-i64 [w v] #?(:jank (wI64 w v) :bb (wI64 w v) :glj (wI64 w v) :lg (wI64 w v) :clj (.wI64 ^IBuf w v) :default (.i64 w v)))
+(defn buf-f64 [w v] #?(:jank (wF64 w v) :bb (wF64 w v) :glj (wF64 w v) :lg (wF64 w v) :clj (.wF64 ^IBuf w v) :default (.f64 w v)))
+(defn buf-varint [w v] #?(:jank (wVarint w v) :bb (wVarint w v) :glj (wVarint w v) :lg (wVarint w v) :clj (.wVarint ^IBuf w v) :default (.varint w v)))
+(defn buf-bytes "Append n bytes of host byte array src from off." [w src off n] #?(:jank (wBytes w src off n) :bb (wBytes w src off n) :glj (wBytes w src off n) :lg (wBytes w src off n) :clj (.wBytes ^IBuf w src off n) :default (.putBytes w src off n)))
+(defn buf-off "Append an offset of the writer's width." [w v] #?(:jank (wOff w v) :bb (wOff w v) :glj (wOff w v) :lg (wOff w v) :clj (.wOff ^IBuf w v) :default (.off w v)))
+(defn buf-patch-u32 "Overwrite the u32 at at (the position stays)." [w at v] #?(:jank (wPatchU32 w at v) :bb (wPatchU32 w at v) :glj (wPatchU32 w at v) :lg (wPatchU32 w at v) :clj (.wPatchU32 ^IBuf w at v) :default (.patchU32 w at v)))
 
 (defn buf-align
   "Zero bytes up to a multiple of a (chunk.cljc's align!)."

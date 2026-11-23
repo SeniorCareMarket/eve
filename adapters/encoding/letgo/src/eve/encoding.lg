@@ -41,6 +41,11 @@
 (defn double->long-bits "The IEEE-754 bits of the double d, as a long (NaN payloads kept)." [d]
   (eve.host-native/double->long-bits (double d)))
 
+(defn int-bits->float "The float32 whose IEEE-754 bits are x, as a double." [x] (eve.host-native/int-bits->float x))
+
+(defn float->int-bits "The IEEE-754 bits of the float32 nearest d, as an int." [d]
+  (eve.host-native/float->int-bits (double d)))
+
 (defn big-integer?
   "An integer of an arbitrary-precision type (let-go's BigInt): eve.codec writes it by its magnitude — INT32 or INT64
    when it fits, else BIGINT."

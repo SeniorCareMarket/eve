@@ -71,8 +71,11 @@
 
 (def ^:private lookup-protocols
   ;; a body that answers lookups itself: the type's own ILookup (either
-  ;; engine's name) or the JVM's keyword-lookup interface
-  '#{ILookup cljs.core/ILookup clojure.lang.ILookup IKeywordLookup clojure.lang.IKeywordLookup})
+  ;; engine's name) or the JVM's keyword-lookup interface. Spelled as a
+  ;; constructor, not a quoted literal: a quoted set literal evaluates
+  ;; to a PersistentList on let-go (measured on lg-eve, 2026-11-22),
+  ;; and contains? over it throws there.
+  (hash-set 'ILookup 'cljs.core/ILookup 'clojure.lang.ILookup 'IKeywordLookup 'clojure.lang.IKeywordLookup))
 
 (defn default-lookup-forms
   "THE DUAL-TYPE FIELD LOOKUP every eve-deftype gets (2026-11-20 ET): an
