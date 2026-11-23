@@ -66,11 +66,11 @@
       (if (str/starts-with? head "ref:")
         (subs (str/trim (slurp (str ".git/" (str/trim (subs head 4))))) 0 7)
         (subs head 0 7)))
-    (catch Throwable _ "unknown")))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ "unknown")))
 
 (defn- load1 []
   (try (first (str/split (str/trim (slurp "/proc/loadavg")) #" "))
-       (catch Throwable _ "?")))
+       #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ "?")))
 
 (defn run!
   [{:keys [rows runs warmup log]

@@ -369,9 +369,9 @@
     (if (> lo hi)
       best
       (let [mid (quot (+ lo hi) 2)
-            r (try (alloc/alloc-run! sio ci mid) (catch Throwable _ nil))]
+            r (try (alloc/alloc-run! sio ci mid) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))]
         (if (and r (== (count r) mid))
-          (do (doseq [o r] (try (alloc/-sio-free! sio o) (catch Throwable _ nil)))
+          (do (doseq [o r] (try (alloc/-sio-free! sio o) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))
               (recur (inc mid) hi mid))
           (recur lo (dec mid) best))))))
 

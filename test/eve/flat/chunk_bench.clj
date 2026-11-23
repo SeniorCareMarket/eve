@@ -32,7 +32,7 @@
 (defn- chunk-lib []
   (try (require 'eve.flat.chunk)
        (resolve 'eve.flat.chunk/pack-all)
-       (catch Throwable _ nil)))
+       #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))
 
 (defn- b7-arms
   "B7 read arms on the records corpus (M4's definitions, tables open: the

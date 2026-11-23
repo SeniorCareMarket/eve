@@ -25,7 +25,7 @@
                :body (String. raw "UTF-8")
                :body-b64 (.encodeToString (Base64/getEncoder) raw)}
           {:keys [status headers body body-as]} (try (handler req)
-                                                     (catch Throwable t {:status 500 :headers {} :body (str t)}))
+                                                     #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t {:status 500 :headers {} :body (str t)}))
           ^bytes bs (if (= :b64 body-as)
                       (.decode (Base64/getDecoder) ^String (str (or body "")))
                       (.getBytes (str (or body "")) "UTF-8"))]

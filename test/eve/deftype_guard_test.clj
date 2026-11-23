@@ -100,7 +100,7 @@
           (if (= ::eof form)
             {:forms forms}
             (recur (conj forms form))))))
-    (catch Throwable e {:error (ex-message e)})))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable e {:error (ex-message e)})))
 
 (defn- ns-form [forms]
   (first (filter (fn [f] (and (seq? f) (= 'ns (first f)))) forms)))

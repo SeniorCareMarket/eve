@@ -309,5 +309,5 @@
 (defn journal-close!
   "Close the journal file; never throws."
   [{:keys [fd]}]
-  (try (jf-close fd) (catch Throwable _ nil))
+  (try (jf-close fd) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))
   nil)

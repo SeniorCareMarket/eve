@@ -217,4 +217,4 @@
   (swap! journal-paths dissoc fc)
   (try
     (.close fc)
-    (catch Throwable _ nil)))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))

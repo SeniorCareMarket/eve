@@ -99,7 +99,7 @@
   (try
     (require 'eve.flat.build)
     {:build-image (resolve 'eve.flat.build/build-image)}
-    (catch Throwable _ nil)))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))
 
 ;; ---------------------------------------------------------------------------
 

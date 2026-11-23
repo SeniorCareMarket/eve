@@ -25,7 +25,7 @@
     ::accepted
     (catch clojure.lang.ExceptionInfo e
       (if-let [c (:check (ex-data e))] c :eve.flat.check-test/host-error))
-    (catch Throwable _ ::host-error)))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ ::host-error)))
 
 ;; ------------------------------------------------------------------ sanity
 
@@ -103,9 +103,9 @@
         (catch clojure.lang.ExceptionInfo e
           (when-not (:check (ex-data e))
             (conj! escapes {:bytes (g/bytes->hex m) :escape (str e)})))
-        (catch Throwable t
-          (conj! escapes {:bytes (g/bytes->hex m)
-                          :escape (str (class t) ": " (.getMessage t))}))))
+        #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t
+                                                       (conj! escapes {:bytes (g/bytes->hex m)
+                                                                       :escape (str (class t) ": " (.getMessage t))}))))
     (let [es (persistent! escapes)]
       (is (empty? es)
           (str "fuzz escapes (want none): " (pr-str (take 3 es)))))))

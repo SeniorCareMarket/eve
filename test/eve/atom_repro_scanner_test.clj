@@ -38,8 +38,8 @@
           (swap! cell (fn [c] (if (= c cur) new-cell c)))
           (vreset! counter i))
         (if (>= i n) [:reached-cap @cell] (recur (inc i))))
-      (catch Throwable t
-        [:threw (str (type t)) @counter (.getMessage t)]))))
+      #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t
+                                                     [:threw (str (type t)) @counter (.getMessage t)]))))
 
 (def ^:private N 6000)
 

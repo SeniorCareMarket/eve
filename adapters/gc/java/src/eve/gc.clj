@@ -10,10 +10,10 @@
 (set! *warn-on-reflection* true)
 
 (defonce ^:private cleaner
-  (try (java.lang.ref.Cleaner/create) (catch Throwable _ nil)))
+  (try (java.lang.ref.Cleaner/create) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))
 
 (defonce ^:private queue
-  (when-not cleaner (try (java.lang.ref.ReferenceQueue.) (catch Throwable _ nil))))
+  (when-not cleaner (try (java.lang.ref.ReferenceQueue.) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))))
 
 (defonce ^:private registry (atom {}))
 

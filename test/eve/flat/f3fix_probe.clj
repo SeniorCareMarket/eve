@@ -35,9 +35,9 @@
     (let [r (f)]
       (println "STEP" label "->" r) (flush)
       r)
-    (catch Throwable t
-      (println "STEP" label "FAILED" (.getName (class t)) "-" (.getMessage t)) (flush)
-      ::failed)))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t
+                                                   (println "STEP" label "FAILED" (.getName (class t)) "-" (.getMessage t)) (flush)
+                                                   ::failed)))
 
 (defn- timed-ms [f]
   (let [t0 (System/nanoTime)

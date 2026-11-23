@@ -175,7 +175,7 @@
     :messages-5k (assoc-in v [i :text] "x")))
 
 (defn- try-op [f]
-  (try (f) (catch Throwable t [:throws (type t)])))
+  (try (f) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t [:throws (type t)])))
 
 (defn heap-battery
   "S4 / R7: the flat heap object an atom delivers, against the

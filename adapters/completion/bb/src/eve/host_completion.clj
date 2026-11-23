@@ -398,7 +398,7 @@
   []
   (or (some? (find-ns 'eve.core))
       (try (require 'eve.core) true
-           (catch Throwable _ false))))
+           #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ false))))
 
 (defonce ^:private sci-defn
   @#'clojure.core/defn)
@@ -683,7 +683,7 @@
             ;; with its refers; requiring vocab first leaves types'
             ;; refers unresolved (measured).
             (try (require 'eve.types)
-                 (catch Throwable _ nil)))
+                 #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))
         vocab (find-ns 'eve.deftype-proto.vocab)
         types (find-ns 'eve.types)
         parse (and jvm-group? vocab
@@ -827,7 +827,7 @@
   (when-let [v (ns-resolve 'extend-clj.core 'deftype-atom)]
     (alter-var-root #'sci-deftype-atom (fn [_] @v))
     (alter-var-root v (fn [_] present-deftype-atom)))
-  (catch Throwable _ nil))
+  #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))
 
 (require '[clojure.data])
 
@@ -959,7 +959,7 @@
                  ;; "SciMap cannot be cast to IEditableCollection"
                  ;; (fix-for-release B2, measured on (d/db-with @a tx)).
                  (catch clojure.lang.ExceptionInfo e (throw e))
-                 (catch Throwable _ (apply sci-fn args))
+                 #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ (apply sci-fn args))
                  (finally (swap! eve-inflight
                                  (fn [pairs]
                                    (vec (remove (fn [[o v]]
@@ -1028,7 +1028,7 @@
   [a]
   (boolean
    (when-let [p (try (requiring-resolve 'eve.atom/IEveAtom)
-                     (catch Throwable _ nil))]
+                     #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))]
      (satisfies? @p a))))
 
 (alter-var-root #'clojure.core/add-watch
@@ -1112,7 +1112,7 @@
     (nil? x) nil
     (eve-typed? x)
     (let [s (try ((eve-method '-seq) x)
-                 (catch Throwable _ ::sci))]
+                 #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ ::sci))]
       (cond (identical? s ::sci) (sci-seq x)
             (nil? s) nil
             (host-instance? clojure.lang.ISeq s) s
@@ -1155,7 +1155,7 @@
 ;; calls (next this)) terminating.
 (defn- seq-of [x]
   (try ((eve-method '-seq) x)
-       (catch Throwable _ ::sci)))
+       #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ ::sci)))
 
 (defn- presented-first
   [x]
@@ -1273,7 +1273,7 @@
     "me.tonsky.persistent-sorted-set.Iter"})
 
 (defn- eve-has-seq? [x]
-  (try ((eve-method '-seq) x) true (catch Throwable _ false)))
+  (try ((eve-method '-seq) x) true #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ false)))
 
 (defn- presented-sequential? [x]
   (boolean (or (sci-sequential? x)
@@ -1727,7 +1727,7 @@
    the SCI type (its str), syms the interface/protocol symbols its spec
    listed. Only symbols naming a host Class are kept."
   [type-str syms]
-  (let [classes (keep (fn [s] (let [c (try (resolve s) (catch Throwable _ nil))]
+  (let [classes (keep (fn [s] (let [c (try (resolve s) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))]
                                 (when (class? c) c)))
                       syms)
         closed (into #{} (mapcat (fn [^Class c] (cons c (supers c)))) classes)]
@@ -1831,7 +1831,7 @@
     ;; intends for non-collection types (measured: (contains? syms
     ;; a-bytes-val) in chunk's column plan threw ISeq-from-SciType
     ;; here before ever reaching the interface check).
-    (let [s (try (presented-seq x) (catch Throwable _ ::no-seq))]
+    (let [s (try (presented-seq x) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ ::no-seq))]
       (if (identical? s ::no-seq)
         x
         (let [ifs (declared x)

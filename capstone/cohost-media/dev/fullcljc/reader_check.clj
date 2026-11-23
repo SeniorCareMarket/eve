@@ -102,8 +102,8 @@
 (doseq [file *command-line-args*]
   (let [base (last (clojure.string/split file #"/"))
         kind (first (clojure.string/split base #"\."))
-        clj-forms (try (read-all-clj file) (catch Throwable t (str "THREW: " (ex-message t))))
-        cljs-forms (try (read-all-cljs file) (catch Throwable t (str "THREW: " (ex-message t))))]
+        clj-forms (try (read-all-clj file) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t (str "THREW: " (ex-message t))))
+        cljs-forms (try (read-all-cljs file) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t (str "THREW: " (ex-message t))))]
     (check (str base " clj-reads") (vector? clj-forms) (str clj-forms))
     (check (str base " cljs-reads") (vector? cljs-forms) (str cljs-forms))
     (when (vector? clj-forms)

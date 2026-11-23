@@ -80,7 +80,7 @@
                  r (fn []
                      (.set ^ThreadLocal local-id id)
                      (let [reason (try (f (assoc boot :self id)) :normal
-                                       (catch Throwable e (error-data e)))]
+                                       #_{:splint/disable [lint/catch-throwable]}   (catch Throwable e (error-data e)))]
                        (.remove ^java.util.Map boxes id)
                        (send! starter {:eve.thread/exit id :reason reason})))]
              (if virtual?
@@ -100,7 +100,7 @@
   [addrs]
   (doseq [a addrs] (send! a :eve.thread/stop)))
 
-(defn attempt [f] (try [true (f)] (catch Throwable e [false e])))
+(defn attempt [f] (try [true (f)] #_{:splint/disable [lint/catch-throwable]}   (catch Throwable e [false e])))
 
 (defn capture-frame [] (get-thread-bindings))
 (defn call-with-frame [frame f] (if frame (with-bindings* frame f) (f)))

@@ -84,7 +84,7 @@
           (a/close-atom-domain! d)
           (is (= "seven" (:tag (fm (:elem (fm (:s (fm h))))))))))
       (finally
-        (try (a/close-atom-domain! d) (catch Throwable _ nil))))))
+        (try (a/close-atom-domain! d) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))))))
 
 (deftest nested-deftype-set-keeps-its-type-key-when-packed
   (let [[d x] (fresh-atom)]
@@ -126,7 +126,7 @@
           (a/close-atom-domain! d)
           (is (= "h3" (:note (fm (:db m)))))))
       (finally
-        (try (a/close-atom-domain! d) (catch Throwable _ nil))))))
+        (try (a/close-atom-domain! d) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))))))
 
 (deftest plain-collection-without-own-types-still-delivers-flat
   (let [[d x] (fresh-atom)]

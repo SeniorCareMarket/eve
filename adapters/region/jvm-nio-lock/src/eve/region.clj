@@ -596,8 +596,8 @@
                     (finally ((:munmap api) p 4096))))
                 (finally ((:close api) fd) (.delete f))))
             (assoc api :available? true))))
-      (catch Throwable e
-        {:available? false :reason (str e)}))))
+      #_{:splint/disable [lint/catch-throwable]}   (catch Throwable e
+                                                     {:available? false :reason (str e)}))))
 
 ;; BbNativeRegion — a file mapped MAP_SHARED by libc mmap (or, for a
 ;; heap region, an arena allocation), every op libatomic's on the

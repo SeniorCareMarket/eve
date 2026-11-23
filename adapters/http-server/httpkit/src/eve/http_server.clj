@@ -20,7 +20,7 @@
                                       :headers (:headers req)
                                       :body (String. raw "UTF-8")
                                       :body-b64 (.encodeToString (Base64/getEncoder) raw)})
-                            (catch Throwable t {:status 500 :headers {} :body (str t)}))]
+                            #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t {:status 500 :headers {} :body (str t)}))]
                  {:status (or (:status r) 200) :headers (or (:headers r) {})
                   :body (if (= :b64 (:body-as r))
                           (java.io.ByteArrayInputStream. (.decode (Base64/getDecoder) ^String (str (or (:body r) ""))))

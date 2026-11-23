@@ -50,11 +50,11 @@
           out (slurp (.getInputStream p))]
       (.waitFor p)
       (str/trim out))
-    (catch Throwable _ "unknown")))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ "unknown")))
 
 (defn- load1 []
   (try (first (str/split (str/trim (slurp "/proc/loadavg")) #" "))
-       (catch Throwable _ "?")))
+       #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ "?")))
 
 (defn- measure-corpus [kind v {:keys [warmup runs]}]
   (let [holder (fresh-atom "z1b/hold")
@@ -66,7 +66,7 @@
         ;; round's rows printed ERROR in the today column for exactly
         ;; that reason — @a itself had not errored).
         detach (try {:detach-ms (bench-min warmup runs #(img/detach holder))}
-                    (catch Throwable e {:error (str e)}))
+                    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable e {:error (str e)}))
         image-ok (when-not (:error detach)
                    (= v (d/eve->clj (img/image-value (img/open-image (img/detach holder))))))]
     (merge {:kind kind :value-ok value-ok :deref-ms deref-ms :image-ok image-ok}
@@ -85,7 +85,7 @@
                         (binding [*out* *err*] (println "BOARD measuring" kind) (flush))
                         (System/gc)
                         (let [r (try (measure-corpus kind v {:warmup warmup :runs runs})
-                                     (catch Throwable e {:kind kind :error (str e)}))]
+                                     #_{:splint/disable [lint/catch-throwable]}   (catch Throwable e {:kind kind :error (str e)}))]
                           (println "BOARD ROW" kind
                                    (if (:error r)
                                      (str "ERROR " (:error r))

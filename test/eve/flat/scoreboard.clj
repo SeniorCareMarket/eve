@@ -63,7 +63,7 @@
      :reader (resolve 'cognitect.transit/reader)
      :write (resolve 'cognitect.transit/write)
      :read (resolve 'cognitect.transit/read)}
-    (catch Throwable _ nil)))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))
 
 (defn- transit-bytes [{:keys [writer write]} v]
   (let [out (ByteArrayOutputStream.)
@@ -149,16 +149,16 @@
       (if (str/starts-with? head "ref:")
         (subs (str/trim (slurp (str ".git/" (str/trim (subs head 4))))) 0 7)
         (subs head 0 7)))
-    (catch Throwable _ "unknown")))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ "unknown")))
 
 (defn- load1 []
   (try (first (str/split (str/trim (slurp "/proc/loadavg")) #" "))
-       (catch Throwable _
-         (try (first (str/split (str/trim (str (first (java.nio.file.Files/readAllLines
-                                                       (java.nio.file.Paths/get "/proc/loadavg"
-                                                                                (into-array String []))))))
-                                #" "))
-              (catch Throwable _ "?")))))
+       #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _
+                                                      (try (first (str/split (str/trim (str (first (java.nio.file.Files/readAllLines
+                                                                                                    (java.nio.file.Paths/get "/proc/loadavg"
+                                                                                                                             (into-array String []))))))
+                                                                             #" "))
+                                                           #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ "?")))))
 
 (defn render-section
   [results {:keys [label runs]}]
@@ -190,8 +190,8 @@
   (let [results (mapv (fn [[kind v]]
                         (System/gc)
                         (try (measure-corpus kind v {:warmup warmup :runs runs})
-                             (catch Throwable e
-                               {:kind kind :error (str e) :rows []})))
+                             #_{:splint/disable [lint/catch-throwable]}   (catch Throwable e
+                                                                            {:kind kind :error (str e) :rows []})))
                       (cond->> (corpora/corpora corpora)
                         only (filter (fn [[k _]] (= k only)))))
         section (render-section results {:label label :runs runs})

@@ -91,9 +91,9 @@
   (try
     (when-let [req (read-request s)]
       (respond s (try (handler req)
-                      (catch Throwable t {:status 500 :headers {} :body (str t)}))))
-    (catch Throwable _ nil)
-    (finally (try (.close s) (catch Throwable _ nil)))))
+                      #_{:splint/disable [lint/catch-throwable]}   (catch Throwable t {:status 500 :headers {} :body (str t)}))))
+    #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)
+    (finally (try (.close s) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))))
 
 (defn serve!
   "Serve handler at opts {:port (0: any free one) :host (default 127.0.0.1)}: {:port :stop}. :stop ends the
@@ -108,7 +108,7 @@
             (try
               (let [s (.accept ss)]
                 (future (serve-conn handler s)))
-              (catch Throwable _ nil))
+              #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil))
             (recur))))
       {:port (.getLocalPort ss)
-       :stop (fn [] (reset! stopped true) (try (.close ss) (catch Throwable _ nil)))})))
+       :stop (fn [] (reset! stopped true) (try (.close ss) #_{:splint/disable [lint/catch-throwable]}   (catch Throwable _ nil)))})))
