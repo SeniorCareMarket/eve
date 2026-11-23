@@ -87,6 +87,6 @@
 (defn proc?
   "Is x a started process (a Proc)? Only the boot seat starts processes; on any other seat the
    answer is false, so a portable watch or kill step can hold pool entries of either kind."
-  [x]
+  [_x]
   #?(:clj (instance? Proc x)
      :cljs false))

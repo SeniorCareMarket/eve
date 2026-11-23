@@ -16,7 +16,7 @@
 (defn start!
   "Start the gateway over atoms' domain and note it in the control atom. Answers serve's server map
    ({:port :stop :gateway :blobs :handler})."
-  [{:keys [control domain] :as atoms}]
+  [{:keys [control domain] :as _atoms}]
   (let [cfg (:config @control)
         srv (serve/start-gateway! domain (assoc (select-keys cfg [:domain-id :api-key :store-secret])
                                                 :port (:gateway-port cfg)

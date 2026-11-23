@@ -92,7 +92,7 @@
   "Join and serve (and, as the coordinator, coordinate) until the boot program sets :stop in the
    control atom. config is the member's pool config: {:caps #{...} :pools {pool threads}
    :options {...} :init :media (optional) :facilities {:av :native} (optional)}."
-  [base out window rid gateway api-key {:keys [caps pools options init facilities] :as config}]
+  [base out window rid gateway api-key {:keys [caps pools options init facilities] :as _config}]
   (let [atoms (domain/open-atoms base)
         dh (pool/attach (:jobs atoms)
                         {:rid rid

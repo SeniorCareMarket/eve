@@ -59,7 +59,7 @@
 
 (defn- getprop
   "This runtime's property k (on the JVM, its system properties), or nil."
-  [k]
+  [_k]
   #?(:clj (System/getProperty k)
      :cljs nil))
 
@@ -344,7 +344,7 @@
    child's OS process is the program's own and its output lands in its log files; a waiter thread
    (a cohost.thread spawn) records the exit and starts it again per the restart policy (a clean
    exit is a stop, not a restart). Starting a process is the boot seat's own work: the :clj arm."
-  [atoms procs rid child]
+  [_atoms _procs _rid _child]
   #?(:clj
      (let [ctl (:control atoms)
            n (sv/next-start ctl rid)
@@ -474,7 +474,7 @@
   "The browser seat's :handler for this run: gateway/seat-handler over the
    started gateway, then the run's output files. The handler runs on the boot
    seat (its server and the gateway live here): the :clj arm builds it."
-  [run atoms procs]
+  [_run _atoms _procs]
   #?(:clj (let [gw (gateway/seat-handler (get @procs "gateway"))]
             (fn [req] (or (gw req) (out-file-resp (:out run) req))))
      :cljs (throw (ex-info "start: the browser seat's handler runs on the boot seat" {}))))
@@ -491,7 +491,7 @@
    process's, as for the JVM member, whose pool also lives here. A seat
    that fails to boot is an exited member (code 1); the seat has no
    restart of its own, where the watched processes had theirs."
-  [run atoms cfg procs child]
+  [_run _atoms _cfg _procs _child]
   #?(:clj
      (let [ex (cljs-pool/executor 1 (assoc (browser-args cfg)
                                            :handler (seat-handler run atoms procs)))]
@@ -523,7 +523,7 @@
    into procs under the member's name, and stop-members! shuts it down with the other executors.
    The pid recorded is this process's, as for the JVM member and the browser, whose pools also
    live under this program's hand."
-  [run atoms cfg procs child]
+  [_run _atoms _cfg _procs _child]
   #?(:clj
      (thread/spawn
       (fn []
@@ -795,7 +795,7 @@
 (defn sha256
   "A file's SHA-256, hex (in process: macOS has no sha256sum). The digest is the boot seat's
    own work: the :clj arm."
-  [path]
+  [_path]
   #?(:clj (let [md (java.security.MessageDigest/getInstance "SHA-256")
                 buf (byte-array 65536)]
             (with-open [in (java.io.FileInputStream. (str path))]
@@ -805,7 +805,7 @@
 
 (defn rid-of [owner] (when owner (first (str/split owner #"#"))))
 
-(defn check [run atoms state]
+(defn check [_run atoms state]
   (let [files (:files @(:library atoms))
         ix @(:index atoms)
         rts (pool/runtimes-of (:jobs atoms))
@@ -1051,7 +1051,7 @@
   "Wait (up to timeout-ms) for the page's check (the app page in the browser seat's shell iframe, whose URL
    carries ?check=<page-check>, writes it into control :page-check); then a screenshot of the page
    (?runtime=0: a view only, no second browser runtime), once its table shows every file of the library."
-  [run atoms cfg timeout-ms]
+  [_run _atoms _cfg _timeout-ms]
   #?(:clj
      (let [t0 (now)
            got (loop []

@@ -308,7 +308,7 @@
          entries (plan rb blocks known)
          [pages where] (lay-out entries region salt)
          where-all (fn [k] (or (get where k) (let [e (get known k)] [(:cid e) (:off e)])))
-         by-band (into {} (map (fn [e] [(b/hex (:band e)) e]) entries))
+         _by-band (into {} (map (fn [e] [(b/hex (:band e)) e]) entries))
          bits (volatile! (into {} (map (fn [[k e]] [k (:bits e)]) known)))
          ;; a slot's bits for a child: a box's / a value's by its image, a collection's from its own (written first)
          bits-of (fn [bd] (let [k (b/hex bd)]

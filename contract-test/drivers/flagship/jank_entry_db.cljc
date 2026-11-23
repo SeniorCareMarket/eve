@@ -8,7 +8,7 @@
 (def base-tx (mapv (fn [i] {:db/id i :name (str "base-" i) :age (+ 20 i)})
                    (range 1 11)))
 
-(defn -main [& args]
+(defn -main [& _args]
   (let [d0 (db/empty-db)
         d1 (db/db-with d0 base-tx)
         n (count (db/datoms d1 :eavt))

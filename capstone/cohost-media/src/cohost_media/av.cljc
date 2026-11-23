@@ -12,7 +12,7 @@
 
 (defn- native-fn
   "The native implementation's var, when this runtime carries it."
-  [sym]
+  [_sym]
   #?(:cljs nil
      :default (try (requiring-resolve sym) (catch Throwable _ nil))))
 
