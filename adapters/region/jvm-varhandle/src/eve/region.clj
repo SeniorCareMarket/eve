@@ -192,8 +192,7 @@
 
 (def ^:private ^ConcurrentHashMap waiters (ConcurrentHashMap.))
 
-(defn- ^ConcurrentLinkedQueue waiter-queue
-  [region byte-off]
+(defn- waiter-queue ^ConcurrentLinkedQueue [region byte-off]
   (let [k [region (long byte-off)]
         q (.get waiters k)]
     (if q

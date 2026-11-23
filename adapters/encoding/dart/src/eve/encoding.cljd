@@ -4,6 +4,10 @@
    codec slot. A byte array is eve.host's, an Int8List. Dart has no ratio and no arbitrary-precision decimal: ratio?
    and bigdec? answer false and their constructors refuse (the codec reads RATIO and BIGDEC as unsupported here);
    an integer past 64 bits is a BigInt."
+  ;; ^Type hints here are ClojureDart annotations naming Dart
+  ;; types (see eve.host's ns note); the JVM-placement linter is
+  ;; scoped off for this namespace only.
+  {:clj-kondo/config {:linters {:non-arg-vec-return-type-hint {:level :off}}}}
   (:refer-clojure :exclude [ratio? aget aset byte-array unchecked-byte unsigned-bit-shift-right
                             long class double bytes])
   (:require ["dart:convert" :as convert]

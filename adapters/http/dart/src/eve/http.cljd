@@ -8,6 +8,10 @@
    base64, :as :bytes as a byte array (eve.host's Int8List, which eve.codec reads); otherwise bodies are UTF-8 text. A
    non-2xx answer is an answer; a transport failure answers {:error message}, as eve.net.wire reads it. A socket here
    speaks no TLS: an https URL answers {:error}."
+  ;; ^Type hints here are ClojureDart annotations naming Dart
+  ;; types (see eve.host's ns note); the JVM-placement linter is
+  ;; scoped off for this namespace only.
+  {:clj-kondo/config {:linters {:non-arg-vec-return-type-hint {:level :off}}}}
   (:require ["dart:convert" :as convert]
             ["dart:io" :as io]
             ["dart:typed_data" :as td]

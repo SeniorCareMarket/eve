@@ -6,6 +6,15 @@
    value to their width as the JVM's arrays do; an object array is cljd's List<Object?>. Dart's native ints are 64-bit
    two's complement and wrap, so the long ops are Dart's own and the narrower ones are toSigned. A Dart isolate is
    one thread: locking runs its body."
+  ;; The ^Type hints in this file are ClojureDart type annotations
+  ;; naming Dart types (int, Uint8List, ...) with the dialect's own
+  ;; semantics (a ^String implies non-nil, per the ClojureDart
+  ;; cheatsheet); they sit on the fn name, this tree's uniform
+  ;; .cljd convention. Kondo's arg-vector placement preference is
+  ;; a JVM-Clojure style rule and this gate carries no ClojureDart
+  ;; compiler to verify a move against, so that one linter is
+  ;; scoped off for this namespace only.
+  {:clj-kondo/config {:linters {:non-arg-vec-return-type-hint {:level :off}}}}
   (:refer-clojure :exclude [aget aset alength aclone byte-array short-array int-array
                             long-array float-array double-array object-array into-array
                             to-array unchecked-byte unchecked-short unchecked-int

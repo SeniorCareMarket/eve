@@ -6,6 +6,10 @@
    CTR, AES-256-GCM, XXH3 and Ed25519 verify are eve.net.portable-crypto's; random bytes are the process feature's
    (Random.secure). Bytes are vectors of 0..255 in and out; eve/test/eve/net/crypto_test.cljc holds this adapter to
    the portable code."
+  ;; ^Type hints here are ClojureDart annotations naming Dart
+  ;; types (see eve.host's ns note); the JVM-placement linter is
+  ;; scoped off for this namespace only.
+  {:clj-kondo/config {:linters {:non-arg-vec-return-type-hint {:level :off}}}}
   (:require ["dart:typed_data" :as td]
             ["package:crypto/crypto.dart" :as dc]
             [eve.net.bigops :as bo]
