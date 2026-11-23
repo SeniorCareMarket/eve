@@ -18,6 +18,15 @@
 ;;
 ;; The :lint-as map is identical to the one in Eve's own
 ;; .clj-kondo/config.edn (the local half); keep them in sync.
+;;
+;; The deftype family also needs the analyze-call hook in
+;; hooks/eve_deftype.clj next to this file (per-pass protocol
+;; translation, options map, generated-var declares — see its
+;; docstring), wired by the :hooks entry below, and the
+;; :linters exclusion for the two deftype residence locals
+;; (sio__/offset__ — bound by the macro in every method body;
+;; see Eve's .clj-kondo/config.edn header for the full reason).
+;; Both are identical to the local half; keep them in sync too.
 {:lint-as {eve.alpha/deftype clojure.core/deftype
            eve.alpha/extend-type clojure.core/extend-type
            eve.deftype/deftype clojure.core/deftype
@@ -27,4 +36,9 @@
            eve.record/defrecord clojure.core/defrecord
            eve.protocol/defprotocol clojure.core/defprotocol
            eve.stm/sync clojure.core/dosync
-           eve.thread/deftask clojure.core/defn}}
+           eve.thread/deftask clojure.core/defn}
+ :hooks {:analyze-call {eve.alpha/deftype hooks.eve-deftype/deftype
+                        eve.deftype/deftype hooks.eve-deftype/deftype
+                        eve.deftype-proto.macros/deftype hooks.eve-deftype/deftype
+                        eve.deftype-proto.macros/host-deftype hooks.eve-deftype/deftype}}
+ :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}

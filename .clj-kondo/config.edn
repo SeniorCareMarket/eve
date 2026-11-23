@@ -16,6 +16,27 @@
 ; clj-kondo export: src/clj-kondo.exports/seniorcaremarket/eve/
 ; config.edn — the two must stay identical; this file is the local
 ; half, that file is the consumer half.
+;
+; The deftype family needs more than :lint-as. The :hooks entry
+; below installs the analyze-call hook in
+; .clj-kondo/hooks/eve_deftype.clj, which rewrites each call to a
+; per-pass clojure.core/deftype: protocol groups translated
+; through eve.deftype-proto.proto-map's own tables (JVM names on
+; :clj, CLJS names on :cljs), the options map re-homed, and the
+; generated <TypeName>? predicate declared. The same hook +
+; :hooks entry ship in the export (hooks/ alongside the export
+; config.edn); keep them in sync too.
+;
+; The :linters entry below is part of the same exception: Eve
+; deftype stores [sio__ offset__] ahead of the written fields,
+; and method bodies reference those two names as locals. They
+; are bound by the macro in every deftype method body and have
+; no other meaning in Eve code, so unresolved-symbol is excluded
+; for exactly these two symbols. (The alternatives were measured
+; and rejected in the Phase 2 Eve lane: prepending the fields
+; falsifies the ->Type constructor arity kondo derives, and
+; let-binding them per method costs an unused-binding warning on
+; every method that does not use both.)
 {:min-clj-kondo-version "2026.10.26"
  :lint-as {eve.alpha/deftype clojure.core/deftype
            eve.alpha/extend-type clojure.core/extend-type
@@ -26,4 +47,9 @@
            eve.record/defrecord clojure.core/defrecord
            eve.protocol/defprotocol clojure.core/defprotocol
            eve.stm/sync clojure.core/dosync
-           eve.thread/deftask clojure.core/defn}}
+           eve.thread/deftask clojure.core/defn}
+ :hooks {:analyze-call {eve.alpha/deftype hooks.eve-deftype/deftype
+                        eve.deftype/deftype hooks.eve-deftype/deftype
+                        eve.deftype-proto.macros/deftype hooks.eve-deftype/deftype
+                        eve.deftype-proto.macros/host-deftype hooks.eve-deftype/deftype}}
+ :linters {:unresolved-symbol {:exclude [sio__ offset__]}}}
