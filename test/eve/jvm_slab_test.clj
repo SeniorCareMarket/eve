@@ -39,3 +39,17 @@
           (alloc/-sio-free! ctx o1)
           (alloc/-sio-free! ctx o2)
           (alloc/-sio-free! ctx o3))))))
+
+(deftest node-i32-matches-sio-read
+  (testing "node-i32 equals -sio-read-i32 for aligned and unaligned field offsets, including a logging wrapper"
+    (let [ctx (alloc/make-jvm-heap-slab-ctx {})
+          off (alloc/-sio-alloc! ctx 64)
+          wrap (alloc/logging-sio ctx)
+          vs [0 1 -1 42 -42 127 -128 255 256 0x7FFFFFFF -0x80000000 0x12345678 -0x01020304]]
+      (doseq [fo [0 1 2 3 7 13]
+              v vs]
+        (alloc/-sio-write-i32! ctx off fo v)
+        (let [want (alloc/-sio-read-i32 ctx off fo)
+              label (str "fo=" fo " v=" v)]
+          (is (= want (alloc/node-i32 ctx off fo)) (str "ctx " label))
+          (is (= want (alloc/node-i32 wrap off fo)) (str "wrap " label)))))))
