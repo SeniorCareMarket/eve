@@ -5,18 +5,19 @@
    image of the same value (the JVM reference hex below is produced by
    the JVM writer of the identical build path — see H4-STATUS.md for
    its provenance; it is regenerated, never edited by hand)."
-  (:require [cljs.test :refer [deftest is testing async use-fixtures]]
-            [eve.process-slab :as ps]
-            [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]
-            [eve.deftype-proto.serialize :as ser]
-            [eve.codec :as codec]
-            [eve.array :as arr]
-            [eve.dataset :as ds]
-            [eve.flat]
-            [eve.flat.image :as img]
+  (:require ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [cljs.test :refer [deftest is testing async use-fixtures]]
+   [eve.process-slab :as ps]
+   [eve.deftype-proto.alloc :as alloc]
+   [eve.deftype-proto.data :as d]
+   [eve.deftype-proto.serialize :as ser]
+   [eve.codec :as codec]
+   [eve.array :as arr]
+   [eve.dataset :as ds]
+   [eve.flat]
+   [eve.flat.image :as img]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-            #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.sio :as ssio]))
+   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.sio :as ssio]))
 
 ;; ---------------------------------------------------------------------------
 ;; helpers — Z1's, in their CLJS form. On this host a heap domain IS the

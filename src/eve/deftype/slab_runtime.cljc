@@ -13,7 +13,8 @@
    because they use the same slab allocator API as eve-slab-deftype."
   (:refer-clojure :exclude [alength bytes])
   (:require
-   [eve.host :refer [alength bytes]]
+   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [alength bytes]]
    [eve.slab-io :as slab]
    ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
    #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]

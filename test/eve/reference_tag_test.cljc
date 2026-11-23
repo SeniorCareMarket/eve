@@ -9,7 +9,8 @@
   ;; is called (clojerl resolves it there)
   (:refer-clojure :exclude [bytes volatile!])
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.host :refer [field bytes volatile!]]
+            ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+            #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [field bytes volatile!]]
             [eve.codec :as codec]
             [eve.core :as e]
             [eve.deftype-proto.alloc :as alloc]

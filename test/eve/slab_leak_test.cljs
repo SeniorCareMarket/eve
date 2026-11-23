@@ -4,7 +4,7 @@
    after swap! operations, causing monotonic slab usage growth.
 
    Run via: node target/eve-test/all.js slab-leak"
-  (:require [cljs.test :refer [deftest testing is async]]
+  (:require [cljs.test :refer [deftest is async]]
             [eve.atom :as atom]
             ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.alloc :as alloc]

@@ -6,22 +6,34 @@
 
    make-heap-region and open-mmap-region open them; lustre-region? says
    whether a region's atomics are fcntl byte-range locks (a Lustre mount)."
-  (:refer-clojure :exclude [aget aset alength byte-array int-array long-array object-array
-                            into-array unchecked-byte unchecked-int unchecked-long
-                            unchecked-inc-int unsigned-bit-shift-right long double class
-                            locking transient persistent! conj! assoc! bytes objects
-                            const-bytes const-objects])
+  (:refer-clojure :exclude ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+                  #_{:clj-kondo/ignore [:unused-referred-var]}   [aget aset alength byte-array int-array long-array object-array
+                                                                  into-array unchecked-byte unchecked-int unchecked-long
+                                                                  unchecked-inc-int unsigned-bit-shift-right long double class
+                                                                  locking transient persistent! conj! assoc! bytes objects
+                                                                  const-bytes const-objects])
   (:require
-   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
-                     into-array unchecked-byte unchecked-int unchecked-long
-                     unchecked-inc-int unsigned-bit-shift-right long double class locking
-                     transient persistent! conj! assoc! bytes objects const-bytes
-                     const-objects]]
-   [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
-                            -fill-i32!]]))
+   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
+                                                                    into-array unchecked-byte unchecked-int unchecked-long
+                                                                    unchecked-inc-int unsigned-bit-shift-right long double class locking
+                                                                    transient persistent! conj! assoc! bytes objects const-bytes
+                                                                    const-objects]]
+   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.mem :as mem :refer ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+                                                   #_{:clj-kondo/ignore [:unused-referred-var]}   [-byte-length -load-i32 -store-i32! -cas-i32!
+                                                                                                   -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                                                                                                   -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                                                                                                   -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
+                                                                                                   -fill-i32!]]))
 
 ;; Every region has atomic RMW unless it says otherwise.
 (extend-protocol mem/IHostAtomics

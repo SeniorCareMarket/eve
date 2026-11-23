@@ -12,8 +12,7 @@
             [eve.record-context :as record-context]
             [eve.core]
             [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
-                                                   cljs-protocol? rename-syms parse-protocol-impls
-                                                   cljs-translate-protocol]]
+                                                   cljs-protocol? cljs-translate-protocol]]
             [eve.deftype-proto.sio :as sio]))
 
 ;; Babashka: a non-map type is a plain deftype over eve.core's protocols

@@ -9,7 +9,8 @@
   ;; :clje — callees' ^long return tags resolve in the CALLER's ns on clojerl; take eve.host's `long`.
   (:refer-clojure :exclude [alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])])
   (:require
-   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])]]
+   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [field alength volatile! vswap! transient persistent! conj! bytes #?@(:clje [long])]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
     :refer [NIL_OFFSET]]

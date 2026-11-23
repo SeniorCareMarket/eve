@@ -13,7 +13,9 @@
    eve.flat.column-scaffold — SCAFFOLDING that C1's chunk.cljc
    replaces; the code under test is eve.flat.column alone."
   (:require #?(:cljs ; the test-framework require; its referred macros are this file's test surface
-               #_{:clj-kondo/ignore [:unused-namespace]}   [cljs.test :refer [deftest testing is]]
+               #_{:clj-kondo/ignore [:unused-namespace]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+               #_{:clj-kondo/ignore [:unused-referred-var]}   ; the test-framework require (cljs.test on this pass); its referred macros are this file's test surface 
+               #_{:clj-kondo/ignore [:unused-referred-var]}   [cljs.test :refer [deftest testing is]]
                :clj  [clojure.test :refer [deftest testing is]])
             ; the alias is exercised on the other reader pass; the require loads on both 
             #_{:clj-kondo/ignore [:unused-namespace]}   [eve.flat.column :as column]

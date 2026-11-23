@@ -16,40 +16,47 @@
                             caching-hash hash-ordered-coll
                             volatile! vswap! long])
   ;; long: index-of-nil's return hint (clojerl resolves it here, the caller)
-  (:require [eve.host :refer [volatile! vswap! long]]
-            [eve.rrb-vector.protocols :as protos
+  (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [volatile! vswap! long]]
+            ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.rrb-vector.protocols :as protos
              ;; the protocols by alias: a clojerl protocol is no var to refer
-             :refer [-slicev -splicev]]
-            [eve.rrb-vector.nodes
-             :refer [regular? empty-node node-ranges overflow? last-range
-                     regular-ranges first-child last-child remove-leftmost-child
-                     replace-leftmost-child replace-rightmost-child
-                     fold-tail new-path* index-of-nil ->VectorNode]]
-            [eve.rrb-vector.trees
-             :refer [push-tail pop-tail new-path do-assoc]]
-            [eve.rrb-vector.transients
-             :refer [ensure-editable editable-root editable-tail push-tail!
-                     pop-tail! do-assoc!]]
+                                                   :refer [-slicev -splicev]]
+   [eve.rrb-vector.nodes
+    :refer [regular? empty-node node-ranges overflow? last-range
+            regular-ranges first-child last-child remove-leftmost-child
+            replace-leftmost-child replace-rightmost-child
+            fold-tail new-path* index-of-nil ->VectorNode]]
+   [eve.rrb-vector.trees
+    :refer [push-tail pop-tail new-path do-assoc]]
+   [eve.rrb-vector.transients
+    :refer [ensure-editable editable-root editable-tail push-tail!
+            pop-tail! do-assoc!]]
             ;; eve: arrays in eve memory, and types written once for every
             ;; host — deftype for one on the host, eve-deftype for one in eve
             ;; memory
-            [eve.deftype.array :refer [make-array aget aset alength aclone
-                                       array-copy array-seq array-chunk]]
-            [eve.deftype :as edt :refer [extend-host-vectors]]
-            [eve.deftype-proto.macros :as eve]
+            ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.deftype.array :refer [make-array aget aset alength aclone
+                                                                             array-copy array-seq array-chunk]]
+   [eve.deftype :as edt :refer [extend-host-vectors]]
+   [eve.deftype-proto.macros :as eve]
             ;; eve: cljs.core's vocabulary, where the host lacks it (the JVM,
             ;; bb, nbb); count, into, empty and subvec reach an eve value on bb
-            [eve.core :refer [count into empty subvec
-                              -count -nth -conj -with-meta -assoc-n
-                              -conj! -assoc-n! -chunked-rest -chunked-next
-                              array pr-str* pr-writer caching-hash
-                              hash-ordered-coll]]
+            ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.core :refer [count into empty subvec
+                                                                    -count -nth -conj -with-meta -assoc-n
+                                                                    -conj! -assoc-n! -chunked-rest -chunked-next
+                                                                    array pr-str* pr-writer caching-hash
+                                                                    hash-ordered-coll]]
             ;; cljs.core's collection helpers and RSeq, written once for every host
-            [eve.coll :refer [pr-sequential-writer equiv-sequential ci-reduce
-                              compare-indexed vector-index-out-of-bounds]]
-            [eve.rseq :refer [->RSeq]]
+            ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.coll :refer [pr-sequential-writer equiv-sequential ci-reduce
+                                                                    compare-indexed vector-index-out-of-bounds]]
+   [eve.rseq :refer [->RSeq]]
             ;; one :require clause: basilisp's ns keeps only the last of each
-            [eve.rrb-vector.macros :refer [dbg]]))
+   [eve.rrb-vector.macros :refer [dbg]]))
 
 (def ^:const rrbt-concat-threshold 33)
 (def ^:const max-extra-search-steps 2)

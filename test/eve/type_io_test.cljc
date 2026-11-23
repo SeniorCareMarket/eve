@@ -1,7 +1,9 @@
 (ns eve.type-io-test
   (:refer-clojure :exclude [deftype])
-  (:require #?(:cljs [cljs.test :refer-macros [deftest is testing use-fixtures]]
-               :default [clojure.test :refer [deftest is testing use-fixtures]])
+  (:require #?(:cljs ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+               #_{:clj-kondo/ignore [:unused-referred-var]}   [cljs.test :refer-macros [deftest is testing use-fixtures]]
+               :default ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+               #_{:clj-kondo/ignore [:unused-referred-var]}   [clojure.test :refer [deftest is testing use-fixtures]])
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn])

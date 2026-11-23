@@ -6,9 +6,12 @@
    (eve.deftype-proto.proto-map); field renames and classes; and the ISlabIO
    reads and writes an eve/deftype type's bodies get. A host realizes a type
    from these in its adapter (eve.types, eve/adapters/types/)."
-  (:refer-clojure :exclude [into-array unchecked-inc-int long objects])
+  (:refer-clojure :exclude ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+                  #_{:clj-kondo/ignore [:unused-referred-var]}   [into-array unchecked-inc-int long objects])
   (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [field into-array unchecked-inc-int long objects]]
+   #_{:clj-kondo/ignore [:unused-namespace]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+                                                   #_{:clj-kondo/ignore [:unused-referred-var]}   [field into-array unchecked-inc-int long objects]]
    [clojure.string :as str]
    [eve.deftype-proto.proto-map :as pm]))
 

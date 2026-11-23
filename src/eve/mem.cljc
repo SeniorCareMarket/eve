@@ -27,11 +27,16 @@
                             locking transient persistent! conj! assoc! bytes objects
                             const-bytes const-objects])
   (:require
-   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
-                     into-array unchecked-byte unchecked-int unchecked-long
-                     unchecked-inc-int unsigned-bit-shift-right long double class locking
-                     transient persistent! conj! assoc! bytes objects const-bytes
-                     const-objects extend-default]]
+   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
+                                                                    into-array unchecked-byte unchecked-int unchecked-long
+                                                                    unchecked-inc-int unsigned-bit-shift-right long double class locking
+                                                                    transient persistent! conj! assoc! bytes objects const-bytes
+                                                                    const-objects extend-default]]
    ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
    #_{:clj-kondo/ignore [:unused-namespace]}   [eve.deftype-proto.data :as d]
    ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 

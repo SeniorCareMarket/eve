@@ -1,7 +1,7 @@
 (ns eve.net.graft-test
   "SwapGraft V3 and the read Bloom in portable cljc: the G3 rows of VS's test/vs/net_graft_test.vs
    — SHAs of labels, epoch 7, timestamp 1700000000000, the layout by offset, the refusals, graft-possible."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [eve.net.bytes :as b]
             [eve.net.graft :as g]
             [eve.net.sha256 :as s]))

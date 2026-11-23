@@ -24,7 +24,7 @@
    [eve.host :refer [alength byte-array short-array int-array float-array double-array
                      unchecked-byte unchecked-short unchecked-int unsigned-bit-shift-right
                      long double transient persistent! conj! bytes shorts ints floats
-                     doubles locking defdelay]]
+                     doubles locking]]
    [eve.core :as e]
    [eve.deftype-proto.data :as d]
    [eve.encoding :as enc]

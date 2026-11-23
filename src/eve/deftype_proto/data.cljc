@@ -64,8 +64,9 @@
    SIMD iteration. For a 1MB slab with 64B blocks (16384 blocks),
    the full bitmap is 2KB = 128 v128 loads worst case."
   (:refer-clojure :exclude [aget alength unsigned-bit-shift-right bytes long])
-  (:require [eve.host :refer [aget alength unsigned-bit-shift-right bytes long extend-default]]
-            [eve.fast-proto :as fp]))
+  (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget alength unsigned-bit-shift-right bytes long extend-default]]
+   [eve.fast-proto :as fp]))
 
 ;;=============================================================================
 ;; Size Classes

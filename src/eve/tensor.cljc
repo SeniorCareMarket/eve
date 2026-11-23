@@ -22,8 +22,9 @@
                             unchecked-inc-int long double volatile! vswap! transient
                             persistent! conj! doubles])
   (:require
-   [eve.host :refer [aget aset unchecked-add-int unchecked-multiply-int unchecked-inc-int
-                     long double volatile! vswap! transient persistent! conj! doubles]]
+   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget aset unchecked-add-int unchecked-multiply-int unchecked-inc-int
+                                                                    long double volatile! vswap! transient persistent! conj! doubles]]
    [eve.core :as e]
    [eve.array :as arr]
    [eve.deftype-proto.data :as d]

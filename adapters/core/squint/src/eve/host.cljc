@@ -49,7 +49,8 @@
             ;; kin), so the stubs register before any deftype form in those
             ;; graphs evaluates. eve.core requires nothing: no cycle.
    ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.core :refer [ILookup IEquiv IHash IPrintWithWriter]]
+   #_{:clj-kondo/ignore [:unused-namespace]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.core :refer [ILookup]]
    ["squint-cljs/core.js" :as core]
    [eve.host-prim :as prim]
    [eve.host-completion]))

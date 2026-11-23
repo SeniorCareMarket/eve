@@ -4,7 +4,7 @@
    Clojure counterparts. Inspired by jank-lang/clojure-test-suite (MPL-2.0)
    and ClojureScript core_test.cljs (EPL-1.0)."
   (:require
-   [cljs.test :refer-macros [deftest testing is are]]
+   [cljs.test :refer-macros [deftest testing is]]
    [eve.alpha :as e]
    [eve.map :as em]
    [eve.vec :as ev]

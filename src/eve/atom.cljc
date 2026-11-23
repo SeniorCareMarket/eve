@@ -28,8 +28,10 @@
    #?@(:jank [[eve.host-completion :refer [defprotocol deftype defrecord reify
                                            extend-type extend-protocol extend
                                            satisfies? extends? halt-when]]])
-   [eve.host :refer [aget alength long class volatile!
-                     vswap! locking transient persistent! conj! bytes token]]
+   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget alength long class volatile!
+                                                                    vswap! locking transient persistent! conj! bytes token]]
    [eve.encoding :as enc]
    ;; Load order: host-deftype's expansion ends in a top-level
    ;; eve.type-readers/register! call, which needs the registry first

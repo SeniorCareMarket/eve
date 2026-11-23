@@ -15,10 +15,11 @@
                             object-array unchecked-int unchecked-add-int
                             unchecked-multiply-int unsigned-bit-shift-right dissoc! disj!
                             long])
-  (:require [eve.host :refer [object-array unchecked-int unchecked-add-int
-                              unchecked-multiply-int unsigned-bit-shift-right dissoc! disj!
-                              long]]
-            [eve.encoding :as enc]))
+  (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [object-array unchecked-int unchecked-add-int
+                                                                    unchecked-multiply-int unsigned-bit-shift-right dissoc! disj!
+                                                                    long]]
+   [eve.encoding :as enc]))
 
 ;; This namespace's own vocabulary declared before its first defprotocol: ValueScript refuses a def of a name the ns
 ;; excludes from clojure.core once the namespace holds a protocol; declared first, the

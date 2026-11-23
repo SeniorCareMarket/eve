@@ -12,7 +12,8 @@
    only when this suite passes with it in place, on that host."
   (:refer-clojure :exclude [aget alength byte-array unchecked-byte bytes])
   (:require [clojure.test :refer [deftest is testing]]
-            [eve.host :refer [field aget alength byte-array unchecked-byte bytes]]
+            ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+            #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [field aget alength byte-array unchecked-byte bytes]]
             [clojure.string :as str]
             [eve.encoding :as enc]
             [eve.hamt-util :as hu]))

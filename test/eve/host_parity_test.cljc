@@ -7,7 +7,7 @@
    Every row also prints one PARITY line (fn, type, ok/FAIL) for the
    cross-host audit table."
   (:refer-clojure :exclude [defrecord])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [clojure.string :as str]
             #?(:cljs [cljs.reader :as reader] :default [clojure.edn :as reader])
             [eve.deftype-proto.alloc :as alloc]

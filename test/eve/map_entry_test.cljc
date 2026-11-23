@@ -1,5 +1,5 @@
 (ns eve.map-entry-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [eve.deftype-proto.alloc :as alloc]
             [eve.map-entry :as me]
             [eve.core :as e]

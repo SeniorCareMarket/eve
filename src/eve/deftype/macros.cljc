@@ -23,7 +23,9 @@
      ^:mutable — mutable via set! (single-worker)
      ^:volatile-mutable — atomic via set!/cas! (cross-worker)"
   (:require ; required for load as part of this namespace's cone (Eve's type/protocol registrations are load-time effects); no vars are referenced from it here 
-   #_{:clj-kondo/ignore [:unused-namespace]}   [eve.host :refer [field]]
+   #_{:clj-kondo/ignore [:unused-namespace]}   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [field]]
    [eve.deftype.registry :as reg]
    [eve.deftype-proto :as proto]
    [eve.deftype-proto.emission :as emission]

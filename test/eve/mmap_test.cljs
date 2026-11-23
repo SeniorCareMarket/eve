@@ -3,7 +3,7 @@
    Requires native addon at build/Release/mmap_cas.node (npm run build:addon).
    NodeMmapRegion tests; JsSabRegion tests are in mem-test.
    NO namespace-level side effects — addon loading is done in run-mmap! (runner)."
-  (:require [cljs.test :refer [deftest testing is async]]
+  (:require [cljs.test :refer [deftest testing is]]
             [eve.region :as region]
             [eve.mem :as mem]))
 

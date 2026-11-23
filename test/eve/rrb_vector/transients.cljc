@@ -9,7 +9,7 @@
 (ns eve.rrb-vector.transients
   (:refer-clojure :exclude [new-path make-array aget aset alength aclone])
   (:require [eve.rrb-vector.nodes
-             :refer [regular? clone node-ranges last-range overflow? ->VectorNode]]
+             :refer [regular? node-ranges last-range overflow? ->VectorNode]]
             [eve.rrb-vector.trees :refer [new-path]]
             [eve.deftype.array :refer [make-array aget aset alength aclone array-copy]]
             [eve.host :refer [token]]))

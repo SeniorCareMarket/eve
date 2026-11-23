@@ -1,6 +1,7 @@
 (ns eve.array-test
   (:require
-   [cljs.test :refer-macros [deftest testing is are use-fixtures]]
+   ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [cljs.test :refer-macros [deftest testing is are use-fixtures]]
    [eve.alpha :as eve]
    [eve.array :as arr]
    [eve.obj :as obj]

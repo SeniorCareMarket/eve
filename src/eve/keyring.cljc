@@ -24,15 +24,16 @@
    Direct region access to an encrypted domain (alloc/-sio-mem-region: eve.array's element views, a typed array's
    block) would read ciphertext, and is refused."
   (:refer-clojure :exclude [aget aset alength unchecked-byte load bytes])
-  (:require [eve.host :refer [aget aset alength unchecked-byte bytes]]
-            [eve.encoding :as enc]
-            [eve.mem :as mem]
-            [eve.region :as region]
-            [eve.crypto :as prim]
-            [eve.net.crypto :as nc]
-            [eve.int32 :as i32]
-            [eve.process :as proc]
-            [eve.deftype-proto.alloc :as alloc]))
+  (:require ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aget aset alength unchecked-byte bytes]]
+   [eve.encoding :as enc]
+   [eve.mem :as mem]
+   [eve.region :as region]
+   [eve.crypto :as prim]
+   [eve.net.crypto :as nc]
+   [eve.int32 :as i32]
+   [eve.process :as proc]
+   [eve.deftype-proto.alloc :as alloc]))
 
 ;;-----------------------------------------------------------------------------
 ;; The record (enc.vs's offsets)

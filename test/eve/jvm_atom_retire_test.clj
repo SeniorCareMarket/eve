@@ -10,7 +10,7 @@
    surviving block counted once. Each reach checked against the allocation log of writing the value.
    (The 9.31 pair-walk this file timed before the descriptor count landed is gone with eve.retire's plan: the
    protocol's hold prunes at counted blocks by construction, so there is no walk left to time.)"
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [eve.alpha]
             [eve.atom]
             [eve.core :as e]

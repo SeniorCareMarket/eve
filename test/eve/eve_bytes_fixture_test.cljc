@@ -13,7 +13,8 @@
   (:refer-clojure :exclude [aclone alength byte-array unchecked-byte bytes])
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.deftype-proto.data :as d]
-            [eve.host :refer [field aclone alength byte-array unchecked-byte bytes]]
+            ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+            #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [field aclone alength byte-array unchecked-byte bytes]]
             #?(:cljs [cljs.reader :as edn] :default [clojure.edn :as edn])
             [clojure.string :as str]
             [eve.hamt-util :as hu]

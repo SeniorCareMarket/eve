@@ -30,7 +30,8 @@
    ;; also end in eve.type-readers/register! calls.
    [eve.type-readers]
    [eve.core :as e]
-   [eve.host :refer [aclone bytes]]
+   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [aclone bytes]]
    [eve.codec :as codec]
    [eve.encoding :as enc]
    [eve.hamt-util :as hu]

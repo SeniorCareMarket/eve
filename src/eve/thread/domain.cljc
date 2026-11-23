@@ -27,19 +27,21 @@
    owner's lease expired (a killed process's: all of them, once its ttl passes; a dead thread's: at once, its lease
    dropped on its exit notice), forgetting settled descriptors nobody will read, taking out runtimes whose own lease
    expired. A runtime with no threads (thread/none) renews on its own swaps, and its waits run the work."
-  (:refer-clojure :exclude [swap! reset! volatile! vswap!])
-  (:require [eve.host :refer [swap! reset! volatile! vswap!]]
-            [eve.deftype-proto.data :as ed]
-            [eve.process :as proc]
-            [eve.thread-host :as h]
-            [eve.thread.cell :as c]
-            [eve.thread.descriptor :as d]
-            [eve.thread.fold :as fold]
-            [eve.thread.future :as fut]
-            [eve.thread.meta :as mt]
-            [eve.thread.pool :as ep]
-            [eve.thread.rung :as rung]
-            [eve.thread.task :as task]))
+  (:refer-clojure :exclude ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+                  #_{:clj-kondo/ignore [:unused-referred-var]}   [swap! reset! volatile! vswap!])
+  (:require ; some of this spec's referred vars are exercised only on the other reader pass or mirror the host-face declaration; the refer list is shared by both passes 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [swap! reset! volatile! vswap!]]
+   [eve.deftype-proto.data :as ed]
+   [eve.process :as proc]
+   [eve.thread-host :as h]
+   [eve.thread.cell :as c]
+   [eve.thread.descriptor :as d]
+   [eve.thread.fold :as fold]
+   [eve.thread.future :as fut]
+   [eve.thread.meta :as mt]
+   [eve.thread.pool :as ep]
+   [eve.thread.rung :as rung]
+   [eve.thread.task :as task]))
 
 (defn now [] (proc/now-ms))
 

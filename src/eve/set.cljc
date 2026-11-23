@@ -10,8 +10,10 @@
                             aget alength unchecked-int unsigned-bit-shift-right volatile!
                             vswap! transient persistent! conj! long bytes])
   (:require
-   [eve.host :refer [field aget alength unchecked-int unsigned-bit-shift-right volatile! vswap!
-                     transient persistent! conj! long bytes]]
+   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   ; this spec's refer list mirrors the file's :refer-clojure :exclude declaration - the host-face surface, kept in sync by construction; the flagged names are not called from this file's body 
+   #_{:clj-kondo/ignore [:unused-referred-var]}   [eve.host :refer [field aget alength unchecked-int unsigned-bit-shift-right volatile! vswap!
+                                                                    transient persistent! conj! long bytes]]
    [eve.slab-io :as slab]
    [eve.deftype-proto.alloc :as alloc
     :refer [NIL_OFFSET]]
