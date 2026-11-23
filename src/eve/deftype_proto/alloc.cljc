@@ -45,7 +45,8 @@
    [eve.region :as region]
    [eve.mem :as mem]
    [eve.codec :as codec]
-   [eve.encoding :as enc]))
+   [eve.encoding :as enc]
+   #?(:jolt [jolt.scheme :as scheme])))
 
 (defn- region-opts
   "The open-mmap-region opts that reopen a file the way r was opened — a
@@ -229,6 +230,32 @@
      ;; nodes a path-copy replaces are found by the retire-time structural
      ;; diff (eve.atom), on every host alike.
 
+     ;; jolt: one Chez procedure per slab access computes the block's region and address (the offset's class and
+     ;; block, the class's data offset and block size: fixnum ops on the arrays' own vectors) and calls the region
+     ;; op with them, where the shared body is two decodes, three host agets and the arithmetic, each a dispatched
+     ;; call with a wrap64 on jolt. The same region ops, the same bytes; other hosts read the :default arms.
+     #?(:jolt
+        (do
+          (scheme/eval-string
+           "(begin
+              (define (eve-sio-ref a i) (let ((v (jolt-array-vec a))) (if (fxvector? v) (fxvector-ref v i) (vector-ref v i))))
+              (define-syntax eve-sio-at
+                (syntax-rules ()
+                  ((_ rs dos bss so fo r a body)
+                   (let* ((u (logand so #xFFFFFFFF)) (ci (fxsrl u 29)) (bi (fxlogand u #x1FFFFFFF))
+                          (r (eve-sio-ref rs ci)) (a (+ (eve-sio-ref dos ci) (* bi (eve-sio-ref bss ci)) fo)))
+                     body))))
+              (define (eve-sio-get rs dos bss so fo op) (eve-sio-at rs dos bss so fo r a (op r a)))
+              (define (eve-sio-put rs dos bss so fo v op) (eve-sio-at rs dos bss so fo r a (op r a v)))
+              (define (eve-sio-u16 rs dos bss so fo pl)
+                (eve-sio-at rs dos bss so fo r a (logor (pl r a) (ash (pl r (+ a 1)) 8))))
+              (define (eve-sio-put-u16 rs dos bss so fo v ps)
+                (eve-sio-at rs dos bss so fo r a (begin (ps r a (logand v 255)) (ps r (+ a 1) (logand (ash v -8) 255))))))")
+          (def ^:private sio-get* (scheme/proc "eve-sio-get"))
+          (def ^:private sio-put* (scheme/proc "eve-sio-put"))
+          (def ^:private sio-u16* (scheme/proc "eve-sio-u16"))
+          (def ^:private sio-put-u16* (scheme/proc "eve-sio-put-u16"))))
+
      (deftype JvmSlabCtx
        [^objects regions         ;; IMemRegion[6+] — one per slab class (data files)
         ^objects bitmap-regions  ;; IMemRegion[6+] — one per slab class (bitmap files)
@@ -263,73 +290,85 @@
        ISlabIO
 
        (-sio-read-u8 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           ;; a plain load (eve.mem/IPlainLoad): no allocation where the region has a plain vehicle
-           (mem/-plain-load-u8 region (+ base (long field-off)))))
+         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off mem/-plain-load-u8)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             ;; a plain load (eve.mem/IPlainLoad): no allocation where the region has a plain vehicle
+             (mem/-plain-load-u8 region (+ base (long field-off))))))
 
        (-sio-write-u8! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-plain-store-u8! region (+ base (long field-off)) val)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val mem/-plain-store-u8!)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-plain-store-u8! region (+ base (long field-off)) val))))
 
        (-sio-read-u16 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)
-               b         (mem/-read-bytes region (+ base field-off) 2)]
-           ;; Little-endian u16
-           (bit-or (bit-and (aget ^bytes b 0) 0xFF)
-                   (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8))))
+         #?(:jolt (sio-u16* regions data-offsets block-sizes slab-offset field-off mem/-plain-load-u8)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)
+                 b         (mem/-read-bytes region (+ base field-off) 2)]
+             ;; Little-endian u16
+             (bit-or (bit-and (aget ^bytes b 0) 0xFF)
+                     (bit-shift-left (bit-and (aget ^bytes b 1) 0xFF) 8)))))
 
        (-sio-write-u16! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-write-bytes! region (+ base field-off)
-                              (enc/bytes-of [(bit-and val 0xFF)
-                                             (bit-and (unsigned-bit-shift-right val 8) 0xFF)]))))
+         #?(:jolt (sio-put-u16* regions data-offsets block-sizes slab-offset field-off val mem/-plain-store-u8!)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-write-bytes! region (+ base field-off)
+                                (enc/bytes-of [(bit-and val 0xFF)
+                                               (bit-and (unsigned-bit-shift-right val 8) 0xFF)])))))
 
        (-sio-read-i32 [_ slab-offset field-off]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           ;; Little-endian i32 through the PLAIN byte path (the u16
-           ;; pair's shape), never the region's atomic -load-i32: slab
-           ;; payload words are packed at arbitrary offsets (HAMT node
-           ;; write-kv! lays out [klen:i32][k][vlen:i32][v], so vlen
-           ;; lands at 4+klen), and IMemRegion's contract requires
-           ;; 4-byte alignment for its atomic ops -- arm64 faults on a
-           ;; misaligned atomic (F-REGION-ATOMIC-ALIGN). Payload words
-           ;; are not atomic fields: a node is immutable once published
-           ;; and publication is ordered by the root CAS, so a plain
-           ;; read is the correct semantics. Real atomic words (root
-           ;; fields, doorbells, CAS) go through mem/ directly, aligned.
-           ;; IPlainLoad's i32: plain, any alignment, little-endian -- the same bytes
-           (mem/-plain-load-i32 region (+ base (long field-off)))))
+         #?(:jolt (sio-get* regions data-offsets block-sizes slab-offset field-off mem/-plain-load-i32)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             ;; Little-endian i32 through the PLAIN byte path (the u16
+             ;; pair's shape), never the region's atomic -load-i32: slab
+             ;; payload words are packed at arbitrary offsets (HAMT node
+             ;; write-kv! lays out [klen:i32][k][vlen:i32][v], so vlen
+             ;; lands at 4+klen), and IMemRegion's contract requires
+             ;; 4-byte alignment for its atomic ops -- arm64 faults on a
+             ;; misaligned atomic (F-REGION-ATOMIC-ALIGN). Payload words
+             ;; are not atomic fields: a node is immutable once published
+             ;; and publication is ordered by the root CAS, so a plain
+             ;; read is the correct semantics. Real atomic words (root
+             ;; fields, doorbells, CAS) go through mem/ directly, aligned.
+             ;; IPlainLoad's i32: plain, any alignment, little-endian -- the same bytes
+             (mem/-plain-load-i32 region (+ base (long field-off))))))
 
        (-sio-write-i32! [_ slab-offset field-off val]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           ;; Plain bytes, as -sio-write-u16!: see -sio-read-i32 --
-           ;; payload words are packed, never atomic fields. The byte
-           ;; layout is unchanged, so seals stay byte-identical.
-           (mem/-plain-store-i32! region (+ base (long field-off)) val)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off val mem/-plain-store-i32!)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             ;; Plain bytes, as -sio-write-u16!: see -sio-read-i32 --
+             ;; payload words are packed, never atomic fields. The byte
+             ;; layout is unchanged, so seals stay byte-identical.
+             (mem/-plain-store-i32! region (+ base (long field-off)) val))))
 
        (-sio-cas-i32! [_ slab-offset field-off expected desired]
          (let [class-idx (decode-class-idx slab-offset)
@@ -340,20 +379,24 @@
            (mem/-cas-i32! region (+ base field-off) expected desired)))
 
        (-sio-read-bytes [_ slab-offset field-off len]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-read-bytes region (+ base field-off) len)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off len mem/-read-bytes)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-read-bytes region (+ base field-off) len))))
 
        (-sio-write-bytes! [_ slab-offset field-off src]
-         (let [class-idx (decode-class-idx slab-offset)
-               block-idx (decode-block-idx slab-offset)
-               base      (+ (aget data-offsets class-idx)
-                            (* block-idx (aget block-sizes class-idx)))
-               region    (aget regions class-idx)]
-           (mem/-write-bytes! region (+ base field-off) src)))
+         #?(:jolt (sio-put* regions data-offsets block-sizes slab-offset field-off src mem/-write-bytes!)
+            :default
+            (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 base      (+ (aget data-offsets class-idx)
+                              (* block-idx (aget block-sizes class-idx)))
+                 region    (aget regions class-idx)]
+             (mem/-write-bytes! region (+ base field-off) src))))
 
        (-sio-alloc! [ctx size-bytes] (ctx-alloc! ctx size-bytes))
 
