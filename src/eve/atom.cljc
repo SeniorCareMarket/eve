@@ -1906,9 +1906,16 @@
       (swap! domain-cache dissoc base-path))))
 
 (defn close!
-  "Release the worker slot of the domain this atom belongs to. Idempotent."
+  "Close the domain this atom belongs to: release the worker slot, stop
+   the heartbeat, and — for a disk domain — forget the domain, so
+   reopening its path opens it fresh from disk (close-atom-domain!'s
+   semantics, addressed by atom). Idempotent: a second close is a
+   no-op. Atoms of the domain are invalid after this."
   [a]
-  (release-domain! (atom-domain-state a)))
+  (let [{:keys [base-path] :as ds} (atom-domain-state a)]
+    (release-domain! ds)
+    (when base-path
+      (swap! domain-cache dissoc base-path))))
 
 (defn sync!
   "Force everything this atom's (or domain's) domain has written to
