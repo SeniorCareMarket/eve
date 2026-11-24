@@ -421,6 +421,12 @@
     (let [b (.-base ^JoltRegion r)]
       (when (int? b) (+ b off)))))
 
+(defn chez-atomics?
+  "True where a JoltRegion's words may be read and CASed from Chez as -load-i32 / -cas-i32! do: Linux x86-64, where
+   a seq-cst load is a plain MOV and the CAS is eve-region-cas4 (eve.tally's jolt row operations ask)."
+  []
+  (boolean x86-64-linux?))
+
 (def ^:private guard! (scheme/proc "eve-region-guard!"))
 
 (def ^:private unreachable (scheme/proc "eve-region-unreachable"))

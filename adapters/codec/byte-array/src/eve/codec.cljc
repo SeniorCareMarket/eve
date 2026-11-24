@@ -104,13 +104,25 @@
            (bytevector-u32-set! (jolt-array-vec a) i (if (fixnum? v) (fxand v #xFFFFFFFF) (bitwise-and v #xFFFFFFFF))
                                 (endianness little)))
          (define (eve-codec-put-s64! a i v) (bytevector-s64-set! (jolt-array-vec a) i v (endianness little)))
+         (define (eve-codec-i32-fix? v) (and (fixnum? v) (fx<= -2147483648 v 2147483647)))
+         (define (eve-codec-i32-bytes n cache)
+           (if (fx<= -128 n 127)
+               (vector-ref (jolt-array-vec cache) (fx+ n 128))
+               (let ((bv (make-bytevector 7)))
+                 (bytevector-u8-set! bv 0 #xEE) (bytevector-u8-set! bv 1 #xDB) (bytevector-u8-set! bv 2 #x03)
+                 (bytevector-s32-set! bv 3 n (endianness little))
+                 (make-jolt-array bv 'byte))))
          #t)")
      (def ^:private u32-le* (scheme/proc "eve-codec-u32"))
      (def ^:private i32-le* (scheme/proc "eve-codec-s32"))
      (def ^:private i64-le* (scheme/proc "eve-codec-s64"))
      (def ^:private f64-le* (scheme/proc "eve-codec-f64"))
      (def ^:private put-u32-le* (scheme/proc "eve-codec-put-u32!"))
-     (def ^:private put-i64-le* (scheme/proc "eve-codec-put-s64!"))))
+     (def ^:private put-i64-le* (scheme/proc "eve-codec-put-s64!"))
+     ;; value->eve-bytes' INT32 arm for a fixnum in int32 range in one call: the fixed-integer?/big-integer?
+     ;; protocol checks before it were 7% of atom-swap-counter on jolt (2026-11-23 ET). Same bytes, same cache.
+     (def ^:private i32-fix?* (scheme/proc "eve-codec-i32-fix?"))
+     (def ^:private i32-bytes* (scheme/proc "eve-codec-i32-bytes"))))
 
 ;; --- EVE binary format — manual LE byte helpers (no ByteBuffer alloc) ---
 
@@ -542,8 +554,10 @@
 
    Fixed-size types use manual LE byte writes (no ByteBuffer allocation).
    nil, booleans, and small integers [-128,127] return cached arrays (zero alloc)."
-   [v]
+  [v]
   (cond
+    #?@(:jolt [(i32-fix?* v) (i32-bytes* v small-int-cache)])
+
     (nil? v)
     BYTES-NIL
 

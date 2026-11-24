@@ -64,7 +64,9 @@
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.serialize :as ser]
             [eve.hamt-util :refer [popcount32]]
-            [eve.int32 :as i32]))
+            [eve.int32 :as i32]
+            #?(:jolt [eve.region :as region])
+            #?(:jolt [jolt.scheme :as scheme])))
 
 ;; ---------------------------------------------------------------------------
 ;; The descriptor's two words (its COUNT and FLAGS column entries: the handle
@@ -356,20 +358,365 @@
                 (recur)))))))
     :norow))
 
+;; jolt: the count's row protocol in Chez — hold-one! and drop-one!, hold!'s walk, the flush's look at one entry,
+;; free-claimed! and free-unreached!'s test — for a block whose domain is a JvmSlabCtx (under any LoggingSlabIO
+;; wrappers) with its words in JoltRegions on Linux x86-64 (region/chez-atomics?). The same words, the same seq-cst
+;; loads (a MOV there, as -load-i32), CASes (eve-region-cas4, as -cas-i32!), stores and adds (libatomic's
+;; __atomic_store_4 and __atomic_fetch_add_4, as -store-i32! and -add-i32!), in the same order, with the same
+;; answers. The walk reads the kinds :map :hamt :set :shamt :leaf (codes 1-5; tag-kind's others are 6-10, which it
+;; hands back): refs, kv-refs, children, value-ref and cache+ as above, the same references in the same order. A
+;; touch (note-touch!, where *touches* is bound) is noted where the portable fns note it. -1 is every other case (a
+;; class-6 or sentinel row, another domain or region kind, a kind it does not read), answered by the portable fns,
+;; before any word is touched. Each step was a dozen dispatched calls a block (desc-row's vector, nth, the region
+;; protocol, wrap64): the tally was ~30% of atom-swap-counter's time on jolt (profile q2, 2026-11-23 ET).
+#?(:jolt
+   (do
+     (scheme/eval-string
+      "(begin
+         (define eve-tk-add4
+           (and eve-region-libatomic (foreign-procedure \"__atomic_fetch_add_4\" (uptr integer-32 int) integer-32)))
+         (define eve-tk-store4
+           (and eve-region-libatomic (foreign-procedure \"__atomic_store_4\" (uptr integer-32 int) void)))
+         (define-syntax eve-tk-ref
+           (syntax-rules ()
+             ((_ a i) (let ((v (jolt-array-vec a))) (if (fxvector? v) (fxvector-ref v i) (vector-ref v i))))))
+         (define-syntax eve-tk-s32
+           (syntax-rules ()
+             ((_ x) (let ((u (bitwise-and x #xFFFFFFFF))) (if (>= u #x80000000) (- u #x100000000) u)))))
+         (define-syntax eve-tk-ld
+           (syntax-rules () ((_ b o) (#3%foreign-ref 'integer-32 b o))))
+         (define-syntax eve-tk-u8
+           (syntax-rules () ((_ b o) (#3%foreign-ref 'unsigned-8 b o))))
+         (define-syntax eve-tk-cas
+           (syntax-rules () ((_ b o e d) (eve-region-cas4 (fx+ b o) e d))))
+         (define-syntax eve-tk-rbase
+           (syntax-rules () ((_ r) (and r (not (eq? r jolt-nil)) (eve-region-base r)))))
+         (define (eve-tk-live? o) (fx< (bitwise-arithmetic-shift-right (bitwise-and o #xFFFFFFFF) 29) 7))
+         ;; block off's row in ctx for body: cb co (its COUNT word's base and offset), fb fo (FLAGS), pb po (POINTER;
+         ;; pb #f where the class has no pointer column), bb bo bm (its bitmap word's base and offset, its bit), bi and
+         ;; blocks (its index, the class's total); norow where the class carries no columns (ctx-desc-row's nil); -1
+         ;; for a class-6 or sentinel offset, or where a word is not in a JoltRegion with a fixnum base
+         (define-syntax eve-tk-row
+           (syntax-rules ()
+             ((_ ctx off (cb co fb fo pb po bb bo bm bi blocks) norow body)
+              (if (not (fixnum? off))
+                  -1
+                  (let* ((u (bitwise-and off #xFFFFFFFF)) (ci (fxsrl u 29)) (bi (fxand u #x1FFFFFFF)))
+                    (if (fx>= ci 6)
+                        -1
+                        (let* ((v (jrec*-vals ctx)) (dr (eve-tk-ref (vector-ref v 9) ci)))
+                          (if (or (not dr) (eq? dr jolt-nil))
+                              norow
+                              (let* ((fr (eve-tk-ref (vector-ref v 10) ci)) (pr (eve-tk-ref (vector-ref v 11) ci))
+                                     (off0 (eve-tk-ref (vector-ref v 12) ci)) (blocks (eve-tk-ref (vector-ref v 4) ci))
+                                     (br (eve-tk-ref (vector-ref v 1) ci)) (boff (eve-tk-ref (vector-ref v 3) ci))
+                                     (cb (eve-tk-rbase dr)) (fb (eve-tk-rbase fr)) (pb (eve-tk-rbase pr))
+                                     (bb (eve-tk-rbase br)))
+                                (if (and cb fb bb (fixnum? off0) (fixnum? blocks) (fixnum? boff))
+                                    (let* ((co (fx+ off0 (fx* 4 bi)))
+                                           (fo (fx+ (if (eq? fr dr) (fx+ off0 (fx* 4 blocks)) off0) (fx* 4 bi)))
+                                           (po (fx+ (if (eq? pr dr) (fx+ off0 (fx* 8 blocks)) off0) (fx* 4 bi)))
+                                           (bo (fx+ boff (fx* 4 (fxsrl bi 5))))
+                                           (bm (fxsll 1 (fxand bi 31)))
+                                           (x body))
+                                      (keep-live dr)
+                                      (keep-live fr)
+                                      (keep-live pr)
+                                      (keep-live br)
+                                      x)
+                                    -1))))))))))
+         (define-syntax eve-tk-allocated?
+           (syntax-rules () ((_ bb bo bm bi blocks) (and (fx< bi blocks) (not (fxzero? (fxand (eve-tk-ld bb bo) bm)))))))
+         (define-syntax eve-tk-set-flag!
+           (syntax-rules ()
+             ((_ fb fo f)
+              (let loop ()
+                (let ((t (eve-tk-ld fb fo)))
+                  (cond ((not (fxzero? (fxand t f))) #t)
+                        ((= t (eve-tk-cas fb fo t (fxior t f))) #f)
+                        (else (loop))))))))
+         (define-syntax eve-tk-clear-flags!
+           (syntax-rules ()
+             ((_ fb fo fs)
+              (let loop ()
+                (let ((t (eve-tk-ld fb fo)))
+                  (unless (= t (eve-tk-cas fb fo t (fxand t (fxnot fs)))) (loop)))))))
+         ;; the JvmSlabCtx under sio (through LoggingSlabIO wrappers) for body as ctx; -1 for any other domain
+         (define-syntax eve-tk-with-ctx
+           (syntax-rules ()
+             ((_ sio ctx ctag ltag cd ld body) (eve-alloc-unwrap sio ctx ctag ltag cd ld body -1))))
+         ;; hold-one!: 0 nil, 1 :held, 2 :new, 3 :norow
+         (define (eve-tk-hold-one ctx off leaf? touch)
+           (eve-tk-row ctx off (cb co fb fo pb po bb bo bm bi blocks) 3
+             (let loop ()
+               (let ((t (eve-tk-ld fb fo)))
+                 (if (not (fxzero? (fxand t 2)))
+                     (let ((c (eve-tk-ld cb co)))
+                       (cond ((fx= c -1) 1)
+                             ((fx= c -2) 0)
+                             (else
+                              (when (and (fxzero? c) (not (fxzero? (fxand t 4))))
+                                (eve-tk-set-flag! fb fo 256))
+                              (if (= c (eve-tk-cas cb co c (if (fx= c -3) -1 (eve-tk-s32 (+ c 1)))))
+                                  (begin (when touch (touch off)) 1)
+                                  (loop)))))
+                     (if (eve-tk-allocated? bb bo bm bi blocks)
+                         (let ((nt (if leaf? (fxior t 130) (fxior t 2))))
+                           (if (= t (eve-tk-cas fb fo t nt))
+                               (begin (when touch (touch off)) (eve-tk-add4 (fx+ cb co) 1 5) 2)
+                               (loop)))
+                         0))))))
+         ;; drop-one!: 0 nil, 1 :dropped, 2 :parked with its entry to queue, 3 :parked already queued
+         (define (eve-tk-drop-one ctx off touch)
+           (eve-tk-row ctx off (cb co fb fo pb po bb bo bm bi blocks) 0
+             (if (fxzero? (fxand (eve-tk-ld fb fo) 2))
+                 0
+                 (let loop ()
+                   (let ((c (eve-tk-ld cb co)))
+                     (cond ((fx= c -1) 1)
+                           ((or (fxzero? c) (fx= c -2)) 0)
+                           ((not (= c (eve-tk-cas cb co c (eve-tk-s32 (- c 1))))) (loop))
+                           ((not (fx= c 1)) (when touch (touch off)) 1)
+                           (else (when touch (touch off)) (if (eve-tk-set-flag! fb fo 4) 3 2))))))))
+         ;; ctx-free! of a bitmap-class block: #t freed, #f free already, -1 not here
+         (define (eve-tk-ctx-free ctx off)
+           (if (not (fixnum? off))
+               -1
+               (let* ((u (bitwise-and off #xFFFFFFFF)) (ci (fxsrl u 29)) (bi (fxand u #x1FFFFFFF)))
+                 (if (fx>= ci 6)
+                     -1
+                     (let* ((v (jrec*-vals ctx)) (rg (eve-tk-ref (vector-ref v 0) ci)) (rb (eve-tk-rbase rg))
+                            (br (eve-tk-ref (vector-ref v 1) ci)) (bb (eve-tk-rbase br))
+                            (boff (eve-tk-ref (vector-ref v 3) ci))
+                            (dr (eve-tk-ref (vector-ref v 9) ci)) (cols? (and dr (not (eq? dr jolt-nil)))))
+                       (if (not (and rb bb (fixnum? boff)))
+                           -1
+                           (let ((reset
+                                  (if cols?
+                                      (eve-tk-row ctx off (cb co fb fo pb po bb2 bo bm bi2 blocks) -1
+                                        (if pb
+                                            (begin (eve-tk-store4 (fx+ cb co) 0 5) (eve-tk-store4 (fx+ fb fo) 0 5)
+                                                   (eve-tk-store4 (fx+ pb po) 0 5) #t)
+                                            -1))
+                                      #t)))
+                             (if (eq? reset -1)
+                                 -1
+                                 (let* ((wo (fx+ boff (fx* (fxsrl bi 5) 4))) (bp (fxand bi 31))
+                                        (clear32 (fxxor (fxsll 1 bp) #xFFFFFFFF))
+                                        (freed? (let loop ()
+                                                  (let* ((cur (eve-tk-ld bb wo)) (cu (bitwise-and cur #xFFFFFFFF))
+                                                         (nv (eve-tk-s32 (bitwise-and cu clear32))))
+                                                    (if (= cur (eve-region-cas4 (fx+ bb wo) cur nv))
+                                                        (not (zero? (bitwise-and (bitwise-arithmetic-shift-right cu bp) 1)))
+                                                        (loop))))))
+                                   (when freed? (eve-tk-add4 (fx+ rb 12) 1 5))
+                                   (keep-live rg)
+                                   (keep-live br)
+                                   freed?)))))))))
+         ;; block off's data address for body as b a (base and offset), or -1
+         (define-syntax eve-tk-blk
+           (syntax-rules ()
+             ((_ ctx off (b a) body)
+              (if (not (fixnum? off))
+                  -1
+                  (let* ((u (bitwise-and off #xFFFFFFFF)) (ci (fxsrl u 29)) (bi (fxand u #x1FFFFFFF)))
+                    (if (fx> ci 6)
+                        -1
+                        (let* ((v (jrec*-vals ctx)) (r (eve-tk-ref (vector-ref v 0) ci)) (b (eve-tk-rbase r))
+                               (dof (eve-tk-ref (vector-ref v 2) ci)) (bs (eve-tk-ref (vector-ref v 5) ci)))
+                          (if (and b (fixnum? dof) (fixnum? bs))
+                              (let* ((a (+ dof (* bi bs))) (x body)) (keep-live r) x)
+                              -1))))))))
+         (define (eve-tk-tag-kind tag)
+           (cond ((fx= tag #x10) 1) ((fx= tag #x11) 3) ((fx= tag #x12) 6) ((fx= tag #x13) 7)
+                 ((and (fx>= tag #x1C) (fx<= tag #x1E)) 5) ((fx= tag #x1F) 8) ((fx= tag #x20) 9)
+                 ((and (fx>= tag #x40) (fx<= tag #xEC)) 10) (else #f)))
+         ;; value-ref: the pair (offset . kind) or #f
+         (define (eve-tk-value-ref b a pos len)
+           (and (or (fx= len 7) (fx= len 11))
+                (fx= #xEE (eve-tk-u8 b (+ a pos)))
+                (fx= #xDB (eve-tk-u8 b (+ a pos 1)))
+                (let* ((tag (eve-tk-u8 b (+ a pos 2)))
+                       (k (if (fx= len 11) (and (fx= tag #x19) 5) (eve-tk-tag-kind tag))))
+                  (and k (cons (eve-tk-ld b (+ a pos 3)) k)))))
+         (define (eve-tk-pop x) (fxpopcount32 (bitwise-and x #xFFFFFFFF)))
+         ;; refs, consed onto acc in reverse order (the last reference first); #f where this reads none (the
+         ;; portable refs answers)
+         (define (eve-tk-children b a n k acc)
+           (let loop ((i 0) (acc acc))
+             (if (fx>= i n)
+                 acc
+                 (let ((c (eve-tk-ld b (+ a 12 (fx* 4 i)))))
+                   (loop (fx+ i 1) (if (eve-tk-live? c) (cons (cons c k) acc) acc))))))
+         (define (eve-tk-kv-refs b a pos n acc)
+           (let loop ((i 0) (pos pos) (acc acc))
+             (if (fx>= i n)
+                 acc
+                 (let* ((klen (eve-tk-ld b (+ a pos))) (vpos (+ pos 4 klen)) (vlen (eve-tk-ld b (+ a vpos)))
+                        (r (eve-tk-value-ref b a (+ vpos 4) vlen)))
+                   (loop (fx+ i 1) (+ vpos 4 vlen) (if r (cons r acc) acc))))))
+         (define (eve-tk-cache+ ctx off acc)
+           (let ((x (eve-tk-row ctx off (cb co fb fo pb po bb bo bm bi blocks) 'norow
+                      (if pb
+                          (let ((p (eve-tk-ld pb po)))
+                            (if (and (not (fxzero? p)) (not (fx= p -1)) (eve-tk-live? p))
+                                (let ((pa (eve-tk-row ctx p (cb2 co2 fb2 fo2 pb2 po2 bb2 bo2 bm2 bi2 blocks2) -1
+                                            (eve-tk-allocated? bb2 bo2 bm2 bi2 blocks2))))
+                                  (cond ((eq? pa -1) -1) (pa (cons (cons p 5) acc)) (else acc)))
+                                acc))
+                          -1))))
+             (cond ((eq? x 'norow) acc) ((eq? x -1) #f) (else x))))
+         (define (eve-tk-refs ctx off k)
+           (let ((x (eve-tk-blk ctx off (b a)
+                      (case k
+                        ((1 3) (let ((r (eve-tk-ld b (+ a 8))))
+                                 (eve-tk-cache+ ctx off (if (eve-tk-live? r) (list (cons r (if (fx= k 1) 2 4))) '()))))
+                        ((2) (let ((t (eve-tk-u8 b a)))
+                               (cond ((fx= t 1)
+                                      (let ((dc (eve-tk-pop (eve-tk-ld b (+ a 4)))) (nc (eve-tk-pop (eve-tk-ld b (+ a 8)))))
+                                        (eve-tk-kv-refs b a (+ 12 (* 4 nc) (* 4 dc)) dc (eve-tk-children b a nc 2 '()))))
+                                     ((fx= t 3) (eve-tk-kv-refs b a 8 (eve-tk-u8 b (+ a 1)) '()))
+                                     (else '()))))
+                        ((4) (if (fx= 1 (eve-tk-u8 b a))
+                                 (eve-tk-children b a (eve-tk-pop (eve-tk-ld b (+ a 8))) 4 '())
+                                 '()))
+                        ((5) '())
+                        (else #f)))))
+             (if (eq? x -1) #f x)))
+         ;; hold!'s walk from off of kind k: 0, its blocks held; more (o k) is called for an item this does not hold
+         ;; (the portable walk from it), more-refs (o k) for a block held here whose references it does not read
+         (define (eve-tk-hold ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio off k touch more more-refs)
+               (eve-tk-with-ctx sio ctx ctag ltag cd ld
+                 (let loop ((work (list (cons off k))))
+                   (if (null? work)
+                       0
+                       (let* ((o (caar work)) (k (cdar work)) (work (cdr work)))
+                         (if (not (and (fx>= k 1) (fx<= k 5)))
+                             (begin (more o k) (loop work))
+                             (let ((r (eve-tk-hold-one ctx o #f touch)))
+                               (cond ((eq? r -1) (more o k) (loop work))
+                                     ((or (eq? r 2) (eq? r 3))
+                                      (let ((rs (eve-tk-refs ctx o k)))
+                                        (if rs
+                                            (loop (append rs work))
+                                            (begin (more-refs o k) (loop work)))))
+                                     (else (loop work))))))))))))
+         (define (eve-tk-hold-one* ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio off leaf? touch) (eve-tk-with-ctx sio ctx ctag ltag cd ld (eve-tk-hold-one ctx off leaf? touch)))))
+         (define (eve-tk-drop-one* ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio off touch) (eve-tk-with-ctx sio ctx ctag ltag cd ld (eve-tk-drop-one ctx off touch)))))
+         ;; the flush's look at one queued entry: 0 it leaves, 1 park it again, 2 it stays, 3 claimed (its flags
+         ;; without LEAF), 4 claimed (with LEAF)
+         (define (eve-tk-flush-entry ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio off eligible?)
+               (eve-tk-with-ctx sio ctx ctag ltag cd ld
+                 (eve-tk-row ctx off (cb co fb fo pb po bb bo bm bi blocks) 0
+                   (let ((t (eve-tk-ld fb fo)) (c (eve-tk-ld cb co)))
+                     (cond ((or (fxzero? (fxand t 4)) (fx= c -2)) 0)
+                           ((not (fxzero? c))
+                            (eve-tk-clear-flags! fb fo 260)
+                            (if (and (fxzero? (eve-tk-ld cb co)) (not (eve-tk-set-flag! fb fo 4))) 1 0))
+                           ((not (fxzero? (fxand t 256))) (eve-tk-clear-flags! fb fo 256) 1)
+                           ((not eligible?) 2)
+                           ((not (fxzero? (eve-tk-cas cb co 0 -2))) 2)
+                           (else (eve-tk-clear-flags! fb fo 6) (if (fxzero? (fxand t 128)) 3 4)))))))))
+         ;; free-claimed! of a claimed block of kind k (leaf? its LEAF flag): its references read, the block freed
+         ;; (here when sio is the context itself, else (free o)), then its references dropped ((park o k) for one
+         ;; that reached 0, (drop o k) for one this does not drop); 1 freed, 0 not, -1 not here (nothing done)
+         (define (eve-tk-free-claimed ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio off k leaf? touch free park drop)
+               (eve-tk-with-ctx sio ctx ctag ltag cd ld
+                 (if (not (and (fx>= k 1) (fx<= k 5)))
+                     -1
+                     (let ((rs (if leaf? '() (eve-tk-refs ctx off k))))
+                       (if (not rs)
+                           -1
+                           (let* ((f (if (eq? sio ctx) (eve-tk-ctx-free ctx off) -1))
+                                  (freed? (if (eq? f -1) (free off) f)))
+                             (for-each (lambda (r)
+                                         (let ((x (eve-tk-drop-one ctx (car r) touch)))
+                                           (cond ((eq? x 2) (park (car r) (cdr r)))
+                                                 ((eq? x -1) (drop (car r) (cdr r))))))
+                                       (reverse rs))
+                             (if (and freed? (not (eq? freed? jolt-nil))) 1 0)))))))))
+         ;; free-unreached!'s test of block off: 1 free it, 0 keep it, -1 not here
+         (define (eve-tk-unreached ctag ltag)
+           (let ((cd #f) (ld #f))
+             (lambda (sio off)
+               (eve-tk-with-ctx sio ctx ctag ltag cd ld
+                 (eve-tk-row ctx off (cb co fb fo pb po bb bo bm bi blocks) 0
+                   (if (and (fxzero? (fxand (eve-tk-ld fb fo) 2)) (eve-tk-allocated? bb bo bm bi blocks)) 1 0))))))
+         #t)")
+     (def ^:private tk-on? (and (region/chez-atomics?) (scheme/eval-string "(and eve-tk-add4 eve-tk-store4 #t)")))
+     (def ^:private tk-touch
+       ;; note-touch! for the Chez steps above, passed where *touches* is bound (else false)
+       (fn [o] (note-touch! o)))
+     (def ^:private tk-kinds [nil :map :hamt :set :shamt :leaf :vec :list :varray :frozen :deftype])
+     (defn- tk-code [kind] (case kind :map 1 :hamt 2 :set 3 :shamt 4 :leaf 5 nil))
+     (def ^:private tk-hold*
+       (let [[c l] (alloc/jolt-ctx-tags)] ((scheme/proc "eve-tk-hold") c l)))
+     (def ^:private tk-hold-one*
+       (let [[c l] (alloc/jolt-ctx-tags)] ((scheme/proc "eve-tk-hold-one*") c l)))
+     (def ^:private tk-drop-one*
+       (let [[c l] (alloc/jolt-ctx-tags)] ((scheme/proc "eve-tk-drop-one*") c l)))
+     (def ^:private tk-flush-entry*
+       (let [[c l] (alloc/jolt-ctx-tags)] ((scheme/proc "eve-tk-flush-entry") c l)))
+     (def ^:private tk-free-claimed*
+       (let [[c l] (alloc/jolt-ctx-tags)] ((scheme/proc "eve-tk-free-claimed") c l)))
+     (def ^:private tk-unreached*
+       (let [[c l] (alloc/jolt-ctx-tags)] ((scheme/proc "eve-tk-unreached") c l)))))
+
+#?(:jolt
+   (defn- tk-hold-one!
+     "hold-one! with its row protocol in Chez where the block's words allow (above); else hold-one!."
+     [sio off leaf?]
+     (case (if tk-on? (tk-hold-one* sio off (boolean leaf?) (if *touches* tk-touch false)) -1)
+       0 nil
+       1 :held
+       2 :new
+       3 :norow
+       (hold-one! sio off leaf?))))
+
+#?(:jolt
+   (defn- hold-work!
+     "hold!'s worklist from work, a vector of [offset kind] items: the walk below, each hold through tk-hold-one!."
+     [sio work]
+     (loop [work work]
+       (when (seq work)
+         (let [[o k] (peek work)
+               work (pop work)
+               leaf? (not (readable? sio o k))
+               r (tk-hold-one! sio o leaf?)]
+           (recur (if (and (not leaf?) (or (= r :new) (= r :norow)))
+                    (into work (refs sio o k))
+                    work)))))))
+
 (defn hold!
   "A holder gains the block at off of kind, and through each block that hold makes counted, everything it
    references (a worklist: no recursion depth bound on a long list or a deep tree)."
   [sio off kind]
   (when (live? off)
-    (loop [work [[off kind]]]
-      (when (seq work)
-        (let [[o k] (peek work)
-              work (pop work)
-              leaf? (not (readable? sio o k))
-              r (hold-one! sio o leaf?)]
-          (recur (if (and (not leaf?) (or (= r :new) (= r :norow)))
-                   (into work (refs sio o k))
-                   work)))))))
+    #?(:jolt (let [kc (when tk-on? (tk-code kind))]
+               (when (or (nil? kc)
+                         (== -1 (tk-hold* sio off kc (if *touches* tk-touch false)
+                                          (fn [o k] (hold-work! sio [[o (nth tk-kinds k)]]))
+                                          (fn [o k] (hold-work! sio (refs sio o (nth tk-kinds k)))))))
+                 (hold-work! sio [[off kind]])))
+       :default (loop [work [[off kind]]]
+                  (when (seq work)
+                    (let [[o k] (peek work)
+                          work (pop work)
+                          leaf? (not (readable? sio o k))
+                          r (hold-one! sio o leaf?)]
+                      (recur (if (and (not leaf?) (or (= r :new) (= r :norow)))
+                               (into work (refs sio o k))
+                               work))))))))
 
 (defn hold-cache!
   "A digest-cache side block was just stamped onto the root header at hdr
@@ -403,11 +750,22 @@
                         (park! off kind))
                       :parked)))))))
 
+#?(:jolt
+   (defn- tk-drop-one!
+     "drop-one! with its row protocol in Chez where the block's words allow (above); else drop-one!."
+     [sio off kind park!]
+     (case (if tk-on? (tk-drop-one* sio off (if *touches* tk-touch false)) -1)
+       0 nil
+       1 :dropped
+       2 (do (park! off kind) :parked)
+       3 :parked
+       (drop-one! sio off kind park!))))
+
 (defn drop!
   "A holder lets the block at off of kind go. park! queues a block that reached 0: (park! off kind)."
   [sio off kind park!]
   (when (live? off)
-    (drop-one! sio off kind park!)))
+    #?(:jolt (tk-drop-one! sio off kind park!) :default (drop-one! sio off kind park!))))
 
 (defonce ^:private parkers
   ;; [domain-root park!] pairs, matched by identity: a domain root is a host slab context, an object no host's
@@ -643,10 +1001,18 @@
    direction, never a use-after-free). Answers how many."
   [sio offs]
   (reduce (fn [n off]
-            (let [row (alloc/desc-row sio off)]
-              (if (and row (zero? (bit-and (flags row) F_PUB)) (alloc/allocated? sio off))
-                (if (slab/free! sio off) (inc n) n)
-                n)))
+            (let [slow (fn []
+                         (let [row (alloc/desc-row sio off)]
+                           (if (and row (zero? (bit-and (flags row) F_PUB)) (alloc/allocated? sio off))
+                             (if (slab/free! sio off) (inc n) n)
+                             n)))]
+              #?(:jolt (if tk-on?
+                         (case (tk-unreached* sio off)
+                           0 n
+                           1 (if (slab/free! sio off) (inc n) n)
+                           (slow))
+                         (slow))
+                 :default (slow))))
           0 offs))
 
 (defn count-of
@@ -674,8 +1040,24 @@
     (do (slab/region-store-i32! (nth row 0) (nth row 1) 0) 0)
     (let [rs (if (zero? (bit-and t F_LEAF)) (refs sio off kind) [])   ;; read BEFORE the free hands the block back
           freed? (slab/free! sio off)]
-      (doseq [[o k] rs] (drop-one! sio o k park!))
+      (doseq [[o k] rs] #?(:jolt (tk-drop-one! sio o k park!) :default (drop-one! sio o k park!)))
       (if freed? 1 0))))
+
+#?(:jolt
+   (defn- tk-free-claimed!
+     "free-claimed! in Chez where the block's kind and words allow (above), row and t as free-claimed!'s (row nil:
+      read here when free-claimed! needs it); else free-claimed!."
+     [sio off kind row t park!]
+     (let [kc (when tk-on? (tk-code kind))
+           r (if kc
+               (tk-free-claimed* sio off kc (not (zero? (bit-and t F_LEAF))) (if *touches* tk-touch false)
+                                 (fn [o] (slab/free! sio o))
+                                 (fn [o k] (park! o (nth tk-kinds k)))
+                                 (fn [o k] (drop-one! sio o (nth tk-kinds k) park!)))
+               -1)]
+       (if (== r -1)
+         (free-claimed! sio off kind (or row (alloc/desc-row sio off)) t park!)
+         r))))
 
 (defn flush!
   "One flush of zero queue q (an atom of a vector of [{:off :kind :epoch} …]).
@@ -730,31 +1112,44 @@
               prefix (subvec entries 0 k)
               suffix (subvec entries k)
               parked (volatile! 0)
-          park! (fn [o k] (vswap! parked inc) (swap! q conj {:off o :kind k :epoch (ep-fn)}))
-          stay (volatile! [])
-          n (reduce
-             (fn [n {:keys [off kind epoch] :as e}]
-               (let [row (alloc/desc-row sio off)
-                     t (if row (flags row) 0)
-                     c (if row (cnt row) CDEAD)]
-                 (cond
-                   (or (zero? (bit-and t F_QUEUED)) (== c CDEAD)) n
-                   (not (zero? c))
-                   (do (clear-flags! row (bit-or F_QUEUED F_TAKEN))
-                       (when (and (zero? (cnt row)) (not (set-flag! row F_QUEUED)))
-                         (park! off kind))
-                       n)
-                   (not (zero? (bit-and t F_TAKEN)))
-                   (do (clear-flags! row F_TAKEN) (park! off kind) n)
-                   (not (or (nil? safe) (< epoch safe)))
-                   (do (vswap! stay conj e) n)
-                   ;; THE STILL-ZERO CHECK, one CAS: 0 -> CDEAD claims it (a hold racing in is refused)
-                   (not (zero? (ccas row 0 CDEAD)))
-                   (do (vswap! stay conj e) n)
-                   :else
-                   (do (clear-flags! row (bit-or F_QUEUED F_PUB))
-                       (+ n (free-claimed! sio off kind row t park!))))))
-             0 prefix)]
+              park! (fn [o k] (vswap! parked inc) (swap! q conj {:off o :kind k :epoch (ep-fn)}))
+              stay (volatile! [])
+              n (reduce
+                 (fn [n {:keys [off kind epoch] :as e}]
+                   (let [slow (fn []
+                                (let [row (alloc/desc-row sio off)
+                                      t (if row (flags row) 0)
+                                      c (if row (cnt row) CDEAD)]
+                                  (cond
+                                    (or (zero? (bit-and t F_QUEUED)) (== c CDEAD)) n
+                                    (not (zero? c))
+                                    (do (clear-flags! row (bit-or F_QUEUED F_TAKEN))
+                                        (when (and (zero? (cnt row)) (not (set-flag! row F_QUEUED)))
+                                          (park! off kind))
+                                        n)
+                                    (not (zero? (bit-and t F_TAKEN)))
+                                    (do (clear-flags! row F_TAKEN) (park! off kind) n)
+                                    (not (or (nil? safe) (< epoch safe)))
+                                    (do (vswap! stay conj e) n)
+                                ;; THE STILL-ZERO CHECK, one CAS: 0 -> CDEAD claims it (a hold racing in is refused)
+                                    (not (zero? (ccas row 0 CDEAD)))
+                                    (do (vswap! stay conj e) n)
+                                    :else
+                                    (do (clear-flags! row (bit-or F_QUEUED F_PUB))
+                                        (+ n #?(:jolt (tk-free-claimed! sio off kind row t park!)
+                                                :default (free-claimed! sio off kind row t park!)))))))]
+                 ;; jolt: the same look in Chez (above), its claim's free-claimed! too
+                     #?(:jolt (if tk-on?
+                                (case (tk-flush-entry* sio off (or (nil? safe) (< epoch safe)))
+                                  0 n
+                                  1 (do (park! off kind) n)
+                                  2 (do (vswap! stay conj e) n)
+                                  3 (+ n (tk-free-claimed! sio off kind nil 0 park!))
+                                  4 (+ n (tk-free-claimed! sio off kind nil F_LEAF park!))
+                                  (slow))
+                                (slow))
+                        :default (slow))))
+                 0 prefix)]
           ;; restore in epoch order: stays, then the unexamined
           ;; suffix, then whatever this scan (park!) or a concurrent
           ;; conj put on q since the drain — all stamped at the

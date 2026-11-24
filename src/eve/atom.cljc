@@ -334,14 +334,15 @@
   "(f exclusive?) as a write to the domain ds: exclusive? when no other participant writes while it runs — a
    lock-only host's every write, a write that asked for the hold (hold?), and a write this thread makes while it
    holds the domain (it runs inside that hold)."
-  [{:keys [root-r lock-only? slot-idx holder]} hold? f]
-  (let [tid (proc/thread-id)
-        held (fn [] (reset! holder tid) (try (f true) (finally (reset! holder nil))))]
-    (cond
-      (= @holder tid) (f true)
-      lock-only? (with-exclusive-hold* root-r (inc slot-idx) held)
-      hold? (with-held-write* root-r (inc slot-idx) held)
-      :else (with-root-write* root-r false (inc slot-idx) (fn [] (f false))))))
+  [ds hold? f]
+  (let [root-r (:root-r ds) lock-only? (:lock-only? ds) slot-idx (:slot-idx ds) holder (:holder ds)]
+    (let [tid (proc/thread-id)
+          held (fn [] (reset! holder tid) (try (f true) (finally (reset! holder nil))))]
+      (cond
+        (= @holder tid) (f true)
+        lock-only? (with-exclusive-hold* root-r (inc slot-idx) held)
+        hold? (with-held-write* root-r (inc slot-idx) held)
+        :else (with-root-write* root-r false (inc slot-idx) (fn [] (f false)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Domain root initialization
@@ -416,7 +417,7 @@
          (define (eve-pt-new addr keep base)
            (let ((a (and eve-pt-store4 (fixnum? addr) addr)))
              (vector (make-eq-hashtable) (make-eq-hashtable) #f #f (make-vector 16 0) 0
-                     (make-mutex) a keep (and a (fixnum? base) base))))
+                     (make-mutex) a keep (and a (fixnum? base) base) eve-pt-collect-q 1)))
          (define (eve-pt-threads pt) (vector-ref pt 0))
          (define (eve-pt-views pt) (vector-ref pt 1))
          (define (eve-pt-tmin pt) (vector-ref pt 2))
@@ -546,6 +547,42 @@
          ;; read-pinned's pin in one call: the root epoch word's load, the pin and its publish (as eve-pt-pin-pub!),
          ;; then the atom slot's pointer word's load, behind the seq-cst store as pin-epoch! then -load-i32 had it;
          ;; the pointer, or #f with nothing done where the table has no root base (the caller takes the old path)
+         ;; slot 10: the retire-queue length at which a commit whose flush this process's own pin blocks has the
+         ;; collector look for dead views in its older generations (eve-pt-collect-views!).
+         ;; Why: a view's pin ends when jolt's collector finds the view dead (eve.gc's guardian). Chez promotes every
+         ;; object live at a collection into the next generation, and generation g is collected only every 4^g
+         ;; collections, so a view that happened to be live at a collection or two — dead a moment later — can keep
+         ;; its epoch pinned for hundreds of thousands of commits: the zero queue grows without bound and nothing is
+         ;; freed (probe jseam.allocprobe: 120k -> 320k entries; one full collection releases it).
+         (define eve-pt-collect-q 65536)
+         ;; (eve.gc's locked pop: the guardian's queue is not safe for two threads at once)
+         (define (eve-pt-sweep-views!)
+           (when (top-level-bound? 'eve-gc-pop)
+             (let ((g (top-level-value 'eve-gc-pop)))
+               (let loop () (let ((r (g))) (when r (r) (loop)))))))
+         ;; qn: the queue's length; e: this process's published pin. Collects generations 0..g (all threads paused,
+         ;; collect-rendezvous under a one-off handler; each survivor moves up one generation only — min target 1 —
+         ;; so the views live now are not sent to the oldest generation to pin there in turn), g from the generation
+         ;; that last released one (slot 11, first
+         ;; 1) up to the oldest, running the released views' unpins after each, until the published pin moves: #t
+         ;; (the caller flushes, the threshold goes back to its base), or #f with the threshold doubled (a pin the
+         ;; program itself still holds is not collected for).
+         (define (eve-pt-collect-views! pt qn)
+           (let ((a (vector-ref pt 7)))
+             (if (and a (fx> qn (vector-ref pt 10)) (top-level-bound? 'eve-gc-guardian))
+                 (let ((e (foreign-ref 'integer-32 a 0)) (mg (collect-maximum-generation)) (h (collect-request-handler)))
+                   (let loop ((g (fxmin (vector-ref pt 11) mg)))
+                     (collect-request-handler (lambda () (collect g 1 (fxmin (fx+ g 1) mg))))
+                     (collect-rendezvous)
+                     (collect-request-handler h)
+                     (eve-pt-sweep-views!)
+                     (cond ((not (= (foreign-ref 'integer-32 a 0) e))
+                            (vector-set! pt 10 eve-pt-collect-q)
+                            (vector-set! pt 11 g)
+                            #t)
+                           ((fx< g mg) (loop (fx+ g 1)))
+                           (else (vector-set! pt 10 (fx* 2 qn)) #f))))
+                 #f)))
          (define (eve-pt-pin-read! pt eoff poff)
            (let ((a (vector-ref pt 7)) (rb (vector-ref pt 9)))
              (if (and a rb)
@@ -586,6 +623,7 @@
      (def ^:private pt-view-unpin!* (scheme/proc "eve-pt-view-unpin!"))
      (def ^:private pt-pin-pub!* (scheme/proc "eve-pt-pin-pub!"))
      (def ^:private pt-pin-read!* (scheme/proc "eve-pt-pin-read!"))
+     (def ^:private pt-collect-views!* (scheme/proc "eve-pt-collect-views!"))
      (def ^:private pt-unpin-pub!* (scheme/proc "eve-pt-unpin-pub!"))
      (def ^:private pt-view-pin-pub!* (scheme/proc "eve-pt-view-pin-pub!"))
      (def ^:private pt-view-unpin-pub!* (scheme/proc "eve-pt-view-unpin-pub!"))
@@ -639,9 +677,10 @@
 
 (defn- park-fn
   "The domain's park!: a block whose count reached 0 queued on the zero queue at the epoch now."
-  [{:keys [root-r retire-q]}]
-  (fn [off kind]
-    (swap! retire-q conj {:off off :kind kind :epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)})))
+  [ds]
+  (let [root-r (:root-r ds) retire-q (:retire-q ds)]
+    (fn [off kind]
+      (swap! retire-q conj {:off off :kind kind :epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)}))))
 
 (defn- take-unforced!
   "One offset in each slab class the zero-queue flush wrote that no force has covered yet, taken (the note emptied):
@@ -686,7 +725,13 @@
   force per commit, ~3.9 ms of an add-5 commit's 17.9 on the bench
   box.)"
   [ds]
-  (let [{:keys [root-r sio retire-q journal durable-commits? base-path unforced]} ds
+  (let [root-r (:root-r ds)
+        sio (:sio ds)
+        retire-q (:retire-q ds)
+        journal (:journal ds)
+        durable-commits? (:durable-commits? ds)
+        base-path (:base-path ds)
+        unforced (:unforced ds)
         ;; a redo-log (v2) domain notes nothing: its flush frees only blocks no durable state reaches (an old root
         ;; is let go after its replacement is durable), so a free left unforced until the next checkpoint's
         ;; whole-domain force can only leak in a crash — and the note copied the whole queue on every flush, which
@@ -697,8 +742,10 @@
     ;; below the queue's head epoch, tally/flush! answers 0 at its head test with no other effect, so the 256-slot
     ;; scan is skipped. A queue past FLUSH_QUEUE_CAP runs the flush on every commit while a view pins an old epoch
     ;; (views go when jolt's collector finds them, thousands of commits apart). Not on a noting (durable) domain.
-    (when-not #?(:jolt (and (not note?)
-                            (some? (:slot-idx ds))
+    ;; When that pin has held the queue past the pin table's threshold, the collector looks for the pinning view
+    ;; in its older generations first (pt-collect-views!*: a dead view promoted there pins until that generation
+    ;; is collected); if that moves the pin, the flush runs. A noting domain never asks (its flush always runs).
+    (when-not #?(:jolt (and (some? (:slot-idx ds))
                             (let [slot-idx (:slot-idx ds)
                                   head (first @retire-q)
                                   e (when head
@@ -708,7 +755,9 @@
                                    (>= (:epoch head) e)
                                    (== (mem/-load-i32 root-r (worker-slot-offset slot-idx d/OFFSET_WS_STATUS))
                                        d/WORKER_STATUS_ACTIVE)
-                                   (not (heartbeat-stale? root-r slot-idx)))))
+                                   (not (heartbeat-stale? root-r slot-idx))))
+                            (not note?)
+                            (not (pt-collect-views!* (pt-of (:pins ds)) (count @retire-q))))
                  :default false)
       (let [queued (when note? (mapv :off @retire-q))]
         (tally/flush! sio retire-q
@@ -1483,35 +1532,38 @@
   "The answer a read gives for raw, read now under the caller's pin: a view
    holding a pin of its own (from the current epoch) when views are built
    here, else raw delivered flat."
-  [{:keys [root-r] :as ds} atom-slot-idx raw]
-  (if-let [h (view-read-fn)]
-    (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+  [ds atom-slot-idx raw]
+  (let [root-r (:root-r ds)]
+    (if-let [h (view-read-fn)]
+      (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
       ;; the read api eve.view chooses from: a pin of the read's own (:hold,
       ;; answering its release), or per-access pins (:enter / :exit) checked
       ;; against the epoch the read was taken at
-      (h raw {:epoch epoch
-              :hold (fn [] (view-pin! ds epoch) (fn [] (view-unpin! ds epoch)))
-              :enter (fn [] (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-                              (pin-epoch! ds e)
-                              e))
-              :exit (fn [] (unpin-epoch! ds))}))
+        (h raw {:epoch epoch
+                :hold (fn [] (view-pin! ds epoch) (fn [] (view-unpin! ds epoch)))
+                :enter (fn [] (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+                                (pin-epoch! ds e)
+                                e))
+                :exit (fn [] (unpin-epoch! ds))}))
     ;; no views here: the new value delivered flat; on a host with no flat
     ;; layer yet (basilisp), the value as before — eve->clj would refuse
     ;; an eve array on every swap!
-    (if-let [deliver (deref-deliver)]
-      (deliver raw)
-      raw)))
+      (if-let [deliver (deref-deliver)]
+        (deliver raw)
+        raw))))
 
-
-(defn- refresh-slabs! [{:keys [base-path sio]}]
-  (when base-path (alloc/refresh! sio)))
+(defn- refresh-slabs! [ds]
+  (let [base-path (:base-path ds) sio (:sio ds)]
+    (when base-path (alloc/refresh! sio))))
 
 ;; ---------------------------------------------------------------------------
 ;; Root values
 ;; ---------------------------------------------------------------------------
 
 (defn- live-ptr? [ptr]
-  (and (not= ptr alloc/NIL_OFFSET) (not= ptr CLAIMED_SENTINEL)))
+  ;; jolt: a pointer word is an integer; == is its compiled compare, not= the variadic generic
+  #?(:jolt (not (or (== ptr alloc/NIL_OFFSET) (== ptr CLAIMED_SENTINEL)))
+     :default (and (not= ptr alloc/NIL_OFFSET) (not= ptr CLAIMED_SENTINEL))))
 
 (defn- read-root-value
   "The slab-backed value at ptr, read through sio. The caller pins."
@@ -1649,16 +1701,17 @@
   "The zero queue's flush, throttled: the 256-slot pin scan runs when the last one is FLUSH_INTERVAL_MS old, or
    FLUSH_COMMIT_THRESHOLD commits ago with the queue past FLUSH_QUEUE_THRESHOLD, or the queue is past
    FLUSH_QUEUE_CAP. Only ever delays a free."
-  [{:keys [retire-q flush-ts flush-n] :as ds}]
-  (let [now (proc/now-ms)
-        n (vswap! flush-n inc)]
-    (when (or (> (- now @flush-ts) FLUSH_INTERVAL_MS)
-              (let [q (count @retire-q)]
-                (or (and (>= n FLUSH_COMMIT_THRESHOLD) (> q FLUSH_QUEUE_THRESHOLD))
-                    (> q FLUSH_QUEUE_CAP))))
-      (reset! flush-ts now)
-      (vreset! flush-n 0)
-      (flush-zero-queue! ds))))
+  [ds]
+  (let [retire-q (:retire-q ds) flush-ts (:flush-ts ds) flush-n (:flush-n ds)]
+    (let [now (proc/now-ms)
+          n (vswap! flush-n inc)]
+      (when (or (> (- now @flush-ts) FLUSH_INTERVAL_MS)
+                (let [q (count @retire-q)]
+                  (or (and (>= n FLUSH_COMMIT_THRESHOLD) (> q FLUSH_QUEUE_THRESHOLD))
+                      (> q FLUSH_QUEUE_CAP))))
+        (reset! flush-ts now)
+        (vreset! flush-n 0)
+        (flush-zero-queue! ds)))))
 
 ;; ---------------------------------------------------------------------------
 ;; deref / swap!
@@ -1936,7 +1989,7 @@
    ran again under the domain's hold); a descriptor count is a CAS word on
    the descriptor row, safe to raise from any write, so no attempt ever
    needs the hold and there is no [:hold nil] return."
-  [{:keys [root-r sio durable-commits? journal] :as ds}
+  [ds
    ptr-off
    atom-slot-idx
    f
@@ -1944,171 +1997,181 @@
    exclusive?]
   (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? false))
 
-
 (defn- swap-attempt-vals!
-  [{:keys [root-r sio durable-commits? journal] :as ds}
+  [ds
    ptr-off
    atom-slot-idx
    f
    args
    exclusive?
    want-vals?]
-  (refresh-slabs! ds)
-  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (let [root-r (:root-r ds) sio (:sio ds) durable-commits? (:durable-commits? ds) journal (:journal ds)]
+    (refresh-slabs! ds)
+    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
   ;; the touched set feeds the durable sweeps alone (every read of it below is inside a durable-commits? arm):
   ;; an in-memory domain binds none, and tally/note-touch! is one nil check (it was a set conj per mutation)
-  (binding [tally/*touches* (when durable-commits? (clojure.core/atom #{}))
-            ;; a redo-log commit notes the blocks eve-deftype fields are written into in place (jlog2-fallback?)
-            alloc/*inplace* (when (jlog2? ds) (clojure.core/atom #{}))]
-    (try
-      (let [old-ptr (mem/-load-i32 root-r ptr-off)
-            _ (refresh-slabs! ds)  ;; behind the load (0004/0007)
-            lsio (alloc/logging-sio sio)  ;; this attempt's allocations
-            old-val (read-root-value lsio old-ptr)
-            new-val (binding [d/*parent-atom* ds
-                              d/*domain-sio* lsio]
-                      (apply f old-val args))
-            ;; the validator (spec clause 6 — new mechanism, Clojure-shaped):
-            ;; runs on the new value pre-commit; false or an exception
-            ;; aborts the swap, unwinding through the pin's finally exactly
-            ;; as a throwing f does — nothing is written, nothing notifies
-            _ (validator-check! (validator-for ds atom-slot-idx) new-val)
-            ;; written in the attempt's domain too: a codec that allocates a nested collection in the running domain
-            ;; (ClojureScript's) logs it here, so a lost CAS frees what the attempt allocated unheld
-            new-ptr (binding [d/*domain-sio* lsio]
-                      (resolve-new-ptr lsio new-val
-                                       (some-> (:foreign-policy ds) deref)))]
-        (if (== new-ptr old-ptr)
-          ;; the same value: nothing to publish, nothing to retire — but
-          ;; the swap SUCCEEDED, so a watched atom still notifies (spec
-          ;; clause 2: notification is not gated by the change decision)
-          ;; swap!'s return is the new value delivered flat (the value
-          ;; model: what leaves an atom is flat), under this attempt's pin
-          (let [delivery (let [w? (or want-vals? (watched? ds atom-slot-idx))
-                               dv (when w? (deliver-value ds atom-slot-idx old-val))]
-                           [dv dv (read-answer ds atom-slot-idx old-val)])]
-            ;; nothing published: whatever f allocated on the way to the old value is held by nothing
-            (tally/free-unreached! sio (alloc/logged-allocs lsio))
-            (alloc/stop-logging! lsio)
-            [:ok new-val delivery])
-          ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
-          (let [_ (tally/hold-root! sio new-ptr)
-                ;; a redo-log (v2) commit: its allocations (read before the log stops), whether it takes the forced
-                ;; fallback, and — after any fallback force, before its CAS — its log seq (jlog2-commit!)
-                v2? (jlog2? ds)
-                allocs (when v2? (alloc/logged-allocs lsio))
-                plan (when v2? (jlog2-plan sio (:log journal) allocs @tally/*touches* @alloc/*inplace*))
-                fallback? (= :fallback plan)
-                jcnt (if (map? plan) (:cnt plan) 1)
-                _ (when fallback?
-                    (alloc/sync-touched! sio (-> @tally/*touches* (into (take-unforced! ds)) (into allocs)
-                                                 (into @alloc/*inplace*))))
-                ;; durability (a disk domain with :durable-commits?): everything this
-                ;; commit wrote is forced BEFORE the root pointer can publish it, so a
-                ;; system crash cannot leave a root pointing at value pages that never
-                ;; reached disk. The force covers the slab classes this attempt
-                ;; touched — its logged allocations and the descriptor rows its
-                ;; tally holds mutated (alloc/sync-touched!) — not the whole slab.
-                ;; Inside the attempt, so a lost CAS wastes one force and the
-                ;; retry writes and forces its own blocks; nothing is held across the retry.
-                ;; A journal domain's J1 commit forces here too (eve-mmap-journal-plan
-                ;; §4.3 step 2): no pointer is visible in the root before the blocks
-                ;; it reaches are durable, so the record its append reads names
-                ;; forced blocks only, whichever process published them (H2). A batch
-                ;; (J10) journal domain defers to its flush, which sweeps the whole
-                ;; domain after reading the table it records.
-                _ (when (and durable-commits? (not v2?)
-                             (or (nil? journal) (<= (:limit journal) 1)))
-                    (alloc/sync-touched! sio
-                                         (into (into @tally/*touches* (take-unforced! ds))
-                                               (alloc/logged-allocs lsio))))
-                jseq (when v2? (jlog2-reserve! ds false jcnt))
-                w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
-            (if (== w old-ptr)
-              (let [label (i32/i32 (inc (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)))]
-                ;; what the attempt allocated that the new root does not reach (the swap function's intermediates)
-                ;; is held by nothing: freed now, before the drop and the durable sweeps below, which cover these
-                ;; classes through the logged allocations they already name
-                (tally/free-unreached! sio (alloc/logged-allocs lsio))
-                (cond
-                  v2?
-                  (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr plan fallback?)
+    ;; jolt: an in-memory domain under no outer touched set skips the binding (its value inside is nil either way;
+    ;; a binding was ~1.5% of atom-swap-counter there, its frame map built on every attempt); a redo-log commit also
+    ;; notes the blocks eve-deftype fields are written into in place (alloc/*inplace*, jlog2-plan)
+    (let [attempt (fn []
+                    (try
+                      (let [old-ptr (mem/-load-i32 root-r ptr-off)
+                            _ (refresh-slabs! ds)  ;; behind the load (0004/0007)
+                            lsio (alloc/logging-sio sio)  ;; this attempt's allocations
+                            old-val (read-root-value lsio old-ptr)
+                            new-val (binding [d/*parent-atom* ds
+                                              d/*domain-sio* lsio]
+                                      (apply f old-val args))
+                              ;; the validator (spec clause 6 — new mechanism, Clojure-shaped):
+                              ;; runs on the new value pre-commit; false or an exception
+                              ;; aborts the swap, unwinding through the pin's finally exactly
+                              ;; as a throwing f does — nothing is written, nothing notifies
+                            _ (validator-check! (validator-for ds atom-slot-idx) new-val)
+                              ;; written in the attempt's domain too: a codec that allocates a nested collection in the running domain
+                              ;; (ClojureScript's) logs it here, so a lost CAS frees what the attempt allocated unheld
+                            new-ptr (binding [d/*domain-sio* lsio]
+                                      (resolve-new-ptr lsio new-val
+                                                       (some-> (:foreign-policy ds) deref)))]
+                        (if (== new-ptr old-ptr)
+                            ;; the same value: nothing to publish, nothing to retire — but
+                            ;; the swap SUCCEEDED, so a watched atom still notifies (spec
+                            ;; clause 2: notification is not gated by the change decision)
+                            ;; swap!'s return is the new value delivered flat (the value
+                            ;; model: what leaves an atom is flat), under this attempt's pin
+                          (let [delivery (let [w? (or want-vals? (watched? ds atom-slot-idx))
+                                               dv (when w? (deliver-value ds atom-slot-idx old-val))]
+                                           [dv dv (read-answer ds atom-slot-idx old-val)])]
+                              ;; nothing published: whatever f allocated on the way to the old value is held by nothing
+                            (tally/free-unreached! sio (alloc/logged-allocs lsio))
+                            (alloc/stop-logging! lsio)
+                            [:ok new-val delivery])
+                            ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
+                          (let [_ (tally/hold-root! sio new-ptr)
+                                  ;; a redo-log (v2) commit: its allocations (read before the log stops), whether it takes the forced
+                                  ;; fallback, and — after any fallback force, before its CAS — its log seq (jlog2-commit!)
+                                v2? (jlog2? ds)
+                                allocs (when v2? (alloc/logged-allocs lsio))
+                                plan (when v2? (jlog2-plan sio (:log journal) allocs @tally/*touches* @alloc/*inplace*))
+                                fallback? (= :fallback plan)
+                                jcnt (if (map? plan) (:cnt plan) 1)
+                                _ (when fallback?
+                                    (alloc/sync-touched! sio (-> @tally/*touches* (into (take-unforced! ds)) (into allocs)
+                                                                 (into @alloc/*inplace*))))
+                                  ;; durability (a disk domain with :durable-commits?): everything this
+                                  ;; commit wrote is forced BEFORE the root pointer can publish it, so a
+                                  ;; system crash cannot leave a root pointing at value pages that never
+                                  ;; reached disk. The force covers the slab classes this attempt
+                                  ;; touched — its logged allocations and the descriptor rows its
+                                  ;; tally holds mutated (alloc/sync-touched!) — not the whole slab.
+                                  ;; Inside the attempt, so a lost CAS wastes one force and the
+                                  ;; retry writes and forces its own blocks; nothing is held across the retry.
+                                  ;; A journal domain's J1 commit forces here too (eve-mmap-journal-plan
+                                  ;; §4.3 step 2): no pointer is visible in the root before the blocks
+                                  ;; it reaches are durable, so the record its append reads names
+                                  ;; forced blocks only, whichever process published them (H2). A batch
+                                  ;; (J10) journal domain defers to its flush, which sweeps the whole
+                                  ;; domain after reading the table it records.
+                                _ (when (and durable-commits? (not v2?)
+                                             (or (nil? journal) (<= (:limit journal) 1)))
+                                    (alloc/sync-touched! sio
+                                                         (into (into @tally/*touches* (take-unforced! ds))
+                                                               (alloc/logged-allocs lsio))))
+                                jseq (when v2? (jlog2-reserve! ds false jcnt))
+                                w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
+                            (if (== w old-ptr)
+                              (let [label (i32/i32 (inc (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)))]
+                                  ;; what the attempt allocated that the new root does not reach (the swap function's intermediates)
+                                  ;; is held by nothing: freed now, before the drop and the durable sweeps below, which cover these
+                                  ;; classes through the logged allocations they already name
+                                (tally/free-unreached! sio (alloc/logged-allocs lsio))
+                                (cond
+                                  v2?
+                                  (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr plan fallback?)
 
-                  (and durable-commits? journal (<= (:limit journal) 1))
-                  ;; J1 (journal, per-commit durability): the slot lets old go, then the
-                  ;; record append and the slot's force are the commit point. The commit
-                  ;; forced its blocks before its CAS; the drop's descriptor writes are left
-                  ;; to the next commit's pre-CAS sweep (a crash before it leaves a count
-                  ;; above its holders: the leak direction, never a use-after-free — §4.3
-                  ;; step 4).
-                  (do
-                    (tally/drop-root! sio old-ptr (park-fn ds))
-                    (when (:unforced ds)
-                      (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*))
-                    (journal-note-commit! ds))
+                                  (and durable-commits? journal (<= (:limit journal) 1))
+                                    ;; J1 (journal, per-commit durability): the slot lets old go, then the
+                                    ;; record append and the slot's force are the commit point. The commit
+                                    ;; forced its blocks before its CAS; the drop's descriptor writes are left
+                                    ;; to the next commit's pre-CAS sweep (a crash before it leaves a count
+                                    ;; above its holders: the leak direction, never a use-after-free — §4.3
+                                    ;; step 4).
+                                  (do
+                                    (tally/drop-root! sio old-ptr (park-fn ds))
+                                    (when (:unforced ds)
+                                      (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*))
+                                    (journal-note-commit! ds))
 
-                  :else
-                  (do  ;; and the epoch is made durable before swap! returns: a
-                    ;; batch journal domain appends its flush record at
-                    ;; its batch boundary (that flush's force is the
-                    ;; batch's commit point; the root file is a
-                    ;; checkpoint and is not forced per commit) —
-                    ;; otherwise (the force-ordering form) the root's
-                    ;; own range, the epoch word through the slot
-                    ;; pointer, is forced after the CAS.
-                    (when durable-commits?
-                      (if journal
-                        (journal-note-commit! ds)
-                        (mem/sync-region! root-r
-                                          (min ptr-off d/ROOT_EPOCH_OFFSET)
-                                          (+ 4
-                                             (- (max ptr-off d/ROOT_EPOCH_OFFSET)
-                                                (min ptr-off d/ROOT_EPOCH_OFFSET))))))
-                    ;; the slot lets old go: a block at 0 is parked at the epoch now
-                    (tally/drop-root! sio old-ptr (park-fn ds))
-                    ;; the drop's descriptor writes are forced too (the root
-                    ;; force above covered the root's own range only)
-                    (when (and durable-commits? (nil? journal))
-                      (alloc/sync-touched! sio (into @tally/*touches* (alloc/logged-allocs lsio))))))
-                ;; delivery computed HERE, under the attempt's pin: the old
-                ;; root is retired by this commit, so converting it after
-                ;; the pin drops would read retired blocks (the discipline
-                ;; flat-deref's in-pin conversion obeys)
-                ;; the new value delivered flat always (swap!'s return); the
-                ;; old one only when a watcher or swap-vals! reads it
-                ;; [old new] flat when a watcher or swap-vals! reads them;
-                ;; swap!'s answer (a view, or flat) for the new root always
-                (let [w? (or want-vals? (watched? ds atom-slot-idx))
-                      new-raw (read-root-value sio new-ptr)
-                      delivery [(when w? (deliver-value ds atom-slot-idx old-val))
-                                (when w? (deliver-value ds atom-slot-idx new-raw))
-                                (read-answer ds atom-slot-idx new-raw)]]
-                  (alloc/stop-logging! lsio)
-                  [:ok new-val delivery]))
-              (let [offs (alloc/logged-allocs lsio)]
-                ;; a redo-log reservation: its slot is closed with an ABORT record
-                (when v2? (jlog2-abort! ds jseq jcnt))
-                ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
-                ;; share with other values keeps its count), and every other block this attempt allocated that no
-                ;; holder took is freed now (a value the attempt stored into another atom is that atom's)
-                ;; (read before the log stops: a stopped log reads empty)
-                (alloc/stop-logging! lsio)
-                (tally/drop-root! sio new-ptr (park-fn ds))
-                (tally/free-unheld! sio offs)
-                ;; the frees' and drop's writes are forced even on a lost
-                ;; attempt (the pre-CAS force covered the allocations, not
-                ;; their taking-back). Journal domains skip this force:
-                ;; nothing was published, and the lagging allocator writes
-                ;; are forced by the flush sweep of whichever commit's
-                ;; record first references a reused block (J1: that
-                ;; commit's touched sweep; J10/checkpoint: the whole-domain
-                ;; sweep) and by the retire flush that recycles the blocks
-                ;; — a crash before then reads the blocks as still
-                ;; allocated, the leak direction only.
-                (when (and durable-commits? (nil? journal))
-                  (alloc/sync-touched! sio (into @tally/*touches* offs)))
-                [:retry nil ::none])))))
-      (finally (unpin-epoch! ds)))))
+                                  :else
+                                  (do  ;; and the epoch is made durable before swap! returns: a
+                                      ;; batch journal domain appends its flush record at
+                                      ;; its batch boundary (that flush's force is the
+                                      ;; batch's commit point; the root file is a
+                                      ;; checkpoint and is not forced per commit) —
+                                      ;; otherwise (the force-ordering form) the root's
+                                      ;; own range, the epoch word through the slot
+                                      ;; pointer, is forced after the CAS.
+                                    (when durable-commits?
+                                      (if journal
+                                        (journal-note-commit! ds)
+                                        (mem/sync-region! root-r
+                                                          (min ptr-off d/ROOT_EPOCH_OFFSET)
+                                                          (+ 4
+                                                             (- (max ptr-off d/ROOT_EPOCH_OFFSET)
+                                                                (min ptr-off d/ROOT_EPOCH_OFFSET))))))
+                                      ;; the slot lets old go: a block at 0 is parked at the epoch now
+                                    (tally/drop-root! sio old-ptr (park-fn ds))
+                                      ;; the drop's descriptor writes are forced too (the root
+                                      ;; force above covered the root's own range only)
+                                    (when (and durable-commits? (nil? journal))
+                                      (alloc/sync-touched! sio (into @tally/*touches* (alloc/logged-allocs lsio))))))
+                                  ;; delivery computed HERE, under the attempt's pin: the old
+                                  ;; root is retired by this commit, so converting it after
+                                  ;; the pin drops would read retired blocks (the discipline
+                                  ;; flat-deref's in-pin conversion obeys)
+                                  ;; the new value delivered flat always (swap!'s return); the
+                                  ;; old one only when a watcher or swap-vals! reads it
+                                  ;; [old new] flat when a watcher or swap-vals! reads them;
+                                  ;; swap!'s answer (a view, or flat) for the new root always
+                                (let [w? (or want-vals? (watched? ds atom-slot-idx))
+                                      new-raw (read-root-value sio new-ptr)
+                                      delivery [(when w? (deliver-value ds atom-slot-idx old-val))
+                                                (when w? (deliver-value ds atom-slot-idx new-raw))
+                                                (read-answer ds atom-slot-idx new-raw)]]
+                                  (alloc/stop-logging! lsio)
+                                  [:ok new-val delivery]))
+                              (let [offs (alloc/logged-allocs lsio)]
+                                  ;; a redo-log reservation: its slot is closed with an ABORT record
+                                (when v2? (jlog2-abort! ds jseq jcnt))
+                                  ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
+                                  ;; share with other values keeps its count), and every other block this attempt allocated that no
+                                  ;; holder took is freed now (a value the attempt stored into another atom is that atom's)
+                                  ;; (read before the log stops: a stopped log reads empty)
+                                (alloc/stop-logging! lsio)
+                                (tally/drop-root! sio new-ptr (park-fn ds))
+                                (tally/free-unheld! sio offs)
+                                  ;; the frees' and drop's writes are forced even on a lost
+                                  ;; attempt (the pre-CAS force covered the allocations, not
+                                  ;; their taking-back). Journal domains skip this force:
+                                  ;; nothing was published, and the lagging allocator writes
+                                  ;; are forced by the flush sweep of whichever commit's
+                                  ;; record first references a reused block (J1: that
+                                  ;; commit's touched sweep; J10/checkpoint: the whole-domain
+                                  ;; sweep) and by the retire flush that recycles the blocks
+                                  ;; — a crash before then reads the blocks as still
+                                  ;; allocated, the leak direction only.
+                                (when (and durable-commits? (nil? journal))
+                                  (alloc/sync-touched! sio (into @tally/*touches* offs)))
+                                [:retry nil ::none])))))
+                      (finally (unpin-epoch! ds))))
+          inplace (when (jlog2? ds) (clojure.core/atom #{}))]
+      #?(:jolt (if (or durable-commits? (some? tally/*touches*))
+                 (binding [tally/*touches* (when durable-commits? (clojure.core/atom #{}))
+                           alloc/*inplace* inplace]
+                   (attempt))
+                 (attempt))
+         :default (binding [tally/*touches* (when durable-commits? (clojure.core/atom #{}))
+                            alloc/*inplace* inplace]
+                    (attempt))))))
 
 (defn- mmap-swap!
   "CAS-loop swap. Accepts any slab-backed value of this domain, a plain
@@ -2247,43 +2310,53 @@
   {:pre [(#{:throw :copy :zip} policy)]}
   (reset! (:foreign-policy (atom-domain-state a)) policy))
 
+;; jolt: the refresh's test inline (refresh-slabs! is a call and two map lookups on every read); the epoch load, the
+;; pin and the pointer load in one call where the pin table has the root's base (pt-pin-read!*), else pin-epoch! and
+;; -load-i32 as on every host; (f v) where there are no args (apply builds the arg list)
+#?(:jolt
+   (defn- read-pinned-jolt [a f args]
+     (let [ds (atom-domain-state a)
+           sio (:sio ds)
+           base-path (:base-path ds)
+           slot (-atom-slot-idx a)
+           pt (pt-of (:pins ds))]
+       (when base-path (alloc/refresh! sio))
+       (if-let [ptr (pt-pin-read!* pt d/ROOT_EPOCH_OFFSET (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
+         (try
+           (when base-path (alloc/refresh! sio))
+           (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args))
+           (finally
+             (pt-unpin-pub!* pt)))
+         (let [root-r (:root-r ds)]
+           (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+           (try
+             (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
+               (when base-path (alloc/refresh! sio))
+               (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args)))
+             (finally
+               (unpin-epoch! ds))))))))
+
 (defn read-pinned
   "Bounded slab-backed access to one atom: (f value & args) with the atom's
    value as the lazy slab-backed Eve value, read under this thread's pinned
    epoch, which is unpinned when f returns — f's result must not keep the
    value. eve's own reads use it; a program reads with eve.alpha/$."
-  [a f & args]
-  (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
-        slot (-atom-slot-idx a)]
-    ;; jolt: the refresh's test inline (refresh-slabs! is a call and two map lookups on every read); the epoch
-    ;; load, the pin and the pointer load in one call where the pin table has the root's base (pt-pin-read!*),
-    ;; else pin-epoch! and -load-i32 as on every host; (f v) where there are no args (apply builds the arg list)
-    #?@(:jolt
-        [(let [pt (pt-of (:pins ds))]
-           (when (:base-path ds) (alloc/refresh! sio))
-           (if-let [ptr (pt-pin-read!* pt d/ROOT_EPOCH_OFFSET (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
-             (try
-               (when (:base-path ds) (alloc/refresh! sio))
-               (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args))
-               (finally
-                 (pt-unpin-pub!* pt)))
-             (do
-               (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-               (try
-                 (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
-                   (when (:base-path ds) (alloc/refresh! sio))
-                   (if (nil? args) (f (read-root-value sio ptr)) (apply f (read-root-value sio ptr) args)))
-                 (finally
-                   (unpin-epoch! ds))))))]
-        :default
-        [(refresh-slabs! ds)
+  #?@(:jolt
+      ;; jolt: a fixed arity for (read-pinned a f) (the rest arity's argument list was counted on every read)
+      [([a f] (read-pinned-jolt a f nil))
+       ([a f & args] (read-pinned-jolt a f args))]
+      :default
+      [[a f & args]
+       (let [{:keys [root-r sio] :as ds} (atom-domain-state a)
+             slot (-atom-slot-idx a)]
+         (refresh-slabs! ds)
          (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
          (try
            (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_PTR_OFFSET))]
              (refresh-slabs! ds)
              (apply f (read-root-value sio ptr) args))
            (finally
-             (unpin-epoch! ds)))])))
+             (unpin-epoch! ds))))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Watches and validators — the public trunk surface (spec clauses 1–3, 6).

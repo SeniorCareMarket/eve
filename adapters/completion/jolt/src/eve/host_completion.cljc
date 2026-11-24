@@ -8,7 +8,8 @@
    jolt's, so do these. into and the chunked-seq fns likewise reach a type's
    own (below). (Calls compiled after this, in any namespace. seq is a native
    op a re-rooted var does not reach: eve.core's seq, adapters/coll/jvm, is
-   Clojure's.)")
+   Clojure's.)"
+  (:require [jolt.scheme :as scheme]))
 
 (alter-var-root #'clojure.core/swap!
   (fn [core]
@@ -221,12 +222,30 @@
 (def ^:private core- clojure.core/-)
 (def ^:private core* clojure.core/*)
 
-(defn checked-add [x y] (if (and (instance? Long x) (instance? Long y)) (Math/addExact x y) (core+ x y)))
-(defn checked-sub [x y] (if (and (instance? Long x) (instance? Long y)) (Math/subtractExact x y) (core- x y)))
+(defn- checked-add* [x y] (if (and (instance? Long x) (instance? Long y)) (Math/addExact x y) (core+ x y)))
+(defn- checked-sub* [x y] (if (and (instance? Long x) (instance? Long y)) (Math/subtractExact x y) (core- x y)))
 (defn checked-mul [x y] (if (and (instance? Long x) (instance? Long y)) (Math/multiplyExact x y) (core* x y)))
 (defn checked-negate [x] (if (instance? Long x) (Math/negateExact x) (core- x)))
-(defn checked-inc [x] (if (instance? Long x) (Math/incrementExact x) (core+ x 1)))
-(defn checked-dec [x] (if (instance? Long x) (Math/decrementExact x) (core- x 1)))
+(defn- checked-inc* [x] (if (instance? Long x) (Math/incrementExact x) (core+ x 1)))
+(defn- checked-dec* [x] (if (instance? Long x) (Math/decrementExact x) (core- x 1)))
+
+;; A fixnum operand (61 bits: a Long, its sum, difference or step at most 62 bits, inside i64, so the *Exact op
+;; never throws for it) answers the exact Chez sum in one call, the same integer Math/*Exact answers; any other
+;; operand takes the checks above. (instance? Long x) and the *Exact emulation were ~56 ns an inc; (swap! a update
+;; :n inc) and the perf suite's counters call inc through its var, 2026-11-23 ET.
+(scheme/eval-string
+ "(begin
+    (define (eve-hc-step d slow) (lambda (x) (if (fixnum? x) (+ x d) (slow x))))
+    (define (eve-hc-op2 op slow) (lambda (x y) (if (and (fixnum? x) (fixnum? y)) (op x y) (slow x y))))
+    #t)")
+(def ^:private inc-fast ((scheme/proc "eve-hc-step") 1 checked-inc*))
+(def ^:private dec-fast ((scheme/proc "eve-hc-step") -1 checked-dec*))
+(def ^:private add-fast ((scheme/proc "eve-hc-op2") (scheme/eval-string "+") checked-add*))
+(def ^:private sub-fast ((scheme/proc "eve-hc-op2") (scheme/eval-string "-") checked-sub*))
+(defn checked-add [x y] (add-fast x y))
+(defn checked-sub [x y] (sub-fast x y))
+(defn checked-inc [x] (inc-fast x))
+(defn checked-dec [x] (dec-fast x))
 
 ;; What the binding reaches on this seat (all measured): the var roots
 ;; carry var-mediated calls — (apply (var-get #'clojure.core/+) [MAX 1])
