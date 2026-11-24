@@ -1,6 +1,6 @@
 # The redo commit log (jlog v2): one device flush per commit
 
-Status: IMPLEMENTED 2026-11-24 ET (`eve.jlog` v2, `eve.atom` jlog2-*; §10 lists where the code differs from the
+Status: IMPLEMENTED 2026-11-24 ET (`eve.jlog`, `eve.atom` jlog-*; §10 lists where the code differs from the
 spec text). Written 2026-11-23 ET. Follows the jlog of `eve-mmap-journal-plan.md` (eve.db.ds), which this changes where
 noted. Asked for by John: "do both option 1 and 2 … I don't like the idea of only some hosts getting some semantics.
 But I'd like them all to go at 0.4 ms or better."
@@ -185,5 +185,6 @@ one (31 flushes); every later checkpoint, and recovery in the same process, is o
   (count or window), and the old roots of the commits before it are let go then.
 - **A zombie** (its reservation voided while alive) runs a checkpoint before it returns: the forced domain and the new
   ANCHOR cover its commit.
-- **v1 logs** are recovered by their own rule and moved to v2 on the open that recovers them (`<base>.jlog` renamed
-  `<base>.jlog.v1`, never deleted), unless that open asks for `:jlog-version 1`.
+- **No version 1.** The snapshot log of the plan (EVR2 records, each commit forced before its CAS) existed only on
+  the development branch and is gone: `eve.jlog/open` refuses a version-1 log, and its migration, options
+  (`:jlog-version`, `:jlog-stripes`) and retention floor are removed.

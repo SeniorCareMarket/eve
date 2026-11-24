@@ -692,34 +692,23 @@
         (if (compare-and-set! unforced u {}) (vals u) (recur))))
     nil))
 
-(declare jlog2?)
+(declare jlog?)
 
 (defn- flush-zero-queue!
   "Free the zero queue's entries whose epoch no live reader pins
-  (eve.tally/flush!). The safe epoch is the retire path's existing
-  input — the minimum pinned reader epoch — with ONE added bound
-  (RETENTION FLOOR, fix (b), decision 2026-10-27): a journal
-  domain's floor epoch, the oldest epoch recovery may still install.
-  The journal pins that epoch the way a slow reader pins its read
-  epoch: blocks reachable from it are not recycled while its record
-  survives. The floor is per-process state set at the open and
-  advanced at every flush (to the previous flush's label — the
-  FLUSH-ADVANCE rule, jlog-append!) and at checkpoint, so
-  a stale local floor only ever makes this process's flush more
-  conservative.
+  (eve.tally/flush!): the safe epoch is the minimum pinned reader epoch.
+  A journaled domain needs no further bound: a commit lets its old root go
+  only once its log record is durable (jlog-commit!), so nothing queued is
+  reachable from a state recovery can install.
 
   The flush's own writes (bitmap + descriptor writes of the frees) are
-  NOT forced here: the classes of the blocks it may free (the queue at
-  entry — the set this flush used to force) are noted on the domain
-  (:unforced) and the next commit's force sweeps them with its
-  own (the pre-CAS sweep of a J1 commit, journaled or not; a batch flush's
-  whole-domain sweep;
-  a checkpoint, sync! and close force the whole domain). Every block
-  this flush frees is unreachable from every version recovery can
-  install (its epoch is below the floor), so a crash before that force
-  can only find a freed block still allocated, or a count above its
-  holders (a cascade drop never forced) — the leak direction, never a
-  use-after-free. (Measured, fix-for-release-2 E2: the flush runs on
+  NOT forced here. On a journaled domain they ride until the next
+  checkpoint's whole-domain force; on the force-ordering form (durable,
+  no journal) the classes of the blocks it may free are noted on the
+  domain (:unforced) and the next commit's pre-CAS force sweeps them
+  with its own. Either way a crash before that force can only find a
+  freed block still allocated, or a count above its holders (a cascade
+  drop never forced) — the leak direction, never a use-after-free. (Measured, fix-for-release-2 E2: the flush runs on
   every single-swap commit — its queue never falls under
   FLUSH_QUEUE_THRESHOLD — so a force here was a second whole-class
   force per commit, ~3.9 ms of an add-5 commit's 17.9 on the bench
@@ -728,15 +717,13 @@
   (let [root-r (:root-r ds)
         sio (:sio ds)
         retire-q (:retire-q ds)
-        journal (:journal ds)
         durable-commits? (:durable-commits? ds)
         base-path (:base-path ds)
         unforced (:unforced ds)
-        ;; a redo-log (v2) domain notes nothing: its flush frees only blocks no durable state reaches (an old root
-        ;; is let go after its replacement is durable), so a free left unforced until the next checkpoint's
-        ;; whole-domain force can only leak in a crash — and the note copied the whole queue on every flush, which
-        ;; grows without bound while a view pins an old epoch
-        note? (and durable-commits? base-path unforced (not (jlog2? ds)))]
+        ;; a journaled domain notes nothing: its flush frees only blocks no durable state reaches, so a free left
+        ;; unforced until the next checkpoint's whole-domain force can only leak in a crash (and the note copied the
+        ;; whole queue on every flush, which grows without bound while a view pins an old epoch)
+        note? (and durable-commits? base-path unforced (not (jlog? ds)))]
     ;; jolt: this process's own published pin already bounds the safe epoch from above (the safe epoch is the least
     ;; live slot's, this slot among them, and the floor only lowers it): when this slot is live and pinned at or
     ;; below the queue's head epoch, tally/flush! answers 0 at its head test with no other effect, so the 256-slot
@@ -762,11 +749,7 @@
       (let [queued (when note? (mapv :off @retire-q))]
         (tally/flush! sio retire-q
                       (fn [] (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-                      (fn [] (let [readers (mmap-min-safe-epoch root-r)
-                                   floor   (some-> journal :floor deref)]
-                               (cond (and readers floor) (min readers floor)
-                                     floor   floor
-                                     :else   readers))))
+                      (fn [] (mmap-min-safe-epoch root-r)))
         (when note?
           (swap! unforced into (map (fn [o] [(alloc/decode-class-idx o) o])) queued))))))
 
@@ -802,121 +785,28 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:dynamic *flush-timing*
-  "When bound to an atom, each journal flush (jlog-append!) conjs its wall
-  time in ms (reserve + snapshot + write + the slot's force).
-  Bench instrumentation only."
+  "When bound to an atom, each commit's wait on the log's watermark
+  (jlog-commit!: the force that makes its record durable) conjs its wall
+  time in ms. Bench instrumentation only."
   nil)
 
 (defn- now-ms []
   ;; eve.process/now-ms is the portable wall clock (per-host adapter);
   ;; System/currentTimeMillis exists only on the JVM — the CLR and
-  ;; Basilisp seats have no java.lang.System, and journal-note-commit!
-  ;; threw there once the batch/window path first ran on them
+  ;; Basilisp seats have no java.lang.System, and the journal's batch
+  ;; window threw there once it first ran on them
   ;; (phase 3). The adapter's now-ms is the one clock on every host.
   (proc/now-ms))
 
 (def ^:dynamic *flush-log*
-  "When bound to an atom, each journal flush (jlog-append!) conjs {:at <wall-ms> :ms
-  <duration-ms>} per flush. Bench/workload instrumentation only."
+  "When bound to an atom, each commit's wait on the log's watermark (jlog-commit!) conjs {:at <wall-ms> :ms
+  <duration-ms>}. Bench/workload instrumentation only."
   nil)
 
 ;; ---------------------------------------------------------------------------
-;; Commit log on the mmapped ring (eve.jlog; eve-mmap-journal-plan §4)
+;; The commit log (eve.jlog, a redo log; doc/jlog-redo-spec.md)
 ;;
-;; A journaled disk domain (the default) keeps its commit records in
-;; <base>.jlog, a fixed-size ring of 4 KiB slots
-;; mapped like the root and claimed by CAS (eve.jlog): no file lock is held
-;; across a commit, so concurrent writers' forces overlap. A record is the
-;; root's epoch label and its whole atom table, read after this commit's
-;; epoch bump; J1 commits force their blocks BEFORE the root CAS (the
-;; force-ordering form's pre-CAS sweep, taken by jlog domains too: no
-;; pointer is visible in the root before the blocks it reaches are durable,
-;; so any snapshot of the table names only forced blocks — H2 closed), then
-;; append and force the record — the commit point. Recovery installs the
-;; valid record with the highest label, never the last in file order, and
-;; erases nothing. The domain's journal map: :log (the eve.jlog handle),
-;; :limit (the batch), :pending, :floor and :last-epoch (the retention floor's
-;; FLUSH-ADVANCE: each flush advances the floor to this process's previous
-;; record's label), and with :journal-window-ms, :window-ms and :last-flush.
-;; ---------------------------------------------------------------------------
-
-(defn- jlog-snapshot
-  "[epoch-label table] of ROOT-R: the epoch, then the atom table read after it
-   (§4.3 step 6), so every pointer in the table is at least as new as the
-   label — a record labelled low is the conservative direction for the floor."
-  [root-r]
-  (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-    [e (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES)]))
-
-(defn- jlog-append!
-  "Append one record of KIND to the domain's log, its [label table] from
-   (SNAPSHOT!) — §4.3 steps 5-10 (eve.jlog/append!: reserve, snapshot, write,
-   force the slot: the commit point) — then advance the retention floor by
-   the FLUSH-ADVANCE rule (decision 2026-10-27: a first append pins the floor
-   at its label, every later one advances it to this process's previous
-   record's label; monotone) with the record's label as the appended epoch. The stripe is the worker slot's residue; a
-   holder of a slot this append waits on is judged dead by its heartbeat
-   (the domain's own death rule). Answers the record's label."
-  [ds kind snapshot!]
-  (let [{:keys [root-r slot-idx journal]} ds
-        log (:log journal)
-        t0 (when *flush-timing* (now-ms))
-        {:keys [label]} (jlog/append! log (bit-and slot-idx (dec (:s log))) slot-idx snapshot!
-                                      {:kind kind :stale? (fn [w] (heartbeat-stale? root-r w))})]
-    (when (:floor journal)
-      (if (nil? @(:floor journal))
-        (reset! (:floor journal) label)
-        (when (and (:last-epoch journal) @(:last-epoch journal))
-          (reset! (:floor journal)
-                  (max @(:floor journal) @(:last-epoch journal))))))
-    (when (:last-epoch journal) (reset! (:last-epoch journal) label))
-    (when (:last-flush journal) (reset! (:last-flush journal) (now-ms)))
-    (when *flush-log*
-      (swap! *flush-log* conj {:at (now-ms) :ms (when t0 (- (now-ms) t0))}))
-    (when t0 (swap! *flush-timing* conj (- (now-ms) t0)))
-    label))
-
-(defn- jlog-flush!
-  "A jlog domain's flush. J1 (WHOLE? false): its blocks were forced before
-   its CAS, so the record is appended as it stands. A batch boundary or a
-   checkpoint (WHOLE? true): the label and table are read FIRST, then the
-   whole domain is forced, then the record appended — the sweep after the
-   read covers every pointer the snapshot names, whichever process published
-   it (§4.3, J10). KIND is the record's (KIND_COMMIT, or KIND_ANCHOR at a
-   checkpoint)."
-  ([ds whole?] (jlog-flush! ds whole? jlog/KIND_COMMIT))
-  ([ds whole? kind]
-   (if whole?
-     (let [snap (jlog-snapshot (:root-r ds))]
-       (take-unforced! ds)
-       (alloc/sync-sio! (:sio ds))
-       (jlog-append! ds kind (constantly snap)))
-     (jlog-append! ds kind #(jlog-snapshot (:root-r ds))))))
-
-(defn- journal-note-commit!
-  "A journal domain's commit published: J1 (limit 1) appends its record now
-   (jlog-flush!: its blocks were forced before its CAS, so the record names
-   forced blocks only) — the slot's force is the commit point. J10 counts the
-   epoch toward the batch; the batch's flush reads the label and table, forces
-   the whole domain, then appends one record (its record names blocks other
-   processes wrote too). With :journal-window-ms set, a commit also flushes
-   when the window has elapsed since the last flush (checked on the commit
-   path — no timer thread; the count batch remains the backstop)."
-  [ds]
-  (let [{:keys [limit pending window-ms last-flush] :as journal} (:journal ds)]
-    (when journal
-      (if (<= limit 1)
-        (jlog-flush! ds false)
-        (let [n (swap! pending inc)]
-          (when (or (>= n limit)
-                    (and window-ms (>= (- (now-ms) @last-flush) window-ms)))
-            (reset! pending 0)
-            (jlog-flush! ds true)))))))
-
-;; ---------------------------------------------------------------------------
-;; The redo commit log (jlog v2; doc/jlog-redo-spec.md)
-;;
-;; A v2 commit forces no slab file. It reserves its log seq after reading the
+;; A commit forces no slab file. It reserves its log seq after reading the
 ;; old root and before its CAS (so log order extends happens-before), CASes,
 ;; writes one record — the delta [slot old new hash] and the redo of what it
 ;; wrote: its new blocks' bytes, their bitmap bits by offset, their flags and
@@ -926,8 +816,8 @@
 ;; slot let the old root go, so no block a durable state reaches is ever
 ;; freed. A commit whose redo would not fit a slot, that allocates in the
 ;; coalesced class, or that wrote in place into a block it did not allocate
-;; takes the fallback: its touched classes forced before its CAS (as J1 on a
-;; v1 log), a delta-only NOREDO record. A checkpoint (half the ring past the
+;; takes the fallback: its touched classes forced before its CAS, a delta-only
+;; NOREDO record. A checkpoint (half the ring past the
 ;; newest anchor, sync!, close) forces the whole domain and writes an ANCHOR,
 ;; the previous anchor folded with the deltas since. Recovery folds the
 ;; anchor and the prefix, replays the redo, pins every row a replayed record
@@ -935,51 +825,51 @@
 ;; domain and installs the table.
 ;; ---------------------------------------------------------------------------
 
-(declare jlog2-checkpoint!)
+(declare jlog-checkpoint!)
 
-(defn- jlog2?
-  "The domain's journal is a redo (v2) log."
+(defn- jlog?
+  "The domain is journaled (its commit log, <base>.jlog)."
   [ds]
-  (= 2 (some-> ds :journal :log :version)))
+  (some? (:journal ds)))
 
 (defn- u32 [x] (bit-and (long x) 0xFFFFFFFF))
 
-(defn- jlog2-stale? [root-r] (fn [w] (heartbeat-stale? root-r w)))
+(defn- jlog-stale? [root-r] (fn [w] (heartbeat-stale? root-r w)))
 
-(defn- jlog2-force-domain!
+(defn- jlog-force-domain!
   "The whole domain forced: every slab region (data, bitmap, the three descriptor columns, the coalesced class)."
   [ds]
   (take-unforced! ds)
   (alloc/sync-sio! (:sio ds)))
 
-(defn- jlog2-await!
+(defn- jlog-await!
   "Return once the log's prefix watermark has passed SEQ (eve.jlog/await-durable!: this process forces what is
    ready; a dead writer's hole is voided after a whole-domain force)."
   [ds seq]
-  (jlog/await-durable! (:log (:journal ds)) seq (jlog2-stale? (:root-r ds)) d/HEARTBEAT_TIMEOUT_MS
-                       #(jlog2-force-domain! ds)))
+  (jlog/await-durable! (:log (:journal ds)) seq (jlog-stale? (:root-r ds)) d/HEARTBEAT_TIMEOUT_MS
+                       #(jlog-force-domain! ds)))
 
-(defn- jlog2-reserve!
+(defn- jlog-reserve!
   "This process's next CNT consecutive seqs (the first answered). A commit may fill the ring to half its slots past
    the newest anchor; at that mark it runs a checkpoint first (CHECKPOINT? true: the checkpoint's own reservation,
    which may use the other half)."
-  ([ds checkpoint?] (jlog2-reserve! ds checkpoint? 1))
+  ([ds checkpoint?] (jlog-reserve! ds checkpoint? 1))
   ([ds checkpoint? cnt]
    (let [{:keys [root-r slot-idx journal]} ds
          log (:log journal)
          room (if checkpoint? (:n log) (quot (:n log) 2))
          gate (fn [t] (< (i32/i32 (- t (jlog/anchor-seq log))) room))]
      (loop [i 0]
-       (let [r (jlog/reserve-run! log slot-idx cnt (jlog2-stale? root-r) d/HEARTBEAT_TIMEOUT_MS gate)]
+       (let [r (jlog/reserve-run! log slot-idx cnt (jlog-stale? root-r) d/HEARTBEAT_TIMEOUT_MS gate)]
          (cond (not= :full r) (:seq r)
                checkpoint? (do (when (> i 100) (proc/sleep-ms! 1)) (recur (inc i)))
-               :else (do (jlog2-checkpoint! ds) (recur (inc i)))))))))
+               :else (do (jlog-checkpoint! ds) (recur (inc i)))))))))
 
-(defn- jlog2-write!
+(defn- jlog-write!
   "Write the record of the CNT seqs from SEQ this process reserved (BODY split over them, each part its own
    CRC-checked record) and release the slots. false when a resolver voided a slot of the run first (this process was
    judged dead while alive): what it won is written as ABORT."
-  ([ds seq kind label body] (jlog2-write! ds seq kind label body 1))
+  ([ds seq kind label body] (jlog-write! ds seq kind label body 1))
   ([ds seq kind label body cnt]
    (let [{:keys [slot-idx journal]} ds
          log (:log journal)
@@ -991,14 +881,14 @@
        (let [s (nth seqs i)]
          (when (nth won i)
            (jlog/write-slot! log s (if ok?
-                                     (jlog/encode-record3 s kind label (:nonce log) (inc slot-idx) (nth parts i)
-                                                          (jlog/part-word i cnt))
-                                     (jlog/encode-record3 s jlog/K_ABORT 0 (:nonce log) (inc slot-idx) nil)))
+                                     (jlog/encode-record s kind label (:nonce log) (inc slot-idx) (nth parts i)
+                                                         (jlog/part-word i cnt))
+                                     (jlog/encode-record s jlog/K_ABORT 0 (:nonce log) (inc slot-idx) nil)))
            (jlog/release! log s))))
      ok?)))
 
-(defn- jlog2-redo
-  "A won commit's redo from its plan (jlog2-plan): [blocks pins] — each of KEPT (the blocks the attempt allocated that
+(defn- jlog-redo
+  "A won commit's redo from its plan (jlog-plan): [blocks pins] — each of KEPT (the blocks the attempt allocated that
    a holder took) with its bytes, flags and pointer column (W1-W3); each of PINS (the other rows its holds touched,
    W4)."
   [sio kept pins]
@@ -1011,7 +901,7 @@
          kept)
    (mapv (fn [off] {:off off :flags 0}) pins)])
 
-(defn- jlog2-plan
+(defn- jlog-plan
   "How a commit is logged, decided before its CAS (after hold-root!): {:cnt :kept :pins} — KEPT the blocks the attempt
    allocated that a holder took (PUB: the new root reaches them; the rest free-unreached! frees after the CAS), PINS
    the other rows its holds touched, CNT the slots their redo takes, exactly — or :fallback, the forced fallback
@@ -1030,18 +920,18 @@
                           (distinct (map u32 touches)))
             body (+ 24 (reduce + 0 (map (fn [off] (+ 16 (d/slab-size (alloc/decode-class-idx off)))) kept))
                     (* 8 (count pins)))
-            cnt (max 1 (quot (+ body (dec jlog/R3_MAX_BODY)) jlog/R3_MAX_BODY))]
+            cnt (max 1 (quot (+ body (dec jlog/REC_MAX_BODY)) jlog/REC_MAX_BODY))]
         (if (> cnt (quot (:n log) 4)) :fallback {:cnt cnt :kept kept :pins pins})))))
 
-(defn- jlog2-drop-pending!
+(defn- jlog-drop-pending!
   "Let go the old roots a batch's commits deferred (their records are durable now)."
   [ds]
   (when-let [pd (:pending-drops (:journal ds))]
     (let [ptrs (loop [] (let [v @pd] (if (compare-and-set! pd v []) v (recur))))]
       (doseq [p ptrs] (tally/drop-root! (:sio ds) p (park-fn ds))))))
 
-(defn- jlog2-commit!
-  "A won v2 commit, after its CAS and epoch bump (LABEL): write its record over the CNT slots from SEQ — COMMIT with
+(defn- jlog-commit!
+  "A won journaled commit, after its CAS and epoch bump (LABEL): write its record over the CNT slots from SEQ — COMMIT with
    the redo, or NOREDO for a FALLBACK? commit (forced before its CAS) — wait until the watermark passes it (a batch
    commit only at its boundary), then let OLD-PTR go. A record a resolver voided (a zombie) is replaced by a
    checkpoint, whose forced domain and ANCHOR cover the commit."
@@ -1051,9 +941,9 @@
                :hash (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))}
         body (if fallback?
                (jlog/encode-commit-body delta nil nil)
-               (let [[blocks pins] (jlog2-redo sio (:kept plan) (:pins plan))]
+               (let [[blocks pins] (jlog-redo sio (:kept plan) (:pins plan))]
                  (jlog/encode-commit-body delta blocks pins)))
-        written? (jlog2-write! ds seq (if fallback? jlog/K_NOREDO jlog/K_COMMIT) label body cnt)
+        written? (jlog-write! ds seq (if fallback? jlog/K_NOREDO jlog/K_COMMIT) label body cnt)
         last-seq (i32/i32 (+ seq (dec cnt)))
         limit (:limit journal)
         boundary? (or (<= limit 1)
@@ -1064,73 +954,73 @@
                           (when last-flush (reset! last-flush (now-ms)))
                           true)))]
     (if (not written?)
-      (do (jlog2-checkpoint! ds)
+      (do (jlog-checkpoint! ds)
           (tally/drop-root! sio old-ptr (park-fn ds)))
       (if boundary?
         (let [t0 (when *flush-timing* (now-ms))]
-          (jlog2-await! ds last-seq)
+          (jlog-await! ds last-seq)
           (when t0 (swap! *flush-timing* conj (- (now-ms) t0)))
           (when *flush-log* (swap! *flush-log* conj {:at (now-ms) :ms (when t0 (- (now-ms) t0))}))
-          (jlog2-drop-pending! ds)
+          (jlog-drop-pending! ds)
           (tally/drop-root! sio old-ptr (park-fn ds)))
         (swap! (:pending-drops journal) conj old-ptr)))
     nil))
 
-(defn- jlog2-abort!
+(defn- jlog-abort!
   "A lost CAS's reservation of CNT slots: an ABORT record in each (the watermark forces them with their neighbours)."
   [ds seq cnt]
   (dotimes [i cnt]
-    (jlog2-write! ds (i32/i32 (+ seq i)) jlog/K_ABORT 0 nil))
+    (jlog-write! ds (i32/i32 (+ seq i)) jlog/K_ABORT 0 nil))
   nil)
 
-(defn- jlog2-note-claim!
+(defn- jlog-note-claim!
   "An atom slot claimed (its pointer CLAIMED, its name hash written): a delta-only record, durable before the claim
    is used, so recovery keeps the slot claimed — the name the registry will give it is never a free slot's."
   [ds slot]
   (let [root-r (:root-r ds)
-        seq (jlog2-reserve! ds false)
+        seq (jlog-reserve! ds false)
         delta {:slot slot :old alloc/NIL_OFFSET :new CLAIMED_SENTINEL
                :hash (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))}]
-    (jlog2-write! ds seq jlog/K_NOREDO (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
-                  (jlog/encode-commit-body delta nil nil))
-    (jlog2-await! ds seq)))
+    (jlog-write! ds seq jlog/K_NOREDO (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                 (jlog/encode-commit-body delta nil nil))
+    (jlog-await! ds seq)))
 
-(defn- jlog2-checkpoint!
+(defn- jlog-checkpoint!
   "A checkpoint (half the ring past the newest anchor, sync!, close; doc/jlog-redo-spec.md §5): reserve a seq, wait
    until every seq before it is durable, force the whole domain, then write an ANCHOR there — the newest anchor's
    table folded with every delta between — wait until it is durable and advance the anchor. A batch's deferred drops
    go after."
   [ds]
   (let [log (:log (:journal ds))
-        seq (jlog2-reserve! ds true)]
-    (jlog2-await! ds (i32/i32 (dec seq)))
-    (jlog2-force-domain! ds)
+        seq (jlog-reserve! ds true)]
+    (jlog-await! ds (i32/i32 (dec seq)))
+    (jlog-force-domain! ds)
     (let [a (jlog/anchor-seq log)
-          anchor (jlog/read-record3 log a)
+          anchor (jlog/read-record log a)
           recs (loop [s (i32/i32 (inc a)) acc []]
-                 (if (== s seq) acc (recur (i32/i32 (inc s)) (conj acc (jlog/read-record3 log s)))))
+                 (if (== s seq) acc (recur (i32/i32 (inc s)) (conj acc (jlog/read-record log s)))))
           [table label] (jlog/fold anchor (jlog/logical (remove nil? recs)))]
-      (when (jlog2-write! ds seq jlog/K_ANCHOR label (jlog/encode-anchor-body table))
-        (jlog2-await! ds seq)
+      (when (jlog-write! ds seq jlog/K_ANCHOR label (jlog/encode-anchor-body table))
+        (jlog-await! ds seq)
         (jlog/advance-anchor! log seq)))
-    (jlog2-drop-pending! ds)))
+    (jlog-drop-pending! ds)))
 
-(defn- jlog2-anchor-fresh!
+(defn- jlog-anchor-fresh!
   "Lay down a fresh ANCHOR of the root's table at the log's tail (a new log, or recovery's end): reserve, write,
    force, advance. Run with no live writer (create, or under the recovery hold)."
   [root-r log]
   (let [{:keys [seq]} (jlog/reserve! log 0 0 (constantly false) d/HEARTBEAT_TIMEOUT_MS)
         table (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES)]
     (jlog/claim-seal! log seq 0)
-    (jlog/write-slot! log seq (jlog/encode-record3 seq jlog/K_ANCHOR (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
-                                                   (:nonce log) 0 (jlog/encode-anchor-body table)))
+    (jlog/write-slot! log seq (jlog/encode-record seq jlog/K_ANCHOR (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                                                  (:nonce log) 0 (jlog/encode-anchor-body table)))
     (jlog/release! log seq)
     (jlog/force-through! log)
     (jlog/advance-anchor! log seq)
     seq))
 
-(defn- jlog2-recover!
-  "Recovery of a v2 log (doc/jlog-redo-spec.md §6), under the recovery hold, no live writer: the newest anchor and
+(defn- jlog-replay!
+  "Recovery of a log (doc/jlog-redo-spec.md §6), under the recovery hold, no live writer: the newest anchor and
    the prefix after it; the table folded; the redo of each COMMIT replayed in log order — block bytes, bitmap bits,
    flags and pointer columns — and every row a replayed record names pinned (count := CPERM); the whole domain
    forced; the table and epoch installed into the root and forced; valid records past the prefix (never
@@ -1161,12 +1051,12 @@
         (mem/sync-region! root-r)))
     (let [next (if anchor
                  (i32/i32 (+ (:seq anchor) 1 (count recs)))
-                 (i32/i32 (inc (or (jlog/max-seq (keep (fn [i] (jlog/read-slot3 log i)) (range (:n log)))) -1))))]
+                 (i32/i32 (inc (or (jlog/max-seq (keep (fn [i] (jlog/read-slot log i)) (range (:n log)))) -1))))]
       ;; records at or past NEXT were never acknowledged: void them before anything new is written at NEXT, or a
       ;; later recovery would read them as the prefix's continuation
       (jlog/void-from! log next)
-      (jlog/rebuild-header2! log next)
-      (jlog2-anchor-fresh! root-r log)
+      (jlog/rebuild-header! log next)
+      (jlog-anchor-fresh! root-r log)
       (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))))
 
 (defn- domain-live?
@@ -1236,13 +1126,10 @@
   {:lustre? (:lustre? opts)})
 
 (defn- jlog-create-opts
-  "A new log's options: v2 (the redo log, one stripe) unless the opener asks for :jlog-version 1."
+  "A new log's options: its slot count (:jlog-slots) and the domain's region options."
   [opts]
-  (let [version (or (:jlog-version opts) jlog/LOG_VERSION)]
-    {:slots (or (:jlog-slots opts) jlog/DEFAULT_SLOTS)
-     :stripes (if (== 2 version) 1 (or (:jlog-stripes opts) jlog/DEFAULT_STRIPES))
-     :version version
-     :region (jlog-region-opts opts)}))
+  {:slots (or (:jlog-slots opts) jlog/DEFAULT_SLOTS)
+   :region (jlog-region-opts opts)})
 
 (defn- legacy-install!
   "Migration's install (§4.7 steps 1-3): the legacy <base>.journal's records read once (eve.jlog/legacy-records:
@@ -1279,67 +1166,33 @@
       (do (when (proc/file-exists? legacy) (legacy-install! root-r legacy))
           (jlog/create! path (jlog-create-opts opts))))))
 
-(declare jlog1-recover!)
-
 (defn- jlog-recover!
-  "Recovery of a non-live jlog domain, under the recovery hold (§4.4 step 4): repair a leaked in-flight count (H5);
-   scan the log; install R* — the valid record with the highest label — into the root when its label or table
-   differs from the root's (a CRC-checked record over an unchecked root table: W1/W2), never a record older than
-   R*, never erasing one; rebuild the reservation state; append an ANCHOR of the root as installed; claim this
-   process's slot inside the hold. Answers {:log :slot-idx :floor}."
+  "Recovery of a non-live journaled domain, under the recovery hold: repair a leaked in-flight count (H5); open the log
+   (or lay one down, after migrating a legacy <base>.journal); replay its prefix (jlog-replay!); rename a migrated
+   legacy journal aside; claim this process's slot inside the hold. Answers {:log :slot-idx}."
   [root-r sio base-path opts]
   (mem/-store-i32! root-r d/ROOT_INFLIGHT_OFFSET 0)
   (let [log (jlog-for-recovery root-r base-path opts)]
-    (if (== 2 (:version log))
-      (do (jlog2-recover! root-r sio log)
-          (let [legacy (str base-path ".journal")]
-            (when (proc/file-exists? legacy) (proc/rename-file! legacy (str legacy ".migrated"))))
-          {:log log :slot-idx (claim-live-slot! root-r true) :floor nil})
-      (jlog1-recover! root-r base-path opts log))))
-
-(defn- jlog1-recover!
-  "jlog-recover!'s v1 arm: install R*, rebuild, ANCHOR. Unless the opener asked for :jlog-version 1, the v1 log is
-   then renamed aside (<base>.jlog.v1, never deleted) and a v2 log laid down, anchored with the installed root."
-  [root-r base-path opts log]
-  (let [recs (jlog/scan log)
-        rstar (jlog/pick recs)
-        e-root (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
-    (when (and rstar
-               (or (not (== (:label rstar) e-root))
-                   (not (enc/bytes= (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES) (:table rstar)))))
-      (mem/-write-bytes! root-r d/ATOM_TABLE_START (:table rstar))
-      (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET (:label rstar))
-      (mem/sync-region! root-r))
-    (jlog/rebuild-header! log recs (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-    (jlog/append! log 0 -1 #(jlog-snapshot root-r) {:kind jlog/KIND_ANCHOR})
-    ;; §4.7 step 5: once the ANCHOR is durable a legacy journal is renamed aside, never deleted
+    (jlog-replay! root-r sio log)
+    ;; once the fresh ANCHOR is durable a legacy journal is renamed aside, never deleted
     (let [legacy (str base-path ".journal")]
       (when (proc/file-exists? legacy) (proc/rename-file! legacy (str legacy ".migrated"))))
-    (if (== 1 (or (:jlog-version opts) jlog/LOG_VERSION))
-      {:log log :slot-idx (claim-live-slot! root-r true) :floor (if rstar (:label rstar) e-root)}
-      (let [path (jlog-path base-path)
-            aside (loop [k 0]
-                    (let [p (str path ".v1" (when (pos? k) (str "-" k)))]
-                      (if (proc/file-exists? p) (recur (inc k)) p)))
-            _ (proc/rename-file! path aside)
-            log2 (jlog/create! path (jlog-create-opts opts))]
-        (jlog2-anchor-fresh! root-r log2)
-        {:log log2 :slot-idx (claim-live-slot! root-r true) :floor nil}))))
+    {:log log :slot-idx (claim-live-slot! root-r true)}))
 
 (defn- jlog-open!
-  "The jlog side of opening a domain (§4.4). A creator — whose root went down under HOLD_RECOVERING
-   (init-domain-root!) — lays the log down, claims its slot, then lets the hold go. A joiner takes the recovery
-   hold: a live domain is joined as it stands (its floor the highest valid label); a domain no process holds is
-   recovered (jlog-recover!). Answers {:log :slot-idx :floor}."
+  "The jlog side of opening a domain. A creator — whose root went down under HOLD_RECOVERING (init-domain-root!) —
+   lays the log down with its first ANCHOR, claims its slot, then lets the hold go. A joiner takes the recovery hold: a
+   live domain is joined as it stands; a domain no process holds is recovered (jlog-recover!). Answers {:log
+   :slot-idx}."
   [root-r sio base-path create? opts]
   (if create?
     (let [log (jlog/create! (jlog-path base-path) (jlog-create-opts opts))
-          _ (when (== 2 (:version log)) (jlog2-anchor-fresh! root-r log))
+          _ (jlog-anchor-fresh! root-r log)
           slot-idx (claim-live-slot! root-r true)]
       (if (mem/-atomic-rmw? root-r)
         (mem/-cas-i32! root-r d/ROOT_HOLD_OFFSET HOLD_RECOVERING 0)
         (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0))
-      {:log log :slot-idx slot-idx :floor (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)})
+      {:log log :slot-idx slot-idx})
     (let [res (with-recovery-hold* root-r
                 (fn [] (if (domain-live? root-r) ::live (jlog-recover! root-r sio base-path opts))))]
       (if (= ::live res)
@@ -1350,9 +1203,7 @@
                                   {:base-path base-path})))
               log (jlog/open path d/HEARTBEAT_TIMEOUT_MS (jlog-region-opts opts))]
           {:log log
-           :slot-idx (claim-live-slot! root-r)
-           :floor (when (== 1 (:version log))
-                    (or (:label (jlog/pick (jlog/scan log))) (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)))})
+           :slot-idx (claim-live-slot! root-r)})
         res))))
 
 (defn- open-mmap-domain!
@@ -1376,14 +1227,7 @@
                    {:log     (:log jl)
                     :limit   (or (:journal-batch opts) 1)
                     :pending (clojure.core/atom 0)
-                    ;; RETENTION FLOOR (fix (b)): the epoch the journal pins against reclamation, set at the open
-                    ;; (jlog-open!: the highest valid label, or the recovered one) and advanced at every flush
-                    ;; (jlog-append!'s FLUSH-ADVANCE)
-                    :floor   (clojure.core/atom (:floor jl))
-                    ;; FLUSH-ADVANCE: the label of the newest record THIS process has durably appended — the
-                    ;; next flush advances :floor to it
-                    :last-epoch (clojure.core/atom nil)
-                    ;; v2: the old roots a batch's commits let go once their records are durable (jlog2-commit!)
+                    ;; the old roots a batch's commits let go once their records are durable (jlog-commit!)
                     :pending-drops (clojure.core/atom [])})
         journal  (cond-> journal
                    (:journal-window-ms opts)
@@ -2012,7 +1856,7 @@
   ;; an in-memory domain binds none, and tally/note-touch! is one nil check (it was a set conj per mutation)
     ;; jolt: an in-memory domain under no outer touched set skips the binding (its value inside is nil either way;
     ;; a binding was ~1.5% of atom-swap-counter there, its frame map built on every attempt); a redo-log commit also
-    ;; notes the blocks eve-deftype fields are written into in place (alloc/*inplace*, jlog2-plan)
+    ;; notes the blocks eve-deftype fields are written into in place (alloc/*inplace*, jlog-plan)
     (let [attempt (fn []
                     (try
                       (let [old-ptr (mem/-load-i32 root-r ptr-off)
@@ -2047,11 +1891,12 @@
                             [:ok new-val delivery])
                             ;; the slot's hold of new, taken before the CAS publishes it (eve.tally/hold-root!)
                           (let [_ (tally/hold-root! sio new-ptr)
-                                  ;; a redo-log (v2) commit: its allocations (read before the log stops), whether it takes the forced
-                                  ;; fallback, and — after any fallback force, before its CAS — its log seq (jlog2-commit!)
-                                v2? (jlog2? ds)
-                                allocs (when v2? (alloc/logged-allocs lsio))
-                                plan (when v2? (jlog2-plan sio (:log journal) allocs @tally/*touches* @alloc/*inplace*))
+                                  ;; a journaled commit: its allocations (read before the log stops), how it is logged (jlog-plan:
+                                  ;; its redo's run of slots, or the forced fallback) and — after any fallback force, before its
+                                  ;; CAS — its log seq (jlog-commit!)
+                                journaled? (jlog? ds)
+                                allocs (when journaled? (alloc/logged-allocs lsio))
+                                plan (when journaled? (jlog-plan sio (:log journal) allocs @tally/*touches* @alloc/*inplace*))
                                 fallback? (= :fallback plan)
                                 jcnt (if (map? plan) (:cnt plan) 1)
                                 _ (when fallback?
@@ -2065,18 +1910,14 @@
                                   ;; tally holds mutated (alloc/sync-touched!) — not the whole slab.
                                   ;; Inside the attempt, so a lost CAS wastes one force and the
                                   ;; retry writes and forces its own blocks; nothing is held across the retry.
-                                  ;; A journal domain's J1 commit forces here too (eve-mmap-journal-plan
-                                  ;; §4.3 step 2): no pointer is visible in the root before the blocks
-                                  ;; it reaches are durable, so the record its append reads names
-                                  ;; forced blocks only, whichever process published them (H2). A batch
-                                  ;; (J10) journal domain defers to its flush, which sweeps the whole
-                                  ;; domain after reading the table it records.
-                                _ (when (and durable-commits? (not v2?)
-                                             (or (nil? journal) (<= (:limit journal) 1)))
+                                  ;; The force-ordering form only (durable, no journal): a journaled commit
+                                  ;; forces nothing here unless it takes the fallback (above) — its record
+                                  ;; carries its redo.
+                                _ (when (and durable-commits? (nil? journal))
                                     (alloc/sync-touched! sio
                                                          (into (into @tally/*touches* (take-unforced! ds))
                                                                (alloc/logged-allocs lsio))))
-                                jseq (when v2? (jlog2-reserve! ds false jcnt))
+                                jseq (when journaled? (jlog-reserve! ds false jcnt))
                                 w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
                             (if (== w old-ptr)
                               (let [label (i32/i32 (inc (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)))]
@@ -2085,39 +1926,19 @@
                                   ;; classes through the logged allocations they already name
                                 (tally/free-unreached! sio (alloc/logged-allocs lsio))
                                 (cond
-                                  v2?
-                                  (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr plan fallback?)
-
-                                  (and durable-commits? journal (<= (:limit journal) 1))
-                                    ;; J1 (journal, per-commit durability): the slot lets old go, then the
-                                    ;; record append and the slot's force are the commit point. The commit
-                                    ;; forced its blocks before its CAS; the drop's descriptor writes are left
-                                    ;; to the next commit's pre-CAS sweep (a crash before it leaves a count
-                                    ;; above its holders: the leak direction, never a use-after-free — §4.3
-                                    ;; step 4).
-                                  (do
-                                    (tally/drop-root! sio old-ptr (park-fn ds))
-                                    (when (:unforced ds)
-                                      (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*))
-                                    (journal-note-commit! ds))
+                                  journaled?
+                                  (jlog-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr plan fallback?)
 
                                   :else
-                                  (do  ;; and the epoch is made durable before swap! returns: a
-                                      ;; batch journal domain appends its flush record at
-                                      ;; its batch boundary (that flush's force is the
-                                      ;; batch's commit point; the root file is a
-                                      ;; checkpoint and is not forced per commit) —
-                                      ;; otherwise (the force-ordering form) the root's
-                                      ;; own range, the epoch word through the slot
-                                      ;; pointer, is forced after the CAS.
+                                  (do  ;; the force-ordering form (durable, no journal): the epoch is made durable before
+                                      ;; swap! returns — the root's own range, the epoch word through the slot pointer,
+                                      ;; is forced after the CAS
                                     (when durable-commits?
-                                      (if journal
-                                        (journal-note-commit! ds)
-                                        (mem/sync-region! root-r
-                                                          (min ptr-off d/ROOT_EPOCH_OFFSET)
-                                                          (+ 4
-                                                             (- (max ptr-off d/ROOT_EPOCH_OFFSET)
-                                                                (min ptr-off d/ROOT_EPOCH_OFFSET))))))
+                                      (mem/sync-region! root-r
+                                                        (min ptr-off d/ROOT_EPOCH_OFFSET)
+                                                        (+ 4
+                                                           (- (max ptr-off d/ROOT_EPOCH_OFFSET)
+                                                              (min ptr-off d/ROOT_EPOCH_OFFSET)))))
                                       ;; the slot lets old go: a block at 0 is parked at the epoch now
                                     (tally/drop-root! sio old-ptr (park-fn ds))
                                       ;; the drop's descriptor writes are forced too (the root
@@ -2141,7 +1962,7 @@
                                   [:ok new-val delivery]))
                               (let [offs (alloc/logged-allocs lsio)]
                                   ;; a redo-log reservation: its slot is closed with an ABORT record
-                                (when v2? (jlog2-abort! ds jseq jcnt))
+                                (when journaled? (jlog-abort! ds jseq jcnt))
                                   ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
                                   ;; share with other values keeps its count), and every other block this attempt allocated that no
                                   ;; holder took is freed now (a value the attempt stored into another atom is that atom's)
@@ -2163,7 +1984,7 @@
                                   (alloc/sync-touched! sio (into @tally/*touches* offs)))
                                 [:retry nil ::none])))))
                       (finally (unpin-epoch! ds))))
-          inplace (when (jlog2? ds) (clojure.core/atom #{}))]
+          inplace (when (jlog? ds) (clojure.core/atom #{}))]
       #?(:jolt (if (or durable-commits? (some? tally/*touches*))
                  (binding [tally/*touches* (when durable-commits? (clojure.core/atom #{}))
                            alloc/*inplace* inplace]
@@ -2584,16 +2405,13 @@
    The journal is <base>.jlog, the mmapped commit log (eve.jlog;
    eve-mmap-journal-plan §4): a fixed-size ring of 4 KiB record slots claimed
    by CAS — one implementation on every host, no file lock. It is a redo log
-   (version 2, doc/jlog-redo-spec.md): a commit's record carries its delta and
-   the bytes it wrote, and one device flush makes it durable; :jlog-version 1
-   lays down the snapshot log of the plan instead (each commit forced before
-   its CAS). :jlog-slots (a power of two, default 1024) sizes it at creation
-   (:jlog-stripes, v1 only). A v1 log is moved to v2 on the first open no
-   other process holds (the v1 file renamed <base>.jlog.v1, never deleted),
-   unless that open asks for :jlog-version 1. A legacy domain's <base>.journal
-   is migrated the same way (and renamed <base>.journal.migrated)."
+   (doc/jlog-redo-spec.md): a commit's record carries its delta and the bytes
+   it wrote, and one device flush makes it durable. :jlog-slots (a power of
+   two, default 1024) sizes it at creation. A legacy domain's <base>.journal
+   is migrated on the first open no other process holds (and renamed
+   <base>.journal.migrated)."
   [base-path & {:keys [capacities lustre? durable? journal-batch journal-window-ms coalesc-descriptors mem-budget segment-bytes
-                       jlog-slots jlog-stripes jlog-version] :or {capacities {} lustre? false durable? true}}]
+                       jlog-slots] :or {capacities {} lustre? false durable? true}}]
   (or (get @domain-cache base-path)
       (let [_  (proc/ensure-parent-dir! base-path)
             ds (open-mmap-domain! base-path (cond-> {:capacities capacities
@@ -2609,9 +2427,7 @@
                                               (assoc :mem-budget mem-budget)
                                               segment-bytes
                                               (assoc :segment-bytes segment-bytes)
-                                              jlog-slots (assoc :jlog-slots jlog-slots)
-                                              jlog-stripes (assoc :jlog-stripes jlog-stripes)
-                                              jlog-version (assoc :jlog-version jlog-version)))
+                                              jlog-slots (assoc :jlog-slots jlog-slots)))
             d  (MmapAtomDomain. ds (clojure.core/atom {}))]
         (swap! domain-cache assoc base-path d)
         d)))
@@ -2632,27 +2448,16 @@
   (mem/sync-region! root-r))
 
 (defn- journal-checkpoint!
-  "A checkpoint (sync!, close): the root's label and atom table read first,
-   the whole domain forced (any pending batch's commits with it: the root
-   file is a checkpoint), then an ANCHOR record appended to the log — no
-   truncation, no rewrite (eve-mmap-journal-plan §4.3). Without a journal
-   this is sync-domain!."
+  "A checkpoint (sync!, close): on a journaled domain jlog-checkpoint! (every commit before it durable, the whole
+   domain forced, an ANCHOR folded from the ring — no truncation, no rewrite), then the reader map and the root
+   forced. Without a journal this is sync-domain!."
   [ds]
   (let [journal (:journal ds)]
-    (cond
-      (jlog2? ds)
+    (if journal
       (do (reset! (:pending journal) 0)
-          (jlog2-checkpoint! ds)
+          (jlog-checkpoint! ds)
           (mem/sync-region! (:rmap-r ds))
           (mem/sync-region! (:root-r ds)))
-
-      journal
-      (let [_ (reset! (:pending journal) 0)
-            snap (jlog-snapshot (:root-r ds))]
-        (sync-domain! ds)
-        (jlog-append! ds jlog/KIND_ANCHOR (constantly snap)))
-
-      :else
       (sync-domain! ds))))
 
 (defn- release-domain! [ds]
@@ -2778,7 +2583,7 @@
         mine (with-domain-write ds false
                (fn [_] (claim-atom-slot! root-r (fnv-1a-hash kw-str))))
         ;; a redo log keeps the claim (the slot's CLAIMED pointer and name hash) durable before the slot is used
-        _ (when (jlog2? ds) (jlog2-note-claim! ds mine))]
+        _ (when (jlog? ds) (jlog-note-claim! ds mine))]
     (when (some? initial-val)
       (mmap-swap! ds mine (constantly initial-val) []))
     (let [slot (register-name! ds kw-str mine)]

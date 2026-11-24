@@ -40,7 +40,7 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 
 ```text
 (persistent-atom-domain base-path & {:keys [capacities lustre? durable? journal-batch
-                                             journal-window-ms jlog-slots jlog-stripes jlog-version
+                                             journal-window-ms jlog-slots
                                              coalesc-descriptors mem-budget segment-bytes]})
 ```
 
@@ -50,8 +50,7 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
   forces, `sync!` is the caller's explicit barrier.
 - The disk tier is journaled whenever it is durable (see *Journal durability*, below): `:journal-batch` (default 1:
   every commit durable when `swap!` returns) and `:journal-window-ms` batch the journal's forces; `:jlog-slots` (a power
-  of two, default 1024) sizes the log when the domain is created; `:jlog-version 1` asks for the v1 log
-  (`:jlog-stripes`, default 1, sizes its stripes).
+  of two, default 1024) sizes the log when the domain is created.
 - `:mem-budget` — bytes: caps the domain's total region growth (see *Tiers and the memory budget*).
 - `:segment-bytes` — a power of two (default 256 MiB): the region mapping window (see *Segmentation*).
 - Which process **creates** a domain is decided by one atomic exclusive create of `<base>.root`
@@ -89,7 +88,7 @@ The window is `:segment-bytes`, an open-time parameter (a power of two, 4096..2^
 256 MiB). It is presentation, not format — stored nowhere in the domain's files — so processes may
 join the same domain with different windows.
 
-### Journal durability and the retention floor
+### Journal durability
 
 A disk domain carries `<base>.jlog` (the disk tier is journaled by design): the commit log, `eve.jlog`
 (`src/eve/jlog.cljc`), one implementation on every host. It is a fixed-size file mapped like the root (the same
@@ -113,17 +112,13 @@ record names (count := held for ever: a count may err high, a leak, never low), 
 table, voids the records past the prefix and appends a fresh anchor. A waiter that finds a dead writer's unwritten
 slot at the watermark forces the whole domain and writes a VOID there. A checkpoint (`sync!`, close, half the ring
 past the newest anchor) waits for the watermark, forces the whole domain and appends an anchor folded from the
-ring; nothing is truncated. A version-1 log (each commit forced before its CAS, records the whole table; the plan's
-design, `:jlog-version 1`) is recovered by its own rule (the highest epoch label) and moved to v2, the old file
-renamed `<base>.jlog.v1`. A domain written by a pre-jlog build (`<base>.journal`, EVJ1) is migrated by the first open
+ring; nothing is truncated. A domain written by a pre-jlog build (`<base>.journal`, EVJ1) is migrated by the first open
 no other process holds: its newest record (by epoch, a legacy record never older than the root) is installed, and
-the file is renamed `<base>.journal.migrated`. The designs and their proofs: `doc/jlog-redo-spec.md` (v2) and eve.db.ds `doc/perf/eve-mmap-journal-plan.md` (v1).
+the file is renamed `<base>.journal.migrated`. The design and its proof: `doc/jlog-redo-spec.md` (it follows eve.db.ds
+`doc/perf/eve-mmap-journal-plan.md`, whose snapshot log it replaces).
 
-A domain on a v1 log keeps a **retention floor** (a v2 log needs none: an old root is let go only after the
-commit that replaced it is durable): the epoch the journal pins against reclamation. It is set at the open (the
-highest valid label, or the recovered one) and advanced by **flush-advance**: each flush records the label of the
-record it appended, and the next flush moves the floor to it. Blocks a still-recoverable epoch needs are therefore
-never reclaimed out from under the journal.
+Reclamation needs no pin beyond the readers': an old root is let go only after the commit that replaced it is
+durable, so no block a recoverable state reaches is ever freed.
 
 ### Tiers and the memory budget
 

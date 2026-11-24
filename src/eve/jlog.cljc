@@ -1,39 +1,37 @@
 (ns eve.jlog
-  "The commit log of a durable disk domain: <base>.jlog, beside <base>.root.
+  "The commit log of a durable disk domain: <base>.jlog, beside <base>.root — a redo log
+   (doc/jlog-redo-spec.md).
 
    One implementation for every host. The log is a fixed-size file mapped
    MAP_SHARED through region/open-mmap-region — the same region, the same
    native binding, every host already opens for the root — and coordinated
    only by CAS on mapped words, as the root's atom table is. No OS file lock.
-   Its only host needs are eve.mem's: i32 load/store/CAS, bulk bytes, and
-   ISyncableRegion's -sync-range! (a durable log refuses a region that cannot
-   force).
+   Its only host needs are eve.mem's: i32 load/store/CAS/wait/notify, bulk
+   bytes, and ISyncableRegion's -sync-range! (a durable log refuses a region
+   that cannot force).
 
    Layout (every word a u32 in the region's own word order, as the root's):
-     page 0   header: magic EVL1 (written last at creation), version, slot
-              bytes, N slots per stripe, S stripes, the file's nonce, the data
-              offset, the recovered epoch; stripe k's 64-byte line at 64+64k
-              holds tail_k (the next seq to reserve: the CAS target) and hint_k
-              (the last completed seq, never authoritative).
-     page 1.. sstate[k][i] (the seq slot i of stripe k is ready to accept) and
-              sowner[k][i] (who holds it: the seq's low 16 bits and 1 + the
-              worker slot).
-     data     S x N slots of 4,096 bytes, one record each:
-              [EVR2][seq][stripe][epoch label][kind][nonce][writer][table-len]
-              [2,048 table bytes][crc32 over everything before it]
-              little-endian.
+     page 0   header: magic EVL1 (written last at creation), version 2, slot
+              bytes, N slots, 1 (the stripe count of the layout), the file's
+              nonce, the data offset, the prefix watermark `durable` (32) and
+              the newest durable anchor's seq (36); at 64, tail (the next seq
+              to reserve: the CAS target).
+     page 1.. sstate[i] (the seq slot i is ready to accept) and sowner[i]
+              (who holds it: the seq's low 16 bits, the owner's state bits
+              and 1 + the worker slot).
+     data     N slots of 4,096 bytes, one record (or one part of a run) each:
+              [EVR3][seq][kind][label][nonce][writer][len][part] (32 bytes),
+              len body bytes, the CRC-32 of everything before it.
 
-   A writer reserves seq t of stripe k by CAS tail_k t -> t+1 once slot
-   t mod N is ready for t (a bounded MPMC ring: a slot is never handed to the
-   next lap while its writer is still writing or forcing it — a slow writer
-   back-pressures, it is never overwritten). It then reads the epoch label and
-   the atom table (the caller's snapshot), writes the record, forces the
-   slot's page (the commit point), and marks the slot ready for seq t+N.
-
-   Recovery scans every slot and keeps the valid records (magic, nonce,
-   stripe, seq mod N, table length and CRC all agree); the record it installs
-   is the one with the highest epoch label (serial arithmetic), never the last
-   in file order, and no record is ever erased."
+   A writer reserves seq t (or a run of seqs) by CAS tail t -> t+n once each
+   slot is ready for its seq (a bounded MPMC ring: a slot is never handed to
+   the next lap while its writer is still writing it, nor past the newest
+   anchor: a slow writer back-pressures, it is never overwritten). It writes
+   its record and releases the slot; the watermark's force-through! forces
+   the run of valid records after `durable` in one msync and advances it — a
+   commit is acknowledged once `durable` passes it. Recovery reads the newest
+   ANCHOR and the consecutive valid records after it (the prefix); nothing in
+   the prefix is ever erased."
   (:refer-clojure :exclude [aget aset alength byte-array unchecked-byte unsigned-bit-shift-right])
   (:require
    [eve.host :refer [aget aset alength byte-array unchecked-byte unsigned-bit-shift-right]]
@@ -50,15 +48,9 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:const LOG_MAGIC 0x45564C31)        ;; "EVL1"
-(def ^:const LOG_VERSION 2)                ;; 2: the redo log (§ v2 below); 1: snapshot records (EVR2)
+(def ^:const LOG_VERSION 2)                ;; the redo log (version 1, the snapshot log of a development build, is gone)
 (def ^:const SLOT_BYTES 4096)
-(def ^:const REC_MAGIC 0x45565232)        ;; "EVR2"
-(def ^:const KIND_COMMIT 1)
-(def ^:const KIND_ANCHOR 2)
 (def ^:const TABLE_BYTES (* d/MAX_ATOM_SLOTS d/ATOM_SLOT_SIZE)) ;; 2048
-(def ^:const REC_TABLE_OFF 32)
-(def ^:const REC_CRC_OFF (+ REC_TABLE_OFF TABLE_BYTES))         ;; 2080
-(def ^:const REC_BYTES (+ REC_CRC_OFF 4))                      ;; 2084
 
 (def ^:const H_MAGIC 0)
 (def ^:const H_VERSION 4)
@@ -67,17 +59,13 @@
 (def ^:const H_S 16)
 (def ^:const H_NONCE 20)
 (def ^:const H_DATA_OFF 24)
-(def ^:const H_RECOVERED_EPOCH 28)
-(def ^:const H_GROUP_DURABLE 32)
-(def ^:const H_DURABLE 32)                ;; v2: the first seq not yet known final and forced (the prefix watermark)
-(def ^:const H_ANCHOR 36)                 ;; v2: the seq of the newest durable ANCHOR record (-1: none yet)
+(def ^:const H_DURABLE 32)                ;; the first seq not yet known final and forced (the prefix watermark)
+(def ^:const H_ANCHOR 36)                 ;; the seq of the newest durable ANCHOR record (-1: none yet)
 (def ^:const STRIPE_BASE 64)
 (def ^:const STRIPE_STRIDE 64)
-(def ^:const MAX_STRIPES 63)
 (def ^:const STATE_BASE 4096)
 
 (def ^:const DEFAULT_SLOTS 1024)
-(def ^:const DEFAULT_STRIPES 1)
 
 (defn- pow2? [n] (and (pos? n) (zero? (bit-and n (dec n)))))
 
@@ -94,7 +82,6 @@
   (+ (data-offset n s) (* s n SLOT_BYTES)))
 
 (defn- tail-off [k] (+ STRIPE_BASE (* STRIPE_STRIDE k)))
-(defn- hint-off [k] (+ STRIPE_BASE (* STRIPE_STRIDE k) 4))
 (defn- sstate-off [{:keys [n]} k i] (+ STATE_BASE (* 4 (+ (* k n) i))))
 (defn- sowner-off [{:keys [n s]} k i] (+ STATE_BASE (* 4 s n) (* 4 (+ (* k n) i))))
 (defn- slot-off [{:keys [n data-off]} k i] (+ data-off (* SLOT_BYTES (+ (* k n) i))))
@@ -124,49 +111,6 @@
                    (bit-shift-left (bit-and (aget b (+ off 3)) 0xFF) 24))))
 
 ;; ---------------------------------------------------------------------------
-;; Records
-;; ---------------------------------------------------------------------------
-
-(defn encode-record
-  "A record's REC_BYTES bytes: seq, stripe, epoch label, kind, nonce, writer
-   (1 + worker slot; 0 for the creator or recovery) and the TABLE_BYTES atom
-   table, then the CRC-32 of everything before it. Every field is written:
-   the buffer is fresh and nothing is left to a previous use."
-  [seq stripe label kind nonce writer ^bytes table]
-  (when-not (== (alength table) TABLE_BYTES)
-    (throw (ex-info "eve.jlog: a record's table is the root's atom table" {:len (alength table)})))
-  (let [b (byte-array REC_BYTES)]
-    (put-u32! b 0 REC_MAGIC)
-    (put-u32! b 4 seq)
-    (put-u32! b 8 stripe)
-    (put-u32! b 12 label)
-    (put-u32! b 16 kind)
-    (put-u32! b 20 nonce)
-    (put-u32! b 24 writer)
-    (put-u32! b 28 TABLE_BYTES)
-    (enc/arraycopy table 0 b REC_TABLE_OFF TABLE_BYTES)
-    (put-u32! b REC_CRC_OFF (crc/crc32 b 0 REC_CRC_OFF))
-    b))
-
-(defn decode-record
-  "The record in B (REC_BYTES bytes read from stripe K's slot I of a log with
-   N slots per stripe and NONCE) as {:seq :stripe :label :kind :writer :table
-   :crc}, or nil when it is not a valid record of that slot: magic, nonce,
-   stripe, seq mod N, table length and CRC must all agree."
-  [^bytes b k i n nonce]
-  (let [seq (get-i32 b 4)]
-    (when (and (== (get-i32 b 0) (i32/i32 REC_MAGIC))
-               (== (get-i32 b 20) (i32/i32 nonce))
-               (== (get-i32 b 8) k)
-               (== (bit-and seq (dec n)) i)
-               (== (get-i32 b 28) TABLE_BYTES)
-               (== (get-i32 b REC_CRC_OFF) (crc/crc32 b 0 REC_CRC_OFF)))
-      (let [table (byte-array TABLE_BYTES)]
-        (enc/arraycopy b REC_TABLE_OFF table 0 TABLE_BYTES)
-        {:seq seq :stripe k :slot i :label (get-i32 b 12) :kind (get-i32 b 16)
-         :writer (get-i32 b 24) :crc (get-i32 b REC_CRC_OFF) :table table}))))
-
-;; ---------------------------------------------------------------------------
 ;; Open / create
 ;; ---------------------------------------------------------------------------
 
@@ -180,27 +124,22 @@
   (let [[a b c e] (proc/random-bytes 4)]
     (i32/i32 (bit-or a (bit-shift-left b 8) (bit-shift-left c 16) (bit-shift-left e 24)))))
 
-(defn- handle [r path n s nonce data-off version]
-  {:r r :path path :n n :s s :mask (dec n) :nonce nonce :data-off data-off :version version})
+(defn- handle [r path n s nonce data-off]
+  {:r r :path path :n n :s s :mask (dec n) :nonce nonce :data-off data-off})
 
 (defn create!
-  "Create <path> as a fresh log: N slots per stripe (a power of two), S stripes
-   (a power of two, at most 63). The file is grown to its full size and every
-   byte written once through the mapping (the preallocation: no page of the
-   log is a hole, so a commit's force never allocates), the header and slot
-   states are laid down, and the magic is written last, after a force: a
-   joiner that sees the magic sees a complete log. :region is the map
-   region/open-mmap-region takes (the domain's own: {:lustre? true} on a
-   Lustre mount, whose atomics are byte-range locks across nodes, as the
-   root's are). Answers the open log."
+  "Create <path> as a fresh log of N slots (:slots, a power of two). The file is grown to its full size and every
+   byte written once through the mapping (the preallocation: no page of the log is a hole, so a commit's force never
+   allocates), the header and slot states are laid down, and the magic is written last, after a force: a joiner that
+   sees the magic sees a complete log. :region is the map region/open-mmap-region takes (the domain's own: {:lustre?
+   true} on a Lustre mount, whose atomics are byte-range locks across nodes, as the root's are). Answers the open
+   log; its anchor is laid by the caller (eve.atom)."
   ([path] (create! path nil))
-  ([path {:keys [slots stripes nonce region version] :or {slots DEFAULT_SLOTS stripes DEFAULT_STRIPES version LOG_VERSION}}]
-   (when-not (and (pow2? slots) (pow2? stripes) (<= stripes MAX_STRIPES) (#{1 2} version)
-                  (or (== version 1) (== stripes 1)))
-     (throw (ex-info "eve.jlog: slots and stripes must be powers of two (stripes <= 63)"
-                     {:slots slots :stripes stripes})))
+  ([path {:keys [slots nonce region] :or {slots DEFAULT_SLOTS}}]
+   (when-not (pow2? slots)
+     (throw (ex-info "eve.jlog: the slot count must be a power of two" {:slots slots})))
    (let [n slots
-         s stripes
+         s 1
          size (file-bytes n s)
          data-off (data-offset n s)
          nonce (or nonce (random-u32))
@@ -213,19 +152,17 @@
          (let [len (min 65536 (- size off))]
            (mem/-write-bytes! r off (if (== len 65536) chunk (byte-array len)))
            (recur (+ off len)))))
-     (mem/-store-i32! r H_VERSION version)
+     (mem/-store-i32! r H_VERSION LOG_VERSION)
      (mem/-store-i32! r H_SLOT_BYTES SLOT_BYTES)
      (mem/-store-i32! r H_N n)
      (mem/-store-i32! r H_S s)
      (mem/-store-i32! r H_NONCE nonce)
      (mem/-store-i32! r H_DATA_OFF data-off)
-     (let [log (handle r path n s nonce data-off version)]
-       (when (== version 2)
-         (mem/-store-i32! r H_DURABLE 0)
-         (mem/-store-i32! r H_ANCHOR -1))
-       (dotimes [k s]
-         (dotimes [i n]
-           (mem/-store-i32! r (sstate-off log k i) i)))
+     (mem/-store-i32! r H_DURABLE 0)
+     (mem/-store-i32! r H_ANCHOR -1)
+     (let [log (handle r path n s nonce data-off)]
+       (dotimes [i n]
+         (mem/-store-i32! r (sstate-off log 0 i) i))
        (mem/sync-region! r 0 size)
        (mem/-store-i32! r H_MAGIC (i32/i32 LOG_MAGIC))
        (mem/sync-region! r 0 4096)
@@ -255,7 +192,8 @@
 (defn open
   "Open the existing log at PATH (waiting up to TIMEOUT-MS for its creator to
    finish), mapped with REGION-OPTS (create!'s :region). Throws on a wrong
-   magic or version: a log is never overwritten."
+   magic, version or layout: a log is never overwritten (a version-1 log, the snapshot log of a development build of
+   this log, is refused too)."
   ([path] (open path d/HEARTBEAT_TIMEOUT_MS nil))
   ([path timeout-ms] (open path timeout-ms nil))
   ([path timeout-ms region-opts]
@@ -266,16 +204,16 @@
          n (mem/-load-i32 hr H_N)
          s (mem/-load-i32 hr H_S)
          data-off (mem/-load-i32 hr H_DATA_OFF)]
-     (when-not (and (#{1 2} version) (== slot-bytes SLOT_BYTES) (pow2? n) (pow2? s)
+     (when-not (and (== version LOG_VERSION) (== slot-bytes SLOT_BYTES) (pow2? n) (== s 1)
                     (== data-off (data-offset n s)))
        (throw (ex-info "eve.jlog: unsupported log version or layout"
                        {:path path :version version :slot-bytes slot-bytes :n n :s s})))
      (let [r (region/open-mmap-region path (file-bytes n s) region-opts)]
        (check-syncable! r path)
-       (handle r path n s (mem/-load-i32 r H_NONCE) data-off version)))))
+       (handle r path n s (mem/-load-i32 r H_NONCE) data-off)))))
 
 ;; ---------------------------------------------------------------------------
-;; Reserve and append (plan §4.3 steps 5-10)
+;; Reserve
 ;; ---------------------------------------------------------------------------
 
 (defn- owner-word
@@ -303,7 +241,7 @@
    when that writer is dead by STALE? (or, for a holder that never named
    itself, after STALE-MS). Answers {:seq :slot :waits}, waits counting the
    reclaim checks made. With GATE (fn [t] ok?), a seq the gate refuses is not
-   reserved: :full is answered instead (v2: the ring would lap its newest
+   reserved: :full is answered instead (the ring would lap its newest
    anchor)."
   ([log k me stale? stale-ms] (reserve! log k me stale? stale-ms nil))
   ([log k me stale? stale-ms gate]
@@ -339,7 +277,7 @@
            (recur waits nil)))))))
 
 (defn reserve-run!
-  "Reserve CNT consecutive seqs of a one-stripe (v2) log for worker ME — a commit whose redo takes CNT slots: once
+  "Reserve CNT consecutive seqs for worker ME — a commit whose redo takes CNT slots: once
    every slot of the run is ready for its seq (a slot its previous lap still holds is waited on, and reclaimed from a
    dead holder, as reserve! does), one CAS moves the tail past the run. GATE (fn [seq] ok?) is asked of the run's
    last seq; a refusal answers :full. Answers {:seq (the run's first) :n :waits}."
@@ -382,103 +320,18 @@
                 :else                   ;; the tail read was stale
                 (recur waits nil)))))))))
 
-(defn append!
-  "Append one record to stripe K for worker ME (plan §4.3 steps 5-10):
-   reserve, call (SNAPSHOT!) for [epoch-label table-bytes] (read after the
-   reservation), write the record, force the slot's page — the commit point —
-   then mark the slot ready for its next lap. opts: :kind (KIND_COMMIT),
-   :stale? (fn [worker] dead?), :stale-ms, :before-force (a test hook run
-   between the write and the force). Answers {:seq :stripe :slot :label
-   :waits}. The slot is released even when the write or the force throws, so
-   a failed append never wedges the ring; the throw reaches the caller."
-  [log k me snapshot! {:keys [kind stale? stale-ms before-force]
-                       :or {kind KIND_COMMIT stale-ms d/HEARTBEAT_TIMEOUT_MS}}]
-  (let [r (:r log)
-        stale? (or stale? (constantly false))
-        {:keys [seq slot waits]} (reserve! log k me stale? stale-ms)
-        off (slot-off log k slot)]
-    (try
-      (let [[label table] (snapshot!)
-            rec (encode-record seq k label kind (:nonce log) (inc me) table)]
-        (mem/-write-bytes! r off rec)
-        (when before-force (before-force))
-        (mem/sync-region! r off SLOT_BYTES)
-        {:seq seq :stripe k :slot slot :label label :waits waits})
-      (finally
-        (mem/-store-i32! r (sstate-off log k slot) (i32/i32 (+ seq (:n log))))
-        (mem/-store-i32! r (hint-off k) seq)))))
-
-;; ---------------------------------------------------------------------------
-;; Scan, pick, rebuild (plan §4.4)
-;; ---------------------------------------------------------------------------
-
-(defn read-slot
-  "The valid record in stripe K's slot I, or nil."
-  [log k i]
-  (decode-record (mem/-read-bytes (:r log) (slot-off log k i) REC_BYTES) k i (:n log) (:nonce log)))
-
-(defn scan
-  "Every valid record in the log, in stripe then slot order."
-  [log]
-  (vec (for [k (range (:s log))
-             i (range (:n log))
-             :let [rec (read-slot log k i)]
-             :when rec]
-         rec)))
-
-(defn pick
-  "R*: among RECS (valid records), the one with the highest epoch label by
-   serial arithmetic relative to the first record's label; equal labels go to
-   the lower stripe, then the higher seq. nil when RECS is empty."
-  [recs]
-  (when (seq recs)
-    (let [ref (:label (first recs))]
-      (reduce (fn [best r]
-                (let [dl (serial- (serial- (:label r) ref) (serial- (:label best) ref))]
-                  (cond
-                    (pos? dl) r
-                    (neg? dl) best
-                    (< (:stripe r) (:stripe best)) r
-                    (> (:stripe r) (:stripe best)) best
-                    (pos? (serial- (:seq r) (:seq best))) r
-                    :else best)))
-              (first recs)
-              (rest recs)))))
-
 (defn max-seq
-  "The highest seq (serial arithmetic) among RECS of one stripe, or nil."
+  "The highest seq (serial arithmetic) among RECS, or nil."
   [recs]
   (when (seq recs)
     (reduce (fn [m r] (if (pos? (serial- (:seq r) m)) (:seq r) m))
             (:seq (first recs))
             (rest recs))))
 
-(defn rebuild-header!
-  "Lay the reservation state down again from RECS (the valid records): each
-   stripe's tail is one past its highest valid seq (0 for a stripe with none),
-   every slot ready for the next seq of its residue at or after that tail, no
-   owners; then force the header and state pages. Run only with no live
-   writer (recovery, under the domain's recovery hold)."
-  [log recs recovered-epoch]
-  (let [r (:r log)
-        n (:n log)
-        mask (:mask log)
-        by-stripe (group-by :stripe recs)]
-    (dotimes [k (:s log)]
-      (let [t (or (some-> (max-seq (get by-stripe k)) inc i32/i32) 0)]
-        (dotimes [i n]
-          (mem/-store-i32! r (sstate-off log k i) (i32/i32 (+ t (bit-and (- i t) mask))))
-          (mem/-store-i32! r (sowner-off log k i) 0))
-        (mem/-store-i32! r (hint-off k) (i32/i32 (dec t)))
-        (mem/-store-i32! r (tail-off k) t)))
-    (mem/-store-i32! r H_RECOVERED_EPOCH (i32/i32 recovered-epoch))
-    (mem/sync-region! r 0 (:data-off log))
-    nil))
-
 ;; ---------------------------------------------------------------------------
-;; v2: the redo log (doc/jlog-redo-spec.md)
+;; Records and the prefix watermark (doc/jlog-redo-spec.md)
 ;;
-;; One stripe. A record is [EVR3][seq][kind][label][nonce][writer][len][0]
+;; A record is [EVR3][seq][kind][label][nonce][writer][len][part]
 ;; then len body bytes, then the CRC-32 of everything before it. A writer
 ;; reserves its seq BEFORE its root CAS (log order then extends
 ;; happens-before: a commit that read another's published root reserves
@@ -491,9 +344,9 @@
 ;; consecutive valid records after it — the prefix.
 ;; ---------------------------------------------------------------------------
 
-(def ^:const REC3_MAGIC 0x45565233)       ;; "EVR3"
-(def ^:const R3_HEADER 32)
-(def ^:const R3_MAX_BODY (- SLOT_BYTES R3_HEADER 4)) ;; 4060
+(def ^:const REC_MAGIC 0x45565233)       ;; "EVR3"
+(def ^:const REC_HEADER 32)
+(def ^:const REC_MAX_BODY (- SLOT_BYTES REC_HEADER 4)) ;; 4060
 (def ^:const K_COMMIT 1)                  ;; delta + redo
 (def ^:const K_NOREDO 2)                  ;; delta only: its blocks were forced before it was written
 (def ^:const K_ABORT 3)                   ;; a reserved slot whose CAS lost
@@ -507,16 +360,16 @@
   [idx cnt]
   (if (<= cnt 1) 0 (bit-or (bit-shift-left idx 16) cnt)))
 
-(defn encode-record3
-  "A v2 record's bytes: header, BODY (a byte array, or nil for none), CRC-32. PART (part-word) names a part of a run
+(defn encode-record
+  "A record's bytes: header, BODY (a byte array, or nil for none), CRC-32. PART (part-word) names a part of a run
    of slots that carries one commit."
-  ([seq kind label nonce writer body] (encode-record3 seq kind label nonce writer body 0))
+  ([seq kind label nonce writer body] (encode-record seq kind label nonce writer body 0))
   ([seq kind label nonce writer ^bytes body part]
    (let [len (if body (alength body) 0)
-         _ (when (> len R3_MAX_BODY)
+         _ (when (> len REC_MAX_BODY)
              (throw (ex-info "eve.jlog: a record body larger than its slot" {:len len})))
-         b (byte-array (+ R3_HEADER len 4))]
-     (put-u32! b 0 REC3_MAGIC)
+         b (byte-array (+ REC_HEADER len 4))]
+     (put-u32! b 0 REC_MAGIC)
      (put-u32! b 4 seq)
      (put-u32! b 8 kind)
      (put-u32! b 12 label)
@@ -524,42 +377,42 @@
      (put-u32! b 20 writer)
      (put-u32! b 24 len)
      (put-u32! b 28 part)
-     (when (pos? len) (enc/arraycopy body 0 b R3_HEADER len))
-     (put-u32! b (+ R3_HEADER len) (crc/crc32 b 0 (+ R3_HEADER len)))
+     (when (pos? len) (enc/arraycopy body 0 b REC_HEADER len))
+     (put-u32! b (+ REC_HEADER len) (crc/crc32 b 0 (+ REC_HEADER len)))
      b)))
 
 (defn- decode-at
-  "The valid v2 record in slot I, or nil; with SEQ, only a record of that seq."
+  "The valid record in slot I, or nil; with SEQ, only a record of that seq."
   [log i seq]
   (let [r (:r log)
         off (slot-off log 0 i)
-        h (mem/-read-bytes r off R3_HEADER)
+        h (mem/-read-bytes r off REC_HEADER)
         s (get-i32 h 4)]
-    (when (and (== (get-i32 h 0) (i32/i32 REC3_MAGIC))
+    (when (and (== (get-i32 h 0) (i32/i32 REC_MAGIC))
                (== (get-i32 h 16) (i32/i32 (:nonce log)))
                (== (bit-and s (:mask log)) i)
                (or (nil? seq) (== s (i32/i32 seq))))
       (let [len (get-i32 h 24)]
-        (when (<= 0 len R3_MAX_BODY)
-          (let [b (mem/-read-bytes r off (+ R3_HEADER len 4))]
-            (when (== (get-i32 b (+ R3_HEADER len)) (crc/crc32 b 0 (+ R3_HEADER len)))
+        (when (<= 0 len REC_MAX_BODY)
+          (let [b (mem/-read-bytes r off (+ REC_HEADER len 4))]
+            (when (== (get-i32 b (+ REC_HEADER len)) (crc/crc32 b 0 (+ REC_HEADER len)))
               (let [body (byte-array len)]
-                (when (pos? len) (enc/arraycopy b R3_HEADER body 0 len))
+                (when (pos? len) (enc/arraycopy b REC_HEADER body 0 len))
                 {:seq s :kind (get-i32 b 8) :label (get-i32 b 12) :writer (get-i32 b 20) :part (get-i32 b 28)
                  :body body}))))))))
 
-(defn read-record3
-  "The valid v2 record of SEQ (in its slot), or nil: unwritten, torn, another lap's, another file's."
+(defn read-record
+  "The valid record of SEQ (in its slot), or nil: unwritten, torn, another lap's, another file's."
   [log seq]
   (decode-at log (bit-and seq (:mask log)) seq))
 
-(defn read-slot3
-  "The valid v2 record in slot I, whatever its seq, or nil."
+(defn read-slot
+  "The valid record in slot I, whatever its seq, or nil."
   [log i]
   (decode-at log i nil))
 
 (defn void-from!
-  "Void every valid v2 record whose seq is at or past NEXT (serial): its magic zeroed and its slot forced. Recovery
+  "Void every valid record whose seq is at or past NEXT (serial): its magic zeroed and its slot forced. Recovery
    runs this before writing at NEXT: such records were never acknowledged, and left valid they would read as the
    continuation of a later prefix."
   [log next]
@@ -632,7 +485,7 @@
   (let [r (:r log)]
     (loop []
       (let [d (mem/-load-i32 r H_DURABLE)
-            e (loop [e d] (if (read-record3 log e) (recur (i32/i32 (inc e))) e))]
+            e (loop [e d] (if (read-record log e) (recur (i32/i32 (inc e))) e))]
         (if (== e d)
           d
           (do (sync-seqs! log d e)
@@ -661,7 +514,7 @@
         resolved (i32/i32 (bit-or (bit-shift-left (bit-and h 0xFFFF) 16) OWNER_RESOLVED))]
     (when (and (not (== w resolved)) (== w (mem/-cas-i32! r o w resolved)))
       (force!)
-      (write-slot! log h (encode-record3 h K_VOID 0 (:nonce log) 0 nil))
+      (write-slot! log h (encode-record h K_VOID 0 (:nonce log) 0 nil))
       (release! log h))
     nil))
 
@@ -692,12 +545,12 @@
                       anchors)]
         (cons a (loop [s (i32/i32 (inc (:seq a)))
                        acc []]
-                  (if-let [rec (read-record3 log s)]
+                  (if-let [rec (read-record log s)]
                     (recur (i32/i32 (inc s)) (conj acc rec))
                     acc)))))))
 
-(defn rebuild-header2!
-  "Lay the v2 reservation state down at NEXT (the seq after the recovered prefix): the tail, every slot ready for its
+(defn rebuild-header!
+  "Lay the reservation state down at NEXT (the seq after the recovered prefix): the tail, every slot ready for its
    residue's next seq at or after NEXT, no owners, the watermark at NEXT; force the header and state pages. Run only
    with no live writer (recovery, under the recovery hold)."
   [log next]
@@ -800,14 +653,14 @@
       acc)))
 
 (defn split-body
-  "BODY in CNT parts of at most R3_MAX_BODY bytes each, in order (the last ones empty when it is shorter)."
+  "BODY in CNT parts of at most REC_MAX_BODY bytes each, in order (the last ones empty when it is shorter)."
   [^bytes body cnt]
   (let [n (alength body)
-        _ (when (> n (* cnt R3_MAX_BODY))
+        _ (when (> n (* cnt REC_MAX_BODY))
             (throw (ex-info "eve.jlog: a record body past its reserved run" {:len n :parts cnt})))]
     (mapv (fn [i]
-            (let [from (min n (* i R3_MAX_BODY))
-                  to (min n (* (inc i) R3_MAX_BODY))
+            (let [from (min n (* i REC_MAX_BODY))
+                  to (min n (* (inc i) REC_MAX_BODY))
                   b (byte-array (- to from))]
               (when (pos? (- to from)) (enc/arraycopy body from b 0 (- to from)))
               b))

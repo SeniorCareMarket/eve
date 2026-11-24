@@ -15,27 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flushes; every later one: 1). Non-Linux hosts and Lustre domains force region by region as before. The Node addon
   gains seven file functions (rebuild it).
 
-- **Changed (every host): the jlog is a redo log — one device flush per commit.** A commit no longer forces the slab
-  classes it touched before its CAS (11 msyncs per commit measured on jolt); its record carries the delta and the
-  bytes of its new blocks, it waits on the log's prefix watermark (one msync, shared by concurrent commits), and it
-  lets its old root go only once the record is durable. Recovery replays the prefix over the newest anchor and pins
-  the rows it touched (a leak, never a use-after-free). A large redo spans a run of slots, still one flush (an
-  eve.db.ds transaction on the JVM: 10.2-10.8 ms before, 5.3-6.4 ms after). Commits that cannot carry their redo
-  (past a quarter of the ring, the coalesced class, an in-place deftype write) force before their CAS and log the
-  delta only. v1 logs are moved to v2
-  on the first open no other process holds (renamed `<base>.jlog.v1`); `:jlog-version 1` keeps v1.
-  `doc/jlog-redo-spec.md`. **Fixed (Node):** the module slab's whole-domain force skipped the descriptor flags and
-  pointer columns.
-
-- **Changed (every host): the commit journal is `<base>.jlog`, one cljc implementation (`eve.jlog`).** A fixed-size
-  ring of 4 KiB record slots in a file mapped like the root, claimed by CAS on mapped words — no OS file lock. It
-  replaces the eleven per-host `eve.journal-file` adapters, whose locks did not exclude each other across hosts (a
-  Node process and a JVM or jolt process could append at once and overwrite each other's records) and whose
-  recovery installed the last record in file order: mixed-host domains lost committed transactions on reopen.
-  Recovery now installs the valid record with the highest epoch and never erases one. A J1 commit forces its blocks
-  before its root CAS, so a record never names another process's unforced blocks. A domain with a legacy
-  `<base>.journal` is migrated on the first open no other process holds (the file is renamed
-  `<base>.journal.migrated`); a live legacy domain is refused. New options `:jlog-slots`, `:jlog-stripes`.
+- **Changed (every host): the commit journal is `<base>.jlog`, one cljc implementation (`eve.jlog`) — a redo log,
+  one device flush per commit.** A fixed-size ring of 4 KiB record slots in a file mapped like the root, claimed by
+  CAS on mapped words — no OS file lock. It replaces the eleven per-host `eve.journal-file` adapters, whose locks did
+  not exclude each other across hosts (a Node process and a JVM or jolt process could append at once and overwrite
+  each other's records) and whose recovery installed the last record in file order: mixed-host domains lost
+  committed transactions on reopen. A commit forces no slab file: it reserves its log seq before its root CAS (log
+  order extends happens-before), writes one record — its delta and the bytes of its new blocks — and waits on the
+  log's prefix watermark (one msync, shared by concurrent commits); it lets its old root go only once the record is
+  durable. A large redo spans a run of slots, still one flush (an eve.db.ds transaction on the JVM: 10.2-10.8 ms
+  before, 5.3-6.4 ms after). Commits that cannot carry their redo (past a quarter of the ring, the coalesced class, an
+  in-place deftype write) force before their CAS and log the delta only. Recovery replays the prefix over the newest
+  anchor and pins the rows it touched (a leak, never a use-after-free); nothing in the prefix is erased. A domain with
+  a legacy `<base>.journal` is migrated on the first open no other process holds (the file is renamed
+  `<base>.journal.migrated`); a live legacy domain is refused. New option `:jlog-slots`. `doc/jlog-redo-spec.md`.
+  **Fixed (Node):** the module slab's whole-domain force skipped the descriptor flags and pointer columns.
 - **Fixed (jolt, babashka's lock-only region, glojure's region):** the region forces its pages (`msync`); before,
   every slab and root force on them was a silent no-op. **Fixed (every JVM-slab host):** the whole-domain force
   also forces the descriptor flags and pointer columns. **Fixed (Node):** the addon's `msync` rounds to the host's

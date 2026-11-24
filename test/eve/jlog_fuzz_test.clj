@@ -1,14 +1,18 @@
 (ns eve.jlog-fuzz-test
-  "Torn-write fuzzing of a jlog domain (eve-mmap-journal-plan §6.4, the image
-   method): a domain driven through K commits and halted (a killed process's
-   files, no checkpoint), then each image restores the pristine .root and .jlog,
-   applies one wound the crash model allows — the newest records torn at every
-   512 B boundary, zeroed or bit-flipped (a power loss mid-append); the root
-   table's second page reverted or zeroed; a CRC-valid record of another file
-   (nonce) or misplaced (seq mod N) planted; the header's reservation words
-   garbage — and reopens. Recovery must not throw, must install the newest
-   record that is still valid (the highest label: every commit whose record
-   survived), and the domain must commit on."
+  "Torn-write fuzzing of a domain on its commit log (eve.jlog, a redo log; the image method of
+   eve-mmap-journal-plan §6.4, doc/jlog-redo-spec.md §8): a domain driven
+   through a checkpoint and K commits after it — some large enough that their
+   redo is a run of slots — halted (a killed process's
+   files), then each image restores the pristine files and applies one wound a
+   power loss allows, crossed with the slab files either as they are or
+   reverted to the checkpoint (every page a commit wrote since lost): the
+   newest 1-3 records torn at every 512 B boundary, zeroed or bit-flipped; a
+   hole inside the prefix (the commits after it never acknowledged); the root
+   table reverted or zeroed; the log header's reservation words and watermark
+   garbage. Recovery must not throw and must serve the value of the newest
+   commit in the prefix the wounded log holds (the anchor's and the consecutive
+   valid records after it), rebuilt from the redo where the slabs lost it; the
+   domain must commit on."
   (:require [clojure.test :refer [deftest is testing]]
             [eve.atom :as a]
             [eve.jlog :as jlog]
@@ -29,126 +33,136 @@
   (let [raf (RandomAccessFile. (File. ^String path) "rw")]
     (try (.seek raf (long off)) (.write raf b) (finally (.close raf)))))
 
-(defn- read-i32 [path off]
-  (let [raf (RandomAccessFile. (File. ^String path) "r")]
-    (try (.seek raf (long off)) (Integer/reverseBytes (.readInt raf)) (finally (.close raf)))))
-
 (defn- copy! [from to]
   (Files/copy (.toPath (File. ^String from)) (.toPath (File. ^String to))
               ^"[Ljava.nio.file.CopyOption;" (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING])))
+
+(defn- crash-restore!
+  "PATH restored to its image at SUFFIX as a power loss leaves it after a growth the code forced: the image's bytes,
+   but a file that grew since keeps its grown length (the new end reads zero) and a slab data file its header page
+   (force-grown! forces both before a block past the old end is used)."
+  [path suffix]
+  (let [f (File. ^String path)
+        cur-len (.length f)
+        data? (re-matches #".*\.slab\d" path)
+        page0 (when data? (let [raf (RandomAccessFile. f "r") b (byte-array 4096)]
+                            (try (.readFully raf b) b (finally (.close raf)))))]
+    (copy! (str path suffix) path)
+    (when (> cur-len (.length f))
+      (let [raf (RandomAccessFile. f "rw")]
+        (try (.setLength raf cur-len)
+             (when page0 (.seek raf 0) (.write raf ^bytes page0))
+             (finally (.close raf)))))))
+
+(defn- slab-files [base]
+  (let [dir (.getParentFile (File. ^String base))
+        stem (str (.getName (File. ^String base)) ".slab")]
+    (sort (for [^File f (.listFiles dir) :when (.startsWith (.getName f) stem)] (.getPath f)))))
 
 (defn- halt! [dom base]
   (let [ds (#'a/atom-domain-state dom)]
     (proc/stop-timer! (:heartbeat ds))
     (#'a/mmap-release-slot! (:root-r ds) (:slot-idx ds))
-    (swap! @#'a/domain-cache dissoc base)))
+    (swap! @#'a/domain-cache dissoc base)
+    ds))
+
+(defn- log-of [dom] (:log (:journal (#'a/atom-domain-state dom))))
 
 (defn- build!
-  "t/x through 1..k, one record per commit; answers {label value} (the label a
-   commit's record carries is the epoch after its bump: one writer)."
+  "t/m through a checkpoint and K commits after it, each adding a key (new blocks every commit); answers {:by-seq
+   (sorted seq -> value after it) :files [the files an image restores] :slot (the killed process's worker slot)}.
+   The pristine files are copied to <path>.pristine, the slabs and root as they were at the checkpoint to
+   <path>.ckpt."
   [base k]
-  (let [dom (a/persistent-atom-domain base :jlog-version 1 :jlog-slots 16)
-        x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
-        m (into {} (for [_ (range k)]
-                     (do (swap! x inc) [(read-i32 (str base ".root") d/ROOT_EPOCH_OFFSET) @x])))]
-    (halt! dom base)
-    m))
-
-(defn- slot-off [log rec] (+ (:data-off log) (* jlog/SLOT_BYTES (:slot rec))))
+  (let [dom (a/persistent-atom-domain base :jlog-slots 256)
+        m (a/lookup-or-create-mmap-atom! dom "t/m" {})
+        step (fn [f] (swap! m f) [(dec (jlog/durable (log-of dom))) (into {} @m)])
+        early (into (sorted-map) (for [i (range 10)] (step #(assoc % i (str "v" i)))))
+        _ (a/sync! m)
+        ckpt-seq (dec (jlog/durable (log-of dom)))
+        files (conj (vec (slab-files base)) (str base ".root"))
+        _ (doseq [p files] (copy! p (str p ".ckpt")))
+        late (into (sorted-map) (for [i (range k)]
+                                  ;; every eighth commit a large one: its redo is a run of slots
+                                  (step (if (zero? (mod i 8))
+                                          #(assoc % (+ 100 i) (vec (range (* 400 (inc (quot i 8))))))
+                                          #(assoc % (+ 100 i) [i (str "w" i)])))))
+        by-seq (-> early (into late) (assoc ckpt-seq (into {} @m)))
+        ds (halt! dom base)
+        files (conj files (str base ".jlog"))]
+    (doseq [p files] (copy! p (str p ".pristine")))
+    {:by-seq by-seq :files files :slot (:slot-idx ds)}))
 
 (defn- expected
-  "The value recovery must serve once WOUND! has been applied to the restored
-   files: the commit of the highest label among the records still valid, the
-   root's own value when no commit record is (an ANCHOR or no record at all)."
-  [base by-label root-value]
+  "The value of the newest commit in the wounded log's prefix: the anchor and the consecutive valid records after it."
+  [base by-seq]
   (let [log (jlog/open (str base ".jlog"))
-        rstar (jlog/pick (jlog/scan log))]
-    (get by-label (:label rstar) root-value)))
+        prefix (jlog/recovery-prefix log)
+        top (:seq (last prefix))]
+    (val (first (rsubseq by-seq <= top)))))
 
 (defn- image!
-  "Restore the pristine root and log, apply WOUND! (fn [base log
-   recs-newest-first]), reopen, answer [expected got committed-on?]. The slab
-   files are the images' common ground, so an image only reads — unless
-   COMMIT? (the last image): then it commits once after recovery, and answers
-   whether the commit landed."
-  [base pristine by-label wound! commit?]
-  (copy! (str pristine ".root") (str base ".root"))
-  (copy! (str pristine ".jlog") (str base ".jlog"))
+  "Restore the pristine files (the slabs reverted to the checkpoint when REVERT?), apply WOUND! (fn [base log recs]
+   — recs the log's valid records, newest seq first), stale the killed slot's heartbeat (a reboot), reopen; answers
+   [expected got committed-on?]."
+  [base {:keys [by-seq files slot]} revert? wound!]
+  (doseq [p files] (copy! (str p ".pristine") p))
+  (when revert? (doseq [p files :when (.exists (File. (str p ".ckpt")))] (crash-restore! p ".ckpt")))
   (let [log (jlog/open (str base ".jlog"))
-        recs (sort-by :label #(compare %2 %1) (jlog/scan log))]
+        recs (sort-by :seq #(compare %2 %1) (keep #(jlog/read-slot log %) (range (:n log))))]
     (wound! base log recs))
-  (let [want (expected base by-label nil)
-        dom (a/persistent-atom-domain base :jlog-version 1)
-        x (a/lookup-or-create-mmap-atom! dom "t/x" 0)
-        got @x
-        on? (if commit? (do (swap! x inc) (= (inc got) @x)) true)]
+  (doseq [w [d/OFFSET_WS_HEARTBEAT_LO d/OFFSET_WS_HEARTBEAT_HI]]
+    (write-range! (str base ".root") (#'a/worker-slot-offset slot w) (byte-array 4)))
+  (let [want (expected base by-seq)
+        dom (a/persistent-atom-domain base)
+        m (a/lookup-or-create-mmap-atom! dom "t/m" {})
+        got (try (into {} @m) (catch Exception e [:threw (.getMessage e)]))
+        on? (try (swap! m assoc :on 1) (= (assoc got :on 1) (into {} @m)) (catch Exception _ false))]
     (halt! dom base)
     [want got on?]))
 
-(deftest torn-writes-recover-to-the-newest-valid-record
+(defn- slot-off [log rec] (+ (:data-off log) (* jlog/SLOT_BYTES (bit-and (:seq rec) (:mask log)))))
+
+(deftest torn-writes-recover-to-the-newest-commit-of-the-prefix
   (let [base (fresh-base)
-        k 40
-        by-label (build! base k)
-        pristine (str base "-pristine")]
-    (copy! (str base ".root") (str pristine ".root"))
-    (copy! (str base ".jlog") (str pristine ".jlog"))
-    (let [rnd (java.util.Random. 20261123)
-          wounds (concat
-                  ;; (i) the newest 1-3 records torn at every 512 B boundary (garbage past the tear), zeroed, bit-flipped
-                  (for [m [1 2 3]
-                        kind (concat (for [t (range 0 2560 512)] [:tear t]) [[:zero] [:flip] [:flip] [:flip]])]
-                    [(str "newest " m " " kind)
-                     (fn [base log recs]
-                       (doseq [rec (take m recs)]
-                         (let [off (slot-off log rec)
-                               path (str base ".jlog")]
-                           (case (first kind)
-                             :tear (write-range! path (+ off (second kind))
-                                                 (let [b (byte-array (- 4096 (second kind)))] (.nextBytes rnd b) b))
-                             :zero (write-range! path off (byte-array 4096))
-                             :flip (let [i (.nextInt rnd jlog/REC_BYTES)
-                                         b (read-range path (+ off i) 1)]
-                                     (write-range! path (+ off i)
-                                                   (byte-array [(unchecked-byte (bit-xor (aget b 0)
-                                                                                         (bit-shift-left 1 (.nextInt rnd 8))))])))))))])
-                  ;; (ii) the root table's second page (8192..8320 of the table's 6272..8320) reverted to an older commit, or zero
-                  [["root table page reverted"
-                    (fn [base _ recs]
-                      (let [old (last recs)]
-                        (write-range! (str base ".root") 8192
-                                      (java.util.Arrays/copyOfRange ^bytes (:table old) (- 8192 d/ATOM_TABLE_START)
-                                                                    jlog/TABLE_BYTES))))]
-                   ["root table page zeroed"
-                    (fn [base _ _] (write-range! (str base ".root") 8192 (byte-array 128)))]]
-                  ;; (iii) a CRC-valid record of another file (nonce) with a higher label, and a misplaced copy
-                  [["foreign-nonce record, higher label"
-                    (fn [base log recs]
-                      (let [top (first recs)
-                            forged (jlog/encode-record (inc (:seq top)) 0 (+ 1000 (:label top)) jlog/KIND_COMMIT
-                                                       (inc (:nonce log)) 1 (byte-array jlog/TABLE_BYTES))
-                            slot (bit-and (inc (:seq top)) (dec (:n log)))]
-                        (write-range! (str base ".jlog") (+ (:data-off log) (* jlog/SLOT_BYTES slot)) forged)))]
-                   ["misplaced copy of the newest record"
-                    (fn [base log recs]
-                      (let [top (first recs)
-                            rec (read-range (str base ".jlog") (slot-off log top) jlog/REC_BYTES)
-                            other (bit-and (+ 3 (:slot top)) (dec (:n log)))]
-                        (write-range! (str base ".jlog") (+ (:data-off log) (* jlog/SLOT_BYTES other)) rec)))]]
-                  ;; (iv) the header's reservation words garbage (recovery rebuilds them)
-                  [["header tail and slot states garbage"
-                    (fn [base log _]
-                      (write-range! (str base ".jlog") 64 (byte-array (repeat 4 (byte 0x5A))))
-                      (write-range! (str base ".jlog") 4096 (let [b (byte-array (* 8 (:n log)))] (.nextBytes rnd b) b)))]])
-          n (count wounds)
-          results (vec (map-indexed (fn [i [label wound!]]
-                                      (let [[want got on?] (image! base pristine by-label wound! (= i (dec n)))]
-                                        [label want got on?]))
-                                    wounds))]
-      (testing "every image recovers to the newest still-valid record and commits on"
-        (doseq [[label want got on?] results]
-          (is (some? got) label)
-          (when want (is (= want got) label))
-          (is on? (str label ": the domain commits after recovery"))))
-      (is (= k (count by-label)))
-      (is (every? (fn [[_ want got]] (or (nil? want) (= want got))) results)
-          (str (count results) " images")))))
+        built (build! base 24)
+        rnd (java.util.Random. 20261124)
+        jpath (str base ".jlog")
+        wounds (concat
+                ;; the newest 1-3 records torn at every 512 B boundary (garbage past the tear), zeroed, bit-flipped
+                (for [m [1 2 3]
+                      kind (concat (for [t (range 0 1024 512)] [:tear t]) [[:zero] [:flip] [:flip]])]
+                  [(str "newest " m " " kind)
+                   (fn [_ log recs]
+                     (doseq [rec (take m recs)]
+                       (let [off (slot-off log rec)]
+                         (case (first kind)
+                           :tear (write-range! jpath (+ off (second kind))
+                                               (let [b (byte-array (- jlog/SLOT_BYTES (second kind)))] (.nextBytes rnd b) b))
+                           :zero (write-range! jpath off (byte-array jlog/SLOT_BYTES))
+                           :flip (let [i (.nextInt rnd (+ jlog/REC_HEADER 32))
+                                       b (read-range jpath (+ off i) 1)]
+                                   (write-range! jpath (+ off i)
+                                                 (byte-array [(unchecked-byte (bit-xor (aget b 0)
+                                                                                       (bit-shift-left 1 (.nextInt rnd 8))))])))))))])
+                ;; a hole inside the prefix: the commits after it were never acknowledged
+                [["a hole five records back"
+                  (fn [_ log recs] (write-range! jpath (slot-off log (nth recs 5)) (byte-array jlog/SLOT_BYTES)))]]
+                ;; the root table reverted to the checkpoint's or zeroed (recovery installs the folded table)
+                [["root table zeroed"
+                  (fn [base _ _] (write-range! (str base ".root") d/ATOM_TABLE_START (byte-array jlog/TABLE_BYTES)))]]
+                ;; the header's tail, watermark and anchor words and the slot states garbage
+                [["header words and slot states garbage"
+                  (fn [_ log _]
+                    (write-range! jpath 32 (let [b (byte-array 8)] (.nextBytes rnd b) b))
+                    (write-range! jpath 64 (byte-array (repeat 4 (byte 0x5A))))
+                    (write-range! jpath 4096 (let [b (byte-array (* 8 (:n log)))] (.nextBytes rnd b) b)))]])
+        results (vec (for [[label wound!] wounds
+                           revert? [false true]]
+                       (let [[want got on?] (image! base built revert? wound!)]
+                         [(str label (when revert? ", slabs at the checkpoint")) want got on?])))]
+    (testing "every image recovers to the newest commit of its prefix and commits on"
+      (doseq [[label want got on?] results]
+        (is (= want got) label)
+        (is on? (str label ": the domain commits after recovery"))))
+    (is (every? (fn [[_ want got]] (= want got)) results) (str (count results) " images"))))

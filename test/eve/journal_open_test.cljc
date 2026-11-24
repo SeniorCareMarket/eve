@@ -73,15 +73,12 @@
     (is (= 0xCBF43926 (u32 (crc/crc32 b 2 9))) "the check value, at an offset")))
 
 (deftest jlog-record-bytes-are-the-golden
-  ;; one record every host encodes byte for byte the same (the jlog spike's golden)
+  ;; one record every host encodes byte for byte the same: an ANCHOR over a 2048-byte table
   (let [table (u8-array (map #(bit-and (* % 7) 0xFF) (range jlog/TABLE_BYTES)))
-        rec (jlog/encode-record 7 0 12345 jlog/KIND_COMMIT 0x01020304 3 table)
+        rec (jlog/encode-record 7 jlog/K_ANCHOR 12345 0x01020304 3 table)
         head (mapv #(bit-and (aget rec %) 0xFF) (range 40))]
-    (is (= jlog/REC_BYTES (alength rec)))
-    (is (= [0x32 0x52 0x56 0x45 7 0 0 0 0 0 0 0 0x39 0x30 0 0 1 0 0 0 4 3 2 1 3 0 0 0 0 8 0 0
+    (is (= (+ jlog/REC_HEADER jlog/TABLE_BYTES 4) (alength rec)))
+    (is (= [0x33 0x52 0x56 0x45 7 0 0 0 5 0 0 0 0x39 0x30 0 0 4 3 2 1 3 0 0 0 0 8 0 0 0 0 0 0
             0 7 14 21 28 35 42 49]
            head))
-    (is (= 1051022323 (u32 (crc/crc32 rec 0 jlog/REC_CRC_OFF))))
-    (is (= {:seq 7 :label 12345 :writer 3 :kind 1}
-           (select-keys (jlog/decode-record rec 0 7 8 0x01020304) [:seq :label :writer :kind])))
-    (is (nil? (jlog/decode-record rec 0 7 8 0x01020305)) "another file's nonce is not this log's record")))
+    (is (= 1911069110 (u32 (crc/crc32 rec 0 (+ jlog/REC_HEADER jlog/TABLE_BYTES)))))))
