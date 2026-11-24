@@ -50,37 +50,37 @@ resolve symbol: long`.
 | disk-swap-counter | 67,321 |
 | thread-submit-64 | 2,529,296 |
 
-### ClojureScript (node) — J, 22:39–22:41 ET, exit 0, 46 s wall, load1 3.77→4.24
+### ClojureScript (node) — J, 23:34–23:36 ET, exit 0, 43 s wall, load1 2.49→5.71
 
-`thread-submit-64` now runs (it failed on `507235b` with a MessagePort error).
-
-| workload | ns/op |
-|---|---:|
-| atom-swap-counter | 42,541 |
-| atom-deref-small | 4,783 |
-| atom-swap-map-1k | 15,319 |
-| atom-deref-map-1k | 5,580 |
-| atom-$-get-map-1k | 6,713 |
-| atom-reset-vec-1k | 11,968,750 |
-| sorted-set-build-200 | 31,906,250 |
-| disk-swap-counter | 187,255 |
-| thread-submit-64 | 62,812,500 |
-
-### browser — J, 22:39–22:41 ET, exit 0, 45 s wall, load1 3.77→4.24
-
-`disk-swap-counter` is n/a (`require is not defined` — no disk domains in a page). `thread-submit-64` was 3,251,953 ns/op on this box at `77b649aa5` (2026-10-21, load1 1.52).
+`thread-submit-64` is 20,140,625 ns/op (20.1 ms; it was 62,812,500 after the MessagePort fix).
 
 | workload | ns/op |
 |---|---:|
-| atom-swap-counter | 18,569 |
-| atom-deref-small | 2,954 |
-| atom-swap-map-1k | 6,908 |
-| atom-deref-map-1k | 2,477 |
-| atom-$-get-map-1k | 2,834 |
-| atom-reset-vec-1k | 6,437,500 |
-| sorted-set-build-200 | 14,554,687 |
+| atom-swap-counter | 44,036 |
+| atom-deref-small | 4,318 |
+| atom-swap-map-1k | 15,701 |
+| atom-deref-map-1k | 5,313 |
+| atom-$-get-map-1k | 6,408 |
+| atom-reset-vec-1k | 11,421,875 |
+| sorted-set-build-200 | 27,718,750 |
+| disk-swap-counter | 197,265 |
+| thread-submit-64 | 20,140,625 |
+
+### browser — J, 23:34–23:36 ET, exit 0, 48 s wall, load1 2.49→5.71
+
+`disk-swap-counter` is n/a (`require is not defined` — no disk domains in a page). `thread-submit-64` is 20,460,937 ns/op (20.5 ms; it was 140,000,000 after the MessagePort fix, and 3,251,953 on this box at `77b649aa5`, 2026-10-21, load1 1.52).
+
+| workload | ns/op |
+|---|---:|
+| atom-swap-counter | 17,730 |
+| atom-deref-small | 2,853 |
+| atom-swap-map-1k | 7,095 |
+| atom-deref-map-1k | 2,340 |
+| atom-$-get-map-1k | 2,882 |
+| atom-reset-vec-1k | 6,898,437 |
+| sorted-set-build-200 | 13,945,312 |
 | disk-swap-counter | n/a |
-| thread-submit-64 | 140,000,000 |
+| thread-submit-64 | 20,460,937 |
 
 ### babashka — J, 21:02–21:02 ET, exit 0, 31 s wall, load1 2.50→1.91
 
@@ -110,21 +110,21 @@ resolve symbol: long`.
 | disk-swap-counter | 2,347,656 |
 | thread-submit-64 | 2,486,328 |
 
-### nbb — J, 22:39–22:41 ET, exit 0, 39 s wall, load1 3.77→4.24
+### nbb — J, 23:34–23:36 ET, exit 0, 40 s wall, load1 2.49→5.71
 
-`thread-submit-64` now runs (same MessagePort fix as ClojureScript).
+`thread-submit-64` is 80,562,500 ns/op (80.6 ms; it was 247,625,000 after the MessagePort fix).
 
 | workload | ns/op |
 |---|---:|
-| atom-swap-counter | 545,898 |
-| atom-deref-small | 23,300 |
-| atom-swap-map-1k | 135,131 |
-| atom-deref-map-1k | 25,924 |
-| atom-$-get-map-1k | 48,828 |
-| atom-reset-vec-1k | 85,687,500 |
-| sorted-set-build-200 | 193,125,000 |
-| disk-swap-counter | 1,232,421 |
-| thread-submit-64 | 247,625,000 |
+| atom-swap-counter | 565,429 |
+| atom-deref-small | 23,422 |
+| atom-swap-map-1k | 141,357 |
+| atom-deref-map-1k | 23,101 |
+| atom-$-get-map-1k | 48,217 |
+| atom-reset-vec-1k | 88,312,500 |
+| sorted-set-build-200 | 197,000,000 |
+| disk-swap-counter | 1,492,187 |
+| thread-submit-64 | 80,562,500 |
 
 ### basilisp (lpy) — J, 21:03–21:06 ET, exit 0, 172 s wall, load1 2.81→1.30
 
@@ -235,9 +235,11 @@ these write shapes, at this pin.
   `Unable to resolve symbol: u8`).
 - **clojerl host suite** — compile fails at `eve/flat_io.cljc:304`
   (`Unable to resolve symbol: long`), twice, same error.
-- **browser `thread-submit-64`** — 140.0 ms on this tree; 3.3 ms on
-  this box at `77b649aa5`. The jump is `70e6f4c8` (eve.wire on the SAB
-  ring), not the MessagePort bug, which was cljs/nbb only and is fixed.
+- **browser `thread-submit-64`** — 20.5 ms on this tree (was 140.0 ms
+  after the MessagePort fix); 3.3 ms on this box at `77b649aa5`. The
+  remaining gap vs October is `70e6f4c8` (eve.wire FORMAT-V1 on the
+  SAB ring) after a native JS packer recovered most of the pack-rep
+  cost.
 - **browser `disk-swap-counter`** — n/a (no disk domains in a page).
 - **Startup shootout, hosts other than JVM source-form** — not re-run
   at this pin.

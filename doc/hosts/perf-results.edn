@@ -39,21 +39,24 @@
   :browser
   {:host :browser,
    :exit 0,
-   :wall-s 45,
+   :wall-s 48,
    :lines
-   [{:ms 1217, :ops 65536, :perf :atom-swap-counter, :ns-per-op 18569}
-    {:ms 1549, :ops 524288, :perf :atom-deref-small, :ns-per-op 2954}
-    {:ms 1811, :ops 262144, :perf :atom-swap-map-1k, :ns-per-op 6908}
-    {:ms 1299, :ops 524288, :perf :atom-deref-map-1k, :ns-per-op 2477}
-    {:ms 1486, :ops 524288, :perf :atom-$-get-map-1k, :ns-per-op 2834}
-    {:ms 1648, :ops 256, :perf :atom-reset-vec-1k, :ns-per-op 6437500}
-    {:ms 1863,
+   [{:ms 1162, :ops 65536, :perf :atom-swap-counter, :ns-per-op 17730}
+    {:ms 1496, :ops 524288, :perf :atom-deref-small, :ns-per-op 2853}
+    {:ms 1860, :ops 262144, :perf :atom-swap-map-1k, :ns-per-op 7095}
+    {:ms 1227, :ops 524288, :perf :atom-deref-map-1k, :ns-per-op 2340}
+    {:ms 1511, :ops 524288, :perf :atom-$-get-map-1k, :ns-per-op 2882}
+    {:ms 1766, :ops 256, :perf :atom-reset-vec-1k, :ns-per-op 6898437}
+    {:ms 1785,
      :ops 128,
      :perf :sorted-set-build-200,
-     :ns-per-op 14554687}
+     :ns-per-op 13945312}
     {:perf :disk-swap-counter, :error "require is not defined"}
-    {:ms 1120, :ops 8, :perf :thread-submit-64, :ns-per-op 140000000}],
-   :at "2026-11-24T03:41:35.242844469Z"},
+    {:ms 2619,
+     :ops 128,
+     :perf :thread-submit-64,
+     :ns-per-op 20460937}],
+   :at "2026-11-24T04:36:59.161906823Z"},
   :lpy
   {:host :lpy,
    :exit 0,
@@ -138,36 +141,36 @@
   :nbb
   {:host :nbb,
    :exit 0,
-   :wall-s 39,
+   :wall-s 40,
    :lines
-   [{:perf :atom-swap-counter, :ops 2048, :ms 1118, :ns-per-op 545898}
-    {:perf :atom-deref-small, :ops 65536, :ms 1527, :ns-per-op 23300}
-    {:perf :atom-swap-map-1k, :ops 8192, :ms 1107, :ns-per-op 135131}
-    {:perf :atom-deref-map-1k, :ops 65536, :ms 1699, :ns-per-op 25924}
-    {:perf :atom-$-get-map-1k, :ops 32768, :ms 1600, :ns-per-op 48828}
-    {:perf :atom-reset-vec-1k, :ops 16, :ms 1371, :ns-per-op 85687500}
+   [{:perf :atom-swap-counter, :ops 2048, :ms 1158, :ns-per-op 565429}
+    {:perf :atom-deref-small, :ops 65536, :ms 1535, :ns-per-op 23422}
+    {:perf :atom-swap-map-1k, :ops 8192, :ms 1158, :ns-per-op 141357}
+    {:perf :atom-deref-map-1k, :ops 65536, :ms 1514, :ns-per-op 23101}
+    {:perf :atom-$-get-map-1k, :ops 32768, :ms 1580, :ns-per-op 48217}
+    {:perf :atom-reset-vec-1k, :ops 16, :ms 1413, :ns-per-op 88312500}
     {:perf :sorted-set-build-200,
      :ops 8,
-     :ms 1545,
-     :ns-per-op 193125000}
-    {:perf :disk-swap-counter, :ops 1024, :ms 1262, :ns-per-op 1232421}
-    {:perf :thread-submit-64, :ops 8, :ms 1981, :ns-per-op 247625000}],
-   :at "2026-11-24T03:41:35.242843477Z"},
+     :ms 1576,
+     :ns-per-op 197000000}
+    {:perf :disk-swap-counter, :ops 1024, :ms 1528, :ns-per-op 1492187}
+    {:perf :thread-submit-64, :ops 16, :ms 1289, :ns-per-op 80562500}],
+   :at "2026-11-24T04:36:59.161905185Z"},
   :cljs
   {:host :cljs,
    :exit 0,
-   :wall-s 46,
+   :wall-s 43,
    :lines
-   [{:perf :atom-swap-counter, :ops 32768, :ms 1394, :ns-per-op 42541}
-    {:perf :atom-deref-small, :ops 262144, :ms 1254, :ns-per-op 4783}
-    {:perf :atom-swap-map-1k, :ops 65536, :ms 1004, :ns-per-op 15319}
-    {:perf :atom-deref-map-1k, :ops 262144, :ms 1463, :ns-per-op 5580}
-    {:perf :atom-$-get-map-1k, :ops 262144, :ms 1760, :ns-per-op 6713}
-    {:perf :atom-reset-vec-1k, :ops 128, :ms 1532, :ns-per-op 11968750}
+   [{:perf :atom-swap-counter, :ops 32768, :ms 1443, :ns-per-op 44036}
+    {:perf :atom-deref-small, :ops 262144, :ms 1132, :ns-per-op 4318}
+    {:perf :atom-swap-map-1k, :ops 65536, :ms 1029, :ns-per-op 15701}
+    {:perf :atom-deref-map-1k, :ops 262144, :ms 1393, :ns-per-op 5313}
+    {:perf :atom-$-get-map-1k, :ops 262144, :ms 1680, :ns-per-op 6408}
+    {:perf :atom-reset-vec-1k, :ops 128, :ms 1462, :ns-per-op 11421875}
     {:perf :sorted-set-build-200,
      :ops 64,
-     :ms 2042,
-     :ns-per-op 31906250}
-    {:perf :disk-swap-counter, :ops 8192, :ms 1534, :ns-per-op 187255}
-    {:perf :thread-submit-64, :ops 32, :ms 2010, :ns-per-op 62812500}],
-   :at "2026-11-24T03:41:35.242801094Z"}}}
+     :ms 1774,
+     :ns-per-op 27718750}
+    {:perf :disk-swap-counter, :ops 8192, :ms 1616, :ns-per-op 197265}
+    {:perf :thread-submit-64, :ops 64, :ms 1289, :ns-per-op 20140625}],
+   :at "2026-11-24T04:36:59.161537374Z"}}}

@@ -45,21 +45,21 @@ compiled ClojureScript's `thread-domain` suite from the ~3.8 GB its baseline not
 <!-- perf:nbb (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 545.9 µs | 2048 | 48 |
-| `atom-deref-small` | 23.3 µs | 65536 | 8.0 |
-| `atom-swap-map-1k` | 135.1 µs | 8192 | 33 |
-| `atom-deref-map-1k` | 25.9 µs | 65536 | 9.5 |
-| `atom-$-get-map-1k` | 48.8 µs | 32768 | 84 |
-| `atom-reset-vec-1k` | 85.7 ms | 16 | 58 |
-| `sorted-set-build-200` | 193.1 ms | 8 | 36 |
-| `disk-swap-counter` | 1.2 ms | 1024 | 18 |
-| `thread-submit-64` | 247.6 ms | 8 | 98 |
+| `atom-swap-counter` | 565.4 µs | 2048 | 49 |
+| `atom-deref-small` | 23.4 µs | 65536 | 8.1 |
+| `atom-swap-map-1k` | 141.4 µs | 8192 | 34 |
+| `atom-deref-map-1k` | 23.1 µs | 65536 | 8.4 |
+| `atom-$-get-map-1k` | 48.2 µs | 32768 | 83 |
+| `atom-reset-vec-1k` | 88.3 ms | 16 | 60 |
+| `sorted-set-build-200` | 197.0 ms | 8 | 37 |
+| `disk-swap-counter` | 1.5 ms | 1024 | 22 |
+| `thread-submit-64` | 80.6 ms | 16 | 32 |
 
-Measured 2026-11-23 10:39–10:41 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `f329fc4` plus the thread-host wire-decode fix, by `bb scripts/perf-all.clj`, one host at a time, load1 3.77; a round of at least 1 s. `thread-submit-64` now runs (it failed on `507235b` with `The "port" argument must be a MessagePort instance`).
+Measured 2026-11-23 11:34–11:36 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `441ae29f` plus the pack-plain wire-encode fix, by `bb scripts/perf-all.clj`, one host at a time, load1 2.49; a round of at least 1 s. `thread-submit-64` is 80.6 ms (it was 247.6 ms after the MessagePort fix, and 11.0 ms in the 2026-10-21 published table).
 <!-- /perf:nbb -->
 
-Reading it: faster than babashka on every in-memory workload that both completed (a counter swap 546 µs against 1.4 ms, a 1,000-key
-map's 135 µs against 2.8 ms, a small deref 23.3 µs against 97.2 µs). `thread-submit-64` is 247.6 ms (babashka 31.3 ms).
+Reading it: faster than babashka on every in-memory workload that both completed (a counter swap 565 µs against 1.4 ms, a 1,000-key
+map's 141 µs against 2.8 ms, a small deref 23.4 µs against 97.2 µs). `thread-submit-64` is 80.6 ms (babashka 31.3 ms).
 
 What sets nbb's numbers: sci interprets every call, and eve's types are sci records answering eve's protocols, so
 nbb pays babashka's interpretation cost on V8 rather than SubstrateVM, with the module slab's DataView reads beneath.

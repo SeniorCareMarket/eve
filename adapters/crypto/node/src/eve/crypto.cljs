@@ -12,7 +12,13 @@
             [eve.net.ed25519 :as ed]
             [eve.process :as process]))
 
-(defn- buf [bs] (js/Buffer.from (into-array bs)))
+(defn- buf
+  "Host bytes as a Node Buffer. A Uint8Array (or Buffer) is taken as
+   it is; a vector of 0..255 still goes through into-array."
+  [bs]
+  (if (instance? js/Uint8Array bs)
+    (if (instance? js/Buffer bs) bs (js/Buffer.from bs))
+    (js/Buffer.from (into-array bs))))
 (defn- v [b] (vec (js/Array.from b)))
 
 (defn sha256 "the 32-byte digest" [bs] (v (.digest (.update (.createHash nc "sha256") (buf bs)))))

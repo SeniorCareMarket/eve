@@ -27,6 +27,7 @@
             [eve.flat-io :as fio]
             #?(:jolt [jolt.scheme :as scheme])
             [eve.platform :as platform]
+            #?(:cljs [eve.flat.pack-plain :as pack-plain])
             ;; The protocol hosts (bb, glojure) spell a handle's surface
             ;; through the seat's eve.core protocols — the same surface
             ;; eve's other types use there. Their eve.core is the
@@ -1532,9 +1533,16 @@
 (defn pack-rep
   "A rep as chunk bytes. Public for eve.flat.sister's construction
    path, which reaches it by requiring-resolve on the runtime-require
-   hosts and by a static table on ClojureScript."
-  (^bytes [rep] (build-chunk (scan rep) rep nil))
-  (^bytes [rep hq] (build-chunk (scan rep) rep hq)))
+   hosts and by a static table on ClojureScript.
+   On ClojureScript (and nbb) a plain EDN rep is packed by a native
+   JS FORMAT-V1 writer (eve.flat.pack-plain): the same bytes as the
+   scan/build-chunk path, including the root recipe."
+  (^bytes [rep]
+   (or #?(:cljs (pack-plain/pack-plain rep (hash rep)))
+       (build-chunk (scan rep) rep nil)))
+  (^bytes [rep hq]
+   (or #?(:cljs (pack-plain/pack-plain rep hq))
+       (build-chunk (scan rep) rep hq))))
 
 (declare open)
 
@@ -2270,7 +2278,9 @@
         (.-rdigest ctx))
       (try (let [out (fio/buf 4)]
              (flat-emit! ctx off out)
-             (sha-vec (buf-bytes-out out)))
+             ;; cljs: hash the writer's prefix in place (no copy, no byte-vec)
+             (sha-vec #?(:cljs (.subarray (fio/buf-raw out) 0 (fio/buf-pos out))
+                         :default (buf-bytes-out out))))
            (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))))
 
 ;; --- read-value --------------------------------------------------------
@@ -2291,6 +2301,7 @@
         ;; vector of 0..255, read here through fio
         (crypto/sha256 #?(:jank (byte-vec bs) :glj (byte-vec bs) :lg (byte-vec bs)
                           :bb bs :clj bs
+                          :cljs (if (or (vector? bs) (instance? js/Uint8Array bs)) bs (byte-vec bs))
                           :default (byte-vec bs)))))
 
 (defn eve-digest
@@ -2309,11 +2320,14 @@
   (emit-flat-any! out x))
 
 (defn- emit-framed!
+  "Frame x as [i32le length][bytes] in out. Length is patched after the
+   payload is written into the same writer: a temp writer + copy per
+   entry was the digest walk's allocation cost (thread-host pack-rep)."
   [out x]
-  (let [tmp (fio/buf 4)]
-    (emit-flat-value! tmp x)
-    (let [bs (buf-bytes-out tmp)]
-      (emit-i32le out (byte-len bs)) (fio/buf-bytes out bs 0 (byte-len bs)))))
+  (let [start (fio/buf-pos out)]
+    (emit-i32le out 0)
+    (emit-flat-value! out x)
+    (fio/buf-patch-u32 out start (- (fio/buf-pos out) start 4))))
 
 (defn- sym-entry-bytes
   "The stored scalar bytes of symbol code c (no magic)."
