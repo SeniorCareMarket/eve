@@ -69,7 +69,7 @@
     #?(:cljs (try (vec (map #(str p "/" %) (js->clj (.readdirSync (js/require "fs") p))))
                   (catch :default _ []))
        :cljr (try (vec (concat (Directory/GetDirectories p) (Directory/GetFiles p)))
-                  (catch :default _ []))
+                  (catch Exception _ []))
        :lpy (try (vec (map #(os/path.join p %) (os/listdir p)))
                  (catch :default _ []))
        :clje (let [r (file/list_dir (erlang/binary_to_list p))]
@@ -108,7 +108,7 @@
       (when (and (pos? (count p)) (not (contains? guarded p)))
         (doseq [c (children-of p)]
           (delete-tree! c))
-        (try (delete-leaf! p) (catch #?(:cljs :default :lpy python/Exception :default Throwable) _ nil))))))
+        (try (delete-leaf! p) (catch #?(:cljs :default :cljr Exception :lpy python/Exception :default Throwable) _ nil))))))
 
 (defn- safe-label
   [label]
