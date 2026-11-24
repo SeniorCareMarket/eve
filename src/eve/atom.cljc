@@ -905,30 +905,42 @@
                        #(jlog2-force-domain! ds)))
 
 (defn- jlog2-reserve!
-  "This process's next seq. A commit may fill the ring to half its slots past the newest anchor; at that mark it runs
-   a checkpoint first (CHECKPOINT? false: the checkpoint's own reservation, which may use the other half)."
-  [ds checkpoint?]
-  (let [{:keys [root-r slot-idx journal]} ds
-        log (:log journal)
-        room (if checkpoint? (:n log) (quot (:n log) 2))
-        gate (fn [t] (< (i32/i32 (- t (jlog/anchor-seq log))) room))]
-    (loop [i 0]
-      (let [r (jlog/reserve! log 0 slot-idx (jlog2-stale? root-r) d/HEARTBEAT_TIMEOUT_MS gate)]
-        (cond (not= :full r) (:seq r)
-              checkpoint? (do (when (> i 100) (proc/sleep-ms! 1)) (recur (inc i)))
-              :else (do (jlog2-checkpoint! ds) (recur (inc i))))))))
+  "This process's next CNT consecutive seqs (the first answered). A commit may fill the ring to half its slots past
+   the newest anchor; at that mark it runs a checkpoint first (CHECKPOINT? true: the checkpoint's own reservation,
+   which may use the other half)."
+  ([ds checkpoint?] (jlog2-reserve! ds checkpoint? 1))
+  ([ds checkpoint? cnt]
+   (let [{:keys [root-r slot-idx journal]} ds
+         log (:log journal)
+         room (if checkpoint? (:n log) (quot (:n log) 2))
+         gate (fn [t] (< (i32/i32 (- t (jlog/anchor-seq log))) room))]
+     (loop [i 0]
+       (let [r (jlog/reserve-run! log slot-idx cnt (jlog2-stale? root-r) d/HEARTBEAT_TIMEOUT_MS gate)]
+         (cond (not= :full r) (:seq r)
+               checkpoint? (do (when (> i 100) (proc/sleep-ms! 1)) (recur (inc i)))
+               :else (do (jlog2-checkpoint! ds) (recur (inc i)))))))))
 
 (defn- jlog2-write!
-  "Write SEQ's record into the slot this process reserved, then release the slot. false when a resolver voided the
-   reservation first (this process was judged dead while alive): nothing is written."
-  [ds seq kind label body]
-  (let [{:keys [slot-idx journal]} ds
-        log (:log journal)]
-    (if (jlog/claim-seal! log seq slot-idx)
-      (do (jlog/write-slot! log seq (jlog/encode-record3 seq kind label (:nonce log) (inc slot-idx) body))
-          (jlog/release! log seq)
-          true)
-      false)))
+  "Write the record of the CNT seqs from SEQ this process reserved (BODY split over them, each part its own
+   CRC-checked record) and release the slots. false when a resolver voided a slot of the run first (this process was
+   judged dead while alive): what it won is written as ABORT."
+  ([ds seq kind label body] (jlog2-write! ds seq kind label body 1))
+  ([ds seq kind label body cnt]
+   (let [{:keys [slot-idx journal]} ds
+         log (:log journal)
+         seqs (mapv (fn [i] (i32/i32 (+ seq i))) (range cnt))
+         won (mapv (fn [s] (jlog/claim-seal! log s slot-idx)) seqs)
+         ok? (every? true? won)
+         parts (if (and ok? (> cnt 1)) (jlog/split-body body cnt) [body])]
+     (dotimes [i cnt]
+       (let [s (nth seqs i)]
+         (when (nth won i)
+           (jlog/write-slot! log s (if ok?
+                                     (jlog/encode-record3 s kind label (:nonce log) (inc slot-idx) (nth parts i)
+                                                          (jlog/part-word i cnt))
+                                     (jlog/encode-record3 s jlog/K_ABORT 0 (:nonce log) (inc slot-idx) nil)))
+           (jlog/release! log s))))
+     ok?)))
 
 (defn- jlog2-redo
   "A won commit's redo: [blocks pins]. blocks: each block the attempt allocated (ALLOCS, its log) that a holder took
@@ -952,17 +964,20 @@
                    (distinct (map u32 touches)))]
     [blocks pins]))
 
-(defn- jlog2-fallback?
-  "Whether a commit takes the forced fallback (NOREDO): an allocation in the coalesced class, a block written in
-   place that the attempt did not allocate (WRITES), or a redo that would not fit one slot."
-  [allocs touches writes]
+(defn- jlog2-plan
+  "How a commit is logged, decided before its CAS: the slots its redo takes (its body, bounded above by every
+   allocation of the attempt), or :fallback — the forced fallback (NOREDO): an allocation in the coalesced class, a
+   block written in place that the attempt did not allocate (WRITES), or a redo past a quarter of the ring."
+  [log allocs touches writes]
   (let [mine (into #{} (map u32) allocs)]
-    (or (some (fn [off] (== alloc/OVERFLOW_CLASS_IDX (alloc/decode-class-idx off))) allocs)
-        (some (fn [off] (not (contains? mine (u32 off)))) writes)
-        (> (+ 24
-              (reduce + 0 (map (fn [off] (+ 16 (d/slab-size (alloc/decode-class-idx off)))) allocs))
-              (* 8 (count (remove (fn [off] (contains? mine (u32 off))) (distinct (map u32 touches))))))
-           jlog/R3_MAX_BODY))))
+    (if (or (some (fn [off] (== alloc/OVERFLOW_CLASS_IDX (alloc/decode-class-idx off))) allocs)
+            (some (fn [off] (not (contains? mine (u32 off)))) writes))
+      :fallback
+      (let [body (+ 24
+                    (reduce + 0 (map (fn [off] (+ 16 (d/slab-size (alloc/decode-class-idx off)))) allocs))
+                    (* 8 (count (remove (fn [off] (contains? mine (u32 off))) (distinct (map u32 touches))))))
+            cnt (quot (+ body (dec jlog/R3_MAX_BODY)) jlog/R3_MAX_BODY)]
+        (if (> cnt (quot (:n log) 4)) :fallback cnt)))))
 
 (defn- jlog2-drop-pending!
   "Let go the old roots a batch's commits deferred (their records are durable now)."
@@ -972,11 +987,11 @@
       (doseq [p ptrs] (tally/drop-root! (:sio ds) p (park-fn ds))))))
 
 (defn- jlog2-commit!
-  "A won v2 commit, after its CAS and epoch bump (LABEL): write its record at SEQ — COMMIT with the redo, or NOREDO
-   for a FALLBACK? commit (forced before its CAS) — wait until the watermark passes it (a batch commit only at its
-   boundary), then let OLD-PTR go. A record a resolver voided (a zombie) is replaced by a checkpoint, whose forced
-   domain and ANCHOR cover the commit."
-  [ds seq label slot old-ptr new-ptr allocs touches fallback?]
+  "A won v2 commit, after its CAS and epoch bump (LABEL): write its record over the CNT slots from SEQ — COMMIT with
+   the redo, or NOREDO for a FALLBACK? commit (forced before its CAS) — wait until the watermark passes it (a batch
+   commit only at its boundary), then let OLD-PTR go. A record a resolver voided (a zombie) is replaced by a
+   checkpoint, whose forced domain and ANCHOR cover the commit."
+  [ds seq cnt label slot old-ptr new-ptr allocs touches fallback?]
   (let [{:keys [root-r sio journal]} ds
         delta {:slot slot :old old-ptr :new new-ptr
                :hash (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))}
@@ -984,7 +999,8 @@
                (jlog/encode-commit-body delta nil nil)
                (let [[blocks pins] (jlog2-redo sio allocs touches)]
                  (jlog/encode-commit-body delta blocks pins)))
-        written? (jlog2-write! ds seq (if fallback? jlog/K_NOREDO jlog/K_COMMIT) label body)
+        written? (jlog2-write! ds seq (if fallback? jlog/K_NOREDO jlog/K_COMMIT) label body cnt)
+        last-seq (i32/i32 (+ seq (dec cnt)))
         limit (:limit journal)
         boundary? (or (<= limit 1)
                       (let [n (swap! (:pending journal) inc)
@@ -998,7 +1014,7 @@
           (tally/drop-root! sio old-ptr (park-fn ds)))
       (if boundary?
         (let [t0 (when *flush-timing* (now-ms))]
-          (jlog2-await! ds seq)
+          (jlog2-await! ds last-seq)
           (when t0 (swap! *flush-timing* conj (- (now-ms) t0)))
           (when *flush-log* (swap! *flush-log* conj {:at (now-ms) :ms (when t0 (- (now-ms) t0))}))
           (jlog2-drop-pending! ds)
@@ -1007,9 +1023,10 @@
     nil))
 
 (defn- jlog2-abort!
-  "A lost CAS's reservation: an ABORT record in its slot (the watermark forces it with its neighbours)."
-  [ds seq]
-  (jlog2-write! ds seq jlog/K_ABORT 0 nil)
+  "A lost CAS's reservation of CNT slots: an ABORT record in each (the watermark forces them with their neighbours)."
+  [ds seq cnt]
+  (dotimes [i cnt]
+    (jlog2-write! ds (i32/i32 (+ seq i)) jlog/K_ABORT 0 nil))
   nil)
 
 (defn- jlog2-note-claim!
@@ -1038,7 +1055,7 @@
           anchor (jlog/read-record3 log a)
           recs (loop [s (i32/i32 (inc a)) acc []]
                  (if (== s seq) acc (recur (i32/i32 (inc s)) (conj acc (jlog/read-record3 log s)))))
-          [table label] (jlog/fold anchor (remove nil? recs))]
+          [table label] (jlog/fold anchor (jlog/logical (remove nil? recs)))]
       (when (jlog2-write! ds seq jlog/K_ANCHOR label (jlog/encode-anchor-body table))
         (jlog2-await! ds seq)
         (jlog/advance-anchor! log seq)))
@@ -1069,7 +1086,7 @@
         e-root (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
     (when anchor
       (alloc/refresh! sio)
-      (doseq [rec recs
+      (doseq [rec (jlog/logical recs)
               :when (== jlog/K_COMMIT (:kind rec))
               :let [{:keys [blocks pins]} (jlog/decode-commit-body (:body rec))]]
         (doseq [{:keys [off flags pointer bytes]} blocks]
@@ -1083,7 +1100,7 @@
           (when-let [row (alloc/desc-row sio off)]
             (slab/region-store-i32! (nth row 0) (nth row 1) tally/CPERM))))
       (alloc/sync-sio! sio)
-      (let [[table label] (jlog/fold anchor recs)]
+      (let [[table label] (jlog/fold anchor (jlog/logical recs))]
         (mem/-write-bytes! root-r d/ATOM_TABLE_START table)
         (mem/-store-i32! root-r d/ROOT_EPOCH_OFFSET
                          (if (pos? (i32/i32 (- label e-root))) label e-root))
@@ -1975,7 +1992,9 @@
                 ;; fallback, and — after any fallback force, before its CAS — its log seq (jlog2-commit!)
                 v2? (jlog2? ds)
                 allocs (when v2? (alloc/logged-allocs lsio))
-                fallback? (and v2? (jlog2-fallback? allocs @tally/*touches* @alloc/*inplace*))
+                plan (when v2? (jlog2-plan (:log journal) allocs @tally/*touches* @alloc/*inplace*))
+                fallback? (= :fallback plan)
+                jcnt (if (number? plan) plan 1)
                 _ (when fallback?
                     (alloc/sync-touched! sio (-> @tally/*touches* (into (take-unforced! ds)) (into allocs)
                                                  (into @alloc/*inplace*))))
@@ -1998,7 +2017,7 @@
                     (alloc/sync-touched! sio
                                          (into (into @tally/*touches* (take-unforced! ds))
                                                (alloc/logged-allocs lsio))))
-                jseq (when v2? (jlog2-reserve! ds false))
+                jseq (when v2? (jlog2-reserve! ds false jcnt))
                 w (mem/-cas-i32! root-r ptr-off old-ptr new-ptr)]
             (if (== w old-ptr)
               (let [label (i32/i32 (inc (mem/-add-i32! root-r d/ROOT_EPOCH_OFFSET 1)))]
@@ -2008,7 +2027,7 @@
                 (tally/free-unreached! sio (alloc/logged-allocs lsio))
                 (cond
                   v2?
-                  (do (jlog2-commit! ds jseq label atom-slot-idx old-ptr new-ptr allocs @tally/*touches* fallback?)
+                  (do (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr allocs @tally/*touches* fallback?)
                       (when (:unforced ds)
                         (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*)))
 
@@ -2065,7 +2084,7 @@
                   [:ok new-val delivery]))
               (let [offs (alloc/logged-allocs lsio)]
                 ;; a redo-log reservation: its slot is closed with an ABORT record
-                (when v2? (jlog2-abort! ds jseq))
+                (when v2? (jlog2-abort! ds jseq jcnt))
                 ;; never published: the hold goes back (new's blocks reach 0 and are freed by the flush, what they
                 ;; share with other values keeps its count), and every other block this attempt allocated that no
                 ;; holder took is freed now (a value the attempt stored into another atom is that atom's)

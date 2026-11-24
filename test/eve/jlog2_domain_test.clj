@@ -35,7 +35,25 @@
             (.getPath f)))))
 
 (defn- snapshot! [paths suffix] (doseq [p paths] (copy! p (str p suffix))))
-(defn- restore! [paths suffix] (doseq [p paths] (copy! (str p suffix) p)))
+
+(defn- crash-restore!
+  "PATH restored to its image at SUFFIX as a power loss leaves it after a growth the code forced: the image's bytes,
+   but a file that grew since keeps its grown length (the new end reads zero) and a slab data file its header page
+   (force-grown! forces both before a block past the old end is used)."
+  [path suffix]
+  (let [f (File. ^String path)
+        cur-len (.length f)
+        data? (re-matches #".*\.slab\d" path)
+        page0 (when data? (let [raf (RandomAccessFile. f "r") b (byte-array 4096)]
+                            (try (.readFully raf b) b (finally (.close raf)))))]
+    (copy! (str path suffix) path)
+    (when (> cur-len (.length f))
+      (let [raf (RandomAccessFile. f "rw")]
+        (try (.setLength raf cur-len)
+             (when page0 (.seek raf 0) (.write raf ^bytes page0))
+             (finally (.close raf)))))))
+
+(defn- restore! [paths suffix] (doseq [p paths] (crash-restore! p suffix)))
 
 (defn- halt!
   "A killed process's leavings: the heartbeat stops, the slot is let go, no checkpoint."
@@ -169,14 +187,37 @@
       (is (= 450 @x2) "every acknowledged commit of three racing threads is recovered")
       (a/close-atom-domain! dom2))))
 
-(deftest an-oversize-commit-takes-the-forced-fallback
+(deftest a-large-commit-spans-a-run-of-slots
   (let [base (fresh-base)
         dom (a/persistent-atom-domain base)
         x (a/lookup-or-create-mmap-atom! dom "t/x" nil)
         big (vec (range 3000))]
+    (a/sync! x)
+    (let [files (conj (vec (slab-files base)) (str base ".root"))
+          _ (snapshot! files ".ckpt")
+          before (jlog/durable (log-of dom))
+          _ (reset! x big)
+          first-part (jlog/read-record3 (log-of dom) before)
+          cnt (bit-and (:part first-part) 0xFFFF)]
+      (is (= jlog/K_COMMIT (:kind first-part)) "a redo past one slot is still a COMMIT")
+      (is (< 1 cnt) "carried by a run of consecutive slots, each its own CRC-checked part")
+      (is (= (+ before cnt) (jlog/durable (log-of dom))) "the whole run is made durable together")
+      (swap! x conj :end)
+      (let [ds0 (halt! dom base)]
+        (power-loss! base files ".ckpt" (:slot-idx ds0)))
+      (let [dom2 (reopen base)
+            x2 (a/lookup-or-create-mmap-atom! dom2 "t/x" nil)]
+        (is (= (conj big :end) @x2) "rebuilt from the run's redo over slabs at the checkpoint")
+        (a/close-atom-domain! dom2)))))
+
+(deftest a-commit-past-a-quarter-of-the-ring-takes-the-forced-fallback
+  (let [base (fresh-base)
+        dom (a/persistent-atom-domain base :jlog-slots 16)
+        x (a/lookup-or-create-mmap-atom! dom "t/x" nil)
+        big (vec (range 3000))]
     (reset! x big)
     (is (= jlog/K_NOREDO (:kind (jlog/read-record3 (log-of dom) (last-seq dom))))
-        "a redo past one slot is a NOREDO record (its blocks forced before its CAS)")
+        "a redo past a quarter of the ring is a NOREDO record (its blocks forced before its CAS)")
     (swap! x conj :end)
     (halt! dom base)
     (let [dom2 (reopen base)

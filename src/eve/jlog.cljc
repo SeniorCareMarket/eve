@@ -338,6 +338,50 @@
            :else                         ;; the tail read was stale
            (recur waits nil)))))))
 
+(defn reserve-run!
+  "Reserve CNT consecutive seqs of a one-stripe (v2) log for worker ME — a commit whose redo takes CNT slots: once
+   every slot of the run is ready for its seq (a slot its previous lap still holds is waited on, and reclaimed from a
+   dead holder, as reserve! does), one CAS moves the tail past the run. GATE (fn [seq] ok?) is asked of the run's
+   last seq; a refusal answers :full. Answers {:seq (the run's first) :n :waits}."
+  [log me cnt stale? stale-ms gate]
+  (if (<= cnt 1)
+    (let [res (reserve! log 0 me stale? stale-ms gate)]
+      (if (= :full res) res (assoc res :n 1)))
+    (let [r (:r log)
+          to (tail-off 0)
+          mask (:mask log)]
+      (loop [waits 0
+             first-seen nil]
+        (let [t (mem/-load-i32 r to)]
+          (if (and gate (not (gate (i32/i32 (+ t (dec cnt))))))
+            :full
+            (let [blocked (loop [i 0]
+                            (when (< i cnt)
+                              (let [s (i32/i32 (+ t i))
+                                    so (sstate-off log 0 (bit-and s mask))
+                                    st (mem/-load-i32 r so)]
+                                (if (== st s) (recur (inc i)) [s st so]))))]
+              (cond
+                (nil? blocked)
+                (if (== t (mem/-cas-i32! r to t (i32/i32 (+ t cnt))))
+                  (do (dotimes [i cnt]
+                        (let [s (i32/i32 (+ t i))]
+                          (mem/-store-i32! r (sowner-off log 0 (bit-and s mask)) (owner-word s me))))
+                      {:seq t :n cnt :waits waits})
+                  (recur waits nil))
+
+                (pos? (serial- (nth blocked 0) (nth blocked 1)))
+                ;; a slot of the run still holds its previous lap's seq: its writer is writing or forcing it
+                (let [[s st so] blocked
+                      fs (or first-seen (proc/now-ms))]
+                  (if (holder-dead? log 0 (bit-and s mask) st stale? stale-ms fs)
+                    (do (mem/-cas-i32! r so st s) (recur (inc waits) nil))
+                    (do (when (> waits 64) (proc/sleep-ms! 1))
+                        (recur (inc waits) fs))))
+
+                :else                   ;; the tail read was stale
+                (recur waits nil)))))))))
+
 (defn append!
   "Append one record to stripe K for worker ME (plan §4.3 steps 5-10):
    reserve, call (SNAPSHOT!) for [epoch-label table-bytes] (read after the
@@ -458,24 +502,31 @@
 (def ^:const OWNER_SEALING 0x8000)        ;; sowner: the reserver is writing its record
 (def ^:const OWNER_RESOLVED 0x4000)       ;; sowner: a resolver voided the slot
 
+(defn part-word
+  "The header word of part IDX of a run of CNT slots (0: a record of one slot)."
+  [idx cnt]
+  (if (<= cnt 1) 0 (bit-or (bit-shift-left idx 16) cnt)))
+
 (defn encode-record3
-  "A v2 record's bytes: header, BODY (a byte array, or nil for none), CRC-32."
-  [seq kind label nonce writer ^bytes body]
-  (let [len (if body (alength body) 0)
-        _ (when (> len R3_MAX_BODY)
-            (throw (ex-info "eve.jlog: a record body larger than its slot" {:len len})))
-        b (byte-array (+ R3_HEADER len 4))]
-    (put-u32! b 0 REC3_MAGIC)
-    (put-u32! b 4 seq)
-    (put-u32! b 8 kind)
-    (put-u32! b 12 label)
-    (put-u32! b 16 nonce)
-    (put-u32! b 20 writer)
-    (put-u32! b 24 len)
-    (put-u32! b 28 0)
-    (when (pos? len) (enc/arraycopy body 0 b R3_HEADER len))
-    (put-u32! b (+ R3_HEADER len) (crc/crc32 b 0 (+ R3_HEADER len)))
-    b))
+  "A v2 record's bytes: header, BODY (a byte array, or nil for none), CRC-32. PART (part-word) names a part of a run
+   of slots that carries one commit."
+  ([seq kind label nonce writer body] (encode-record3 seq kind label nonce writer body 0))
+  ([seq kind label nonce writer ^bytes body part]
+   (let [len (if body (alength body) 0)
+         _ (when (> len R3_MAX_BODY)
+             (throw (ex-info "eve.jlog: a record body larger than its slot" {:len len})))
+         b (byte-array (+ R3_HEADER len 4))]
+     (put-u32! b 0 REC3_MAGIC)
+     (put-u32! b 4 seq)
+     (put-u32! b 8 kind)
+     (put-u32! b 12 label)
+     (put-u32! b 16 nonce)
+     (put-u32! b 20 writer)
+     (put-u32! b 24 len)
+     (put-u32! b 28 part)
+     (when (pos? len) (enc/arraycopy body 0 b R3_HEADER len))
+     (put-u32! b (+ R3_HEADER len) (crc/crc32 b 0 (+ R3_HEADER len)))
+     b)))
 
 (defn- decode-at
   "The valid v2 record in slot I, or nil; with SEQ, only a record of that seq."
@@ -494,7 +545,8 @@
             (when (== (get-i32 b (+ R3_HEADER len)) (crc/crc32 b 0 (+ R3_HEADER len)))
               (let [body (byte-array len)]
                 (when (pos? len) (enc/arraycopy b R3_HEADER body 0 len))
-                {:seq s :kind (get-i32 b 8) :label (get-i32 b 12) :writer (get-i32 b 20) :body body}))))))))
+                {:seq s :kind (get-i32 b 8) :label (get-i32 b 12) :writer (get-i32 b 20) :part (get-i32 b 28)
+                 :body body}))))))))
 
 (defn read-record3
   "The valid v2 record of SEQ (in its slot), or nil: unwritten, torn, another lap's, another file's."
@@ -710,6 +762,54 @@
             np (get-i32 b p)
             pins (mapv (fn [k] {:off (get-i32 b (+ p 4 (* 8 k))) :flags (get-i32 b (+ p 8 (* 8 k)))}) (range np))]
         (assoc delta :blocks blocks :pins pins)))))
+
+(defn- concat-bodies [bodies]
+  (let [n (reduce + 0 (map (fn [^bytes b] (alength b)) bodies))
+        out (byte-array n)]
+    (loop [bs (seq bodies)
+           pos 0]
+      (if-let [b (first bs)]
+        (do (enc/arraycopy b 0 out pos (alength ^bytes b))
+            (recur (next bs) (+ pos (alength ^bytes b))))
+        out))))
+
+(defn logical
+  "RECS (consecutive records of a prefix, in seq order) as logical records: a run of CNT slots that carries one commit
+   (part i at seq s+i, one writer, kind and label) as one record at s whose body is its parts' bodies in order; a run
+   with a part missing, torn or voided drops out whole — its commit was never acknowledged."
+  [recs]
+  (loop [rs (seq recs)
+         acc []]
+    (if-let [rec (first rs)]
+      (let [cnt (bit-and (:part rec) 0xFFFF)]
+        (if (<= cnt 1)
+          (recur (next rs) (if (zero? (:part rec)) (conj acc rec) acc))
+          (let [run (vec (take cnt rs))
+                ok? (and (== cnt (count run))
+                         (every? (fn [i]
+                                   (let [p (nth run i)]
+                                     (and (== (:part p) (part-word i cnt))
+                                          (== (:seq p) (i32/i32 (+ (:seq rec) i)))
+                                          (== (:writer p) (:writer rec))
+                                          (== (:kind p) (:kind rec))
+                                          (== (:label p) (:label rec)))))
+                                 (range cnt)))]
+            (if ok?
+              (recur (nthnext rs cnt) (conj acc (assoc rec :part 0 :body (concat-bodies (map :body run)))))
+              (recur (next rs) acc)))))
+      acc)))
+
+(defn split-body
+  "BODY in CNT parts of at most R3_MAX_BODY bytes each, in order (the last ones empty when it is shorter)."
+  [^bytes body cnt]
+  (let [n (alength body)]
+    (mapv (fn [i]
+            (let [from (min n (* i R3_MAX_BODY))
+                  to (min n (* (inc i) R3_MAX_BODY))
+                  b (byte-array (- to from))]
+              (when (pos? (- to from)) (enc/arraycopy body from b 0 (- to from)))
+              b))
+          (range cnt))))
 
 (defn fold
   "[table label]: ANCHOR's atom table (a copy) with the deltas of RECS' COMMIT and NOREDO records applied in log

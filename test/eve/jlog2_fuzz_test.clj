@@ -1,7 +1,8 @@
 (ns eve.jlog2-fuzz-test
   "Torn-write fuzzing of a domain on the redo log (jlog v2; the image method of
    eve-mmap-journal-plan §6.4, doc/jlog-redo-spec.md §8): a domain driven
-   through a checkpoint and K commits after it, halted (a killed process's
+   through a checkpoint and K commits after it — some large enough that their
+   redo is a run of slots — halted (a killed process's
    files), then each image restores the pristine files and applies one wound a
    power loss allows, crossed with the slab files either as they are or
    reverted to the checkpoint (every page a commit wrote since lost): the
@@ -36,6 +37,23 @@
   (Files/copy (.toPath (File. ^String from)) (.toPath (File. ^String to))
               ^"[Ljava.nio.file.CopyOption;" (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING])))
 
+(defn- crash-restore!
+  "PATH restored to its image at SUFFIX as a power loss leaves it after a growth the code forced: the image's bytes,
+   but a file that grew since keeps its grown length (the new end reads zero) and a slab data file its header page
+   (force-grown! forces both before a block past the old end is used)."
+  [path suffix]
+  (let [f (File. ^String path)
+        cur-len (.length f)
+        data? (re-matches #".*\.slab\d" path)
+        page0 (when data? (let [raf (RandomAccessFile. f "r") b (byte-array 4096)]
+                            (try (.readFully raf b) b (finally (.close raf)))))]
+    (copy! (str path suffix) path)
+    (when (> cur-len (.length f))
+      (let [raf (RandomAccessFile. f "rw")]
+        (try (.setLength raf cur-len)
+             (when page0 (.seek raf 0) (.write raf ^bytes page0))
+             (finally (.close raf)))))))
+
 (defn- slab-files [base]
   (let [dir (.getParentFile (File. ^String base))
         stem (str (.getName (File. ^String base)) ".slab")]
@@ -56,7 +74,7 @@
    The pristine files are copied to <path>.pristine, the slabs and root as they were at the checkpoint to
    <path>.ckpt."
   [base k]
-  (let [dom (a/persistent-atom-domain base :jlog-slots 128)
+  (let [dom (a/persistent-atom-domain base :jlog-slots 256)
         m (a/lookup-or-create-mmap-atom! dom "t/m" {})
         step (fn [f] (swap! m f) [(dec (jlog/durable (log-of dom))) (into {} @m)])
         early (into (sorted-map) (for [i (range 10)] (step #(assoc % i (str "v" i)))))
@@ -64,7 +82,11 @@
         ckpt-seq (dec (jlog/durable (log-of dom)))
         files (conj (vec (slab-files base)) (str base ".root"))
         _ (doseq [p files] (copy! p (str p ".ckpt")))
-        late (into (sorted-map) (for [i (range k)] (step #(assoc % (+ 100 i) [i (str "w" i)]))))
+        late (into (sorted-map) (for [i (range k)]
+                                  ;; every eighth commit a large one: its redo is a run of slots
+                                  (step (if (zero? (mod i 8))
+                                          #(assoc % (+ 100 i) (vec (range (* 400 (inc (quot i 8))))))
+                                          #(assoc % (+ 100 i) [i (str "w" i)])))))
         by-seq (-> early (into late) (assoc ckpt-seq (into {} @m)))
         ds (halt! dom base)
         files (conj files (str base ".jlog"))]
@@ -85,7 +107,7 @@
    [expected got committed-on?]."
   [base {:keys [by-seq files slot]} revert? wound!]
   (doseq [p files] (copy! (str p ".pristine") p))
-  (when revert? (doseq [p files :when (.exists (File. (str p ".ckpt")))] (copy! (str p ".ckpt") p)))
+  (when revert? (doseq [p files :when (.exists (File. (str p ".ckpt")))] (crash-restore! p ".ckpt")))
   (let [log (jlog/open (str base ".jlog"))
         recs (sort-by :seq #(compare %2 %1) (keep #(jlog/read-slot3 log %) (range (:n log))))]
     (wound! base log recs))
