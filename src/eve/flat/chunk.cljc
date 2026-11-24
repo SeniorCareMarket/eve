@@ -2647,6 +2647,9 @@
         #?(:clj (if (satisfies? IAttachMeta inner)
                   (-attach-meta inner (read-value ctx mo))
                   inner)
+           :cljr (if (satisfies? IAttachMeta inner)
+                   (-attach-meta inner (read-value ctx mo))
+                   inner)
            ;; IWithMeta, as at this file's other meta-attach sites:
            ;; clojure.lang.IObj names nothing on the cljs face (an
            ;; undeclared var the JVM compiler only warns about; SCI

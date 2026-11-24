@@ -3,7 +3,7 @@
    names; what differs is translated here, at expansion, against the CLR's
    own types.
    The entry points eve's macros call (every eve.types has them):
-     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     host-type, plain-type, slab-type, eve-type, flat-type, extend-eve-type,
      existing-def, rename-fields, reader-of, print-form, vector-types."
   (:refer-clojure :exclude [into-array])
   (:require [clojure.string :as str]
@@ -64,7 +64,7 @@
   [ifaces mname n]
   (distinct (for [^Type i ifaces
                   ^System.Reflection.MethodInfo m (.GetMethods i)
-                  :when (and (= (.Name m) (str mname)) (== (count (.GetParameters m)) n))]
+                  :when (and (= (.Name m) (str (munge mname))) (== (count (.GetParameters m)) n))]
               (.ReturnType m))))
 
 (def ^:private cljr-body-renames
@@ -120,11 +120,16 @@
         ;; a method pooled under an interface entry that none of the
         ;; type's CLR interfaces declares (getKey, call, run: the JVM's
         ;; Map$Entry, Callable, Runnable) has nothing to implement here
+        ;; ClojureCLR's protocol interfaces munge method names
+        ;; (-mcount -> _mcount). Compare the munged name, or dashed
+        ;; methods are dropped and the leftover interface stubs throw
+        ;; NotImplementedException (FlatTagged IMapSource._mcount).
         declared (set (for [^Type i ifaces ^System.Reflection.MethodInfo m (.GetMethods i)] (.Name m)))
         impls (mapv (fn [{:keys [protocol] :as impl}]
                       (let [t (clr-type protocol)
                             keep? (if (and t (.IsInterface ^Type t))
-                                    #(contains? declared (str (:name %)))
+                                    #(or (contains? declared (str (:name %)))
+                                         (contains? declared (str (munge (:name %)))))
                                     (constantly true))]
                         (update impl :methods
                                 (fn [ms] (vec (mapcat (fn [m] (expand (update m :body #(rename-syms % cljr-body-renames))))
@@ -231,6 +236,11 @@
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
 (defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn flat-type
+  "An eve-deftype's generated flat sister (eve.deftype.macros/eve-deftype*,
+   lane H5): from the shared eve.deftype-proto.sio/flat-type."
+  [ctx]
+  (sio/flat-type ctx (hooks)))
 (defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
 
 (defn existing-def

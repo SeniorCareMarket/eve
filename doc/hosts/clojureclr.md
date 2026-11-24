@@ -17,6 +17,7 @@ CLOJURE_LOAD_PATH=... cljr -m eve.runner.cljr-main perf     # the performance su
 
 | Run | Result | When (ET) |
 |---|---|---|
+| `bb test:cljr eve.type-io-test eve.numeric-test eve.record-test eve.deftype.type-id-test eve.sorted-migration-test` | **50 tests, 392 assertions, 0 failures, 0 errors**. Previously failing: `record-test` `persistent-record-survives-reopen`, `deftype.type-id-test` `types-that-share-a-type-id` (4E), `sorted-migration-test` (FlatTagged IMapSource._mcount NotImplementedException). `eve.types/flat-type` is now realized on CLR via the shared sio generator; `cljr-translate-protos` keeps dashed protocol methods by comparing munged CLR names; META nodes attach through IAttachMeta. type-io and numeric stay clean. | 2026-11-24, 5:23:43–5:24:21 AM ET, this tree |
 | `bb test:cljr eve.type-io-test` | **8 tests, 47 assertions, 0 failures, 0 errors** (was 6E/2F: pr-str as `#object[...]`, then "No reader function for tag object"). host-deftype on CLR now realizes IPrintWithWriter as print-method, without jvm-translate-protos. | 2026-11-24, 4:51:07–4:51:24 AM ET, this tree |
 | `bb test:cljr eve.numeric-test eve.numeric-tags-test eve.overflow-test` | **13 tests, 168 assertions, 0 failures, 0 errors**. `eve.numeric-test` alone is 6/84/0/0 (was 57E/3F on the 12:38 AM official run: String→BigInteger from `(BigInteger. s)`, checked `+` overflow past a long, typetags not recognized). `numeric-tags` and `overflow` stay clean. | 2026-11-24, 4:35–4:36 AM ET, this tree (`eve.numeric` :cljr arms) |
 | `bb test:cljr` | Official shared suite **loads and runs**. 22 namespaces started; 16 clean (clock-uuid, associative-transient, hamt-util, eve-bytes-fixture, numeric-tags, overflow, collection-hash, reference-tag, big-value, sorted-coll, keyring, value-buffer, vec-retire, reclaim, tally, domain-open). 6 failed (90 ERROR, 7 FAIL) before the run was killed mid `eve.rrb-vector-test` `test-splicing`: `eve.numeric-test` 57E/3F (including String→BigInteger in optional-arithmetic); `eve.type-io-test` 6E/2F (tagged print/read — "No reader function for tag object", print as `#object[...]`); `eve.record-test` 1E/2F; `eve.deftype.type-id-test` 4E; `eve.sorted-migration-test` 2E; `eve.rrb-vector-test` 20E (`RRBChunkedSeq` is not `clojure.lang.ISeq`; slab-domain: "An Eve value allocated in a different slab domain cannot be put in this one" on VectorNode during withMeta / pack-all / deliver-flat). `eve.thread-*` and `eve.net.crypto-fast-path-test` did not run. Not green. | 2026-11-24, 12:38–12:46 AM ET, this tree (compile-complete `eve.flat.chunk` / `eve.flat.freeze` port) |
@@ -33,9 +34,10 @@ numeric and reference tags, collection hashing, the vector retire walk, transien
 the whole thread feature
 including the network rung. Not run: the four typed-array suites — ClojureCLR has no typed-array adapter yet.
 On 2026-11-24 the official battery loads through `eve.domain-open-test`. On this tree `eve.numeric-test` is 6/84/0/0
-(4:35 AM ET) and `eve.type-io-test` is 8/47/0/0 (4:51 AM ET). The 12:38 AM official pass's remaining failures are
-`record`, `deftype.type-id`, `sorted-migration`, and `rrb-vector` (ISeq / slab-domain). The thread/net namespaces did
-not run in that pass. October's green counts are historical and are not the current official result.
+(4:35 AM ET), `eve.type-io-test` is 8/47/0/0 (4:51 AM ET), and `eve.record-test` / `eve.deftype.type-id-test` /
+`eve.sorted-migration-test` are included in a 50/392/0/0 batch with those two (5:23:43–5:24:21 AM ET). The 12:38 AM
+official pass's remaining failure is `rrb-vector` (ISeq / slab-domain). The thread/net namespaces did not run in that
+pass. October's green counts are historical and are not the current official result.
 
 ## Performance
 
@@ -52,7 +54,7 @@ not run in that pass. October's green counts are historical and are not the curr
 | `disk-swap-counter` | — | — | — |
 | `thread-submit-64` | — | — | — |
 
-Not re-run: .NET 8.0.428 and Clojure.Main 1.12.6 are installed (`/workspace/tools/dotnet`, `cljr` on PATH). The portable flat-io `:cljr` arm landed; `eve.flat-io-conformance-test` is 11 tests / 264 assertions, 0 failures, 0 errors (2026-11-24 12:04 AM ET). Official `bb test:cljr` now loads and executes the shared suite (16 of 22 started namespaces clean; remaining failures in the Correctness table). `cljr -m eve.runner.cljr-main perf` has not been re-run at this pin. Previous numbers are not carried forward.
+Not re-run: .NET 8.0.428 and Clojure.Main 1.12.6 are installed (`/workspace/tools/dotnet`, `cljr` on PATH). The portable flat-io `:cljr` arm landed; `eve.flat-io-conformance-test` is 11 tests / 264 assertions, 0 failures, 0 errors (2026-11-24 12:04 AM ET). Official `bb test:cljr` now loads and executes the shared suite (16 of 22 started namespaces clean on the 12:38 AM pass; numeric, type-io, record, type-id, and sorted-migration are green on this tree; remaining failure in the Correctness table is rrb-vector). `cljr -m eve.runner.cljr-main perf` has not been re-run at this pin. Previous numbers are not carried forward.
 <!-- /perf:cljr -->
 
 The table above was not re-run on this box (no official `perf-all` at this pin). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
