@@ -30,13 +30,16 @@
 
 (def eve (str (fs/absolutize ".")))
 (def perf? (some? (System/getenv "EVE_BROWSER_PERF")))
+;; EVE_BROWSER_PERF=opfs: the OPFS disk tier's opt-in cells instead (:eve-perf-opfs-browser: the page mounts the
+;; pool first, then the suite's disk cell runs on OPFS); every other value, the suite as before
+(def perf-opfs? (= "opfs" (System/getenv "EVE_BROWSER_PERF")))
 (def opfs? (and (not perf?) (some? (System/getenv "EVE_BROWSER_OPFS"))))
 (def suite (System/getenv "EVE_BROWSER_SUITE"))
 (def dom? (contains? #{"dom" "dom-demo" "dom-perf"} suite))
 (def demo-assets? (contains? #{"dom-demo" "dom-perf"} suite))
-(def build (cond perf? "eve-perf-browser" opfs? "eve-opfs-browser" (= "dom" suite) "eve-dom-browser"
+(def build (cond perf-opfs? "eve-perf-opfs-browser" perf? "eve-perf-browser" opfs? "eve-opfs-browser" (= "dom" suite) "eve-dom-browser"
                  (= "dom-demo" suite) "eve-dom-demo" (= "dom-perf" suite) "eve-dom-perf" :else "eve-thread-browser"))
-(def out (str eve (cond perf? "/target/perf-browser" opfs? "/target/opfs-browser" (= "dom" suite) "/target/dom-browser"
+(def out (str eve (cond perf-opfs? "/target/perf-opfs-browser" perf? "/target/perf-browser" opfs? "/target/opfs-browser" (= "dom" suite) "/target/dom-browser"
                         (= "dom-demo" suite) "/target/dom-demo" (= "dom-perf" suite) "/target/dom-perf"
                         :else "/target/thread-browser")))
 (def aliases (if demo-assets? "-M:browser-test:dom-demo" "-M:browser-test"))
@@ -57,7 +60,7 @@
   (fs/copy-tree (str eve "/adapters/dom/browser/demo/public") public {:replace-existing true}))
 
 ;; the OPFS page boots through eve's service worker (eve.opfs.boot: it isolates a page served without COOP/COEP)
-(when opfs? (fs/copy (str eve "/adapters/sw/browser/eve-sw.js") (str public "/eve-sw.js") {:replace-existing true}))
+(when (or opfs? perf-opfs?) (fs/copy (str eve "/adapters/sw/browser/eve-sw.js") (str public "/eve-sw.js") {:replace-existing true}))
 
 (if (and (System/getenv "EVE_BROWSER_NO_BUILD") (fs/exists? (str public "/js/main.js")))
   (step (str "reusing the built page (EVE_BROWSER_NO_BUILD): " public "/js/main.js"))

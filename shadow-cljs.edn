@@ -125,6 +125,15 @@
    :modules {:main {:init-fn eve.runner.perf-browser-main/init}}
    :compiler-options {:optimizations :simple :output-wrapper false}}
 
+  ;; the OPFS disk tier's opt-in perf cells (EVE_BROWSER_PERF=opfs bb test:browser): a build of its own, so the
+  ;; suite's own page loads no OPFS code
+  :eve-perf-opfs-browser
+  {:target :browser
+   :output-dir "target/perf-opfs-browser/public/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn eve.runner.perf-opfs-browser-main/init}}
+   :compiler-options {:optimizations :simple :output-wrapper false}}
+
   ;; cohost-media's page, built through :browser-test and :cohost-media-page (the browser's http, crypto and thread
   ;; adapters; reagami): at :simple with no output wrapper, so the workers it starts (eve.thread's browser adapter, the
   ;; fat-kernel route) load it as their kernel with its names global
